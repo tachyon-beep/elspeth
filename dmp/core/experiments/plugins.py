@@ -5,6 +5,25 @@ from __future__ import annotations
 from typing import Dict, Protocol, Any, List, Optional
 
 
+class ValidationError(RuntimeError):
+    """Raised when a validation plugin rejects an LLM response."""
+
+
+class ValidationPlugin(Protocol):
+    """Evaluates LLM responses and raises ``ValidationError`` on failure."""
+
+    name: str
+
+    def validate(
+        self,
+        response: Dict[str, Any],
+        *,
+        context: Optional[Dict[str, Any]] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        ...
+
+
 class RowExperimentPlugin(Protocol):
     """Processes a single experiment row and returns derived fields."""
 

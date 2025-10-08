@@ -1,0 +1,37 @@
+colour_animals:
+  datasource:
+    plugin: local_csv
+    options:
+      path: config/data/colour_animals.csv
+  llm:
+    plugin: http_openai
+    options:
+      api_base: http://192.168.1.240:5000
+      model: gpt-4o-mini
+      temperature: 0.2
+      timeout: 45
+  sinks:
+    - plugin: csv
+      options:
+        path: outputs/colour_animals/latest_results.csv
+        overwrite: true
+  prompts:
+    system: |
+      You are a zoologist who associates colours with animals. Provide concise answers without explanation.
+    user: |
+      {% set tone_descriptor = "bright" if tone == "light" else "deep" if tone == "dark" else "balanced" %}
+      {% if season == "winter" %}
+      The colour "{{ colour }}" is a {{ tone_descriptor }} winter hue. Name an animal adapted to cold climates that fits this colour.
+      {% elif season == "summer" %}
+      The colour "{{ colour }}" is a {{ tone_descriptor }} summer shade. Choose an animal known for vibrant warm-weather colours.
+      {% elif season == "spring" %}
+      The colour "{{ colour }}" is a {{ tone_descriptor }} spring tone. Provide an animal associated with renewal or blossoms in this colour.
+      {% else %}
+      The colour "{{ colour }}" is a {{ tone_descriptor }} autumn nuance. Give an animal that matches earthy harvest colours.
+      {% endif %}
+      Respond with **only** the animal name in Title Case, no extra words or punctuation.
+  prompt_fields:
+    - colour
+    - tone
+    - season
+  suite_defaults: {}

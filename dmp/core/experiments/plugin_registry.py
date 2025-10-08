@@ -9,6 +9,7 @@ from dmp.core.experiments.plugins import (
     AggregationExperimentPlugin,
     BaselineComparisonPlugin,
     EarlyStopPlugin,
+    ValidationPlugin,
 )
 from dmp.core.validation import ConfigurationError, validate_schema
 
@@ -33,6 +34,7 @@ class _PluginFactory:
 _row_plugins: Dict[str, _PluginFactory] = {}
 _aggregation_plugins: Dict[str, _PluginFactory] = {}
 _baseline_plugins: Dict[str, _PluginFactory] = {}
+_validation_plugins: Dict[str, _PluginFactory] = {}
 _early_stop_plugins: Dict[str, _PluginFactory] = {}
 
 
@@ -61,6 +63,15 @@ def register_baseline_plugin(
     schema: Mapping[str, Any] | None = None,
 ) -> None:
     _baseline_plugins[name] = _PluginFactory(factory, schema=schema)
+
+
+def register_validation_plugin(
+    name: str,
+    factory: Callable[[Dict[str, Any]], ValidationPlugin],
+    *,
+    schema: Mapping[str, Any] | None = None,
+) -> None:
+    _validation_plugins[name] = _PluginFactory(factory, schema=schema)
 
 
 def register_early_stop_plugin(
@@ -100,6 +111,16 @@ def create_baseline_plugin(definition: Dict[str, Any]) -> BaselineComparisonPlug
     if name not in _baseline_plugins:
         raise ValueError(f"Unknown baseline comparison plugin '{name}'")
     return _baseline_plugins[name].create(options, context=f"baseline_plugin:{name}")
+
+
+def create_validation_plugin(definition: Dict[str, Any]) -> ValidationPlugin:
+    if not definition:
+        raise ValueError("Validation plugin definition cannot be empty")
+    name = definition.get("name")
+    options = definition.get("options", {})
+    if name not in _validation_plugins:
+        raise ValueError(f"Unknown validation plugin '{name}'")
+    return _validation_plugins[name].create(options, context=f"validation_plugin:{name}")
 
 
 def create_early_stop_plugin(definition: Dict[str, Any]) -> EarlyStopPlugin:
@@ -163,14 +184,17 @@ __all__ = [
     "register_row_plugin",
     "register_aggregation_plugin",
     "register_baseline_plugin",
+    "register_validation_plugin",
     "create_row_plugin",
     "create_aggregation_plugin",
     "create_baseline_plugin",
+    "create_validation_plugin",
     "register_early_stop_plugin",
     "create_early_stop_plugin",
     "validate_row_plugin_definition",
     "validate_aggregation_plugin_definition",
     "validate_baseline_plugin_definition",
+    "validate_validation_plugin_definition",
     "validate_early_stop_plugin_definition",
     "normalize_early_stop_definitions",
 ]
@@ -204,6 +228,16 @@ def validate_baseline_plugin_definition(definition: Dict[str, Any]) -> None:
     if name not in _baseline_plugins:
         raise ConfigurationError(f"Unknown baseline comparison plugin '{name}'")
     _baseline_plugins[name].validate(options, context=f"baseline_plugin:{name}")
+
+
+def validate_validation_plugin_definition(definition: Dict[str, Any]) -> None:
+    if not definition:
+        raise ConfigurationError("Validation plugin definition cannot be empty")
+    name = definition.get("name")
+    options = definition.get("options", {})
+    if name not in _validation_plugins:
+        raise ConfigurationError(f"Unknown validation plugin '{name}'")
+    _validation_plugins[name].validate(options, context=f"validation_plugin:{name}")
 
 
 def validate_early_stop_plugin_definition(definition: Dict[str, Any]) -> None:

@@ -18,9 +18,14 @@ import pandas as pd
 from dmp.config import load_settings
 from dmp.core.orchestrator import ExperimentOrchestrator
 from dmp.core.experiments import ExperimentSuiteRunner, ExperimentSuite
+from dmp.core.experiments.tools import (
+    export_suite_configuration,
+    create_experiment_template,
+)
 from dmp.plugins.outputs.csv_file import CsvResultSink
 from dmp.core.controls import create_rate_limiter, create_cost_tracker
 from dmp.core.validation import validate_settings, validate_suite
+from dmp.tools.reporting import SuiteReportGenerator
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +78,26 @@ def build_parser() -> argparse.ArgumentParser:
         "--live-outputs",
         action="store_true",
         help="Allow sinks to perform live writes (disables repo dry-run modes)",
+    )
+    parser.add_argument(
+        "--export-suite-config",
+        type=Path,
+        help="Optional path to export suite configuration (JSON or YAML) before running",
+    )
+    parser.add_argument(
+        "--create-experiment-template",
+        metavar="NAME",
+        help="Create a disabled experiment template with the specified name before running",
+    )
+    parser.add_argument(
+        "--template-base",
+        metavar="NAME",
+        help="Optional base experiment to copy when creating a new template",
+    )
+    parser.add_argument(
+        "--reports-dir",
+        type=Path,
+        help="Directory to write analytics reports when running a suite",
     )
     return parser
 
@@ -143,14 +168,47 @@ def run(args: argparse.Namespace) -> None:
     if args.disable_metrics:
         _strip_metrics_plugins(settings)
     _configure_sink_dry_run(settings, enable_live=args.live_outputs)
-    suite_root = args.suite_root or settings.suite_root
+    suite_root_value = args.suite_root or settings.suite_root
+    suite_root = Path(suite_root_value) if suite_root_value else None
+
+    suite_instance: ExperimentSuite | None = None
+    export_path = getattr(args, "export_suite_config", None)
+    template_name = getattr(args, "create_experiment_template", None)
+    reports_dir = getattr(args, "reports_dir", None)
+    template_base = getattr(args, "template_base", None)
+    management_requested = any([export_path, template_name, reports_dir])
+    if management_requested and not suite_root:
+        raise SystemExit("Suite root is required for template creation, export, or report generation.")
+    if suite_root and management_requested:
+        suite_instance = ExperimentSuite.load(suite_root)
+
+    if template_name:
+        assert suite_instance is not None  # for mypy
+        destination = create_experiment_template(
+            suite_instance,
+            template_name,
+            base_experiment=template_base,
+        )
+        logger.info("Created experiment template at %s", destination)
+        suite_instance = ExperimentSuite.load(suite_root)
+
+    if export_path:
+        assert suite_instance is not None
+        export_suite_configuration(suite_instance, export_path)
+        logger.info("Exported suite configuration to %s", export_path)
 
     if suite_root and not args.single_run:
         suite_validation = validate_suite(suite_root)
         for warning in suite_validation.report.warnings:
             logger.warning(warning.format())
         suite_validation.report.raise_if_errors()
-        _run_suite(args, settings, suite_root, preflight=suite_validation.preflight)
+        _run_suite(
+            args,
+            settings,
+            suite_root,
+            preflight=suite_validation.preflight,
+            suite=suite_instance,
+        )
     else:
         _run_single(args, settings)
 
@@ -201,9 +259,16 @@ def _clone_suite_sinks(base_sinks: list, experiment_name: str) -> list:
     return cloned
 
 
-def _run_suite(args: argparse.Namespace, settings, suite_root: Path, *, preflight: dict | None = None) -> None:
+def _run_suite(
+    args: argparse.Namespace,
+    settings,
+    suite_root: Path,
+    *,
+    preflight: dict | None = None,
+    suite: ExperimentSuite | None = None,
+) -> None:
     logger.info("Running suite at %s", suite_root)
-    suite = ExperimentSuite.load(suite_root)
+    suite = suite or ExperimentSuite.load(suite_root)
     df = settings.datasource.load()
     suite_runner = ExperimentSuiteRunner(
         suite=suite,
@@ -226,6 +291,8 @@ def _run_suite(args: argparse.Namespace, settings, suite_root: Path, *, prefligh
         defaults["aggregator_plugin_defs"] = settings.orchestrator_config.aggregator_plugin_defs
     if settings.orchestrator_config.baseline_plugin_defs:
         defaults["baseline_plugin_defs"] = settings.orchestrator_config.baseline_plugin_defs
+    if settings.orchestrator_config.validation_plugin_defs:
+        defaults["validation_plugin_defs"] = settings.orchestrator_config.validation_plugin_defs
     if settings.orchestrator_config.sink_defs:
         defaults["sink_defs"] = settings.orchestrator_config.sink_defs
     if settings.orchestrator_config.llm_middleware_defs:
@@ -254,6 +321,8 @@ def _run_suite(args: argparse.Namespace, settings, suite_root: Path, *, prefligh
         defaults["aggregator_plugin_defs"] = suite_defaults["aggregator_plugins"]
     if "baseline_plugins" in suite_defaults:
         defaults["baseline_plugin_defs"] = suite_defaults["baseline_plugins"]
+    if "validation_plugins" in suite_defaults:
+        defaults["validation_plugin_defs"] = suite_defaults["validation_plugins"]
     if "llm_middlewares" in suite_defaults:
         defaults["llm_middleware_defs"] = suite_defaults["llm_middlewares"]
     if "prompt_defaults" in suite_defaults:
@@ -288,6 +357,13 @@ def _run_suite(args: argparse.Namespace, settings, suite_root: Path, *, prefligh
 
     for name, entry in results.items():
         logger.info("Experiment %s completed with %s rows", name, len(entry["payload"]["results"]))
+
+    reports_dir = getattr(args, "reports_dir", None)
+    if reports_dir:
+        if args.single_run:
+            logger.warning("Report generation skipped: reports require suite execution.")
+        else:
+            SuiteReportGenerator(suite, results).generate_all_reports(reports_dir)
 
 
 def _strip_metrics_plugins(settings) -> None:

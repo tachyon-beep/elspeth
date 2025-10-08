@@ -11,7 +11,12 @@ from dmp.core.interfaces import DataSource, LLMClientProtocol, ResultSink
 from dmp.core.experiments.runner import ExperimentRunner
 from dmp.core.controls import RateLimiter, CostTracker
 from dmp.core.llm.registry import create_middlewares
-from dmp.core.experiments.plugin_registry import create_row_plugin, create_aggregation_plugin, create_early_stop_plugin
+from dmp.core.experiments.plugin_registry import (
+    create_row_plugin,
+    create_aggregation_plugin,
+    create_early_stop_plugin,
+    create_validation_plugin,
+)
 
 
 @dataclass
@@ -25,6 +30,7 @@ class OrchestratorConfig:
     sink_defs: List[Dict[str, Any]] | None = None
     prompt_pack: str | None = None
     baseline_plugin_defs: List[Dict[str, Any]] | None = None
+    validation_plugin_defs: List[Dict[str, Any]] | None = None
     retry_config: Dict[str, Any] | None = None
     checkpoint_config: Dict[str, Any] | None = None
     llm_middleware_defs: List[Dict[str, Any]] | None = None
@@ -60,10 +66,14 @@ class ExperimentOrchestrator:
         aggregator_plugins = None
         if config.aggregator_plugin_defs:
             aggregator_plugins = [create_aggregation_plugin(defn) for defn in config.aggregator_plugin_defs]
+        validation_plugins = None
+        if config.validation_plugin_defs:
+            validation_plugins = [create_validation_plugin(defn) for defn in config.validation_plugin_defs]
         early_stop_plugins = None
         if config.early_stop_plugin_defs:
             early_stop_plugins = [create_early_stop_plugin(defn) for defn in config.early_stop_plugin_defs]
         self.early_stop_plugins = early_stop_plugins
+        self.validation_plugins = validation_plugins
 
         self.experiment_runner = experiment_runner or ExperimentRunner(
             llm_client=llm_client,
@@ -74,6 +84,7 @@ class ExperimentOrchestrator:
             criteria=config.criteria,
             row_plugins=row_plugins,
             aggregator_plugins=aggregator_plugins,
+            validation_plugins=validation_plugins,
             rate_limiter=rate_limiter,
             cost_tracker=cost_tracker,
             experiment_name=name,
@@ -102,5 +113,6 @@ class ExperimentOrchestrator:
         runner.experiment_name = self.name
         runner.concurrency_config = self.config.concurrency_config
         runner.early_stop_plugins = self.early_stop_plugins
+        runner.validation_plugins = self.validation_plugins
         payload = runner.run(df)
         return payload

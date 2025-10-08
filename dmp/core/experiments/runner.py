@@ -18,7 +18,13 @@ from dmp.core.interfaces import LLMClientProtocol, ResultSink
 from dmp.core.processing import prepare_prompt_context
 from dmp.core.prompts import PromptEngine, PromptTemplate, PromptRenderingError, PromptValidationError
 from dmp.core.llm.middleware import LLMMiddleware, LLMRequest
-from dmp.core.experiments.plugins import RowExperimentPlugin, AggregationExperimentPlugin, EarlyStopPlugin
+from dmp.core.experiments.plugins import (
+    RowExperimentPlugin,
+    AggregationExperimentPlugin,
+    EarlyStopPlugin,
+    ValidationPlugin,
+    ValidationError,
+)
 from dmp.core.experiments.plugin_registry import create_early_stop_plugin
 from dmp.core.controls import RateLimiter, CostTracker
 from dmp.core.security import normalize_security_level, resolve_security_level
@@ -38,6 +44,7 @@ class ExperimentRunner:
     criteria: List[Dict[str, str]] | None = None
     row_plugins: List[RowExperimentPlugin] | None = None
     aggregator_plugins: List[AggregationExperimentPlugin] | None = None
+    validation_plugins: List[ValidationPlugin] | None = None
     rate_limiter: RateLimiter | None = None
     cost_tracker: CostTracker | None = None
     experiment_name: str | None = None
@@ -302,6 +309,7 @@ class ExperimentRunner:
             return None, None
         try:
             rendered_system_prompt = engine.render(system_template, context)
+            base_user_prompt = engine.render(user_template, context)
             if self.criteria:
                 responses: Dict[str, Dict[str, Any]] = {}
                 for crit in self.criteria:
@@ -312,6 +320,7 @@ class ExperimentRunner:
                         user_prompt,
                         {"row_id": row.get("APPID"), "criteria": crit_name},
                         system_prompt=rendered_system_prompt,
+                        row_context=context,
                     )
                     responses[crit_name] = response
                 first_response = next(iter(responses.values())) if responses else {}
@@ -321,16 +330,25 @@ class ExperimentRunner:
                     if metrics:
                         record.setdefault("metrics", {}).update(metrics)
             else:
-                user_prompt = engine.render(user_template, context)
+                user_prompt = base_user_prompt
                 response = self._execute_llm(
                     user_prompt,
                     {"row_id": row.get("APPID")},
                     system_prompt=rendered_system_prompt,
+                    row_context=context,
                 )
                 record = {"row": context, "response": response}
                 metrics = response.get("metrics")
                 if metrics:
                     record.setdefault("metrics", {}).update(metrics)
+
+            record_metadata = record.setdefault("metadata", {})
+            record_metadata.setdefault("prompt_system", rendered_system_prompt)
+            record_metadata.setdefault("prompt_user", base_user_prompt)
+            record_metadata.setdefault("prompt_system_template", system_template.raw)
+            record_metadata.setdefault("prompt_user_template", user_template.raw)
+            if getattr(user_template, "required_fields", None):
+                record_metadata.setdefault("prompt_user_fields", list(user_template.required_fields))
 
             retry_meta = response.get("retry")
             if retry_meta:
@@ -445,7 +463,14 @@ class ExperimentRunner:
             )
         return bindings
 
-    def _execute_llm(self, user_prompt: str, metadata: Dict[str, Any], *, system_prompt: str | None = None) -> Dict[str, Any]:
+    def _execute_llm(
+        self,
+        user_prompt: str,
+        metadata: Dict[str, Any],
+        *,
+        system_prompt: str | None = None,
+        row_context: Dict[str, Any] | None = None,
+    ) -> Dict[str, Any]:
         attempts = 1
         delay = 0.0
         max_attempts = 1
@@ -497,6 +522,9 @@ class ExperimentRunner:
                     cost_metrics = self.cost_tracker.record(response, {"experiment": self.experiment_name, **request.metadata})
                     if cost_metrics:
                         response.setdefault("metrics", {}).update(cost_metrics)
+
+                self._run_validations(response, request, row_context=row_context)
+
                 attempt_record = {
                     "attempt": attempt,
                     "status": "success",
@@ -565,6 +593,21 @@ class ExperimentRunner:
                     hook(request, metadata, error)
                 except Exception:  # pragma: no cover - middleware isolation
                     logger.debug("Middleware %s retry hook failed", getattr(middleware, "name", middleware), exc_info=True)
+
+    def _run_validations(
+        self,
+        response: Dict[str, Any],
+        request: LLMRequest,
+        *,
+        row_context: Dict[str, Any] | None = None,
+    ) -> None:
+        plugins = self.validation_plugins or []
+        if not plugins:
+            return
+        metadata = request.metadata if isinstance(request.metadata, dict) else {}
+        context = row_context
+        for plugin in plugins:
+            plugin.validate(response, context=context, metadata=metadata)
 
     def _load_checkpoint(self, path: Path) -> set[str]:
         processed: set[str] = set()

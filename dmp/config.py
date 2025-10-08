@@ -54,6 +54,7 @@ def load_settings(path: str | Path, profile: str = "default") -> Settings:
     row_plugin_defs: List[Dict[str, Any]] = profile_data.get("row_plugins", [])
     aggregator_plugin_defs: List[Dict[str, Any]] = profile_data.get("aggregator_plugins", [])
     baseline_plugin_defs: List[Dict[str, Any]] = profile_data.get("baseline_plugins", [])
+    validation_plugin_defs: List[Dict[str, Any]] = profile_data.get("validation_plugins", [])
     sink_defs: List[Dict[str, Any]] = profile_data.get("sinks", [])
     rate_limiter_def = profile_data.get("rate_limiter")
     cost_tracker_def = profile_data.get("cost_tracker")
@@ -80,6 +81,7 @@ def load_settings(path: str | Path, profile: str = "default") -> Settings:
         row_plugin_defs = list(pack.get("row_plugins", [])) + row_plugin_defs
         aggregator_plugin_defs = list(pack.get("aggregator_plugins", [])) + aggregator_plugin_defs
         baseline_plugin_defs = list(pack.get("baseline_plugins", [])) + baseline_plugin_defs
+        validation_plugin_defs = list(pack.get("validation_plugins", [])) + validation_plugin_defs
         llm_middleware_defs = list(pack.get("llm_middlewares", [])) + llm_middleware_defs
         if not sink_defs:
             sink_defs = pack.get("sinks", [])
@@ -110,6 +112,7 @@ def load_settings(path: str | Path, profile: str = "default") -> Settings:
         row_plugin_defs=row_plugin_defs,
         aggregator_plugin_defs=aggregator_plugin_defs,
         baseline_plugin_defs=baseline_plugin_defs,
+        validation_plugin_defs=validation_plugin_defs,
         sink_defs=sink_defs,
         prompt_pack=prompt_pack_name,
         retry_config=profile_data.get("retry"),
@@ -132,6 +135,7 @@ def load_settings(path: str | Path, profile: str = "default") -> Settings:
             suite_defaults.setdefault("row_plugins", pack.get("row_plugins", []))
             suite_defaults.setdefault("aggregator_plugins", pack.get("aggregator_plugins", []))
             suite_defaults.setdefault("baseline_plugins", pack.get("baseline_plugins", []))
+            suite_defaults.setdefault("validation_plugins", pack.get("validation_plugins", []))
             suite_defaults.setdefault("llm_middlewares", pack.get("llm_middlewares", []))
             suite_defaults.setdefault("sinks", pack.get("sinks", []))
             if pack.get("rate_limiter"):

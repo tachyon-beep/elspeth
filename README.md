@@ -32,6 +32,41 @@ clients, metrics, and sinks can be swapped without touching the core runner.
    python -m dmp.cli --help
    ```
 
+### Suite management & reporting
+The CLI now supports legacy-friendly suite maintenance tasks:
+
+```bash
+# Create a disabled experiment scaffold (copies prompts when baseline available)
+python -m dmp.cli \
+  --settings config/settings.yaml \
+  --suite-root config/sample_suite \
+  --create-experiment-template draft_variant \
+  --template-base baseline_experiment \
+  --head 0
+
+# Export the full suite definition to JSON/YAML
+python -m dmp.cli \
+  --settings config/settings.yaml \
+  --suite-root config/sample_suite \
+  --export-suite-config outputs/sample_suite_export.yaml \
+  --head 0
+
+# Run the suite and generate consolidated analytics artefacts
+python -m dmp.cli \
+  --settings config/settings.yaml \
+  --suite-root config/sample_suite \
+  --reports-dir outputs/sample_suite_reports \
+  --head 0
+```
+
+Reports require pandas/openpyxl (for Excel) and matplotlib/seaborn (for PNG charts).
+Install them via the dev extra plus matplotlib:
+
+```bash
+pip install -e .[dev]
+pip install matplotlib seaborn
+```
+
 ## Configuration Overview
 Settings files (default: `config/settings.yaml`) describe the runtime:
 - `datasource` – plugin + options (e.g. `azure_blob`, `local_csv`).
@@ -176,3 +211,5 @@ To add a new plugin, implement the appropriate interface from
 - `docs/migration-guide.md` – end-to-end migration guide from legacy scripts to the plugin architecture, including prompt packs, middleware, and sink configuration.
 - `docs/logging-standards.md` – structured logging expectations for middleware and sinks.
 - `docs/release-checklist.md` – pre-release verification steps and governance reminders.
+- `docs/reporting-and-suite-management.md` – CLI walkthrough for suite exports, template creation, and analytics reports.
+- `docs/examples_colour_animals.md` – end-to-end example using the HTTP OpenAI plugin with a colour→animal dataset.

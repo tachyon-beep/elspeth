@@ -7,7 +7,7 @@ from typing import Any, Callable, Dict, Mapping
 
 from dmp.core.interfaces import DataSource, ResultSink, LLMClientProtocol
 from dmp.plugins.datasources import BlobDataSource, CSVBlobDataSource, CSVDataSource
-from dmp.plugins.llms import AzureOpenAIClient, MockLLMClient
+from dmp.plugins.llms import AzureOpenAIClient, HttpOpenAIClient, MockLLMClient
 from dmp.plugins.outputs import (
     BlobResultSink,
     CsvResultSink,
@@ -142,6 +142,23 @@ class PluginRegistry:
                         "client": {},
                     },
                     "required": ["config"],
+                    "additionalProperties": True,
+                },
+            ),
+            "http_openai": PluginFactory(
+                create=lambda options: HttpOpenAIClient(**options),
+                schema={
+                    "type": "object",
+                    "properties": {
+                        "api_base": {"type": "string"},
+                        "api_key": {"type": "string"},
+                        "api_key_env": {"type": "string"},
+                        "model": {"type": "string"},
+                        "temperature": {"type": "number"},
+                        "max_tokens": {"type": "integer"},
+                        "timeout": {"type": "number", "exclusiveMinimum": 0},
+                    },
+                    "required": ["api_base"],
                     "additionalProperties": True,
                 },
             ),

@@ -13,6 +13,7 @@ from dmp.core.experiments.plugin_registry import (
     create_row_plugin,
     create_aggregation_plugin,
     create_baseline_plugin,
+    create_validation_plugin,
     create_early_stop_plugin,
     normalize_early_stop_definitions,
 )
@@ -122,6 +123,13 @@ class ExperimentSuiteRunner:
             agg_defs += config.aggregator_plugin_defs
         aggregator_plugins = [create_aggregation_plugin(defn) for defn in agg_defs] if agg_defs else None
 
+        validation_defs = list(defaults.get("validation_plugin_defs", []))
+        if pack and pack.get("validation_plugins"):
+            validation_defs = list(pack.get("validation_plugins", [])) + validation_defs
+        if config.validation_plugin_defs:
+            validation_defs += config.validation_plugin_defs
+        validation_plugins = [create_validation_plugin(defn) for defn in validation_defs] if validation_defs else None
+
         rate_limiter = defaults.get("rate_limiter")
         if defaults.get("rate_limiter_def"):
             rate_limiter = create_rate_limiter(defaults["rate_limiter_def"])
@@ -166,6 +174,7 @@ class ExperimentSuiteRunner:
             "prompt_defaults": prompt_defaults or None,
             "row_plugins": row_plugins,
             "aggregator_plugins": aggregator_plugins,
+            "validation_plugins": validation_plugins,
             "rate_limiter": rate_limiter,
             "cost_tracker": cost_tracker,
             "experiment_name": config.name,

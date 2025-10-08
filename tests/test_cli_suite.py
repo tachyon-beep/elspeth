@@ -1,4 +1,5 @@
 import argparse
+import json
 from pathlib import Path
 
 import pandas as pd
@@ -165,3 +166,93 @@ def test_cli_suite_prompt_pack_override(tmp_path, monkeypatch):
     system_prompt, user_prompt, _ = llm.calls[0]
     assert system_prompt == "Pack System"
     assert user_prompt == "Pack User 1"
+
+
+def test_cli_suite_management_flags(tmp_path, monkeypatch):
+    suite_root = tmp_path / "suite"
+    create_suite(suite_root)
+    exp1_config = suite_root / "exp1" / "config.json"
+    exp1_data = json.loads(exp1_config.read_text(encoding="utf-8"))
+    exp1_data["is_baseline"] = True
+    exp1_config.write_text(json.dumps(exp1_data), encoding="utf-8")
+
+    class DummyDatasource:
+        def load(self):
+            return pd.DataFrame({"APPID": ["1"]})
+
+    class DummyLLM:
+        def generate(self, *, system_prompt, user_prompt, metadata=None):
+            return {"content": user_prompt}
+
+    output_base = tmp_path / "outputs" / "latest_results.csv"
+    settings_obj = argparse.Namespace(
+        datasource=DummyDatasource(),
+        llm=DummyLLM(),
+        sinks=[CsvResultSink(path=output_base)],
+        orchestrator_config=OrchestratorConfig(
+            llm_prompt={"system": "sys", "user": "unused"},
+            prompt_fields=["APPID"],
+            criteria=None,
+            row_plugin_defs=None,
+            aggregator_plugin_defs=None,
+            sink_defs=None,
+            prompt_pack=None,
+            baseline_plugin_defs=None,
+            retry_config=None,
+            checkpoint_config=None,
+            llm_middleware_defs=None,
+            prompt_defaults=None,
+        ),
+        suite_root=suite_root,
+        suite_defaults={},
+        rate_limiter=None,
+        cost_tracker=None,
+        prompt_packs={},
+        prompt_pack=None,
+    )
+
+    def fake_load_settings(path, profile="default"):
+        return settings_obj
+
+    generated_paths = []
+
+    class Recorder:
+        def __init__(self, suite, results):
+            self.suite = suite
+            self.results = results
+
+        def generate_all_reports(self, path):
+            generated_paths.append(Path(path))
+
+    monkeypatch.setattr(cli, "SuiteReportGenerator", Recorder)
+    monkeypatch.setattr(cli, "load_settings", fake_load_settings)
+    monkeypatch.setattr(cli, "ExperimentSuite", cli.ExperimentSuite)
+    monkeypatch.setattr(cli, "validate_settings", lambda *a, **k: ValidationReport())
+    monkeypatch.setattr(
+        cli,
+        "validate_suite",
+        lambda *a, **k: SuiteValidationReport(report=ValidationReport(), preflight={}),
+    )
+
+    export_path = tmp_path / "suite_export.json"
+    reports_dir = tmp_path / "reports"
+    cli.main(
+        [
+            "--settings",
+            str(tmp_path / "settings.yaml"),
+            "--suite-root",
+            str(suite_root),
+            "--create-experiment-template",
+            "new_template",
+            "--export-suite-config",
+            str(export_path),
+            "--reports-dir",
+            str(reports_dir),
+            "--head",
+            "0",
+        ]
+    )
+
+    assert (suite_root / "new_template" / "config.json").exists()
+    assert export_path.exists()
+    assert generated_paths and generated_paths[0] == reports_dir

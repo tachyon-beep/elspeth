@@ -1,0 +1,41 @@
+prompt_variants_demo:
+  datasource:
+    plugin: local_csv
+    options:
+      path: config/data/prompt_variants_demo.csv
+  llm:
+    plugin: mock
+    options:
+      seed: 31415
+  sinks:
+    - plugin: csv
+      options:
+        path: outputs/prompt_variants/latest_results.csv
+        overwrite: true
+  prompts:
+    system: |
+      You produce illustrative marketing copy variations for regression testing.
+    user: |
+      Craft a {{ tone }} marketing headline that promotes {{ product }} to {{ audience }}.
+      Respond with a single compelling sentence.
+  prompt_fields:
+    - product
+    - audience
+    - tone
+  aggregator_plugins:
+    - name: prompt_variants
+      options:
+        prompt_template: |
+          You will rewrite the original user prompt while preserving every placeholder token exactly as-is.
+          Base user prompt:
+          ---
+          {{ user_prompt_template }}
+          ---
+          Placeholders that must remain: {{ placeholder_tokens | join(', ') }}
+          This is variant {{ index + 1 }} of {{ count }}. Produce a fresh prompt that keeps the same placeholders once each and keeps the request focused on marketing headlines. Return only the rewritten prompt text.
+        count: 3
+        max_attempts: 3
+        variant_llm:
+          plugin: mock
+          options:
+            seed: 27182

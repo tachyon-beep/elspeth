@@ -293,6 +293,7 @@ def validate_suite(
         _validate_experiment_plugins(report, data.get("row_plugins"), exp_registry.validate_row_plugin_definition, f"experiment:{name}.row_plugin")
         _validate_experiment_plugins(report, data.get("aggregator_plugins"), exp_registry.validate_aggregation_plugin_definition, f"experiment:{name}.aggregation_plugin")
         _validate_experiment_plugins(report, data.get("baseline_plugins"), exp_registry.validate_baseline_plugin_definition, f"experiment:{name}.baseline_plugin")
+        _validate_experiment_plugins(report, data.get("validation_plugins"), exp_registry.validate_validation_plugin_definition, f"experiment:{name}.validation_plugin")
         _validate_experiment_plugins(report, data.get("early_stop_plugins"), exp_registry.validate_early_stop_plugin_definition, f"experiment:{name}.early_stop_plugin")
         _validate_middleware_list(report, data.get("llm_middlewares"), llm_registry.validate_middleware_definition, context=f"experiment:{name}.middleware")
         _validate_plugin_list(report, data.get("sinks"), registry.validate_sink, context=f"experiment:{name}.sink")
@@ -421,6 +422,7 @@ def _validate_prompt_pack(
     _validate_experiment_plugins(report, pack.get("row_plugins"), exp_registry.validate_row_plugin_definition, f"{context}.row_plugin")
     _validate_experiment_plugins(report, pack.get("aggregator_plugins"), exp_registry.validate_aggregation_plugin_definition, f"{context}.aggregation_plugin")
     _validate_experiment_plugins(report, pack.get("baseline_plugins"), exp_registry.validate_baseline_plugin_definition, f"{context}.baseline_plugin")
+    _validate_experiment_plugins(report, pack.get("validation_plugins"), exp_registry.validate_validation_plugin_definition, f"{context}.validation_plugin")
     _validate_experiment_plugins(report, pack.get("early_stop_plugins"), exp_registry.validate_early_stop_plugin_definition, f"{context}.early_stop_plugin")
     _validate_middleware_list(report, pack.get("llm_middlewares"), llm_registry.validate_middleware_definition, context=f"{context}.middleware")
     _validate_plugin_list(report, pack.get("sinks"), registry.validate_sink, context=f"{context}.sink")
@@ -437,6 +439,7 @@ def _validate_suite_defaults(
     _validate_experiment_plugins(report, defaults.get("row_plugins"), exp_registry.validate_row_plugin_definition, "suite_defaults.row_plugin")
     _validate_experiment_plugins(report, defaults.get("aggregator_plugins"), exp_registry.validate_aggregation_plugin_definition, "suite_defaults.aggregation_plugin")
     _validate_experiment_plugins(report, defaults.get("baseline_plugins"), exp_registry.validate_baseline_plugin_definition, "suite_defaults.baseline_plugin")
+    _validate_experiment_plugins(report, defaults.get("validation_plugins"), exp_registry.validate_validation_plugin_definition, "suite_defaults.validation_plugin")
     _validate_experiment_plugins(report, defaults.get("early_stop_plugins"), exp_registry.validate_early_stop_plugin_definition, "suite_defaults.early_stop_plugin")
     _validate_middleware_list(report, defaults.get("llm_middlewares"), llm_registry.validate_middleware_definition, context="suite_defaults.middleware")
     _validate_plugin_list(report, defaults.get("sinks"), registry.validate_sink, context="suite_defaults.sink")
@@ -576,6 +579,7 @@ _SETTINGS_SCHEMA = {
         "concurrency": {"type": "object"},
         "early_stop": {"type": "object"},
         "early_stop_plugins": {"type": "array", "items": _PLUGIN_DEF_SCHEMA},
+        "validation_plugins": {"type": "array", "items": _PLUGIN_DEF_SCHEMA},
     },
     "required": ["datasource", "llm", "sinks"],
     "additionalProperties": True,
@@ -595,6 +599,7 @@ _EXPERIMENT_SCHEMA = {
         "row_plugins": {"type": "array", "items": _PLUGIN_DEF_SCHEMA},
         "aggregator_plugins": {"type": "array", "items": _PLUGIN_DEF_SCHEMA},
         "baseline_plugins": {"type": "array", "items": _PLUGIN_DEF_SCHEMA},
+        "validation_plugins": {"type": "array", "items": _PLUGIN_DEF_SCHEMA},
         "llm_middlewares": {"type": "array", "items": _MIDDLEWARE_DEF_SCHEMA},
         "sinks": {"type": "array", "items": _PLUGIN_REFERENCE_SCHEMA},
         "rate_limiter": {"type": "object"},

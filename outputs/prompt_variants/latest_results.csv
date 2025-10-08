@@ -1,0 +1,10 @@
+product,audience,tone,llm_content
+Eco-friendly water bottle,outdoor enthusiasts,energetic,"[mock] score=0.77
+Craft a energetic marketing headline that promotes Eco-friendly water bottle to outdoor enthusiasts.
+Respond with a single compelling sentence."
+Noise-cancelling earbuds,remote workers,calm,"[mock] score=0.43
+Craft a calm marketing headline that promotes Noise-cancelling earbuds to remote workers.
+Respond with a single compelling sentence."
+Smart garden sensor,urban apartment dwellers,instructive,"[mock] score=0.47
+Craft a instructive marketing headline that promotes Smart garden sensor to urban apartment dwellers.
+Respond with a single compelling sentence."

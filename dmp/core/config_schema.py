@@ -7,6 +7,17 @@ from typing import Mapping, Any
 from dmp.core.validation import validate_schema, ConfigurationError
 
 
+_PLUGIN_DEF_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "name": {"type": "string"},
+        "options": {"type": "object"},
+    },
+    "required": ["name"],
+    "additionalProperties": True,
+}
+
+
 EXPERIMENT_CONFIG_SCHEMA = {
     "type": "object",
     "required": ["name", "temperature", "max_tokens", "enabled"],
@@ -25,6 +36,10 @@ EXPERIMENT_CONFIG_SCHEMA = {
         },
         "prompt_pack": {"type": "string"},
         "security_level": {"type": "string"},
+        "validation_plugins": {
+            "type": "array",
+            "items": _PLUGIN_DEF_SCHEMA,
+        },
     },
     "additionalProperties": True,
 }
@@ -35,4 +50,3 @@ def validate_experiment_config(config: Mapping[str, Any]) -> None:
     if errors:
         message = "\n".join(msg.format() for msg in errors)
         raise ConfigurationError(message)
-
