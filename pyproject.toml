@@ -1,0 +1,62 @@
+[build-system]
+requires = ["setuptools>=65", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dmp"
+version = "0.1.0"
+description = "Domain Model Platform utilities and tooling"
+authors = [
+  { name = "DMP Team" }
+]
+requires-python = ">=3.12"
+dependencies = [
+  "azure-identity>=1.15.0",
+  "azure-storage-blob>=12.19.0",
+  "pandas>=2.2.0",
+  "pyyaml>=6.0",
+  "openai>=1.12.0",
+  "requests>=2.31.0",
+  "jinja2>=3.1.0",
+  "jsonschema>=4.21.1",
+  "scipy>=1.10.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.0.0",
+  "pytest-mock>=3.10.0",
+  "pytest-cov>=5.0.0",
+  "openpyxl>=3.1",
+  "black>=24.3.0",
+  "isort>=5.13.2",
+]
+azure = [
+  "azureml-core>=1.56.0",
+]
+stats-core = [
+  "scipy>=1.10.0",
+]
+stats-agreement = [
+  "pingouin>=0.5",
+]
+stats-bayesian = [
+  "scipy>=1.10",
+]
+stats-planning = [
+  "statsmodels>=0.14",
+]
+stats-distribution = [
+  "scipy>=1.10",
+]
+sinks-excel = [
+  "openpyxl>=3.1",
+]
+
+[tool.setuptools.packages.find]
+include = ["dmp*"]
+exclude = ["tests", "old", "notes", "config"]
+
+[tool.pytest.ini_options]
+addopts = "-ra --cov=dmp --cov-report=term-missing"
+testpaths = ["tests"]

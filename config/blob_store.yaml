@@ -1,0 +1,10 @@
+# Blob storage connections used for experiment datasets.
+# Profiles allow switching between environments (dev, staging, prod, etc.).
+
+default:
+  connection_name: "workspaceblobstore"
+  azureml_datastore_uri: "azureml://subscriptions/b1a4da9f-5275-4cc8-85ec-b2fd2236538c/resourcegroups/AI_Sandpit/workspaces/cto_poc_sourcing1/datastores/workspaceblobstore/paths/UI/2025-08-21_191420_UTC/PCS100-22.08.25.csv"
+  account_name: "dmpsyntheticdata"
+  container_name: "dmpdatasource"
+  blob_path: "SyntheticData.csv"
+  sas_token: "sp=rl&st=2025-10-03T02:13:02Z&se=2025-10-03T10:28:02Z&spr=https&sv=2024-11-04&sr=c&sig=vcKOPLIWXlbPlqW3iFJi8qQ%2BAQuKx1qyIuIii5AH3Wc%3D"

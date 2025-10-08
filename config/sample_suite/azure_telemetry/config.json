@@ -1,0 +1,16 @@
+{
+  "name": "azure_telemetry",
+  "description": "Sample wiring for Azure ML telemetry middleware (disabled by default).",
+  "enabled": false,
+  "temperature": 0.0,
+  "max_tokens": 256,
+  "prompt_pack": "sample",
+  "llm_middlewares": [
+    {
+      "name": "azure_environment",
+      "options": {
+        "log_prompts": false
+      }
+    }
+  ]
+}

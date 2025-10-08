@@ -1,0 +1,55 @@
+{
+  "execution_order": [
+    "producer",
+    "sanitizer",
+    "consumer"
+  ],
+  "prepared": {
+    "sanitizer": [
+      {
+        "@raw": [
+          {
+            "id": "DummySink:2:raw",
+            "type": "file/raw",
+            "security_level": "secret",
+            "produced_by": "DummySink:2"
+          }
+        ],
+        "raw": [
+          {
+            "id": "DummySink:2:raw",
+            "type": "file/raw",
+            "security_level": "secret",
+            "produced_by": "DummySink:2"
+          }
+        ]
+      }
+    ],
+    "consumer": [
+      {
+        "file/csv": [
+          {
+            "id": "DummySink:1:sanitized",
+            "type": "file/csv",
+            "security_level": "official",
+            "produced_by": "DummySink:1"
+          }
+        ]
+      }
+    ]
+  },
+  "store": {
+    "DummySink:1:sanitized": {
+      "type": "file/csv",
+      "produced_by": "DummySink:1",
+      "security_level": "official",
+      "persist": true
+    },
+    "DummySink:2:raw": {
+      "type": "file/raw",
+      "produced_by": "DummySink:2",
+      "security_level": "secret",
+      "persist": true
+    }
+  }
+}

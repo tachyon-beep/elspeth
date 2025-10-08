@@ -1,0 +1,6 @@
+APPID,title,summary,industry,priority
+APP-001,Basic Widget,A standard widget used for baseline validations,manufacturing,medium
+APP-002,Example Gadget,Reference gadget entry with predictable metrics,technology,low
+APP-003,Placeholder Service,Boring managed service record for smoke testing,services,medium
+APP-004,Sample Subscription,Plain SaaS subscription with default configuration,software,high
+APP-005,Utility Package,Utility package entry to exercise CSV ingestion,utilities,low

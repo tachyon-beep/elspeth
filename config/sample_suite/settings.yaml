@@ -1,0 +1,57 @@
+# Sample suite settings leveraging the mock LLM and local CSV datasource.
+
+default:
+  datasource:
+    plugin: local_csv
+    options:
+      path: config/sample_suite/data/sample_input.csv
+  llm:
+    plugin: mock
+    options:
+      seed: 42
+  sinks:
+    - plugin: csv
+      options:
+        path: outputs/sample_suite/latest_results.csv
+  prompt_packs:
+    sample:
+      prompts:
+        system: |
+          You are an evaluation assistant that returns concise JSON feedback.
+        user: |
+          Evaluate application {{ APPID }} titled "{{ title }}".
+          {% if industry %}Industry: {{ industry }}.{% endif %}
+          Summary: {{ summary }}.
+          Return JSON {"score": <0-1>, "comment": "<insight>"}.
+      prompt_fields:
+        - APPID
+        - title
+        - summary
+        - industry
+      prompt_defaults:
+        industry: ""
+      criteria:
+        - name: analysis
+          template: |
+            Provide JSON {"score": <0-1>, "comment": "<analysis>"} assessing clarity of summary for {{ APPID }}.
+        - name: prioritization
+          template: |
+            Estimate priority (0-1) for {{ APPID }} considering industry "{{ industry|default('general', boolean=true) }}".
+      row_plugins:
+        - name: score_extractor
+          options:
+            key: score
+            threshold: 0.7
+      aggregator_plugins:
+        - name: score_stats
+        - name: score_recommendation
+      baseline_plugins:
+        - name: score_delta
+  prompt_pack: sample
+  suite_defaults:
+    prompt_pack: sample
+    concurrency:
+      enabled: true
+      max_workers: 4
+      backlog_threshold: 2
+      utilization_pause: 0.9

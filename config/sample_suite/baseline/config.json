@@ -1,0 +1,9 @@
+{
+  "name": "baseline",
+  "description": "Baseline evaluation using the sample prompt pack",
+  "enabled": true,
+  "is_baseline": true,
+  "temperature": 0.0,
+  "max_tokens": 256,
+  "prompt_pack": "sample"
+}

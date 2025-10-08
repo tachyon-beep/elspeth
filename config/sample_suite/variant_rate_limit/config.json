@@ -1,0 +1,25 @@
+{
+  "name": "variant_rate_limit",
+  "description": "Variant demonstrating rate limiter and cost tracker overrides",
+  "enabled": true,
+  "temperature": 0.0,
+  "max_tokens": 256,
+  "prompt_pack": "sample",
+  "rate_limiter": {
+    "plugin": "fixed_window",
+    "options": {
+      "requests": 1,
+      "per_seconds": 1
+    }
+  },
+  "cost_tracker": {
+    "plugin": "fixed_price",
+    "options": {
+      "prompt_token_price": 0.0001,
+      "completion_token_price": 0.00015
+    }
+  },
+  "baseline_plugins": [
+    {"name": "score_delta"}
+  ]
+}

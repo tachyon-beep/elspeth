@@ -1,0 +1,128 @@
+# High-level configuration selecting plugins for orchestrator
+
+default:
+  prompt_packs:
+    whimsical:
+      prompts:
+        system: |
+          You are a whimsical assistant asked to invent silly reviews.
+        user: |
+          Provide a humorous summary for application {APPID} in the category "{category_name}".
+          Mention: Context1 "{context_1}" and Context2 "{context_2}". Do not be serious.
+      prompt_fields:
+        - APPID
+        - category_name
+        - context_1
+        - context_2
+      criteria:
+        - name: summary
+          template: |
+            Provide a humorous summary for application {APPID} in the category "{category_name}".
+        - name: advice
+          template: |
+            Offer whimsical advice to the applicant {APPID} considering context "{context_1}" and "{context_2}".
+      row_plugins:
+        - name: score_extractor
+          options:
+            threshold: 0.7
+            threshold_mode: gte
+      aggregator_plugins:
+        - name: score_stats
+        - name: score_recommendation
+      baseline_plugins:
+        - name: score_delta
+    archival:
+      prompts:
+        system: |
+          You are an archival assistant summarising experiment outputs for long-term storage.
+        user: |
+          Generate a factual summary for application {APPID} with priority {priority_level}.
+      prompt_fields:
+        - APPID
+        - priority_level
+      criteria:
+        - name: archival_summary
+          template: |
+            Provide a factual archival summary for application {APPID} with priority {priority_level}.
+      row_plugins:
+        - name: score_extractor
+          options:
+            key: score
+            threshold: 0.8
+      aggregator_plugins:
+        - name: score_stats
+      sinks:
+        - plugin: local_bundle
+          options:
+            base_path: outputs/bundles
+            bundle_name: archival
+        - plugin: signed_artifact
+          options:
+            base_path: outputs/signed
+            bundle_name: archival
+            key_env: DMP_SIGNING_KEY
+        - plugin: github_repo
+          options:
+            owner: example
+            repo: experiment-archive
+            path_template: archives/{experiment}/{timestamp}
+            dry_run: true
+        - plugin: azure_devops_repo
+          options:
+            organization: example-org
+            project: llm-experiments
+            repository: archival-repo
+            dry_run: true
+  datasource:
+    plugin: csv_blob
+    options:
+      path: config/data/generic_input.csv
+  llm:
+    plugin: mock
+    options:
+      seed: 1337
+  sinks:
+    - plugin: csv
+      options:
+        path: outputs/latest_results.csv
+  prompt_pack: whimsical
+  prompts:
+    system: |
+      You are a whimsical assistant asked to invent silly reviews.
+    user: |
+      Provide a humorous summary for application {APPID} in the category "{category_name}".
+      Mention: Context1 "{context_1}" and Context2 "{context_2}". Do not be serious.
+  prompt_fields:
+    - APPID
+    - category_name
+    - context_1
+    - context_2
+  criteria:
+    - name: summary
+      template: |
+        Provide a humorous summary for application {APPID} in the category "{category_name}".
+    - name: advice
+      template: |
+        Offer whimsical advice to the applicant {APPID} considering context "{context_1}" and "{context_2}".
+  row_plugins:
+    - name: score_extractor
+      options:
+        threshold: 0.7
+        threshold_mode: gte
+  aggregator_plugins:
+    - name: score_stats
+    - name: score_recommendation
+  baseline_plugins:
+    - name: score_delta
+  suite_defaults:
+    prompt_pack: whimsical
+    row_plugins:
+      - name: score_extractor
+        options:
+          threshold: 0.7
+          threshold_mode: gte
+    aggregator_plugins:
+      - name: score_stats
+      - name: score_recommendation
+    baseline_plugins:
+      - name: score_delta
