@@ -1,36 +1,19 @@
-# Agent Orientation
+# Repository Guidelines
 
-This document helps future agents and contributors reorient quickly after a memory compact.
+## Project Structure & Module Organization
+The Python package lives in `src/elspeth/`, with `core/` covering experiment orchestration, `plugins/` hosting metrics and output sinks, and `cli.py` providing the entrypoint. Support material sits in `config/sample_suite/` for runnable demos, `notes/` for decisions and planning, and `scripts/` for bootstrap helpers. Shared tests reside in `tests/`, mirroring module layouts for easy discovery.
 
-## Project Snapshot
-- **Repository**: ELSPETH (secure plugin-driven LLM experiment orchestrator)
-- **Status**: Core refactor through Phase 4 complete (retry/backoff, checkpointing, baseline comparisons).
-- **Python**: 3.12.x (ensure local runtime matches `pyproject.toml`).
+## Build, Test, and Development Commands
+Run `make bootstrap` (or `scripts/bootstrap.sh`) to create `.venv/`, install extras, and execute the sanity pytest pass. Activate the environment via `source .venv/bin/activate`, then use `pip install -e .[dev]` when dependencies shift. The sample orchestration flow is validated with `make sample-suite`, which exercises the CSV datasource plus mock LLM path. Use `python -m pytest -m "not slow"` for rapid feedback, and append `--maxfail=1 --disable-warnings` during triage.
 
-## Virtual Environment
-- Preferred environment lives at `.venv/` in the repo root.
-- Activate with `source .venv/bin/activate`.
-- Includes dev extras (`pytest`, `pytest-cov`, etc.); reinstall via `pip install -e .[dev]` if needed.
+## Coding Style & Naming Conventions
+Code targets Python 3.12 with 4-space indentation, `typing` annotations, and descriptive module names (`metrics_*.py`, `suite_runner.py`). Format changes with `black` and fix imports using `isort`; the Makefile pins compatible versions. Prefer snake_case for functions and variables, PascalCase for classes, and keep docstrings concise but informative, especially around plugin hooks.
 
-## Key Entry Points
-- `src/elspeth/cli.py` – main CLI driving orchestrator and suite operations (`--disable-metrics`, `--live-outputs`).
-- `src/elspeth/core/experiments/runner.py` – row execution with retries/checkpoints.
-- `src/elspeth/core/experiments/suite_runner.py` – baseline-first suite orchestration.
-- `src/elspeth/core/prompts/` – templating engine (Jinja-backed) with validation/cloning helpers.
-- `src/elspeth/plugins/experiments/metrics.py` – default metrics plugins (`score_extractor`, `score_stats`, `score_recommendation`, `score_delta`).
-- `src/elspeth/plugins/outputs/` – sinks for CSV, blob, local bundles, GitHub/Azure DevOps repos, and signed artifacts.
-- `config/sample_suite/` – runnable sample suite using local CSV datasource + mock LLM.
-- `src/elspeth/core/llm/` – middleware registry (audit logging, prompt shield) and concurrency helpers.
+## Testing Guidelines
+Pytest is the standard; new tests belong under `tests/` using `test_*.py` naming. Mirror package structure (`tests/core/test_runner.py`) to align fixtures with production modules. Aim to maintain the current ~83% coverage; add parametrized cases for concurrency, backoff, and plugin registration edge cases. When adding integration features, supply a CLI exercise under `tests/integration/` and document expected artifacts in assertions.
 
-## Tooling & Testing
-- `make bootstrap` (or `scripts/bootstrap.sh`) prepares `.venv`, installs deps, and runs pytest.
-- `make sample-suite` executes the mock-LLM sample suite with CSV outputs.
-- Run `source .venv/bin/activate && python -m pytest` for the full suite with coverage (61 tests, ~83% coverage as of latest run).
-- Concurrency is configurable via `concurrency` blocks in settings/prompt packs; ExperimentRunner spawns threads subject to rate limiter utilization thresholds.
+## Commit & Pull Request Guidelines
+Commits follow the existing imperative style (`Add`, `Refine`, `Fix`) and concentrate on one logical change. Include concise body context when touching orchestration flows or configuration formats. Pull requests should link tracking issues or roadmap phases, summarize impact, call out migrations/config changes, and list verification commands (pytest, sample suite, or custom scripts). Attach screenshots or artifact snippets when outputs change.
 
-## Active Roadmap
-- **Phase 5**: Metrics/statistical experiment plugins (row + aggregation).
-- **Phase 6**: Output & archival sinks (Excel/zip/DevOps) and metadata capture.
-- **Phase 7**: Tooling/documentation/bootstrap scripts.
-
-Reference `notes/plugin-architecture.md` for detailed planning and historical decisions.
+## Security & Configuration Tips
+Secrets and API keys must live outside the repo; use environment variables consumed by the LLM adapters. Treat `config/sample_suite/` as non-sensitive reference material and fork configurations for real deployments. Review `notes/plugin-architecture.md` before introducing new plugins to ensure registration settings and audit logging remain compliant.

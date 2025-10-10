@@ -1,6 +1,7 @@
 import pytest
 
 from elspeth.core.prompts import PromptEngine, PromptRenderingError
+from elspeth.core.prompts.exceptions import PromptValidationError
 
 
 def test_auto_convert_format_placeholders():
@@ -20,8 +21,9 @@ def test_template_conditionals():
 def test_missing_variable_raises():
     engine = PromptEngine()
     tpl = engine.compile("Hello {{ name }}", name="missing")
-    with pytest.raises(PromptRenderingError):
+    with pytest.raises(PromptRenderingError) as excinfo:
         engine.render(tpl, {})
+    assert excinfo.value.name == "missing"
 
 
 def test_clone_template():
@@ -36,3 +38,12 @@ def test_default_filter():
     tpl = engine.compile("{{ value|default('fallback') }}", name="default")
     assert engine.render(tpl, {}) == "fallback"
     assert engine.render(tpl, {"value": "set"}) == "set"
+
+
+def test_prompt_validation_error_contains_missing_fields():
+    engine = PromptEngine()
+    tpl = engine.compile("{{ secret }}", name="secure")
+    with pytest.raises(PromptValidationError) as excinfo:
+        engine.validate(tpl, context={})
+    assert excinfo.value.missing == {"secret"}
+    assert excinfo.value.name == "secure"

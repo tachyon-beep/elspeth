@@ -1,4 +1,6 @@
 import json
+import pytest
+from datetime import datetime, timezone
 
 from elspeth.core.security import verify_signature
 from elspeth.plugins.outputs.signed import SignedArtifactSink
@@ -32,3 +34,44 @@ def test_signed_artifact_sink(tmp_path):
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert manifest["signature"]["value"] == signature_payload["signature"]
     assert manifest["rows"] == 1
+
+
+def test_signed_artifact_sink_env_key_and_timestamp(tmp_path, monkeypatch):
+    class FixedDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2024, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
+
+    monkeypatch.setenv("ELSPETH_SIGNING_KEY", "env-secret")
+    monkeypatch.setattr("elspeth.plugins.outputs.signed.datetime", FixedDateTime)
+
+    base = tmp_path / "signed"
+    sink = SignedArtifactSink(base_path=base, bundle_name="exp", timestamped=True)
+    sink.write(fake_results(), metadata={"name": "exp"})
+
+    bundle_dirs = list(base.iterdir())
+    assert len(bundle_dirs) == 1
+    assert bundle_dirs[0].name == "exp_20240102T030405Z"
+    assert sink.key == "env-secret"
+
+
+def test_signed_artifact_sink_legacy_env(monkeypatch, tmp_path, caplog):
+    monkeypatch.delenv("ELSPETH_SIGNING_KEY", raising=False)
+    monkeypatch.setenv("DMP_SIGNING_KEY", "legacy")
+
+    sink = SignedArtifactSink(base_path=tmp_path / "signed", bundle_name="exp", timestamped=False)
+
+    with caplog.at_level("WARNING"):
+        sink.write(fake_results(), metadata={"experiment": "exp"})
+
+    assert any("legacy" in record.message for record in caplog.records)
+
+
+def test_signed_artifact_sink_skip_on_error(monkeypatch, tmp_path, caplog):
+    monkeypatch.delenv("ELSPETH_SIGNING_KEY", raising=False)
+    sink = SignedArtifactSink(base_path=tmp_path / "signed", bundle_name="exp", timestamped=False, on_error="skip")
+
+    with caplog.at_level("WARNING"):
+        sink.write(fake_results(), metadata={})
+
+    assert any("skipping bundle creation" in record.message for record in caplog.records)

@@ -204,3 +204,37 @@ def test_blob_loader_uses_sas_token(monkeypatch):
     loader.load_bytes()
 
     assert captured["credential"] == "sig=123"
+
+
+def test_blob_data_loader_download_prevents_overwrite(tmp_path):
+    from elspeth.datasources.blob_store import BlobConfig, BlobDataLoader
+
+    config = BlobConfig.from_mapping(
+        {
+            "connection_name": "workspaceblobstore",
+            "azureml_datastore_uri": "azureml://example",
+            "storage_uri": "https://account.blob.core.windows.net/container/blob.csv",
+        }
+    )
+
+    loader = BlobDataLoader(config, credential="token")
+
+    class DummyDownloader:
+        def readall(self):
+            return b"data"
+
+    class DummyBlob:
+        def download_blob(self):
+            return DummyDownloader()
+
+    loader._blob_client = DummyBlob()
+
+    destination = tmp_path / "output.csv"
+    destination.write_text("existing", encoding="utf-8")
+
+    with pytest.raises(FileExistsError):
+        loader.download_to_file(destination)
+
+    # Allow overwrite when requested
+    loader.download_to_file(destination, overwrite=True)
+    assert destination.read_bytes() == b"data"
