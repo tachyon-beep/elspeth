@@ -74,7 +74,12 @@ def validate_schema(
         yield ValidationMessage(details, context=context)
 
 
-def _validate_node(value: Any, schema: Mapping[str, Any], path: Sequence[object], errors: List[tuple[Sequence[object], str]]) -> None:
+def _validate_node(
+    value: Any,
+    schema: Mapping[str, Any],
+    path: Sequence[object],
+    errors: List[tuple[Sequence[object], str]],
+) -> None:
     if schema is None:
         return
 
@@ -172,15 +177,17 @@ def validate_settings(path: str | Path, profile: str = "default") -> ValidationR
         report.add_error(f"Profile '{profile}' not found", context=str(config_path))
         return report
 
-    for message in validate_schema(profile_data, _SETTINGS_SCHEMA, context=f"settings[{profile}]"):
+    for message in validate_schema(
+        profile_data, _SETTINGS_SCHEMA, context=f"settings[{profile}]"
+    ):
         report.errors.append(message)
     if report.has_errors():
         return report
 
     from elspeth.core import registry as core_registry
+    from elspeth.core.controls import registry as controls_registry
     from elspeth.core.experiments import plugin_registry as exp_registry
     from elspeth.core.llm import registry as llm_registry
-    from elspeth.core.controls import registry as controls_registry
 
     registry = core_registry.registry
 
@@ -198,9 +205,12 @@ def validate_settings(path: str | Path, profile: str = "default") -> ValidationR
     )
 
     sinks = profile_data.get("sinks")
-    if not isinstance(sinks, list) or not sinks:
-        report.add_error("'sinks' must be a non-empty list", context=f"settings[{profile}]")
-    else:
+    has_top_level_sinks = isinstance(sinks, list) and bool(sinks)
+    if sinks is not None and not isinstance(sinks, list):
+        report.add_error(
+            "'sinks' must be a list when provided", context=f"settings[{profile}]"
+        )
+    if has_top_level_sinks:
         for entry in sinks:
             _validate_plugin_reference(
                 report,
@@ -208,10 +218,35 @@ def validate_settings(path: str | Path, profile: str = "default") -> ValidationR
                 kind="sink",
                 validator=registry.validate_sink,
             )
+    else:
+        prompt_pack_name = profile_data.get("prompt_pack")
+        prompt_packs_raw = profile_data.get("prompt_packs")
+        fallback_from_prompt_pack = False
+        if isinstance(prompt_packs_raw, Mapping) and prompt_pack_name:
+            pack_definition = prompt_packs_raw.get(prompt_pack_name)
+            if isinstance(pack_definition, Mapping):
+                pack_sinks = pack_definition.get("sinks")
+                if isinstance(pack_sinks, list) and pack_sinks:
+                    fallback_from_prompt_pack = True
+
+        suite_defaults_raw = profile_data.get("suite_defaults")
+        fallback_from_suite_defaults = False
+        if isinstance(suite_defaults_raw, Mapping):
+            defaults_sinks = suite_defaults_raw.get("sinks")
+            if isinstance(defaults_sinks, list) and defaults_sinks:
+                fallback_from_suite_defaults = True
+
+        if not (fallback_from_prompt_pack or fallback_from_suite_defaults):
+            report.add_error(
+                "'sinks' must be provided either at the profile level or via prompt pack/suite defaults",
+                context=f"settings[{profile}]",
+            )
 
     prompt_packs = profile_data.get("prompt_packs") or {}
     if not isinstance(prompt_packs, Mapping):
-        report.add_error("'prompt_packs' must be a mapping", context=f"settings[{profile}]")
+        report.add_error(
+            "'prompt_packs' must be a mapping", context=f"settings[{profile}]"
+        )
         prompt_packs = {}
     for name, pack in prompt_packs.items():
         _validate_prompt_pack(report, name, pack, registry, exp_registry, llm_registry)
@@ -233,14 +268,20 @@ def validate_settings(path: str | Path, profile: str = "default") -> ValidationR
 
     suite_defaults = profile_data.get("suite_defaults") or {}
     if not isinstance(suite_defaults, Mapping):
-        report.add_error("'suite_defaults' must be a mapping", context=f"settings[{profile}]")
+        report.add_error(
+            "'suite_defaults' must be a mapping", context=f"settings[{profile}]"
+        )
         suite_defaults = {}
-    _validate_suite_defaults(report, suite_defaults, registry, exp_registry, llm_registry, controls_registry)
+    _validate_suite_defaults(
+        report, suite_defaults, registry, exp_registry, llm_registry, controls_registry
+    )
 
     for key in ("retry", "checkpoint", "concurrency"):
         value = profile_data.get(key)
         if value is not None and not isinstance(value, Mapping):
-            report.add_error(f"'{key}' must be a mapping", context=f"settings[{profile}]")
+            report.add_error(
+                f"'{key}' must be a mapping", context=f"settings[{profile}]"
+            )
 
     return report
 
@@ -258,9 +299,9 @@ def validate_suite(
         return SuiteValidationReport(report=report)
 
     from elspeth.core import registry as core_registry
+    from elspeth.core.controls import registry as controls_registry
     from elspeth.core.experiments import plugin_registry as exp_registry
     from elspeth.core.llm import registry as llm_registry
-    from elspeth.core.controls import registry as controls_registry
 
     registry = core_registry.registry
 
@@ -269,7 +310,9 @@ def validate_suite(
     baseline_count = 0
     baseline_name: str | None = None
 
-    for folder in sorted(p for p in suite_path.iterdir() if p.is_dir() and not p.name.startswith(".")):
+    for folder in sorted(
+        p for p in suite_path.iterdir() if p.is_dir() and not p.name.startswith(".")
+    ):
         config_path = folder / "config.json"
         if not config_path.exists():
             continue
@@ -279,7 +322,9 @@ def validate_suite(
             report.add_error(f"Invalid JSON: {exc}", context=str(config_path))
             continue
 
-        for message in validate_schema(data, _EXPERIMENT_SCHEMA, context=f"experiment:{folder.name}"):
+        for message in validate_schema(
+            data, _EXPERIMENT_SCHEMA, context=f"experiment:{folder.name}"
+        ):
             report.errors.append(message)
         name = data.get("name") or folder.name
         enabled = bool(data.get("enabled", True))
@@ -290,13 +335,48 @@ def validate_suite(
                 baseline_count += 1
                 baseline_name = name
 
-        _validate_experiment_plugins(report, data.get("row_plugins"), exp_registry.validate_row_plugin_definition, f"experiment:{name}.row_plugin")
-        _validate_experiment_plugins(report, data.get("aggregator_plugins"), exp_registry.validate_aggregation_plugin_definition, f"experiment:{name}.aggregation_plugin")
-        _validate_experiment_plugins(report, data.get("baseline_plugins"), exp_registry.validate_baseline_plugin_definition, f"experiment:{name}.baseline_plugin")
-        _validate_experiment_plugins(report, data.get("validation_plugins"), exp_registry.validate_validation_plugin_definition, f"experiment:{name}.validation_plugin")
-        _validate_experiment_plugins(report, data.get("early_stop_plugins"), exp_registry.validate_early_stop_plugin_definition, f"experiment:{name}.early_stop_plugin")
-        _validate_middleware_list(report, data.get("llm_middlewares"), llm_registry.validate_middleware_definition, context=f"experiment:{name}.middleware")
-        _validate_plugin_list(report, data.get("sinks"), registry.validate_sink, context=f"experiment:{name}.sink")
+        _validate_experiment_plugins(
+            report,
+            data.get("row_plugins"),
+            exp_registry.validate_row_plugin_definition,
+            f"experiment:{name}.row_plugin",
+        )
+        _validate_experiment_plugins(
+            report,
+            data.get("aggregator_plugins"),
+            exp_registry.validate_aggregation_plugin_definition,
+            f"experiment:{name}.aggregation_plugin",
+        )
+        _validate_experiment_plugins(
+            report,
+            data.get("baseline_plugins"),
+            exp_registry.validate_baseline_plugin_definition,
+            f"experiment:{name}.baseline_plugin",
+        )
+        _validate_experiment_plugins(
+            report,
+            data.get("validation_plugins"),
+            exp_registry.validate_validation_plugin_definition,
+            f"experiment:{name}.validation_plugin",
+        )
+        _validate_experiment_plugins(
+            report,
+            data.get("early_stop_plugins"),
+            exp_registry.validate_early_stop_plugin_definition,
+            f"experiment:{name}.early_stop_plugin",
+        )
+        _validate_middleware_list(
+            report,
+            data.get("llm_middlewares"),
+            llm_registry.validate_middleware_definition,
+            context=f"experiment:{name}.middleware",
+        )
+        _validate_plugin_list(
+            report,
+            data.get("sinks"),
+            registry.validate_sink,
+            context=f"experiment:{name}.sink",
+        )
         try:
             controls_registry.validate_rate_limiter(data.get("rate_limiter"))
         except ConfigurationError as exc:
@@ -306,8 +386,12 @@ def validate_suite(
         except ConfigurationError as exc:
             report.add_error(str(exc), context=f"experiment:{name}.cost_tracker")
 
-        if data.get("concurrency") is not None and not isinstance(data.get("concurrency"), Mapping):
-            report.add_error("'concurrency' must be a mapping", context=f"experiment:{name}")
+        if data.get("concurrency") is not None and not isinstance(
+            data.get("concurrency"), Mapping
+        ):
+            report.add_error(
+                "'concurrency' must be a mapping", context=f"experiment:{name}"
+            )
 
         _validate_prompt_files(report, folder, name, data)
 
@@ -339,7 +423,9 @@ def validate_suite(
             report.add_warning(warning, context="suite")
             warnings.append(warning)
         if exp["enabled"] and exp["max_tokens"] > 2000:
-            warning = f"High max_tokens ({exp['max_tokens']}) for experiment '{exp['name']}'"
+            warning = (
+                f"High max_tokens ({exp['max_tokens']}) for experiment '{exp['name']}'"
+            )
             report.add_warning(warning, context="suite")
             warnings.append(warning)
 
@@ -417,15 +503,50 @@ def _validate_prompt_pack(
             report.add_error("'prompts' must be a mapping", context=context)
         else:
             if "system" not in prompts or "user" not in prompts:
-                report.add_error("Prompt pack prompts must include 'system' and 'user'", context=context)
+                report.add_error(
+                    "Prompt pack prompts must include 'system' and 'user'",
+                    context=context,
+                )
 
-    _validate_experiment_plugins(report, pack.get("row_plugins"), exp_registry.validate_row_plugin_definition, f"{context}.row_plugin")
-    _validate_experiment_plugins(report, pack.get("aggregator_plugins"), exp_registry.validate_aggregation_plugin_definition, f"{context}.aggregation_plugin")
-    _validate_experiment_plugins(report, pack.get("baseline_plugins"), exp_registry.validate_baseline_plugin_definition, f"{context}.baseline_plugin")
-    _validate_experiment_plugins(report, pack.get("validation_plugins"), exp_registry.validate_validation_plugin_definition, f"{context}.validation_plugin")
-    _validate_experiment_plugins(report, pack.get("early_stop_plugins"), exp_registry.validate_early_stop_plugin_definition, f"{context}.early_stop_plugin")
-    _validate_middleware_list(report, pack.get("llm_middlewares"), llm_registry.validate_middleware_definition, context=f"{context}.middleware")
-    _validate_plugin_list(report, pack.get("sinks"), registry.validate_sink, context=f"{context}.sink")
+    _validate_experiment_plugins(
+        report,
+        pack.get("row_plugins"),
+        exp_registry.validate_row_plugin_definition,
+        f"{context}.row_plugin",
+    )
+    _validate_experiment_plugins(
+        report,
+        pack.get("aggregator_plugins"),
+        exp_registry.validate_aggregation_plugin_definition,
+        f"{context}.aggregation_plugin",
+    )
+    _validate_experiment_plugins(
+        report,
+        pack.get("baseline_plugins"),
+        exp_registry.validate_baseline_plugin_definition,
+        f"{context}.baseline_plugin",
+    )
+    _validate_experiment_plugins(
+        report,
+        pack.get("validation_plugins"),
+        exp_registry.validate_validation_plugin_definition,
+        f"{context}.validation_plugin",
+    )
+    _validate_experiment_plugins(
+        report,
+        pack.get("early_stop_plugins"),
+        exp_registry.validate_early_stop_plugin_definition,
+        f"{context}.early_stop_plugin",
+    )
+    _validate_middleware_list(
+        report,
+        pack.get("llm_middlewares"),
+        llm_registry.validate_middleware_definition,
+        context=f"{context}.middleware",
+    )
+    _validate_plugin_list(
+        report, pack.get("sinks"), registry.validate_sink, context=f"{context}.sink"
+    )
 
 
 def _validate_suite_defaults(
@@ -436,13 +557,48 @@ def _validate_suite_defaults(
     llm_registry,
     controls_registry,
 ) -> None:
-    _validate_experiment_plugins(report, defaults.get("row_plugins"), exp_registry.validate_row_plugin_definition, "suite_defaults.row_plugin")
-    _validate_experiment_plugins(report, defaults.get("aggregator_plugins"), exp_registry.validate_aggregation_plugin_definition, "suite_defaults.aggregation_plugin")
-    _validate_experiment_plugins(report, defaults.get("baseline_plugins"), exp_registry.validate_baseline_plugin_definition, "suite_defaults.baseline_plugin")
-    _validate_experiment_plugins(report, defaults.get("validation_plugins"), exp_registry.validate_validation_plugin_definition, "suite_defaults.validation_plugin")
-    _validate_experiment_plugins(report, defaults.get("early_stop_plugins"), exp_registry.validate_early_stop_plugin_definition, "suite_defaults.early_stop_plugin")
-    _validate_middleware_list(report, defaults.get("llm_middlewares"), llm_registry.validate_middleware_definition, context="suite_defaults.middleware")
-    _validate_plugin_list(report, defaults.get("sinks"), registry.validate_sink, context="suite_defaults.sink")
+    _validate_experiment_plugins(
+        report,
+        defaults.get("row_plugins"),
+        exp_registry.validate_row_plugin_definition,
+        "suite_defaults.row_plugin",
+    )
+    _validate_experiment_plugins(
+        report,
+        defaults.get("aggregator_plugins"),
+        exp_registry.validate_aggregation_plugin_definition,
+        "suite_defaults.aggregation_plugin",
+    )
+    _validate_experiment_plugins(
+        report,
+        defaults.get("baseline_plugins"),
+        exp_registry.validate_baseline_plugin_definition,
+        "suite_defaults.baseline_plugin",
+    )
+    _validate_experiment_plugins(
+        report,
+        defaults.get("validation_plugins"),
+        exp_registry.validate_validation_plugin_definition,
+        "suite_defaults.validation_plugin",
+    )
+    _validate_experiment_plugins(
+        report,
+        defaults.get("early_stop_plugins"),
+        exp_registry.validate_early_stop_plugin_definition,
+        "suite_defaults.early_stop_plugin",
+    )
+    _validate_middleware_list(
+        report,
+        defaults.get("llm_middlewares"),
+        llm_registry.validate_middleware_definition,
+        context="suite_defaults.middleware",
+    )
+    _validate_plugin_list(
+        report,
+        defaults.get("sinks"),
+        registry.validate_sink,
+        context="suite_defaults.sink",
+    )
     try:
         controls_registry.validate_rate_limiter(defaults.get("rate_limiter"))
     except ConfigurationError as exc:
@@ -500,8 +656,14 @@ def _validate_middleware_list(
             report.add_error(str(exc), context=context)
 
 
-def _validate_prompt_files(report: ValidationReport, folder: Path, name: str, config: Mapping[str, Any]) -> None:
-    if config.get("prompt_pack") or config.get("prompt_system") or config.get("prompt_template"):
+def _validate_prompt_files(
+    report: ValidationReport, folder: Path, name: str, config: Mapping[str, Any]
+) -> None:
+    if (
+        config.get("prompt_pack")
+        or config.get("prompt_system")
+        or config.get("prompt_template")
+    ):
         return
     system_path = folder / "system_prompt.md"
     user_path = folder / "user_prompt.md"
@@ -516,6 +678,7 @@ def _find_duplicates(items: Iterable[str]) -> List[str]:
     for item in items:
         counts[item] = counts.get(item, 0) + 1
     return [item for item, count in counts.items() if count > 1]
+
 
 __all__ = [
     "ConfigurationError",
