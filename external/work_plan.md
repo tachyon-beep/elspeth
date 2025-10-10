@@ -200,3 +200,79 @@ This programme converts the ISS/IRAP-oriented review findings (see `CODE_REVIEW.
 - WP1, WP6 share schema changes; schedule code reviews jointly.
 - WP8 structured logging affects WP4 scenarios—coordinate to keep assertions stable.
 - Document owners (docs/security) should sync with release notes once WPs close.
+
+---
+
+---
+## Plugin Reform Alignment (see `PLUGIN_REFORM.md`)
+
+The plugin reform initiative introduces platform-level capabilities that build on the earlier security hardening WPs. We track these as PR-series work packages to make sequencing explicit.
+
+### PR1 – Plugin Manifest & Self-Description (aligns with North Star principle 2)
+- **Scope:** Implement `PluginManifest` model with name/type/version/api_version, config/input/output schemas, required permissions, classification bounds, egress allow list, side effects, healthcheck flag.
+- **Steps:**
+  1. Add `elspeth/core/plugins/manifest.py` with Pydantic model and loader.
+  2. Update plugin registry to require manifest presence and validate schemas.
+  3. Migrate all built-in plugins to ship manifests; expose via CLI `elspeth plugins info`.
+- **Dependencies:** WP6 secure-mode schema groundwork.
+
+### PR2 – Capability Permissions & Host API (principles 1 & 2)
+- **Scope:** Introduce a Host API that mediates file/network/secrets actions and enforces permissions declared in manifests.
+- **Steps:**
+  1. Design Host API facade with policy enforcement (path sandboxing, egress allow list, timeouts).
+  2. Refactor core plugins to use Host API instead of direct I/O.
+  3. Add tests to ensure blocked egress/path escapes raise security errors.
+- **Dependencies:** PR1 manifest metadata; WP6 policy engine.
+
+### PR3 – Trust Tiers & Isolation (principle 3)
+- **Scope:** Support running vetted/untrusted plugins out-of-process or in sandboxed containers.
+- **Steps:**
+  1. Define trust tiers (`core`, `vetted`, `untrusted`) and configuration options.
+  2. Implement out-of-process worker using Host API RPC; prototype container execution for untrusted tier (non-root, read-only, cgroup limits).
+  3. Integrate capability checks and Host API transport across boundaries.
+- **Dependencies:** PR2 Host API, WP8 structured logging for observability.
+
+### PR4 – Policy as Code Engine (principles 1 & 4)
+- **Scope:** Centralise classification, egress, and secret policies.
+- **Steps:**
+  1. Implement `elspeth/policy/engine.py` evaluating manifests + run context.
+  2. Enforce rules: experiment level <= plugin max classification, secure-mode host allow lists, sink eligibility.
+  3. Hook engine into manifest validation and Host API.
+- **Dependencies:** WP6 secure-mode schemas, PR1 manifests.
+
+### PR5 – Supply Chain & Provenance (principle 1)
+- **Scope:** Build on WP7 to require signed plugin artefacts, SBOMs, and runtime attestations.
+- **Steps:**
+  1. Integrate Sigstore signing/verification for plugin wheels.
+  2. Enforce package allow-list; record per-run attestation (plugin version, manifest checksum) in output manifests.
+- **Dependencies:** WP7 scanners, WP1 manifest metadata.
+
+### PR6 – SDK Versioning & Compatibility (principle 6)
+- **Scope:** Establish clear semver for plugin SDK and enforce `api_version` compatibility.
+- **Steps:**
+  1. Version SDK modules; update developer docs.
+  2. Registry refuses incompatible API versions; provide adapter for previous major.
+  3. Add `elspeth plugins doctor` CLI command.
+- **Dependencies:** PR1 manifest.
+
+### PR7 – Observability & Resilience (principles 1 & 7)
+- **Scope:** Expand structured logging to full telemetry and resilience primitives.
+- **Steps:**
+  1. Instrument Host API/runner with OpenTelemetry traces + metrics (success rate, latency, saturation).
+  2. Implement timeouts, retries with jitter, circuit breakers, bulkheads guided by manifest.
+  3. Surface health status/heartbeats; integrate into sample suite.
+- **Dependencies:** WP8 structured logging, PR2 Host API.
+
+### PR8 – Developer Experience & Guardrails (principle 5)
+- **Scope:** Deliver CLI tooling that makes safe plugin development the default.
+- **Steps:**
+  1. New CLI commands: `elspeth plugins ls/info/verify` exposing manifest, permissions, policy evaluation.
+  2. Replace scaffold script with `elspeth plugin init` generating manifest, Host API stub, tests, README.
+  3. Add `elspeth plugins verify` (schema + policy lint) and integrate into contributor CI template.
+- **Dependencies:** PR1 manifest, PR4 policy engine.
+
+### Sequencing Notes
+- PR1 & PR2 kick off after WP6 secure mode and WP8 structured logging land.
+- PR3–PR5 depend on manifests + policy engine; stage across subsequent milestones.
+- PR6–PR8 run alongside platform maturity work once manifest infrastructure stabilises.
+
