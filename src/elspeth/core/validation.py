@@ -235,10 +235,18 @@ def validate_settings(path: str | Path, profile: str = "default") -> ValidationR
             defaults_sinks = suite_defaults_raw.get("sinks")
             if isinstance(defaults_sinks, list) and defaults_sinks:
                 fallback_from_suite_defaults = True
+            else:
+                suite_defaults_pack = suite_defaults_raw.get("prompt_pack")
+                if isinstance(prompt_packs_raw, Mapping) and suite_defaults_pack:
+                    pack_definition = prompt_packs_raw.get(suite_defaults_pack)
+                    if isinstance(pack_definition, Mapping):
+                        pack_sinks = pack_definition.get("sinks")
+                        if isinstance(pack_sinks, list) and pack_sinks:
+                            fallback_from_suite_defaults = True
 
         if not (fallback_from_prompt_pack or fallback_from_suite_defaults):
             report.add_error(
-                "'sinks' must be provided either at the profile level or via prompt pack/suite defaults",
+                "'sinks' must be provided either at the profile level, via prompt pack, or suite defaults",
                 context=f"settings[{profile}]",
             )
 
@@ -733,7 +741,6 @@ _SETTINGS_SCHEMA = {
         "sinks": {
             "type": "array",
             "items": _PLUGIN_REFERENCE_SCHEMA,
-            "minItems": 1,
         },
         "prompt_packs": {"type": "object"},
         "suite_defaults": {"type": "object"},
@@ -744,7 +751,7 @@ _SETTINGS_SCHEMA = {
         "early_stop_plugins": {"type": "array", "items": _PLUGIN_DEF_SCHEMA},
         "validation_plugins": {"type": "array", "items": _PLUGIN_DEF_SCHEMA},
     },
-    "required": ["datasource", "llm", "sinks"],
+    "required": ["datasource", "llm"],
     "additionalProperties": True,
 }
 
