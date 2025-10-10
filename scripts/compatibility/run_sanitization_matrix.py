@@ -212,7 +212,9 @@ def run_matrix(guard: str, verbose: bool = False) -> int:
 
 
 def parse_args(argv: List[str]) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run sanitisation compatibility checks")
+    parser = argparse.ArgumentParser(
+        description="Run sanitisation compatibility checks"
+    )
     parser.add_argument(
         "--guard",
         default="'",

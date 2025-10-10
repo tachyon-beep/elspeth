@@ -152,7 +152,7 @@ def test_zip_sink_disable_sanitization(tmp_path):
         header = next(csv_reader)
         rows = list(csv_reader)
         formula_values = [row[header.index("formula")] for row in rows]
-        assert any(value.startswith('=') for value in formula_values)
+        assert any(value.startswith("=") for value in formula_values)
 
 
 def test_zip_sink_skip_on_error(monkeypatch, tmp_path, caplog):

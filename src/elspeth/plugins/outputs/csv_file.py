@@ -12,7 +12,6 @@ from elspeth.core.interfaces import Artifact, ArtifactDescriptor, ResultSink
 from elspeth.core.security import normalize_security_level
 from elspeth.plugins.outputs._sanitize import sanitize_cell
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -43,7 +42,10 @@ class CsvResultSink(ResultSink):
             )
         self._last_written_path: str | None = None
         self._security_level: str | None = None
-        self._sanitization = {"enabled": self.sanitize_formulas, "guard": self.sanitize_guard}
+        self._sanitization = {
+            "enabled": self.sanitize_formulas,
+            "guard": self.sanitize_guard,
+        }
 
     # ------------------------------------------------------------------ helpers
     def _sanitize_key(self, key: Any) -> Any:
@@ -56,7 +58,9 @@ class CsvResultSink(ResultSink):
             return value
         return sanitize_cell(value, guard=self.sanitize_guard)
 
-    def write(self, results: Dict[str, Any], *, metadata: Dict[str, Any] | None = None) -> None:
+    def write(
+        self, results: Dict[str, Any], *, metadata: Dict[str, Any] | None = None
+    ) -> None:
         try:
             entries = results.get("results", [])
             if not entries:
@@ -69,15 +73,17 @@ class CsvResultSink(ResultSink):
                     record: Dict[Any, Any] = {}
                     if isinstance(row, dict):
                         for key, value in row.items():
-                            record[self._sanitize_key(key)] = self._sanitize_value(value)
+                            record[self._sanitize_key(key)] = self._sanitize_value(
+                                value
+                            )
                     record[self._sanitize_key("llm_content")] = self._sanitize_value(
                         response.get("content")
                     )
                     responses = item.get("responses") or {}
                     if isinstance(responses, dict):
                         for name, resp in responses.items():
-                            record[self._sanitize_key(f"llm_{name}")] = self._sanitize_value(
-                                (resp or {}).get("content")
+                            record[self._sanitize_key(f"llm_{name}")] = (
+                                self._sanitize_value((resp or {}).get("content"))
                             )
                     rows.append(record)
                 df = pd.DataFrame(rows)
@@ -89,10 +95,14 @@ class CsvResultSink(ResultSink):
             df.to_csv(self.path, index=False)
             self._last_written_path = str(self.path)
             if metadata:
-                self._security_level = normalize_security_level(metadata.get("security_level"))
+                self._security_level = normalize_security_level(
+                    metadata.get("security_level")
+                )
         except Exception as exc:
             if self.on_error == "skip":
-                logger.warning("CSV sink failed; skipping write to '%s': %s", self.path, exc)
+                logger.warning(
+                    "CSV sink failed; skipping write to '%s': %s", self.path, exc
+                )
                 return
             raise
 
@@ -104,7 +114,9 @@ class CsvResultSink(ResultSink):
     def consumes(self):  # pragma: no cover - placeholder for artifact chaining
         return []
 
-    def finalize(self, artifacts, *, metadata=None):  # pragma: no cover - optional cleanup
+    def finalize(
+        self, artifacts, *, metadata=None
+    ):  # pragma: no cover - optional cleanup
         return None
 
     def collect_artifacts(self) -> Dict[str, Artifact]:  # pragma: no cover - optional

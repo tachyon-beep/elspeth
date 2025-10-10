@@ -12,7 +12,6 @@ from elspeth.core.interfaces import Artifact, ArtifactDescriptor, ResultSink
 from elspeth.core.security import normalize_security_level
 from elspeth.plugins.outputs._sanitize import sanitize_cell
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -69,10 +68,15 @@ class ExcelResultSink(ResultSink):
         self._workbook_factory = _load_workbook_dependencies()
         self._last_workbook_path: str | None = None
         self._security_level: str | None = None
-        self._sanitization = {"enabled": self.sanitize_formulas, "guard": self.sanitize_guard}
+        self._sanitization = {
+            "enabled": self.sanitize_formulas,
+            "guard": self.sanitize_guard,
+        }
 
     # ------------------------------------------------------------------ public API
-    def write(self, results: Dict[str, Any], *, metadata: Dict[str, Any] | None = None) -> None:
+    def write(
+        self, results: Dict[str, Any], *, metadata: Dict[str, Any] | None = None
+    ) -> None:
         metadata = metadata or {}
         timestamp = datetime.now(timezone.utc)
         try:
@@ -91,7 +95,9 @@ class ExcelResultSink(ResultSink):
             workbook.save(path)
             self._last_workbook_path = str(path)
             if metadata:
-                self._security_level = normalize_security_level(metadata.get("security_level"))
+                self._security_level = normalize_security_level(
+                    metadata.get("security_level")
+                )
         except Exception as exc:
             if self.on_error == "skip":
                 logger.warning("Excel sink failed; skipping workbook creation: %s", exc)
@@ -131,7 +137,9 @@ class ExcelResultSink(ResultSink):
             headers = sorted({key for row in flattened for key in row.keys()})
             sheet.append([self._sanitize_header(column) for column in headers])
             for row in flattened:
-                sheet.append([self._sanitize_value(row.get(column)) for column in headers])
+                sheet.append(
+                    [self._sanitize_value(row.get(column)) for column in headers]
+                )
         else:
             sheet.append([self._sanitize_value("no_results")])
 
@@ -154,10 +162,12 @@ class ExcelResultSink(ResultSink):
 
     def _populate_aggregates_sheet(self, workbook, aggregates: Mapping[str, Any]) -> None:  # type: ignore[no-untyped-def]
         sheet = workbook.create_sheet(self.aggregates_sheet)
-        sheet.append([
-            self._sanitize_header("metric"),
-            self._sanitize_header("value"),
-        ])
+        sheet.append(
+            [
+                self._sanitize_header("metric"),
+                self._sanitize_header("value"),
+            ]
+        )
         for key, value in aggregates.items():
             if isinstance(value, Mapping):
                 rendered = json.dumps(value, sort_keys=True)
@@ -189,9 +199,11 @@ class ExcelResultSink(ResultSink):
     ) -> Dict[str, Any]:
         manifest: Dict[str, Any] = {
             "generated_at": timestamp.isoformat(),
-            "rows": len(results.get("results", []))
-            if isinstance(results.get("results"), list)
-            else 0,
+            "rows": (
+                len(results.get("results", []))
+                if isinstance(results.get("results"), list)
+                else 0
+            ),
             "metadata": dict(metadata),
             "sanitization": self._sanitization,
         }
@@ -203,13 +215,17 @@ class ExcelResultSink(ResultSink):
 
     def produces(self):  # pragma: no cover - placeholder for artifact chaining
         return [
-            ArtifactDescriptor(name="excel", type="file/xlsx", persist=True, alias="excel"),
+            ArtifactDescriptor(
+                name="excel", type="file/xlsx", persist=True, alias="excel"
+            ),
         ]
 
     def consumes(self):  # pragma: no cover - placeholder for artifact chaining
         return []
 
-    def finalize(self, artifacts, *, metadata=None):  # pragma: no cover - optional cleanup
+    def finalize(
+        self, artifacts, *, metadata=None
+    ):  # pragma: no cover - optional cleanup
         return None
 
     def collect_artifacts(self) -> Dict[str, Artifact]:  # pragma: no cover

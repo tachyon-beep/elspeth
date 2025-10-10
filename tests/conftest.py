@@ -32,7 +32,9 @@ def assert_sanitized_artifact() -> Callable[[str | Path], None]:
         if value[0] in _SANITIZATION_PREFIXES:
             raise AssertionError(f"Unsanitized spreadsheet value {raw!r} in {context}")
 
-    def _assert(path: str | Path, *, guard: str = "'") -> None:  # guard kept for future extension
+    def _assert(
+        path: str | Path, *, guard: str = "'"
+    ) -> None:  # guard kept for future extension
         artifact_path = Path(path)
         suffix = artifact_path.suffix.lower()
         if suffix == ".csv":
@@ -40,7 +42,10 @@ def assert_sanitized_artifact() -> Callable[[str | Path], None]:
                 reader = csv.reader(handle)
                 for row_index, row in enumerate(reader):
                     for column_index, cell in enumerate(row):
-                        _check_value(cell, context=f"{artifact_path.name}:{row_index}:{column_index}")
+                        _check_value(
+                            cell,
+                            context=f"{artifact_path.name}:{row_index}:{column_index}",
+                        )
         elif suffix in {".xlsx", ".xlsm"}:
             if load_workbook is None:
                 raise AssertionError("openpyxl is required to validate Excel artifacts")
@@ -49,8 +54,13 @@ def assert_sanitized_artifact() -> Callable[[str | Path], None]:
                 for row_index, row in enumerate(sheet.iter_rows(values_only=True)):
                     for column_index, cell in enumerate(row):
                         if isinstance(cell, str):
-                            _check_value(cell, context=f"{artifact_path.name}:{sheet.title}:{row_index}:{column_index}")
+                            _check_value(
+                                cell,
+                                context=f"{artifact_path.name}:{sheet.title}:{row_index}:{column_index}",
+                            )
         else:
-            raise AssertionError(f"Unsupported artifact type for sanitization check: {artifact_path}")
+            raise AssertionError(
+                f"Unsupported artifact type for sanitization check: {artifact_path}"
+            )
 
     return _assert

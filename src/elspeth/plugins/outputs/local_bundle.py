@@ -12,7 +12,6 @@ from typing import Any, Dict
 from elspeth.core.interfaces import ResultSink
 from elspeth.plugins.outputs.csv_file import CsvResultSink
 
-
 logger = logging.getLogger(__name__)
 
 
@@ -43,7 +42,9 @@ class LocalBundleSink(ResultSink):
                 "Local bundle CSV sanitization disabled; outputs may trigger spreadsheet formulas."
             )
 
-    def write(self, results: Dict[str, Any], *, metadata: Dict[str, Any] | None = None) -> None:
+    def write(
+        self, results: Dict[str, Any], *, metadata: Dict[str, Any] | None = None
+    ) -> None:
         metadata = metadata or {}
         timestamp = datetime.now(timezone.utc)
         try:
@@ -52,11 +53,15 @@ class LocalBundleSink(ResultSink):
 
             manifest = self._build_manifest(results, metadata, timestamp)
             manifest_path = bundle_dir / self.manifest_name
-            manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+            manifest_path.write_text(
+                json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8"
+            )
 
             if self.write_json:
                 results_path = bundle_dir / self.results_name
-                results_path.write_text(json.dumps(results, indent=2, sort_keys=True), encoding="utf-8")
+                results_path.write_text(
+                    json.dumps(results, indent=2, sort_keys=True), encoding="utf-8"
+                )
 
             if self.write_csv:
                 csv_path = bundle_dir / self.csv_name
@@ -69,13 +74,19 @@ class LocalBundleSink(ResultSink):
                 csv_sink.write(results, metadata=metadata)
         except Exception as exc:
             if self.on_error == "skip":
-                logger.warning("Local bundle sink failed; skipping bundle creation: %s", exc)
+                logger.warning(
+                    "Local bundle sink failed; skipping bundle creation: %s", exc
+                )
                 return
             raise
 
     # ------------------------------------------------------------------ helpers
-    def _resolve_bundle_dir(self, metadata: Dict[str, Any], timestamp: datetime) -> Path:
-        name = self.bundle_name or str(metadata.get("experiment") or metadata.get("name") or "experiment")
+    def _resolve_bundle_dir(
+        self, metadata: Dict[str, Any], timestamp: datetime
+    ) -> Path:
+        name = self.bundle_name or str(
+            metadata.get("experiment") or metadata.get("name") or "experiment"
+        )
         if self.timestamped:
             stamp = timestamp.strftime("%Y%m%dT%H%M%SZ")
             name = f"{name}_{stamp}"
@@ -109,5 +120,7 @@ class LocalBundleSink(ResultSink):
     def consumes(self):  # pragma: no cover - placeholder for artifact chaining
         return []
 
-    def finalize(self, artifacts, *, metadata=None):  # pragma: no cover - optional cleanup
+    def finalize(
+        self, artifacts, *, metadata=None
+    ):  # pragma: no cover - optional cleanup
         return None

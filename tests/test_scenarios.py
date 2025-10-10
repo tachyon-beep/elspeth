@@ -3,13 +3,13 @@ from pathlib import Path
 
 import pandas as pd
 
-from elspeth.core.experiments.runner import ExperimentRunner
-from elspeth.core.experiments.config import ExperimentSuite
-from elspeth.core.experiments.suite_runner import ExperimentSuiteRunner
 from elspeth.core.experiments import plugin_registry
+from elspeth.core.experiments.config import ExperimentSuite
+from elspeth.core.experiments.runner import ExperimentRunner
+from elspeth.core.experiments.suite_runner import ExperimentSuiteRunner
 from elspeth.plugins.llms.mock import MockLLMClient
-from elspeth.plugins.outputs.local_bundle import LocalBundleSink
 from elspeth.plugins.outputs.csv_file import CsvResultSink
+from elspeth.plugins.outputs.local_bundle import LocalBundleSink
 
 
 def test_end_to_end_local_pipeline(tmp_path, assert_sanitized_artifact):
@@ -20,7 +20,9 @@ def test_end_to_end_local_pipeline(tmp_path, assert_sanitized_artifact):
     runner = ExperimentRunner(
         llm_client=MockLLMClient(seed=7),
         sinks=[
-            LocalBundleSink(base_path=bundle_dir, timestamped=False, write_json=True, write_csv=True),
+            LocalBundleSink(
+                base_path=bundle_dir, timestamped=False, write_json=True, write_csv=True
+            ),
             CsvResultSink(path=csv_path, overwrite=True),
         ],
         prompt_system="Rate the submission",
@@ -28,7 +30,9 @@ def test_end_to_end_local_pipeline(tmp_path, assert_sanitized_artifact):
         prompt_fields=["value"],
         prompt_defaults={"audience": "quality"},
         row_plugins=[plugin_registry.create_row_plugin({"name": "score_extractor"})],
-        aggregator_plugins=[plugin_registry.create_aggregation_plugin({"name": "score_stats"})],
+        aggregator_plugins=[
+            plugin_registry.create_aggregation_plugin({"name": "score_stats"})
+        ],
         validation_plugins=[
             plugin_registry.create_validation_plugin(
                 {"name": "regex_match", "options": {"pattern": r"(?s).*\[mock\].*"}}
@@ -53,7 +57,9 @@ def test_end_to_end_local_pipeline(tmp_path, assert_sanitized_artifact):
     assert_sanitized_artifact(csv_path)
 
 
-def _write_experiment(root: Path, name: str, *, is_baseline: bool = False, prompt_pack: str | None = None) -> None:
+def _write_experiment(
+    root: Path, name: str, *, is_baseline: bool = False, prompt_pack: str | None = None
+) -> None:
     exp_dir = root / name
     exp_dir.mkdir(parents=True, exist_ok=True)
     payload = {

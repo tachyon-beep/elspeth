@@ -1,6 +1,10 @@
 import pytest
 
-from elspeth.plugins.outputs._sanitize import DANGEROUS_PREFIXES, sanitize_cell, should_sanitize
+from elspeth.plugins.outputs._sanitize import (
+    DANGEROUS_PREFIXES,
+    sanitize_cell,
+    should_sanitize,
+)
 
 
 def test_should_sanitize_dangerous_prefixes():
