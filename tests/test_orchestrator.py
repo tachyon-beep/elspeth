@@ -1,7 +1,7 @@
 import pandas as pd
 
-from dmp.core.orchestrator import ExperimentOrchestrator, OrchestratorConfig
-from dmp.core.experiments.plugin_registry import register_row_plugin, register_aggregation_plugin
+from elspeth.core.orchestrator import ExperimentOrchestrator, OrchestratorConfig
+from elspeth.core.experiments.plugin_registry import register_row_plugin, register_aggregation_plugin
 
 
 def test_orchestrator_runs(monkeypatch):

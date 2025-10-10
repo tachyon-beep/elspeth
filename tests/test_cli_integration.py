@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pandas as pd
 
-import dmp.cli as cli
+import elspeth.cli as cli
 
 
 def test_cli_single_run_executes_real_config(tmp_path):

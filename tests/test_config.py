@@ -2,8 +2,8 @@ import yaml
 
 import pytest
 
-from dmp.config import load_settings
-from dmp.core.validation import ConfigurationError
+from elspeth.config import load_settings
+from elspeth.core.validation import ConfigurationError
 
 
 def test_load_settings(tmp_path, monkeypatch):
@@ -41,7 +41,7 @@ def test_load_settings(tmp_path, monkeypatch):
         encoding="utf-8",
     )
 
-    import dmp.core.registry as registry_module
+    import elspeth.core.registry as registry_module
 
     # patch registry to return simple objects
     orig_ds = registry_module.registry._datasources["azure_blob"]
@@ -87,7 +87,7 @@ def test_load_settings_missing_prompts_defaults_to_blank(tmp_path):
         encoding="utf-8",
     )
 
-    import dmp.core.registry as registry_module
+    import elspeth.core.registry as registry_module
 
     orig_ds = registry_module.registry._datasources.get("local_csv")
     orig_llm = registry_module.registry._llms.get("mock")
@@ -147,7 +147,7 @@ def test_load_settings_prompt_pack_merges_overrides(tmp_path, monkeypatch):
         encoding="utf-8",
     )
 
-    import dmp.core.registry as registry_module
+    import elspeth.core.registry as registry_module
 
     orig_ds = registry_module.registry._datasources.get("local_csv")
     orig_llm = registry_module.registry._llms.get("mock")
@@ -202,7 +202,7 @@ def test_load_settings_suite_defaults_inherit_pack(tmp_path, monkeypatch):
         encoding="utf-8",
     )
 
-    import dmp.core.registry as registry_module
+    import elspeth.core.registry as registry_module
 
     orig_ds = registry_module.registry._datasources.get("local_csv")
     orig_llm = registry_module.registry._llms.get("mock")

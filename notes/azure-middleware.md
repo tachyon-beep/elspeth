@@ -22,7 +22,7 @@
 - Expose hooks for future Azure-specific behaviours (e.g., posting cost summaries to Azure Monitor) without editing other layers.
 
 ## Integration Plan
-1. Implement `AzureEnvironmentMiddleware` under `dmp/plugins/llms/middleware_azure.py` (name TBD) registering with the middleware registry. Constructor accepts flags for telemetry features.
+1. Implement `AzureEnvironmentMiddleware` under `src/elspeth/plugins/llms/middleware_azure.py` (name TBD) registering with the middleware registry. Constructor accepts flags for telemetry features.
 2. Middleware `before_request` / `after_response` interact with Azure ML SDK guarded behind optional imports; degrade gracefully when SDK is absent or context is offline.
 3. Update configuration docs to show enabling the middleware via profile defaults or prompt packs:
    ```yaml

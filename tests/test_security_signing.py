@@ -1,4 +1,4 @@
-from dmp.core.security import generate_signature, verify_signature
+from elspeth.core.security import generate_signature, verify_signature
 
 
 def test_generate_and_verify_signature():

@@ -1,13 +1,13 @@
 import pytest
 import pandas as pd
 
-from dmp.core.experiments.runner import ExperimentRunner
-from dmp.plugins.experiments.validation import (
+from elspeth.core.experiments.runner import ExperimentRunner
+from elspeth.plugins.experiments.validation import (
     RegexValidationPlugin,
     JsonValidationPlugin,
     LLMGuardValidationPlugin,
 )
-from dmp.core.experiments.plugins import ValidationError
+from elspeth.core.experiments.plugins import ValidationError
 
 
 class DummyValidatorLLM:

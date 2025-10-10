@@ -6,8 +6,8 @@ from typing import Any, Dict
 
 import pytest
 
-from dmp.core.artifact_pipeline import ArtifactPipeline, SinkBinding
-from dmp.core.interfaces import ResultSink, ArtifactDescriptor, Artifact
+from elspeth.core.artifact_pipeline import ArtifactPipeline, SinkBinding
+from elspeth.core.interfaces import ResultSink, ArtifactDescriptor, Artifact
 
 
 class DummySink(ResultSink):
@@ -29,7 +29,7 @@ class DummySink(ResultSink):
         self.log = log
         self._produced_artifacts = produced_artifacts or {}
         self.on_error = on_error
-        self._dmp_security_level = security_level
+        self._elspeth_security_level = security_level
         self.capture_consumed = capture_consumed
         self.prepared_artifacts: list[Dict[str, list[Dict[str, Any]]]] = []
 

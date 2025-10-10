@@ -1,6 +1,6 @@
 import pandas as pd
 
-from dmp.plugins.outputs.csv_file import CsvResultSink
+from elspeth.plugins.outputs.csv_file import CsvResultSink
 
 
 def test_csv_result_sink_writes(tmp_path):

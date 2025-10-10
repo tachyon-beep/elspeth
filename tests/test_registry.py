@@ -1,9 +1,9 @@
 import pandas as pd
 import pytest
 
-from dmp.core.registry import registry
-from dmp.core.experiments import plugin_registry
-from dmp.core.validation import ConfigurationError
+from elspeth.core.registry import registry
+from elspeth.core.experiments import plugin_registry
+from elspeth.core.validation import ConfigurationError
 
 
 def test_registry_creates_blob_datasource(tmp_path, monkeypatch):
@@ -26,7 +26,7 @@ def test_registry_creates_blob_datasource(tmp_path, monkeypatch):
         assert profile == "default"
         return pd.DataFrame({"value": [1]})
 
-    import dmp.plugins.datasources.blob as blob_module
+    import elspeth.plugins.datasources.blob as blob_module
 
     monkeypatch.setattr(blob_module, "load_blob_csv", fake_load_blob_csv)
 
@@ -66,7 +66,7 @@ def test_registry_constructs_llm_and_sink(monkeypatch):
         def __init__(self, **kwargs):
             self.kwargs = kwargs
 
-    import dmp.core.registry as registry_module
+    import elspeth.core.registry as registry_module
 
     registry_module.registry._llms["dummy"] = registry_module.PluginFactory(lambda options: DummyLLM(**options))
     registry_module.registry._sinks["dummy"] = registry_module.PluginFactory(lambda options: DummySink(**options))

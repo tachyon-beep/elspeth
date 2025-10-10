@@ -4,8 +4,8 @@ from zipfile import ZipFile
 
 import pytest
 
-from dmp.plugins.outputs.excel import ExcelResultSink
-from dmp.plugins.outputs.zip_bundle import ZipResultSink
+from elspeth.plugins.outputs.excel import ExcelResultSink
+from elspeth.plugins.outputs.zip_bundle import ZipResultSink
 
 
 def sample_results():
@@ -122,7 +122,7 @@ def test_zip_sink_skip_on_error(monkeypatch, tmp_path, caplog):
         def __init__(self, *args, **kwargs):
             raise RuntimeError("boom")
 
-    monkeypatch.setattr("dmp.plugins.outputs.zip_bundle.ZipFile", BrokenZip)
+    monkeypatch.setattr("elspeth.plugins.outputs.zip_bundle.ZipFile", BrokenZip)
 
     with caplog.at_level("WARNING"):
         sink.write(sample_results(), metadata={"experiment": "exp1"})

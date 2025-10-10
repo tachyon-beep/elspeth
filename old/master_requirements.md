@@ -1,7 +1,7 @@
 # Legacy Experiment Platform Master Requirements
 
 ## Cross-Cutting Expectations
-- Preserve backward compatibility with legacy entry points while deferring to refactored `dmp` packages whenever possible; imports and wrappers should avoid circular dependencies and keep cost low.
+- Preserve backward compatibility with legacy entry points while deferring to refactored `elspeth` packages whenever possible; imports and wrappers should avoid circular dependencies and keep cost low.
 - Ensure logging, rate limiting, and Azure ML integrations stay opt-in, fail gracefully when unavailable, and remain safe for concurrent execution across CLI and orchestration paths.
 - Keep all filesystem access read-only unless explicitly exporting artifacts, favouring UTF-8 encoding, deterministic ordering, and actionable error surfaces.
 
@@ -9,7 +9,7 @@
 
 ### Bootstrapping & Compatibility
 - `SRC_DIR` bootstrap: resolve the sibling `src/` directory at import time, append it to `sys.path` only when present, and keep the logic idempotent and platform agnostic so packaging scenarios stay unaffected.
-- `StatsAnalyzer` fallback: try importing from `dmp.stats`, automatically fall back to `experiment_stats.StatsAnalyzer`, expose the resolved symbol without noisy logging, and perform the resolution once per process.
+- `StatsAnalyzer` fallback: try importing from `elspeth.stats`, automatically fall back to `experiment_stats.StatsAnalyzer`, expose the resolved symbol without noisy logging, and perform the resolution once per process.
 - Compatibility wrappers (`load_configurations`, `validate_*`, `retry_with_backoff`): lazily import refactored implementations on demand, proxy arguments and return values unchanged, surface legacy exceptions, and avoid circular imports or unnecessary runtime cost.
 
 ### Logging, Context & Globals
@@ -23,18 +23,18 @@
 - `LLMQueryError`: provide a lightweight exception derived from `Exception` to differentiate prompt/config retrieval failures without introducing extra state.
 
 ### Prompt & Configuration Utilities
-- `load_prompts`: fetch prompt bundles through `dmp.prompts` helpers, cache or clone as required, validate schema, and keep operations idempotent with clear error messaging.
+- `load_prompts`: fetch prompt bundles through `elspeth.prompts` helpers, cache or clone as required, validate schema, and keep operations idempotent with clear error messaging.
 - `parse_score`: normalize numeric scores (including string inputs), guard against malformed data, and raise informative errors without crashing the run.
 - `format_user_prompt`: merge prompt templates with row data, respect token limits, log context sparingly, and keep formatting deterministic for tests.
 
 ### LLM Invocation & Execution Flow
 - `query_llm`: enforce retry/backoff via the injected rate limiter, record token usage on `cost_tracker`, pass through safety/audit hooks, handle Azure vs. local execution, and continue processing rows after recoverable errors.
-- `run_single_experiment_with_config`: adapt arguments to `dmp.runner.execute_single_experiment_with_config`, run imports lazily, and return results unchanged.
+- `run_single_experiment_with_config`: adapt arguments to `elspeth.runner.execute_single_experiment_with_config`, run imports lazily, and return results unchanged.
 - `run_single_experiment`: orchestrate prompt loading, Azure OpenAI client creation, per-call rate limiter (concurrency 1), row iteration with processing and querying hooks, error recording with ISO timestamps, result persistence, and ensure logging avoids sensitive data.
 - `run_experiment_suite`: build Azure clients and execution context, swap in context-driven cost tracker, delegate to `execute_experiment_suite` with proper hooks, and preserve thread safety for shared globals.
 
 ### CLI Delegation
-- `main`: lazily import `dmp.cli.main` and forward execution/exit codes without side effects.
+- `main`: lazily import `elspeth.cli.main` and forward execution/exit codes without side effects.
 - `if __name__ == "__main__"` guard: ensure CLI runs only when invoked directly, keeping module safe for import by tooling and tests.
 
 ## `old/experiment_runner.py` – Legacy Suite Management

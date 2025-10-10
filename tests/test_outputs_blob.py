@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from dmp.plugins.outputs.blob import BlobResultSink
+from elspeth.plugins.outputs.blob import BlobResultSink
 
 
 def create_blob_config(tmp_path: Path) -> Path:

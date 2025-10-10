@@ -4,7 +4,7 @@
     "python_files": 53,
     "loc": 7503,
     "entry_points": [
-      "dmp/cli.py",
+      "src/elspeth/cli.py",
       "Makefile",
       "scripts/bootstrap.sh"
     ],
@@ -75,7 +75,7 @@
     ],
     "modified_features": [
       "Metrics/statistics reimplemented as plugins",
-      "Configuration validation centralised in dmp.core.validation",
+      "Configuration validation centralised in elspeth.core.validation",
       "Output sinks refactored into modular plugins"
     ]
   },
@@ -83,17 +83,17 @@
     {
       "id": "single_run_plugins",
       "description": "Single-run orchestrator ignores configured row/aggregation plugins.",
-      "reference": "dmp/core/orchestrator.py:55"
+      "reference": "src/elspeth/core/orchestrator.py:55"
     },
     {
       "id": "azure_middleware_default",
       "description": "Azure middleware aborts when run context is unavailable unless explicitly disabled.",
-      "reference": "dmp/plugins/llms/middleware_azure.py:60"
+      "reference": "src/elspeth/plugins/llms/middleware_azure.py:60"
     },
     {
       "id": "retry_visibility",
       "description": "Retry loop re-raises final exception without additional context.",
-      "reference": "dmp/core/experiments/runner.py:326"
+      "reference": "src/elspeth/core/experiments/runner.py:326"
     }
   ],
   "recommendations": [

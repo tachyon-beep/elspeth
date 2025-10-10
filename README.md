@@ -1,12 +1,13 @@
-# Digital Marketplace AI Augmentation Project (DMP)
+# ELSPETH Secure LLM Orchestrator
 
-A modular experimentation harness for evaluating prompts, LLM calls, and result
-pipelines. The refactored architecture emphasises plugins so datasources, LLM
-clients, metrics, and sinks can be swapped without touching the core runner.
+ELSPETH is a general-purpose, security-focused orchestration layer for large
+language model experiments. The platform emphasises pluggable components so
+datasources, LLM clients, metrics, and result sinks can be swapped without
+touching the core runner while preserving a defensible audit trail.
 
 ## Project Structure
-- `dmp/core/` – orchestration, prompt engine, controls (rate/cost), registry.
-- `dmp/plugins/` – concrete plugins for datasources (Azure blob, local CSV),
+- `src/elspeth/core/` – orchestration, prompt engine, controls (rate/cost), registry.
+- `src/elspeth/plugins/` – concrete plugins for datasources (Azure blob, local CSV),
   LLM clients (Azure OpenAI, mock), metrics/statistics, and result sinks
   (CSV, blob, repository, signed artifacts).
 - `config/` – global settings, sample suite definitions, and blob datastore config.
@@ -29,7 +30,7 @@ clients, metrics, and sinks can be swapped without touching the core runner.
 3. **Activate the CLI manually** (optional):
    ```bash
    source .venv/bin/activate
-   python -m dmp.cli --help
+   python -m elspeth.cli --help
    ```
 
 ### Suite management & reporting
@@ -37,7 +38,7 @@ The CLI now supports legacy-friendly suite maintenance tasks:
 
 ```bash
 # Create a disabled experiment scaffold (copies prompts when baseline available)
-python -m dmp.cli \
+python -m elspeth.cli \
   --settings config/settings.yaml \
   --suite-root config/sample_suite \
   --create-experiment-template draft_variant \
@@ -45,14 +46,14 @@ python -m dmp.cli \
   --head 0
 
 # Export the full suite definition to JSON/YAML
-python -m dmp.cli \
+python -m elspeth.cli \
   --settings config/settings.yaml \
   --suite-root config/sample_suite \
   --export-suite-config outputs/sample_suite_export.yaml \
   --head 0
 
 # Run the suite and generate consolidated analytics artefacts
-python -m dmp.cli \
+python -m elspeth.cli \
   --settings config/settings.yaml \
   --suite-root config/sample_suite \
   --reports-dir outputs/sample_suite_reports \
@@ -105,7 +106,7 @@ Prompts are rendered via the new Jinja-based engine:
 - Rendering failures raise informative `PromptRenderingError` exceptions.
 
 ## Plugins
-Each plugin type registers with `dmp/core/registry.py`.
+Each plugin type registers with `src/elspeth/core/registry.py`.
 - **Datasources**: `azure_blob`, `csv_blob` (local CSV stand-in for blob inputs), `local_csv` (reads local CSV files).
 - **LLM clients**: `azure_openai`, `mock` (deterministic responses for testing).
 - **Metrics**: `score_extractor`, `score_stats`, `score_recommendation`, `score_delta`, `score_variant_ranking`.
@@ -125,7 +126,7 @@ reference per-criteria values via paths like `scores.analysis`.
   signed artifact bundles, analytics report sink (JSON/Markdown summaries).
 
 To add a new plugin, implement the appropriate interface from
-`dmp/core/interfaces.py` and register it via the registry helper.
+`src/elspeth/core/interfaces.py` and register it via the registry helper.
 
 ## Testing & Tooling
 - Run `make test` (or `python -m pytest`) to execute the suite (61 tests, ~83% coverage).
@@ -143,11 +144,11 @@ To add a new plugin, implement the appropriate interface from
 - Azure telemetry middleware logs a `llm_retry_exhausted` row whenever the retry budget is consumed, capturing error type and serialized history for investigation.
 
 ## Working with Real Services
-- Populate `.env` or export environment variables (`DMP_AZURE_OPENAI_KEY`,
-  `DMP_AZURE_OPENAI_ENDPOINT`, `DMP_AZURE_OPENAI_DEPLOYMENT`, blob SAS tokens,
+- Populate `.env` or export environment variables (`ELSPETH_AZURE_OPENAI_KEY`,
+  `ELSPETH_AZURE_OPENAI_ENDPOINT`, `ELSPETH_AZURE_OPENAI_DEPLOYMENT`, blob SAS tokens,
   etc.) before switching the `llm` or `datasource` plugins.
 - Use `--live-outputs` on the CLI to disable dry-run mode for repository sinks.
-- Signed artifact sink expects a shared secret via `DMP_SIGNING_KEY` (or
+- Signed artifact sink expects a shared secret via `ELSPETH_SIGNING_KEY` (or
   explicit `key` option).
 - Install Azure extras when running inside Azure ML or using Azure telemetry:
   ```bash
@@ -198,10 +199,10 @@ To add a new plugin, implement the appropriate interface from
  such as `promptPack`/`promptPacks` and `middlewares` have been renamed.
   A concise mapping is maintained in `notes/config-migration.md` for reference.
 - Validators surface actionable messages (unknown prompt packs list available names,
-  middleware errors show configured options). Run `dmp validate --settings <file>` to
+  middleware errors show configured options). Run `elspeth validate --settings <file>` to
   review a configuration before execution.
 - When migrating older suites, update prompt pack references and ensure all middleware
-  names correspond to registered plugins (see `dmp/plugins/llms/`).
+  names correspond to registered plugins (see `src/elspeth/plugins/llms/`).
 
 ## Further Reading
 - `notes/plugin-architecture.md` – architecture and migration notes per phase.

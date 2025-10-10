@@ -6,7 +6,7 @@ result sinks so that operations teams have consistent telemetry.
 ## Middleware
 
 - **Channels** – Each middleware should emit logs under a dedicated logger
-  (e.g. `dmp.health`, `dmp.prompt_shield`, `dmp.azure_content_safety`).
+  (e.g. `elspeth.health`, `elspeth.prompt_shield`, `elspeth.azure_content_safety`).
 - **Heartbeat entries** (`health_monitor`):
   ```json
   {

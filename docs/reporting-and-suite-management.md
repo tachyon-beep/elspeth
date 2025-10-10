@@ -27,7 +27,7 @@ Identify your suite directory (for example `config/sample_suite`). Then run:
 
 ```bash
 # Scaffold a new experiment by copying prompts from the baseline experiment
-python -m dmp.cli \
+python -m elspeth.cli \
   --settings config/settings.yaml \
   --suite-root config/sample_suite \
   --create-experiment-template draft_variant \
@@ -42,7 +42,7 @@ start from the default template.
 To export the entire suite definition:
 
 ```bash
-python -m dmp.cli \
+python -m elspeth.cli \
   --settings config/settings.yaml \
   --suite-root config/sample_suite \
   --export-suite-config outputs/sample_suite_export.json \
@@ -57,7 +57,7 @@ ready for auditing or versioned backups.
 Reporting builds on the normal suite run. Provide a target directory via `--reports-dir`:
 
 ```bash
-python -m dmp.cli \
+python -m elspeth.cli \
   --settings config/settings.yaml \
   --suite-root config/sample_suite \
   --reports-dir outputs/sample_suite_reports \
@@ -104,7 +104,7 @@ Add the commands above to CI pipelines or Make targets. For example:
 ```Makefile
 reports:
 	. .venv/bin/activate && \
-	python -m dmp.cli \
+	python -m elspeth.cli \
 	  --settings config/settings.yaml \
 	  --suite-root config/sample_suite \
 	  --reports-dir outputs/sample_suite_reports \

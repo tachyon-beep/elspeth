@@ -1,8 +1,8 @@
 # Prompt Engine Migration – Phase A Findings
 
 Legacy behaviour (observed via `old/main.py` and call sites):
-- Prompts were loaded via `dmp.prompts.load_prompts_default`, with validation/error handling.
-- Formatting delegated to `dmp.prompts.format_user_prompt`, which supported:
+- Prompts were loaded via `elspeth.prompts.load_prompts_default`, with validation/error handling.
+- Formatting delegated to `elspeth.prompts.format_user_prompt`, which supported:
   * Placeholder substitution for case-study fields and criteria metadata.
   * Conditional inclusion/templated guidance (e.g. optional criteria descriptions).
   * Prompt cloning/templating so variants could inherit from a baseline prompt pack.
@@ -16,7 +16,7 @@ New architecture gaps:
   * No reusable abstraction for cloning/adapting prompt templates across experiments.
 
 Design direction for the new engine:
-- Introduce `dmp.core.prompts` package providing:
+- Introduce `elspeth.core.prompts` package providing:
   * `PromptTemplate` dataclass storing raw text, compiled artefact, required fields, and metadata.
   * `PromptEngine` that compiles templates using a strict renderer (Jinja2-backed) with support for `{ field }` placeholders, `{{ field|default('x') }}`, `{{#if}}`-style guards (mapped to Jinja `{% if %}`), and iteration.
   * Validation utilities that analyse undeclared variables pre-render, logging/raising `PromptValidationError` with helpful messages.

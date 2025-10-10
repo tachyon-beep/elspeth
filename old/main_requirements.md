@@ -12,7 +12,7 @@
 
 ## `StatsAnalyzer` import fallback (old/main.py:32-36)
 - Functional requirements:
-  - Attempt to import `StatsAnalyzer` from the refactored `dmp.stats` package.
+  - Attempt to import `StatsAnalyzer` from the refactored `elspeth.stats` package.
   - Fall back to `experiment_stats.StatsAnalyzer` automatically when the packaged analyzer is unavailable.
   - Expose the resolved `StatsAnalyzer` symbol for downstream consumers without requiring call-site changes.
 - Non-functional requirements:
@@ -72,7 +72,7 @@
 ## Compatibility wrapper functions (old/main.py:119-138)
 - Covered symbols: `load_configurations`, `validate_text_field`, `validate_context`, `validate_category`, `retry_with_backoff`.
 - Functional requirements:
-  - Lazily import the corresponding implementations from the refactored package (`dmp.*`) at call time.
+  - Lazily import the corresponding implementations from the refactored package (`elspeth.*`) at call time.
   - Pass through all arguments unchanged and return the delegated result.
   - Preserve legacy function signatures and expected exceptions for callers.
 - Non-functional requirements:
@@ -91,7 +91,7 @@
 ## `load_prompts` (old/main.py:149-181)
 - Functional requirements:
   - Determine prompt directory relative to the current file’s location.
-  - Delegate prompt loading to `dmp.prompts.load_prompts_default`.
+  - Delegate prompt loading to `elspeth.prompts.load_prompts_default`.
   - Convert file-not-found or validation issues into `LLMQueryError` while logging errors.
   - Log 100-character previews of both system and user prompts (sanitized for newline visibility).
   - Return a tuple `(system_prompt, user_prompt)` on success.
@@ -102,7 +102,7 @@
 
 ## `parse_score` shim (old/main.py:183-186)
 - Functional requirements:
-  - Provide backwards-compatible function that delegates to `dmp.validators.parse_score`.
+  - Provide backwards-compatible function that delegates to `elspeth.validators.parse_score`.
   - Return the same tuple output and propagate exceptions identically to the delegated function.
 - Non-functional requirements:
   - Keep wrapper overhead negligible.
@@ -111,7 +111,7 @@
 ## `format_user_prompt` (old/main.py:188-207)
 - Functional requirements:
   - Accept prompt text, case study data, summaries, titles, service summary, criteria, descriptions, and guidance.
-  - Delegate formatting to `dmp.prompts.format_user_prompt` with equivalent arguments.
+  - Delegate formatting to `elspeth.prompts.format_user_prompt` with equivalent arguments.
   - Ensure resulting prompt respects new templating engine while matching historical interface.
 - Non-functional requirements:
   - Avoid duplicating formatting logic locally to prevent drift.
@@ -132,7 +132,7 @@
 
 ## `run_single_experiment_with_config` (old/main.py:287-310)
 - Functional requirements:
-  - Serve as a thin wrapper around `dmp.runner.execute_single_experiment_with_config`.
+  - Serve as a thin wrapper around `elspeth.runner.execute_single_experiment_with_config`.
   - Forward dataframe, CLI args, Azure client, experiment configuration, rate limiter, and helper hooks (processing, querying, early-stop, configuration loader, Azure context flags).
   - Return the execution results exactly as provided by the delegated function.
 - Non-functional requirements:
@@ -168,7 +168,7 @@
 
 ## `main` (old/main.py:402-405)
 - Functional requirements:
-  - Import `dmp.cli.main` lazily and delegate execution when invoked.
+  - Import `elspeth.cli.main` lazily and delegate execution when invoked.
   - Ensure CLI exit codes and behavior mirror the packaged CLI entry point.
 - Non-functional requirements:
   - Avoid side effects beyond delegation, keeping function safe for reuse in other launchers.

@@ -35,7 +35,7 @@ analytics versus the refactored plugin stack. Outstanding gaps now focus on:
 
 ## Phase 1 Execution Steps (Core Pack)
 1. Update `pyproject.toml` with `[project.optional-dependencies] stats-core = ["scipy>=1.10"]`.
-2. Add baseline plugin `score_significance` in `dmp/plugins/experiments/metrics.py`:
+2. Add baseline plugin `score_significance` in `src/elspeth/plugins/experiments/metrics.py`:
    - Collect baseline/variant scores per criterion.
    - Compute mean difference, pooled variance, Cohen's d, Welch t-statistic.
    - Attempt to import `scipy.stats`; if present, compute p-value; otherwise set `p_value = None` and record reason.

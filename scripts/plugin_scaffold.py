@@ -17,11 +17,11 @@ from textwrap import dedent
 from typing import Callable, Dict
 
 PLUGIN_DEFAULT_DIRS: Dict[str, Path] = {
-    "row": Path("dmp/plugins/experiments"),
-    "aggregator": Path("dmp/plugins/experiments"),
-    "baseline": Path("dmp/plugins/experiments"),
-    "sink": Path("dmp/plugins/outputs"),
-    "middleware": Path("dmp/plugins/llms"),
+    "row": Path("src/elspeth/plugins/experiments"),
+    "aggregator": Path("src/elspeth/plugins/experiments"),
+    "baseline": Path("src/elspeth/plugins/experiments"),
+    "sink": Path("src/elspeth/plugins/outputs"),
+    "middleware": Path("src/elspeth/plugins/llms"),
 }
 
 
@@ -44,7 +44,7 @@ def row_template(name: str, class_name: str) -> str:
 
         from typing import Any, Dict
 
-        from dmp.core.experiments.plugin_registry import register_row_plugin
+        from elspeth.core.experiments.plugin_registry import register_row_plugin
 
 
         class {class_name}:
@@ -82,7 +82,7 @@ def aggregator_template(name: str, class_name: str) -> str:
 
         from typing import Any, Dict, List
 
-        from dmp.core.experiments.plugin_registry import register_aggregation_plugin
+        from elspeth.core.experiments.plugin_registry import register_aggregation_plugin
 
 
         class {class_name}:
@@ -117,7 +117,7 @@ def baseline_template(name: str, class_name: str) -> str:
 
         from typing import Any, Dict
 
-        from dmp.core.experiments.plugin_registry import register_baseline_plugin
+        from elspeth.core.experiments.plugin_registry import register_baseline_plugin
 
 
         class {class_name}:
@@ -153,7 +153,7 @@ def sink_template(name: str, class_name: str) -> str:
         from pathlib import Path
         from typing import Any, Dict, Iterable
 
-        from dmp.core.interfaces import ResultSink, ArtifactDescriptor, Artifact
+        from elspeth.core.interfaces import ResultSink, ArtifactDescriptor, Artifact
 
 
         class {class_name}(ResultSink):
@@ -189,8 +189,8 @@ def middleware_template(name: str, class_name: str) -> str:
 
         from typing import Any, Dict
 
-        from dmp.core.llm.middleware import LLMMiddleware, LLMRequest
-        from dmp.core.llm.registry import register_middleware
+        from elspeth.core.llm.middleware import LLMMiddleware, LLMRequest
+        from elspeth.core.llm.registry import register_middleware
 
 
         class {class_name}(LLMMiddleware):

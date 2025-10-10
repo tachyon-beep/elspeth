@@ -3,9 +3,9 @@ from pathlib import Path
 
 import pandas as pd
 
-from dmp.core.experiments.config import ExperimentSuite
-from dmp.core.experiments.suite_runner import ExperimentSuiteRunner
-from dmp.plugins.llms.mock import MockLLMClient
+from elspeth.core.experiments.config import ExperimentSuite
+from elspeth.core.experiments.suite_runner import ExperimentSuiteRunner
+from elspeth.plugins.llms.mock import MockLLMClient
 
 
 def _write_experiment(

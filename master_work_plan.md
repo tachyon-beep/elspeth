@@ -37,7 +37,7 @@
 **Objective:** Resolve non-blocking defects uncovered during risk triage and reinforce regression coverage.
 
 ### Step 1.1 – Test Suite Expansion
-- [x] Task 1.1.1: Add smoke tests for `dmp/cli.py` covering `--single-run`, `--disable-metrics`, and prompt-pack overrides.
+- [x] Task 1.1.1: Add smoke tests for `src/elspeth/cli.py` covering `--single-run`, `--disable-metrics`, and prompt-pack overrides.
 - [x] Task 1.1.2: Introduce golden-data fixtures validating artifact pipeline ordering and security level propagation.
   - *Notes:* CLI suite now exercises metrics stripping, prompt-pack overrides, and failure logging; artifact pipeline test compares execution order and security snapshots against a golden fixture.
 

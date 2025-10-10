@@ -3,7 +3,7 @@
 This document helps future agents and contributors reorient quickly after a memory compact.
 
 ## Project Snapshot
-- **Repository**: Domain Model Platform (new plugin-driven experiment runner)
+- **Repository**: ELSPETH (secure plugin-driven LLM experiment orchestrator)
 - **Status**: Core refactor through Phase 4 complete (retry/backoff, checkpointing, baseline comparisons).
 - **Python**: 3.12.x (ensure local runtime matches `pyproject.toml`).
 
@@ -13,14 +13,14 @@ This document helps future agents and contributors reorient quickly after a memo
 - Includes dev extras (`pytest`, `pytest-cov`, etc.); reinstall via `pip install -e .[dev]` if needed.
 
 ## Key Entry Points
-- `dmp/cli.py` – main CLI driving orchestrator and suite operations (`--disable-metrics`, `--live-outputs`).
-- `dmp/core/experiments/runner.py` – row execution with retries/checkpoints.
-- `dmp/core/experiments/suite_runner.py` – baseline-first suite orchestration.
-- `dmp/core/prompts/` – templating engine (Jinja-backed) with validation/cloning helpers.
-- `dmp/plugins/experiments/metrics.py` – default metrics plugins (`score_extractor`, `score_stats`, `score_recommendation`, `score_delta`).
-- `dmp/plugins/outputs/` – sinks for CSV, blob, local bundles, GitHub/Azure DevOps repos, and signed artifacts.
+- `src/elspeth/cli.py` – main CLI driving orchestrator and suite operations (`--disable-metrics`, `--live-outputs`).
+- `src/elspeth/core/experiments/runner.py` – row execution with retries/checkpoints.
+- `src/elspeth/core/experiments/suite_runner.py` – baseline-first suite orchestration.
+- `src/elspeth/core/prompts/` – templating engine (Jinja-backed) with validation/cloning helpers.
+- `src/elspeth/plugins/experiments/metrics.py` – default metrics plugins (`score_extractor`, `score_stats`, `score_recommendation`, `score_delta`).
+- `src/elspeth/plugins/outputs/` – sinks for CSV, blob, local bundles, GitHub/Azure DevOps repos, and signed artifacts.
 - `config/sample_suite/` – runnable sample suite using local CSV datasource + mock LLM.
-- `dmp/core/llm/` – middleware registry (audit logging, prompt shield) and concurrency helpers.
+- `src/elspeth/core/llm/` – middleware registry (audit logging, prompt shield) and concurrency helpers.
 
 ## Tooling & Testing
 - `make bootstrap` (or `scripts/bootstrap.sh`) prepares `.venv`, installs deps, and runs pytest.

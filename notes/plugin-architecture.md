@@ -8,14 +8,14 @@
 - **Monitoring/Logging**: plugin hooks for audit logging, health checks.
 
 ## Module Layout Proposal
-- `dmp/core/` high-level orchestration (experiment runner, stats)
-- `dmp/plugins/`
+- `src/elspeth/core/` high-level orchestration (experiment runner, stats)
+- `src/elspeth/plugins/`
   - `datasources/` (blob, csv, ado)
   - `llms/` (azure_openai, openai, mock)
   - `outputs/` (blob, filesystem, github, oracle)
   - `monitoring/`
-- `dmp/config/` load config and resolve plugins via entrypoints or registry
-- `dmp/cli.py` orchestrates using config-driven plugin selection
+- `src/elspeth/config/` load config and resolve plugins via entrypoints or registry
+- `src/elspeth/cli.py` orchestrates using config-driven plugin selection
 
 ## Configuration Concepts
 - Central `config/settings.yaml` with sections:
@@ -42,8 +42,8 @@
 
 ## Refactor Roadmap
 1. **Baseline Extraction**
-   - Move legacy experiment runner/stat analyzer into `dmp/core` modules with minimal changes; stub external `dmp` dependencies.
-   - Replace direct imports in `old/` scripts with new `dmp.core` modules, using the CLI as primary entry point.
+   - Move legacy experiment runner/stat analyzer into `src/elspeth/core` modules with minimal changes; stub external `elspeth` dependencies.
+   - Replace direct imports in `old/` scripts with new `elspeth.core` modules, using the CLI as primary entry point.
 2. **Interface Definition**
    - Introduce `DataSource`, `LLMClientProtocol`, `ResultSink` protocols and register default implementations.
    - Create a plugin registry (simple mapping keyed by name) to instantiate plugins from YAML config.
@@ -60,19 +60,19 @@
    - Deprecate `old/` entry points once new architecture validated; maintain notes for remaining gaps.
 
 ## Progress 2024-05
-- Created `dmp/core/interfaces.py` defining `DataSource`, `LLMClientProtocol`, `ResultSink`, and `ExperimentContext` dataclass.
-- Added blob datasource plugin (`dmp/plugins/datasources/blob.py`) wrapping existing loader plus registry entry (`dmp/core/registry.py`).
+- Created `src/elspeth/core/interfaces.py` defining `DataSource`, `LLMClientProtocol`, `ResultSink`, and `ExperimentContext` dataclass.
+- Added blob datasource plugin (`src/elspeth/plugins/datasources/blob.py`) wrapping existing loader plus registry entry (`src/elspeth/core/registry.py`).
 - Tests (`tests/test_registry.py`) ensure registry resolves the blob datasource via config options; pytest suite now at 10 passing tests.
 - Extended plugin registry to cover LLM (`azure_openai`) and result sinks (placeholder `BlobResultSink`); interfaces updated to capture structured prompts.
 - Registry tests now validate error handling and custom plugin registration (total pytest count 12).
-- Added orchestrator (`dmp/core/orchestrator.py`) connecting datasource, LLM, and sinks with formatting prompts.
-- Introduced config loader (`dmp/config.py`) + default `config/settings.yaml`; CLI now loads settings, runs orchestrator, and writes preview.
+- Added orchestrator (`src/elspeth/core/orchestrator.py`) connecting datasource, LLM, and sinks with formatting prompts.
+- Introduced config loader (`src/elspeth/config.py`) + default `config/settings.yaml`; CLI now loads settings, runs orchestrator, and writes preview.
 - Tests updated (`tests/test_orchestrator.py`, `tests/test_config.py`, CLI tests) with suite at 14 passes.
 
 ## Upcoming Refactor Tasks
 1. **Port Core Utilities**
-   - Extract essential logic from `old/` (process_data, prompt formatting stubs) into `dmp/core` modules compatible with new interfaces.
-   - Build placeholder implementations where external `dmp.*` packages were expected.
+   - Extract essential logic from `old/` (process_data, prompt formatting stubs) into `src/elspeth/core` modules compatible with new interfaces.
+   - Build placeholder implementations where external `elspeth.*` packages were expected.
 2. **LLM Plugin Implementation**
    - Flesh out `AzureOpenAIClient` with actual SDK usage (config-driven credentials, rate limiter hook).
    - Add unit tests using mocked Azure client to ensure prompt flow.
@@ -86,9 +86,9 @@
    - Document migration status and deprecate old modules once parity achieved.
 - Introduced `prepare_prompt_context` helper to control row-to-prompt mapping and wired it into the orchestrator/config (supports field filtering + aliases).
 - Tests expanded (`tests/test_processing.py`, updated orchestrator/CLI/config tests); suite now 15 passing with coverage ~87%.
-- Implemented functional Azure OpenAI plugin (`dmp/plugins/llms/azure_openai.py`) with config/env credential resolution and chat.completions invocation; new tests in `tests/test_llm_azure.py` verify prompt wiring and error handling.
+- Implemented functional Azure OpenAI plugin (`src/elspeth/plugins/llms/azure_openai.py`) with config/env credential resolution and chat.completions invocation; new tests in `tests/test_llm_azure.py` verify prompt wiring and error handling.
 - Updated dependencies to include `openai`.
-- Added CSV result sink plugin (`dmp/plugins/outputs/csv_file.py`) and registry support (`dmp/core/registry.py`) plus tests (`tests/test_outputs_csv.py`).
+- Added CSV result sink plugin (`src/elspeth/plugins/outputs/csv_file.py`) and registry support (`src/elspeth/core/registry.py`) plus tests (`tests/test_outputs_csv.py`).
 - Suite now 20 passing tests; coverage ~89%.
 
 ## Lexicon Update (User Guidance)
@@ -100,10 +100,10 @@
 ## Legacy Experiment Logic Migration Plan
 1. **Discovery & Inventory**
    - Review `old/main.py`, `old/experiment_runner.py`, `old/experiment_stats.py` to catalogue key behaviours: data preparation (`process_data`), prompt assembly, experiment suite configuration, cost/rate limiting, stats exports.
-   - Identify external dependencies still missing (e.g., `dmp.runner`, `dmp.costs`) and decide whether to stub or rebuild.
+   - Identify external dependencies still missing (e.g., `elspeth.runner`, `elspeth.costs`) and decide whether to stub or rebuild.
 
 2. **Module Restructuring**
-   - Create `dmp/core/experiments/` package housing:
+   - Create `src/elspeth/core/experiments/` package housing:
      * `suite.py`: experiment suite orchestration (multiple configs, baseline handling).
      * `runner.py`: per-experiment execution (criteria loops, retries, checkpointing stubs).
      * `stats.py`: migrate necessary analytics (minimal viable subset first).
@@ -130,7 +130,7 @@
 7. **Future Enhancements**
    - Reintroduce statistics/analysis (from `experiment_stats.py`) as separate plugins or sinks.
    - Add configuration bootstrap script to generate venv, load `.env`, and run smoke tests.
-- Introduced `dmp/core/experiments` package with suite loader and basic runner to kick off legacy migration; added tests (`tests/test_experiments.py`). Next steps: expand runner to handle multi-criteria configs, cost tracking, and integrate with orchestrator.
+- Introduced `src/elspeth/core/experiments` package with suite loader and basic runner to kick off legacy migration; added tests (`tests/test_experiments.py`). Next steps: expand runner to handle multi-criteria configs, cost tracking, and integrate with orchestrator.
 - `ExperimentOrchestrator` now delegates to the new `ExperimentRunner`, keeping prompt handling centralized; runner metadata restored (`rows` + `row_count`).
 - ExperimentRunner now supports criteria lists, storing per-criteria responses and passing both aggregated `response` and `responses` maps. CSV sink flattens criteria into `llm_<name>` columns. Updated config to include sample criteria and tests (`tests/test_experiments.py`, `tests/test_orchestrator.py`).
 - ExperimentSuite loader now captures prompts/fields/criteria from experiment folders (reading Markdown prompt files when present), enabling future parity with legacy experiment configs. Tests updated to validate prompt extraction.
@@ -216,7 +216,7 @@
    - Allow per-experiment overrides for sinks/plugins by referencing default sink plugin list (e.g., `suite_defaults: { sinks: [...], row_plugins: [...], aggregator_plugins: [...] }`).
 
 2. **CLI Enhancements**
-   - Add flags to `dmp/cli.py`: `--suite-root`, `--suite-profile` (if referencing multiple suites). If provided, the CLI loads suite settings and invokes `ExperimentSuiteRunner` instead of single-run orchestrator.
+   - Add flags to `src/elspeth/cli.py`: `--suite-root`, `--suite-profile` (if referencing multiple suites). If provided, the CLI loads suite settings and invokes `ExperimentSuiteRunner` instead of single-run orchestrator.
    - Provide optional `--single` flag to force single experiment even when suite config exists (for debugging).
 
 3. **Execution Flow**
@@ -253,7 +253,7 @@
 5. **Documentation**
    - Update notes and eventually README with the experiment config schema (JSON structure, plugin references).
 
-- Experiment config now captures per-experiment plugin/sink definitions (`row_plugins`, `aggregator_plugins`, `sinks`). Added plugin registry (`dmp/core/experiments/plugin_registry.py`) with default no-op plugins, and suite runner instantiates plugins/sinks per experiment. Tests cover plugin definition handling and CLI suite flow.
+- Experiment config now captures per-experiment plugin/sink definitions (`row_plugins`, `aggregator_plugins`, `sinks`). Added plugin registry (`src/elspeth/core/experiments/plugin_registry.py`) with default no-op plugins, and suite runner instantiates plugins/sinks per experiment. Tests cover plugin definition handling and CLI suite flow.
 
 ## Rate Limiting & Cost Tracking Plugin Plan
 1. **Plugin Interfaces**
@@ -282,7 +282,7 @@
 
 6. **Documentation**
    - Update notes/README with plugin configuration examples for rate limiting and cost tracking, enabling provider-specific pricing swap-outs.
-- Added rate limiter and cost tracker plugin infrastructure (`dmp/core/controls/*`), wired into orchestrator/runner with config-driven instantiation. Defaults include no-op and fixed window/price implementations. CLI and suite runner now honour `rate_limiter`/`cost_tracker` definitions, and tests cover limiter/cost tracker behavior.
+- Added rate limiter and cost tracker plugin infrastructure (`src/elspeth/core/controls/*`), wired into orchestrator/runner with config-driven instantiation. Defaults include no-op and fixed window/price implementations. CLI and suite runner now honour `rate_limiter`/`cost_tracker` definitions, and tests cover limiter/cost tracker behavior.
 
 ## Legacy Experiment Port Plan
 1. Audit & Architecture Mapping
@@ -329,7 +329,7 @@
    - Run performance sanity checks on medium datasets to confirm no regressions; profile hotspots if statistical calculations become heavy.
 
 **Phase 5 status (2025-05-XX):**
-- Implemented default metrics stack under `dmp/plugins/experiments/metrics.py` with row (`score_extractor`), aggregation (`score_stats`, `score_recommendation`), and baseline comparison (`score_delta`) plugins.
+- Implemented default metrics stack under `src/elspeth/plugins/experiments/metrics.py` with row (`score_extractor`), aggregation (`score_stats`, `score_recommendation`), and baseline comparison (`score_delta`) plugins.
 - Added configuration wiring in `config/settings.yaml` and CLI toggle `--disable-metrics` to opt-out when required.
 - Comprehensive unit coverage in `tests/test_experiment_metrics_plugins.py`; full suite passes with metrics enabled by default.
 
@@ -391,6 +391,6 @@
    - Failure aggregation tests confirming summaries include counts and sample error messages.
 - Added retry/backoff configuration, checkpoint handling, and failure tracking to `ExperimentRunner`; suite runner now runs baseline first and applies baseline comparison plugins. Checkpoint files skip processed rows, failure metadata captured, and tests cover retries, failures, and checkpoint resume.
 - **Prompt Engine Migration Roadmap**
-  1. Inventory legacy templating helpers (cloning, conditional blocks, validation) and map to new abstractions under `dmp/core/prompts/`.
+  1. Inventory legacy templating helpers (cloning, conditional blocks, validation) and map to new abstractions under `src/elspeth/core/prompts/`.
   2. Port template parsing/rendering with support for default values, conditionals, error messaging, and cloning utilities.
   3. Integrate prompt engine into orchestrator/runner, update samples, and document usage.

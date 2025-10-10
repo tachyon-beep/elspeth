@@ -3,7 +3,7 @@ import types
 
 import pytest
 
-from dmp.datasources import (
+from elspeth.datasources import (
     BlobConfig,
     BlobDataLoader,
     BlobConfigurationError,
@@ -133,7 +133,7 @@ def test_load_blob_csv_convenience(monkeypatch, tmp_path):
 
     captured = {}
 
-    import dmp.datasources.blob_store as blob_store_module
+    import elspeth.datasources.blob_store as blob_store_module
 
     class DummyLoader:
         def __init__(self, config, credential=None, timeout=60):

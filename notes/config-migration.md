@@ -14,5 +14,5 @@ When modernising older configs:
 
 1. Rename keys per the table above.
 2. Ensure any prompt pack referenced via `prompt_pack` is defined in `prompt_packs`.
-3. If legacy middleware names were used, verify a matching plugin exists (run `dmp list middlewares` or check `dmp/plugins/llms/`).
-4. Run `dmp validate --settings <file>` to surface actionable error messages.
+3. If legacy middleware names were used, verify a matching plugin exists (run `elspeth list middlewares` or check `src/elspeth/plugins/llms/`).
+4. Run `elspeth validate --settings <file>` to surface actionable error messages.

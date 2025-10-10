@@ -1,7 +1,7 @@
 import json
 from pathlib import Path
 
-from dmp.plugins.outputs.local_bundle import LocalBundleSink
+from elspeth.plugins.outputs.local_bundle import LocalBundleSink
 
 
 def test_local_bundle_sink_creates_bundle(tmp_path):

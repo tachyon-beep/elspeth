@@ -4,8 +4,8 @@ from pathlib import Path
 import pytest
 import yaml
 
-from dmp.core.experiments.config import ExperimentSuite
-from dmp.core.experiments.tools import (
+from elspeth.core.experiments.config import ExperimentSuite
+from elspeth.core.experiments.tools import (
     export_suite_configuration,
     create_experiment_template,
     summarize_suite,

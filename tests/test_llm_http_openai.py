@@ -4,7 +4,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import pytest
 
-from dmp.plugins.llms.openai_http import HttpOpenAIClient
+from elspeth.plugins.llms.openai_http import HttpOpenAIClient
 
 
 class _Handler(BaseHTTPRequestHandler):

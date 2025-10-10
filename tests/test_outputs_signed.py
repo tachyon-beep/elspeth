@@ -1,7 +1,7 @@
 import json
 
-from dmp.core.security import verify_signature
-from dmp.plugins.outputs.signed import SignedArtifactSink
+from elspeth.core.security import verify_signature
+from elspeth.plugins.outputs.signed import SignedArtifactSink
 
 
 def fake_results():

@@ -1,7 +1,7 @@
 import json
 
 def test_analytics_report_sink_writes(tmp_path):
-    from dmp.plugins.outputs.analytics_report import AnalyticsReportSink
+    from elspeth.plugins.outputs.analytics_report import AnalyticsReportSink
 
     sink = AnalyticsReportSink(base_path=tmp_path / "reports", file_stem="summary")
 
@@ -27,7 +27,7 @@ def test_analytics_report_sink_writes(tmp_path):
 
 
 def test_analytics_report_sink_skip_on_error(tmp_path, monkeypatch):
-    from dmp.plugins.outputs.analytics_report import AnalyticsReportSink
+    from elspeth.plugins.outputs.analytics_report import AnalyticsReportSink
 
     sink = AnalyticsReportSink(base_path=tmp_path / "reports", on_error="skip")
 

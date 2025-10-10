@@ -60,7 +60,7 @@ default:
           options:
             base_path: outputs/signed
             bundle_name: archival
-            key_env: DMP_SIGNING_KEY
+            key_env: ELSPETH_SIGNING_KEY
         - plugin: github_repo
           options:
             owner: example

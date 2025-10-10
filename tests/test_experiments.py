@@ -5,14 +5,14 @@ import pandas as pd
 import pytest
 import time
 
-from dmp.core.experiments.config import ExperimentSuite
-from dmp.core.experiments.runner import ExperimentRunner
-from dmp.core.experiments.suite_runner import ExperimentSuiteRunner
-from dmp.core.experiments import plugin_registry as exp_plugin_registry
-from dmp.core.experiments.plugins import RowExperimentPlugin, AggregationExperimentPlugin
-from dmp.core.controls.rate_limit import NoopRateLimiter
-from dmp.core.controls.cost_tracker import FixedPriceCostTracker
-from dmp.core.controls.cost_tracker import FixedPriceCostTracker
+from elspeth.core.experiments.config import ExperimentSuite
+from elspeth.core.experiments.runner import ExperimentRunner
+from elspeth.core.experiments.suite_runner import ExperimentSuiteRunner
+from elspeth.core.experiments import plugin_registry as exp_plugin_registry
+from elspeth.core.experiments.plugins import RowExperimentPlugin, AggregationExperimentPlugin
+from elspeth.core.controls.rate_limit import NoopRateLimiter
+from elspeth.core.controls.cost_tracker import FixedPriceCostTracker
+from elspeth.core.controls.cost_tracker import FixedPriceCostTracker
 
 
 def test_experiment_suite_load(tmp_path):
@@ -270,7 +270,7 @@ def test_experiment_runner_cost_tracker():
         def write(self, results, *, metadata=None):
             self.meta = metadata
 
-    from dmp.core.controls.cost_tracker import FixedPriceCostTracker
+    from elspeth.core.controls.cost_tracker import FixedPriceCostTracker
 
     sink = DummySink()
     tracker = FixedPriceCostTracker(prompt_token_price=0.01, completion_token_price=0.02)
@@ -415,7 +415,7 @@ def test_execute_llm_retry(monkeypatch):
             pass
 
     sleep_calls = []
-    monkeypatch.setattr("dmp.core.experiments.runner.time.sleep", lambda x: sleep_calls.append(x))
+    monkeypatch.setattr("elspeth.core.experiments.runner.time.sleep", lambda x: sleep_calls.append(x))
 
     runner = ExperimentRunner(
         llm_client=FlakyLLM(),

@@ -1,6 +1,6 @@
 import pytest
 
-from dmp.core.prompts import PromptEngine, PromptRenderingError
+from elspeth.core.prompts import PromptEngine, PromptRenderingError
 
 
 def test_auto_convert_format_placeholders():

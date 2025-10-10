@@ -5,10 +5,10 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-import dmp.cli as cli
-from dmp.core.orchestrator import OrchestratorConfig
-from dmp.plugins.outputs.csv_file import CsvResultSink
-from dmp.core.validation import ValidationReport, SuiteValidationReport
+import elspeth.cli as cli
+from elspeth.core.orchestrator import OrchestratorConfig
+from elspeth.plugins.outputs.csv_file import CsvResultSink
+from elspeth.core.validation import ValidationReport, SuiteValidationReport
 
 
 def create_suite(root: Path):

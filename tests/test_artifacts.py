@@ -1,6 +1,6 @@
 import pytest
 
-from dmp.core import artifacts
+from elspeth.core import artifacts
 
 
 def test_file_type_helpers():

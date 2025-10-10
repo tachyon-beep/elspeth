@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from dmp.core.experiments.config import ExperimentSuite
-from dmp.tools.reporting import SuiteReportGenerator
+from elspeth.core.experiments.config import ExperimentSuite
+from elspeth.tools.reporting import SuiteReportGenerator
 
 
 def _basic_payload(mean: float) -> dict:

@@ -1,7 +1,7 @@
 import pytest
 
-from dmp.core import registry
-from dmp.core.validation import ConfigurationError
+from elspeth.core import registry
+from elspeth.core.validation import ConfigurationError
 
 
 def test_sink_accepts_artifact_config():

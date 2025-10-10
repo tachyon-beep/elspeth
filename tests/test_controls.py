@@ -3,8 +3,8 @@ import time
 
 import pytest
 
-from dmp.core.controls.rate_limit import FixedWindowRateLimiter, NoopRateLimiter, AdaptiveRateLimiter
-from dmp.core.controls.cost_tracker import FixedPriceCostTracker
+from elspeth.core.controls.rate_limit import FixedWindowRateLimiter, NoopRateLimiter, AdaptiveRateLimiter
+from elspeth.core.controls.cost_tracker import FixedPriceCostTracker
 
 
 def test_fixed_window_rate_limiter(monkeypatch):
@@ -20,8 +20,8 @@ def test_fixed_window_rate_limiter(monkeypatch):
         sleep_calls.append(duration)
         times[0] += duration
 
-    monkeypatch.setattr("dmp.core.controls.rate_limit.time.time", fake_time)
-    monkeypatch.setattr("dmp.core.controls.rate_limit.time.sleep", fake_sleep)
+    monkeypatch.setattr("elspeth.core.controls.rate_limit.time.time", fake_time)
+    monkeypatch.setattr("elspeth.core.controls.rate_limit.time.sleep", fake_sleep)
 
     with limiter.acquire():
         pass

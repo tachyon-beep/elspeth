@@ -3,11 +3,11 @@ requires = ["setuptools>=65", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "dmp"
+name = "elspeth"
 version = "0.1.0"
-description = "Domain Model Platform utilities and tooling"
+description = "ELSPETH secure LLM orchestration platform"
 authors = [
-  { name = "DMP Team" }
+  { name = "ELSPETH Team" }
 ]
 requires-python = ">=3.12"
 dependencies = [
@@ -54,9 +54,13 @@ sinks-excel = [
 ]
 
 [tool.setuptools.packages.find]
-include = ["dmp*"]
+where = ["src"]
+include = ["elspeth*"]
 exclude = ["tests", "old", "notes", "config"]
 
+[tool.setuptools.package-dir]
+"" = "src"
+
 [tool.pytest.ini_options]
-addopts = "-ra --cov=dmp --cov-report=term-missing"
+addopts = "-ra --cov=elspeth --cov-report=term-missing"
 testpaths = ["tests"]

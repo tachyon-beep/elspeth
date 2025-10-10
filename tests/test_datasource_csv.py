@@ -1,7 +1,7 @@
 import pandas as pd
 
-from dmp.plugins.datasources.csv_blob import CSVBlobDataSource
-from dmp.plugins.datasources.csv_local import CSVDataSource
+from elspeth.plugins.datasources.csv_blob import CSVBlobDataSource
+from elspeth.plugins.datasources.csv_local import CSVDataSource
 
 
 def test_csv_datasource_loads(tmp_path):

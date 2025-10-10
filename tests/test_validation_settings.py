@@ -1,7 +1,7 @@
 from pathlib import Path
 
-from dmp.core.validation import validate_settings, validate_suite, ValidationReport
-from dmp.core import validation
+from elspeth.core.validation import validate_settings, validate_suite, ValidationReport
+from elspeth.core import validation
 
 
 def write_settings(path: Path, content: str) -> None:

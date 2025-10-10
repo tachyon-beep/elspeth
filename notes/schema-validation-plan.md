@@ -42,9 +42,9 @@
 5. After validation passes, instantiate plugins and proceed with execution.
 
 ## Implementation Steps
-1. Introduce `dmp/core/validation.py` with reusable validators and error types backed by `jsonschema` helpers.
+1. Introduce `src/elspeth/core/validation.py` with reusable validators and error types backed by `jsonschema` helpers.
 2. Define schemas for settings, prompt packs, suite defaults, and per-experiment configs (reuse legacy schema definitions where possible).
-3. Extend plugin registries (`dmp/core/registry.py`, `dmp/core/experiments/plugin_registry.py`, etc.) to store option schemas and validate before instantiation.
+3. Extend plugin registries (`src/elspeth/core/registry.py`, `src/elspeth/core/experiments/plugin_registry.py`, etc.) to store option schemas and validate before instantiation.
 4. Update CLI to run validation before orchestrator/suite runner invocation; present aggregated error messages when multiple config issues are detected.
 5. Port preflight calculations into new validator, capturing issues/warnings in a structured object.
 6. Write unit tests covering:

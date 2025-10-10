@@ -1,7 +1,7 @@
 import pandas as pd
 
-from dmp.core.experiments.runner import ExperimentRunner
-from dmp.plugins.experiments.prompt_variants import PromptVariantsAggregator
+from elspeth.core.experiments.runner import ExperimentRunner
+from elspeth.plugins.experiments.prompt_variants import PromptVariantsAggregator
 
 
 class SpyLLM:

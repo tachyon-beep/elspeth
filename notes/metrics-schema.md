@@ -63,7 +63,7 @@ Aggregator plugins are written against this contract:
 
 ## Downstream Consumers
 
-- **CLI flattening:** `dmp/cli.py` prefixes all entries in `record["metrics"]`
+- **CLI flattening:** `src/elspeth/cli.py` prefixes all entries in `record["metrics"]`
   with `metric_`, recursing through nested maps. Per-criteria values therefore
   appear as `metric_scores_<criteria>` columns in CSV preview/output.
 - **CSV sink:** The default sink mirrors the CLI behaviour, writing the flattened

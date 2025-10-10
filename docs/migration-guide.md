@@ -1,6 +1,6 @@
 # Migration Guide: Legacy Stack → Plugin Architecture
 
-This guide helps teams upgrade from the legacy `old/` implementation to the modern plugin-driven Domain Model Platform.
+This guide helps teams upgrade from the legacy `old/` implementation to the modern plugin-driven ELSPETH.
 
 ## Prerequisites
 - Python 3.12+
@@ -11,10 +11,10 @@ This guide helps teams upgrade from the legacy `old/` implementation to the mode
 
 | Legacy Concept | New Location | Notes |
 |----------------|--------------|-------|
-| `old/main.py` CLI | `dmp/cli.py` | All execution flows funnel through the CLI using config-driven plugins. |
+| `old/main.py` CLI | `src/elspeth/cli.py` | All execution flows funnel through the CLI using config-driven plugins. |
 | Safety manager / prompt shields | LLM middleware: `prompt_shield`, `azure_content_safety` | Configure in `llm_middlewares` to replicate legacy safety checks. |
 | Health monitor | `health_monitor` middleware | Emits heartbeat logs similar to legacy `HealthMonitor`. |
-| Experiment stats / analytics | Plugins in `dmp/plugins/experiments/metrics.py` | Metrics, practical significance, Cliff’s delta, reporting sink replace legacy `StatsAnalyzer`. |
+| Experiment stats / analytics | Plugins in `src/elspeth/plugins/experiments/metrics.py` | Metrics, practical significance, Cliff’s delta, reporting sink replace legacy `StatsAnalyzer`. |
 | Azure DevOps archiving | Repository sink (`azure_devops_repo`) | Configure in sinks section of settings. |
 | Azure telemetry logging | `azure_environment` middleware | Handles Azure ML run interaction; defaults to skip when no run context. |
 
@@ -94,7 +94,7 @@ Refer to `notes/config-migration.md` for key renames. Typical steps:
 ## Sample Migration Steps
 1. Copy legacy experiment JSON folders into `config/sample_suite/<experiment>/` and ensure each has `config.json`, `system_prompt.md`, `user_prompt.md`.
 2. Update `config.json` to include `prompt_pack`, plugin definitions, and any experiment-specific middleware or sinks.
-3. Run validation: `python -m dmp.cli --settings config/sample_suite/settings.yaml --suite-root config/sample_suite --head 3`.
+3. Run validation: `python -m elspeth.cli --settings config/sample_suite/settings.yaml --suite-root config/sample_suite --head 3`.
 4. Inspect outputs under `outputs/sample_suite/` and analytics reports for parity.
 
 ## Reference Material
@@ -105,5 +105,5 @@ Refer to `notes/config-migration.md` for key renames. Typical steps:
 - `notes/azure-middleware.md` – Azure middleware usage notes.
 
 ## Support Channels
-- Run `dmp list plugins` (future enhancement) or browse `dmp/plugins/` for available plugins.
+- Run `elspeth list plugins` (future enhancement) or browse `src/elspeth/plugins/` for available plugins.
 - Unit tests in `tests/` illustrate configuration patterns and middleware/sink behavior.

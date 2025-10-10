@@ -3,12 +3,12 @@ import json
 
 import pandas as pd
 
-from dmp.core.experiments.runner import ExperimentRunner
-from dmp.core.artifact_pipeline import ArtifactPipeline, SinkBinding
-from dmp.plugins.outputs.csv_file import CsvResultSink
-from dmp.plugins.outputs.file_copy import FileCopySink
-from dmp.plugins.outputs.zip_bundle import ZipResultSink
-from dmp.core.artifact_pipeline import ArtifactPipeline, SinkBinding
+from elspeth.core.experiments.runner import ExperimentRunner
+from elspeth.core.artifact_pipeline import ArtifactPipeline, SinkBinding
+from elspeth.plugins.outputs.csv_file import CsvResultSink
+from elspeth.plugins.outputs.file_copy import FileCopySink
+from elspeth.plugins.outputs.zip_bundle import ZipResultSink
+from elspeth.core.artifact_pipeline import ArtifactPipeline, SinkBinding
 import zipfile
 
 
@@ -20,18 +20,18 @@ def configure_sink(
     produces=None,
     security_level: str | None = None,
 ):
-    setattr(sink, "_dmp_plugin_name", plugin)
-    setattr(sink, "_dmp_sink_name", alias or plugin)
+    setattr(sink, "_elspeth_plugin_name", plugin)
+    setattr(sink, "_elspeth_sink_name", alias or plugin)
     setattr(
         sink,
-        "_dmp_artifact_config",
+        "_elspeth_artifact_config",
         {
             "consumes": consumes or [],
             "produces": produces or [],
         },
     )
     if security_level:
-        setattr(sink, "_dmp_security_level", security_level)
+        setattr(sink, "_elspeth_security_level", security_level)
 
 
 def test_csv_to_file_copy_pipeline(tmp_path):
@@ -55,8 +55,8 @@ def test_csv_to_file_copy_pipeline(tmp_path):
     )
 
     bindings = [
-        SinkBinding("copy", "file_copy", copy_sink, copy_sink._dmp_artifact_config, 1, security_level="secret"),
-        SinkBinding("csv", "csv", csv_sink, csv_sink._dmp_artifact_config, 0, security_level="secret"),
+        SinkBinding("copy", "file_copy", copy_sink, copy_sink._elspeth_artifact_config, 1, security_level="secret"),
+        SinkBinding("csv", "csv", csv_sink, csv_sink._elspeth_artifact_config, 0, security_level="secret"),
     ]
 
     pipeline = ArtifactPipeline(bindings)
@@ -128,9 +128,9 @@ def test_zip_consumes_all_files(tmp_path):
     )
 
     bindings = [
-        SinkBinding("csv1", "csv", csv_one, csv_one._dmp_artifact_config, 0, security_level="secret"),
-        SinkBinding("csv2", "csv", csv_two, csv_two._dmp_artifact_config, 1, security_level="secret"),
-        SinkBinding("zip", "zip_bundle", zip_sink, zip_sink._dmp_artifact_config, 2, security_level="secret"),
+        SinkBinding("csv1", "csv", csv_one, csv_one._elspeth_artifact_config, 0, security_level="secret"),
+        SinkBinding("csv2", "csv", csv_two, csv_two._elspeth_artifact_config, 1, security_level="secret"),
+        SinkBinding("zip", "zip_bundle", zip_sink, zip_sink._elspeth_artifact_config, 2, security_level="secret"),
     ]
 
     payload = {

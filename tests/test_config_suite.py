@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from dmp.config import load_settings
+from elspeth.config import load_settings
 
 
 
@@ -37,7 +37,7 @@ def test_load_settings_with_suite(tmp_path, monkeypatch):
         encoding="utf-8",
     )
 
-    import dmp.core.registry as registry_module
+    import elspeth.core.registry as registry_module
 
     orig_ds = registry_module.registry._datasources["azure_blob"]
     orig_llm = registry_module.registry._llms["azure_openai"]
@@ -88,7 +88,7 @@ def test_suite_defaults_override_prompt_pack_when_missing(tmp_path, monkeypatch)
         encoding="utf-8",
     )
 
-    import dmp.core.registry as registry_module
+    import elspeth.core.registry as registry_module
 
     orig_ds = registry_module.registry._datasources.get("local_csv")
     orig_llm = registry_module.registry._llms.get("mock")

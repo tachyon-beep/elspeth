@@ -50,7 +50,7 @@ The extra `tone` and `season` columns drive multi-dimensional templating.
 
 ```bash
 source .venv/bin/activate
-python -m dmp.cli \
+python -m elspeth.cli \
   --settings config/settings_colour_animals.yaml \
   --profile colour_animals \
   --single-run \
@@ -66,7 +66,7 @@ python -m dmp.cli \
 To produce consolidated reports instead (Markdown/JSON/Excel/PNG), first install pandas + openpyxl + matplotlib as above, then run:
 
 ```bash
-python -m dmp.cli \
+python -m elspeth.cli \
   --settings config/settings_colour_animals.yaml \
   --profile colour_animals \
   --reports-dir outputs/colour_animals/reports \

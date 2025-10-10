@@ -2,7 +2,7 @@ import math
 
 import pytest
 
-from dmp.core.experiments.plugin_registry import (
+from elspeth.core.experiments.plugin_registry import (
     create_row_plugin,
     create_aggregation_plugin,
     create_baseline_plugin,
@@ -122,7 +122,7 @@ def test_score_recommendation_aggregator():
 
 
 def test_score_significance_baseline_plugin(monkeypatch):
-    import dmp.plugins.experiments.metrics as metrics_mod
+    import elspeth.plugins.experiments.metrics as metrics_mod
 
     class DummyT:
         @staticmethod
@@ -272,7 +272,7 @@ def test_score_variant_ranking():
 
 
 def test_score_significance_on_error_skip(monkeypatch):
-    import dmp.plugins.experiments.metrics as metrics_mod
+    import elspeth.plugins.experiments.metrics as metrics_mod
 
     plugin = metrics_mod.ScoreSignificanceBaselinePlugin(on_error="skip")
 
@@ -295,7 +295,7 @@ def test_score_agreement_aggregator(monkeypatch):
         records.append({"metrics": metrics})
 
     # monkeypatch pingouin response
-    import dmp.plugins.experiments.metrics as metrics_mod
+    import elspeth.plugins.experiments.metrics as metrics_mod
 
     class DummyPingouin:
         @staticmethod
@@ -310,7 +310,7 @@ def test_score_agreement_aggregator(monkeypatch):
 
 
 def test_score_agreement_on_error_skip(monkeypatch):
-    import dmp.plugins.experiments.metrics as metrics_mod
+    import elspeth.plugins.experiments.metrics as metrics_mod
 
     plugin = metrics_mod.ScoreAgreementAggregator(on_error="skip")
 
@@ -322,7 +322,7 @@ def test_score_agreement_on_error_skip(monkeypatch):
 
 
 def test_score_bayes_baseline_plugin(monkeypatch):
-    import dmp.plugins.experiments.metrics as metrics_mod
+    import elspeth.plugins.experiments.metrics as metrics_mod
 
     baseline = {
         "results": [
@@ -363,7 +363,7 @@ def test_score_bayes_baseline_plugin(monkeypatch):
 
 
 def test_score_bayes_on_error_skip(monkeypatch):
-    import dmp.plugins.experiments.metrics as metrics_mod
+    import elspeth.plugins.experiments.metrics as metrics_mod
 
     plugin = metrics_mod.ScoreBayesianBaselinePlugin(on_error="skip")
 
@@ -375,7 +375,7 @@ def test_score_bayes_on_error_skip(monkeypatch):
 
 
 def test_score_power_aggregator(monkeypatch):
-    import dmp.plugins.experiments.metrics as metrics_mod
+    import elspeth.plugins.experiments.metrics as metrics_mod
 
     records = [
         {"metrics": {"scores": {"crit": 0.6}}},
@@ -403,7 +403,7 @@ def test_score_power_aggregator(monkeypatch):
 
 
 def test_score_power_on_error_skip(monkeypatch):
-    import dmp.plugins.experiments.metrics as metrics_mod
+    import elspeth.plugins.experiments.metrics as metrics_mod
 
     plugin = metrics_mod.ScorePowerAggregator(on_error="skip")
 
@@ -415,7 +415,7 @@ def test_score_power_on_error_skip(monkeypatch):
 
 
 def test_score_distribution_baseline_plugin(monkeypatch):
-    import dmp.plugins.experiments.metrics as metrics_mod
+    import elspeth.plugins.experiments.metrics as metrics_mod
 
     baseline = {
         "results": [
@@ -460,7 +460,7 @@ def test_score_distribution_baseline_plugin(monkeypatch):
 
 
 def test_score_distribution_on_error_skip(monkeypatch):
-    import dmp.plugins.experiments.metrics as metrics_mod
+    import elspeth.plugins.experiments.metrics as metrics_mod
 
     plugin = metrics_mod.ScoreDistributionAggregator(on_error="skip")
 

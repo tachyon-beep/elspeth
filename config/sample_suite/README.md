@@ -37,7 +37,7 @@ outputs that flow through the metrics and CSV sinks.
    ```
 2. Execute the suite via the CLI
    ```bash
-   python -m dmp.cli \
+   python -m elspeth.cli \
      --settings config/sample_suite/settings.yaml \
      --suite-root config/sample_suite \
      --head 0 \
