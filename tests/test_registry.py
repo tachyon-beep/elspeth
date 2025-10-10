@@ -1,3 +1,4 @@
+from pathlib import Path
 import pandas as pd
 import pytest
 
@@ -128,3 +129,24 @@ def test_normalize_early_stop_definitions_rejects_invalid_types():
         plugin_registry.normalize_early_stop_definitions("invalid")
     with pytest.raises(ConfigurationError):
         plugin_registry.normalize_early_stop_definitions([1, 2])
+
+def test_registry_validate_sink_schema_errors():
+    with pytest.raises(ConfigurationError):
+        registry.validate_sink("csv", {"path": None})
+    with pytest.raises(ConfigurationError):
+        registry.validate_sink("file_copy", {"destination": None})
+
+
+def test_registry_sink_schema_success(tmp_path):
+    dest = tmp_path / "out.txt"
+    registry.validate_sink("csv", {"path": dest.as_posix()})
+    registry.validate_sink("file_copy", {"destination": dest.as_posix()})
+    sink = registry.create_sink("file_copy", {"destination": dest.as_posix()})
+    from elspeth.core.interfaces import Artifact
+
+    src = tmp_path / "src.txt"
+    src.write_text("hello", encoding="utf-8")
+    sink.prepare_artifacts({"input": [Artifact(id="a", type="text/plain", path=str(src))]})
+    sink.write({}, metadata={})
+    artifacts = sink.collect_artifacts()
+    assert Path(artifacts["file"].path).read_text(encoding="utf-8") == "hello"

@@ -255,3 +255,85 @@ def test_validate_settings_prompt_pack_sinks_must_be_list(tmp_path):
     report = validate_settings(config_path)
     messages = [msg.format() for msg in report.errors]
     assert any("prompt_pack:bad.sink" in message and "Expected a list" in message for message in messages)
+
+def test_validate_settings_suite_defaults_invalid_sink(tmp_path):
+    config_path = tmp_path / "settings.yaml"
+    write_settings(
+        config_path,
+        """
+        default:
+          datasource:
+            plugin: local_csv
+            options:
+              path: data.csv
+          llm:
+            plugin: mock
+          sinks:
+            - plugin: csv
+              options:
+                path: outputs/results.csv
+          suite_defaults:
+            sinks:
+              - plugin: csv
+                options: {}
+        """,
+    )
+    report = validate_settings(config_path)
+    messages = [msg.format() for msg in report.errors]
+    assert any("suite_defaults.sink" in message for message in messages)
+
+
+def test_validate_settings_suite_defaults_rate_limiter_error(tmp_path):
+    config_path = tmp_path / "settings.yaml"
+    write_settings(
+        config_path,
+        """
+        default:
+          datasource:
+            plugin: local_csv
+            options:
+              path: data.csv
+          llm:
+            plugin: mock
+          sinks:
+            - plugin: csv
+              options:
+                path: outputs/results.csv
+          suite_defaults:
+            rate_limiter:
+              plugin: missing
+        """,
+    )
+    report = validate_settings(config_path)
+    messages = [msg.format() for msg in report.errors]
+    assert any("suite_defaults.rate_limiter" in message for message in messages)
+
+
+def test_validate_settings_prompt_pack_invalid_sink_list(tmp_path):
+    config_path = tmp_path / "settings.yaml"
+    write_settings(
+        config_path,
+        """
+        default:
+          datasource:
+            plugin: local_csv
+            options:
+              path: data.csv
+          llm:
+            plugin: mock
+          sinks:
+            - plugin: csv
+              options:
+                path: outputs/results.csv
+          prompt_packs:
+            invalid_pack:
+              prompts:
+                system: Sys
+                user: User
+              sinks:
+                plugin: csv
+        """,
+    )
+    report = validate_settings(config_path)
+    messages = [msg.format() for msg in report.errors]
+    assert any("prompt_pack:invalid_pack.sink" in message and "Expected a list" in message for message in messages)

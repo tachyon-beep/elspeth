@@ -259,3 +259,124 @@ def test_blob_result_sink_missing_placeholder_raises(tmp_path):
     sink = BlobResultSink(config_path=config_path, profile="default", path_template="runs/{missing}/")
     with pytest.raises(ValueError):
         sink.write({"results": []}, metadata={"experiment": "exp1"})
+
+def test_blob_result_sink_stage_block_failure_skip(tmp_path, monkeypatch, caplog):
+    config_path = create_blob_config(tmp_path)
+
+    class FailingStageClient:
+        def __init__(self, name):
+            self.name = name
+
+        def stage_block(self, block_id, chunk):
+            raise RuntimeError("stage failure")
+
+        def commit_block_list(self, block_ids, metadata=None, content_settings=None):
+            raise AssertionError("commit should not be called")
+
+    sink = BlobResultSink(
+        config_path=config_path,
+        profile="default",
+        upload_chunk_size=4,
+        on_error="skip",
+    )
+
+    monkeypatch.setattr(
+        BlobResultSink,
+        "_create_blob_client",
+        lambda self, name: FailingStageClient(name),
+    )
+
+    payload = {"results": [{"row": {"APPID": "1"}, "response": {"content": "x" * 12}}]}
+    with caplog.at_level("WARNING"):
+        sink.write(payload, metadata={"experiment": "exp1"})
+
+    assert any("Blob sink failed" in record.message for record in caplog.records)
+
+
+def test_blob_result_sink_stage_block_failure_abort(tmp_path, monkeypatch):
+    config_path = create_blob_config(tmp_path)
+
+    class FailingStageClient:
+        def stage_block(self, block_id, chunk):
+            raise RuntimeError("stage failure")
+
+    sink = BlobResultSink(
+        config_path=config_path,
+        profile="default",
+        upload_chunk_size=2,
+        on_error="abort",
+    )
+
+    monkeypatch.setattr(
+        BlobResultSink,
+        "_create_blob_client",
+        lambda self, name: FailingStageClient(),
+    )
+
+    with pytest.raises(RuntimeError):
+        sink.write({"results": [{"row": {}, "response": {"content": "abcdef"}}]}, metadata={})
+
+
+def test_blob_result_sink_commit_failure(tmp_path, monkeypatch, caplog):
+    config_path = create_blob_config(tmp_path)
+    staged = []
+
+    class CommitFailClient:
+        def stage_block(self, block_id, chunk):
+            staged.append(block_id)
+
+        def commit_block_list(self, block_ids, metadata=None, content_settings=None):
+            raise RuntimeError("commit failure")
+
+    sink = BlobResultSink(
+        config_path=config_path,
+        profile="default",
+        upload_chunk_size=3,
+        on_error="skip",
+    )
+
+    monkeypatch.setattr(
+        BlobResultSink,
+        "_create_blob_client",
+        lambda self, name: CommitFailClient(),
+    )
+
+    with caplog.at_level("WARNING"):
+        sink.write({"results": [{"row": {}, "response": {"content": "abcdef"}}]}, metadata={})
+
+    assert staged, "stage_block should have been called"
+    assert any("Blob sink failed" in record.message for record in caplog.records)
+
+
+def test_blob_result_sink_uses_content_settings(tmp_path, monkeypatch):
+    config_path = create_blob_config(tmp_path)
+    committed = {}
+
+    class ChunkClient:
+        def __init__(self):
+            self.blocks = []
+
+        def stage_block(self, block_id, chunk):
+            self.blocks.append(block_id)
+
+        def commit_block_list(self, block_ids, metadata=None, content_settings=None):
+            committed["block_ids"] = block_ids
+            committed["content_settings"] = content_settings
+
+    class DummyContentSettings:
+        def __init__(self, content_type):
+            self.content_type = content_type
+
+    sink = BlobResultSink(
+        config_path=config_path,
+        profile="default",
+        upload_chunk_size=4,
+    )
+
+    monkeypatch.setattr(BlobResultSink, "_create_blob_client", lambda self, name: ChunkClient())
+    monkeypatch.setattr("elspeth.plugins.outputs.blob.ContentSettings", DummyContentSettings)
+
+    sink.write({"results": [{"row": {}, "response": {"content": "abcd" * 4}}]}, metadata={})
+
+    assert isinstance(committed["content_settings"], DummyContentSettings)
+    assert committed["content_settings"].content_type == "application/json"
