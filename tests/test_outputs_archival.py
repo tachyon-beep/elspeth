@@ -1,3 +1,4 @@
+import csv
 import json
 from pathlib import Path
 from zipfile import ZipFile
@@ -12,7 +13,7 @@ def sample_results():
     return {
         "results": [
             {
-                "row": {"APPID": "1", "name": "alpha"},
+                "row": {"APPID": "1", "name": "alpha", "formula": "=SUM(1,2)"},
                 "response": {"content": "ok"},
                 "metrics": {"latency": 0.5},
             }
@@ -22,7 +23,7 @@ def sample_results():
     }
 
 
-def test_excel_result_sink_writes_workbook(tmp_path):
+def test_excel_result_sink_writes_workbook(tmp_path, assert_sanitized_artifact):
     pytest.importorskip("openpyxl")
     from openpyxl import load_workbook
 
@@ -47,13 +48,22 @@ def test_excel_result_sink_writes_workbook(tmp_path):
     ws = wb[sink.results_sheet]
     headers = [cell.value for cell in ws[1]]
     assert "row.APPID" in headers
+    assert "row.formula" in headers
     content_cell = ws[2][headers.index("response")]
     assert "ok" in content_cell.value
+    formula_cell = ws[2][headers.index("row.formula")]
+    assert formula_cell.value == "'=SUM(1,2)"
 
     manifest_sheet = wb[sink.manifest_sheet]
-    manifest_values = {row[0].value: row[1].value for row in manifest_sheet.iter_rows(min_row=2)}
+    manifest_values = {
+        row[0].value: row[1].value for row in manifest_sheet.iter_rows(min_row=2)
+    }
     assert manifest_values["rows"] == 1
     assert json.loads(manifest_values["metadata"])["experiment"] == "exp1"
+    sanitization_meta = json.loads(manifest_values["sanitization"])
+    assert sanitization_meta == {"enabled": True, "guard": "'"}
+
+    assert_sanitized_artifact(workbook_path)
 
 
 def test_excel_sink_skip_on_error(monkeypatch, tmp_path, caplog):
@@ -110,9 +120,39 @@ def test_zip_result_sink_creates_archive(tmp_path):
         manifest = json.loads(zf.read(sink.manifest_name))
         assert manifest["rows"] == 1
         assert manifest["metadata"]["experiment"] == "exp1"
+        assert manifest["sanitization"] == {"enabled": True, "guard": "'"}
 
-        csv_content = zf.read(sink.csv_name).decode("utf-8").strip()
-        assert "APPID" in csv_content
+        csv_reader = csv.reader(zf.read(sink.csv_name).decode("utf-8").splitlines())
+        header = next(csv_reader)
+        rows = list(csv_reader)
+        assert header[2] == "formula"
+        assert rows
+        formula_values = [row[2] for row in rows]
+        assert all(value == "'=SUM(1,2)" for value in formula_values)
+
+
+def test_zip_sink_disable_sanitization(tmp_path):
+    sink = ZipResultSink(
+        base_path=tmp_path,
+        bundle_name="bundle_no_guard",
+        include_csv=True,
+        sanitize_formulas=False,
+        timestamped=False,
+    )
+
+    sink.write(sample_results(), metadata={"experiment": "exp1"})
+
+    archive_path = tmp_path / "bundle_no_guard.zip"
+    assert archive_path.exists()
+
+    with ZipFile(archive_path) as zf:
+        manifest = json.loads(zf.read(sink.manifest_name))
+        assert manifest["sanitization"] == {"enabled": False, "guard": "'"}
+        csv_reader = csv.reader(zf.read(sink.csv_name).decode("utf-8").splitlines())
+        header = next(csv_reader)
+        rows = list(csv_reader)
+        formula_values = [row[header.index("formula")] for row in rows]
+        assert any(value.startswith('=') for value in formula_values)
 
 
 def test_zip_sink_skip_on_error(monkeypatch, tmp_path, caplog):

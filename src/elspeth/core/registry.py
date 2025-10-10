@@ -207,6 +207,12 @@ class PluginRegistry:
                     "properties": {
                         "path": {"type": "string"},
                         "overwrite": {"type": "boolean"},
+                        "sanitize_formulas": {"type": "boolean"},
+                        "sanitize_guard": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 1,
+                        },
                         "artifacts": ARTIFACTS_SECTION_SCHEMA,
                         "security_level": {"type": "string"},
                         "on_error": ON_ERROR_ENUM,
@@ -225,6 +231,12 @@ class PluginRegistry:
                         "timestamped": {"type": "boolean"},
                         "write_json": {"type": "boolean"},
                         "write_csv": {"type": "boolean"},
+                        "sanitize_formulas": {"type": "boolean"},
+                        "sanitize_guard": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 1,
+                        },
                         "artifacts": ARTIFACTS_SECTION_SCHEMA,
                         "security_level": {"type": "string"},
                         "on_error": ON_ERROR_ENUM,
@@ -246,6 +258,12 @@ class PluginRegistry:
                         "aggregates_sheet": {"type": "string"},
                         "include_manifest": {"type": "boolean"},
                         "include_aggregates": {"type": "boolean"},
+                        "sanitize_formulas": {"type": "boolean"},
+                        "sanitize_guard": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 1,
+                        },
                         "artifacts": ARTIFACTS_SECTION_SCHEMA,
                         "security_level": {"type": "string"},
                         "on_error": ON_ERROR_ENUM,

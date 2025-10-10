@@ -12,7 +12,7 @@ from elspeth.plugins.outputs.local_bundle import LocalBundleSink
 from elspeth.plugins.outputs.csv_file import CsvResultSink
 
 
-def test_end_to_end_local_pipeline(tmp_path):
+def test_end_to_end_local_pipeline(tmp_path, assert_sanitized_artifact):
     data = pd.DataFrame({"APPID": ["1", "2"], "value": ["low", "high"]})
     bundle_dir = tmp_path / "bundles"
     csv_path = tmp_path / "results.csv"
@@ -48,6 +48,9 @@ def test_end_to_end_local_pipeline(tmp_path):
     manifest = json.loads(manifest_matches[0].read_text(encoding="utf-8"))
     assert manifest["rows"] == len(data)
     assert "value" in manifest.get("columns", [])
+    assert manifest["sanitization"] == {"enabled": True, "guard": "'"}
+
+    assert_sanitized_artifact(csv_path)
 
 
 def _write_experiment(root: Path, name: str, *, is_baseline: bool = False, prompt_pack: str | None = None) -> None:
@@ -67,7 +70,7 @@ def _write_experiment(root: Path, name: str, *, is_baseline: bool = False, promp
     (exp_dir / "user_prompt.md").write_text("User prompt {{ value }}", encoding="utf-8")
 
 
-def test_suite_runner_end_to_end_without_azure(tmp_path):
+def test_suite_runner_end_to_end_without_azure(tmp_path, assert_sanitized_artifact):
     suite_root = tmp_path / "suite"
     bundle_root = tmp_path / "suite_bundles"
 
@@ -132,5 +135,11 @@ def test_suite_runner_end_to_end_without_azure(tmp_path):
     manifest_files = sorted(bundle_root.glob("**/manifest.json"))
     assert manifest_files, "local bundle sink should emit a manifest"
 
-    manifest_data = json.loads(manifest_files[-1].read_text(encoding="utf-8"))
+    manifest_path = manifest_files[-1]
+    manifest_data = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert manifest_data["rows"] == len(df)
+    assert manifest_data["sanitization"] == {"enabled": True, "guard": "'"}
+
+    csv_artifact = manifest_path.parent / "results.csv"
+    if csv_artifact.exists():
+        assert_sanitized_artifact(csv_artifact)

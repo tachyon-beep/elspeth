@@ -9,7 +9,7 @@ touching the core runner while preserving a defensible audit trail.
 - `src/elspeth/core/` – orchestration, prompt engine, controls (rate/cost), registry.
 - `src/elspeth/plugins/` – concrete plugins for datasources (Azure blob, local CSV),
   LLM clients (Azure OpenAI, mock), metrics/statistics, and result sinks
-  (CSV, blob, repository, signed artifacts).
+  (CSV, blob, repository, signed artifacts with spreadsheet sanitisation).
 - `config/` – global settings, sample suite definitions, and blob datastore config.
 - `tests/` – pytest suite covering plugins, orchestrator, CLI, and prompt engine.
 - `scripts/bootstrap.sh` / `Makefile` – tooling to create the virtual
@@ -73,6 +73,7 @@ Settings files (default: `config/settings.yaml`) describe the runtime:
 - `datasource` – plugin + options (e.g. `azure_blob`, `local_csv`).
 - `llm` – LLM client (`azure_openai` for real endpoint, `mock` for offline).
 - `sinks` – destination plugins; CSV sink is safe for local testing.
+- Spreadsheet sinks escape leading `= + - @`, tab, newline, and single-quote characters by default. Configure per sink with `sanitize_formulas` (default `true`) and `sanitize_guard` (default `'`); manifests record the guard for auditing.
 - `prompt_packs` – reusable prompt bundles defining system/user prompts,
   criteria, plugin stacks, and defaults.
 - `suite_defaults` – values shared across experiments when running suites.
@@ -122,14 +123,18 @@ reference per-criteria values via paths like `scores.analysis`.
   `score_power` (target sample size/power estimates), `score_distribution`
   (distribution shift tests), and `score_variant_ranking` in addition to `score_stats` and `score_recommendation`.
 - **LLM middleware**: `audit_logger`, `prompt_shield`, `azure_content_safety`, `health_monitor`.
-- **Sinks**: CSV, Azure blob, local bundles, GitHub/Azure DevOps repositories,
-  signed artifact bundles, analytics report sink (JSON/Markdown summaries).
+- **Sinks**: CSV, Azure blob, local bundles, ZIP bundles, GitHub/Azure DevOps repositories,
+  signed artifact bundles, analytics report sink (JSON/Markdown summaries). Spreadsheet sinks support
+  `sanitize_formulas` / `sanitize_guard` options; guard choices propagate to manifest metadata.
 
 To add a new plugin, implement the appropriate interface from
 `src/elspeth/core/interfaces.py` and register it via the registry helper.
 
 ## Testing & Tooling
 - Run `make test` (or `python -m pytest`) to execute the suite (61 tests, ~83% coverage).
+- Spreadsheet compatibility matrix: `tox -e sanitization-matrix` generates guarded CSV/Excel
+  artifacts and validates them with pandas, the stdlib `csv` reader, and openpyxl, recording
+  outcomes in `docs/notes/sanitization_compat.md`.
 - `scripts/bootstrap.sh` supports idempotent environment setup; set
   `RUN_TESTS=0` to skip the test phase.
 - Lint helpers (`make lint`) install and run `black`/`isort` in check mode.
