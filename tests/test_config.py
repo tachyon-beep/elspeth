@@ -1,6 +1,9 @@
 import yaml
 
+import pytest
+
 from dmp.config import load_settings
+from dmp.core.validation import ConfigurationError
 
 
 def test_load_settings(tmp_path, monkeypatch):
@@ -66,3 +69,156 @@ def test_load_settings(tmp_path, monkeypatch):
     assert settings.orchestrator_config.retry_config is None
     assert settings.rate_limiter is not None
     assert settings.cost_tracker is not None
+
+
+def test_load_settings_missing_prompts_defaults_to_blank(tmp_path):
+    config_file = tmp_path / "settings.yaml"
+    config_file.write_text(
+        """
+        default:
+          datasource:
+            plugin: local_csv
+            options:
+              path: input.csv
+          llm:
+            plugin: mock
+          sinks: []
+        """,
+        encoding="utf-8",
+    )
+
+    import dmp.core.registry as registry_module
+
+    orig_ds = registry_module.registry._datasources.get("local_csv")
+    orig_llm = registry_module.registry._llms.get("mock")
+    orig_sink = registry_module.registry._sinks.get("csv")
+
+    registry_module.registry._datasources["local_csv"] = registry_module.PluginFactory(lambda options: ("ds", options))
+    registry_module.registry._llms["mock"] = registry_module.PluginFactory(lambda options: ("llm", options))
+    registry_module.registry._sinks["csv"] = registry_module.PluginFactory(lambda options: ("sink", options))
+
+    try:
+        settings = load_settings(config_file)
+    finally:
+        if orig_ds is not None:
+            registry_module.registry._datasources["local_csv"] = orig_ds
+        if orig_llm is not None:
+            registry_module.registry._llms["mock"] = orig_llm
+        if orig_sink is not None:
+            registry_module.registry._sinks["csv"] = orig_sink
+
+    assert settings.orchestrator_config.llm_prompt.get("system", "") == ""
+    assert settings.orchestrator_config.llm_prompt.get("user", "") == ""
+
+
+def test_load_settings_prompt_pack_merges_overrides(tmp_path, monkeypatch):
+    config_file = tmp_path / "settings.yaml"
+    config_file.write_text(
+        """
+        default:
+          datasource:
+            plugin: local_csv
+            options:
+              path: data.csv
+          llm:
+            plugin: mock
+          sinks:
+            - plugin: csv
+              options:
+                path: outputs/latest.csv
+          prompt_pack: sample
+          prompt_packs:
+            sample:
+              prompts:
+                system: Sample sys
+                user: Sample user {id}
+              prompt_fields: ["id"]
+              row_plugins:
+                - name: pack_row
+              aggregator_plugins:
+                - name: pack_agg
+          prompts:
+            user: Inline {{ name }}
+          row_plugins:
+            - name: inline_row
+          aggregator_plugins:
+            - name: inline_agg
+        """,
+        encoding="utf-8",
+    )
+
+    import dmp.core.registry as registry_module
+
+    orig_ds = registry_module.registry._datasources.get("local_csv")
+    orig_llm = registry_module.registry._llms.get("mock")
+    orig_sink = registry_module.registry._sinks.get("csv")
+
+    registry_module.registry._datasources["local_csv"] = registry_module.PluginFactory(lambda options: ("ds", options))
+    registry_module.registry._llms["mock"] = registry_module.PluginFactory(lambda options: ("llm", options))
+    registry_module.registry._sinks["csv"] = registry_module.PluginFactory(lambda options: ("sink", options))
+
+    try:
+        settings = load_settings(config_file, profile="default")
+    finally:
+        if orig_ds is not None:
+            registry_module.registry._datasources["local_csv"] = orig_ds
+        if orig_llm is not None:
+            registry_module.registry._llms["mock"] = orig_llm
+        if orig_sink is not None:
+            registry_module.registry._sinks["csv"] = orig_sink
+
+    assert settings.orchestrator_config.llm_prompt["system"] == "Sample sys"
+    assert settings.orchestrator_config.llm_prompt["user"] == "Inline {{ name }}"
+    assert settings.orchestrator_config.prompt_fields == ["id"]
+    assert settings.orchestrator_config.row_plugin_defs == [{"name": "pack_row"}, {"name": "inline_row"}]
+    assert settings.orchestrator_config.aggregator_plugin_defs == [{"name": "pack_agg"}, {"name": "inline_agg"}]
+
+
+def test_load_settings_suite_defaults_inherit_pack(tmp_path, monkeypatch):
+    config_file = tmp_path / "settings.yaml"
+    config_file.write_text(
+        """
+        default:
+          datasource:
+            plugin: local_csv
+            options:
+              path: data.csv
+          llm:
+            plugin: mock
+          sinks: []
+          prompt_packs:
+            base:
+              prompts:
+                system: Pack system
+                user: Pack user {{ id }}
+              prompt_fields: ["id"]
+              row_plugins:
+                - name: pack_row
+          suite_defaults:
+            prompt_pack: base
+            aggregator_plugins:
+              - name: suite_agg
+        """,
+        encoding="utf-8",
+    )
+
+    import dmp.core.registry as registry_module
+
+    orig_ds = registry_module.registry._datasources.get("local_csv")
+    orig_llm = registry_module.registry._llms.get("mock")
+
+    registry_module.registry._datasources["local_csv"] = registry_module.PluginFactory(lambda options: ("ds", options))
+    registry_module.registry._llms["mock"] = registry_module.PluginFactory(lambda options: ("llm", options))
+
+    try:
+        settings = load_settings(config_file)
+    finally:
+        if orig_ds is not None:
+            registry_module.registry._datasources["local_csv"] = orig_ds
+        if orig_llm is not None:
+            registry_module.registry._llms["mock"] = orig_llm
+
+    assert settings.suite_defaults["prompts"]["system"] == "Pack system"
+    assert settings.suite_defaults["prompt_fields"] == ["id"]
+    assert settings.suite_defaults["row_plugins"] == [{"name": "pack_row"}]
+    assert settings.suite_defaults["aggregator_plugins"] == [{"name": "suite_agg"}]

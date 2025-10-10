@@ -1,7 +1,9 @@
 import pandas as pd
+import pytest
 
 from dmp.core.registry import registry
-
+from dmp.core.experiments import plugin_registry
+from dmp.core.validation import ConfigurationError
 
 
 def test_registry_creates_blob_datasource(tmp_path, monkeypatch):
@@ -74,3 +76,55 @@ def test_registry_constructs_llm_and_sink(monkeypatch):
 
     assert isinstance(llm, DummyLLM)
     assert isinstance(sink, DummySink)
+
+
+def test_create_row_plugin_requires_known_name():
+    with pytest.raises(ValueError, match="Unknown row experiment plugin"):
+        plugin_registry.create_row_plugin({"name": "missing"})
+
+
+def test_create_row_plugin_validates_schema():
+    def build_plugin(options):
+        class _Plugin:
+            name = "limited"
+
+            def process_row(self, row, responses):
+                return {}
+
+        return _Plugin()
+
+    plugin_registry.register_row_plugin(
+        "limited",
+        build_plugin,
+        schema={
+            "type": "object",
+            "properties": {"threshold": {"type": "number"}},
+            "required": ["threshold"],
+        },
+    )
+
+    with pytest.raises(ConfigurationError):
+        plugin_registry.validate_row_plugin_definition({"name": "limited", "options": {}})
+
+    plugin_registry.validate_row_plugin_definition({"name": "limited", "options": {"threshold": 0.5}})
+
+
+def test_normalize_early_stop_definitions_handles_various_forms():
+    entries = [
+        {"name": "custom", "options": {"limit": 5}},
+        {"plugin": "custom", "threshold": 2},
+        {"limit": 3},
+    ]
+    normalized = plugin_registry.normalize_early_stop_definitions(entries)
+    assert normalized == [
+        {"name": "custom", "options": {"limit": 5}},
+        {"name": "custom", "options": {"threshold": 2}},
+        {"name": "threshold", "options": {"limit": 3}},
+    ]
+
+
+def test_normalize_early_stop_definitions_rejects_invalid_types():
+    with pytest.raises(ConfigurationError):
+        plugin_registry.normalize_early_stop_definitions("invalid")
+    with pytest.raises(ConfigurationError):
+        plugin_registry.normalize_early_stop_definitions([1, 2])
