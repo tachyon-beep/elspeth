@@ -105,47 +105,112 @@ def _validate_node(
 
     any_of = schema.get("anyOf")
     if any_of:
-        for option in any_of:
-            option_errors: List[tuple[Tuple[object, ...], str]] = []
-            _validate_node(value, option, path, option_errors)
-            if not option_errors:
-                break
-        else:
-            errors.append((path, "did not match any allowed schemas"))
+        _validate_any_of(value, any_of, path, errors)
 
     expected_type = schema.get("type")
-    if expected_type:
-        if not _check_type(value, expected_type):
-            errors.append((path, f"must be of type {expected_type}"))
-            return
+    if expected_type and not _check_type(value, expected_type):
+        errors.append((path, f"must be of type {expected_type}"))
+        return
 
     if isinstance(value, Mapping):
-        required = schema.get("required", [])
-        for key in required:
-            if key not in value:
-                errors.append((path + (key,), "is a required property"))
-        properties = schema.get("properties", {})
-        for key, subschema in properties.items():
-            if key in value:
-                _validate_node(value[key], subschema, path + (key,), errors)
-
+        _validate_object(value, schema, path, errors)
     if isinstance(value, list):
-        item_schema = schema.get("items")
-        if item_schema:
-            for index, item in enumerate(value):
-                _validate_node(item, item_schema, path + (index,), errors)
+        _validate_array(value, schema, path, errors)
+
+    _validate_enum_membership(value, schema, path, errors)
+    _validate_numeric_bounds(value, schema, path, errors)
+
+
+def _validate_any_of(
+    value: Any,
+    options: Sequence[Mapping[str, Any]],
+    path: Tuple[object, ...],
+    errors: List[tuple[Tuple[object, ...], str]],
+) -> None:
+    """Validate ``value`` matches at least one schema in ``options``."""
+
+    for option in options:
+        option_errors: List[tuple[Tuple[object, ...], str]] = []
+        _validate_node(value, option, path, option_errors)
+        if not option_errors:
+            return
+    errors.append((path, "did not match any allowed schemas"))
+
+
+def _validate_object(
+    value: Mapping[str, Any],
+    schema: Mapping[str, Any],
+    path: Tuple[object, ...],
+    errors: List[tuple[Tuple[object, ...], str]],
+) -> None:
+    """Validate object-specific constraints for ``value``."""
+
+    required = schema.get("required", [])
+    for key in required:
+        if key not in value:
+            errors.append((path + (key,), "is a required property"))
+
+    properties = schema.get("properties", {})
+    for key, subschema in properties.items():
+        if key in value:
+            _validate_node(value[key], subschema, path + (key,), errors)
+
+
+def _validate_array(
+    value: Sequence[Any],
+    schema: Mapping[str, Any],
+    path: Tuple[object, ...],
+    errors: List[tuple[Tuple[object, ...], str]],
+) -> None:
+    """Validate array-specific constraints for ``value``."""
+
+    item_schema = schema.get("items")
+    if not item_schema:
+        return
+
+    for index, item in enumerate(value):
+        _validate_node(item, item_schema, path + (index,), errors)
+
+
+def _validate_enum_membership(
+    value: Any,
+    schema: Mapping[str, Any],
+    path: Tuple[object, ...],
+    errors: List[tuple[Tuple[object, ...], str]],
+) -> None:
+    """Ensure ``value`` is one of the allowed enum values if provided."""
 
     enum = schema.get("enum")
     if enum is not None and value not in enum:
         errors.append((path, f"must be one of {enum}"))
 
+
+def _validate_numeric_bounds(
+    value: Any,
+    schema: Mapping[str, Any],
+    path: Tuple[object, ...],
+    errors: List[tuple[Tuple[object, ...], str]],
+) -> None:
+    """Validate numeric upper and lower bounds for ``value``."""
+
+    if not _is_number(value):
+        return
+
     minimum = schema.get("minimum")
-    if minimum is not None and _is_number(value) and value < minimum:
+    if minimum is not None and value < minimum:
         errors.append((path, f"must be >= {minimum}"))
 
     exclusive_min = schema.get("exclusiveMinimum")
-    if exclusive_min is not None and _is_number(value) and value <= exclusive_min:
+    if exclusive_min is not None and value <= exclusive_min:
         errors.append((path, f"must be > {exclusive_min}"))
+
+    maximum = schema.get("maximum")
+    if maximum is not None and value > maximum:
+        errors.append((path, f"must be <= {maximum}"))
+
+    exclusive_max = schema.get("exclusiveMaximum")
+    if exclusive_max is not None and value >= exclusive_max:
+        errors.append((path, f"must be < {exclusive_max}"))
 
 
 def _check_type(value: Any, expected: str) -> bool:
@@ -330,7 +395,7 @@ def validate_suite(
     registry = core_registry.registry
     _ = defaults  # reserved for future suite default overrides
 
-    summaries, names, baseline_name, baseline_count = _collect_suite_experiments(
+    summaries, all_names, baseline_name, baseline_count = _collect_suite_experiments(
         suite_path,
         report,
         registry,
@@ -342,7 +407,7 @@ def validate_suite(
     if not summaries:
         report.add_error("No experiments found", context=str(suite_path))
 
-    duplicates = _find_duplicates(names)
+    duplicates = _find_duplicates(all_names)
     for dup in duplicates:
         report.add_error(f"Duplicate experiment name '{dup}'", context="suite")
 
@@ -621,7 +686,7 @@ def _load_experiment_summary(
     if isinstance(data, str):
         try:
             data = json.loads(data)
-        except json.JSONDecodeError as exc:
+        except json.JSONDecodeError:
             report.add_error(
                 f"Profile data in {config_path} is a string but not valid JSON",
                 context=str(config_path),
@@ -727,7 +792,7 @@ def _collect_suite_experiments(
     """Collect and validate experiment summaries from the suite directory."""
 
     summaries: List[_ExperimentSummary] = []
-    enabled_names: List[str] = []
+    all_names: List[str] = []
     baseline_name: str | None = None
     baseline_count = 0
 
@@ -737,13 +802,12 @@ def _collect_suite_experiments(
         if summary is None:
             continue
         summaries.append(summary)
-        if summary.enabled:
-            enabled_names.append(summary.name)
-            if summary.is_baseline:
-                baseline_count += 1
-                baseline_name = summary.name
+        all_names.append(summary.name)
+        if summary.enabled and summary.is_baseline:
+            baseline_count += 1
+            baseline_name = summary.name
 
-    return summaries, enabled_names, baseline_name, baseline_count
+    return summaries, all_names, baseline_name, baseline_count
 
 
 def _calculate_preflight(
