@@ -850,9 +850,7 @@ def _has_fallback_sinks(
 ) -> bool:
     """Return True when sinks are provided via prompt packs or suite defaults."""
 
-    return _prompt_pack_provides_sinks(profile_data, prompt_packs) or _suite_defaults_provide_sinks(
-        suite_defaults, prompt_packs
-    )
+    return _prompt_pack_provides_sinks(profile_data, prompt_packs) or _suite_defaults_provide_sinks(suite_defaults, prompt_packs)
 
 
 def _validate_prompt_pack_section(

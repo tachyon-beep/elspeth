@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Any, Callable, Dict, List
+from typing import Any, Callable, Dict, List, cast
 
 from elspeth.core import registry as core_registry
 from elspeth.core.controls import create_cost_tracker, create_rate_limiter
@@ -67,16 +66,15 @@ class ExperimentSuiteRunner:
                 middleware_defs.extend(source)
         middlewares = self._create_middlewares(middleware_defs)
 
-        concurrency_config: Dict[str, Any] = {}
+        raw_concurrency: Dict[str, Any] = {}
         for source in (
             defaults.get("concurrency_config") or defaults.get("concurrency"),
             pack.get("concurrency") if pack else None,
             config.concurrency_config,
         ):
             if source:
-                concurrency_config.update(source)
-        if not concurrency_config:
-            concurrency_config = None
+                raw_concurrency.update(source)
+        concurrency_config = raw_concurrency or None
 
         early_stop_plugin_defs: List[Dict[str, Any]] = []
         for source in (
@@ -87,16 +85,15 @@ class ExperimentSuiteRunner:
             if source:
                 early_stop_plugin_defs.extend(normalize_early_stop_definitions(source))
 
-        early_stop_config: Dict[str, Any] = {}
+        raw_early_stop_config: Dict[str, Any] = {}
         for source in (
             defaults.get("early_stop_config") or defaults.get("early_stop"),
             pack.get("early_stop") if pack else None,
             config.early_stop_config,
         ):
             if source:
-                early_stop_config.update(source)
-        if not early_stop_config:
-            early_stop_config = None
+                raw_early_stop_config.update(source)
+        early_stop_config = raw_early_stop_config or None
         if not early_stop_plugin_defs and early_stop_config:
             early_stop_plugin_defs.extend(normalize_early_stop_definitions(early_stop_config))
         early_stop_plugins = [create_early_stop_plugin(defn) for defn in early_stop_plugin_defs] if early_stop_plugin_defs else None
@@ -162,27 +159,26 @@ class ExperimentSuiteRunner:
                 f"Experiment '{config.name}' has no user prompt defined. Provide one in the experiment, defaults, or prompt pack."
             )
 
-        runner_kwargs = {
-            "llm_client": self.llm_client,
-            "sinks": sinks,
-            "prompt_system": prompt_system,
-            "prompt_template": prompt_template,
-            "prompt_fields": prompt_fields,
-            "criteria": criteria,
-            "prompt_defaults": prompt_defaults or None,
-            "row_plugins": row_plugins,
-            "aggregator_plugins": aggregator_plugins,
-            "validation_plugins": validation_plugins,
-            "rate_limiter": rate_limiter,
-            "cost_tracker": cost_tracker,
-            "experiment_name": config.name,
-            "llm_middlewares": middlewares or None,
-            "concurrency_config": concurrency_config,
-            "security_level": security_level,
-            "early_stop_plugins": early_stop_plugins,
-            "early_stop_config": early_stop_config,
-        }
-        return ExperimentRunner(**runner_kwargs)
+        return ExperimentRunner(
+            llm_client=self.llm_client,
+            sinks=sinks,
+            prompt_system=prompt_system,
+            prompt_template=prompt_template,
+            prompt_fields=prompt_fields,
+            criteria=criteria,
+            row_plugins=row_plugins,
+            aggregator_plugins=aggregator_plugins,
+            validation_plugins=validation_plugins,
+            rate_limiter=rate_limiter,
+            cost_tracker=cost_tracker,
+            experiment_name=config.name,
+            prompt_defaults=prompt_defaults or None,
+            llm_middlewares=middlewares or None,
+            concurrency_config=concurrency_config,
+            security_level=security_level,
+            early_stop_plugins=early_stop_plugins,
+            early_stop_config=early_stop_config,
+        )
 
     def _create_middlewares(self, definitions: list[Dict[str, Any]] | None) -> list[Any]:
         instances: list[Any] = []
@@ -198,6 +194,8 @@ class ExperimentSuiteRunner:
         sinks: List[ResultSink] = []
         for index, entry in enumerate(defs):
             plugin = entry.get("plugin")
+            if not isinstance(plugin, str) or not plugin:
+                raise ConfigurationError("Each sink definition must include a 'plugin' string")
             raw_options = dict(entry.get("options", {}))
             core_registry.registry.validate_sink(plugin, raw_options)
             options = dict(raw_options)
@@ -206,7 +204,8 @@ class ExperimentSuiteRunner:
             sink = core_registry.registry.create_sink(plugin, options)
             setattr(sink, "_elspeth_artifact_config", artifacts_cfg or {})
             setattr(sink, "_elspeth_plugin_name", plugin)
-            base_name = entry.get("name") or plugin or f"sink{index}"
+            name_value = entry.get("name")
+            base_name = name_value if isinstance(name_value, str) and name_value else plugin or f"sink{index}"
             setattr(sink, "_elspeth_sink_name", base_name)
             if security_level:
                 setattr(sink, "_elspeth_security_level", security_level)
@@ -264,7 +263,7 @@ class ExperimentSuiteRunner:
                 {**defaults, "prompt_packs": prompt_packs, "prompt_pack": pack_name},
                 sinks,
             )
-            middlewares = list(runner.llm_middlewares or [])
+            middlewares = cast(List[Any], runner.llm_middlewares or [])
             suite_notified = []
             for mw in middlewares:
                 key = id(mw)
