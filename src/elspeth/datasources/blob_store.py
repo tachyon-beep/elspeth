@@ -61,7 +61,11 @@ class BlobConfig:
             container_name = data.get("container_name")
             blob_path = data.get("blob_path")
 
-            if not all([account_name, container_name, blob_path]):
+            if not isinstance(account_name, str) or not account_name:
+                raise BlobConfigurationError("Provide either 'storage_uri' or all of 'account_name', 'container_name', 'blob_path'")
+            if not isinstance(container_name, str) or not container_name:
+                raise BlobConfigurationError("Provide either 'storage_uri' or all of 'account_name', 'container_name', 'blob_path'")
+            if not isinstance(blob_path, str) or not blob_path:
                 raise BlobConfigurationError("Provide either 'storage_uri' or all of 'account_name', 'container_name', 'blob_path'")
 
             account_url_value = data.get("account_url")
@@ -75,9 +79,9 @@ class BlobConfig:
             connection_name=data["connection_name"],
             azureml_datastore_uri=data["azureml_datastore_uri"],
             storage_uri=storage_uri,
-            account_url=str(account_url),
-            container_name=str(container_name),
-            blob_path=str(blob_path),
+            account_url=account_url,
+            container_name=container_name,
+            blob_path=blob_path,
             sas_token=sas_token,
         )
 
@@ -229,7 +233,7 @@ class BlobDataLoader:
         """Load the blob as a Pandas DataFrame."""
 
         try:
-            import pandas as pd
+            import pandas as pd  # pylint: disable=import-outside-toplevel
         except ImportError as exc:  # pragma: no cover - optional dependency
             raise BlobConfigurationError("pandas is required to read blob contents as CSV") from exc
 

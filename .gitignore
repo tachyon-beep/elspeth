@@ -130,3 +130,4 @@ external/
 data/
 outputs/
 old/
+.coverage
