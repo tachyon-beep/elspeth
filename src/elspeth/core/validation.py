@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Mapping, Sequence
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Tuple
 
 import yaml
 
@@ -64,7 +64,7 @@ def validate_schema(
         yield ValidationMessage("value is missing", context=context)
         return
 
-    errors: List[tuple[Sequence[object], str]] = []
+    errors: List[tuple[Tuple[object, ...], str]] = []
     _validate_node(data, schema, (), errors)
     for path, message in errors:
         pointer = _format_error_path(path)
@@ -77,8 +77,8 @@ def validate_schema(
 def _validate_node(
     value: Any,
     schema: Mapping[str, Any],
-    path: Sequence[object],
-    errors: List[tuple[Sequence[object], str]],
+    path: Tuple[object, ...],
+    errors: List[tuple[Tuple[object, ...], str]],
 ) -> None:
     if schema is None:
         return
@@ -86,7 +86,7 @@ def _validate_node(
     any_of = schema.get("anyOf")
     if any_of:
         for option in any_of:
-            option_errors: List[tuple[Sequence[object], str]] = []
+            option_errors: List[tuple[Tuple[object, ...], str]] = []
             _validate_node(value, option, path, option_errors)
             if not option_errors:
                 break
@@ -449,8 +449,16 @@ def _validate_plugin_reference(
         report.add_error("Plugin name must be a string", context=kind)
         return
     options = entry.get("options")
+    options_dict: Dict[str, Any] | None
+    if options is None:
+        options_dict = None
+    elif isinstance(options, Mapping):
+        options_dict = dict(options)
+    else:
+        report.add_error("Options must be a mapping", context=f"{kind}:{plugin}")
+        options_dict = {}
     try:
-        validator(plugin, options if isinstance(options, Mapping) else {})
+        validator(plugin, options_dict)
     except (ValueError, ConfigurationError) as exc:
         report.add_error(str(exc), context=f"{kind}:{plugin}")
 
@@ -609,7 +617,7 @@ def _validate_experiment_plugins(
             report.add_error("Plugin definition must be a mapping", context=context)
             continue
         try:
-            validator(definition)
+            validator(dict(definition))
         except ConfigurationError as exc:
             report.add_error(str(exc), context=context)
         except ValueError as exc:
@@ -633,7 +641,7 @@ def _validate_middleware_list(
             report.add_error("Middleware definition must be a mapping", context=context)
             continue
         try:
-            validator(definition)
+            validator(dict(definition))
         except ConfigurationError as exc:
             report.add_error(str(exc), context=context)
         except ValueError as exc:

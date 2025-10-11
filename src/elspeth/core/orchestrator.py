@@ -5,8 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Dict, List
 
-import pandas as pd
-
 from elspeth.core.controls import CostTracker, RateLimiter
 from elspeth.core.experiments.plugin_registry import (
     create_aggregation_plugin,
@@ -20,7 +18,9 @@ from elspeth.core.llm.registry import create_middlewares
 
 
 @dataclass
-class OrchestratorConfig:
+class OrchestratorConfig:  # pylint: disable=too-many-instance-attributes
+    """Container describing orchestrator runtime configuration values."""
+
     llm_prompt: Dict[str, str]
     prompt_fields: List[str] | None = None
     prompt_aliases: Dict[str, str] | None = None
@@ -40,8 +40,10 @@ class OrchestratorConfig:
     early_stop_plugin_defs: List[Dict[str, Any]] | None = None
 
 
-class ExperimentOrchestrator:
-    def __init__(
+class ExperimentOrchestrator:  # pylint: disable=too-many-instance-attributes,too-few-public-methods
+    """Coordinates datasource loading, experiment execution, and sink writes."""
+
+    def __init__(  # pylint: disable=too-many-arguments
         self,
         *,
         datasource: DataSource,
@@ -98,11 +100,12 @@ class ExperimentOrchestrator:
         )
 
     def run(self) -> Dict[str, Any]:
+        """Execute all configured experiments and return the runner payload."""
+
         df = self.datasource.load()
         system_prompt = self.config.llm_prompt["system"]
         user_prompt_format = self.config.llm_prompt["user"]
 
-        results = []
         runner = self.experiment_runner
         runner.prompt_system = system_prompt
         runner.prompt_template = user_prompt_format
