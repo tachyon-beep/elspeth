@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Mapping, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Mapping, Sequence, Tuple
 
 import yaml
 
@@ -16,10 +16,14 @@ class ConfigurationError(RuntimeError):
 
 @dataclass
 class ValidationMessage:
+    """Represents a single validation outcome with optional context."""
+
     message: str
     context: str | None = None
 
     def format(self) -> str:
+        """Return a human-readable message suitable for user display."""
+
         if self.context:
             return f"{self.context}: {self.message}"
         return self.message
@@ -27,28 +31,42 @@ class ValidationMessage:
 
 @dataclass
 class ValidationReport:
+    """Aggregates validation errors and warnings for a configuration."""
+
     errors: List[ValidationMessage] = field(default_factory=list)
     warnings: List[ValidationMessage] = field(default_factory=list)
 
     def add_error(self, message: str, context: str | None = None) -> None:
+        """Record an error message with optional context."""
+
         self.errors.append(ValidationMessage(message=message, context=context))
 
     def add_warning(self, message: str, context: str | None = None) -> None:
+        """Record a warning message with optional context."""
+
         self.warnings.append(ValidationMessage(message=message, context=context))
 
     def extend(self, other: "ValidationReport") -> None:
+        """Merge another report into this one."""
+
         self.errors.extend(other.errors)
         self.warnings.extend(other.warnings)
 
     def raise_if_errors(self) -> None:
+        """Raise a ConfigurationError when the report contains errors."""
+
         if self.errors:
             formatted = "\n".join(msg.format() for msg in self.errors)
             raise ConfigurationError(formatted)
 
     def has_errors(self) -> bool:
+        """Return True if the report contains errors."""
+
         return bool(self.errors)
 
     def has_warnings(self) -> bool:
+        """Return True if the report contains warnings."""
+
         return bool(self.warnings)
 
 
@@ -80,6 +98,8 @@ def _validate_node(
     path: Tuple[object, ...],
     errors: List[tuple[Tuple[object, ...], str]],
 ) -> None:
+    """Recursively validate ``value`` against ``schema`` accumulating errors."""
+
     if schema is None:
         return
 
@@ -129,6 +149,8 @@ def _validate_node(
 
 
 def _check_type(value: Any, expected: str) -> bool:
+    """Return True when ``value`` matches the schema ``expected`` type."""
+
     if expected == "object":
         return isinstance(value, Mapping)
     if expected == "array":
@@ -145,6 +167,8 @@ def _check_type(value: Any, expected: str) -> bool:
 
 
 def _is_number(value: Any) -> bool:
+    """Return True for numeric values excluding booleans."""
+
     return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
@@ -161,6 +185,8 @@ def _format_error_path(path: Iterable[object]) -> str:
 
 
 def validate_settings(path: str | Path, profile: str = "default") -> ValidationReport:
+    """Validate a settings YAML profile and return accumulated messages."""
+
     report = ValidationReport()
     config_path = Path(path)
     try:
@@ -182,10 +208,10 @@ def validate_settings(path: str | Path, profile: str = "default") -> ValidationR
     if report.has_errors():
         return report
 
-    from elspeth.core import registry as core_registry
-    from elspeth.core.controls import registry as controls_registry
-    from elspeth.core.experiments import plugin_registry as exp_registry
-    from elspeth.core.llm import registry as llm_registry
+    from elspeth.core import registry as core_registry  # pylint: disable=import-outside-toplevel
+    from elspeth.core.controls import registry as controls_registry  # pylint: disable=import-outside-toplevel
+    from elspeth.core.experiments import plugin_registry as exp_registry  # pylint: disable=import-outside-toplevel
+    from elspeth.core.llm import registry as llm_registry  # pylint: disable=import-outside-toplevel
 
     registry = core_registry.registry
 
@@ -288,113 +314,32 @@ def validate_suite(
     defaults: Mapping[str, Any] | None = None,
     row_estimate: int = 100,
 ) -> SuiteValidationReport:
+    """Validate suite configuration folders and compute preflight metadata."""
+
     report = ValidationReport()
     suite_path = Path(suite_root)
     if not suite_path.exists():
         report.add_error("Suite root does not exist", context=str(suite_path))
         return SuiteValidationReport(report=report)
 
-    from elspeth.core import registry as core_registry
-    from elspeth.core.controls import registry as controls_registry
-    from elspeth.core.experiments import plugin_registry as exp_registry
-    from elspeth.core.llm import registry as llm_registry
+    from elspeth.core import registry as core_registry  # pylint: disable=import-outside-toplevel
+    from elspeth.core.controls import registry as controls_registry  # pylint: disable=import-outside-toplevel
+    from elspeth.core.experiments import plugin_registry as exp_registry  # pylint: disable=import-outside-toplevel
+    from elspeth.core.llm import registry as llm_registry  # pylint: disable=import-outside-toplevel
 
     registry = core_registry.registry
+    _ = defaults  # reserved for future suite default overrides
 
-    experiments: List[Dict[str, Any]] = []
-    names: List[str] = []
-    baseline_count = 0
-    baseline_name: str | None = None
+    summaries, names, baseline_name, baseline_count = _collect_suite_experiments(
+        suite_path,
+        report,
+        registry,
+        exp_registry,
+        llm_registry,
+        controls_registry,
+    )
 
-    for folder in sorted(p for p in suite_path.iterdir() if p.is_dir() and not p.name.startswith(".")):
-        config_path = folder / "config.json"
-        if not config_path.exists():
-            continue
-        try:
-            data = json.loads(config_path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError as exc:
-            report.add_error(f"Invalid JSON: {exc}", context=str(config_path))
-            continue
-
-        for message in validate_schema(data, _EXPERIMENT_SCHEMA, context=f"experiment:{folder.name}"):
-            report.errors.append(message)
-        name = data.get("name") or folder.name
-        enabled = bool(data.get("enabled", True))
-        is_baseline = bool(data.get("is_baseline", False))
-        if enabled:
-            names.append(name)
-            if is_baseline:
-                baseline_count += 1
-                baseline_name = name
-
-        _validate_experiment_plugins(
-            report,
-            data.get("row_plugins"),
-            exp_registry.validate_row_plugin_definition,
-            f"experiment:{name}.row_plugin",
-        )
-        _validate_experiment_plugins(
-            report,
-            data.get("aggregator_plugins"),
-            exp_registry.validate_aggregation_plugin_definition,
-            f"experiment:{name}.aggregation_plugin",
-        )
-        _validate_experiment_plugins(
-            report,
-            data.get("baseline_plugins"),
-            exp_registry.validate_baseline_plugin_definition,
-            f"experiment:{name}.baseline_plugin",
-        )
-        _validate_experiment_plugins(
-            report,
-            data.get("validation_plugins"),
-            exp_registry.validate_validation_plugin_definition,
-            f"experiment:{name}.validation_plugin",
-        )
-        _validate_experiment_plugins(
-            report,
-            data.get("early_stop_plugins"),
-            exp_registry.validate_early_stop_plugin_definition,
-            f"experiment:{name}.early_stop_plugin",
-        )
-        _validate_middleware_list(
-            report,
-            data.get("llm_middlewares"),
-            llm_registry.validate_middleware_definition,
-            context=f"experiment:{name}.middleware",
-        )
-        _validate_plugin_list(
-            report,
-            data.get("sinks"),
-            registry.validate_sink,
-            context=f"experiment:{name}.sink",
-        )
-        try:
-            controls_registry.validate_rate_limiter(data.get("rate_limiter"))
-        except ConfigurationError as exc:
-            report.add_error(str(exc), context=f"experiment:{name}.rate_limiter")
-        try:
-            controls_registry.validate_cost_tracker(data.get("cost_tracker"))
-        except ConfigurationError as exc:
-            report.add_error(str(exc), context=f"experiment:{name}.cost_tracker")
-
-        if data.get("concurrency") is not None and not isinstance(data.get("concurrency"), Mapping):
-            report.add_error("'concurrency' must be a mapping", context=f"experiment:{name}")
-
-        _validate_prompt_files(report, folder, name, data)
-
-        experiments.append(
-            {
-                "name": name,
-                "enabled": enabled,
-                "is_baseline": is_baseline,
-                "criteria": data.get("criteria") or [],
-                "temperature": data.get("temperature", 0.0),
-                "max_tokens": data.get("max_tokens", 0),
-            }
-        )
-
-    if not experiments:
+    if not summaries:
         report.add_error("No experiments found", context=str(suite_path))
 
     duplicates = _find_duplicates(names)
@@ -404,29 +349,7 @@ def validate_suite(
     if baseline_count == 0:
         report.add_error("No baseline experiment found", context="suite")
 
-    warnings = []
-    for exp in experiments:
-        if exp["enabled"] and exp["temperature"] > 1.5:
-            warning = f"High temperature ({exp['temperature']}) for experiment '{exp['name']}'"
-            report.add_warning(warning, context="suite")
-            warnings.append(warning)
-        if exp["enabled"] and exp["max_tokens"] > 2000:
-            warning = f"High max_tokens ({exp['max_tokens']}) for experiment '{exp['name']}'"
-            report.add_warning(warning, context="suite")
-            warnings.append(warning)
-
-    enabled_experiments = [exp for exp in experiments if exp["enabled"]]
-    criteria_counts = [len(exp["criteria"]) or 1 for exp in enabled_experiments]
-    estimated_calls = sum(row_estimate * count for count in criteria_counts)
-    estimated_time_minutes = estimated_calls / 60 if estimated_calls else 0
-
-    preflight = {
-        "experiment_count": len(enabled_experiments),
-        "baseline": baseline_name,
-        "estimated_api_calls": estimated_calls,
-        "estimated_time_minutes": estimated_time_minutes,
-        "warnings": warnings,
-    }
+    preflight = _calculate_preflight(summaries, baseline_name, row_estimate, report)
 
     return SuiteValidationReport(report=report, preflight=preflight)
 
@@ -438,6 +361,7 @@ def _validate_plugin_reference(
     kind: str,
     validator: Callable[[str, Dict[str, Any] | None], None],
 ) -> None:
+    """Validate a single plugin reference entry."""
     if not isinstance(entry, Mapping):
         report.add_error(f"{kind} configuration must be a mapping", context=kind)
         return
@@ -470,6 +394,7 @@ def _validate_plugin_list(
     *,
     context: str,
 ) -> None:
+    """Validate a list of plugin references using ``validator``."""
     if entries is None:
         return
     if not isinstance(entries, list):
@@ -487,6 +412,7 @@ def _validate_prompt_pack(
     exp_registry,
     llm_registry,
 ) -> None:
+    """Validate a prompt pack configuration entry."""
     context = f"prompt_pack:{name}"
     if not isinstance(pack, Mapping):
         report.add_error("Prompt pack must be a mapping", context=context)
@@ -549,6 +475,7 @@ def _validate_suite_defaults(
     llm_registry,
     controls_registry,
 ) -> None:
+    """Validate suite-level default configuration entries."""
     _validate_experiment_plugins(
         report,
         defaults.get("row_plugins"),
@@ -607,6 +534,8 @@ def _validate_experiment_plugins(
     validator: Callable[[Dict[str, Any]], None],
     context: str,
 ) -> None:
+    """Validate experiment plugin definitions using ``validator``."""
+
     if entries is None:
         return
     if not isinstance(entries, list):
@@ -631,6 +560,7 @@ def _validate_middleware_list(
     *,
     context: str,
 ) -> None:
+    """Validate middleware entries using ``validator``."""
     if entries is None:
         return
     if not isinstance(entries, list):
@@ -649,6 +579,7 @@ def _validate_middleware_list(
 
 
 def _validate_prompt_files(report: ValidationReport, folder: Path, name: str, config: Mapping[str, Any]) -> None:
+    """Ensure file-based prompts are present when inline definitions are absent."""
     if config.get("prompt_pack") or config.get("prompt_system") or config.get("prompt_template"):
         return
     system_path = folder / "system_prompt.md"
@@ -660,10 +591,193 @@ def _validate_prompt_files(report: ValidationReport, folder: Path, name: str, co
 
 
 def _find_duplicates(items: Iterable[str]) -> List[str]:
+    """Return the list of duplicate items found in ``items``."""
     counts: Dict[str, int] = {}
     for item in items:
         counts[item] = counts.get(item, 0) + 1
     return [item for item, count in counts.items() if count > 1]
+
+
+def _load_experiment_summary(
+    folder: Path,
+    report: ValidationReport,
+    registry,
+    exp_registry,
+    llm_registry,
+    controls_registry,
+) -> _ExperimentSummary | None:
+    """Load and validate an experiment directory returning its summary."""
+
+    config_path = folder / "config.json"
+    if not config_path.exists():
+        return None
+
+    try:
+        data = json.loads(config_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        report.add_error(f"Invalid JSON: {exc}", context=str(config_path))
+        return None
+
+    if isinstance(data, str):
+        try:
+            data = json.loads(data)
+        except json.JSONDecodeError as exc:
+            report.add_error(
+                f"Profile data in {config_path} is a string but not valid JSON",
+                context=str(config_path),
+            )
+            return None
+
+    if not isinstance(data, dict):
+        report.add_error(
+            f"Experiment config must be a mapping, got {type(data).__name__}",
+            context=str(config_path),
+        )
+        return None
+
+    experiment_context = f"experiment:{folder.name}"
+    for message in validate_schema(data, _EXPERIMENT_SCHEMA, context=experiment_context):
+        report.errors.append(message)
+
+    name = str(data.get("name") or folder.name)
+    enabled = bool(data.get("enabled", True))
+    is_baseline = bool(data.get("is_baseline", False))
+
+    _validate_experiment_plugins(
+        report,
+        data.get("row_plugins"),
+        exp_registry.validate_row_plugin_definition,
+        f"{experiment_context}.row_plugin",
+    )
+    _validate_experiment_plugins(
+        report,
+        data.get("aggregator_plugins"),
+        exp_registry.validate_aggregation_plugin_definition,
+        f"{experiment_context}.aggregation_plugin",
+    )
+    _validate_experiment_plugins(
+        report,
+        data.get("baseline_plugins"),
+        exp_registry.validate_baseline_plugin_definition,
+        f"{experiment_context}.baseline_plugin",
+    )
+    _validate_experiment_plugins(
+        report,
+        data.get("validation_plugins"),
+        exp_registry.validate_validation_plugin_definition,
+        f"{experiment_context}.validation_plugin",
+    )
+    _validate_experiment_plugins(
+        report,
+        data.get("early_stop_plugins"),
+        exp_registry.validate_early_stop_plugin_definition,
+        f"{experiment_context}.early_stop_plugin",
+    )
+    _validate_middleware_list(
+        report,
+        data.get("llm_middlewares"),
+        llm_registry.validate_middleware_definition,
+        context=f"{experiment_context}.middleware",
+    )
+    _validate_plugin_list(
+        report,
+        data.get("sinks"),
+        registry.validate_sink,
+        context=f"{experiment_context}.sink",
+    )
+
+    try:
+        controls_registry.validate_rate_limiter(data.get("rate_limiter"))
+    except ConfigurationError as exc:
+        report.add_error(str(exc), context=f"{experiment_context}.rate_limiter")
+    try:
+        controls_registry.validate_cost_tracker(data.get("cost_tracker"))
+    except ConfigurationError as exc:
+        report.add_error(str(exc), context=f"{experiment_context}.cost_tracker")
+
+    concurrency = data.get("concurrency")
+    if concurrency is not None and not isinstance(concurrency, Mapping):
+        report.add_error("'concurrency' must be a mapping", context=experiment_context)
+
+    _validate_prompt_files(report, folder, name, data)
+
+    criteria = data.get("criteria") or []
+    criteria_count = len(criteria)
+    temperature = float(data.get("temperature", 0.0) or 0.0)
+    max_tokens = int(data.get("max_tokens", 0) or 0)
+
+    return _ExperimentSummary(
+        name=name,
+        enabled=enabled,
+        is_baseline=is_baseline,
+        criteria_count=criteria_count,
+        temperature=temperature,
+        max_tokens=max_tokens,
+    )
+
+
+def _collect_suite_experiments(
+    suite_path: Path,
+    report: ValidationReport,
+    registry,
+    exp_registry,
+    llm_registry,
+    controls_registry,
+) -> tuple[List[_ExperimentSummary], List[str], str | None, int]:
+    """Collect and validate experiment summaries from the suite directory."""
+
+    summaries: List[_ExperimentSummary] = []
+    enabled_names: List[str] = []
+    baseline_name: str | None = None
+    baseline_count = 0
+
+    folders = sorted(p for p in suite_path.iterdir() if p.is_dir() and not p.name.startswith("."))
+    for folder in folders:
+        summary = _load_experiment_summary(folder, report, registry, exp_registry, llm_registry, controls_registry)
+        if summary is None:
+            continue
+        summaries.append(summary)
+        if summary.enabled:
+            enabled_names.append(summary.name)
+            if summary.is_baseline:
+                baseline_count += 1
+                baseline_name = summary.name
+
+    return summaries, enabled_names, baseline_name, baseline_count
+
+
+def _calculate_preflight(
+    summaries: Sequence[_ExperimentSummary],
+    baseline_name: str | None,
+    row_estimate: int,
+    report: ValidationReport,
+) -> Dict[str, Any]:
+    """Compute preflight metadata and register warnings on the report."""
+
+    warnings: List[str] = []
+    enabled = [summary for summary in summaries if summary.enabled]
+
+    for summary in enabled:
+        if summary.temperature > 1.5:
+            warning = f"High temperature ({summary.temperature}) for experiment '{summary.name}'"
+            warnings.append(warning)
+            report.add_warning(warning, context="suite")
+        if summary.max_tokens > 2000:
+            warning = f"High max_tokens ({summary.max_tokens}) for experiment '{summary.name}'"
+            warnings.append(warning)
+            report.add_warning(warning, context="suite")
+
+    criteria_counts = [max(summary.criteria_count, 1) for summary in enabled]
+    estimated_calls = sum(row_estimate * count for count in criteria_counts)
+    estimated_time_minutes = estimated_calls / 60 if estimated_calls else 0
+
+    return {
+        "experiment_count": len(enabled),
+        "baseline": baseline_name,
+        "estimated_api_calls": estimated_calls,
+        "estimated_time_minutes": estimated_time_minutes,
+        "warnings": warnings,
+    }
 
 
 __all__ = [
@@ -763,8 +877,24 @@ _EXPERIMENT_SCHEMA = {
 
 @dataclass
 class SuiteValidationReport:
+    """Convenience wrapper bundling validation results with preflight data."""
+
     report: ValidationReport
     preflight: Dict[str, Any] = field(default_factory=dict)
 
     def raise_if_errors(self) -> None:
+        """Raise ``ConfigurationError`` if any validation errors exist."""
+
         self.report.raise_if_errors()
+
+
+@dataclass
+class _ExperimentSummary:
+    """Lightweight summary of experiment configuration for suite reporting."""
+
+    name: str
+    enabled: bool
+    is_baseline: bool
+    criteria_count: int
+    temperature: float
+    max_tokens: int

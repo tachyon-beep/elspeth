@@ -64,10 +64,8 @@ class BlobConfig:
             if not all([account_name, container_name, blob_path]):
                 raise BlobConfigurationError("Provide either 'storage_uri' or all of 'account_name', 'container_name', 'blob_path'")
 
-            account_url = data.get(
-                "account_url",
-                f"https://{account_name}.blob.core.windows.net",
-            )
+            account_url_value = data.get("account_url")
+            account_url = account_url_value if isinstance(account_url_value, str) else f"https://{account_name}.blob.core.windows.net"
 
         sas_token = data.get("sas_token")
         if sas_token and sas_token.startswith("?"):
@@ -77,9 +75,9 @@ class BlobConfig:
             connection_name=data["connection_name"],
             azureml_datastore_uri=data["azureml_datastore_uri"],
             storage_uri=storage_uri,
-            account_url=account_url,
-            container_name=container_name,
-            blob_path=blob_path,
+            account_url=str(account_url),
+            container_name=str(container_name),
+            blob_path=str(blob_path),
             sas_token=sas_token,
         )
 
@@ -130,7 +128,7 @@ def load_blob_config(config_path: Path | str, profile: str = "default") -> BlobC
 
     if profile not in data:
         available = ", ".join(sorted(data)) if isinstance(data, dict) else ""
-        raise BlobConfigurationError(f"Profile '{profile}' not found in configuration." f" Available: {available}")
+        raise BlobConfigurationError(f"Profile '{profile}' not found in configuration. Available: {available}")
 
     profile_data = data[profile]
     if isinstance(profile_data, str):
@@ -173,14 +171,14 @@ class BlobDataLoader:
 
         if self._blob_client is None:
             try:
-                from azure.storage.blob import BlobClient
+                from azure.storage.blob import BlobClient  # pylint: disable=import-outside-toplevel
             except ImportError as exc:  # pragma: no cover - environment specific
                 raise BlobConfigurationError("azure-storage-blob is required to access Azure Blob Storage") from exc
 
             credential = self.credential or self.config.sas_token
             if credential is None:
                 try:
-                    from azure.identity import DefaultAzureCredential
+                    from azure.identity import DefaultAzureCredential  # pylint: disable=import-outside-toplevel
                 except ImportError as exc:
                     raise BlobConfigurationError("azure-identity is required when no credential is provided") from exc
                 credential = DefaultAzureCredential()
