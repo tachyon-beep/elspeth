@@ -11,12 +11,16 @@ Algorithm = Literal["hmac-sha256", "hmac-sha512"]
 
 
 def _normalize_key(key: str | bytes) -> bytes:
+    """Ensure secret keys are bytes prior to HMAC operations."""
+
     if isinstance(key, bytes):
         return key
     return key.encode("utf-8")
 
 
 def _resolve_digest(algorithm: Algorithm):
+    """Return the hashlib constructor for the requested algorithm."""
+
     if algorithm == "hmac-sha256":
         return hashlib.sha256
     if algorithm == "hmac-sha512":
@@ -25,11 +29,15 @@ def _resolve_digest(algorithm: Algorithm):
 
 
 def generate_signature(data: bytes, key: str | bytes, algorithm: Algorithm = "hmac-sha256") -> str:
+    """Generate a base64-encoded HMAC signature for the payload."""
+
     digest = _resolve_digest(algorithm)
     signer = hmac.new(_normalize_key(key), data, digest)
     return base64.b64encode(signer.digest()).decode("ascii")
 
 
 def verify_signature(data: bytes, signature: str, key: str | bytes, algorithm: Algorithm = "hmac-sha256") -> bool:
+    """Verify the signature matches the payload using the shared secret."""
+
     expected = generate_signature(data, key, algorithm)
     return hmac.compare_digest(expected, signature)

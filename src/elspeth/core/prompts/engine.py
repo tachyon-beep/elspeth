@@ -28,6 +28,8 @@ def _auto_convert(text: str) -> str:
 
 
 def _create_environment() -> Environment:
+    """Create a strict Jinja environment with helpful defaults."""
+
     env = Environment(
         undefined=StrictUndefined,
         trim_blocks=True,
@@ -42,6 +44,8 @@ def _create_environment() -> Environment:
 
 
 def _default_filter(value: Any, fallback: Any = "", boolean: bool = False) -> Any:
+    """Provide a Jinja-compatible default filter supporting boolean coercion."""
+
     if boolean:
         return value or fallback
     return fallback if value is None else value
@@ -49,6 +53,8 @@ def _default_filter(value: Any, fallback: Any = "", boolean: bool = False) -> An
 
 @dataclass
 class PromptEngine:
+    """Compile, validate, and render named prompt templates."""
+
     environment: Environment = field(default_factory=_create_environment)
 
     def compile(
@@ -59,6 +65,8 @@ class PromptEngine:
         defaults: Mapping[str, Any] | None = None,
         metadata: Mapping[str, Any] | None = None,
     ) -> PromptTemplate:
+        """Compile prompt source and capture required fields."""
+
         normalized = _auto_convert(source or "")
         template = self.environment.from_string(normalized)
         ast = self.environment.parse(normalized)
@@ -84,6 +92,8 @@ class PromptEngine:
         context: Mapping[str, Any] | None = None,
         extra: Mapping[str, Any] | None = None,
     ) -> None:
+        """Validate that required prompt variables have values available."""
+
         context = context or {}
         extra = extra or {}
         provided = set(template.defaults.keys()) | set(context.keys()) | set(extra.keys())
@@ -101,8 +111,12 @@ class PromptEngine:
         context: Mapping[str, Any] | None = None,
         extra: Mapping[str, Any] | None = None,
     ) -> str:
+        """Render a template after validation helpers have run."""
+
         return template.render(context=context, extra=extra)
 
     def _filter_declared(self, variables: set[str]) -> set[str]:
+        """Remove variables automatically provided by Jinja from dependency set."""
+
         skip = set(self.environment.globals.keys()) | {"loop", "cycler", "namespace"}
         return {var for var in variables if var not in skip}

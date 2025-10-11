@@ -9,17 +9,27 @@ class CostTracker:
     """Tracks LLM costs per request and aggregates totals."""
 
     def record(self, response: Dict[str, Any], metadata: Optional[Dict[str, object]] = None) -> Dict[str, Any]:
+        """Record billing information for a single response."""
+
         raise NotImplementedError
 
     def summary(self) -> Dict[str, Any]:
+        """Return aggregate totals accumulated so far."""
+
         raise NotImplementedError
 
 
 class NoopCostTracker(CostTracker):  # pragma: no cover - trivial
+    """No-op tracker that never accumulates cost."""
+
     def record(self, response: Dict[str, Any], metadata: Optional[Dict[str, object]] = None) -> Dict[str, Any]:
+        """Skip tracking but retain the interface contract."""
+
         return {}
 
     def summary(self) -> Dict[str, Any]:
+        """Return an empty summary for the noop tracker."""
+
         return {}
 
 
@@ -34,6 +44,8 @@ class FixedPriceCostTracker(CostTracker):
         self.total_cost = 0.0
 
     def record(self, response: Dict[str, Any], metadata: Optional[Dict[str, object]] = None) -> Dict[str, Any]:
+        """Capture usage metrics from the raw response and compute incremental cost."""
+
         usage = self._extract_usage(response.get("raw"))
         prompt_tokens = usage.get("prompt_tokens", 0)
         completion_tokens = usage.get("completion_tokens", 0)
@@ -51,6 +63,8 @@ class FixedPriceCostTracker(CostTracker):
         }
 
     def summary(self) -> Dict[str, Any]:
+        """Return the cumulative token counts and cost."""
+
         return {
             "prompt_tokens": self.total_prompt_tokens,
             "completion_tokens": self.total_completion_tokens,
@@ -59,6 +73,8 @@ class FixedPriceCostTracker(CostTracker):
 
     @staticmethod
     def _extract_usage(raw: Any) -> Dict[str, int]:
+        """Extract token usage from various OpenAI/LLM response formats."""
+
         if raw is None:
             return {}
         usage = None

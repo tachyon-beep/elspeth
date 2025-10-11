@@ -16,15 +16,20 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-@dataclass
 class ArtifactRequest:
+    """Declarative request describing how a sink consumes artifacts."""
+
     token: str
     mode: str = "single"
 
 
 class ArtifactRequestParser:
+    """Parsing helpers for artifact consumption declarations."""
+
     @staticmethod
     def parse(entry: Any) -> ArtifactRequest:
+        """Convert configuration entries into `ArtifactRequest` objects."""
+
         if isinstance(entry, ArtifactRequest):
             ArtifactRequestParser._validate(entry.mode)
             return entry
@@ -42,6 +47,8 @@ class ArtifactRequestParser:
 
     @staticmethod
     def _validate(mode: str) -> None:
+        """Ensure request mode is one of the supported options."""
+
         if mode not in VALID_REQUEST_MODES:
             raise ValueError(f"Unsupported artifact request mode '{mode}'")
 
@@ -64,11 +71,15 @@ class ArtifactStore:
     """Holds produced artifacts for downstream sinks."""
 
     def __init__(self) -> None:
+        """Initialise internal indexes for artifact lookups."""
+
         self._by_id: Dict[str, Artifact] = {}
         self._by_alias: Dict[str, Artifact] = {}
         self._by_type: Dict[str, List[Artifact]] = defaultdict(list)
 
     def register(self, binding: SinkBinding, descriptor: ArtifactDescriptor, artifact: Artifact) -> None:
+        """Record an artifact emitted by `binding` under the descriptor metadata."""
+
         artifact_id = artifact.id or f"{binding.id}:{descriptor.name}"
         artifact.id = artifact_id
         artifact.produced_by = binding.id
@@ -85,12 +96,18 @@ class ArtifactStore:
         self._by_type[descriptor.type].append(artifact)
 
     def get_by_alias(self, alias: str) -> Artifact | None:
+        """Look up an artifact via its alias."""
+
         return self._by_alias.get(alias)
 
     def get_by_type(self, type_name: str) -> List[Artifact]:
+        """Return all artifacts matching a specific type."""
+
         return list(self._by_type.get(type_name, []))
 
     def resolve_requests(self, requests: Iterable[ArtifactRequest]) -> Dict[str, List[Artifact]]:
+        """Resolve a list of artifact requests into concrete artifact results."""
+
         resolved: Dict[str, List[Artifact]] = {}
         for request in requests:
             token = request.token
@@ -117,6 +134,8 @@ class ArtifactStore:
         return resolved
 
     def items(self) -> Iterable[tuple[str, Artifact]]:
+        """Yield stored artifacts keyed by their canonical identifier."""
+
         return self._by_id.items()
 
 
@@ -124,11 +143,15 @@ class ArtifactPipeline:
     """Resolves sink execution order based on declared artifact dependencies."""
 
     def __init__(self, bindings: List[SinkBinding]) -> None:
+        """Prepare bindings and calculate execution order."""
+
         self._bindings = [self._prepare_binding(binding) for binding in bindings]
         self._ordered_bindings = self._resolve_order(self._bindings)
 
     @staticmethod
     def _prepare_binding(binding: SinkBinding) -> SinkBinding:
+        """Populate sink binding metadata from configuration and sink methods."""
+
         binding.security_level = normalize_security_level(binding.security_level)
         artifact_section = binding.artifact_config or {}
         produces_config = artifact_section.get("produces", []) or []
@@ -161,6 +184,8 @@ class ArtifactPipeline:
 
     @staticmethod
     def _enforce_dependency_security(consumer: SinkBinding, producer: SinkBinding) -> None:
+        """Ensure a consumer is allowed to read artifacts produced by the producer."""
+
         if not consumer.security_level:
             return
         if not is_security_level_allowed(producer.security_level, consumer.security_level):
@@ -168,6 +193,8 @@ class ArtifactPipeline:
 
     @staticmethod
     def _resolve_order(bindings: List[SinkBinding]) -> List[SinkBinding]:
+        """Topologically sort bindings based on artifact dependencies."""
+
         if not bindings:
             return []
 
@@ -238,6 +265,8 @@ class ArtifactPipeline:
         return ordered
 
     def execute(self, payload: Dict[str, Any], metadata: Mapping[str, Any] | None = None) -> ArtifactStore:
+        """Run all sinks in dependency order, producing the final artifact store."""
+
         store = ArtifactStore()
         for binding in self._ordered_bindings:
             consumed = store.resolve_requests(binding.consumes)

@@ -16,6 +16,8 @@ from elspeth.core.registry import registry
 
 @dataclass
 class Settings:
+    """Fully hydrated configuration for orchestrator execution."""
+
     datasource: Any
     llm: Any
     sinks: Any
@@ -29,12 +31,16 @@ class Settings:
 
 
 def _merge_pack(base: Dict[str, Any], pack: Dict[str, Any]) -> Dict[str, Any]:
+    """Merge prompt pack defaults into an existing dict without mutating inputs."""
+
     merged = dict(pack)
     merged.update(base)
     return merged
 
 
 def load_settings(path: str | Path, profile: str = "default") -> Settings:
+    """Load orchestrator settings from YAML and materialize runtime objects."""
+
     config_path = Path(path)
     data = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
     profile_data = dict(data.get(profile, {}))

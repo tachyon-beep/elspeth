@@ -11,11 +11,15 @@ from .rate_limit import AdaptiveRateLimiter, FixedWindowRateLimiter, NoopRateLim
 
 
 class _Factory:
+    """Wrap plugin constructors with optional schema validation."""
+
     def __init__(self, factory: Callable[[Dict[str, Any]], Any], schema: Mapping[str, Any] | None = None):
         self.factory = factory
         self.schema = schema
 
     def validate(self, options: Dict[str, Any], *, context: str) -> None:
+        """Validate option dictionaries using the provided schema."""
+
         if self.schema is None:
             return
         errors = list(validate_schema(options or {}, self.schema, context=context))
@@ -23,6 +27,8 @@ class _Factory:
             raise ConfigurationError("\n".join(msg.format() for msg in errors))
 
     def create(self, options: Dict[str, Any], *, context: str) -> Any:
+        """Validate and instantiate the plugin with `options`."""
+
         self.validate(options, context=context)
         return self.factory(options)
 
@@ -82,14 +88,20 @@ _cost_trackers: Dict[str, _Factory] = {
 
 
 def register_rate_limiter(name: str, factory: Callable[[Dict[str, Any]], RateLimiter]) -> None:
+    """Register a custom rate limiter factory under the given name."""
+
     _rate_limiters[name] = _Factory(factory)
 
 
 def register_cost_tracker(name: str, factory: Callable[[Dict[str, Any]], CostTracker]) -> None:
+    """Register a custom cost tracker factory under the given name."""
+
     _cost_trackers[name] = _Factory(factory)
 
 
 def create_rate_limiter(definition: Dict[str, Any] | None) -> RateLimiter | None:
+    """Instantiate a rate limiter from a configuration dictionary."""
+
     if not definition:
         return None
     name = definition.get("plugin") or definition.get("name")
@@ -100,6 +112,8 @@ def create_rate_limiter(definition: Dict[str, Any] | None) -> RateLimiter | None
 
 
 def create_cost_tracker(definition: Dict[str, Any] | None) -> CostTracker | None:
+    """Instantiate a cost tracker from a configuration dictionary."""
+
     if not definition:
         return None
     name = definition.get("plugin") or definition.get("name")
@@ -110,6 +124,8 @@ def create_cost_tracker(definition: Dict[str, Any] | None) -> CostTracker | None
 
 
 def validate_rate_limiter(definition: Dict[str, Any] | None) -> None:
+    """Validate a rate limiter definition without instantiating it."""
+
     if not definition:
         return
     name = definition.get("plugin") or definition.get("name")
@@ -120,6 +136,8 @@ def validate_rate_limiter(definition: Dict[str, Any] | None) -> None:
 
 
 def validate_cost_tracker(definition: Dict[str, Any] | None) -> None:
+    """Validate a cost tracker definition without instantiation."""
+
     if not definition:
         return
     name = definition.get("plugin") or definition.get("name")

@@ -12,6 +12,8 @@ SECURITY_LEVELS = [
 
 
 def normalize_security_level(level: str | None) -> str:
+    """Coerce user-supplied levels to a canonical lower-case value."""
+
     if level is None or not str(level).strip():
         return SECURITY_LEVELS[0]
     normalized = str(level).strip().lower()
@@ -21,6 +23,8 @@ def normalize_security_level(level: str | None) -> str:
 
 
 def is_security_level_allowed(data_level: str | None, clearance_level: str | None) -> bool:
+    """Return True when the clearance equals or exceeds the data classification."""
+
     normalized_data = normalize_security_level(data_level)
     normalized_clearance = normalize_security_level(clearance_level)
     data_idx = SECURITY_LEVELS.index(normalized_data)
@@ -29,6 +33,8 @@ def is_security_level_allowed(data_level: str | None, clearance_level: str | Non
 
 
 def resolve_security_level(*levels: str | None) -> str:
+    """Resolve multiple levels to the highest classification."""
+
     normalized = [normalize_security_level(level) for level in levels if level is not None]
     if not normalized:
         return SECURITY_LEVELS[0]

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, List, Mapping, Protocol, runtime_checkable
+from typing import Any, Dict, List, Mapping, Protocol, runtime_checkable
 
 import pandas as pd
 
@@ -12,7 +12,10 @@ import pandas as pd
 class DataSource(Protocol):
     """Loads experiment input data as a pandas DataFrame."""
 
-    def load(self) -> pd.DataFrame: ...
+    def load(self) -> pd.DataFrame:
+        """Return the experiment dataset."""
+
+        ...
 
 
 @runtime_checkable
@@ -25,30 +28,46 @@ class LLMClientProtocol(Protocol):
         system_prompt: str,
         user_prompt: str,
         metadata: Dict[str, Any] | None = None,
-    ) -> Dict[str, Any]: ...
+    ) -> Dict[str, Any]:
+        """Invoke the model and return a response payload."""
+
+        ...
 
 
 @runtime_checkable
 class ResultSink(Protocol):
     """Receives experiment results and persists them externally."""
 
-    def write(self, results: Dict[str, Any], *, metadata: Dict[str, Any] | None = None) -> None: ...
+    def write(self, results: Dict[str, Any], *, metadata: Dict[str, Any] | None = None) -> None:
+        """Persist experiment results."""
+
+        ...
 
     def produces(self) -> List["ArtifactDescriptor"]:  # pragma: no cover - optional
+        """Describe artifacts the sink emits, enabling chaining."""
+
         return []
 
     def consumes(self) -> List[str]:  # pragma: no cover - optional
+        """Return artifact names the sink depends on."""
+
         return []
 
     def finalize(
         self, artifacts: Mapping[str, "Artifact"], *, metadata: Dict[str, Any] | None = None
     ) -> None:  # pragma: no cover - optional
+        """Perform cleanup or post-processing once artifacts are available."""
+
         return None
 
     def prepare_artifacts(self, artifacts: Mapping[str, List["Artifact"]]) -> None:  # pragma: no cover - optional
+        """Allow the sink to modify artifacts before finalization."""
+
         return None
 
     def collect_artifacts(self) -> Dict[str, "Artifact"]:  # pragma: no cover - optional
+        """Expose artifacts generated during `write` for downstream consumers."""
+
         return {}
 
 

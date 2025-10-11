@@ -10,14 +10,20 @@ VALID_PREFIXES = (FILE_PREFIX, DATA_PREFIX)
 
 
 def is_file_type(type_name: str) -> bool:
+    """Return True when the artifact type uses the file/ prefix."""
+
     return type_name.startswith(FILE_PREFIX)
 
 
 def is_data_type(type_name: str) -> bool:
+    """Return True when the artifact type uses the data/ prefix."""
+
     return type_name.startswith(DATA_PREFIX)
 
 
 def validate_artifact_type(type_name: str) -> None:
+    """Ensure an artifact type string declares a supported prefix and subtype."""
+
     prefix = next((prefix for prefix in VALID_PREFIXES if type_name.startswith(prefix)), None)
     if prefix is None:
         raise ValueError(f"Unsupported artifact type '{type_name}'. Expected prefix one of {VALID_PREFIXES}.")
@@ -27,6 +33,8 @@ def validate_artifact_type(type_name: str) -> None:
 
 
 def normalize_metadata(metadata: Dict[str, Any] | None) -> Dict[str, Any]:
+    """Return a copy of metadata dictionaries, normalising None to an empty dict."""
+
     return dict(metadata) if metadata else {}
 
 

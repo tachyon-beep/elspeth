@@ -22,6 +22,8 @@ class PromptTemplate:
     required_fields: tuple[str, ...] = field(default_factory=tuple)
 
     def render(self, context: Mapping[str, Any] | None = None, extra: Mapping[str, Any] | None = None) -> str:
+        """Render the template using defaults, context, and extra overrides."""
+
         payload: Dict[str, Any] = {}
         if self.defaults:
             payload.update(self.defaults)

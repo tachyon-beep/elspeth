@@ -69,10 +69,14 @@ ARTIFACTS_SECTION_SCHEMA = {
 
 @dataclass
 class PluginFactory:
+    """Factory metadata holding creation callable and validation schema."""
+
     create: Callable[[Dict[str, Any]], Any]
     schema: Mapping[str, Any] | None = None
 
     def validate(self, options: Dict[str, Any], context: str) -> None:
+        """Validate options against the schema, raising ConfigurationError on failure."""
+
         if self.schema is None:
             return
         errors = list(validate_schema(options or {}, self.schema, context=context))
@@ -82,6 +86,8 @@ class PluginFactory:
 
 
 class PluginRegistry:
+    """Central registry for datasource, LLM, and sink plugins."""
+
     def __init__(self):
         self._datasources: Dict[str, PluginFactory] = {
             "azure_blob": PluginFactory(
@@ -396,6 +402,8 @@ class PluginRegistry:
         }
 
     def create_datasource(self, name: str, options: Dict[str, Any]) -> DataSource:
+        """Instantiate a datasource plugin by name after validating options."""
+
         try:
             factory = self._datasources[name]
         except KeyError as exc:
@@ -404,6 +412,8 @@ class PluginRegistry:
         return factory.create(options)
 
     def validate_datasource(self, name: str, options: Dict[str, Any] | None) -> None:
+        """Validate datasource plugin options without creating the plugin."""
+
         try:
             factory = self._datasources[name]
         except KeyError as exc:
@@ -411,6 +421,8 @@ class PluginRegistry:
         factory.validate(options or {}, context=f"datasource:{name}")
 
     def create_llm(self, name: str, options: Dict[str, Any]) -> LLMClientProtocol:
+        """Instantiate an LLM plugin by name after validating options."""
+
         try:
             factory = self._llms[name]
         except KeyError as exc:
@@ -419,6 +431,8 @@ class PluginRegistry:
         return factory.create(options)
 
     def validate_llm(self, name: str, options: Dict[str, Any] | None) -> None:
+        """Validate LLM plugin options without instantiation."""
+
         try:
             factory = self._llms[name]
         except KeyError as exc:
@@ -426,6 +440,8 @@ class PluginRegistry:
         factory.validate(options or {}, context=f"llm:{name}")
 
     def create_sink(self, name: str, options: Dict[str, Any]) -> ResultSink:
+        """Instantiate a sink plugin by name after validating options."""
+
         try:
             factory = self._sinks[name]
         except KeyError as exc:
@@ -434,6 +450,8 @@ class PluginRegistry:
         return factory.create(options)
 
     def validate_sink(self, name: str, options: Dict[str, Any] | None) -> None:
+        """Validate sink plugin options without instantiation."""
+
         try:
             factory = self._sinks[name]
         except KeyError as exc:

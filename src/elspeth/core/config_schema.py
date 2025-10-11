@@ -45,6 +45,8 @@ EXPERIMENT_CONFIG_SCHEMA = {
 
 
 def validate_experiment_config(config: Mapping[str, Any]) -> None:
+    """Validate experiment configuration dictionaries against the JSON schema."""
+
     errors = list(validate_schema(config, EXPERIMENT_CONFIG_SCHEMA, context="experiment_config"))
     if errors:
         message = "\n".join(msg.format() for msg in errors)
