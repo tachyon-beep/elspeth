@@ -81,6 +81,7 @@ class CollectingSink(ResultSink):
         self.calls: List[tuple[Dict[str, Any], Dict[str, Any] | None]] = []
         self.prepared: List[Dict[str, Any]] = []
         self.collected: List[Dict[str, Artifact]] = []
+        self._elspeth_security_level = "secret"
 
     def prepare_artifacts(self, artifacts: Dict[str, List[Artifact]]) -> None:
         self.prepared.append(dict(artifacts))

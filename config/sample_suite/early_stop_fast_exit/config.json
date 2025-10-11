@@ -8,6 +8,7 @@
   "early_stop_plugins": [
     {
       "name": "threshold",
+      "security_level": "official",
       "options": {
         "metric": "score",
         "threshold": 0.55,

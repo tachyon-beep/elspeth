@@ -17,6 +17,9 @@
     }
   ],
   "baseline_plugins": [
-    {"name": "score_delta"}
+    {
+      "name": "score_delta",
+      "security_level": "official"
+    }
   ]
 }

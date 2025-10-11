@@ -9,6 +9,7 @@ from elspeth.core.experiments.plugins import AggregationExperimentPlugin
 from elspeth.core.interfaces import LLMClientProtocol
 from elspeth.core.prompts.engine import PromptEngine
 from elspeth.core.registry import registry
+from elspeth.core.security import coalesce_security_level
 
 
 class PromptVariantsAggregator(AggregationExperimentPlugin):
@@ -150,7 +151,13 @@ def _build_prompt_variants(options: Dict[str, Any]) -> PromptVariantsAggregator:
         plugin = spec.get("plugin")
         if not plugin:
             raise ValueError("variant_llm definition requires 'plugin'")
-        llm = registry.create_llm(plugin, spec.get("options", {}))
+        options_map = dict(spec.get("options", {}) or {})
+        try:
+            level = coalesce_security_level(spec.get("security_level"), options_map.pop("security_level", None))
+        except ValueError as exc:
+            raise ValueError(f"variant_llm security_level error: {exc}") from exc
+        llm = registry.create_llm(plugin, options_map)
+        setattr(llm, "_elspeth_security_level", level)
     else:
         raise ValueError("variant_llm must be an LLM definition or client")
 

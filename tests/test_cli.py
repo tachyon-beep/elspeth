@@ -28,6 +28,7 @@ def mock_settings(monkeypatch):
     class DummySink:
         def __init__(self):
             captured.setdefault("sink_calls", 0)
+            self._elspeth_security_level = "official"
 
         def write(self, results, *, metadata=None):
             captured["sink_calls"] += 1
@@ -147,15 +148,18 @@ def test_single_run_output_csv_includes_metrics(tmp_path, monkeypatch):
         def generate(self, *, system_prompt, user_prompt, metadata=None):
             return {"content": user_prompt, "metrics": {"score": 0.5}}
 
+    csv_sink = CsvResultSink(path=sink_path)
+    setattr(csv_sink, "_elspeth_security_level", "official")
+
     settings = argparse.Namespace(
         datasource=DummyDatasource(),
         llm=DummyLLM(),
-        sinks=[CsvResultSink(path=sink_path)],
+        sinks=[csv_sink],
         orchestrator_config=OrchestratorConfig(
             llm_prompt={"system": "sys", "user": "Prompt {col}"},
             prompt_fields=["col"],
             criteria=None,
-            row_plugin_defs=[{"name": "single_run_row_plugin"}],
+            row_plugin_defs=[{"name": "single_run_row_plugin", "security_level": "official"}],
             aggregator_plugin_defs=None,
             sink_defs=None,
             prompt_pack=None,
@@ -294,11 +298,11 @@ def test_disable_metrics_strips_plugins(monkeypatch):
                 llm_prompt={"system": "sys", "user": "Prompt {col}"},
                 prompt_fields=["col"],
                 criteria=None,
-                row_plugin_defs=[{"name": "score_extractor"}],
-                aggregator_plugin_defs=[{"name": "score_stats"}],
+                row_plugin_defs=[{"name": "score_extractor", "security_level": "official"}],
+                aggregator_plugin_defs=[{"name": "score_stats", "security_level": "official"}],
                 sink_defs=None,
                 prompt_pack=None,
-                baseline_plugin_defs=[{"name": "score_delta"}],
+                baseline_plugin_defs=[{"name": "score_delta", "security_level": "official"}],
                 retry_config=None,
                 checkpoint_config=None,
                 llm_middleware_defs=None,
@@ -306,17 +310,17 @@ def test_disable_metrics_strips_plugins(monkeypatch):
             )
             self.suite_root = None
             self.suite_defaults = {
-                "row_plugins": [{"name": "score_extractor"}],
-                "aggregator_plugins": [{"name": "score_stats"}],
-                "baseline_plugins": [{"name": "score_delta"}],
+                "row_plugins": [{"name": "score_extractor", "security_level": "official"}],
+                "aggregator_plugins": [{"name": "score_stats", "security_level": "official"}],
+                "baseline_plugins": [{"name": "score_delta", "security_level": "official"}],
             }
             self.rate_limiter = None
             self.cost_tracker = None
             self.prompt_packs = {
                 "pack": {
-                    "row_plugins": [{"name": "score_extractor"}],
-                    "aggregator_plugins": [{"name": "score_stats"}],
-                    "baseline_plugins": [{"name": "score_delta"}],
+                    "row_plugins": [{"name": "score_extractor", "security_level": "official"}],
+                    "aggregator_plugins": [{"name": "score_stats", "security_level": "official"}],
+                    "baseline_plugins": [{"name": "score_delta", "security_level": "official"}],
                 }
             }
             self.prompt_pack = None

@@ -43,3 +43,18 @@ def test_validate_plugin_list_requires_sequence():
     validation._validate_plugin_list(report, entries="not-a-list", validator=lambda *_: None, context="validation")
 
     assert any("Expected a list of plugin definitions" in msg.format() for msg in report.errors)
+
+
+def test_validate_plugin_reference_requires_security_level():
+    report = ValidationReport()
+
+    validation._validate_plugin_reference(
+        report,
+        entry={"plugin": "known", "options": {}},
+        kind="sink",
+        validator=lambda *_: None,
+        require_security_level=True,
+    )
+
+    messages = [msg.format() for msg in report.errors]
+    assert any("security_level" in message for message in messages)

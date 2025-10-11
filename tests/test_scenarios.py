@@ -17,19 +17,21 @@ def test_end_to_end_local_pipeline(tmp_path, assert_sanitized_artifact):
     bundle_dir = tmp_path / "bundles"
     csv_path = tmp_path / "results.csv"
 
+    bundle_sink = LocalBundleSink(base_path=bundle_dir, timestamped=False, write_json=True, write_csv=True)
+    setattr(bundle_sink, "_elspeth_security_level", "official")
+    csv_sink = CsvResultSink(path=csv_path, overwrite=True)
+    setattr(csv_sink, "_elspeth_security_level", "official")
+
     runner = ExperimentRunner(
         llm_client=MockLLMClient(seed=7),
-        sinks=[
-            LocalBundleSink(base_path=bundle_dir, timestamped=False, write_json=True, write_csv=True),
-            CsvResultSink(path=csv_path, overwrite=True),
-        ],
+        sinks=[bundle_sink, csv_sink],
         prompt_system="Rate the submission",
         prompt_template="Value: {{ value }}",
         prompt_fields=["value"],
         prompt_defaults={"audience": "quality"},
-        row_plugins=[plugin_registry.create_row_plugin({"name": "score_extractor"})],
-        aggregator_plugins=[plugin_registry.create_aggregation_plugin({"name": "score_stats"})],
-        validation_plugins=[plugin_registry.create_validation_plugin({"name": "regex_match", "options": {"pattern": r"(?s).*\[mock\].*"}})],
+        row_plugins=[plugin_registry.create_row_plugin({"name": "score_extractor", "security_level": "official"})],
+        aggregator_plugins=[plugin_registry.create_aggregation_plugin({"name": "score_stats", "security_level": "official"})],
+        validation_plugins=[plugin_registry.create_validation_plugin({"name": "regex_match", "security_level": "official", "options": {"pattern": r"(?s).*\[mock\].*"}})],
         experiment_name="local_pipeline",
     )
 
@@ -85,12 +87,13 @@ def test_suite_runner_end_to_end_without_azure(tmp_path, assert_sanitized_artifa
         "prompt_template": "Provide feedback for {{ value }}",
         "prompt_fields": ["value"],
         "prompt_defaults": {"audience": "review"},
-        "row_plugin_defs": [{"name": "score_extractor"}],
-        "aggregator_plugin_defs": [{"name": "score_stats"}],
-        "validation_plugin_defs": [{"name": "regex_match", "options": {"pattern": r"(?s).*\[mock\].*"}}],
+        "row_plugin_defs": [{"name": "score_extractor", "security_level": "official"}],
+        "aggregator_plugin_defs": [{"name": "score_stats", "security_level": "official"}],
+        "validation_plugin_defs": [{"name": "regex_match", "security_level": "official", "options": {"pattern": r"(?s).*\[mock\].*"}}],
         "sink_defs": [
             {
                 "plugin": "local_bundle",
+                "security_level": "official",
                 "options": {
                     "base_path": bundle_root.as_posix(),
                     "timestamped": False,

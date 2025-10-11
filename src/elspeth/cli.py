@@ -258,6 +258,7 @@ def _clone_suite_sinks(base_sinks: list, experiment_name: str) -> list:
 
     cloned = []
     for sink in base_sinks:
+        security_level = getattr(sink, "_elspeth_security_level", None)
         if isinstance(sink, CsvResultSink):
             base_path = Path(sink.path)
             new_path = base_path.with_name(f"{experiment_name}_{base_path.name}")
@@ -270,6 +271,8 @@ def _clone_suite_sinks(base_sinks: list, experiment_name: str) -> list:
                     sanitize_guard=sink.sanitize_guard,
                 )
             )
+            if security_level:
+                setattr(cloned[-1], "_elspeth_security_level", security_level)
         else:
             cloned.append(sink)
     return cloned
@@ -441,7 +444,10 @@ def _configure_sink_dry_run(settings, enable_live: bool) -> None:
             options = dict(entry.get("options", {}))
             if entry.get("plugin") in {"github_repo", "azure_devops_repo"} or "dry_run" in options:
                 options["dry_run"] = dry_run
-            updated.append({"plugin": entry.get("plugin"), "options": options})
+            payload = {"plugin": entry.get("plugin"), "options": options}
+            if entry.get("security_level") is not None:
+                payload["security_level"] = entry.get("security_level")
+            updated.append(payload)
         return updated
 
     config = settings.orchestrator_config

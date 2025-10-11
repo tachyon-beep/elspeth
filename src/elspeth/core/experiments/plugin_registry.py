@@ -12,6 +12,7 @@ from elspeth.core.experiments.plugins import (
     RowExperimentPlugin,
     ValidationPlugin,
 )
+from elspeth.core.security import coalesce_security_level
 from elspeth.core.validation import ConfigurationError, validate_schema
 
 
@@ -106,10 +107,16 @@ def create_row_plugin(definition: Dict[str, Any]) -> RowExperimentPlugin:
     if not definition:
         raise ValueError("Row plugin definition cannot be empty")
     name = definition.get("name")
-    options = definition.get("options", {})
+    options = dict(definition.get("options", {}) or {})
     if name not in _row_plugins:
         raise ValueError(f"Unknown row experiment plugin '{name}'")
-    return _row_plugins[name].create(options, context=f"row_plugin:{name}")
+    try:
+        level = coalesce_security_level(definition.get("security_level"), options.pop("security_level", None))
+    except ValueError as exc:
+        raise ConfigurationError(f"row_plugin:{name}: {exc}") from exc
+    plugin = _row_plugins[name].create(options, context=f"row_plugin:{name}")
+    setattr(plugin, "_elspeth_security_level", level)
+    return plugin
 
 
 def create_aggregation_plugin(definition: Dict[str, Any]) -> AggregationExperimentPlugin:
@@ -118,10 +125,16 @@ def create_aggregation_plugin(definition: Dict[str, Any]) -> AggregationExperime
     if not definition:
         raise ValueError("Aggregation plugin definition cannot be empty")
     name = definition.get("name")
-    options = definition.get("options", {})
+    options = dict(definition.get("options", {}) or {})
     if name not in _aggregation_plugins:
         raise ValueError(f"Unknown aggregation experiment plugin '{name}'")
-    return _aggregation_plugins[name].create(options, context=f"aggregation_plugin:{name}")
+    try:
+        level = coalesce_security_level(definition.get("security_level"), options.pop("security_level", None))
+    except ValueError as exc:
+        raise ConfigurationError(f"aggregation_plugin:{name}: {exc}") from exc
+    plugin = _aggregation_plugins[name].create(options, context=f"aggregation_plugin:{name}")
+    setattr(plugin, "_elspeth_security_level", level)
+    return plugin
 
 
 def create_baseline_plugin(definition: Dict[str, Any]) -> BaselineComparisonPlugin:
@@ -130,10 +143,16 @@ def create_baseline_plugin(definition: Dict[str, Any]) -> BaselineComparisonPlug
     if not definition:
         raise ValueError("Baseline plugin definition cannot be empty")
     name = definition.get("name")
-    options = definition.get("options", {})
+    options = dict(definition.get("options", {}) or {})
     if name not in _baseline_plugins:
         raise ValueError(f"Unknown baseline comparison plugin '{name}'")
-    return _baseline_plugins[name].create(options, context=f"baseline_plugin:{name}")
+    try:
+        level = coalesce_security_level(definition.get("security_level"), options.pop("security_level", None))
+    except ValueError as exc:
+        raise ConfigurationError(f"baseline_plugin:{name}: {exc}") from exc
+    plugin = _baseline_plugins[name].create(options, context=f"baseline_plugin:{name}")
+    setattr(plugin, "_elspeth_security_level", level)
+    return plugin
 
 
 def create_validation_plugin(definition: Dict[str, Any]) -> ValidationPlugin:
@@ -142,10 +161,16 @@ def create_validation_plugin(definition: Dict[str, Any]) -> ValidationPlugin:
     if not definition:
         raise ValueError("Validation plugin definition cannot be empty")
     name = definition.get("name")
-    options = definition.get("options", {})
+    options = dict(definition.get("options", {}) or {})
     if name not in _validation_plugins:
         raise ValueError(f"Unknown validation plugin '{name}'")
-    return _validation_plugins[name].create(options, context=f"validation_plugin:{name}")
+    try:
+        level = coalesce_security_level(definition.get("security_level"), options.pop("security_level", None))
+    except ValueError as exc:
+        raise ConfigurationError(f"validation_plugin:{name}: {exc}") from exc
+    plugin = _validation_plugins[name].create(options, context=f"validation_plugin:{name}")
+    setattr(plugin, "_elspeth_security_level", level)
+    return plugin
 
 
 def create_early_stop_plugin(definition: Dict[str, Any]) -> EarlyStopPlugin:
@@ -154,10 +179,16 @@ def create_early_stop_plugin(definition: Dict[str, Any]) -> EarlyStopPlugin:
     if not definition:
         raise ValueError("Early-stop plugin definition cannot be empty")
     name = definition.get("name")
-    options = definition.get("options", {})
+    options = dict(definition.get("options", {}) or {})
     if name not in _early_stop_plugins:
         raise ValueError(f"Unknown early-stop plugin '{name}'")
-    return _early_stop_plugins[name].create(options, context=f"early_stop_plugin:{name}")
+    try:
+        level = coalesce_security_level(definition.get("security_level"), options.pop("security_level", None))
+    except ValueError as exc:
+        raise ConfigurationError(f"early_stop_plugin:{name}: {exc}") from exc
+    plugin = _early_stop_plugins[name].create(options, context=f"early_stop_plugin:{name}")
+    setattr(plugin, "_elspeth_security_level", level)
+    return plugin
 
 
 class _NoopRowPlugin:  # pylint: disable=too-few-public-methods
@@ -244,7 +275,17 @@ def validate_row_plugin_definition(definition: Dict[str, Any]) -> None:
     options = definition.get("options", {})
     if name not in _row_plugins:
         raise ConfigurationError(f"Unknown row experiment plugin '{name}'")
-    _row_plugins[name].validate(options, context=f"row_plugin:{name}")
+    if options is None:
+        options = {}
+    elif not isinstance(options, dict):
+        raise ConfigurationError("Row plugin options must be a mapping")
+    try:
+        coalesce_security_level(definition.get("security_level"), options.get("security_level"))
+    except ValueError as exc:
+        raise ConfigurationError(f"row_plugin:{name}: {exc}") from exc
+    prepared = dict(options)
+    prepared.pop("security_level", None)
+    _row_plugins[name].validate(prepared, context=f"row_plugin:{name}")
 
 
 def validate_aggregation_plugin_definition(definition: Dict[str, Any]) -> None:
@@ -256,7 +297,17 @@ def validate_aggregation_plugin_definition(definition: Dict[str, Any]) -> None:
     options = definition.get("options", {})
     if name not in _aggregation_plugins:
         raise ConfigurationError(f"Unknown aggregation experiment plugin '{name}'")
-    _aggregation_plugins[name].validate(options, context=f"aggregation_plugin:{name}")
+    if options is None:
+        options = {}
+    elif not isinstance(options, dict):
+        raise ConfigurationError("Aggregation plugin options must be a mapping")
+    try:
+        coalesce_security_level(definition.get("security_level"), options.get("security_level"))
+    except ValueError as exc:
+        raise ConfigurationError(f"aggregation_plugin:{name}: {exc}") from exc
+    prepared = dict(options)
+    prepared.pop("security_level", None)
+    _aggregation_plugins[name].validate(prepared, context=f"aggregation_plugin:{name}")
 
 
 def validate_baseline_plugin_definition(definition: Dict[str, Any]) -> None:
@@ -268,7 +319,17 @@ def validate_baseline_plugin_definition(definition: Dict[str, Any]) -> None:
     options = definition.get("options", {})
     if name not in _baseline_plugins:
         raise ConfigurationError(f"Unknown baseline comparison plugin '{name}'")
-    _baseline_plugins[name].validate(options, context=f"baseline_plugin:{name}")
+    if options is None:
+        options = {}
+    elif not isinstance(options, dict):
+        raise ConfigurationError("Baseline plugin options must be a mapping")
+    try:
+        coalesce_security_level(definition.get("security_level"), options.get("security_level"))
+    except ValueError as exc:
+        raise ConfigurationError(f"baseline_plugin:{name}: {exc}") from exc
+    prepared = dict(options)
+    prepared.pop("security_level", None)
+    _baseline_plugins[name].validate(prepared, context=f"baseline_plugin:{name}")
 
 
 def validate_validation_plugin_definition(definition: Dict[str, Any]) -> None:
@@ -280,7 +341,17 @@ def validate_validation_plugin_definition(definition: Dict[str, Any]) -> None:
     options = definition.get("options", {})
     if name not in _validation_plugins:
         raise ConfigurationError(f"Unknown validation plugin '{name}'")
-    _validation_plugins[name].validate(options, context=f"validation_plugin:{name}")
+    if options is None:
+        options = {}
+    elif not isinstance(options, dict):
+        raise ConfigurationError("Validation plugin options must be a mapping")
+    try:
+        coalesce_security_level(definition.get("security_level"), options.get("security_level"))
+    except ValueError as exc:
+        raise ConfigurationError(f"validation_plugin:{name}: {exc}") from exc
+    prepared = dict(options)
+    prepared.pop("security_level", None)
+    _validation_plugins[name].validate(prepared, context=f"validation_plugin:{name}")
 
 
 def validate_early_stop_plugin_definition(definition: Dict[str, Any]) -> None:
@@ -292,7 +363,17 @@ def validate_early_stop_plugin_definition(definition: Dict[str, Any]) -> None:
     options = definition.get("options", {})
     if name not in _early_stop_plugins:
         raise ConfigurationError(f"Unknown early-stop plugin '{name}'")
-    _early_stop_plugins[name].validate(options, context=f"early_stop_plugin:{name}")
+    if options is None:
+        options = {}
+    elif not isinstance(options, dict):
+        raise ConfigurationError("Early-stop plugin options must be a mapping")
+    try:
+        coalesce_security_level(definition.get("security_level"), options.get("security_level"))
+    except ValueError as exc:
+        raise ConfigurationError(f"early_stop_plugin:{name}: {exc}") from exc
+    prepared = dict(options)
+    prepared.pop("security_level", None)
+    _early_stop_plugins[name].validate(prepared, context=f"early_stop_plugin:{name}")
 
 
 def normalize_early_stop_definitions(definitions: Any) -> List[Dict[str, Any]]:

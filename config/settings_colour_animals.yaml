@@ -1,10 +1,12 @@
 colour_animals:
   datasource:
     plugin: local_csv
+    security_level: official
     options:
       path: config/data/colour_animals.csv
   llm:
     plugin: http_openai
+    security_level: official
     options:
       api_base: http://192.168.1.240:5000
       model: gpt-4o-mini
@@ -12,6 +14,7 @@ colour_animals:
       timeout: 45
   sinks:
     - plugin: csv
+      security_level: official
       options:
         path: outputs/colour_animals/latest_results.csv
         overwrite: true

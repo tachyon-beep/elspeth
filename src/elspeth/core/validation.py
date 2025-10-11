@@ -9,6 +9,8 @@ from typing import Any, Callable, Dict, Iterable, List, Mapping, Sequence, Tuple
 
 import yaml
 
+from elspeth.core.security import normalize_security_level
+
 
 class ConfigurationError(RuntimeError):
     """Raised when configuration validation fails."""
@@ -370,6 +372,47 @@ def validate_suite(
 
     return SuiteValidationReport(report=report, preflight=preflight)
 
+def _validate_security_level_fields(
+    report: ValidationReport,
+    *,
+    context: str,
+    entry_level: Any,
+    options_level: Any,
+) -> str | None:
+    """Ensure plugin definitions declare a consistent security level."""
+
+    normalized_entry: str | None = None
+    normalized_options: str | None = None
+
+    entry_text = str(entry_level).strip() if entry_level is not None else ""
+    options_text = str(options_level).strip() if options_level is not None else ""
+
+    if entry_level is not None:
+        if not entry_text:
+            report.add_error("security_level must be non-empty", context=context)
+        else:
+            try:
+                normalized_entry = normalize_security_level(entry_text)
+            except ValueError as exc:
+                report.add_error(str(exc), context=context)
+
+    if options_level is not None:
+        if not options_text:
+            report.add_error("options.security_level must be non-empty", context=context)
+        else:
+            try:
+                normalized_options = normalize_security_level(options_text)
+            except ValueError as exc:
+                report.add_error(str(exc), context=context)
+
+    if normalized_entry and normalized_options and normalized_entry != normalized_options:
+        report.add_error("Conflicting security_level values between definition and options", context=context)
+
+    if not normalized_entry and not normalized_options:
+        report.add_error("Plugin must declare a security_level", context=context)
+
+    return normalized_entry or normalized_options
+
 
 def _validate_plugin_reference(
     report: ValidationReport,
@@ -377,11 +420,14 @@ def _validate_plugin_reference(
     *,
     kind: str,
     validator: Callable[[str, Dict[str, Any] | None], None],
+    require_security_level: bool = False,
 ) -> None:
     """Validate a single plugin reference entry."""
+
     if not isinstance(entry, Mapping):
         report.add_error(f"{kind} configuration must be a mapping", context=kind)
         return
+
     plugin = entry.get("plugin")
     if not plugin:
         report.add_error("Missing 'plugin'", context=kind)
@@ -389,15 +435,29 @@ def _validate_plugin_reference(
     if not isinstance(plugin, str):
         report.add_error("Plugin name must be a string", context=kind)
         return
+
     options = entry.get("options")
     options_dict: Dict[str, Any] | None
+    options_level_raw = None
     if options is None:
         options_dict = None
     elif isinstance(options, Mapping):
         options_dict = dict(options)
+        options_level_raw = options_dict.pop("security_level", None)
     else:
         report.add_error("Options must be a mapping", context=f"{kind}:{plugin}")
         options_dict = {}
+
+    context_label = f"{kind}:{plugin}" if plugin else kind
+
+    if require_security_level:
+        _validate_security_level_fields(
+            report,
+            context=context_label,
+            entry_level=entry.get("security_level"),
+            options_level=options_level_raw,
+        )
+
     try:
         validator(plugin, options_dict)
     except (ValueError, ConfigurationError) as exc:
@@ -410,6 +470,7 @@ def _validate_plugin_list(
     validator: Callable[[str, Dict[str, Any] | None], None],
     *,
     context: str,
+    require_security_level: bool = False,
 ) -> None:
     """Validate a list of plugin references using ``validator``."""
     if entries is None:
@@ -418,7 +479,13 @@ def _validate_plugin_list(
         report.add_error("Expected a list of plugin definitions", context=context)
         return
     for entry in entries:
-        _validate_plugin_reference(report, entry, kind=context, validator=validator)
+        _validate_plugin_reference(
+            report,
+            entry,
+            kind=context,
+            validator=validator,
+            require_security_level=require_security_level,
+        )
 
 
 def _validate_prompt_pack(
@@ -481,7 +548,13 @@ def _validate_prompt_pack(
         llm_registry.validate_middleware_definition,
         context=f"{context}.middleware",
     )
-    _validate_plugin_list(report, pack.get("sinks"), registry.validate_sink, context=f"{context}.sink")
+    _validate_plugin_list(
+        report,
+        pack.get("sinks"),
+        registry.validate_sink,
+        context=f"{context}.sink",
+        require_security_level=True,
+    )
 
 
 def _validate_suite_defaults(
@@ -534,6 +607,7 @@ def _validate_suite_defaults(
         defaults.get("sinks"),
         registry.validate_sink,
         context="suite_defaults.sink",
+        require_security_level=True,
     )
     try:
         controls_registry.validate_rate_limiter(defaults.get("rate_limiter"))
@@ -562,8 +636,21 @@ def _validate_experiment_plugins(
         if not isinstance(definition, Mapping):
             report.add_error("Plugin definition must be a mapping", context=context)
             continue
+        options_obj = definition.get("options") if isinstance(definition.get("options"), Mapping) else None
+        options_level = options_obj.get("security_level") if options_obj else None
+        _validate_security_level_fields(
+            report,
+            context=context,
+            entry_level=definition.get("security_level"),
+            options_level=options_level,
+        )
         try:
-            validator(dict(definition))
+            prepared = dict(definition)
+            if options_obj is not None:
+                prepared_options = dict(options_obj)
+                prepared_options.pop("security_level", None)
+                prepared["options"] = prepared_options
+            validator(prepared)
         except ConfigurationError as exc:
             report.add_error(str(exc), context=context)
         except ValueError as exc:
@@ -587,8 +674,21 @@ def _validate_middleware_list(
         if not isinstance(definition, Mapping):
             report.add_error("Middleware definition must be a mapping", context=context)
             continue
+        options_obj = definition.get("options") if isinstance(definition.get("options"), Mapping) else None
+        options_level = options_obj.get("security_level") if options_obj else None
+        _validate_security_level_fields(
+            report,
+            context=context,
+            entry_level=definition.get("security_level"),
+            options_level=options_level,
+        )
         try:
-            validator(dict(definition))
+            prepared = dict(definition)
+            if options_obj is not None:
+                prepared_options = dict(options_obj)
+                prepared_options.pop("security_level", None)
+                prepared["options"] = prepared_options
+            validator(prepared)
         except ConfigurationError as exc:
             report.add_error(str(exc), context=context)
         except ValueError as exc:
@@ -701,6 +801,7 @@ def _load_experiment_summary(
         data.get("sinks"),
         registry.validate_sink,
         context=f"{experiment_context}.sink",
+        require_security_level=True,
     )
 
     try:
@@ -808,12 +909,14 @@ def _validate_primary_plugins(
         profile_data.get("datasource"),
         kind="datasource",
         validator=registry.validate_datasource,
+        require_security_level=True,
     )
     _validate_plugin_reference(
         report,
         profile_data.get("llm"),
         kind="llm",
         validator=registry.validate_llm,
+        require_security_level=True,
     )
 
 
@@ -839,6 +942,7 @@ def _validate_top_level_sinks(
             entry,
             kind="sink",
             validator=registry.validate_sink,
+            require_security_level=True,
         )
     return True
 

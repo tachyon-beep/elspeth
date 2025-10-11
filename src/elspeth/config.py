@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Mapping, Optional
 
 import yaml
 
@@ -12,6 +12,8 @@ from elspeth.core.controls import create_cost_tracker, create_rate_limiter
 from elspeth.core.experiments.plugin_registry import normalize_early_stop_definitions
 from elspeth.core.orchestrator import OrchestratorConfig
 from elspeth.core.registry import registry
+from elspeth.core.security import coalesce_security_level
+from elspeth.core.validation import ConfigurationError
 
 
 @dataclass
@@ -28,6 +30,19 @@ class Settings:
     cost_tracker: Any | None = None
     prompt_packs: Dict[str, Any] = field(default_factory=dict)
     prompt_pack: Optional[str] = None
+
+
+def _prepare_plugin_definition(definition: Mapping[str, Any], context: str) -> tuple[Dict[str, Any], str]:
+    """Extract options and normalized security level from a plugin definition."""
+
+    options = dict(definition.get("options", {}) or {})
+    entry_level = definition.get("security_level")
+    options_level = options.pop("security_level", None)
+    try:
+        level = coalesce_security_level(entry_level, options_level)
+    except ValueError as exc:
+        raise ConfigurationError(f"{context}: {exc}") from exc
+    return options, level
 
 
 def _merge_pack(base: Dict[str, Any], pack: Dict[str, Any]) -> Dict[str, Any]:
@@ -50,10 +65,14 @@ def load_settings(path: str | Path, profile: str = "default") -> Settings:
     pack = prompt_packs.get(prompt_pack_name) if prompt_pack_name else None
 
     datasource_cfg = profile_data["datasource"]
-    datasource = registry.create_datasource(datasource_cfg["plugin"], datasource_cfg.get("options", {}))
+    datasource_options, datasource_level = _prepare_plugin_definition(datasource_cfg, "datasource")
+    datasource = registry.create_datasource(datasource_cfg["plugin"], datasource_options)
+    setattr(datasource, "_elspeth_security_level", datasource_level)
 
     llm_cfg = profile_data["llm"]
-    llm = registry.create_llm(llm_cfg["plugin"], llm_cfg.get("options", {}))
+    llm_options, llm_level = _prepare_plugin_definition(llm_cfg, "llm")
+    llm = registry.create_llm(llm_cfg["plugin"], llm_options)
+    setattr(llm, "_elspeth_security_level", llm_level)
 
     row_plugin_defs: List[Dict[str, Any]] = profile_data.get("row_plugins", [])
     aggregator_plugin_defs: List[Dict[str, Any]] = profile_data.get("aggregator_plugins", [])
@@ -118,7 +137,12 @@ def load_settings(path: str | Path, profile: str = "default") -> Settings:
                         if isinstance(pack_sinks, list) and pack_sinks:
                             sink_defs = pack_sinks
 
-    sinks = [registry.create_sink(item["plugin"], item.get("options", {})) for item in sink_defs]
+    sinks = []
+    for definition in sink_defs:
+        options, level = _prepare_plugin_definition(definition, "sink")
+        sink = registry.create_sink(definition["plugin"], options)
+        setattr(sink, "_elspeth_security_level", level)
+        sinks.append(sink)
 
     rate_limiter = create_rate_limiter(rate_limiter_def)
     cost_tracker = create_cost_tracker(cost_tracker_def)

@@ -21,6 +21,7 @@ def test_orchestrator_runs(monkeypatch):
     class DummySink:
         def __init__(self):
             self.calls = []
+            self._elspeth_security_level = "official"
 
         def write(self, results, *, metadata=None):
             self.calls.append((results, metadata))
@@ -62,6 +63,9 @@ def test_orchestrator_with_criteria(monkeypatch):
             return {"prompt": user_prompt, "meta": metadata, "content": metadata["criteria"]}
 
     class DummySink:
+        def __init__(self):
+            self._elspeth_security_level = "official"
+
         def write(self, results, *, metadata=None):
             pass
 
@@ -123,6 +127,7 @@ def test_orchestrator_single_run_executes_plugins(monkeypatch):
     class DummySink:
         def __init__(self):
             self.calls = []
+            self._elspeth_security_level = "official"
 
         def write(self, results, *, metadata=None):
             self.calls.append((results, metadata))
@@ -136,8 +141,8 @@ def test_orchestrator_single_run_executes_plugins(monkeypatch):
         config=OrchestratorConfig(
             llm_prompt={"system": "sys", "user": "Hello {name}"},
             prompt_fields=["APPID", "name"],
-            row_plugin_defs=[{"name": "single_run_row_plugin"}],
-            aggregator_plugin_defs=[{"name": "single_run_agg_plugin"}],
+            row_plugin_defs=[{"name": "single_run_row_plugin", "security_level": "official"}],
+            aggregator_plugin_defs=[{"name": "single_run_agg_plugin", "security_level": "official"}],
         ),
     )
 

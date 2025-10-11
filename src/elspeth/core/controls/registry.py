@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, Mapping
 
+from elspeth.core.security import coalesce_security_level
 from elspeth.core.validation import ConfigurationError, validate_schema
 
 from .cost_tracker import CostTracker, FixedPriceCostTracker, NoopCostTracker
@@ -105,10 +106,16 @@ def create_rate_limiter(definition: Dict[str, Any] | None) -> RateLimiter | None
     if not definition:
         return None
     name = definition.get("plugin") or definition.get("name")
-    options = definition.get("options", {})
+    options = dict(definition.get("options", {}) or {})
     if name not in _rate_limiters:
         raise ValueError(f"Unknown rate limiter plugin '{name}'")
-    return _rate_limiters[name].create(options, context=f"rate_limiter:{name}")
+    try:
+        level = coalesce_security_level(definition.get("security_level"), options.pop("security_level", None))
+    except ValueError as exc:
+        raise ConfigurationError(f"rate_limiter:{name}: {exc}") from exc
+    limiter = _rate_limiters[name].create(options, context=f"rate_limiter:{name}")
+    setattr(limiter, "_elspeth_security_level", level)
+    return limiter
 
 
 def create_cost_tracker(definition: Dict[str, Any] | None) -> CostTracker | None:
@@ -117,10 +124,16 @@ def create_cost_tracker(definition: Dict[str, Any] | None) -> CostTracker | None
     if not definition:
         return None
     name = definition.get("plugin") or definition.get("name")
-    options = definition.get("options", {})
+    options = dict(definition.get("options", {}) or {})
     if name not in _cost_trackers:
         raise ValueError(f"Unknown cost tracker plugin '{name}'")
-    return _cost_trackers[name].create(options, context=f"cost_tracker:{name}")
+    try:
+        level = coalesce_security_level(definition.get("security_level"), options.pop("security_level", None))
+    except ValueError as exc:
+        raise ConfigurationError(f"cost_tracker:{name}: {exc}") from exc
+    tracker = _cost_trackers[name].create(options, context=f"cost_tracker:{name}")
+    setattr(tracker, "_elspeth_security_level", level)
+    return tracker
 
 
 def validate_rate_limiter(definition: Dict[str, Any] | None) -> None:
@@ -132,7 +145,17 @@ def validate_rate_limiter(definition: Dict[str, Any] | None) -> None:
     options = definition.get("options", {})
     if name not in _rate_limiters:
         raise ConfigurationError(f"Unknown rate limiter plugin '{name}'")
-    _rate_limiters[name].validate(options, context=f"rate_limiter:{name}")
+    if options is None:
+        options = {}
+    elif not isinstance(options, dict):
+        raise ConfigurationError("Rate limiter options must be a mapping")
+    try:
+        coalesce_security_level(definition.get("security_level"), options.get("security_level"))
+    except ValueError as exc:
+        raise ConfigurationError(f"rate_limiter:{name}: {exc}") from exc
+    prepared = dict(options)
+    prepared.pop("security_level", None)
+    _rate_limiters[name].validate(prepared, context=f"rate_limiter:{name}")
 
 
 def validate_cost_tracker(definition: Dict[str, Any] | None) -> None:
@@ -144,7 +167,17 @@ def validate_cost_tracker(definition: Dict[str, Any] | None) -> None:
     options = definition.get("options", {})
     if name not in _cost_trackers:
         raise ConfigurationError(f"Unknown cost tracker plugin '{name}'")
-    _cost_trackers[name].validate(options, context=f"cost_tracker:{name}")
+    if options is None:
+        options = {}
+    elif not isinstance(options, dict):
+        raise ConfigurationError("Cost tracker options must be a mapping")
+    try:
+        coalesce_security_level(definition.get("security_level"), options.get("security_level"))
+    except ValueError as exc:
+        raise ConfigurationError(f"cost_tracker:{name}: {exc}") from exc
+    prepared = dict(options)
+    prepared.pop("security_level", None)
+    _cost_trackers[name].validate(prepared, context=f"cost_tracker:{name}")
 
 
 __all__ = [

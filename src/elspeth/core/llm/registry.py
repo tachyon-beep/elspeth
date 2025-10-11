@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, Mapping
 
+from elspeth.core.security import coalesce_security_level
 from elspeth.core.validation import ConfigurationError, validate_schema
 
 from .middleware import LLMMiddleware
@@ -46,8 +47,14 @@ def create_middleware(definition: Dict[str, Any]) -> LLMMiddleware:
         raise ValueError("Middleware definition missing 'name' or 'plugin'")
     if name not in _middlewares:
         raise ValueError(f"Unknown LLM middleware '{name}'")
-    options = definition.get("options", {})
-    return _middlewares[name].create(options, context=f"llm_middleware:{name}")
+    options = dict(definition.get("options", {}) or {})
+    try:
+        level = coalesce_security_level(definition.get("security_level"), options.pop("security_level", None))
+    except ValueError as exc:
+        raise ConfigurationError(f"llm_middleware:{name}: {exc}") from exc
+    middleware = _middlewares[name].create(options, context=f"llm_middleware:{name}")
+    setattr(middleware, "_elspeth_security_level", level)
+    return middleware
 
 
 def create_middlewares(definitions: list[Dict[str, Any]] | None) -> list[LLMMiddleware]:
@@ -66,6 +73,16 @@ def validate_middleware_definition(definition: Dict[str, Any]) -> None:
         options = ", ".join(sorted(_middlewares)) or "<none>"
         raise ConfigurationError(f"Unknown LLM middleware '{name}'. Available: {options}")
     options = definition.get("options", {})
+    if options is None:
+        options = {}
+    elif not isinstance(options, dict):
+        raise ConfigurationError("Middleware options must be a mapping")
+    try:
+        coalesce_security_level(definition.get("security_level"), options.get("security_level"))
+    except ValueError as exc:
+        raise ConfigurationError(f"llm_middleware:{name}: {exc}") from exc
+    options = dict(options)
+    options.pop("security_level", None)
     _middlewares[name].validate(options, context=f"llm_middleware:{name}")
 
 

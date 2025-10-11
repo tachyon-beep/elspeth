@@ -106,22 +106,26 @@ def test_create_row_plugin_validates_schema():
     )
 
     with pytest.raises(ConfigurationError):
-        plugin_registry.validate_row_plugin_definition({"name": "limited", "options": {}})
+        plugin_registry.validate_row_plugin_definition(
+            {"name": "limited", "security_level": "official", "options": {}}
+        )
 
-    plugin_registry.validate_row_plugin_definition({"name": "limited", "options": {"threshold": 0.5}})
+    plugin_registry.validate_row_plugin_definition(
+        {"name": "limited", "security_level": "official", "options": {"threshold": 0.5}}
+    )
 
 
 def test_normalize_early_stop_definitions_handles_various_forms():
     entries = [
-        {"name": "custom", "options": {"limit": 5}},
-        {"plugin": "custom", "threshold": 2},
-        {"limit": 3},
+        {"name": "custom", "options": {"limit": 5}, "security_level": "official"},
+        {"plugin": "custom", "threshold": 2, "security_level": "official"},
+        {"limit": 3, "security_level": "official"},
     ]
     normalized = plugin_registry.normalize_early_stop_definitions(entries)
     assert normalized == [
-        {"name": "custom", "options": {"limit": 5}},
-        {"name": "custom", "options": {"threshold": 2}},
-        {"name": "threshold", "options": {"limit": 3}},
+        {"name": "custom", "options": {"limit": 5, "security_level": "official"}},
+        {"name": "custom", "options": {"threshold": 2, "security_level": "official"}},
+        {"name": "threshold", "options": {"limit": 3, "security_level": "official"}},
     ]
 
 

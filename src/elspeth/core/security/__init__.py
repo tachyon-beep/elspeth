@@ -41,6 +41,27 @@ def resolve_security_level(*levels: str | None) -> str:
     return max(normalized, key=SECURITY_LEVELS.index)
 
 
+def coalesce_security_level(*levels: str | None) -> str:
+    """Return a single normalized level ensuring all inputs agree."""
+
+    normalized: list[str] = []
+    for level in levels:
+        if level is None:
+            continue
+        text = str(level).strip()
+        if not text:
+            continue
+        normalized.append(normalize_security_level(text))
+
+    if not normalized:
+        raise ValueError("security_level is required")
+
+    if len(set(normalized)) > 1:
+        raise ValueError("Conflicting security_level values")
+
+    return normalized[0]
+
+
 __all__ = [
     "generate_signature",
     "verify_signature",
@@ -48,4 +69,5 @@ __all__ = [
     "normalize_security_level",
     "is_security_level_allowed",
     "resolve_security_level",
+    "coalesce_security_level",
 ]

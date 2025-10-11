@@ -37,6 +37,7 @@ def test_clone_suite_sinks_preserves_csv_sanitization(tmp_path):
         sanitize_formulas=False,
         sanitize_guard="#",
     )
+    setattr(sink, "_elspeth_security_level", "official")
 
     cloned = cli._clone_suite_sinks([sink], "exp1")
 
@@ -66,10 +67,13 @@ def test_cli_suite_execution(tmp_path, monkeypatch):
         def generate(self, *, system_prompt, user_prompt, metadata=None):
             return {"content": user_prompt}
 
+    csv_sink = CsvResultSink(path=output_base)
+    setattr(csv_sink, "_elspeth_security_level", "official")
+
     settings_obj = argparse.Namespace(
         datasource=DummyDatasource(),
         llm=DummyLLM(),
-        sinks=[CsvResultSink(path=output_base)],
+        sinks=[csv_sink],
         orchestrator_config=OrchestratorConfig(
             llm_prompt={"system": "sys", "user": "unused"},
             prompt_fields=["APPID"],
@@ -208,10 +212,13 @@ def test_cli_suite_management_flags(tmp_path, monkeypatch):
             return {"content": user_prompt}
 
     output_base = tmp_path / "outputs" / "latest_results.csv"
+    csv_sink = CsvResultSink(path=output_base)
+    setattr(csv_sink, "_elspeth_security_level", "official")
+
     settings_obj = argparse.Namespace(
         datasource=DummyDatasource(),
         llm=DummyLLM(),
-        sinks=[CsvResultSink(path=output_base)],
+        sinks=[csv_sink],
         orchestrator_config=OrchestratorConfig(
             llm_prompt={"system": "sys", "user": "unused"},
             prompt_fields=["APPID"],

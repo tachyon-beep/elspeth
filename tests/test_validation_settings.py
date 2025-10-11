@@ -16,6 +16,7 @@ def test_validate_settings_missing_required_fields(tmp_path):
         default:
           llm:
             plugin: mock
+            security_level: official
           sinks: []
         """,
     )
@@ -30,12 +31,15 @@ def test_validate_settings_unknown_prompt_pack(tmp_path):
         default:
           datasource:
             plugin: local_csv
+            security_level: official
             options:
               path: data.csv
           llm:
             plugin: mock
+            security_level: official
           sinks:
             - plugin: csv
+              security_level: official
               options:
                 path: outputs/latest.csv
           prompt_pack: imaginary
@@ -56,16 +60,20 @@ def test_validate_settings_unknown_middleware(tmp_path):
         default:
           datasource:
             plugin: local_csv
+            security_level: official
             options:
               path: data.csv
           llm:
             plugin: mock
+            security_level: official
           sinks:
             - plugin: csv
+              security_level: official
               options:
                 path: outputs/latest.csv
           llm_middlewares:
             - name: not_real
+              security_level: official
         """,
         encoding="utf-8",
     )
@@ -84,10 +92,37 @@ def test_validate_settings_valid_configuration(tmp_path):
         default:
           datasource:
             plugin: local_csv
+            security_level: official
             options:
               path: data.csv
           llm:
             plugin: mock
+            security_level: official
+          sinks:
+            - plugin: csv
+              security_level: official
+              options:
+                path: outputs/latest.csv
+        """,
+    )
+    report = validate_settings(config_path)
+    report.raise_if_errors()
+
+
+def test_validate_settings_requires_sink_security_level(tmp_path):
+    config_path = tmp_path / "settings.yaml"
+    write_settings(
+        config_path,
+        """
+        default:
+          datasource:
+            plugin: local_csv
+            security_level: official
+            options:
+              path: data.csv
+          llm:
+            plugin: mock
+            security_level: official
           sinks:
             - plugin: csv
               options:
@@ -95,7 +130,9 @@ def test_validate_settings_valid_configuration(tmp_path):
         """,
     )
     report = validate_settings(config_path)
-    report.raise_if_errors()
+    assert report.has_errors()
+    messages = [msg.format() for msg in report.errors]
+    assert any("security_level" in message for message in messages)
 
 
 def test_validate_suite_detects_missing_prompts(tmp_path):

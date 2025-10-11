@@ -155,6 +155,8 @@ class ArtifactPipeline:  # pylint: disable=too-many-instance-attributes
     def _prepare_binding(binding: SinkBinding) -> SinkBinding:
         """Populate sink binding metadata from configuration and sink methods."""
 
+        if binding.security_level is None or not str(binding.security_level).strip():
+            raise ValueError(f"Sink '{binding.id}' must declare a security_level")
         binding.security_level = normalize_security_level(binding.security_level)
         artifact_section = binding.artifact_config or {}
         produces_config = artifact_section.get("produces", []) or []

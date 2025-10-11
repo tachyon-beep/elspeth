@@ -20,8 +20,16 @@ def test_load_settings_merges_prompt_pack_and_defaults(tmp_path: Path) -> None:
 
     settings_payload = {
         "default": {
-            "datasource": {"plugin": "local_csv", "options": {"path": str(input_csv)}},
-            "llm": {"plugin": "mock", "options": {"seed": 1}},
+            "datasource": {
+                "plugin": "local_csv",
+                "security_level": "official",
+                "options": {"path": str(input_csv)},
+            },
+            "llm": {
+                "plugin": "mock",
+                "security_level": "official",
+                "options": {"seed": 1},
+            },
             "prompt_pack": "packA",
             "prompt_packs": {
                 "packA": {
@@ -30,10 +38,14 @@ def test_load_settings_merges_prompt_pack_and_defaults(tmp_path: Path) -> None:
                         "user": "Pack user {{ value }}",
                     },
                     "prompt_defaults": {"tone": "warm"},
-                    "row_plugins": [{"name": "score_extractor"}],
-                    "aggregator_plugins": [{"name": "score_stats"}],
+                    "row_plugins": [{"name": "score_extractor", "security_level": "official"}],
+                    "aggregator_plugins": [{"name": "score_stats", "security_level": "official"}],
                     "sinks": [
-                        {"plugin": "csv", "options": {"path": str(tmp_path / "pack_results.csv")}}
+                        {
+                            "plugin": "csv",
+                            "security_level": "official",
+                            "options": {"path": str(tmp_path / "pack_results.csv")},
+                        }
                     ],
                 }
             },
@@ -41,7 +53,11 @@ def test_load_settings_merges_prompt_pack_and_defaults(tmp_path: Path) -> None:
             "suite_defaults": {
                 "prompt_pack": "packA",
                 "sinks": [
-                    {"plugin": "csv", "options": {"path": str(tmp_path / "suite_results.csv")}}
+                    {
+                        "plugin": "csv",
+                        "security_level": "official",
+                        "options": {"path": str(tmp_path / "suite_results.csv")},
+                    }
                 ],
                 "security_level": "secret",
             },
@@ -63,7 +79,10 @@ def test_load_settings_merges_prompt_pack_and_defaults(tmp_path: Path) -> None:
 
     defaults = cli._assemble_suite_defaults(settings)
     assert defaults["prompt_pack"] == "packA"
-    assert defaults["row_plugin_defs"][0]["name"] == "score_extractor"
+    assert defaults["row_plugin_defs"][0] == {
+        "name": "score_extractor",
+        "security_level": "official",
+    }
     assert "sink_defs" in defaults
     assert settings.suite_defaults["security_level"] == "secret"
 

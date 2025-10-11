@@ -68,6 +68,9 @@ def test_runner_retries_on_validation_failure():
             return {"content": "Valid"}
 
     class DummySink:
+        def __init__(self):
+            self._elspeth_security_level = "official"
+
         def write(self, results, *, metadata=None):
             pass
 
