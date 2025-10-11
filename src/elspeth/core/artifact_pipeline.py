@@ -263,7 +263,7 @@ class ArtifactPipeline:  # pylint: disable=too-many-instance-attributes
                     if not deps:
                         dependent_binding = by_id[dependent_id]
                         ready.append(dependent_binding)
-                        ready = deque(sorted(list(ready), key=lambda b: b.original_index))
+                        ready = deque(sorted(ready, key=lambda b: b.original_index))
 
         if len(ordered) != len(bindings):
             raise ValueError("Sink artifact dependencies contain a cycle or unresolved reference")
@@ -271,7 +271,7 @@ class ArtifactPipeline:  # pylint: disable=too-many-instance-attributes
         return ordered
 
     # pylint: disable=too-many-locals
-    def execute(self, payload: Dict[str, Any], metadata: Mapping[str, Any] | None = None) -> ArtifactStore:
+    def execute(self, payload: Dict[str, Any], metadata: Dict[str, Any] | None = None) -> ArtifactStore:
         """Run all sinks in dependency order, producing the final artifact store."""
 
         store = ArtifactStore()
