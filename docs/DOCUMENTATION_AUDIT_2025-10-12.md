@@ -2,44 +2,44 @@
 Date: 2025-10-12
 
 ## Files Updated
-- `docs/architecture/architecture-overview.md`, `component-diagram.md`, `data-flow-diagrams.md`, `security-controls.md`, `threat-surfaces.md`, `configuration-security.md`, `plugin-security-model.md`, `audit-logging.md`, `dependency-analysis.md`
-- Operational guides: `docs/migration-guide.md`, `logging-standards.md`, `release-checklist.md`, `reporting-and-suite-management.md`, `docs/examples_colour_animals.md`
-- Top-level references: `README.md`, `AGENTS.md`
-- Notes refreshed: `notes/2024-05-Initial-Assessment.md`, `2025-05-status.md`, `azure-middleware.md`, `azure-telemetry-plan.md`, `config-migration.md`, `legacy-audit.md`, `metrics-schema.md`, `phase5-metrics.md`, `phase6-sinks.md`, `phase7-docs.md`, `plugin-architecture.md`, `prompt-engine.md`, `schema-validation-plan.md`, `stats-analytics-inventory.md`, `stats-refactor-plan.md`
-- New artefacts: `docs/architecture/CONTROL_INVENTORY.md`, `docs/TRACEABILITY_MATRIX.md`, `docs/DOCUMENTATION_AUDIT_2025-10-12.md`
+- docs/architecture/architecture-overview.md – Added footnoted cross-references, concurrency/early-stop annotations, analytics sinks, and artifact chaining updates.
+- docs/architecture/component-diagram.md – Refreshed diagrams for middleware chains and artifact pipelines, introduced section anchors for registry/config references.
+- docs/architecture/data-flow-diagrams.md – Documented trust boundaries, retry/telemetry flows, and suite lifecycle checkpoints.
+- docs/architecture/security-controls.md – Expanded control descriptions (middleware safeguards, artifact clearance, managed identity) with cross-doc footnotes.
+- docs/architecture/threat-surfaces.md – Updated trust zones, external interfaces, and analytics/reporting risk annotations.
+- docs/architecture/configuration-security.md – Added loader/secret governance notes and suite default guidance.
+- docs/architecture/plugin-security-model.md – Documented registry enforcement, early-stop lifecycle, and artifact token governance.
+- docs/architecture/audit-logging.md – Added retry exhaustion, middleware telemetry, and visual evidence logging notes.
+- docs/architecture/dependency-analysis.md – Highlighted optional extras, tooling dependencies, and transitive risk considerations.
+- docs/architecture/CONTROL_INVENTORY.md – Realigned control references and added Azure telemetry control entry.
+- Operational docs (migration-guide.md, logging-standards.md, release-checklist.md, reporting-and-suite-management.md, examples_colour_animals.md, README.md) – Synced with new concurrency, analytics, visual sink, and dependency guidance.
 
 ## New Content Added
-- Documented threaded execution, checkpoint recovery, retry telemetry, early-stop governance, and visual analytics capabilities across architecture, security, and operational guides.
-- Introduced updated component and data-flow diagrams showing middleware chains, artifact DAGs, analytics sinks (JSON/visual), and Azure telemetry endpoints.
-- Expanded security coverage with analytics reporting controls, visual artifact handling guidance, Azure ML audit logging, and configuration validation references; produced a formal control inventory.
-- Added traceability matrix tying core components (including the visual analytics sink) to documentation and source modules for accreditation review.
-- Refreshed migration and example guides with concurrency/retry configuration steps, rate-limiter guidance, and reporting verification checklists.
+- Footnoted cross-reference network across architecture docs (security, auditing, data flow, component diagrams).
+- Middleware and telemetry updates covering Azure Environment suite hooks, retry exhaustion payloads, and analytics sinks.
+- Dependency extras guidance including analytics-visual optional install path.
+- Verification checklist for suite report generation and release readiness (dependency audit, signed artefacts, visual analytics).
 
 ## Gaps Identified
-- Interactive/advanced visualisation plugins (e.g., HTML dashboards) and ordinal regression analytics remain backlog items; document once implemented.
-- No dedicated hardening guide for deploying analytics artifacts to restricted environments—recommend future addition covering filesystem hygiene and signing workflows.
-- Azure Monitor/webhook integrations for telemetry not yet described; track in future middleware enhancements.
+- No dedicated how-to for configuring rate limiter thresholds per deployment; consider authoring a tuning guide.
+- Sample suite README lacks explicit instructions for analytics-visual sink enablement; add screenshots or CLI outputs in future iteration.
+- Need formal SOP for rotating signed artifact keys post-release (documented only in checklist bullet).
 
 ## Verification Status
-- Verified architecture claims against current code (`src/elspeth/core/experiments/runner.py`, `suite_runner.py`, `artifact_pipeline.py`, `plugins/outputs/analytics_report.py`, `plugins/outputs/visual_report.py`, `plugins/llms/middleware_azure.py`).
-- Confirmed configuration schemas via `src/elspeth/core/config_schema.py` and validation helpers; cross-checked CLI options in `src/elspeth/cli.py`.
-- Validated static test LLM plugin (`src/elspeth/plugins/llms/static.py`) for deterministic integration testing.
-- Ensured security control references map to active tests (see `docs/architecture/CONTROL_INVENTORY.md`).
-- Outstanding behaviours (interactive dashboards, ordinal regression) flagged as future work; no documentation asserts they exist.
+- Claims cross-checked against source modules (`src/elspeth/core/experiments/runner.py`, `src/elspeth/plugins/outputs/analytics_report.py`, `src/elspeth/plugins/llms/middleware_azure.py`, etc.).
+- Tested commands: `make sample-suite`, `python -m elspeth.cli --reports-dir ...` executed locally prior to update (artifact availability confirmed).
+- Pending manual review: ensure `python -m elspeth.tools.verify_signature` helper works with refreshed bundle examples.
 
 ## Cross-Reference Map
-| Component | Source Location | Documentation |
-|-----------|-----------------|---------------|
-| Experiment Runner | `src/elspeth/core/experiments/runner.py` | `docs/architecture/architecture-overview.md` (Added 2025-10-12), `docs/architecture/data-flow-diagrams.md` |
-| Artifact Pipeline | `src/elspeth/core/artifact_pipeline.py` | `docs/architecture/security-controls.md`, `docs/architecture/architecture-overview.md` |
-| Analytics Report Sink | `src/elspeth/plugins/outputs/analytics_report.py` | `docs/architecture/architecture-overview.md`, `docs/architecture/audit-logging.md`, `docs/reporting-and-suite-management.md` |
-| Visual Analytics Sink | `src/elspeth/plugins/outputs/visual_report.py` | `docs/architecture/architecture-overview.md`, `docs/reporting-and-suite-management.md`, `docs/architecture/security-controls.md` |
-| Static Test LLM | `src/elspeth/plugins/llms/static.py` | `README.md` (§Plugins), `docs/migration-guide.md` (Testing notes) |
-| Azure Environment Middleware | `src/elspeth/plugins/llms/middleware_azure.py` | `docs/architecture/security-controls.md`, `docs/architecture/audit-logging.md` |
-| Validation Engine | `src/elspeth/core/validation.py`, `src/elspeth/core/config_schema.py` | `docs/architecture/configuration-security.md`, `notes/schema-validation-plan.md` |
-| Suite Reporting | `src/elspeth/tools/reporting.py` | `docs/reporting-and-suite-management.md`, `docs/architecture/architecture-overview.md` |
+| Component | Documentation Reference |
+|-----------|------------------------|
+| Concurrency & Checkpoints | docs/architecture/data-flow-diagrams.md (Update 2025-10-12: Parallel Execution Gate), docs/migration-guide.md (Added 2025-10-12 checklist) |
+| Azure Telemetry | docs/architecture/audit-logging.md (Update 2025-10-12: Azure Telemetry), docs/architecture/security-controls.md (Update 2025-10-12: Middleware Safeguards) |
+| Analytics Sinks | docs/architecture/architecture-overview.md (Update 2025-10-12: Early Stop and Baseline Analytics), docs/reporting-and-suite-management.md (Section 2) |
+| Artifact Clearance | docs/architecture/security-controls.md (Update 2025-10-12: Artifact Clearance), docs/architecture/component-diagram.md (Update 2025-10-12: Artifact Pipeline) |
+| Dependency Extras | docs/architecture/dependency-analysis.md (Optional Extras), README.md (Optional extras list) |
 
 ## Recommended Next Steps
-1. Extend telemetry documentation when Azure Monitor/webhook integrations ship; include retention/alerting guidance.
-2. Consider producing a hardened-deployment checklist consolidating secrets management, filesystem hygiene, and analytics export handling.
-3. Schedule periodic control inventory reviews to keep test coverage mapping current as plugins evolve.
+1. Author a rate limiting/concurrency tuning guide referencing recent telemetry fields.
+2. Capture screenshots or sample artefact snippets for analytics_visual outputs to include in reporting documentation.
+3. Validate signed artifact verification helper against current bundle format and record the procedure in docs/security-controls.md or release-checklist.md.

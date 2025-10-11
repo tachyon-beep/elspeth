@@ -69,7 +69,7 @@ python -m elspeth.cli \
 ```
 
 Reports require pandas/openpyxl (for Excel) and matplotlib/seaborn (for PNG charts).
-Install them via the dev extra plus matplotlib:
+Install them via the dev extra plus matplotlib:[^readme-reporting-2025-10-12]
 
 ```bash
 pip install -e .[dev]
@@ -102,7 +102,7 @@ Settings files (default: `config/settings.yaml`) describe the runtime:
   - `pip install -e .[stats-bayesian]` – enables Bayesian baseline comparisons.
   - `pip install -e .[stats-planning]` – brings in power/sample-size analytics.
   - `pip install -e .[stats-distribution]` – enables distribution/drift analytics.
-  - `pip install -e .[analytics-visual]` – installs matplotlib/seaborn for PNG/HTML analytics charts.
+  - `pip install -e .[analytics-visual]` – installs matplotlib/seaborn for PNG/HTML analytics charts.[^readme-visual-extra-2025-10-12]
 
 Experiments (`config/sample_suite/*/config.json`) can:
 
@@ -267,3 +267,9 @@ To add a new plugin, implement the appropriate interface from
 - `docs/release-checklist.md` – pre-release verification steps and governance reminders.
 - `docs/reporting-and-suite-management.md` – CLI walkthrough for suite exports, template creation, and analytics reports.
 - `docs/examples_colour_animals.md` – end-to-end example using the HTTP OpenAI plugin with a colour→animal dataset.
+
+## Update History
+- 2025-10-12 – Update 2025-10-12: Added dependencies/visual extras guidance and linked to reporting documentation for analytics workflows.
+
+[^readme-reporting-2025-10-12]: Update 2025-10-12: Reporting dependencies correspond to docs/reporting-and-suite-management.md (Prerequisites) and docs/architecture/dependency-analysis.md (Optional Extras).
+[^readme-visual-extra-2025-10-12]: Update 2025-10-12: Visual analytics extra aligns with docs/architecture/dependency-analysis.md (Optional Extras) and docs/architecture/security-controls.md (Update 2025-10-12: Output Sanitisation).

@@ -13,7 +13,7 @@ pip install matplotlib seaborn
 ```
 
 > The remainder of the CLI only requires the base installation, but report generation skips
-> Excel/visual outputs when pandas or matplotlib are unavailable.
+> Excel/visual outputs when pandas or matplotlib are unavailable.[^reporting-deps-2025-10-12]
 <!-- UPDATE 2025-10-12: The visual analytics sink also relies on matplotlib (and optionally seaborn) when producing PNG/HTML charts; install these packages before enabling the sink. -->
 <!-- UPDATE 2025-10-12: Optional analytics extras (`pip install -e .[stats-core]` etc.) enable additional statistics in comparative reports; install before generating accreditation evidence. -->
 <!-- UPDATE 2025-10-12: `pip install -e .[analytics-visual]` provides the plotting stack (matplotlib/seaborn) when enabling visual chart outputs without adding global dependencies. -->
@@ -121,10 +121,17 @@ This keeps the suite exports and analytics reports in sync with every build. For
 iterate over directories or use multiple CLI invocations with different `--suite-root` values.
 
 ## Added 2025-10-12 – Reporting Verification Checklist
-- After generating reports, open `consolidated/analysis_config.json` and confirm `plugin_summary` enumerates expected middleware, metrics, and sinks (`src/elspeth/tools/reporting.py:83`).
-- Validate that `consolidated/validation_results.json` captures suite warnings or errors emitted by `validate_suite`; accreditation reviewers rely on these logs (`src/elspeth/tools/reporting.py:38`).
-- If running with `--live-outputs`, confirm repository or blob sinks remained in dry-run mode unless explicitly toggled (`src/elspeth/cli.py:344`).
-- When the visual analytics sink is enabled, review `analytics_visual.png`/`.html` and ensure HTML outputs remain self-contained (no external asset references) before distribution.
+- After generating reports, open `consolidated/analysis_config.json` and confirm `plugin_summary` enumerates expected middleware, metrics, and sinks (`src/elspeth/tools/reporting.py:83`).[^reporting-plugin-summary-2025-10-12]
+- Validate that `consolidated/validation_results.json` captures suite warnings or errors emitted by `validate_suite`; accreditation reviewers rely on these logs (`src/elspeth/tools/reporting.py:38`).[^reporting-validation-2025-10-12]
+- If running with `--live-outputs`, confirm repository or blob sinks remained in dry-run mode unless explicitly toggled (`src/elspeth/cli.py:344`).[^reporting-live-outputs-2025-10-12]
+- When the visual analytics sink is enabled, review `analytics_visual.png`/`.html` and ensure HTML outputs remain self-contained (no external asset references) before distribution.[^reporting-visual-2025-10-12]
 
 ## Update History
 - 2025-10-12 – Documented dependency extras interplay, analytics null-handling, visual chart outputs, and a post-run verification checklist for generated reports.
+- 2025-10-12 – Update 2025-10-12: Added references to dependency analysis and verification steps for analytics artefacts.
+
+[^reporting-deps-2025-10-12]: Update 2025-10-12: Dependency requirements align with docs/architecture/dependency-analysis.md (Optional Extras).
+[^reporting-plugin-summary-2025-10-12]: Update 2025-10-12: Plugin summary expectations tie to docs/architecture/component-diagram.md (Update 2025-10-12: Plugin Registry).
+[^reporting-validation-2025-10-12]: Update 2025-10-12: Validation outputs linked to docs/architecture/configuration-security.md (Update 2025-10-12: Suite Defaults).
+[^reporting-live-outputs-2025-10-12]: Update 2025-10-12: Dry-run considerations covered in docs/architecture/threat-surfaces.md (Update 2025-10-12: Repository Interfaces).
+[^reporting-visual-2025-10-12]: Update 2025-10-12: Visual sink guidance matches docs/architecture/security-controls.md (Update 2025-10-12: Output Sanitisation).

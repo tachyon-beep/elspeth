@@ -85,7 +85,7 @@ Refer to `notes/config-migration.md` for key renames. Typical steps:
 ## Analytics & Reporting
 - Configure experiment-level metrics via `row_plugins`, `aggregator_plugins`, and `baseline_plugins`.
 - `analytics_report` sink writes JSON/Markdown summaries of results, aggregators, and baseline comparisons.
-- Sample configuration: `config/sample_suite/` demonstrates early stop, analytics, and reporting sinks.
+- Sample configuration: `config/sample_suite/` demonstrates early stop, analytics, and reporting sinks.[^migration-sample-suite-2025-10-12]
 <!-- UPDATE 2025-10-12: Suite reporting commands (`--reports-dir`) now generate comparative analysis, validation summaries, and recommendations mirroring legacy Excel dashboards (`src/elspeth/tools/reporting.py:33`). -->
 
 ## Azure-Specific Features
@@ -112,7 +112,7 @@ Refer to `notes/config-migration.md` for key renames. Typical steps:
 - Unit tests in `tests/` illustrate configuration patterns and middleware/sink behavior.
 
 ## Added 2025-10-12 – Concurrency & Early-stop Parity Checklist
-- Enable threaded execution by defining:
+- Enable threaded execution by defining:[^migration-concurrency-2025-10-12]
   ```yaml
   concurrency:
     enabled: true
@@ -124,7 +124,7 @@ Refer to `notes/config-migration.md` for key renames. Typical steps:
     field: APPID
   ```
   This mirrors the legacy runner’s parallel mode and resume semantics (`src/elspeth/core/experiments/runner.py:365`, `src/elspeth/core/experiments/runner.py:280`).
-- Map legacy early-stop flags (`runner.earlyStop`) to the normalized plugin definition:
+- Map legacy early-stop flags (`runner.earlyStop`) to the normalized plugin definition:[^migration-early-stop-2025-10-12]
   ```yaml
   early_stop_plugins:
     - name: threshold
@@ -135,7 +135,13 @@ Refer to `notes/config-migration.md` for key renames. Typical steps:
         min_rows: 3
   ```
   (`src/elspeth/plugins/experiments/early_stop.py:17`, `src/elspeth/core/experiments/plugin_registry.py:298`).
-- Translate analytics/reporting scripts to CLI calls that include `--reports-dir` so consolidated JSON, Markdown, and Excel assets replace bespoke notebook workflows (`src/elspeth/cli.py:240`, `src/elspeth/tools/reporting.py:94`).
+- Translate analytics/reporting scripts to CLI calls that include `--reports-dir` so consolidated JSON, Markdown, and Excel assets replace bespoke notebook workflows (`src/elspeth/cli.py:240`, `src/elspeth/tools/reporting.py:94`).[^migration-suite-reporting-2025-10-12]
 
 ## Update History
 - 2025-10-12 – Documented concurrency, checkpoint, early-stop migration steps and noted suite reporting parity with legacy dashboards.
+- 2025-10-12 – Update 2025-10-12: Added references to sample suites, concurrency governance, and suite reporting CLI flows.
+
+[^migration-sample-suite-2025-10-12]: Update 2025-10-12: Sample suite coverage aligns with docs/reporting-and-suite-management.md (Update 2025-10-12: Suite Report Generator).
+[^migration-concurrency-2025-10-12]: Update 2025-10-12: Concurrency guidance ties to docs/architecture/data-flow-diagrams.md (Update 2025-10-12: Parallel Execution Gate).
+[^migration-early-stop-2025-10-12]: Update 2025-10-12: Early-stop plugins normalised per docs/architecture/plugin-security-model.md (Update 2025-10-12: Early-Stop Lifecycle).
+[^migration-suite-reporting-2025-10-12]: Update 2025-10-12: Suite reporting flows elaborated in docs/reporting-and-suite-management.md (Update 2025-10-12: Suite Export Tooling).

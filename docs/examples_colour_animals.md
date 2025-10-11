@@ -10,7 +10,7 @@ This example drives a locally hosted OpenAI-compatible model (running on `http:/
    python3 -m venv .venv
    source .venv/bin/activate
    pip install -e .[dev]
-   pip install matplotlib seaborn  # optional for report visuals
+   pip install matplotlib seaborn  # optional for report visuals[^colour-visual-deps-2025-10-12]
    ```
 
 ## Dataset
@@ -64,7 +64,7 @@ python -m elspeth.cli \
 
 ## Optional reporting
 
-To produce consolidated reports instead (Markdown/JSON/Excel/PNG), first install pandas + openpyxl + matplotlib as above, then run:
+To produce consolidated reports instead (Markdown/JSON/Excel/PNG), first install pandas + openpyxl + matplotlib as above, then run:[^colour-reporting-2025-10-12]
 
 ```bash
 python -m elspeth.cli \
@@ -81,3 +81,7 @@ If the endpoint requires a bearer token, expose it via environment variable and 
 
 ## Update History
 - 2025-10-12 – Documented retry/rate-limit tweaks for the colour→animal example, noted optional analytics/visual sinks, and confirmed reporting workflow alignment.
+- 2025-10-12 – Update 2025-10-12: Added dependency and reporting cross-references for the colour example.
+
+[^colour-visual-deps-2025-10-12]: Update 2025-10-12: Visual dependencies correspond to docs/architecture/dependency-analysis.md (Optional Extras).
+[^colour-reporting-2025-10-12]: Update 2025-10-12: Reporting workflow mirrors docs/reporting-and-suite-management.md (Section 2).
