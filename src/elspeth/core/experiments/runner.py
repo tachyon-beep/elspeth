@@ -10,7 +10,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, Iterable, List, Mapping
 
 import pandas as pd
 
@@ -306,58 +306,25 @@ class ExperimentRunner:
         if self._early_stop_event and self._early_stop_event.is_set():
             return None, None
         try:
-            rendered_system_prompt = engine.render(system_template, context)
-            base_user_prompt = engine.render(user_template, context)
-            if self.criteria:
-                responses: Dict[str, Dict[str, Any]] = {}
-                for crit in self.criteria:
-                    crit_name = crit.get("name") or crit.get("template", "criteria")
-                    prompt_template = criteria_templates[crit_name]
-                    user_prompt = engine.render(prompt_template, context, extra={"criteria": crit_name})
-                    response = self._execute_llm(
-                        user_prompt,
-                        {"row_id": row.get("APPID"), "criteria": crit_name},
-                        system_prompt=rendered_system_prompt,
-                        row_context=context,
-                    )
-                    responses[crit_name] = response
-                first_response = next(iter(responses.values())) if responses else {}
-                record: Dict[str, Any] = {"row": context, "response": first_response, "responses": responses}
-                for resp in responses.values():
-                    metrics = resp.get("metrics")
-                    if metrics:
-                        record.setdefault("metrics", {}).update(metrics)
-            else:
-                user_prompt = base_user_prompt
-                response = self._execute_llm(
-                    user_prompt,
-                    {"row_id": row.get("APPID")},
-                    system_prompt=rendered_system_prompt,
-                    row_context=context,
-                )
-                record = {"row": context, "response": response}
-                metrics = response.get("metrics")
-                if metrics:
-                    record.setdefault("metrics", {}).update(metrics)
-
-            record_metadata = record.setdefault("metadata", {})
-            record_metadata.setdefault("prompt_system", rendered_system_prompt)
-            record_metadata.setdefault("prompt_user", base_user_prompt)
-            record_metadata.setdefault("prompt_system_template", system_template.raw)
-            record_metadata.setdefault("prompt_user_template", user_template.raw)
-            if getattr(user_template, "required_fields", None):
-                record_metadata.setdefault("prompt_user_fields", list(user_template.required_fields))
-
-            retry_meta = response.get("retry")
-            if retry_meta:
-                record["retry"] = retry_meta
-
-            for plugin in row_plugins:
-                derived = plugin.process_row(record["row"], record.get("responses") or {"default": record["response"]})
-                if derived:
-                    record.setdefault("metrics", {}).update(derived)
-            if self._active_security_level:
-                record["security_level"] = self._active_security_level
+            rendered_system_prompt, base_user_prompt = self._render_prompts(engine, system_template, user_template, context)
+            record, primary_response = self._collect_responses(
+                rendered_system_prompt,
+                base_user_prompt,
+                criteria_templates,
+                context,
+                row,
+                row_id,
+            )
+            self._populate_prompt_metadata(
+                record,
+                system_template,
+                user_template,
+                rendered_system_prompt,
+                base_user_prompt,
+            )
+            self._attach_retry_metadata(record, primary_response)
+            self._apply_row_plugins(record, row_plugins)
+            self._apply_security_level(record)
             return record, None
         except (PromptRenderingError, PromptValidationError) as exc:
             return None, {
@@ -379,6 +346,108 @@ class ExperimentRunner:
                     "history": history,
                 }
             return None, failure
+
+    def _render_prompts(
+        self,
+        engine: PromptEngine,
+        system_template: PromptTemplate,
+        user_template: PromptTemplate,
+        context: Dict[str, Any],
+    ) -> tuple[str, str]:
+        rendered_system_prompt = engine.render(system_template, context)
+        base_user_prompt = engine.render(user_template, context)
+        return rendered_system_prompt, base_user_prompt
+
+    def _collect_responses(
+        self,
+        rendered_system_prompt: str,
+        base_user_prompt: str,
+        criteria_templates: Dict[str, PromptTemplate],
+        context: Dict[str, Any],
+        row: pd.Series,
+        row_id: str | None,
+    ) -> tuple[Dict[str, Any], Dict[str, Any]]:
+        if self.criteria:
+            return self._collect_criteria_responses(
+                rendered_system_prompt,
+                criteria_templates,
+                context,
+                row,
+            )
+        response = self._execute_llm(
+            base_user_prompt,
+            {"row_id": row.get("APPID", row_id)},
+            system_prompt=rendered_system_prompt,
+            row_context=context,
+        )
+        record: Dict[str, Any] = {"row": context, "response": response}
+        self._merge_response_metrics(record, [response])
+        return record, response
+
+    def _collect_criteria_responses(
+        self,
+        rendered_system_prompt: str,
+        criteria_templates: Dict[str, PromptTemplate],
+        context: Dict[str, Any],
+        row: pd.Series,
+    ) -> tuple[Dict[str, Any], Dict[str, Any]]:
+        responses: Dict[str, Dict[str, Any]] = {}
+        for crit in self.criteria or []:
+            crit_name = crit.get("name") or crit.get("template", "criteria")
+            prompt_template = criteria_templates[crit_name]
+            user_prompt = prompt_template.render(context, extra={"criteria": crit_name})  # type: ignore[attr-defined]
+            response = self._execute_llm(
+                user_prompt,
+                {"row_id": row.get("APPID"), "criteria": crit_name},
+                system_prompt=rendered_system_prompt,
+                row_context=context,
+            )
+            responses[crit_name] = response
+        primary_response = next(iter(responses.values())) if responses else {}
+        record: Dict[str, Any] = {"row": context, "response": primary_response, "responses": responses}
+        self._merge_response_metrics(record, responses.values())
+        return record, primary_response
+
+    @staticmethod
+    def _merge_response_metrics(record: Dict[str, Any], responses: Iterable[Mapping[str, Any]]) -> None:
+        for resp in responses:
+            metrics = resp.get("metrics") if isinstance(resp, Mapping) else None
+            if metrics:
+                record.setdefault("metrics", {}).update(metrics)
+
+    @staticmethod
+    def _populate_prompt_metadata(
+        record: Dict[str, Any],
+        system_template: PromptTemplate,
+        user_template: PromptTemplate,
+        rendered_system_prompt: str,
+        base_user_prompt: str,
+    ) -> None:
+        metadata = record.setdefault("metadata", {})
+        metadata.setdefault("prompt_system", rendered_system_prompt)
+        metadata.setdefault("prompt_user", base_user_prompt)
+        metadata.setdefault("prompt_system_template", system_template.raw)
+        metadata.setdefault("prompt_user_template", user_template.raw)
+        required = getattr(user_template, "required_fields", None)
+        if required:
+            metadata.setdefault("prompt_user_fields", list(required))
+
+    @staticmethod
+    def _attach_retry_metadata(record: Dict[str, Any], response: Mapping[str, Any]) -> None:
+        retry_meta = response.get("retry") if isinstance(response, Mapping) else None
+        if retry_meta:
+            record["retry"] = retry_meta
+
+    def _apply_row_plugins(self, record: Dict[str, Any], row_plugins: List[RowExperimentPlugin]) -> None:
+        responses = record.get("responses") or {"default": record.get("response")}
+        for plugin in row_plugins:
+            derived = plugin.process_row(record["row"], responses)
+            if derived:
+                record.setdefault("metrics", {}).update(derived)
+
+    def _apply_security_level(self, record: Dict[str, Any]) -> None:
+        if self._active_security_level:
+            record["security_level"] = self._active_security_level
 
     def _should_run_parallel(self, config: Dict[str, Any], backlog_size: int) -> bool:
         if not config or not config.get("enabled"):
