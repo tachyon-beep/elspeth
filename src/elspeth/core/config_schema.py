@@ -7,7 +7,7 @@ from typing import Any, Mapping
 from elspeth.core.validation import ConfigurationError, validate_schema
 
 _PLUGIN_DEF_SCHEMA = {
-    "type": "object",
+    """Base schema for plugin definitions referencing a name and options.""" "type": "object",
     "properties": {
         "name": {"type": "string"},
         "options": {"type": "object"},
@@ -18,7 +18,7 @@ _PLUGIN_DEF_SCHEMA = {
 
 
 EXPERIMENT_CONFIG_SCHEMA = {
-    "type": "object",
+    """JSON schema describing individual experiment configuration entries.""" "type": "object",
     "required": ["name", "temperature", "max_tokens", "enabled"],
     "properties": {
         "name": {"type": "string", "minLength": 1},

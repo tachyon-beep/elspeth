@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Any, Dict, Mapping
+from typing import Any, Mapping
 
-from jinja2 import Environment, StrictUndefined, Template
+from jinja2 import Environment, StrictUndefined
 from jinja2 import meta as jinja_meta
 
 from .exceptions import PromptValidationError

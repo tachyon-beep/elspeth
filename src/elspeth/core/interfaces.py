@@ -2,24 +2,24 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Dict, List, Mapping, Protocol, runtime_checkable
 
 import pandas as pd
 
 
 @runtime_checkable
-class DataSource(Protocol):
+class DataSource(Protocol):  # pylint: disable=too-few-public-methods
     """Loads experiment input data as a pandas DataFrame."""
 
     def load(self) -> pd.DataFrame:
         """Return the experiment dataset."""
 
-        ...
+        raise NotImplementedError
 
 
 @runtime_checkable
-class LLMClientProtocol(Protocol):
+class LLMClientProtocol(Protocol):  # pylint: disable=too-few-public-methods
     """Normalized interface for LLM interactions."""
 
     def generate(
@@ -31,17 +31,17 @@ class LLMClientProtocol(Protocol):
     ) -> Dict[str, Any]:
         """Invoke the model and return a response payload."""
 
-        ...
+        raise NotImplementedError
 
 
 @runtime_checkable
-class ResultSink(Protocol):
+class ResultSink(Protocol):  # pylint: disable=too-few-public-methods
     """Receives experiment results and persists them externally."""
 
     def write(self, results: Dict[str, Any], *, metadata: Dict[str, Any] | None = None) -> None:
         """Persist experiment results."""
 
-        ...
+        raise NotImplementedError
 
     def produces(self) -> List["ArtifactDescriptor"]:  # pragma: no cover - optional
         """Describe artifacts the sink emits, enabling chaining."""
@@ -80,7 +80,7 @@ class ExperimentContext:
 
 
 @dataclass
-class ArtifactDescriptor:
+class ArtifactDescriptor:  # pylint: disable=too-many-instance-attributes
     """Describes an artifact produced by a sink for dependency resolution."""
 
     name: str
@@ -92,22 +92,18 @@ class ArtifactDescriptor:
 
 
 @dataclass
-class Artifact:
+class Artifact:  # pylint: disable=too-many-instance-attributes
     """Concrete artifact emitted by a sink during execution."""
 
     id: str
     type: str
     path: str | None = None
     payload: Any | None = None
-    metadata: Dict[str, Any] = None  # type: ignore[assignment]
+    metadata: Dict[str, Any] = field(default_factory=dict)
     schema_id: str | None = None
     produced_by: str | None = None
     persist: bool = False
     security_level: str | None = None
-
-    def __post_init__(self) -> None:
-        if self.metadata is None:
-            self.metadata = {}
 
 
 __all__ = [

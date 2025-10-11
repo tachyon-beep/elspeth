@@ -38,7 +38,7 @@ def resolve_security_level(*levels: str | None) -> str:
     normalized = [normalize_security_level(level) for level in levels if level is not None]
     if not normalized:
         return SECURITY_LEVELS[0]
-    return max(normalized, key=lambda lvl: SECURITY_LEVELS.index(lvl))
+    return max(normalized, key=SECURITY_LEVELS.index)
 
 
 __all__ = [

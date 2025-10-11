@@ -36,7 +36,7 @@ class PromptTemplate:
         except UndefinedError as exc:  # pragma: no cover - exercised via unit tests
             raise PromptRenderingError(str(exc), name=self.name) from exc
 
-    def clone(
+    def clone(  # pylint: disable=too-many-arguments
         self,
         *,
         name: str | None = None,

@@ -15,6 +15,7 @@ VALID_REQUEST_MODES = {"single", "all"}
 logger = logging.getLogger(__name__)
 
 
+# pylint: disable=too-few-public-methods
 @dataclass
 class ArtifactRequest:
     """Declarative request describing how a sink consumes artifacts."""
@@ -53,6 +54,7 @@ class ArtifactRequestParser:
             raise ValueError(f"Unsupported artifact request mode '{mode}'")
 
 
+# pylint: disable=too-many-instance-attributes
 @dataclass
 class SinkBinding:
     """Container tying a sink instance to its configuration metadata."""
@@ -67,6 +69,7 @@ class SinkBinding:
     security_level: str | None = None
 
 
+# pylint: disable=too-few-public-methods
 class ArtifactStore:
     """Holds produced artifacts for downstream sinks."""
 
@@ -139,7 +142,7 @@ class ArtifactStore:
         return self._by_id.items()
 
 
-class ArtifactPipeline:
+class ArtifactPipeline:  # pylint: disable=too-many-instance-attributes
     """Resolves sink execution order based on declared artifact dependencies."""
 
     def __init__(self, bindings: List[SinkBinding]) -> None:
@@ -192,7 +195,7 @@ class ArtifactPipeline:
             raise PermissionError(f"Sink '{consumer.id}' cannot depend on '{producer.id}' due to security level mismatch")
 
     @staticmethod
-    def _resolve_order(bindings: List[SinkBinding]) -> List[SinkBinding]:
+    def _resolve_order(bindings: List[SinkBinding]) -> List[SinkBinding]:  # pylint: disable=too-many-branches,too-many-locals
         """Topologically sort bindings based on artifact dependencies."""
 
         if not bindings:
@@ -264,7 +267,9 @@ class ArtifactPipeline:
 
         return ordered
 
-    def execute(self, payload: Dict[str, Any], metadata: Mapping[str, Any] | None = None) -> ArtifactStore:
+    def execute(
+        self, payload: Dict[str, Any], metadata: Mapping[str, Any] | None = None
+    ) -> ArtifactStore:  # pylint: disable=too-many-locals
         """Run all sinks in dependency order, producing the final artifact store."""
 
         store = ArtifactStore()
