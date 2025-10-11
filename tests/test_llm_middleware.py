@@ -4,11 +4,11 @@ import pandas as pd
 import pytest
 import requests
 
+from elspeth.core.experiments.config import ExperimentConfig, ExperimentSuite
+from elspeth.core.experiments.runner import ExperimentRunner
+from elspeth.core.experiments.suite_runner import ExperimentSuiteRunner
 from elspeth.core.llm.middleware import LLMRequest
 from elspeth.core.llm.registry import create_middlewares
-from elspeth.core.experiments.runner import ExperimentRunner
-from elspeth.core.experiments.config import ExperimentSuite, ExperimentConfig
-from elspeth.core.experiments.suite_runner import ExperimentSuiteRunner
 from elspeth.plugins.llms.middleware_azure import AzureEnvironmentMiddleware
 
 
@@ -61,9 +61,7 @@ def test_middleware_chain(monkeypatch):
 
 
 def test_prompt_shield_blocks():
-    middlewares = create_middlewares(
-        [{"name": "prompt_shield", "options": {"denied_terms": ["forbidden"], "on_violation": "abort"}}]
-    )
+    middlewares = create_middlewares([{"name": "prompt_shield", "options": {"denied_terms": ["forbidden"], "on_violation": "abort"}}])
 
     runner = ExperimentRunner(
         llm_client=DummyLLM(),
@@ -552,6 +550,8 @@ def test_azure_environment_middleware_logs_aggregate_table(monkeypatch):
     )
 
     assert "experiment_exp_aggregates" in run.tables
+
+
 def test_suite_runner_deduplicates_shared_middleware(monkeypatch):
     events = []
 

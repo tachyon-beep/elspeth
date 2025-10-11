@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from typing import Any, Callable, Dict, Mapping
 
-from .middleware import LLMMiddleware
 from elspeth.core.validation import ConfigurationError, validate_schema
+
+from .middleware import LLMMiddleware
 
 
 class _Factory:

@@ -23,9 +23,7 @@ def _split_bom(value: str) -> tuple[str, str]:
     return "", value
 
 
-def should_sanitize(
-    value: Any, *, guard: str | None = "'", aggressive: bool = False
-) -> bool:
+def should_sanitize(value: Any, *, guard: str | None = "'", aggressive: bool = False) -> bool:
     """Return True when the provided value should be prefixed with the guard."""
 
     if not isinstance(value, str) or value == "":
@@ -39,9 +37,7 @@ def should_sanitize(
     return remainder[0] in DANGEROUS_PREFIXES
 
 
-def sanitize_cell(
-    value: Any, *, guard: str | None = "'", aggressive: bool = False
-) -> Any:
+def sanitize_cell(value: Any, *, guard: str | None = "'", aggressive: bool = False) -> Any:
     """Return a sanitised value suitable for CSV/Excel output."""
 
     if not isinstance(value, str) or value == "":

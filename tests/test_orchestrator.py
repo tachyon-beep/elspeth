@@ -1,16 +1,18 @@
 import pandas as pd
 
+from elspeth.core.experiments.plugin_registry import register_aggregation_plugin, register_row_plugin
 from elspeth.core.orchestrator import ExperimentOrchestrator, OrchestratorConfig
-from elspeth.core.experiments.plugin_registry import register_row_plugin, register_aggregation_plugin
 
 
 def test_orchestrator_runs(monkeypatch):
     class DummyDatasource:
         def load(self):
-            return pd.DataFrame([
-                {"APPID": "1", "name": "Alice"},
-                {"APPID": "2", "name": "Bob"},
-            ])
+            return pd.DataFrame(
+                [
+                    {"APPID": "1", "name": "Alice"},
+                    {"APPID": "2", "name": "Bob"},
+                ]
+            )
 
     class DummyLLM:
         def generate(self, *, system_prompt, user_prompt, metadata=None):
@@ -45,9 +47,11 @@ def test_orchestrator_runs(monkeypatch):
 def test_orchestrator_with_criteria(monkeypatch):
     class DummyDatasource:
         def load(self):
-            return pd.DataFrame([
-                {"APPID": "1", "name": "Alice"},
-            ])
+            return pd.DataFrame(
+                [
+                    {"APPID": "1", "name": "Alice"},
+                ]
+            )
 
     class DummyLLM:
         def __init__(self):

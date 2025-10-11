@@ -2,11 +2,7 @@ import math
 
 import pytest
 
-from elspeth.core.experiments.plugin_registry import (
-    create_row_plugin,
-    create_aggregation_plugin,
-    create_baseline_plugin,
-)
+from elspeth.core.experiments.plugin_registry import create_aggregation_plugin, create_baseline_plugin, create_row_plugin
 
 
 @pytest.mark.parametrize(
@@ -84,16 +80,20 @@ def test_score_delta_baseline_plugin():
     agg_plugin = create_aggregation_plugin({"name": "score_stats"})
     baseline_payload = {
         "aggregates": {
-            "score_stats": agg_plugin.finalize([
-                {"metrics": {"scores": {"crit": 0.5}}},
-            ])
+            "score_stats": agg_plugin.finalize(
+                [
+                    {"metrics": {"scores": {"crit": 0.5}}},
+                ]
+            )
         }
     }
     variant_payload = {
         "aggregates": {
-            "score_stats": agg_plugin.finalize([
-                {"metrics": {"scores": {"crit": 0.8}}},
-            ])
+            "score_stats": agg_plugin.finalize(
+                [
+                    {"metrics": {"scores": {"crit": 0.8}}},
+                ]
+            )
         }
     }
 
@@ -183,6 +183,7 @@ def test_score_cliffs_delta():
 
 def test_score_assumptions_baseline_plugin():
     import scipy.stats  # noqa: F401
+
     plugin = create_baseline_plugin({"name": "score_assumptions"})
     baseline = {
         "results": [
@@ -249,9 +250,7 @@ def test_score_significance_with_adjustments():
             {"metrics": {"scores": {"crit": 5}}},
         ]
     }
-    plugin = create_baseline_plugin(
-        {"name": "score_significance", "options": {"adjustment": "bonferroni", "family_size": 10}}
-    )
+    plugin = create_baseline_plugin({"name": "score_significance", "options": {"adjustment": "bonferroni", "family_size": 10}})
     result = plugin.compare(baseline, variant)
     assert "adjusted_p_value" in result["crit"]
 
@@ -318,7 +317,7 @@ def test_score_agreement_on_error_skip(monkeypatch):
         raise RuntimeError("boom")
 
     monkeypatch.setattr(metrics_mod, "_collect_scores_by_criterion", boom)
-    assert plugin.finalize([{ }]) == {}
+    assert plugin.finalize([{}]) == {}
 
 
 def test_score_bayes_baseline_plugin(monkeypatch):
@@ -411,7 +410,7 @@ def test_score_power_on_error_skip(monkeypatch):
         raise RuntimeError("boom")
 
     monkeypatch.setattr(metrics_mod, "_collect_scores_by_criterion", boom)
-    assert plugin.finalize([{ }]) == {}
+    assert plugin.finalize([{}]) == {}
 
 
 def test_score_distribution_baseline_plugin(monkeypatch):

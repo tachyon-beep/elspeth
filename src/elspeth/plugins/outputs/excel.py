@@ -19,9 +19,7 @@ def _load_workbook_dependencies():  # type: ignore[return-any]
     try:
         from openpyxl import Workbook  # type: ignore
     except ImportError as exc:  # pragma: no cover - handled during sink initialisation
-        raise RuntimeError(
-            "ExcelResultSink requires the 'openpyxl' package. Install with 'pip install openpyxl'"
-        ) from exc
+        raise RuntimeError("ExcelResultSink requires the 'openpyxl' package. Install with 'pip install openpyxl'") from exc
     return Workbook
 
 
@@ -61,9 +59,7 @@ class ExcelResultSink(ResultSink):
         self.sanitize_formulas = sanitize_formulas
         self.sanitize_guard = sanitize_guard
         if not self.sanitize_formulas:
-            logger.warning(
-                "Excel sink sanitization disabled; outputs may trigger spreadsheet formulas."
-            )
+            logger.warning("Excel sink sanitization disabled; outputs may trigger spreadsheet formulas.")
         # Ensure dependency availability early for fast failure when configured incorrectly.
         self._workbook_factory = _load_workbook_dependencies()
         self._last_workbook_path: str | None = None
@@ -74,9 +70,7 @@ class ExcelResultSink(ResultSink):
         }
 
     # ------------------------------------------------------------------ public API
-    def write(
-        self, results: Dict[str, Any], *, metadata: Dict[str, Any] | None = None
-    ) -> None:
+    def write(self, results: Dict[str, Any], *, metadata: Dict[str, Any] | None = None) -> None:
         metadata = metadata or {}
         timestamp = datetime.now(timezone.utc)
         try:
@@ -95,9 +89,7 @@ class ExcelResultSink(ResultSink):
             workbook.save(path)
             self._last_workbook_path = str(path)
             if metadata:
-                self._security_level = normalize_security_level(
-                    metadata.get("security_level")
-                )
+                self._security_level = normalize_security_level(metadata.get("security_level"))
         except Exception as exc:
             if self.on_error == "skip":
                 logger.warning("Excel sink failed; skipping workbook creation: %s", exc)
@@ -116,18 +108,14 @@ class ExcelResultSink(ResultSink):
         return self._sanitize_value(value)
 
     def _resolve_path(self, metadata: Mapping[str, Any], timestamp: datetime) -> Path:
-        name = self.workbook_name or str(
-            metadata.get("experiment") or metadata.get("name") or "experiment"
-        )
+        name = self.workbook_name or str(metadata.get("experiment") or metadata.get("name") or "experiment")
         if name.endswith(".xlsx"):
             name = name.removesuffix(".xlsx")
         if self.timestamped:
             name = f"{name}_{timestamp.strftime('%Y%m%dT%H%M%SZ')}"
         return self.base_path / f"{name}.xlsx"
 
-    def _populate_results_sheet(
-        self, workbook, entries: Iterable[Mapping[str, Any]]
-    ) -> None:  # type: ignore[no-untyped-def]
+    def _populate_results_sheet(self, workbook, entries: Iterable[Mapping[str, Any]]) -> None:  # type: ignore[no-untyped-def]
         sheet = workbook.active
         sheet.title = self.results_sheet
 
@@ -137,9 +125,7 @@ class ExcelResultSink(ResultSink):
             headers = sorted({key for row in flattened for key in row.keys()})
             sheet.append([self._sanitize_header(column) for column in headers])
             for row in flattened:
-                sheet.append(
-                    [self._sanitize_value(row.get(column)) for column in headers]
-                )
+                sheet.append([self._sanitize_value(row.get(column)) for column in headers])
         else:
             sheet.append([self._sanitize_value("no_results")])
 
@@ -199,11 +185,7 @@ class ExcelResultSink(ResultSink):
     ) -> Dict[str, Any]:
         manifest: Dict[str, Any] = {
             "generated_at": timestamp.isoformat(),
-            "rows": (
-                len(results.get("results", []))
-                if isinstance(results.get("results"), list)
-                else 0
-            ),
+            "rows": (len(results.get("results", [])) if isinstance(results.get("results"), list) else 0),
             "metadata": dict(metadata),
             "sanitization": self._sanitization,
         }
@@ -215,17 +197,13 @@ class ExcelResultSink(ResultSink):
 
     def produces(self):  # pragma: no cover - placeholder for artifact chaining
         return [
-            ArtifactDescriptor(
-                name="excel", type="file/xlsx", persist=True, alias="excel"
-            ),
+            ArtifactDescriptor(name="excel", type="file/xlsx", persist=True, alias="excel"),
         ]
 
     def consumes(self):  # pragma: no cover - placeholder for artifact chaining
         return []
 
-    def finalize(
-        self, artifacts, *, metadata=None
-    ):  # pragma: no cover - optional cleanup
+    def finalize(self, artifacts, *, metadata=None):  # pragma: no cover - optional cleanup
         return None
 
     def collect_artifacts(self) -> Dict[str, Artifact]:  # pragma: no cover

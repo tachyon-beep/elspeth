@@ -64,3 +64,12 @@ exclude = ["tests", "old", "notes", "config"]
 [tool.pytest.ini_options]
 addopts = "-ra --cov=elspeth --cov-report=term-missing --cov-report=xml:coverage.xml"
 testpaths = ["tests"]
+
+[tool.black]
+line-length = 140
+target-version = ["py312"]
+
+[tool.isort]
+profile = "black"
+line_length = 140
+known_first_party = ["elspeth"]

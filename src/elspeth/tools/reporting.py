@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Mapping
 
-from elspeth.core.experiments.config import ExperimentSuite, ExperimentConfig
+from elspeth.core.experiments.config import ExperimentConfig, ExperimentSuite
 from elspeth.core.experiments.tools import export_suite_configuration, summarize_suite
 from elspeth.core.validation import validate_suite
 

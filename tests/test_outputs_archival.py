@@ -55,9 +55,7 @@ def test_excel_result_sink_writes_workbook(tmp_path, assert_sanitized_artifact):
     assert formula_cell.value == "'=SUM(1,2)"
 
     manifest_sheet = wb[sink.manifest_sheet]
-    manifest_values = {
-        row[0].value: row[1].value for row in manifest_sheet.iter_rows(min_row=2)
-    }
+    manifest_values = {row[0].value: row[1].value for row in manifest_sheet.iter_rows(min_row=2)}
     assert manifest_values["rows"] == 1
     assert json.loads(manifest_values["metadata"])["experiment"] == "exp1"
     sanitization_meta = json.loads(manifest_values["sanitization"])

@@ -1,9 +1,10 @@
 from pathlib import Path
+
 import pandas as pd
 import pytest
 
-from elspeth.core.registry import registry
 from elspeth.core.experiments import plugin_registry
+from elspeth.core.registry import registry
 from elspeth.core.validation import ConfigurationError
 
 
@@ -129,6 +130,7 @@ def test_normalize_early_stop_definitions_rejects_invalid_types():
         plugin_registry.normalize_early_stop_definitions("invalid")
     with pytest.raises(ConfigurationError):
         plugin_registry.normalize_early_stop_definitions([1, 2])
+
 
 def test_registry_validate_sink_schema_errors():
     with pytest.raises(ConfigurationError):

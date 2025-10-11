@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from elspeth.plugins.outputs.repository import GitHubRepoSink, AzureDevOpsRepoSink
+from elspeth.plugins.outputs.repository import AzureDevOpsRepoSink, GitHubRepoSink
 
 
 class DummyResponse:

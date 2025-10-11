@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Dict, Optional, Any
+from typing import Any, Dict, Optional
 
 
 class CostTracker:
@@ -38,9 +38,7 @@ class FixedPriceCostTracker(CostTracker):
         prompt_tokens = usage.get("prompt_tokens", 0)
         completion_tokens = usage.get("completion_tokens", 0)
 
-        cost = (
-            prompt_tokens * self.prompt_token_price + completion_tokens * self.completion_token_price
-        )
+        cost = prompt_tokens * self.prompt_token_price + completion_tokens * self.completion_token_price
 
         self.total_prompt_tokens += prompt_tokens
         self.total_completion_tokens += completion_tokens

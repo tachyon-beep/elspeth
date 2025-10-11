@@ -1,9 +1,9 @@
 import pandas as pd
 
-from elspeth.core.experiments.runner import ExperimentRunner
-from elspeth.core.experiments.plugin_registry import create_row_plugin, create_early_stop_plugin
-from elspeth.plugins.llms.mock import MockLLMClient
 from elspeth.cli import _result_to_row
+from elspeth.core.experiments.plugin_registry import create_early_stop_plugin, create_row_plugin
+from elspeth.core.experiments.runner import ExperimentRunner
+from elspeth.plugins.llms.mock import MockLLMClient
 
 
 class DummySink:

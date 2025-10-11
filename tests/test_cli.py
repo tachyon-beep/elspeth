@@ -5,10 +5,10 @@ import pandas as pd
 import pytest
 
 import elspeth.cli as cli
-from elspeth.core.orchestrator import OrchestratorConfig
 from elspeth.core.experiments.plugin_registry import register_row_plugin
+from elspeth.core.orchestrator import OrchestratorConfig
+from elspeth.core.validation import SuiteValidationReport, ValidationReport
 from elspeth.plugins.outputs.csv_file import CsvResultSink
-from elspeth.core.validation import ValidationReport, SuiteValidationReport
 
 
 @pytest.fixture

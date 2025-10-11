@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol, runtime_checkable, Any, Dict, Iterable, List, Mapping
+from typing import Any, Dict, Iterable, List, Mapping, Protocol, runtime_checkable
 
 import pandas as pd
 
@@ -12,8 +12,7 @@ import pandas as pd
 class DataSource(Protocol):
     """Loads experiment input data as a pandas DataFrame."""
 
-    def load(self) -> pd.DataFrame:
-        ...
+    def load(self) -> pd.DataFrame: ...
 
 
 @runtime_checkable
@@ -26,16 +25,14 @@ class LLMClientProtocol(Protocol):
         system_prompt: str,
         user_prompt: str,
         metadata: Dict[str, Any] | None = None,
-    ) -> Dict[str, Any]:
-        ...
+    ) -> Dict[str, Any]: ...
 
 
 @runtime_checkable
 class ResultSink(Protocol):
     """Receives experiment results and persists them externally."""
 
-    def write(self, results: Dict[str, Any], *, metadata: Dict[str, Any] | None = None) -> None:
-        ...
+    def write(self, results: Dict[str, Any], *, metadata: Dict[str, Any] | None = None) -> None: ...
 
     def produces(self) -> List["ArtifactDescriptor"]:  # pragma: no cover - optional
         return []
@@ -43,7 +40,9 @@ class ResultSink(Protocol):
     def consumes(self) -> List[str]:  # pragma: no cover - optional
         return []
 
-    def finalize(self, artifacts: Mapping[str, "Artifact"], *, metadata: Dict[str, Any] | None = None) -> None:  # pragma: no cover - optional
+    def finalize(
+        self, artifacts: Mapping[str, "Artifact"], *, metadata: Dict[str, Any] | None = None
+    ) -> None:  # pragma: no cover - optional
         return None
 
     def prepare_artifacts(self, artifacts: Mapping[str, List["Artifact"]]) -> None:  # pragma: no cover - optional

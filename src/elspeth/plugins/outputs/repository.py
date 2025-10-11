@@ -4,19 +4,18 @@ from __future__ import annotations
 
 import base64
 import json
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional
 
-import logging
-
 import requests
 
 from elspeth.core.interfaces import ResultSink
 
-
 logger = logging.getLogger(__name__)
+
 
 def _default_context(metadata: Mapping[str, Any], timestamp: datetime) -> Dict[str, Any]:
     context = {k: v for k, v in metadata.items() if isinstance(k, str)}
@@ -324,9 +323,7 @@ class AzureDevOpsRepoSink(_RepoSinkBase):
         expected_status = expected_status or {200, 201}
         response = self.session.request(method, url, headers=self._headers(), **kwargs)
         if response.status_code not in expected_status:
-            raise RuntimeError(
-                f"Azure DevOps API call failed ({response.status_code}): {response.text}"
-            )
+            raise RuntimeError(f"Azure DevOps API call failed ({response.status_code}): {response.text}")
         return response
 
     def _ensure_path(self, path: str) -> str:

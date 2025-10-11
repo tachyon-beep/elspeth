@@ -1,7 +1,7 @@
 """LLM middleware utilities."""
 
-from .middleware import LLMRequest, LLMMiddleware
-from .registry import register_middleware, create_middlewares
+from .middleware import LLMMiddleware, LLMRequest
+from .registry import create_middlewares, register_middleware
 
 __all__ = [
     "LLMRequest",

@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import base64
-import hmac
 import hashlib
+import hmac
 from typing import Literal
 
 Algorithm = Literal["hmac-sha256", "hmac-sha512"]

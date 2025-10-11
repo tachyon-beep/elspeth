@@ -1,7 +1,7 @@
 from pathlib import Path
 
-from elspeth.core.validation import validate_settings, validate_suite, ValidationReport
 from elspeth.core import validation
+from elspeth.core.validation import ValidationReport, validate_settings, validate_suite
 
 
 def write_settings(path: Path, content: str) -> None:
@@ -255,6 +255,7 @@ def test_validate_settings_prompt_pack_sinks_must_be_list(tmp_path):
     report = validate_settings(config_path)
     messages = [msg.format() for msg in report.errors]
     assert any("prompt_pack:bad.sink" in message and "Expected a list" in message for message in messages)
+
 
 def test_validate_settings_suite_defaults_invalid_sink(tmp_path):
     config_path = tmp_path / "settings.yaml"

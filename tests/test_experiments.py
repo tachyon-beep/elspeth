@@ -1,18 +1,17 @@
-from pathlib import Path
 import threading
+import time
+from pathlib import Path
 
 import pandas as pd
 import pytest
-import time
 
+from elspeth.core.controls.cost_tracker import FixedPriceCostTracker
+from elspeth.core.controls.rate_limit import NoopRateLimiter
+from elspeth.core.experiments import plugin_registry as exp_plugin_registry
 from elspeth.core.experiments.config import ExperimentSuite
+from elspeth.core.experiments.plugins import AggregationExperimentPlugin, RowExperimentPlugin
 from elspeth.core.experiments.runner import ExperimentRunner
 from elspeth.core.experiments.suite_runner import ExperimentSuiteRunner
-from elspeth.core.experiments import plugin_registry as exp_plugin_registry
-from elspeth.core.experiments.plugins import RowExperimentPlugin, AggregationExperimentPlugin
-from elspeth.core.controls.rate_limit import NoopRateLimiter
-from elspeth.core.controls.cost_tracker import FixedPriceCostTracker
-from elspeth.core.controls.cost_tracker import FixedPriceCostTracker
 
 
 def test_experiment_suite_load(tmp_path):
@@ -386,11 +385,14 @@ def test_suite_runner_with_plugin_definitions(tmp_path, monkeypatch):
     import pandas as pd
 
     df = pd.DataFrame({"APPID": ["1"]})
-    results = runner.run(df, defaults={
-        "prompt_system": "sys",
-        "prompt_template": "Exp {APPID}",
-        "prompt_fields": ["APPID"],
-    })
+    results = runner.run(
+        df,
+        defaults={
+            "prompt_system": "sys",
+            "prompt_template": "Exp {APPID}",
+            "prompt_fields": ["APPID"],
+        },
+    )
 
     baseline_payload = results["baseline"]["payload"]
     variant_payload = results["variant"]["payload"]
@@ -474,6 +476,7 @@ def test_checkpoint_skips_processed(tmp_path):
     class DummySink:
         def write(self, results, *, metadata=None):
             pass
+
         def collect_artifacts(self):
             return {}
 
@@ -547,8 +550,8 @@ def test_experiment_runner_early_stop():
         def generate(self, *, system_prompt, user_prompt, metadata=None):
             self.calls += 1
             return {
-                'content': user_prompt,
-                'metrics': {'score': float(self.calls)},
+                "content": user_prompt,
+                "metrics": {"score": float(self.calls)},
             }
 
     class DummySink:
@@ -558,22 +561,22 @@ def test_experiment_runner_early_stop():
     runner = ExperimentRunner(
         llm_client=MetricsLLM(),
         sinks=[DummySink()],
-        prompt_system='sys',
-        prompt_template='Hello',
+        prompt_system="sys",
+        prompt_template="Hello",
         prompt_fields=[],
         early_stop_config={
-            'metric': 'score',
-            'threshold': 2,
-            'comparison': 'gte',
-            'min_rows': 2,
+            "metric": "score",
+            "threshold": 2,
+            "comparison": "gte",
+            "min_rows": 2,
         },
     )
 
-    df = pd.DataFrame({'APPID': ['1', '2', '3', '4']})
+    df = pd.DataFrame({"APPID": ["1", "2", "3", "4"]})
     payload = runner.run(df)
-    assert len(payload['results']) == 2
-    early = payload['metadata'].get('early_stop')
-    assert early and early['value'] == 2.0 and early['plugin'] == 'threshold'
+    assert len(payload["results"]) == 2
+    early = payload["metadata"].get("early_stop")
+    assert early and early["value"] == 2.0 and early["plugin"] == "threshold"
 
 
 def test_experiment_runner_early_stop_plugin_instance():
@@ -584,8 +587,8 @@ def test_experiment_runner_early_stop_plugin_instance():
         def generate(self, *, system_prompt, user_prompt, metadata=None):
             self.calls += 1
             return {
-                'content': user_prompt,
-                'metrics': {'score': float(self.calls)},
+                "content": user_prompt,
+                "metrics": {"score": float(self.calls)},
             }
 
     class DummySink:
@@ -614,15 +617,15 @@ def test_experiment_runner_early_stop_plugin_instance():
     runner = ExperimentRunner(
         llm_client=MetricsLLM(),
         sinks=[DummySink()],
-        prompt_system='sys',
-        prompt_template='Hello',
+        prompt_system="sys",
+        prompt_template="Hello",
         prompt_fields=[],
         early_stop_plugins=[plugin],
     )
 
-    df = pd.DataFrame({'APPID': ['1', '2', '3']})
+    df = pd.DataFrame({"APPID": ["1", "2", "3"]})
     payload = runner.run(df)
-    assert len(payload['results']) == 1
-    early = payload['metadata'].get('early_stop')
-    assert early and early['plugin'] == 'test_stop' and early['reason'] == 'manual'
+    assert len(payload["results"]) == 1
+    early = payload["metadata"].get("early_stop")
+    assert early and early["plugin"] == "test_stop" and early["reason"] == "manual"
     assert plugin.reset_called == 1

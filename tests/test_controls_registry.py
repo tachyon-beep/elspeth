@@ -1,16 +1,14 @@
 import pytest
 
 from elspeth.core.controls import registry as controls_registry
-from elspeth.core.controls.rate_limit import NoopRateLimiter
 from elspeth.core.controls.cost_tracker import NoopCostTracker
+from elspeth.core.controls.rate_limit import NoopRateLimiter
 from elspeth.core.validation import ConfigurationError
 
 
 def test_create_rate_limiter_validates_schema():
     with pytest.raises(ConfigurationError):
-        controls_registry.create_rate_limiter(
-            {"plugin": "fixed_window", "options": {"requests": 0, "per_seconds": 0}}
-        )
+        controls_registry.create_rate_limiter({"plugin": "fixed_window", "options": {"requests": 0, "per_seconds": 0}})
 
 
 def test_validate_rate_limiter_unknown():
@@ -32,9 +30,7 @@ def test_register_custom_rate_limiter(monkeypatch):
 
 def test_create_cost_tracker_validates_schema():
     with pytest.raises(ConfigurationError):
-        controls_registry.create_cost_tracker(
-            {"plugin": "fixed_price", "options": {"prompt_token_price": -1}}
-        )
+        controls_registry.create_cost_tracker({"plugin": "fixed_price", "options": {"prompt_token_price": -1}})
 
 
 def test_register_custom_cost_tracker():

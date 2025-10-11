@@ -5,11 +5,7 @@ import pytest
 import yaml
 
 from elspeth.core.experiments.config import ExperimentSuite
-from elspeth.core.experiments.tools import (
-    export_suite_configuration,
-    create_experiment_template,
-    summarize_suite,
-)
+from elspeth.core.experiments.tools import create_experiment_template, export_suite_configuration, summarize_suite
 
 
 def _write_experiment(root: Path, name: str, *, enabled: bool = True, is_baseline: bool = False) -> Path:

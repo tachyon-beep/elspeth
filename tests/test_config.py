@@ -1,6 +1,5 @@
-import yaml
-
 import pytest
+import yaml
 
 from elspeth.config import load_settings
 from elspeth.core.validation import ConfigurationError

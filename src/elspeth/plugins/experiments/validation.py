@@ -8,11 +8,11 @@ from typing import Any, Dict, Optional
 
 from jinja2 import Template
 
-from elspeth.core.experiments.plugins import ValidationPlugin, ValidationError
 from elspeth.core.experiments.plugin_registry import register_validation_plugin
+from elspeth.core.experiments.plugins import ValidationError, ValidationPlugin
 from elspeth.core.interfaces import LLMClientProtocol
-from elspeth.core.registry import registry
 from elspeth.core.prompts.engine import PromptEngine
+from elspeth.core.registry import registry
 
 
 def _extract_content(response: Dict[str, Any]) -> str:
@@ -55,9 +55,7 @@ class RegexValidationPlugin(ValidationPlugin):
     ) -> None:
         text = _extract_content(response)
         if not self._compiled.fullmatch(text):
-            raise ValidationError(
-                f"Response did not match required pattern '{self.pattern}'"
-            )
+            raise ValidationError(f"Response did not match required pattern '{self.pattern}'")
 
 
 class JsonValidationPlugin(ValidationPlugin):

@@ -211,9 +211,7 @@ def test_blob_result_sink_manifest_template(tmp_path, monkeypatch):
     monkeypatch.setattr(
         BlobResultSink,
         "_upload_bytes",
-        lambda self, name, data, *, content_type, upload_metadata: writes.append(
-            (name, content_type, upload_metadata, data)
-        ),
+        lambda self, name, data, *, content_type, upload_metadata: writes.append((name, content_type, upload_metadata, data)),
     )
 
     sink.write(
@@ -252,13 +250,12 @@ def test_blob_result_sink_abort_on_upload_error(tmp_path, monkeypatch):
         sink.write({"results": []}, metadata={})
 
 
-
-
 def test_blob_result_sink_missing_placeholder_raises(tmp_path):
     config_path = create_blob_config(tmp_path)
     sink = BlobResultSink(config_path=config_path, profile="default", path_template="runs/{missing}/")
     with pytest.raises(ValueError):
         sink.write({"results": []}, metadata={"experiment": "exp1"})
+
 
 def test_blob_result_sink_stage_block_failure_skip(tmp_path, monkeypatch, caplog):
     config_path = create_blob_config(tmp_path)

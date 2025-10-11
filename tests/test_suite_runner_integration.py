@@ -96,8 +96,7 @@ def test_suite_runner_executes_with_defaults_and_packs(tmp_path):
                 "name": "prompt_variants",
                 "options": {
                     "prompt_template": (
-                        "Provide a variation that keeps {{ placeholder_tokens | join(', ') }}.\\n"
-                        "Base prompt: {{ user_prompt_template }}"
+                        "Provide a variation that keeps {{ placeholder_tokens | join(', ') }}.\\n" "Base prompt: {{ user_prompt_template }}"
                     ),
                     "count": 2,
                     "max_attempts": 1,

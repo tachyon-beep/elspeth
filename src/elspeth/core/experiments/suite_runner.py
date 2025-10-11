@@ -2,25 +2,25 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import json
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Callable
+from typing import Any, Callable, Dict, List
 
-from elspeth.core.experiments.config import ExperimentSuite, ExperimentConfig
-from elspeth.core.experiments.runner import ExperimentRunner
+from elspeth.core import registry as core_registry
+from elspeth.core.controls import create_cost_tracker, create_rate_limiter
+from elspeth.core.experiments.config import ExperimentConfig, ExperimentSuite
 from elspeth.core.experiments.plugin_registry import (
-    create_row_plugin,
     create_aggregation_plugin,
     create_baseline_plugin,
-    create_validation_plugin,
     create_early_stop_plugin,
+    create_row_plugin,
+    create_validation_plugin,
     normalize_early_stop_definitions,
 )
+from elspeth.core.experiments.runner import ExperimentRunner
 from elspeth.core.interfaces import LLMClientProtocol, ResultSink
-from elspeth.core.controls import create_rate_limiter, create_cost_tracker
 from elspeth.core.llm.registry import create_middleware
-from elspeth.core import registry as core_registry
 from elspeth.core.security import resolve_security_level
 from elspeth.core.validation import ConfigurationError
 
@@ -99,9 +99,7 @@ class ExperimentSuiteRunner:
             early_stop_config = None
         if not early_stop_plugin_defs and early_stop_config:
             early_stop_plugin_defs.extend(normalize_early_stop_definitions(early_stop_config))
-        early_stop_plugins = (
-            [create_early_stop_plugin(defn) for defn in early_stop_plugin_defs] if early_stop_plugin_defs else None
-        )
+        early_stop_plugins = [create_early_stop_plugin(defn) for defn in early_stop_plugin_defs] if early_stop_plugin_defs else None
 
         security_level = resolve_security_level(
             config.security_level,

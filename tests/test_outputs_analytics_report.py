@@ -1,5 +1,6 @@
 import json
 
+
 def test_analytics_report_sink_writes(tmp_path):
     from elspeth.plugins.outputs.analytics_report import AnalyticsReportSink
 

@@ -5,10 +5,10 @@ from __future__ import annotations
 from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence
 
 from elspeth.core.experiments.plugins import (
-    RowExperimentPlugin,
     AggregationExperimentPlugin,
     BaselineComparisonPlugin,
     EarlyStopPlugin,
+    RowExperimentPlugin,
     ValidationPlugin,
 )
 from elspeth.core.validation import ConfigurationError, validate_schema
@@ -273,9 +273,7 @@ def normalize_early_stop_definitions(definitions: Any) -> List[Dict[str, Any]]:
             if options is None:
                 options = {}
             if not isinstance(options, Mapping):
-                raise ConfigurationError(
-                    f"Early-stop plugin '{plugin_name}' options must be an object, got {type(options).__name__}"
-                )
+                raise ConfigurationError(f"Early-stop plugin '{plugin_name}' options must be an object, got {type(options).__name__}")
             base_options = dict(options)
             # Allow inline options alongside the name/plugin keys for convenience.
             extra_keys = {k: v for k, v in entry.items() if k not in {"name", "plugin", "options"}}

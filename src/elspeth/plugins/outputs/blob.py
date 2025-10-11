@@ -8,11 +8,10 @@ import logging
 import os
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Mapping, List
+from typing import Any, Dict, List, Mapping
 
-from elspeth.core.interfaces import ResultSink, Artifact
-from elspeth.datasources.blob_store import load_blob_config, BlobConfig
-
+from elspeth.core.interfaces import Artifact, ResultSink
+from elspeth.datasources.blob_store import BlobConfig, load_blob_config
 
 logger = logging.getLogger(__name__)
 

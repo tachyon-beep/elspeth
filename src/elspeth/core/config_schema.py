@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Mapping, Any
+from typing import Any, Mapping
 
-from elspeth.core.validation import validate_schema, ConfigurationError
-
+from elspeth.core.validation import ConfigurationError, validate_schema
 
 _PLUGIN_DEF_SCHEMA = {
     "type": "object",

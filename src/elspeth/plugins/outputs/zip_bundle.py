@@ -57,9 +57,7 @@ class ZipResultSink(ResultSink):
         self.sanitize_formulas = sanitize_formulas
         self.sanitize_guard = sanitize_guard
         if not self.sanitize_formulas:
-            logger.warning(
-                "ZIP sink sanitization disabled; CSV artifacts may trigger formulas."
-            )
+            logger.warning("ZIP sink sanitization disabled; CSV artifacts may trigger formulas.")
         self._sanitization = {
             "enabled": self.sanitize_formulas,
             "guard": self.sanitize_guard,
@@ -69,9 +67,7 @@ class ZipResultSink(ResultSink):
         self._additional_inputs: Dict[str, List[Artifact]] = {}
         self._security_level: str | None = None
 
-    def write(
-        self, results: Dict[str, Any], *, metadata: Dict[str, Any] | None = None
-    ) -> None:
+    def write(self, results: Dict[str, Any], *, metadata: Dict[str, Any] | None = None) -> None:
         metadata = metadata or {}
         timestamp = datetime.now(timezone.utc)
         try:
@@ -101,9 +97,7 @@ class ZipResultSink(ResultSink):
                         counter += 1
                         name = None
                         if artifact.metadata:
-                            name = artifact.metadata.get(
-                                "filename"
-                            ) or artifact.metadata.get("path")
+                            name = artifact.metadata.get("filename") or artifact.metadata.get("path")
                             if name and Path(name).is_absolute():
                                 name = Path(name).name
                         if not name and artifact.path:
@@ -120,9 +114,7 @@ class ZipResultSink(ResultSink):
                 "sanitization": self._sanitization,
             }
             if metadata:
-                self._security_level = normalize_security_level(
-                    metadata.get("security_level")
-                )
+                self._security_level = normalize_security_level(metadata.get("security_level"))
         except Exception as exc:
             if self.on_error == "skip":
                 logger.warning("ZIP sink failed; skipping archive creation: %s", exc)
@@ -143,9 +135,7 @@ class ZipResultSink(ResultSink):
 
     # ------------------------------------------------------------------ helpers
     def _resolve_path(self, metadata: Mapping[str, Any], timestamp: datetime) -> Path:
-        name = self.bundle_name or str(
-            metadata.get("experiment") or metadata.get("name") or "experiment"
-        )
+        name = self.bundle_name or str(metadata.get("experiment") or metadata.get("name") or "experiment")
         if self.timestamped:
             name = f"{name}_{timestamp.strftime('%Y%m%dT%H%M%SZ')}"
         return self.base_path / f"{name}.zip"
@@ -158,11 +148,7 @@ class ZipResultSink(ResultSink):
     ) -> Dict[str, Any]:
         manifest = {
             "generated_at": timestamp.isoformat(),
-            "rows": (
-                len(results.get("results", []))
-                if isinstance(results.get("results"), list)
-                else 0
-            ),
+            "rows": (len(results.get("results", [])) if isinstance(results.get("results"), list) else 0),
             "metadata": dict(metadata),
             "sanitization": self._sanitization,
         }
@@ -187,16 +173,12 @@ class ZipResultSink(ResultSink):
                     record[self._sanitize_key(key)] = self._sanitize_value(value)
             response = item.get("response", {}) if isinstance(item, Mapping) else {}
             if isinstance(response, Mapping):
-                record[self._sanitize_key("llm_content")] = self._sanitize_value(
-                    response.get("content")
-                )
+                record[self._sanitize_key("llm_content")] = self._sanitize_value(response.get("content"))
             responses = item.get("responses") if isinstance(item, Mapping) else None
             if isinstance(responses, Mapping):
                 for name, resp in responses.items():
                     if isinstance(resp, Mapping):
-                        record[self._sanitize_key(f"llm_{name}")] = (
-                            self._sanitize_value(resp.get("content"))
-                        )
+                        record[self._sanitize_key(f"llm_{name}")] = self._sanitize_value(resp.get("content"))
             rows.append(record)
         df = pd.DataFrame(rows)
         if not df.empty:
@@ -213,9 +195,7 @@ class ZipResultSink(ResultSink):
     def consumes(self):  # pragma: no cover - placeholder for artifact chaining
         return []
 
-    def finalize(
-        self, artifacts, *, metadata=None
-    ):  # pragma: no cover - optional cleanup
+    def finalize(self, artifacts, *, metadata=None):  # pragma: no cover - optional cleanup
         return None
 
     def collect_artifacts(self) -> Dict[str, Artifact]:  # pragma: no cover
@@ -236,18 +216,10 @@ class ZipResultSink(ResultSink):
         self._security_level = None
         return {"zip": artifact}
 
-    def prepare_artifacts(
-        self, artifacts: Mapping[str, List[Artifact]]
-    ):  # pragma: no cover
-        self._additional_inputs = {
-            key: list(values) for key, values in artifacts.items() if values
-        }
+    def prepare_artifacts(self, artifacts: Mapping[str, List[Artifact]]):  # pragma: no cover
+        self._additional_inputs = {key: list(values) for key, values in artifacts.items() if values}
         if not self._security_level and self._additional_inputs:
-            levels = [
-                artifact.security_level
-                for values in self._additional_inputs.values()
-                for artifact in values
-            ]
+            levels = [artifact.security_level for values in self._additional_inputs.values() for artifact in values]
             self._security_level = resolve_security_level(*levels)
 
     @staticmethod

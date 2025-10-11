@@ -44,9 +44,7 @@ class BlobConfig:
         required = ["connection_name", "azureml_datastore_uri"]
         missing = [key for key in required if not data.get(key)]
         if missing:
-            raise BlobConfigurationError(
-                f"Missing required blob configuration keys: {', '.join(missing)}"
-            )
+            raise BlobConfigurationError(f"Missing required blob configuration keys: {', '.join(missing)}")
 
         storage_uri = data.get("storage_uri")
         account_url = None
@@ -64,9 +62,7 @@ class BlobConfig:
             blob_path = data.get("blob_path")
 
             if not all([account_name, container_name, blob_path]):
-                raise BlobConfigurationError(
-                    "Provide either 'storage_uri' or all of 'account_name', 'container_name', 'blob_path'"
-                )
+                raise BlobConfigurationError("Provide either 'storage_uri' or all of 'account_name', 'container_name', 'blob_path'")
 
             account_url = data.get(
                 "account_url",
@@ -93,18 +89,14 @@ def _parse_storage_uri(storage_uri: str) -> Dict[str, str]:
 
     parsed = urlparse(storage_uri)
     if parsed.scheme not in {"https", "http"}:
-        raise BlobConfigurationError(
-            f"Unsupported storage URI scheme: {parsed.scheme or '<missing>'}"
-        )
+        raise BlobConfigurationError(f"Unsupported storage URI scheme: {parsed.scheme or '<missing>'}")
 
     if not parsed.netloc:
         raise BlobConfigurationError("Storage URI is missing a host component")
 
     path = parsed.path.lstrip("/")
     if "/" not in path:
-        raise BlobConfigurationError(
-            "Storage URI must include container and blob path segments"
-        )
+        raise BlobConfigurationError("Storage URI must include container and blob path segments")
 
     container_name, blob_path = path.split("/", 1)
     if not container_name or not blob_path:
@@ -138,24 +130,17 @@ def load_blob_config(config_path: Path | str, profile: str = "default") -> BlobC
 
     if profile not in data:
         available = ", ".join(sorted(data)) if isinstance(data, dict) else ""
-        raise BlobConfigurationError(
-            f"Profile '{profile}' not found in configuration."
-            f" Available: {available}"
-        )
+        raise BlobConfigurationError(f"Profile '{profile}' not found in configuration." f" Available: {available}")
 
     profile_data = data[profile]
     if isinstance(profile_data, str):
         try:
             profile_data = json.loads(profile_data)
         except json.JSONDecodeError as exc:
-            raise BlobConfigurationError(
-                f"Profile '{profile}' is a string but not valid JSON"
-            ) from exc
+            raise BlobConfigurationError(f"Profile '{profile}' is a string but not valid JSON") from exc
 
     if not isinstance(profile_data, dict):
-        raise BlobConfigurationError(
-            f"Profile '{profile}' should be a mapping, got {type(profile_data).__name__}"
-        )
+        raise BlobConfigurationError(f"Profile '{profile}' should be a mapping, got {type(profile_data).__name__}")
 
     config = BlobConfig.from_mapping(profile_data)
     logger.debug(
@@ -190,18 +175,14 @@ class BlobDataLoader:
             try:
                 from azure.storage.blob import BlobClient
             except ImportError as exc:  # pragma: no cover - environment specific
-                raise BlobConfigurationError(
-                    "azure-storage-blob is required to access Azure Blob Storage"
-                ) from exc
+                raise BlobConfigurationError("azure-storage-blob is required to access Azure Blob Storage") from exc
 
             credential = self.credential or self.config.sas_token
             if credential is None:
                 try:
                     from azure.identity import DefaultAzureCredential
                 except ImportError as exc:
-                    raise BlobConfigurationError(
-                        "azure-identity is required when no credential is provided"
-                    ) from exc
+                    raise BlobConfigurationError("azure-identity is required when no credential is provided") from exc
                 credential = DefaultAzureCredential()
 
             self._blob_client = BlobClient(
@@ -252,9 +233,7 @@ class BlobDataLoader:
         try:
             import pandas as pd
         except ImportError as exc:  # pragma: no cover - optional dependency
-            raise BlobConfigurationError(
-                "pandas is required to read blob contents as CSV"
-            ) from exc
+            raise BlobConfigurationError("pandas is required to read blob contents as CSV") from exc
 
         downloader = self.blob_client.download_blob()
         buffer = io.BytesIO(downloader.readall())

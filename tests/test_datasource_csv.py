@@ -1,5 +1,5 @@
-import pytest
 import pandas as pd
+import pytest
 
 from elspeth.plugins.datasources.csv_blob import CSVBlobDataSource
 from elspeth.plugins.datasources.csv_local import CSVDataSource

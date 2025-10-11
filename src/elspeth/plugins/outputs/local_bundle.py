@@ -38,13 +38,9 @@ class LocalBundleSink(ResultSink):
         if len(self.sanitize_guard) != 1:
             raise ValueError("sanitize_guard must be a single character")
         if not self.sanitize_formulas:
-            logger.warning(
-                "Local bundle CSV sanitization disabled; outputs may trigger spreadsheet formulas."
-            )
+            logger.warning("Local bundle CSV sanitization disabled; outputs may trigger spreadsheet formulas.")
 
-    def write(
-        self, results: Dict[str, Any], *, metadata: Dict[str, Any] | None = None
-    ) -> None:
+    def write(self, results: Dict[str, Any], *, metadata: Dict[str, Any] | None = None) -> None:
         metadata = metadata or {}
         timestamp = datetime.now(timezone.utc)
         try:
@@ -53,15 +49,11 @@ class LocalBundleSink(ResultSink):
 
             manifest = self._build_manifest(results, metadata, timestamp)
             manifest_path = bundle_dir / self.manifest_name
-            manifest_path.write_text(
-                json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8"
-            )
+            manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
 
             if self.write_json:
                 results_path = bundle_dir / self.results_name
-                results_path.write_text(
-                    json.dumps(results, indent=2, sort_keys=True), encoding="utf-8"
-                )
+                results_path.write_text(json.dumps(results, indent=2, sort_keys=True), encoding="utf-8")
 
             if self.write_csv:
                 csv_path = bundle_dir / self.csv_name
@@ -74,27 +66,19 @@ class LocalBundleSink(ResultSink):
                 csv_sink.write(results, metadata=metadata)
         except Exception as exc:
             if self.on_error == "skip":
-                logger.warning(
-                    "Local bundle sink failed; skipping bundle creation: %s", exc
-                )
+                logger.warning("Local bundle sink failed; skipping bundle creation: %s", exc)
                 return
             raise
 
     # ------------------------------------------------------------------ helpers
-    def _resolve_bundle_dir(
-        self, metadata: Dict[str, Any], timestamp: datetime
-    ) -> Path:
-        name = self.bundle_name or str(
-            metadata.get("experiment") or metadata.get("name") or "experiment"
-        )
+    def _resolve_bundle_dir(self, metadata: Dict[str, Any], timestamp: datetime) -> Path:
+        name = self.bundle_name or str(metadata.get("experiment") or metadata.get("name") or "experiment")
         if self.timestamped:
             stamp = timestamp.strftime("%Y%m%dT%H%M%SZ")
             name = f"{name}_{stamp}"
         return self.base_path / name
 
-    def _build_manifest(
-        self, results: Dict[str, Any], metadata: Dict[str, Any], timestamp: datetime
-    ) -> Dict[str, Any]:
+    def _build_manifest(self, results: Dict[str, Any], metadata: Dict[str, Any], timestamp: datetime) -> Dict[str, Any]:
         manifest = {
             "generated_at": timestamp.isoformat(),
             "rows": len(results.get("results", [])),
@@ -109,9 +93,7 @@ class LocalBundleSink(ResultSink):
         if "cost_summary" in results:
             manifest["cost_summary"] = results["cost_summary"]
         if results.get("results"):
-            manifest["columns"] = sorted(
-                {key for row in results["results"] for key in row.get("row", {}).keys()}
-            )
+            manifest["columns"] = sorted({key for row in results["results"] for key in row.get("row", {}).keys()})
         return manifest
 
     def produces(self):  # pragma: no cover - placeholder for artifact chaining
@@ -120,7 +102,5 @@ class LocalBundleSink(ResultSink):
     def consumes(self):  # pragma: no cover - placeholder for artifact chaining
         return []
 
-    def finalize(
-        self, artifacts, *, metadata=None
-    ):  # pragma: no cover - optional cleanup
+    def finalize(self, artifacts, *, metadata=None):  # pragma: no cover - optional cleanup
         return None

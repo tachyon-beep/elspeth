@@ -2,34 +2,33 @@
 
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
 import contextlib
-from dataclasses import dataclass
-from pathlib import Path
-from typing import Any, Dict, List
 import json
 import logging
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Dict, List
 
 import pandas as pd
 
-from elspeth.core.interfaces import LLMClientProtocol, ResultSink
-from elspeth.core.processing import prepare_prompt_context
-from elspeth.core.prompts import PromptEngine, PromptTemplate, PromptRenderingError, PromptValidationError
-from elspeth.core.llm.middleware import LLMMiddleware, LLMRequest
+from elspeth.core.artifact_pipeline import ArtifactPipeline, SinkBinding
+from elspeth.core.controls import CostTracker, RateLimiter
+from elspeth.core.experiments.plugin_registry import create_early_stop_plugin
 from elspeth.core.experiments.plugins import (
-    RowExperimentPlugin,
     AggregationExperimentPlugin,
     EarlyStopPlugin,
-    ValidationPlugin,
+    RowExperimentPlugin,
     ValidationError,
+    ValidationPlugin,
 )
-from elspeth.core.experiments.plugin_registry import create_early_stop_plugin
-from elspeth.core.controls import RateLimiter, CostTracker
+from elspeth.core.interfaces import LLMClientProtocol, ResultSink
+from elspeth.core.llm.middleware import LLMMiddleware, LLMRequest
+from elspeth.core.processing import prepare_prompt_context
+from elspeth.core.prompts import PromptEngine, PromptRenderingError, PromptTemplate, PromptValidationError
 from elspeth.core.security import normalize_security_level, resolve_security_level
-from elspeth.core.artifact_pipeline import ArtifactPipeline, SinkBinding
-
 
 logger = logging.getLogger(__name__)
 
@@ -293,7 +292,6 @@ class ExperimentRunner:
         else:
             _evaluate()
 
-
     def _process_single_row(
         self,
         engine: PromptEngine,
@@ -532,11 +530,14 @@ class ExperimentRunner:
                 }
                 attempt_history.append(attempt_record)
                 response.setdefault("metrics", {})["attempts_used"] = attempt
-                response.setdefault("retry", {
-                    "attempts": attempt,
-                    "max_attempts": max_attempts,
-                    "history": attempt_history,
-                })
+                response.setdefault(
+                    "retry",
+                    {
+                        "attempts": attempt,
+                        "max_attempts": max_attempts,
+                        "history": attempt_history,
+                    },
+                )
                 if self.rate_limiter:
                     self.rate_limiter.update_usage(response, request.metadata)
                 return response

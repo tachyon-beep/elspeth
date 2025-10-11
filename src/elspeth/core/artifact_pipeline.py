@@ -2,15 +2,14 @@
 
 from __future__ import annotations
 
-from collections import defaultdict, deque
 import logging
+from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, List, Mapping
 
-from elspeth.core.interfaces import ResultSink, ArtifactDescriptor, Artifact
 from elspeth.core.artifacts import validate_artifact_type
-from elspeth.core.security import normalize_security_level, is_security_level_allowed
-
+from elspeth.core.interfaces import Artifact, ArtifactDescriptor, ResultSink
+from elspeth.core.security import is_security_level_allowed, normalize_security_level
 
 VALID_REQUEST_MODES = {"single", "all"}
 logger = logging.getLogger(__name__)
@@ -165,9 +164,7 @@ class ArtifactPipeline:
         if not consumer.security_level:
             return
         if not is_security_level_allowed(producer.security_level, consumer.security_level):
-            raise PermissionError(
-                f"Sink '{consumer.id}' cannot depend on '{producer.id}' due to security level mismatch"
-            )
+            raise PermissionError(f"Sink '{consumer.id}' cannot depend on '{producer.id}' due to security level mismatch")
 
     @staticmethod
     def _resolve_order(bindings: List[SinkBinding]) -> List[SinkBinding]:

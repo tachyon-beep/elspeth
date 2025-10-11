@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-
 FILE_PREFIX = "file/"
 DATA_PREFIX = "data/"
 VALID_PREFIXES = (FILE_PREFIX, DATA_PREFIX)
@@ -21,9 +20,7 @@ def is_data_type(type_name: str) -> bool:
 def validate_artifact_type(type_name: str) -> None:
     prefix = next((prefix for prefix in VALID_PREFIXES if type_name.startswith(prefix)), None)
     if prefix is None:
-        raise ValueError(
-            f"Unsupported artifact type '{type_name}'. Expected prefix one of {VALID_PREFIXES}."
-        )
+        raise ValueError(f"Unsupported artifact type '{type_name}'. Expected prefix one of {VALID_PREFIXES}.")
     suffix = type_name[len(prefix) :]
     if not suffix:
         raise ValueError(f"Artifact type '{type_name}' must include subtype, e.g. 'file/csv'.")

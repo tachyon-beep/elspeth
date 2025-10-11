@@ -56,6 +56,7 @@ src/elspeth/plugins/llms/middleware_azure.py
 src/elspeth/plugins/llms/mock.py
 src/elspeth/plugins/llms/openai_http.py
 src/elspeth/plugins/outputs/__init__.py
+src/elspeth/plugins/outputs/_sanitize.py
 src/elspeth/plugins/outputs/analytics_report.py
 src/elspeth/plugins/outputs/blob.py
 src/elspeth/plugins/outputs/csv_file.py
@@ -75,6 +76,8 @@ tests/test_cli_suite.py
 tests/test_config.py
 tests/test_config_suite.py
 tests/test_controls.py
+tests/test_controls_registry.py
+tests/test_datasource_blob_plugin.py
 tests/test_datasource_csv.py
 tests/test_experiment_metrics_plugins.py
 tests/test_experiments.py
@@ -94,13 +97,17 @@ tests/test_outputs_signed.py
 tests/test_processing.py
 tests/test_prompt_variants_plugin.py
 tests/test_prompts.py
+tests/test_prompts_loader.py
 tests/test_registry.py
 tests/test_registry_artifacts.py
+tests/test_sanitize_utils.py
 tests/test_scaffold.py
+tests/test_scenarios.py
 tests/test_security_signing.py
 tests/test_sink_chaining.py
 tests/test_suite_reporter.py
 tests/test_suite_runner_integration.py
 tests/test_suite_tools.py
+tests/test_validation_core.py
 tests/test_validation_plugins.py
 tests/test_validation_settings.py

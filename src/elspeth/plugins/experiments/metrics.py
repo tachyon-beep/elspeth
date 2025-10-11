@@ -3,19 +3,15 @@
 from __future__ import annotations
 
 import json
-import math
 import logging
+import math
 from statistics import NormalDist
 from typing import Any, Dict, Mapping, Sequence
 
 import numpy as np
 import pandas as pd
 
-from elspeth.core.experiments.plugin_registry import (
-    register_row_plugin,
-    register_aggregation_plugin,
-    register_baseline_plugin,
-)
+from elspeth.core.experiments.plugin_registry import register_aggregation_plugin, register_baseline_plugin, register_row_plugin
 
 logger = logging.getLogger(__name__)
 
@@ -754,7 +750,7 @@ class ScoreSignificanceBaselinePlugin:
                     if result is not None:
                         result["adjusted_p_value"] = float(adjusted)
                         result["adjustment"] = "fdr"
-                missing = set(p_values.keys()) - {name for name, _ in (valid if 'valid' in locals() else [])}
+                missing = set(p_values.keys()) - {name for name, _ in (valid if "valid" in locals() else [])}
                 for name in missing:
                     result = results.get(name)
                     if result is not None:
@@ -1374,12 +1370,12 @@ def _compute_significance(
         term_var = (var_var / n_var) if n_var > 1 else 0.0
         denom_terms = term_base + term_var
         if denom_terms > 0:
-            numerator = denom_terms ** 2
+            numerator = denom_terms**2
             denominator = 0.0
             if n_base > 1 and term_base > 0:
-                denominator += (term_base ** 2) / (n_base - 1)
+                denominator += (term_base**2) / (n_base - 1)
             if n_var > 1 and term_var > 0:
-                denominator += (term_var ** 2) / (n_var - 1)
+                denominator += (term_var**2) / (n_var - 1)
             df = numerator / denominator if denominator > 0 else None
         else:
             df = None
@@ -1391,12 +1387,12 @@ def _compute_significance(
     if pooled is not None and pooled > 0:
         effect_size = mean_diff / math.sqrt(pooled)
     elif std_base > 0 or std_var > 0:
-        pooled_var = ((std_base ** 2) + (std_var ** 2)) / 2
+        pooled_var = ((std_base**2) + (std_var**2)) / 2
         if pooled_var > 0:
             effect_size = mean_diff / math.sqrt(pooled_var)
 
     p_value = None
-    if t_stat is not None and 'df' in locals() and df is not None and scipy_stats is not None:
+    if t_stat is not None and "df" in locals() and df is not None and scipy_stats is not None:
         try:
             p_value = float(scipy_stats.t.sf(abs(t_stat), df) * 2)
         except Exception:  # pragma: no cover - scipy failure
@@ -1440,12 +1436,12 @@ def _compute_bayesian_summary(
     denom_terms = term_base + term_var
     df = None
     if denom_terms > 0:
-        numerator = denom_terms ** 2
+        numerator = denom_terms**2
         denominator = 0.0
         if n_base > 1 and term_base > 0:
-            denominator += (term_base ** 2) / (n_base - 1)
+            denominator += (term_base**2) / (n_base - 1)
         if n_var > 1 and term_var > 0:
-            denominator += (term_var ** 2) / (n_var - 1)
+            denominator += (term_var**2) / (n_var - 1)
         df = numerator / denominator if denominator > 0 else None
 
     if df is not None and scipy_stats is not None:

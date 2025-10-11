@@ -1,5 +1,5 @@
-from elspeth.core.validation import ValidationReport, validate_schema
 import elspeth.core.validation as validation
+from elspeth.core.validation import ValidationReport, validate_schema
 
 
 def test_validate_schema_anyof_failure_reports_context():

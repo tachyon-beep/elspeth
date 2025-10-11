@@ -11,20 +11,17 @@ import argparse
 import json
 import logging
 from pathlib import Path
-from typing import Iterable, Any, Dict, Mapping
+from typing import Any, Dict, Iterable, Mapping
 
 import pandas as pd
 
 from elspeth.config import load_settings
+from elspeth.core.controls import create_cost_tracker, create_rate_limiter
+from elspeth.core.experiments import ExperimentSuite, ExperimentSuiteRunner
+from elspeth.core.experiments.tools import create_experiment_template, export_suite_configuration
 from elspeth.core.orchestrator import ExperimentOrchestrator
-from elspeth.core.experiments import ExperimentSuiteRunner, ExperimentSuite
-from elspeth.core.experiments.tools import (
-    export_suite_configuration,
-    create_experiment_template,
-)
-from elspeth.plugins.outputs.csv_file import CsvResultSink
-from elspeth.core.controls import create_rate_limiter, create_cost_tracker
 from elspeth.core.validation import validate_settings, validate_suite
+from elspeth.plugins.outputs.csv_file import CsvResultSink
 from elspeth.tools.reporting import SuiteReportGenerator
 
 logger = logging.getLogger(__name__)
@@ -312,7 +309,15 @@ def _run_suite(
             k: v
             for k, v in suite_defaults.items()
             if k
-            not in {"row_plugins", "aggregator_plugins", "sinks", "baseline_plugins", "llm_middlewares", "early_stop_plugins", "early_stop_plugin_defs"}
+            not in {
+                "row_plugins",
+                "aggregator_plugins",
+                "sinks",
+                "baseline_plugins",
+                "llm_middlewares",
+                "early_stop_plugins",
+                "early_stop_plugin_defs",
+            }
         }
     )
     if "row_plugins" in suite_defaults:

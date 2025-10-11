@@ -5,38 +5,37 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Mapping
 
-from elspeth.core.interfaces import DataSource, ResultSink, LLMClientProtocol
+from elspeth.core.interfaces import DataSource, LLMClientProtocol, ResultSink
+from elspeth.core.validation import ConfigurationError, validate_schema
 from elspeth.plugins.datasources import BlobDataSource, CSVBlobDataSource, CSVDataSource
 from elspeth.plugins.llms import AzureOpenAIClient, HttpOpenAIClient, MockLLMClient
 from elspeth.plugins.outputs import (
+    AnalyticsReportSink,
+    AzureDevOpsRepoSink,
     BlobResultSink,
     CsvResultSink,
-    LocalBundleSink,
     ExcelResultSink,
-    ZipResultSink,
     FileCopySink,
     GitHubRepoSink,
-    AzureDevOpsRepoSink,
+    LocalBundleSink,
     SignedArtifactSink,
-    AnalyticsReportSink,
+    ZipResultSink,
 )
-from elspeth.core.validation import ConfigurationError, validate_schema
-
 
 ON_ERROR_ENUM = {"type": "string", "enum": ["abort", "skip"]}
 
 ARTIFACT_DESCRIPTOR_SCHEMA = {
-        "type": "object",
-        "properties": {
-            "name": {"type": "string"},
-            "type": {"type": "string"},
-            "schema_id": {"type": "string"},
-            "persist": {"type": "boolean"},
-            "alias": {"type": "string"},
-            "security_level": {"type": "string"},
-        },
-        "required": ["name", "type"],
-        "additionalProperties": False,
+    "type": "object",
+    "properties": {
+        "name": {"type": "string"},
+        "type": {"type": "string"},
+        "schema_id": {"type": "string"},
+        "persist": {"type": "boolean"},
+        "alias": {"type": "string"},
+        "security_level": {"type": "string"},
+    },
+    "required": ["name", "type"],
+    "additionalProperties": False,
 }
 
 ARTIFACTS_SECTION_SCHEMA = {

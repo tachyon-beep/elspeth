@@ -7,8 +7,8 @@ import pytest
 
 import elspeth.cli as cli
 from elspeth.core.orchestrator import OrchestratorConfig
+from elspeth.core.validation import SuiteValidationReport, ValidationReport
 from elspeth.plugins.outputs.csv_file import CsvResultSink
-from elspeth.core.validation import ValidationReport, SuiteValidationReport
 
 
 def create_suite(root: Path):

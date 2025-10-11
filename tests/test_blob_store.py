@@ -3,13 +3,7 @@ import types
 
 import pytest
 
-from elspeth.datasources import (
-    BlobConfig,
-    BlobDataLoader,
-    BlobConfigurationError,
-    load_blob_config,
-    load_blob_csv,
-)
+from elspeth.datasources import BlobConfig, BlobConfigurationError, BlobDataLoader, load_blob_config, load_blob_csv
 
 
 def test_load_blob_config_success(tmp_path):

@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-import json
 
 DEFAULT_INPUT_COST_PER_1K = 0.03
 DEFAULT_OUTPUT_COST_PER_1K = 0.06
@@ -13,8 +13,8 @@ DEFAULT_AVG_INPUT_TOKENS = 2000
 DEFAULT_ROW_COUNT = 100
 
 from elspeth.core.config_schema import validate_experiment_config
-from elspeth.core.validation import ConfigurationError
 from elspeth.core.experiments.plugin_registry import normalize_early_stop_definitions
+from elspeth.core.validation import ConfigurationError
 
 
 @dataclass

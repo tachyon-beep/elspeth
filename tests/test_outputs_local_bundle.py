@@ -81,9 +81,7 @@ def test_file_copy_sink_skip_on_missing_artifact(tmp_path, caplog):
     with caplog.at_level("WARNING"):
         sink.write({}, metadata={})
     assert not (tmp_path / "dest.txt").exists()
-    assert any(
-        "requires an input artifact" in record.message for record in caplog.records
-    )
+    assert any("requires an input artifact" in record.message for record in caplog.records)
 
 
 def test_file_copy_sink_skip_when_source_missing(tmp_path, caplog):
@@ -91,19 +89,11 @@ def test_file_copy_sink_skip_when_source_missing(tmp_path, caplog):
     from elspeth.plugins.outputs.file_copy import FileCopySink
 
     sink = FileCopySink(destination=str(tmp_path / "dest.txt"), on_error="skip")
-    sink.prepare_artifacts(
-        {
-            "input": [
-                Artifact(id="a1", type="text/plain", path=str(tmp_path / "missing.txt"))
-            ]
-        }
-    )
+    sink.prepare_artifacts({"input": [Artifact(id="a1", type="text/plain", path=str(tmp_path / "missing.txt"))]})
     with caplog.at_level("WARNING"):
         sink.write({}, metadata={})
     assert not (tmp_path / "dest.txt").exists()
-    assert any(
-        "Source artifact path not found" in record.message for record in caplog.records
-    )
+    assert any("Source artifact path not found" in record.message for record in caplog.records)
 
 
 def test_file_copy_sink_overwrite_protection(tmp_path):
@@ -116,8 +106,6 @@ def test_file_copy_sink_overwrite_protection(tmp_path):
     dest.write_text("existing", encoding="utf-8")
 
     sink = FileCopySink(destination=str(dest), overwrite=False)
-    sink.prepare_artifacts(
-        {"input": [Artifact(id="a1", type="text/plain", path=str(src))]}
-    )
+    sink.prepare_artifacts({"input": [Artifact(id="a1", type="text/plain", path=str(src))]})
     with pytest.raises(FileExistsError):
         sink.write({}, metadata={})

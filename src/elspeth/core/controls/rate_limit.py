@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 import time
-from contextlib import contextmanager
 from collections import deque
+from contextlib import contextmanager
 from threading import Lock
 from typing import Any, ContextManager, Deque, Dict, Optional, Tuple
 
@@ -18,7 +18,9 @@ class RateLimiter:
     def utilization(self) -> float:  # pragma: no cover - default no usage
         return 0.0
 
-    def update_usage(self, response: Dict[str, Any], metadata: Optional[Dict[str, object]] = None) -> None:  # pragma: no cover - optional override
+    def update_usage(
+        self, response: Dict[str, Any], metadata: Optional[Dict[str, object]] = None
+    ) -> None:  # pragma: no cover - optional override
         return
 
 

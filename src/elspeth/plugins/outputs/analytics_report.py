@@ -3,14 +3,12 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Any, Dict, Iterable, Mapping, Sequence
 
-import logging
-
-from elspeth.core.interfaces import ResultSink, ArtifactDescriptor, Artifact
+from elspeth.core.interfaces import Artifact, ArtifactDescriptor, ResultSink
 from elspeth.core.security import normalize_security_level
-
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +30,7 @@ class AnalyticsReportSink(ResultSink):
         self.base_path = Path(base_path)
         self.file_stem = file_stem or "analytics_report"
         selected = []
-        for fmt in (formats or ["json", "md"]):
+        for fmt in formats or ["json", "md"]:
             normalized = (fmt or "").strip().lower()
             if normalized == "markdown":
                 normalized = "md"

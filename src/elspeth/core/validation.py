@@ -177,9 +177,7 @@ def validate_settings(path: str | Path, profile: str = "default") -> ValidationR
         report.add_error(f"Profile '{profile}' not found", context=str(config_path))
         return report
 
-    for message in validate_schema(
-        profile_data, _SETTINGS_SCHEMA, context=f"settings[{profile}]"
-    ):
+    for message in validate_schema(profile_data, _SETTINGS_SCHEMA, context=f"settings[{profile}]"):
         report.errors.append(message)
     if report.has_errors():
         return report
@@ -207,9 +205,7 @@ def validate_settings(path: str | Path, profile: str = "default") -> ValidationR
     sinks = profile_data.get("sinks")
     has_top_level_sinks = isinstance(sinks, list) and bool(sinks)
     if sinks is not None and not isinstance(sinks, list):
-        report.add_error(
-            "'sinks' must be a list when provided", context=f"settings[{profile}]"
-        )
+        report.add_error("'sinks' must be a list when provided", context=f"settings[{profile}]")
     if has_top_level_sinks:
         for entry in sinks:
             _validate_plugin_reference(
@@ -252,9 +248,7 @@ def validate_settings(path: str | Path, profile: str = "default") -> ValidationR
 
     prompt_packs = profile_data.get("prompt_packs") or {}
     if not isinstance(prompt_packs, Mapping):
-        report.add_error(
-            "'prompt_packs' must be a mapping", context=f"settings[{profile}]"
-        )
+        report.add_error("'prompt_packs' must be a mapping", context=f"settings[{profile}]")
         prompt_packs = {}
     for name, pack in prompt_packs.items():
         _validate_prompt_pack(report, name, pack, registry, exp_registry, llm_registry)
@@ -276,20 +270,14 @@ def validate_settings(path: str | Path, profile: str = "default") -> ValidationR
 
     suite_defaults = profile_data.get("suite_defaults") or {}
     if not isinstance(suite_defaults, Mapping):
-        report.add_error(
-            "'suite_defaults' must be a mapping", context=f"settings[{profile}]"
-        )
+        report.add_error("'suite_defaults' must be a mapping", context=f"settings[{profile}]")
         suite_defaults = {}
-    _validate_suite_defaults(
-        report, suite_defaults, registry, exp_registry, llm_registry, controls_registry
-    )
+    _validate_suite_defaults(report, suite_defaults, registry, exp_registry, llm_registry, controls_registry)
 
     for key in ("retry", "checkpoint", "concurrency"):
         value = profile_data.get(key)
         if value is not None and not isinstance(value, Mapping):
-            report.add_error(
-                f"'{key}' must be a mapping", context=f"settings[{profile}]"
-            )
+            report.add_error(f"'{key}' must be a mapping", context=f"settings[{profile}]")
 
     return report
 
@@ -318,9 +306,7 @@ def validate_suite(
     baseline_count = 0
     baseline_name: str | None = None
 
-    for folder in sorted(
-        p for p in suite_path.iterdir() if p.is_dir() and not p.name.startswith(".")
-    ):
+    for folder in sorted(p for p in suite_path.iterdir() if p.is_dir() and not p.name.startswith(".")):
         config_path = folder / "config.json"
         if not config_path.exists():
             continue
@@ -330,9 +316,7 @@ def validate_suite(
             report.add_error(f"Invalid JSON: {exc}", context=str(config_path))
             continue
 
-        for message in validate_schema(
-            data, _EXPERIMENT_SCHEMA, context=f"experiment:{folder.name}"
-        ):
+        for message in validate_schema(data, _EXPERIMENT_SCHEMA, context=f"experiment:{folder.name}"):
             report.errors.append(message)
         name = data.get("name") or folder.name
         enabled = bool(data.get("enabled", True))
@@ -394,12 +378,8 @@ def validate_suite(
         except ConfigurationError as exc:
             report.add_error(str(exc), context=f"experiment:{name}.cost_tracker")
 
-        if data.get("concurrency") is not None and not isinstance(
-            data.get("concurrency"), Mapping
-        ):
-            report.add_error(
-                "'concurrency' must be a mapping", context=f"experiment:{name}"
-            )
+        if data.get("concurrency") is not None and not isinstance(data.get("concurrency"), Mapping):
+            report.add_error("'concurrency' must be a mapping", context=f"experiment:{name}")
 
         _validate_prompt_files(report, folder, name, data)
 
@@ -431,9 +411,7 @@ def validate_suite(
             report.add_warning(warning, context="suite")
             warnings.append(warning)
         if exp["enabled"] and exp["max_tokens"] > 2000:
-            warning = (
-                f"High max_tokens ({exp['max_tokens']}) for experiment '{exp['name']}'"
-            )
+            warning = f"High max_tokens ({exp['max_tokens']}) for experiment '{exp['name']}'"
             report.add_warning(warning, context="suite")
             warnings.append(warning)
 
@@ -552,9 +530,7 @@ def _validate_prompt_pack(
         llm_registry.validate_middleware_definition,
         context=f"{context}.middleware",
     )
-    _validate_plugin_list(
-        report, pack.get("sinks"), registry.validate_sink, context=f"{context}.sink"
-    )
+    _validate_plugin_list(report, pack.get("sinks"), registry.validate_sink, context=f"{context}.sink")
 
 
 def _validate_suite_defaults(
@@ -664,14 +640,8 @@ def _validate_middleware_list(
             report.add_error(str(exc), context=context)
 
 
-def _validate_prompt_files(
-    report: ValidationReport, folder: Path, name: str, config: Mapping[str, Any]
-) -> None:
-    if (
-        config.get("prompt_pack")
-        or config.get("prompt_system")
-        or config.get("prompt_template")
-    ):
+def _validate_prompt_files(report: ValidationReport, folder: Path, name: str, config: Mapping[str, Any]) -> None:
+    if config.get("prompt_pack") or config.get("prompt_system") or config.get("prompt_template"):
         return
     system_path = folder / "system_prompt.md"
     user_path = folder / "user_prompt.md"
