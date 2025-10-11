@@ -62,5 +62,5 @@ exclude = ["tests", "old", "notes", "config"]
 "" = "src"
 
 [tool.pytest.ini_options]
-addopts = "-ra --cov=elspeth --cov-report=term-missing"
+addopts = "-ra --cov=elspeth --cov-report=term-missing --cov-report=xml:coverage.xml"
 testpaths = ["tests"]

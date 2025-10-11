@@ -143,6 +143,18 @@ To add a new plugin, implement the appropriate interface from
 - Enable formatting hooks with `pip install -e .[dev] && pre-commit install`
   (see `.pre-commit-config.yaml`).
 
+## SonarQube Coverage
+- Running `python -m pytest` (or `make test`) now emits `coverage.xml` alongside the terminal report so SonarQube/SonarCloud can ingest the data.
+- Populate `sonar-project.properties` with your organisation and project identifiers (or override them via `sonar-scanner` flags). The file already enables `sonar.python.coverage.reportPaths=coverage.xml` as described in the [official guide](https://docs.sonarsource.com/sonarqube-cloud/enriching/test-coverage/python-test-coverage).
+- Execute the scanner from the project root after setting a `SONAR_TOKEN`, e.g.
+  ```bash
+  export SONAR_TOKEN=xxxxxxxxxxxxxxxxxxxxxxxx
+  sonar-scanner \
+    -Dsonar.login=$SONAR_TOKEN \
+    -Dsonar.host.url=https://sonarcloud.io
+  ```
+  The command reuses values defined in `sonar-project.properties`; override any parameter with additional `-D` flags when needed.
+
 ## Retry Observability
 - Each LLM invocation records a retry history. Successful responses expose `response["retry"]` detailing attempts, and failures capture the same structure under `payload["failures"][*]["retry"]`.
 - CLI single-run output flattens retry statistics (attempt counts and JSON history) alongside metrics, and logs a warning when retries are exhausted.
