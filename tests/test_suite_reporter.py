@@ -1,6 +1,8 @@
 import builtins
 import importlib.util
 import json
+import sys
+import types
 from pathlib import Path
 
 import pytest
@@ -137,3 +139,121 @@ def test_suite_report_generator_failure_analysis(tmp_path: Path) -> None:
     assert "variant" in failure_data
     exec_summary = (consolidated / "executive_summary.md").read_text(encoding="utf-8")
     assert "variant" in exec_summary
+
+
+def test_suite_report_excel_generation_with_stubs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    suite = _write_suite(tmp_path / "suite")
+    results = {
+        "baseline": {"payload": _basic_payload(3.0), "config": suite.baseline},
+        "variant": {
+            "payload": _basic_payload(3.2),
+            "config": next(exp for exp in suite.experiments if exp.name == "variant"),
+            "baseline_comparison": {"score_delta": {"quality": 0.2}},
+        },
+    }
+    reporter = SuiteReportGenerator(suite, results)
+
+    class FakeDataFrame:
+        def __init__(self, rows):
+            self.rows = rows
+
+        def to_excel(self, writer, sheet_name, index=False):
+            writer.register(sheet_name, self.rows)
+
+    class FakeExcelWriter:
+        def __init__(self, path, engine=None):
+            self.path = Path(path)
+            self.records = {}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            self.path.write_text(json.dumps(self.records, indent=2, sort_keys=True), encoding="utf-8")
+
+        def register(self, sheet_name, rows):
+            self.records[sheet_name] = rows
+
+    import types
+
+    fake_pd = types.ModuleType("pandas")
+    fake_pd.ExcelWriter = FakeExcelWriter
+
+    def _dataframe(data):
+        return FakeDataFrame(data)
+
+    fake_pd.DataFrame = _dataframe
+    monkeypatch.setitem(sys.modules, "pandas", fake_pd)
+    monkeypatch.setitem(sys.modules, "openpyxl", types.ModuleType("openpyxl"))
+
+    consolidated = tmp_path / "reports" / "consolidated"
+    consolidated.mkdir(parents=True, exist_ok=True)
+    comparative = reporter._generate_comparative(consolidated)
+    recommendations = reporter._generate_recommendations(consolidated)
+    reporter._generate_excel_report(consolidated, comparative, recommendations)
+
+    excel_path = consolidated / "analysis.xlsx"
+    data = json.loads(excel_path.read_text(encoding="utf-8"))
+    assert "Summary" in data
+    assert "Comparisons" in data
+    assert "Recommendations" in data
+
+
+def test_suite_report_visualization_generation_with_stubs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    suite = _write_suite(tmp_path / "suite")
+    results = {
+        "baseline": {"payload": _basic_payload(2.0), "config": suite.baseline},
+        "variant": {"payload": _basic_payload(3.0), "config": next(exp for exp in suite.experiments if exp.name == "variant")},
+    }
+    reporter = SuiteReportGenerator(suite, results)
+    consolidated = tmp_path / "reports" / "consolidated"
+    consolidated.mkdir(parents=True, exist_ok=True)
+    comparative = reporter._generate_comparative(consolidated)
+
+    class FakeFigure:
+        def __init__(self):
+            self.saved = None
+
+        def tight_layout(self):
+            pass
+
+        def savefig(self, path, dpi=150):
+            self.saved = path
+            Path(path).write_text("figure", encoding="utf-8")
+
+    class FakeAxes:
+        def bar(self, *args, **kwargs):
+            pass
+
+        def set_ylabel(self, *args, **kwargs):
+            pass
+
+        def set_title(self, *args, **kwargs):
+            pass
+
+        def grid(self, *args, **kwargs):
+            pass
+
+    class FakePlt:
+        def __init__(self):
+            self.fig = FakeFigure()
+
+        def subplots(self, figsize=(8, 4)):
+            return self.fig, FakeAxes()
+
+        def xticks(self, *args, **kwargs):
+            pass
+
+        def close(self, fig):
+            pass
+
+    import types
+
+    fake_matplotlib = types.ModuleType("matplotlib")
+    fake_matplotlib.use = lambda backend: None  # type: ignore[attr-defined]
+    fake_plt = FakePlt()
+    monkeypatch.setitem(sys.modules, "matplotlib", fake_matplotlib)
+    monkeypatch.setitem(sys.modules, "matplotlib.pyplot", fake_plt)
+
+    reporter._generate_visualizations(consolidated, comparative)
+    assert (consolidated / "analysis_summary.png").exists()
