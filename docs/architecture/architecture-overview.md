@@ -1,0 +1,26 @@
+# ELSPETH Architecture Overview
+
+## Core Principles
+- **Defense by design** – All external integrations are fronted by typed protocols so untrusted components can be swapped without touching orchestration logic (`src/elspeth/core/interfaces.py:11`, `src/elspeth/core/interfaces.py:22`, `src/elspeth/core/interfaces.py:37`).
+- **Configuration as code** – Profiles are hydrated through validated YAML and merged prompt packs, preventing runtime surprises and enabling fail-fast feedback (`src/elspeth/config.py:41`, `src/elspeth/core/validation.py:271`, `src/elspeth/core/validation.py:1012`).
+- **Traceable execution** – The orchestrator records retries, aggregates, costs, and security classifications on every run so sinks and auditors receive consistent metadata (`src/elspeth/core/experiments/runner.py:162`, `src/elspeth/core/experiments/runner.py:198`, `src/elspeth/core/experiments/runner.py:218`).
+- **Least privilege propagation** – Data, middleware, and artifact flows carry explicit security levels allowing downstream sinks to enforce clearance before consuming artifacts (`src/elspeth/core/security/__init__.py:14`, `src/elspeth/core/experiments/runner.py:208`, `src/elspeth/core/artifact_pipeline.py:192`).
+
+## Component Layers
+- **Ingress** – Datasources load tabular experiments, tagging each frame with its classification. Local CSV, CSV-blob stand-ins, and Azure blob sources all normalize security levels and support `on_error` policies (`src/elspeth/plugins/datasources/csv_local.py:17`, `src/elspeth/plugins/datasources/csv_blob.py:17`, `src/elspeth/plugins/datasources/blob.py:17`).
+- **Configuration Loader** – Profiles compose datasource/LLM/sink stacks, merge prompt packs, and resolve suite defaults before instantiating runtime dependencies (`src/elspeth/config.py:52`, `src/elspeth/config.py:78`, `src/elspeth/config.py:121`).
+- **Orchestrator** – Binds a datasource, LLM client, sinks, and optional rate/cost/validation plugins into a cohesive experiment with shared middleware and retry settings (`src/elspeth/core/orchestrator.py:43`, `src/elspeth/core/orchestrator.py:80`).
+- **Experiment Runner** – Compiles prompts with strict rendering, enforces per-row middleware chains, handles concurrency, retries, validation plugins, and aggregates before dispatching results into the artifact pipeline (`src/elspeth/core/experiments/runner.py:65`, `src/elspeth/core/experiments/runner.py:126`, `src/elspeth/core/experiments/runner.py:464`).
+- **Artifact Pipeline** – Orders sinks by declared dependencies, enforces security clearances, and allows chaining of produced artifacts (CSV, signed bundles, repo uploads) for downstream consumers (`src/elspeth/core/artifact_pipeline.py:153`, `src/elspeth/core/artifact_pipeline.py:192`, `src/elspeth/core/artifact_pipeline.py:218`).
+- **Plugin Controls** – Rate limiting and cost tracking are pluggable, with schema validation guarding misconfiguration and adaptive logic that tracks both requests and token budgets (`src/elspeth/core/controls/registry.py:36`, `src/elspeth/core/controls/rate_limit.py:104`, `src/elspeth/core/controls/cost_tracker.py:36`).
+
+## Security Posture Highlights
+- **Prompt hygiene** – Prompts render through a `StrictUndefined` Jinja environment and raise explicit errors when required fields are missing (`src/elspeth/core/prompts/engine.py:33`, `src/elspeth/core/prompts/template.py:24`).
+- **Middleware stack** – Request/response middlewares apply audit logging, prompt shielding, Azure Content Safety scans, health telemetry, and Azure ML run reporting without modifying the core runner (`src/elspeth/plugins/llms/middleware.py:70`, `src/elspeth/plugins/llms/middleware.py:124`, `src/elspeth/plugins/llms/middleware.py:206`, `src/elspeth/plugins/llms/middleware_azure.py:76`).
+- **Output sanitisation and signing** – Spreadsheet guards neutralise leading formula characters, while signed bundles embed HMAC manifests for tamper evidence (`src/elspeth/plugins/outputs/csv_file.py:49`, `src/elspeth/plugins/outputs/_sanitize.py:18`, `src/elspeth/plugins/outputs/signed.py:37`).
+- **Suite-level governance** – Suite runners merge defaults, instantiate experiment-specific sink stacks, and notify shared middleware about lifecycle events, ensuring telemetry and baseline comparisons stay consistent (`src/elspeth/core/experiments/suite_runner.py:35`, `src/elspeth/core/experiments/suite_runner.py:118`, `src/elspeth/core/experiments/suite_runner.py:208`).
+
+## Areas to Monitor
+- **Credential sources** – Azure, GitHub, DevOps, and signing sinks rely on environment-provided secrets; ensure deployment pipelines inject these via secure stores rather than committed config (`src/elspeth/plugins/outputs/blob.py:187`, `src/elspeth/plugins/outputs/repository.py:149`, `src/elspeth/plugins/outputs/signed.py:107`).
+- **Optional extras** – Statistical and Excel extras pull in additional scientific libraries; pinning and vulnerability monitoring should accompany their use (`pyproject.toml:25`).
+- **Network middleware** – Azure Content Safety and repository sinks make outbound HTTP calls; configure outbound firewall rules and timeouts appropriately (`src/elspeth/plugins/llms/middleware.py:249`, `src/elspeth/plugins/outputs/repository.py:106`).

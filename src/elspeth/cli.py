@@ -261,7 +261,15 @@ def _clone_suite_sinks(base_sinks: list, experiment_name: str) -> list:
         if isinstance(sink, CsvResultSink):
             base_path = Path(sink.path)
             new_path = base_path.with_name(f"{experiment_name}_{base_path.name}")
-            cloned.append(CsvResultSink(path=str(new_path), overwrite=True))
+            cloned.append(
+                CsvResultSink(
+                    path=str(new_path),
+                    overwrite=sink.overwrite,
+                    on_error=sink.on_error,
+                    sanitize_formulas=sink.sanitize_formulas,
+                    sanitize_guard=sink.sanitize_guard,
+                )
+            )
         else:
             cloned.append(sink)
     return cloned

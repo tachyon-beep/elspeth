@@ -28,6 +28,29 @@ def create_suite(root: Path):
     (root / "exp2" / "user_prompt.md").write_text("Exp2 {APPID}", encoding="utf-8")
 
 
+def test_clone_suite_sinks_preserves_csv_sanitization(tmp_path):
+    base_path = tmp_path / "suite.csv"
+    sink = CsvResultSink(
+        path=base_path,
+        overwrite=False,
+        on_error="skip",
+        sanitize_formulas=False,
+        sanitize_guard="#",
+    )
+
+    cloned = cli._clone_suite_sinks([sink], "exp1")
+
+    assert len(cloned) == 1
+    clone = cloned[0]
+    assert isinstance(clone, CsvResultSink)
+    expected_path = base_path.with_name(f"exp1_{base_path.name}")
+    assert clone.path == expected_path
+    assert clone.overwrite is False
+    assert clone.on_error == "skip"
+    assert clone.sanitize_formulas is False
+    assert clone.sanitize_guard == "#"
+
+
 def test_cli_suite_execution(tmp_path, monkeypatch):
     suite_root = tmp_path / "suite"
     create_suite(suite_root)
