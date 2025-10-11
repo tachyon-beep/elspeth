@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterable, List, Mapping
+from typing import Any, Dict, Iterable, List, Mapping, Optional, cast
 
 from elspeth.core.artifacts import validate_artifact_type
 from elspeth.core.interfaces import Artifact, ArtifactDescriptor, ResultSink
@@ -172,16 +172,19 @@ class ArtifactPipeline:  # pylint: disable=too-many-instance-attributes
 
         produces_method = getattr(binding.sink, "produces", None)
         if callable(produces_method):
-            for descriptor in produces_method() or []:
-                validate_artifact_type(descriptor.type)
-                descriptor.security_level = normalize_security_level(descriptor.security_level)
-                binding.produces.append(descriptor)
+            produced_iterable = produces_method()
+            if produced_iterable:
+                for descriptor in cast(Iterable[ArtifactDescriptor], produced_iterable):
+                    validate_artifact_type(descriptor.type)
+                    descriptor.security_level = normalize_security_level(descriptor.security_level)
+                    binding.produces.append(descriptor)
 
         consumes_config = list(artifact_section.get("consumes", []) or [])
         consumes_method = getattr(binding.sink, "consumes", None)
         if callable(consumes_method):
-            for token in consumes_method() or []:
-                consumes_config.append(token)
+            consumed_tokens = consumes_method()
+            if consumed_tokens:
+                consumes_config.extend(cast(Iterable[str], consumed_tokens))
         binding.consumes = [ArtifactRequestParser.parse(entry) for entry in consumes_config]
         return binding
 
@@ -267,12 +270,12 @@ class ArtifactPipeline:  # pylint: disable=too-many-instance-attributes
 
         return ordered
 
-    def execute(
-        self, payload: Dict[str, Any], metadata: Mapping[str, Any] | None = None
-    ) -> ArtifactStore:  # pylint: disable=too-many-locals
+    # pylint: disable=too-many-locals
+    def execute(self, payload: Dict[str, Any], metadata: Mapping[str, Any] | None = None) -> ArtifactStore:
         """Run all sinks in dependency order, producing the final artifact store."""
 
         store = ArtifactStore()
+        metadata_dict: Optional[Dict[str, Any]] = dict(metadata) if metadata is not None else None
         for binding in self._ordered_bindings:
             consumed = store.resolve_requests(binding.consumes)
 
@@ -290,12 +293,14 @@ class ArtifactPipeline:  # pylint: disable=too-many-instance-attributes
             if callable(prepare):
                 prepare(consumed)
 
-            binding.sink.write(payload, metadata=metadata)
+            binding.sink.write(payload, metadata=metadata_dict)
 
-            produced = {}
+            produced: Dict[str, Artifact] = {}
             collector = getattr(binding.sink, "collect_artifacts", None)
             if callable(collector):
-                produced = collector() or {}
+                collected = collector()
+                if collected:
+                    produced = cast(Dict[str, Artifact], collected)
 
             for descriptor in binding.produces:
                 key = descriptor.name
@@ -307,6 +312,6 @@ class ArtifactPipeline:  # pylint: disable=too-many-instance-attributes
 
             finalize = getattr(binding.sink, "finalize", None)
             if callable(finalize):
-                finalize(dict(store.items()), metadata=metadata)
+                finalize(dict(store.items()), metadata=metadata_dict)
 
         return store
