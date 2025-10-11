@@ -6,25 +6,47 @@ import time
 from collections import deque
 from contextlib import contextmanager
 from threading import Lock
-from typing import Any, ContextManager, Deque, Dict, Optional, Tuple
+from typing import Any, ContextManager, Deque, Dict, Optional, SupportsFloat, Tuple
+
+
+def _coerce_float(value: object, *, context: str) -> float:
+    """Convert a value to float, raising a descriptive error when invalid."""
+
+    if isinstance(value, str):
+        try:
+            return float(value)
+        except ValueError as exc:
+            raise ValueError(f"Invalid numeric value for {context}: {value!r}") from exc
+    if isinstance(value, SupportsFloat):
+        return float(value)
+    raise TypeError(f"Value for {context} must be numeric, received {type(value).__name__}")
 
 
 class RateLimiter:
     """Base protocol for rate limiters."""
 
     def acquire(self, metadata: Optional[Dict[str, object]] = None) -> ContextManager[None]:
+        """Return a context manager that enforces the rate limit."""
+
+        del metadata  # Unused in base implementation.
         raise NotImplementedError
 
     def utilization(self) -> float:  # pragma: no cover - default no usage
+        """Return a utilization ratio in the range [0, 1]."""
+
         return 0.0
 
     def update_usage(
         self, response: Dict[str, Any], metadata: Optional[Dict[str, object]] = None
     ) -> None:  # pragma: no cover - optional override
-        return
+        """Record response metadata to refine future rate limiting."""
+
+        del response, metadata  # Unused in base implementation.
 
 
 class NoopRateLimiter(RateLimiter):
+    """Limiter implementation that performs no throttling."""
+
     def acquire(self, metadata: Optional[Dict[str, object]] = None) -> ContextManager[None]:  # pragma: no cover - trivial
         @contextmanager
         def _cm():
@@ -65,10 +87,7 @@ class FixedWindowRateLimiter(RateLimiter):
                         break
                     sleep_for = self.per_seconds - elapsed
                 time.sleep(max(sleep_for, 0.001))
-            try:
-                yield
-            finally:
-                pass
+            yield
 
         return _cm()
 
@@ -107,9 +126,11 @@ class AdaptiveRateLimiter(RateLimiter):
     def acquire(self, metadata: Optional[Dict[str, object]] = None) -> ContextManager[None]:
         estimated_tokens = 0.0
         if metadata:
-            value = metadata.get("estimated_tokens") or metadata.get("expected_tokens")
+            value = metadata.get("estimated_tokens")
+            if value is None:
+                value = metadata.get("expected_tokens")
             if value is not None:
-                estimated_tokens = float(value)
+                estimated_tokens = _coerce_float(value, context="estimated tokens")
 
         @contextmanager
         def _cm():
@@ -128,10 +149,7 @@ class AdaptiveRateLimiter(RateLimiter):
                         break
                     sleep_for = self._next_available_time(now)
                 time.sleep(sleep_for)
-            try:
-                yield
-            finally:
-                pass
+            yield
 
         return _cm()
 
@@ -141,8 +159,12 @@ class AdaptiveRateLimiter(RateLimiter):
         metrics = response.get("metrics") if isinstance(response, dict) else None
         tokens = 0.0
         if isinstance(metrics, dict):
-            tokens += float(metrics.get("prompt_tokens") or 0)
-            tokens += float(metrics.get("completion_tokens") or 0)
+            prompt = metrics.get("prompt_tokens")
+            if prompt is not None:
+                tokens += _coerce_float(prompt, context="prompt_tokens")
+            completion = metrics.get("completion_tokens")
+            if completion is not None:
+                tokens += _coerce_float(completion, context="completion_tokens")
         if tokens <= 0:
             return
         with self._lock:

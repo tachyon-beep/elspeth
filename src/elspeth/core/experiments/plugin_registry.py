@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, List, Mapping, Optional, Sequence
+from importlib import import_module
+from typing import Any, Callable, Dict, List, Mapping, Sequence
 
 from elspeth.core.experiments.plugins import (
     AggregationExperimentPlugin,
@@ -15,11 +16,15 @@ from elspeth.core.validation import ConfigurationError, validate_schema
 
 
 class _PluginFactory:
-    def __init__(self, factory: Callable[[Dict[str, Any]], Any], schema: Mapping[str, Any] | None = None):
+    """Wrap plugin factories with optional schema validation."""
+
+    def __init__(self, factory: Callable[[Dict[str, Any]], Any], schema: Mapping[str, Any] | None = None) -> None:
         self.factory = factory
         self.schema = schema
 
     def validate(self, options: Dict[str, Any], *, context: str) -> None:
+        """Run schema validation for the provided options."""
+
         if self.schema is None:
             return
         errors = list(validate_schema(options or {}, self.schema, context=context))
@@ -27,6 +32,8 @@ class _PluginFactory:
             raise ConfigurationError("\n".join(msg.format() for msg in errors))
 
     def create(self, options: Dict[str, Any], *, context: str) -> Any:
+        """Validate options and instantiate the plugin."""
+
         self.validate(options, context=context)
         return self.factory(options)
 
@@ -44,6 +51,8 @@ def register_row_plugin(
     *,
     schema: Mapping[str, Any] | None = None,
 ) -> None:
+    """Register a row-level experiment plugin."""
+
     _row_plugins[name] = _PluginFactory(factory, schema=schema)
 
 
@@ -53,6 +62,8 @@ def register_aggregation_plugin(
     *,
     schema: Mapping[str, Any] | None = None,
 ) -> None:
+    """Register an aggregation experiment plugin."""
+
     _aggregation_plugins[name] = _PluginFactory(factory, schema=schema)
 
 
@@ -62,6 +73,8 @@ def register_baseline_plugin(
     *,
     schema: Mapping[str, Any] | None = None,
 ) -> None:
+    """Register a baseline comparison plugin."""
+
     _baseline_plugins[name] = _PluginFactory(factory, schema=schema)
 
 
@@ -71,6 +84,8 @@ def register_validation_plugin(
     *,
     schema: Mapping[str, Any] | None = None,
 ) -> None:
+    """Register a suite validation plugin."""
+
     _validation_plugins[name] = _PluginFactory(factory, schema=schema)
 
 
@@ -80,10 +95,14 @@ def register_early_stop_plugin(
     *,
     schema: Mapping[str, Any] | None = None,
 ) -> None:
+    """Register an early-stop plugin."""
+
     _early_stop_plugins[name] = _PluginFactory(factory, schema=schema)
 
 
 def create_row_plugin(definition: Dict[str, Any]) -> RowExperimentPlugin:
+    """Instantiate a registered row plugin from its definition."""
+
     if not definition:
         raise ValueError("Row plugin definition cannot be empty")
     name = definition.get("name")
@@ -94,6 +113,8 @@ def create_row_plugin(definition: Dict[str, Any]) -> RowExperimentPlugin:
 
 
 def create_aggregation_plugin(definition: Dict[str, Any]) -> AggregationExperimentPlugin:
+    """Instantiate a registered aggregation plugin from its definition."""
+
     if not definition:
         raise ValueError("Aggregation plugin definition cannot be empty")
     name = definition.get("name")
@@ -104,6 +125,8 @@ def create_aggregation_plugin(definition: Dict[str, Any]) -> AggregationExperime
 
 
 def create_baseline_plugin(definition: Dict[str, Any]) -> BaselineComparisonPlugin:
+    """Instantiate a registered baseline plugin from its definition."""
+
     if not definition:
         raise ValueError("Baseline plugin definition cannot be empty")
     name = definition.get("name")
@@ -114,6 +137,8 @@ def create_baseline_plugin(definition: Dict[str, Any]) -> BaselineComparisonPlug
 
 
 def create_validation_plugin(definition: Dict[str, Any]) -> ValidationPlugin:
+    """Instantiate a validation plugin from its definition."""
+
     if not definition:
         raise ValueError("Validation plugin definition cannot be empty")
     name = definition.get("name")
@@ -124,6 +149,8 @@ def create_validation_plugin(definition: Dict[str, Any]) -> ValidationPlugin:
 
 
 def create_early_stop_plugin(definition: Dict[str, Any]) -> EarlyStopPlugin:
+    """Instantiate an early-stop plugin from its definition."""
+
     if not definition:
         raise ValueError("Early-stop plugin definition cannot be empty")
     name = definition.get("name")
@@ -133,33 +160,41 @@ def create_early_stop_plugin(definition: Dict[str, Any]) -> EarlyStopPlugin:
     return _early_stop_plugins[name].create(options, context=f"early_stop_plugin:{name}")
 
 
-class _NoopRowPlugin:
+class _NoopRowPlugin:  # pylint: disable=too-few-public-methods
     name = "noop"
 
-    def process_row(self, row, responses):  # pragma: no cover - trivial
+    def process_row(self, _row, _responses):  # pragma: no cover - trivial
+        """Return an empty payload for noop processing."""
+
         return {}
 
 
-class _NoopAggPlugin:
+class _NoopAggPlugin:  # pylint: disable=too-few-public-methods
     name = "noop"
 
-    def finalize(self, records):  # pragma: no cover - trivial
+    def finalize(self, _records):  # pragma: no cover - trivial
+        """Return an empty aggregation result."""
+
         return {}
 
 
-class _NoopBaselinePlugin:
+class _NoopBaselinePlugin:  # pylint: disable=too-few-public-methods
     name = "noop"
 
-    def compare(self, baseline, variant):  # pragma: no cover - trivial
+    def compare(self, _baseline, _variant):  # pragma: no cover - trivial
+        """Return an empty comparison result."""
+
         return {}
 
 
-class _RowCountBaselinePlugin:
+class _RowCountBaselinePlugin:  # pylint: disable=too-few-public-methods
     def __init__(self, key: str = "row_delta"):
         self.name = "row_count"
         self._key = key
 
     def compare(self, baseline, variant):
+        """Return the delta in result counts between baseline and variant."""
+
         base_count = len(baseline.get("results", [])) if baseline else 0
         variant_count = len(variant.get("results", [])) if variant else 0
         return {self._key: variant_count - base_count}
@@ -201,6 +236,8 @@ __all__ = [
 
 
 def validate_row_plugin_definition(definition: Dict[str, Any]) -> None:
+    """Validate a row plugin definition without instantiating it."""
+
     if not definition:
         raise ConfigurationError("Row plugin definition cannot be empty")
     name = definition.get("name")
@@ -211,6 +248,8 @@ def validate_row_plugin_definition(definition: Dict[str, Any]) -> None:
 
 
 def validate_aggregation_plugin_definition(definition: Dict[str, Any]) -> None:
+    """Validate an aggregation plugin definition without instantiating it."""
+
     if not definition:
         raise ConfigurationError("Aggregation plugin definition cannot be empty")
     name = definition.get("name")
@@ -221,6 +260,8 @@ def validate_aggregation_plugin_definition(definition: Dict[str, Any]) -> None:
 
 
 def validate_baseline_plugin_definition(definition: Dict[str, Any]) -> None:
+    """Validate a baseline plugin definition."""
+
     if not definition:
         raise ConfigurationError("Baseline plugin definition cannot be empty")
     name = definition.get("name")
@@ -231,6 +272,8 @@ def validate_baseline_plugin_definition(definition: Dict[str, Any]) -> None:
 
 
 def validate_validation_plugin_definition(definition: Dict[str, Any]) -> None:
+    """Validate a validation plugin definition."""
+
     if not definition:
         raise ConfigurationError("Validation plugin definition cannot be empty")
     name = definition.get("name")
@@ -241,6 +284,8 @@ def validate_validation_plugin_definition(definition: Dict[str, Any]) -> None:
 
 
 def validate_early_stop_plugin_definition(definition: Dict[str, Any]) -> None:
+    """Validate an early-stop plugin definition."""
+
     if not definition:
         raise ConfigurationError("Early-stop plugin definition cannot be empty")
     name = definition.get("name")
@@ -256,43 +301,46 @@ def normalize_early_stop_definitions(definitions: Any) -> List[Dict[str, Any]]:
     normalized: List[Dict[str, Any]] = []
     if not definitions:
         return normalized
+    for entry in _iter_early_stop_entries(definitions):
+        normalized.append(_normalize_early_stop_entry(entry))
+    return normalized
+
+
+def _iter_early_stop_entries(definitions: Any) -> Sequence[Any]:
+    """Return iterable entries for early-stop configuration."""
 
     if isinstance(definitions, Mapping):
-        items: Sequence[Any] = [definitions]
-    elif isinstance(definitions, Sequence) and not isinstance(definitions, (str, bytes)):
-        items = list(definitions)
-    else:
-        raise ConfigurationError("Early-stop configuration must be an object or list of objects")
+        return [definitions]
+    if isinstance(definitions, Sequence) and not isinstance(definitions, (str, bytes)):
+        return list(definitions)
+    raise ConfigurationError("Early-stop configuration must be an object or list of objects")
 
-    for entry in items:
-        if not isinstance(entry, Mapping):
-            raise ConfigurationError("Each early-stop entry must be an object")
-        plugin_name = entry.get("name") or entry.get("plugin")
-        if plugin_name:
-            options = entry.get("options")
-            if options is None:
-                options = {}
-            if not isinstance(options, Mapping):
-                raise ConfigurationError(f"Early-stop plugin '{plugin_name}' options must be an object, got {type(options).__name__}")
-            base_options = dict(options)
-            # Allow inline options alongside the name/plugin keys for convenience.
-            extra_keys = {k: v for k, v in entry.items() if k not in {"name", "plugin", "options"}}
-            if extra_keys:
-                base_options.update(extra_keys)
-            normalized.append({"name": str(plugin_name), "options": base_options})
-            continue
 
-        # Treat bare dictionaries as options for the default threshold plugin.
-        normalized.append({"name": "threshold", "options": dict(entry)})
+def _normalize_early_stop_entry(entry: Any) -> Dict[str, Any]:
+    """Normalise a single early-stop entry."""
 
-    return normalized
+    if not isinstance(entry, Mapping):
+        raise ConfigurationError("Each early-stop entry must be an object")
+
+    plugin_name = entry.get("name") or entry.get("plugin")
+    if plugin_name:
+        options = entry.get("options") or {}
+        if not isinstance(options, Mapping):
+            raise ConfigurationError(f"Early-stop plugin '{plugin_name}' options must be an object, got {type(options).__name__}")
+        base_options = dict(options)
+        extra_keys = {k: v for k, v in entry.items() if k not in {"name", "plugin", "options"}}
+        if extra_keys:
+            base_options.update(extra_keys)
+        return {"name": str(plugin_name), "options": base_options}
+
+    return {"name": "threshold", "options": dict(entry)}
 
 
 def _load_default_plugins() -> None:
     """Load default plugin implementations via import side-effects."""
 
     try:  # pragma: no cover - best-effort import only
-        import elspeth.plugins.experiments  # noqa: F401
+        import_module("elspeth.plugins.experiments")
     except ImportError:
         pass
 
