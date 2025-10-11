@@ -3,5 +3,9 @@
         "tests"
     ],
     "python.testing.unittestEnabled": false,
-    "python.testing.pytestEnabled": true
+    "python.testing.pytestEnabled": true,
+    "sonarlint.connectedMode.project": {
+        "connectionId": "tachyon-beep",
+        "projectKey": "tachyon-beep_elspeth"
+    }
 }
