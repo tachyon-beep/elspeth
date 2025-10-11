@@ -16,7 +16,6 @@ from typing import Any, Dict, Iterable, Mapping
 import pandas as pd
 
 from elspeth.config import load_settings
-from elspeth.core.controls import create_cost_tracker, create_rate_limiter
 from elspeth.core.experiments import ExperimentSuite, ExperimentSuiteRunner
 from elspeth.core.experiments.tools import create_experiment_template, export_suite_configuration
 from elspeth.core.orchestrator import ExperimentOrchestrator
@@ -174,13 +173,14 @@ def run(args: argparse.Namespace) -> None:
     reports_dir = getattr(args, "reports_dir", None)
     template_base = getattr(args, "template_base", None)
     management_requested = any([export_path, template_name, reports_dir])
-    if management_requested and not suite_root:
+    if management_requested and suite_root is None:
         raise SystemExit("Suite root is required for template creation, export, or report generation.")
-    if suite_root and management_requested:
+    if suite_root is not None and management_requested:
         suite_instance = ExperimentSuite.load(suite_root)
 
     if template_name:
         assert suite_instance is not None  # for mypy
+        assert suite_root is not None  # for mypy
         destination = create_experiment_template(
             suite_instance,
             template_name,
@@ -194,7 +194,7 @@ def run(args: argparse.Namespace) -> None:
         export_suite_configuration(suite_instance, export_path)
         logger.info("Exported suite configuration to %s", export_path)
 
-    if suite_root and not args.single_run:
+    if suite_root is not None and not args.single_run:
         suite_validation = validate_suite(suite_root)
         for warning in suite_validation.report.warnings:
             logger.warning(warning.format())
@@ -250,7 +250,7 @@ def _clone_suite_sinks(base_sinks: list, experiment_name: str) -> list:
         if isinstance(sink, CsvResultSink):
             base_path = Path(sink.path)
             new_path = base_path.with_name(f"{experiment_name}_{base_path.name}")
-            cloned.append(CsvResultSink(path=new_path, overwrite=True))
+            cloned.append(CsvResultSink(path=str(new_path), overwrite=True))
         else:
             cloned.append(sink)
     return cloned
