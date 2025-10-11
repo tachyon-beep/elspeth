@@ -6,6 +6,7 @@ from .file_copy import FileCopySink
 from .local_bundle import LocalBundleSink
 from .repository import AzureDevOpsRepoSink, GitHubRepoSink
 from .signed import SignedArtifactSink
+from .visual_report import VisualAnalyticsSink
 from .zip_bundle import ZipResultSink
 
 __all__ = [
@@ -19,4 +20,5 @@ __all__ = [
     "AzureDevOpsRepoSink",
     "SignedArtifactSink",
     "AnalyticsReportSink",
+    "VisualAnalyticsSink",
 ]

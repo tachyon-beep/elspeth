@@ -55,3 +55,7 @@ analytics versus the refactored plugin stack. Outstanding gaps now focus on:
   - Bayesian Pack: implemented `score_bayes` for posterior probabilities and credible intervals.
   - Planning Pack: implemented `score_power` for sample size/power estimates.
 - Phase 5: Distribution/Drift detection via `score_distribution` baseline plugin (KS, Mann-Whitney, JS divergence).
+<!-- UPDATE 2025-10-12: Remaining backlog items include optional visualization sinks and potential ordinal regression/weighted kappa plugins; core packs listed above ship with the current release. -->
+
+## Update History
+- 2025-10-12 – Confirmed execution of significance, agreement, Bayesian, planning, and distribution packs; identified remaining advanced analytics enhancements.

@@ -52,6 +52,7 @@
    - Experiment folder missing prompts/config.
    - Duplicate experiment names or missing baseline raising errors.
    - Successful validation path resulting in telemetry logging via middleware (tying into Azure logging for parity).
+<!-- UPDATE 2025-10-12: Validation module, plugin schemas, and CLI integration have been implemented (`src/elspeth/core/validation.py`, `src/elspeth/core/registry.py`, `src/elspeth/cli.py:131`). Tests reside in `tests/test_validation_settings.py` and `tests/test_validation_suite.py`. -->
 
 ## Notes
 - Keep validation pure: no network/file side effects beyond reading config/prompts. Plugin instantiation should happen only after validation succeeds.
@@ -72,3 +73,7 @@
 - **Integration**: extend CLI tests (`tests/test_cli_suite.py`) to confirm the CLI aborts early on invalid configuration and reports warnings when applicable.
 - **Telemetry Parity**: verify Azure middleware receives preflight warnings/errors for logging by injecting validation reports in tests.
 - **Rollout**: implement validators behind feature flag if needed, but default to “on” to uphold fail-fast principle; update documentation and sample configs to highlight required fields.
+<!-- UPDATE 2025-10-12: Validators are enabled by default; documentation updates live in `docs/architecture/configuration-security.md` and README configuration overview. -->
+
+## Update History
+- 2025-10-12 – Confirmed validation plan execution and linked to implementation/test locations.

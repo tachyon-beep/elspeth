@@ -1,9 +1,11 @@
 # Initial Assessment (2024-05)
+<!-- UPDATE 2025-10-12: ELSPETH core package, plugin architecture, and sample suite are now fully implemented under `src/elspeth/`. The legacy `old/` scripts remain archival; current orchestration flows live in `src/elspeth/core/experiments/runner.py`, `src/elspeth/cli.py`, and associated plugins. -->
 
 ## Repository Snapshot
 - Current tree only exposes `old/` with three Python entry points: `main.py`, `experiment_runner.py`, and `experiment_stats.py`.
 - `main.py` is now a thin façade over an external `elspeth` package (expects `elspeth.cli`, `elspeth.runner`, etc.); those modules are **not** present in this repo, so executing `python old/main.py` will immediately fail with `ModuleNotFoundError`.
 - Legacy helpers (`experiment_runner.py`, `experiment_stats.py`) still implement substantial logic but import shared utilities from the missing `elspeth` package as well.
+<!-- UPDATE 2025-10-12: The modern stack lives in `src/elspeth/` with equivalent functionality; see `docs/architecture/architecture-overview.md` for the current system design. -->
 
 ## Runtime Expectations
 - Core dependencies from direct imports:
@@ -74,3 +76,7 @@
 - Enhance cost/rate plugin configuration with provider presets; consider surface in suite defaults.
 - Broaden sink support (multi-experiment reporting, DevOps/DB output) and document suite CLI usage.
 - Provide bootstrap tooling (setup script, sample suite) and finalize documentation for plugin configuration and suite mode.
+<!-- UPDATE 2025-10-12: Phases 5–7 delivered metrics plugins, analytics reporting, Azure telemetry middleware, and documentation/CLI tooling. Remaining roadmap items live in `notes/phase7-docs.md` and subsequent phase notes. -->
+
+## Update History
+- 2025-10-12 – Annotated legacy assessment with current implementation status and pointers to the rebuilt ELSPETH package.

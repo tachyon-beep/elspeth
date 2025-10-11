@@ -35,3 +35,6 @@ Provides-Extra: stats-distribution
 Requires-Dist: scipy>=1.10; extra == "stats-distribution"
 Provides-Extra: sinks-excel
 Requires-Dist: openpyxl>=3.1; extra == "sinks-excel"
+Provides-Extra: analytics-visual
+Requires-Dist: matplotlib>=3.8.0; extra == "analytics-visual"
+Requires-Dist: seaborn>=0.13.0; extra == "analytics-visual"

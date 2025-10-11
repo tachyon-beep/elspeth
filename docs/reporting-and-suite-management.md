@@ -14,6 +14,9 @@ pip install matplotlib seaborn
 
 > The remainder of the CLI only requires the base installation, but report generation skips
 > Excel/visual outputs when pandas or matplotlib are unavailable.
+<!-- UPDATE 2025-10-12: The visual analytics sink also relies on matplotlib (and optionally seaborn) when producing PNG/HTML charts; install these packages before enabling the sink. -->
+<!-- UPDATE 2025-10-12: Optional analytics extras (`pip install -e .[stats-core]` etc.) enable additional statistics in comparative reports; install before generating accreditation evidence. -->
+<!-- UPDATE 2025-10-12: `pip install -e .[analytics-visual]` provides the plotting stack (matplotlib/seaborn) when enabling visual chart outputs without adding global dependencies. -->
 
 ## 1. Create or update suites
 
@@ -74,6 +77,7 @@ outputs/sample_suite_reports/
     ├── analysis_config.json
     ├── analysis.xlsx        # requires pandas + openpyxl
     ├── analysis_summary.png # requires matplotlib
+    ├── analytics_visual.png # generated when visual sink enabled
     ├── comparative_analysis.json
     ├── executive_summary.md
     ├── failure_analysis.json
@@ -88,6 +92,7 @@ outputs/sample_suite_reports/
 - **executive_summary.md** – human-readable highlights (baseline, variant deltas, recommendations).
 - **analysis.xlsx** – Excel workbook with summary, comparisons, and recommendation sheets.
 - **analysis_summary.png** – bar chart comparing mean scores (error bars reflect std dev).
+- **analytics_visual.png / analytics_visual.html** – optional chart outputs when the visual analytics sink is configured; HTML embeds a base64 PNG and inline summary tables.
 - **failure_analysis.json** – captured row-level failures (including retry history).
 - **validation_results.json** – output from `validate_suite`, including warnings and preflight estimates.
 
@@ -96,6 +101,7 @@ outputs/sample_suite_reports/
 When pandas/openpyxl/matplotlib are missing, the CLI logs an informational message and skips the
 Excel or PNG artefacts while still producing JSON/Markdown reports. Install the suggested packages
 to unlock the full pipeline.
+<!-- UPDATE 2025-10-12: When statistical extras are missing, analytics sections still render but omit p-values/intervals; review `analytics_report.json` for null placeholders before distributing. -->
 
 ## 3. Automating workflows
 
@@ -113,3 +119,12 @@ reports:
 
 This keeps the suite exports and analytics reports in sync with every build. For multi-suite setups,
 iterate over directories or use multiple CLI invocations with different `--suite-root` values.
+
+## Added 2025-10-12 – Reporting Verification Checklist
+- After generating reports, open `consolidated/analysis_config.json` and confirm `plugin_summary` enumerates expected middleware, metrics, and sinks (`src/elspeth/tools/reporting.py:83`).
+- Validate that `consolidated/validation_results.json` captures suite warnings or errors emitted by `validate_suite`; accreditation reviewers rely on these logs (`src/elspeth/tools/reporting.py:38`).
+- If running with `--live-outputs`, confirm repository or blob sinks remained in dry-run mode unless explicitly toggled (`src/elspeth/cli.py:344`).
+- When the visual analytics sink is enabled, review `analytics_visual.png`/`.html` and ensure HTML outputs remain self-contained (no external asset references) before distribution.
+
+## Update History
+- 2025-10-12 – Documented dependency extras interplay, analytics null-handling, visual chart outputs, and a post-run verification checklist for generated reports.

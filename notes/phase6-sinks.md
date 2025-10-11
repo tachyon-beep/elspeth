@@ -18,6 +18,7 @@
 - **Security flow**: Datasources, experiments, and sinks now accept `security_level`. During execution, the runner resolves the strictest level from datasource attrs, experiment config, and sink overrides. The pipeline only allows a sink to consume artifacts at or below its clearance, respecting `on_error=skip` when levels mismatch. Produced artifacts inherit the highest applicable level, enabling downstream enforcement and audit.
 - **Existing sinks** (GitHub, signed artifacts, local bundles) need schema validation and documented options; add `on_error` to all.
 - **Optional targets** (SharePoint, S3) remain future work once core surfaces are stable.
+<!-- UPDATE 2025-10-12: Implementations for analytics report sink, file copy sink, artifact chaining, and Azure telemetry middleware are complete; optional targets remain backlog. -->
 
 ## Dependencies & Packaging
 - `azure-storage-blob` already present; continue using raw REST via SDK. Add optional extra `sinks-azure-devops` for any future SDK integration.
@@ -57,3 +58,7 @@
   - Blob uploads tag manifest/results blobs via metadata/headers.
   - ZIP manifests include a `security_level` entry and per-file listing when needed.
   - Future `data/*` artifacts should preserve row-level classification.
+  - Visual analytics sink emits inline base64 PNGs to prevent mixed content and inherits pipeline security levels.
+
+## Update History
+- 2025-10-12 – Documented completion status for Phase 6 sinks/telemetry and highlighted remaining optional targets.

@@ -11,9 +11,14 @@ Code targets Python 3.12 with 4-space indentation, `typing` annotations, and des
 
 ## Testing Guidelines
 Pytest is the standard; new tests belong under `tests/` using `test_*.py` naming. Mirror package structure (`tests/core/test_runner.py`) to align fixtures with production modules. Aim to maintain the current ~83% coverage; add parametrized cases for concurrency, backoff, and plugin registration edge cases. When adding integration features, supply a CLI exercise under `tests/integration/` and document expected artifacts in assertions.
+<!-- UPDATE 2025-10-12: Include analytics/reporting regression tests when touching SuiteReportGenerator, analytics sinks, or the visual analytics sink; see `tests/test_reporting.py`, `tests/test_outputs_visual.py`, and `tests/test_integration_visual_suite.py`. -->
 
 ## Commit & Pull Request Guidelines
 Commits follow the existing imperative style (`Add`, `Refine`, `Fix`) and concentrate on one logical change. Include concise body context when touching orchestration flows or configuration formats. Pull requests should link tracking issues or roadmap phases, summarize impact, call out migrations/config changes, and list verification commands (pytest, sample suite, or custom scripts). Attach screenshots or artifact snippets when outputs change.
 
 ## Security & Configuration Tips
 Secrets and API keys must live outside the repo; use environment variables consumed by the LLM adapters. Treat `config/sample_suite/` as non-sensitive reference material and fork configurations for real deployments. Review `notes/plugin-architecture.md` before introducing new plugins to ensure registration settings and audit logging remain compliant.
+<!-- UPDATE 2025-10-12: When modifying concurrency, retry, early-stop logic, or analytics sinks (JSON/visual), update the corresponding architecture docs and regenerate signed/visual artefacts if output formats change. -->
+
+## Update History
+- 2025-10-12 – Added guidance on analytics regression tests and documentation touchpoints for concurrency/early-stop changes.

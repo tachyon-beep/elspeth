@@ -34,6 +34,7 @@
    ```
 4. Leave Azure OpenAI client untouched except for exposing metadata useful to the middleware (already available via request metadata / response metrics in runner).
 5. Consider follow-up aggregation or sink plugins for Azure Storage/DevOps outputs separately; middleware should not write artefacts.
+<!-- UPDATE 2025-10-12: Steps 1–4 are now complete; `AzureEnvironmentMiddleware` implements lifecycle hooks, retry logging, and suite summaries (`src/elspeth/plugins/llms/middleware_azure.py`). -->
 
 ## Open Questions
 - Which Azure ML SDK flavour to target (`azureml-core` vs. `azure-ai-ml`)? Initial implementation can rely on `azureml-core` with optional dependency guard.
@@ -43,8 +44,13 @@
 ## Dependencies & Fail-fast Behaviour
 - Middleware requires the Azure ML runtime (`azureml-core`) to be installed and a live run context available. When invoked without these prerequisites it now defaults to `on_error="skip"` which logs a message and disables telemetry instead of raising, using environment-variable heuristics to decide whether Azure ML is expected.
 - Configurations that reference the middleware should run inside Azure ML when telemetry is required. Set `on_error="abort"` to fail fast if the run context is missing; otherwise local executions degrade gracefully.
+<!-- UPDATE 2025-10-12: Middleware now logs fallback behaviour at INFO/WARNING when `on_error="skip"`; tests cover these scenarios in `tests/test_llm_middleware.py`. -->
 
 ## Next Steps
 1. Scaffold middleware class and register it.
 2. Add unit tests exercising telemetry hooks with mocked Azure ML Run.
 3. Document configuration usage in README / notes after implementation.
+<!-- UPDATE 2025-10-12: Completed. Future enhancements include optional Azure Monitor webhooks and richer suite summary metrics. -->
+
+## Update History
+- 2025-10-12 – Noted completion of middleware implementation and highlighted future telemetry enhancements.

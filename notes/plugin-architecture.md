@@ -332,6 +332,7 @@
 - Implemented default metrics stack under `src/elspeth/plugins/experiments/metrics.py` with row (`score_extractor`), aggregation (`score_stats`, `score_recommendation`), and baseline comparison (`score_delta`) plugins.
 - Added configuration wiring in `config/settings.yaml` and CLI toggle `--disable-metrics` to opt-out when required.
 - Comprehensive unit coverage in `tests/test_experiment_metrics_plugins.py`; full suite passes with metrics enabled by default.
+<!-- UPDATE 2025-10-12: Additional analytics plugins (`score_assumptions`, `score_practical`, `score_bayes`, `score_power`, `score_distribution`, `score_agreement`) and analytics sinks have since been shipped. -->
 
 ### Phase 6 – Output & Archival Sinks
 0. **Risk Reduction – Sink Surface Audit & Dependency Design**
@@ -355,7 +356,8 @@
    - Validate signing output with round-trip verification and document operational runbooks.
 
 **Phase 6 status (2025-05-XX):**
-- Shipping sinks now cover Azure Blob, local bundles, GitHub/Azure DevOps repositories (dry-run aware), and HMAC-signed artifacts. Config/CLI wiring allows operators to toggle between dry-run and live modes and switch prompt packs for archival workflows. Unit tests cover blob uploads, bundle generation, repo interactions, signature verification, and CLI toggles.
+- Shipping sinks now cover Azure Blob, local bundles, GitHub/Azure DevOps repositories (dry-run aware), HMAC-signed artifacts, analytics reports, and visual analytics charts. Config/CLI wiring allows operators to toggle between dry-run and live modes and switch prompt packs for archival workflows. Unit tests cover blob uploads, visualization output, bundle generation, repo interactions, signature verification, and CLI toggles.
+<!-- UPDATE 2025-10-12: Analytics report and visual sinks, file copy sink, artifact DAG enforcement, and Azure telemetry middleware are fully integrated; optional targets remain backlog. -->
 
 ### Phase 7 – Tooling & Documentation
 1. Publish sample suite (prompts, configs, plugins) mirroring legacy structure.
@@ -369,6 +371,10 @@
 - Authored a top-level `README.md`, refreshed `AGENTS.md`, and documented onboarding/tooling expectations.
 - Introduced LLM middleware (audit logging, prompt shielding) and adaptive rate limiting with threaded execution controls to mirror legacy safety/audit behaviour.
 - Outstanding work: Azure ML telemetry hooks, DevOps/Excel archivers, advanced statistics suite, and schema/preflight validation from legacy runner.
+<!-- UPDATE 2025-10-12: Outstanding items addressed via telemetry middleware, Excel/ZIP sinks, analytics extras, and validation enhancements (`src/elspeth/core/validation.py`). -->
+
+## Update History
+- 2025-10-12 – Recorded completion of Phases 5–7 enhancements and noted remaining optional backlog items.
 
 ## Phase 4 Plan – Retries, Checkpointing, Failure Handling
 1. **Retry Configuration**

@@ -8,7 +8,7 @@ from typing import Any, Callable, Dict, Mapping
 from elspeth.core.interfaces import DataSource, LLMClientProtocol, ResultSink
 from elspeth.core.validation import ConfigurationError, validate_schema
 from elspeth.plugins.datasources import BlobDataSource, CSVBlobDataSource, CSVDataSource
-from elspeth.plugins.llms import AzureOpenAIClient, HttpOpenAIClient, MockLLMClient
+from elspeth.plugins.llms import AzureOpenAIClient, HttpOpenAIClient, MockLLMClient, StaticLLMClient
 from elspeth.plugins.outputs import (
     AnalyticsReportSink,
     AzureDevOpsRepoSink,
@@ -19,6 +19,7 @@ from elspeth.plugins.outputs import (
     GitHubRepoSink,
     LocalBundleSink,
     SignedArtifactSink,
+    VisualAnalyticsSink,
     ZipResultSink,
 )
 
@@ -173,6 +174,22 @@ class PluginRegistry:
                     "type": "object",
                     "properties": {
                         "seed": {"type": "integer"},
+                    },
+                    "additionalProperties": True,
+                },
+            ),
+            "static_test": PluginFactory(
+                create=lambda options: StaticLLMClient(
+                    content=options.get("content", "STATIC RESPONSE"),
+                    score=options.get("score", 0.5),
+                    metrics=options.get("metrics"),
+                ),
+                schema={
+                    "type": "object",
+                    "properties": {
+                        "content": {"type": "string"},
+                        "score": {"type": "number"},
+                        "metrics": {"type": "object"},
                     },
                     "additionalProperties": True,
                 },
@@ -391,6 +408,47 @@ class PluginRegistry:
                         "include_metadata": {"type": "boolean"},
                         "include_aggregates": {"type": "boolean"},
                         "include_comparisons": {"type": "boolean"},
+                        "artifacts": ARTIFACTS_SECTION_SCHEMA,
+                        "security_level": {"type": "string"},
+                        "on_error": ON_ERROR_ENUM,
+                    },
+                    "required": ["base_path"],
+                    "additionalProperties": True,
+                },
+            ),
+            "analytics_visual": PluginFactory(
+                create=lambda options: VisualAnalyticsSink(
+                    base_path=options["base_path"],
+                    file_stem=options.get("file_stem", "analytics_visual"),
+                    formats=options.get("formats"),
+                    dpi=int(options.get("dpi", 150)),
+                    figure_size=options.get("figure_size"),
+                    include_table=options.get("include_table", True),
+                    bar_color=options.get("bar_color"),
+                    chart_title=options.get("chart_title"),
+                    seaborn_style=options.get("seaborn_style", "darkgrid"),
+                    on_error=options.get("on_error", "abort"),
+                ),
+                schema={
+                    "type": "object",
+                    "properties": {
+                        "base_path": {"type": "string"},
+                        "file_stem": {"type": "string"},
+                        "formats": {
+                            "type": "array",
+                            "items": {"type": "string", "enum": ["png", "html"]},
+                        },
+                        "dpi": {"type": "integer", "minimum": 50},
+                        "figure_size": {
+                            "type": "array",
+                            "items": {"type": "number"},
+                            "minItems": 2,
+                            "maxItems": 2,
+                        },
+                        "include_table": {"type": "boolean"},
+                        "bar_color": {"type": "string"},
+                        "chart_title": {"type": "string"},
+                        "seaborn_style": {"type": "string"},
                         "artifacts": ARTIFACTS_SECTION_SCHEMA,
                         "security_level": {"type": "string"},
                         "on_error": ON_ERROR_ENUM,

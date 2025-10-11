@@ -75,6 +75,7 @@ Install them via the dev extra plus matplotlib:
 pip install -e .[dev]
 pip install matplotlib seaborn
 ```
+<!-- UPDATE 2025-10-12: Alternatively install plotting dependencies via `pip install -e .[analytics-visual]` when enabling the visual analytics sink. -->
 
 ## Configuration Overview
 
@@ -101,6 +102,7 @@ Settings files (default: `config/settings.yaml`) describe the runtime:
   - `pip install -e .[stats-bayesian]` – enables Bayesian baseline comparisons.
   - `pip install -e .[stats-planning]` – brings in power/sample-size analytics.
   - `pip install -e .[stats-distribution]` – enables distribution/drift analytics.
+  - `pip install -e .[analytics-visual]` – installs matplotlib/seaborn for PNG/HTML analytics charts.
 
 Experiments (`config/sample_suite/*/config.json`) can:
 
@@ -124,7 +126,7 @@ Prompts are rendered via the new Jinja-based engine:
 Each plugin type registers with `src/elspeth/core/registry.py`.
 
 - **Datasources**: `azure_blob`, `csv_blob` (local CSV stand-in for blob inputs), `local_csv` (reads local CSV files).
-- **LLM clients**: `azure_openai`, `mock` (deterministic responses for testing).
+- **LLM clients**: `azure_openai`, `mock` (deterministic hashing), and `static_test` (returns predefined content/metrics for tests and fixtures).
 - **Metrics**: `score_extractor`, `score_stats`, `score_recommendation`, `score_delta`, `score_variant_ranking`.
 
 Metrics emitted by the default row plugin live under `record["metrics"]`:
@@ -138,10 +140,11 @@ reference per-criteria values via paths like `scores.analysis`.
 - **Aggregators**: `score_agreement` (Cronbach’s alpha, Krippendorff’s alpha),
   `score_power` (target sample size/power estimates), `score_distribution`
   (distribution shift tests), and `score_variant_ranking` in addition to `score_stats` and `score_recommendation`.
+- **Early stop**: `threshold` plugin halts execution when configured metrics cross thresholds; definitions can be provided via `early_stop` shorthand or `early_stop_plugins` arrays (`src/elspeth/plugins/experiments/early_stop.py`).
 - **LLM middleware**: `audit_logger`, `prompt_shield`, `azure_content_safety`, `health_monitor`.
 - **Sinks**: CSV, Azure blob, local bundles, ZIP bundles, GitHub/Azure DevOps repositories,
-  signed artifact bundles, analytics report sink (JSON/Markdown summaries). Spreadsheet sinks support
-  `sanitize_formulas` / `sanitize_guard` options; guard choices propagate to manifest metadata.
+  signed artifact bundles, analytics report sink (JSON/Markdown summaries), and analytics visual sink (PNG/HTML charts). Spreadsheet sinks support
+  `sanitize_formulas` / `sanitize_guard` options; guard choices propagate to manifest metadata. The visual sink requires `matplotlib` (and optionally `seaborn`) when generating charts.
 
 To add a new plugin, implement the appropriate interface from
 `src/elspeth/core/interfaces.py` and register it via the registry helper.
@@ -159,6 +162,9 @@ To add a new plugin, implement the appropriate interface from
   available kinds: `row`, `aggregator`, `baseline`, `sink`, `middleware`.
 - Enable formatting hooks with `pip install -e .[dev] && pre-commit install`
   (see `.pre-commit-config.yaml`).
+
+## Update History
+- 2025-10-12 – Added early-stop plugin catalogue entry, visual analytics sink reference, and aligned documentation with concurrency, analytics, and telemetry enhancements.
 
 ## SonarQube Coverage
 

@@ -17,6 +17,7 @@ This guide helps teams upgrade from the legacy `old/` implementation to the mode
 | Experiment stats / analytics | Plugins in `src/elspeth/plugins/experiments/metrics.py` | Metrics, practical significance, Cliff’s delta, reporting sink replace legacy `StatsAnalyzer`. |
 | Azure DevOps archiving | Repository sink (`azure_devops_repo`) | Configure in sinks section of settings. |
 | Azure telemetry logging | `azure_environment` middleware | Handles Azure ML run interaction; defaults to skip when no run context. |
+| Concurrency / checkpointing | `concurrency` & `checkpoint` settings | Configure thread pool thresholds and resumable IDs to match legacy behaviour. |
 
 ## Configuration Migration
 
@@ -85,6 +86,7 @@ Refer to `notes/config-migration.md` for key renames. Typical steps:
 - Configure experiment-level metrics via `row_plugins`, `aggregator_plugins`, and `baseline_plugins`.
 - `analytics_report` sink writes JSON/Markdown summaries of results, aggregators, and baseline comparisons.
 - Sample configuration: `config/sample_suite/` demonstrates early stop, analytics, and reporting sinks.
+<!-- UPDATE 2025-10-12: Suite reporting commands (`--reports-dir`) now generate comparative analysis, validation summaries, and recommendations mirroring legacy Excel dashboards (`src/elspeth/tools/reporting.py:33`). -->
 
 ## Azure-Specific Features
 - **Azure ML telemetry**: Use `azure_environment` middleware in specific experiments or suite defaults. Set `on_error` to `skip` for local runs.
@@ -103,7 +105,37 @@ Refer to `notes/config-migration.md` for key renames. Typical steps:
 - `notes/stats-analytics-inventory.md` – Analytics plugin coverage.
 - `notes/stats-refactor-plan.md` – Future analytics enhancements.
 - `notes/azure-middleware.md` – Azure middleware usage notes.
+<!-- UPDATE 2025-10-12: `notes/config-migration.md` now lists normalized `concurrency`, `early_stop_plugins`, and `checkpoint` keys to map legacy runner flags. -->
 
 ## Support Channels
 - Run `elspeth list plugins` (future enhancement) or browse `src/elspeth/plugins/` for available plugins.
 - Unit tests in `tests/` illustrate configuration patterns and middleware/sink behavior.
+
+## Added 2025-10-12 – Concurrency & Early-stop Parity Checklist
+- Enable threaded execution by defining:
+  ```yaml
+  concurrency:
+    enabled: true
+    max_workers: 6
+    backlog_threshold: 25
+    utilization_pause: 0.85
+  checkpoint:
+    path: checkpoints/latest.jsonl
+    field: APPID
+  ```
+  This mirrors the legacy runner’s parallel mode and resume semantics (`src/elspeth/core/experiments/runner.py:365`, `src/elspeth/core/experiments/runner.py:280`).
+- Map legacy early-stop flags (`runner.earlyStop`) to the normalized plugin definition:
+  ```yaml
+  early_stop_plugins:
+    - name: threshold
+      options:
+        metric: metrics.scores.analysis
+        threshold: 0.8
+        comparison: gte
+        min_rows: 3
+  ```
+  (`src/elspeth/plugins/experiments/early_stop.py:17`, `src/elspeth/core/experiments/plugin_registry.py:298`).
+- Translate analytics/reporting scripts to CLI calls that include `--reports-dir` so consolidated JSON, Markdown, and Excel assets replace bespoke notebook workflows (`src/elspeth/cli.py:240`, `src/elspeth/tools/reporting.py:94`).
+
+## Update History
+- 2025-10-12 – Documented concurrency, checkpoint, early-stop migration steps and noted suite reporting parity with legacy dashboards.

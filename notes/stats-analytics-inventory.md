@@ -12,9 +12,9 @@ and required dependencies.
 | **Score extraction & summaries** | Extract scores from LLM output, mean/median/std, pass-rate, histograms | ✅ `score_extractor`, `score_stats` provide per-criteria metrics | numpy, pandas | Complete |
 | **Recommendations** | Text guidance combining effect size, power, penalties | ✅ `score_recommendation` aggregator | numpy | Complete |
 | **Effect sizes** | Cohen’s d (+ bootstrap CI), Cliff’s delta | ✅ Cohen’s d via `score_stats`; ❌ Cliff’s delta | numpy, scipy | Need Cliff’s delta baseline plugin |
-| **Significance tests (parametric)** | t-test, assumption checks (Shapiro, Levene) | ❌ | scipy.stats | Candidate: diagnostics aggregator producing normality/variance results |
+| **Significance tests (parametric)** | t-test, assumption checks (Shapiro, Levene) | ✅ `score_significance` + `score_assumptions` | scipy.stats | Implemented aggregator handles Welch t-test + diagnostics |
 | **Significance tests (non-parametric)** | Mann–Whitney, Wilcoxon | ✅ Mann–Whitney/Wilcoxon in `score_distribution` | scipy.stats | Already covered; ensure docs mention usage |
-| **Multiple comparisons** | Bonferroni, FDR corrections | ❌ | statsmodels | Option to add aggregator utility or integrate into baseline plugins |
+| **Multiple comparisons** | Bonferroni, FDR corrections | ✅ `score_significance` adjustments | statsmodels | Available when `[stats-planning]` extra installed |
 | **Bayesian analysis** | PyMC3 model + bootstrap fallback | ✅ `score_bayes` (beta posterior) provides probability of improvement; ❌ PyMC3 mode/CI | scipy (beta), optional pymc3 | Determine if PyMC3 support needed; fallback already present |
 | **Distribution shift** | KL divergence, KS test, histograms | ✅ `score_distribution` (KL, KS, summary) | numpy, scipy | Histogram plotting not yet ported |
 | **Practical significance** | NNT, meaningful-change counts | ✅ `score_practical` baseline plugin | numpy | Delivered in Phase 2.2.2 |
@@ -23,6 +23,7 @@ and required dependencies.
 | **Ordinal regression** | statsmodels OrderedModel | ❌ | statsmodels | Consider advanced plugin or defer |
 | **Composite ranking** | Score variants by effect, power, risk | ✅ `score_variant_ranking` aggregator | numpy | Delivered; richer reporting still future work |
 | **Visualisations** | Matplotlib dashboards (heatmaps, distributions) | ❌ | matplotlib | Candidate for future report sink (Task 2.2.3) |
+<!-- UPDATE 2025-10-12: Visual analytics sink delivers static PNG/HTML charts via `[analytics-visual]`; interactive dashboards remain future scope. -->
 | **Reporting / JSON summaries** | Write markdown/JSON outputs, recommendations | ✅ Analytics report sink (JSON/Markdown) | stdlib | Delivered in Task 2.2.3 |
 
 ## Dependencies Overview
@@ -49,3 +50,6 @@ and required dependencies.
 - Ensure README/docs reference optional extras required for advanced analytics.
 
 This inventory completes Task 2.2.1 by providing a baseline for the analytics parity plan. Future tasks will implement the missing pieces and introduce stakeholder-friendly outputs.
+
+## Update History
+- 2025-10-12 – Reflected delivered analytics plugins (significance, multiple comparisons, Bayesian, analytics sink) and noted remaining optional work (visualisations, ordinal regression).

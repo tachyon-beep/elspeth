@@ -32,6 +32,7 @@
 - Cost tracking, rate limiting, and Azure telemetry (Run logging).
 - Output archiving (CSV, Excel, zip, DevOps uploads) and environment capture.
 - Statistical reporting and experiment comparison against baseline.
+<!-- UPDATE 2025-10-12: All behaviours now exist in the modern stack (see `src/elspeth/core/experiments/runner.py`, `src/elspeth/tools/reporting.py`, and `src/elspeth/plugins/experiments/metrics.py`). -->
 
 ## Proposed Mapping to New Architecture
 - **Prompt Packs / Validation** → Extend `ExperimentConfig` loader and experiment plugins to support reusable prompt bundles and validators; use row plugins for validation failures.
@@ -41,3 +42,7 @@
 - **Output Archiving** → Introduce sinks for CSV/Excel/zip/DevOps; environment capture and DevOps upload can be separate sink plugins.
 - **Statistical Analysis** → Port `experiment_stats.py` functions into aggregation plugins that compute scores/effect sizes and feed summary sinks.
 - **Azure Telemetry** → Optional plugin or sink that logs metrics back to Azure ML Run when context exists.
+<!-- UPDATE 2025-10-12: Mapping realised through plugin registries, artifact pipeline, analytics report sink, and Azure telemetry middleware. -->
+
+## Update History
+- 2025-10-12 – Marked legacy behaviour migration complete and pointed to modern implementations.
