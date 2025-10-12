@@ -68,6 +68,9 @@ def test_load_settings(tmp_path, monkeypatch):
     assert settings.datasource.kind == "datasource"
     assert settings.llm.kind == "llm"
     assert settings.sinks[0].kind == "sink"
+    assert settings.datasource.options["security_level"] == "official"
+    assert settings.llm.options["security_level"] == "official"
+    assert settings.sinks[0].options["security_level"] == "official"
     assert settings.orchestrator_config.llm_prompt["system"] == "sys"
     assert settings.orchestrator_config.prompt_fields == ["id"]
     assert settings.orchestrator_config.criteria[0]["name"] == "crit"

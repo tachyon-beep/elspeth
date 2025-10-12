@@ -65,11 +65,12 @@ def _prepare_plugin_definition(definition: Mapping[str, Any], context: str) -> t
 
     options = dict(definition.get("options", {}) or {})
     entry_level = definition.get("security_level")
-    options_level = options.pop("security_level", None)
+    options_level = options.get("security_level")
     try:
         level = coalesce_security_level(entry_level, options_level)
     except ValueError as exc:
         raise ConfigurationError(f"{context}: {exc}") from exc
+    options["security_level"] = level
     return options, level
 
 
