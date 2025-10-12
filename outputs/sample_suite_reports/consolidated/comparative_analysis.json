@@ -1,0 +1,313 @@
+{
+  "baseline": "baseline",
+  "baseline_stats": {
+    "criteria": {
+      "analysis": {
+        "count": 3,
+        "missing": 0,
+        "mean": 0.6222222222222222,
+        "median": 0.6294117647058823,
+        "min": 0.5666666666666667,
+        "max": 0.6705882352941177,
+        "std": 0.04272930491158474,
+        "pass_rate": 0.0,
+        "passes": 0
+      },
+      "prioritization": {
+        "count": 3,
+        "missing": 0,
+        "mean": 0.8228758169934641,
+        "median": 0.8176470588235294,
+        "min": 0.7980392156862746,
+        "max": 0.8529411764705883,
+        "std": 0.02271653228363762,
+        "pass_rate": 1.0,
+        "passes": 3
+      }
+    },
+    "overall": {
+      "count": 6,
+      "missing": 0,
+      "mean": 0.7225490196078432,
+      "median": 0.7343137254901961,
+      "min": 0.5666666666666667,
+      "max": 0.8529411764705883,
+      "std": 0.10600180867450235,
+      "pass_rate": 0.5,
+      "passes": 3
+    }
+  },
+  "variants": {
+    "early_stop_fast_exit": {
+      "stats": {
+        "criteria": {
+          "analysis": {
+            "count": 1,
+            "missing": 0,
+            "mean": 0.5666666666666667,
+            "median": 0.5666666666666667,
+            "min": 0.5666666666666667,
+            "max": 0.5666666666666667,
+            "std": 0.0,
+            "pass_rate": 0.0,
+            "passes": 0
+          },
+          "prioritization": {
+            "count": 1,
+            "missing": 0,
+            "mean": 0.7980392156862746,
+            "median": 0.7980392156862746,
+            "min": 0.7980392156862746,
+            "max": 0.7980392156862746,
+            "std": 0.0,
+            "pass_rate": 1.0,
+            "passes": 1
+          }
+        },
+        "overall": {
+          "count": 2,
+          "missing": 0,
+          "mean": 0.6823529411764706,
+          "median": 0.6823529411764706,
+          "min": 0.5666666666666667,
+          "max": 0.7980392156862746,
+          "std": 0.11568627450980395,
+          "pass_rate": 0.5,
+          "passes": 1
+        }
+      },
+      "comparisons": {
+        "score_delta": {
+          "analysis": -0.05555555555555558,
+          "prioritization": -0.024836601307189565
+        }
+      }
+    },
+    "early_stop_threshold": {
+      "stats": {
+        "criteria": {
+          "analysis": {
+            "count": 2,
+            "missing": 0,
+            "mean": 0.5980392156862745,
+            "median": 0.5980392156862745,
+            "min": 0.5666666666666667,
+            "max": 0.6294117647058823,
+            "std": 0.03137254901960784,
+            "pass_rate": 0.0,
+            "passes": 0
+          },
+          "prioritization": {
+            "count": 2,
+            "missing": 0,
+            "mean": 0.8254901960784314,
+            "median": 0.8254901960784314,
+            "min": 0.7980392156862746,
+            "max": 0.8529411764705883,
+            "std": 0.027450980392156876,
+            "pass_rate": 1.0,
+            "passes": 2
+          }
+        },
+        "overall": {
+          "count": 4,
+          "missing": 0,
+          "mean": 0.711764705882353,
+          "median": 0.7137254901960784,
+          "min": 0.5666666666666667,
+          "max": 0.8529411764705883,
+          "std": 0.11748354650153135,
+          "pass_rate": 0.5,
+          "passes": 2
+        }
+      },
+      "comparisons": {
+        "score_delta": {
+          "analysis": -0.024183006535947738,
+          "prioritization": 0.002614379084967311
+        }
+      }
+    },
+    "prompt_shield_demo": {
+      "stats": {
+        "criteria": {
+          "analysis": {
+            "count": 3,
+            "missing": 0,
+            "mean": 0.6222222222222222,
+            "median": 0.6294117647058823,
+            "min": 0.5666666666666667,
+            "max": 0.6705882352941177,
+            "std": 0.04272930491158474,
+            "pass_rate": 0.0,
+            "passes": 0
+          },
+          "prioritization": {
+            "count": 3,
+            "missing": 0,
+            "mean": 0.8228758169934641,
+            "median": 0.8176470588235294,
+            "min": 0.7980392156862746,
+            "max": 0.8529411764705883,
+            "std": 0.02271653228363762,
+            "pass_rate": 1.0,
+            "passes": 3
+          }
+        },
+        "overall": {
+          "count": 6,
+          "missing": 0,
+          "mean": 0.7225490196078432,
+          "median": 0.7343137254901961,
+          "min": 0.5666666666666667,
+          "max": 0.8529411764705883,
+          "std": 0.10600180867450235,
+          "pass_rate": 0.5,
+          "passes": 3
+        }
+      },
+      "comparisons": {
+        "score_delta": {
+          "analysis": 0.0,
+          "prioritization": 0.0
+        }
+      }
+    },
+    "slow_rate_limit_demo": {
+      "stats": {
+        "criteria": {
+          "analysis": {
+            "count": 3,
+            "missing": 0,
+            "mean": 0.6222222222222222,
+            "median": 0.6294117647058823,
+            "min": 0.5666666666666667,
+            "max": 0.6705882352941177,
+            "std": 0.04272930491158474,
+            "pass_rate": 0.0,
+            "passes": 0
+          },
+          "prioritization": {
+            "count": 3,
+            "missing": 0,
+            "mean": 0.8228758169934641,
+            "median": 0.8176470588235294,
+            "min": 0.7980392156862746,
+            "max": 0.8529411764705883,
+            "std": 0.02271653228363762,
+            "pass_rate": 1.0,
+            "passes": 3
+          }
+        },
+        "overall": {
+          "count": 6,
+          "missing": 0,
+          "mean": 0.7225490196078432,
+          "median": 0.7343137254901961,
+          "min": 0.5666666666666667,
+          "max": 0.8529411764705883,
+          "std": 0.10600180867450235,
+          "pass_rate": 0.5,
+          "passes": 3
+        }
+      },
+      "comparisons": {
+        "score_delta": {
+          "analysis": 0.0,
+          "prioritization": 0.0
+        }
+      }
+    },
+    "variant_prompt": {
+      "stats": {
+        "criteria": {
+          "analysis": {
+            "count": 3,
+            "missing": 0,
+            "mean": 0.6326797385620915,
+            "median": 0.5823529411764706,
+            "min": 0.4803921568627451,
+            "max": 0.8352941176470589,
+            "std": 0.1491943706343231,
+            "pass_rate": 0.3333333333333333,
+            "passes": 1
+          },
+          "prioritization": {
+            "count": 3,
+            "missing": 0,
+            "mean": 0.657516339869281,
+            "median": 0.6098039215686275,
+            "min": 0.5764705882352942,
+            "max": 0.7862745098039217,
+            "std": 0.09205714718393174,
+            "pass_rate": 0.3333333333333333,
+            "passes": 1
+          }
+        },
+        "overall": {
+          "count": 6,
+          "missing": 0,
+          "mean": 0.6450980392156863,
+          "median": 0.5960784313725491,
+          "min": 0.4803921568627451,
+          "max": 0.8352941176470589,
+          "std": 0.12458311875784372,
+          "pass_rate": 0.3333333333333333,
+          "passes": 2
+        }
+      },
+      "comparisons": {
+        "score_delta": {
+          "analysis": 0.010457516339869244,
+          "prioritization": -0.16535947712418309
+        }
+      }
+    },
+    "variant_rate_limit": {
+      "stats": {
+        "criteria": {
+          "analysis": {
+            "count": 3,
+            "missing": 0,
+            "mean": 0.6222222222222222,
+            "median": 0.6294117647058823,
+            "min": 0.5666666666666667,
+            "max": 0.6705882352941177,
+            "std": 0.04272930491158474,
+            "pass_rate": 0.0,
+            "passes": 0
+          },
+          "prioritization": {
+            "count": 3,
+            "missing": 0,
+            "mean": 0.8228758169934641,
+            "median": 0.8176470588235294,
+            "min": 0.7980392156862746,
+            "max": 0.8529411764705883,
+            "std": 0.02271653228363762,
+            "pass_rate": 1.0,
+            "passes": 3
+          }
+        },
+        "overall": {
+          "count": 6,
+          "missing": 0,
+          "mean": 0.7225490196078432,
+          "median": 0.7343137254901961,
+          "min": 0.5666666666666667,
+          "max": 0.8529411764705883,
+          "std": 0.10600180867450235,
+          "pass_rate": 0.5,
+          "passes": 3
+        }
+      },
+      "comparisons": {
+        "score_delta": {
+          "analysis": 0.0,
+          "prioritization": 0.0
+        }
+      }
+    }
+  },
+  "generated_at": "2025-10-12T08:09:15.283742+00:00"
+}

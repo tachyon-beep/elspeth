@@ -1,0 +1,90 @@
+{
+  "experiment": "early_stop_fast_exit",
+  "row_count": 1,
+  "failures": 0,
+  "aggregates": {
+    "score_stats": {
+      "criteria": {
+        "analysis": {
+          "count": 1,
+          "missing": 0,
+          "mean": 0.5666666666666667,
+          "median": 0.5666666666666667,
+          "min": 0.5666666666666667,
+          "max": 0.5666666666666667,
+          "std": 0.0,
+          "pass_rate": 0.0,
+          "passes": 0
+        },
+        "prioritization": {
+          "count": 1,
+          "missing": 0,
+          "mean": 0.7980392156862746,
+          "median": 0.7980392156862746,
+          "min": 0.7980392156862746,
+          "max": 0.7980392156862746,
+          "std": 0.0,
+          "pass_rate": 1.0,
+          "passes": 1
+        }
+      },
+      "overall": {
+        "count": 2,
+        "missing": 0,
+        "mean": 0.6823529411764706,
+        "median": 0.6823529411764706,
+        "min": 0.5666666666666667,
+        "max": 0.7980392156862746,
+        "std": 0.11568627450980395,
+        "pass_rate": 0.5,
+        "passes": 1
+      }
+    },
+    "score_recommendation": {
+      "recommendation": "Insufficient data for confident recommendation",
+      "summary": {
+        "count": 2,
+        "missing": 0,
+        "mean": 0.6823529411764706,
+        "median": 0.6823529411764706,
+        "min": 0.5666666666666667,
+        "max": 0.7980392156862746,
+        "std": 0.11568627450980395,
+        "pass_rate": 0.5,
+        "passes": 1
+      }
+    }
+  },
+  "config": {
+    "name": "early_stop_fast_exit",
+    "description": "Stops immediately when the overall score exceeds 0.55",
+    "enabled": true,
+    "temperature": 0.0,
+    "max_tokens": 256,
+    "prompt_pack": "sample",
+    "early_stop_plugins": [
+      {
+        "name": "threshold",
+        "security_level": "official",
+        "options": {
+          "metric": "score",
+          "threshold": 0.55,
+          "comparison": "gte",
+          "min_rows": 1,
+          "label": "first_row_high"
+        }
+      }
+    ],
+    "is_baseline": false,
+    "hypothesis": "",
+    "author": "unknown",
+    "tags": [],
+    "estimated_cost": {
+      "estimated_requests": 100.0,
+      "estimated_input_cost": 6.0,
+      "estimated_output_cost": 1.536,
+      "estimated_total_cost": 7.536
+    }
+  },
+  "timestamp": "2025-10-12T08:09:15.282118+00:00"
+}

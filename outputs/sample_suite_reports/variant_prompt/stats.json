@@ -1,0 +1,106 @@
+{
+  "experiment": "variant_prompt",
+  "row_count": 3,
+  "failures": 0,
+  "aggregates": {
+    "score_stats": {
+      "criteria": {
+        "analysis": {
+          "count": 3,
+          "missing": 0,
+          "mean": 0.6326797385620915,
+          "median": 0.5823529411764706,
+          "min": 0.4803921568627451,
+          "max": 0.8352941176470589,
+          "std": 0.1491943706343231,
+          "pass_rate": 0.3333333333333333,
+          "passes": 1
+        },
+        "prioritization": {
+          "count": 3,
+          "missing": 0,
+          "mean": 0.657516339869281,
+          "median": 0.6098039215686275,
+          "min": 0.5764705882352942,
+          "max": 0.7862745098039217,
+          "std": 0.09205714718393174,
+          "pass_rate": 0.3333333333333333,
+          "passes": 1
+        }
+      },
+      "overall": {
+        "count": 6,
+        "missing": 0,
+        "mean": 0.6450980392156863,
+        "median": 0.5960784313725491,
+        "min": 0.4803921568627451,
+        "max": 0.8352941176470589,
+        "std": 0.12458311875784372,
+        "pass_rate": 0.3333333333333333,
+        "passes": 2
+      }
+    },
+    "score_recommendation": {
+      "recommendation": "prioritization leads with mean score 0.66, pass rate 33%",
+      "summary": {
+        "count": 6,
+        "missing": 0,
+        "mean": 0.6450980392156863,
+        "median": 0.5960784313725491,
+        "min": 0.4803921568627451,
+        "max": 0.8352941176470589,
+        "std": 0.12458311875784372,
+        "pass_rate": 0.3333333333333333,
+        "passes": 2
+      },
+      "best_criteria": "prioritization",
+      "best_stats": {
+        "count": 3,
+        "missing": 0,
+        "mean": 0.657516339869281,
+        "median": 0.6098039215686275,
+        "min": 0.5764705882352942,
+        "max": 0.7862745098039217,
+        "std": 0.09205714718393174,
+        "pass_rate": 0.3333333333333333,
+        "passes": 1
+      }
+    }
+  },
+  "config": {
+    "name": "variant_prompt",
+    "description": "Variant emphasising industry-specific guidance",
+    "enabled": true,
+    "temperature": 0.0,
+    "max_tokens": 256,
+    "prompt_pack": "sample",
+    "prompt_template": "You are reviewing {{ APPID }} ({{ title }}).\nIndustry: {{ industry|default('general', boolean=true) }}.\nSummary: {{ summary }}.\nReturn JSON {\"score\": <0-1>, \"comment\": \"...\"}.",
+    "criteria": [
+      {
+        "name": "analysis",
+        "template": "Evaluate {{ APPID }} for adoption in the {{ industry|default('general', boolean=true) }} sector. Return JSON {\"score\": <0-1>, \"comment\": \"...\"}."
+      },
+      {
+        "name": "prioritization",
+        "template": "Rate priority (0-1) for {{ APPID }} focusing on the opportunity described as '{{ summary }}'."
+      }
+    ],
+    "baseline_plugins": [
+      {
+        "name": "score_delta",
+        "security_level": "official"
+      }
+    ],
+    "is_baseline": false,
+    "hypothesis": "",
+    "author": "unknown",
+    "tags": [],
+    "estimated_cost": {
+      "estimated_requests": 200.0,
+      "estimated_input_cost": 12.0,
+      "estimated_output_cost": 3.072,
+      "estimated_total_cost": 15.072
+    }
+  },
+  "timestamp": "2025-10-12T08:09:15.282118+00:00"
+}

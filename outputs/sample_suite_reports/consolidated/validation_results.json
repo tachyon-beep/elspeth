@@ -1,0 +1,11 @@
+{
+  "errors": [],
+  "warnings": [],
+  "preflight": {
+    "experiment_count": 7,
+    "baseline": "baseline",
+    "estimated_api_calls": 800,
+    "estimated_time_minutes": 13.333333333333334,
+    "warnings": []
+  }
+}

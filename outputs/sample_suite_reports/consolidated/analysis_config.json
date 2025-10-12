@@ -1,0 +1,118 @@
+{
+  "generated_at": "2025-10-12T08:09:15.285127+00:00",
+  "suite": {
+    "total_experiments": 7,
+    "baseline": "baseline",
+    "experiments": [
+      {
+        "name": "baseline",
+        "temperature": 0.0,
+        "max_tokens": 256,
+        "is_baseline": true,
+        "tags": [],
+        "estimated_cost": {
+          "estimated_requests": 100.0,
+          "estimated_input_cost": 6.0,
+          "estimated_output_cost": 1.536,
+          "estimated_total_cost": 7.536
+        },
+        "validation_plugins": []
+      },
+      {
+        "name": "early_stop_fast_exit",
+        "temperature": 0.0,
+        "max_tokens": 256,
+        "is_baseline": false,
+        "tags": [],
+        "estimated_cost": {
+          "estimated_requests": 100.0,
+          "estimated_input_cost": 6.0,
+          "estimated_output_cost": 1.536,
+          "estimated_total_cost": 7.536
+        },
+        "validation_plugins": []
+      },
+      {
+        "name": "early_stop_threshold",
+        "temperature": 0.0,
+        "max_tokens": 256,
+        "is_baseline": false,
+        "tags": [],
+        "estimated_cost": {
+          "estimated_requests": 100.0,
+          "estimated_input_cost": 6.0,
+          "estimated_output_cost": 1.536,
+          "estimated_total_cost": 7.536
+        },
+        "validation_plugins": []
+      },
+      {
+        "name": "prompt_shield_demo",
+        "temperature": 0.0,
+        "max_tokens": 256,
+        "is_baseline": false,
+        "tags": [],
+        "estimated_cost": {
+          "estimated_requests": 100.0,
+          "estimated_input_cost": 6.0,
+          "estimated_output_cost": 1.536,
+          "estimated_total_cost": 7.536
+        },
+        "validation_plugins": []
+      },
+      {
+        "name": "slow_rate_limit_demo",
+        "temperature": 0.0,
+        "max_tokens": 256,
+        "is_baseline": false,
+        "tags": [],
+        "estimated_cost": {
+          "estimated_requests": 100.0,
+          "estimated_input_cost": 6.0,
+          "estimated_output_cost": 1.536,
+          "estimated_total_cost": 7.536
+        },
+        "validation_plugins": []
+      },
+      {
+        "name": "variant_prompt",
+        "temperature": 0.0,
+        "max_tokens": 256,
+        "is_baseline": false,
+        "tags": [],
+        "estimated_cost": {
+          "estimated_requests": 200.0,
+          "estimated_input_cost": 12.0,
+          "estimated_output_cost": 3.072,
+          "estimated_total_cost": 15.072
+        },
+        "validation_plugins": []
+      },
+      {
+        "name": "variant_rate_limit",
+        "temperature": 0.0,
+        "max_tokens": 256,
+        "is_baseline": false,
+        "tags": [],
+        "estimated_cost": {
+          "estimated_requests": 100.0,
+          "estimated_input_cost": 6.0,
+          "estimated_output_cost": 1.536,
+          "estimated_total_cost": 7.536
+        },
+        "validation_plugins": []
+      }
+    ],
+    "total_estimated_cost": 60.288
+  },
+  "plugin_summary": {
+    "row_plugins": [],
+    "aggregator_plugins": [],
+    "baseline_plugins": [
+      "score_delta"
+    ],
+    "llm_middlewares": [
+      "prompt_shield"
+    ]
+  }
+}
