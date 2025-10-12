@@ -14,6 +14,8 @@ update as processes evolve.
 1. **Concurrency & retry sanity** – run at least one suite with `concurrency.enabled` and `retry.max_attempts>1`, confirming retry summaries and early-stop metadata appear in outputs (`outputs/*/analytics_report.json`).[^release-concurrency-2025-10-12]
 1. **Signed artifact verification** – when signed sink is enabled, execute verification helper (`python -m elspeth.tools.verify_signature <bundle>`) or manual HMAC check to ensure keys rotate correctly.[^release-signed-2025-10-12]
 1. **Visual analytics check** – when `analytics_visual` sink is configured, open the generated PNG/HTML reports, verify embedded metadata (retry/cost summaries) and confirm files reside in a hardened location.[^release-visual-2025-10-12]
+1. **Suite report parity** – run CLI with `--reports-dir` and confirm all consolidated artefacts exist (validation, comparative, recommendations, analytics, visual, Excel); ensure logs list each produced path for audit traceability (`src/elspeth/tools/reporting.py:33`).[^release-suite-report-2025-10-12]
+1. **Blob/repository dry-run** – if publishing to external sinks, rerun with `--live-outputs` disabled to confirm dry-run manifests/logs capture target paths without mutating external systems (`src/elspeth/cli.py:344`).[^release-dry-run-2025-10-12]
 
 ## Documentation
 1. Update `README.md`, `AGENTS.md`, and relevant docs (migration guide, logging standards) when behaviour changes.
@@ -32,6 +34,7 @@ update as processes evolve.
 1. Submit analytics/signed artefact samples to accreditation archive and rotate secrets used during validation.
 
 ## Update History
+- 2025-10-12 – Update 2025-10-12: Added suite reporting verification and dry-run sink validation steps aligned with new reporting and telemetry flows.
 - 2025-10-12 – Added dependency audit, concurrency/retry validation, visual analytics verification, and signed artifact verification steps to align with accreditation checkpoints.
 - 2025-10-12 – Update 2025-10-12: Added references to dependency analysis, data-flow concurrency checks, and security controls for signing/visual analytics.
 
@@ -39,3 +42,5 @@ update as processes evolve.
 [^release-concurrency-2025-10-12]: Update 2025-10-12: Concurrency validation aligns with docs/architecture/data-flow-diagrams.md (Update 2025-10-12: Parallel Execution Gate).
 [^release-signed-2025-10-12]: Update 2025-10-12: Signed artifact verification ties to docs/architecture/security-controls.md (Update 2025-10-12: Artifact Signing).
 [^release-visual-2025-10-12]: Update 2025-10-12: Visual analytics checks reference docs/architecture/security-controls.md (Update 2025-10-12: Output Sanitisation) and docs/reporting-and-suite-management.md (Update 2025-10-12: Visual Analytics Sink).
+[^release-suite-report-2025-10-12]: Update 2025-10-12: Suite report parity checkpoints described in docs/reporting-and-suite-management.md (Artefact overview).
+[^release-dry-run-2025-10-12]: Update 2025-10-12: Dry-run verification linked to docs/architecture/threat-surfaces.md (Update 2025-10-12: Repository Interfaces) and docs/logging-standards.md (Suite report exports).

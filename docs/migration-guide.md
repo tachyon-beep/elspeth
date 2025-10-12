@@ -87,11 +87,23 @@ Refer to `notes/config-migration.md` for key renames. Typical steps:
 - `analytics_report` sink writes JSON/Markdown summaries of results, aggregators, and baseline comparisons.
 - Sample configuration: `config/sample_suite/` demonstrates early stop, analytics, and reporting sinks.[^migration-sample-suite-2025-10-12]
 <!-- UPDATE 2025-10-12: Suite reporting commands (`--reports-dir`) now generate comparative analysis, validation summaries, and recommendations mirroring legacy Excel dashboards (`src/elspeth/tools/reporting.py:33`). -->
+- **Visual analytics parity** – Configure `visual_report` sink (requires the `analytics-visual` extra) to regenerate PNG/HTML dashboards that previously relied on bespoke plotting scripts:
+  ```yaml
+  sinks:
+    - plugin: visual_report
+      options:
+        base_path: outputs/sample_suite/visual
+        formats: ["png", "html"]
+        chart_title: "Mean Scores by Criterion"
+  ```
+  Install extras with `pip install .[analytics-visual]` to pull `matplotlib`/`seaborn` (`src/elspeth/plugins/outputs/visual_report.py:17`).[^migration-visual-2025-10-12]
+- **Suite report exports** – Pass `--reports-dir outputs/sample_suite/reports` to re-create executive summaries, validation JSON, comparative analysis, recommendations, and Excel dashboards without custom notebooks (`src/elspeth/cli.py:392`, `src/elspeth/tools/reporting.py:138`).[^migration-suite-reports-2025-10-12]
 
 ## Azure-Specific Features
 - **Azure ML telemetry**: Use `azure_environment` middleware in specific experiments or suite defaults. Set `on_error` to `skip` for local runs.
 - **Azure DevOps repository sink**: Add `azure_devops_repo` to sinks with organization/project/repository options. Works best with `--live-outputs`.
 - **Content Safety**: Set `AZURE_CONTENT_SAFETY_ENDPOINT` and `AZURE_CONTENT_SAFETY_KEY` env variables for middleware to authenticate.
+- **Credential migration**: Replace legacy hard-coded SAS/keys with environment variables referenced via `_env` options, or rely on managed identity defaults added in the plugin refactor (`src/elspeth/plugins/outputs/blob.py:210`, `src/elspeth/plugins/outputs/signed.py:107`).[^migration-azure-creds-2025-10-12]
 
 ## Sample Migration Steps
 1. Copy legacy experiment JSON folders into `config/sample_suite/<experiment>/` and ensure each has `config.json`, `system_prompt.md`, `user_prompt.md`.
@@ -136,6 +148,7 @@ Refer to `notes/config-migration.md` for key renames. Typical steps:
   ```
   (`src/elspeth/plugins/experiments/early_stop.py:17`, `src/elspeth/core/experiments/plugin_registry.py:298`).
 - Translate analytics/reporting scripts to CLI calls that include `--reports-dir` so consolidated JSON, Markdown, and Excel assets replace bespoke notebook workflows (`src/elspeth/cli.py:240`, `src/elspeth/tools/reporting.py:94`).[^migration-suite-reporting-2025-10-12]
+- Enable analytics and visual extras via `pip install .[stats-core,stats-agreement,analytics-visual]` when migrating legacy statistical notebooks; document the chosen extras in accreditation runbooks to ensure dependency parity (`pyproject.toml:39`, `pyproject.toml:56`).[^migration-analytics-extras-2025-10-12]
 
 ## Update History
 - 2025-10-12 – Documented concurrency, checkpoint, early-stop migration steps and noted suite reporting parity with legacy dashboards.
@@ -145,3 +158,7 @@ Refer to `notes/config-migration.md` for key renames. Typical steps:
 [^migration-concurrency-2025-10-12]: Update 2025-10-12: Concurrency guidance ties to docs/architecture/data-flow-diagrams.md (Update 2025-10-12: Parallel Execution Gate).
 [^migration-early-stop-2025-10-12]: Update 2025-10-12: Early-stop plugins normalised per docs/architecture/plugin-security-model.md (Update 2025-10-12: Early-Stop Lifecycle).
 [^migration-suite-reporting-2025-10-12]: Update 2025-10-12: Suite reporting flows elaborated in docs/reporting-and-suite-management.md (Update 2025-10-12: Suite Export Tooling).
+[^migration-visual-2025-10-12]: Update 2025-10-12: Visual analytics sink usage matches docs/reporting-and-suite-management.md (Update 2025-10-12: Visual Analytics Sink).
+[^migration-suite-reports-2025-10-12]: Update 2025-10-12: Suite reports inventory detailed in docs/architecture/data-flow-diagrams.md (Update 2025-10-12: Suite Reporting Export Flow).
+[^migration-azure-creds-2025-10-12]: Update 2025-10-12: Azure credential handling cross-referenced in docs/architecture/security-controls.md (Update 2025-10-12: Secret Management).
+[^migration-analytics-extras-2025-10-12]: Update 2025-10-12: Optional extras documented in docs/architecture/dependency-analysis.md (Update 2025-10-12: Optional Extras).
