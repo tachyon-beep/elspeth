@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterable, List, Mapping, Optional, cast
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple, cast
 
 from elspeth.core.artifacts import validate_artifact_type
 from elspeth.core.interfaces import Artifact, ArtifactDescriptor, ResultSink
@@ -202,13 +202,26 @@ class ArtifactPipeline:  # pylint: disable=too-many-instance-attributes
             raise PermissionError(f"Sink '{consumer.id}' cannot depend on '{producer.id}' due to security level mismatch")
 
     @staticmethod
-    def _resolve_order(bindings: List[SinkBinding]) -> List[SinkBinding]:  # pylint: disable=too-many-branches,too-many-locals
+    def _resolve_order(bindings: List[SinkBinding]) -> List[SinkBinding]:
         """Topologically sort bindings based on artifact dependencies."""
 
         if not bindings:
             return []
 
         by_id = {binding.id: binding for binding in bindings}
+        producers_by_name, producers_by_type = ArtifactPipeline._build_producer_indexes(bindings)
+        dependencies, dependents = ArtifactPipeline._build_dependency_graph(bindings, producers_by_name, producers_by_type)
+        ordered = ArtifactPipeline._topological_sort(bindings, dependencies, dependents, by_id)
+
+        if len(ordered) != len(bindings):
+            raise ValueError("Sink artifact dependencies contain a cycle or unresolved reference")
+
+        return ordered
+
+    @staticmethod
+    def _build_producer_indexes(bindings: Iterable[SinkBinding]) -> Tuple[Dict[str, SinkBinding], Dict[str, List[SinkBinding]]]:
+        """Index bindings by produced alias/name and artifact type."""
+
         producers_by_name: Dict[str, SinkBinding] = {}
         producers_by_type: Dict[str, List[SinkBinding]] = defaultdict(list)
 
@@ -219,34 +232,69 @@ class ArtifactPipeline:  # pylint: disable=too-many-instance-attributes
                     producers_by_name[key] = binding
                 producers_by_type[descriptor.type].append(binding)
 
+        return producers_by_name, producers_by_type
+
+    @staticmethod
+    def _iter_producers_for_request(
+        consumer: SinkBinding,
+        request: ArtifactRequest,
+        producers_by_name: Dict[str, SinkBinding],
+        producers_by_type: Dict[str, List[SinkBinding]],
+    ) -> Iterable[SinkBinding]:
+        """Yield producer bindings that satisfy a consume request."""
+
+        token = request.token
+        if not token:
+            return []
+
+        if token.startswith("@"):
+            key = token[1:]
+            producer = producers_by_name.get(key)
+            if producer:
+                ArtifactPipeline._enforce_dependency_security(consumer, producer)
+                return [producer]
+            return []
+
+        try:
+            validate_artifact_type(token)
+        except ValueError:
+            return []
+
+        matches: List[SinkBinding] = []
+        for producer in producers_by_type.get(token, []):
+            ArtifactPipeline._enforce_dependency_security(consumer, producer)
+            matches.append(producer)
+        return matches
+
+    @staticmethod
+    def _build_dependency_graph(
+        bindings: Iterable[SinkBinding],
+        producers_by_name: Dict[str, SinkBinding],
+        producers_by_type: Dict[str, List[SinkBinding]],
+    ) -> Tuple[Dict[str, set[str]], Dict[str, set[str]]]:
+        """Map dependencies and dependents between bindings."""
+
         dependencies: Dict[str, set[str]] = {binding.id: set() for binding in bindings}
         dependents: Dict[str, set[str]] = {binding.id: set() for binding in bindings}
 
         for binding in bindings:
             for request in binding.consumes:
-                token = request.token
-                if not token:
-                    continue
-                matched_ids: List[str] = []
-                if token.startswith("@"):  # alias/name match
-                    key = token[1:]
-                    producer_binding = producers_by_name.get(key)
-                    if producer_binding:
-                        ArtifactPipeline._enforce_dependency_security(binding, producer_binding)
-                        matched_ids.append(producer_binding.id)
-                else:
-                    try:
-                        validate_artifact_type(token)
-                    except ValueError:
+                for producer in ArtifactPipeline._iter_producers_for_request(binding, request, producers_by_name, producers_by_type):
+                    if producer.id == binding.id:
                         continue
-                    for producer_binding in producers_by_type.get(token, []):
-                        ArtifactPipeline._enforce_dependency_security(binding, producer_binding)
-                        matched_ids.append(producer_binding.id)
-                for producer_id in matched_ids:
-                    if producer_id == binding.id:
-                        continue
-                    dependencies[binding.id].add(producer_id)
-                    dependents[producer_id].add(binding.id)
+                    dependencies[binding.id].add(producer.id)
+                    dependents[producer.id].add(binding.id)
+
+        return dependencies, dependents
+
+    @staticmethod
+    def _topological_sort(
+        bindings: Iterable[SinkBinding],
+        dependencies: Dict[str, set[str]],
+        dependents: Dict[str, set[str]],
+        by_id: Dict[str, SinkBinding],
+    ) -> List[SinkBinding]:
+        """Order bindings based on resolved dependencies."""
 
         ready: deque[SinkBinding] = deque(
             sorted(
@@ -262,15 +310,13 @@ class ArtifactPipeline:  # pylint: disable=too-many-instance-attributes
             ordered.append(current)
             for dependent_id in dependents[current.id]:
                 deps = dependencies[dependent_id]
-                if current.id in deps:
-                    deps.remove(current.id)
-                    if not deps:
-                        dependent_binding = by_id[dependent_id]
-                        ready.append(dependent_binding)
-                        ready = deque(sorted(ready, key=lambda b: b.original_index))
-
-        if len(ordered) != len(bindings):
-            raise ValueError("Sink artifact dependencies contain a cycle or unresolved reference")
+                if current.id not in deps:
+                    continue
+                deps.remove(current.id)
+                if deps:
+                    continue
+                ready.append(by_id[dependent_id])
+                ready = deque(sorted(ready, key=lambda b: b.original_index))
 
         return ordered
 

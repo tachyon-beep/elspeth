@@ -2,12 +2,14 @@
 <!-- UPDATE 2025-10-12: ELSPETH core package, plugin architecture, and sample suite are now fully implemented under `src/elspeth/`. The legacy `old/` scripts remain archival; current orchestration flows live in `src/elspeth/core/experiments/runner.py`, `src/elspeth/cli.py`, and associated plugins. -->
 
 ## Repository Snapshot
+
 - Current tree only exposes `old/` with three Python entry points: `main.py`, `experiment_runner.py`, and `experiment_stats.py`.
 - `main.py` is now a thin façade over an external `elspeth` package (expects `elspeth.cli`, `elspeth.runner`, etc.); those modules are **not** present in this repo, so executing `python old/main.py` will immediately fail with `ModuleNotFoundError`.
 - Legacy helpers (`experiment_runner.py`, `experiment_stats.py`) still implement substantial logic but import shared utilities from the missing `elspeth` package as well.
 <!-- UPDATE 2025-10-12: The modern stack lives in `src/elspeth/` with equivalent functionality; see `docs/architecture/architecture-overview.md` for the current system design. -->
 
 ## Runtime Expectations
+
 - Core dependencies from direct imports:
   - Data stack: `pandas`, `numpy`, `scipy`, `matplotlib`, `pyyaml`, `jsonschema`.
   - Azure/OpenAI: `openai` (Azure client), `azureml-core` (optional telemetry), `requests`.
@@ -16,6 +18,7 @@
 - File layout expectations: experiments directory with subfolders containing `config.json`, `system_prompt.md`, `user_prompt.md`; shared `prompts/` folder; configuration YAMLs. None of these assets are currently committed.
 
 ## Gaps to Address for Local Execution
+
 1. Provide or recreate the `elspeth` package (or refactor the legacy scripts to run without it). Without these modules the runtime cannot start.
 2. Assemble configuration + prompt assets under the expected paths so that experiment discovery does not error out.
 3. Curate a `requirements.txt` (Python 3.12 compatible) covering mandatory libraries above; confirm availability of heavier scientific packages or decide which to mark optional.
@@ -23,18 +26,22 @@
 5. Clarify data inputs (CSV schema consumed by `process_data`) because nothing in `old/` defines it anymore; likely lives in the missing package.
 
 ## Open Questions / Next Actions
+
 - Do we have an archived copy of the `elspeth` package or should we rebuild equivalent functionality within this repo?
 - Are we expected to run purely locally (mocking Azure services) or will the VM have network + Azure credentials available during development?
 - Need confirmation on experiment assets location before scripting bootstrap.
 
 ## Additional Context (User 2024-05-??)
+
 - `elspeth` package and experiment assets are not yet available; the user will supply representative snippets later for testing.
 - Final solution must read the experiment input data directly from Azure Blob Storage (not local CSV). Bootstrap stack needs to account for blob access and auth.
 
 ## Blob Loader Module (WIP)
+
 - Added `src/elspeth/datasources/blob_store.py` with `BlobConfig` + `BlobDataLoader` to fetch CSV inputs using `azure-storage-blob` and `azure-identity` (DefaultAzureCredential).
 - Configuration stored in `config/blob_store.yaml`; supports multiple profiles with the provided Azure ML datastore URI and raw blob URI.
 - Usage example:
+
   ```python
   from elspeth.datasources import load_blob_config, BlobDataLoader
 
@@ -42,9 +49,11 @@
   loader = BlobDataLoader(cfg)
   df = loader.load_csv()
   ```
+
 - Dependencies to add to requirements: `azure-storage-blob`, `azure-identity`, `pyyaml`, `pandas` (if CSV parsing needed).
 
 ## Project Infrastructure
+
 - Introduced `pyproject.toml` using PEP 621 metadata; pins Python >=3.12 and runtime deps (`azure-identity`, `azure-storage-blob`, `pandas`, `pyyaml`). Dev extras include `pytest` + `pytest-mock`.
 - Added pytest suite under `tests/` with coverage for config parsing and blob loader client wiring (stubs azure SDK to avoid network calls).
 - Capture remaining setup gap: local environment still needs dependencies installed before running `pytest` or connecting to Azure.
@@ -60,6 +69,7 @@
 - Added tests in `tests/test_cli.py` covering parser defaults, run-path side effects, and CLI invocation; total pytest count now 9.
 
 ## Architecture Principles (2024-05-User)
+
 - Treat each integration point as a plugin surface area: LLM client, data sources, output sinks, etc. should be swappable with minimal friction.
 - Output channel (currently blob) must become a pluggable interface capable of targeting alternatives such as GitHub, flat files, or Oracle DB via simple plugin swaps.
 - Added `pytest-cov` to dev tooling (pyproject + venv) and enabled `--cov` reporting via pytest.ini settings; current coverage 87% overall.
@@ -71,6 +81,7 @@
 - With updated config (`deployment_env` + API version 2024-12-01-preview) and `.env` values (deployment `gpt-4o`), live Azure OpenAI call succeeded; orchestrator produced 19 responses and CSV sink captured outputs.
 
 ## Remaining Work (2024-05)
+
 - Port legacy experiment logic: prompt packs, baseline comparisons, templates, and checkpointing from `old/` into new plugin architecture.
 - Implement concrete experiment metrics/statistical plugins based on legacy `experiment_stats.py` (score parsing, aggregations, significance tests).
 - Enhance cost/rate plugin configuration with provider presets; consider surface in suite defaults.
@@ -79,4 +90,5 @@
 <!-- UPDATE 2025-10-12: Phases 5–7 delivered metrics plugins, analytics reporting, Azure telemetry middleware, and documentation/CLI tooling. Remaining roadmap items live in `notes/phase7-docs.md` and subsequent phase notes. -->
 
 ## Update History
+
 - 2025-10-12 – Annotated legacy assessment with current implementation status and pointers to the rebuilt ELSPETH package.

@@ -5,6 +5,7 @@ It uses the local CSV datasource and the mock LLM client to produce deterministi
 outputs that flow through the metrics and CSV sinks.
 
 ## Contents
+
 - `data/sample_input.csv` – input dataset with three example applications.
 - `baseline/`, `variant_prompt/` – experiments sharing the `sample` prompt pack
   while varying prompts and baseline comparisons.
@@ -30,12 +31,16 @@ outputs that flow through the metrics and CSV sinks.
   and sinks.
 
 ## Running the Suite
+
 1. Activate the project virtual environment
+
    ```bash
    source .venv/bin/activate
    pip install -e .[dev,analytics-visual]
    ```
+
 2. Execute the suite via the CLI
+
    ```bash
    python -m elspeth.cli \
      --settings config/sample_suite/settings.yaml \
@@ -43,6 +48,7 @@ outputs that flow through the metrics and CSV sinks.
      --head 0 \
      --live-outputs
    ```
+
 3. Results are written to `outputs/sample_suite/<experiment>_latest_results.csv`
    alongside aggregates and baseline comparisons in the payload metadata.
 
