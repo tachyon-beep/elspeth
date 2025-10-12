@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from elspeth.core.interfaces import Artifact
-from elspeth.plugins.outputs.excel import ExcelResultSink, _load_workbook_dependencies
+from elspeth.plugins.outputs.excel import ExcelResultSink
 
 
 class StubSheet:

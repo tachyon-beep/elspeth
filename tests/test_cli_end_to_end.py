@@ -6,7 +6,6 @@ import json
 from pathlib import Path
 
 import pandas as pd
-import pytest
 import yaml
 
 from elspeth import cli
@@ -42,8 +41,6 @@ def test_cli_generates_suite_outputs(tmp_path: Path, monkeypatch) -> None:
             "prompt_fields": ["payload"],
         }
     }
-    profile = settings_data["default"]
-
     tmp_settings = tmp_path / "settings.yaml"
     tmp_settings.write_text(yaml.safe_dump(settings_data), encoding="utf-8")
 

@@ -1,8 +1,6 @@
 import base64
 import json
 
-import pytest
-
 from elspeth.plugins.outputs.repository import AzureDevOpsRepoSink, GitHubRepoSink
 
 

@@ -106,13 +106,9 @@ def test_create_row_plugin_validates_schema():
     )
 
     with pytest.raises(ConfigurationError):
-        plugin_registry.validate_row_plugin_definition(
-            {"name": "limited", "security_level": "official", "options": {}}
-        )
+        plugin_registry.validate_row_plugin_definition({"name": "limited", "security_level": "official", "options": {}})
 
-    plugin_registry.validate_row_plugin_definition(
-        {"name": "limited", "security_level": "official", "options": {"threshold": 0.5}}
-    )
+    plugin_registry.validate_row_plugin_definition({"name": "limited", "security_level": "official", "options": {"threshold": 0.5}})
 
 
 def test_normalize_early_stop_definitions_handles_various_forms():

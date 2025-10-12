@@ -194,7 +194,7 @@ def create_early_stop_plugin(definition: Dict[str, Any]) -> EarlyStopPlugin:
 class _NoopRowPlugin:  # pylint: disable=too-few-public-methods
     name = "noop"
 
-    def process_row(self, _row, _responses):  # pragma: no cover - trivial
+    def process_row(self, _row: Dict[str, Any], _responses: Dict[str, Any]) -> Dict[str, Any]:  # pragma: no cover - trivial
         """Return an empty payload for noop processing."""
 
         return {}
@@ -203,7 +203,7 @@ class _NoopRowPlugin:  # pylint: disable=too-few-public-methods
 class _NoopAggPlugin:  # pylint: disable=too-few-public-methods
     name = "noop"
 
-    def finalize(self, _records):  # pragma: no cover - trivial
+    def finalize(self, _records: List[Dict[str, Any]]) -> Dict[str, Any]:  # pragma: no cover - trivial
         """Return an empty aggregation result."""
 
         return {}
@@ -212,7 +212,7 @@ class _NoopAggPlugin:  # pylint: disable=too-few-public-methods
 class _NoopBaselinePlugin:  # pylint: disable=too-few-public-methods
     name = "noop"
 
-    def compare(self, _baseline, _variant):  # pragma: no cover - trivial
+    def compare(self, _baseline: Dict[str, Any], _variant: Dict[str, Any]) -> Dict[str, Any]:  # pragma: no cover - trivial
         """Return an empty comparison result."""
 
         return {}
@@ -223,7 +223,7 @@ class _RowCountBaselinePlugin:  # pylint: disable=too-few-public-methods
         self.name = "row_count"
         self._key = key
 
-    def compare(self, baseline, variant):
+    def compare(self, baseline: Dict[str, Any], variant: Dict[str, Any]) -> Dict[str, Any]:
         """Return the delta in result counts between baseline and variant."""
 
         base_count = len(baseline.get("results", [])) if baseline else 0

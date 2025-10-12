@@ -1,4 +1,3 @@
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -53,9 +52,7 @@ def test_load_settings_with_suite(tmp_path, monkeypatch):
     registry_module.registry._llms["azure_openai"] = registry_module.PluginFactory(
         lambda options: SimpleNamespace(kind="llm", options=options)
     )
-    registry_module.registry._sinks["csv"] = registry_module.PluginFactory(
-        lambda options: SimpleNamespace(kind="sink", options=options)
-    )
+    registry_module.registry._sinks["csv"] = registry_module.PluginFactory(lambda options: SimpleNamespace(kind="sink", options=options))
 
     try:
         settings = load_settings(config_file)
@@ -110,9 +107,7 @@ def test_suite_defaults_override_prompt_pack_when_missing(tmp_path, monkeypatch)
     registry_module.registry._datasources["local_csv"] = registry_module.PluginFactory(
         lambda options: SimpleNamespace(kind="ds", options=options)
     )
-    registry_module.registry._llms["mock"] = registry_module.PluginFactory(
-        lambda options: SimpleNamespace(kind="llm", options=options)
-    )
+    registry_module.registry._llms["mock"] = registry_module.PluginFactory(lambda options: SimpleNamespace(kind="llm", options=options))
 
     try:
         settings = load_settings(config_file)

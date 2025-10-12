@@ -1,6 +1,5 @@
 import threading
 import time
-from pathlib import Path
 
 import pandas as pd
 import pytest
@@ -9,7 +8,6 @@ from elspeth.core.controls.cost_tracker import FixedPriceCostTracker
 from elspeth.core.controls.rate_limit import NoopRateLimiter
 from elspeth.core.experiments import plugin_registry as exp_plugin_registry
 from elspeth.core.experiments.config import ExperimentSuite
-from elspeth.core.experiments.plugins import AggregationExperimentPlugin, RowExperimentPlugin
 from elspeth.core.experiments.runner import ExperimentRunner
 from elspeth.core.experiments.suite_runner import ExperimentSuiteRunner
 
@@ -410,7 +408,6 @@ def test_suite_runner_with_plugin_definitions(tmp_path, monkeypatch):
         },
     )
 
-    baseline_payload = results["baseline"]["payload"]
     variant_payload = results["variant"]["payload"]
     assert variant_payload["results"][0]["metrics"]["value"] == 5
     assert variant_payload["aggregates"]["test_agg"]["total"] == 1

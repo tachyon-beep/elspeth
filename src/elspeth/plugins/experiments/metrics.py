@@ -9,7 +9,6 @@ from statistics import NormalDist
 from typing import Any, Dict, Mapping, Sequence
 
 import numpy as np
-import pandas as pd
 
 from elspeth.core.experiments.plugin_registry import register_aggregation_plugin, register_baseline_plugin, register_row_plugin
 

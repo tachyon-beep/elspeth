@@ -31,7 +31,11 @@ def test_end_to_end_local_pipeline(tmp_path, assert_sanitized_artifact):
         prompt_defaults={"audience": "quality"},
         row_plugins=[plugin_registry.create_row_plugin({"name": "score_extractor", "security_level": "official"})],
         aggregator_plugins=[plugin_registry.create_aggregation_plugin({"name": "score_stats", "security_level": "official"})],
-        validation_plugins=[plugin_registry.create_validation_plugin({"name": "regex_match", "security_level": "official", "options": {"pattern": r"(?s).*\[mock\].*"}})],
+        validation_plugins=[
+            plugin_registry.create_validation_plugin(
+                {"name": "regex_match", "security_level": "official", "options": {"pattern": r"(?s).*\[mock\].*"}}
+            )
+        ],
         experiment_name="local_pipeline",
     )
 

@@ -1,9 +1,8 @@
-import pytest
 from types import SimpleNamespace
 
+import pytest
+
 from elspeth.core.controls import registry as controls_registry
-from elspeth.core.controls.cost_tracker import NoopCostTracker
-from elspeth.core.controls.rate_limit import NoopRateLimiter
 from elspeth.core.validation import ConfigurationError
 
 
@@ -31,9 +30,7 @@ def test_register_custom_rate_limiter(monkeypatch):
         return created
 
     controls_registry.register_rate_limiter("custom", factory)
-    limiter = controls_registry.create_rate_limiter(
-        {"plugin": "custom", "security_level": "official", "options": {"tag": "blue"}}
-    )
+    limiter = controls_registry.create_rate_limiter({"plugin": "custom", "security_level": "official", "options": {"tag": "blue"}})
     assert limiter is created
 
 
@@ -56,9 +53,7 @@ def test_register_custom_cost_tracker():
         return created
 
     controls_registry.register_cost_tracker("custom_cost", factory)
-    tracker = controls_registry.create_cost_tracker(
-        {"plugin": "custom_cost", "security_level": "official", "options": {"tier": "gold"}}
-    )
+    tracker = controls_registry.create_cost_tracker({"plugin": "custom_cost", "security_level": "official", "options": {"tier": "gold"}})
     assert tracker is created
 
 

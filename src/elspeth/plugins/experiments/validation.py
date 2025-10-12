@@ -11,7 +11,6 @@ from jinja2 import Template
 from elspeth.core.experiments.plugin_registry import register_validation_plugin
 from elspeth.core.experiments.plugins import ValidationError, ValidationPlugin
 from elspeth.core.interfaces import LLMClientProtocol
-from elspeth.core.prompts.engine import PromptEngine
 from elspeth.core.registry import registry
 
 

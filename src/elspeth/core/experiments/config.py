@@ -7,18 +7,20 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from elspeth.core.config_schema import validate_experiment_config
+from elspeth.core.experiments.plugin_registry import normalize_early_stop_definitions
+from elspeth.core.validation import ConfigurationError
+
 DEFAULT_INPUT_COST_PER_1K = 0.03
 DEFAULT_OUTPUT_COST_PER_1K = 0.06
 DEFAULT_AVG_INPUT_TOKENS = 2000
 DEFAULT_ROW_COUNT = 100
 
-from elspeth.core.config_schema import validate_experiment_config
-from elspeth.core.experiments.plugin_registry import normalize_early_stop_definitions
-from elspeth.core.validation import ConfigurationError
-
 
 @dataclass
 class ExperimentConfig:
+    """Runtime configuration for a single experiment run."""
+
     name: str
     temperature: float
     max_tokens: int
@@ -51,6 +53,8 @@ class ExperimentConfig:
 
     @classmethod
     def from_file(cls, path: Path) -> "ExperimentConfig":
+        """Construct an experiment config by reading JSON plus prompt overrides."""
+
         config_path = path
         data = json.loads(path.read_text(encoding="utf-8"))
         try:
@@ -106,6 +110,10 @@ class ExperimentConfig:
         )
 
     def to_export_dict(self) -> Dict[str, Any]:
+        """Serialize the configuration back into a JSON-compatible mapping."""
+
+        """Return a serializable view of the experiment config and derived fields."""
+
         payload = dict(self.options)
         payload.update(
             {
@@ -153,6 +161,8 @@ class ExperimentConfig:
         input_cost_per_1k: float = DEFAULT_INPUT_COST_PER_1K,
         output_cost_per_1k: float = DEFAULT_OUTPUT_COST_PER_1K,
     ) -> Dict[str, float]:
+        """Estimate token consumption and cost for a representative run."""
+
         criteria_count = len(self.criteria or []) or 1
         total_requests = max(row_count, 1) * criteria_count
         total_input_tokens = total_requests * max(avg_input_tokens, 0)
@@ -167,6 +177,8 @@ class ExperimentConfig:
         }
 
     def summary(self) -> Dict[str, Any]:
+        """Provide high-level metadata for reporting and dashboards."""
+
         return {
             "name": self.name,
             "temperature": self.temperature,
@@ -180,12 +192,16 @@ class ExperimentConfig:
 
 @dataclass
 class ExperimentSuite:
+    """Materialized experiment suite with baseline metadata."""
+
     root: Path
     experiments: List[ExperimentConfig]
     baseline: Optional[ExperimentConfig]
 
     @classmethod
     def load(cls, root: Path) -> "ExperimentSuite":
+        """Load all experiment configs under ``root`` and select a baseline."""
+
         experiments: List[ExperimentConfig] = []
         baseline: Optional[ExperimentConfig] = None
 

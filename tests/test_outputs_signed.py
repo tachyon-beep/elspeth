@@ -1,8 +1,6 @@
 import json
 from datetime import datetime, timezone
 
-import pytest
-
 from elspeth.core.security import verify_signature
 from elspeth.plugins.outputs.signed import SignedArtifactSink
 

@@ -1,9 +1,6 @@
-import pytest
-import yaml
 from types import SimpleNamespace
 
 from elspeth.config import load_settings
-from elspeth.core.validation import ConfigurationError
 
 
 def test_load_settings(tmp_path, monkeypatch):
@@ -59,9 +56,7 @@ def test_load_settings(tmp_path, monkeypatch):
     registry_module.registry._llms["azure_openai"] = registry_module.PluginFactory(
         lambda options: SimpleNamespace(kind="llm", options=options)
     )
-    registry_module.registry._sinks["csv"] = registry_module.PluginFactory(
-        lambda options: SimpleNamespace(kind="sink", options=options)
-    )
+    registry_module.registry._sinks["csv"] = registry_module.PluginFactory(lambda options: SimpleNamespace(kind="sink", options=options))
 
     try:
         settings = load_settings(config_file)
@@ -109,12 +104,8 @@ def test_load_settings_missing_prompts_defaults_to_blank(tmp_path):
     registry_module.registry._datasources["local_csv"] = registry_module.PluginFactory(
         lambda options: SimpleNamespace(kind="ds", options=options)
     )
-    registry_module.registry._llms["mock"] = registry_module.PluginFactory(
-        lambda options: SimpleNamespace(kind="llm", options=options)
-    )
-    registry_module.registry._sinks["csv"] = registry_module.PluginFactory(
-        lambda options: SimpleNamespace(kind="sink", options=options)
-    )
+    registry_module.registry._llms["mock"] = registry_module.PluginFactory(lambda options: SimpleNamespace(kind="llm", options=options))
+    registry_module.registry._sinks["csv"] = registry_module.PluginFactory(lambda options: SimpleNamespace(kind="sink", options=options))
 
     try:
         settings = load_settings(config_file)
@@ -182,12 +173,8 @@ def test_load_settings_prompt_pack_merges_overrides(tmp_path, monkeypatch):
     registry_module.registry._datasources["local_csv"] = registry_module.PluginFactory(
         lambda options: SimpleNamespace(kind="ds", options=options)
     )
-    registry_module.registry._llms["mock"] = registry_module.PluginFactory(
-        lambda options: SimpleNamespace(kind="llm", options=options)
-    )
-    registry_module.registry._sinks["csv"] = registry_module.PluginFactory(
-        lambda options: SimpleNamespace(kind="sink", options=options)
-    )
+    registry_module.registry._llms["mock"] = registry_module.PluginFactory(lambda options: SimpleNamespace(kind="llm", options=options))
+    registry_module.registry._sinks["csv"] = registry_module.PluginFactory(lambda options: SimpleNamespace(kind="sink", options=options))
 
     try:
         settings = load_settings(config_file, profile="default")
@@ -252,9 +239,7 @@ def test_load_settings_suite_defaults_inherit_pack(tmp_path, monkeypatch):
     registry_module.registry._datasources["local_csv"] = registry_module.PluginFactory(
         lambda options: SimpleNamespace(kind="ds", options=options)
     )
-    registry_module.registry._llms["mock"] = registry_module.PluginFactory(
-        lambda options: SimpleNamespace(kind="llm", options=options)
-    )
+    registry_module.registry._llms["mock"] = registry_module.PluginFactory(lambda options: SimpleNamespace(kind="llm", options=options))
 
     try:
         settings = load_settings(config_file)

@@ -75,42 +75,30 @@ def _verify_csv(csv_path: Path, guard: str, originals: List[str]) -> List[str]:
     ]
 
     if list(df.columns) != expected_columns:
-        failures.append(
-            f"CSV columns mismatch: expected {expected_columns}, got {list(df.columns)}"
-        )
+        failures.append(f"CSV columns mismatch: expected {expected_columns}, got {list(df.columns)}")
 
     for idx, original in enumerate(originals):
         expected_value = sanitize_cell(original, guard=guard)
         row = df.iloc[idx]
         if row["id"] != str(idx + 1):
-            failures.append(
-                f"CSV row {idx} id mismatch: expected {idx + 1}, got {row['id']}"
-            )
+            failures.append(f"CSV row {idx} id mismatch: expected {idx + 1}, got {row['id']}")
         for column in expected_columns[1:]:
             observed = row[column]
             if _normalize(str(observed)) != _normalize(expected_value):
-                failures.append(
-                    f"CSV row {idx} column '{column}' expected {expected_value!r}, got {observed!r}"
-                )
+                failures.append(f"CSV row {idx} column '{column}' expected {expected_value!r}, got {observed!r}")
 
     with open(csv_path, newline="", encoding="utf-8") as handle:
         reader = csv_module.reader(handle)
         header = next(reader)
         if header != expected_columns:
-            failures.append(
-                f"CSV header mismatch via csv.reader: expected {expected_columns}, got {header}"
-            )
+            failures.append(f"CSV header mismatch via csv.reader: expected {expected_columns}, got {header}")
         for row_index, row in enumerate(reader, start=1):
             expected_value = sanitize_cell(originals[row_index - 1], guard=guard)
             if row[0] != str(row_index):
-                failures.append(
-                    f"CSV reader row {row_index} id mismatch: expected {row_index}, got {row[0]}"
-                )
+                failures.append(f"CSV reader row {row_index} id mismatch: expected {row_index}, got {row[0]}")
             for column_index, cell in enumerate(row[1:], start=1):
                 if _normalize(cell) != _normalize(expected_value):
-                    failures.append(
-                        f"CSV reader row {row_index} column {column_index} expected {expected_value!r}, got {cell!r}"
-                    )
+                    failures.append(f"CSV reader row {row_index} column {column_index} expected {expected_value!r}, got {cell!r}")
 
     return failures
 
@@ -130,29 +118,21 @@ def _verify_excel(xlsx_path: Path, guard: str, originals: List[str]) -> List[str
         failures.append(f"Excel missing expected columns: {missing}")
         return failures
 
-    for row_index, row in enumerate(
-        results_sheet.iter_rows(min_row=2, values_only=True), start=1
-    ):
+    for row_index, row in enumerate(results_sheet.iter_rows(min_row=2, values_only=True), start=1):
         expected_value = sanitize_cell(originals[row_index - 1], guard=guard)
         row_cells = list(row)
 
         id_cell = row_cells[header_index["row.id"]]
         if str(id_cell) != str(row_index):
-            failures.append(
-                f"Excel row {row_index} id mismatch: expected {row_index}, got {id_cell}"
-            )
+            failures.append(f"Excel row {row_index} id mismatch: expected {row_index}, got {id_cell}")
 
         input_cell = row_cells[header_index["row.input"]]
         if _normalize(str(input_cell)) != _normalize(expected_value):
-            failures.append(
-                f"Excel row {row_index} input mismatch: expected {expected_value!r}, got {input_cell!r}"
-            )
+            failures.append(f"Excel row {row_index} input mismatch: expected {expected_value!r}, got {input_cell!r}")
 
         danger_cell = row_cells[header_index[f"row.{DANGEROUS_HEADER}"]]
         if _normalize(str(danger_cell)) != _normalize(expected_value):
-            failures.append(
-                f"Excel row {row_index} dangerous header mismatch: expected {expected_value!r}, got {danger_cell!r}"
-            )
+            failures.append(f"Excel row {row_index} dangerous header mismatch: expected {expected_value!r}, got {danger_cell!r}")
 
     if "Manifest" in workbook.sheetnames:
         manifest_sheet = workbook["Manifest"]
@@ -172,9 +152,7 @@ def _verify_excel(xlsx_path: Path, guard: str, originals: List[str]) -> List[str
             if not sanitization_entry.get("enabled", False):
                 failures.append("Manifest reports sanitization disabled")
             if sanitization_entry.get("guard") != guard:
-                failures.append(
-                    f"Manifest guard mismatch: expected {guard!r}, got {sanitization_entry.get('guard')!r}"
-                )
+                failures.append(f"Manifest guard mismatch: expected {guard!r}, got {sanitization_entry.get('guard')!r}")
 
     return failures
 
@@ -212,9 +190,7 @@ def run_matrix(guard: str, verbose: bool = False) -> int:
 
 
 def parse_args(argv: List[str]) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Run sanitisation compatibility checks"
-    )
+    parser = argparse.ArgumentParser(description="Run sanitisation compatibility checks")
     parser.add_argument(
         "--guard",
         default="'",

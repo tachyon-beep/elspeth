@@ -61,7 +61,9 @@ def test_middleware_chain(monkeypatch):
 
 
 def test_prompt_shield_blocks():
-    middlewares = create_middlewares([{"name": "prompt_shield", "security_level": "official", "options": {"denied_terms": ["forbidden"], "on_violation": "abort"}}])
+    middlewares = create_middlewares(
+        [{"name": "prompt_shield", "security_level": "official", "options": {"denied_terms": ["forbidden"], "on_violation": "abort"}}]
+    )
 
     runner = ExperimentRunner(
         llm_client=DummyLLM(),
@@ -466,7 +468,7 @@ def test_suite_runner_applies_per_experiment_azure_middleware(monkeypatch):
     assert any(name.startswith("baseline_variant") for name in run.tables)
 
 
-def test_suite_runner_deduplicates_shared_middleware(monkeypatch):
+def test_suite_runner_deduplicates_shared_middleware_multiple_experiments(monkeypatch):
     events = []
 
     class SharedMiddleware:

@@ -372,6 +372,7 @@ def validate_suite(
 
     return SuiteValidationReport(report=report, preflight=preflight)
 
+
 def _validate_security_level_fields(
     report: ValidationReport,
     *,

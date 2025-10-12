@@ -174,8 +174,6 @@ def test_suite_report_excel_generation_with_stubs(tmp_path: Path, monkeypatch: p
         def register(self, sheet_name, rows):
             self.records[sheet_name] = rows
 
-    import types
-
     fake_pd = types.ModuleType("pandas")
     fake_pd.ExcelWriter = FakeExcelWriter
 
@@ -246,8 +244,6 @@ def test_suite_report_visualization_generation_with_stubs(tmp_path: Path, monkey
 
         def close(self, fig):
             pass
-
-    import types
 
     fake_matplotlib = types.ModuleType("matplotlib")
     fake_matplotlib.use = lambda backend: None  # type: ignore[attr-defined]

@@ -1,6 +1,7 @@
 # Audit Logging & Telemetry
 
 ## Logging Sources
+
 - **CLI validation** – Configuration validation emits warnings for missing plugins or schema violations before execution begins, ensuring anomalies are captured in operator logs (`src/elspeth/cli.py:83`, `src/elspeth/core/validation.py:271`).[^audit-cli-2025-10-12]
 - **Experiment runner** – Row-level failures, retry exhaustion, and early-stop triggers are logged with structured metadata for later analysis (`src/elspeth/core/experiments/runner.py:223`, `src/elspeth/core/experiments/runner.py:584`, `src/elspeth/core/experiments/runner.py:575`).[^audit-runner-2025-10-12]
 - **Middleware telemetry** – Audit middleware logs request metadata (optionally including prompts), health monitoring emits rolling latency/failure metrics, and Azure environment middleware streams events to Azure ML run tables or standard logs (`src/elspeth/plugins/llms/middleware.py:70`, `src/elspeth/plugins/llms/middleware.py:124`, `src/elspeth/plugins/llms/middleware_azure.py:180`).[^audit-middleware-2025-10-12]
@@ -8,9 +9,11 @@
 <!-- Update 2025-10-12: Retry exhaustion logs include serialized attempt history and last error context via middleware callbacks, coordinating with Azure ML tables for alerting (`src/elspeth/core/experiments/runner.py:531`, `src/elspeth/plugins/llms/middleware_azure.py:233`). -->
 
 ### Update 2025-10-12: Retry Exhaustion Events
+
 - Middleware `on_retry_exhausted` hooks capture attempt histories and errors for SOC alerting (`src/elspeth/core/experiments/runner.py:531`, `src/elspeth/plugins/llms/middleware_azure.py:233`).
 
 ### Update 2025-10-12: Middleware Telemetry
+
 - Channel names (`elspeth.audit`, `elspeth.prompt_shield`, `elspeth.health`, `elspeth.azure_content_safety`) enable targeted SIEM filters; ensure handlers forward structured JSON payloads.
 
 - **Retry summaries** – Result payloads include retry histories, exhausted counts, and attempt metrics that downstream sinks persist for forensic review (`src/elspeth/core/experiments/runner.py:177`, `src/elspeth/core/experiments/runner.py:534`).[^audit-retry-summary-2025-10-12]
@@ -19,6 +22,7 @@
 <!-- Update 2025-10-12: Visual analytics sink metadata captures chart inputs and pass rates for audit trails alongside PNG/HTML outputs (`src/elspeth/plugins/outputs/visual_report.py:182`). -->
 
 ### Update 2025-10-12: Visual Evidence Logging
+
 - Visual analytics sinks log chart inputs, pass rates, and inline PNG data for auditors (`src/elspeth/plugins/outputs/visual_report.py:182`).
 
 - **Azure ML integration** – When running inside Azure ML, middleware writes tables (`log_table`) and rows (`log_row`) containing experiment summaries, failures, and baseline comparisons for later retrieval via workspace diagnostics (`src/elspeth/plugins/llms/middleware_azure.py:208`, `src/elspeth/plugins/llms/middleware_azure.py:250`).[^audit-azureml-2025-10-12]
@@ -26,14 +30,17 @@
 - **Signed bundles** – Signatures embed generated timestamps, cost summaries, and digests, providing tamper-evident audit artefacts ready for accreditation packages (`src/elspeth/plugins/outputs/signed.py:48`, `src/elspeth/plugins/outputs/signed.py:75`).[^audit-signed-2025-10-12]
 
 ### Update 2025-10-12: Azure Telemetry
+
 - Azure ML run logging persists suite summaries, aggregates, and retry events for downstream workspace diagnostics (`src/elspeth/plugins/llms/middleware_azure.py:219`).
 
 ## Added 2025-10-12 – Suite Reporting Audit Trail
+
 - **Report generation** – `SuiteReportGenerator` logs the consolidated output directory and writes validation/failure/comparative artefacts that should be hashed or signed for accreditation submissions (`src/elspeth/tools/reporting.py:31`, `src/elspeth/tools/reporting.py:138`, `src/elspeth/tools/reporting.py:207`).[^audit-suite-generator-2025-10-12]
 - **Export inventory** – CLI `--export-suite-config` and `--create-experiment-template` commands emit hydrated configuration artefacts; capture stdout/stderr and sign the exported files to maintain provenance (`src/elspeth/cli.py:137`, `src/elspeth/cli.py:201`).[^audit-suite-export-2025-10-12]
 - **Analytics artefacts** – Report sinks reuse analytics/visual/Excel plugins, so the resulting JSON/Markdown/PNG/XLSX outputs inherit retry/cost metadata and should be retained alongside run logs (`src/elspeth/plugins/outputs/analytics_report.py:69`, `src/elspeth/plugins/outputs/visual_report.py:205`, `src/elspeth/plugins/outputs/excel.py:134`).[^audit-suite-artifacts-2025-10-12]
 
 ## Operational Guidance
+
 - Configure logging handlers to ship `elspeth.*` channels to central SIEM storage; the middleware channel names (`elspeth.audit`, `elspeth.prompt_shield`, `elspeth.azure_content_safety`, `elspeth.health`) are designed for targeted filters (`src/elspeth/plugins/llms/middleware.py:74`, `src/elspeth/plugins/llms/middleware.py:101`, `src/elspeth/plugins/llms/middleware.py:226`, `src/elspeth/plugins/llms/middleware.py:136`).
 - Maintain retention for retry histories and cost summaries, as these satisfy many accreditation evidence requirements (e.g., demonstrating adherence to rate-limit policies).
 - When operating offline or in restricted environments, enable dry-run sinks and signed bundles to capture audit-friendly artefacts without contacting external services.
@@ -43,6 +50,7 @@
 - **Suite reporting pipeline** – CLI report generation writes validation results, failure analysis, and comparative insights to disk while logging each path; ensure those logs are ingested or signed when used for accreditation review (`src/elspeth/tools/reporting.py:53`, `src/elspeth/cli.py:258`).[^audit-suite-report-2025-10-12]
 
 ## Update History
+
 - 2025-10-12 – Update 2025-10-12: Added suite reporting audit considerations covering CLI exports, analytics artefacts, and report generator logging.
 - 2025-10-12 – Captured Azure telemetry enhancements, analytics report logging, and structured retry exhaustion evidence for accreditation logging requirements.
 - 2025-10-12 – Update 2025-10-12: Added retry exhaustion, middleware telemetry, and visual evidence annotations with cross-document references.

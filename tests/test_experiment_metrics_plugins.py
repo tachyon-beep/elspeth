@@ -254,14 +254,20 @@ def test_score_significance_with_adjustments():
             {"metrics": {"scores": {"crit": 5}}},
         ]
     }
-    plugin = create_baseline_plugin({"name": "score_significance", "security_level": "official", "options": {"adjustment": "bonferroni", "family_size": 10}})
+    plugin = create_baseline_plugin(
+        {"name": "score_significance", "security_level": "official", "options": {"adjustment": "bonferroni", "family_size": 10}}
+    )
     result = plugin.compare(baseline, variant)
     assert "adjusted_p_value" in result["crit"]
 
 
 def test_score_variant_ranking():
     aggregator = create_aggregation_plugin(
-        {"name": "score_variant_ranking", "security_level": "official", "options": {"threshold": 0.6, "weight_mean": 1.0, "weight_pass": 1.0}}
+        {
+            "name": "score_variant_ranking",
+            "security_level": "official",
+            "options": {"threshold": 0.6, "weight_mean": 1.0, "weight_pass": 1.0},
+        }
     )
     records = [
         {"metrics": {"score": 0.5}},

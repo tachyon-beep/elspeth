@@ -11,6 +11,20 @@ from .cost_tracker import CostTracker, FixedPriceCostTracker, NoopCostTracker
 from .rate_limit import AdaptiveRateLimiter, FixedWindowRateLimiter, NoopRateLimiter, RateLimiter
 
 
+def _create_adaptive_rate_limiter(options: Dict[str, Any]) -> AdaptiveRateLimiter:
+    """Build an adaptive rate limiter using validated option defaults."""
+
+    requests_per_minute = int(options.get("requests_per_minute", options.get("requests", 60)) or 60)
+    token_value = options.get("tokens_per_minute")
+    tokens_per_minute = int(token_value) if token_value is not None else None
+    interval_seconds = float(options.get("interval_seconds", 60.0))
+    return AdaptiveRateLimiter(
+        requests_per_minute=requests_per_minute,
+        tokens_per_minute=tokens_per_minute,
+        interval_seconds=interval_seconds,
+    )
+
+
 class _Factory:
     """Wrap plugin constructors with optional schema validation."""
 
@@ -51,11 +65,7 @@ _rate_limiters: Dict[str, _Factory] = {
         },
     ),
     "adaptive": _Factory(
-        lambda options: AdaptiveRateLimiter(
-            requests_per_minute=int(options.get("requests_per_minute", options.get("requests", 60)) or 60),
-            tokens_per_minute=(lambda value: int(value) if value is not None else None)(options.get("tokens_per_minute")),
-            interval_seconds=float(options.get("interval_seconds", 60.0)),
-        ),
+        _create_adaptive_rate_limiter,
         schema={
             "type": "object",
             "properties": {

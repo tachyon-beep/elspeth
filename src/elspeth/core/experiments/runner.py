@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-import contextlib
-import json
 import logging
 import threading
 import time
+from _thread import LockType
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,13 +16,7 @@ import pandas as pd
 from elspeth.core.artifact_pipeline import ArtifactPipeline, SinkBinding
 from elspeth.core.controls import CostTracker, RateLimiter
 from elspeth.core.experiments.plugin_registry import create_early_stop_plugin
-from elspeth.core.experiments.plugins import (
-    AggregationExperimentPlugin,
-    EarlyStopPlugin,
-    RowExperimentPlugin,
-    ValidationError,
-    ValidationPlugin,
-)
+from elspeth.core.experiments.plugins import AggregationExperimentPlugin, EarlyStopPlugin, RowExperimentPlugin, ValidationPlugin
 from elspeth.core.interfaces import LLMClientProtocol, ResultSink
 from elspeth.core.llm.middleware import LLMMiddleware, LLMRequest
 from elspeth.core.processing import prepare_prompt_context
@@ -40,7 +33,7 @@ class ExperimentRunner:
     prompt_system: str
     prompt_template: str
     prompt_fields: List[str] | None = None
-    criteria: List[Dict[str, str]] | None = None
+    criteria: List[Dict[str, Any]] | None = None
     row_plugins: List[RowExperimentPlugin] | None = None
     aggregator_plugins: List[AggregationExperimentPlugin] | None = None
     validation_plugins: List[ValidationPlugin] | None = None
@@ -61,6 +54,10 @@ class ExperimentRunner:
     _active_security_level: str | None = None
     early_stop_plugins: List[EarlyStopPlugin] | None = None
     early_stop_config: Dict[str, Any] | None = None
+    _active_early_stop_plugins: List[EarlyStopPlugin] | None = None
+    _early_stop_event: threading.Event | None = None
+    _early_stop_lock: LockType | None = None
+    _early_stop_reason: Dict[str, Any] | None = None
 
     def run(self, df: pd.DataFrame) -> Dict[str, Any]:
         self._init_early_stop()
@@ -159,10 +156,10 @@ class ExperimentRunner:
         records_with_index.sort(key=lambda item: item[0])
         results = [record for _, record in records_with_index]
 
-        payload = {"results": results}
+        payload: Dict[str, Any] = {"results": results}
         if failures:
             payload["failures"] = failures
-        aggregates = {}
+        aggregates: Dict[str, Any] = {}
         for plugin in self.aggregator_plugins or []:
             derived = plugin.finalize(results)
             if derived:
@@ -170,11 +167,11 @@ class ExperimentRunner:
         if aggregates:
             payload["aggregates"] = aggregates
 
-        metadata = {
+        metadata: Dict[str, Any] = {
             "rows": len(results),
             "row_count": len(results),
         }
-        retry_summary = {
+        retry_summary: Dict[str, int] = {
             "total_requests": len(results) + len(failures),
             "total_retries": 0,
             "exhausted": len(failures),
@@ -246,11 +243,11 @@ class ExperimentRunner:
             self._early_stop_lock = None
 
     def _maybe_trigger_early_stop(self, record: Dict[str, Any], *, row_index: int | None = None) -> None:
-        event: threading.Event | None = getattr(self, "_early_stop_event", None)
+        event = self._early_stop_event
         if not event or event.is_set():
             return
-        plugins: List[EarlyStopPlugin] = getattr(self, "_active_early_stop_plugins", []) or []
-        if not plugins or getattr(self, "_early_stop_reason", None):
+        plugins = self._active_early_stop_plugins or []
+        if not plugins or self._early_stop_reason:
             return
 
         metadata: Dict[str, Any] | None = None
@@ -258,7 +255,7 @@ class ExperimentRunner:
             metadata = {"row_index": row_index}
 
         def _evaluate() -> None:
-            if event.is_set() or getattr(self, "_early_stop_reason", None):
+            if event.is_set() or self._early_stop_reason:
                 return
             for plugin in plugins:
                 try:
@@ -285,9 +282,8 @@ class ExperimentRunner:
                 )
                 break
 
-        lock: threading.Lock | None = getattr(self, "_early_stop_lock", None)
-        if lock:
-            with lock:
+        if self._early_stop_lock:
+            with self._early_stop_lock:
                 _evaluate()
         else:
             _evaluate()
@@ -538,7 +534,6 @@ class ExperimentRunner:
         system_prompt: str | None = None,
         row_context: Dict[str, Any] | None = None,
     ) -> Dict[str, Any]:
-        attempts = 1
         delay = 0.0
         max_attempts = 1
         backoff = 0.0
@@ -553,6 +548,7 @@ class ExperimentRunner:
         last_request: LLMRequest | None = None
         while attempt < max_attempts:
             attempt += 1
+            attempt_start = time.time()
             try:
                 request = LLMRequest(
                     system_prompt=system_prompt or self.prompt_system or "",
@@ -560,7 +556,6 @@ class ExperimentRunner:
                     metadata={**metadata, "attempt": attempt},
                 )
                 last_request = request
-                attempt_start = time.time()
                 for middleware in self.llm_middlewares or []:
                     request = middleware.before_request(request)
 

@@ -4,7 +4,7 @@ import time
 import pytest
 
 from elspeth.core.controls.cost_tracker import FixedPriceCostTracker
-from elspeth.core.controls.rate_limit import AdaptiveRateLimiter, FixedWindowRateLimiter, NoopRateLimiter
+from elspeth.core.controls.rate_limit import AdaptiveRateLimiter, FixedWindowRateLimiter
 
 
 def test_fixed_window_rate_limiter(monkeypatch):

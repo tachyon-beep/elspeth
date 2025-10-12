@@ -3,7 +3,6 @@ import json
 from pathlib import Path
 
 import pandas as pd
-import pytest
 
 import elspeth.cli as cli
 from elspeth.core.orchestrator import OrchestratorConfig
