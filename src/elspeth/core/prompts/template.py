@@ -22,6 +22,8 @@ class PromptTemplate:
     required_fields: tuple[str, ...] = field(default_factory=tuple)
 
     def render(self, context: Mapping[str, Any] | None = None, extra: Mapping[str, Any] | None = None) -> str:
+        """Render the template using defaults, context, and extra overrides."""
+
         payload: Dict[str, Any] = {}
         if self.defaults:
             payload.update(self.defaults)
@@ -34,7 +36,7 @@ class PromptTemplate:
         except UndefinedError as exc:  # pragma: no cover - exercised via unit tests
             raise PromptRenderingError(str(exc), name=self.name) from exc
 
-    def clone(
+    def clone(  # pylint: disable=too-many-arguments
         self,
         *,
         name: str | None = None,

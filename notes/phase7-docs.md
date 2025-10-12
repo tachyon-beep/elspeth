@@ -39,3 +39,7 @@
 - DevOps/Excel/zip archiving flows remain to be ported.
 - Advanced statistical analysis (Bayesian/effect size) still pending.
 - Schema/preflight validation and helper CLI hooks to be carried over.
+<!-- UPDATE 2025-10-12: Telemetry, Excel/ZIP sinks, and advanced analytics plugins are now available; remaining work focuses on optional visualisations and extended CLI ergonomics. -->
+
+## Update History
+- 2025-10-12 – Marked Phase 7 deliverables complete (telemetry, sinks, analytics) and clarified ongoing optional work.

@@ -14,7 +14,7 @@ fi
 source "$VENV_PATH/bin/activate"
 
 python -m pip install --upgrade pip
-python -m pip install -e "$ROOT_DIR"[dev]
+python -m pip install -e "$ROOT_DIR"[dev,analytics-visual]
 
 if [ "$RUN_TESTS" != "0" ]; then
   python -m pytest

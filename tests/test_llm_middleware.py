@@ -4,11 +4,11 @@ import pandas as pd
 import pytest
 import requests
 
+from elspeth.core.experiments.config import ExperimentConfig, ExperimentSuite
+from elspeth.core.experiments.runner import ExperimentRunner
+from elspeth.core.experiments.suite_runner import ExperimentSuiteRunner
 from elspeth.core.llm.middleware import LLMRequest
 from elspeth.core.llm.registry import create_middlewares
-from elspeth.core.experiments.runner import ExperimentRunner
-from elspeth.core.experiments.config import ExperimentSuite, ExperimentConfig
-from elspeth.core.experiments.suite_runner import ExperimentSuiteRunner
 from elspeth.plugins.llms.middleware_azure import AzureEnvironmentMiddleware
 
 
@@ -40,8 +40,8 @@ def test_middleware_chain(monkeypatch):
     from elspeth.core.llm import registry as mw_registry
 
     box = []
-    mw_registry.register_middleware("collect", lambda options: CollectingMiddleware(box))
-    middlewares = create_middlewares([{"name": "collect"}])
+    mw_registry.register_middleware("collect", lambda options, context: CollectingMiddleware(box))
+    middlewares = create_middlewares([{"name": "collect", "security_level": "official"}])
 
     runner = ExperimentRunner(
         llm_client=DummyLLM(),
@@ -62,7 +62,7 @@ def test_middleware_chain(monkeypatch):
 
 def test_prompt_shield_blocks():
     middlewares = create_middlewares(
-        [{"name": "prompt_shield", "options": {"denied_terms": ["forbidden"], "on_violation": "abort"}}]
+        [{"name": "prompt_shield", "security_level": "official", "options": {"denied_terms": ["forbidden"], "on_violation": "abort"}}]
     )
 
     runner = ExperimentRunner(
@@ -87,6 +87,7 @@ def test_prompt_shield_masks(caplog):
         [
             {
                 "name": "prompt_shield",
+                "security_level": "official",
                 "options": {"denied_terms": ["top secret"], "on_violation": "mask", "mask": "***"},
             }
         ]
@@ -115,6 +116,7 @@ def test_prompt_shield_logs_warning(caplog):
         [
             {
                 "name": "prompt_shield",
+                "security_level": "official",
                 "options": {
                     "denied_terms": ["restricted"],
                     "on_violation": "mask",
@@ -335,7 +337,7 @@ def test_middleware_retry_hook_invoked(monkeypatch):
         def on_retry_exhausted(self, request, metadata, error):
             events.append({"metadata": metadata, "error": str(error)})
 
-    mw_registry.register_middleware("retry_tracker", lambda options: RetryMiddleware())
+    mw_registry.register_middleware("retry_tracker", lambda options, context: RetryMiddleware())
 
     class FailingLLM:
         def generate(self, *, system_prompt, user_prompt, metadata=None):
@@ -348,7 +350,7 @@ def test_middleware_retry_hook_invoked(monkeypatch):
         prompt_template="Hello",
         prompt_fields=[],
         retry_config={"max_attempts": 2, "initial_delay": 0},
-        llm_middlewares=create_middlewares([{"name": "retry_tracker"}]),
+        llm_middlewares=create_middlewares([{"name": "retry_tracker", "security_level": "official"}]),
     )
 
     import pandas as pd
@@ -428,7 +430,7 @@ def test_suite_runner_applies_per_experiment_azure_middleware(monkeypatch):
         prompt_system="sys",
         prompt_template="{{ APPID }}",
         is_baseline=True,
-        llm_middleware_defs=[{"name": "azure_environment"}],
+        llm_middleware_defs=[{"name": "azure_environment", "security_level": "official"}],
     )
     variant = ExperimentConfig(
         name="variant",
@@ -436,8 +438,8 @@ def test_suite_runner_applies_per_experiment_azure_middleware(monkeypatch):
         max_tokens=10,
         prompt_system="sys",
         prompt_template="{{ APPID }}",
-        llm_middleware_defs=[{"name": "azure_environment"}],
-        baseline_plugin_defs=[{"name": "row_count"}],
+        llm_middleware_defs=[{"name": "azure_environment", "security_level": "official"}],
+        baseline_plugin_defs=[{"name": "row_count", "security_level": "official"}],
     )
 
     suite = ExperimentSuite(root=Path("."), experiments=[baseline, variant], baseline=baseline)
@@ -453,7 +455,7 @@ def test_suite_runner_applies_per_experiment_azure_middleware(monkeypatch):
         defaults={
             "prompt_system": "sys",
             "prompt_template": "{{ APPID }}",
-            "baseline_plugin_defs": [{"name": "row_count"}],
+            "baseline_plugin_defs": [{"name": "row_count", "security_level": "official"}],
         },
     )
 
@@ -466,7 +468,7 @@ def test_suite_runner_applies_per_experiment_azure_middleware(monkeypatch):
     assert any(name.startswith("baseline_variant") for name in run.tables)
 
 
-def test_suite_runner_deduplicates_shared_middleware(monkeypatch):
+def test_suite_runner_deduplicates_shared_middleware_multiple_experiments(monkeypatch):
     events = []
 
     class SharedMiddleware:
@@ -492,7 +494,7 @@ def test_suite_runner_deduplicates_shared_middleware(monkeypatch):
 
     from elspeth.core.llm import registry as mw_registry
 
-    mw_registry.register_middleware("shared", lambda options: SharedMiddleware())
+    mw_registry.register_middleware("shared", lambda options, context: SharedMiddleware())
 
     exp_config = ExperimentConfig(
         name="exp",
@@ -500,7 +502,7 @@ def test_suite_runner_deduplicates_shared_middleware(monkeypatch):
         max_tokens=10,
         prompt_system="sys",
         prompt_template="{{ APPID }}",
-        llm_middleware_defs=[{"name": "shared"}],
+        llm_middleware_defs=[{"name": "shared", "security_level": "official"}],
     )
 
     suite = ExperimentSuite(root=Path("."), experiments=[exp_config], baseline=exp_config)
@@ -516,7 +518,7 @@ def test_suite_runner_deduplicates_shared_middleware(monkeypatch):
         defaults={
             "prompt_system": "sys",
             "prompt_template": "{{ APPID }}",
-            "llm_middleware_defs": [{"name": "shared"}],
+            "llm_middleware_defs": [{"name": "shared", "security_level": "official"}],
         },
     )
 
@@ -552,6 +554,8 @@ def test_azure_environment_middleware_logs_aggregate_table(monkeypatch):
     )
 
     assert "experiment_exp_aggregates" in run.tables
+
+
 def test_suite_runner_deduplicates_shared_middleware(monkeypatch):
     events = []
 
@@ -572,7 +576,7 @@ def test_suite_runner_deduplicates_shared_middleware(monkeypatch):
 
     from elspeth.core.llm import registry as mw_registry
 
-    mw_registry.register_middleware("shared", lambda options: SharedMiddleware())
+    mw_registry.register_middleware("shared", lambda options, context: SharedMiddleware())
 
     baseline_config = ExperimentConfig(
         name="baseline",
@@ -581,7 +585,7 @@ def test_suite_runner_deduplicates_shared_middleware(monkeypatch):
         prompt_system="sys",
         prompt_template="{{ APPID }}",
         is_baseline=True,
-        llm_middleware_defs=[{"name": "shared"}],
+        llm_middleware_defs=[{"name": "shared", "security_level": "official"}],
     )
 
     variant_config = ExperimentConfig(
@@ -590,7 +594,7 @@ def test_suite_runner_deduplicates_shared_middleware(monkeypatch):
         max_tokens=10,
         prompt_system="sys",
         prompt_template="{{ APPID }}",
-        llm_middleware_defs=[{"name": "shared"}],
+        llm_middleware_defs=[{"name": "shared", "security_level": "official"}],
     )
 
     suite = ExperimentSuite(root=Path("."), experiments=[baseline_config, variant_config], baseline=baseline_config)
@@ -606,7 +610,7 @@ def test_suite_runner_deduplicates_shared_middleware(monkeypatch):
         defaults={
             "prompt_system": "sys",
             "prompt_template": "{{ APPID }}",
-            "llm_middleware_defs": [{"name": "shared"}],
+            "llm_middleware_defs": [{"name": "shared", "security_level": "official"}],
         },
     )
 

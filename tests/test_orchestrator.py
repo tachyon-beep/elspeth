@@ -1,16 +1,18 @@
 import pandas as pd
 
+from elspeth.core.experiments.plugin_registry import register_aggregation_plugin, register_row_plugin
 from elspeth.core.orchestrator import ExperimentOrchestrator, OrchestratorConfig
-from elspeth.core.experiments.plugin_registry import register_row_plugin, register_aggregation_plugin
 
 
 def test_orchestrator_runs(monkeypatch):
     class DummyDatasource:
         def load(self):
-            return pd.DataFrame([
-                {"APPID": "1", "name": "Alice"},
-                {"APPID": "2", "name": "Bob"},
-            ])
+            return pd.DataFrame(
+                [
+                    {"APPID": "1", "name": "Alice"},
+                    {"APPID": "2", "name": "Bob"},
+                ]
+            )
 
     class DummyLLM:
         def generate(self, *, system_prompt, user_prompt, metadata=None):
@@ -19,6 +21,7 @@ def test_orchestrator_runs(monkeypatch):
     class DummySink:
         def __init__(self):
             self.calls = []
+            self._elspeth_security_level = "official"
 
         def write(self, results, *, metadata=None):
             self.calls.append((results, metadata))
@@ -45,9 +48,11 @@ def test_orchestrator_runs(monkeypatch):
 def test_orchestrator_with_criteria(monkeypatch):
     class DummyDatasource:
         def load(self):
-            return pd.DataFrame([
-                {"APPID": "1", "name": "Alice"},
-            ])
+            return pd.DataFrame(
+                [
+                    {"APPID": "1", "name": "Alice"},
+                ]
+            )
 
     class DummyLLM:
         def __init__(self):
@@ -58,6 +63,9 @@ def test_orchestrator_with_criteria(monkeypatch):
             return {"prompt": user_prompt, "meta": metadata, "content": metadata["criteria"]}
 
     class DummySink:
+        def __init__(self):
+            self._elspeth_security_level = "official"
+
         def write(self, results, *, metadata=None):
             pass
 
@@ -85,7 +93,7 @@ def test_orchestrator_single_run_executes_plugins(monkeypatch):
     row_calls = []
     agg_calls = []
 
-    def make_row_plugin(options):
+    def make_row_plugin(options, context):
         class _Plugin:
             name = "single_run_row_plugin"
 
@@ -95,7 +103,7 @@ def test_orchestrator_single_run_executes_plugins(monkeypatch):
 
         return _Plugin()
 
-    def make_agg_plugin(options):
+    def make_agg_plugin(options, context):
         class _Plugin:
             name = "single_run_agg_plugin"
 
@@ -119,6 +127,7 @@ def test_orchestrator_single_run_executes_plugins(monkeypatch):
     class DummySink:
         def __init__(self):
             self.calls = []
+            self._elspeth_security_level = "official"
 
         def write(self, results, *, metadata=None):
             self.calls.append((results, metadata))
@@ -132,8 +141,8 @@ def test_orchestrator_single_run_executes_plugins(monkeypatch):
         config=OrchestratorConfig(
             llm_prompt={"system": "sys", "user": "Hello {name}"},
             prompt_fields=["APPID", "name"],
-            row_plugin_defs=[{"name": "single_run_row_plugin"}],
-            aggregator_plugin_defs=[{"name": "single_run_agg_plugin"}],
+            row_plugin_defs=[{"name": "single_run_row_plugin", "security_level": "official"}],
+            aggregator_plugin_defs=[{"name": "single_run_agg_plugin", "security_level": "official"}],
         ),
     )
 

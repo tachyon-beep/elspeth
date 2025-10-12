@@ -3,25 +3,33 @@ import pandas as pd
 from elspeth.plugins.outputs.csv_file import CsvResultSink
 
 
-def test_csv_result_sink_writes(tmp_path):
+def test_csv_result_sink_writes(tmp_path, assert_sanitized_artifact):
     path = tmp_path / "results.csv"
     sink = CsvResultSink(path=path)
 
-    sink.write({
-        "results": [
-            {
-                "row": {"APPID": "1"},
-                "response": {"content": "ok"},
-                "responses": {"crit": {"content": "crit-ok"}},
-            }
-        ]
-    })
+    sink.write(
+        {
+            "results": [
+                {
+                    "row": {"APPID": "1"},
+                    "response": {"content": "ok"},
+                    "responses": {"crit": {"content": "crit-ok"}},
+                }
+            ]
+        }
+    )
 
     assert path.exists()
     df = pd.read_csv(path)
     assert "APPID" in df.columns
     assert df.loc[0, "llm_content"] == "ok"
     assert df.loc[0, "llm_crit"] == "crit-ok"
+
+    assert_sanitized_artifact(path)
+
+    artifacts = sink.collect_artifacts()
+    assert "csv" in artifacts
+    assert artifacts["csv"].metadata["sanitization"] == {"enabled": True, "guard": "'"}
 
 
 def test_csv_result_sink_overwrite(tmp_path):

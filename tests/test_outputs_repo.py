@@ -1,9 +1,7 @@
 import base64
 import json
 
-import pytest
-
-from elspeth.plugins.outputs.repository import GitHubRepoSink, AzureDevOpsRepoSink
+from elspeth.plugins.outputs.repository import AzureDevOpsRepoSink, GitHubRepoSink
 
 
 class DummyResponse:
@@ -117,3 +115,29 @@ def test_azure_devops_repo_sink_skip_on_error(monkeypatch, caplog):
         sink.write(sample_results(), metadata={"experiment": "exp1"})
 
     assert "skipping upload" in "".join(caplog.messages)
+
+
+def test_github_repo_sink_headers_use_env(monkeypatch):
+    monkeypatch.setenv("MY_GITHUB_TOKEN", "abc123")
+    sink = GitHubRepoSink(owner="org", repo="repo", token_env="MY_GITHUB_TOKEN")
+
+    headers_first = sink._headers()
+    monkeypatch.delenv("MY_GITHUB_TOKEN", raising=False)
+    headers_second = sink._headers()
+
+    assert headers_first["Authorization"] == "Bearer abc123"
+    assert headers_first is headers_second
+
+
+def test_github_repo_sink_skip_on_error(monkeypatch, caplog):
+    sink = GitHubRepoSink(owner="org", repo="repo", dry_run=False, on_error="skip")
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("network down")
+
+    monkeypatch.setattr(GitHubRepoSink, "_request", boom)
+
+    with caplog.at_level("WARNING"):
+        sink.write(sample_results(), metadata={"experiment": "exp1"})
+
+    assert any("skipping upload" in record.message for record in caplog.records)

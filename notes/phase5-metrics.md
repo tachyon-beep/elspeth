@@ -33,3 +33,7 @@
 - Row plugin `score_extractor` emits `metrics['scores']` and optional `metrics['score_flags']` entries (threshold configurable per settings). Missing values default to `NaN` unless `allow_missing=True`.
 - Aggregation plugins `score_stats` and `score_recommendation` aggregate statistics and craft summary messaging; baseline deltas supplied via `score_delta` plugin during suite comparisons.
 - Defaults activated through `config/settings.yaml` prompt pack + suite defaults; CLI flag `--disable-metrics` strips the stack when experiments require raw outputs only.
+<!-- UPDATE 2025-10-12: The optional extras enumerated here are live; analytics report sink and suite reporting pipeline consume these metrics for accreditation artefacts (`src/elspeth/plugins/outputs/analytics_report.py:69`, `src/elspeth/tools/reporting.py:94`). -->
+
+## Update History
+- 2025-10-12 – Noted completion of metric plugins and integration with analytics/reporting surfaces.

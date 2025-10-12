@@ -7,7 +7,7 @@ from typing import Any, Dict
 import pytest
 
 from elspeth.core.artifact_pipeline import ArtifactPipeline, SinkBinding
-from elspeth.core.interfaces import ResultSink, ArtifactDescriptor, Artifact
+from elspeth.core.interfaces import Artifact, ArtifactDescriptor, ResultSink
 
 
 class DummySink(ResultSink):
@@ -68,7 +68,7 @@ def binding_for(
     sink: ResultSink,
     *,
     artifacts: Dict[str, Any] | None = None,
-    security_level: str | None = None,
+    security_level: str | None = "official",
 ) -> SinkBinding:
     return SinkBinding(
         id=f"{sink.__class__.__name__}:{index}",
@@ -78,6 +78,12 @@ def binding_for(
         original_index=index,
         security_level=security_level,
     )
+
+
+def test_pipeline_requires_security_level():
+    sink = DummySink("missing_security")
+    with pytest.raises(ValueError, match="must declare a security_level"):
+        ArtifactPipeline([binding_for(0, sink, security_level=None)])
 
 
 def test_pipeline_preserves_order_without_artifacts():

@@ -38,6 +38,7 @@ class DummyLLM:
 class DummySink:
     def __init__(self):
         self.last_metadata = None
+        self._elspeth_security_level = "official"
 
     def write(self, results, *, metadata=None):
         self.last_metadata = metadata

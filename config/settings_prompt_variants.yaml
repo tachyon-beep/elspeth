@@ -1,14 +1,17 @@
 prompt_variants_demo:
   datasource:
     plugin: local_csv
+    security_level: official
     options:
       path: config/data/prompt_variants_demo.csv
   llm:
     plugin: mock
+    security_level: official
     options:
       seed: 31415
   sinks:
     - plugin: csv
+      security_level: official
       options:
         path: outputs/prompt_variants/latest_results.csv
         overwrite: true
@@ -24,6 +27,7 @@ prompt_variants_demo:
     - tone
   aggregator_plugins:
     - name: prompt_variants
+      security_level: official
       options:
         prompt_template: |
           You will rewrite the original user prompt while preserving every placeholder token exactly as-is.
@@ -37,5 +41,6 @@ prompt_variants_demo:
         max_attempts: 3
         variant_llm:
           plugin: mock
+          security_level: official
           options:
             seed: 27182

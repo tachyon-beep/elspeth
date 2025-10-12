@@ -2,25 +2,25 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 import json
-from pathlib import Path
-from typing import Any, Dict, List, Callable
+from dataclasses import dataclass, field
+from typing import Any, Callable, Dict, List, cast
 
-from elspeth.core.experiments.config import ExperimentSuite, ExperimentConfig
-from elspeth.core.experiments.runner import ExperimentRunner
+from elspeth.core import registry as core_registry
+from elspeth.core.controls import create_cost_tracker, create_rate_limiter
+from elspeth.core.experiments.config import ExperimentConfig, ExperimentSuite
 from elspeth.core.experiments.plugin_registry import (
-    create_row_plugin,
     create_aggregation_plugin,
     create_baseline_plugin,
-    create_validation_plugin,
     create_early_stop_plugin,
+    create_row_plugin,
+    create_validation_plugin,
     normalize_early_stop_definitions,
 )
+from elspeth.core.experiments.runner import ExperimentRunner
 from elspeth.core.interfaces import LLMClientProtocol, ResultSink
-from elspeth.core.controls import create_rate_limiter, create_cost_tracker
 from elspeth.core.llm.registry import create_middleware
-from elspeth.core import registry as core_registry
+from elspeth.core.plugins import PluginContext, apply_plugin_context
 from elspeth.core.security import resolve_security_level
 from elspeth.core.validation import ConfigurationError
 
@@ -65,18 +65,17 @@ class ExperimentSuiteRunner:
         ):
             if source:
                 middleware_defs.extend(source)
-        middlewares = self._create_middlewares(middleware_defs)
+        middlewares: list[Any] | None = None
 
-        concurrency_config: Dict[str, Any] = {}
+        raw_concurrency: Dict[str, Any] = {}
         for source in (
             defaults.get("concurrency_config") or defaults.get("concurrency"),
             pack.get("concurrency") if pack else None,
             config.concurrency_config,
         ):
             if source:
-                concurrency_config.update(source)
-        if not concurrency_config:
-            concurrency_config = None
+                raw_concurrency.update(source)
+        concurrency_config = raw_concurrency or None
 
         early_stop_plugin_defs: List[Dict[str, Any]] = []
         for source in (
@@ -87,21 +86,47 @@ class ExperimentSuiteRunner:
             if source:
                 early_stop_plugin_defs.extend(normalize_early_stop_definitions(source))
 
-        early_stop_config: Dict[str, Any] = {}
+        raw_early_stop_config: Dict[str, Any] = {}
         for source in (
             defaults.get("early_stop_config") or defaults.get("early_stop"),
             pack.get("early_stop") if pack else None,
             config.early_stop_config,
         ):
             if source:
-                early_stop_config.update(source)
-        if not early_stop_config:
-            early_stop_config = None
+                raw_early_stop_config.update(source)
+        early_stop_config = raw_early_stop_config or None
         if not early_stop_plugin_defs and early_stop_config:
             early_stop_plugin_defs.extend(normalize_early_stop_definitions(early_stop_config))
-        early_stop_plugins = (
-            [create_early_stop_plugin(defn) for defn in early_stop_plugin_defs] if early_stop_plugin_defs else None
-        )
+
+        row_defs = list(defaults.get("row_plugin_defs", []))
+        if pack and pack.get("row_plugins"):
+            row_defs = list(pack.get("row_plugins", [])) + row_defs
+        if config.row_plugin_defs:
+            row_defs += config.row_plugin_defs
+
+        agg_defs = list(defaults.get("aggregator_plugin_defs", []))
+        if pack and pack.get("aggregator_plugins"):
+            agg_defs = list(pack.get("aggregator_plugins", [])) + agg_defs
+        if config.aggregator_plugin_defs:
+            agg_defs += config.aggregator_plugin_defs
+
+        validation_defs = list(defaults.get("validation_plugin_defs", []))
+        if pack and pack.get("validation_plugins"):
+            validation_defs = list(pack.get("validation_plugins", [])) + validation_defs
+        if config.validation_plugin_defs:
+            validation_defs += config.validation_plugin_defs
+
+        rate_limiter_def = defaults.get("rate_limiter_def")
+        if pack and pack.get("rate_limiter"):
+            rate_limiter_def = pack["rate_limiter"]
+        if config.rate_limiter_def:
+            rate_limiter_def = config.rate_limiter_def
+
+        cost_tracker_def = defaults.get("cost_tracker_def")
+        if pack and pack.get("cost_tracker"):
+            cost_tracker_def = pack["cost_tracker"]
+        if config.cost_tracker_def:
+            cost_tracker_def = config.cost_tracker_def
 
         security_level = resolve_security_level(
             config.security_level,
@@ -109,42 +134,93 @@ class ExperimentSuiteRunner:
             defaults.get("security_level"),
         )
 
+        experiment_context = PluginContext(
+            plugin_name=config.name,
+            plugin_kind="experiment",
+            security_level=security_level,
+            provenance=(f"experiment:{config.name}.resolved",),
+        )
+
+        for idx, sink in enumerate(sinks):
+            sink_name = getattr(sink, "_elspeth_sink_name", getattr(sink, "_elspeth_plugin_name", sink.__class__.__name__))
+            sink_level = getattr(sink, "security_level", experiment_context.security_level)
+            sink_context = experiment_context.derive(
+                plugin_name=str(sink_name),
+                plugin_kind="sink",
+                security_level=sink_level,
+                provenance=(f"sink:{sink_name}.resolved",),
+            )
+            apply_plugin_context(sink, sink_context)
+
+        row_plugins = [create_row_plugin(defn, parent_context=experiment_context) for defn in row_defs] if row_defs else None
+        aggregator_plugins = [create_aggregation_plugin(defn, parent_context=experiment_context) for defn in agg_defs] if agg_defs else None
+        validation_plugins = (
+            [create_validation_plugin(defn, parent_context=experiment_context) for defn in validation_defs] if validation_defs else None
+        )
+        early_stop_plugins = (
+            [create_early_stop_plugin(defn, parent_context=experiment_context) for defn in early_stop_plugin_defs]
+            if early_stop_plugin_defs
+            else None
+        )
+        middlewares = self._create_middlewares(middleware_defs, parent_context=experiment_context)
+
+        rate_limiter: Any | None = None
+        if rate_limiter_def:
+            rate_limiter = create_rate_limiter(rate_limiter_def, parent_context=experiment_context)
+        elif defaults.get("rate_limiter") is not None:
+            base = defaults["rate_limiter"]
+            apply_plugin_context(
+                base,
+                experiment_context.derive(
+                    plugin_name=getattr(base, "name", "rate_limiter"),
+                    plugin_kind="rate_limiter",
+                ),
+            )
+            rate_limiter = base
+
+        cost_tracker: Any | None = None
+        if cost_tracker_def:
+            cost_tracker = create_cost_tracker(cost_tracker_def, parent_context=experiment_context)
+        elif defaults.get("cost_tracker") is not None:
+            base_tracker = defaults["cost_tracker"]
+            apply_plugin_context(
+                base_tracker,
+                experiment_context.derive(
+                    plugin_name=getattr(base_tracker, "name", "cost_tracker"),
+                    plugin_kind="cost_tracker",
+                ),
+            )
+            cost_tracker = base_tracker
+
         row_defs = list(defaults.get("row_plugin_defs", []))
         if pack and pack.get("row_plugins"):
             row_defs = list(pack.get("row_plugins", [])) + row_defs
         if config.row_plugin_defs:
             row_defs += config.row_plugin_defs
-        row_plugins = [create_row_plugin(defn) for defn in row_defs] if row_defs else None
 
         agg_defs = list(defaults.get("aggregator_plugin_defs", []))
         if pack and pack.get("aggregator_plugins"):
             agg_defs = list(pack.get("aggregator_plugins", [])) + agg_defs
         if config.aggregator_plugin_defs:
             agg_defs += config.aggregator_plugin_defs
-        aggregator_plugins = [create_aggregation_plugin(defn) for defn in agg_defs] if agg_defs else None
 
         validation_defs = list(defaults.get("validation_plugin_defs", []))
         if pack and pack.get("validation_plugins"):
             validation_defs = list(pack.get("validation_plugins", [])) + validation_defs
         if config.validation_plugin_defs:
             validation_defs += config.validation_plugin_defs
-        validation_plugins = [create_validation_plugin(defn) for defn in validation_defs] if validation_defs else None
 
-        rate_limiter = defaults.get("rate_limiter")
-        if defaults.get("rate_limiter_def"):
-            rate_limiter = create_rate_limiter(defaults["rate_limiter_def"])
+        rate_limiter_def = defaults.get("rate_limiter_def")
         if pack and pack.get("rate_limiter"):
-            rate_limiter = create_rate_limiter(pack["rate_limiter"])
+            rate_limiter_def = pack["rate_limiter"]
         if config.rate_limiter_def:
-            rate_limiter = create_rate_limiter(config.rate_limiter_def)
+            rate_limiter_def = config.rate_limiter_def
 
-        cost_tracker = defaults.get("cost_tracker")
-        if defaults.get("cost_tracker_def"):
-            cost_tracker = create_cost_tracker(defaults["cost_tracker_def"])
+        cost_tracker_def = defaults.get("cost_tracker_def")
         if pack and pack.get("cost_tracker"):
-            cost_tracker = create_cost_tracker(pack["cost_tracker"])
+            cost_tracker_def = pack["cost_tracker"]
         if config.cost_tracker_def:
-            cost_tracker = create_cost_tracker(config.cost_tracker_def)
+            cost_tracker_def = config.cost_tracker_def
 
         if pack:
             pack_prompts = pack.get("prompts", {})
@@ -164,35 +240,41 @@ class ExperimentSuiteRunner:
                 f"Experiment '{config.name}' has no user prompt defined. Provide one in the experiment, defaults, or prompt pack."
             )
 
-        runner_kwargs = {
-            "llm_client": self.llm_client,
-            "sinks": sinks,
-            "prompt_system": prompt_system,
-            "prompt_template": prompt_template,
-            "prompt_fields": prompt_fields,
-            "criteria": criteria,
-            "prompt_defaults": prompt_defaults or None,
-            "row_plugins": row_plugins,
-            "aggregator_plugins": aggregator_plugins,
-            "validation_plugins": validation_plugins,
-            "rate_limiter": rate_limiter,
-            "cost_tracker": cost_tracker,
-            "experiment_name": config.name,
-            "llm_middlewares": middlewares or None,
-            "concurrency_config": concurrency_config,
-            "security_level": security_level,
-            "early_stop_plugins": early_stop_plugins,
-            "early_stop_config": early_stop_config,
-        }
-        return ExperimentRunner(**runner_kwargs)
+        runner_instance = ExperimentRunner(
+            llm_client=self.llm_client,
+            sinks=sinks,
+            prompt_system=prompt_system,
+            prompt_template=prompt_template,
+            prompt_fields=prompt_fields,
+            criteria=criteria,
+            row_plugins=row_plugins,
+            aggregator_plugins=aggregator_plugins,
+            validation_plugins=validation_plugins,
+            rate_limiter=rate_limiter,
+            cost_tracker=cost_tracker,
+            experiment_name=config.name,
+            prompt_defaults=prompt_defaults or None,
+            llm_middlewares=middlewares or None,
+            concurrency_config=concurrency_config,
+            security_level=security_level,
+            early_stop_plugins=early_stop_plugins,
+            early_stop_config=early_stop_config,
+        )
+        setattr(runner_instance, "plugin_context", experiment_context)
+        return runner_instance
 
-    def _create_middlewares(self, definitions: list[Dict[str, Any]] | None) -> list[Any]:
+    def _create_middlewares(
+        self,
+        definitions: list[Dict[str, Any]] | None,
+        *,
+        parent_context: PluginContext,
+    ) -> list[Any]:
         instances: list[Any] = []
         for defn in definitions or []:
             name = defn.get("name") or defn.get("plugin")
-            identifier = f"{name}:{json.dumps(defn.get('options', {}), sort_keys=True)}"
+            identifier = f"{name}:{json.dumps(defn.get('options', {}), sort_keys=True)}:{parent_context.security_level}"
             if identifier not in self._shared_middlewares:
-                self._shared_middlewares[identifier] = create_middleware(defn)
+                self._shared_middlewares[identifier] = create_middleware(defn, parent_context=parent_context)
             instances.append(self._shared_middlewares[identifier])
         return instances
 
@@ -200,18 +282,26 @@ class ExperimentSuiteRunner:
         sinks: List[ResultSink] = []
         for index, entry in enumerate(defs):
             plugin = entry.get("plugin")
+            if not isinstance(plugin, str) or not plugin:
+                raise ConfigurationError("Each sink definition must include a 'plugin' string")
             raw_options = dict(entry.get("options", {}))
-            core_registry.registry.validate_sink(plugin, raw_options)
-            options = dict(raw_options)
-            artifacts_cfg = options.pop("artifacts", None)
-            security_level = options.pop("security_level", entry.get("security_level"))
-            sink = core_registry.registry.create_sink(plugin, options)
+            artifacts_cfg = raw_options.pop("artifacts", None)
+            security_level = entry.get("security_level", raw_options.get("security_level"))
+            if security_level is None:
+                raise ConfigurationError(f"sink '{plugin}' requires a security_level")
+            options_with_level = dict(raw_options)
+            options_with_level["security_level"] = security_level
+            core_registry.registry.validate_sink(plugin, options_with_level)
+            sink = core_registry.registry.create_sink(
+                plugin,
+                options_with_level,
+                provenance=(f"sink:{plugin}.definition",),
+            )
             setattr(sink, "_elspeth_artifact_config", artifacts_cfg or {})
             setattr(sink, "_elspeth_plugin_name", plugin)
-            base_name = entry.get("name") or plugin or f"sink{index}"
+            name_value = entry.get("name")
+            base_name = name_value if isinstance(name_value, str) and name_value else plugin or f"sink{index}"
             setattr(sink, "_elspeth_sink_name", base_name)
-            if security_level:
-                setattr(sink, "_elspeth_security_level", security_level)
             sinks.append(sink)
         return sinks
 
@@ -266,7 +356,20 @@ class ExperimentSuiteRunner:
                 {**defaults, "prompt_packs": prompt_packs, "prompt_pack": pack_name},
                 sinks,
             )
-            middlewares = list(runner.llm_middlewares or [])
+            experiment_context = getattr(
+                runner,
+                "plugin_context",
+                PluginContext(
+                    plugin_name=experiment.name,
+                    plugin_kind="experiment",
+                    security_level=resolve_security_level(
+                        experiment.security_level,
+                        defaults.get("security_level"),
+                    ),
+                    provenance=(f"experiment:{experiment.name}.fallback",),
+                ),
+            )
+            middlewares = cast(List[Any], runner.llm_middlewares or [])
             suite_notified = []
             for mw in middlewares:
                 key = id(mw)
@@ -312,7 +415,7 @@ class ExperimentSuiteRunner:
                     comp_defs += experiment.baseline_plugin_defs
                 comparisons = {}
                 for defn in comp_defs:
-                    plugin = create_baseline_plugin(defn)
+                    plugin = create_baseline_plugin(defn, parent_context=experiment_context)
                     diff = plugin.compare(baseline_payload, payload)
                     if diff:
                         comparisons[plugin.name] = diff

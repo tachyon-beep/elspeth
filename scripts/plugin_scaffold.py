@@ -16,12 +16,16 @@ from pathlib import Path
 from textwrap import dedent
 from typing import Callable, Dict
 
+EXPERIMENT_PLUGINS_DIR = Path("src/elspeth/plugins/experiments")
+OUTPUT_PLUGINS_DIR = Path("src/elspeth/plugins/outputs")
+LLM_MIDDLEWARE_DIR = Path("src/elspeth/plugins/llms")
+
 PLUGIN_DEFAULT_DIRS: Dict[str, Path] = {
-    "row": Path("src/elspeth/plugins/experiments"),
-    "aggregator": Path("src/elspeth/plugins/experiments"),
-    "baseline": Path("src/elspeth/plugins/experiments"),
-    "sink": Path("src/elspeth/plugins/outputs"),
-    "middleware": Path("src/elspeth/plugins/llms"),
+    "row": EXPERIMENT_PLUGINS_DIR,
+    "aggregator": EXPERIMENT_PLUGINS_DIR,
+    "baseline": EXPERIMENT_PLUGINS_DIR,
+    "sink": OUTPUT_PLUGINS_DIR,
+    "middleware": LLM_MIDDLEWARE_DIR,
 }
 
 

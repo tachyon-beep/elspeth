@@ -37,6 +37,7 @@ Each successful row produced by `ExperimentRunner` has the following shape:
   "security_level": "..."   // optional
 }
 ```
+<!-- UPDATE 2025-10-12: Runner payload metadata now also contains `metadata.retry_summary`, `metadata.cost_summary`, optional `baseline_comparison`, and `early_stop` records consumed by analytics sinks and telemetry middleware (`src/elspeth/core/experiments/runner.py:170`, `src/elspeth/plugins/outputs/analytics_report.py:69`). -->
 
 ### Scalar vs. Per-Criteria Values
 
@@ -60,6 +61,7 @@ Aggregator plugins are written against this contract:
 - Baseline comparison plugins pull per-criteria series via
   `_collect_scores_by_criterion`, which scans `record["metrics"]["scores"]`.
 - Early-stop heuristics should read per-criteria values using the same paths.
+<!-- UPDATE 2025-10-12: Early-stop plugins receive the full record and should continue to resolve metrics through nested maps (`src/elspeth/plugins/experiments/early_stop.py:51`). -->
 
 ## Downstream Consumers
 
@@ -71,6 +73,7 @@ Aggregator plugins are written against this contract:
 - **Azure telemetry middleware:** Copies top-level metric keys into logged rows.
   Nested structures (e.g., `scores`) are emitted as dictionaries; consuming side
   should handle serialisation accordingly.
+<!-- UPDATE 2025-10-12: Middleware now serialises retry histories, cost summaries, early-stop reasons, and baseline comparisons when present (`src/elspeth/plugins/llms/middleware_azure.py:208`). -->
 
 ## Validation
 
@@ -83,3 +86,6 @@ Automated tests assert this contract:
 
 When adding new metrics plugins or sinks, ensure nested data stays under the
 `record["metrics"]` namespace and update this document if the contract evolves.
+
+## Update History
+- 2025-10-12 – Documented additional metadata (`retry_summary`, `baseline_comparison`, `cost_summary`) consumed by analytics sinks and telemetry middleware.

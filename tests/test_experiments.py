@@ -1,18 +1,21 @@
-from pathlib import Path
+import json
 import threading
+import time
 
 import pandas as pd
 import pytest
-import time
 
+from elspeth.core.controls.cost_tracker import FixedPriceCostTracker
+from elspeth.core.controls.rate_limit import NoopRateLimiter
+from elspeth.core.experiments import plugin_registry as exp_plugin_registry
 from elspeth.core.experiments.config import ExperimentSuite
 from elspeth.core.experiments.runner import ExperimentRunner
 from elspeth.core.experiments.suite_runner import ExperimentSuiteRunner
-from elspeth.core.experiments import plugin_registry as exp_plugin_registry
-from elspeth.core.experiments.plugins import RowExperimentPlugin, AggregationExperimentPlugin
-from elspeth.core.controls.rate_limit import NoopRateLimiter
-from elspeth.core.controls.cost_tracker import FixedPriceCostTracker
-from elspeth.core.controls.cost_tracker import FixedPriceCostTracker
+
+
+def _secure_sink(sink, level: str = "official"):
+    setattr(sink, "_elspeth_security_level", level)
+    return sink
 
 
 def test_experiment_suite_load(tmp_path):
@@ -20,13 +23,30 @@ def test_experiment_suite_load(tmp_path):
     (exp_root / "exp1").mkdir(parents=True)
     (exp_root / "exp2").mkdir(parents=True)
     (exp_root / "exp1" / "config.json").write_text(
-        '{"name": "exp1", "temperature": 0.5, "max_tokens": 128, "enabled": true, "is_baseline": true, "prompt_fields": ["APPID"], "criteria": [{"name": "crit", "template": "Crit {APPID}"}]}',
+        json.dumps(
+            {
+                "name": "exp1",
+                "temperature": 0.5,
+                "max_tokens": 128,
+                "enabled": True,
+                "is_baseline": True,
+                "prompt_fields": ["APPID"],
+                "criteria": [{"name": "crit", "template": "Crit {APPID}"}],
+            }
+        ),
         encoding="utf-8",
     )
     (exp_root / "exp1" / "system_prompt.md").write_text("Sys", encoding="utf-8")
     (exp_root / "exp1" / "user_prompt.md").write_text("User {APPID}", encoding="utf-8")
     (exp_root / "exp2" / "config.json").write_text(
-        '{"name": "exp2", "temperature": 0.7, "max_tokens": 256, "enabled": true}',
+        json.dumps(
+            {
+                "name": "exp2",
+                "temperature": 0.7,
+                "max_tokens": 256,
+                "enabled": True,
+            }
+        ),
         encoding="utf-8",
     )
 
@@ -51,13 +71,14 @@ def test_experiment_runner(monkeypatch):
     class DummySink:
         def __init__(self):
             self.payloads = []
+            self._elspeth_security_level = "official"
 
         def write(self, results, *, metadata=None):
             self.payloads.append((results, metadata))
 
     runner = ExperimentRunner(
         llm_client=DummyLLM(),
-        sinks=[DummySink()],
+        sinks=[_secure_sink(DummySink())],
         prompt_system="sys",
         prompt_template="Test {APPID}",
         prompt_fields=["APPID"],
@@ -80,12 +101,15 @@ def test_experiment_runner_with_criteria():
             return {"content": f"resp-{metadata['criteria']}"}
 
     class DummySink:
+        def __init__(self):
+            self._elspeth_security_level = "official"
+
         def write(self, results, *, metadata=None):
             pass
 
     runner = ExperimentRunner(
         llm_client=DummyLLM(),
-        sinks=[DummySink()],
+        sinks=[_secure_sink(DummySink())],
         prompt_system="sys",
         prompt_template="unused",
         prompt_fields=["APPID"],
@@ -123,11 +147,12 @@ def test_experiment_runner_plugins():
     class DummySink:
         def __init__(self):
             self.meta = None
+            self._elspeth_security_level = "official"
 
         def write(self, results, *, metadata=None):
             self.meta = metadata
 
-    sink = DummySink()
+    sink = _secure_sink(DummySink())
     runner = ExperimentRunner(
         llm_client=DummyLLM(),
         sinks=[sink],
@@ -156,12 +181,15 @@ def test_experiment_runner_jinja_prompts():
             return {"content": user_prompt}
 
     class DummySink:
+        def __init__(self):
+            self._elspeth_security_level = "official"
+
         def write(self, results, *, metadata=None):
             pass
 
     runner = ExperimentRunner(
         llm_client=DummyLLM(),
-        sinks=[DummySink()],
+        sinks=[_secure_sink(DummySink())],
         prompt_system="System {{ APPID }}",
         prompt_template="Hello {{ APPID }}{% if FLAG %} {{ FLAG }}{% endif %}",
         prompt_defaults={"FLAG": ""},
@@ -184,12 +212,15 @@ def test_experiment_runner_concurrency(monkeypatch):
             return {"content": user_prompt, "metrics": {}}
 
     class DummySink:
+        def __init__(self):
+            self._elspeth_security_level = "official"
+
         def write(self, results, *, metadata=None):
             pass
 
     runner = ExperimentRunner(
         llm_client=SlowLLM(),
-        sinks=[DummySink()],
+        sinks=[_secure_sink(DummySink())],
         prompt_system="sys",
         prompt_template="Hello {{ APPID }}",
         rate_limiter=NoopRateLimiter(),
@@ -241,7 +272,7 @@ def test_experiment_suite_runner(tmp_path):
     runner = ExperimentSuiteRunner(
         suite=suite,
         llm_client=DummyLLM(),
-        sinks=[DummySink()],
+        sinks=[_secure_sink(DummySink())],
     )
 
     import pandas as pd
@@ -254,7 +285,7 @@ def test_experiment_suite_runner(tmp_path):
             "prompt_fields": ["APPID"],
             "prompt_packs": {},
         },
-        sink_factory=lambda exp: [DummySink()],
+        sink_factory=lambda exp: [_secure_sink(DummySink())],
     )
 
     assert set(results.keys()) == {"expA", "expB"}
@@ -272,7 +303,7 @@ def test_experiment_runner_cost_tracker():
 
     from elspeth.core.controls.cost_tracker import FixedPriceCostTracker
 
-    sink = DummySink()
+    sink = _secure_sink(DummySink())
     tracker = FixedPriceCostTracker(prompt_token_price=0.01, completion_token_price=0.02)
     runner = ExperimentRunner(
         llm_client=DummyLLM(),
@@ -310,7 +341,7 @@ def test_suite_runner_prompt_pack(tmp_path):
     runner = ExperimentSuiteRunner(
         suite=suite,
         llm_client=DummyLLM(),
-        sinks=[DummySink()],
+        sinks=[_secure_sink(DummySink())],
     )
 
     df = pd.DataFrame({"APPID": ["1"]})
@@ -341,9 +372,9 @@ def test_suite_runner_with_plugin_definitions(tmp_path, monkeypatch):
     (exp_root / "baseline" / "user_prompt.md").write_text("Base {APPID}", encoding="utf-8")
     (exp_root / "variant" / "config.json").write_text(
         '{"name": "variant", "enabled": true, "temperature": 0.6, "max_tokens": 256, '
-        '"row_plugins": [{"name": "test_row", "options": {"value": 5}}], '
-        '"aggregator_plugins": [{"name": "test_agg", "options": {"key": "total"}}], '
-        '"baseline_plugins": [{"name": "row_count", "options": {"key": "delta"}}]}',
+        '"row_plugins": [{"name": "test_row", "security_level": "official", "options": {"value": 5}}], '
+        '"aggregator_plugins": [{"name": "test_agg", "security_level": "official", "options": {"key": "total"}}], '
+        '"baseline_plugins": [{"name": "row_count", "security_level": "official", "options": {"key": "delta"}}]}',
         encoding="utf-8",
     )
     (exp_root / "variant" / "user_prompt.md").write_text("Var {APPID}", encoding="utf-8")
@@ -366,8 +397,8 @@ def test_suite_runner_with_plugin_definitions(tmp_path, monkeypatch):
         def finalize(self, records):
             return {self._key: len(records)}
 
-    exp_plugin_registry.register_row_plugin("test_row", lambda opts: CustomRowPlugin(opts.get("value", 0)))
-    exp_plugin_registry.register_aggregation_plugin("test_agg", lambda opts: CustomAggPlugin(opts.get("key", "total")))
+    exp_plugin_registry.register_row_plugin("test_row", lambda opts, context: CustomRowPlugin(opts.get("value", 0)))
+    exp_plugin_registry.register_aggregation_plugin("test_agg", lambda opts, context: CustomAggPlugin(opts.get("key", "total")))
 
     class DummyLLM:
         def generate(self, *, system_prompt, user_prompt, metadata=None):
@@ -380,19 +411,21 @@ def test_suite_runner_with_plugin_definitions(tmp_path, monkeypatch):
     runner = ExperimentSuiteRunner(
         suite=suite,
         llm_client=DummyLLM(),
-        sinks=[DummySink()],
+        sinks=[_secure_sink(DummySink())],
     )
 
     import pandas as pd
 
     df = pd.DataFrame({"APPID": ["1"]})
-    results = runner.run(df, defaults={
-        "prompt_system": "sys",
-        "prompt_template": "Exp {APPID}",
-        "prompt_fields": ["APPID"],
-    })
+    results = runner.run(
+        df,
+        defaults={
+            "prompt_system": "sys",
+            "prompt_template": "Exp {APPID}",
+            "prompt_fields": ["APPID"],
+        },
+    )
 
-    baseline_payload = results["baseline"]["payload"]
     variant_payload = results["variant"]["payload"]
     assert variant_payload["results"][0]["metrics"]["value"] == 5
     assert variant_payload["aggregates"]["test_agg"]["total"] == 1
@@ -419,7 +452,7 @@ def test_execute_llm_retry(monkeypatch):
 
     runner = ExperimentRunner(
         llm_client=FlakyLLM(),
-        sinks=[DummySink()],
+        sinks=[_secure_sink(DummySink())],
         prompt_system="sys",
         prompt_template="Hello",
         prompt_fields=[],
@@ -447,7 +480,7 @@ def test_runner_records_failures(tmp_path):
 
     runner = ExperimentRunner(
         llm_client=FailingLLM(),
-        sinks=[DummySink()],
+        sinks=[_secure_sink(DummySink())],
         prompt_system="sys",
         prompt_template="Hi",
         prompt_fields=[],
@@ -474,12 +507,13 @@ def test_checkpoint_skips_processed(tmp_path):
     class DummySink:
         def write(self, results, *, metadata=None):
             pass
+
         def collect_artifacts(self):
             return {}
 
     runner = ExperimentRunner(
         llm_client=DummyLLM(),
-        sinks=[DummySink()],
+        sinks=[_secure_sink(DummySink())],
         prompt_system="sys",
         prompt_template="Hello {APPID}",
         prompt_fields=["APPID"],
@@ -547,8 +581,8 @@ def test_experiment_runner_early_stop():
         def generate(self, *, system_prompt, user_prompt, metadata=None):
             self.calls += 1
             return {
-                'content': user_prompt,
-                'metrics': {'score': float(self.calls)},
+                "content": user_prompt,
+                "metrics": {"score": float(self.calls)},
             }
 
     class DummySink:
@@ -557,23 +591,24 @@ def test_experiment_runner_early_stop():
 
     runner = ExperimentRunner(
         llm_client=MetricsLLM(),
-        sinks=[DummySink()],
-        prompt_system='sys',
-        prompt_template='Hello',
+        sinks=[_secure_sink(DummySink())],
+        prompt_system="sys",
+        prompt_template="Hello",
         prompt_fields=[],
         early_stop_config={
-            'metric': 'score',
-            'threshold': 2,
-            'comparison': 'gte',
-            'min_rows': 2,
+            "metric": "score",
+            "threshold": 2,
+            "comparison": "gte",
+            "min_rows": 2,
+            "security_level": "official",
         },
     )
 
-    df = pd.DataFrame({'APPID': ['1', '2', '3', '4']})
+    df = pd.DataFrame({"APPID": ["1", "2", "3", "4"]})
     payload = runner.run(df)
-    assert len(payload['results']) == 2
-    early = payload['metadata'].get('early_stop')
-    assert early and early['value'] == 2.0 and early['plugin'] == 'threshold'
+    assert len(payload["results"]) == 2
+    early = payload["metadata"].get("early_stop")
+    assert early and early["value"] == 2.0 and early["plugin"] == "threshold"
 
 
 def test_experiment_runner_early_stop_plugin_instance():
@@ -584,8 +619,8 @@ def test_experiment_runner_early_stop_plugin_instance():
         def generate(self, *, system_prompt, user_prompt, metadata=None):
             self.calls += 1
             return {
-                'content': user_prompt,
-                'metrics': {'score': float(self.calls)},
+                "content": user_prompt,
+                "metrics": {"score": float(self.calls)},
             }
 
     class DummySink:
@@ -610,19 +645,20 @@ def test_experiment_runner_early_stop_plugin_instance():
             return None
 
     plugin = ImmediateStopPlugin()
+    setattr(plugin, "_elspeth_security_level", "official")
 
     runner = ExperimentRunner(
         llm_client=MetricsLLM(),
-        sinks=[DummySink()],
-        prompt_system='sys',
-        prompt_template='Hello',
+        sinks=[_secure_sink(DummySink())],
+        prompt_system="sys",
+        prompt_template="Hello",
         prompt_fields=[],
         early_stop_plugins=[plugin],
     )
 
-    df = pd.DataFrame({'APPID': ['1', '2', '3']})
+    df = pd.DataFrame({"APPID": ["1", "2", "3"]})
     payload = runner.run(df)
-    assert len(payload['results']) == 1
-    early = payload['metadata'].get('early_stop')
-    assert early and early['plugin'] == 'test_stop' and early['reason'] == 'manual'
+    assert len(payload["results"]) == 1
+    early = payload["metadata"].get("early_stop")
+    assert early and early["plugin"] == "test_stop" and early["reason"] == "manual"
     assert plugin.reset_called == 1

@@ -34,3 +34,7 @@
 3. Capture preflight output from suite defaults (or new helper) and pass to middleware.
 4. Add tests in `tests/test_llm_middleware.py` (or a dedicated suite test) validating the new behaviours with mocked run.
 5. Update notes/README to document Azure parity and config expectations.
+<!-- UPDATE 2025-10-12: All steps completed; `SuiteReportGenerator` and middleware hooks now log experiments, baseline comparisons, retry exhaustion, and suite summaries. -->
+
+## Update History
+- 2025-10-12 – Marked Azure telemetry parity tasks as delivered; future work focuses on additional dashboards rather than middleware plumbing.

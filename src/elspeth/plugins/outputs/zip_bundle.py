@@ -7,14 +7,14 @@ import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Mapping, List
+from typing import Any, Dict, List, Mapping
 from zipfile import ZIP_DEFLATED, ZipFile
 
 import pandas as pd
 
-from elspeth.core.interfaces import ResultSink, Artifact, ArtifactDescriptor
+from elspeth.core.interfaces import Artifact, ArtifactDescriptor, ResultSink
 from elspeth.core.security import normalize_security_level, resolve_security_level
-
+from elspeth.plugins.outputs._sanitize import sanitize_cell
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +35,8 @@ class ZipResultSink(ResultSink):
         results_name: str = "results.json",
         csv_name: str = "results.csv",
         on_error: str = "abort",
+        sanitize_formulas: bool = True,
+        sanitize_guard: str = "'",
     ) -> None:
         self.base_path = Path(base_path)
         self.bundle_name = bundle_name
@@ -48,6 +50,18 @@ class ZipResultSink(ResultSink):
         if on_error not in {"abort", "skip"}:
             raise ValueError("on_error must be 'abort' or 'skip'")
         self.on_error = on_error
+        if not sanitize_guard:
+            sanitize_guard = "'"
+        if len(sanitize_guard) != 1:
+            raise ValueError("sanitize_guard must be a single character")
+        self.sanitize_formulas = sanitize_formulas
+        self.sanitize_guard = sanitize_guard
+        if not self.sanitize_formulas:
+            logger.warning("ZIP sink sanitization disabled; CSV artifacts may trigger formulas.")
+        self._sanitization = {
+            "enabled": self.sanitize_formulas,
+            "guard": self.sanitize_guard,
+        }
         self._last_archive_path: str | None = None
         self._last_artifacts: Dict[str, Any] = {}
         self._additional_inputs: Dict[str, List[Artifact]] = {}
@@ -67,7 +81,10 @@ class ZipResultSink(ResultSink):
 
                 if self.include_manifest:
                     manifest = self._build_manifest(results, metadata, timestamp)
-                    bundle.writestr(self.manifest_name, json.dumps(manifest, indent=2, sort_keys=True))
+                    bundle.writestr(
+                        self.manifest_name,
+                        json.dumps(manifest, indent=2, sort_keys=True),
+                    )
 
                 if self.include_csv:
                     csv_data = self._render_csv(results)
@@ -94,6 +111,7 @@ class ZipResultSink(ResultSink):
                 "results": self.results_name if self.include_results else None,
                 "manifest": self.manifest_name if self.include_manifest else None,
                 "csv": self.csv_name if self.include_csv else None,
+                "sanitization": self._sanitization,
             }
             if metadata:
                 self._security_level = normalize_security_level(metadata.get("security_level"))
@@ -105,25 +123,34 @@ class ZipResultSink(ResultSink):
         finally:
             self._additional_inputs = {}
 
+    def _sanitize_key(self, key: Any) -> Any:
+        if not self.sanitize_formulas or not isinstance(key, str):
+            return key
+        return sanitize_cell(key, guard=self.sanitize_guard)
+
+    def _sanitize_value(self, value: Any) -> Any:
+        if not self.sanitize_formulas:
+            return value
+        return sanitize_cell(value, guard=self.sanitize_guard)
+
     # ------------------------------------------------------------------ helpers
     def _resolve_path(self, metadata: Mapping[str, Any], timestamp: datetime) -> Path:
-        name = self.bundle_name or str(
-            metadata.get("experiment") or metadata.get("name") or "experiment"
-        )
+        name = self.bundle_name or str(metadata.get("experiment") or metadata.get("name") or "experiment")
         if self.timestamped:
             name = f"{name}_{timestamp.strftime('%Y%m%dT%H%M%SZ')}"
         return self.base_path / f"{name}.zip"
 
-    @staticmethod
     def _build_manifest(
+        self,
         results: Mapping[str, Any],
         metadata: Mapping[str, Any],
         timestamp: datetime,
     ) -> Dict[str, Any]:
         manifest = {
             "generated_at": timestamp.isoformat(),
-            "rows": len(results.get("results", [])) if isinstance(results.get("results"), list) else 0,
+            "rows": (len(results.get("results", [])) if isinstance(results.get("results"), list) else 0),
             "metadata": dict(metadata),
+            "sanitization": self._sanitization,
         }
         if "aggregates" in results:
             manifest["aggregates"] = results["aggregates"]
@@ -133,25 +160,29 @@ class ZipResultSink(ResultSink):
             manifest["failures"] = results["failures"]
         return manifest
 
-    @staticmethod
-    def _render_csv(results: Mapping[str, Any]) -> str:
+    def _render_csv(self, results: Mapping[str, Any]) -> str:
         entries = results.get("results", [])
         if not entries:
             return ""
-        rows = []
+        rows: List[Dict[Any, Any]] = []
         for item in entries:
+            record: Dict[Any, Any] = {}
             row_data = item.get("row", {}) if isinstance(item, Mapping) else {}
+            if isinstance(row_data, Mapping):
+                for key, value in row_data.items():
+                    record[self._sanitize_key(key)] = self._sanitize_value(value)
             response = item.get("response", {}) if isinstance(item, Mapping) else {}
-            record = dict(row_data)
             if isinstance(response, Mapping):
-                record["llm_content"] = response.get("content")
+                record[self._sanitize_key("llm_content")] = self._sanitize_value(response.get("content"))
             responses = item.get("responses") if isinstance(item, Mapping) else None
             if isinstance(responses, Mapping):
                 for name, resp in responses.items():
                     if isinstance(resp, Mapping):
-                        record[f"llm_{name}"] = resp.get("content")
+                        record[self._sanitize_key(f"llm_{name}")] = self._sanitize_value(resp.get("content"))
             rows.append(record)
         df = pd.DataFrame(rows)
+        if not df.empty:
+            df.columns = [self._sanitize_key(col) for col in df.columns]
         buffer = io.StringIO()
         df.to_csv(buffer, index=False)
         return buffer.getvalue()
@@ -186,11 +217,7 @@ class ZipResultSink(ResultSink):
         return {"zip": artifact}
 
     def prepare_artifacts(self, artifacts: Mapping[str, List[Artifact]]):  # pragma: no cover
-        self._additional_inputs = {
-            key: list(values)
-            for key, values in artifacts.items()
-            if values
-        }
+        self._additional_inputs = {key: list(values) for key, values in artifacts.items() if values}
         if not self._security_level and self._additional_inputs:
             levels = [artifact.security_level for values in self._additional_inputs.values() for artifact in values]
             self._security_level = resolve_security_level(*levels)

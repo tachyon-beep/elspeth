@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Dict, Protocol, Any, List, Optional
+from typing import Any, Dict, List, Optional, Protocol
 
 
 class ValidationError(RuntimeError):
@@ -21,7 +21,7 @@ class ValidationPlugin(Protocol):
         context: Optional[Dict[str, Any]] = None,
         metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
-        ...
+        """Inspect a response and raise ``ValidationError`` when criteria fail."""
 
 
 class RowExperimentPlugin(Protocol):
@@ -30,7 +30,7 @@ class RowExperimentPlugin(Protocol):
     name: str
 
     def process_row(self, row: Dict[str, Any], responses: Dict[str, Any]) -> Dict[str, Any]:
-        ...
+        """Return derived metrics or annotations for a single row result."""
 
 
 class AggregationExperimentPlugin(Protocol):
@@ -39,7 +39,7 @@ class AggregationExperimentPlugin(Protocol):
     name: str
 
     def finalize(self, records: List[Dict[str, Any]]) -> Dict[str, Any]:
-        ...
+        """Produce aggregate analytics from the collected row results."""
 
 
 class BaselineComparisonPlugin(Protocol):
@@ -48,7 +48,7 @@ class BaselineComparisonPlugin(Protocol):
     name: str
 
     def compare(self, baseline: Dict[str, Any], variant: Dict[str, Any]) -> Dict[str, Any]:
-        ...
+        """Compute a comparison between baseline and variant payloads."""
 
 
 class EarlyStopPlugin(Protocol):
@@ -57,7 +57,7 @@ class EarlyStopPlugin(Protocol):
     name: str
 
     def reset(self) -> None:
-        ...
+        """Reset any internal early-stop state."""
 
     def check(self, record: Dict[str, Any], *, metadata: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
-        ...
+        """Return a reason to trigger early stop, or ``None`` to continue."""

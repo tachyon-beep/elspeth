@@ -1,9 +1,8 @@
-from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from elspeth.config import load_settings
-
 
 
 def test_load_settings_with_suite(tmp_path, monkeypatch):
@@ -15,11 +14,13 @@ def test_load_settings_with_suite(tmp_path, monkeypatch):
         default:
           datasource:
             plugin: azure_blob
+            security_level: official
             options:
               config_path: config/blob_store.yaml
               profile: default
           llm:
             plugin: azure_openai
+            security_level: official
             options:
               config: {}
           sinks: []
@@ -43,9 +44,15 @@ def test_load_settings_with_suite(tmp_path, monkeypatch):
     orig_llm = registry_module.registry._llms["azure_openai"]
     orig_sink = registry_module.registry._sinks["csv"]
 
-    registry_module.registry._datasources["azure_blob"] = registry_module.PluginFactory(lambda options: ("datasource", options))
-    registry_module.registry._llms["azure_openai"] = registry_module.PluginFactory(lambda options: ("llm", options))
-    registry_module.registry._sinks["csv"] = registry_module.PluginFactory(lambda options: ("sink", options))
+    registry_module.registry._datasources["azure_blob"] = registry_module.PluginFactory(
+        lambda options, context: SimpleNamespace(kind="datasource", options=options, context=context)
+    )
+    registry_module.registry._llms["azure_openai"] = registry_module.PluginFactory(
+        lambda options, context: SimpleNamespace(kind="llm", options=options, context=context)
+    )
+    registry_module.registry._sinks["csv"] = registry_module.PluginFactory(
+        lambda options, context: SimpleNamespace(kind="sink", options=options, context=context)
+    )
 
     try:
         settings = load_settings(config_file)
@@ -68,10 +75,12 @@ def test_suite_defaults_override_prompt_pack_when_missing(tmp_path, monkeypatch)
         default:
           datasource:
             plugin: local_csv
+            security_level: official
             options:
               path: input.csv
           llm:
             plugin: mock
+            security_level: official
           sinks: []
           prompt_packs:
             sample:
@@ -93,8 +102,12 @@ def test_suite_defaults_override_prompt_pack_when_missing(tmp_path, monkeypatch)
     orig_ds = registry_module.registry._datasources.get("local_csv")
     orig_llm = registry_module.registry._llms.get("mock")
 
-    registry_module.registry._datasources["local_csv"] = registry_module.PluginFactory(lambda options: ("ds", options))
-    registry_module.registry._llms["mock"] = registry_module.PluginFactory(lambda options: ("llm", options))
+    registry_module.registry._datasources["local_csv"] = registry_module.PluginFactory(
+        lambda options, context: SimpleNamespace(kind="ds", options=options, context=context)
+    )
+    registry_module.registry._llms["mock"] = registry_module.PluginFactory(
+        lambda options, context: SimpleNamespace(kind="llm", options=options, context=context)
+    )
 
     try:
         settings = load_settings(config_file)
@@ -114,8 +127,10 @@ def test_load_settings_unknown_datasource_plugin_raises(tmp_path):
         default:
           datasource:
             plugin: missing_source
+            security_level: official
           llm:
             plugin: mock
+            security_level: official
           sinks: []
         """,
         encoding="utf-8",

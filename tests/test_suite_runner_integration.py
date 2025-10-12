@@ -53,10 +53,11 @@ def test_suite_runner_executes_with_defaults_and_packs(tmp_path):
         "variant",
         prompt_pack="variant_pack",
         extra_config={
-            "baseline_plugins": [{"name": "row_count"}],
+            "baseline_plugins": [{"name": "row_count", "security_level": "official"}],
             "sinks": [
                 {
                     "plugin": "local_bundle",
+                    "security_level": "official",
                     "options": {
                         "base_path": bundle_root.as_posix(),
                         "bundle_name": "variant_bundle",
@@ -83,6 +84,7 @@ def test_suite_runner_executes_with_defaults_and_packs(tmp_path):
         "sink_defs": [
             {
                 "plugin": "local_bundle",
+                "security_level": "official",
                 "options": {
                     "base_path": bundle_root.as_posix(),
                     "bundle_name": "baseline_bundle",
@@ -94,24 +96,29 @@ def test_suite_runner_executes_with_defaults_and_packs(tmp_path):
         "aggregator_plugin_defs": [
             {
                 "name": "prompt_variants",
+                "security_level": "official",
                 "options": {
                     "prompt_template": (
-                        "Provide a variation that keeps {{ placeholder_tokens | join(', ') }}.\\n"
-                        "Base prompt: {{ user_prompt_template }}"
+                        "Provide a variation that keeps {{ placeholder_tokens | join(', ') }}.\\n" "Base prompt: {{ user_prompt_template }}"
                     ),
                     "count": 2,
                     "max_attempts": 1,
                     "variant_llm": {
                         "plugin": "mock",
+                        "security_level": "official",
                         "options": {"seed": 11},
                     },
                 },
             }
         ],
         "validation_plugin_defs": [
-            {"name": "regex_match", "options": {"pattern": r".+", "flags": "DOTALL"}},
+            {
+                "name": "regex_match",
+                "security_level": "official",
+                "options": {"pattern": r".+", "flags": "DOTALL"},
+            },
         ],
-        "baseline_plugin_defs": [{"name": "row_count"}],
+        "baseline_plugin_defs": [{"name": "row_count", "security_level": "official"}],
         "prompt_packs": {
             "baseline_pack": {
                 "prompts": {

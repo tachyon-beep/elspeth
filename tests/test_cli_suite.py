@@ -3,12 +3,11 @@ import json
 from pathlib import Path
 
 import pandas as pd
-import pytest
 
 import elspeth.cli as cli
 from elspeth.core.orchestrator import OrchestratorConfig
+from elspeth.core.validation import SuiteValidationReport, ValidationReport
 from elspeth.plugins.outputs.csv_file import CsvResultSink
-from elspeth.core.validation import ValidationReport, SuiteValidationReport
 
 
 def create_suite(root: Path):
@@ -28,6 +27,30 @@ def create_suite(root: Path):
     (root / "exp2" / "user_prompt.md").write_text("Exp2 {APPID}", encoding="utf-8")
 
 
+def test_clone_suite_sinks_preserves_csv_sanitization(tmp_path):
+    base_path = tmp_path / "suite.csv"
+    sink = CsvResultSink(
+        path=base_path,
+        overwrite=False,
+        on_error="skip",
+        sanitize_formulas=False,
+        sanitize_guard="#",
+    )
+    setattr(sink, "_elspeth_security_level", "official")
+
+    cloned = cli._clone_suite_sinks([sink], "exp1")
+
+    assert len(cloned) == 1
+    clone = cloned[0]
+    assert isinstance(clone, CsvResultSink)
+    expected_path = base_path.with_name(f"exp1_{base_path.name}")
+    assert clone.path == expected_path
+    assert clone.overwrite is False
+    assert clone.on_error == "skip"
+    assert clone.sanitize_formulas is False
+    assert clone.sanitize_guard == "#"
+
+
 def test_cli_suite_execution(tmp_path, monkeypatch):
     suite_root = tmp_path / "suite"
     create_suite(suite_root)
@@ -43,10 +66,13 @@ def test_cli_suite_execution(tmp_path, monkeypatch):
         def generate(self, *, system_prompt, user_prompt, metadata=None):
             return {"content": user_prompt}
 
+    csv_sink = CsvResultSink(path=output_base)
+    setattr(csv_sink, "_elspeth_security_level", "official")
+
     settings_obj = argparse.Namespace(
         datasource=DummyDatasource(),
         llm=DummyLLM(),
-        sinks=[CsvResultSink(path=output_base)],
+        sinks=[csv_sink],
         orchestrator_config=OrchestratorConfig(
             llm_prompt={"system": "sys", "user": "unused"},
             prompt_fields=["APPID"],
@@ -185,10 +211,13 @@ def test_cli_suite_management_flags(tmp_path, monkeypatch):
             return {"content": user_prompt}
 
     output_base = tmp_path / "outputs" / "latest_results.csv"
+    csv_sink = CsvResultSink(path=output_base)
+    setattr(csv_sink, "_elspeth_security_level", "official")
+
     settings_obj = argparse.Namespace(
         datasource=DummyDatasource(),
         llm=DummyLLM(),
-        sinks=[CsvResultSink(path=output_base)],
+        sinks=[csv_sink],
         orchestrator_config=OrchestratorConfig(
             llm_prompt={"system": "sys", "user": "unused"},
             prompt_fields=["APPID"],

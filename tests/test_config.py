@@ -1,9 +1,6 @@
-import yaml
-
-import pytest
+from types import SimpleNamespace
 
 from elspeth.config import load_settings
-from elspeth.core.validation import ConfigurationError
 
 
 def test_load_settings(tmp_path, monkeypatch):
@@ -13,16 +10,19 @@ def test_load_settings(tmp_path, monkeypatch):
         default:
           datasource:
             plugin: azure_blob
+            security_level: official
             options:
               config_path: config/blob_store.yaml
           llm:
             plugin: azure_openai
+            security_level: official
             options:
               config:
                 api_version: 1
                 deployment_env: TEST_DEPLOYMENT
           sinks:
             - plugin: csv
+              security_level: official
               options:
                 path: outputs.csv
           prompts:
@@ -35,8 +35,10 @@ def test_load_settings(tmp_path, monkeypatch):
               template: crit {id}
           rate_limiter:
             plugin: noop
+            security_level: official
           cost_tracker:
             plugin: noop
+            security_level: official
         """,
         encoding="utf-8",
     )
@@ -48,9 +50,15 @@ def test_load_settings(tmp_path, monkeypatch):
     orig_llm = registry_module.registry._llms["azure_openai"]
     orig_sink = registry_module.registry._sinks["csv"]
 
-    registry_module.registry._datasources["azure_blob"] = registry_module.PluginFactory(lambda options: ("datasource", options))
-    registry_module.registry._llms["azure_openai"] = registry_module.PluginFactory(lambda options: ("llm", options))
-    registry_module.registry._sinks["csv"] = registry_module.PluginFactory(lambda options: ("sink", options))
+    registry_module.registry._datasources["azure_blob"] = registry_module.PluginFactory(
+        lambda options, context: SimpleNamespace(kind="datasource", options=options, context=context)
+    )
+    registry_module.registry._llms["azure_openai"] = registry_module.PluginFactory(
+        lambda options, context: SimpleNamespace(kind="llm", options=options, context=context)
+    )
+    registry_module.registry._sinks["csv"] = registry_module.PluginFactory(
+        lambda options, context: SimpleNamespace(kind="sink", options=options, context=context)
+    )
 
     try:
         settings = load_settings(config_file)
@@ -59,9 +67,12 @@ def test_load_settings(tmp_path, monkeypatch):
         registry_module.registry._llms["azure_openai"] = orig_llm
         registry_module.registry._sinks["csv"] = orig_sink
 
-    assert settings.datasource[0] == "datasource"
-    assert settings.llm[0] == "llm"
-    assert settings.sinks[0][0] == "sink"
+    assert settings.datasource.kind == "datasource"
+    assert settings.llm.kind == "llm"
+    assert settings.sinks[0].kind == "sink"
+    assert settings.datasource._elspeth_security_level == "official"
+    assert settings.llm._elspeth_security_level == "official"
+    assert settings.sinks[0]._elspeth_security_level == "official"
     assert settings.orchestrator_config.llm_prompt["system"] == "sys"
     assert settings.orchestrator_config.prompt_fields == ["id"]
     assert settings.orchestrator_config.criteria[0]["name"] == "crit"
@@ -78,10 +89,12 @@ def test_load_settings_missing_prompts_defaults_to_blank(tmp_path):
         default:
           datasource:
             plugin: local_csv
+            security_level: official
             options:
               path: input.csv
           llm:
             plugin: mock
+            security_level: official
           sinks: []
         """,
         encoding="utf-8",
@@ -93,9 +106,15 @@ def test_load_settings_missing_prompts_defaults_to_blank(tmp_path):
     orig_llm = registry_module.registry._llms.get("mock")
     orig_sink = registry_module.registry._sinks.get("csv")
 
-    registry_module.registry._datasources["local_csv"] = registry_module.PluginFactory(lambda options: ("ds", options))
-    registry_module.registry._llms["mock"] = registry_module.PluginFactory(lambda options: ("llm", options))
-    registry_module.registry._sinks["csv"] = registry_module.PluginFactory(lambda options: ("sink", options))
+    registry_module.registry._datasources["local_csv"] = registry_module.PluginFactory(
+        lambda options, context: SimpleNamespace(kind="ds", options=options, context=context)
+    )
+    registry_module.registry._llms["mock"] = registry_module.PluginFactory(
+        lambda options, context: SimpleNamespace(kind="llm", options=options, context=context)
+    )
+    registry_module.registry._sinks["csv"] = registry_module.PluginFactory(
+        lambda options, context: SimpleNamespace(kind="sink", options=options, context=context)
+    )
 
     try:
         settings = load_settings(config_file)
@@ -118,12 +137,15 @@ def test_load_settings_prompt_pack_merges_overrides(tmp_path, monkeypatch):
         default:
           datasource:
             plugin: local_csv
+            security_level: official
             options:
               path: data.csv
           llm:
             plugin: mock
+            security_level: official
           sinks:
             - plugin: csv
+              security_level: official
               options:
                 path: outputs/latest.csv
           prompt_pack: sample
@@ -135,14 +157,18 @@ def test_load_settings_prompt_pack_merges_overrides(tmp_path, monkeypatch):
               prompt_fields: ["id"]
               row_plugins:
                 - name: pack_row
+                  security_level: official
               aggregator_plugins:
                 - name: pack_agg
+                  security_level: official
           prompts:
             user: Inline {{ name }}
           row_plugins:
             - name: inline_row
+              security_level: official
           aggregator_plugins:
             - name: inline_agg
+              security_level: official
         """,
         encoding="utf-8",
     )
@@ -153,9 +179,15 @@ def test_load_settings_prompt_pack_merges_overrides(tmp_path, monkeypatch):
     orig_llm = registry_module.registry._llms.get("mock")
     orig_sink = registry_module.registry._sinks.get("csv")
 
-    registry_module.registry._datasources["local_csv"] = registry_module.PluginFactory(lambda options: ("ds", options))
-    registry_module.registry._llms["mock"] = registry_module.PluginFactory(lambda options: ("llm", options))
-    registry_module.registry._sinks["csv"] = registry_module.PluginFactory(lambda options: ("sink", options))
+    registry_module.registry._datasources["local_csv"] = registry_module.PluginFactory(
+        lambda options, context: SimpleNamespace(kind="ds", options=options, context=context)
+    )
+    registry_module.registry._llms["mock"] = registry_module.PluginFactory(
+        lambda options, context: SimpleNamespace(kind="llm", options=options, context=context)
+    )
+    registry_module.registry._sinks["csv"] = registry_module.PluginFactory(
+        lambda options, context: SimpleNamespace(kind="sink", options=options, context=context)
+    )
 
     try:
         settings = load_settings(config_file, profile="default")
@@ -170,8 +202,14 @@ def test_load_settings_prompt_pack_merges_overrides(tmp_path, monkeypatch):
     assert settings.orchestrator_config.llm_prompt["system"] == "Sample sys"
     assert settings.orchestrator_config.llm_prompt["user"] == "Inline {{ name }}"
     assert settings.orchestrator_config.prompt_fields == ["id"]
-    assert settings.orchestrator_config.row_plugin_defs == [{"name": "pack_row"}, {"name": "inline_row"}]
-    assert settings.orchestrator_config.aggregator_plugin_defs == [{"name": "pack_agg"}, {"name": "inline_agg"}]
+    assert settings.orchestrator_config.row_plugin_defs == [
+        {"name": "pack_row", "security_level": "official"},
+        {"name": "inline_row", "security_level": "official"},
+    ]
+    assert settings.orchestrator_config.aggregator_plugin_defs == [
+        {"name": "pack_agg", "security_level": "official"},
+        {"name": "inline_agg", "security_level": "official"},
+    ]
 
 
 def test_load_settings_suite_defaults_inherit_pack(tmp_path, monkeypatch):
@@ -181,10 +219,12 @@ def test_load_settings_suite_defaults_inherit_pack(tmp_path, monkeypatch):
         default:
           datasource:
             plugin: local_csv
+            security_level: official
             options:
               path: data.csv
           llm:
             plugin: mock
+            security_level: official
           sinks: []
           prompt_packs:
             base:
@@ -194,10 +234,12 @@ def test_load_settings_suite_defaults_inherit_pack(tmp_path, monkeypatch):
               prompt_fields: ["id"]
               row_plugins:
                 - name: pack_row
+                  security_level: official
           suite_defaults:
             prompt_pack: base
             aggregator_plugins:
               - name: suite_agg
+                security_level: official
         """,
         encoding="utf-8",
     )
@@ -207,8 +249,12 @@ def test_load_settings_suite_defaults_inherit_pack(tmp_path, monkeypatch):
     orig_ds = registry_module.registry._datasources.get("local_csv")
     orig_llm = registry_module.registry._llms.get("mock")
 
-    registry_module.registry._datasources["local_csv"] = registry_module.PluginFactory(lambda options: ("ds", options))
-    registry_module.registry._llms["mock"] = registry_module.PluginFactory(lambda options: ("llm", options))
+    registry_module.registry._datasources["local_csv"] = registry_module.PluginFactory(
+        lambda options, context: SimpleNamespace(kind="ds", options=options, context=context)
+    )
+    registry_module.registry._llms["mock"] = registry_module.PluginFactory(
+        lambda options, context: SimpleNamespace(kind="llm", options=options, context=context)
+    )
 
     try:
         settings = load_settings(config_file)
@@ -220,5 +266,5 @@ def test_load_settings_suite_defaults_inherit_pack(tmp_path, monkeypatch):
 
     assert settings.suite_defaults["prompts"]["system"] == "Pack system"
     assert settings.suite_defaults["prompt_fields"] == ["id"]
-    assert settings.suite_defaults["row_plugins"] == [{"name": "pack_row"}]
-    assert settings.suite_defaults["aggregator_plugins"] == [{"name": "suite_agg"}]
+    assert settings.suite_defaults["row_plugins"] == [{"name": "pack_row", "security_level": "official"}]
+    assert settings.suite_defaults["aggregator_plugins"] == [{"name": "suite_agg", "security_level": "official"}]

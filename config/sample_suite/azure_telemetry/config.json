@@ -8,6 +8,7 @@
   "llm_middlewares": [
     {
       "name": "azure_environment",
+      "security_level": "official",
       "options": {
         "log_prompts": false
       }

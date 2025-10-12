@@ -2,11 +2,7 @@ import math
 
 import pytest
 
-from elspeth.core.experiments.plugin_registry import (
-    create_row_plugin,
-    create_aggregation_plugin,
-    create_baseline_plugin,
-)
+from elspeth.core.experiments.plugin_registry import create_aggregation_plugin, create_baseline_plugin, create_row_plugin
 
 
 @pytest.mark.parametrize(
@@ -19,7 +15,7 @@ from elspeth.core.experiments.plugin_registry import (
     ],
 )
 def test_score_extractor_basic(response, expected):
-    plugin = create_row_plugin({"name": "score_extractor"})
+    plugin = create_row_plugin({"name": "score_extractor", "security_level": "official"})
     derived = plugin.process_row({}, {"crit": response})
     scores = derived["scores"]
     assert "crit" in scores
@@ -33,6 +29,7 @@ def test_score_extractor_threshold_flag():
     plugin = create_row_plugin(
         {
             "name": "score_extractor",
+            "security_level": "official",
             "options": {"threshold": 0.7, "threshold_mode": "gte"},
         }
     )
@@ -51,6 +48,7 @@ def test_score_extractor_allow_missing():
     plugin = create_row_plugin(
         {
             "name": "score_extractor",
+            "security_level": "official",
             "options": {"allow_missing": True},
         }
     )
@@ -59,7 +57,7 @@ def test_score_extractor_allow_missing():
 
 
 def test_score_stats_aggregator():
-    row_plugin = create_row_plugin({"name": "score_extractor", "options": {"threshold": 0.7}})
+    row_plugin = create_row_plugin({"name": "score_extractor", "security_level": "official", "options": {"threshold": 0.7}})
     responses = [
         {"critA": {"metrics": {"score": 0.8}}},
         {"critA": {"metrics": {"score": 0.6}}},
@@ -70,7 +68,7 @@ def test_score_stats_aggregator():
         metrics = row_plugin.process_row({}, resp)
         records.append({"metrics": metrics})
 
-    agg_plugin = create_aggregation_plugin({"name": "score_stats"})
+    agg_plugin = create_aggregation_plugin({"name": "score_stats", "security_level": "official"})
     summary = agg_plugin.finalize(records)
     crit_summary = summary["criteria"]["critA"]
 
@@ -81,29 +79,33 @@ def test_score_stats_aggregator():
 
 
 def test_score_delta_baseline_plugin():
-    agg_plugin = create_aggregation_plugin({"name": "score_stats"})
+    agg_plugin = create_aggregation_plugin({"name": "score_stats", "security_level": "official"})
     baseline_payload = {
         "aggregates": {
-            "score_stats": agg_plugin.finalize([
-                {"metrics": {"scores": {"crit": 0.5}}},
-            ])
+            "score_stats": agg_plugin.finalize(
+                [
+                    {"metrics": {"scores": {"crit": 0.5}}},
+                ]
+            )
         }
     }
     variant_payload = {
         "aggregates": {
-            "score_stats": agg_plugin.finalize([
-                {"metrics": {"scores": {"crit": 0.8}}},
-            ])
+            "score_stats": agg_plugin.finalize(
+                [
+                    {"metrics": {"scores": {"crit": 0.8}}},
+                ]
+            )
         }
     }
 
-    plugin = create_baseline_plugin({"name": "score_delta"})
+    plugin = create_baseline_plugin({"name": "score_delta", "security_level": "official"})
     delta = plugin.compare(baseline_payload, variant_payload)
     assert delta["crit"] == pytest.approx(0.8 - 0.5)
 
 
 def test_score_recommendation_aggregator():
-    row_plugin = create_row_plugin({"name": "score_extractor"})
+    row_plugin = create_row_plugin({"name": "score_extractor", "security_level": "official"})
     records = []
     for value in [0.4, 0.6, 0.7, 0.9, 0.85]:
         metrics = row_plugin.process_row({}, {"critA": {"metrics": {"score": value}}})
@@ -112,6 +114,7 @@ def test_score_recommendation_aggregator():
     rec_plugin = create_aggregation_plugin(
         {
             "name": "score_recommendation",
+            "security_level": "official",
             "options": {"min_samples": 3, "improvement_margin": 0.01},
         }
     )
@@ -146,7 +149,7 @@ def test_score_significance_baseline_plugin(monkeypatch):
         ]
     }
 
-    plugin = create_baseline_plugin({"name": "score_significance"})
+    plugin = create_baseline_plugin({"name": "score_significance", "security_level": "official"})
     result = plugin.compare(baseline_payload, variant_payload)
     stats = result["crit"]
     assert stats["baseline_samples"] == 3
@@ -159,7 +162,7 @@ def test_score_significance_baseline_plugin(monkeypatch):
 
 
 def test_score_cliffs_delta():
-    plugin = create_baseline_plugin({"name": "score_cliffs_delta"})
+    plugin = create_baseline_plugin({"name": "score_cliffs_delta", "security_level": "official"})
     baseline = {
         "results": [
             {"metrics": {"scores": {"crit": 1}}},
@@ -183,7 +186,8 @@ def test_score_cliffs_delta():
 
 def test_score_assumptions_baseline_plugin():
     import scipy.stats  # noqa: F401
-    plugin = create_baseline_plugin({"name": "score_assumptions"})
+
+    plugin = create_baseline_plugin({"name": "score_assumptions", "security_level": "official"})
     baseline = {
         "results": [
             {"metrics": {"scores": {"crit": 3}}},
@@ -210,6 +214,7 @@ def test_score_practical_baseline_plugin():
     plugin = create_baseline_plugin(
         {
             "name": "score_practical",
+            "security_level": "official",
             "options": {"threshold": 1.0, "success_threshold": 4.0},
         }
     )
@@ -250,7 +255,7 @@ def test_score_significance_with_adjustments():
         ]
     }
     plugin = create_baseline_plugin(
-        {"name": "score_significance", "options": {"adjustment": "bonferroni", "family_size": 10}}
+        {"name": "score_significance", "security_level": "official", "options": {"adjustment": "bonferroni", "family_size": 10}}
     )
     result = plugin.compare(baseline, variant)
     assert "adjusted_p_value" in result["crit"]
@@ -258,7 +263,11 @@ def test_score_significance_with_adjustments():
 
 def test_score_variant_ranking():
     aggregator = create_aggregation_plugin(
-        {"name": "score_variant_ranking", "options": {"threshold": 0.6, "weight_mean": 1.0, "weight_pass": 1.0}}
+        {
+            "name": "score_variant_ranking",
+            "security_level": "official",
+            "options": {"threshold": 0.6, "weight_mean": 1.0, "weight_pass": 1.0},
+        }
     )
     records = [
         {"metrics": {"score": 0.5}},
@@ -284,7 +293,7 @@ def test_score_significance_on_error_skip(monkeypatch):
 
 
 def test_score_agreement_aggregator(monkeypatch):
-    plugin = create_aggregation_plugin({"name": "score_agreement"})
+    plugin = create_aggregation_plugin({"name": "score_agreement", "security_level": "official"})
     records = []
     values = [
         {"scores": {"critA": 0.6, "critB": 0.65}},
@@ -318,7 +327,7 @@ def test_score_agreement_on_error_skip(monkeypatch):
         raise RuntimeError("boom")
 
     monkeypatch.setattr(metrics_mod, "_collect_scores_by_criterion", boom)
-    assert plugin.finalize([{ }]) == {}
+    assert plugin.finalize([{}]) == {}
 
 
 def test_score_bayes_baseline_plugin(monkeypatch):
@@ -355,7 +364,7 @@ def test_score_bayes_baseline_plugin(monkeypatch):
 
     monkeypatch.setattr(metrics_mod, "scipy_stats", DummyStats())
 
-    plugin = create_baseline_plugin({"name": "score_bayes", "options": {"credible_interval": 0.9}})
+    plugin = create_baseline_plugin({"name": "score_bayes", "security_level": "official", "options": {"credible_interval": 0.9}})
     result = plugin.compare(baseline, variant)
     stats = result["crit"]
     assert stats["prob_variant_gt_baseline"] == pytest.approx(0.8)
@@ -393,6 +402,7 @@ def test_score_power_aggregator(monkeypatch):
     plugin = create_aggregation_plugin(
         {
             "name": "score_power",
+            "security_level": "official",
             "options": {"null_mean": 0.5, "alpha": 0.05, "target_power": 0.8},
         }
     )
@@ -411,7 +421,7 @@ def test_score_power_on_error_skip(monkeypatch):
         raise RuntimeError("boom")
 
     monkeypatch.setattr(metrics_mod, "_collect_scores_by_criterion", boom)
-    assert plugin.finalize([{ }]) == {}
+    assert plugin.finalize([{}]) == {}
 
 
 def test_score_distribution_baseline_plugin(monkeypatch):
@@ -451,7 +461,7 @@ def test_score_distribution_baseline_plugin(monkeypatch):
 
     monkeypatch.setattr(metrics_mod, "scipy_stats", DummyStats())
 
-    plugin = create_baseline_plugin({"name": "score_distribution"})
+    plugin = create_baseline_plugin({"name": "score_distribution", "security_level": "official"})
     result = plugin.compare(baseline, variant)
     stats = result["crit"]
     assert stats["ks_statistic"] == pytest.approx(0.5)

@@ -6,11 +6,11 @@ import json
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, Any
+from typing import Any, Dict
 
 import yaml
 
-from .config import ExperimentSuite, ExperimentConfig
+from .config import ExperimentConfig, ExperimentSuite
 
 DEFAULT_PROMPT_SYSTEM = "# System Prompt\n\nDefine the system prompt here."
 DEFAULT_PROMPT_USER = "# User Prompt\n\nDefine the user prompt here."

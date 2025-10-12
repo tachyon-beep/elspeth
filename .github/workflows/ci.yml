@@ -1,0 +1,71 @@
+name: Lint, Tests & Sample Suite
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  lint-and-test:
+    name: Lint and Unit Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          python -m venv .venv
+          source .venv/bin/activate
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev,analytics-visual]"
+
+      - name: Lint
+        shell: bash
+        run: |
+          source .venv/bin/activate
+          make lint
+
+      - name: Run tests
+        shell: bash
+        run: |
+          source .venv/bin/activate
+          python -m pytest -m "not slow" --maxfail=1 --disable-warnings
+
+  sample-suite:
+    name: Sample Suite Smoke Test
+    runs-on: ubuntu-latest
+    needs: lint-and-test
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        shell: bash
+        run: |
+          python -m venv .venv
+          source .venv/bin/activate
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev,analytics-visual]"
+
+      - name: Run sample suite smoke test
+        shell: bash
+        run: |
+          source .venv/bin/activate
+          make sample-suite

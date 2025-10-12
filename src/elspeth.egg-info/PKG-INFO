@@ -18,6 +18,7 @@ Requires-Dist: pytest>=8.0.0; extra == "dev"
 Requires-Dist: pytest-mock>=3.10.0; extra == "dev"
 Requires-Dist: pytest-cov>=5.0.0; extra == "dev"
 Requires-Dist: openpyxl>=3.1; extra == "dev"
+Requires-Dist: pandas-stubs>=2.2.0.240807; extra == "dev"
 Requires-Dist: black>=24.3.0; extra == "dev"
 Requires-Dist: isort>=5.13.2; extra == "dev"
 Provides-Extra: azure
@@ -34,3 +35,6 @@ Provides-Extra: stats-distribution
 Requires-Dist: scipy>=1.10; extra == "stats-distribution"
 Provides-Extra: sinks-excel
 Requires-Dist: openpyxl>=3.1; extra == "sinks-excel"
+Provides-Extra: analytics-visual
+Requires-Dist: matplotlib>=3.8.0; extra == "analytics-visual"
+Requires-Dist: seaborn>=0.13.0; extra == "analytics-visual"

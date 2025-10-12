@@ -1,13 +1,9 @@
-import pytest
 import pandas as pd
+import pytest
 
-from elspeth.core.experiments.runner import ExperimentRunner
-from elspeth.plugins.experiments.validation import (
-    RegexValidationPlugin,
-    JsonValidationPlugin,
-    LLMGuardValidationPlugin,
-)
 from elspeth.core.experiments.plugins import ValidationError
+from elspeth.core.experiments.runner import ExperimentRunner
+from elspeth.plugins.experiments.validation import JsonValidationPlugin, LLMGuardValidationPlugin, RegexValidationPlugin
 
 
 class DummyValidatorLLM:
@@ -72,8 +68,12 @@ def test_runner_retries_on_validation_failure():
             return {"content": "Valid"}
 
     class DummySink:
+        def __init__(self):
+            self._elspeth_security_level = "official"
+
         def write(self, results, *, metadata=None):
-            pass
+            """No-op sink used to satisfy the interface during retry tests."""
+            _ = (results, metadata)
 
     runner = ExperimentRunner(
         llm_client=FlakyLLM(),

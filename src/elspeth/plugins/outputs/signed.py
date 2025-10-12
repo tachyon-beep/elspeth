@@ -3,17 +3,15 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict
-
-import logging
+from typing import Any, Dict, Literal
 
 from elspeth.core.interfaces import ResultSink
 from elspeth.core.security import generate_signature
-
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +24,7 @@ class SignedArtifactSink(ResultSink):
     results_name: str = "results.json"
     signature_name: str = "signature.json"
     manifest_name: str = "manifest.json"
-    algorithm: str = "hmac-sha256"
+    algorithm: Literal["hmac-sha256", "hmac-sha512"] = "hmac-sha256"
     key: str | None = None
     key_env: str | None = "ELSPETH_SIGNING_KEY"
     on_error: str = "abort"
@@ -118,9 +116,7 @@ class SignedArtifactSink(ResultSink):
             if self.key_env == "ELSPETH_SIGNING_KEY":
                 legacy_env = os.getenv("DMP_SIGNING_KEY")
                 if legacy_env:
-                    logger.warning(
-                        "Using legacy DMP_SIGNING_KEY environment variable; please migrate to ELSPETH_SIGNING_KEY"
-                    )
+                    logger.warning("Using legacy DMP_SIGNING_KEY environment variable; please migrate to ELSPETH_SIGNING_KEY")
                     self.key = legacy_env
                     return legacy_env
         raise ValueError("Signing key not provided; set 'key' or environment variable")

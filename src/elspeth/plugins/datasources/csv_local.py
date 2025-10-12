@@ -2,16 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any, Dict
 
 import pandas as pd
 
-import logging
-
 from elspeth.core.interfaces import DataSource
 from elspeth.core.security import normalize_security_level
-
 
 logger = logging.getLogger(__name__)
 

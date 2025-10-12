@@ -104,23 +104,18 @@ class AzureEnvironmentMiddleware(LLMMiddleware):
         if enable_run_logging and self._run is None:
             if env_detected:
                 message = (
-                    "AzureEnvironmentMiddleware requires an Azure ML run context; "
-                    "ensure azureml-core is installed and the run is active"
+                    "AzureEnvironmentMiddleware requires an Azure ML run context; " "ensure azureml-core is installed and the run is active"
                 )
                 if self.on_error == "skip":
                     logger.warning("%s. Continuing without run context due to on_error=skip", message)
                 else:
                     raise RuntimeError(message)
             else:
-                message = (
-                    "Azure ML environment variables not detected; telemetry logging will be disabled."
-                )
+                message = "Azure ML environment variables not detected; telemetry logging will be disabled."
                 if self.on_error == "skip":
                     logger.info(message)
                 else:
-                    raise RuntimeError(
-                        "AzureEnvironmentMiddleware requires an Azure ML run context when on_error=abort"
-                    )
+                    raise RuntimeError("AzureEnvironmentMiddleware requires an Azure ML run context when on_error=abort")
         self._inflight: Dict[str, float] = {}
         self._lock = threading.Lock()
         self._sequence = 0
@@ -236,7 +231,10 @@ class AzureEnvironmentMiddleware(LLMMiddleware):
             if self.log_metrics:
                 self._log_table(
                     f"experiment_{name}_aggregates",
-                    {key: [value] if not isinstance(value, Mapping) else [json.dumps(value, sort_keys=True)] for key, value in aggregates.items()},
+                    {
+                        key: [value] if not isinstance(value, Mapping) else [json.dumps(value, sort_keys=True)]
+                        for key, value in aggregates.items()
+                    },
                 )
         if failures:
             record["failures_detail"] = json.dumps(failures[:3])  # sample failures
@@ -320,7 +318,7 @@ class AzureEnvironmentMiddleware(LLMMiddleware):
 
 register_middleware(
     "azure_environment",
-    lambda options: AzureEnvironmentMiddleware(
+    lambda options, context: AzureEnvironmentMiddleware(
         enable_run_logging=options.get("enable_run_logging", True),
         log_prompts=options.get("log_prompts", False),
         log_config_diffs=options.get("log_config_diffs", True),

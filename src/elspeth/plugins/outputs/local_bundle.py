@@ -3,16 +3,14 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict
 
-import logging
-
 from elspeth.core.interfaces import ResultSink
 from elspeth.plugins.outputs.csv_file import CsvResultSink
-
 
 logger = logging.getLogger(__name__)
 
@@ -28,11 +26,19 @@ class LocalBundleSink(ResultSink):
     results_name: str = "results.json"
     csv_name: str = "results.csv"
     on_error: str = "abort"
+    sanitize_formulas: bool = True
+    sanitize_guard: str = "'"
 
     def __post_init__(self) -> None:
         self.base_path = Path(self.base_path)
         if self.on_error not in {"abort", "skip"}:
             raise ValueError("on_error must be 'abort' or 'skip'")
+        if not self.sanitize_guard:
+            self.sanitize_guard = "'"
+        if len(self.sanitize_guard) != 1:
+            raise ValueError("sanitize_guard must be a single character")
+        if not self.sanitize_formulas:
+            logger.warning("Local bundle CSV sanitization disabled; outputs may trigger spreadsheet formulas.")
 
     def write(self, results: Dict[str, Any], *, metadata: Dict[str, Any] | None = None) -> None:
         metadata = metadata or {}
@@ -51,7 +57,12 @@ class LocalBundleSink(ResultSink):
 
             if self.write_csv:
                 csv_path = bundle_dir / self.csv_name
-                csv_sink = CsvResultSink(path=csv_path, overwrite=True)
+                csv_sink = CsvResultSink(
+                    path=str(csv_path),
+                    overwrite=True,
+                    sanitize_formulas=self.sanitize_formulas,
+                    sanitize_guard=self.sanitize_guard,
+                )
                 csv_sink.write(results, metadata=metadata)
         except Exception as exc:
             if self.on_error == "skip":
@@ -67,12 +78,15 @@ class LocalBundleSink(ResultSink):
             name = f"{name}_{stamp}"
         return self.base_path / name
 
-    @staticmethod
-    def _build_manifest(results: Dict[str, Any], metadata: Dict[str, Any], timestamp: datetime) -> Dict[str, Any]:
+    def _build_manifest(self, results: Dict[str, Any], metadata: Dict[str, Any], timestamp: datetime) -> Dict[str, Any]:
         manifest = {
             "generated_at": timestamp.isoformat(),
             "rows": len(results.get("results", [])),
             "metadata": metadata,
+            "sanitization": {
+                "enabled": self.sanitize_formulas,
+                "guard": self.sanitize_guard,
+            },
         }
         if "aggregates" in results:
             manifest["aggregates"] = results["aggregates"]

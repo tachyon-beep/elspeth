@@ -14,6 +14,7 @@ New architecture gaps:
   * No support for conditional blocks, default fallbacks, or iterating over criteria.
   * Missing validation for incomplete context; runtime `KeyError` bubbles up without clarity.
   * No reusable abstraction for cloning/adapting prompt templates across experiments.
+<!-- UPDATE 2025-10-12: Prompt engine implemented in `src/elspeth/core/prompts/engine.py` with `StrictUndefined`, default filters, and templating support; the gap analysis remains for historical context. -->
 
 Design direction for the new engine:
 - Introduce `elspeth.core.prompts` package providing:
@@ -33,3 +34,7 @@ Next steps (Phase B):
 1. Implement the prompt engine (`PromptTemplate`, `PromptEngine`, exceptions, utilities).
 2. Swap `ExperimentRunner` to use the new rendering path (system/user/criteria).
 3. Update tests + sample configs to exercise the richer templating.
+<!-- UPDATE 2025-10-12: Completed; see `tests/test_prompt_engine.py` and README prompt engine section for usage guidance. -->
+
+## Update History
+- 2025-10-12 – Confirmed prompt engine migration complete and linked to implementation details.

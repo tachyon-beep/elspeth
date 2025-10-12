@@ -8,6 +8,7 @@
   "llm_middlewares": [
     {
       "name": "prompt_shield",
+      "security_level": "official",
       "options": {
         "denied_terms": ["classified", "top secret"],
         "on_violation": "mask",

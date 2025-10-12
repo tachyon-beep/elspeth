@@ -3,19 +3,14 @@
 from __future__ import annotations
 
 import json
-import math
 import logging
+import math
 from statistics import NormalDist
 from typing import Any, Dict, Mapping, Sequence
 
 import numpy as np
-import pandas as pd
 
-from elspeth.core.experiments.plugin_registry import (
-    register_row_plugin,
-    register_aggregation_plugin,
-    register_baseline_plugin,
-)
+from elspeth.core.experiments.plugin_registry import register_aggregation_plugin, register_baseline_plugin, register_row_plugin
 
 logger = logging.getLogger(__name__)
 
@@ -277,7 +272,7 @@ class ScoreExtractorPlugin:
 
 register_row_plugin(
     "score_extractor",
-    lambda options: ScoreExtractorPlugin(
+    lambda options, context: ScoreExtractorPlugin(
         key=options.get("key", "score"),
         criteria=options.get("criteria"),
         parse_json_content=options.get("parse_json_content", True),
@@ -417,7 +412,7 @@ class ScoreDeltaBaselinePlugin:
 
 register_aggregation_plugin(
     "score_stats",
-    lambda options: ScoreStatsAggregator(
+    lambda options, context: ScoreStatsAggregator(
         source_field=options.get("source_field", "scores"),
         flag_field=options.get("flag_field", "score_flags"),
         ddof=int(options.get("ddof", 0)),
@@ -427,7 +422,7 @@ register_aggregation_plugin(
 
 register_baseline_plugin(
     "score_delta",
-    lambda options: ScoreDeltaBaselinePlugin(
+    lambda options, context: ScoreDeltaBaselinePlugin(
         metric=options.get("metric", "mean"),
         criteria=options.get("criteria"),
     ),
@@ -481,7 +476,7 @@ class ScoreCliffsDeltaPlugin:
 
 register_baseline_plugin(
     "score_cliffs_delta",
-    lambda options: ScoreCliffsDeltaPlugin(
+    lambda options, context: ScoreCliffsDeltaPlugin(
         criteria=options.get("criteria"),
         min_samples=int(options.get("min_samples", 1)),
         on_error=options.get("on_error", "abort"),
@@ -578,7 +573,7 @@ class ScoreAssumptionsBaselinePlugin:
 
 register_baseline_plugin(
     "score_assumptions",
-    lambda options: ScoreAssumptionsBaselinePlugin(
+    lambda options, context: ScoreAssumptionsBaselinePlugin(
         criteria=options.get("criteria"),
         min_samples=int(options.get("min_samples", 3)),
         alpha=float(options.get("alpha", 0.05)),
@@ -656,7 +651,7 @@ class ScorePracticalBaselinePlugin:
 
 register_baseline_plugin(
     "score_practical",
-    lambda options: ScorePracticalBaselinePlugin(
+    lambda options, context: ScorePracticalBaselinePlugin(
         criteria=options.get("criteria"),
         threshold=float(options.get("threshold", 1.0)),
         success_threshold=float(options.get("success_threshold", 4.0)),
@@ -740,7 +735,7 @@ class ScoreSignificanceBaselinePlugin:
                         result["adjustment"] = "bonferroni"
             elif self._adjustment == "fdr":
                 try:
-                    from statsmodels.stats.multitest import fdrcorrection
+                    from statsmodels.stats.multitest import fdrcorrection  # pytype: disable=import-error
 
                     valid = [(name, p) for name, p in p_values.items() if p is not None]
                     p_vals = [p for _, p in valid]
@@ -754,7 +749,7 @@ class ScoreSignificanceBaselinePlugin:
                     if result is not None:
                         result["adjusted_p_value"] = float(adjusted)
                         result["adjustment"] = "fdr"
-                missing = set(p_values.keys()) - {name for name, _ in (valid if 'valid' in locals() else [])}
+                missing = set(p_values.keys()) - {name for name, _ in (valid if "valid" in locals() else [])}
                 for name in missing:
                     result = results.get(name)
                     if result is not None:
@@ -765,7 +760,7 @@ class ScoreSignificanceBaselinePlugin:
 
 register_baseline_plugin(
     "score_significance",
-    lambda options: ScoreSignificanceBaselinePlugin(
+    lambda options, context: ScoreSignificanceBaselinePlugin(
         criteria=options.get("criteria"),
         min_samples=int(options.get("min_samples", 2)),
         equal_var=bool(options.get("equal_var", False)),
@@ -827,7 +822,7 @@ class ScoreBayesianBaselinePlugin:
 
 register_baseline_plugin(
     "score_bayes",
-    lambda options: ScoreBayesianBaselinePlugin(
+    lambda options, context: ScoreBayesianBaselinePlugin(
         criteria=options.get("criteria"),
         min_samples=int(options.get("min_samples", 2)),
         credible_interval=float(options.get("credible_interval", 0.95)),
@@ -909,7 +904,7 @@ class ScoreRecommendationAggregator:
 
 register_aggregation_plugin(
     "score_recommendation",
-    lambda options: ScoreRecommendationAggregator(
+    lambda options, context: ScoreRecommendationAggregator(
         min_samples=int(options.get("min_samples", 5)),
         improvement_margin=float(options.get("improvement_margin", 0.05)),
         source_field=options.get("source_field", "scores"),
@@ -975,7 +970,7 @@ class ScoreVariantRankingAggregator:
 
 register_aggregation_plugin(
     "score_variant_ranking",
-    lambda options: ScoreVariantRankingAggregator(
+    lambda options, context: ScoreVariantRankingAggregator(
         threshold=float(options.get("threshold", 0.7)),
         weight_mean=float(options.get("weight_mean", 1.0)),
         weight_pass=float(options.get("weight_pass", 1.0)),
@@ -1095,7 +1090,7 @@ class ScoreAgreementAggregator:
 
 register_aggregation_plugin(
     "score_agreement",
-    lambda options: ScoreAgreementAggregator(
+    lambda options, context: ScoreAgreementAggregator(
         criteria=options.get("criteria"),
         min_items=int(options.get("min_items", 2)),
         on_error=options.get("on_error", "abort"),
@@ -1200,7 +1195,7 @@ class ScorePowerAggregator:
 
 register_aggregation_plugin(
     "score_power",
-    lambda options: ScorePowerAggregator(
+    lambda options, context: ScorePowerAggregator(
         criteria=options.get("criteria"),
         min_samples=int(options.get("min_samples", 2)),
         alpha=float(options.get("alpha", 0.05)),
@@ -1264,7 +1259,7 @@ class ScoreDistributionAggregator:
 
 register_baseline_plugin(
     "score_distribution",
-    lambda options: ScoreDistributionAggregator(
+    lambda options, context: ScoreDistributionAggregator(
         criteria=options.get("criteria"),
         min_samples=int(options.get("min_samples", 2)),
         on_error=options.get("on_error", "abort"),
@@ -1374,12 +1369,12 @@ def _compute_significance(
         term_var = (var_var / n_var) if n_var > 1 else 0.0
         denom_terms = term_base + term_var
         if denom_terms > 0:
-            numerator = denom_terms ** 2
+            numerator = denom_terms**2
             denominator = 0.0
             if n_base > 1 and term_base > 0:
-                denominator += (term_base ** 2) / (n_base - 1)
+                denominator += (term_base**2) / (n_base - 1)
             if n_var > 1 and term_var > 0:
-                denominator += (term_var ** 2) / (n_var - 1)
+                denominator += (term_var**2) / (n_var - 1)
             df = numerator / denominator if denominator > 0 else None
         else:
             df = None
@@ -1391,12 +1386,12 @@ def _compute_significance(
     if pooled is not None and pooled > 0:
         effect_size = mean_diff / math.sqrt(pooled)
     elif std_base > 0 or std_var > 0:
-        pooled_var = ((std_base ** 2) + (std_var ** 2)) / 2
+        pooled_var = ((std_base**2) + (std_var**2)) / 2
         if pooled_var > 0:
             effect_size = mean_diff / math.sqrt(pooled_var)
 
     p_value = None
-    if t_stat is not None and 'df' in locals() and df is not None and scipy_stats is not None:
+    if t_stat is not None and "df" in locals() and df is not None and scipy_stats is not None:
         try:
             p_value = float(scipy_stats.t.sf(abs(t_stat), df) * 2)
         except Exception:  # pragma: no cover - scipy failure
@@ -1440,12 +1435,12 @@ def _compute_bayesian_summary(
     denom_terms = term_base + term_var
     df = None
     if denom_terms > 0:
-        numerator = denom_terms ** 2
+        numerator = denom_terms**2
         denominator = 0.0
         if n_base > 1 and term_base > 0:
-            denominator += (term_base ** 2) / (n_base - 1)
+            denominator += (term_base**2) / (n_base - 1)
         if n_var > 1 and term_var > 0:
-            denominator += (term_var ** 2) / (n_var - 1)
+            denominator += (term_var**2) / (n_var - 1)
         df = numerator / denominator if denominator > 0 else None
 
     if df is not None and scipy_stats is not None:

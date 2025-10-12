@@ -271,7 +271,7 @@ class AzureContentSafetyMiddleware(LLMMiddleware):
 
 register_middleware(
     "audit_logger",
-    lambda options: AuditMiddleware(
+    lambda options, context: AuditMiddleware(
         include_prompts=bool(options.get("include_prompts", False)),
         channel=options.get("channel"),
     ),
@@ -280,7 +280,7 @@ register_middleware(
 
 register_middleware(
     "prompt_shield",
-    lambda options: PromptShieldMiddleware(
+    lambda options, context: PromptShieldMiddleware(
         denied_terms=options.get("denied_terms", []),
         mask=options.get("mask", "[REDACTED]"),
         on_violation=options.get("on_violation", "abort"),
@@ -291,7 +291,7 @@ register_middleware(
 
 register_middleware(
     "health_monitor",
-    lambda options: HealthMonitorMiddleware(
+    lambda options, context: HealthMonitorMiddleware(
         heartbeat_interval=float(options.get("heartbeat_interval", 60.0)),
         stats_window=int(options.get("stats_window", 50)),
         channel=options.get("channel"),
@@ -302,7 +302,7 @@ register_middleware(
 
 register_middleware(
     "azure_content_safety",
-    lambda options: AzureContentSafetyMiddleware(
+    lambda options, context: AzureContentSafetyMiddleware(
         endpoint=options.get("endpoint"),
         key=options.get("key"),
         key_env=options.get("key_env"),

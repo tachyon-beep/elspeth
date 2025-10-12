@@ -8,6 +8,7 @@
   "llm_middlewares": [
     {
       "name": "azure_content_safety",
+      "security_level": "official",
       "options": {
         "endpoint": "https://YOUR-CONTENT-SAFETY.cognitiveservices.azure.com",
         "key_env": "AZURE_CONTENT_SAFETY_KEY",

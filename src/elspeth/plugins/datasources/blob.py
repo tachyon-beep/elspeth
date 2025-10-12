@@ -2,16 +2,14 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict
-
 import logging
+from typing import Any, Dict
 
 import pandas as pd
 
 from elspeth.core.interfaces import DataSource
 from elspeth.core.security import normalize_security_level
 from elspeth.datasources import load_blob_csv
-
 
 logger = logging.getLogger(__name__)
 

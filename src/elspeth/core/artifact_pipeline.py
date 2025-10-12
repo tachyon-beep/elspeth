@@ -2,30 +2,35 @@
 
 from __future__ import annotations
 
-from collections import defaultdict, deque
 import logging
+from collections import defaultdict, deque
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterable, List, Mapping
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple, cast
 
-from elspeth.core.interfaces import ResultSink, ArtifactDescriptor, Artifact
 from elspeth.core.artifacts import validate_artifact_type
-from elspeth.core.security import normalize_security_level, is_security_level_allowed
-
+from elspeth.core.interfaces import Artifact, ArtifactDescriptor, ResultSink
+from elspeth.core.security import is_security_level_allowed, normalize_security_level
 
 VALID_REQUEST_MODES = {"single", "all"}
 logger = logging.getLogger(__name__)
 
 
-@dataclass
+# pylint: disable=too-few-public-methods
 @dataclass
 class ArtifactRequest:
+    """Declarative request describing how a sink consumes artifacts."""
+
     token: str
     mode: str = "single"
 
 
 class ArtifactRequestParser:
+    """Parsing helpers for artifact consumption declarations."""
+
     @staticmethod
     def parse(entry: Any) -> ArtifactRequest:
+        """Convert configuration entries into `ArtifactRequest` objects."""
+
         if isinstance(entry, ArtifactRequest):
             ArtifactRequestParser._validate(entry.mode)
             return entry
@@ -43,10 +48,13 @@ class ArtifactRequestParser:
 
     @staticmethod
     def _validate(mode: str) -> None:
+        """Ensure request mode is one of the supported options."""
+
         if mode not in VALID_REQUEST_MODES:
             raise ValueError(f"Unsupported artifact request mode '{mode}'")
 
 
+# pylint: disable=too-many-instance-attributes
 @dataclass
 class SinkBinding:
     """Container tying a sink instance to its configuration metadata."""
@@ -61,15 +69,20 @@ class SinkBinding:
     security_level: str | None = None
 
 
+# pylint: disable=too-few-public-methods
 class ArtifactStore:
     """Holds produced artifacts for downstream sinks."""
 
     def __init__(self) -> None:
+        """Initialise internal indexes for artifact lookups."""
+
         self._by_id: Dict[str, Artifact] = {}
         self._by_alias: Dict[str, Artifact] = {}
         self._by_type: Dict[str, List[Artifact]] = defaultdict(list)
 
     def register(self, binding: SinkBinding, descriptor: ArtifactDescriptor, artifact: Artifact) -> None:
+        """Record an artifact emitted by `binding` under the descriptor metadata."""
+
         artifact_id = artifact.id or f"{binding.id}:{descriptor.name}"
         artifact.id = artifact_id
         artifact.produced_by = binding.id
@@ -86,21 +99,29 @@ class ArtifactStore:
         self._by_type[descriptor.type].append(artifact)
 
     def get_by_alias(self, alias: str) -> Artifact | None:
+        """Look up an artifact via its alias."""
+
         return self._by_alias.get(alias)
 
     def get_by_type(self, type_name: str) -> List[Artifact]:
+        """Return all artifacts matching a specific type."""
+
         return list(self._by_type.get(type_name, []))
 
     def resolve_requests(self, requests: Iterable[ArtifactRequest]) -> Dict[str, List[Artifact]]:
+        """Resolve a list of artifact requests into concrete artifact results."""
+
         resolved: Dict[str, List[Artifact]] = {}
         for request in requests:
             token = request.token
             if not token:
                 continue
+            selected: List[Artifact] = []
             if token.startswith("@"):  # alias lookup
                 alias = token[1:]
                 artifact = self.get_by_alias(alias)
-                selected = [artifact] if artifact else []
+                if artifact is not None:
+                    selected.append(artifact)
             else:
                 try:
                     validate_artifact_type(token)
@@ -118,18 +139,26 @@ class ArtifactStore:
         return resolved
 
     def items(self) -> Iterable[tuple[str, Artifact]]:
+        """Yield stored artifacts keyed by their canonical identifier."""
+
         return self._by_id.items()
 
 
-class ArtifactPipeline:
+class ArtifactPipeline:  # pylint: disable=too-many-instance-attributes
     """Resolves sink execution order based on declared artifact dependencies."""
 
     def __init__(self, bindings: List[SinkBinding]) -> None:
+        """Prepare bindings and calculate execution order."""
+
         self._bindings = [self._prepare_binding(binding) for binding in bindings]
         self._ordered_bindings = self._resolve_order(self._bindings)
 
     @staticmethod
     def _prepare_binding(binding: SinkBinding) -> SinkBinding:
+        """Populate sink binding metadata from configuration and sink methods."""
+
+        if binding.security_level is None or not str(binding.security_level).strip():
+            raise ValueError(f"Sink '{binding.id}' must declare a security_level")
         binding.security_level = normalize_security_level(binding.security_level)
         artifact_section = binding.artifact_config or {}
         produces_config = artifact_section.get("produces", []) or []
@@ -147,34 +176,52 @@ class ArtifactPipeline:
 
         produces_method = getattr(binding.sink, "produces", None)
         if callable(produces_method):
-            for descriptor in produces_method() or []:
-                validate_artifact_type(descriptor.type)
-                descriptor.security_level = normalize_security_level(descriptor.security_level)
-                binding.produces.append(descriptor)
+            produced_iterable = produces_method()
+            if produced_iterable:
+                for descriptor in cast(Iterable[ArtifactDescriptor], produced_iterable):
+                    validate_artifact_type(descriptor.type)
+                    descriptor.security_level = normalize_security_level(descriptor.security_level)
+                    binding.produces.append(descriptor)
 
         consumes_config = list(artifact_section.get("consumes", []) or [])
         consumes_method = getattr(binding.sink, "consumes", None)
         if callable(consumes_method):
-            for token in consumes_method() or []:
-                consumes_config.append(token)
+            consumed_tokens = consumes_method()
+            if consumed_tokens:
+                consumes_config.extend(cast(Iterable[str], consumed_tokens))
         binding.consumes = [ArtifactRequestParser.parse(entry) for entry in consumes_config]
         return binding
 
     @staticmethod
     def _enforce_dependency_security(consumer: SinkBinding, producer: SinkBinding) -> None:
+        """Ensure a consumer is allowed to read artifacts produced by the producer."""
+
         if not consumer.security_level:
             return
         if not is_security_level_allowed(producer.security_level, consumer.security_level):
-            raise PermissionError(
-                f"Sink '{consumer.id}' cannot depend on '{producer.id}' due to security level mismatch"
-            )
+            raise PermissionError(f"Sink '{consumer.id}' cannot depend on '{producer.id}' due to security level mismatch")
 
     @staticmethod
     def _resolve_order(bindings: List[SinkBinding]) -> List[SinkBinding]:
+        """Topologically sort bindings based on artifact dependencies."""
+
         if not bindings:
             return []
 
         by_id = {binding.id: binding for binding in bindings}
+        producers_by_name, producers_by_type = ArtifactPipeline._build_producer_indexes(bindings)
+        dependencies, dependents = ArtifactPipeline._build_dependency_graph(bindings, producers_by_name, producers_by_type)
+        ordered = ArtifactPipeline._topological_sort(bindings, dependencies, dependents, by_id)
+
+        if len(ordered) != len(bindings):
+            raise ValueError("Sink artifact dependencies contain a cycle or unresolved reference")
+
+        return ordered
+
+    @staticmethod
+    def _build_producer_indexes(bindings: Iterable[SinkBinding]) -> Tuple[Dict[str, SinkBinding], Dict[str, List[SinkBinding]]]:
+        """Index bindings by produced alias/name and artifact type."""
+
         producers_by_name: Dict[str, SinkBinding] = {}
         producers_by_type: Dict[str, List[SinkBinding]] = defaultdict(list)
 
@@ -185,34 +232,69 @@ class ArtifactPipeline:
                     producers_by_name[key] = binding
                 producers_by_type[descriptor.type].append(binding)
 
+        return producers_by_name, producers_by_type
+
+    @staticmethod
+    def _iter_producers_for_request(
+        consumer: SinkBinding,
+        request: ArtifactRequest,
+        producers_by_name: Dict[str, SinkBinding],
+        producers_by_type: Dict[str, List[SinkBinding]],
+    ) -> Iterable[SinkBinding]:
+        """Yield producer bindings that satisfy a consume request."""
+
+        token = request.token
+        if not token:
+            return []
+
+        if token.startswith("@"):
+            key = token[1:]
+            producer = producers_by_name.get(key)
+            if producer:
+                ArtifactPipeline._enforce_dependency_security(consumer, producer)
+                return [producer]
+            return []
+
+        try:
+            validate_artifact_type(token)
+        except ValueError:
+            return []
+
+        matches: List[SinkBinding] = []
+        for producer in producers_by_type.get(token, []):
+            ArtifactPipeline._enforce_dependency_security(consumer, producer)
+            matches.append(producer)
+        return matches
+
+    @staticmethod
+    def _build_dependency_graph(
+        bindings: Iterable[SinkBinding],
+        producers_by_name: Dict[str, SinkBinding],
+        producers_by_type: Dict[str, List[SinkBinding]],
+    ) -> Tuple[Dict[str, set[str]], Dict[str, set[str]]]:
+        """Map dependencies and dependents between bindings."""
+
         dependencies: Dict[str, set[str]] = {binding.id: set() for binding in bindings}
         dependents: Dict[str, set[str]] = {binding.id: set() for binding in bindings}
 
         for binding in bindings:
             for request in binding.consumes:
-                token = request.token
-                if not token:
-                    continue
-                matched_ids: List[str] = []
-                if token.startswith("@"):  # alias/name match
-                    key = token[1:]
-                    producer_binding = producers_by_name.get(key)
-                    if producer_binding:
-                        ArtifactPipeline._enforce_dependency_security(binding, producer_binding)
-                        matched_ids.append(producer_binding.id)
-                else:
-                    try:
-                        validate_artifact_type(token)
-                    except ValueError:
+                for producer in ArtifactPipeline._iter_producers_for_request(binding, request, producers_by_name, producers_by_type):
+                    if producer.id == binding.id:
                         continue
-                    for producer_binding in producers_by_type.get(token, []):
-                        ArtifactPipeline._enforce_dependency_security(binding, producer_binding)
-                        matched_ids.append(producer_binding.id)
-                for producer_id in matched_ids:
-                    if producer_id == binding.id:
-                        continue
-                    dependencies[binding.id].add(producer_id)
-                    dependents[producer_id].add(binding.id)
+                    dependencies[binding.id].add(producer.id)
+                    dependents[producer.id].add(binding.id)
+
+        return dependencies, dependents
+
+    @staticmethod
+    def _topological_sort(
+        bindings: Iterable[SinkBinding],
+        dependencies: Dict[str, set[str]],
+        dependents: Dict[str, set[str]],
+        by_id: Dict[str, SinkBinding],
+    ) -> List[SinkBinding]:
+        """Order bindings based on resolved dependencies."""
 
         ready: deque[SinkBinding] = deque(
             sorted(
@@ -228,20 +310,22 @@ class ArtifactPipeline:
             ordered.append(current)
             for dependent_id in dependents[current.id]:
                 deps = dependencies[dependent_id]
-                if current.id in deps:
-                    deps.remove(current.id)
-                    if not deps:
-                        dependent_binding = by_id[dependent_id]
-                        ready.append(dependent_binding)
-                        ready = deque(sorted(list(ready), key=lambda b: b.original_index))
-
-        if len(ordered) != len(bindings):
-            raise ValueError("Sink artifact dependencies contain a cycle or unresolved reference")
+                if current.id not in deps:
+                    continue
+                deps.remove(current.id)
+                if deps:
+                    continue
+                ready.append(by_id[dependent_id])
+                ready = deque(sorted(ready, key=lambda b: b.original_index))
 
         return ordered
 
-    def execute(self, payload: Dict[str, Any], metadata: Mapping[str, Any] | None = None) -> ArtifactStore:
+    # pylint: disable=too-many-locals
+    def execute(self, payload: Dict[str, Any], metadata: Dict[str, Any] | None = None) -> ArtifactStore:
+        """Run all sinks in dependency order, producing the final artifact store."""
+
         store = ArtifactStore()
+        metadata_dict: Optional[Dict[str, Any]] = dict(metadata) if metadata is not None else None
         for binding in self._ordered_bindings:
             consumed = store.resolve_requests(binding.consumes)
 
@@ -259,12 +343,14 @@ class ArtifactPipeline:
             if callable(prepare):
                 prepare(consumed)
 
-            binding.sink.write(payload, metadata=metadata)
+            binding.sink.write(payload, metadata=metadata_dict)
 
-            produced = {}
+            produced: Dict[str, Artifact] = {}
             collector = getattr(binding.sink, "collect_artifacts", None)
             if callable(collector):
-                produced = collector() or {}
+                collected = collector()
+                if collected:
+                    produced = cast(Dict[str, Artifact], collected)
 
             for descriptor in binding.produces:
                 key = descriptor.name
@@ -276,6 +362,6 @@ class ArtifactPipeline:
 
             finalize = getattr(binding.sink, "finalize", None)
             if callable(finalize):
-                finalize(dict(store.items()), metadata=metadata)
+                finalize(dict(store.items()), metadata=metadata_dict)
 
         return store

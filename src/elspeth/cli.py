@@ -11,26 +11,24 @@ import argparse
 import json
 import logging
 from pathlib import Path
-from typing import Iterable, Any, Dict, Mapping
+from typing import Any, Dict, Iterable, Mapping
 
 import pandas as pd
 
 from elspeth.config import load_settings
+from elspeth.core.experiments import ExperimentSuite, ExperimentSuiteRunner
+from elspeth.core.experiments.tools import create_experiment_template, export_suite_configuration
 from elspeth.core.orchestrator import ExperimentOrchestrator
-from elspeth.core.experiments import ExperimentSuiteRunner, ExperimentSuite
-from elspeth.core.experiments.tools import (
-    export_suite_configuration,
-    create_experiment_template,
-)
-from elspeth.plugins.outputs.csv_file import CsvResultSink
-from elspeth.core.controls import create_rate_limiter, create_cost_tracker
 from elspeth.core.validation import validate_settings, validate_suite
+from elspeth.plugins.outputs.csv_file import CsvResultSink
 from elspeth.tools.reporting import SuiteReportGenerator
 
 logger = logging.getLogger(__name__)
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """Define CLI arguments for ELSPETH orchestration workflows."""
+
     parser = argparse.ArgumentParser(description="ELSPETH orchestration CLI")
     parser.add_argument(
         "--settings",
@@ -103,6 +101,8 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def configure_logging(level: str) -> None:
+    """Configure root logging with the requested verbosity."""
+
     logging.basicConfig(level=getattr(logging, level.upper(), logging.INFO))
 
 
@@ -159,45 +159,15 @@ def _result_to_row(record: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def run(args: argparse.Namespace) -> None:
+    """Dispatch execution based on CLI arguments and configuration."""
+
     configure_logging(args.log_level)
-    settings_report = validate_settings(args.settings, profile=args.profile)
-    for warning in settings_report.warnings:
-        logger.warning(warning.format())
-    settings_report.raise_if_errors()
-    settings = load_settings(args.settings, profile=args.profile)
-    if args.disable_metrics:
-        _strip_metrics_plugins(settings)
-    _configure_sink_dry_run(settings, enable_live=args.live_outputs)
-    suite_root_value = args.suite_root or settings.suite_root
-    suite_root = Path(suite_root_value) if suite_root_value else None
+    settings = _load_settings_from_args(args)
+    suite_root = _resolve_suite_root(args, settings)
 
-    suite_instance: ExperimentSuite | None = None
-    export_path = getattr(args, "export_suite_config", None)
-    template_name = getattr(args, "create_experiment_template", None)
-    reports_dir = getattr(args, "reports_dir", None)
-    template_base = getattr(args, "template_base", None)
-    management_requested = any([export_path, template_name, reports_dir])
-    if management_requested and not suite_root:
-        raise SystemExit("Suite root is required for template creation, export, or report generation.")
-    if suite_root and management_requested:
-        suite_instance = ExperimentSuite.load(suite_root)
+    suite_instance = _handle_suite_management(args, suite_root)
 
-    if template_name:
-        assert suite_instance is not None  # for mypy
-        destination = create_experiment_template(
-            suite_instance,
-            template_name,
-            base_experiment=template_base,
-        )
-        logger.info("Created experiment template at %s", destination)
-        suite_instance = ExperimentSuite.load(suite_root)
-
-    if export_path:
-        assert suite_instance is not None
-        export_suite_configuration(suite_instance, export_path)
-        logger.info("Exported suite configuration to %s", export_path)
-
-    if suite_root and not args.single_run:
+    if suite_root is not None and not args.single_run:
         suite_validation = validate_suite(suite_root)
         for warning in suite_validation.report.warnings:
             logger.warning(warning.format())
@@ -214,6 +184,8 @@ def run(args: argparse.Namespace) -> None:
 
 
 def _run_single(args: argparse.Namespace, settings) -> None:
+    """Execute a single experiment using the provided settings."""
+
     logger.info("Running single experiment")
     orchestrator = ExperimentOrchestrator(
         datasource=settings.datasource,
@@ -248,15 +220,156 @@ def _run_single(args: argparse.Namespace, settings) -> None:
 
 
 def _clone_suite_sinks(base_sinks: list, experiment_name: str) -> list:
+    """Create experiment-scoped sink instances for suite execution."""
+
     cloned = []
     for sink in base_sinks:
+        security_level = getattr(sink, "_elspeth_security_level", None)
         if isinstance(sink, CsvResultSink):
             base_path = Path(sink.path)
             new_path = base_path.with_name(f"{experiment_name}_{base_path.name}")
-            cloned.append(CsvResultSink(path=new_path, overwrite=True))
+            cloned.append(
+                CsvResultSink(
+                    path=str(new_path),
+                    overwrite=sink.overwrite,
+                    on_error=sink.on_error,
+                    sanitize_formulas=sink.sanitize_formulas,
+                    sanitize_guard=sink.sanitize_guard,
+                )
+            )
+            if security_level:
+                setattr(cloned[-1], "_elspeth_security_level", security_level)
         else:
             cloned.append(sink)
     return cloned
+
+
+def _assemble_suite_defaults(settings) -> dict:
+    """Merge orchestrator, suite, and runtime defaults for suite execution."""
+
+    config = settings.orchestrator_config
+    defaults: dict[str, Any] = {
+        "prompt_system": config.llm_prompt.get("system", ""),
+        "prompt_template": config.llm_prompt.get("user", ""),
+        "prompt_fields": config.prompt_fields,
+        "criteria": config.criteria,
+        "prompt_packs": settings.prompt_packs,
+    }
+
+    optional_overrides = {
+        "prompt_pack": config.prompt_pack,
+        "row_plugin_defs": config.row_plugin_defs,
+        "aggregator_plugin_defs": config.aggregator_plugin_defs,
+        "baseline_plugin_defs": config.baseline_plugin_defs,
+        "validation_plugin_defs": config.validation_plugin_defs,
+        "sink_defs": config.sink_defs,
+        "llm_middleware_defs": config.llm_middleware_defs,
+        "prompt_defaults": config.prompt_defaults,
+        "concurrency_config": config.concurrency_config,
+        "early_stop_plugin_defs": config.early_stop_plugin_defs,
+        "early_stop_config": config.early_stop_config,
+    }
+    for key, value in optional_overrides.items():
+        if value:
+            defaults[key] = value
+
+    suite_defaults = settings.suite_defaults or {}
+    passthrough_keys = {
+        k: v
+        for k, v in suite_defaults.items()
+        if k
+        not in {
+            "row_plugins",
+            "aggregator_plugins",
+            "sinks",
+            "baseline_plugins",
+            "llm_middlewares",
+            "early_stop_plugins",
+            "early_stop_plugin_defs",
+        }
+    }
+    defaults.update(passthrough_keys)
+
+    plugin_mappings = {
+        "row_plugin_defs": ["row_plugins"],
+        "aggregator_plugin_defs": ["aggregator_plugins"],
+        "baseline_plugin_defs": ["baseline_plugins"],
+        "validation_plugin_defs": ["validation_plugins"],
+        "llm_middleware_defs": ["llm_middlewares"],
+        "prompt_defaults": ["prompt_defaults"],
+        "concurrency_config": ["concurrency"],
+        "early_stop_plugin_defs": ["early_stop_plugin_defs", "early_stop_plugins"],
+        "early_stop_config": ["early_stop"],
+        "sink_defs": ["sinks"],
+        "prompt_pack": ["prompt_pack"],
+        "rate_limiter_def": ["rate_limiter"],
+        "cost_tracker_def": ["cost_tracker"],
+    }
+    for target, sources in plugin_mappings.items():
+        for candidate in sources:
+            if candidate in suite_defaults:
+                defaults[target] = suite_defaults[candidate]
+                break
+
+    if settings.rate_limiter:
+        defaults["rate_limiter"] = settings.rate_limiter
+    if settings.cost_tracker:
+        defaults["cost_tracker"] = settings.cost_tracker
+
+    return defaults
+
+
+def _load_settings_from_args(args: argparse.Namespace):
+    """Load orchestrator settings after validating configuration."""
+
+    settings_report = validate_settings(args.settings, profile=args.profile)
+    for warning in settings_report.warnings:
+        logger.warning(warning.format())
+    settings_report.raise_if_errors()
+    settings = load_settings(args.settings, profile=args.profile)
+    if args.disable_metrics:
+        _strip_metrics_plugins(settings)
+    _configure_sink_dry_run(settings, enable_live=args.live_outputs)
+    return settings
+
+
+def _resolve_suite_root(args: argparse.Namespace, settings) -> Path | None:
+    """Determine the suite root directory from CLI overrides or settings."""
+
+    suite_root_value = args.suite_root or settings.suite_root
+    return Path(suite_root_value) if suite_root_value else None
+
+
+def _handle_suite_management(args: argparse.Namespace, suite_root: Path | None) -> ExperimentSuite | None:
+    """Process template/export/report requests before running experiments."""
+
+    export_path = getattr(args, "export_suite_config", None)
+    template_name = getattr(args, "create_experiment_template", None)
+    reports_dir = getattr(args, "reports_dir", None)
+    template_base = getattr(args, "template_base", None)
+    management_requested = any([export_path, template_name, reports_dir])
+    if not management_requested:
+        return None
+    if suite_root is None:
+        message = "Suite root is required for template creation, export, or report generation."
+        raise SystemExit(message)
+
+    suite_instance = ExperimentSuite.load(suite_root)
+
+    if template_name:
+        destination = create_experiment_template(
+            suite_instance,
+            template_name,
+            base_experiment=template_base,
+        )
+        logger.info("Created experiment template at %s", destination)
+        suite_instance = ExperimentSuite.load(suite_root)
+
+    if export_path:
+        export_suite_configuration(suite_instance, export_path)
+        logger.info("Exported suite configuration to %s", export_path)
+
+    return suite_instance
 
 
 def _run_suite(
@@ -267,6 +380,8 @@ def _run_suite(
     preflight: dict | None = None,
     suite: ExperimentSuite | None = None,
 ) -> None:
+    """Execute all experiments declared in a suite configuration."""
+
     logger.info("Running suite at %s", suite_root)
     suite = suite or ExperimentSuite.load(suite_root)
     df = settings.datasource.load()
@@ -276,77 +391,7 @@ def _run_suite(
         sinks=settings.sinks,
     )
 
-    defaults = {
-        "prompt_system": settings.orchestrator_config.llm_prompt.get("system", ""),
-        "prompt_template": settings.orchestrator_config.llm_prompt.get("user", ""),
-        "prompt_fields": settings.orchestrator_config.prompt_fields,
-        "criteria": settings.orchestrator_config.criteria,
-    }
-    defaults["prompt_packs"] = settings.prompt_packs
-    if settings.orchestrator_config.prompt_pack:
-        defaults["prompt_pack"] = settings.orchestrator_config.prompt_pack
-    if settings.orchestrator_config.row_plugin_defs:
-        defaults["row_plugin_defs"] = settings.orchestrator_config.row_plugin_defs
-    if settings.orchestrator_config.aggregator_plugin_defs:
-        defaults["aggregator_plugin_defs"] = settings.orchestrator_config.aggregator_plugin_defs
-    if settings.orchestrator_config.baseline_plugin_defs:
-        defaults["baseline_plugin_defs"] = settings.orchestrator_config.baseline_plugin_defs
-    if settings.orchestrator_config.validation_plugin_defs:
-        defaults["validation_plugin_defs"] = settings.orchestrator_config.validation_plugin_defs
-    if settings.orchestrator_config.sink_defs:
-        defaults["sink_defs"] = settings.orchestrator_config.sink_defs
-    if settings.orchestrator_config.llm_middleware_defs:
-        defaults["llm_middleware_defs"] = settings.orchestrator_config.llm_middleware_defs
-    if settings.orchestrator_config.prompt_defaults:
-        defaults["prompt_defaults"] = settings.orchestrator_config.prompt_defaults
-    if settings.orchestrator_config.concurrency_config:
-        defaults["concurrency_config"] = settings.orchestrator_config.concurrency_config
-    if settings.orchestrator_config.early_stop_plugin_defs:
-        defaults["early_stop_plugin_defs"] = settings.orchestrator_config.early_stop_plugin_defs
-    if settings.orchestrator_config.early_stop_config:
-        defaults["early_stop_config"] = settings.orchestrator_config.early_stop_config
-
-    suite_defaults = settings.suite_defaults or {}
-    defaults.update(
-        {
-            k: v
-            for k, v in suite_defaults.items()
-            if k
-            not in {"row_plugins", "aggregator_plugins", "sinks", "baseline_plugins", "llm_middlewares", "early_stop_plugins", "early_stop_plugin_defs"}
-        }
-    )
-    if "row_plugins" in suite_defaults:
-        defaults["row_plugin_defs"] = suite_defaults["row_plugins"]
-    if "aggregator_plugins" in suite_defaults:
-        defaults["aggregator_plugin_defs"] = suite_defaults["aggregator_plugins"]
-    if "baseline_plugins" in suite_defaults:
-        defaults["baseline_plugin_defs"] = suite_defaults["baseline_plugins"]
-    if "validation_plugins" in suite_defaults:
-        defaults["validation_plugin_defs"] = suite_defaults["validation_plugins"]
-    if "llm_middlewares" in suite_defaults:
-        defaults["llm_middleware_defs"] = suite_defaults["llm_middlewares"]
-    if "prompt_defaults" in suite_defaults:
-        defaults["prompt_defaults"] = suite_defaults["prompt_defaults"]
-    if "concurrency" in suite_defaults:
-        defaults["concurrency_config"] = suite_defaults["concurrency"]
-    if "early_stop_plugin_defs" in suite_defaults:
-        defaults["early_stop_plugin_defs"] = suite_defaults["early_stop_plugin_defs"]
-    if "early_stop_plugins" in suite_defaults:
-        defaults["early_stop_plugin_defs"] = suite_defaults["early_stop_plugins"]
-    if "early_stop" in suite_defaults:
-        defaults["early_stop_config"] = suite_defaults["early_stop"]
-    if "sinks" in suite_defaults:
-        defaults["sink_defs"] = suite_defaults["sinks"]
-    if settings.rate_limiter:
-        defaults["rate_limiter"] = settings.rate_limiter
-    if settings.cost_tracker:
-        defaults["cost_tracker"] = settings.cost_tracker
-    if "rate_limiter" in suite_defaults:
-        defaults["rate_limiter_def"] = suite_defaults["rate_limiter"]
-    if "cost_tracker" in suite_defaults:
-        defaults["cost_tracker_def"] = suite_defaults["cost_tracker"]
-    if "prompt_pack" in suite_defaults:
-        defaults["prompt_pack"] = suite_defaults["prompt_pack"]
+    defaults = _assemble_suite_defaults(settings)
 
     results = suite_runner.run(
         df,
@@ -418,7 +463,10 @@ def _configure_sink_dry_run(settings, enable_live: bool) -> None:
             options = dict(entry.get("options", {}))
             if entry.get("plugin") in {"github_repo", "azure_devops_repo"} or "dry_run" in options:
                 options["dry_run"] = dry_run
-            updated.append({"plugin": entry.get("plugin"), "options": options})
+            payload = {"plugin": entry.get("plugin"), "options": options}
+            if entry.get("security_level") is not None:
+                payload["security_level"] = entry.get("security_level")
+            updated.append(payload)
         return updated
 
     config = settings.orchestrator_config
@@ -434,6 +482,8 @@ def _configure_sink_dry_run(settings, enable_live: bool) -> None:
 
 
 def main(argv: Iterable[str] | None = None) -> None:
+    """Entry point used by the console script."""
+
     parser = build_parser()
     args = parser.parse_args(list(argv) if argv is not None else None)
     run(args)

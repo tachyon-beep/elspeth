@@ -1,12 +1,15 @@
 import pandas as pd
 
-from elspeth.core.experiments.runner import ExperimentRunner
-from elspeth.core.experiments.plugin_registry import create_row_plugin, create_early_stop_plugin
-from elspeth.plugins.llms.mock import MockLLMClient
 from elspeth.cli import _result_to_row
+from elspeth.core.experiments.plugin_registry import create_early_stop_plugin, create_row_plugin
+from elspeth.core.experiments.runner import ExperimentRunner
+from elspeth.plugins.llms.mock import MockLLMClient
 
 
 class DummySink:
+    def __init__(self):
+        self._elspeth_security_level = "official"
+
     def write(self, results, *, metadata=None):
         pass
 
@@ -22,7 +25,7 @@ def _build_runner():
             {"name": "analysis", "template": "Give analysis for {{ APPID }}."},
             {"name": "prioritization", "template": "Prioritise {{ APPID }}."},
         ],
-        row_plugins=[create_row_plugin({"name": "score_extractor"})],
+        row_plugins=[create_row_plugin({"name": "score_extractor", "security_level": "official"})],
     )
 
 
@@ -52,6 +55,7 @@ def test_early_stop_plugins_can_reference_nested_metrics():
     analysis_plugin = create_early_stop_plugin(
         {
             "name": "threshold",
+            "security_level": "official",
             "options": {
                 "metric": "scores.analysis",
                 "threshold": first["metrics"]["scores"]["analysis"] - 0.01,
@@ -64,6 +68,7 @@ def test_early_stop_plugins_can_reference_nested_metrics():
     score_plugin = create_early_stop_plugin(
         {
             "name": "threshold",
+            "security_level": "official",
             "options": {
                 "metric": "score",
                 "threshold": max(first["metrics"]["score"], second["metrics"]["score"]) - 0.01,
