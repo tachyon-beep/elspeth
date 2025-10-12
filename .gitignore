@@ -119,14 +119,14 @@ venv.bak/
 # Project data/artifacts
 /data/
 /outputs/
+# Legacy reference material (tracked separately)
 /external/
+# Quarantined historical scripts (tracked)
+!/old/*.historical
 
 # SonarQube cached scans
 .scannerwork/
 
 # Azure CLI/cache
 .azure/
-
-
-old/
 .coverage
