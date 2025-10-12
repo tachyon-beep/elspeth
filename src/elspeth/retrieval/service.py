@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Iterable, Mapping, Sequence
+from typing import Iterable, Mapping
 
 from elspeth.retrieval.embedding import AzureOpenAIEmbedder, Embedder, OpenAIEmbedder
 from elspeth.retrieval.providers import QueryResult, VectorQueryClient, create_query_client

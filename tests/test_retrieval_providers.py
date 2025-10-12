@@ -133,12 +133,14 @@ def azure_modules(monkeypatch):
                 }
             )
             return [
-                StubDocument({
-                    "document_id": "doc-1",
-                    "contents": "trace",
-                    "metadata": {"region": "test"},
-                    "@search.score": 0.83,
-                })
+                StubDocument(
+                    {
+                        "document_id": "doc-1",
+                        "contents": "trace",
+                        "metadata": {"region": "test"},
+                        "@search.score": 0.83,
+                    }
+                )
             ]
 
     documents_module.SearchClient = StubSearchClient
@@ -185,4 +187,3 @@ def test_create_query_client_azure_success(monkeypatch, azure_modules, providers
     assert len(results) == 1
     assert results[0].metadata == {"region": "test"}
     assert results[0].score == pytest.approx(0.83)
-

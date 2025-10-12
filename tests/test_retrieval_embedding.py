@@ -22,9 +22,6 @@ def openai_stub(monkeypatch):
             self.config = kwargs
             self.calls = []
 
-        def embeddings(self):
-            raise AssertionError("not used")  # pragma: no cover - safety
-
         class _Embeddings:
             def __init__(self, parent):
                 self._parent = parent

@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
 import os
-from typing import Dict, Iterable, Sequence
+from dataclasses import dataclass
+from typing import Any, Dict, Iterable, Mapping, Sequence
 
 from elspeth.core.validation import ConfigurationError
 
@@ -104,8 +104,8 @@ class AzureSearchQueryClient(VectorQueryClient):
         content_field: str = "contents",
     ) -> None:
         try:
-            from azure.search.documents import SearchClient  # type: ignore
             from azure.core.credentials import AzureKeyCredential  # type: ignore
+            from azure.search.documents import SearchClient  # type: ignore
         except ModuleNotFoundError as exc:  # pragma: no cover - optional dependency
             raise RuntimeError("azure-search-documents package is required for Azure retrieval") from exc
 

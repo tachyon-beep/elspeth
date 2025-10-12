@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from elspeth.retrieval.providers import QueryResult
-from elspeth.retrieval.service import RetrievalService, create_retrieval_service, _create_embedder
+from elspeth.retrieval.service import RetrievalService, _create_embedder, create_retrieval_service
 
 
 class StubClient:

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import sys
 import types
 
@@ -192,6 +191,7 @@ def test_embeddings_sink_azure_provider_uses_env_key(monkeypatch):
 
     assert created["endpoint"] == "https://example"
     assert created["index"] == "idx"
+    assert sink.provider_name == "azure_search"
 
 
 def test_embeddings_sink_collect_artifacts_resets_manifest():

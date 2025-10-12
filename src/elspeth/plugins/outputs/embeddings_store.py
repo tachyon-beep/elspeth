@@ -166,8 +166,8 @@ class AzureSearchVectorClient(VectorStoreClient):
         namespace_field: str = "namespace",
     ) -> None:
         try:
-            from azure.search.documents import SearchClient  # type: ignore
             from azure.core.credentials import AzureKeyCredential  # type: ignore
+            from azure.search.documents import SearchClient  # type: ignore
         except ModuleNotFoundError as exc:  # pragma: no cover - optional dependency
             raise RuntimeError("azure-search-documents package is required for azure_search provider") from exc
 
@@ -345,15 +345,15 @@ class EmbeddingsStoreSink(ResultSink):
 
     def _extract_metadata(self, record: Mapping[str, Any], run_metadata: Mapping[str, Any]) -> Dict[str, Any]:
         extracted: Dict[str, Any] = {}
-        for field in self._metadata_fields:
-            value = self._extract_value(record, field)
+        for field_name in self._metadata_fields:
+            value = self._extract_value(record, field_name)
             if value is None:
-                lookup_path = field
-                if field.startswith("metadata."):
-                    lookup_path = field[len("metadata.") :]
+                lookup_path = field_name
+                if field_name.startswith("metadata."):
+                    lookup_path = field_name[len("metadata.") :]
                 value = self._extract_value(run_metadata, lookup_path)
             if value is not None:
-                extracted[field] = value
+                extracted[field_name] = value
         return extracted
 
     def _extract_value(self, payload: Mapping[str, Any], path: str) -> Any:
@@ -374,7 +374,9 @@ class EmbeddingsStoreSink(ResultSink):
             dsn = options.get("dsn")
             if not dsn:
                 raise ConfigurationError("pgvector provider requires 'dsn' option")
-            return PgVectorClient(dsn=dsn, table=options.get("table", "elspeth_rag"), upsert_conflict=options.get("upsert_conflict", "replace"))
+            return PgVectorClient(
+                dsn=dsn, table=options.get("table", "elspeth_rag"), upsert_conflict=options.get("upsert_conflict", "replace")
+            )
         if provider == "azure_search":
             endpoint = options.get("endpoint")
             index = options.get("index")
