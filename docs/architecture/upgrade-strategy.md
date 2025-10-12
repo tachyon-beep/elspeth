@@ -2,7 +2,7 @@
 
 ## Dependency Inventory
 - Canonical requirements live in `pyproject.toml:13-55`, splitting runtime vs optional extras (Azure ML telemetry, advanced statistics, Excel sinks).
-- Development tooling (`pytest`, `black`, `isort`) is pinned for deterministic CI (`pyproject.toml:26-33`).
+- Development tooling (`pytest`, `ruff`, `pytype`) is pinned for deterministic CI (`pyproject.toml:26-33`).
 - Bootstrap installs the editable package plus dev extras, then executes the whole pytest suite (`scripts/bootstrap.sh:16`), ensuring compatibility before promoting new builds.
 
 ## Upgrade Workflow

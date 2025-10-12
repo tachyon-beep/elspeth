@@ -397,7 +397,7 @@ class PluginRegistry:
                 },
             ),
             "analytics_report": PluginFactory(
-                create=lambda options: AnalyticsReportSink(**options),
+                create=lambda options, context: AnalyticsReportSink(**options),
                 schema={
                     "type": "object",
                     "properties": {

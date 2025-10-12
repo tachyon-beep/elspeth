@@ -58,7 +58,7 @@ class LocalBundleSink(ResultSink):
             if self.write_csv:
                 csv_path = bundle_dir / self.csv_name
                 csv_sink = CsvResultSink(
-                    path=csv_path,
+                    path=str(csv_path),
                     overwrite=True,
                     sanitize_formulas=self.sanitize_formulas,
                     sanitize_guard=self.sanitize_guard,

@@ -4,9 +4,9 @@ from pathlib import Path
 
 import pytest
 
-pytest.importorskip("matplotlib")  # Skip entire module if matplotlib is unavailable
-
 from elspeth.plugins.outputs.visual_report import VisualAnalyticsSink
+
+pytest.importorskip("matplotlib")  # Skip entire module if matplotlib is unavailable
 
 
 def _sample_payload() -> dict:

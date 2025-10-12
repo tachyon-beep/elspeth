@@ -12,7 +12,7 @@ from elspeth.core.controls import create_cost_tracker, create_rate_limiter
 from elspeth.core.experiments.plugin_registry import normalize_early_stop_definitions
 from elspeth.core.orchestrator import OrchestratorConfig
 from elspeth.core.registry import registry
-from elspeth.core.security import coalesce_security_level, normalize_security_level
+from elspeth.core.security import coalesce_security_level
 from elspeth.core.validation import ConfigurationError
 
 
@@ -60,9 +60,7 @@ class PluginDefinitions:
     early_stop_plugin_defs: List[Dict[str, Any]]
 
 
-def _prepare_plugin_definition(
-    definition: Mapping[str, Any], context: str
-) -> tuple[Dict[str, Any], str, tuple[str, ...]]:
+def _prepare_plugin_definition(definition: Mapping[str, Any], context: str) -> tuple[Dict[str, Any], str, tuple[str, ...]]:
     """Extract options, normalized security level, and provenance."""
 
     options = dict(definition.get("options", {}) or {})
@@ -108,7 +106,7 @@ def _read_profile_data(config_path: Path, profile: str) -> Dict[str, Any]:
 def _instantiate_plugin(
     definition: Mapping[str, Any],
     context: str,
-    factory: Callable[[str, Dict[str, Any]], Any],
+    factory: Callable[..., Any],
 ) -> Any:
     """Instantiate a plugin and apply the resolved security level attribute."""
 

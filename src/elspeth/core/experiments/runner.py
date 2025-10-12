@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from _thread import LockType
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
@@ -56,7 +55,7 @@ class ExperimentRunner:
     early_stop_config: Dict[str, Any] | None = None
     _active_early_stop_plugins: List[EarlyStopPlugin] | None = None
     _early_stop_event: threading.Event | None = None
-    _early_stop_lock: LockType | None = None
+    _early_stop_lock: threading.Lock | None = None
     _early_stop_reason: Dict[str, Any] | None = None
 
     def run(self, df: pd.DataFrame) -> Dict[str, Any]:

@@ -21,7 +21,7 @@
 
 ## Tooling & Development
 - **pytest / pytest-cov** – Test harness invoked by `make bootstrap` to ensure changes do not regress security controls (`pyproject.toml:26`, `scripts/bootstrap.sh:19`).[^dep-pytest-2025-10-12]
-- **black / isort** – Formatting tools, keeping code reviews deterministic (`pyproject.toml:32`, `Makefile:15`).[^dep-formatting-2025-10-12]
+- **ruff / pytype** – Primary linting & type-check stack (`pyproject.toml:32`, `Makefile:15`); ruff covers style/formatting, pytype adds static type analysis.[^dep-formatting-2025-10-12]
 
 ## Risk Considerations
 - Track vendor advisories for Azure SDKs and OpenAI libraries; patch windows should be documented in the accreditation runbook.[^dep-advisories-2025-10-12]
@@ -49,7 +49,7 @@
 [^dep-openpyxl-2025-10-12]: Update 2025-10-12: Excel dependency related to docs/architecture/security-controls.md (Update 2025-10-12: Output Sanitisation).
 [^dep-stats-2025-10-12]: Update 2025-10-12: Analytics extras referenced in docs/architecture/component-diagram.md (Update 2025-10-12: Artifact Pipeline).
 [^dep-pytest-2025-10-12]: Update 2025-10-12: Tooling dependency tied to docs/README.md (testing guidance).
-[^dep-formatting-2025-10-12]: Update 2025-10-12: Formatting tools ensure deterministic diffs; see CONTRIBUTING (if available).
+[^dep-formatting-2025-10-12]: Update 2025-10-12: Ruff enforces style/formatting while pytype adds static analysis; see CONTRIBUTING (if available).
 [^dep-advisories-2025-10-12]: Update 2025-10-12: Advisory tracking recommendation supports docs/architecture/threat-surfaces.md.
 [^dep-mock-2025-10-12]: Update 2025-10-12: Mock client usage described in docs/architecture/threat-surfaces.md (Update 2025-10-12: Service Abuse).
 [^dep-pipaudit-2025-10-12]: Update 2025-10-12: Vulnerability scanning recommendation recorded for accreditation artefacts.

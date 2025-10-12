@@ -29,8 +29,8 @@ dev = [
   "pytest-cov>=5.0.0",
   "openpyxl>=3.1",
   "pandas-stubs>=2.2.0.240807",
-  "black>=24.3.0",
-  "isort>=5.13.2",
+  "ruff>=0.6.2",
+  "pytype>=2024.9.13",
 ]
 azure = [
   "azureml-core>=1.56.0",
@@ -70,11 +70,23 @@ exclude = ["tests", "old", "notes", "config"]
 addopts = "-ra --cov=elspeth --cov-report=term-missing --cov-report=xml:coverage.xml"
 testpaths = ["tests"]
 
-[tool.black]
+[tool.ruff]
 line-length = 140
-target-version = ["py312"]
+target-version = "py312"
 
-[tool.isort]
-profile = "black"
-line_length = 140
-known_first_party = ["elspeth"]
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+ignore = []
+
+[tool.ruff.lint.isort]
+known-first-party = ["elspeth"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"
+
+[tool.pytype]
+inputs = ["src/elspeth"]
+python_version = "3.12"
+pythonpath = ["src"]

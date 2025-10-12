@@ -8,7 +8,7 @@ import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, Literal
 
 from elspeth.core.interfaces import ResultSink
 from elspeth.core.security import generate_signature
@@ -24,7 +24,7 @@ class SignedArtifactSink(ResultSink):
     results_name: str = "results.json"
     signature_name: str = "signature.json"
     manifest_name: str = "manifest.json"
-    algorithm: str = "hmac-sha256"
+    algorithm: Literal["hmac-sha256", "hmac-sha512"] = "hmac-sha256"
     key: str | None = None
     key_env: str | None = "ELSPETH_SIGNING_KEY"
     on_error: str = "abort"

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 from typing import Any, Callable, Dict, Iterable, Mapping
 
 from elspeth.core.plugins import PluginContext, apply_plugin_context
@@ -109,16 +110,32 @@ _cost_trackers: Dict[str, _Factory] = {
 }
 
 
-def register_rate_limiter(name: str, factory: Callable[[Dict[str, Any]], RateLimiter]) -> None:
+def register_rate_limiter(name: str, factory: Callable[..., RateLimiter]) -> None:
     """Register a custom rate limiter factory under the given name."""
 
-    _rate_limiters[name] = _Factory(factory)
+    signature = inspect.signature(factory)
+
+    if len(signature.parameters) == 1:
+        def _wrapped(options: Dict[str, Any], context: PluginContext) -> RateLimiter:
+            return factory(options)
+
+        _rate_limiters[name] = _Factory(_wrapped)
+    else:
+        _rate_limiters[name] = _Factory(factory)  # type: ignore[arg-type]
 
 
-def register_cost_tracker(name: str, factory: Callable[[Dict[str, Any]], CostTracker]) -> None:
+def register_cost_tracker(name: str, factory: Callable[..., CostTracker]) -> None:
     """Register a custom cost tracker factory under the given name."""
 
-    _cost_trackers[name] = _Factory(factory)
+    signature = inspect.signature(factory)
+
+    if len(signature.parameters) == 1:
+        def _wrapped(options: Dict[str, Any], context: PluginContext) -> CostTracker:
+            return factory(options)
+
+        _cost_trackers[name] = _Factory(_wrapped)
+    else:
+        _cost_trackers[name] = _Factory(factory)  # type: ignore[arg-type]
 
 
 def create_rate_limiter(

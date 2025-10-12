@@ -85,7 +85,7 @@ For diagrams and deep detail, see `docs/architecture/architecture-overview.md`, 
 
 - Run `python -m pytest -m "not slow"` (or `make test`) for fast feedback.
 - Use `python -m pytest --maxfail=1 --disable-warnings` during triage.
-- Lint/format with `make lint` (wraps `ruff`, `black`, and `isort` in check mode).
+- Lint/format with `make lint` (runs `ruff` formatting/checks plus `pytype`).
 - Regenerate analytics artefacts after reporting or sink changes:
 
   ```bash

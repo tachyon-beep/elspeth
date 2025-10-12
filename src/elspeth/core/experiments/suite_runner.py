@@ -153,15 +153,9 @@ class ExperimentSuiteRunner:
             apply_plugin_context(sink, sink_context)
 
         row_plugins = [create_row_plugin(defn, parent_context=experiment_context) for defn in row_defs] if row_defs else None
-        aggregator_plugins = (
-            [create_aggregation_plugin(defn, parent_context=experiment_context) for defn in agg_defs]
-            if agg_defs
-            else None
-        )
+        aggregator_plugins = [create_aggregation_plugin(defn, parent_context=experiment_context) for defn in agg_defs] if agg_defs else None
         validation_plugins = (
-            [create_validation_plugin(defn, parent_context=experiment_context) for defn in validation_defs]
-            if validation_defs
-            else None
+            [create_validation_plugin(defn, parent_context=experiment_context) for defn in validation_defs] if validation_defs else None
         )
         early_stop_plugins = (
             [create_early_stop_plugin(defn, parent_context=experiment_context) for defn in early_stop_plugin_defs]

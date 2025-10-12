@@ -32,9 +32,7 @@ def test_registry_creates_blob_datasource(tmp_path, monkeypatch):
 
     monkeypatch.setattr(blob_module, "load_blob_csv", fake_load_blob_csv)
 
-    ds = registry.create_datasource(
-        "azure_blob", {"config_path": cfg.as_posix(), "security_level": "official"}
-    )
+    ds = registry.create_datasource("azure_blob", {"config_path": cfg.as_posix(), "security_level": "official"})
 
     frame = ds.load()
     assert isinstance(frame, pd.DataFrame)
@@ -52,9 +50,7 @@ def test_registry_creates_csv_blob_datasource(tmp_path):
     csv_path = tmp_path / "data.csv"
     pd.DataFrame({"value": [1, 2]}).to_csv(csv_path, index=False)
 
-    ds = registry.create_datasource(
-        "csv_blob", {"path": csv_path.as_posix(), "security_level": "official"}
-    )
+    ds = registry.create_datasource("csv_blob", {"path": csv_path.as_posix(), "security_level": "official"})
     frame = ds.load()
 
     assert list(frame["value"]) == [1, 2]
@@ -143,12 +139,8 @@ def test_registry_validate_sink_schema_errors():
 def test_registry_sink_schema_success(tmp_path):
     dest = tmp_path / "out.txt"
     registry.validate_sink("csv", {"path": dest.as_posix(), "security_level": "official"})
-    registry.validate_sink(
-        "file_copy", {"destination": dest.as_posix(), "security_level": "official"}
-    )
-    sink = registry.create_sink(
-        "file_copy", {"destination": dest.as_posix(), "security_level": "official"}
-    )
+    registry.validate_sink("file_copy", {"destination": dest.as_posix(), "security_level": "official"})
+    sink = registry.create_sink("file_copy", {"destination": dest.as_posix(), "security_level": "official"})
     from elspeth.core.interfaces import Artifact
 
     src = tmp_path / "src.txt"

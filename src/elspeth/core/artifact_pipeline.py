@@ -116,10 +116,12 @@ class ArtifactStore:
             token = request.token
             if not token:
                 continue
+            selected: List[Artifact] = []
             if token.startswith("@"):  # alias lookup
                 alias = token[1:]
                 artifact = self.get_by_alias(alias)
-                selected = [artifact] if artifact else []
+                if artifact is not None:
+                    selected.append(artifact)
             else:
                 try:
                     validate_artifact_type(token)

@@ -1,3 +1,4 @@
+import json
 import threading
 import time
 
@@ -22,13 +23,30 @@ def test_experiment_suite_load(tmp_path):
     (exp_root / "exp1").mkdir(parents=True)
     (exp_root / "exp2").mkdir(parents=True)
     (exp_root / "exp1" / "config.json").write_text(
-        '{"name": "exp1", "temperature": 0.5, "max_tokens": 128, "enabled": true, "is_baseline": true, "prompt_fields": ["APPID"], "criteria": [{"name": "crit", "template": "Crit {APPID}"}]}',
+        json.dumps(
+            {
+                "name": "exp1",
+                "temperature": 0.5,
+                "max_tokens": 128,
+                "enabled": True,
+                "is_baseline": True,
+                "prompt_fields": ["APPID"],
+                "criteria": [{"name": "crit", "template": "Crit {APPID}"}],
+            }
+        ),
         encoding="utf-8",
     )
     (exp_root / "exp1" / "system_prompt.md").write_text("Sys", encoding="utf-8")
     (exp_root / "exp1" / "user_prompt.md").write_text("User {APPID}", encoding="utf-8")
     (exp_root / "exp2" / "config.json").write_text(
-        '{"name": "exp2", "temperature": 0.7, "max_tokens": 256, "enabled": true}',
+        json.dumps(
+            {
+                "name": "exp2",
+                "temperature": 0.7,
+                "max_tokens": 256,
+                "enabled": True,
+            }
+        ),
         encoding="utf-8",
     )
 

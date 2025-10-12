@@ -19,7 +19,7 @@ python -m elspeth.cli \
 Review the resulting artefacts (validation results, analytics/visual reports, Excel workbook) and capture checksum/signature outputs if they form part of accreditation evidence.
 
 ## Coding Style & Naming Conventions
-Code targets Python 3.12 with 4-space indentation, `typing` annotations, and descriptive module names (`metrics_*.py`, `suite_runner.py`). Format changes with `black` and fix imports using `isort`; the Makefile pins compatible versions. Prefer snake_case for functions and variables, PascalCase for classes, and keep docstrings concise but informative, especially around plugin hooks.
+Code targets Python 3.12 with 4-space indentation, `typing` annotations, and descriptive module names (`metrics_*.py`, `suite_runner.py`). Use `ruff` for formatting and linting, and run `pytype` for static analysis; the Makefile target `lint` installs pinned versions. Prefer snake_case for functions and variables, PascalCase for classes, and keep docstrings concise but informative, especially around plugin hooks.
 
 ## Testing Guidelines
 Pytest is the standard; new tests belong under `tests/` using `test_*.py` naming. Mirror package structure (`tests/core/test_runner.py`) to align fixtures with production modules. Aim to maintain the current ~83% coverage; add parametrized cases for concurrency, backoff, and plugin registration edge cases. When adding integration features, supply a CLI exercise under `tests/integration/` and document expected artifacts in assertions.

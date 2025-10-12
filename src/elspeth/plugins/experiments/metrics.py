@@ -735,7 +735,7 @@ class ScoreSignificanceBaselinePlugin:
                         result["adjustment"] = "bonferroni"
             elif self._adjustment == "fdr":
                 try:
-                    from statsmodels.stats.multitest import fdrcorrection
+                    from statsmodels.stats.multitest import fdrcorrection  # pytype: disable=import-error
 
                     valid = [(name, p) for name, p in p_values.items() if p is not None]
                     p_vals = [p for _, p in valid]

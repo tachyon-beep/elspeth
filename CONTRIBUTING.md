@@ -27,7 +27,7 @@ Thanks for investing time in improving Elspeth! This guide outlines the expectat
 3. **Follow coding standards**
 
    - Python 3.12, `typing` annotations, 4-space indentation.
-   - Run `make lint` (wraps `ruff`, `black`, `isort`) before pushing.
+   - Run `make lint` (ruff checks/format + pytype) before pushing.
    - Keep functions focused; factor helpers when cognitive complexity warns.
    - Commit messages use imperative style (`Add`, `Fix`, `Refine`).
 

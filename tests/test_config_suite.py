@@ -34,9 +34,7 @@ def test_load_settings_with_suite(tmp_path, monkeypatch):
             cost_tracker:
               plugin: fixed_price
               options: {prompt_token_price: 0.01}
-        """.replace(
-            "SUITE_ROOT", suite_root.as_posix()
-        ),
+        """.replace("SUITE_ROOT", suite_root.as_posix()),
         encoding="utf-8",
     )
 
@@ -95,9 +93,7 @@ def test_suite_defaults_override_prompt_pack_when_missing(tmp_path, monkeypatch)
             prompt_pack: sample
             prompts:
               system: Inline system
-        """.replace(
-            "SUITE_ROOT", suite_root.as_posix()
-        ),
+        """.replace("SUITE_ROOT", suite_root.as_posix()),
         encoding="utf-8",
     )
 
