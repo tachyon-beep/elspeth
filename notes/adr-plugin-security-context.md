@@ -1,15 +1,18 @@
 # ADR: Introduce Plugin Context for Secure Plugin Instantiation
 
 ## Status
+
 Proposed
 
 ## Context
+
 The platform now requires every plugin definition to declare a `security_level`. Registry methods in `src/elspeth/core/registry.py` and `src/elspeth/core/experiments/plugin_registry.py` validate that a level is supplied, normalize it, and strip the field before invoking plugin factory callables. They then re-attach the normalized classification to the constructed instance via the `_elspeth_security_level` attribute. This sequence ensures validation but prevents plugin constructors from reacting to the classification during initialization. Moreover, downstream components and third-party plugins rely on ad-hoc attribute access (`getattr(plugin, "_elspeth_security_level", None)`), which is undocumented and error-prone.
 
 Nested builders—such as `_build_llm_guard` in `src/elspeth/plugins/experiments/validation.py`
 —must manually coalesce security levels when instantiating sub-plugins. Any oversight in these helpers leads to runtime `ConfigurationError` exceptions. In addition, configuration merging (suite defaults, prompt packs, experiment overrides) uses `coalesce_security_level` without preserving the provenance of the resolved value, reducing auditability when conflicts arise.
 
 ## Decision
+
 We will introduce a `PluginContext` object that encapsulates metadata required during plugin construction, starting with:
 
 - `plugin_name`: the registry identifier being instantiated.
@@ -31,6 +34,7 @@ A lightweight `SecurityScopedPlugin` protocol will be published, exposing read-o
 Configuration validation will also record provenance information when resolving security levels. Diagnostics will report the origin of each level and highlight conflicts between overrides, supporting audits and troubleshooting.
 
 ## Consequences
+
 - Plugin constructors can branch on security classification at creation time (e.g., enforce stricter defaults for `official-sensitive`).
 - Context propagation standardizes metadata delivery across nested plugin builders, eliminating repeated `setattr` logic and reducing regressions when adding new helper functions.
 - Third-party plugin authors have a documented contract for accessing security metadata via `SecurityScopedPlugin`.
@@ -38,6 +42,7 @@ Configuration validation will also record provenance information when resolving 
 - Configuration loaders must capture provenance details, increasing bookkeeping but improving auditability. Logging changes may be needed to surface provenance on conflicts.
 
 ## Implementation Outline
+
 1. Define `PluginContext` dataclass in `elspeth/core/plugins/context.py` (new module) and expose it to plugin registries.
 2. Update registry `PluginFactory.create` signatures to accept `context` and forward it to plugin constructors.
 3. Modify builtin plugins to accept `context` and read `context.security_level` instead of reaching for `_elspeth_security_level` post-instantiation.
@@ -47,11 +52,12 @@ Configuration validation will also record provenance information when resolving 
 7. Document the new context-based plugin interface in `docs/architecture/plugin-system.md` and update developer guidelines.
 
 ## Alternatives Considered
+
 - Continue using `_elspeth_security_level` with better documentation: rejected because it does not enable constructors to react to classification and leaves nested builders error-prone.
 - Encode security level in plugin kwargs only: rejected because validating every plugin to accept `security_level` creates inconsistent APIs and does not convey provenance.
 
 ## Rollout
+
 - Introduce the new context class behind a feature flag, allowing internal plugins to adopt it first.
 - Provide a deprecation period where registries still set `_elspeth_security_level` for legacy consumers, emitting warnings when constructors do not accept the new `context` parameter.
 - After the transition window, remove the legacy attribute pathway.
-
