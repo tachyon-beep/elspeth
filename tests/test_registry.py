@@ -108,6 +108,31 @@ def test_create_row_plugin_validates_schema():
     plugin_registry.validate_row_plugin_definition({"name": "limited", "security_level": "official", "options": {"threshold": 0.5}})
 
 
+def test_create_row_plugin_conflicting_security_levels():
+    with pytest.raises(ConfigurationError) as exc:
+        plugin_registry.create_row_plugin(
+            {
+                "name": "score_extractor",
+                "security_level": "official",
+                "options": {"security_level": "secret"},
+            }
+        )
+    assert "Conflicting security_level values" in str(exc.value)
+
+
+def test_create_row_plugin_inherits_parent_context():
+    from elspeth.core.plugins import PluginContext
+
+    parent_context = PluginContext(plugin_name="suite", plugin_kind="suite", security_level="secret")
+    plugin = plugin_registry.create_row_plugin(
+        {"name": "score_extractor", "security_level": "secret"},
+        parent_context=parent_context,
+    )
+    assert plugin.plugin_context.parent == parent_context
+    assert plugin.plugin_context.security_level == "secret"
+    assert plugin.security_level == "secret"
+
+
 def test_normalize_early_stop_definitions_handles_various_forms():
     entries = [
         {"name": "custom", "options": {"limit": 5}, "security_level": "official"},

@@ -63,3 +63,29 @@ def test_visual_sink_skip_when_backend_missing(monkeypatch, tmp_path: Path) -> N
 
     assert not list(tmp_path.iterdir())
     assert sink.collect_artifacts() == {}
+
+
+def test_visual_sink_falls_back_to_row_metrics(tmp_path: Path) -> None:
+    sink = VisualAnalyticsSink(base_path=str(tmp_path), formats=["png"])
+    payload = {
+        "results": [
+            {
+                "row": {"APPID": "1"},
+                "metrics": {"scores": {"analysis": 0.2}, "score_flags": {"analysis": True}},
+            },
+            {
+                "row": {"APPID": "2"},
+                "metrics": {"scores": {"analysis": 0.6}, "score_flags": {"analysis": False}},
+            },
+        ]
+    }
+    metadata = {"security_level": "official", "early_stop": {"reason": "threshold"}}
+
+    sink.write(payload, metadata=metadata)
+    artifacts = sink.collect_artifacts()
+
+    assert (tmp_path / "analytics_visual.png").exists()
+    chart_data = artifacts["analytics_visual_png"].metadata["chart_data"]
+    pass_rates = artifacts["analytics_visual_png"].metadata["pass_rates"]
+    assert chart_data["analysis"] == pytest.approx(0.4)
+    assert pass_rates["analysis"] == pytest.approx(0.5)

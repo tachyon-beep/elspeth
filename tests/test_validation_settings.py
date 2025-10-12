@@ -134,6 +134,60 @@ def test_validate_settings_requires_sink_security_level(tmp_path):
     assert any("security_level" in message for message in messages)
 
 
+def test_validate_settings_rejects_blank_sink_security_level(tmp_path):
+    config_path = tmp_path / "settings.yaml"
+    write_settings(
+        config_path,
+        """
+        default:
+          datasource:
+            plugin: local_csv
+            security_level: official
+            options:
+              path: input.csv
+          llm:
+            plugin: mock
+            security_level: official
+          sinks:
+            - plugin: csv
+              security_level: ""
+              options:
+                path: outputs/latest.csv
+        """,
+    )
+    report = validate_settings(config_path)
+    messages = [msg.format() for msg in report.errors]
+    assert any("security_level must be non-empty" in message for message in messages)
+    assert any("Plugin must declare a security_level" in message for message in messages)
+
+
+def test_validate_settings_conflicting_sink_security_levels(tmp_path):
+    config_path = tmp_path / "settings.yaml"
+    write_settings(
+        config_path,
+        """
+        default:
+          datasource:
+            plugin: local_csv
+            security_level: official
+            options:
+              path: input.csv
+          llm:
+            plugin: mock
+            security_level: official
+          sinks:
+            - plugin: csv
+              security_level: official
+              options:
+                path: outputs/latest.csv
+                security_level: secret
+        """,
+    )
+    report = validate_settings(config_path)
+    messages = [msg.format() for msg in report.errors]
+    assert any("Conflicting security_level values" in message for message in messages)
+
+
 def test_validate_suite_detects_missing_prompts(tmp_path):
     suite_root = tmp_path / "suite"
     exp = suite_root / "experiment"
