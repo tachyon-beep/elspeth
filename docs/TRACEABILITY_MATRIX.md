@@ -1,3 +1,5 @@
+# Traceability Matrix
+
 | Component | File Path | Documentation Reference | Last Verified |
 |-----------|-----------|------------------------|---------------|
 | Orchestrator Core | src/elspeth/core/orchestrator.py | docs/architecture/architecture-overview.md (Update 2025-10-12: Orchestrator Core), docs/architecture/component-diagram.md (Update 2025-10-12: Orchestrator Core) | 2025-10-12 |

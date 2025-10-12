@@ -162,44 +162,10 @@ def run(args: argparse.Namespace) -> None:
     """Dispatch execution based on CLI arguments and configuration."""
 
     configure_logging(args.log_level)
-    settings_report = validate_settings(args.settings, profile=args.profile)
-    for warning in settings_report.warnings:
-        logger.warning(warning.format())
-    settings_report.raise_if_errors()
-    settings = load_settings(args.settings, profile=args.profile)
-    if args.disable_metrics:
-        _strip_metrics_plugins(settings)
-    _configure_sink_dry_run(settings, enable_live=args.live_outputs)
-    suite_root_value = args.suite_root or settings.suite_root
-    suite_root = Path(suite_root_value) if suite_root_value else None
+    settings = _load_settings_from_args(args)
+    suite_root = _resolve_suite_root(args, settings)
 
-    suite_instance: ExperimentSuite | None = None
-    export_path = getattr(args, "export_suite_config", None)
-    template_name = getattr(args, "create_experiment_template", None)
-    reports_dir = getattr(args, "reports_dir", None)
-    template_base = getattr(args, "template_base", None)
-    management_requested = any([export_path, template_name, reports_dir])
-    if management_requested and suite_root is None:
-        message = "Suite root is required for template creation, export, or report generation."
-        raise SystemExit(message)
-    if suite_root is not None and management_requested:
-        suite_instance = ExperimentSuite.load(suite_root)
-
-    if template_name:
-        assert suite_instance is not None  # for mypy
-        assert suite_root is not None  # for mypy
-        destination = create_experiment_template(
-            suite_instance,
-            template_name,
-            base_experiment=template_base,
-        )
-        logger.info("Created experiment template at %s", destination)
-        suite_instance = ExperimentSuite.load(suite_root)
-
-    if export_path:
-        assert suite_instance is not None
-        export_suite_configuration(suite_instance, export_path)
-        logger.info("Exported suite configuration to %s", export_path)
+    suite_instance = _handle_suite_management(args, suite_root)
 
     if suite_root is not None and not args.single_run:
         suite_validation = validate_suite(suite_root)
@@ -351,6 +317,61 @@ def _assemble_suite_defaults(settings) -> dict:
         defaults["cost_tracker"] = settings.cost_tracker
 
     return defaults
+
+
+def _load_settings_from_args(args: argparse.Namespace):
+    """Load orchestrator settings after validating configuration."""
+
+    settings_report = validate_settings(args.settings, profile=args.profile)
+    for warning in settings_report.warnings:
+        logger.warning(warning.format())
+    settings_report.raise_if_errors()
+    settings = load_settings(args.settings, profile=args.profile)
+    if args.disable_metrics:
+        _strip_metrics_plugins(settings)
+    _configure_sink_dry_run(settings, enable_live=args.live_outputs)
+    return settings
+
+
+def _resolve_suite_root(args: argparse.Namespace, settings) -> Path | None:
+    """Determine the suite root directory from CLI overrides or settings."""
+
+    suite_root_value = args.suite_root or settings.suite_root
+    return Path(suite_root_value) if suite_root_value else None
+
+
+def _handle_suite_management(
+    args: argparse.Namespace, suite_root: Path | None
+) -> ExperimentSuite | None:
+    """Process template/export/report requests before running experiments."""
+
+    export_path = getattr(args, "export_suite_config", None)
+    template_name = getattr(args, "create_experiment_template", None)
+    reports_dir = getattr(args, "reports_dir", None)
+    template_base = getattr(args, "template_base", None)
+    management_requested = any([export_path, template_name, reports_dir])
+    if not management_requested:
+        return None
+    if suite_root is None:
+        message = "Suite root is required for template creation, export, or report generation."
+        raise SystemExit(message)
+
+    suite_instance = ExperimentSuite.load(suite_root)
+
+    if template_name:
+        destination = create_experiment_template(
+            suite_instance,
+            template_name,
+            base_experiment=template_base,
+        )
+        logger.info("Created experiment template at %s", destination)
+        suite_instance = ExperimentSuite.load(suite_root)
+
+    if export_path:
+        export_suite_configuration(suite_instance, export_path)
+        logger.info("Exported suite configuration to %s", export_path)
+
+    return suite_instance
 
 
 def _run_suite(

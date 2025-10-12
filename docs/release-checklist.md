@@ -4,6 +4,7 @@ Use this list before shipping a new release. Treat it as a living document;
 update as processes evolve.
 
 ## Pre-Release Validation
+
 1. **Environment** – create/activate `.venv`, run `pip install -e .[dev]`.
 1. **Formatting & linting** – `pre-commit run --all-files` (or `make lint`).
 1. **Unit tests** – `python -m pytest` (ensure coverage for new code).
@@ -18,22 +19,26 @@ update as processes evolve.
 1. **Blob/repository dry-run** – if publishing to external sinks, rerun with `--live-outputs` disabled to confirm dry-run manifests/logs capture target paths without mutating external systems (`src/elspeth/cli.py:344`).[^release-dry-run-2025-10-12]
 
 ## Documentation
+
 1. Update `README.md`, `AGENTS.md`, and relevant docs (migration guide, logging standards) when behaviour changes.
 1. Increment plan status in `master_work_plan.md` (mark completed tasks, add notes for deferrals).
 1. Run `docs/reporting-and-suite-management.md` commands to ensure CLI help text remains accurate; update screenshots or artefact lists if analytics pipeline changed.
 
 ## Packaging & Changelog
+
 1. Update `pyproject.toml` version if publishing.
 1. Draft release notes summarising major features, bug fixes, and upgrade steps.
 1. Reference dependency audit, telemetry updates, and any new optional extras in the changelog to aid security reviewers.
 
 ## Post-Release
+
 1. Tag the release and push (after manual verification).
 1. Archive generated outputs/logs if needed; reset `outputs/` locally.
 1. Review telemetry dashboards/alerts to confirm healthy runtime behaviour.
 1. Submit analytics/signed artefact samples to accreditation archive and rotate secrets used during validation.
 
 ## Update History
+
 - 2025-10-12 – Update 2025-10-12: Added suite reporting verification and dry-run sink validation steps aligned with new reporting and telemetry flows.
 - 2025-10-12 – Added dependency audit, concurrency/retry validation, visual analytics verification, and signed artifact verification steps to align with accreditation checkpoints.
 - 2025-10-12 – Update 2025-10-12: Added references to dependency analysis, data-flow concurrency checks, and security controls for signing/visual analytics.

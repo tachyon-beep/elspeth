@@ -8,6 +8,7 @@ result sinks so that operations teams have consistent telemetry.
 - **Channels** – Each middleware should emit logs under a dedicated logger
   (e.g. `elspeth.health`, `elspeth.prompt_shield`, `elspeth.azure_content_safety`).
 - **Heartbeat entries** (`health_monitor`):
+
   ```json
   {
     "requests": 42,
@@ -19,6 +20,7 @@ result sinks so that operations teams have consistent telemetry.
     "latency_max": 1.12
   }
   ```
+
   Emit at INFO level; include counts even when zero.
 - **Safety violations** (`prompt_shield`, `azure_content_safety`):
   - Log at WARNING with the blocked term/category and action taken
@@ -55,12 +57,14 @@ result sinks so that operations teams have consistent telemetry.
 - Avoid over-constraining format (timestamp, ordering) so logging can evolve.
 
 ## References
+
 - `tests/test_llm_middleware.py` demonstrates log validation for heartbeats and
   safety middleware.
 - `tests/test_outputs_*` should assert sink logging behaviour where relevant.
 - `tests/test_reporting.py` verifies analytics/report exports log created artefacts and metadata hand-offs.
 
 ## Update History
+
 - 2025-10-12 – Update 2025-10-12: Added suite report export logging expectations and Azure blob telemetry guidance aligned with new reporting flows.
 - 2025-10-12 – Clarified retry exhaustion payload fields, suite lifecycle telemetry, and analytics sink logging expectations for accreditation traceability.
 - 2025-10-12 – Update 2025-10-12: Added references to audit logging sections and sink provenance requirements.
