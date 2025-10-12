@@ -94,8 +94,57 @@
   - Requires middleware cooperation to emit the structured trace events.
   - Less suited for real-time observability; more of a forensic/compliance tool.
 
+<!-- UPDATE 2025-10-12: Option C detailed plan -->
+#### Option C – Implementation Plan
+
+1. **Trace Capture Middleware**
+   - Build `structured_trace_recorder` middleware to wrap LLM calls, generating UUID trace/span identifiers and recording ISO-8601 start timestamps.
+   - Hash prompts (SHA-256 default) before sending downstream; optionally include truncated raw bodies (controlled via `record_body`/`max_prompt_chars`).
+   - On response, append duration, retry metadata (`response["retry"]`), token/cost metrics, and outcome state to `response.setdefault("trace", {"events": []})`.
+   - Config flags: `include_cost_metrics`, `custom_metadata_fields` (dot paths from request metadata), `redact_fields`, `hash_algorithm`, ensuring middleware stays thread-safe by storing transient state in `request.metadata["_trace_ctx"]`.
+
+2. **StructuredTraceSink**
+   - New sink consumes trace events from result payloads, writing NDJSON bundles under `base_path` (default `outputs/trace_bundles`).
+   - Key options: `bundle_name`, `rotate_every`, `compress` (`none`/`gzip`), `include_raw_prompts`, `redaction_rules` (regex/JSONPath), `retention_days`, and optional `signing` block (delegating to existing signing helpers).
+   - Enrich each event with `suite`, `experiment`, `run_id`, `row_id`, and `security_level` based on `PluginContext`/execution metadata; apply redaction rules before persistence.
+   - Maintain per-file counters for rotation; close handles on rotation/finalize and emit manifest summarising file names, SHA256 checksums, event counts, retention policy, and classification. Manifest surfaced via `collect_artifacts()` as `audit/trace-manifest+json` while bundles use `audit/trace+ndjson`.
+   - When signing enabled, produce companion `.sig` files and reference them inside the manifest.
+
+3. **Schema Definition**
+   - NDJSON event schema fields:
+
+     | Field | Description |
+     | --- | --- |
+     | `trace_id`, `span_id`, `parent_span_id` | UUID identifiers linking retries and sub-operations. |
+     | `timestamp`, `duration_ms` | Start timestamp (ISO-8601) and elapsed duration. |
+     | `suite`, `experiment`, `run_id`, `row_id` | Provenance derived from context/metadata. |
+     | `security_level` | Effective classification for downstream storage policy. |
+     | `llm.plugin`, `llm.provider`, `llm.model` | Originating LLM metadata. |
+     | `prompts.hash`, `prompts.body` | Hash always present; body optional per config/redaction. |
+     | `prompt.tokens`, `completion.tokens`, `cost` | Token usage & cost summaries when available. |
+     | `retry` | Attempt counts, delays, final status. |
+     | `response.status`, `response.error_code` | Execution outcome for filtering/alerts. |
+     | `metadata` | Sanitised extra fields requested via configuration. |
+
+4. **Pipeline Integration**
+   - Register sink in `core/registry.py` with schema validation enforcing `security_level`, `base_path`, rotation defaults, and signing payload structure.
+   - Ensure artifact pipeline exposes produced artifacts (bundles + manifest) for chained sinks (e.g., signing, archiving).
+   - Update documentation/CLI samples to show middleware + sink configuration for audit-ready deployments.
+
+5. **Testing & Verification**
+   - Unit tests for middleware hashing/redaction, sink rotation, manifest creation, and signing (using stub keys).
+   - Integration test running a mock suite with middleware + sink ensuring NDJSON output, manifest accuracy, and artifact registration.
+   - Static checks: JSON schema validation for event envelopes, coverage for error-path handling (e.g., retries, exceptions).
+
+6. **Open Questions**
+   - Handling of large prompt bodies when `include_raw_prompts` is true (streaming vs. truncation?).
+   - Retention signalling—should expiration be enforced by sink (deletion) or reported via manifest only?
+   - Shared schema versioning: embed `schema_version` in events/manifest to manage forward compatibility.
+<!-- END UPDATE -->
+
 <!-- END UPDATE -->
 
 ## Update History
 
 - 2025-10-12 – Documented LLM tracing plugin options (OpenTelemetry middleware, Azure Monitor middleware, structured trace sink) with configuration surfaces and trade-off analysis.
+- 2025-10-12 – Added detailed implementation plan for Structured Trace Sink (Option C).

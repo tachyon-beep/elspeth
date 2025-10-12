@@ -88,3 +88,38 @@ def test_rag_query_plugin_shim_warns():
     payload = plugin.process_row({"query": "example"}, {})
 
     assert payload["metrics"]["retrieval"]["hits"] == 1
+
+
+def test_retrieval_utility_no_hits_returns_metrics_block():
+    service = StubRetrievalService([])
+    utility = RetrievalContextUtility(
+        provider="pgvector",
+        dsn="postgresql://example",
+        embed_model={"provider": "openai", "model": "irrelevant"},
+        service_factory=lambda config: service,
+    )
+    _attach_utility_context(utility)
+
+    payload = utility.build_payload(row={"query": "absent"})
+
+    assert payload == {"metrics": {"retrieval": {"hits": 0, "namespace": "suite.experiment.official"}}}
+
+
+def test_retrieval_utility_resolves_query_from_metadata():
+    hits = [QueryResult(document_id="doc-1", text="Hit", score=0.6, metadata={})]
+    service = StubRetrievalService(hits)
+    utility = RetrievalContextUtility(
+        provider="pgvector",
+        dsn="postgresql://example",
+        embed_model={"provider": "openai", "model": "irrelevant"},
+        service_factory=lambda config: service,
+        query_field="metadata.prompt",
+    )
+    _attach_utility_context(utility)
+
+    payload = utility.build_payload(row={}, metadata={"prompt": "from metadata"})
+
+    assert payload["metrics"]["retrieval"]["hits"] == 1
+    namespace, query_text, _, _ = service.calls[0]
+    assert namespace == "suite.experiment.official"
+    assert query_text == "from metadata"

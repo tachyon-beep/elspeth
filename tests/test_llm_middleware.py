@@ -9,6 +9,7 @@ from elspeth.core.experiments.runner import ExperimentRunner
 from elspeth.core.experiments.suite_runner import ExperimentSuiteRunner
 from elspeth.core.llm.middleware import LLMRequest
 from elspeth.core.llm.registry import create_middlewares
+from elspeth.plugins.llms.middleware import AuditMiddleware, HealthMonitorMiddleware
 from elspeth.plugins.llms.middleware_azure import AzureEnvironmentMiddleware
 
 
@@ -198,6 +199,36 @@ def test_azure_content_safety_masks(monkeypatch):
     request = LLMRequest(system_prompt="sys", user_prompt="bad prompt", metadata={})
     updated = middleware.before_request(request)
     assert updated.user_prompt == "***"
+
+
+def test_audit_middleware_logs_prompts(caplog):
+    middleware = AuditMiddleware(include_prompts=True, channel="test.audit")
+    request = LLMRequest(system_prompt="sys", user_prompt="prompt text", metadata={"run": "123"})
+    response = {"metrics": {"tokens": 12}, "content": "reply"}
+
+    with caplog.at_level("DEBUG"):
+        middleware.before_request(request)
+        middleware.after_response(request, response)
+
+    messages = " ".join(record.message for record in caplog.records)
+    assert "LLM request metadata" in messages
+    assert "prompt text" in messages
+    assert "LLM response content" in messages
+
+
+def test_health_monitor_emits_heartbeat(monkeypatch, caplog):
+    times = iter([0.0, 0.25, 0.5])
+    monkeypatch.setattr("elspeth.plugins.llms.middleware.time.monotonic", lambda: next(times))
+
+    middleware = HealthMonitorMiddleware(heartbeat_interval=0, stats_window=2, channel="test.health", include_latency=True)
+    request = LLMRequest(system_prompt="sys", user_prompt="hello", metadata={})
+
+    with caplog.at_level("INFO"):
+        middleware.before_request(request)
+        middleware.after_response(request, {"content": "reply"})
+
+    assert any("test.health" in record.message for record in caplog.records)
+    assert any("latency_avg" in record.message for record in caplog.records)
 
 
 def test_azure_content_safety_skip_on_error(monkeypatch, caplog):
