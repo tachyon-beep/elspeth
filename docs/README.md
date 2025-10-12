@@ -10,6 +10,8 @@ This directory captures the operational guides, architecture references, and com
 - [`logging-standards.md`](logging-standards.md) – Expectations for structured logging, audit trails, and telemetry integration.
 - [`migration-guide.md`](migration-guide.md) – Steps for upgrading Elspeth deployments between releases.
 - [`release-checklist.md`](release-checklist.md) – Tasks required before tagging a release, from artefact regeneration to documentation updates.
+- [`FEATURE_ROADMAP.md`](FEATURE_ROADMAP.md) – Feature and vendor taxonomy for upcoming plugin work.
+- [`COMPLIANCE_ROADMAP.md`](COMPLIANCE_ROADMAP.md) – Accreditation, documentation, and evidence roadmap.
 
 ## Architecture & Security
 
@@ -22,12 +24,15 @@ Security-focused documents include:
 - [`architecture/threat-traceability.md`](architecture/threat-traceability.md) – Links from threats to implemented controls.
 - [`architecture/incident-response.md`](architecture/incident-response.md) – Response plan and runbook expectations.
 - [`TRACEABILITY_MATRIX.md`](TRACEABILITY_MATRIX.md) – Requirement-to-test traceability for accreditation.
+- [`notes/plugin-hardening-principles.md`](notes/plugin-hardening-principles.md) – Long-term plan for plugin manifests, Host API, and isolation tiers.
 
 ## Compliance & Accreditation Artefacts
 
 - [`architecture/CONTROL_INVENTORY.md`](architecture/CONTROL_INVENTORY.md) – Control IDs, owners, and verification activities.
 - [`architecture/accreditation-run-example.md`](architecture/accreditation-run-example.md) – End-to-end example aligned with accreditation evidence requirements.
 - [`architecture/environment-hardening.md`](architecture/environment-hardening.md) – Baseline hardening guidance for deployment environments.
+- [`notes/security-hardening-work-plan.md`](notes/security-hardening-work-plan.md) – Archived work packages and status for security hardening initiatives.
+- [`notes/security-assessment-archive.md`](notes/security-assessment-archive.md) – Historical security/code-quality findings with current status.
 
 ## Testing & Quality
 
