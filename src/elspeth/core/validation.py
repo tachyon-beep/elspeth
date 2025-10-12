@@ -444,7 +444,7 @@ def _validate_plugin_reference(
         options_dict = None
     elif isinstance(options, Mapping):
         options_dict = dict(options)
-        options_level_raw = options_dict.pop("security_level", None)
+        options_level_raw = options_dict.get("security_level")
     else:
         report.add_error("Options must be a mapping", context=f"{kind}:{plugin}")
         options_dict = {}
@@ -459,8 +459,14 @@ def _validate_plugin_reference(
             options_level=options_level_raw,
         )
 
+    validation_options = dict(options_dict or {})
+    if entry.get("security_level") is not None:
+        validation_options.setdefault("security_level", entry.get("security_level"))
+    elif options_level_raw is not None:
+        validation_options.setdefault("security_level", options_level_raw)
+
     try:
-        validator(plugin, options_dict)
+        validator(plugin, validation_options)
     except (ValueError, ConfigurationError) as exc:
         report.add_error(str(exc), context=f"{kind}:{plugin}")
 

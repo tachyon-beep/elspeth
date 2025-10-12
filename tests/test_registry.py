@@ -33,8 +33,7 @@ def test_registry_creates_blob_datasource(tmp_path, monkeypatch):
     monkeypatch.setattr(blob_module, "load_blob_csv", fake_load_blob_csv)
 
     ds = registry.create_datasource(
-        "azure_blob",
-        {"config_path": cfg.as_posix()},
+        "azure_blob", {"config_path": cfg.as_posix(), "security_level": "official"}
     )
 
     frame = ds.load()
@@ -53,7 +52,9 @@ def test_registry_creates_csv_blob_datasource(tmp_path):
     csv_path = tmp_path / "data.csv"
     pd.DataFrame({"value": [1, 2]}).to_csv(csv_path, index=False)
 
-    ds = registry.create_datasource("csv_blob", {"path": csv_path.as_posix()})
+    ds = registry.create_datasource(
+        "csv_blob", {"path": csv_path.as_posix(), "security_level": "official"}
+    )
     frame = ds.load()
 
     assert list(frame["value"]) == [1, 2]
@@ -73,8 +74,8 @@ def test_registry_constructs_llm_and_sink(monkeypatch):
     registry_module.registry._llms["dummy"] = registry_module.PluginFactory(lambda options: DummyLLM(**options))
     registry_module.registry._sinks["dummy"] = registry_module.PluginFactory(lambda options: DummySink(**options))
 
-    llm = registry.create_llm("dummy", {"name": "llm"})
-    sink = registry.create_sink("dummy", {"name": "sink"})
+    llm = registry.create_llm("dummy", {"name": "llm", "security_level": "official"})
+    sink = registry.create_sink("dummy", {"name": "sink", "security_level": "official"})
 
     assert isinstance(llm, DummyLLM)
     assert isinstance(sink, DummySink)
@@ -134,16 +135,20 @@ def test_normalize_early_stop_definitions_rejects_invalid_types():
 
 def test_registry_validate_sink_schema_errors():
     with pytest.raises(ConfigurationError):
-        registry.validate_sink("csv", {"path": None})
+        registry.validate_sink("csv", {"path": None, "security_level": "official"})
     with pytest.raises(ConfigurationError):
-        registry.validate_sink("file_copy", {"destination": None})
+        registry.validate_sink("file_copy", {"destination": None, "security_level": "official"})
 
 
 def test_registry_sink_schema_success(tmp_path):
     dest = tmp_path / "out.txt"
-    registry.validate_sink("csv", {"path": dest.as_posix()})
-    registry.validate_sink("file_copy", {"destination": dest.as_posix()})
-    sink = registry.create_sink("file_copy", {"destination": dest.as_posix()})
+    registry.validate_sink("csv", {"path": dest.as_posix(), "security_level": "official"})
+    registry.validate_sink(
+        "file_copy", {"destination": dest.as_posix(), "security_level": "official"}
+    )
+    sink = registry.create_sink(
+        "file_copy", {"destination": dest.as_posix(), "security_level": "official"}
+    )
     from elspeth.core.interfaces import Artifact
 
     src = tmp_path / "src.txt"

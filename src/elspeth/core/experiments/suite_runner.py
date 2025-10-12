@@ -197,18 +197,19 @@ class ExperimentSuiteRunner:
             if not isinstance(plugin, str) or not plugin:
                 raise ConfigurationError("Each sink definition must include a 'plugin' string")
             raw_options = dict(entry.get("options", {}))
-            core_registry.registry.validate_sink(plugin, raw_options)
-            options = dict(raw_options)
-            artifacts_cfg = options.pop("artifacts", None)
-            security_level = options.pop("security_level", entry.get("security_level"))
-            sink = core_registry.registry.create_sink(plugin, options)
+            artifacts_cfg = raw_options.pop("artifacts", None)
+            security_level = entry.get("security_level", raw_options.get("security_level"))
+            if security_level is None:
+                raise ConfigurationError(f"sink '{plugin}' requires a security_level")
+            options_with_level = dict(raw_options)
+            options_with_level["security_level"] = security_level
+            core_registry.registry.validate_sink(plugin, options_with_level)
+            sink = core_registry.registry.create_sink(plugin, options_with_level)
             setattr(sink, "_elspeth_artifact_config", artifacts_cfg or {})
             setattr(sink, "_elspeth_plugin_name", plugin)
             name_value = entry.get("name")
             base_name = name_value if isinstance(name_value, str) and name_value else plugin or f"sink{index}"
             setattr(sink, "_elspeth_sink_name", base_name)
-            if security_level:
-                setattr(sink, "_elspeth_security_level", security_level)
             sinks.append(sink)
         return sinks
 

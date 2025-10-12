@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Dict, Mapping
 
 from elspeth.core.interfaces import DataSource, LLMClientProtocol, ResultSink
+from elspeth.core.security import normalize_security_level
 from elspeth.core.validation import ConfigurationError, validate_schema
 from elspeth.plugins.datasources import BlobDataSource, CSVBlobDataSource, CSVDataSource
 from elspeth.plugins.llms import AzureOpenAIClient, HttpOpenAIClient, MockLLMClient, StaticLLMClient
@@ -467,7 +468,16 @@ class PluginRegistry:
         except KeyError as exc:
             raise ValueError(f"Unknown datasource plugin '{name}'") from exc
         factory.validate(options or {}, context=f"datasource:{name}")
-        return factory.create(options)
+        security_level = options.get("security_level")
+        if security_level is None:
+            raise ConfigurationError(f"datasource:{name}: security_level is required")
+        normalized_level = normalize_security_level(security_level)
+        sanitized = dict(options or {})
+        sanitized.pop("security_level", None)
+        plugin = factory.create(sanitized)
+        setattr(plugin, "security_level", normalized_level)
+        setattr(plugin, "_elspeth_security_level", normalized_level)
+        return plugin
 
     def validate_datasource(self, name: str, options: Dict[str, Any] | None) -> None:
         """Validate datasource plugin options without creating the plugin."""
@@ -476,7 +486,10 @@ class PluginRegistry:
             factory = self._datasources[name]
         except KeyError as exc:
             raise ValueError(f"Unknown datasource plugin '{name}'") from exc
-        factory.validate(options or {}, context=f"datasource:{name}")
+        data = options or {}
+        if data.get("security_level") is None:
+            raise ConfigurationError(f"datasource:{name}: security_level is required")
+        factory.validate(data, context=f"datasource:{name}")
 
     def create_llm(self, name: str, options: Dict[str, Any]) -> LLMClientProtocol:
         """Instantiate an LLM plugin by name after validating options."""
@@ -486,7 +499,16 @@ class PluginRegistry:
         except KeyError as exc:
             raise ValueError(f"Unknown llm plugin '{name}'") from exc
         factory.validate(options or {}, context=f"llm:{name}")
-        return factory.create(options)
+        security_level = options.get("security_level")
+        if security_level is None:
+            raise ConfigurationError(f"llm:{name}: security_level is required")
+        normalized_level = normalize_security_level(security_level)
+        sanitized = dict(options or {})
+        sanitized.pop("security_level", None)
+        plugin = factory.create(sanitized)
+        setattr(plugin, "security_level", normalized_level)
+        setattr(plugin, "_elspeth_security_level", normalized_level)
+        return plugin
 
     def validate_llm(self, name: str, options: Dict[str, Any] | None) -> None:
         """Validate LLM plugin options without instantiation."""
@@ -495,7 +517,10 @@ class PluginRegistry:
             factory = self._llms[name]
         except KeyError as exc:
             raise ValueError(f"Unknown llm plugin '{name}'") from exc
-        factory.validate(options or {}, context=f"llm:{name}")
+        data = options or {}
+        if data.get("security_level") is None:
+            raise ConfigurationError(f"llm:{name}: security_level is required")
+        factory.validate(data, context=f"llm:{name}")
 
     def create_sink(self, name: str, options: Dict[str, Any]) -> ResultSink:
         """Instantiate a sink plugin by name after validating options."""
@@ -505,7 +530,16 @@ class PluginRegistry:
         except KeyError as exc:
             raise ValueError(f"Unknown sink plugin '{name}'") from exc
         factory.validate(options or {}, context=f"sink:{name}")
-        return factory.create(options)
+        security_level = options.get("security_level")
+        if security_level is None:
+            raise ConfigurationError(f"sink:{name}: security_level is required")
+        normalized_level = normalize_security_level(security_level)
+        sanitized = dict(options or {})
+        sanitized.pop("security_level", None)
+        plugin = factory.create(sanitized)
+        setattr(plugin, "security_level", normalized_level)
+        setattr(plugin, "_elspeth_security_level", normalized_level)
+        return plugin
 
     def validate_sink(self, name: str, options: Dict[str, Any] | None) -> None:
         """Validate sink plugin options without instantiation."""
@@ -514,7 +548,10 @@ class PluginRegistry:
             factory = self._sinks[name]
         except KeyError as exc:
             raise ValueError(f"Unknown sink plugin '{name}'") from exc
-        factory.validate(options or {}, context=f"sink:{name}")
+        data = options or {}
+        if data.get("security_level") is None:
+            raise ConfigurationError(f"sink:{name}: security_level is required")
+        factory.validate(data, context=f"sink:{name}")
 
 
 registry = PluginRegistry()

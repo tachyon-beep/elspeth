@@ -156,7 +156,9 @@ def _build_prompt_variants(options: Dict[str, Any]) -> PromptVariantsAggregator:
             level = coalesce_security_level(spec.get("security_level"), options_map.pop("security_level", None))
         except ValueError as exc:
             raise ValueError(f"variant_llm security_level error: {exc}") from exc
-        llm = registry.create_llm(plugin, options_map)
+        options_with_level = dict(options_map)
+        options_with_level["security_level"] = level
+        llm = registry.create_llm(plugin, options_with_level)
         setattr(llm, "_elspeth_security_level", level)
     else:
         raise ValueError("variant_llm must be an LLM definition or client")

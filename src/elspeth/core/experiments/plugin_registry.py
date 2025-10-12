@@ -165,10 +165,16 @@ def create_validation_plugin(definition: Dict[str, Any]) -> ValidationPlugin:
     if name not in _validation_plugins:
         raise ValueError(f"Unknown validation plugin '{name}'")
     try:
-        level = coalesce_security_level(definition.get("security_level"), options.pop("security_level", None))
+        level = coalesce_security_level(definition.get("security_level"), options.get("security_level"))
     except ValueError as exc:
         raise ConfigurationError(f"validation_plugin:{name}: {exc}") from exc
-    plugin = _validation_plugins[name].create(options, context=f"validation_plugin:{name}")
+
+    factory = _validation_plugins[name]
+    payload = dict(options)
+    payload.pop("security_level", None)
+    factory.validate(payload, context=f"validation_plugin:{name}")
+    payload["_elspeth_security_level"] = level
+    plugin = factory.factory(payload)
     setattr(plugin, "_elspeth_security_level", level)
     return plugin
 

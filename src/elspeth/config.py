@@ -12,7 +12,7 @@ from elspeth.core.controls import create_cost_tracker, create_rate_limiter
 from elspeth.core.experiments.plugin_registry import normalize_early_stop_definitions
 from elspeth.core.orchestrator import OrchestratorConfig
 from elspeth.core.registry import registry
-from elspeth.core.security import coalesce_security_level
+from elspeth.core.security import coalesce_security_level, normalize_security_level
 from elspeth.core.validation import ConfigurationError
 
 
@@ -110,9 +110,9 @@ def _instantiate_plugin(
     if not plugin_name:
         raise ConfigurationError(f"{context} configuration must define a plugin name.")
     options, level = _prepare_plugin_definition(definition, context)
-    plugin = factory(plugin_name, options)
-    setattr(plugin, "_elspeth_security_level", level)
-    return plugin
+    payload = dict(options)
+    payload["security_level"] = level
+    return factory(plugin_name, payload)
 
 
 def _collect_prompt_configuration(profile_data: Mapping[str, Any]) -> PromptConfiguration:
