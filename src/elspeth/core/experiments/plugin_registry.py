@@ -12,6 +12,7 @@ from elspeth.core.experiments.plugins import (
     RowExperimentPlugin,
     ValidationPlugin,
 )
+from elspeth.core.plugins import PluginContext, apply_plugin_context
 from elspeth.core.security import coalesce_security_level
 from elspeth.core.validation import ConfigurationError, validate_schema
 
@@ -19,7 +20,11 @@ from elspeth.core.validation import ConfigurationError, validate_schema
 class _PluginFactory:
     """Wrap plugin factories with optional schema validation."""
 
-    def __init__(self, factory: Callable[[Dict[str, Any]], Any], schema: Mapping[str, Any] | None = None) -> None:
+    def __init__(
+        self,
+        factory: Callable[[Dict[str, Any], PluginContext], Any],
+        schema: Mapping[str, Any] | None = None,
+    ) -> None:
         self.factory = factory
         self.schema = schema
 
@@ -32,11 +37,11 @@ class _PluginFactory:
         if errors:
             raise ConfigurationError("\n".join(msg.format() for msg in errors))
 
-    def create(self, options: Dict[str, Any], *, context: str) -> Any:
+    def create(self, options: Dict[str, Any], *, plugin_context: PluginContext, schema_context: str) -> Any:
         """Validate options and instantiate the plugin."""
 
-        self.validate(options, context=context)
-        return self.factory(options)
+        self.validate(options, context=schema_context)
+        return self.factory(options, plugin_context)
 
 
 _row_plugins: Dict[str, _PluginFactory] = {}
@@ -48,7 +53,7 @@ _early_stop_plugins: Dict[str, _PluginFactory] = {}
 
 def register_row_plugin(
     name: str,
-    factory: Callable[[Dict[str, Any]], RowExperimentPlugin],
+    factory: Callable[[Dict[str, Any], PluginContext], RowExperimentPlugin],
     *,
     schema: Mapping[str, Any] | None = None,
 ) -> None:
@@ -59,7 +64,7 @@ def register_row_plugin(
 
 def register_aggregation_plugin(
     name: str,
-    factory: Callable[[Dict[str, Any]], AggregationExperimentPlugin],
+    factory: Callable[[Dict[str, Any], PluginContext], AggregationExperimentPlugin],
     *,
     schema: Mapping[str, Any] | None = None,
 ) -> None:
@@ -70,7 +75,7 @@ def register_aggregation_plugin(
 
 def register_baseline_plugin(
     name: str,
-    factory: Callable[[Dict[str, Any]], BaselineComparisonPlugin],
+    factory: Callable[[Dict[str, Any], PluginContext], BaselineComparisonPlugin],
     *,
     schema: Mapping[str, Any] | None = None,
 ) -> None:
@@ -81,7 +86,7 @@ def register_baseline_plugin(
 
 def register_validation_plugin(
     name: str,
-    factory: Callable[[Dict[str, Any]], ValidationPlugin],
+    factory: Callable[[Dict[str, Any], PluginContext], ValidationPlugin],
     *,
     schema: Mapping[str, Any] | None = None,
 ) -> None:
@@ -92,7 +97,7 @@ def register_validation_plugin(
 
 def register_early_stop_plugin(
     name: str,
-    factory: Callable[[Dict[str, Any]], EarlyStopPlugin],
+    factory: Callable[[Dict[str, Any], PluginContext], EarlyStopPlugin],
     *,
     schema: Mapping[str, Any] | None = None,
 ) -> None:
@@ -101,7 +106,11 @@ def register_early_stop_plugin(
     _early_stop_plugins[name] = _PluginFactory(factory, schema=schema)
 
 
-def create_row_plugin(definition: Dict[str, Any]) -> RowExperimentPlugin:
+def create_row_plugin(
+    definition: Dict[str, Any],
+    *,
+    parent_context: PluginContext | None = None,
+) -> RowExperimentPlugin:
     """Instantiate a registered row plugin from its definition."""
 
     if not definition:
@@ -110,16 +119,48 @@ def create_row_plugin(definition: Dict[str, Any]) -> RowExperimentPlugin:
     options = dict(definition.get("options", {}) or {})
     if name not in _row_plugins:
         raise ValueError(f"Unknown row experiment plugin '{name}'")
+    definition_level = definition.get("security_level")
+    option_level = options.get("security_level")
+    sources: list[str] = []
+    if definition_level is not None:
+        sources.append(f"row_plugin:{name}.definition.security_level")
+    if option_level is not None:
+        sources.append(f"row_plugin:{name}.options.security_level")
     try:
-        level = coalesce_security_level(definition.get("security_level"), options.pop("security_level", None))
+        level = coalesce_security_level(definition_level, option_level)
     except ValueError as exc:
         raise ConfigurationError(f"row_plugin:{name}: {exc}") from exc
-    plugin = _row_plugins[name].create(options, context=f"row_plugin:{name}")
-    setattr(plugin, "_elspeth_security_level", level)
+    payload = dict(options)
+    payload.pop("security_level", None)
+    provenance = tuple(sources or (f"row_plugin:{name}.resolved",))
+    if parent_context:
+        context = parent_context.derive(
+            plugin_name=name,
+            plugin_kind="row_plugin",
+            security_level=level,
+            provenance=provenance,
+        )
+    else:
+        context = PluginContext(
+            plugin_name=name,
+            plugin_kind="row_plugin",
+            security_level=level,
+            provenance=provenance,
+        )
+    plugin = _row_plugins[name].create(
+        payload,
+        plugin_context=context,
+        schema_context=f"row_plugin:{name}",
+    )
+    apply_plugin_context(plugin, context)
     return plugin
 
 
-def create_aggregation_plugin(definition: Dict[str, Any]) -> AggregationExperimentPlugin:
+def create_aggregation_plugin(
+    definition: Dict[str, Any],
+    *,
+    parent_context: PluginContext | None = None,
+) -> AggregationExperimentPlugin:
     """Instantiate a registered aggregation plugin from its definition."""
 
     if not definition:
@@ -128,16 +169,48 @@ def create_aggregation_plugin(definition: Dict[str, Any]) -> AggregationExperime
     options = dict(definition.get("options", {}) or {})
     if name not in _aggregation_plugins:
         raise ValueError(f"Unknown aggregation experiment plugin '{name}'")
+    definition_level = definition.get("security_level")
+    option_level = options.get("security_level")
+    sources: list[str] = []
+    if definition_level is not None:
+        sources.append(f"aggregation_plugin:{name}.definition.security_level")
+    if option_level is not None:
+        sources.append(f"aggregation_plugin:{name}.options.security_level")
     try:
-        level = coalesce_security_level(definition.get("security_level"), options.pop("security_level", None))
+        level = coalesce_security_level(definition_level, option_level)
     except ValueError as exc:
         raise ConfigurationError(f"aggregation_plugin:{name}: {exc}") from exc
-    plugin = _aggregation_plugins[name].create(options, context=f"aggregation_plugin:{name}")
-    setattr(plugin, "_elspeth_security_level", level)
+    payload = dict(options)
+    payload.pop("security_level", None)
+    provenance = tuple(sources or (f"aggregation_plugin:{name}.resolved",))
+    if parent_context:
+        context = parent_context.derive(
+            plugin_name=name,
+            plugin_kind="aggregation_plugin",
+            security_level=level,
+            provenance=provenance,
+        )
+    else:
+        context = PluginContext(
+            plugin_name=name,
+            plugin_kind="aggregation_plugin",
+            security_level=level,
+            provenance=provenance,
+        )
+    plugin = _aggregation_plugins[name].create(
+        payload,
+        plugin_context=context,
+        schema_context=f"aggregation_plugin:{name}",
+    )
+    apply_plugin_context(plugin, context)
     return plugin
 
 
-def create_baseline_plugin(definition: Dict[str, Any]) -> BaselineComparisonPlugin:
+def create_baseline_plugin(
+    definition: Dict[str, Any],
+    *,
+    parent_context: PluginContext | None = None,
+) -> BaselineComparisonPlugin:
     """Instantiate a registered baseline plugin from its definition."""
 
     if not definition:
@@ -146,16 +219,48 @@ def create_baseline_plugin(definition: Dict[str, Any]) -> BaselineComparisonPlug
     options = dict(definition.get("options", {}) or {})
     if name not in _baseline_plugins:
         raise ValueError(f"Unknown baseline comparison plugin '{name}'")
+    definition_level = definition.get("security_level")
+    option_level = options.get("security_level")
+    sources: list[str] = []
+    if definition_level is not None:
+        sources.append(f"baseline_plugin:{name}.definition.security_level")
+    if option_level is not None:
+        sources.append(f"baseline_plugin:{name}.options.security_level")
     try:
-        level = coalesce_security_level(definition.get("security_level"), options.pop("security_level", None))
+        level = coalesce_security_level(definition_level, option_level)
     except ValueError as exc:
         raise ConfigurationError(f"baseline_plugin:{name}: {exc}") from exc
-    plugin = _baseline_plugins[name].create(options, context=f"baseline_plugin:{name}")
-    setattr(plugin, "_elspeth_security_level", level)
+    payload = dict(options)
+    payload.pop("security_level", None)
+    provenance = tuple(sources or (f"baseline_plugin:{name}.resolved",))
+    if parent_context:
+        context = parent_context.derive(
+            plugin_name=name,
+            plugin_kind="baseline_plugin",
+            security_level=level,
+            provenance=provenance,
+        )
+    else:
+        context = PluginContext(
+            plugin_name=name,
+            plugin_kind="baseline_plugin",
+            security_level=level,
+            provenance=provenance,
+        )
+    plugin = _baseline_plugins[name].create(
+        payload,
+        plugin_context=context,
+        schema_context=f"baseline_plugin:{name}",
+    )
+    apply_plugin_context(plugin, context)
     return plugin
 
 
-def create_validation_plugin(definition: Dict[str, Any]) -> ValidationPlugin:
+def create_validation_plugin(
+    definition: Dict[str, Any],
+    *,
+    parent_context: PluginContext | None = None,
+) -> ValidationPlugin:
     """Instantiate a validation plugin from its definition."""
 
     if not definition:
@@ -164,22 +269,49 @@ def create_validation_plugin(definition: Dict[str, Any]) -> ValidationPlugin:
     options = dict(definition.get("options", {}) or {})
     if name not in _validation_plugins:
         raise ValueError(f"Unknown validation plugin '{name}'")
+    definition_level = definition.get("security_level")
+    option_level = options.get("security_level")
+    sources: list[str] = []
+    if definition_level is not None:
+        sources.append(f"validation_plugin:{name}.definition.security_level")
+    if option_level is not None:
+        sources.append(f"validation_plugin:{name}.options.security_level")
     try:
-        level = coalesce_security_level(definition.get("security_level"), options.get("security_level"))
+        level = coalesce_security_level(definition_level, option_level)
     except ValueError as exc:
         raise ConfigurationError(f"validation_plugin:{name}: {exc}") from exc
 
-    factory = _validation_plugins[name]
     payload = dict(options)
     payload.pop("security_level", None)
-    factory.validate(payload, context=f"validation_plugin:{name}")
-    payload["_elspeth_security_level"] = level
-    plugin = factory.factory(payload)
-    setattr(plugin, "_elspeth_security_level", level)
+    provenance = tuple(sources or (f"validation_plugin:{name}.resolved",))
+    if parent_context:
+        context = parent_context.derive(
+            plugin_name=name,
+            plugin_kind="validation_plugin",
+            security_level=level,
+            provenance=provenance,
+        )
+    else:
+        context = PluginContext(
+            plugin_name=name,
+            plugin_kind="validation_plugin",
+            security_level=level,
+            provenance=provenance,
+        )
+    plugin = _validation_plugins[name].create(
+        payload,
+        plugin_context=context,
+        schema_context=f"validation_plugin:{name}",
+    )
+    apply_plugin_context(plugin, context)
     return plugin
 
 
-def create_early_stop_plugin(definition: Dict[str, Any]) -> EarlyStopPlugin:
+def create_early_stop_plugin(
+    definition: Dict[str, Any],
+    *,
+    parent_context: PluginContext | None = None,
+) -> EarlyStopPlugin:
     """Instantiate an early-stop plugin from its definition."""
 
     if not definition:
@@ -188,12 +320,40 @@ def create_early_stop_plugin(definition: Dict[str, Any]) -> EarlyStopPlugin:
     options = dict(definition.get("options", {}) or {})
     if name not in _early_stop_plugins:
         raise ValueError(f"Unknown early-stop plugin '{name}'")
+    definition_level = definition.get("security_level")
+    option_level = options.get("security_level")
+    sources: list[str] = []
+    if definition_level is not None:
+        sources.append(f"early_stop_plugin:{name}.definition.security_level")
+    if option_level is not None:
+        sources.append(f"early_stop_plugin:{name}.options.security_level")
     try:
-        level = coalesce_security_level(definition.get("security_level"), options.pop("security_level", None))
+        level = coalesce_security_level(definition_level, option_level)
     except ValueError as exc:
         raise ConfigurationError(f"early_stop_plugin:{name}: {exc}") from exc
-    plugin = _early_stop_plugins[name].create(options, context=f"early_stop_plugin:{name}")
-    setattr(plugin, "_elspeth_security_level", level)
+    payload = dict(options)
+    payload.pop("security_level", None)
+    provenance = tuple(sources or (f"early_stop_plugin:{name}.resolved",))
+    if parent_context:
+        context = parent_context.derive(
+            plugin_name=name,
+            plugin_kind="early_stop_plugin",
+            security_level=level,
+            provenance=provenance,
+        )
+    else:
+        context = PluginContext(
+            plugin_name=name,
+            plugin_kind="early_stop_plugin",
+            security_level=level,
+            provenance=provenance,
+        )
+    plugin = _early_stop_plugins[name].create(
+        payload,
+        plugin_context=context,
+        schema_context=f"early_stop_plugin:{name}",
+    )
+    apply_plugin_context(plugin, context)
     return plugin
 
 
@@ -238,12 +398,12 @@ class _RowCountBaselinePlugin:  # pylint: disable=too-few-public-methods
 
 
 # Register defaults
-register_row_plugin("noop", lambda options: _NoopRowPlugin())
-register_aggregation_plugin("noop", lambda options: _NoopAggPlugin())
-register_baseline_plugin("noop", lambda options: _NoopBaselinePlugin())
+register_row_plugin("noop", lambda options, context: _NoopRowPlugin())
+register_aggregation_plugin("noop", lambda options, context: _NoopAggPlugin())
+register_baseline_plugin("noop", lambda options, context: _NoopBaselinePlugin())
 register_baseline_plugin(
     "row_count",
-    lambda options: _RowCountBaselinePlugin(options.get("key", "row_delta")),
+    lambda options, context: _RowCountBaselinePlugin(options.get("key", "row_delta")),
     schema={
         "type": "object",
         "properties": {"key": {"type": "string"}},

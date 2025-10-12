@@ -126,7 +126,7 @@ def test_main_smoke(mock_settings, capsys):
 
 
 def test_single_run_output_csv_includes_metrics(tmp_path, monkeypatch):
-    def make_row_plugin(options):
+    def make_row_plugin(options, context):
         class _Plugin:
             name = "single_run_row_plugin"
 

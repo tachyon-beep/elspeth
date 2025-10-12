@@ -318,7 +318,7 @@ class AzureEnvironmentMiddleware(LLMMiddleware):
 
 register_middleware(
     "azure_environment",
-    lambda options: AzureEnvironmentMiddleware(
+    lambda options, context: AzureEnvironmentMiddleware(
         enable_run_logging=options.get("enable_run_logging", True),
         log_prompts=options.get("log_prompts", False),
         log_config_diffs=options.get("log_config_diffs", True),

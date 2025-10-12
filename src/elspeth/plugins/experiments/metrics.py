@@ -272,7 +272,7 @@ class ScoreExtractorPlugin:
 
 register_row_plugin(
     "score_extractor",
-    lambda options: ScoreExtractorPlugin(
+    lambda options, context: ScoreExtractorPlugin(
         key=options.get("key", "score"),
         criteria=options.get("criteria"),
         parse_json_content=options.get("parse_json_content", True),
@@ -412,7 +412,7 @@ class ScoreDeltaBaselinePlugin:
 
 register_aggregation_plugin(
     "score_stats",
-    lambda options: ScoreStatsAggregator(
+    lambda options, context: ScoreStatsAggregator(
         source_field=options.get("source_field", "scores"),
         flag_field=options.get("flag_field", "score_flags"),
         ddof=int(options.get("ddof", 0)),
@@ -422,7 +422,7 @@ register_aggregation_plugin(
 
 register_baseline_plugin(
     "score_delta",
-    lambda options: ScoreDeltaBaselinePlugin(
+    lambda options, context: ScoreDeltaBaselinePlugin(
         metric=options.get("metric", "mean"),
         criteria=options.get("criteria"),
     ),
@@ -476,7 +476,7 @@ class ScoreCliffsDeltaPlugin:
 
 register_baseline_plugin(
     "score_cliffs_delta",
-    lambda options: ScoreCliffsDeltaPlugin(
+    lambda options, context: ScoreCliffsDeltaPlugin(
         criteria=options.get("criteria"),
         min_samples=int(options.get("min_samples", 1)),
         on_error=options.get("on_error", "abort"),
@@ -573,7 +573,7 @@ class ScoreAssumptionsBaselinePlugin:
 
 register_baseline_plugin(
     "score_assumptions",
-    lambda options: ScoreAssumptionsBaselinePlugin(
+    lambda options, context: ScoreAssumptionsBaselinePlugin(
         criteria=options.get("criteria"),
         min_samples=int(options.get("min_samples", 3)),
         alpha=float(options.get("alpha", 0.05)),
@@ -651,7 +651,7 @@ class ScorePracticalBaselinePlugin:
 
 register_baseline_plugin(
     "score_practical",
-    lambda options: ScorePracticalBaselinePlugin(
+    lambda options, context: ScorePracticalBaselinePlugin(
         criteria=options.get("criteria"),
         threshold=float(options.get("threshold", 1.0)),
         success_threshold=float(options.get("success_threshold", 4.0)),
@@ -760,7 +760,7 @@ class ScoreSignificanceBaselinePlugin:
 
 register_baseline_plugin(
     "score_significance",
-    lambda options: ScoreSignificanceBaselinePlugin(
+    lambda options, context: ScoreSignificanceBaselinePlugin(
         criteria=options.get("criteria"),
         min_samples=int(options.get("min_samples", 2)),
         equal_var=bool(options.get("equal_var", False)),
@@ -822,7 +822,7 @@ class ScoreBayesianBaselinePlugin:
 
 register_baseline_plugin(
     "score_bayes",
-    lambda options: ScoreBayesianBaselinePlugin(
+    lambda options, context: ScoreBayesianBaselinePlugin(
         criteria=options.get("criteria"),
         min_samples=int(options.get("min_samples", 2)),
         credible_interval=float(options.get("credible_interval", 0.95)),
@@ -904,7 +904,7 @@ class ScoreRecommendationAggregator:
 
 register_aggregation_plugin(
     "score_recommendation",
-    lambda options: ScoreRecommendationAggregator(
+    lambda options, context: ScoreRecommendationAggregator(
         min_samples=int(options.get("min_samples", 5)),
         improvement_margin=float(options.get("improvement_margin", 0.05)),
         source_field=options.get("source_field", "scores"),
@@ -970,7 +970,7 @@ class ScoreVariantRankingAggregator:
 
 register_aggregation_plugin(
     "score_variant_ranking",
-    lambda options: ScoreVariantRankingAggregator(
+    lambda options, context: ScoreVariantRankingAggregator(
         threshold=float(options.get("threshold", 0.7)),
         weight_mean=float(options.get("weight_mean", 1.0)),
         weight_pass=float(options.get("weight_pass", 1.0)),
@@ -1090,7 +1090,7 @@ class ScoreAgreementAggregator:
 
 register_aggregation_plugin(
     "score_agreement",
-    lambda options: ScoreAgreementAggregator(
+    lambda options, context: ScoreAgreementAggregator(
         criteria=options.get("criteria"),
         min_items=int(options.get("min_items", 2)),
         on_error=options.get("on_error", "abort"),
@@ -1195,7 +1195,7 @@ class ScorePowerAggregator:
 
 register_aggregation_plugin(
     "score_power",
-    lambda options: ScorePowerAggregator(
+    lambda options, context: ScorePowerAggregator(
         criteria=options.get("criteria"),
         min_samples=int(options.get("min_samples", 2)),
         alpha=float(options.get("alpha", 0.05)),
@@ -1259,7 +1259,7 @@ class ScoreDistributionAggregator:
 
 register_baseline_plugin(
     "score_distribution",
-    lambda options: ScoreDistributionAggregator(
+    lambda options, context: ScoreDistributionAggregator(
         criteria=options.get("criteria"),
         min_samples=int(options.get("min_samples", 2)),
         on_error=options.get("on_error", "abort"),

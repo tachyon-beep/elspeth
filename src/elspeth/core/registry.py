@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Mapping
+from typing import Any, Callable, Dict, Iterable, Mapping
 
 from elspeth.core.interfaces import DataSource, LLMClientProtocol, ResultSink
-from elspeth.core.security import normalize_security_level
+from elspeth.core.plugins import PluginContext, apply_plugin_context
+from elspeth.core.security import coalesce_security_level, normalize_security_level
 from elspeth.core.validation import ConfigurationError, validate_schema
 from elspeth.plugins.datasources import BlobDataSource, CSVBlobDataSource, CSVDataSource
 from elspeth.plugins.llms import AzureOpenAIClient, HttpOpenAIClient, MockLLMClient, StaticLLMClient
@@ -73,7 +74,7 @@ ARTIFACTS_SECTION_SCHEMA = {
 class PluginFactory:
     """Factory metadata holding creation callable and validation schema."""
 
-    create: Callable[[Dict[str, Any]], Any]
+    create: Callable[[Dict[str, Any], PluginContext], Any]
     schema: Mapping[str, Any] | None = None
 
     def validate(self, options: Dict[str, Any], context: str) -> None:
@@ -93,7 +94,7 @@ class PluginRegistry:
     def __init__(self):
         self._datasources: Dict[str, PluginFactory] = {
             "azure_blob": PluginFactory(
-                create=lambda options: BlobDataSource(**options),
+                create=lambda options, context: BlobDataSource(**options),
                 schema={
                     "type": "object",
                     "properties": {
@@ -108,7 +109,7 @@ class PluginRegistry:
                 },
             ),
             "csv_blob": PluginFactory(
-                create=lambda options: CSVBlobDataSource(**options),
+                create=lambda options, context: CSVBlobDataSource(**options),
                 schema={
                     "type": "object",
                     "properties": {
@@ -123,7 +124,7 @@ class PluginRegistry:
                 },
             ),
             "local_csv": PluginFactory(
-                create=lambda options: CSVDataSource(**options),
+                create=lambda options, context: CSVDataSource(**options),
                 schema={
                     "type": "object",
                     "properties": {
@@ -140,7 +141,7 @@ class PluginRegistry:
         }
         self._llms: Dict[str, PluginFactory] = {
             "azure_openai": PluginFactory(
-                create=lambda options: AzureOpenAIClient(**options),
+                create=lambda options, context: AzureOpenAIClient(**options),
                 schema={
                     "type": "object",
                     "properties": {
@@ -153,7 +154,7 @@ class PluginRegistry:
                 },
             ),
             "http_openai": PluginFactory(
-                create=lambda options: HttpOpenAIClient(**options),
+                create=lambda options, context: HttpOpenAIClient(**options),
                 schema={
                     "type": "object",
                     "properties": {
@@ -170,7 +171,7 @@ class PluginRegistry:
                 },
             ),
             "mock": PluginFactory(
-                create=lambda options: MockLLMClient(**options),
+                create=lambda options, context: MockLLMClient(**options),
                 schema={
                     "type": "object",
                     "properties": {
@@ -180,7 +181,7 @@ class PluginRegistry:
                 },
             ),
             "static_test": PluginFactory(
-                create=lambda options: StaticLLMClient(
+                create=lambda options, context: StaticLLMClient(
                     content=options.get("content", "STATIC RESPONSE"),
                     score=options.get("score", 0.5),
                     metrics=options.get("metrics"),
@@ -198,7 +199,7 @@ class PluginRegistry:
         }
         self._sinks: Dict[str, PluginFactory] = {
             "azure_blob": PluginFactory(
-                create=lambda options: BlobResultSink(**options),
+                create=lambda options, context: BlobResultSink(**options),
                 schema={
                     "type": "object",
                     "properties": {
@@ -224,7 +225,7 @@ class PluginRegistry:
                 },
             ),
             "csv": PluginFactory(
-                create=lambda options: CsvResultSink(**options),
+                create=lambda options, context: CsvResultSink(**options),
                 schema={
                     "type": "object",
                     "properties": {
@@ -245,7 +246,7 @@ class PluginRegistry:
                 },
             ),
             "local_bundle": PluginFactory(
-                create=lambda options: LocalBundleSink(**options),
+                create=lambda options, context: LocalBundleSink(**options),
                 schema={
                     "type": "object",
                     "properties": {
@@ -269,7 +270,7 @@ class PluginRegistry:
                 },
             ),
             "excel_workbook": PluginFactory(
-                create=lambda options: ExcelResultSink(**options),
+                create=lambda options, context: ExcelResultSink(**options),
                 schema={
                     "type": "object",
                     "properties": {
@@ -296,7 +297,7 @@ class PluginRegistry:
                 },
             ),
             "zip_bundle": PluginFactory(
-                create=lambda options: ZipResultSink(**options),
+                create=lambda options, context: ZipResultSink(**options),
                 schema={
                     "type": "object",
                     "properties": {
@@ -318,7 +319,7 @@ class PluginRegistry:
                 },
             ),
             "file_copy": PluginFactory(
-                create=lambda options: FileCopySink(**options),
+                create=lambda options, context: FileCopySink(**options),
                 schema={
                     "type": "object",
                     "properties": {
@@ -333,7 +334,7 @@ class PluginRegistry:
                 },
             ),
             "github_repo": PluginFactory(
-                create=lambda options: GitHubRepoSink(**options),
+                create=lambda options, context: GitHubRepoSink(**options),
                 schema={
                     "type": "object",
                     "properties": {
@@ -354,7 +355,7 @@ class PluginRegistry:
                 },
             ),
             "azure_devops_repo": PluginFactory(
-                create=lambda options: AzureDevOpsRepoSink(**options),
+                create=lambda options, context: AzureDevOpsRepoSink(**options),
                 schema={
                     "type": "object",
                     "properties": {
@@ -378,7 +379,7 @@ class PluginRegistry:
                 },
             ),
             "signed_artifact": PluginFactory(
-                create=lambda options: SignedArtifactSink(**options),
+                create=lambda options, context: SignedArtifactSink(**options),
                 schema={
                     "type": "object",
                     "properties": {
@@ -418,7 +419,7 @@ class PluginRegistry:
                 },
             ),
             "analytics_visual": PluginFactory(
-                create=lambda options: VisualAnalyticsSink(
+                create=lambda options, context: VisualAnalyticsSink(
                     base_path=options["base_path"],
                     file_stem=options.get("file_stem", "analytics_visual"),
                     formats=options.get("formats"),
@@ -460,23 +461,48 @@ class PluginRegistry:
             ),
         }
 
-    def create_datasource(self, name: str, options: Dict[str, Any]) -> DataSource:
+    def create_datasource(
+        self,
+        name: str,
+        options: Dict[str, Any],
+        *,
+        provenance: Iterable[str] | None = None,
+        parent_context: PluginContext | None = None,
+    ) -> DataSource:
         """Instantiate a datasource plugin by name after validating options."""
 
         try:
             factory = self._datasources[name]
         except KeyError as exc:
             raise ValueError(f"Unknown datasource plugin '{name}'") from exc
-        factory.validate(options or {}, context=f"datasource:{name}")
-        security_level = options.get("security_level")
+        payload = dict(options or {})
+        validation_payload = dict(payload)
+        validation_payload.pop("security_level", None)
+        factory.validate(validation_payload, context=f"datasource:{name}")
+        security_level = payload.get("security_level")
         if security_level is None:
             raise ConfigurationError(f"datasource:{name}: security_level is required")
         normalized_level = normalize_security_level(security_level)
-        sanitized = dict(options or {})
-        sanitized.pop("security_level", None)
-        plugin = factory.create(sanitized)
-        setattr(plugin, "security_level", normalized_level)
-        setattr(plugin, "_elspeth_security_level", normalized_level)
+        payload["security_level"] = normalized_level
+        sources = tuple(provenance or ("options.security_level",))
+        if parent_context:
+            context = parent_context.derive(
+                plugin_name=name,
+                plugin_kind="datasource",
+                security_level=normalized_level,
+                provenance=sources,
+            )
+        else:
+            context = PluginContext(
+                plugin_name=name,
+                plugin_kind="datasource",
+                security_level=normalized_level,
+                provenance=sources,
+            )
+        call_payload = dict(payload)
+        call_payload.pop("security_level", None)
+        plugin = factory.create(call_payload, context)
+        apply_plugin_context(plugin, context)
         return plugin
 
     def validate_datasource(self, name: str, options: Dict[str, Any] | None) -> None:
@@ -491,24 +517,98 @@ class PluginRegistry:
             raise ConfigurationError(f"datasource:{name}: security_level is required")
         factory.validate(data, context=f"datasource:{name}")
 
-    def create_llm(self, name: str, options: Dict[str, Any]) -> LLMClientProtocol:
+    def create_llm(
+        self,
+        name: str,
+        options: Dict[str, Any],
+        *,
+        provenance: Iterable[str] | None = None,
+        parent_context: PluginContext | None = None,
+    ) -> LLMClientProtocol:
         """Instantiate an LLM plugin by name after validating options."""
 
         try:
             factory = self._llms[name]
         except KeyError as exc:
             raise ValueError(f"Unknown llm plugin '{name}'") from exc
-        factory.validate(options or {}, context=f"llm:{name}")
-        security_level = options.get("security_level")
+        payload = dict(options or {})
+        validation_payload = dict(payload)
+        validation_payload.pop("security_level", None)
+        factory.validate(validation_payload, context=f"llm:{name}")
+        security_level = payload.get("security_level")
         if security_level is None:
             raise ConfigurationError(f"llm:{name}: security_level is required")
         normalized_level = normalize_security_level(security_level)
-        sanitized = dict(options or {})
-        sanitized.pop("security_level", None)
-        plugin = factory.create(sanitized)
-        setattr(plugin, "security_level", normalized_level)
-        setattr(plugin, "_elspeth_security_level", normalized_level)
+        payload["security_level"] = normalized_level
+        sources = tuple(provenance or ("options.security_level",))
+        if parent_context:
+            context = parent_context.derive(
+                plugin_name=name,
+                plugin_kind="llm",
+                security_level=normalized_level,
+                provenance=sources,
+            )
+        else:
+            context = PluginContext(
+                plugin_name=name,
+                plugin_kind="llm",
+                security_level=normalized_level,
+                provenance=sources,
+            )
+        call_payload = dict(payload)
+        call_payload.pop("security_level", None)
+        plugin = factory.create(call_payload, context)
+        apply_plugin_context(plugin, context)
         return plugin
+
+    def create_llm_from_definition(
+        self,
+        definition: Mapping[str, Any] | LLMClientProtocol,
+        *,
+        parent_context: PluginContext,
+        provenance: Iterable[str] | None = None,
+    ) -> LLMClientProtocol:
+        """Instantiate an LLM plugin from a nested definition with inherited context."""
+
+        if isinstance(definition, LLMClientProtocol):
+            context = parent_context.derive(
+                plugin_name=getattr(definition, "name", definition.__class__.__name__),
+                plugin_kind="llm",
+                security_level=parent_context.security_level,
+                provenance=tuple(provenance or ("llm.instance",)),
+            )
+            apply_plugin_context(definition, context)
+            return definition
+
+        if not isinstance(definition, Mapping):
+            raise ValueError("LLM definition must be a mapping or LLM instance")
+
+        plugin_name = definition.get("plugin")
+        if not plugin_name:
+            raise ConfigurationError("LLM definition requires 'plugin'")
+        options = dict(definition.get("options", {}) or {})
+        entry_level = definition.get("security_level")
+        options_level = options.get("security_level")
+        sources: list[str] = []
+        if entry_level is not None:
+            sources.append(f"llm:{plugin_name}.definition.security_level")
+        if options_level is not None:
+            sources.append(f"llm:{plugin_name}.options.security_level")
+        if provenance:
+            sources.extend(provenance)
+        try:
+            level = coalesce_security_level(parent_context.security_level, entry_level, options_level)
+        except ValueError as exc:
+            raise ConfigurationError(f"llm:{plugin_name}: {exc}") from exc
+        payload = dict(options)
+        payload["security_level"] = level
+        resolved_provenance = tuple(sources or (f"llm:{plugin_name}.resolved",))
+        return self.create_llm(
+            plugin_name,
+            payload,
+            provenance=resolved_provenance,
+            parent_context=parent_context,
+        )
 
     def validate_llm(self, name: str, options: Dict[str, Any] | None) -> None:
         """Validate LLM plugin options without instantiation."""
@@ -522,23 +622,48 @@ class PluginRegistry:
             raise ConfigurationError(f"llm:{name}: security_level is required")
         factory.validate(data, context=f"llm:{name}")
 
-    def create_sink(self, name: str, options: Dict[str, Any]) -> ResultSink:
+    def create_sink(
+        self,
+        name: str,
+        options: Dict[str, Any],
+        *,
+        provenance: Iterable[str] | None = None,
+        parent_context: PluginContext | None = None,
+    ) -> ResultSink:
         """Instantiate a sink plugin by name after validating options."""
 
         try:
             factory = self._sinks[name]
         except KeyError as exc:
             raise ValueError(f"Unknown sink plugin '{name}'") from exc
-        factory.validate(options or {}, context=f"sink:{name}")
-        security_level = options.get("security_level")
+        payload = dict(options or {})
+        validation_payload = dict(payload)
+        validation_payload.pop("security_level", None)
+        factory.validate(validation_payload, context=f"sink:{name}")
+        security_level = payload.get("security_level")
         if security_level is None:
             raise ConfigurationError(f"sink:{name}: security_level is required")
         normalized_level = normalize_security_level(security_level)
-        sanitized = dict(options or {})
-        sanitized.pop("security_level", None)
-        plugin = factory.create(sanitized)
-        setattr(plugin, "security_level", normalized_level)
-        setattr(plugin, "_elspeth_security_level", normalized_level)
+        payload["security_level"] = normalized_level
+        sources = tuple(provenance or ("options.security_level",))
+        if parent_context:
+            context = parent_context.derive(
+                plugin_name=name,
+                plugin_kind="sink",
+                security_level=normalized_level,
+                provenance=sources,
+            )
+        else:
+            context = PluginContext(
+                plugin_name=name,
+                plugin_kind="sink",
+                security_level=normalized_level,
+                provenance=sources,
+            )
+        call_payload = dict(payload)
+        call_payload.pop("security_level", None)
+        plugin = factory.create(call_payload, context)
+        apply_plugin_context(plugin, context)
         return plugin
 
     def validate_sink(self, name: str, options: Dict[str, Any] | None) -> None:

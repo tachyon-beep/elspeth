@@ -93,7 +93,7 @@ def test_orchestrator_single_run_executes_plugins(monkeypatch):
     row_calls = []
     agg_calls = []
 
-    def make_row_plugin(options):
+    def make_row_plugin(options, context):
         class _Plugin:
             name = "single_run_row_plugin"
 
@@ -103,7 +103,7 @@ def test_orchestrator_single_run_executes_plugins(monkeypatch):
 
         return _Plugin()
 
-    def make_agg_plugin(options):
+    def make_agg_plugin(options, context):
         class _Plugin:
             name = "single_run_agg_plugin"
 

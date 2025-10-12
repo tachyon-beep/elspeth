@@ -220,12 +220,13 @@ class ExperimentRunner:
     def _init_early_stop(self) -> None:
         self._early_stop_reason = None
         plugins: List[EarlyStopPlugin] = []
+        parent_context = getattr(self, "plugin_context", None)
 
         if self.early_stop_plugins:
             plugins = list(self.early_stop_plugins)
         elif self.early_stop_config:
             definition = {"name": "threshold", "options": dict(self.early_stop_config)}
-            plugin = create_early_stop_plugin(definition)
+            plugin = create_early_stop_plugin(definition, parent_context=parent_context)
             plugins = [plugin]
 
         if plugins:

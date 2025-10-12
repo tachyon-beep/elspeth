@@ -11,8 +11,8 @@ from jinja2 import Template
 from elspeth.core.experiments.plugin_registry import register_validation_plugin
 from elspeth.core.experiments.plugins import ValidationError, ValidationPlugin
 from elspeth.core.interfaces import LLMClientProtocol
+from elspeth.core.plugins import PluginContext
 from elspeth.core.registry import registry
-from elspeth.core.security import coalesce_security_level
 
 
 def _extract_content(response: Dict[str, Any]) -> str:
@@ -132,7 +132,7 @@ class LLMGuardValidationPlugin(ValidationPlugin):
 
 register_validation_plugin(
     "regex_match",
-    lambda options: RegexValidationPlugin(
+    lambda options, context: RegexValidationPlugin(
         pattern=options.get("pattern", ""),
         flags=options.get("flags"),
     ),
@@ -149,7 +149,7 @@ register_validation_plugin(
 
 register_validation_plugin(
     "json",
-    lambda options: JsonValidationPlugin(ensure_object=bool(options.get("ensure_object", False))),
+    lambda options, context: JsonValidationPlugin(ensure_object=bool(options.get("ensure_object", False))),
     schema={
         "type": "object",
         "properties": {
@@ -160,30 +160,15 @@ register_validation_plugin(
 )
 
 
-def _build_llm_guard(options: Dict[str, Any]) -> LLMGuardValidationPlugin:
-    inherited_level = options.pop("_elspeth_security_level", None)
+def _build_llm_guard(options: Dict[str, Any], context: PluginContext) -> LLMGuardValidationPlugin:
     llm_spec = options.get("validator_llm") or options.get("llm")
-    if isinstance(llm_spec, LLMClientProtocol):
-        validator_llm = llm_spec
-    elif isinstance(llm_spec, dict):
-        plugin_name = llm_spec.get("plugin")
-        if not plugin_name:
-            raise ValueError("validator_llm definition requires 'plugin'")
-        llm_options = dict(llm_spec.get("options", {}) or {})
-        try:
-            level = coalesce_security_level(
-                llm_spec.get("security_level"),
-                llm_options.get("security_level"),
-                inherited_level,
-            )
-        except ValueError as exc:
-            raise ValueError(f"validator_llm security_level error: {exc}") from exc
-        payload = dict(llm_options)
-        payload["security_level"] = level
-        validator_llm = registry.create_llm(plugin_name, payload)
-        setattr(validator_llm, "_elspeth_security_level", level)
-    else:
-        raise ValueError("validator_llm must be an LLM client or definition")
+    if llm_spec is None:
+        raise ValueError("LLM guard validation plugin requires 'validator_llm'")
+    validator_llm = registry.create_llm_from_definition(
+        llm_spec,
+        parent_context=context,
+        provenance=("validator_llm",),
+    )
 
     template = options.get("user_prompt_template") or options.get("prompt_template")
     if not template:

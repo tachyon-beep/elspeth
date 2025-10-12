@@ -71,8 +71,8 @@ def test_registry_constructs_llm_and_sink(monkeypatch):
 
     import elspeth.core.registry as registry_module
 
-    registry_module.registry._llms["dummy"] = registry_module.PluginFactory(lambda options: DummyLLM(**options))
-    registry_module.registry._sinks["dummy"] = registry_module.PluginFactory(lambda options: DummySink(**options))
+    registry_module.registry._llms["dummy"] = registry_module.PluginFactory(lambda options, context: DummyLLM(**options))
+    registry_module.registry._sinks["dummy"] = registry_module.PluginFactory(lambda options, context: DummySink(**options))
 
     llm = registry.create_llm("dummy", {"name": "llm", "security_level": "official"})
     sink = registry.create_sink("dummy", {"name": "sink", "security_level": "official"})
@@ -87,7 +87,7 @@ def test_create_row_plugin_requires_known_name():
 
 
 def test_create_row_plugin_validates_schema():
-    def build_plugin(options):
+    def build_plugin(options, context):
         class _Plugin:
             name = "limited"
 

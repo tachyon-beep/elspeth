@@ -60,12 +60,19 @@ class PluginDefinitions:
     early_stop_plugin_defs: List[Dict[str, Any]]
 
 
-def _prepare_plugin_definition(definition: Mapping[str, Any], context: str) -> tuple[Dict[str, Any], str]:
-    """Extract options and normalized security level from a plugin definition."""
+def _prepare_plugin_definition(
+    definition: Mapping[str, Any], context: str
+) -> tuple[Dict[str, Any], str, tuple[str, ...]]:
+    """Extract options, normalized security level, and provenance."""
 
     options = dict(definition.get("options", {}) or {})
     entry_level = definition.get("security_level")
     options_level = options.get("security_level")
+    sources: list[str] = []
+    if entry_level is not None:
+        sources.append(f"{context}.definition.security_level")
+    if options_level is not None:
+        sources.append(f"{context}.options.security_level")
     try:
         level = coalesce_security_level(entry_level, options_level)
     except ValueError as exc:
@@ -74,7 +81,8 @@ def _prepare_plugin_definition(definition: Mapping[str, Any], context: str) -> t
     # plugin constructors (e.g. CSV/Excel sinks) can normalise it themselves. Removing
     # it causes them to fall back to their default ("unofficial") security posture.
     options["security_level"] = level
-    return options, level
+    provenance = tuple(sources or (f"{context}.resolved",))
+    return options, level, provenance
 
 
 def _merge_pack(base: Dict[str, Any], pack: Dict[str, Any]) -> Dict[str, Any]:
@@ -109,10 +117,10 @@ def _instantiate_plugin(
     plugin_name = definition.get("plugin")
     if not plugin_name:
         raise ConfigurationError(f"{context} configuration must define a plugin name.")
-    options, level = _prepare_plugin_definition(definition, context)
+    options, level, provenance = _prepare_plugin_definition(definition, context)
     payload = dict(options)
     payload["security_level"] = level
-    return factory(plugin_name, payload)
+    return factory(plugin_name, payload, provenance=provenance)
 
 
 def _collect_prompt_configuration(profile_data: Mapping[str, Any]) -> PromptConfiguration:

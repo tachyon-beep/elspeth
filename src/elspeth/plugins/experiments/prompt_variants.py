@@ -7,9 +7,9 @@ from typing import Any, Dict, List, Optional
 from elspeth.core.experiments.plugin_registry import register_aggregation_plugin
 from elspeth.core.experiments.plugins import AggregationExperimentPlugin
 from elspeth.core.interfaces import LLMClientProtocol
+from elspeth.core.plugins import PluginContext
 from elspeth.core.prompts.engine import PromptEngine
 from elspeth.core.registry import registry
-from elspeth.core.security import coalesce_security_level
 
 
 class PromptVariantsAggregator(AggregationExperimentPlugin):
@@ -143,25 +143,15 @@ class PromptVariantsAggregator(AggregationExperimentPlugin):
         return payload
 
 
-def _build_prompt_variants(options: Dict[str, Any]) -> PromptVariantsAggregator:
+def _build_prompt_variants(options: Dict[str, Any], context: PluginContext) -> PromptVariantsAggregator:
     spec = options.get("variant_llm") or options.get("llm")
-    if isinstance(spec, LLMClientProtocol):
-        llm = spec
-    elif isinstance(spec, dict):
-        plugin = spec.get("plugin")
-        if not plugin:
-            raise ValueError("variant_llm definition requires 'plugin'")
-        options_map = dict(spec.get("options", {}) or {})
-        try:
-            level = coalesce_security_level(spec.get("security_level"), options_map.pop("security_level", None))
-        except ValueError as exc:
-            raise ValueError(f"variant_llm security_level error: {exc}") from exc
-        options_with_level = dict(options_map)
-        options_with_level["security_level"] = level
-        llm = registry.create_llm(plugin, options_with_level)
-        setattr(llm, "_elspeth_security_level", level)
-    else:
-        raise ValueError("variant_llm must be an LLM definition or client")
+    if spec is None:
+        raise ValueError("prompt_variants plugin requires 'variant_llm'")
+    llm = registry.create_llm_from_definition(
+        spec,
+        parent_context=context,
+        provenance=("variant_llm",),
+    )
 
     template = options.get("prompt_template")
     if not template:

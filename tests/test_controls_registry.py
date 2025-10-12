@@ -25,7 +25,7 @@ def test_validate_rate_limiter_unknown():
 def test_register_custom_rate_limiter(monkeypatch):
     created = SimpleNamespace()
 
-    def factory(options):
+    def factory(options, context):
         assert options == {"tag": "blue"}
         return created
 
@@ -48,7 +48,7 @@ def test_create_cost_tracker_validates_schema():
 def test_register_custom_cost_tracker():
     created = SimpleNamespace()
 
-    def factory(options):
+    def factory(options, context):
         assert options == {"tier": "gold"}
         return created
 

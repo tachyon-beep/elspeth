@@ -15,6 +15,8 @@ from elspeth.core.experiments.plugin_registry import (
 from elspeth.core.experiments.runner import ExperimentRunner
 from elspeth.core.interfaces import DataSource, LLMClientProtocol, ResultSink
 from elspeth.core.llm.registry import create_middlewares
+from elspeth.core.plugins import PluginContext, apply_plugin_context
+from elspeth.core.security import resolve_security_level
 
 
 @dataclass
@@ -62,20 +64,58 @@ class ExperimentOrchestrator:  # pylint: disable=too-many-instance-attributes,to
         self.rate_limiter = rate_limiter
         self.cost_tracker = cost_tracker
         self.name = name
-        row_plugins = None
-        if config.row_plugin_defs:
-            row_plugins = [create_row_plugin(defn) for defn in config.row_plugin_defs]
-        aggregator_plugins = None
-        if config.aggregator_plugin_defs:
-            aggregator_plugins = [create_aggregation_plugin(defn) for defn in config.aggregator_plugin_defs]
-        validation_plugins = None
-        if config.validation_plugin_defs:
-            validation_plugins = [create_validation_plugin(defn) for defn in config.validation_plugin_defs]
-        early_stop_plugins = None
-        if config.early_stop_plugin_defs:
-            early_stop_plugins = [create_early_stop_plugin(defn) for defn in config.early_stop_plugin_defs]
+        security_level = resolve_security_level(
+            getattr(datasource, "security_level", None),
+            getattr(llm_client, "security_level", None),
+        )
+        experiment_context = PluginContext(
+            plugin_name=name,
+            plugin_kind="experiment",
+            security_level=security_level,
+            provenance=(f"orchestrator:{name}.resolved",),
+        )
+
+        if self.rate_limiter is not None:
+            apply_plugin_context(
+                self.rate_limiter,
+                experiment_context.derive(
+                    plugin_name=getattr(self.rate_limiter, "name", "rate_limiter"),
+                    plugin_kind="rate_limiter",
+                ),
+            )
+        if self.cost_tracker is not None:
+            apply_plugin_context(
+                self.cost_tracker,
+                experiment_context.derive(
+                    plugin_name=getattr(self.cost_tracker, "name", "cost_tracker"),
+                    plugin_kind="cost_tracker",
+                ),
+            )
+
+        row_plugins = (
+            [create_row_plugin(defn, parent_context=experiment_context) for defn in config.row_plugin_defs]
+            if config.row_plugin_defs
+            else None
+        )
+        aggregator_plugins = (
+            [create_aggregation_plugin(defn, parent_context=experiment_context) for defn in config.aggregator_plugin_defs]
+            if config.aggregator_plugin_defs
+            else None
+        )
+        validation_plugins = (
+            [create_validation_plugin(defn, parent_context=experiment_context) for defn in config.validation_plugin_defs]
+            if config.validation_plugin_defs
+            else None
+        )
+        early_stop_plugins = (
+            [create_early_stop_plugin(defn, parent_context=experiment_context) for defn in config.early_stop_plugin_defs]
+            if config.early_stop_plugin_defs
+            else None
+        )
         self.early_stop_plugins = early_stop_plugins
         self.validation_plugins = validation_plugins
+
+        middlewares = create_middlewares(config.llm_middleware_defs, parent_context=experiment_context)
 
         self.experiment_runner = experiment_runner or ExperimentRunner(
             llm_client=llm_client,
@@ -87,17 +127,19 @@ class ExperimentOrchestrator:  # pylint: disable=too-many-instance-attributes,to
             row_plugins=row_plugins,
             aggregator_plugins=aggregator_plugins,
             validation_plugins=validation_plugins,
-            rate_limiter=rate_limiter,
-            cost_tracker=cost_tracker,
+            rate_limiter=self.rate_limiter,
+            cost_tracker=self.cost_tracker,
             experiment_name=name,
             retry_config=config.retry_config,
             checkpoint_config=config.checkpoint_config,
-            llm_middlewares=create_middlewares(config.llm_middleware_defs),
+            llm_middlewares=middlewares,
             prompt_defaults=config.prompt_defaults,
             concurrency_config=config.concurrency_config,
+            security_level=experiment_context.security_level,
             early_stop_plugins=early_stop_plugins,
             early_stop_config=config.early_stop_config,
         )
+        setattr(self.experiment_runner, "plugin_context", experiment_context)
 
     def run(self) -> Dict[str, Any]:
         """Execute all configured experiments and return the runner payload."""

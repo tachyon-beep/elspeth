@@ -102,7 +102,7 @@ class ThresholdEarlyStopPlugin:
 
 register_early_stop_plugin(
     ThresholdEarlyStopPlugin.name,
-    lambda options: ThresholdEarlyStopPlugin(
+    lambda options, context: ThresholdEarlyStopPlugin(
         metric=options.get("metric"),
         threshold=options.get("threshold"),
         comparison=options.get("comparison", "gte"),

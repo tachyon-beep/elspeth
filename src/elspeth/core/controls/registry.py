@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, Mapping
+from typing import Any, Callable, Dict, Iterable, Mapping
 
+from elspeth.core.plugins import PluginContext, apply_plugin_context
 from elspeth.core.security import coalesce_security_level
 from elspeth.core.validation import ConfigurationError, validate_schema
 
@@ -28,7 +29,11 @@ def _create_adaptive_rate_limiter(options: Dict[str, Any]) -> AdaptiveRateLimite
 class _Factory:
     """Wrap plugin constructors with optional schema validation."""
 
-    def __init__(self, factory: Callable[[Dict[str, Any]], Any], schema: Mapping[str, Any] | None = None):
+    def __init__(
+        self,
+        factory: Callable[[Dict[str, Any], PluginContext], Any],
+        schema: Mapping[str, Any] | None = None,
+    ):
         self.factory = factory
         self.schema = schema
 
@@ -41,17 +46,23 @@ class _Factory:
         if errors:
             raise ConfigurationError("\n".join(msg.format() for msg in errors))
 
-    def create(self, options: Dict[str, Any], *, context: str) -> Any:
+    def create(
+        self,
+        options: Dict[str, Any],
+        *,
+        plugin_context: PluginContext,
+        schema_context: str,
+    ) -> Any:
         """Validate and instantiate the plugin with `options`."""
 
-        self.validate(options, context=context)
-        return self.factory(options)
+        self.validate(options, context=schema_context)
+        return self.factory(options, plugin_context)
 
 
 _rate_limiters: Dict[str, _Factory] = {
-    "noop": _Factory(lambda options: NoopRateLimiter()),
+    "noop": _Factory(lambda options, context: NoopRateLimiter()),
     "fixed_window": _Factory(
-        lambda options: FixedWindowRateLimiter(
+        lambda options, context: FixedWindowRateLimiter(
             requests=int(options.get("requests", 1)),
             per_seconds=float(options.get("per_seconds", 1.0)),
         ),
@@ -65,7 +76,7 @@ _rate_limiters: Dict[str, _Factory] = {
         },
     ),
     "adaptive": _Factory(
-        _create_adaptive_rate_limiter,
+        lambda options, context: _create_adaptive_rate_limiter(options),
         schema={
             "type": "object",
             "properties": {
@@ -80,9 +91,9 @@ _rate_limiters: Dict[str, _Factory] = {
 }
 
 _cost_trackers: Dict[str, _Factory] = {
-    "noop": _Factory(lambda options: NoopCostTracker()),
+    "noop": _Factory(lambda options, context: NoopCostTracker()),
     "fixed_price": _Factory(
-        lambda options: FixedPriceCostTracker(
+        lambda options, context: FixedPriceCostTracker(
             prompt_token_price=float(options.get("prompt_token_price", 0.0)),
             completion_token_price=float(options.get("completion_token_price", 0.0)),
         ),
@@ -110,7 +121,12 @@ def register_cost_tracker(name: str, factory: Callable[[Dict[str, Any]], CostTra
     _cost_trackers[name] = _Factory(factory)
 
 
-def create_rate_limiter(definition: Dict[str, Any] | None) -> RateLimiter | None:
+def create_rate_limiter(
+    definition: Dict[str, Any] | None,
+    *,
+    parent_context: PluginContext | None = None,
+    provenance: Iterable[str] | None = None,
+) -> RateLimiter | None:
     """Instantiate a rate limiter from a configuration dictionary."""
 
     if not definition:
@@ -119,16 +135,51 @@ def create_rate_limiter(definition: Dict[str, Any] | None) -> RateLimiter | None
     options = dict(definition.get("options", {}) or {})
     if name not in _rate_limiters:
         raise ValueError(f"Unknown rate limiter plugin '{name}'")
+    definition_level = definition.get("security_level")
+    option_level = options.get("security_level")
+    sources: list[str] = []
+    if definition_level is not None:
+        sources.append(f"rate_limiter:{name}.definition.security_level")
+    if option_level is not None:
+        sources.append(f"rate_limiter:{name}.options.security_level")
+    if provenance:
+        sources.extend(provenance)
     try:
-        level = coalesce_security_level(definition.get("security_level"), options.pop("security_level", None))
+        level = coalesce_security_level(definition_level, option_level)
     except ValueError as exc:
         raise ConfigurationError(f"rate_limiter:{name}: {exc}") from exc
-    limiter = _rate_limiters[name].create(options, context=f"rate_limiter:{name}")
-    setattr(limiter, "_elspeth_security_level", level)
+    payload = dict(options)
+    payload.pop("security_level", None)
+    provenance_sources = tuple(sources or (f"rate_limiter:{name}.resolved",))
+    if parent_context:
+        context = parent_context.derive(
+            plugin_name=name,
+            plugin_kind="rate_limiter",
+            security_level=level,
+            provenance=provenance_sources,
+        )
+    else:
+        context = PluginContext(
+            plugin_name=name,
+            plugin_kind="rate_limiter",
+            security_level=level,
+            provenance=provenance_sources,
+        )
+    limiter = _rate_limiters[name].create(
+        payload,
+        plugin_context=context,
+        schema_context=f"rate_limiter:{name}",
+    )
+    apply_plugin_context(limiter, context)
     return limiter
 
 
-def create_cost_tracker(definition: Dict[str, Any] | None) -> CostTracker | None:
+def create_cost_tracker(
+    definition: Dict[str, Any] | None,
+    *,
+    parent_context: PluginContext | None = None,
+    provenance: Iterable[str] | None = None,
+) -> CostTracker | None:
     """Instantiate a cost tracker from a configuration dictionary."""
 
     if not definition:
@@ -137,12 +188,42 @@ def create_cost_tracker(definition: Dict[str, Any] | None) -> CostTracker | None
     options = dict(definition.get("options", {}) or {})
     if name not in _cost_trackers:
         raise ValueError(f"Unknown cost tracker plugin '{name}'")
+    definition_level = definition.get("security_level")
+    option_level = options.get("security_level")
+    sources: list[str] = []
+    if definition_level is not None:
+        sources.append(f"cost_tracker:{name}.definition.security_level")
+    if option_level is not None:
+        sources.append(f"cost_tracker:{name}.options.security_level")
+    if provenance:
+        sources.extend(provenance)
     try:
-        level = coalesce_security_level(definition.get("security_level"), options.pop("security_level", None))
+        level = coalesce_security_level(definition_level, option_level)
     except ValueError as exc:
         raise ConfigurationError(f"cost_tracker:{name}: {exc}") from exc
-    tracker = _cost_trackers[name].create(options, context=f"cost_tracker:{name}")
-    setattr(tracker, "_elspeth_security_level", level)
+    payload = dict(options)
+    payload.pop("security_level", None)
+    provenance_sources = tuple(sources or (f"cost_tracker:{name}.resolved",))
+    if parent_context:
+        context = parent_context.derive(
+            plugin_name=name,
+            plugin_kind="cost_tracker",
+            security_level=level,
+            provenance=provenance_sources,
+        )
+    else:
+        context = PluginContext(
+            plugin_name=name,
+            plugin_kind="cost_tracker",
+            security_level=level,
+            provenance=provenance_sources,
+        )
+    tracker = _cost_trackers[name].create(
+        payload,
+        plugin_context=context,
+        schema_context=f"cost_tracker:{name}",
+    )
+    apply_plugin_context(tracker, context)
     return tracker
 
 

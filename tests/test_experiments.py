@@ -379,8 +379,8 @@ def test_suite_runner_with_plugin_definitions(tmp_path, monkeypatch):
         def finalize(self, records):
             return {self._key: len(records)}
 
-    exp_plugin_registry.register_row_plugin("test_row", lambda opts: CustomRowPlugin(opts.get("value", 0)))
-    exp_plugin_registry.register_aggregation_plugin("test_agg", lambda opts: CustomAggPlugin(opts.get("key", "total")))
+    exp_plugin_registry.register_row_plugin("test_row", lambda opts, context: CustomRowPlugin(opts.get("value", 0)))
+    exp_plugin_registry.register_aggregation_plugin("test_agg", lambda opts, context: CustomAggPlugin(opts.get("key", "total")))
 
     class DummyLLM:
         def generate(self, *, system_prompt, user_prompt, metadata=None):

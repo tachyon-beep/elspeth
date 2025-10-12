@@ -40,7 +40,7 @@ def test_middleware_chain(monkeypatch):
     from elspeth.core.llm import registry as mw_registry
 
     box = []
-    mw_registry.register_middleware("collect", lambda options: CollectingMiddleware(box))
+    mw_registry.register_middleware("collect", lambda options, context: CollectingMiddleware(box))
     middlewares = create_middlewares([{"name": "collect", "security_level": "official"}])
 
     runner = ExperimentRunner(
@@ -337,7 +337,7 @@ def test_middleware_retry_hook_invoked(monkeypatch):
         def on_retry_exhausted(self, request, metadata, error):
             events.append({"metadata": metadata, "error": str(error)})
 
-    mw_registry.register_middleware("retry_tracker", lambda options: RetryMiddleware())
+    mw_registry.register_middleware("retry_tracker", lambda options, context: RetryMiddleware())
 
     class FailingLLM:
         def generate(self, *, system_prompt, user_prompt, metadata=None):
@@ -494,7 +494,7 @@ def test_suite_runner_deduplicates_shared_middleware_multiple_experiments(monkey
 
     from elspeth.core.llm import registry as mw_registry
 
-    mw_registry.register_middleware("shared", lambda options: SharedMiddleware())
+    mw_registry.register_middleware("shared", lambda options, context: SharedMiddleware())
 
     exp_config = ExperimentConfig(
         name="exp",
@@ -576,7 +576,7 @@ def test_suite_runner_deduplicates_shared_middleware(monkeypatch):
 
     from elspeth.core.llm import registry as mw_registry
 
-    mw_registry.register_middleware("shared", lambda options: SharedMiddleware())
+    mw_registry.register_middleware("shared", lambda options, context: SharedMiddleware())
 
     baseline_config = ExperimentConfig(
         name="baseline",
