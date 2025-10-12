@@ -106,6 +106,6 @@ def test_create_experiment_template_defaults_when_no_base(tmp_path: Path) -> Non
     destination = create_experiment_template(suite, "fresh")
     config = json.loads((destination / "config.json").read_text(encoding="utf-8"))
     assert config["name"] == "fresh"
-    assert config["temperature"] == 0.0
+    assert config["temperature"] == pytest.approx(0.0)
     assert (destination / "system_prompt.md").exists()
     assert (destination / "user_prompt.md").exists()

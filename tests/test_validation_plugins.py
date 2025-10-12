@@ -72,7 +72,8 @@ def test_runner_retries_on_validation_failure():
             self._elspeth_security_level = "official"
 
         def write(self, results, *, metadata=None):
-            pass
+            """No-op sink used to satisfy the interface during retry tests."""
+            _ = (results, metadata)
 
     runner = ExperimentRunner(
         llm_client=FlakyLLM(),
