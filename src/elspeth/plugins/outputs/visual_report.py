@@ -298,9 +298,7 @@ class VisualAnalyticsSink(ResultSink):
             for name, value in means.items():
                 rate = pass_rates.get(name)
                 rate_text = f"{rate*100:.1f}%" if rate is not None else "n/a"
-                rows.append(
-                    f"<tr><td>{name}</td><td>{value:.4f}</td><td>{rate_text}</td></tr>"
-                )
+                rows.append(f"<tr><td>{name}</td><td>{value:.4f}</td><td>{rate_text}</td></tr>")
             table_html = (
                 "<table>"
                 "<thead><tr><th>Criterion</th><th>Mean</th><th>Pass Rate</th></tr></thead>"

@@ -340,9 +340,7 @@ def _resolve_suite_root(args: argparse.Namespace, settings) -> Path | None:
     return Path(suite_root_value) if suite_root_value else None
 
 
-def _handle_suite_management(
-    args: argparse.Namespace, suite_root: Path | None
-) -> ExperimentSuite | None:
+def _handle_suite_management(args: argparse.Namespace, suite_root: Path | None) -> ExperimentSuite | None:
     """Process template/export/report requests before running experiments."""
 
     export_path = getattr(args, "export_suite_config", None)
