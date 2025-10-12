@@ -59,7 +59,7 @@ class VisualAnalyticsSink(ResultSink):
         self.chart_title = chart_title or "Mean Scores by Criterion"
         self.seaborn_style = seaborn_style
         self._security_level: str | None = None
-        self._last_written_files: list[tuple[Path, Dict[str, Any]]] = []
+        self._last_written_files: list[tuple[list[str], Path, Dict[str, Any]]] = []
         self._plot_modules: tuple[Any, Any, Any] | None = None
 
     # --------------------------------------------------------------------- API
@@ -111,12 +111,13 @@ class VisualAnalyticsSink(ResultSink):
             plt.close(fig)
             png_bytes = buffer.getvalue()
 
-            written: list[tuple[Path, Dict[str, Any]]] = []
+            written: list[tuple[list[str], Path, Dict[str, Any]]] = []
             if "png" in self.formats:
                 png_path = self.base_path / f"{self.file_stem}.png"
                 png_path.write_bytes(png_bytes)
                 written.append(
                     (
+                        self._artifact_keys_for_format("png", png_path),
                         png_path,
                         {
                             "chart_data": score_means,
@@ -131,6 +132,7 @@ class VisualAnalyticsSink(ResultSink):
                 html_path.write_text(html_content, encoding="utf-8")
                 written.append(
                     (
+                        self._artifact_keys_for_format("html", html_path),
                         html_path,
                         {
                             "chart_data": score_means,
@@ -177,7 +179,7 @@ class VisualAnalyticsSink(ResultSink):
 
     def collect_artifacts(self) -> Dict[str, Artifact]:
         artifacts: Dict[str, Artifact] = {}
-        for path, extra in self._last_written_files:
+        for keys, path, extra in self._last_written_files:
             suffix = path.suffix.lower()
             if suffix == ".png":
                 content_type = "image/png"
@@ -187,7 +189,7 @@ class VisualAnalyticsSink(ResultSink):
                 content_type = "application/octet-stream"
             metadata = {"path": str(path), "content_type": content_type}
             metadata.update(extra)
-            artifacts[path.name] = Artifact(
+            artifact = Artifact(
                 id="",
                 type=content_type,
                 path=str(path),
@@ -195,6 +197,8 @@ class VisualAnalyticsSink(ResultSink):
                 persist=True,
                 security_level=self._security_level,
             )
+            for key in keys:
+                artifacts[key] = artifact
         self._last_written_files = []
         return artifacts
 
@@ -269,6 +273,17 @@ class VisualAnalyticsSink(ResultSink):
             if attempts:
                 pass_rates[name] = successes / attempts
         return means, pass_rates
+
+    def _artifact_keys_for_format(self, fmt: str, path: Path) -> list[str]:
+        primary, alias = {
+            "png": ("analytics_visual_png", "analytics_visual"),
+            "html": ("analytics_visual_html", "analytics_visual_html"),
+        }.get(fmt, (path.name, path.name))
+        keys = [primary]
+        if alias and alias != primary:
+            keys.append(alias)
+        keys.append(path.name)
+        return keys
 
     def _render_html(
         self,

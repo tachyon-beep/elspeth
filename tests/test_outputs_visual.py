@@ -43,9 +43,10 @@ def test_visual_sink_creates_artifacts(tmp_path: Path) -> None:
 
     assert (tmp_path / "visual.png").exists()
     assert (tmp_path / "visual.html").exists()
-    assert set(artifacts.keys()) == {"visual.png", "visual.html"}
-    png_artifact = artifacts["visual.png"]
-    html_artifact = artifacts["visual.html"]
+    assert {"analytics_visual_png", "analytics_visual_html"}.issubset(artifacts.keys())
+    assert artifacts["analytics_visual"].path.endswith("visual.png")
+    png_artifact = artifacts["analytics_visual_png"]
+    html_artifact = artifacts["analytics_visual_html"]
     assert png_artifact.metadata["chart_data"]["analysis"] == pytest.approx(0.82)
     assert "pass_rates" in html_artifact.metadata
     assert png_artifact.security_level == "official"
