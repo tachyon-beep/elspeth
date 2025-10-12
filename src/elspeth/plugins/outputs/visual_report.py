@@ -6,7 +6,7 @@ import base64
 import io
 import logging
 from pathlib import Path
-from typing import Any, Dict, Iterable, Mapping, Sequence, Tuple
+from typing import Any, Dict, Mapping, Sequence, Tuple
 
 from elspeth.core.interfaces import Artifact, ArtifactDescriptor, ResultSink
 from elspeth.core.security import normalize_security_level
@@ -71,7 +71,7 @@ class VisualAnalyticsSink(ResultSink):
                 logger.info("Visual analytics sink found no numeric scores; skipping output")
                 self._last_written_files = []
                 return
-            matplotlib, plt, seaborn = self._load_plot_modules()
+            _matplotlib, plt, seaborn = self._load_plot_modules()
         except Exception as exc:  # pragma: no cover - defensive guard
             if self.on_error == "skip":
                 logger.warning("Visual analytics sink cannot initialise plotting backend; skipping output: %s", exc)
@@ -150,7 +150,7 @@ class VisualAnalyticsSink(ResultSink):
                 return
             raise
 
-    def produces(self) -> Iterable[ArtifactDescriptor]:  # pragma: no cover - metadata only
+    def produces(self) -> list[ArtifactDescriptor]:  # pragma: no cover - metadata only
         descriptors: list[ArtifactDescriptor] = []
         if "png" in self.formats:
             descriptors.append(
@@ -172,7 +172,7 @@ class VisualAnalyticsSink(ResultSink):
             )
         return descriptors
 
-    def consumes(self) -> Iterable[str]:  # pragma: no cover - no dependencies
+    def consumes(self) -> list[str]:  # pragma: no cover - no dependencies
         return []
 
     def collect_artifacts(self) -> Dict[str, Artifact]:
