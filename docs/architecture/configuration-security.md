@@ -7,7 +7,8 @@
 <!-- Update 2025-10-12: Profiles also expose `concurrency`, `early_stop`, and `checkpoint` sections that are normalised via `normalize_early_stop_definitions` to align with plugin schemas (`src/elspeth/config.py:66`, `src/elspeth/core/experiments/plugin_registry.py:298`). -->
 
 ### Update 2025-10-12: Loader Safeguards
-- `load_settings` merges prompt packs, early-stop definitions, and concurrency defaults while preserving security levels (`src/elspeth/config.py:52`, `src/elspeth/config.py:146`).
+- `load_settings` merges prompt packs, early-stop definitions, and concurrency defaults while preserving security levels (`src/elspeth/config.py:52`, `src/elspeth/config.py:146`).[^config-loader-safeguards-2025-10-12]
+- Early-stop configuration passed as shorthand objects or legacy keys is normalised into canonical plugin definitions, preventing ambiguous threshold semantics (`src/elspeth/config.py:68`, `src/elspeth/core/experiments/plugin_registry.py:298`).[^config-early-stop-normalised-2025-10-12]
 
 ## Secret Resolution
 - **Environment variables** – LLM clients, repository sinks, and signing bundles resolve credentials via `_env` keys or well-known variables, keeping secrets out of config artefacts (`src/elspeth/plugins/llms/azure_openai.py:66`, `src/elspeth/plugins/outputs/repository.py:149`, `src/elspeth/plugins/outputs/signed.py:107`).[^config-env-2025-10-12]
@@ -30,6 +31,8 @@
 - **On-error policies** – Datasources and sinks accept `"abort"` or `"skip"` to tailor resilience vs. strictness; combine with telemetry to ensure skipped components are investigated (`src/elspeth/plugins/datasources/csv_local.py:30`, `src/elspeth/plugins/outputs/blob.py:64`, `src/elspeth/plugins/outputs/excel.py:52`).[^config-on-error-2025-10-12]
 - **Security levels** – Datasources, sinks, and suite defaults can specify classifications that propagate through the artifact pipeline, enabling downstream segregation of outputs (`src/elspeth/plugins/datasources/csv_blob.py:25`, `src/elspeth/core/experiments/suite_runner.py:116`, `src/elspeth/core/artifact_pipeline.py:192`).[^config-security-levels-2025-10-12]
 <!-- Update 2025-10-12: `concurrency.enabled`, `max_workers`, and `utilization_pause` settings guard thread pools, while `checkpoint.path`/`field` control resumable runs; ensure these paths point to hardened storage (`src/elspeth/core/experiments/runner.py:365`, `src/elspeth/core/experiments/runner.py:280`). -->
+- **Concurrency & checkpointing** – `concurrency` blocks configure thread pools and rate-limiter backoff, while `checkpoint` paths direct resumable execution to hardened storage locations (`src/elspeth/config.py:97`, `src/elspeth/core/experiments/runner.py:365`, `src/elspeth/core/experiments/runner.py:280`).[^config-concurrency-2025-10-12]
+- **Suite defaults harmonisation** – Suite defaults merge prompt packs (including middleware/rate limiters) before experiments override them, ensuring accreditation-approved stacks remain in effect (`src/elspeth/core/experiments/suite_runner.py:55`, `src/elspeth/core/experiments/suite_runner.py:118`).[^config-suite-defaults-2025-10-12]
 
 ### Update 2025-10-12: Prompt Pack Governance
 - Prompt packs should exclude development middleware and enforce accreditation-required stacks (prompt shield + content safety) by default.
@@ -45,6 +48,7 @@
 - **Plugin whitelisting** – Registries validate plugin names against in-memory maps. Harden builds by avoiding dynamic imports at runtime and auditing prompt packs/suite defaults for unexpected plugin references (`src/elspeth/core/registry.py:69`, `src/elspeth/core/experiments/plugin_registry.py:52`).[^config-plugin-whitelist-2025-10-12]
 
 ## Update History
+- 2025-10-12 – Update 2025-10-12: Documented loader normalisation, concurrency/checkpoint controls, suite default harmonisation, and evidence export flows for accreditation-ready profiles.
 - 2025-10-12 – Captured concurrency/checkpoint configuration impacts, suite export considerations, and plugin inheritance safeguards.
 - 2025-10-12 – Update 2025-10-12: Added loader/secret governance notes, suite default annotations, and cross-references for prompt packs and exports.
 
@@ -66,3 +70,7 @@
 [^config-suite-exports-2025-10-12]: Update 2025-10-12: Export paths compared in docs/reporting-and-suite-management.md (Update 2025-10-12: Suite Export Tooling).
 [^config-prompt-inheritance-2025-10-12]: Update 2025-10-12: Prompt pack inheritance diagrammed in docs/architecture/component-diagram.md (Update 2025-10-12: Configuration Loader).
 [^config-plugin-whitelist-2025-10-12]: Update 2025-10-12: Plugin whitelisting guidance overlaps with docs/architecture/plugin-security-model.md (Update 2025-10-12: Registry Enforcement).
+[^config-loader-safeguards-2025-10-12]: Update 2025-10-12: Loader safeguards corroborated by docs/architecture/data-flow-diagrams.md (Update 2025-10-12: Suite Lifecycle).
+[^config-early-stop-normalised-2025-10-12]: Update 2025-10-12: Early-stop normalisation detailed in docs/architecture/plugin-security-model.md (Update 2025-10-12: Early-Stop Lifecycle).
+[^config-concurrency-2025-10-12]: Update 2025-10-12: Concurrency and checkpoint guidance visualised in docs/architecture/data-flow-diagrams.md (Update 2025-10-12: Parallel Execution Gate / Checkpoint Loop).
+[^config-suite-defaults-2025-10-12]: Update 2025-10-12: Suite defaults harmonisation aligned with docs/architecture/component-diagram.md (Update 2025-10-12: Suite reporting outputs).

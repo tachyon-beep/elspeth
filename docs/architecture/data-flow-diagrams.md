@@ -31,6 +31,8 @@ sequenceDiagram
 - Middleware can veto, mask, or audit prompts before the LLM is contacted, forming the first trust boundary for untrusted input (`src/elspeth/plugins/llms/middleware.py:110`, `src/elspeth/plugins/llms/middleware.py:233`).[^df-middleware-2025-10-12]
 - Cost tracking and rate limiting wrap each LLM invocation with deterministic retry state (`src/elspeth/core/experiments/runner.py:498`, `src/elspeth/core/experiments/runner.py:520`, `src/elspeth/core/controls/rate_limit.py:74`).[^df-retry-2025-10-12]
 - The artifact pipeline enforces dependency ordering and classification-aware access before sinks persist or aggregate results (`src/elspeth/core/artifact_pipeline.py:192`, `src/elspeth/core/artifact_pipeline.py:201`).[^df-pipeline-2025-10-12]
+<!-- UPDATE 2025-10-12: Runner metadata -->
+- `ExperimentRunner` attaches `retry_summary`, `cost_summary`, and `early_stop` payloads to the execution metadata so sinks, analytics reports, and telemetry consumers can reproduce control decisions (`src/elspeth/core/experiments/runner.py:170`, `src/elspeth/core/experiments/runner.py:198`, `src/elspeth/core/experiments/runner.py:214`).[^df-runner-metadata-2025-10-12]
 <!-- Update 2025-10-12: When concurrency is enabled, rows enter a worker pool governed by `concurrency_config` thresholds, and early-stop plugins can halt submission once metrics breach criteria (`src/elspeth/core/experiments/runner.py:365`, `src/elspeth/core/experiments/runner.py:248`). -->
 
 ### Update 2025-10-12: Ingress Classification Flow
@@ -128,6 +130,31 @@ flowchart LR
 - `SuiteReportGenerator.generate_all_reports` and CLI `--reports-dir` invocations reuse the credential graph for analytics, repository, and signing sinks (`src/elspeth/tools/reporting.py:19`, `src/elspeth/cli.py:392`).
 <!-- Update 2025-10-12: Suite export/reporting commands inherit the same credential flow when emitting analytics or repository artifacts, so secure stores must cover `analytics_report` and repository PAT tokens (`src/elspeth/cli.py:205`, `src/elspeth/plugins/outputs/analytics_report.py:28`). -->
 
+## Added 2025-10-12 – Suite Reporting Export Flow
+```mermaid
+flowchart LR
+    CLI["CLI (`python -m elspeth.cli --reports-dir`)"] --> SuiteRunner
+    SuiteRunner[ExperimentSuiteRunner] --> ResultsMap["Experiment Payload Map"]
+    ResultsMap --> SuiteReport[SuiteReportGenerator.generate_all_reports]
+    SuiteReport --> Validation["consolidated/validation_results.json"]
+    SuiteReport --> Comparative["comparative_analysis.json"]
+    SuiteReport --> Recommendations["recommendations.json"]
+    SuiteReport --> FailureReport["failure_analysis.json"]
+    SuiteReport --> ExecSummary["executive_summary.md"]
+    SuiteReport --> ExcelReport["analysis.xlsx"]
+    SuiteReport --> AnalyticsArtifacts["analytics_report.json / .md"]
+    SuiteReport --> VisualArtifacts["visual_report/*.png / *.html"]
+    SuiteReport --> Consolidated["experiment/*/stats.json"]
+    VisualArtifacts --> Telemetry["AzureEnvironmentMiddleware (log_table)"]
+    AnalyticsArtifacts --> AnalyticsSink
+    ExcelReport --> ExcelSink
+    classDef suite fill:#eef5ff,stroke:#3a6cf0,stroke-width:1px;
+    class SuiteReport,Validation,Comparative,Recommendations,FailureReport,ExecSummary,ExcelReport,AnalyticsArtifacts,VisualArtifacts,Consolidated suite;
+```
+
+### Update 2025-10-12: Suite Reporting Outputs
+- `SuiteReportGenerator` reuses experiment payloads, aggregates, and baseline comparisons to emit consolidated JSON, Markdown, Excel, and visual artifacts suitable for accreditation packages (`src/elspeth/tools/reporting.py:19`, `src/elspeth/tools/reporting.py:117`, `src/elspeth/tools/reporting.py:207`). The CLI dispatch lives at `src/elspeth/cli.py:392`, and tests assert report structure in `tests/test_suite_reporter.py`.[^df-suite-reporting-2025-10-12]
+
 ## Artifact Lifecycle
 ```mermaid
 flowchart TD
@@ -136,19 +163,40 @@ flowchart TD
     SinkCSV["CSV Sink\n(sanitises formulas)"]
     SinkSigned["Signed Artifact Bundle"]
     SinkRepo["Repository Sink\n(dry-run or live commit)"]
+    SinkAnalytics["Analytics Report Sink"]
+    SinkVisual["Visual Analytics Sink"]
+    SinkExcel["Excel Result Sink"]
+    SinkZip["ZIP Bundle Sink"]
+    SinkBlob["Blob Storage Sink"]
 
     Results --> Pipeline
     Pipeline --> SinkCSV
     Pipeline --> SinkSigned
     Pipeline --> SinkRepo
+    Pipeline --> SinkAnalytics
+    Pipeline --> SinkVisual
+    Pipeline --> SinkExcel
+    Pipeline --> SinkZip
+    Pipeline --> SinkBlob
     SinkCSV -->|"produces file/csv"| Pipeline
     SinkSigned -->|"produces signed bundle"| Pipeline
     SinkRepo -->|"dry_run manifests"| Pipeline
+    SinkAnalytics -->|"produces analytics_report"| Pipeline
+    SinkVisual -->|"produces visual artifacts"| Pipeline
+    SinkExcel -->|"produces file/xlsx"| Pipeline
+    SinkZip -->|"produces file/zip"| Pipeline
+    SinkBlob -->|"uploads manifests/artifacts"| Pipeline
 ```
 
 - CSV outputs escape spreadsheet metacharacters and record sanitisation metadata for downstream auditors (`src/elspeth/plugins/outputs/csv_file.py:49`, `src/elspeth/plugins/outputs/_sanitize.py:18`).[^df-csv-2025-10-12]
 - Signed artifacts emit HMAC digests and manifests containing response metadata, enabling tamper detection when results are redistributed (`src/elspeth/plugins/outputs/signed.py:37`, `src/elspeth/plugins/outputs/signed.py:75`).[^df-signed-2025-10-12]
 - Repository sinks support dry-run inspection by caching payload manifests, reducing blast radius during accreditation rehearsals (`src/elspeth/plugins/outputs/repository.py:70`, `src/elspeth/plugins/outputs/repository.py:124`).[^df-repo-2025-10-12]
+<!-- UPDATE 2025-10-12: Analytics/visual sinks -->
+- Analytics report sinks emit JSON/Markdown summaries of retry, cost, aggregate, and baseline data which Suite reports and auditors consume (`src/elspeth/plugins/outputs/analytics_report.py:28`, `src/elspeth/plugins/outputs/analytics_report.py:62`).[^df-analytics-2025-10-12]
+- Visual analytics sinks transform aggregate statistics into PNG/HTML artifacts that embed retry and cost metadata for offline evidence (`src/elspeth/plugins/outputs/visual_report.py:63`, `src/elspeth/plugins/outputs/visual_report.py:205`).[^df-visual-2025-10-12]
+- Excel outputs consolidate flattened rows, manifests, and aggregate metrics while retaining sanitisation markers (`src/elspeth/plugins/outputs/excel.py:45`, `src/elspeth/plugins/outputs/excel.py:146`).[^df-excel-2025-10-12]
+- ZIP bundle sinks package raw results, manifests, CSV excerpts, and collected upstream artifacts with consistent sanitisation metadata (`src/elspeth/plugins/outputs/zip_bundle.py:45`, `src/elspeth/plugins/outputs/zip_bundle.py:132`).[^df-zip-2025-10-12]
+- Blob sinks mirror artifact payloads into Azure storage, propagating security level metadata and optional manifests for traceability (`src/elspeth/plugins/outputs/blob.py:127`, `src/elspeth/plugins/outputs/blob.py:173`).[^df-blob-sink-2025-10-12]
 <!-- Update 2025-10-12: Analytics sinks and zip bundles now register `produces` descriptors so the pipeline can chain artifacts while enforcing classification gates (`src/elspeth/plugins/outputs/analytics_report.py:62`, `src/elspeth/plugins/outputs/zip_bundle.py:41`, `src/elspeth/core/artifact_pipeline.py:167`). -->
 <!-- Update 2025-10-12: Visual analytics sink converts score summaries into PNG/HTML charts with inline metadata, inheriting pipeline security levels (`src/elspeth/plugins/outputs/visual_report.py:63`, `src/elspeth/plugins/outputs/visual_report.py:180`). -->
 
@@ -156,6 +204,7 @@ flowchart TD
 - `ArtifactPipeline` stores produced artifacts and rehydrates them for downstream sinks through `collect_artifacts`, ensuring sanitisation metadata and security levels persist (`src/elspeth/core/artifact_pipeline.py:120`, `src/elspeth/core/interfaces.py:101`).
 
 ## Update History
+- 2025-10-12 – Update 2025-10-12: Added suite reporting export flow, expanded artifact lifecycle coverage (analytics/visual/excel/zip/blob), and documented runner metadata propagation for accreditation evidence.
 - 2025-10-12 – Added retry/early-stop telemetry sequence, documented concurrency impacts, and noted analytics artifact propagation.
 - 2025-10-12 – Update 2025-10-12: Annotated trust boundaries, added credential and artifact footnotes, and cross-referenced sanitation/security documentation.
 
@@ -169,3 +218,10 @@ flowchart TD
 [^df-csv-2025-10-12]: Update 2025-10-12: Sanitisation controls catalogued in docs/architecture/CONTROL_INVENTORY.md.
 [^df-signed-2025-10-12]: Update 2025-10-12: Signing mechanism described in docs/architecture/security-controls.md (Update 2025-10-12: Artifact Signing).
 [^df-repo-2025-10-12]: Update 2025-10-12: Repository safeguards outlined in docs/architecture/plugin-security-model.md (Update 2025-10-12: Output Sinks).
+[^df-runner-metadata-2025-10-12]: Update 2025-10-12: Metadata propagation aligns with docs/architecture/audit-logging.md (Update 2025-10-12: Retry Summaries) and docs/architecture/architecture-overview.md Added 2025-10-12 – Concurrency, Checkpoints, and Retry Telemetry.
+[^df-analytics-2025-10-12]: Update 2025-10-12: Analytics sink outputs detailed in docs/reporting-and-suite-management.md (Update 2025-10-12: Analytics Outputs).
+[^df-visual-2025-10-12]: Update 2025-10-12: Visual artifact retention described in docs/architecture/audit-logging.md (Update 2025-10-12: Visual Evidence Logging).
+[^df-excel-2025-10-12]: Update 2025-10-12: Excel workbook sanitisation references docs/architecture/security-controls.md (Update 2025-10-12: Spreadsheet Controls).
+[^df-zip-2025-10-12]: Update 2025-10-12: ZIP bundle lifecycle cross-referenced in docs/architecture/CONTROL_INVENTORY.md (Update 2025-10-12: Bundle Controls).
+[^df-blob-sink-2025-10-12]: Update 2025-10-12: Blob sink enforcement detailed in docs/architecture/threat-surfaces.md (Update 2025-10-12: Storage Surfaces).
+[^df-suite-reporting-2025-10-12]: Update 2025-10-12: Suite reporting CLI usage illustrated in docs/reporting-and-suite-management.md (Update 2025-10-12: Suite Reporting Exports).

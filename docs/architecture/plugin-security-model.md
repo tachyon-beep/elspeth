@@ -4,6 +4,7 @@
 - **Central factories** – Datasource, LLM, and sink registries wrap constructors with JSON-schema validation, rejecting unknown plugin names or malformed options before instantiation (`src/elspeth/core/registry.py:91`, `src/elspeth/core/registry.py:208`).[^plugin-central-2025-10-12]
 - **Experiment plugins** – Row, aggregation, baseline, validation, and early-stop plugins register via dedicated registries that normalise definitions and check option schemas (`src/elspeth/core/experiments/plugin_registry.py:93`, `src/elspeth/core/experiments/plugin_registry.py:227`).[^plugin-experiment-2025-10-12]
 - **Control plane plugins** – Rate limiter and cost tracker factories follow the same pattern, providing a consistent extension point for throttle/cost logic while retaining validation hooks (`src/elspeth/core/controls/registry.py:36`, `src/elspeth/core/controls/registry.py:102`).[^plugin-control-2025-10-12]
+- **Reporting sinks** – Analytics, visual, Excel, signed, and bundle sinks are registered through the same registry facade and stamp `_elspeth_security_level`, allowing suite reporting to reuse sanctioned factories rather than constructing sinks manually (`src/elspeth/core/registry.py:120`, `src/elspeth/plugins/outputs/analytics_report.py:17`, `src/elspeth/plugins/outputs/visual_report.py:17`).[^plugin-reporting-2025-10-12]
 <!-- Update 2025-10-12: Registry creation paths also stamp `_elspeth_security_level` on plugins, ensuring artifact pipeline enforcement downstream (`src/elspeth/core/experiments/plugin_registry.py:122`, `src/elspeth/core/registry.py:120`). -->
 
 ### Update 2025-10-12: Registry Enforcement
@@ -31,6 +32,10 @@
 ### Update 2025-10-12: Artifact Tokens
 - Sink descriptors map produced artifacts to types and aliases, enabling secure dependency resolution across the pipeline (`src/elspeth/core/interfaces.py:83`, `src/elspeth/core/artifact_pipeline.py:167`).
 
+## Suite Reporting Integrations
+- **Report generation** – CLI report commands instantiate `SuiteReportGenerator`, which reuses registry-created sinks to emit consolidated analytics, visual, Excel, and signed artifacts while honouring security levels and sanitisation policies (`src/elspeth/cli.py:392`, `src/elspeth/tools/reporting.py:33`, `src/elspeth/tools/reporting.py:138`).[^plugin-suite-reporting-2025-10-12]
+- **Prompt pack & suite defaults** – Prompt packs can pre-register middleware, rate limiters, sinks, and early-stop plugins; suite defaults merge these definitions before experiments override them, ensuring registries receive validated options (`src/elspeth/config.py:78`, `src/elspeth/core/experiments/suite_runner.py:55`).[^plugin-suite-defaults-2025-10-12]
+
 ## Extensibility Controls
 - **Side-effect imports** – Default plugin packages register themselves on import, but alternative registries can be loaded explicitly to constrain available plugins in hardened deployments (`src/elspeth/plugins/experiments/__init__.py:5`, `src/elspeth/plugins/llms/__init__.py:1`).[^plugin-side-effect-2025-10-12]
 - **Custom plugin onboarding** – Helper scripts scaffold new plugin skeletons while registries enforce schema validation, reducing the risk of insecure copy/paste code (`scripts/plugin_scaffold.py:19`).[^plugin-onboarding-2025-10-12]
@@ -45,6 +50,7 @@
 - **Artifact-aware sinks** – The registry records sink artifact descriptors and binds security levels, enabling downstream pipeline enforcement without granting sinks arbitrary filesystem access (`src/elspeth/core/registry.py:120`, `src/elspeth/core/artifact_pipeline.py:153`).[^plugin-artifact-aware-2025-10-12]
 
 ## Update History
+- 2025-10-12 – Update 2025-10-12: Added suite reporting integration notes, reporting sink registry coverage, and prompt pack default harmonisation guidance.
 - 2025-10-12 – Documented middleware lifecycle hooks, plugin normalisation safeguards, and artifact-aware sink enforcement within the security model.
 - 2025-10-12 – Update 2025-10-12: Added registry/control registry notes, validation plugin coverage, and plugin lifecycle guidance with cross-references.
 
@@ -63,3 +69,6 @@
 [^plugin-middleware-lifecycle-2025-10-12]: Update 2025-10-12: Middleware lifecycle callbacks documented in docs/architecture/data-flow-diagrams.md (Update 2025-10-12: Baseline Evaluation).
 [^plugin-normalisation-2025-10-12]: Update 2025-10-12: Normalisation helpers cross-referenced in docs/architecture/configuration-security.md (Update 2025-10-12: Suite Defaults).
 [^plugin-artifact-aware-2025-10-12]: Update 2025-10-12: Artifact-aware sink enforcement linked to docs/architecture/security-controls.md (Update 2025-10-12: Artifact Tokens).
+[^plugin-reporting-2025-10-12]: Update 2025-10-12: Reporting sink registry usage referenced in docs/architecture/component-diagram.md (Update 2025-10-12: Suite reporting outputs).
+[^plugin-suite-reporting-2025-10-12]: Update 2025-10-12: Suite reporting pipeline covered in docs/reporting-and-suite-management.md (Update 2025-10-12: Suite Reporting Exports).
+[^plugin-suite-defaults-2025-10-12]: Update 2025-10-12: Prompt pack and suite default harmonisation described in docs/architecture/configuration-security.md (Update 2025-10-12: Suite Defaults).

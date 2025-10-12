@@ -20,11 +20,13 @@
 - **Poisoned datasets** – CSV/Blob datasources read untrusted files; normalised security levels in dataframe metadata help classify downstream results, but content validation depends on experiment-specific plugins (`src/elspeth/plugins/datasources/csv_blob.py:35`, `src/elspeth/core/experiments/runner.py:208`).[^threat-poisoned-2025-10-12]
 - **Prompt injection** – User-provided fields can attempt to override instructions. Strict prompt rendering and middleware-based term blocking/content safety mitigate common injection patterns (`src/elspeth/core/prompts/engine.py:33`, `src/elspeth/plugins/llms/middleware.py:110`, `src/elspeth/plugins/llms/middleware.py:232`).[^threat-prompt-2025-10-12]
 - **Configuration spoofing** – Invalid plugin names or options are caught before instantiation; however, accreditation deployments should sign configuration bundles to prevent tampering at rest (`src/elspeth/core/validation.py:271`, `src/elspeth/core/registry.py:202`).[^threat-config-2025-10-12]
+- **Suite configuration drift** – Prompt pack merges and suite defaults can silently introduce outdated plugins; monitor `suite_defaults` and prompt pack digests, and sign exported configs (`src/elspeth/config.py:52`, `src/elspeth/core/experiments/suite_runner.py:69`).[^threat-suite-config-2025-10-12]
 
 ## Output Threats
 - **Spreadsheet exploits** – CSV/Excel sinks neutralise formula prefixes and record sanitiser metadata. For high-assurance contexts, retain sanitisation artifacts alongside exports for auditability (`src/elspeth/plugins/outputs/_sanitize.py:18`, `src/elspeth/plugins/outputs/excel.py:41`).[^threat-spreadsheet-2025-10-12]
 - **Artifact exfiltration** – Artifact pipeline enforces security levels so a sink with lower clearance cannot consume classified outputs; misconfigured security levels remain a residual risk (`src/elspeth/core/security/__init__.py:14`, `src/elspeth/core/artifact_pipeline.py:192`).[^threat-artifact-2025-10-12]
 - **Repository drift** – Dry-run support reduces risk of accidental commits, but enabling live pushes requires rotating PAT tokens and enforcing branch protection server-side (`src/elspeth/plugins/outputs/repository.py:70`, `src/elspeth/plugins/outputs/repository.py:149`).[^threat-repo-2025-10-12]
+- **Suite reporting artefacts** – Consolidated analytics, visual, and Excel outputs reside on local disk before signing; ensure `--reports-dir` targets a restricted path and artefacts are signed or hashed (`src/elspeth/tools/reporting.py:33`, `src/elspeth/tools/reporting.py:170`).[^threat-suite-report-2025-10-12]
 <!-- Update 2025-10-12: Analytics reports and signed bundles persist locally before handoff; ensure filesystem permissions restrict tampering of `outputs/` directories that later feed accreditation packages (`src/elspeth/plugins/outputs/analytics_report.py:92`, `src/elspeth/plugins/outputs/signed.py:64`). -->
 <!-- Update 2025-10-12: Visual analytics outputs embed PNG data inside HTML; treat generated files as sensitive artefacts, avoid hosting them on unauthenticated endpoints, and keep base64 images to prevent mixed-content risks (`src/elspeth/plugins/outputs/visual_report.py:208`). -->
 
@@ -54,6 +56,7 @@
 - **Plugin discovery** – Experiments can request custom plugins via JSON config; ensure registries remain immutable in accreditation builds or gate additions by deploying with a sealed plugin catalogue (`src/elspeth/core/experiments/plugin_registry.py:34`, `src/elspeth/plugins/experiments/__init__.py:1`).[^threat-plugin-discovery-2025-10-12]
 
 ## Update History
+- 2025-10-12 – Update 2025-10-12: Added suite configuration drift and suite reporting export threats to reflect new governance surfaces.
 - 2025-10-12 – Highlighted Azure ML telemetry surfaces, analytics export risks, and dynamic plugin onboarding considerations for threat modelling.
 - 2025-10-12 – Update 2025-10-12: Added storage/LLM/provider annotations, analytics export guidance, and concurrency safeguards with cross-document references.
 
@@ -74,5 +77,6 @@
 [^threat-supply-2025-10-12]: Update 2025-10-12: Plugin supply chain governance tied to docs/architecture/plugin-security-model.md (Update 2025-10-12: Plugin Lifecycle).
 [^threat-concurrency-2025-10-12]: Update 2025-10-12: Concurrency mitigation described in docs/architecture/data-flow-diagrams.md (Update 2025-10-12: Suite Concurrency).
 [^threat-azureml-2025-10-12]: Update 2025-10-12: Azure ML surfaces cross-referenced in docs/architecture/audit-logging.md (Update 2025-10-12: Azure Telemetry).
-[^threat-suite-report-2025-10-12]: Update 2025-10-12: Reporting artefact handling covered in docs/reporting-and-suite-management.md (Update 2025-10-12: Analytics Outputs).
+[^threat-suite-report-2025-10-12]: Update 2025-10-12: Suite reporting exports and artefact handling detailed in docs/reporting-and-suite-management.md (Update 2025-10-12: Suite Reporting Exports).
 [^threat-plugin-discovery-2025-10-12]: Update 2025-10-12: Plugin discovery guardrails summarised in docs/architecture/plugin-security-model.md (Update 2025-10-12: Registry Enforcement).
+[^threat-suite-config-2025-10-12]: Update 2025-10-12: Suite governance safeguards detailed in docs/architecture/security-controls.md (Update 2025-10-12: Suite governance).

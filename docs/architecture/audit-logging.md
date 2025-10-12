@@ -28,6 +28,11 @@
 ### Update 2025-10-12: Azure Telemetry
 - Azure ML run logging persists suite summaries, aggregates, and retry events for downstream workspace diagnostics (`src/elspeth/plugins/llms/middleware_azure.py:219`).
 
+## Added 2025-10-12 – Suite Reporting Audit Trail
+- **Report generation** – `SuiteReportGenerator` logs the consolidated output directory and writes validation/failure/comparative artefacts that should be hashed or signed for accreditation submissions (`src/elspeth/tools/reporting.py:31`, `src/elspeth/tools/reporting.py:138`, `src/elspeth/tools/reporting.py:207`).[^audit-suite-generator-2025-10-12]
+- **Export inventory** – CLI `--export-suite-config` and `--create-experiment-template` commands emit hydrated configuration artefacts; capture stdout/stderr and sign the exported files to maintain provenance (`src/elspeth/cli.py:137`, `src/elspeth/cli.py:201`).[^audit-suite-export-2025-10-12]
+- **Analytics artefacts** – Report sinks reuse analytics/visual/Excel plugins, so the resulting JSON/Markdown/PNG/XLSX outputs inherit retry/cost metadata and should be retained alongside run logs (`src/elspeth/plugins/outputs/analytics_report.py:69`, `src/elspeth/plugins/outputs/visual_report.py:205`, `src/elspeth/plugins/outputs/excel.py:134`).[^audit-suite-artifacts-2025-10-12]
+
 ## Operational Guidance
 - Configure logging handlers to ship `elspeth.*` channels to central SIEM storage; the middleware channel names (`elspeth.audit`, `elspeth.prompt_shield`, `elspeth.azure_content_safety`, `elspeth.health`) are designed for targeted filters (`src/elspeth/plugins/llms/middleware.py:74`, `src/elspeth/plugins/llms/middleware.py:101`, `src/elspeth/plugins/llms/middleware.py:226`, `src/elspeth/plugins/llms/middleware.py:136`).
 - Maintain retention for retry histories and cost summaries, as these satisfy many accreditation evidence requirements (e.g., demonstrating adherence to rate-limit policies).
@@ -38,6 +43,7 @@
 - **Suite reporting pipeline** – CLI report generation writes validation results, failure analysis, and comparative insights to disk while logging each path; ensure those logs are ingested or signed when used for accreditation review (`src/elspeth/tools/reporting.py:53`, `src/elspeth/cli.py:258`).[^audit-suite-report-2025-10-12]
 
 ## Update History
+- 2025-10-12 – Update 2025-10-12: Added suite reporting audit considerations covering CLI exports, analytics artefacts, and report generator logging.
 - 2025-10-12 – Captured Azure telemetry enhancements, analytics report logging, and structured retry exhaustion evidence for accreditation logging requirements.
 - 2025-10-12 – Update 2025-10-12: Added retry exhaustion, middleware telemetry, and visual evidence annotations with cross-document references.
 
@@ -54,3 +60,6 @@
 [^audit-azure-run-2025-10-12]: Update 2025-10-12: Azure run tables align with docs/architecture/threat-surfaces.md (Update 2025-10-12: Azure ML run logging).
 [^audit-analytics-2025-10-12]: Update 2025-10-12: Analytics report telemetry linked to docs/reporting-and-suite-management.md (Update 2025-10-12: Analytics Outputs).
 [^audit-suite-report-2025-10-12]: Update 2025-10-12: Suite reporting pipeline logging documented in docs/reporting-and-suite-management.md (Update 2025-10-12: Suite Report Generator).
+[^audit-suite-generator-2025-10-12]: Update 2025-10-12: Report generator evidence captured in docs/architecture/component-diagram.md (Update 2025-10-12: Suite reporting outputs).
+[^audit-suite-export-2025-10-12]: Update 2025-10-12: Export tooling guidance cross-referenced in docs/architecture/configuration-security.md (Update 2025-10-12: Suite Management & Export Pathing).
+[^audit-suite-artifacts-2025-10-12]: Update 2025-10-12: Artefact retention guidance linked to docs/architecture/data-flow-diagrams.md (Update 2025-10-12: Suite Reporting Export Flow).

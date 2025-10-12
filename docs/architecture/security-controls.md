@@ -19,6 +19,14 @@
 ### Update 2025-10-12: Prompt Hygiene
 - Prompt defaults and strict templates prevent missing variables, aligning with docs/architecture/architecture-overview.md Core Principles and data flow ingress controls.
 
+## Middleware Safeguards
+- **Prompt shield** – Request prompts are scanned for denied terms and either aborted, masked, or logged based on policy, preventing high-risk inputs from reaching the model (`src/elspeth/plugins/llms/middleware.py:91`, `src/elspeth/plugins/llms/middleware.py:112`).[^sec-prompt-shield-2025-10-12]
+- **Azure Content Safety** – Outbound prompts are inspected against Azure categories and severity thresholds; violations can abort or mask, and errors respect configurable `on_error` behaviour (`src/elspeth/plugins/llms/middleware.py:206`, `src/elspeth/plugins/llms/middleware_azure.py:95`).[^sec-content-safety-2025-10-12]
+- **Audit logger** – Metadata-only logging offers traceability for every LLM call without exposing sensitive prompts unless explicitly enabled (`src/elspeth/plugins/llms/middleware.py:70`, `src/elspeth/plugins/llms/middleware.py:101`).[^sec-audit-2025-10-12]
+- **Health monitor** – Rolling latency/failure metrics provide heartbeat telemetry, making saturation or outage detection observable (`src/elspeth/plugins/llms/middleware.py:120`, `src/elspeth/plugins/llms/middleware.py:144`).[^sec-health-monitor-2025-10-12]
+- **Azure environment telemetry** – When running under Azure ML, middleware writes structured rows/tables (suite inventory, experiment summaries, retry exhaustion) to the run context for immutable audit trails (`src/elspeth/plugins/llms/middleware_azure.py:180`, `src/elspeth/plugins/llms/middleware_azure.py:250`).[^audit-azure-run-2025-10-12]
+- **Retry exhaustion hooks** – `_notify_retry_exhausted` and middleware callbacks emit structured attempt histories whenever retries are exhausted, ensuring SOC teams receive actionable evidence (`src/elspeth/core/experiments/runner.py:520`, `src/elspeth/plugins/llms/middleware_azure.py:233`).[^sec-retry-2025-10-12]
+
 ## Output Sanitisation
 - **CSV and Excel guards** – Tabular sinks prefix dangerous characters and record sanitisation metadata for audits, mitigating spreadsheet formula injection (`src/elspeth/plugins/outputs/_sanitize.py:18`, `src/elspeth/plugins/outputs/csv_file.py:49`, `src/elspeth/plugins/outputs/excel.py:41`).[^sec-output-sanitize-2025-10-12]
 - **Manifest hygiene** – Excel and signed sinks capture security level, cost summary, and retry failure samples so downstream consumers can filter sensitive outputs (`src/elspeth/plugins/outputs/excel.py:134`, `src/elspeth/plugins/outputs/signed.py:75`).[^sec-manifest-2025-10-12]
@@ -65,12 +73,18 @@
 - **Analytics provenance** – The analytics report sink consolidates retry summaries, cost totals, early-stop reasons, and baseline comparisons so auditors receive a single tamper-evident package (`src/elspeth/plugins/outputs/analytics_report.py:69`, `src/elspeth/plugins/outputs/analytics_report.py:116`).[^sec-analytics-provenance-2025-10-12]
 - **Classification propagation** – Artifact bindings enforce security level compatibility at dependency resolution time, preventing low-clearance sinks from accessing sensitive artifacts even when chained (`src/elspeth/core/artifact_pipeline.py:167`, `src/elspeth/core/security/__init__.py:27`).[^sec-classification-2025-10-12]
 
+## Suite Reporting & Evidence
+- **Consolidated validation** – Suite reporting writes validation results, comparative analysis, failure breakdowns, and executive summaries to immutable files for accreditation reviews (`src/elspeth/tools/reporting.py:33`, `src/elspeth/tools/reporting.py:117`, `src/elspeth/tools/reporting.py:207`).[^sec-suite-reporting-2025-10-12]
+- **Evidence parity** – Generated analytics/visual/Excel artifacts mirror sink outputs, ensuring the same sanitisation and security metadata appears in both real-time pipeline runs and offline accreditation packages (`src/elspeth/tools/reporting.py:138`, `src/elspeth/tools/reporting.py:170`).[^sec-analytics-provenance-2025-10-12]
+- **CLI gating** – Report generation is only enabled when `--reports-dir` is supplied, making it explicit when accreditation artefacts are produced and ensuring logs capture the destination (`src/elspeth/cli.py:392`).[^sec-suite-reporting-2025-10-12]
+
 ## Gaps & Hardening Opportunities
 - **Credential rotation** – Secrets are currently read directly from environment variables; integration with managed secret stores (e.g., Azure Key Vault) or signed credential files should be prioritised (`config/blob_store.yaml:4`, `src/elspeth/plugins/outputs/signed.py:107`).
 - **Middleware execution order** – Middleware is executed in the order defined by configuration; formalising precedence or conflict detection would prevent misconfiguration when multiple enforcement layers are active (`src/elspeth/core/experiments/runner.py:493`).
 - **LLM response sanitisation** – While validation plugins exist, default stacks do not enforce JSON schemes. Accrediting authorities may require baseline validators for each prompt pack instead of optional opt-in (`src/elspeth/plugins/experiments/validation.py:47`).
 
 ## Update History
+- 2025-10-12 – Update 2025-10-12: Added middleware safeguard inventory, suite reporting evidence controls, and Azure telemetry references aligned with updated architecture diagrams.
 - 2025-10-12 – Documented Azure telemetry audit hooks, analytics reporting controls, and schema validation enhancements supporting accreditation evidence.
 - 2025-10-12 – Update 2025-10-12: Added managed identity, prompt hygiene, artifact clearance, and middleware safeguard annotations with cross-document footnotes.
 
@@ -102,3 +116,4 @@
 [^sec-retry-evidence-2025-10-12]: Update 2025-10-12: Retry evidence logging summarised in docs/architecture/audit-logging.md (Update 2025-10-12: Retry Exhaustion Events).
 [^sec-analytics-provenance-2025-10-12]: Update 2025-10-12: Analytics provenance described in docs/reporting-and-suite-management.md (Update 2025-10-12: Analytics Outputs).
 [^sec-classification-2025-10-12]: Update 2025-10-12: Classification propagation tied to docs/architecture/component-diagram.md (Update 2025-10-12: Artifact Pipeline).
+[^sec-suite-reporting-2025-10-12]: Update 2025-10-12: Suite reporting CLI usage and artefact inventory detailed in docs/reporting-and-suite-management.md (Update 2025-10-12: Suite Reporting Exports).
