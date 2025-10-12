@@ -73,7 +73,7 @@ Install them via the dev extra plus matplotlib:[^readme-reporting-2025-10-12]
 
 ```bash
 pip install -e .[dev]
-pip install matplotlib seaborn
+pip install -e .[analytics-visual]  # installs matplotlib + seaborn for charts
 ```
 <!-- UPDATE 2025-10-12: Alternatively install plotting dependencies via `pip install -e .[analytics-visual]` when enabling the visual analytics sink. -->
 

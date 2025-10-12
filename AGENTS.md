@@ -6,6 +6,18 @@ The Python package lives in `src/elspeth/`, with `core/` covering experiment orc
 ## Build, Test, and Development Commands
 Run `make bootstrap` (or `scripts/bootstrap.sh`) to create `.venv/`, install extras, and execute the sanity pytest pass. Activate the environment via `source .venv/bin/activate`, then use `pip install -e .[dev]` when dependencies shift. The sample orchestration flow is validated with `make sample-suite`, which exercises the CSV datasource plus mock LLM path. Use `python -m pytest -m "not slow"` for rapid feedback, and append `--maxfail=1 --disable-warnings` during triage.
 
+When introducing changes that touch analytics, reporting, or suite flows, run the consolidated reporting command to regenerate artefacts and verify logs:
+
+```bash
+python -m elspeth.cli \
+  --settings config/sample_suite/settings.yaml \
+  --suite-root config/sample_suite \
+  --reports-dir outputs/sample_suite_reports \
+  --head 0
+```
+
+Review the resulting artefacts (validation results, analytics/visual reports, Excel workbook) and capture checksum/signature outputs if they form part of accreditation evidence.
+
 ## Coding Style & Naming Conventions
 Code targets Python 3.12 with 4-space indentation, `typing` annotations, and descriptive module names (`metrics_*.py`, `suite_runner.py`). Format changes with `black` and fix imports using `isort`; the Makefile pins compatible versions. Prefer snake_case for functions and variables, PascalCase for classes, and keep docstrings concise but informative, especially around plugin hooks.
 
@@ -21,4 +33,4 @@ Secrets and API keys must live outside the repo; use environment variables consu
 <!-- UPDATE 2025-10-12: When modifying concurrency, retry, early-stop logic, or analytics sinks (JSON/visual), update the corresponding architecture docs and regenerate signed/visual artefacts if output formats change. -->
 
 ## Update History
-- 2025-10-12 – Added guidance on analytics regression tests and documentation touchpoints for concurrency/early-stop changes.
+- 2025-10-12 – Update 2025-10-12: Added reporting artefact regeneration guidance and reiterated analytics regression checks for concurrency/early-stop changes.
