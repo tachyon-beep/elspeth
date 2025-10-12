@@ -69,6 +69,9 @@ exclude = ["tests", "old", "notes", "config"]
 [tool.pytest.ini_options]
 addopts = "-ra --cov=elspeth --cov-report=term-missing --cov-report=xml:coverage.xml"
 testpaths = ["tests"]
+markers = [
+  "integration: marks tests that require external services such as pgvector",
+]
 
 [tool.ruff]
 line-length = 140

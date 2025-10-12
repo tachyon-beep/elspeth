@@ -36,7 +36,14 @@ All built-in plugins now receive a `PluginContext` instance during construction.
 | Name | Implementation | Purpose | Notable Options | Context Status | Coverage |
 | --- | --- | --- | --- | --- | --- |
 | `score_extractor` | `src/elspeth/plugins/experiments/metrics.py` | Pull scalar metrics from responses with threshold flagging. | `key`, `criteria`, `threshold`, `threshold_mode`. | ✔ Context passed (unused but available). | `tests/test_experiment_metrics_plugins.py` |
+| `rag_query` | `src/elspeth/plugins/experiments/rag_query.py` | Retrieve embeddings-based context and inject into prompts/metadata. | `provider`, `dsn/endpoint`, `embed_model`, `inject_mode`, `top_k`, `min_score`. | ✔ Namespace + classification enforced via context; telemetry omits sensitive content. | `tests/test_rag_query_plugin.py` |
 | `noop` | `src/elspeth/core/experiments/plugin_registry.py` | No-op row processing. | None. | ✔ Context applied. | Implicit via registry tests |
+
+<!-- UPDATE 2025-10-12: Retired rag_query row plugin in favour of utilities -->
+- The `rag_query` experiment plugin now serves as a thin compatibility shim over the general-purpose `retrieval_context` utility plugin (see `src/elspeth/plugins/utilities/retrieval.py`). It remains available for legacy configurations but is no longer registered by default in the experiment registry.
+- Dedicated coverage moved to `tests/test_retrieval_utility.py`, which exercises the utility interface and the shim’s deprecation path. The former `tests/test_rag_query_plugin.py` has been replaced accordingly.
+- Utility plugins resolve via the new `elspeth.core.utilities` registry; when documenting plugin usage, prefer the utility entry (below) and flag any remaining experiment references as transitional.
+<!-- END UPDATE -->
 
 ### Aggregators
 
@@ -50,6 +57,14 @@ All built-in plugins now receive a `PluginContext` instance during construction.
 | `score_distribution` | same | Distribution summaries and histograms. | `bins`, `quantiles`. | ✔ | `tests/test_experiment_metrics_plugins.py` |
 | `prompt_variants` | `src/elspeth/plugins/experiments/prompt_variants.py` | Generate prompt alternatives via secondary LLM. | `prompt_template`, `variant_llm`, `count`, `max_attempts`. | ✔ Uses `create_llm_from_definition`. | `tests/test_prompt_variants_plugin.py` |
 | `noop` | registry default | No aggregation. | None. | ✔ | Registry tests |
+
+<!-- UPDATE 2025-10-12: Introduced utility plugin catalogue -->
+### Utility Plugins
+
+| Name | Implementation | Purpose | Notable Options | Context Status | Coverage |
+| --- | --- | --- | --- | --- | --- |
+| `retrieval_context` | `src/elspeth/plugins/utilities/retrieval.py` | Query vector stores and return structured context payloads for prompt enrichment outside experiment-only flows. | `provider`, `dsn/endpoint`, `embed_model`, `query_field`, `inject_mode`, `top_k`, `min_score`. | ✔ Uses `PluginContext` with `plugin_kind="utility"` ensuring namespace derivation respects classification. | `tests/test_retrieval_utility.py` |
+<!-- END UPDATE -->
 
 ### Baseline Comparisons
 
@@ -89,6 +104,7 @@ All built-in plugins now receive a `PluginContext` instance during construction.
 | `azure_devops_repo` | `src/elspeth/plugins/outputs/repository.py` | Commit artifacts into Azure DevOps repo. | Repo identifiers, `token_env`, `dry_run`. | ✔ | `tests/test_outputs_repo.py` |
 | `csv` | `src/elspeth/plugins/outputs/csv_file.py` | Flat CSV export with sanitisation. | `path`, `sanitize_formulas`, `sanitize_guard`, `overwrite`. | ✔ | `tests/test_outputs_csv.py` |
 | `excel_workbook` | `src/elspeth/plugins/outputs/excel.py` | Excel workbook export. | `base_path`, `timestamped`, `include_manifest`, `sanitize_formulas`. | ✔ | `tests/test_outputs_excel.py` |
+| `embeddings_store` | `src/elspeth/plugins/outputs/embeddings_store.py` | Persist experiment payloads as vector embeddings (pgvector/Azure Search). | `provider`, `namespace`, `dsn/endpoint`, `embed_model`, `metadata_fields`. | ✔ Context-derived namespaces prevent cross-tier reuse; Azure provider respects key-rotation guidance. | `tests/test_outputs_embeddings_store.py` |
 | `file_copy` | `src/elspeth/plugins/outputs/file_copy.py` | Copy artifacts to filesystem destinations. | `destination`, `overwrite`. | ✔ | `tests/test_sink_chaining.py` |
 | `github_repo` | `src/elspeth/plugins/outputs/repository.py` | Commit artifacts into GitHub repository. | `owner`, `repo`, `branch`, `token_env`, `dry_run`. | ✔ | `tests/test_outputs_repo.py` |
 | `local_bundle` | `src/elspeth/plugins/outputs/local_bundle.py` | Create local JSON/CSV bundle directories. | `base_path`, `bundle_name`, `timestamped`, `write_json/csv`. | ✔ | `tests/test_outputs_local_bundle.py` |
@@ -132,6 +148,8 @@ The orchestrator can support workflows beyond LLM prompting and score aggregatio
 | Early-Stop Plugin | `budget_guard` | Halt experiment when projected spend or elapsed runtime exceeds policy. | `max_cost`, `max_runtime`, binding to cost tracker context. | Reads cost tracker context; require matching security classification to prevent lower tier from observing higher-tier telemetry. | Proposed |
 | Sink | `stream_forwarder` | Publish experiment events or aggregates to Kafka/Kinesis for near-real-time dashboards. | `stream_config`, `serialization` (JSON/Avro), `partition_key`. | Partition streams per security tier; encrypt payloads at rest. | Proposed |
 | Sink | `notebook_bundle` | Generate Jupyter notebook artifacts summarising prompts, responses, metrics for human review. | `base_path`, `template_path`, `include_raw_prompts`. | Strip sensitive fields based on context before embedding into notebook. | Proposed |
+<!-- UPDATE 2025-10-12: Document embeddings/RAG plugin design references. -->
+<!-- END UPDATE -->
 
 These backlog items aim to extend the orchestrator into data integration, compliance, and operational observability scenarios. When implementing, ensure each follows the context-aware factory contract, declares schemas for validation, and registers targeted tests mirroring the existing plugin suites.
 

@@ -24,6 +24,12 @@ from elspeth.plugins.outputs import (
     VisualAnalyticsSink,
     ZipResultSink,
 )
+from elspeth.plugins.outputs.embeddings_store import (
+    DEFAULT_EMBEDDING_FIELD,
+    DEFAULT_ID_FIELD,
+    DEFAULT_TEXT_FIELD,
+    EmbeddingsStoreSink,
+)
 
 ON_ERROR_ENUM = {"type": "string", "enum": ["abort", "skip"]}
 
@@ -456,6 +462,60 @@ class PluginRegistry:
                         "on_error": ON_ERROR_ENUM,
                     },
                     "required": ["base_path"],
+                    "additionalProperties": True,
+                },
+            ),
+            "embeddings_store": PluginFactory(
+                create=lambda options, context: EmbeddingsStoreSink(
+                    provider=options["provider"],
+                    namespace=options.get("namespace"),
+                    dsn=options.get("dsn"),
+                    table=options.get("table", "elspeth_rag"),
+                    text_field=options.get("text_field", DEFAULT_TEXT_FIELD),
+                    embedding_source=options.get("embedding_source", DEFAULT_EMBEDDING_FIELD),
+                    embed_model=options.get("embed_model"),
+                    metadata_fields=options.get("metadata_fields"),
+                    id_field=options.get("id_field", DEFAULT_ID_FIELD),
+                    batch_size=options.get("batch_size", 50),
+                    upsert_conflict=options.get("upsert_conflict", "replace"),
+                    provider_options={
+                        key: options.get(key)
+                        for key in (
+                            "endpoint",
+                            "index",
+                            "api_key",
+                            "api_key_env",
+                            "vector_field",
+                            "namespace_field",
+                            "id_field",
+                        )
+                        if options.get(key) is not None
+                    },
+                ),
+                schema={
+                    "type": "object",
+                    "properties": {
+                        "provider": {"type": "string"},
+                        "namespace": {"type": "string"},
+                        "dsn": {"type": "string"},
+                        "table": {"type": "string"},
+                        "text_field": {"type": "string"},
+                        "embedding_source": {"type": "string"},
+                        "embed_model": {"type": "object"},
+                        "metadata_fields": {"type": "array", "items": {"type": "string"}},
+                        "id_field": {"type": "string"},
+                        "batch_size": {"type": "integer", "minimum": 1},
+                        "upsert_conflict": {"type": "string", "enum": ["replace", "skip", "merge"]},
+                        "endpoint": {"type": "string"},
+                        "index": {"type": "string"},
+                        "api_key": {"type": "string"},
+                        "api_key_env": {"type": "string"},
+                        "vector_field": {"type": "string"},
+                        "namespace_field": {"type": "string"},
+                        "artifacts": ARTIFACTS_SECTION_SCHEMA,
+                        "security_level": {"type": "string"},
+                    },
+                    "required": ["provider"],
                     "additionalProperties": True,
                 },
             ),
