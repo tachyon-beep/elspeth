@@ -70,6 +70,9 @@ def _prepare_plugin_definition(definition: Mapping[str, Any], context: str) -> t
         level = coalesce_security_level(entry_level, options_level)
     except ValueError as exc:
         raise ConfigurationError(f"{context}: {exc}") from exc
+    # Keep the resolved level inside the options we hand to plugin factories so that
+    # plugin constructors (e.g. CSV/Excel sinks) can normalise it themselves. Removing
+    # it causes them to fall back to their default ("unofficial") security posture.
     options["security_level"] = level
     return options, level
 
