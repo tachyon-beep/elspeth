@@ -5,7 +5,7 @@ update as processes evolve.
 
 ## Pre-Release Validation
 
-1. **Environment** – create/activate `.venv`, run `pip install -e .[dev]`.
+1. **Environment** – create/activate `.venv`, run `pip install -e .[dev,analytics-visual]`.
 1. **Formatting & linting** – `pre-commit run --all-files` (or `make lint`).
 1. **Unit tests** – `python -m pytest` (ensure coverage for new code).
 1. **Sample suite** – run `python -m elspeth.cli --settings config/sample_suite/settings.yaml --suite-root config/sample_suite --head 0 --live-outputs` and inspect outputs under `outputs/sample_suite/`.

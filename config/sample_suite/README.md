@@ -33,7 +33,7 @@ outputs that flow through the metrics and CSV sinks.
 1. Activate the project virtual environment
    ```bash
    source .venv/bin/activate
-   pip install -e .[dev]
+   pip install -e .[dev,analytics-visual]
    ```
 2. Execute the suite via the CLI
    ```bash

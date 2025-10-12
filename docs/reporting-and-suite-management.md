@@ -8,9 +8,7 @@ experiment scaffolds, and producing consolidated analytics artefacts.
 Install the optional dependencies used by the reporting pipeline:
 
 ```bash
-pip install -e .[dev]      # brings in pandas + openpyxl for Excel exports
-pip install -e .[analytics-visual]  # matplotlib + seaborn for chart artefacts
-pip install matplotlib seaborn
+pip install -e .[dev,analytics-visual]  # pandas/openpyxl + matplotlib/seaborn for reports
 ```
 
 > The remainder of the CLI only requires the base installation, but report generation skips

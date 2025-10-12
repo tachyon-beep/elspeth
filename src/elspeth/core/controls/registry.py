@@ -116,6 +116,7 @@ def register_rate_limiter(name: str, factory: Callable[..., RateLimiter]) -> Non
     signature = inspect.signature(factory)
 
     if len(signature.parameters) == 1:
+
         def _wrapped(options: Dict[str, Any], context: PluginContext) -> RateLimiter:
             return factory(options)
 
@@ -130,6 +131,7 @@ def register_cost_tracker(name: str, factory: Callable[..., CostTracker]) -> Non
     signature = inspect.signature(factory)
 
     if len(signature.parameters) == 1:
+
         def _wrapped(options: Dict[str, Any], context: PluginContext) -> CostTracker:
             return factory(options)
 

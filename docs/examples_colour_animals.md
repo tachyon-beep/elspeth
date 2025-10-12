@@ -10,8 +10,7 @@ This example drives a locally hosted OpenAI-compatible model (running on `http:/
    ```bash
    python3 -m venv .venv
    source .venv/bin/activate
-   pip install -e .[dev]
-   pip install matplotlib seaborn  # optional for report visuals[^colour-visual-deps-2025-10-12]
+   pip install -e .[dev,analytics-visual]  # pulls matplotlib/seaborn for visuals[^colour-visual-deps-2025-10-12]
    ```
 
 ## Dataset
@@ -97,7 +96,7 @@ python -m elspeth.cli \
 
 If the endpoint requires a bearer token, expose it via environment variable and reference it with `api_key_env` in the settings file.
 <!-- UPDATE 2025-10-12: Consider adding a `rate_limiter` definition if the local gateway enforces quotas; the Azure-compatible `adaptive` limiter is available via `src/elspeth/core/controls/registry.py:45`. -->
-<!-- UPDATE 2025-10-12: Enable the `analytics_visual` sink (install via `pip install -e .[analytics-visual]`) to generate PNG/HTML charts alongside CSV outputs when comparing colour responses. -->
+<!-- UPDATE 2025-10-12: Enable the `analytics_visual` sink (install via `pip install -e .[dev,analytics-visual]`) to generate PNG/HTML charts alongside CSV outputs when comparing colour responses. -->
 - Add an `analytics_report` or `analytics_visual` sink alongside the CSV sink to capture retry summaries, failure samples, and charts for accreditation evidence:
 
   ```yaml

@@ -4,7 +4,7 @@
 The Python package lives in `src/elspeth/`, with `core/` covering experiment orchestration, `plugins/` hosting metrics and output sinks, and `cli.py` providing the entrypoint. Support material sits in `config/sample_suite/` for runnable demos, `notes/` for decisions and planning, and `scripts/` for bootstrap helpers. Shared tests reside in `tests/`, mirroring module layouts for easy discovery.
 
 ## Build, Test, and Development Commands
-Run `make bootstrap` (or `scripts/bootstrap.sh`) to create `.venv/`, install extras, and execute the sanity pytest pass. Activate the environment via `source .venv/bin/activate`, then use `pip install -e .[dev]` when dependencies shift. The sample orchestration flow is validated with `make sample-suite`, which exercises the CSV datasource plus mock LLM path. Use `python -m pytest -m "not slow"` for rapid feedback, and append `--maxfail=1 --disable-warnings` during triage.
+Run `make bootstrap` (or `scripts/bootstrap.sh`) to create `.venv/`, install extras, and execute the sanity pytest pass. Activate the environment via `source .venv/bin/activate`, then use `pip install -e .[dev,analytics-visual]` when dependencies shift. The sample orchestration flow is validated with `make sample-suite`, which exercises the CSV datasource plus mock LLM path. Use `python -m pytest -m "not slow"` for rapid feedback, and append `--maxfail=1 --disable-warnings` during triage.
 
 When introducing changes that touch analytics, reporting, or suite flows, run the consolidated reporting command to regenerate artefacts and verify logs:
 

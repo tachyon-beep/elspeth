@@ -5,7 +5,7 @@ This guide helps teams upgrade from the legacy `old/` implementation to the mode
 ## Prerequisites
 
 - Python 3.12+
-- `pip install -e .[dev]` to pull dependencies.
+- `pip install -e .[dev,analytics-visual]` to pull dependencies.
 - Review `README.md` for project overview and setup notes.
 
 ## High-Level Mapping
@@ -103,7 +103,7 @@ Refer to `notes/config-migration.md` for key renames. Typical steps:
         chart_title: "Mean Scores by Criterion"
   ```
 
-  Install extras with `pip install .[analytics-visual]` to pull `matplotlib`/`seaborn` (`src/elspeth/plugins/outputs/visual_report.py:17`).[^migration-visual-2025-10-12]
+  Install extras with `pip install -e .[dev,analytics-visual]` to pull `matplotlib`/`seaborn` (`src/elspeth/plugins/outputs/visual_report.py:17`).[^migration-visual-2025-10-12]
 - **Suite report exports** – Pass `--reports-dir outputs/sample_suite/reports` to re-create executive summaries, validation JSON, comparative analysis, recommendations, and Excel dashboards without custom notebooks (`src/elspeth/cli.py:392`, `src/elspeth/tools/reporting.py:138`).[^migration-suite-reports-2025-10-12]
 
 ## Azure-Specific Features

@@ -15,7 +15,7 @@ Thanks for investing time in improving Elspeth! This guide outlines the expectat
    ```bash
    make bootstrap            # or scripts/bootstrap.sh
    source .venv/bin/activate
-   pip install -e .[dev]
+   pip install -e .[dev,analytics-visual]
    ```
 
 2. **Create a feature branch**

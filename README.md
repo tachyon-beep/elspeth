@@ -32,7 +32,7 @@ Activate the environment when working manually:
 
 ```bash
 source .venv/bin/activate
-pip install -e .[dev]
+pip install -e .[dev,analytics-visual]
 ```
 
 ### Run the sample suite

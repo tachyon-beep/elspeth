@@ -48,7 +48,7 @@
 - Introduced `pyproject.toml` using PEP 621 metadata; pins Python >=3.12 and runtime deps (`azure-identity`, `azure-storage-blob`, `pandas`, `pyyaml`). Dev extras include `pytest` + `pytest-mock`.
 - Added pytest suite under `tests/` with coverage for config parsing and blob loader client wiring (stubs azure SDK to avoid network calls).
 - Capture remaining setup gap: local environment still needs dependencies installed before running `pytest` or connecting to Azure.
-- Local `.venv` created; package installed in editable mode (`.venv/bin/pip install -e .[dev]`).
+- Local `.venv` created; package installed in editable mode (`.venv/bin/pip install -e .[dev,analytics-visual]`).
 - `pytest` suite (`.venv/bin/pytest`) passes with blob loader tests.
 - Added `load_blob_csv` convenience helper in `src/elspeth/datasources/blob_store.py` wired to config + loader.
 - Extended pytest coverage (`tests/test_blob_store.py`) to validate helper wiring and kwargs propagation.
