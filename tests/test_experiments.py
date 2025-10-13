@@ -600,7 +600,8 @@ def test_experiment_runner_early_stop():
             "threshold": 2,
             "comparison": "gte",
             "min_rows": 2,
-            "security_level": "OFFICIAL", "determinism_level": "guaranteed",
+            "security_level": "OFFICIAL",
+            "determinism_level": "guaranteed",
         },
     )
 

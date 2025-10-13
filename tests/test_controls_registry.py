@@ -11,7 +11,8 @@ def test_create_rate_limiter_validates_schema():
         controls_registry.create_rate_limiter(
             {
                 "plugin": "fixed_window",
-                "security_level": "OFFICIAL", "determinism_level": "guaranteed",
+                "security_level": "OFFICIAL",
+                "determinism_level": "guaranteed",
                 "options": {"requests": 0, "per_seconds": 0},
             }
         )
@@ -30,7 +31,9 @@ def test_register_custom_rate_limiter(monkeypatch):
         return created
 
     controls_registry.register_rate_limiter("custom", factory)
-    limiter = controls_registry.create_rate_limiter({"plugin": "custom", "security_level": "OFFICIAL", "determinism_level": "guaranteed", "options": {"tag": "blue"}})
+    limiter = controls_registry.create_rate_limiter(
+        {"plugin": "custom", "security_level": "OFFICIAL", "determinism_level": "guaranteed", "options": {"tag": "blue"}}
+    )
     assert limiter is created
 
 
@@ -39,7 +42,8 @@ def test_create_cost_tracker_validates_schema():
         controls_registry.create_cost_tracker(
             {
                 "plugin": "fixed_price",
-                "security_level": "OFFICIAL", "determinism_level": "guaranteed",
+                "security_level": "OFFICIAL",
+                "determinism_level": "guaranteed",
                 "options": {"prompt_token_price": -1},
             }
         )
@@ -53,7 +57,9 @@ def test_register_custom_cost_tracker():
         return created
 
     controls_registry.register_cost_tracker("custom_cost", factory)
-    tracker = controls_registry.create_cost_tracker({"plugin": "custom_cost", "security_level": "OFFICIAL", "determinism_level": "guaranteed", "options": {"tier": "gold"}})
+    tracker = controls_registry.create_cost_tracker(
+        {"plugin": "custom_cost", "security_level": "OFFICIAL", "determinism_level": "guaranteed", "options": {"tier": "gold"}}
+    )
     assert tracker is created
 
 
@@ -74,7 +80,8 @@ def test_validate_cost_tracker_success():
     controls_registry.validate_cost_tracker(
         {
             "plugin": "fixed_price",
-            "security_level": "OFFICIAL", "determinism_level": "guaranteed",
+            "security_level": "OFFICIAL",
+            "determinism_level": "guaranteed",
             "options": {"prompt_token_price": 0.1},
         }
     )

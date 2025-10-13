@@ -31,14 +31,14 @@ def validate_tfn(tfn_str: str) -> bool:
         True if valid TFN checksum, False otherwise
     """
     # Remove all non-digits
-    digits = ''.join(c for c in tfn_str if c.isdigit())
+    digits = "".join(c for c in tfn_str if c.isdigit())
 
     if len(digits) not in (8, 9):
         return False
 
     # Pad to 9 digits if needed
     if len(digits) == 8:
-        digits = '0' + digits
+        digits = "0" + digits
 
     weights = [1, 4, 3, 7, 5, 8, 6, 9, 10]
     total = sum(int(digits[i]) * weights[i] for i in range(9))
@@ -61,7 +61,7 @@ def validate_abn(abn_str: str) -> bool:
         True if valid ABN checksum, False otherwise
     """
     # Remove all non-digits
-    digits = ''.join(c for c in abn_str if c.isdigit())
+    digits = "".join(c for c in abn_str if c.isdigit())
 
     if len(digits) != 11:
         return False
@@ -94,7 +94,7 @@ def validate_acn(acn_str: str) -> bool:
         True if valid ACN checksum, False otherwise
     """
     # Remove all non-digits
-    digits = ''.join(c for c in acn_str if c.isdigit())
+    digits = "".join(c for c in acn_str if c.isdigit())
 
     if len(digits) != 9:
         return False
@@ -123,7 +123,7 @@ def validate_medicare(medicare_str: str) -> bool:
         True if valid Medicare checksum, False otherwise
     """
     # Remove all non-digits
-    digits = ''.join(c for c in medicare_str if c.isdigit())
+    digits = "".join(c for c in medicare_str if c.isdigit())
 
     # Medicare can be 10 or 11 digits (11th is IRN)
     if len(digits) not in (10, 11):
@@ -154,7 +154,7 @@ def validate_luhn(card_str: str) -> bool:
         True if passes Luhn check, False otherwise
     """
     # Remove all non-digits
-    digits = ''.join(c for c in card_str if c.isdigit())
+    digits = "".join(c for c in card_str if c.isdigit())
 
     if not (13 <= len(digits) <= 19):
         return False
@@ -187,7 +187,7 @@ def validate_bsb(bsb_str: str) -> bool:
         True if valid format (6 digits), False otherwise
     """
     # Remove all non-digits
-    digits = ''.join(c for c in bsb_str if c.isdigit())
+    digits = "".join(c for c in bsb_str if c.isdigit())
 
     return len(digits) == 6
 
@@ -201,4 +201,4 @@ def canonicalize_identifier(value: str) -> str:
     Returns:
         Canonicalized string (digits/letters only, uppercase)
     """
-    return ''.join(c.upper() for c in value if c.isalnum())
+    return "".join(c.upper() for c in value if c.isalnum())

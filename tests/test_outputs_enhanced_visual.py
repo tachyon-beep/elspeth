@@ -343,7 +343,7 @@ def test_enhanced_visual_sink_html_output(tmp_path: Path) -> None:
 
     html_content = html_path.read_text(encoding="utf-8")
     assert "<!DOCTYPE html>" in html_content
-    assert "<html lang=\"en\">" in html_content
+    assert '<html lang="en">' in html_content
     assert "Violin Visualization" in html_content
     assert "data:image/png;base64," in html_content
     assert "<img src=" in html_content

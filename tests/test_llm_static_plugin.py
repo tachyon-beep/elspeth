@@ -21,7 +21,8 @@ def test_static_llm_registry_integration() -> None:
             "content": "Registry",
             "score": 0.9,
             "metrics": {"extra": "value"},
-            "security_level": "OFFICIAL", "determinism_level": "guaranteed",
+            "security_level": "OFFICIAL",
+            "determinism_level": "guaranteed",
         },
     )
 

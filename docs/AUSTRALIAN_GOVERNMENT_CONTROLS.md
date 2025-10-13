@@ -11,14 +11,17 @@ Elspeth was designed to support **secure LLM experimentation within Australian g
 The `pii_shield` middleware detects and protects all critical Australian personally identifiable information:
 
 #### Tax & Business Identifiers
+
 - **Tax File Number (TFN)** - 9 digits (123 456 789)
 - **Australian Business Number (ABN)** - 11 digits (51 824 753 556)
 - **Australian Company Number (ACN)** - 9 digits (123 456 789)
 
 #### Healthcare
+
 - **Medicare Number** - 10 digits (1234 56789 1)
 
 #### Contact Information
+
 - **Australian Landline** - Local/international formats
   - `(02) 1234 5678`
   - `02 1234 5678`
@@ -28,6 +31,7 @@ The `pii_shield` middleware detects and protects all critical Australian persona
   - `+61 412 345 678`
 
 #### Identity Documents
+
 - **Australian Passport** - 1 letter + 7 digits (N1234567)
 - **Driver's Licenses**:
   - NSW: 8 digits
@@ -54,6 +58,7 @@ llm:
 The `classified_material` middleware detects Australian government and international classification markings:
 
 #### Australian Government (PSPF)
+
 - `OFFICIAL: Sensitive` (Correct format with colon and space)
 - `OFFICIAL-SENSITIVE` (Legacy format - hyphenated)
 - `PROTECTED`
@@ -65,6 +70,7 @@ The `classified_material` middleware detects Australian government and internati
 - `PROTECTED: CABINET CODEWORD`
 
 #### Australian Caveats
+
 - `AUSTEO` (Australian Eyes Only)
 - `AGAO` (Australian Government Access Only)
 - `REL TO` (Release To - with countries)
@@ -72,6 +78,7 @@ The `classified_material` middleware detects Australian government and internati
 - `REL FVEY` (Release to Five Eyes)
 
 #### US Classifications
+
 - `TS//SCI` (Top Secret / Sensitive Compartmented Information)
 - `TS/SCI`
 - `NOFORN` (No Foreign Nationals)
@@ -81,11 +88,13 @@ The `classified_material` middleware detects Australian government and internati
 - `CUI` (Controlled Unclassified Information)
 
 #### UK/Five Eyes
+
 - `FVEY` (Five Eyes)
 - `UK EYES ONLY`
 - `CANADIAN EYES ONLY`
 
 #### Legacy/Other
+
 - `CONFIDENTIAL`
 - `RESTRICTED`
 
@@ -123,6 +132,7 @@ llm:
 ```
 
 **Features**:
+
 - Run context detection for Azure Government Cloud
 - Classification-aware logging (never logs sensitive content)
 - Metric aggregation for cost tracking
@@ -212,6 +222,7 @@ experiments:
 ### 1. PII Never Reaches LLM
 
 The `pii_shield` middleware operates in the `before_request` hook, ensuring:
+
 - Australian PII is detected **before** prompts are sent to Azure OpenAI
 - Three modes: `abort` (block request), `mask` (redact PII), `log` (warn only)
 - All 19 PII patterns checked on every request
@@ -219,6 +230,7 @@ The `pii_shield` middleware operates in the `before_request` hook, ensuring:
 ### 2. Classification Markings Blocked
 
 The `classified_material` middleware prevents accidental inclusion of classified markings:
+
 - Detects 17 government classification markings
 - Case-insensitive matching by default
 - Custom markings supported for agency-specific classifications
@@ -226,6 +238,7 @@ The `classified_material` middleware prevents accidental inclusion of classified
 ### 3. Artifact Security Levels
 
 All outputs respect classification inheritance:
+
 - Sinks cannot consume artifacts from higher security levels
 - Security level flows: datasource + LLM → experiment → artifacts
 - Artifact pipeline enforces "read-up" restrictions
@@ -233,6 +246,7 @@ All outputs respect classification inheritance:
 ### 4. Audit Trail
 
 Comprehensive audit logging for compliance:
+
 - Request/response logging via `audit_logger` middleware
 - Classification-aware logging (respects `include_prompts: false`)
 - Azure ML telemetry integration
@@ -241,6 +255,7 @@ Comprehensive audit logging for compliance:
 ### 5. Formula Injection Protection
 
 CSV/Excel sinks sanitize formulas to prevent code execution:
+
 - Configurable via `sanitize_formulas` and `sanitize_guard`
 - Guards against `=`, `+`, `-`, `@` formula prefixes
 - Protects downstream analysts from malicious content
@@ -250,6 +265,7 @@ CSV/Excel sinks sanitize formulas to prevent code execution:
 ### 1. Determinism Levels
 
 Experiments can declare reproducibility guarantees:
+
 - `guaranteed` - Fully deterministic (temperature=0, seed set)
 - `expected` - Should be reproducible but may vary slightly
 - `nondeterministic` - Sampling/stochastic processes
@@ -257,6 +273,7 @@ Experiments can declare reproducibility guarantees:
 ### 2. Provenance Tracking
 
 Every plugin receives `PluginContext` with:
+
 - `security_level` - Classification of data being processed
 - `provenance` - Chain of data origins
 - `plugin_kind` - Type of plugin (datasource, llm, sink, etc.)
@@ -265,6 +282,7 @@ Every plugin receives `PluginContext` with:
 ### 3. Cost Tracking
 
 Government-mandated cost visibility:
+
 - Token-level cost tracking via `CostSummaryAggregator`
 - Fixed-price and usage-based cost trackers
 - Per-experiment cost breakdowns in reports
@@ -272,6 +290,7 @@ Government-mandated cost visibility:
 ### 4. Rate Limiting
 
 Protect against runaway costs and abuse:
+
 - `fixed_window` - Simple request quotas
 - `adaptive` - Token-aware throttling
 - Configurable per-experiment and per-LLM
@@ -313,6 +332,7 @@ python -m pytest -k "classified" -v
 ## Contact & Support
 
 For Australian government-specific deployment guidance:
+
 - Review `docs/reporting-and-suite-management.md` for operational procedures
 - See `docs/end_to_end_scenarios.md` for common workflow patterns
 - Check `CLAUDE.md` for development guidelines

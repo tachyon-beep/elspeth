@@ -117,25 +117,17 @@ class EnhancedVisualAnalyticsSink(ResultSink):
             # Generate each requested chart type
             for chart_type in self.chart_types:
                 try:
-                    chart_files = self._generate_chart(
-                        chart_type, score_data, plt, seaborn, metadata
-                    )
+                    chart_files = self._generate_chart(chart_type, score_data, plt, seaborn, metadata)
                     written.extend(chart_files)
                 except Exception as exc:
-                    logger.warning(
-                        "Failed to generate %s chart: %s", chart_type, exc
-                    )
+                    logger.warning("Failed to generate %s chart: %s", chart_type, exc)
                     if self.on_error == "abort":
                         raise
 
             self._last_written_files = written
             if metadata:
-                self._security_level = normalize_security_level(
-                    metadata.get("security_level")
-                )
-                self._determinism_level = normalize_determinism_level(
-                    metadata.get("determinism_level")
-                )
+                self._security_level = normalize_security_level(metadata.get("security_level"))
+                self._determinism_level = normalize_determinism_level(metadata.get("determinism_level"))
             else:
                 self._security_level = None
                 self._determinism_level = None
@@ -197,9 +189,7 @@ class EnhancedVisualAnalyticsSink(ResultSink):
             matplotlib.use("Agg")  # type: ignore[attr-defined]
             import matplotlib.pyplot as plt  # type: ignore
         except Exception as exc:
-            raise RuntimeError(
-                "matplotlib is required for enhanced visual sink"
-            ) from exc
+            raise RuntimeError("matplotlib is required for enhanced visual sink") from exc
         try:
             import seaborn  # type: ignore
         except Exception:
@@ -230,9 +220,7 @@ class EnhancedVisualAnalyticsSink(ResultSink):
                     try:
                         numeric = float(value)
                         if not math.isnan(numeric):
-                            data["scores_by_criterion"].setdefault(name, []).append(
-                                numeric
-                            )
+                            data["scores_by_criterion"].setdefault(name, []).append(numeric)
                     except (TypeError, ValueError):
                         continue
 
@@ -492,9 +480,7 @@ class EnhancedVisualAnalyticsSink(ResultSink):
 
         return self._save_figure(fig, plt, "distribution", {"chart_type": "distribution"})
 
-    def _save_figure(
-        self, fig: Any, plt: Any, chart_type: str, extra_metadata: Dict[str, Any]
-    ) -> List[Tuple[str, Path, Dict[str, Any]]]:
+    def _save_figure(self, fig: Any, plt: Any, chart_type: str, extra_metadata: Dict[str, Any]) -> List[Tuple[str, Path, Dict[str, Any]]]:
         """Save figure to configured formats and return file references."""
         buffer = io.BytesIO()
         fig.savefig(buffer, format="png", dpi=self.dpi)

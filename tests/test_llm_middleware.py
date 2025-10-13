@@ -63,7 +63,14 @@ def test_middleware_chain(monkeypatch):
 
 def test_prompt_shield_blocks():
     middlewares = create_middlewares(
-        [{"name": "prompt_shield", "security_level": "OFFICIAL", "determinism_level": "guaranteed", "options": {"denied_terms": ["forbidden"], "on_violation": "abort"}}]
+        [
+            {
+                "name": "prompt_shield",
+                "security_level": "OFFICIAL",
+                "determinism_level": "guaranteed",
+                "options": {"denied_terms": ["forbidden"], "on_violation": "abort"},
+            }
+        ]
     )
 
     runner = ExperimentRunner(
@@ -88,7 +95,8 @@ def test_prompt_shield_masks(caplog):
         [
             {
                 "name": "prompt_shield",
-                "security_level": "OFFICIAL", "determinism_level": "guaranteed",
+                "security_level": "OFFICIAL",
+                "determinism_level": "guaranteed",
                 "options": {"denied_terms": ["top secret"], "on_violation": "mask", "mask": "***"},
             }
         ]
@@ -117,7 +125,8 @@ def test_prompt_shield_logs_warning(caplog):
         [
             {
                 "name": "prompt_shield",
-                "security_level": "OFFICIAL", "determinism_level": "guaranteed",
+                "security_level": "OFFICIAL",
+                "determinism_level": "guaranteed",
                 "options": {
                     "denied_terms": ["restricted"],
                     "on_violation": "mask",

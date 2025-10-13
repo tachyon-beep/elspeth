@@ -7,7 +7,6 @@ import pytest
 from elspeth.core.llm.middleware import LLMRequest
 from elspeth.plugins.llms.middleware import ClassifiedMaterialMiddleware, PIIShieldMiddleware
 
-
 # =====================================================================
 # PIIShieldMiddleware Tests
 # =====================================================================

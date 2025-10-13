@@ -55,7 +55,8 @@ def test_early_stop_plugins_can_reference_nested_metrics():
     analysis_plugin = create_early_stop_plugin(
         {
             "name": "threshold",
-            "security_level": "OFFICIAL", "determinism_level": "guaranteed",
+            "security_level": "OFFICIAL",
+            "determinism_level": "guaranteed",
             "options": {
                 "metric": "scores.analysis",
                 "threshold": first["metrics"]["scores"]["analysis"] - 0.01,
@@ -68,7 +69,8 @@ def test_early_stop_plugins_can_reference_nested_metrics():
     score_plugin = create_early_stop_plugin(
         {
             "name": "threshold",
-            "security_level": "OFFICIAL", "determinism_level": "guaranteed",
+            "security_level": "OFFICIAL",
+            "determinism_level": "guaranteed",
             "options": {
                 "metric": "score",
                 "threshold": max(first["metrics"]["score"], second["metrics"]["score"]) - 0.01,

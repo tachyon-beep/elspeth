@@ -1936,12 +1936,8 @@ class RationaleAnalysisAggregator:
             low_counter = Counter(data["low_score_words"])
             high_counter = Counter(data["high_score_words"])
 
-            low_keywords = [
-                {"word": word, "count": count} for word, count in low_counter.most_common(self._top_keywords)
-            ]
-            high_keywords = [
-                {"word": word, "count": count} for word, count in high_counter.most_common(self._top_keywords)
-            ]
+            low_keywords = [{"word": word, "count": count} for word, count in low_counter.most_common(self._top_keywords)]
+            high_keywords = [{"word": word, "count": count} for word, count in high_counter.most_common(self._top_keywords)]
 
             # Confidence indicators (simple heuristic)
             confidence_indicators = self._detect_confidence(rationales)
@@ -2133,16 +2129,12 @@ class RefereeAlignmentBaselinePlugin:
             mae_improved = variant_alignment["mean_absolute_error"] < baseline_alignment["mean_absolute_error"]
             # Higher correlation is better alignment
             corr_improved = False
-            if (
-                baseline_alignment["correlation"] is not None
-                and variant_alignment["correlation"] is not None
-            ):
+            if baseline_alignment["correlation"] is not None and variant_alignment["correlation"] is not None:
                 corr_improved = variant_alignment["correlation"] > baseline_alignment["correlation"]
 
             results["comparison"] = {
                 "mae_improved": mae_improved,
-                "mae_difference": variant_alignment["mean_absolute_error"]
-                - baseline_alignment["mean_absolute_error"],
+                "mae_difference": variant_alignment["mean_absolute_error"] - baseline_alignment["mean_absolute_error"],
                 "correlation_improved": corr_improved,
                 "correlation_difference": (
                     variant_alignment["correlation"] - baseline_alignment["correlation"]
@@ -2155,12 +2147,8 @@ class RefereeAlignmentBaselinePlugin:
         if self._criteria:
             criteria_results = {}
             for crit_name in self._criteria:
-                baseline_crit = [
-                    (llm.get(crit_name), ref) for llm, ref in baseline_pairs if crit_name in llm
-                ]
-                variant_crit = [
-                    (llm.get(crit_name), ref) for llm, ref in variant_pairs if crit_name in llm
-                ]
+                baseline_crit = [(llm.get(crit_name), ref) for llm, ref in baseline_pairs if crit_name in llm]
+                variant_crit = [(llm.get(crit_name), ref) for llm, ref in variant_pairs if crit_name in llm]
 
                 # Filter out None scores
                 baseline_crit = [(l, r) for l, r in baseline_crit if l is not None and r is not None]
@@ -2169,13 +2157,9 @@ class RefereeAlignmentBaselinePlugin:
                 if baseline_crit or variant_crit:
                     crit_result: Dict[str, Any] = {}
                     if baseline_crit:
-                        crit_result["baseline"] = self._compute_alignment_metrics(
-                            [({"score": l}, r) for l, r in baseline_crit]
-                        )
+                        crit_result["baseline"] = self._compute_alignment_metrics([({"score": l}, r) for l, r in baseline_crit])
                     if variant_crit:
-                        crit_result["variant"] = self._compute_alignment_metrics(
-                            [({"score": l}, r) for l, r in variant_crit]
-                        )
+                        crit_result["variant"] = self._compute_alignment_metrics([({"score": l}, r) for l, r in variant_crit])
                     criteria_results[crit_name] = crit_result
 
             if criteria_results:
@@ -2183,9 +2167,7 @@ class RefereeAlignmentBaselinePlugin:
 
         return results
 
-    def _extract_score_pairs(
-        self, payload: Dict[str, Any]
-    ) -> list[tuple[Dict[str, float], float]]:
+    def _extract_score_pairs(self, payload: Dict[str, Any]) -> list[tuple[Dict[str, float], float]]:
         """Extract (LLM scores dict, referee score) pairs from experiment results."""
         pairs: list[tuple[Dict[str, float], float]] = []
 
@@ -2257,9 +2239,7 @@ class RefereeAlignmentBaselinePlugin:
 
         return None
 
-    def _compute_alignment_metrics(
-        self, pairs: list[tuple[Dict[str, float], float]]
-    ) -> Dict[str, Any]:
+    def _compute_alignment_metrics(self, pairs: list[tuple[Dict[str, float], float]]) -> Dict[str, Any]:
         """Compute alignment metrics from (LLM scores, referee score) pairs."""
         if len(pairs) < self._min_samples:
             return {}
@@ -2599,9 +2579,7 @@ class ScoreFlipAnalysisAggregator:
                 if delta >= self._major_change:
                     crit_flips["major_gains_count"] += 1
 
-            crit_flips["net_flip_impact"] = (
-                crit_flips["fail_to_pass_count"] - crit_flips["pass_to_fail_count"]
-            )
+            crit_flips["net_flip_impact"] = crit_flips["fail_to_pass_count"] - crit_flips["pass_to_fail_count"]
             criteria_results[crit_name] = crit_flips
 
         # Overall results
@@ -2611,10 +2589,7 @@ class ScoreFlipAnalysisAggregator:
             "major_drops_count": len(flips["major_drops"]),
             "major_gains_count": len(flips["major_gains"]),
             "net_flip_impact": len(flips["fail_to_pass"]) - len(flips["pass_to_fail"]),
-            "examples": {
-                k: [(round(b, 2), round(v, 2)) for b, v in v[:5]]
-                for k, v in flips.items()
-            },
+            "examples": {k: [(round(b, 2), round(v, 2)) for b, v in v[:5]] for k, v in flips.items()},
             "criteria": criteria_results,
         }
 
@@ -2760,9 +2735,7 @@ class CategoryEffectsAggregator:
                 categories.add(str(category))
         return categories
 
-    def _filter_by_category(
-        self, payload: Dict[str, Any], category: str
-    ) -> list[Dict[str, Any]]:
+    def _filter_by_category(self, payload: Dict[str, Any], category: str) -> list[Dict[str, Any]]:
         """Filter results by category value."""
         filtered = []
         for result in payload.get("results", []) or []:
@@ -2772,9 +2745,7 @@ class CategoryEffectsAggregator:
                 filtered.append(result)
         return filtered
 
-    def _compute_cohens_d(
-        self, baseline: list[float], variant: list[float]
-    ) -> float | None:
+    def _compute_cohens_d(self, baseline: list[float], variant: list[float]) -> float | None:
         """Compute Cohen's d effect size."""
         if not baseline or not variant:
             return None
@@ -2793,9 +2764,7 @@ class CategoryEffectsAggregator:
         var_base = arr_base.var(ddof=1)
         var_var = arr_var.var(ddof=1)
 
-        pooled_var = ((n_base - 1) * var_base + (n_var - 1) * var_var) / (
-            n_base + n_var - 2
-        )
+        pooled_var = ((n_base - 1) * var_base + (n_var - 1) * var_var) / (n_base + n_var - 2)
 
         # Guard against near-zero variance (numerical stability)
         if pooled_var <= 1e-10:
@@ -2899,20 +2868,14 @@ class CriteriaEffectsBaselinePlugin:
             n_var = var_arr.size
             var_base = base_arr.var(ddof=1) if n_base > 1 else 0.0
             var_var = var_arr.var(ddof=1) if n_var > 1 else 0.0
-            pooled_var = ((n_base - 1) * var_base + (n_var - 1) * var_var) / (
-                n_base + n_var - 2
-            )
-            effect_size = (
-                delta / math.sqrt(pooled_var) if pooled_var > 0 else None
-            )
+            pooled_var = ((n_base - 1) * var_base + (n_var - 1) * var_var) / (n_base + n_var - 2)
+            effect_size = delta / math.sqrt(pooled_var) if pooled_var > 0 else None
 
             # Mann-Whitney U test (non-parametric)
             p_value = None
             if scipy_stats is not None:
                 try:
-                    mw_result = scipy_stats.mannwhitneyu(
-                        base, var, alternative="two-sided"
-                    )
+                    mw_result = scipy_stats.mannwhitneyu(base, var, alternative="two-sided")
                     p_value = float(mw_result.pvalue)
                 except Exception:  # pragma: no cover
                     p_value = None

@@ -4,20 +4,21 @@
 import re
 from pathlib import Path
 
+
 def add_determinism_to_dict_literals(content):
     """Add determinism_level to dict literals containing security_level."""
 
-    lines = content.split('\n')
+    lines = content.split("\n")
     result = []
 
     for line in lines:
         # Skip if determinism_level already present on this line
-        if 'determinism_level' in line:
+        if "determinism_level" in line:
             result.append(line)
             continue
 
         # Skip if no security_level on this line
-        if 'security_level' not in line:
+        if "security_level" not in line:
             result.append(line)
             continue
 
@@ -52,11 +53,12 @@ def add_determinism_to_dict_literals(content):
 
         result.append(line)
 
-    return '\n'.join(result)
+    return "\n".join(result)
+
 
 def migrate_file(file_path):
     """Migrate a single test file."""
-    content = file_path.read_text(encoding='utf-8')
+    content = file_path.read_text(encoding="utf-8")
     original = content
 
     # Add determinism_level to dict literals
@@ -67,12 +69,13 @@ def migrate_file(file_path):
     content = content.replace("security_level='secret'", "security_level='SECRET'")
 
     if content != original:
-        file_path.write_text(content, encoding='utf-8')
+        file_path.write_text(content, encoding="utf-8")
         print(f"✓ Updated {file_path.name}")
         return True
     else:
         print(f"  Skipped {file_path.name}")
         return False
+
 
 def main():
     """Process all test files."""
@@ -85,6 +88,7 @@ def main():
             updated += 1
 
     print(f"\nUpdated {updated}/{len(test_files)} files")
+
 
 if __name__ == "__main__":
     main()

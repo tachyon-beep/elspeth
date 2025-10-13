@@ -29,13 +29,13 @@ from elspeth.plugins.outputs import (
     VisualAnalyticsSink,
     ZipResultSink,
 )
-from elspeth.plugins.outputs.enhanced_visual_report import EnhancedVisualAnalyticsSink
 from elspeth.plugins.outputs.embeddings_store import (
     DEFAULT_EMBEDDING_FIELD,
     DEFAULT_ID_FIELD,
     DEFAULT_TEXT_FIELD,
     EmbeddingsStoreSink,
 )
+from elspeth.plugins.outputs.enhanced_visual_report import EnhancedVisualAnalyticsSink
 
 ON_ERROR_ENUM = {"type": "string", "enum": ["abort", "skip"]}
 
@@ -48,7 +48,7 @@ ARTIFACT_DESCRIPTOR_SCHEMA = {
         "persist": {"type": "boolean"},
         "alias": {"type": "string"},
         "security_level": {"type": "string"},
-    "determinism_level": {"type": "string"},
+        "determinism_level": {"type": "string"},
     },
     "required": ["name", "type"],
     "additionalProperties": False,
@@ -585,7 +585,7 @@ class PluginRegistry:
                         "namespace_field": {"type": "string"},
                         "artifacts": ARTIFACTS_SECTION_SCHEMA,
                         "security_level": {"type": "string"},
-                    "determinism_level": {"type": "string"},
+                        "determinism_level": {"type": "string"},
                     },
                     "required": ["provider"],
                     "additionalProperties": True,

@@ -8,6 +8,7 @@ This generates a stub file with a basic registration schema. Use
 `--directory` to override the output folder and `--force` to overwrite
 existing files intentionally.
 """
+
 from __future__ import annotations
 
 import argparse

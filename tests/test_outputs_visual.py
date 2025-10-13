@@ -33,7 +33,8 @@ def test_visual_sink_creates_artifacts(tmp_path: Path) -> None:
     )
     payload = _sample_payload()
     metadata = {
-        "security_level": "OFFICIAL", "determinism_level": "guaranteed",
+        "security_level": "OFFICIAL",
+        "determinism_level": "guaranteed",
         "retry_summary": {"total_requests": 10, "total_retries": 2},
         "cost_summary": {"total_cost": 1.23},
     }

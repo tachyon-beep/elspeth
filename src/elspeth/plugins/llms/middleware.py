@@ -353,16 +353,37 @@ class PIIShieldMiddleware(LLMMiddleware):
 
     # Strong context tokens that boost confidence
     STRONG_TOKENS = [
-        "tfn", "tax file", "tax file number",
-        "abn", "business number", "australian business",
-        "acn", "company number", "australian company",
-        "medicare", "medicare number", "medicare card",
-        "ssn", "social security", "social security number",
-        "bsb", "bank state branch",
-        "account", "account number", "acct",
-        "credit card", "card number", "visa", "mastercard", "amex",
-        "passport", "passport number",
-        "driver", "driver's license", "licence", "license",
+        "tfn",
+        "tax file",
+        "tax file number",
+        "abn",
+        "business number",
+        "australian business",
+        "acn",
+        "company number",
+        "australian company",
+        "medicare",
+        "medicare number",
+        "medicare card",
+        "ssn",
+        "social security",
+        "social security number",
+        "bsb",
+        "bank state branch",
+        "account",
+        "account number",
+        "acct",
+        "credit card",
+        "card number",
+        "visa",
+        "mastercard",
+        "amex",
+        "passport",
+        "passport number",
+        "driver",
+        "driver's license",
+        "licence",
+        "license",
     ]
 
     # Suppression patterns (high false-positive contexts)
@@ -684,6 +705,7 @@ class PIIShieldMiddleware(LLMMiddleware):
 
         # Take first 6 bytes, encode as base64, strip padding
         import base64
+
         token = base64.b64encode(hash_digest[:6]).decode("ascii").rstrip("=")
 
         # Format as type#token
@@ -746,7 +768,7 @@ class PIIShieldMiddleware(LLMMiddleware):
                     # Check for pattern-specific context tokens
                     context_tokens = metadata.get("context_tokens", [])
                     if context_tokens:
-                        context_window = text[max(0, match_start - 40):min(len(text), match_end + 40)].lower()
+                        context_window = text[max(0, match_start - 40) : min(len(text), match_end + 40)].lower()
                         if not any(token in context_window for token in context_tokens):
                             continue  # Skip without context
                     else:
@@ -762,34 +784,35 @@ class PIIShieldMiddleware(LLMMiddleware):
                 severity = metadata["severity"] if self.severity_scoring else "HIGH"
                 pseudonym = self._generate_pseudonym(name, match_value)
 
-                findings.append({
-                    "type": name,
-                    "severity": severity,
-                    "offset": match_start,
-                    "length": len(match_value),
-                    "value": match_value,
-                    "hash": pseudonym,
-                })
+                findings.append(
+                    {
+                        "type": name,
+                        "severity": severity,
+                        "offset": match_start,
+                        "length": len(match_value),
+                        "value": match_value,
+                        "hash": pseudonym,
+                    }
+                )
 
         # 2. BSB+Account combo detection
         combos = self._detect_bsb_account_combo(text)
         for start, end, bsb_val, acct_val in combos:
             # Check if already detected individually
-            already_detected = any(
-                f["offset"] == start or f["offset"] == end
-                for f in findings
-            )
+            already_detected = any(f["offset"] == start or f["offset"] == end for f in findings)
             if not already_detected:
                 combo_value = f"{bsb_val}+{acct_val}"
                 pseudonym = self._generate_pseudonym("bsb_account", combo_value)
-                findings.append({
-                    "type": "bsb_account_combo",
-                    "severity": "HIGH",
-                    "offset": start,
-                    "length": end - start,
-                    "value": combo_value,
-                    "hash": pseudonym,
-                })
+                findings.append(
+                    {
+                        "type": "bsb_account_combo",
+                        "severity": "HIGH",
+                        "offset": start,
+                        "length": end - start,
+                        "value": combo_value,
+                        "hash": pseudonym,
+                    }
+                )
 
         # 3. Calculate severity counts and max severity
         if findings:
@@ -875,9 +898,7 @@ class PIIShieldMiddleware(LLMMiddleware):
                     )
                     return request
 
-                raise ValueError(
-                    f"Prompt contains PII (severity={max_severity}): {', '.join(sorted(pii_types))}"
-                )
+                raise ValueError(f"Prompt contains PII (severity={max_severity}): {', '.join(sorted(pii_types))}")
 
             if self.mode == "mask":
                 # Return redacted version
@@ -960,22 +981,58 @@ class ClassifiedMaterialMiddleware(LLMMiddleware):
     # Homoglyph map (common unicode lookalikes to ASCII)
     HOMOGLYPHS = {
         # Cyrillic to Latin
-        'А': 'A', 'В': 'B', 'Е': 'E', 'К': 'K', 'М': 'M', 'Н': 'H', 'О': 'O',
-        'Р': 'P', 'С': 'C', 'Т': 'T', 'Х': 'X', 'а': 'a', 'е': 'e', 'о': 'o',
-        'р': 'p', 'с': 'c', 'х': 'x', 'у': 'y',
+        "А": "A",
+        "В": "B",
+        "Е": "E",
+        "К": "K",
+        "М": "M",
+        "Н": "H",
+        "О": "O",
+        "Р": "P",
+        "С": "C",
+        "Т": "T",
+        "Х": "X",
+        "а": "a",
+        "е": "e",
+        "о": "o",
+        "р": "p",
+        "с": "c",
+        "х": "x",
+        "у": "y",
         # Greek to Latin
-        'Α': 'A', 'Β': 'B', 'Ε': 'E', 'Ζ': 'Z', 'Η': 'H', 'Ι': 'I', 'Κ': 'K',
-        'Μ': 'M', 'Ν': 'N', 'Ο': 'O', 'Ρ': 'P', 'Τ': 'T', 'Υ': 'Y', 'Χ': 'X',
+        "Α": "A",
+        "Β": "B",
+        "Ε": "E",
+        "Ζ": "Z",
+        "Η": "H",
+        "Ι": "I",
+        "Κ": "K",
+        "Μ": "M",
+        "Ν": "N",
+        "Ο": "O",
+        "Ρ": "P",
+        "Τ": "T",
+        "Υ": "Y",
+        "Χ": "X",
     }
 
     # REL TO country code canonicalization
     REL_TO_CANON = {
-        "aus": "AUS", "australia": "AUS",
-        "can": "CAN", "canada": "CAN",
-        "gbr": "GBR", "uk": "GBR", "united kingdom": "GBR", "great britain": "GBR",
-        "nzl": "NZL", "new zealand": "NZL",
-        "usa": "USA", "us": "USA", "united states": "USA",
-        "fvey": "FVEY", "five eyes": "FVEY",
+        "aus": "AUS",
+        "australia": "AUS",
+        "can": "CAN",
+        "canada": "CAN",
+        "gbr": "GBR",
+        "uk": "GBR",
+        "united kingdom": "GBR",
+        "great britain": "GBR",
+        "nzl": "NZL",
+        "new zealand": "NZL",
+        "usa": "USA",
+        "us": "USA",
+        "united states": "USA",
+        "fvey": "FVEY",
+        "five eyes": "FVEY",
     }
 
     # Fuzzy regex patterns
@@ -1079,17 +1136,17 @@ class ClassifiedMaterialMiddleware(LLMMiddleware):
             Tuple of (normalized_text, punctuation_stripped_shadow)
         """
         # NFKC unicode normalization
-        normalized = unicodedata.normalize('NFKC', text)
+        normalized = unicodedata.normalize("NFKC", text)
 
         # Apply homoglyph map
         chars = []
         for char in normalized:
             chars.append(self.HOMOGLYPHS.get(char, char))
-        normalized = ''.join(chars)
+        normalized = "".join(chars)
 
         # Create punctuation-stripped shadow (collapse whitespace, remove punctuation)
-        shadow = re.sub(r'[^\w\s]', '', normalized)
-        shadow = re.sub(r'\s+', ' ', shadow)
+        shadow = re.sub(r"[^\w\s]", "", normalized)
+        shadow = re.sub(r"\s+", " ", shadow)
 
         return normalized, shadow
 
@@ -1104,9 +1161,23 @@ class ClassifiedMaterialMiddleware(LLMMiddleware):
 
         # HIGH if any of these detected
         high_signals = {
-            "TOP SECRET", "SECRET", "PROTECTED", "AUSTEO", "AGAO", "CABINET", "NATIONAL CABINET",
-            "NOFORN", "ORCON", "SCI", "SI", "HCS", "TK", "COSMIC TOP SECRET",
-            "NATO SECRET", "TS//SCI", "TS/SCI"
+            "TOP SECRET",
+            "SECRET",
+            "PROTECTED",
+            "AUSTEO",
+            "AGAO",
+            "CABINET",
+            "NATIONAL CABINET",
+            "NOFORN",
+            "ORCON",
+            "SCI",
+            "SI",
+            "HCS",
+            "TK",
+            "COSMIC TOP SECRET",
+            "NATO SECRET",
+            "TS//SCI",
+            "TS/SCI",
         }
 
         # Check for banner structure, eyes only, REL TO
@@ -1240,9 +1311,7 @@ class ClassifiedMaterialMiddleware(LLMMiddleware):
             )
 
             if self.mode == "abort":
-                raise ValueError(
-                    f"Prompt contains classification markings (severity={severity}): {marking_list}"
-                )
+                raise ValueError(f"Prompt contains classification markings (severity={severity}): {marking_list}")
 
             if self.mode == "mask":
                 masked_text = text

@@ -285,4 +285,6 @@ def test_load_settings_suite_defaults_inherit_pack(tmp_path, monkeypatch):
     assert settings.suite_defaults["prompts"]["system"] == "Pack system"
     assert settings.suite_defaults["prompt_fields"] == ["id"]
     assert settings.suite_defaults["row_plugins"] == [{"name": "pack_row", "security_level": "OFFICIAL", "determinism_level": "guaranteed"}]
-    assert settings.suite_defaults["aggregator_plugins"] == [{"name": "suite_agg", "security_level": "OFFICIAL", "determinism_level": "guaranteed"}]
+    assert settings.suite_defaults["aggregator_plugins"] == [
+        {"name": "suite_agg", "security_level": "OFFICIAL", "determinism_level": "guaranteed"}
+    ]

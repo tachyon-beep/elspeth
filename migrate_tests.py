@@ -21,16 +21,8 @@ def migrate_security_levels(content):
     """Replace lowercase security levels with PSPF uppercase."""
     for old, new in SECURITY_MAPPING.items():
         # Match: "security_level": "old" or 'security_level': 'old'
-        content = re.sub(
-            rf'("security_level"\s*:\s*")[{old}](")' ,
-            rf'\1{new}\2',
-            content
-        )
-        content = re.sub(
-            rf"('security_level'\s*:\s*')[{old}](')",
-            rf'\1{new}\2',
-            content
-        )
+        content = re.sub(rf'("security_level"\s*:\s*")[{old}](")', rf"\1{new}\2", content)
+        content = re.sub(rf"('security_level'\s*:\s*')[{old}](')", rf"\1{new}\2", content)
     return content
 
 
@@ -64,33 +56,20 @@ def add_determinism_level(content):
         insertion_point = sec_match.end()
 
         # Check if there's a comma after security_level
-        after_sec = full_match[insertion_point:insertion_point+5]
-        if ',' not in after_sec:
+        after_sec = full_match[insertion_point : insertion_point + 5]
+        if "," not in after_sec:
             # Need to add comma before determinism_level
-            new_dict = (
-                full_match[:insertion_point] +
-                f', "determinism_level": "{determinism_val}"' +
-                full_match[insertion_point:]
-            )
+            new_dict = full_match[:insertion_point] + f', "determinism_level": "{determinism_val}"' + full_match[insertion_point:]
         else:
             # Insert after the comma
-            comma_pos = full_match.index(',', insertion_point)
-            new_dict = (
-                full_match[:comma_pos+1] +
-                f' "determinism_level": "{determinism_val}",' +
-                full_match[comma_pos+1:]
-            )
+            comma_pos = full_match.index(",", insertion_point)
+            new_dict = full_match[: comma_pos + 1] + f' "determinism_level": "{determinism_val}",' + full_match[comma_pos + 1 :]
 
         return new_dict
 
     # Match dictionary literals containing security_level
     # This is a simplified pattern - may need refinement
-    content = re.sub(
-        r'\{[^{}]*["\']security_level["\'][^{}]*\}',
-        replace_dict,
-        content,
-        flags=re.MULTILINE
-    )
+    content = re.sub(r'\{[^{}]*["\']security_level["\'][^{}]*\}', replace_dict, content, flags=re.MULTILINE)
 
     return content
 

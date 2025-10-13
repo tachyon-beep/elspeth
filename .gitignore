@@ -132,3 +132,7 @@ venv.bak/
 .coverage
 
 .mcp.json
+
+
+#Ignore vscode AI rules
+.github/instructions/codacy.instructions.md

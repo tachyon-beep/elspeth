@@ -43,7 +43,8 @@ def test_create_utility_plugin_with_schema_validation():
     plugin = create_utility_plugin(
         {
             "name": "dummy",
-            "security_level": "OFFICIAL", "determinism_level": "guaranteed",
+            "security_level": "OFFICIAL",
+            "determinism_level": "guaranteed",
             "options": {"foo": "bar"},
         }
     )
@@ -63,7 +64,8 @@ def test_create_utility_plugin_conflicting_security_levels():
         create_utility_plugin(
             {
                 "name": "dummy",
-                "security_level": "OFFICIAL", "determinism_level": "guaranteed",
+                "security_level": "OFFICIAL",
+                "determinism_level": "guaranteed",
                 "options": {"security_level": "PROTECTED", "determinism_level": "guaranteed"},
             }
         )
@@ -100,7 +102,8 @@ def test_create_utility_plugin_missing_required_field_raises():
         create_utility_plugin(
             {
                 "name": "dummy",
-                "security_level": "OFFICIAL", "determinism_level": "guaranteed",
+                "security_level": "OFFICIAL",
+                "determinism_level": "guaranteed",
                 "options": {},
             }
         )

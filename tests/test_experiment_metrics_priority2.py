@@ -11,7 +11,6 @@ from elspeth.plugins.experiments.metrics import (
     ScoreFlipAnalysisAggregator,
 )
 
-
 # =====================================================================
 # Outlier Detection Tests
 # =====================================================================
@@ -158,17 +157,9 @@ def test_outlier_detection_no_common_ids() -> None:
     """Test that outlier detection handles disjoint ID sets."""
     plugin = OutlierDetectionAggregator(top_n=10)
 
-    baseline = {
-        "results": [
-            {"row": {"id": 1}, "metrics": {"scores": {"quality": 4.0}}}
-        ]
-    }
+    baseline = {"results": [{"row": {"id": 1}, "metrics": {"scores": {"quality": 4.0}}}]}
 
-    variant = {
-        "results": [
-            {"row": {"id": 2}, "metrics": {"scores": {"quality": 4.0}}}
-        ]
-    }
+    variant = {"results": [{"row": {"id": 2}, "metrics": {"scores": {"quality": 4.0}}}]}
 
     result = plugin.compare(baseline, variant)
 
@@ -196,9 +187,7 @@ def test_outlier_detection_on_error_skip() -> None:
 
 def test_score_flip_analysis_fail_to_pass() -> None:
     """Test detection of fail→pass transitions."""
-    plugin = ScoreFlipAnalysisAggregator(
-        fail_threshold=2.0, pass_threshold=3.0
-    )
+    plugin = ScoreFlipAnalysisAggregator(fail_threshold=2.0, pass_threshold=3.0)
 
     baseline = {
         "results": [
@@ -226,9 +215,7 @@ def test_score_flip_analysis_fail_to_pass() -> None:
 
 def test_score_flip_analysis_pass_to_fail() -> None:
     """Test detection of pass→fail transitions."""
-    plugin = ScoreFlipAnalysisAggregator(
-        fail_threshold=2.0, pass_threshold=3.0
-    )
+    plugin = ScoreFlipAnalysisAggregator(fail_threshold=2.0, pass_threshold=3.0)
 
     baseline = {
         "results": [
@@ -318,17 +305,9 @@ def test_score_flip_analysis_criteria_filter() -> None:
     """Test that criteria filtering applies to flip analysis."""
     plugin = ScoreFlipAnalysisAggregator(criteria=["quality"])
 
-    baseline = {
-        "results": [
-            {"metrics": {"scores": {"quality": 2.0, "safety": 2.0}}}
-        ]
-    }
+    baseline = {"results": [{"metrics": {"scores": {"quality": 2.0, "safety": 2.0}}}]}
 
-    variant = {
-        "results": [
-            {"metrics": {"scores": {"quality": 4.0, "safety": 4.0}}}
-        ]
-    }
+    variant = {"results": [{"metrics": {"scores": {"quality": 4.0, "safety": 4.0}}}]}
 
     result = plugin.compare(baseline, variant)
 

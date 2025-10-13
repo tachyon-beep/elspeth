@@ -7,7 +7,8 @@ from elspeth.core.validation import ConfigurationError
 def test_sink_accepts_artifact_config():
     config = {
         "path": "out.csv",
-        "security_level": "OFFICIAL", "determinism_level": "guaranteed",
+        "security_level": "OFFICIAL",
+        "determinism_level": "guaranteed",
         "artifacts": {
             "produces": [
                 {"name": "csv", "type": "file/csv", "persist": True},
@@ -22,7 +23,8 @@ def test_sink_accepts_artifact_config():
 def test_sink_rejects_invalid_artifact_config():
     config = {
         "path": "out.csv",
-        "security_level": "OFFICIAL", "determinism_level": "guaranteed",
+        "security_level": "OFFICIAL",
+        "determinism_level": "guaranteed",
         "artifacts": {
             "produces": [
                 {"name": "csv"},

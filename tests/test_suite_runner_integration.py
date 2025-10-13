@@ -57,7 +57,8 @@ def test_suite_runner_executes_with_defaults_and_packs(tmp_path):
             "sinks": [
                 {
                     "plugin": "local_bundle",
-                    "security_level": "OFFICIAL", "determinism_level": "guaranteed",
+                    "security_level": "OFFICIAL",
+                    "determinism_level": "guaranteed",
                     "options": {
                         "base_path": bundle_root.as_posix(),
                         "bundle_name": "variant_bundle",
@@ -84,7 +85,8 @@ def test_suite_runner_executes_with_defaults_and_packs(tmp_path):
         "sink_defs": [
             {
                 "plugin": "local_bundle",
-                "security_level": "OFFICIAL", "determinism_level": "guaranteed",
+                "security_level": "OFFICIAL",
+                "determinism_level": "guaranteed",
                 "options": {
                     "base_path": bundle_root.as_posix(),
                     "bundle_name": "baseline_bundle",
@@ -96,7 +98,8 @@ def test_suite_runner_executes_with_defaults_and_packs(tmp_path):
         "aggregator_plugin_defs": [
             {
                 "name": "prompt_variants",
-                "security_level": "OFFICIAL", "determinism_level": "guaranteed",
+                "security_level": "OFFICIAL",
+                "determinism_level": "guaranteed",
                 "options": {
                     "prompt_template": (
                         "Provide a variation that keeps {{ placeholder_tokens | join(', ') }}.\\n" "Base prompt: {{ user_prompt_template }}"
@@ -105,7 +108,8 @@ def test_suite_runner_executes_with_defaults_and_packs(tmp_path):
                     "max_attempts": 1,
                     "variant_llm": {
                         "plugin": "mock",
-                        "security_level": "OFFICIAL", "determinism_level": "guaranteed",
+                        "security_level": "OFFICIAL",
+                        "determinism_level": "guaranteed",
                         "options": {"seed": 11},
                     },
                 },
@@ -114,7 +118,8 @@ def test_suite_runner_executes_with_defaults_and_packs(tmp_path):
         "validation_plugin_defs": [
             {
                 "name": "regex_match",
-                "security_level": "OFFICIAL", "determinism_level": "guaranteed",
+                "security_level": "OFFICIAL",
+                "determinism_level": "guaranteed",
                 "options": {"pattern": r".+", "flags": "DOTALL"},
             },
         ],
