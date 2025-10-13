@@ -1,0 +1,294 @@
+"""Tests for registry context utilities."""
+
+import pytest
+
+from elspeth.core.plugins import PluginContext
+from elspeth.core.registry.context_utils import (
+    create_plugin_context,
+    extract_security_levels,
+    prepare_plugin_payload,
+)
+from elspeth.core.validation import ConfigurationError
+
+
+# extract_security_levels tests
+
+
+def test_extract_from_options():
+    """Extract levels from options dictionary."""
+    security, determinism, sources = extract_security_levels(
+        definition={},
+        options={
+            "security_level": "confidential",
+            "determinism_level": "deterministic",
+        },
+        plugin_type="datasource",
+        plugin_name="csv",
+    )
+
+    assert security == "confidential"
+    assert determinism == "deterministic"
+    assert "datasource:csv.options.security_level" in sources
+    assert "datasource:csv.options.determinism_level" in sources
+
+
+def test_extract_from_definition():
+    """Extract levels from definition dictionary."""
+    security, determinism, sources = extract_security_levels(
+        definition={
+            "security_level": "internal",
+            "determinism_level": "non-deterministic",
+        },
+        options={},
+        plugin_type="llm",
+        plugin_name="azure",
+    )
+
+    assert security == "internal"
+    assert determinism == "non_deterministic"  # normalized
+    assert "llm:azure.definition.security_level" in sources
+    assert "llm:azure.definition.determinism_level" in sources
+
+
+def test_extract_with_parent_context():
+    """Inherit levels from parent context."""
+    parent = PluginContext(
+        plugin_name="parent",
+        plugin_kind="parent",
+        security_level="restricted",
+        determinism_level="deterministic",
+        provenance=("parent",),
+    )
+
+    security, determinism, sources = extract_security_levels(
+        definition={},
+        options={},
+        plugin_type="utility",
+        plugin_name="helper",
+        parent_context=parent,
+        require_security=False,
+        require_determinism=False,
+    )
+
+    # Should inherit from parent when not specified
+    assert security == "restricted"
+    assert determinism == "deterministic"
+
+
+def test_extract_missing_required_security():
+    """Raise error when required security_level missing."""
+    with pytest.raises(ConfigurationError, match="security_level is required"):
+        extract_security_levels(
+            definition={},
+            options={},
+            plugin_type="datasource",
+            plugin_name="csv",
+            require_security=True,
+        )
+
+
+def test_extract_missing_required_determinism():
+    """Raise error when required determinism_level missing."""
+    with pytest.raises(ConfigurationError, match="determinism_level is required"):
+        extract_security_levels(
+            definition={},
+            options={"security_level": "internal"},
+            plugin_type="datasource",
+            plugin_name="csv",
+            require_determinism=True,
+        )
+
+
+def test_extract_options_override_definition():
+    """Options security level overrides definition."""
+    security, determinism, sources = extract_security_levels(
+        definition={"security_level": "public"},
+        options={"security_level": "confidential"},
+        plugin_type="sink",
+        plugin_name="csv",
+    )
+
+    # Options should take precedence
+    assert security == "confidential"
+    assert "sink:csv.definition.security_level" in sources
+    assert "sink:csv.options.security_level" in sources
+
+
+def test_extract_determinism_defaults_to_none():
+    """Determinism defaults to 'none' when not specified."""
+    security, determinism, sources = extract_security_levels(
+        definition={},
+        options={"security_level": "internal"},
+        plugin_type="datasource",
+        plugin_name="csv",
+        require_determinism=False,
+    )
+
+    assert determinism == "none"
+
+
+def test_extract_provenance_tracking():
+    """Build correct provenance source list."""
+    security, determinism, sources = extract_security_levels(
+        definition={"security_level": "internal"},
+        options={"determinism_level": "deterministic"},
+        plugin_type="llm",
+        plugin_name="openai",
+    )
+
+    assert len(sources) == 2
+    assert "llm:openai.definition.security_level" in sources
+    assert "llm:openai.options.determinism_level" in sources
+
+
+def test_extract_normalizes_levels():
+    """Security and determinism levels are normalized."""
+    security, determinism, sources = extract_security_levels(
+        definition={},
+        options={
+            "security_level": "CONFIDENTIAL",  # uppercase
+            "determinism_level": "non deterministic",  # spaces
+        },
+        plugin_type="datasource",
+        plugin_name="test",
+    )
+
+    assert security == "confidential"  # lowercase
+    assert determinism == "non_deterministic"  # underscored
+
+
+# create_plugin_context tests
+
+
+def test_create_context_new():
+    """Create new context without parent."""
+    context = create_plugin_context(
+        plugin_name="csv",
+        plugin_kind="datasource",
+        security_level="internal",
+        determinism_level="deterministic",
+        provenance=["datasource:csv.options"],
+    )
+
+    assert isinstance(context, PluginContext)
+    assert context.plugin_name == "csv"
+    assert context.plugin_kind == "datasource"
+    assert context.security_level == "internal"
+    assert context.determinism_level == "deterministic"
+    assert "datasource:csv.options" in context.provenance
+
+
+def test_create_context_derived():
+    """Derive context from parent."""
+    parent = PluginContext(
+        plugin_name="parent",
+        plugin_kind="parent",
+        security_level="restricted",
+        determinism_level="deterministic",
+        provenance=("parent.source",),
+    )
+
+    context = create_plugin_context(
+        plugin_name="child",
+        plugin_kind="child",
+        security_level="restricted",
+        determinism_level="deterministic",
+        provenance=["child.source"],
+        parent_context=parent,
+    )
+
+    assert isinstance(context, PluginContext)
+    assert context.plugin_name == "child"
+    # Parent provenance should be included
+    assert "parent.source" in context.provenance
+    assert "child.source" in context.provenance
+
+
+def test_create_context_empty_provenance():
+    """Handle empty provenance gracefully."""
+    context = create_plugin_context(
+        plugin_name="test",
+        plugin_kind="test",
+        security_level="internal",
+        determinism_level="deterministic",
+        provenance=[],
+    )
+
+    # Should have default provenance
+    assert len(context.provenance) > 0
+    assert "test:test.resolved" in context.provenance
+
+
+# prepare_plugin_payload tests
+
+
+def test_prepare_payload_strips_security():
+    """Strip security_level from options."""
+    options = {
+        "path": "data.csv",
+        "security_level": "confidential",
+        "determinism_level": "deterministic",
+    }
+
+    payload = prepare_plugin_payload(options)
+
+    assert "path" in payload
+    assert "security_level" not in payload
+    assert "determinism_level" not in payload
+
+
+def test_prepare_payload_keep_security():
+    """Keep security_level when strip_security=False."""
+    options = {
+        "path": "data.csv",
+        "security_level": "confidential",
+    }
+
+    payload = prepare_plugin_payload(options, strip_security=False)
+
+    assert "security_level" in payload
+    assert payload["security_level"] == "confidential"
+
+
+def test_prepare_payload_keep_determinism():
+    """Keep determinism_level when strip_determinism=False."""
+    options = {
+        "path": "data.csv",
+        "determinism_level": "deterministic",
+    }
+
+    payload = prepare_plugin_payload(options, strip_determinism=False)
+
+    assert "determinism_level" in payload
+    assert payload["determinism_level"] == "deterministic"
+
+
+def test_prepare_payload_creates_copy():
+    """Prepare payload creates copy, doesn't modify original."""
+    options = {
+        "path": "data.csv",
+        "security_level": "confidential",
+    }
+
+    payload = prepare_plugin_payload(options)
+
+    assert "security_level" not in payload
+    assert "security_level" in options  # original unchanged
+
+
+def test_prepare_payload_empty_options():
+    """Handle empty options dict."""
+    payload = prepare_plugin_payload({})
+
+    assert isinstance(payload, dict)
+    assert len(payload) == 0
+
+
+def test_prepare_payload_no_framework_keys():
+    """Handle options without framework keys."""
+    options = {"path": "data.csv", "encoding": "utf-8"}
+
+    payload = prepare_plugin_payload(options)
+
+    assert payload == options  # should be unchanged (except being a copy)
+    assert payload is not options  # but still a copy
