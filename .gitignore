@@ -130,3 +130,5 @@ venv.bak/
 # Azure CLI/cache
 .azure/
 .coverage
+
+.mcp.json

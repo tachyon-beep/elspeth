@@ -20,7 +20,7 @@
 | `redact_prompts` | Bool; when true replace prompt/response bodies with hashes while retaining token counts. |
 | `include_cost_metrics` | Bool; attach prompt/completion cost metrics when cost tracker is enabled. |
 
-### Fit Considerations
+### Fit Considerations - A
 
 - **Pros**:
   - Portable across on-prem and cloud collectors; aligns with CNCF standards.
@@ -38,7 +38,7 @@
 - **Integration Point**: LLM middleware with dependency on `azure-monitor-opentelemetry`.
 - **Purpose**: Push trace spans and cost telemetry to Azure Application Insights / Monitor.
 
-### Configuration Surface
+### Configuration Surface - B
 
 | Option | Description |
 | --- | --- |
@@ -50,7 +50,7 @@
 | `sampling_percentage` | Percentage-based sampling (0–100). |
 | `cost_metric_namespace` | Custom metric namespace for cost telemetry (default `Elspeth/LLM`). |
 
-### Fit Considerations
+### Fit Considerations  - B
 
 - **Pros**:
   - Native integration with existing Azure telemetry dashboards and alerting.
@@ -69,7 +69,7 @@
 - **Integration Point**: Result sink that consumes trace envelopes from middleware via artifact chaining.
 - **Purpose**: Persist sanitized request/response envelopes, retry metadata, and decision lineage to signed NDJSON bundles for regulated environments without external telemetry dependencies.
 
-### Configuration Surface
+### Configuration Surface - C
 
 | Option | Description |
 | --- | --- |
@@ -81,7 +81,7 @@
 | `rotate_every` | Max records per bundle before rolling to a new file. |
 | `retention_days` | Optional auto-expiry metadata for downstream retention tooling. |
 
-### Fit Considerations
+### Fit Considerations - C
 
 - **Pros**:
   - Works fully offline/air-gapped; no external services required.
