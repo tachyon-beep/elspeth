@@ -20,6 +20,7 @@ from elspeth.core.interfaces import LLMClientProtocol, ResultSink
 from elspeth.core.llm.middleware import LLMMiddleware, LLMRequest
 from elspeth.core.processing import prepare_prompt_context
 from elspeth.core.prompts import PromptEngine, PromptRenderingError, PromptTemplate, PromptValidationError
+from elspeth.core.schema import SchemaViolation, validate_row, validate_schema_compatibility
 from elspeth.core.security import normalize_security_level, resolve_determinism_level, resolve_security_level
 
 logger = logging.getLogger(__name__)
@@ -59,6 +60,9 @@ class ExperimentRunner:
     _early_stop_event: threading.Event | None = None
     _early_stop_lock: threading.Lock | None = None
     _early_stop_reason: Dict[str, Any] | None = None
+    on_schema_violation: str = "abort"  # "abort" | "route" | "skip"
+    malformed_data_sink: ResultSink | None = None
+    _malformed_rows: List[SchemaViolation] | None = None
 
     def run(self, df: pd.DataFrame) -> Dict[str, Any]:
         self._init_early_stop()
@@ -97,6 +101,14 @@ class ExperimentRunner:
         self._compiled_system_prompt = system_template
         self._compiled_user_prompt = user_template
         self._compiled_criteria_prompts = criteria_templates
+
+        # Config-time schema validation: Check plugin compatibility
+        datasource_schema = df.attrs.get("schema") if hasattr(df, "attrs") else None
+        if datasource_schema:
+            self._validate_plugin_schemas(datasource_schema)
+
+        # Initialize malformed data tracking
+        self._malformed_rows = []
 
         rows_to_process: List[tuple[int, pd.Series, Dict[str, Any], str | None]] = []
         for idx, (_, row) in enumerate(df.iterrows()):
@@ -695,3 +707,105 @@ class ExperimentRunner:
     def _append_checkpoint(self, path: Path, row_id: str) -> None:
         with path.open("a", encoding="utf-8") as handle:
             handle.write(f"{row_id}\n")
+
+    def _validate_plugin_schemas(self, datasource_schema):
+        """
+        Validate that all plugins are compatible with datasource schema.
+
+        This is config-time validation - runs once before row processing.
+        """
+        # Validate row plugins
+        for plugin in self.row_plugins or []:
+            if hasattr(plugin, "input_schema") and callable(plugin.input_schema):
+                plugin_schema = plugin.input_schema()
+                if plugin_schema:
+                    try:
+                        validate_schema_compatibility(
+                            datasource_schema,
+                            plugin_schema,
+                            plugin_name=f"row_plugin:{plugin.name}",
+                        )
+                        logger.debug(
+                            "Row plugin '%s' schema compatible with datasource",
+                            plugin.name,
+                        )
+                    except Exception as exc:
+                        logger.error(
+                            "Schema compatibility check failed for row plugin '%s': %s",
+                            plugin.name,
+                            exc,
+                        )
+                        raise
+
+        # Validate aggregation plugins
+        for plugin in self.aggregator_plugins or []:
+            if hasattr(plugin, "input_schema") and callable(plugin.input_schema):
+                plugin_schema = plugin.input_schema()
+                if plugin_schema:
+                    try:
+                        validate_schema_compatibility(
+                            datasource_schema,
+                            plugin_schema,
+                            plugin_name=f"aggregation_plugin:{plugin.name}",
+                        )
+                        logger.debug(
+                            "Aggregation plugin '%s' schema compatible with datasource",
+                            plugin.name,
+                        )
+                    except Exception as exc:
+                        logger.error(
+                            "Schema compatibility check failed for aggregation plugin '%s': %s",
+                            plugin.name,
+                            exc,
+                        )
+                        raise
+
+        # Validate validation plugins
+        for plugin in self.validation_plugins or []:
+            if hasattr(plugin, "input_schema") and callable(plugin.input_schema):
+                plugin_schema = plugin.input_schema()
+                if plugin_schema:
+                    try:
+                        validate_schema_compatibility(
+                            datasource_schema,
+                            plugin_schema,
+                            plugin_name=f"validation_plugin:{plugin.name}",
+                        )
+                        logger.debug(
+                            "Validation plugin '%s' schema compatible with datasource",
+                            plugin.name,
+                        )
+                    except Exception as exc:
+                        logger.error(
+                            "Schema compatibility check failed for validation plugin '%s': %s",
+                            plugin.name,
+                            exc,
+                        )
+                        raise
+
+    def _write_malformed_data(self) -> None:
+        """Write malformed rows to dedicated sink."""
+        if not self._malformed_rows or not self.malformed_data_sink:
+            return
+
+        malformed_payload = {
+            "malformed_data": [v.to_dict() for v in self._malformed_rows],
+            "count": len(self._malformed_rows),
+            "schema_name": self._malformed_rows[0].schema_name if self._malformed_rows else None,
+        }
+
+        try:
+            self.malformed_data_sink.write(
+                malformed_payload,
+                metadata={"type": "schema_violations"},
+            )
+            logger.info(
+                "Wrote %d malformed rows to dedicated sink",
+                len(self._malformed_rows),
+            )
+        except Exception as exc:
+            logger.error(
+                "Failed to write malformed data to sink: %s",
+                exc,
+                exc_info=True,
+            )

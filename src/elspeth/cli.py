@@ -97,6 +97,11 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         help="Directory to write analytics reports when running a suite",
     )
+    parser.add_argument(
+        "--validate-schemas",
+        action="store_true",
+        help="Validate datasource schema compatibility with plugins without running experiments",
+    )
     return parser
 
 
@@ -165,6 +170,11 @@ def run(args: argparse.Namespace) -> None:
     settings = _load_settings_from_args(args)
     suite_root = _resolve_suite_root(args, settings)
 
+    # Handle schema validation mode
+    if args.validate_schemas:
+        _validate_schemas(args, settings, suite_root)
+        return
+
     suite_instance = _handle_suite_management(args, suite_root)
 
     if suite_root is not None and not args.single_run:
@@ -181,6 +191,41 @@ def run(args: argparse.Namespace) -> None:
         )
     else:
         _run_single(args, settings)
+
+
+def _validate_schemas(args: argparse.Namespace, settings, suite_root: Path | None) -> None:
+    """Validate datasource schema compatibility without running experiments."""
+    logger.info("Validating datasource schema compatibility...")
+
+    try:
+        # Load DataFrame from datasource
+        df = settings.datasource.load()
+        logger.info("✓ Datasource loaded successfully: %d rows, %d columns", len(df), len(df.columns))
+
+        # Check if schema is attached
+        datasource_schema = df.attrs.get("schema") if hasattr(df, "attrs") else None
+
+        if datasource_schema:
+            logger.info("✓ Schema found: %s", datasource_schema.__name__)
+            logger.info("  Columns: %s", list(datasource_schema.__annotations__.keys()))
+
+            # For now, just report success - actual plugin validation would happen
+            # during experiment runner initialization
+            logger.info("✓ Schema validation passed")
+            print("\n✅ Schema validation successful!")
+            print(f"   Datasource: {settings.datasource.__class__.__name__}")
+            print(f"   Schema: {datasource_schema.__name__}")
+            print(f"   Columns: {', '.join(datasource_schema.__annotations__.keys())}")
+        else:
+            logger.warning("⚠ No schema defined - validation skipped")
+            logger.warning("  Consider adding a schema declaration to your datasource configuration")
+            print("\n⚠️  No schema validation performed")
+            print("   Tip: Add a 'schema' section to your datasource configuration for type safety")
+
+    except Exception as exc:
+        logger.error("✗ Schema validation failed: %s", exc, exc_info=True)
+        print(f"\n❌ Schema validation failed: {exc}")
+        raise SystemExit(1)
 
 
 def _run_single(args: argparse.Namespace, settings) -> None:

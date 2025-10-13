@@ -3,19 +3,34 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Mapping, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Protocol, runtime_checkable
 
 import pandas as pd
 
+if TYPE_CHECKING:
+    from elspeth.core.schema import DataFrameSchema
+
 
 @runtime_checkable
-class DataSource(Protocol):  # pylint: disable=too-few-public-methods
+class DataSource(Protocol):
     """Loads experiment input data as a pandas DataFrame."""
 
     def load(self) -> pd.DataFrame:
         """Return the experiment dataset."""
 
         raise NotImplementedError
+
+    def output_schema(self) -> type["DataFrameSchema"] | None:  # pragma: no cover - optional
+        """
+        Return the schema of the DataFrame this datasource produces.
+
+        If implemented, enables config-time validation of schema compatibility
+        between datasources and plugins.
+
+        Returns:
+            DataFrameSchema subclass describing output columns, or None if unknown
+        """
+        return None
 
 
 @runtime_checkable

@@ -7,6 +7,13 @@ default:
     determinism_level: guaranteed
     options:
       path: config/sample_suite/data/sample_input.csv
+      # Schema validation: Declare expected columns with types
+      # This enables fail-fast validation at config-time instead of row 501
+      schema:
+        APPID: str
+        title: str
+        summary: str
+        industry: str
   llm:
     plugin: mock
     security_level: OFFICIAL

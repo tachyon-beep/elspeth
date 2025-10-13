@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Protocol
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Protocol
+
+if TYPE_CHECKING:
+    from elspeth.core.schema import DataFrameSchema
 
 
 class ValidationError(RuntimeError):
@@ -23,6 +26,18 @@ class ValidationPlugin(Protocol):
     ) -> None:
         """Inspect a response and raise ``ValidationError`` when criteria fail."""
 
+    def input_schema(self) -> type["DataFrameSchema"] | None:  # pragma: no cover - optional
+        """
+        Return the schema of input columns this plugin requires.
+
+        For validation plugins, this describes any DataFrame columns needed
+        for validation context (if applicable).
+
+        Returns:
+            DataFrameSchema subclass describing required input columns, or None
+        """
+        return None
+
 
 class RowExperimentPlugin(Protocol):
     """Processes a single experiment row and returns derived fields."""
@@ -32,6 +47,18 @@ class RowExperimentPlugin(Protocol):
     def process_row(self, row: Dict[str, Any], responses: Dict[str, Any]) -> Dict[str, Any]:
         """Return derived metrics or annotations for a single row result."""
 
+    def input_schema(self) -> type["DataFrameSchema"] | None:  # pragma: no cover - optional
+        """
+        Return the schema of input columns this plugin requires.
+
+        If implemented, enables config-time validation that datasource provides
+        the columns this plugin expects.
+
+        Returns:
+            DataFrameSchema subclass describing required input columns, or None
+        """
+        return None
+
 
 class AggregationExperimentPlugin(Protocol):
     """Runs after all rows to compute aggregated outputs."""
@@ -40,6 +67,18 @@ class AggregationExperimentPlugin(Protocol):
 
     def finalize(self, records: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Produce aggregate analytics from the collected row results."""
+
+    def input_schema(self) -> type["DataFrameSchema"] | None:  # pragma: no cover - optional
+        """
+        Return the schema of input columns this plugin requires.
+
+        For aggregation plugins, this describes the columns needed from
+        the original DataFrame or from row plugin outputs.
+
+        Returns:
+            DataFrameSchema subclass describing required input columns, or None
+        """
+        return None
 
 
 class BaselineComparisonPlugin(Protocol):
