@@ -5,8 +5,8 @@ from elspeth.core.types import DeterminismLevel, SecurityLevel
 from .signing import generate_signature, verify_signature
 
 # Export enum types for backward compatibility
-SECURITY_LEVELS = [level.value for level in SecurityLevel]
-DETERMINISM_LEVELS = [level.value for level in DeterminismLevel]
+SECURITY_LEVELS = [level.value for level in list(SecurityLevel)]
+DETERMINISM_LEVELS = [level.value for level in list(DeterminismLevel)]
 
 
 def normalize_security_level(level: str | SecurityLevel | None) -> str:

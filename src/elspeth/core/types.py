@@ -84,7 +84,7 @@ class SecurityLevel(str, Enum):
         try:
             return cls(normalized)
         except ValueError as exc:
-            valid_levels = ", ".join(level.value for level in cls)
+            valid_levels = ", ".join(level.value for level in list(cls))
             raise ValueError(f"Unknown security level '{value}'. Must be one of: {valid_levels}") from exc
 
 
@@ -158,7 +158,7 @@ class DeterminismLevel(str, Enum):
         try:
             return cls(normalized)
         except ValueError as exc:
-            valid_levels = ", ".join(level.value for level in cls)
+            valid_levels = ", ".join(level.value for level in list(cls))
             raise ValueError(f"Unknown determinism level '{value}'. Must be one of: {valid_levels}") from exc
 
 
@@ -266,7 +266,7 @@ class DataType(str, Enum):
         try:
             return cls(normalized)
         except ValueError as exc:
-            valid_types = ", ".join(dtype.value for dtype in cls)
+            valid_types = ", ".join(dtype.value for dtype in list(cls))
             raise ValueError(f"Unknown data type '{value}'. Must be one of: {valid_types}") from exc
 
     def to_pandas_dtype(self):
@@ -391,7 +391,7 @@ class PluginType(str, Enum):
         try:
             return cls(normalized)
         except ValueError as exc:
-            valid_types = ", ".join(ptype.value for ptype in cls)
+            valid_types = ", ".join(ptype.value for ptype in list(cls))
             raise ValueError(f"Unknown plugin type '{value}'. Must be one of: {valid_types}") from exc
 
 

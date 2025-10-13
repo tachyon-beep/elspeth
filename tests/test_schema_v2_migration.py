@@ -79,20 +79,14 @@ class TestOptionalFieldHandling:
 
     def test_optional_field_accepts_none(self):
         """Test optional fields accept None values."""
-        schema = schema_from_config({
-            "required": "str",
-            "optional": {"type": "int", "required": False}
-        })
+        schema = schema_from_config({"required": "str", "optional": {"type": "int", "required": False}})
         valid, violation = validate_row({"required": "test"}, schema)
         assert valid is True
         assert violation is None
 
     def test_optional_field_accepts_value(self):
         """Test optional fields accept actual values."""
-        schema = schema_from_config({
-            "required": "str",
-            "optional": {"type": "int", "required": False}
-        })
+        schema = schema_from_config({"required": "str", "optional": {"type": "int", "required": False}})
         valid, violation = validate_row({"required": "test", "optional": 42}, schema)
         assert valid is True
 
@@ -106,15 +100,11 @@ class TestOptionalFieldHandling:
 
     def test_inferred_optional_fields(self):
         """Test schema inference with optional columns."""
-        df = pd.DataFrame({
-            "id": [1, 2, 3],
-            "name": ["A", "B", "C"],
-            "score": [95, 87, 92]
-        })
+        df = pd.DataFrame({"id": [1, 2, 3], "name": ["A", "B", "C"], "score": [95, 87, 92]})
         schema = infer_schema_from_dataframe(
             df,
             schema_name="TestSchema",
-            required_columns=["id", "name"]  # score is optional
+            required_columns=["id", "name"],  # score is optional
         )
 
         # Should accept row missing optional 'score'
@@ -150,22 +140,11 @@ class TestSchemaCompatibility:
 
     def test_compatible_schemas_pass(self):
         """Test compatible schemas pass validation."""
-        datasource_schema = schema_from_config({
-            "id": "int",
-            "name": "str",
-            "score": "int"
-        })
-        plugin_schema = schema_from_config({
-            "id": "int",
-            "score": "int"
-        })
+        datasource_schema = schema_from_config({"id": "int", "name": "str", "score": "int"})
+        plugin_schema = schema_from_config({"id": "int", "score": "int"})
 
         # Should not raise
-        validate_schema_compatibility(
-            datasource_schema,
-            plugin_schema,
-            plugin_name="test_plugin"
-        )
+        validate_schema_compatibility(datasource_schema, plugin_schema, plugin_name="test_plugin")
 
     def test_missing_required_column_fails(self):
         """Test missing required column raises SchemaCompatibilityError."""
@@ -173,11 +152,7 @@ class TestSchemaCompatibility:
         plugin_schema = schema_from_config({"id": "int", "name": "str"})
 
         with pytest.raises(SchemaCompatibilityError) as exc_info:
-            validate_schema_compatibility(
-                datasource_schema,
-                plugin_schema,
-                plugin_name="test_plugin"
-            )
+            validate_schema_compatibility(datasource_schema, plugin_schema, plugin_name="test_plugin")
 
         assert "name" in str(exc_info.value)
         assert "test_plugin" in str(exc_info.value)
@@ -193,18 +168,11 @@ class TestSchemaCompatibility:
         could check field.is_required() to skip optional fields.
         """
         datasource_schema = schema_from_config({"id": "int"})
-        plugin_schema = schema_from_config({
-            "id": "int",
-            "optional_name": {"type": "str", "required": False}
-        })
+        plugin_schema = schema_from_config({"id": "int", "optional_name": {"type": "str", "required": False}})
 
         # Currently raises even for optional fields (known limitation)
         with pytest.raises(SchemaCompatibilityError) as exc_info:
-            validate_schema_compatibility(
-                datasource_schema,
-                plugin_schema,
-                plugin_name="test_plugin"
-            )
+            validate_schema_compatibility(datasource_schema, plugin_schema, plugin_name="test_plugin")
 
         assert "optional_name" in str(exc_info.value)
 
@@ -215,11 +183,7 @@ class TestErrorMessageFormat:
     def test_validation_error_structure(self):
         """Test SchemaViolation captures v2 error format."""
         schema = schema_from_config({"name": "str", "age": "int"})
-        valid, violation = validate_row(
-            {"name": "test", "age": "invalid"},
-            schema,
-            row_index=5
-        )
+        valid, violation = validate_row({"name": "test", "age": "invalid"}, schema, row_index=5)
 
         assert valid is False
         assert violation is not None
@@ -236,11 +200,7 @@ class TestErrorMessageFormat:
     def test_error_dict_conversion(self):
         """Test SchemaViolation.to_dict() includes all fields."""
         schema = schema_from_config({"value": "int"})
-        valid, violation = validate_row(
-            {"value": "bad"},
-            schema,
-            row_index=10
-        )
+        valid, violation = validate_row({"value": "bad"}, schema, row_index=10)
 
         error_dict = violation.to_dict()
         assert error_dict["row_index"] == 10
@@ -255,10 +215,7 @@ class TestDataFrameValidation:
 
     def test_validate_dataframe_all_valid(self):
         """Test validating DataFrame with all valid rows."""
-        df = pd.DataFrame({
-            "name": ["Alice", "Bob", "Charlie"],
-            "age": [30, 25, 35]
-        })
+        df = pd.DataFrame({"name": ["Alice", "Bob", "Charlie"], "age": [30, 25, 35]})
         schema = schema_from_config({"name": "str", "age": "int"})
 
         valid, violations = validate_dataframe(df, schema)
@@ -267,10 +224,7 @@ class TestDataFrameValidation:
 
     def test_validate_dataframe_with_errors(self):
         """Test validating DataFrame with invalid rows."""
-        df = pd.DataFrame({
-            "name": ["Alice", "Bob", "Charlie"],
-            "age": [30, "invalid", 35]
-        })
+        df = pd.DataFrame({"name": ["Alice", "Bob", "Charlie"], "age": [30, "invalid", 35]})
         schema = schema_from_config({"name": "str", "age": "int"})
 
         valid, violations = validate_dataframe(df, schema, early_stop=False)
@@ -280,9 +234,7 @@ class TestDataFrameValidation:
 
     def test_validate_dataframe_early_stop(self):
         """Test early_stop parameter stops on first error."""
-        df = pd.DataFrame({
-            "value": ["1", "bad", "also_bad"]
-        })
+        df = pd.DataFrame({"value": ["1", "bad", "also_bad"]})
         schema = schema_from_config({"value": "int"})
 
         valid, violations = validate_dataframe(df, schema, early_stop=True)
@@ -295,25 +247,14 @@ class TestBackwardsCompatibility:
 
     def test_existing_simple_schema_works(self):
         """Test simple schemas from config still work."""
-        schema = schema_from_config({
-            "APPID": "str",
-            "question": "str",
-            "expected_answer": "str"
-        })
+        schema = schema_from_config({"APPID": "str", "question": "str", "expected_answer": "str"})
 
-        valid, _ = validate_row({
-            "APPID": "A1",
-            "question": "What?",
-            "expected_answer": "Answer"
-        }, schema)
+        valid, _ = validate_row({"APPID": "A1", "question": "What?", "expected_answer": "Answer"}, schema)
         assert valid is True
 
     def test_schema_inference_works(self):
         """Test DataFrame schema inference still works."""
-        df = pd.DataFrame({
-            "id": [1, 2, 3],
-            "value": [10.5, 20.3, 30.1]
-        })
+        df = pd.DataFrame({"id": [1, 2, 3], "value": [10.5, 20.3, 30.1]})
         schema = infer_schema_from_dataframe(df, "InferredSchema")
 
         assert hasattr(schema, "__annotations__")
@@ -322,13 +263,7 @@ class TestBackwardsCompatibility:
 
     def test_constraint_validation_works(self):
         """Test field constraints (min, max) still work."""
-        schema = schema_from_config({
-            "score": {
-                "type": "int",
-                "min": 0,
-                "max": 100
-            }
-        })
+        schema = schema_from_config({"score": {"type": "int", "min": 0, "max": 100}})
 
         # Valid score
         valid, _ = validate_row({"score": 50}, schema)

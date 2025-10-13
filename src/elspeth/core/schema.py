@@ -169,7 +169,7 @@ def infer_schema_from_dataframe(
         schema_name,
         __base__=DataFrameSchema,
         __config__=DataFrameSchema.model_config,  # Explicit v2 config inheritance
-        **fields
+        **fields,
     )
 
 
@@ -305,7 +305,7 @@ def schema_from_config(
         schema_name,
         __base__=DataFrameSchema,
         __config__=DataFrameSchema.model_config,  # Explicit v2 config inheritance
-        **fields
+        **fields,
     )
 
 
