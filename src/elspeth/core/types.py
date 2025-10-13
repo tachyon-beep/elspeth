@@ -4,7 +4,7 @@ This module defines type-safe enumerations for security levels, determinism leve
 and data types used throughout the framework.
 """
 
-from enum import Enum, auto
+from enum import Enum
 
 
 class SecurityLevel(str, Enum):

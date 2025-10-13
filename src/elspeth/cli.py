@@ -166,18 +166,20 @@ def _result_to_row(record: Dict[str, Any]) -> Dict[str, Any]:
 def run(args: argparse.Namespace) -> None:
     """Dispatch execution based on CLI arguments and configuration."""
 
-    configure_logging(args.log_level)
+    log_level = getattr(args, "log_level", "INFO")
+    configure_logging(log_level)
     settings = _load_settings_from_args(args)
     suite_root = _resolve_suite_root(args, settings)
 
     # Handle schema validation mode
-    if args.validate_schemas:
+    if getattr(args, "validate_schemas", False):
         _validate_schemas(args, settings, suite_root)
         return
 
     suite_instance = _handle_suite_management(args, suite_root)
 
-    if suite_root is not None and not args.single_run:
+    single_run = getattr(args, "single_run", False)
+    if suite_root is not None and not single_run:
         suite_validation = validate_suite(suite_root)
         for warning in suite_validation.report.warnings:
             logger.warning(warning.format())

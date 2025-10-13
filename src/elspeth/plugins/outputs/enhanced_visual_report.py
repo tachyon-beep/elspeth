@@ -199,8 +199,6 @@ class EnhancedVisualAnalyticsSink(ResultSink):
 
     def _extract_score_data(self, payload: Mapping[str, Any]) -> Dict[str, Any]:
         """Extract score data for visualization from experiment payload."""
-        import numpy as np
-
         data: Dict[str, Any] = {
             "criteria": [],
             "scores_by_criterion": {},
@@ -422,8 +420,8 @@ class EnhancedVisualAnalyticsSink(ResultSink):
             effects,
             y_pos,
             xerr=[
-                [e - l for e, l in zip(effects, ci_lower)],
-                [u - e for e, u in zip(effects, ci_upper)],
+                [effect - lower for effect, lower in zip(effects, ci_lower)],
+                [upper - effect for effect, upper in zip(effects, ci_upper)],
             ],
             fmt="o",
             capsize=5,
@@ -449,8 +447,6 @@ class EnhancedVisualAnalyticsSink(ResultSink):
         self, data: Dict[str, Any], plt: Any, seaborn: Any, metadata: Dict[str, Any]
     ) -> List[Tuple[str, Path, Dict[str, Any]]]:
         """Generate overlaid histogram showing score distributions."""
-        import numpy as np
-
         criteria = data["criteria"]
         scores_by_criterion = data["scores_by_criterion"]
 

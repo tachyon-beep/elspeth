@@ -20,7 +20,7 @@ from elspeth.core.interfaces import LLMClientProtocol, ResultSink
 from elspeth.core.llm.middleware import LLMMiddleware, LLMRequest
 from elspeth.core.processing import prepare_prompt_context
 from elspeth.core.prompts import PromptEngine, PromptRenderingError, PromptTemplate, PromptValidationError
-from elspeth.core.schema import SchemaViolation, validate_row, validate_schema_compatibility
+from elspeth.core.schema import SchemaViolation, validate_schema_compatibility
 from elspeth.core.security import normalize_security_level, resolve_determinism_level, resolve_security_level
 
 logger = logging.getLogger(__name__)

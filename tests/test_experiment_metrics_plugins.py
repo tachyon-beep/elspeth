@@ -190,8 +190,6 @@ def test_score_cliffs_delta():
 
 
 def test_score_assumptions_baseline_plugin():
-    import scipy.stats  # noqa: F401
-
     plugin = create_baseline_plugin({"name": "score_assumptions", "security_level": "OFFICIAL", "determinism_level": "guaranteed"})
     baseline = {
         "results": [
@@ -412,7 +410,7 @@ def test_score_power_aggregator(monkeypatch):
                 return 42
             return 0.75
 
-    monkeypatch.setattr(metrics_mod, "TTestPower", lambda: DummyTest())
+    monkeypatch.setattr(metrics_mod, "TTestPower", DummyTest)
     plugin = create_aggregation_plugin(
         {
             "name": "score_power",
@@ -598,9 +596,6 @@ def test_cost_summary_on_error_skip(monkeypatch):
 
     plugin = metrics_mod.CostSummaryAggregator(on_error="skip")
 
-    # Mock to raise an error
-    original_finalize = plugin._finalize_impl
-
     def boom(*args, **kwargs):
         raise RuntimeError("boom")
 
@@ -612,9 +607,6 @@ def test_latency_summary_on_error_skip(monkeypatch):
     import elspeth.plugins.experiments.metrics as metrics_mod
 
     plugin = metrics_mod.LatencySummaryAggregator(on_error="skip")
-
-    # Mock to raise an error
-    original_finalize = plugin._finalize_impl
 
     def boom(*args, **kwargs):
         raise RuntimeError("boom")

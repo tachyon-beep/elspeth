@@ -402,8 +402,6 @@ def test_enhanced_visual_sink_on_error_skip_chart_generation_failure(monkeypatch
         on_error="skip",
     )
 
-    original_generate = sink._generate_violin_plot
-
     def _fail_violin(*args, **kwargs):
         raise RuntimeError("Violin plot failed")
 

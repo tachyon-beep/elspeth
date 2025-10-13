@@ -2151,15 +2151,27 @@ class RefereeAlignmentBaselinePlugin:
                 variant_crit = [(llm.get(crit_name), ref) for llm, ref in variant_pairs if crit_name in llm]
 
                 # Filter out None scores
-                baseline_crit = [(l, r) for l, r in baseline_crit if l is not None and r is not None]
-                variant_crit = [(l, r) for l, r in variant_crit if l is not None and r is not None]
+                baseline_crit = [
+                    (score_value, referee_score)
+                    for score_value, referee_score in baseline_crit
+                    if score_value is not None and referee_score is not None
+                ]
+                variant_crit = [
+                    (score_value, referee_score)
+                    for score_value, referee_score in variant_crit
+                    if score_value is not None and referee_score is not None
+                ]
 
                 if baseline_crit or variant_crit:
                     crit_result: Dict[str, Any] = {}
                     if baseline_crit:
-                        crit_result["baseline"] = self._compute_alignment_metrics([({"score": l}, r) for l, r in baseline_crit])
+                        crit_result["baseline"] = self._compute_alignment_metrics(
+                            [({"score": score_value}, referee_score) for score_value, referee_score in baseline_crit]
+                        )
                     if variant_crit:
-                        crit_result["variant"] = self._compute_alignment_metrics([({"score": l}, r) for l, r in variant_crit])
+                        crit_result["variant"] = self._compute_alignment_metrics(
+                            [({"score": score_value}, referee_score) for score_value, referee_score in variant_crit]
+                        )
                     criteria_results[crit_name] = crit_result
 
             if criteria_results:

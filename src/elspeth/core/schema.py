@@ -470,7 +470,10 @@ def validate_schema_compatibility(
 
     if type_mismatches:
         mismatch_details = "\n".join(
-            [f"  - Column '{col}': datasource has {ds_type}, plugin expects {plugin_type}" for col, (ds_type, plugin_type) in type_mismatches.items()]
+            [
+                f"  - Column '{col}': datasource has {ds_type}, plugin expects {plugin_type}"
+                for col, (ds_type, plugin_type) in type_mismatches.items()
+            ]
         )
         error_msg = f"Plugin '{plugin_name}' has type mismatches with datasource:\n{mismatch_details}"
         raise SchemaCompatibilityError(error_msg, type_mismatches=type_mismatches)
@@ -514,15 +517,15 @@ def _types_compatible(datasource_type: Type, plugin_type: Type) -> bool:
     - String compatibility: str compatible with most types (parsing possible)
     """
     # Exact match
-    if datasource_type == plugin_type:
+    if datasource_type is plugin_type:
         return True
 
     # Numeric widening: int -> float is safe
-    if datasource_type == int and plugin_type == float:
+    if datasource_type is int and plugin_type is float:
         return True
 
     # String source can be parsed to most types (permissive for CSV data)
-    if datasource_type == str:
+    if datasource_type is str:
         return True  # Assume parsing is possible
 
     # Otherwise incompatible

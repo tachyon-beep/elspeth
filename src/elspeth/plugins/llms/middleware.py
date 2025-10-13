@@ -1279,7 +1279,6 @@ class ClassifiedMaterialMiddleware(LLMMiddleware):
         if self.fuzzy_matching:
             for pattern_name, pattern in self.regex_compiled.items():
                 for match in pattern.finditer(check_shadow):
-                    match_text = match.group(0)
                     if self._check_false_positives(check_shadow, match.start(), match.end()):
                         continue
                     detected.append(("regex", pattern_name))
