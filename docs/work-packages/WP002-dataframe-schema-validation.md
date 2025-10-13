@@ -1,11 +1,14 @@
 # WP002: DataFrame Schema Validation and Type Safety
 
-**Status**: Draft
+**Status**: Implemented with Pydantic v2
 **Priority**: Critical
 **Estimated Effort**: 3-4 days (1 FTE)
 **Dependencies**: None (but complements WP001)
 **Created**: 2025-10-13
+**Updated**: 2025-10-14 (Pydantic v2 migration)
 **Owner**: Core Tech Team
+
+**Note**: As of 2025-10-14, this implementation uses **Pydantic v2.12.0** with modern patterns (`model_config`, `model_validate`, explicit `Optional` types).
 
 ---
 
@@ -94,7 +97,7 @@ Elspeth has a **critical type safety gap**: DataFrames flow from datasources thr
 ```python
 # src/elspeth/core/interfaces.py
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Optional, Type, Dict, Any
 import pandas as pd
 
@@ -104,8 +107,10 @@ class DataFrameSchema(BaseModel):
     Subclasses define column names as fields with type annotations.
     """
 
-    class Config:
-        extra = "allow"  # Allow undeclared columns by default
+    model_config = ConfigDict(
+        extra="allow",  # Allow undeclared columns by default
+        arbitrary_types_allowed=True,
+    )
 
 # Update DataSource protocol
 @runtime_checkable

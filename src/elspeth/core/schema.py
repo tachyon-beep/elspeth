@@ -11,10 +11,11 @@ This module provides:
 from __future__ import annotations
 
 import logging
+import typing
 from typing import Any, Dict, List, Optional, Tuple, Type
 
 import pandas as pd
-from pydantic import BaseModel, Field, create_model
+from pydantic import BaseModel, ConfigDict, Field, create_model
 from pydantic import ValidationError as PydanticValidationError
 
 logger = logging.getLogger(__name__)
@@ -53,9 +54,10 @@ class DataFrameSchema(BaseModel):
         - arbitrary_types_allowed: Supports pandas types if needed
     """
 
-    class Config:
-        extra = "allow"  # Allow undeclared columns by default
-        arbitrary_types_allowed = True
+    model_config = ConfigDict(
+        extra="allow",  # Allow undeclared columns by default
+        arbitrary_types_allowed=True,
+    )
 
 
 class SchemaViolation:
@@ -160,9 +162,15 @@ def infer_schema_from_dataframe(
         if is_required:
             fields[col] = (python_type, Field(...))  # Required field
         else:
-            fields[col] = (python_type, Field(default=None))  # Optional field
+            # Pydantic v2 requires explicit Optional for optional fields
+            fields[col] = (Optional[python_type], Field(default=None))  # Optional field
 
-    return create_model(schema_name, __base__=DataFrameSchema, **fields)
+    return create_model(
+        schema_name,
+        __base__=DataFrameSchema,
+        __config__=DataFrameSchema.model_config,  # Explicit v2 config inheritance
+        **fields
+    )
 
 
 def _parse_type_string(type_str: str) -> Type:
@@ -266,9 +274,12 @@ def schema_from_config(
         # Build Field with constraints
         field_kwargs: Dict[str, Any] = {}
 
-        # Required/optional
-        if not col_spec.get("required", True):
+        # Required/optional handling
+        is_optional = not col_spec.get("required", True)
+        if is_optional:
             field_kwargs["default"] = None
+            # Pydantic v2: Make type explicitly Optional
+            python_type = Optional[python_type]
 
         # Numeric constraints
         if "min" in col_spec:
@@ -290,7 +301,12 @@ def schema_from_config(
         else:
             fields[col_name] = (python_type, Field(**field_kwargs))
 
-    return create_model(schema_name, __base__=DataFrameSchema, **fields)
+    return create_model(
+        schema_name,
+        __base__=DataFrameSchema,
+        __config__=DataFrameSchema.model_config,  # Explicit v2 config inheritance
+        **fields
+    )
 
 
 def validate_row(
@@ -324,8 +340,8 @@ def validate_row(
         'age'
     """
     try:
-        # Attempt to validate row
-        schema(**row)
+        # Attempt to validate row using Pydantic v2 model_validate
+        schema.model_validate(row)
         return (True, None)
 
     except PydanticValidationError as e:
@@ -488,11 +504,15 @@ def _unwrap_optional(type_hint: Any) -> Any:
 
     Returns:
         Unwrapped type
+
+    Note:
+        Uses typing.get_origin and typing.get_args for Pydantic v2 compatibility.
     """
     # Handle Union types (Optional[T] is Union[T, None])
-    if hasattr(type_hint, "__origin__") and type_hint.__origin__ is type(None) | type:
+    origin = typing.get_origin(type_hint)
+    if origin is typing.Union:
         # Get the non-None type from Union
-        args = type_hint.__args__
+        args = typing.get_args(type_hint)
         non_none_types = [arg for arg in args if arg is not type(None)]
         if len(non_none_types) == 1:
             return non_none_types[0]
