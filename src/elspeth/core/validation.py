@@ -103,7 +103,7 @@ def _validate_node(
     """Recursively validate ``value`` against ``schema`` accumulating errors."""
 
     if schema is None:
-        return
+        return  # type: ignore[unreachable]
 
     any_of = schema.get("anyOf")
     if any_of:

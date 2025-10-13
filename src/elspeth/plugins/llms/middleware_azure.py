@@ -60,7 +60,7 @@ def _resolve_azure_run() -> Any | None:
     """Attempt to resolve an Azure ML Run context."""
 
     try:
-        from azureml.core import Run  # type: ignore
+        from azureml.core import Run
     except Exception:  # pragma: no cover - optional dependency guard
         return None
 
@@ -249,10 +249,10 @@ class AzureEnvironmentMiddleware(LLMMiddleware):
 
     def on_suite_complete(self) -> None:
         summary = dict(self._summary)
-        summary["timestamp"] = time.time()
+        summary["timestamp"] = int(time.time())
         self._log_row("suite_summary", summary)
 
-    def on_retry_exhausted(self, request, metadata, error) -> None:  # type: ignore[override]
+    def on_retry_exhausted(self, request, metadata, error) -> None:
         payload = {
             "timestamp": time.time(),
             "sequence": request.metadata.get("azure_sequence"),

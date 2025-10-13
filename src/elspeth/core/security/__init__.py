@@ -22,8 +22,8 @@ def normalize_security_level(level: str | SecurityLevel | None) -> str:
         ValueError: If the level is invalid
     """
     if isinstance(level, SecurityLevel):
-        return level.value
-    return SecurityLevel.from_string(level).value
+        return level.value  # type: ignore[no-any-return]
+    return SecurityLevel.from_string(level).value  # type: ignore[no-any-return]
 
 
 def is_security_level_allowed(data_level: str | None, clearance_level: str | None) -> bool:
@@ -41,7 +41,7 @@ def resolve_security_level(*levels: str | None) -> str:
 
     normalized = [normalize_security_level(level) for level in levels if level is not None]
     if not normalized:
-        return SECURITY_LEVELS[0]
+        return SECURITY_LEVELS[0]  # type: ignore[no-any-return]
     return max(normalized, key=SECURITY_LEVELS.index)
 
 
@@ -84,8 +84,8 @@ def normalize_determinism_level(level: str | DeterminismLevel | None) -> str:
         ValueError: If the level is invalid
     """
     if isinstance(level, DeterminismLevel):
-        return level.value
-    return DeterminismLevel.from_string(level).value
+        return level.value  # type: ignore[no-any-return]
+    return DeterminismLevel.from_string(level).value  # type: ignore[no-any-return]
 
 
 def resolve_determinism_level(*levels: str | None) -> str:
@@ -99,7 +99,7 @@ def resolve_determinism_level(*levels: str | None) -> str:
 
     normalized = [normalize_determinism_level(level) for level in levels if level is not None]
     if not normalized:
-        return DETERMINISM_LEVELS[0]  # Default to "none"
+        return DETERMINISM_LEVELS[0]  # type: ignore[no-any-return]  # Default to "none"
     return min(normalized, key=DETERMINISM_LEVELS.index)
 
 

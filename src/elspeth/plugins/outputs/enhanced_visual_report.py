@@ -106,8 +106,8 @@ class EnhancedVisualAnalyticsSink(ResultSink):
         try:
             if seaborn is not None and self.seaborn_style:
                 try:
-                    seaborn.set_theme(style=self.seaborn_style)  # type: ignore[attr-defined]
-                    seaborn.set_palette(self.color_palette)  # type: ignore[attr-defined]
+                    seaborn.set_theme(style=self.seaborn_style)
+                    seaborn.set_palette(self.color_palette)
                 except Exception:
                     logger.debug("Seaborn theme unavailable; using matplotlib defaults")
 
@@ -184,14 +184,14 @@ class EnhancedVisualAnalyticsSink(ResultSink):
         if self._plot_modules is not None:
             return self._plot_modules
         try:
-            import matplotlib  # type: ignore
+            import matplotlib
 
-            matplotlib.use("Agg")  # type: ignore[attr-defined]
-            import matplotlib.pyplot as plt  # type: ignore
+            matplotlib.use("Agg")
+            import matplotlib.pyplot as plt
         except Exception as exc:
             raise RuntimeError("matplotlib is required for enhanced visual sink") from exc
         try:
-            import seaborn  # type: ignore
+            import seaborn
         except Exception:
             seaborn = None
         self._plot_modules = (matplotlib, plt, seaborn)

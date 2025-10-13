@@ -6,26 +6,29 @@ import json
 import logging
 import math
 from statistics import NormalDist
-from typing import Any, Dict, Mapping, Sequence
+from typing import TYPE_CHECKING, Any, Dict, Mapping, Sequence
 
 import numpy as np
 
 from elspeth.core.experiments.plugin_registry import register_aggregation_plugin, register_baseline_plugin, register_row_plugin
 
+if TYPE_CHECKING:
+    from elspeth.core.schema import DataFrameSchema
+
 logger = logging.getLogger(__name__)
 
 try:
-    from scipy import stats as scipy_stats  # type: ignore
+    from scipy import stats as scipy_stats
 except Exception:  # pragma: no cover - optional dependency
     scipy_stats = None
 
 try:
-    import pingouin  # type: ignore
+    import pingouin
 except Exception:  # pragma: no cover - optional dependency
     pingouin = None
 
 try:
-    from statsmodels.stats.power import TTestPower  # type: ignore
+    from statsmodels.stats.power import TTestPower
 except Exception:  # pragma: no cover - optional dependency
     TTestPower = None
 
@@ -257,6 +260,7 @@ class ScoreExtractorPlugin:
         return None
 
     def _compare_threshold(self, value: float) -> bool:
+        assert self._threshold is not None, "threshold must not be None"
         mode = self._threshold_mode
         threshold = float(self._threshold)
         if mode == "gt":
@@ -268,6 +272,10 @@ class ScoreExtractorPlugin:
         if mode == "lte":
             return value <= threshold
         raise ValueError(f"Unsupported threshold_mode '{mode}'")
+
+    def input_schema(self) -> type["DataFrameSchema"] | None:
+        """ScoreExtractorPlugin does not require specific input columns."""
+        return None
 
 
 register_row_plugin(
@@ -368,6 +376,10 @@ class ScoreStatsAggregator:
             result["passes"] = passes
         return result
 
+    def input_schema(self) -> type["DataFrameSchema"] | None:
+        """ScoreStatsAggregator does not require specific input columns."""
+        return None
+
 
 class ScoreDeltaBaselinePlugin:
     """Compare score statistics between baseline and variant."""
@@ -407,7 +419,7 @@ class ScoreDeltaBaselinePlugin:
         criteria = stats.get("criteria")
         if not isinstance(criteria, Mapping):
             return {}
-        return criteria
+        return dict(criteria)
 
 
 register_aggregation_plugin(
@@ -901,6 +913,10 @@ class ScoreRecommendationAggregator:
                 clauses.append(f"which is {abs(delta):.2f} {direction} overall average")
         return ", ".join(clauses)
 
+    def input_schema(self) -> type["DataFrameSchema"] | None:
+        """ScoreRecommendationAggregator does not require specific input columns."""
+        return None
+
 
 register_aggregation_plugin(
     "score_recommendation",
@@ -966,6 +982,10 @@ class ScoreVariantRankingAggregator:
             "pass_rate": pass_count / len(values),
             "composite_score": score,
         }
+
+    def input_schema(self) -> type["DataFrameSchema"] | None:
+        """ScoreVariantRankingAggregator does not require specific input columns."""
+        return None
 
 
 register_aggregation_plugin(
@@ -1087,6 +1107,10 @@ class ScoreAgreementAggregator:
             "krippendorff_alpha": krippendorff_alpha,
         }
 
+    def input_schema(self) -> type["DataFrameSchema"] | None:
+        """ScoreAgreementAggregator does not require specific input columns."""
+        return None
+
 
 register_aggregation_plugin(
     "score_agreement",
@@ -1191,6 +1215,10 @@ class ScorePowerAggregator:
             }
 
         return power_results
+
+    def input_schema(self) -> type["DataFrameSchema"] | None:
+        """ScorePowerAggregator does not require specific input columns."""
+        return None
 
 
 register_aggregation_plugin(
@@ -1374,6 +1402,10 @@ class CostSummaryAggregator:
 
         return result
 
+    def input_schema(self) -> type["DataFrameSchema"] | None:
+        """CostSummaryAggregator does not require specific input columns."""
+        return None
+
 
 class LatencySummaryAggregator:
     """Aggregate latency metrics across all rows.
@@ -1438,6 +1470,10 @@ class LatencySummaryAggregator:
                 "p99": float(np.percentile(arr, 99)),
             },
         }
+
+    def input_schema(self) -> type["DataFrameSchema"] | None:
+        """LatencySummaryAggregator does not require specific input columns."""
+        return None
 
 
 register_aggregation_plugin(
@@ -1549,7 +1585,7 @@ def _compute_significance(
     denom = math.sqrt((var_base / n_base if n_base > 0 else 0.0) + (var_var / n_var if n_var > 0 else 0.0))
     t_stat = mean_diff / denom if denom > 0 else None
 
-    df = None
+    df: float | None = None
 
     if equal_var and n_base > 1 and n_var > 1:
         df = n_base + n_var - 2
@@ -1978,9 +2014,6 @@ class RationaleAnalysisAggregator:
 
     def _extract_rationale(self, response: Mapping[str, Any]) -> str | None:
         """Extract rationale text from response content."""
-        if not isinstance(response, Mapping):
-            return None
-
         # Try metrics first
         metrics = response.get("metrics")
         if isinstance(metrics, Mapping) and self._rationale_field in metrics:
@@ -2034,6 +2067,10 @@ class RationaleAnalysisAggregator:
             "low_confidence_rate": low_conf_count / total if total else 0.0,
             "hedge_rate": hedge_count / total if total else 0.0,
         }
+
+    def input_schema(self) -> type["DataFrameSchema"] | None:
+        """RationaleAnalysisAggregator does not require specific input columns."""
+        return None
 
 
 register_aggregation_plugin(
@@ -2165,12 +2202,14 @@ class RefereeAlignmentBaselinePlugin:
                 if baseline_crit or variant_crit:
                     crit_result: Dict[str, Any] = {}
                     if baseline_crit:
+                        # baseline_crit has already filtered out None values
                         crit_result["baseline"] = self._compute_alignment_metrics(
-                            [({"score": score_value}, referee_score) for score_value, referee_score in baseline_crit]
+                            [({"score": sv}, rs) for sv, rs in baseline_crit]  # type: ignore[dict-item]
                         )
                     if variant_crit:
+                        # variant_crit has already filtered out None values
                         crit_result["variant"] = self._compute_alignment_metrics(
-                            [({"score": score_value}, referee_score) for score_value, referee_score in variant_crit]
+                            [({"score": sv}, rs) for sv, rs in variant_crit]  # type: ignore[dict-item]
                         )
                     criteria_results[crit_name] = crit_result
 
@@ -2536,7 +2575,7 @@ class ScoreFlipAnalysisAggregator:
             return {}
 
         # Aggregate flips across all criteria
-        flips = {
+        flips: Dict[str, list[tuple[float, float]]] = {
             "fail_to_pass": [],
             "pass_to_fail": [],
             "major_drops": [],
@@ -2601,7 +2640,7 @@ class ScoreFlipAnalysisAggregator:
             "major_drops_count": len(flips["major_drops"]),
             "major_gains_count": len(flips["major_gains"]),
             "net_flip_impact": len(flips["fail_to_pass"]) - len(flips["pass_to_fail"]),
-            "examples": {k: [(round(b, 2), round(v, 2)) for b, v in v[:5]] for k, v in flips.items()},
+            "examples": {k: [(round(b, 2), round(v, 2)) for b, v in pairs[:5]] for k, pairs in flips.items()},
             "criteria": criteria_results,
         }
 

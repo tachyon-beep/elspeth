@@ -42,7 +42,7 @@ class AzureOpenAIClient(LLMClientProtocol):
         if deployment:
             return deployment
         if self.config.get("deployment"):
-            return self.config["deployment"]
+            return self.config["deployment"]  # type: ignore[no-any-return]
         env_key = self.config.get("deployment_env")
         if env_key:
             value = os.getenv(env_key)
@@ -64,14 +64,14 @@ class AzureOpenAIClient(LLMClientProtocol):
 
     def _resolve_optional(self, key: str) -> Optional[str]:
         if key in self.config and self.config[key]:
-            return self.config[key]
+            return self.config[key]  # type: ignore[no-any-return]
         env_key = self.config.get(f"{key}_env")
         if env_key:
             return os.getenv(env_key)
         return None
 
     @property
-    def client(self):  # type: ignore[return-any]
+    def client(self):
         return self._client
 
     def generate(

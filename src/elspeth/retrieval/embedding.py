@@ -20,7 +20,7 @@ class OpenAIEmbedder(Embedder):
 
     def __init__(self, *, model: str, api_key: str | None = None):
         try:
-            from openai import OpenAI  # type: ignore
+            from openai import OpenAI
         except ModuleNotFoundError as exc:  # pragma: no cover - optional dependency
             raise RuntimeError("openai package is required for OpenAI embeddings") from exc
 
@@ -47,7 +47,7 @@ class AzureOpenAIEmbedder(Embedder):
         api_version: str | None = None,
     ) -> None:
         try:
-            from openai import AzureOpenAI  # type: ignore
+            from openai import AzureOpenAI
         except ModuleNotFoundError as exc:  # pragma: no cover - optional dependency
             raise RuntimeError("openai package >=1.0 with Azure support is required for Azure embeddings") from exc
 

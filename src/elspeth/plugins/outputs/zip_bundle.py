@@ -236,7 +236,7 @@ class ZipResultSink(ResultSink):
             if isinstance(payload, (bytes, bytearray)):
                 return bytes(payload)
             if hasattr(payload, "read"):
-                return payload.read()
+                return payload.read()  # type: ignore[no-any-return]
             return json.dumps(payload).encode("utf-8")
         raise ValueError("Artifact is missing payload data")
 

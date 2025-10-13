@@ -409,7 +409,7 @@ class ExperimentRunner:
         for crit in self.criteria or []:
             crit_name = crit.get("name") or crit.get("template", "criteria")
             prompt_template = criteria_templates[crit_name]
-            user_prompt = prompt_template.render(context, extra={"criteria": crit_name})  # type: ignore[attr-defined]
+            user_prompt = prompt_template.render(context, extra={"criteria": crit_name})
             response = self._execute_llm(
                 user_prompt,
                 {"row_id": row.get("APPID"), "criteria": crit_name},
@@ -738,7 +738,7 @@ class ExperimentRunner:
                         raise
 
         # Validate aggregation plugins
-        for plugin in self.aggregator_plugins or []:
+        for plugin in self.aggregator_plugins or []:  # type: ignore[assignment]
             if hasattr(plugin, "input_schema") and callable(plugin.input_schema):
                 plugin_schema = plugin.input_schema()
                 if plugin_schema:
@@ -761,7 +761,7 @@ class ExperimentRunner:
                         raise
 
         # Validate validation plugins
-        for plugin in self.validation_plugins or []:
+        for plugin in self.validation_plugins or []:  # type: ignore[assignment]
             if hasattr(plugin, "input_schema") and callable(plugin.input_schema):
                 plugin_schema = plugin.input_schema()
                 if plugin_schema:

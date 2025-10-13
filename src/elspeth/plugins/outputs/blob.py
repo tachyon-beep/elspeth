@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 try:  # pragma: no cover - optional dataclasses when azure libs absent
     from azure.storage.blob import ContentSettings
 except Exception:  # pragma: no cover
-    ContentSettings = None
+    ContentSettings = None  # type: ignore[assignment,misc]
 
 
 class BlobResultSink(ResultSink):
@@ -188,7 +188,7 @@ class BlobResultSink(ResultSink):
             manifest["cost_summary"] = results["cost_summary"]
         return manifest
 
-    def _create_blob_client(self, blob_name: str):  # type: ignore[return-any]
+    def _create_blob_client(self, blob_name: str):
         service = self._get_service_client()
         container_client = service.get_container_client(self.config.container_name)
         return container_client.get_blob_client(blob_name)
@@ -233,9 +233,9 @@ class BlobResultSink(ResultSink):
                     combined[key] = value
         return combined or None
 
-    def _get_service_client(self):  # type: ignore[return-any]
+    def _get_service_client(self):
         if self._blob_service_client is not None:
-            return self._blob_service_client
+            return self._blob_service_client  # type: ignore[unreachable]
 
         try:
             from azure.storage.blob import BlobServiceClient
@@ -243,10 +243,11 @@ class BlobResultSink(ResultSink):
             raise RuntimeError("azure-storage-blob is required for BlobResultSink") from exc
 
         credential = self._resolve_credential(self.config)
-        self._blob_service_client = BlobServiceClient(
+        client = BlobServiceClient(
             account_url=self.config.account_url,
             credential=credential,
         )
+        self._blob_service_client = client  # type: ignore[assignment]
         return self._blob_service_client
 
     def _resolve_credential(self, config: BlobConfig):
@@ -301,7 +302,7 @@ class BlobResultSink(ResultSink):
             if isinstance(payload, (bytes, bytearray)):
                 return bytes(payload)
             if hasattr(payload, "read"):
-                return payload.read()
+                return payload.read()  # type: ignore[no-any-return]
             return json.dumps(payload).encode("utf-8")
         raise ValueError("Artifact is missing payload data")
 

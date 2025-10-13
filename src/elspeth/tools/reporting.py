@@ -243,7 +243,7 @@ class SuiteReportGenerator:
 
         excel_path = consolidated / "analysis.xlsx"
         try:
-            with pd.ExcelWriter(excel_path, engine="openpyxl") as writer:  # type: ignore[arg-type]
+            with pd.ExcelWriter(excel_path, engine="openpyxl") as writer:
                 summary_df.to_excel(writer, sheet_name="Summary", index=False)
                 comparisons_df.to_excel(writer, sheet_name="Comparisons", index=False)
                 recommendations_df.to_excel(writer, sheet_name="Recommendations", index=False)
@@ -254,8 +254,8 @@ class SuiteReportGenerator:
         try:
             import matplotlib
 
-            matplotlib.use("Agg")  # type: ignore
-            import matplotlib.pyplot as plt  # type: ignore
+            matplotlib.use("Agg")
+            import matplotlib.pyplot as plt
         except ImportError:  # pragma: no cover - optional dependency
             logger.info("Skipping visualizations (matplotlib not available)")
             return
@@ -301,7 +301,7 @@ class SuiteReportGenerator:
         stats = aggregates.get("score_stats")
         if not isinstance(stats, Mapping):
             return {}
-        return stats
+        return dict(stats)
 
     @staticmethod
     def _config_dict(config: ExperimentConfig | None) -> Dict[str, Any]:

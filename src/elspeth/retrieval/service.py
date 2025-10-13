@@ -29,7 +29,10 @@ class RetrievalService:
 
 def create_retrieval_service(config: Mapping[str, object]) -> RetrievalService:
     provider = str(config.get("provider") or "").lower()
-    provider_options = dict(config.get("provider_options") or {})
+    provider_options_raw = config.get("provider_options") or {}
+    if not isinstance(provider_options_raw, Mapping):
+        raise TypeError("provider_options must be a mapping")
+    provider_options = dict(provider_options_raw)
 
     embed_cfg = config.get("embed_model")
     if not isinstance(embed_cfg, Mapping):
@@ -43,12 +46,22 @@ def create_retrieval_service(config: Mapping[str, object]) -> RetrievalService:
 def _create_embedder(config: Mapping[str, object]) -> Embedder:
     provider = str(config.get("provider") or "").lower()
     if provider == "openai":
-        return OpenAIEmbedder(model=str(config.get("model") or "text-embedding-3-large"), api_key=config.get("api_key"))
+        model = str(config.get("model") or "text-embedding-3-large")
+        api_key_raw = config.get("api_key")
+        api_key = str(api_key_raw) if api_key_raw is not None else None
+        return OpenAIEmbedder(model=model, api_key=api_key)
     if provider == "azure_openai":
+        endpoint_raw = config.get("endpoint")
+        endpoint = str(endpoint_raw) if endpoint_raw is not None else None
+        deployment = str(config.get("deployment") or "")
+        api_key_raw = config.get("api_key")
+        api_key = str(api_key_raw) if api_key_raw is not None else None
+        api_version_raw = config.get("api_version")
+        api_version = str(api_version_raw) if api_version_raw is not None else None
         return AzureOpenAIEmbedder(
-            endpoint=config.get("endpoint"),
-            deployment=str(config.get("deployment") or ""),
-            api_key=config.get("api_key"),
-            api_version=config.get("api_version"),
+            endpoint=endpoint,
+            deployment=deployment,
+            api_key=api_key,
+            api_version=api_version,
         )
     raise ValueError(f"Unsupported embed_model provider '{provider}'")

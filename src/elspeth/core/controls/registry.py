@@ -122,7 +122,7 @@ def register_rate_limiter(name: str, factory: Callable[..., RateLimiter]) -> Non
 
         _rate_limiters[name] = _Factory(_wrapped)
     else:
-        _rate_limiters[name] = _Factory(factory)  # type: ignore[arg-type]
+        _rate_limiters[name] = _Factory(factory)
 
 
 def register_cost_tracker(name: str, factory: Callable[..., CostTracker]) -> None:
@@ -137,7 +137,7 @@ def register_cost_tracker(name: str, factory: Callable[..., CostTracker]) -> Non
 
         _cost_trackers[name] = _Factory(_wrapped)
     else:
-        _cost_trackers[name] = _Factory(factory)  # type: ignore[arg-type]
+        _cost_trackers[name] = _Factory(factory)
 
 
 def create_rate_limiter(
@@ -190,7 +190,7 @@ def create_rate_limiter(
         schema_context=f"rate_limiter:{name}",
     )
     apply_plugin_context(limiter, context)
-    return limiter
+    return limiter  # type: ignore[no-any-return]
 
 
 def create_cost_tracker(
@@ -243,7 +243,7 @@ def create_cost_tracker(
         schema_context=f"cost_tracker:{name}",
     )
     apply_plugin_context(tracker, context)
-    return tracker
+    return tracker  # type: ignore[no-any-return]
 
 
 def validate_rate_limiter(definition: Dict[str, Any] | None) -> None:

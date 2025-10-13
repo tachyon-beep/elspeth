@@ -71,7 +71,7 @@ class PgVectorClient(VectorStoreClient):
         upsert_conflict: str = "replace",
     ) -> None:
         try:
-            import psycopg  # type: ignore
+            import psycopg
         except ModuleNotFoundError as exc:  # pragma: no cover - optional dependency
             raise RuntimeError("psycopg package is required for pgvector provider") from exc
 
@@ -166,8 +166,8 @@ class AzureSearchVectorClient(VectorStoreClient):
         namespace_field: str = "namespace",
     ) -> None:
         try:
-            from azure.core.credentials import AzureKeyCredential  # type: ignore
-            from azure.search.documents import SearchClient  # type: ignore
+            from azure.core.credentials import AzureKeyCredential
+            from azure.search.documents import SearchClient
         except ModuleNotFoundError as exc:  # pragma: no cover - optional dependency
             raise RuntimeError("azure-search-documents package is required for azure_search provider") from exc
 
@@ -411,9 +411,11 @@ class EmbeddingsStoreSink(ResultSink):
         if provider == "openai":
             return OpenAIEmbedder(model=config.get("model", "text-embedding-3-large"), api_key=config.get("api_key"))
         if provider == "azure_openai":
+            deployment_raw = config.get("deployment")
+            deployment = str(deployment_raw) if deployment_raw is not None else ""
             return AzureOpenAIEmbedder(
                 endpoint=config.get("endpoint") or os.getenv("AZURE_OPENAI_ENDPOINT", ""),
-                deployment=config.get("deployment"),
+                deployment=deployment,
                 api_key=config.get("api_key"),
                 api_version=config.get("api_version"),
             )

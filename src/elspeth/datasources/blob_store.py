@@ -170,7 +170,7 @@ class BlobDataLoader:
         self._blob_client = None
 
     @property
-    def blob_client(self):  # type: ignore[return-any]
+    def blob_client(self):
         """Instantiate the BlobClient lazily to avoid import costs."""
 
         if self._blob_client is None:
@@ -187,7 +187,7 @@ class BlobDataLoader:
                     raise BlobConfigurationError("azure-identity is required when no credential is provided") from exc
                 credential = DefaultAzureCredential()
 
-            self._blob_client = BlobClient(
+            client = BlobClient(
                 account_url=self.config.account_url,
                 container_name=self.config.container_name,
                 blob_name=self.config.blob_path,
@@ -195,6 +195,7 @@ class BlobDataLoader:
                 connection_timeout=self.timeout,
                 read_timeout=self.timeout,
             )
+            self._blob_client = client  # type: ignore[assignment]
         return self._blob_client
 
     def download_to_file(self, destination: Path | str, overwrite: bool = False) -> Path:
@@ -221,13 +222,13 @@ class BlobDataLoader:
 
         downloader = self.blob_client.download_blob()
         raw = downloader.readall()
-        return raw.decode(encoding)
+        return raw.decode(encoding)  # type: ignore[no-any-return]
 
     def load_bytes(self) -> bytes:
         """Return the blob contents as raw bytes."""
 
         downloader = self.blob_client.download_blob()
-        return downloader.readall()
+        return downloader.readall()  # type: ignore[no-any-return]
 
     def load_csv(self, **pandas_kwargs):
         """Load the blob as a Pandas DataFrame."""

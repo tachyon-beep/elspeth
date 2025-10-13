@@ -82,12 +82,12 @@ class VisualAnalyticsSink(ResultSink):
         try:
             if seaborn is not None and self.seaborn_style:
                 try:
-                    seaborn.set_theme(style=self.seaborn_style)  # type: ignore[attr-defined]
+                    seaborn.set_theme(style=self.seaborn_style)
                 except Exception:
                     logger.debug("Seaborn style '%s' unavailable; using matplotlib defaults", self.seaborn_style)
 
             self.base_path.mkdir(parents=True, exist_ok=True)
-            fig, ax = plt.subplots(figsize=self.figure_size)  # type: ignore[arg-type]
+            fig, ax = plt.subplots(figsize=self.figure_size)
             labels = list(score_means.keys())
             values = [score_means[label] for label in labels]
             bar_kwargs: Dict[str, Any] = {}
@@ -211,14 +211,14 @@ class VisualAnalyticsSink(ResultSink):
         if self._plot_modules is not None:
             return self._plot_modules
         try:
-            import matplotlib  # type: ignore
+            import matplotlib
 
-            matplotlib.use("Agg")  # type: ignore[attr-defined]
-            import matplotlib.pyplot as plt  # type: ignore
+            matplotlib.use("Agg")
+            import matplotlib.pyplot as plt
         except Exception as exc:
             raise RuntimeError("matplotlib is required for the analytics_visual sink") from exc
         try:
-            import seaborn  # type: ignore
+            import seaborn
         except Exception:
             seaborn = None
         self._plot_modules = (matplotlib, plt, seaborn)

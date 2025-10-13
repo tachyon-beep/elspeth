@@ -60,7 +60,7 @@ class _RepoSinkBase(ResultSink):
             prefix = self._resolve_prefix(context)
             files = self._prepare_files(results, metadata, prefix, timestamp)
             commit_message = self.commit_message_template.format(**context)
-            payload = {
+            payload: Dict[str, Any] = {
                 "context": context,
                 "commit_message": commit_message,
                 "files": [
@@ -201,10 +201,11 @@ class GitHubRepoSink(_RepoSinkBase):
         if response.status_code == 404:
             return None
         data = response.json()
-        return data.get("sha")
+        return data.get("sha")  # type: ignore[no-any-return]
 
-    def _request(self, method: str, url: str, expected_status: set[int] | None = None, **kwargs: Any):  # type: ignore[return-any]
+    def _request(self, method: str, url: str, expected_status: set[int] | None = None, **kwargs: Any):
         expected_status = expected_status or {200, 201}
+        assert self.session is not None, "session must be initialized"
         response = self.session.request(method, url, headers=self._headers(), **kwargs)
         if response.status_code not in expected_status:
             raise RuntimeError(f"GitHub API call failed ({response.status_code}): {response.text}")
@@ -307,7 +308,7 @@ class AzureDevOpsRepoSink(_RepoSinkBase):
         data = response.json()
         if not data.get("value"):
             raise RuntimeError(f"Branch '{self.branch}' not found")
-        return data["value"][0]["objectId"]
+        return data["value"][0]["objectId"]  # type: ignore[no-any-return]
 
     def _item_exists(self, path: str) -> bool:
         url = (
@@ -316,10 +317,11 @@ class AzureDevOpsRepoSink(_RepoSinkBase):
             f"&includeContentMetadata=true&api-version={self.api_version}"
         )
         response = self._request("GET", url, expected_status={200, 404})
-        return response.status_code == 200
+        return response.status_code == 200  # type: ignore[no-any-return]
 
-    def _request(self, method: str, url: str, expected_status: set[int] | None = None, **kwargs: Any):  # type: ignore[return-any]
+    def _request(self, method: str, url: str, expected_status: set[int] | None = None, **kwargs: Any):
         expected_status = expected_status or {200, 201}
+        assert self.session is not None, "session must be initialized"
         response = self.session.request(method, url, headers=self._headers(), **kwargs)
         if response.status_code not in expected_status:
             raise RuntimeError(f"Azure DevOps API call failed ({response.status_code}): {response.text}")

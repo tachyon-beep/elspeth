@@ -140,7 +140,7 @@ class AuditMiddleware(LLMMiddleware):
         self.channel = channel or "elspeth.audit"
 
     def before_request(self, request: LLMRequest) -> LLMRequest:
-        payload = {"metadata": request.metadata}
+        payload: Dict[str, Any] = {"metadata": request.metadata}
         if self.include_prompts:
             payload.update({"system": request.system_prompt, "user": request.user_prompt})
         logger.info("[%s] LLM request metadata=%s", self.channel, payload)
@@ -596,14 +596,17 @@ class PIIShieldMiddleware(LLMMiddleware):
         self.patterns: list[tuple[str, re.Pattern[str], Dict[str, Any]]] = []
         for pattern_def in all_patterns:
             try:
-                compiled = re.compile(pattern_def["regex"])
-                metadata = {
+                # Cast pattern_def values from object to proper types
+                regex_str = str(pattern_def["regex"])
+                name_str = str(pattern_def["name"])
+                compiled = re.compile(regex_str)
+                metadata: Dict[str, Any] = {
                     "severity": pattern_def.get("severity", "HIGH"),
                     "validator": pattern_def.get("validator"),
                     "requires_context": pattern_def.get("requires_context", False),
                     "context_tokens": pattern_def.get("context_tokens", []),
                 }
-                self.patterns.append((pattern_def["name"], compiled, metadata))
+                self.patterns.append((name_str, compiled, metadata))
             except re.error as exc:
                 logger.warning(
                     "[%s] Invalid regex pattern '%s': %s",
@@ -1362,10 +1365,10 @@ register_middleware(
 register_middleware(
     "azure_content_safety",
     lambda options, context: AzureContentSafetyMiddleware(
-        endpoint=options.get("endpoint"),
-        key=options.get("key"),
-        key_env=options.get("key_env"),
-        api_version=options.get("api_version"),
+        endpoint=str(options.get("endpoint", "")),
+        key=str(options.get("key")) if options.get("key") is not None else None,
+        key_env=str(options.get("key_env")) if options.get("key_env") is not None else None,
+        api_version=str(options.get("api_version")) if options.get("api_version") is not None else None,
         categories=options.get("categories"),
         severity_threshold=int(options.get("severity_threshold", 4)),
         on_violation=options.get("on_violation", "abort"),

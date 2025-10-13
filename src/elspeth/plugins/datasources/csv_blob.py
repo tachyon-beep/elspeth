@@ -54,7 +54,7 @@ class CSVBlobDataSource(DataSource):
                 return df
             raise FileNotFoundError(f"CSV blob datasource file not found: {self.path}")
         try:
-            df = pd.read_csv(self.path, dtype=self.dtype, encoding=self.encoding)
+            df = pd.read_csv(self.path, dtype=self.dtype, encoding=self.encoding)  # type: ignore[arg-type]
             df.attrs["security_level"] = self.security_level
             df.attrs["determinism_level"] = self.determinism_level
 
@@ -101,7 +101,7 @@ class CSVBlobDataSource(DataSource):
             try:
                 # Load DataFrame temporarily for inference if not already loaded
                 if not self._df_loaded:
-                    df = pd.read_csv(self.path, dtype=self.dtype, encoding=self.encoding, nrows=100)
+                    df = pd.read_csv(self.path, dtype=self.dtype, encoding=self.encoding, nrows=100)  # type: ignore[arg-type]
                     schema_name = f"{self.path.stem}_InferredSchema"
                     self._cached_schema = infer_schema_from_dataframe(df, schema_name)
                     logger.debug(f"Inferred schema for {self.path}: {schema_name}")

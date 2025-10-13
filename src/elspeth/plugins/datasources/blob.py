@@ -43,7 +43,7 @@ class BlobDataSource(DataSource):
             )
             df.attrs["security_level"] = self.security_level
             df.attrs["determinism_level"] = self.determinism_level
-            return df
+            return df  # type: ignore[no-any-return]
         except Exception as exc:
             if self.on_error == "skip":
                 logger.warning("Blob datasource failed; returning empty dataset: %s", exc)

@@ -153,7 +153,7 @@ def create_row_plugin(
         schema_context=f"row_plugin:{name}",
     )
     apply_plugin_context(plugin, context)
-    return plugin
+    return plugin  # type: ignore[no-any-return]
 
 
 def create_aggregation_plugin(
@@ -203,7 +203,7 @@ def create_aggregation_plugin(
         schema_context=f"aggregation_plugin:{name}",
     )
     apply_plugin_context(plugin, context)
-    return plugin
+    return plugin  # type: ignore[no-any-return]
 
 
 def create_baseline_plugin(
@@ -253,7 +253,7 @@ def create_baseline_plugin(
         schema_context=f"baseline_plugin:{name}",
     )
     apply_plugin_context(plugin, context)
-    return plugin
+    return plugin  # type: ignore[no-any-return]
 
 
 def create_validation_plugin(
@@ -304,7 +304,7 @@ def create_validation_plugin(
         schema_context=f"validation_plugin:{name}",
     )
     apply_plugin_context(plugin, context)
-    return plugin
+    return plugin  # type: ignore[no-any-return]
 
 
 def create_early_stop_plugin(
@@ -354,7 +354,7 @@ def create_early_stop_plugin(
         schema_context=f"early_stop_plugin:{name}",
     )
     apply_plugin_context(plugin, context)
-    return plugin
+    return plugin  # type: ignore[no-any-return]
 
 
 class _NoopRowPlugin:  # pylint: disable=too-few-public-methods
@@ -365,6 +365,10 @@ class _NoopRowPlugin:  # pylint: disable=too-few-public-methods
 
         return {}
 
+    def input_schema(self):
+        """Noop plugin does not require specific input columns."""
+        return None
+
 
 class _NoopAggPlugin:  # pylint: disable=too-few-public-methods
     name = "noop"
@@ -373,6 +377,10 @@ class _NoopAggPlugin:  # pylint: disable=too-few-public-methods
         """Return an empty aggregation result."""
 
         return {}
+
+    def input_schema(self):
+        """Noop plugin does not require specific input columns."""
+        return None
 
 
 class _NoopBaselinePlugin:  # pylint: disable=too-few-public-methods

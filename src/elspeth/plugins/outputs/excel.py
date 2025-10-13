@@ -15,9 +15,9 @@ from elspeth.plugins.outputs._sanitize import sanitize_cell
 logger = logging.getLogger(__name__)
 
 
-def _load_workbook_dependencies():  # type: ignore[return-any]
+def _load_workbook_dependencies():
     try:
-        from openpyxl import Workbook  # type: ignore
+        from openpyxl import Workbook  # type: ignore[import-untyped]
     except ImportError as exc:  # pragma: no cover - handled during sink initialisation
         raise RuntimeError("ExcelResultSink requires the 'openpyxl' package. Install with 'pip install openpyxl'") from exc
     return Workbook
@@ -85,7 +85,9 @@ class ExcelResultSink(ResultSink):
                 self._populate_manifest_sheet(workbook, results, metadata, timestamp)
 
             if self.include_aggregates and results.get("aggregates"):
-                self._populate_aggregates_sheet(workbook, results.get("aggregates"))
+                aggregates = results.get("aggregates")
+                if isinstance(aggregates, Mapping):
+                    self._populate_aggregates_sheet(workbook, aggregates)
 
             workbook.save(path)
             self._last_workbook_path = str(path)
@@ -117,7 +119,7 @@ class ExcelResultSink(ResultSink):
             name = f"{name}_{timestamp.strftime('%Y%m%dT%H%M%SZ')}"
         return self.base_path / f"{name}.xlsx"
 
-    def _populate_results_sheet(self, workbook, entries: Iterable[Mapping[str, Any]]) -> None:  # type: ignore[no-untyped-def]
+    def _populate_results_sheet(self, workbook, entries: Iterable[Mapping[str, Any]]) -> None:
         sheet = workbook.active
         sheet.title = self.results_sheet
 
@@ -137,7 +139,7 @@ class ExcelResultSink(ResultSink):
         results: Mapping[str, Any],
         metadata: Mapping[str, Any],
         timestamp: datetime,
-    ) -> None:  # type: ignore[no-untyped-def]
+    ) -> None:
         sheet = workbook.create_sheet(self.manifest_sheet)
         manifest = self._build_manifest(results, metadata, timestamp)
         sheet.append([self._sanitize_header("key"), self._sanitize_header("value")])
@@ -148,7 +150,7 @@ class ExcelResultSink(ResultSink):
                 rendered = value
             sheet.append([self._sanitize_value(key), self._sanitize_value(rendered)])
 
-    def _populate_aggregates_sheet(self, workbook, aggregates: Mapping[str, Any]) -> None:  # type: ignore[no-untyped-def]
+    def _populate_aggregates_sheet(self, workbook, aggregates: Mapping[str, Any]) -> None:
         sheet = workbook.create_sheet(self.aggregates_sheet)
         sheet.append(
             [

@@ -30,7 +30,7 @@ class LocalBundleSink(ResultSink):
     sanitize_guard: str = "'"
 
     def __post_init__(self) -> None:
-        self.base_path = Path(self.base_path)
+        self.base_path: Path = Path(self.base_path)
         if self.on_error not in {"abort", "skip"}:
             raise ValueError("on_error must be 'abort' or 'skip'")
         if not self.sanitize_guard:
@@ -76,7 +76,8 @@ class LocalBundleSink(ResultSink):
         if self.timestamped:
             stamp = timestamp.strftime("%Y%m%dT%H%M%SZ")
             name = f"{name}_{stamp}"
-        return self.base_path / name
+        # base_path is guaranteed to be Path after __post_init__
+        return Path(self.base_path) / name
 
     def _build_manifest(self, results: Dict[str, Any], metadata: Dict[str, Any], timestamp: datetime) -> Dict[str, Any]:
         manifest = {

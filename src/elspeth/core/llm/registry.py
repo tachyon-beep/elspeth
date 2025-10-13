@@ -122,18 +122,20 @@ def validate_middleware_definition(definition: Dict[str, Any]) -> None:
     if name not in _middlewares:
         options = ", ".join(sorted(_middlewares)) or "<none>"
         raise ConfigurationError(f"Unknown LLM middleware '{name}'. Available: {options}")
-    options = definition.get("options", {})
-    if options is None:
-        options = {}
-    elif not isinstance(options, dict):
+    options_raw = definition.get("options", {})
+    if options_raw is None:
+        options_dict: Dict[str, Any] = {}
+    elif not isinstance(options_raw, dict):
         raise ConfigurationError("Middleware options must be a mapping")
+    else:
+        options_dict = dict(options_raw)
+
     try:
-        coalesce_security_level(definition.get("security_level"), options.get("security_level"))
+        coalesce_security_level(definition.get("security_level"), options_dict.get("security_level"))
     except ValueError as exc:
         raise ConfigurationError(f"llm_middleware:{name}: {exc}") from exc
-    options = dict(options)
-    options.pop("security_level", None)
-    _middlewares[name].validate(options, context=f"llm_middleware:{name}")
+    options_dict.pop("security_level", None)
+    _middlewares[name].validate(options_dict, context=f"llm_middleware:{name}")
 
 
 __all__ = ["register_middleware", "create_middleware", "create_middlewares", "validate_middleware_definition"]

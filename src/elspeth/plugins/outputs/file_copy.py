@@ -44,7 +44,7 @@ class FileCopySink(ResultSink):
                 self._security_level = self._source_artifact.security_level
                 return
 
-    def write(self, results: Dict, *, metadata: Dict | None = None) -> None:  # type: ignore[override]
+    def write(self, results: Dict, *, metadata: Dict | None = None) -> None:
         if not self._source_artifact or not self._source_artifact.path:
             message = "FileCopySink requires an input artifact; configure artifacts.consumes"
             if self.on_error == "skip":

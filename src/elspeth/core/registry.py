@@ -649,7 +649,7 @@ class PluginRegistry:
         call_payload.pop("determinism_level", None)
         plugin = factory.create(call_payload, context)
         apply_plugin_context(plugin, context)
-        return plugin
+        return plugin  # type: ignore[no-any-return]
 
     def validate_datasource(self, name: str, options: Dict[str, Any] | None) -> None:
         """Validate datasource plugin options without creating the plugin."""
@@ -721,7 +721,7 @@ class PluginRegistry:
         call_payload.pop("determinism_level", None)
         plugin = factory.create(call_payload, context)
         apply_plugin_context(plugin, context)
-        return plugin
+        return plugin  # type: ignore[no-any-return]
 
     def create_llm_from_definition(
         self,
@@ -867,7 +867,7 @@ class PluginRegistry:
         call_payload.pop("determinism_level", None)
         plugin = factory.create(call_payload, context)
         apply_plugin_context(plugin, context)
-        return plugin
+        return plugin  # type: ignore[no-any-return]
 
     def validate_sink(self, name: str, options: Dict[str, Any] | None) -> None:
         """Validate sink plugin options without instantiation."""

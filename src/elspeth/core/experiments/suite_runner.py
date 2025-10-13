@@ -304,7 +304,7 @@ class ExperimentSuiteRunner:
             setattr(sink, "_elspeth_artifact_config", artifacts_cfg or {})
             setattr(sink, "_elspeth_plugin_name", plugin)
             name_value = entry.get("name")
-            base_name = name_value if isinstance(name_value, str) and name_value else plugin or f"sink{index}"
+            base_name = name_value if isinstance(name_value, str) and name_value else plugin
             setattr(sink, "_elspeth_sink_name", base_name)
             sinks.append(sink)
         return sinks

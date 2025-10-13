@@ -70,7 +70,8 @@ class SignedArtifactSink(ResultSink):
         if self.timestamped:
             stamp = timestamp.strftime("%Y%m%dT%H%M%SZ")
             name = f"{name}_{stamp}"
-        return self.base_path / name
+        # base_path is guaranteed to be Path after __post_init__
+        return Path(self.base_path) / name
 
     def _build_manifest(
         self,
