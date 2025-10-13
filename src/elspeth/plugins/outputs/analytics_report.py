@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Mapping, Sequence
 
 from elspeth.core.interfaces import Artifact, ArtifactDescriptor, ResultSink
-from elspeth.core.security import normalize_security_level
+from elspeth.core.security import normalize_determinism_level, normalize_security_level
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +45,7 @@ class AnalyticsReportSink(ResultSink):
         self.include_comparisons = include_comparisons
         self._last_written_files: list[Path] = []
         self._security_level: str | None = None
+        self._determinism_level: str | None = None
 
     def write(self, results: Dict[str, Any], *, metadata: Dict[str, Any] | None = None) -> None:
         try:
@@ -62,6 +63,7 @@ class AnalyticsReportSink(ResultSink):
             self._last_written_files = written
             if metadata:
                 self._security_level = normalize_security_level(metadata.get("security_level"))
+                self._determinism_level = normalize_determinism_level(metadata.get("determinism_level"))
         except Exception as exc:  # pragma: no cover - error handling path
             if self.on_error == "skip":
                 logger.warning("Analytics report sink failed; skipping write: %s", exc)
@@ -87,6 +89,7 @@ class AnalyticsReportSink(ResultSink):
                 metadata={"path": str(path), "content_type": content_type},
                 persist=True,
                 security_level=self._security_level,
+                determinism_level=self._determinism_level,
             )
         self._last_written_files = []
         return artifacts
@@ -107,6 +110,7 @@ class AnalyticsReportSink(ResultSink):
                 "early_stop": payload_meta.get("early_stop"),
                 "cost_summary": payload_meta.get("cost_summary"),
                 "security_level": payload_meta.get("security_level"),
+                "determinism_level": payload_meta.get("determinism_level"),
             }
         if self.include_aggregates and payload.get("aggregates"):
             summary["aggregates"] = payload["aggregates"]

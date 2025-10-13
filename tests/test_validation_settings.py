@@ -15,7 +15,8 @@ def test_validate_settings_missing_required_fields(tmp_path):
         default:
           llm:
             plugin: mock
-            security_level: official
+            security_level: OFFICIAL
+            determinism_level: guaranteed
           sinks: []
         """,
     )
@@ -30,15 +31,18 @@ def test_validate_settings_unknown_prompt_pack(tmp_path):
         default:
           datasource:
             plugin: local_csv
-            security_level: official
+            security_level: OFFICIAL
+            determinism_level: guaranteed
             options:
               path: data.csv
           llm:
             plugin: mock
-            security_level: official
+            security_level: OFFICIAL
+            determinism_level: guaranteed
           sinks:
             - plugin: csv
-              security_level: official
+              security_level: OFFICIAL
+              determinism_level: guaranteed
               options:
                 path: outputs/latest.csv
           prompt_pack: imaginary
@@ -59,20 +63,24 @@ def test_validate_settings_unknown_middleware(tmp_path):
         default:
           datasource:
             plugin: local_csv
-            security_level: official
+            security_level: OFFICIAL
+            determinism_level: guaranteed
             options:
               path: data.csv
           llm:
             plugin: mock
-            security_level: official
+            security_level: OFFICIAL
+            determinism_level: guaranteed
           sinks:
             - plugin: csv
-              security_level: official
+              security_level: OFFICIAL
+              determinism_level: guaranteed
               options:
                 path: outputs/latest.csv
           llm_middlewares:
             - name: not_real
-              security_level: official
+              security_level: OFFICIAL
+              determinism_level: guaranteed
         """,
         encoding="utf-8",
     )
@@ -91,15 +99,18 @@ def test_validate_settings_valid_configuration(tmp_path):
         default:
           datasource:
             plugin: local_csv
-            security_level: official
+            security_level: OFFICIAL
+            determinism_level: guaranteed
             options:
               path: data.csv
           llm:
             plugin: mock
-            security_level: official
+            security_level: OFFICIAL
+            determinism_level: guaranteed
           sinks:
             - plugin: csv
-              security_level: official
+              security_level: OFFICIAL
+              determinism_level: guaranteed
               options:
                 path: outputs/latest.csv
         """,
@@ -116,12 +127,14 @@ def test_validate_settings_requires_sink_security_level(tmp_path):
         default:
           datasource:
             plugin: local_csv
-            security_level: official
+            security_level: OFFICIAL
+            determinism_level: guaranteed
             options:
               path: data.csv
           llm:
             plugin: mock
-            security_level: official
+            security_level: OFFICIAL
+            determinism_level: guaranteed
           sinks:
             - plugin: csv
               options:
@@ -142,15 +155,18 @@ def test_validate_settings_rejects_blank_sink_security_level(tmp_path):
         default:
           datasource:
             plugin: local_csv
-            security_level: official
+            security_level: OFFICIAL
+            determinism_level: guaranteed
             options:
               path: input.csv
           llm:
             plugin: mock
-            security_level: official
+            security_level: OFFICIAL
+            determinism_level: guaranteed
           sinks:
             - plugin: csv
               security_level: ""
+              determinism_level: guaranteed
               options:
                 path: outputs/latest.csv
         """,
@@ -169,18 +185,22 @@ def test_validate_settings_conflicting_sink_security_levels(tmp_path):
         default:
           datasource:
             plugin: local_csv
-            security_level: official
+            security_level: OFFICIAL
+            determinism_level: guaranteed
             options:
               path: input.csv
           llm:
             plugin: mock
-            security_level: official
+            security_level: OFFICIAL
+            determinism_level: guaranteed
           sinks:
             - plugin: csv
-              security_level: official
+              security_level: OFFICIAL
+              determinism_level: guaranteed
               options:
                 path: outputs/latest.csv
                 security_level: secret
+                determinism_level: guaranteed
         """,
     )
     report = validate_settings(config_path)

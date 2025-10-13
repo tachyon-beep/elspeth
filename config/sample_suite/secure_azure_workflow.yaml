@@ -1,0 +1,276 @@
+---
+# ==============================================================================
+# Secure Azure Workflow Example
+# ==============================================================================
+# This configuration demonstrates a complete secure workflow:
+# 1. Load data from Azure Blob Storage CSV
+# 2. Assemble prompts from template + row data
+# 3. Filter through security middleware (Content Safety, PII, Classification)
+# 4. Send to Azure OpenAI
+# 5. Validate JSON responses
+# 6. Compute statistics on results
+# 7. Export to Azure DevOps repository
+# ==============================================================================
+
+suite:
+  name: "secure_azure_workflow"
+  description: "End-to-end secure LLM evaluation pipeline with Azure integration"
+
+  # Suite-level defaults
+  defaults:
+    # Datasource: CSV from Azure Blob Storage
+    datasource:
+      type: csv_blob
+      security_level: confidential
+      path: "https://mystorageaccount.blob.core.windows.net/experiments/input_data.csv"
+      on_error: skip
+
+    # LLM: Azure OpenAI with security middleware stack
+    llm:
+      type: azure_openai
+      security_level: confidential
+      config: azure_openai_config  # References ~/.elspeth/azure_openai.json
+      deployment: gpt-4
+      temperature: 0.0
+      max_tokens: 500
+
+      # Security middleware pipeline (executed in order)
+      middleware:
+        # 1. Azure Content Safety - Screen for harmful content
+        - type: azure_content_safety
+          endpoint: "https://my-content-safety.cognitiveservices.azure.com"
+          key_env: AZURE_CONTENT_SAFETY_KEY
+          categories: ["Hate", "Violence", "SelfHarm", "Sexual"]
+          severity_threshold: 4
+          on_violation: abort  # Block requests that fail safety checks
+          on_error: skip  # Continue if service unavailable
+
+        # 2. PII Shield - Detect personal information
+        - type: pii_shield
+          include_defaults: true  # All US, UK, Australian patterns
+          on_violation: abort  # Block prompts containing PII
+          mask: "[PII REDACTED]"
+
+        # 3. Classified Material Filter - Detect classification markings
+        - type: classified_material
+          include_defaults: true  # All government classification markings
+          case_sensitive: false
+          on_violation: abort  # Block prompts with classified markings
+          mask: "[CLASSIFIED]"
+
+        # 4. Audit Logger - Record all requests/responses
+        - type: audit_logger
+          include_prompts: true
+          channel: "elspeth.secure.audit"
+
+        # 5. Health Monitor - Track performance metrics
+        - type: health_monitor
+          heartbeat_interval: 60
+          include_latency: true
+
+    # Prompt template - Assembled from row data
+    prompt_system: |
+      You are a helpful assistant that analyzes customer feedback.
+      Always respond with valid JSON containing your analysis.
+
+    prompt_template: |
+      Analyze the following customer feedback and provide a structured response.
+
+      Customer ID: {{ customer_id }}
+      Feedback: {{ feedback_text }}
+      Category: {{ category }}
+
+      Respond with JSON in this format:
+      {
+        "sentiment": "positive|negative|neutral",
+        "key_themes": ["theme1", "theme2"],
+        "priority": "high|medium|low",
+        "recommended_action": "brief description"
+      }
+
+    # Experiment plugins
+    plugins:
+      # Row-level: Extract scores from JSON response
+      row:
+        - type: score_extractor
+          key: sentiment_score
+          criteria:
+            - positive_sentiment
+            - priority_level
+
+      # Validation: Ensure responses are valid JSON
+      validation:
+        - type: json
+          ensure_object: true
+
+      # Aggregators: Compute statistics
+      aggregators:
+        - type: score_stats
+          source_field: scores
+          ddof: 1
+
+        - type: score_distribution
+          bins: 10
+          quantiles: [0.25, 0.5, 0.75, 0.95]
+
+        - type: cost_summary
+          on_error: skip
+
+        - type: latency_summary
+          on_error: skip
+
+    # Result sinks - Where to write outputs
+    sinks:
+      # 1. Local CSV export (for successful rows)
+      - type: csv
+        path: "outputs/secure_workflow/results.csv"
+        sanitize_formulas: true
+        overwrite: true
+
+      # 2. Analytics report (JSON + Markdown)
+      - type: analytics_report
+        base_path: "outputs/secure_workflow/analytics"
+        formats: ["json", "markdown"]
+        include_manifest: true
+
+      # 3. Enhanced visualizations
+      - type: enhanced_visual
+        base_path: "outputs/secure_workflow/charts"
+        chart_types: ["violin", "heatmap", "distribution"]
+        formats: ["png", "html"]
+        dpi: 150
+
+      # 4. Azure DevOps repository (final artifact storage)
+      - type: azure_devops_repo
+        organization: "myorg"
+        project: "llm-experiments"
+        repo: "experiment-results"
+        branch: "main"
+        path_template: "workflows/{{ suite_name }}/{{ experiment_name }}/{{ timestamp }}"
+        token_env: AZURE_DEVOPS_PAT
+        commit_message: |
+          Secure workflow results: {{ experiment_name }}
+
+          - Total rows: {{ total_rows }}
+          - Successful: {{ success_count }}
+          - Failed: {{ failure_count }}
+          - Security level: {{ security_level }}
+        dry_run: false
+
+# ==============================================================================
+# Experiments
+# ==============================================================================
+
+experiments:
+  # Main experiment - Process all feedback
+  - name: customer_feedback_analysis
+    description: "Analyze customer feedback with full security stack"
+
+    # Override defaults if needed
+    llm:
+      temperature: 0.1  # Slight variation for analysis
+
+    # Experiment-specific aggregators
+    plugins:
+      aggregators:
+        - type: rationale_analysis
+          rationale_field: recommended_action
+          score_field: priority_level
+          top_keywords: 20
+          on_error: skip
+
+  # Baseline comparison experiment (if you have historical data)
+  - name: feedback_analysis_baseline
+    description: "Baseline comparison with previous model"
+
+    llm:
+      deployment: gpt-35-turbo  # Older model for comparison
+
+    # Baseline comparison plugins
+    baseline_comparisons:
+      - type: score_delta
+        criteria: ["positive_sentiment", "priority_level"]
+
+      - type: score_significance
+        criteria: ["positive_sentiment"]
+        alpha: 0.05
+        alternative: "two-sided"
+
+      - type: score_practical
+        threshold: 0.5
+        criteria: ["positive_sentiment"]
+
+# ==============================================================================
+# Prompt Packs (optional - for reusable configurations)
+# ==============================================================================
+
+prompt_packs:
+  secure_australian:
+    description: "Extra Australian PII detection"
+    llm:
+      middleware:
+        - type: pii_shield
+          patterns:
+            # Extra Australian business patterns
+            - name: aus_company_reg
+              regex: '\bACN\s*\d{3}\s*\d{3}\s*\d{3}\b'
+            - name: aus_business_reg
+              regex: '\bABN\s*\d{2}\s*\d{3}\s*\d{3}\s*\d{3}\b'
+          include_defaults: true
+          on_violation: mask
+          mask: "[AU-PII]"
+
+# ==============================================================================
+# Configuration Notes
+# ==============================================================================
+#
+# Prerequisites:
+# 1. Azure Storage account with CSV data
+# 2. Azure OpenAI deployment (GPT-4 or GPT-3.5)
+# 3. Azure Content Safety resource
+# 4. Azure DevOps Personal Access Token (PAT)
+# 5. Environment variables:
+#    - AZURE_CONTENT_SAFETY_KEY
+#    - AZURE_DEVOPS_PAT
+#
+# CSV Input Format (example):
+# customer_id,feedback_text,category
+# CUST001,"Great service, very helpful!",support
+# CUST002,"Product quality could be better",product
+#
+# Run command:
+# python -m elspeth.cli \
+#   --settings config/sample_suite/secure_azure_workflow.yaml \
+#   --suite-root config/sample_suite \
+#   --reports-dir outputs/secure_workflow_reports \
+#   --live-outputs
+#
+# Output locations:
+# - CSV results: outputs/secure_workflow/results.csv
+# - Analytics: outputs/secure_workflow/analytics/*.json, *.md
+# - Visualizations: outputs/secure_workflow/charts/*.png, *.html
+# - Azure DevOps: https://dev.azure.com/myorg/llm-experiments/_git/experiment-results
+#
+# The workflow will:
+# 1. Load CSV from Azure Blob Storage
+# 2. For each row:
+#    a. Assemble prompt from template + row data
+#    b. Screen through Azure Content Safety
+#    c. Check for PII (US, UK, Australian patterns)
+#    d. Check for classified material markings
+#    e. Audit log the request
+#    f. Send to Azure OpenAI
+#    g. Validate JSON response
+#    h. Extract scores and metrics
+# 3. Compute aggregate statistics
+# 4. Generate visualizations
+# 5. Commit results to Azure DevOps repo
+#
+# Security guarantees:
+# - All PII detected and blocked/masked
+# - Classification markings detected and blocked
+# - Content safety screening applied
+# - Full audit trail maintained
+# - Security levels propagated through artifacts
+# - Formula injection protection in CSV/Excel outputs
+# ==============================================================================

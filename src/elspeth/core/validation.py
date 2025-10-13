@@ -440,11 +440,13 @@ def _validate_plugin_reference(
     options = entry.get("options")
     options_dict: Dict[str, Any] | None
     options_level_raw = None
+    options_determinism_raw = None
     if options is None:
         options_dict = None
     elif isinstance(options, Mapping):
         options_dict = dict(options)
         options_level_raw = options_dict.get("security_level")
+        options_determinism_raw = options_dict.get("determinism_level")
     else:
         report.add_error("Options must be a mapping", context=f"{kind}:{plugin}")
         options_dict = {}
@@ -464,6 +466,11 @@ def _validate_plugin_reference(
         validation_options.setdefault("security_level", entry.get("security_level"))
     elif options_level_raw is not None:
         validation_options.setdefault("security_level", options_level_raw)
+
+    if entry.get("determinism_level") is not None:
+        validation_options.setdefault("determinism_level", entry.get("determinism_level"))
+    elif options_determinism_raw is not None:
+        validation_options.setdefault("determinism_level", options_determinism_raw)
 
     try:
         validator(plugin, validation_options)

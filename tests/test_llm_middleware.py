@@ -42,7 +42,7 @@ def test_middleware_chain(monkeypatch):
 
     box = []
     mw_registry.register_middleware("collect", lambda options, context: CollectingMiddleware(box))
-    middlewares = create_middlewares([{"name": "collect", "security_level": "official"}])
+    middlewares = create_middlewares([{"name": "collect", "security_level": "OFFICIAL", "determinism_level": "guaranteed"}])
 
     runner = ExperimentRunner(
         llm_client=DummyLLM(),
@@ -63,7 +63,7 @@ def test_middleware_chain(monkeypatch):
 
 def test_prompt_shield_blocks():
     middlewares = create_middlewares(
-        [{"name": "prompt_shield", "security_level": "official", "options": {"denied_terms": ["forbidden"], "on_violation": "abort"}}]
+        [{"name": "prompt_shield", "security_level": "OFFICIAL", "determinism_level": "guaranteed", "options": {"denied_terms": ["forbidden"], "on_violation": "abort"}}]
     )
 
     runner = ExperimentRunner(
@@ -88,7 +88,7 @@ def test_prompt_shield_masks(caplog):
         [
             {
                 "name": "prompt_shield",
-                "security_level": "official",
+                "security_level": "OFFICIAL", "determinism_level": "guaranteed",
                 "options": {"denied_terms": ["top secret"], "on_violation": "mask", "mask": "***"},
             }
         ]
@@ -117,7 +117,7 @@ def test_prompt_shield_logs_warning(caplog):
         [
             {
                 "name": "prompt_shield",
-                "security_level": "official",
+                "security_level": "OFFICIAL", "determinism_level": "guaranteed",
                 "options": {
                     "denied_terms": ["restricted"],
                     "on_violation": "mask",
@@ -381,7 +381,7 @@ def test_middleware_retry_hook_invoked(monkeypatch):
         prompt_template="Hello",
         prompt_fields=[],
         retry_config={"max_attempts": 2, "initial_delay": 0},
-        llm_middlewares=create_middlewares([{"name": "retry_tracker", "security_level": "official"}]),
+        llm_middlewares=create_middlewares([{"name": "retry_tracker", "security_level": "OFFICIAL", "determinism_level": "guaranteed"}]),
     )
 
     import pandas as pd
@@ -461,7 +461,7 @@ def test_suite_runner_applies_per_experiment_azure_middleware(monkeypatch):
         prompt_system="sys",
         prompt_template="{{ APPID }}",
         is_baseline=True,
-        llm_middleware_defs=[{"name": "azure_environment", "security_level": "official"}],
+        llm_middleware_defs=[{"name": "azure_environment", "security_level": "OFFICIAL", "determinism_level": "guaranteed"}],
     )
     variant = ExperimentConfig(
         name="variant",
@@ -469,8 +469,8 @@ def test_suite_runner_applies_per_experiment_azure_middleware(monkeypatch):
         max_tokens=10,
         prompt_system="sys",
         prompt_template="{{ APPID }}",
-        llm_middleware_defs=[{"name": "azure_environment", "security_level": "official"}],
-        baseline_plugin_defs=[{"name": "row_count", "security_level": "official"}],
+        llm_middleware_defs=[{"name": "azure_environment", "security_level": "OFFICIAL", "determinism_level": "guaranteed"}],
+        baseline_plugin_defs=[{"name": "row_count", "security_level": "OFFICIAL", "determinism_level": "guaranteed"}],
     )
 
     suite = ExperimentSuite(root=Path("."), experiments=[baseline, variant], baseline=baseline)
@@ -486,7 +486,7 @@ def test_suite_runner_applies_per_experiment_azure_middleware(monkeypatch):
         defaults={
             "prompt_system": "sys",
             "prompt_template": "{{ APPID }}",
-            "baseline_plugin_defs": [{"name": "row_count", "security_level": "official"}],
+            "baseline_plugin_defs": [{"name": "row_count", "security_level": "OFFICIAL", "determinism_level": "guaranteed"}],
         },
     )
 
@@ -533,7 +533,7 @@ def test_suite_runner_deduplicates_shared_middleware_multiple_experiments(monkey
         max_tokens=10,
         prompt_system="sys",
         prompt_template="{{ APPID }}",
-        llm_middleware_defs=[{"name": "shared", "security_level": "official"}],
+        llm_middleware_defs=[{"name": "shared", "security_level": "OFFICIAL", "determinism_level": "guaranteed"}],
     )
 
     suite = ExperimentSuite(root=Path("."), experiments=[exp_config], baseline=exp_config)
@@ -549,7 +549,7 @@ def test_suite_runner_deduplicates_shared_middleware_multiple_experiments(monkey
         defaults={
             "prompt_system": "sys",
             "prompt_template": "{{ APPID }}",
-            "llm_middleware_defs": [{"name": "shared", "security_level": "official"}],
+            "llm_middleware_defs": [{"name": "shared", "security_level": "OFFICIAL", "determinism_level": "guaranteed"}],
         },
     )
 
@@ -616,7 +616,7 @@ def test_suite_runner_deduplicates_shared_middleware(monkeypatch):
         prompt_system="sys",
         prompt_template="{{ APPID }}",
         is_baseline=True,
-        llm_middleware_defs=[{"name": "shared", "security_level": "official"}],
+        llm_middleware_defs=[{"name": "shared", "security_level": "OFFICIAL", "determinism_level": "guaranteed"}],
     )
 
     variant_config = ExperimentConfig(
@@ -625,7 +625,7 @@ def test_suite_runner_deduplicates_shared_middleware(monkeypatch):
         max_tokens=10,
         prompt_system="sys",
         prompt_template="{{ APPID }}",
-        llm_middleware_defs=[{"name": "shared", "security_level": "official"}],
+        llm_middleware_defs=[{"name": "shared", "security_level": "OFFICIAL", "determinism_level": "guaranteed"}],
     )
 
     suite = ExperimentSuite(root=Path("."), experiments=[baseline_config, variant_config], baseline=baseline_config)
@@ -641,7 +641,7 @@ def test_suite_runner_deduplicates_shared_middleware(monkeypatch):
         defaults={
             "prompt_system": "sys",
             "prompt_template": "{{ APPID }}",
-            "llm_middleware_defs": [{"name": "shared", "security_level": "official"}],
+            "llm_middleware_defs": [{"name": "shared", "security_level": "OFFICIAL", "determinism_level": "guaranteed"}],
         },
     )
 

@@ -36,7 +36,7 @@ class StubEmbedder(Embedder):
 
 
 def _attach_context(sink: EmbeddingsStoreSink) -> None:
-    suite_ctx = PluginContext(plugin_name="suite", plugin_kind="suite", security_level="official")
+    suite_ctx = PluginContext(plugin_name="suite", plugin_kind="suite", security_level="official", determinism_level="none")
     experiment_ctx = suite_ctx.derive(plugin_name="experiment", plugin_kind="experiment")
     sink_ctx = experiment_ctx.derive(plugin_name="embeddings_store", plugin_kind="sink")
     apply_plugin_context(sink, sink_ctx)
@@ -64,7 +64,7 @@ def test_embeddings_sink_upserts_records_using_stub_provider():
             }
         ]
     }
-    metadata = {"security_level": "official", "retry_summary": {"total": 1}}
+    metadata = {"security_level": "OFFICIAL", "determinism_level": "guaranteed", "retry_summary": {"total": 1}}
 
     sink.write(results, metadata=metadata)
     artifacts = sink.collect_artifacts()
@@ -88,7 +88,7 @@ def test_embeddings_sink_errors_when_embeddings_missing_without_model():
     _attach_context(sink)
 
     with pytest.raises(ConfigurationError):
-        sink.write({"results": [{"row": {"APPID": "missing"}}]}, metadata={"security_level": "official"})
+        sink.write({"results": [{"row": {"APPID": "missing"}}]}, metadata={"security_level": "OFFICIAL", "determinism_level": "guaranteed"})
     assert not provider.calls
     assert sink.collect_artifacts() == {}
 
@@ -114,7 +114,7 @@ def test_embeddings_sink_embeds_text_when_vector_missing():
                 }
             ]
         },
-        metadata={"security_level": "official", "run_id": "run-1"},
+        metadata={"security_level": "OFFICIAL", "determinism_level": "guaranteed", "run_id": "run-1"},
     )
 
     _, records = provider.calls[0]
@@ -143,7 +143,7 @@ def test_embeddings_sink_metadata_falls_back_to_run_metadata():
                 }
             ]
         },
-        metadata={"security_level": "official", "ticket": "INC-123"},
+        metadata={"security_level": "OFFICIAL", "determinism_level": "guaranteed", "ticket": "INC-123"},
     )
 
     _, records = provider.calls[0]
@@ -214,7 +214,7 @@ def test_embeddings_sink_collect_artifacts_resets_manifest():
                 }
             ]
         },
-        metadata={"security_level": "official"},
+        metadata={"security_level": "OFFICIAL", "determinism_level": "guaranteed"},
     )
 
     manifest = sink.collect_artifacts()
@@ -241,7 +241,7 @@ def test_embeddings_sink_batches_results():
                 {"row": {"APPID": "A-2"}, "response": {"content": "two", "metrics": {"embedding": [0.3, 0.4]}}},
             ]
         },
-        metadata={"security_level": "official"},
+        metadata={"security_level": "OFFICIAL", "determinism_level": "guaranteed"},
     )
 
     assert len(provider.calls) == 2

@@ -372,9 +372,9 @@ def test_suite_runner_with_plugin_definitions(tmp_path, monkeypatch):
     (exp_root / "baseline" / "user_prompt.md").write_text("Base {APPID}", encoding="utf-8")
     (exp_root / "variant" / "config.json").write_text(
         '{"name": "variant", "enabled": true, "temperature": 0.6, "max_tokens": 256, '
-        '"row_plugins": [{"name": "test_row", "security_level": "official", "options": {"value": 5}}], '
-        '"aggregator_plugins": [{"name": "test_agg", "security_level": "official", "options": {"key": "total"}}], '
-        '"baseline_plugins": [{"name": "row_count", "security_level": "official", "options": {"key": "delta"}}]}',
+        '"row_plugins": [{"name": "test_row", "security_level": "OFFICIAL", "determinism_level": "guaranteed", "options": {"value": 5}}], '
+        '"aggregator_plugins": [{"name": "test_agg", "security_level": "OFFICIAL", "determinism_level": "guaranteed", "options": {"key": "total"}}], '
+        '"baseline_plugins": [{"name": "row_count", "security_level": "OFFICIAL", "determinism_level": "guaranteed", "options": {"key": "delta"}}]}',
         encoding="utf-8",
     )
     (exp_root / "variant" / "user_prompt.md").write_text("Var {APPID}", encoding="utf-8")
@@ -600,7 +600,7 @@ def test_experiment_runner_early_stop():
             "threshold": 2,
             "comparison": "gte",
             "min_rows": 2,
-            "security_level": "official",
+            "security_level": "OFFICIAL", "determinism_level": "guaranteed",
         },
     )
 

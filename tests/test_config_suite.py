@@ -14,13 +14,15 @@ def test_load_settings_with_suite(tmp_path, monkeypatch):
         default:
           datasource:
             plugin: azure_blob
-            security_level: official
+            security_level: OFFICIAL
+            determinism_level: guaranteed
             options:
               config_path: config/blob_store.yaml
               profile: default
           llm:
             plugin: azure_openai
-            security_level: official
+            security_level: OFFICIAL
+            determinism_level: guaranteed
             options:
               config: {}
           sinks: []
@@ -75,12 +77,14 @@ def test_suite_defaults_override_prompt_pack_when_missing(tmp_path, monkeypatch)
         default:
           datasource:
             plugin: local_csv
-            security_level: official
+            security_level: OFFICIAL
+            determinism_level: guaranteed
             options:
               path: input.csv
           llm:
             plugin: mock
-            security_level: official
+            security_level: OFFICIAL
+            determinism_level: guaranteed
           sinks: []
           prompt_packs:
             sample:
@@ -127,10 +131,12 @@ def test_load_settings_unknown_datasource_plugin_raises(tmp_path):
         default:
           datasource:
             plugin: missing_source
-            security_level: official
+            security_level: OFFICIAL
+            determinism_level: guaranteed
           llm:
             plugin: mock
-            security_level: official
+            security_level: OFFICIAL
+            determinism_level: guaranteed
           sinks: []
         """,
         encoding="utf-8",

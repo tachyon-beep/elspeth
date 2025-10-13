@@ -20,11 +20,13 @@ def test_blob_datasource_loads_with_kwargs(monkeypatch, tmp_path):
         profile="alt",
         pandas_kwargs={"sep": ";"},
         security_level="Secret",
+        determinism_level="guaranteed",
     )
 
     df = datasource.load()
 
-    assert df.attrs["security_level"] == "secret"
+    assert df.attrs["security_level"] == "SECRET"
+    assert df.attrs["determinism_level"] == "guaranteed"
     assert calls == {
         "path": str(tmp_path / "config.yaml"),
         "profile": "alt",
@@ -42,13 +44,15 @@ def test_blob_datasource_skip_on_error(monkeypatch, caplog, tmp_path):
         config_path=str(tmp_path / "config.yaml"),
         on_error="skip",
         security_level="official-sensitive",
+        determinism_level="guaranteed",
     )
 
     with caplog.at_level("WARNING"):
         df = datasource.load()
 
     assert df.empty
-    assert df.attrs["security_level"] == "official-sensitive"
+    assert df.attrs["security_level"] == "OFFICIAL_SENSITIVE"
+    assert df.attrs["determinism_level"] == "guaranteed"
     assert any("Blob datasource failed" in record.message for record in caplog.records)
 
 

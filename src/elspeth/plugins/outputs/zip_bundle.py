@@ -13,7 +13,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 import pandas as pd
 
 from elspeth.core.interfaces import Artifact, ArtifactDescriptor, ResultSink
-from elspeth.core.security import normalize_security_level, resolve_security_level
+from elspeth.core.security import normalize_determinism_level, normalize_security_level, resolve_security_level
 from elspeth.plugins.outputs._sanitize import sanitize_cell
 
 logger = logging.getLogger(__name__)
@@ -66,6 +66,7 @@ class ZipResultSink(ResultSink):
         self._last_artifacts: Dict[str, Any] = {}
         self._additional_inputs: Dict[str, List[Artifact]] = {}
         self._security_level: str | None = None
+        self._determinism_level: str | None = None
 
     def write(self, results: Dict[str, Any], *, metadata: Dict[str, Any] | None = None) -> None:
         metadata = metadata or {}
@@ -115,6 +116,7 @@ class ZipResultSink(ResultSink):
             }
             if metadata:
                 self._security_level = normalize_security_level(metadata.get("security_level"))
+                self._determinism_level = normalize_determinism_level(metadata.get("determinism_level"))
         except Exception as exc:
             if self.on_error == "skip":
                 logger.warning("ZIP sink failed; skipping archive creation: %s", exc)
@@ -203,6 +205,7 @@ class ZipResultSink(ResultSink):
             return {}
         metadata = {key: value for key, value in self._last_artifacts.items() if value}
         metadata["security_level"] = self._security_level
+        metadata["determinism_level"] = self._determinism_level
         artifact = Artifact(
             id="",
             type="file/zip",
@@ -210,10 +213,12 @@ class ZipResultSink(ResultSink):
             metadata=metadata,
             persist=True,
             security_level=self._security_level,
+            determinism_level=self._determinism_level,
         )
         self._last_archive_path = None
         self._last_artifacts = {}
         self._security_level = None
+        self._determinism_level = None
         return {"zip": artifact}
 
     def prepare_artifacts(self, artifacts: Mapping[str, List[Artifact]]):  # pragma: no cover

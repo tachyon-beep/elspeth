@@ -25,7 +25,7 @@ def _build_runner():
             {"name": "analysis", "template": "Give analysis for {{ APPID }}."},
             {"name": "prioritization", "template": "Prioritise {{ APPID }}."},
         ],
-        row_plugins=[create_row_plugin({"name": "score_extractor", "security_level": "official"})],
+        row_plugins=[create_row_plugin({"name": "score_extractor", "security_level": "OFFICIAL", "determinism_level": "guaranteed"})],
     )
 
 
@@ -55,7 +55,7 @@ def test_early_stop_plugins_can_reference_nested_metrics():
     analysis_plugin = create_early_stop_plugin(
         {
             "name": "threshold",
-            "security_level": "official",
+            "security_level": "OFFICIAL", "determinism_level": "guaranteed",
             "options": {
                 "metric": "scores.analysis",
                 "threshold": first["metrics"]["scores"]["analysis"] - 0.01,
@@ -68,7 +68,7 @@ def test_early_stop_plugins_can_reference_nested_metrics():
     score_plugin = create_early_stop_plugin(
         {
             "name": "threshold",
-            "security_level": "official",
+            "security_level": "OFFICIAL", "determinism_level": "guaranteed",
             "options": {
                 "metric": "score",
                 "threshold": max(first["metrics"]["score"], second["metrics"]["score"]) - 0.01,

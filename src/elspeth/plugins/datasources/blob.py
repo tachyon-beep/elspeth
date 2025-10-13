@@ -8,7 +8,7 @@ from typing import Any, Dict
 import pandas as pd
 
 from elspeth.core.interfaces import DataSource
-from elspeth.core.security import normalize_security_level
+from elspeth.core.security import normalize_determinism_level, normalize_security_level
 from elspeth.datasources import load_blob_csv
 
 logger = logging.getLogger(__name__)
@@ -23,6 +23,7 @@ class BlobDataSource(DataSource):
         pandas_kwargs: Dict[str, Any] | None = None,
         on_error: str = "abort",
         security_level: str | None = None,
+        determinism_level: str | None = None,
     ):
         self.config_path = config_path
         self.profile = profile
@@ -31,6 +32,7 @@ class BlobDataSource(DataSource):
             raise ValueError("on_error must be 'abort' or 'skip'")
         self.on_error = on_error
         self.security_level = normalize_security_level(security_level)
+        self.determinism_level = normalize_determinism_level(determinism_level)
 
     def load(self) -> pd.DataFrame:
         try:
@@ -40,11 +42,13 @@ class BlobDataSource(DataSource):
                 pandas_kwargs=self.pandas_kwargs,
             )
             df.attrs["security_level"] = self.security_level
+            df.attrs["determinism_level"] = self.determinism_level
             return df
         except Exception as exc:
             if self.on_error == "skip":
                 logger.warning("Blob datasource failed; returning empty dataset: %s", exc)
                 df = pd.DataFrame()
                 df.attrs["security_level"] = self.security_level
+                df.attrs["determinism_level"] = self.determinism_level
                 return df
             raise

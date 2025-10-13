@@ -7,7 +7,12 @@ from typing import Any, Callable, Dict, Iterable, Mapping
 
 from elspeth.core.interfaces import DataSource, LLMClientProtocol, ResultSink
 from elspeth.core.plugins import PluginContext, apply_plugin_context
-from elspeth.core.security import coalesce_security_level, normalize_security_level
+from elspeth.core.security import (
+    coalesce_determinism_level,
+    coalesce_security_level,
+    normalize_determinism_level,
+    normalize_security_level,
+)
 from elspeth.core.validation import ConfigurationError, validate_schema
 from elspeth.plugins.datasources import BlobDataSource, CSVBlobDataSource, CSVDataSource
 from elspeth.plugins.llms import AzureOpenAIClient, HttpOpenAIClient, MockLLMClient, StaticLLMClient
@@ -24,6 +29,7 @@ from elspeth.plugins.outputs import (
     VisualAnalyticsSink,
     ZipResultSink,
 )
+from elspeth.plugins.outputs.enhanced_visual_report import EnhancedVisualAnalyticsSink
 from elspeth.plugins.outputs.embeddings_store import (
     DEFAULT_EMBEDDING_FIELD,
     DEFAULT_ID_FIELD,
@@ -42,6 +48,7 @@ ARTIFACT_DESCRIPTOR_SCHEMA = {
         "persist": {"type": "boolean"},
         "alias": {"type": "string"},
         "security_level": {"type": "string"},
+    "determinism_level": {"type": "string"},
     },
     "required": ["name", "type"],
     "additionalProperties": False,
@@ -109,6 +116,7 @@ class PluginRegistry:
                         "pandas_kwargs": {"type": "object"},
                         "on_error": ON_ERROR_ENUM,
                         "security_level": {"type": "string"},
+                        "determinism_level": {"type": "string"},
                     },
                     "required": ["config_path"],
                     "additionalProperties": True,
@@ -124,6 +132,7 @@ class PluginRegistry:
                         "encoding": {"type": "string"},
                         "on_error": ON_ERROR_ENUM,
                         "security_level": {"type": "string"},
+                        "determinism_level": {"type": "string"},
                     },
                     "required": ["path"],
                     "additionalProperties": True,
@@ -139,6 +148,7 @@ class PluginRegistry:
                         "encoding": {"type": "string"},
                         "on_error": ON_ERROR_ENUM,
                         "security_level": {"type": "string"},
+                        "determinism_level": {"type": "string"},
                     },
                     "required": ["path"],
                     "additionalProperties": True,
@@ -154,6 +164,7 @@ class PluginRegistry:
                         "config": {"type": "object"},
                         "deployment": {"type": "string"},
                         "client": {},
+                        "determinism_level": {"type": "string"},
                     },
                     "required": ["config"],
                     "additionalProperties": True,
@@ -171,6 +182,7 @@ class PluginRegistry:
                         "temperature": {"type": "number"},
                         "max_tokens": {"type": "integer"},
                         "timeout": {"type": "number", "exclusiveMinimum": 0},
+                        "determinism_level": {"type": "string"},
                     },
                     "required": ["api_base"],
                     "additionalProperties": True,
@@ -182,6 +194,7 @@ class PluginRegistry:
                     "type": "object",
                     "properties": {
                         "seed": {"type": "integer"},
+                        "determinism_level": {"type": "string"},
                     },
                     "additionalProperties": True,
                 },
@@ -198,6 +211,7 @@ class PluginRegistry:
                         "content": {"type": "string"},
                         "score": {"type": "number"},
                         "metrics": {"type": "object"},
+                        "determinism_level": {"type": "string"},
                     },
                     "additionalProperties": True,
                 },
@@ -224,6 +238,7 @@ class PluginRegistry:
                         "content_type": {"type": "string"},
                         "artifacts": ARTIFACTS_SECTION_SCHEMA,
                         "security_level": {"type": "string"},
+                        "determinism_level": {"type": "string"},
                         "on_error": ON_ERROR_ENUM,
                     },
                     "required": ["config_path"],
@@ -245,6 +260,7 @@ class PluginRegistry:
                         },
                         "artifacts": ARTIFACTS_SECTION_SCHEMA,
                         "security_level": {"type": "string"},
+                        "determinism_level": {"type": "string"},
                         "on_error": ON_ERROR_ENUM,
                     },
                     "required": ["path"],
@@ -269,6 +285,7 @@ class PluginRegistry:
                         },
                         "artifacts": ARTIFACTS_SECTION_SCHEMA,
                         "security_level": {"type": "string"},
+                        "determinism_level": {"type": "string"},
                         "on_error": ON_ERROR_ENUM,
                     },
                     "required": ["base_path"],
@@ -296,6 +313,7 @@ class PluginRegistry:
                         },
                         "artifacts": ARTIFACTS_SECTION_SCHEMA,
                         "security_level": {"type": "string"},
+                        "determinism_level": {"type": "string"},
                         "on_error": ON_ERROR_ENUM,
                     },
                     "required": ["base_path"],
@@ -318,6 +336,7 @@ class PluginRegistry:
                         "csv_name": {"type": "string"},
                         "artifacts": ARTIFACTS_SECTION_SCHEMA,
                         "security_level": {"type": "string"},
+                        "determinism_level": {"type": "string"},
                         "on_error": ON_ERROR_ENUM,
                     },
                     "required": ["base_path"],
@@ -333,6 +352,7 @@ class PluginRegistry:
                         "overwrite": {"type": "boolean"},
                         "artifacts": ARTIFACTS_SECTION_SCHEMA,
                         "security_level": {"type": "string"},
+                        "determinism_level": {"type": "string"},
                         "on_error": ON_ERROR_ENUM,
                     },
                     "required": ["destination"],
@@ -354,6 +374,7 @@ class PluginRegistry:
                         "dry_run": {"type": "boolean"},
                         "artifacts": ARTIFACTS_SECTION_SCHEMA,
                         "security_level": {"type": "string"},
+                        "determinism_level": {"type": "string"},
                         "on_error": ON_ERROR_ENUM,
                     },
                     "required": ["owner", "repo"],
@@ -378,6 +399,7 @@ class PluginRegistry:
                         "dry_run": {"type": "boolean"},
                         "artifacts": ARTIFACTS_SECTION_SCHEMA,
                         "security_level": {"type": "string"},
+                        "determinism_level": {"type": "string"},
                         "on_error": ON_ERROR_ENUM,
                     },
                     "required": ["organization", "project", "repository"],
@@ -395,6 +417,7 @@ class PluginRegistry:
                         "key_env": {"type": "string"},
                         "hash_algorithm": {"type": "string"},
                         "security_level": {"type": "string"},
+                        "determinism_level": {"type": "string"},
                         "artifacts": ARTIFACTS_SECTION_SCHEMA,
                         "on_error": ON_ERROR_ENUM,
                     },
@@ -418,6 +441,7 @@ class PluginRegistry:
                         "include_comparisons": {"type": "boolean"},
                         "artifacts": ARTIFACTS_SECTION_SCHEMA,
                         "security_level": {"type": "string"},
+                        "determinism_level": {"type": "string"},
                         "on_error": ON_ERROR_ENUM,
                     },
                     "required": ["base_path"],
@@ -459,6 +483,53 @@ class PluginRegistry:
                         "seaborn_style": {"type": "string"},
                         "artifacts": ARTIFACTS_SECTION_SCHEMA,
                         "security_level": {"type": "string"},
+                        "determinism_level": {"type": "string"},
+                        "on_error": ON_ERROR_ENUM,
+                    },
+                    "required": ["base_path"],
+                    "additionalProperties": True,
+                },
+            ),
+            "enhanced_visual": PluginFactory(
+                create=lambda options, context: EnhancedVisualAnalyticsSink(
+                    base_path=options["base_path"],
+                    file_stem=options.get("file_stem", "enhanced_visual"),
+                    formats=options.get("formats"),
+                    chart_types=options.get("chart_types"),
+                    dpi=int(options.get("dpi", 150)),
+                    figure_size=options.get("figure_size"),
+                    seaborn_style=options.get("seaborn_style", "darkgrid"),
+                    color_palette=options.get("color_palette", "Set2"),
+                    on_error=options.get("on_error", "abort"),
+                ),
+                schema={
+                    "type": "object",
+                    "properties": {
+                        "base_path": {"type": "string"},
+                        "file_stem": {"type": "string"},
+                        "formats": {
+                            "type": "array",
+                            "items": {"type": "string", "enum": ["png", "html"]},
+                        },
+                        "chart_types": {
+                            "type": "array",
+                            "items": {
+                                "type": "string",
+                                "enum": ["violin", "box", "heatmap", "forest", "distribution"],
+                            },
+                        },
+                        "dpi": {"type": "integer", "minimum": 50},
+                        "figure_size": {
+                            "type": "array",
+                            "items": {"type": "number"},
+                            "minItems": 2,
+                            "maxItems": 2,
+                        },
+                        "seaborn_style": {"type": "string"},
+                        "color_palette": {"type": "string"},
+                        "artifacts": ARTIFACTS_SECTION_SCHEMA,
+                        "security_level": {"type": "string"},
+                        "determinism_level": {"type": "string"},
                         "on_error": ON_ERROR_ENUM,
                     },
                     "required": ["base_path"],
@@ -514,6 +585,7 @@ class PluginRegistry:
                         "namespace_field": {"type": "string"},
                         "artifacts": ARTIFACTS_SECTION_SCHEMA,
                         "security_level": {"type": "string"},
+                    "determinism_level": {"type": "string"},
                     },
                     "required": ["provider"],
                     "additionalProperties": True,
@@ -538,29 +610,43 @@ class PluginRegistry:
         payload = dict(options or {})
         validation_payload = dict(payload)
         validation_payload.pop("security_level", None)
+        validation_payload.pop("determinism_level", None)
         factory.validate(validation_payload, context=f"datasource:{name}")
+
+        # Extract and normalize security_level
         security_level = payload.get("security_level")
         if security_level is None:
             raise ConfigurationError(f"datasource:{name}: security_level is required")
-        normalized_level = normalize_security_level(security_level)
-        payload["security_level"] = normalized_level
-        sources = tuple(provenance or ("options.security_level",))
+        normalized_sec_level = normalize_security_level(security_level)
+        payload["security_level"] = normalized_sec_level
+
+        # Extract and normalize determinism_level
+        determinism_level = payload.get("determinism_level")
+        if determinism_level is None:
+            raise ConfigurationError(f"datasource:{name}: determinism_level is required")
+        normalized_det_level = normalize_determinism_level(determinism_level)
+        payload["determinism_level"] = normalized_det_level
+
+        sources = tuple(provenance or ("options.security_level", "options.determinism_level"))
         if parent_context:
             context = parent_context.derive(
                 plugin_name=name,
                 plugin_kind="datasource",
-                security_level=normalized_level,
+                security_level=normalized_sec_level,
+                determinism_level=normalized_det_level,
                 provenance=sources,
             )
         else:
             context = PluginContext(
                 plugin_name=name,
                 plugin_kind="datasource",
-                security_level=normalized_level,
+                security_level=normalized_sec_level,
+                determinism_level=normalized_det_level,
                 provenance=sources,
             )
         call_payload = dict(payload)
         call_payload.pop("security_level", None)
+        call_payload.pop("determinism_level", None)
         plugin = factory.create(call_payload, context)
         apply_plugin_context(plugin, context)
         return plugin
@@ -575,6 +661,8 @@ class PluginRegistry:
         data = options or {}
         if data.get("security_level") is None:
             raise ConfigurationError(f"datasource:{name}: security_level is required")
+        if data.get("determinism_level") is None:
+            raise ConfigurationError(f"datasource:{name}: determinism_level is required")
         factory.validate(data, context=f"datasource:{name}")
 
     def create_llm(
@@ -594,29 +682,43 @@ class PluginRegistry:
         payload = dict(options or {})
         validation_payload = dict(payload)
         validation_payload.pop("security_level", None)
+        validation_payload.pop("determinism_level", None)
         factory.validate(validation_payload, context=f"llm:{name}")
+
+        # Extract and normalize security_level
         security_level = payload.get("security_level")
         if security_level is None:
             raise ConfigurationError(f"llm:{name}: security_level is required")
-        normalized_level = normalize_security_level(security_level)
-        payload["security_level"] = normalized_level
-        sources = tuple(provenance or ("options.security_level",))
+        normalized_sec_level = normalize_security_level(security_level)
+        payload["security_level"] = normalized_sec_level
+
+        # Extract and normalize determinism_level
+        determinism_level = payload.get("determinism_level")
+        if determinism_level is None:
+            raise ConfigurationError(f"llm:{name}: determinism_level is required")
+        normalized_det_level = normalize_determinism_level(determinism_level)
+        payload["determinism_level"] = normalized_det_level
+
+        sources = tuple(provenance or ("options.security_level", "options.determinism_level"))
         if parent_context:
             context = parent_context.derive(
                 plugin_name=name,
                 plugin_kind="llm",
-                security_level=normalized_level,
+                security_level=normalized_sec_level,
+                determinism_level=normalized_det_level,
                 provenance=sources,
             )
         else:
             context = PluginContext(
                 plugin_name=name,
                 plugin_kind="llm",
-                security_level=normalized_level,
+                security_level=normalized_sec_level,
+                determinism_level=normalized_det_level,
                 provenance=sources,
             )
         call_payload = dict(payload)
         call_payload.pop("security_level", None)
+        call_payload.pop("determinism_level", None)
         plugin = factory.create(call_payload, context)
         apply_plugin_context(plugin, context)
         return plugin
@@ -635,6 +737,7 @@ class PluginRegistry:
                 plugin_name=getattr(definition, "name", definition.__class__.__name__),
                 plugin_kind="llm",
                 security_level=parent_context.security_level,
+                determinism_level=parent_context.determinism_level,
                 provenance=tuple(provenance or ("llm.instance",)),
             )
             apply_plugin_context(definition, context)
@@ -647,21 +750,45 @@ class PluginRegistry:
         if not plugin_name:
             raise ConfigurationError("LLM definition requires 'plugin'")
         options = dict(definition.get("options", {}) or {})
-        entry_level = definition.get("security_level")
-        options_level = options.get("security_level")
+
+        # Handle security_level coalescing
+        entry_sec_level = definition.get("security_level")
+        options_sec_level = options.get("security_level")
         sources: list[str] = []
-        if entry_level is not None:
+        if entry_sec_level is not None:
             sources.append(f"llm:{plugin_name}.definition.security_level")
-        if options_level is not None:
+        if options_sec_level is not None:
             sources.append(f"llm:{plugin_name}.options.security_level")
+
+        # Handle determinism_level coalescing
+        entry_det_level = definition.get("determinism_level")
+        options_det_level = options.get("determinism_level")
+        if entry_det_level is not None:
+            sources.append(f"llm:{plugin_name}.definition.determinism_level")
+        if options_det_level is not None:
+            sources.append(f"llm:{plugin_name}.options.determinism_level")
+
         if provenance:
             sources.extend(provenance)
+
         try:
-            level = coalesce_security_level(parent_context.security_level, entry_level, options_level)
+            sec_level = coalesce_security_level(parent_context.security_level, entry_sec_level, options_sec_level)
         except ValueError as exc:
             raise ConfigurationError(f"llm:{plugin_name}: {exc}") from exc
+
+        # For determinism_level: if definition specifies it, use that; otherwise inherit from parent
+        if entry_det_level is not None or options_det_level is not None:
+            try:
+                det_level = coalesce_determinism_level(entry_det_level, options_det_level)
+            except ValueError as exc:
+                raise ConfigurationError(f"llm:{plugin_name}: {exc}") from exc
+        else:
+            # No explicit determinism_level in definition, inherit from parent
+            det_level = parent_context.determinism_level
+
         payload = dict(options)
-        payload["security_level"] = level
+        payload["security_level"] = sec_level
+        payload["determinism_level"] = det_level
         resolved_provenance = tuple(sources or (f"llm:{plugin_name}.resolved",))
         return self.create_llm(
             plugin_name,
@@ -680,6 +807,8 @@ class PluginRegistry:
         data = options or {}
         if data.get("security_level") is None:
             raise ConfigurationError(f"llm:{name}: security_level is required")
+        if data.get("determinism_level") is None:
+            raise ConfigurationError(f"llm:{name}: determinism_level is required")
         factory.validate(data, context=f"llm:{name}")
 
     def create_sink(
@@ -699,29 +828,43 @@ class PluginRegistry:
         payload = dict(options or {})
         validation_payload = dict(payload)
         validation_payload.pop("security_level", None)
+        validation_payload.pop("determinism_level", None)
         factory.validate(validation_payload, context=f"sink:{name}")
+
+        # Extract and normalize security_level
         security_level = payload.get("security_level")
         if security_level is None:
             raise ConfigurationError(f"sink:{name}: security_level is required")
-        normalized_level = normalize_security_level(security_level)
-        payload["security_level"] = normalized_level
-        sources = tuple(provenance or ("options.security_level",))
+        normalized_sec_level = normalize_security_level(security_level)
+        payload["security_level"] = normalized_sec_level
+
+        # Extract and normalize determinism_level
+        determinism_level = payload.get("determinism_level")
+        if determinism_level is None:
+            raise ConfigurationError(f"sink:{name}: determinism_level is required")
+        normalized_det_level = normalize_determinism_level(determinism_level)
+        payload["determinism_level"] = normalized_det_level
+
+        sources = tuple(provenance or ("options.security_level", "options.determinism_level"))
         if parent_context:
             context = parent_context.derive(
                 plugin_name=name,
                 plugin_kind="sink",
-                security_level=normalized_level,
+                security_level=normalized_sec_level,
+                determinism_level=normalized_det_level,
                 provenance=sources,
             )
         else:
             context = PluginContext(
                 plugin_name=name,
                 plugin_kind="sink",
-                security_level=normalized_level,
+                security_level=normalized_sec_level,
+                determinism_level=normalized_det_level,
                 provenance=sources,
             )
         call_payload = dict(payload)
         call_payload.pop("security_level", None)
+        call_payload.pop("determinism_level", None)
         plugin = factory.create(call_payload, context)
         apply_plugin_context(plugin, context)
         return plugin
@@ -736,6 +879,8 @@ class PluginRegistry:
         data = options or {}
         if data.get("security_level") is None:
             raise ConfigurationError(f"sink:{name}: security_level is required")
+        if data.get("determinism_level") is None:
+            raise ConfigurationError(f"sink:{name}: determinism_level is required")
         factory.validate(data, context=f"sink:{name}")
 
 

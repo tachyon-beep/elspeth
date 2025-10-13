@@ -50,19 +50,27 @@ def test_csv_datasource_security_level_and_dtype(tmp_path):
         dtype={"value": str},
         encoding="utf-16",
         security_level="Official",
+        determinism_level="guaranteed",
     )
 
     df = datasource.load()
-    assert df.attrs["security_level"] == "official"
+    assert df.attrs["security_level"] == "OFFICIAL"
+    assert df.attrs["determinism_level"] == "guaranteed"
     assert list(df["value"]) == ["001", "002"]
 
 
 def test_csv_blob_datasource_skip_missing_returns_empty(tmp_path, caplog):
-    datasource = CSVBlobDataSource(path=tmp_path / "missing.csv", on_error="skip", security_level="top-secret")
+    datasource = CSVBlobDataSource(
+        path=tmp_path / "missing.csv",
+        on_error="skip",
+        security_level="SECRET",
+        determinism_level="guaranteed",
+    )
     with caplog.at_level("WARNING"):
         df = datasource.load()
     assert df.empty
-    assert df.attrs["security_level"] == "top-secret"
+    assert df.attrs["security_level"] == "SECRET"
+    assert df.attrs["determinism_level"] == "guaranteed"
     assert any("missing file" in record.message for record in caplog.records)
 
 

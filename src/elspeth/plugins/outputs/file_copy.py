@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Dict, List, Mapping
 
 from elspeth.core.interfaces import Artifact, ResultSink
-from elspeth.core.security import normalize_security_level
+from elspeth.core.security import normalize_determinism_level, normalize_security_level
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +24,7 @@ class FileCopySink(ResultSink):
         self._written_path: Path | None = None
         self._output_type: str | None = None
         self._security_level: str | None = None
+        self._determinism_level: str | None = None
 
     def prepare_artifacts(self, artifacts: Mapping[str, List[Artifact]]):  # pragma: no cover - optional
         self._source_artifact = None
@@ -67,6 +68,7 @@ class FileCopySink(ResultSink):
         self._written_path = self.destination
         if metadata and metadata.get("security_level"):
             self._security_level = normalize_security_level(metadata.get("security_level"))
+            self._determinism_level = normalize_determinism_level(metadata.get("determinism_level"))
 
     def collect_artifacts(self) -> Dict[str, Artifact]:  # pragma: no cover - optional
         if not self._written_path:
@@ -75,6 +77,7 @@ class FileCopySink(ResultSink):
             "source": self._source_artifact.id if self._source_artifact else None,
             "source_path": self._source_artifact.path if self._source_artifact else None,
             "security_level": self._security_level,
+            "determinism_level": self._determinism_level,
         }
         if self._source_artifact and self._source_artifact.metadata:
             source_ct = self._source_artifact.metadata.get("content_type")
@@ -87,9 +90,11 @@ class FileCopySink(ResultSink):
             metadata=metadata,
             persist=True,
             security_level=self._security_level,
+            determinism_level=self._determinism_level,
         )
         self._written_path = None
         self._source_artifact = None
         self._output_type = None
         self._security_level = None
+        self._determinism_level = None
         return {"file": artifact}

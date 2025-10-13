@@ -1268,6 +1268,195 @@ register_baseline_plugin(
 )
 
 
+_COST_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "on_error": _ON_ERROR_SCHEMA,
+    },
+    "additionalProperties": True,
+}
+
+_LATENCY_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "on_error": _ON_ERROR_SCHEMA,
+    },
+    "additionalProperties": True,
+}
+
+
+class CostSummaryAggregator:
+    """Aggregate cost and token usage metrics across all rows.
+
+    Collects prompt_tokens, completion_tokens, and cost from response metrics
+    (added by cost tracker) and computes totals, averages, min, and max.
+    """
+
+    name = "cost_summary"
+
+    def __init__(self, *, on_error: str = "abort") -> None:
+        if on_error not in {"abort", "skip"}:
+            raise ValueError("on_error must be 'abort' or 'skip'")
+        self._on_error = on_error
+
+    def finalize(self, records: list[Dict[str, Any]]) -> Dict[str, Any]:
+        try:
+            return self._finalize_impl(records)
+        except Exception as exc:  # pragma: no cover - defensive
+            if self._on_error == "skip":
+                logger.warning("cost_summary skipped due to error: %s", exc)
+                return {}
+            raise
+
+    def _finalize_impl(self, records: list[Dict[str, Any]]) -> Dict[str, Any]:
+        if not records:
+            return {}
+
+        prompt_tokens_list: list[int] = []
+        completion_tokens_list: list[int] = []
+        cost_list: list[float] = []
+
+        for record in records:
+            metrics = record.get("metrics") or {}
+            prompt_tokens = metrics.get("prompt_tokens")
+            completion_tokens = metrics.get("completion_tokens")
+            cost = metrics.get("cost")
+
+            if prompt_tokens is not None:
+                try:
+                    prompt_tokens_list.append(int(prompt_tokens))
+                except (TypeError, ValueError):
+                    pass
+
+            if completion_tokens is not None:
+                try:
+                    completion_tokens_list.append(int(completion_tokens))
+                except (TypeError, ValueError):
+                    pass
+
+            if cost is not None:
+                try:
+                    cost_list.append(float(cost))
+                except (TypeError, ValueError):
+                    pass
+
+        result: Dict[str, Any] = {
+            "total_requests": len(records),
+            "requests_with_cost": len(cost_list),
+        }
+
+        if prompt_tokens_list:
+            result["prompt_tokens"] = {
+                "total": sum(prompt_tokens_list),
+                "mean": float(np.mean(prompt_tokens_list)),
+                "median": float(np.median(prompt_tokens_list)),
+                "min": min(prompt_tokens_list),
+                "max": max(prompt_tokens_list),
+            }
+
+        if completion_tokens_list:
+            result["completion_tokens"] = {
+                "total": sum(completion_tokens_list),
+                "mean": float(np.mean(completion_tokens_list)),
+                "median": float(np.median(completion_tokens_list)),
+                "min": min(completion_tokens_list),
+                "max": max(completion_tokens_list),
+            }
+
+        if cost_list:
+            result["cost"] = {
+                "total": sum(cost_list),
+                "mean": float(np.mean(cost_list)),
+                "median": float(np.median(cost_list)),
+                "min": min(cost_list),
+                "max": max(cost_list),
+            }
+
+        return result
+
+
+class LatencySummaryAggregator:
+    """Aggregate latency metrics across all rows.
+
+    Collects latency_seconds from response metrics and computes
+    totals, averages, percentiles, min, and max.
+    """
+
+    name = "latency_summary"
+
+    def __init__(self, *, on_error: str = "abort") -> None:
+        if on_error not in {"abort", "skip"}:
+            raise ValueError("on_error must be 'abort' or 'skip'")
+        self._on_error = on_error
+
+    def finalize(self, records: list[Dict[str, Any]]) -> Dict[str, Any]:
+        try:
+            return self._finalize_impl(records)
+        except Exception as exc:  # pragma: no cover - defensive
+            if self._on_error == "skip":
+                logger.warning("latency_summary skipped due to error: %s", exc)
+                return {}
+            raise
+
+    def _finalize_impl(self, records: list[Dict[str, Any]]) -> Dict[str, Any]:
+        if not records:
+            return {}
+
+        latency_list: list[float] = []
+
+        for record in records:
+            metrics = record.get("metrics") or {}
+            latency = metrics.get("latency_seconds")
+
+            if latency is not None:
+                try:
+                    lat_val = float(latency)
+                    if not math.isnan(lat_val) and lat_val >= 0:
+                        latency_list.append(lat_val)
+                except (TypeError, ValueError):
+                    pass
+
+        if not latency_list:
+            return {
+                "total_requests": len(records),
+                "requests_with_latency": 0,
+            }
+
+        arr = np.array(latency_list, dtype=float)
+
+        return {
+            "total_requests": len(records),
+            "requests_with_latency": len(latency_list),
+            "latency_seconds": {
+                "mean": float(np.mean(arr)),
+                "median": float(np.median(arr)),
+                "std": float(np.std(arr, ddof=1)) if len(arr) > 1 else 0.0,
+                "min": float(np.min(arr)),
+                "max": float(np.max(arr)),
+                "p50": float(np.percentile(arr, 50)),
+                "p95": float(np.percentile(arr, 95)),
+                "p99": float(np.percentile(arr, 99)),
+            },
+        }
+
+
+register_aggregation_plugin(
+    "cost_summary",
+    lambda options, context: CostSummaryAggregator(
+        on_error=options.get("on_error", "abort"),
+    ),
+    schema=_COST_SCHEMA,
+)
+
+register_aggregation_plugin(
+    "latency_summary",
+    lambda options, context: LatencySummaryAggregator(
+        on_error=options.get("on_error", "abort"),
+    ),
+    schema=_LATENCY_SCHEMA,
+)
+
+
 def _collect_scores_by_criterion(payload: Mapping[str, Any]) -> Dict[str, list[float]]:
     scores_by_name: Dict[str, list[float]] = {}
     for record in payload.get("results", []) or []:
@@ -1554,6 +1743,1206 @@ def _benjamini_hochberg(p_values: Sequence[float]) -> list[float]:
     return adjusted
 
 
+_RATIONALE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "rationale_field": {"type": "string"},
+        "score_field": {"type": "string"},
+        "criteria": {"type": "array", "items": {"type": "string"}},
+        "min_word_length": {"type": "integer", "minimum": 2},
+        "top_keywords": {"type": "integer", "minimum": 1},
+        "on_error": _ON_ERROR_SCHEMA,
+    },
+    "additionalProperties": True,
+}
+
+_REFEREE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "referee_fields": {"type": "array", "items": {"type": "string"}},
+        "score_field": {"type": "string"},
+        "criteria": {"type": "array", "items": {"type": "string"}},
+        "min_samples": {"type": "integer", "minimum": 2},
+        "value_mapping": {"type": "object"},
+        "on_error": _ON_ERROR_SCHEMA,
+    },
+    "additionalProperties": True,
+}
+
+
+class RationaleAnalysisAggregator:
+    """Analyze LLM rationales to understand scoring patterns and provide interpretability.
+
+    This plugin extracts rationales from response content, analyzes common themes
+    in low vs high scoring responses, computes rationale length statistics, and
+    identifies confidence indicators. Provides qualitative insights to complement
+    quantitative scoring metrics.
+    """
+
+    name = "rationale_analysis"
+
+    def __init__(
+        self,
+        *,
+        rationale_field: str = "rationale",
+        score_field: str = "score",
+        criteria: list[str] | None = None,
+        min_word_length: int = 3,
+        top_keywords: int = 10,
+        on_error: str = "abort",
+    ) -> None:
+        self._rationale_field = rationale_field
+        self._score_field = score_field
+        self._criteria = set(criteria) if criteria else None
+        self._min_word_length = max(int(min_word_length), 2)
+        self._top_keywords = max(int(top_keywords), 1)
+        if on_error not in {"abort", "skip"}:
+            raise ValueError("on_error must be 'abort' or 'skip'")
+        self._on_error = on_error
+
+        # Common stop words to filter out
+        self._stop_words = {
+            "the",
+            "a",
+            "an",
+            "and",
+            "or",
+            "but",
+            "in",
+            "on",
+            "at",
+            "to",
+            "for",
+            "of",
+            "with",
+            "by",
+            "from",
+            "is",
+            "was",
+            "are",
+            "were",
+            "been",
+            "be",
+            "have",
+            "has",
+            "had",
+            "do",
+            "does",
+            "did",
+            "will",
+            "would",
+            "could",
+            "should",
+            "may",
+            "might",
+            "can",
+            "this",
+            "that",
+            "these",
+            "those",
+            "it",
+            "as",
+            "not",
+        }
+
+    def finalize(self, records: list[Dict[str, Any]]) -> Dict[str, Any]:
+        try:
+            return self._finalize_impl(records)
+        except Exception as exc:  # pragma: no cover - defensive
+            if self._on_error == "skip":
+                logger.warning("rationale_analysis skipped due to error: %s", exc)
+                return {}
+            raise
+
+    def _finalize_impl(self, records: list[Dict[str, Any]]) -> Dict[str, Any]:
+        if not records:
+            return {}
+
+        # Collect rationales and scores by criterion
+        criterion_data: Dict[str, Dict[str, Any]] = {}
+
+        for record in records:
+            responses = record.get("responses") or {}
+            metrics = record.get("metrics") or {}
+            scores = metrics.get("scores") or {}
+
+            for crit_name, response in responses.items():
+                if self._criteria and crit_name not in self._criteria:
+                    continue
+
+                # Extract rationale from response content
+                rationale = self._extract_rationale(response)
+                if not rationale:
+                    continue
+
+                # Extract score
+                score = scores.get(crit_name)
+                if score is None:
+                    continue
+                try:
+                    score_val = float(score)
+                except (TypeError, ValueError):
+                    continue
+                if math.isnan(score_val):
+                    continue
+
+                # Store in criterion bucket
+                bucket = criterion_data.setdefault(
+                    crit_name,
+                    {
+                        "rationales": [],
+                        "scores": [],
+                        "low_score_words": [],
+                        "high_score_words": [],
+                    },
+                )
+                bucket["rationales"].append(rationale)
+                bucket["scores"].append(score_val)
+
+                # Categorize words by score
+                words = self._extract_words(rationale)
+                if score_val <= 2:
+                    bucket["low_score_words"].extend(words)
+                elif score_val >= 4:
+                    bucket["high_score_words"].extend(words)
+
+        # Analyze each criterion
+        results: Dict[str, Any] = {}
+        overall_stats: Dict[str, Any] = {
+            "total_rationales": 0,
+            "avg_length_chars": 0.0,
+            "avg_length_words": 0.0,
+        }
+
+        all_lengths_chars = []
+        all_lengths_words = []
+
+        for crit_name, data in criterion_data.items():
+            rationales = data["rationales"]
+            scores = data["scores"]
+
+            if not rationales:
+                continue
+
+            # Length statistics
+            lengths_chars = [len(r) for r in rationales]
+            lengths_words = [len(r.split()) for r in rationales]
+            all_lengths_chars.extend(lengths_chars)
+            all_lengths_words.extend(lengths_words)
+
+            # Keyword analysis
+            from collections import Counter
+
+            low_counter = Counter(data["low_score_words"])
+            high_counter = Counter(data["high_score_words"])
+
+            low_keywords = [
+                {"word": word, "count": count} for word, count in low_counter.most_common(self._top_keywords)
+            ]
+            high_keywords = [
+                {"word": word, "count": count} for word, count in high_counter.most_common(self._top_keywords)
+            ]
+
+            # Confidence indicators (simple heuristic)
+            confidence_indicators = self._detect_confidence(rationales)
+
+            # Score correlation with length
+            length_score_corr = None
+            if len(lengths_chars) >= 2:
+                try:
+                    corr_arr = np.corrcoef(lengths_chars, scores)
+                    length_score_corr = float(corr_arr[0, 1]) if not np.isnan(corr_arr[0, 1]) else None
+                except Exception:  # pragma: no cover
+                    length_score_corr = None
+
+            results[crit_name] = {
+                "count": len(rationales),
+                "avg_length_chars": float(np.mean(lengths_chars)),
+                "avg_length_words": float(np.mean(lengths_words)),
+                "min_length_chars": min(lengths_chars),
+                "max_length_chars": max(lengths_chars),
+                "length_score_correlation": length_score_corr,
+                "low_score_keywords": low_keywords,
+                "high_score_keywords": high_keywords,
+                "confidence_indicators": confidence_indicators,
+            }
+
+        # Overall statistics
+        if all_lengths_chars:
+            overall_stats["total_rationales"] = len(all_lengths_chars)
+            overall_stats["avg_length_chars"] = float(np.mean(all_lengths_chars))
+            overall_stats["avg_length_words"] = float(np.mean(all_lengths_words))
+            overall_stats["median_length_chars"] = float(np.median(all_lengths_chars))
+            overall_stats["median_length_words"] = float(np.median(all_lengths_words))
+
+        return {
+            "criteria": results,
+            "overall": overall_stats,
+        }
+
+    def _extract_rationale(self, response: Mapping[str, Any]) -> str | None:
+        """Extract rationale text from response content."""
+        if not isinstance(response, Mapping):
+            return None
+
+        # Try metrics first
+        metrics = response.get("metrics")
+        if isinstance(metrics, Mapping) and self._rationale_field in metrics:
+            rationale = metrics.get(self._rationale_field)
+            if isinstance(rationale, str) and rationale.strip():
+                return rationale.strip()
+
+        # Try parsing JSON content
+        content = response.get("content")
+        if isinstance(content, str):
+            try:
+                payload = json.loads(content)
+                if isinstance(payload, Mapping) and self._rationale_field in payload:
+                    rationale = payload.get(self._rationale_field)
+                    if isinstance(rationale, str) and rationale.strip():
+                        return rationale.strip()
+            except json.JSONDecodeError:
+                pass
+
+        return None
+
+    def _extract_words(self, text: str) -> list[str]:
+        """Extract meaningful words from text, filtering stop words and short words."""
+        import re
+
+        words = re.findall(r"\b\w+\b", text.lower())
+        return [w for w in words if len(w) >= self._min_word_length and w not in self._stop_words]
+
+    def _detect_confidence(self, rationales: list[str]) -> Dict[str, Any]:
+        """Detect confidence indicators in rationales (simple heuristic)."""
+        high_confidence_words = {"clearly", "definitely", "certainly", "obviously", "absolutely", "undoubtedly"}
+        low_confidence_words = {"maybe", "perhaps", "possibly", "might", "somewhat", "unclear", "uncertain"}
+        hedge_words = {"seems", "appears", "suggests", "likely", "probably", "potentially"}
+
+        high_conf_count = 0
+        low_conf_count = 0
+        hedge_count = 0
+
+        for rationale in rationales:
+            text_lower = rationale.lower()
+            if any(word in text_lower for word in high_confidence_words):
+                high_conf_count += 1
+            if any(word in text_lower for word in low_confidence_words):
+                low_conf_count += 1
+            if any(word in text_lower for word in hedge_words):
+                hedge_count += 1
+
+        total = len(rationales)
+        return {
+            "high_confidence_rate": high_conf_count / total if total else 0.0,
+            "low_confidence_rate": low_conf_count / total if total else 0.0,
+            "hedge_rate": hedge_count / total if total else 0.0,
+        }
+
+
+register_aggregation_plugin(
+    "rationale_analysis",
+    lambda options, context: RationaleAnalysisAggregator(
+        rationale_field=options.get("rationale_field", "rationale"),
+        score_field=options.get("score_field", "score"),
+        criteria=options.get("criteria"),
+        min_word_length=int(options.get("min_word_length", 3)),
+        top_keywords=int(options.get("top_keywords", 10)),
+        on_error=options.get("on_error", "abort"),
+    ),
+    schema=_RATIONALE_SCHEMA,
+)
+
+
+class RefereeAlignmentBaselinePlugin:
+    """Compare LLM scores against human referee/expert judgments.
+
+    This plugin measures how well LLM scores align with human expert assessments
+    (referees). It computes alignment metrics (mean absolute error, correlation)
+    between baseline and variant to determine if the variant improves agreement
+    with human judgment.
+
+    Useful for validating that model changes maintain or improve alignment with
+    human expert consensus.
+    """
+
+    name = "referee_alignment"
+
+    def __init__(
+        self,
+        *,
+        referee_fields: list[str] | None = None,
+        score_field: str = "scores",
+        criteria: list[str] | None = None,
+        min_samples: int = 2,
+        value_mapping: dict[str, float] | None = None,
+        on_error: str = "abort",
+    ) -> None:
+        self._referee_fields = referee_fields or ["referee_score"]
+        self._score_field = score_field
+        self._criteria = set(criteria) if criteria else None
+        self._min_samples = max(int(min_samples), 2)
+        if on_error not in {"abort", "skip"}:
+            raise ValueError("on_error must be 'abort' or 'skip'")
+        self._on_error = on_error
+
+        # Default value mapping for common string values
+        default_mapping = {
+            "yes": 5.0,
+            "no": 1.0,
+            "partially": 3.0,
+            "partial": 3.0,
+            "n/a": None,
+            "na": None,
+        }
+        self._value_mapping = {**default_mapping, **(value_mapping or {})}
+
+    def compare(self, baseline: Dict[str, Any], variant: Dict[str, Any]) -> Dict[str, Any]:
+        try:
+            return self._compare_impl(baseline, variant)
+        except Exception as exc:  # pragma: no cover - defensive
+            if self._on_error == "skip":
+                logger.warning("referee_alignment skipped due to error: %s", exc)
+                return {}
+            raise
+
+    def _compare_impl(self, baseline: Dict[str, Any], variant: Dict[str, Any]) -> Dict[str, Any]:
+        # Extract scores and referee judgments for both experiments
+        baseline_pairs = self._extract_score_pairs(baseline)
+        variant_pairs = self._extract_score_pairs(variant)
+
+        if not baseline_pairs and not variant_pairs:
+            return {}
+
+        # Compute alignment metrics
+        results: Dict[str, Any] = {}
+
+        # Overall alignment
+        baseline_alignment = self._compute_alignment_metrics(baseline_pairs)
+        variant_alignment = self._compute_alignment_metrics(variant_pairs)
+
+        if baseline_alignment:
+            results["baseline"] = baseline_alignment
+
+        if variant_alignment:
+            results["variant"] = variant_alignment
+
+        # Comparison
+        if baseline_alignment and variant_alignment:
+            # Lower MAE is better alignment
+            mae_improved = variant_alignment["mean_absolute_error"] < baseline_alignment["mean_absolute_error"]
+            # Higher correlation is better alignment
+            corr_improved = False
+            if (
+                baseline_alignment["correlation"] is not None
+                and variant_alignment["correlation"] is not None
+            ):
+                corr_improved = variant_alignment["correlation"] > baseline_alignment["correlation"]
+
+            results["comparison"] = {
+                "mae_improved": mae_improved,
+                "mae_difference": variant_alignment["mean_absolute_error"]
+                - baseline_alignment["mean_absolute_error"],
+                "correlation_improved": corr_improved,
+                "correlation_difference": (
+                    variant_alignment["correlation"] - baseline_alignment["correlation"]
+                    if variant_alignment["correlation"] is not None and baseline_alignment["correlation"] is not None
+                    else None
+                ),
+            }
+
+        # Per-criterion breakdown
+        if self._criteria:
+            criteria_results = {}
+            for crit_name in self._criteria:
+                baseline_crit = [
+                    (llm.get(crit_name), ref) for llm, ref in baseline_pairs if crit_name in llm
+                ]
+                variant_crit = [
+                    (llm.get(crit_name), ref) for llm, ref in variant_pairs if crit_name in llm
+                ]
+
+                # Filter out None scores
+                baseline_crit = [(l, r) for l, r in baseline_crit if l is not None and r is not None]
+                variant_crit = [(l, r) for l, r in variant_crit if l is not None and r is not None]
+
+                if baseline_crit or variant_crit:
+                    crit_result: Dict[str, Any] = {}
+                    if baseline_crit:
+                        crit_result["baseline"] = self._compute_alignment_metrics(
+                            [({"score": l}, r) for l, r in baseline_crit]
+                        )
+                    if variant_crit:
+                        crit_result["variant"] = self._compute_alignment_metrics(
+                            [({"score": l}, r) for l, r in variant_crit]
+                        )
+                    criteria_results[crit_name] = crit_result
+
+            if criteria_results:
+                results["criteria"] = criteria_results
+
+        return results
+
+    def _extract_score_pairs(
+        self, payload: Dict[str, Any]
+    ) -> list[tuple[Dict[str, float], float]]:
+        """Extract (LLM scores dict, referee score) pairs from experiment results."""
+        pairs: list[tuple[Dict[str, float], float]] = []
+
+        for result in payload.get("results", []) or []:
+            row = result.get("row") or {}
+            metrics = result.get("metrics") or {}
+
+            # Extract referee score from row data
+            referee_score = self._extract_referee_score(row)
+            if referee_score is None:
+                continue
+
+            # Extract LLM scores
+            llm_scores = metrics.get(self._score_field)
+            if not isinstance(llm_scores, Mapping):
+                continue
+
+            # Convert to dict of floats
+            score_dict: Dict[str, float] = {}
+            for crit_name, value in llm_scores.items():
+                if self._criteria and crit_name not in self._criteria:
+                    continue
+                try:
+                    score_val = float(value)
+                    if not math.isnan(score_val):
+                        score_dict[crit_name] = score_val
+                except (TypeError, ValueError):
+                    continue
+
+            if score_dict:
+                pairs.append((score_dict, referee_score))
+
+        return pairs
+
+    def _extract_referee_score(self, row: Dict[str, Any]) -> float | None:
+        """Extract and aggregate referee score from row data."""
+        referee_values: list[float] = []
+
+        for field_name in self._referee_fields:
+            value = row.get(field_name)
+            if value is None:
+                continue
+
+            # Try to convert to float
+            converted = self._convert_referee_value(value)
+            if converted is not None:
+                referee_values.append(converted)
+
+        # Return mean of all referee values
+        return float(np.mean(referee_values)) if referee_values else None
+
+    def _convert_referee_value(self, value: Any) -> float | None:
+        """Convert referee value to float using mapping or direct conversion."""
+        # Try direct numeric conversion first
+        if isinstance(value, (int, float)):
+            return float(value) if not math.isnan(float(value)) else None
+
+        # Try string mapping
+        if isinstance(value, str):
+            value_lower = value.strip().lower()
+            if value_lower in self._value_mapping:
+                return self._value_mapping[value_lower]
+
+            # Try parsing as number
+            try:
+                return float(value)
+            except ValueError:
+                pass
+
+        return None
+
+    def _compute_alignment_metrics(
+        self, pairs: list[tuple[Dict[str, float], float]]
+    ) -> Dict[str, Any]:
+        """Compute alignment metrics from (LLM scores, referee score) pairs."""
+        if len(pairs) < self._min_samples:
+            return {}
+
+        # Compute mean LLM score for each pair
+        llm_means: list[float] = []
+        referee_scores: list[float] = []
+
+        for llm_dict, ref_score in pairs:
+            if llm_dict:
+                llm_means.append(float(np.mean(list(llm_dict.values()))))
+                referee_scores.append(ref_score)
+
+        if not llm_means:
+            return {}
+
+        # Mean Absolute Error (lower is better)
+        mae = float(np.mean([abs(llm - ref) for llm, ref in zip(llm_means, referee_scores)]))
+
+        # Root Mean Square Error
+        rmse = float(np.sqrt(np.mean([(llm - ref) ** 2 for llm, ref in zip(llm_means, referee_scores)])))
+
+        # Correlation (higher is better)
+        correlation = None
+        if len(llm_means) >= 2:
+            try:
+                corr_matrix = np.corrcoef(llm_means, referee_scores)
+                corr_val = corr_matrix[0, 1]
+                if not np.isnan(corr_val):
+                    correlation = float(corr_val)
+            except Exception:  # pragma: no cover
+                correlation = None
+
+        # Agreement rate (within 1 point)
+        within_1 = sum(1 for llm, ref in zip(llm_means, referee_scores) if abs(llm - ref) <= 1.0)
+        agreement_rate = within_1 / len(llm_means)
+
+        return {
+            "samples": len(llm_means),
+            "mean_absolute_error": mae,
+            "root_mean_square_error": rmse,
+            "correlation": correlation,
+            "agreement_rate_within_1": agreement_rate,
+            "llm_mean": float(np.mean(llm_means)),
+            "llm_std": float(np.std(llm_means)),
+            "referee_mean": float(np.mean(referee_scores)),
+            "referee_std": float(np.std(referee_scores)),
+        }
+
+
+register_baseline_plugin(
+    "referee_alignment",
+    lambda options, context: RefereeAlignmentBaselinePlugin(
+        referee_fields=options.get("referee_fields"),
+        score_field=options.get("score_field", "scores"),
+        criteria=options.get("criteria"),
+        min_samples=int(options.get("min_samples", 2)),
+        value_mapping=options.get("value_mapping"),
+        on_error=options.get("on_error", "abort"),
+    ),
+    schema=_REFEREE_SCHEMA,
+)
+
+
+# =====================================================================
+# Priority 2 Features: Outlier Detection, Score Flips, Category Effects, Criteria Effects
+# =====================================================================
+
+_OUTLIER_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "top_n": {"type": "integer", "minimum": 1},
+        "criteria": {"type": "array", "items": {"type": "string"}},
+        "min_delta": {"type": "number", "minimum": 0},
+        "on_error": _ON_ERROR_SCHEMA,
+    },
+    "additionalProperties": True,
+}
+
+
+class OutlierDetectionAggregator:
+    """Identify rows with largest score disagreements between baseline and variant.
+
+    This plugin finds cases where experiments disagree most, helping identify
+    problematic inputs or edge cases. Computes per-row score deltas, sorts by
+    magnitude, and returns configurable top N outliers with full details.
+
+    Useful for: finding problematic test cases, edge case identification,
+    quality assurance reviews.
+    """
+
+    name = "outlier_detection"
+
+    def __init__(
+        self,
+        *,
+        top_n: int = 10,
+        criteria: list[str] | None = None,
+        min_delta: float = 0.0,
+        on_error: str = "abort",
+    ) -> None:
+        self._top_n = max(int(top_n), 1)
+        self._criteria = set(criteria) if criteria else None
+        self._min_delta = float(min_delta)
+        if on_error not in {"abort", "skip"}:
+            raise ValueError("on_error must be 'abort' or 'skip'")
+        self._on_error = on_error
+
+    def compare(self, baseline: Dict[str, Any], variant: Dict[str, Any]) -> Dict[str, Any]:
+        try:
+            return self._compare_impl(baseline, variant)
+        except Exception as exc:  # pragma: no cover - defensive
+            if self._on_error == "skip":
+                logger.warning("outlier_detection skipped due to error: %s", exc)
+                return {}
+            raise
+
+    def _compare_impl(self, baseline: Dict[str, Any], variant: Dict[str, Any]) -> Dict[str, Any]:
+        baseline_results = baseline.get("results", []) or []
+        variant_results = variant.get("results", []) or []
+
+        # Create ID mapping for paired comparison
+        baseline_by_id: Dict[Any, Dict[str, Any]] = {}
+        variant_by_id: Dict[Any, Dict[str, Any]] = {}
+
+        for result in baseline_results:
+            row = result.get("row") or {}
+            row_id = row.get("id")
+            if row_id is not None:
+                baseline_by_id[row_id] = result
+
+        for result in variant_results:
+            row = result.get("row") or {}
+            row_id = row.get("id")
+            if row_id is not None:
+                variant_by_id[row_id] = result
+
+        common_ids = set(baseline_by_id.keys()) & set(variant_by_id.keys())
+        if not common_ids:
+            return {}
+
+        # Compute outliers
+        outliers: list[Dict[str, Any]] = []
+
+        for row_id in common_ids:
+            b_result = baseline_by_id[row_id]
+            v_result = variant_by_id[row_id]
+
+            b_scores = self._extract_scores(b_result)
+            v_scores = self._extract_scores(v_result)
+
+            if not b_scores or not v_scores:
+                continue
+
+            # Compute mean delta across criteria
+            b_mean = float(np.mean(list(b_scores.values())))
+            v_mean = float(np.mean(list(v_scores.values())))
+            delta = abs(v_mean - b_mean)
+
+            if delta < self._min_delta:
+                continue
+
+            outliers.append(
+                {
+                    "id": row_id,
+                    "baseline_mean": round(b_mean, 2),
+                    "variant_mean": round(v_mean, 2),
+                    "delta": round(delta, 2),
+                    "direction": "higher" if v_mean > b_mean else "lower",
+                    "baseline_scores": {k: round(v, 2) for k, v in b_scores.items()},
+                    "variant_scores": {k: round(v, 2) for k, v in v_scores.items()},
+                }
+            )
+
+        # Sort by delta magnitude (descending) and return top N
+        outliers.sort(key=lambda x: x["delta"], reverse=True)
+        top_outliers = outliers[: self._top_n]
+
+        return {
+            "top_outliers": top_outliers,
+            "total_outliers_found": len(outliers),
+            "requested_top_n": self._top_n,
+        }
+
+    def _extract_scores(self, result: Dict[str, Any]) -> Dict[str, float]:
+        """Extract scores from result, filtering by criteria if specified."""
+        metrics = result.get("metrics") or {}
+        scores = metrics.get("scores") or {}
+
+        if not isinstance(scores, Mapping):
+            return {}
+
+        extracted: Dict[str, float] = {}
+        for name, value in scores.items():
+            if self._criteria and name not in self._criteria:
+                continue
+            try:
+                num = float(value)
+                if not math.isnan(num):
+                    extracted[name] = num
+            except (TypeError, ValueError):
+                continue
+
+        return extracted
+
+
+register_baseline_plugin(
+    "outlier_detection",
+    lambda options, context: OutlierDetectionAggregator(
+        top_n=int(options.get("top_n", 10)),
+        criteria=options.get("criteria"),
+        min_delta=float(options.get("min_delta", 0.0)),
+        on_error=options.get("on_error", "abort"),
+    ),
+    schema=_OUTLIER_SCHEMA,
+)
+
+
+_SCORE_FLIP_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "criteria": {"type": "array", "items": {"type": "string"}},
+        "pass_threshold": {"type": "number"},
+        "fail_threshold": {"type": "number"},
+        "major_change": {"type": "number", "minimum": 0},
+        "on_error": _ON_ERROR_SCHEMA,
+    },
+    "additionalProperties": True,
+}
+
+
+class ScoreFlipAnalysisAggregator:
+    """Analyze score direction changes (flips) between baseline and variant.
+
+    Identifies fail→pass transitions, pass→fail transitions, major score drops,
+    and major score gains. Useful for understanding where the variant changed
+    scoring patterns most dramatically.
+
+    Typical use cases: regression detection, improvement tracking, edge case analysis.
+    """
+
+    name = "score_flip_analysis"
+
+    def __init__(
+        self,
+        *,
+        criteria: list[str] | None = None,
+        pass_threshold: float = 3.0,
+        fail_threshold: float = 2.0,
+        major_change: float = 2.0,
+        on_error: str = "abort",
+    ) -> None:
+        self._criteria = set(criteria) if criteria else None
+        self._pass_threshold = float(pass_threshold)
+        self._fail_threshold = float(fail_threshold)
+        self._major_change = float(major_change)
+        if on_error not in {"abort", "skip"}:
+            raise ValueError("on_error must be 'abort' or 'skip'")
+        self._on_error = on_error
+
+    def compare(self, baseline: Dict[str, Any], variant: Dict[str, Any]) -> Dict[str, Any]:
+        try:
+            return self._compare_impl(baseline, variant)
+        except Exception as exc:  # pragma: no cover - defensive
+            if self._on_error == "skip":
+                logger.warning("score_flip_analysis skipped due to error: %s", exc)
+                return {}
+            raise
+
+    def _compare_impl(self, baseline: Dict[str, Any], variant: Dict[str, Any]) -> Dict[str, Any]:
+        # Get paired scores by criterion
+        pairs = _collect_paired_scores_by_criterion(baseline, variant)
+
+        if not pairs:
+            return {}
+
+        # Apply criteria filter
+        if self._criteria is not None:
+            pairs = {name: scores for name, scores in pairs.items() if name in self._criteria}
+
+        if not pairs:
+            return {}
+
+        # Aggregate flips across all criteria
+        flips = {
+            "fail_to_pass": [],
+            "pass_to_fail": [],
+            "major_drops": [],
+            "major_gains": [],
+        }
+
+        all_pairs: list[tuple[float, float]] = []
+        for criterion_pairs in pairs.values():
+            all_pairs.extend(criterion_pairs)
+
+        for baseline_score, variant_score in all_pairs:
+            delta = variant_score - baseline_score
+
+            # Fail → Pass
+            if baseline_score <= self._fail_threshold and variant_score >= self._pass_threshold:
+                flips["fail_to_pass"].append((baseline_score, variant_score))
+
+            # Pass → Fail
+            elif baseline_score >= self._pass_threshold and variant_score <= self._fail_threshold:
+                flips["pass_to_fail"].append((baseline_score, variant_score))
+
+            # Major drops
+            if delta <= -self._major_change:
+                flips["major_drops"].append((baseline_score, variant_score))
+
+            # Major gains
+            elif delta >= self._major_change:
+                flips["major_gains"].append((baseline_score, variant_score))
+
+        # Per-criterion breakdown
+        criteria_results: Dict[str, Any] = {}
+        for crit_name, criterion_pairs in pairs.items():
+            crit_flips = {
+                "fail_to_pass_count": 0,
+                "pass_to_fail_count": 0,
+                "major_drops_count": 0,
+                "major_gains_count": 0,
+            }
+
+            for baseline_score, variant_score in criterion_pairs:
+                delta = variant_score - baseline_score
+
+                if baseline_score <= self._fail_threshold and variant_score >= self._pass_threshold:
+                    crit_flips["fail_to_pass_count"] += 1
+
+                if baseline_score >= self._pass_threshold and variant_score <= self._fail_threshold:
+                    crit_flips["pass_to_fail_count"] += 1
+
+                if delta <= -self._major_change:
+                    crit_flips["major_drops_count"] += 1
+
+                if delta >= self._major_change:
+                    crit_flips["major_gains_count"] += 1
+
+            crit_flips["net_flip_impact"] = (
+                crit_flips["fail_to_pass_count"] - crit_flips["pass_to_fail_count"]
+            )
+            criteria_results[crit_name] = crit_flips
+
+        # Overall results
+        return {
+            "fail_to_pass_count": len(flips["fail_to_pass"]),
+            "pass_to_fail_count": len(flips["pass_to_fail"]),
+            "major_drops_count": len(flips["major_drops"]),
+            "major_gains_count": len(flips["major_gains"]),
+            "net_flip_impact": len(flips["fail_to_pass"]) - len(flips["pass_to_fail"]),
+            "examples": {
+                k: [(round(b, 2), round(v, 2)) for b, v in v[:5]]
+                for k, v in flips.items()
+            },
+            "criteria": criteria_results,
+        }
+
+
+register_baseline_plugin(
+    "score_flip_analysis",
+    lambda options, context: ScoreFlipAnalysisAggregator(
+        criteria=options.get("criteria"),
+        pass_threshold=float(options.get("pass_threshold", 3.0)),
+        fail_threshold=float(options.get("fail_threshold", 2.0)),
+        major_change=float(options.get("major_change", 2.0)),
+        on_error=options.get("on_error", "abort"),
+    ),
+    schema=_SCORE_FLIP_SCHEMA,
+)
+
+
+_CATEGORY_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "category_field": {"type": "string"},
+        "criteria": {"type": "array", "items": {"type": "string"}},
+        "min_samples": {"type": "integer", "minimum": 1},
+        "top_n": {"type": "integer", "minimum": 1},
+        "on_error": _ON_ERROR_SCHEMA,
+    },
+    "additionalProperties": True,
+}
+
+
+class CategoryEffectsAggregator:
+    """Analyze how categorical variables affect score distributions.
+
+    Discovers categories dynamically from row data, computes per-category statistics,
+    effect sizes, and ranks categories by impact magnitude. Useful for understanding
+    which subpopulations are most affected by variant changes.
+
+    Example use case: Understanding performance across document types, user segments,
+    or difficulty levels.
+    """
+
+    name = "category_effects"
+
+    def __init__(
+        self,
+        *,
+        category_field: str = "category",
+        criteria: list[str] | None = None,
+        min_samples: int = 2,
+        top_n: int = 10,
+        on_error: str = "abort",
+    ) -> None:
+        self._category_field = category_field
+        self._criteria = set(criteria) if criteria else None
+        self._min_samples = max(int(min_samples), 1)
+        self._top_n = max(int(top_n), 1)
+        if on_error not in {"abort", "skip"}:
+            raise ValueError("on_error must be 'abort' or 'skip'")
+        self._on_error = on_error
+
+    def compare(self, baseline: Dict[str, Any], variant: Dict[str, Any]) -> Dict[str, Any]:
+        try:
+            return self._compare_impl(baseline, variant)
+        except Exception as exc:  # pragma: no cover - defensive
+            if self._on_error == "skip":
+                logger.warning("category_effects skipped due to error: %s", exc)
+                return {}
+            raise
+
+    def _compare_impl(self, baseline: Dict[str, Any], variant: Dict[str, Any]) -> Dict[str, Any]:
+        # Discover categories from baseline data
+        categories = self._discover_categories(baseline)
+
+        if not categories:
+            return {}
+
+        # Analyze each category
+        category_impacts: Dict[str, Dict[str, Any]] = {}
+
+        for category in categories:
+            baseline_cat = self._filter_by_category(baseline, category)
+            variant_cat = self._filter_by_category(variant, category)
+
+            if not baseline_cat or not variant_cat:
+                continue
+
+            # Extract scores
+            baseline_scores = _collect_scores_by_criterion({"results": baseline_cat})
+            variant_scores = _collect_scores_by_criterion({"results": variant_cat})
+
+            # Compute overall mean for this category
+            all_baseline = []
+            all_variant = []
+            for crit_name in baseline_scores:
+                if self._criteria and crit_name not in self._criteria:
+                    continue
+                all_baseline.extend(baseline_scores.get(crit_name, []))
+                all_variant.extend(variant_scores.get(crit_name, []))
+
+            if len(all_baseline) < self._min_samples or len(all_variant) < self._min_samples:
+                continue
+
+            baseline_mean = float(np.mean(all_baseline))
+            variant_mean = float(np.mean(all_variant))
+            delta = variant_mean - baseline_mean
+
+            # Compute Cohen's d effect size
+            effect_size = self._compute_cohens_d(all_baseline, all_variant)
+
+            category_impacts[category] = {
+                "baseline_mean": round(baseline_mean, 2),
+                "variant_mean": round(variant_mean, 2),
+                "delta": round(delta, 2),
+                "effect_size": round(effect_size, 3) if effect_size is not None else None,
+                "baseline_samples": len(all_baseline),
+                "variant_samples": len(all_variant),
+            }
+
+        if not category_impacts:
+            return {}
+
+        # Rank by absolute effect size
+        ranked = sorted(
+            category_impacts.items(),
+            key=lambda x: abs(x[1]["effect_size"]) if x[1]["effect_size"] is not None else 0,
+            reverse=True,
+        )
+
+        return {
+            "category_impacts": category_impacts,
+            "most_affected": [{"category": k, **v} for k, v in ranked[: self._top_n]],
+            "least_affected": [{"category": k, **v} for k, v in ranked[-self._top_n :]],
+            "total_categories": len(category_impacts),
+        }
+
+    def _discover_categories(self, payload: Dict[str, Any]) -> set[str]:
+        """Discover unique category values from baseline data."""
+        categories: set[str] = set()
+        for result in payload.get("results", []) or []:
+            row = result.get("row") or {}
+            category = row.get(self._category_field)
+            if category is not None and isinstance(category, (str, int, float)):
+                categories.add(str(category))
+        return categories
+
+    def _filter_by_category(
+        self, payload: Dict[str, Any], category: str
+    ) -> list[Dict[str, Any]]:
+        """Filter results by category value."""
+        filtered = []
+        for result in payload.get("results", []) or []:
+            row = result.get("row") or {}
+            cat_value = row.get(self._category_field)
+            if cat_value is not None and str(cat_value) == category:
+                filtered.append(result)
+        return filtered
+
+    def _compute_cohens_d(
+        self, baseline: list[float], variant: list[float]
+    ) -> float | None:
+        """Compute Cohen's d effect size."""
+        if not baseline or not variant:
+            return None
+
+        arr_base = np.array(baseline, dtype=float)
+        arr_var = np.array(variant, dtype=float)
+
+        n_base = arr_base.size
+        n_var = arr_var.size
+
+        if n_base < 2 or n_var < 2:
+            return None
+
+        mean_base = arr_base.mean()
+        mean_var = arr_var.mean()
+        var_base = arr_base.var(ddof=1)
+        var_var = arr_var.var(ddof=1)
+
+        pooled_var = ((n_base - 1) * var_base + (n_var - 1) * var_var) / (
+            n_base + n_var - 2
+        )
+
+        # Guard against near-zero variance (numerical stability)
+        if pooled_var <= 1e-10:
+            return None
+
+        return float((mean_var - mean_base) / math.sqrt(pooled_var))
+
+
+register_baseline_plugin(
+    "category_effects",
+    lambda options, context: CategoryEffectsAggregator(
+        category_field=options.get("category_field", "category"),
+        criteria=options.get("criteria"),
+        min_samples=int(options.get("min_samples", 2)),
+        top_n=int(options.get("top_n", 10)),
+        on_error=options.get("on_error", "abort"),
+    ),
+    schema=_CATEGORY_SCHEMA,
+)
+
+
+_CRITERIA_EFFECTS_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "criteria": {"type": "array", "items": {"type": "string"}},
+        "min_samples": {"type": "integer", "minimum": 2},
+        "alpha": {"type": "number", "minimum": 0.001, "maximum": 0.5},
+        "on_error": _ON_ERROR_SCHEMA,
+    },
+    "additionalProperties": True,
+}
+
+
+class CriteriaEffectsBaselinePlugin:
+    """Perform per-criterion statistical comparisons between baseline and variant.
+
+    Computes detailed statistics for each scoring criterion individually, including
+    means, effect sizes, Mann-Whitney U tests, and significance flags. Provides
+    finer-grained analysis than overall score comparisons.
+
+    Useful for: understanding which criteria are most affected by changes,
+    identifying criterion-specific regressions or improvements.
+    """
+
+    name = "criteria_effects"
+
+    def __init__(
+        self,
+        *,
+        criteria: list[str] | None = None,
+        min_samples: int = 2,
+        alpha: float = 0.05,
+        on_error: str = "abort",
+    ) -> None:
+        self._criteria = set(criteria) if criteria else None
+        self._min_samples = max(int(min_samples), 2)
+        self._alpha = float(alpha)
+        if on_error not in {"abort", "skip"}:
+            raise ValueError("on_error must be 'abort' or 'skip'")
+        self._on_error = on_error
+
+    def compare(self, baseline: Dict[str, Any], variant: Dict[str, Any]) -> Dict[str, Any]:
+        try:
+            return self._compare_impl(baseline, variant)
+        except Exception as exc:  # pragma: no cover - defensive
+            if self._on_error == "skip":
+                logger.warning("criteria_effects skipped due to error: %s", exc)
+                return {}
+            raise
+
+    def _compare_impl(self, baseline: Dict[str, Any], variant: Dict[str, Any]) -> Dict[str, Any]:
+        base_scores = _collect_scores_by_criterion(baseline)
+        var_scores = _collect_scores_by_criterion(variant)
+
+        criteria = sorted(set(base_scores.keys()) & set(var_scores.keys()))
+
+        if self._criteria is not None:
+            criteria = [name for name in criteria if name in self._criteria]
+
+        if not criteria:
+            return {}
+
+        results: Dict[str, Any] = {}
+
+        for crit_name in criteria:
+            base = base_scores.get(crit_name, [])
+            var = var_scores.get(crit_name, [])
+
+            if len(base) < self._min_samples or len(var) < self._min_samples:
+                continue
+
+            base_arr = np.array(base, dtype=float)
+            var_arr = np.array(var, dtype=float)
+
+            baseline_mean = float(base_arr.mean())
+            variant_mean = float(var_arr.mean())
+            delta = variant_mean - baseline_mean
+
+            # Cohen's d effect size
+            n_base = base_arr.size
+            n_var = var_arr.size
+            var_base = base_arr.var(ddof=1) if n_base > 1 else 0.0
+            var_var = var_arr.var(ddof=1) if n_var > 1 else 0.0
+            pooled_var = ((n_base - 1) * var_base + (n_var - 1) * var_var) / (
+                n_base + n_var - 2
+            )
+            effect_size = (
+                delta / math.sqrt(pooled_var) if pooled_var > 0 else None
+            )
+
+            # Mann-Whitney U test (non-parametric)
+            p_value = None
+            if scipy_stats is not None:
+                try:
+                    mw_result = scipy_stats.mannwhitneyu(
+                        base, var, alternative="two-sided"
+                    )
+                    p_value = float(mw_result.pvalue)
+                except Exception:  # pragma: no cover
+                    p_value = None
+
+            results[crit_name] = {
+                "baseline_mean": round(baseline_mean, 2),
+                "variant_mean": round(variant_mean, 2),
+                "delta": round(delta, 2),
+                "effect_size": round(effect_size, 3) if effect_size is not None else None,
+                "p_value": round(p_value, 4) if p_value is not None else None,
+                "significant": bool(p_value < self._alpha) if p_value is not None else None,
+                "n_baseline": n_base,
+                "n_variant": n_var,
+            }
+
+        return results
+
+
+register_baseline_plugin(
+    "criteria_effects",
+    lambda options, context: CriteriaEffectsBaselinePlugin(
+        criteria=options.get("criteria"),
+        min_samples=int(options.get("min_samples", 2)),
+        alpha=float(options.get("alpha", 0.05)),
+        on_error=options.get("on_error", "abort"),
+    ),
+    schema=_CRITERIA_EFFECTS_SCHEMA,
+)
+
+
 __all__ = [
     "ScoreExtractorPlugin",
     "ScoreStatsAggregator",
@@ -1568,4 +2957,12 @@ __all__ = [
     "ScoreAssumptionsBaselinePlugin",
     "ScorePracticalBaselinePlugin",
     "ScoreVariantRankingAggregator",
+    "CostSummaryAggregator",
+    "LatencySummaryAggregator",
+    "RationaleAnalysisAggregator",
+    "RefereeAlignmentBaselinePlugin",
+    "OutlierDetectionAggregator",
+    "ScoreFlipAnalysisAggregator",
+    "CategoryEffectsAggregator",
+    "CriteriaEffectsBaselinePlugin",
 ]

@@ -28,7 +28,7 @@ def _sample_payload() -> dict[str, object]:
         },
         "baseline_comparison": {"score_significance": {"p_value": 0.04}},
         "score_cliffs_delta": {"analysis": {"delta": 0.6}},
-        "metadata": {"retry_summary": {"total_requests": 2}, "security_level": "official"},
+        "metadata": {"retry_summary": {"total_requests": 2}, "security_level": "OFFICIAL", "determinism_level": "guaranteed"},
     }
 
 
@@ -39,7 +39,7 @@ def test_analytics_report_sink_generates_files_and_artifacts(tmp_path: Path) -> 
         formats=["json", "markdown"],
     )
 
-    sink.write(_sample_payload(), metadata={"security_level": "official"})
+    sink.write(_sample_payload(), metadata={"security_level": "OFFICIAL", "determinism_level": "guaranteed"})
 
     json_path = tmp_path / "reports" / "summary.json"
     md_path = tmp_path / "reports" / "summary.md"
@@ -49,7 +49,8 @@ def test_analytics_report_sink_generates_files_and_artifacts(tmp_path: Path) -> 
     data = json.loads(json_path.read_text(encoding="utf-8"))
     assert data["rows"] == 1
     assert data["failures"] == 1
-    assert data["metadata"]["security_level"] == "official"
+    assert data["metadata"]["security_level"] == "OFFICIAL"
+    assert data["metadata"]["determinism_level"] == "guaranteed"
     assert data["aggregates"]["score_stats"]["overall"]["mean"] == 0.8
     assert "analytics" in data and "score_cliffs_delta" in data["analytics"]
 
@@ -63,7 +64,8 @@ def test_analytics_report_sink_generates_files_and_artifacts(tmp_path: Path) -> 
     assert "summary.md" in artifacts
     json_artifact = artifacts["summary.json"]
     assert json_artifact.persist is True
-    assert json_artifact.security_level == "official"
+    assert json_artifact.security_level == "OFFICIAL"
+    assert json_artifact.determinism_level == "guaranteed"
 
 
 def test_analytics_report_sink_skip_on_error(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -83,7 +85,7 @@ def test_analytics_report_sink_skip_on_error(tmp_path: Path, monkeypatch: pytest
 
     monkeypatch.setattr(Path, "write_text", patched_write_text)
 
-    sink.write({"results": []}, metadata={"security_level": "official"})
+    sink.write({"results": []}, metadata={"security_level": "OFFICIAL", "determinism_level": "guaranteed"})
 
     # JSON file should exist even though markdown write failed.
     json_path = tmp_path / "reports" / "broken.json"

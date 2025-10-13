@@ -11,7 +11,7 @@
           {
             "id": "DummySink:2:raw",
             "type": "file/raw",
-            "security_level": "secret",
+            "security_level": "SECRET",
             "produced_by": "DummySink:2"
           }
         ],
@@ -19,7 +19,7 @@
           {
             "id": "DummySink:2:raw",
             "type": "file/raw",
-            "security_level": "secret",
+            "security_level": "SECRET",
             "produced_by": "DummySink:2"
           }
         ]
@@ -31,7 +31,7 @@
           {
             "id": "DummySink:1:sanitized",
             "type": "file/csv",
-            "security_level": "official",
+            "security_level": "OFFICIAL",
             "produced_by": "DummySink:1"
           }
         ]
@@ -42,13 +42,13 @@
     "DummySink:1:sanitized": {
       "type": "file/csv",
       "produced_by": "DummySink:1",
-      "security_level": "official",
+      "security_level": "OFFICIAL",
       "persist": true
     },
     "DummySink:2:raw": {
       "type": "file/raw",
       "produced_by": "DummySink:2",
-      "security_level": "secret",
+      "security_level": "SECRET",
       "persist": true
     }
   }

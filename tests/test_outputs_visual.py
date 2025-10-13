@@ -33,7 +33,7 @@ def test_visual_sink_creates_artifacts(tmp_path: Path) -> None:
     )
     payload = _sample_payload()
     metadata = {
-        "security_level": "official",
+        "security_level": "OFFICIAL", "determinism_level": "guaranteed",
         "retry_summary": {"total_requests": 10, "total_retries": 2},
         "cost_summary": {"total_cost": 1.23},
     }
@@ -49,7 +49,8 @@ def test_visual_sink_creates_artifacts(tmp_path: Path) -> None:
     html_artifact = artifacts["analytics_visual_html"]
     assert png_artifact.metadata["chart_data"]["analysis"] == pytest.approx(0.82)
     assert "pass_rates" in html_artifact.metadata
-    assert png_artifact.security_level == "official"
+    assert png_artifact.security_level == "OFFICIAL"
+    assert png_artifact.determinism_level == "guaranteed"
 
 
 def test_visual_sink_skip_when_backend_missing(monkeypatch, tmp_path: Path) -> None:
@@ -79,7 +80,7 @@ def test_visual_sink_falls_back_to_row_metrics(tmp_path: Path) -> None:
             },
         ]
     }
-    metadata = {"security_level": "official", "early_stop": {"reason": "threshold"}}
+    metadata = {"security_level": "OFFICIAL", "determinism_level": "guaranteed", "early_stop": {"reason": "threshold"}}
 
     sink.write(payload, metadata=metadata)
     artifacts = sink.collect_artifacts()

@@ -75,6 +75,7 @@ def _build_runner(tmp_path: Path) -> ExperimentRunner:
         cost_tracker=None,
         experiment_name="visual_suite",
         security_level="official",
+        determinism_level="guaranteed",
     )
 
 
@@ -103,4 +104,5 @@ def test_integration_visual_and_analytics_sinks(tmp_path: Path) -> None:
     assert "data:image/png;base64" in html_content
 
     # Validate security level propagation
-    assert payload["metadata"]["security_level"] == "official"
+    assert payload["metadata"]["security_level"] == "OFFICIAL"
+    assert payload["metadata"]["determinism_level"] == "guaranteed"

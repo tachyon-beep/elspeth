@@ -43,7 +43,7 @@ def test_create_utility_plugin_with_schema_validation():
     plugin = create_utility_plugin(
         {
             "name": "dummy",
-            "security_level": "official",
+            "security_level": "OFFICIAL", "determinism_level": "guaranteed",
             "options": {"foo": "bar"},
         }
     )
@@ -52,7 +52,8 @@ def test_create_utility_plugin_with_schema_validation():
     assert plugin.options == {"foo": "bar"}
     assert plugin.plugin_context.plugin_name == "dummy"
     assert plugin.plugin_context.plugin_kind == "utility"
-    assert plugin.plugin_context.security_level == "official"
+    assert plugin.plugin_context.security_level == "OFFICIAL"
+    assert plugin.plugin_context.determinism_level == "guaranteed"
 
 
 def test_create_utility_plugin_conflicting_security_levels():
@@ -62,8 +63,8 @@ def test_create_utility_plugin_conflicting_security_levels():
         create_utility_plugin(
             {
                 "name": "dummy",
-                "security_level": "official",
-                "options": {"security_level": "protected"},
+                "security_level": "OFFICIAL", "determinism_level": "guaranteed",
+                "options": {"security_level": "PROTECTED", "determinism_level": "guaranteed"},
             }
         )
 
@@ -71,13 +72,14 @@ def test_create_utility_plugin_conflicting_security_levels():
 def test_create_named_utility_inherits_parent_context():
     register_utility_plugin("dummy", lambda options, context: DummyUtility(context=context, options=options))
 
-    parent = PluginContext(plugin_name="suite", plugin_kind="suite", security_level="official")
+    parent = PluginContext(plugin_name="suite", plugin_kind="suite", security_level="official", determinism_level="guaranteed")
     child = parent.derive(plugin_name="experiment", plugin_kind="experiment")
 
     plugin = create_named_utility("dummy", {"foo": "bar"}, parent_context=child)
 
     assert isinstance(plugin, DummyUtility)
-    assert plugin.plugin_context.security_level == "official"
+    assert plugin.plugin_context.security_level == "OFFICIAL"
+    assert plugin.plugin_context.determinism_level == "guaranteed"
     assert plugin.plugin_context.parent == child
     assert plugin.plugin_context.provenance == ("utility:dummy.resolved",)
     assert plugin.options["foo"] == "bar"
@@ -98,7 +100,7 @@ def test_create_utility_plugin_missing_required_field_raises():
         create_utility_plugin(
             {
                 "name": "dummy",
-                "security_level": "official",
+                "security_level": "OFFICIAL", "determinism_level": "guaranteed",
                 "options": {},
             }
         )

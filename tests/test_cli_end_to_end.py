@@ -19,18 +19,21 @@ def test_cli_generates_suite_outputs(tmp_path: Path, monkeypatch) -> None:
         "default": {
             "datasource": {
                 "plugin": "local_csv",
-                "security_level": "official",
+                "security_level": "OFFICIAL",
+                "determinism_level": "guaranteed",
                 "options": {"path": str(input_csv)},
             },
             "llm": {
                 "plugin": "mock",
-                "security_level": "official",
+                "security_level": "OFFICIAL",
+                "determinism_level": "guaranteed",
                 "options": {"seed": 123},
             },
             "sinks": [
                 {
                     "plugin": "csv",
-                    "security_level": "official",
+                    "security_level": "OFFICIAL",
+                    "determinism_level": "guaranteed",
                     "options": {"path": str(tmp_path / "latest_results.csv")},
                 }
             ],

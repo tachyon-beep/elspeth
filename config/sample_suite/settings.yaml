@@ -3,17 +3,20 @@
 default:
   datasource:
     plugin: local_csv
-    security_level: official
+    security_level: OFFICIAL
+    determinism_level: guaranteed
     options:
       path: config/sample_suite/data/sample_input.csv
   llm:
     plugin: mock
-    security_level: official
+    security_level: OFFICIAL
+    determinism_level: high
     options:
       seed: 42
   sinks:
     - plugin: csv
-      security_level: official
+      security_level: OFFICIAL
+      determinism_level: guaranteed
       options:
         path: outputs/sample_suite/latest_results.csv
   prompt_packs:
@@ -42,18 +45,22 @@ default:
             Estimate priority (0-1) for {{ APPID }} considering industry "{{ industry|default('general', boolean=true) }}".
       row_plugins:
         - name: score_extractor
-          security_level: official
+          security_level: OFFICIAL
+          determinism_level: guaranteed
           options:
             key: score
             threshold: 0.7
       aggregator_plugins:
         - name: score_stats
-          security_level: official
+          security_level: OFFICIAL
+          determinism_level: guaranteed
         - name: score_recommendation
-          security_level: official
+          security_level: OFFICIAL
+          determinism_level: guaranteed
       baseline_plugins:
         - name: score_delta
-          security_level: official
+          security_level: OFFICIAL
+          determinism_level: guaranteed
   prompt_pack: sample
   suite_defaults:
     prompt_pack: sample

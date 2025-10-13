@@ -27,6 +27,8 @@ All built-in plugins now receive a `PluginContext` instance during construction.
 | `prompt_shield` | same as above | Mask/abort on banned prompt terms. | `denied_terms`, `mask`, `on_violation`. | ✔ Context propagated. | `tests/test_llm_middleware.py` |
 | `health_monitor` | same | Heartbeat telemetry and latency tracking. | `heartbeat_interval`, `stats_window`, `include_latency`. | ✔ Context carried into metrics. | `tests/test_llm_middleware.py` |
 | `azure_content_safety` | same | Azure Content Safety screening. | `endpoint`, `key/_env`, `severity_threshold`, `on_violation`, `on_error`. | ✔ Context provides classification for audit logs. | `tests/test_llm_middleware.py` |
+| `pii_shield` | same | Detect and block Personal Identifiable Information using regex patterns. **Default patterns**: email, credit card, IP address, US SSN, US phone, US passport, UK NI number, **Australian TFN, ABN, ACN, Medicare, phone/mobile, passport, driver's licenses (NSW/VIC/QLD)**. | `patterns` (custom regex), `include_defaults`, `on_violation` (abort/mask/log), `mask`. | ✔ Context propagated for security-aware PII detection. | `tests/test_middleware_security_filters.py` |
+| `classified_material` | same | Detect and block classified material markings (SECRET, TOP SECRET, PROTECTED, CABINET CODEWORD, TS//SCI, NOFORN, FVEY, etc.). | `classification_markings`, `include_defaults`, `case_sensitive`, `on_violation`, `mask`. | ✔ Context enables classification-aware filtering. | `tests/test_middleware_security_filters.py` |
 | `azure_environment` | `src/elspeth/plugins/llms/middleware_azure.py` | Azure ML run and telemetry integration. | `enable_run_logging`, `log_prompts`, `severity_threshold`, `on_error`. | ✔ Context controls logging classification. | `tests/test_llm_middleware.py` |
 
 ## Experiment Plugins
@@ -55,6 +57,9 @@ All built-in plugins now receive a `PluginContext` instance during construction.
 | `score_agreement` | same | Agreement metrics across evaluators. | `threshold`, `required_votes`. | ✔ | `tests/test_experiment_metrics_plugins.py` |
 | `score_power` | same | Statistical power estimates. | `alpha`, `min_effect`, `min_samples`. | ✔ | `tests/test_experiment_metrics_plugins.py` |
 | `score_distribution` | same | Distribution summaries and histograms. | `bins`, `quantiles`. | ✔ | `tests/test_experiment_metrics_plugins.py` |
+| `cost_summary` | same | Aggregate cost and token usage across experiment. | `on_error`. | ✔ | `tests/test_experiment_metrics_plugins.py` |
+| `latency_summary` | same | Aggregate latency metrics with percentiles. | `on_error`. | ✔ | `tests/test_experiment_metrics_plugins.py` |
+| `rationale_analysis` | same | Analyze LLM rationales for interpretability insights. Extract themes, keywords, confidence indicators from explanation text. | `rationale_field`, `score_field`, `criteria`, `min_word_length`, `top_keywords`, `on_error`. | ✔ Context available. | `tests/test_experiment_metrics_plugins.py` |
 | `prompt_variants` | `src/elspeth/plugins/experiments/prompt_variants.py` | Generate prompt alternatives via secondary LLM. | `prompt_template`, `variant_llm`, `count`, `max_attempts`. | ✔ Uses `create_llm_from_definition`. | `tests/test_prompt_variants_plugin.py` |
 | `noop` | registry default | No aggregation. | None. | ✔ | Registry tests |
 
@@ -72,12 +77,13 @@ All built-in plugins now receive a `PluginContext` instance during construction.
 | --- | --- | --- | --- | --- | --- |
 | `row_count` | `src/elspeth/core/experiments/plugin_registry.py` | Compare result row counts. | `key`. | ✔ | `tests/test_experiments.py` |
 | `score_delta` | `src/elspeth/plugins/experiments/metrics.py` | Delta of chosen metric across criteria. | `metric`, `criteria`. | ✔ | `tests/test_experiment_metrics_plugins.py` |
-| `score_cliffs_delta` | same | Cliff’s delta effect size. | `criteria`, `min_samples`, `on_error`. | ✔ | `tests/test_experiment_metrics_plugins.py` |
+| `score_cliffs_delta` | same | Cliff's delta effect size. | `criteria`, `min_samples`, `on_error`. | ✔ | `tests/test_experiment_metrics_plugins.py` |
 | `score_assumptions` | same | Normality/variance diagnostics. | `criteria`, `alpha`, `min_samples`, `on_error`. | ✔ | `tests/test_experiment_metrics_plugins.py` |
 | `score_significance` | same | Hypothesis test significance. | `criteria`, `alpha`, `alternative`. | ✔ | `tests/test_experiment_metrics_plugins.py` |
 | `score_practical` | same | Practical significance heuristics. | `threshold`, `criteria`. | ✔ | `tests/test_experiment_metrics_plugins.py` |
 | `score_bayes` | same | Bayesian comparison summary. | `credible_interval`, `min_samples`. | ✔ | `tests/test_experiment_metrics_plugins.py` |
 | `score_distribution` | same | Baseline distribution comparison. | `criteria`, `bins`. | ✔ | `tests/test_experiment_metrics_plugins.py` |
+| `referee_alignment` | same | Compare LLM scores against human expert/referee judgments. Measures alignment using MAE, RMSE, correlation, and agreement rates. | `referee_fields`, `score_field`, `criteria`, `min_samples`, `value_mapping`, `on_error`. | ✔ | `tests/test_experiment_metrics_plugins.py` |
 | `noop` | registry default | No comparison. | None. | ✔ | Registry tests |
 
 ### Validation Plugins
@@ -100,6 +106,7 @@ All built-in plugins now receive a `PluginContext` instance during construction.
 | --- | --- | --- | --- | --- | --- |
 | `analytics_report` | `src/elspeth/plugins/outputs/analytics_report.py` | Structured JSON/Markdown analytics. | `base_path`, `include_manifest`, `formats`. | ✔ Context drives artifact security. | `tests/test_outputs_analytics_report.py` |
 | `analytics_visual` | `src/elspeth/plugins/outputs/visual_report.py` | Visual analytics (PNG/HTML). | `base_path`, `formats`, `dpi`, `figure_size`. | ✔ | `tests/test_outputs_visual.py` |
+| `enhanced_visual` | `src/elspeth/plugins/outputs/enhanced_visual_report.py` | Advanced visualizations: violin plots, box plots, heatmaps, forest plots, distribution overlays. | `base_path`, `chart_types` (violin/box/heatmap/forest/distribution), `formats`, `figure_size`, `color_palette`. | ✔ Context drives artifact security. | `tests/test_outputs_enhanced_visual.py` |
 | `azure_blob` | `src/elspeth/plugins/outputs/blob.py` | Upload results to Azure Blob Storage. | `config_path`, `profile`, `path_template`, `include_manifest`, `credential`. | ✔ | `tests/test_outputs_blob.py` |
 | `azure_devops_repo` | `src/elspeth/plugins/outputs/repository.py` | Commit artifacts into Azure DevOps repo. | Repo identifiers, `token_env`, `dry_run`. | ✔ | `tests/test_outputs_repo.py` |
 | `csv` | `src/elspeth/plugins/outputs/csv_file.py` | Flat CSV export with sanitisation. | `path`, `sanitize_formulas`, `sanitize_guard`, `overwrite`. | ✔ | `tests/test_outputs_csv.py` |
@@ -140,7 +147,7 @@ The orchestrator can support workflows beyond LLM prompting and score aggregatio
 | Datasource | `sql_query` | Execute parameterised SQL against vetted warehouses to seed experiments with richer tabular data. | `connection_profile`, `query_template`, `parameters`, optional row-level security filter. | Run queries via read-only service accounts; use context level to enforce schema allowlists. | Proposed |
 | Datasource | `api_batch` | Pull JSON batches from REST APIs for regression testing agents on live data. | `base_url`, per-endpoint `requests`, `auth_profile`, backoff policy. | Context level maps to API scopes; redact sensitive fields before caching. | Proposed |
 | LLM Middleware | `prompt_hash_cache` | Deduplicate prompts/responses across suites to reduce cost; hash and persist by security tier. | `cache_backend`, `ttl`, `hash_fields`, `hit_policy`. | Separate caches per security level to avoid cross-tier leakage. | Proposed |
-| LLM Middleware | `pii_scrubber` | Pre-scan prompts for PII/entities and mask before inference. Complements Content Safety with deterministic masking. | `detectors` (regex, ML), `mask_token`, `on_detection` (abort/mask/log). | Tie detector aggressiveness to `context.security_level`; log anonymised evidence only. | Proposed |
+| LLM Middleware | ~~`pii_scrubber`~~ | ~~Pre-scan prompts for PII/entities and mask before inference. Complements Content Safety with deterministic masking.~~ **IMPLEMENTED as `pii_shield`** (see LLM Middleware section above). | N/A | N/A | ✅ Completed |
 | Validation Plugin | `schema_guard` | Validate JSON responses against defined JSON Schema / Pydantic models for downstream automation. | `schema_ref`, `mode` (strict/coerce), `on_failure`. | Store schema per security class; avoid logging raw payloads on failure when marked sensitive. | Proposed |
 | Row Plugin | `entity_enricher` | Call secondary knowledge APIs to enrich row context (e.g., domain facts) prior to evaluation. | `enrichment_sources`, `fields`, rate limits. | Use context to fence API keys and redact enriched data when exporting. | Proposed |
 | Aggregation Plugin | `cost_summary` | Aggregate cost tracker outputs per experiment, including middleware call stats. | `metrics` (prompt/completion), `include_middlewares`. | Ensures cost visibility by security tier; no additional classification changes. | Proposed |

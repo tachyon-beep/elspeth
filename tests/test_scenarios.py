@@ -29,11 +29,11 @@ def test_end_to_end_local_pipeline(tmp_path, assert_sanitized_artifact):
         prompt_template="Value: {{ value }}",
         prompt_fields=["value"],
         prompt_defaults={"audience": "quality"},
-        row_plugins=[plugin_registry.create_row_plugin({"name": "score_extractor", "security_level": "official"})],
-        aggregator_plugins=[plugin_registry.create_aggregation_plugin({"name": "score_stats", "security_level": "official"})],
+        row_plugins=[plugin_registry.create_row_plugin({"name": "score_extractor", "security_level": "OFFICIAL", "determinism_level": "guaranteed"})],
+        aggregator_plugins=[plugin_registry.create_aggregation_plugin({"name": "score_stats", "security_level": "OFFICIAL", "determinism_level": "guaranteed"})],
         validation_plugins=[
             plugin_registry.create_validation_plugin(
-                {"name": "regex_match", "security_level": "official", "options": {"pattern": r"(?s).*\[mock\].*"}}
+                {"name": "regex_match", "security_level": "OFFICIAL", "determinism_level": "guaranteed", "options": {"pattern": r"(?s).*\[mock\].*"}}
             )
         ],
         experiment_name="local_pipeline",
@@ -91,13 +91,13 @@ def test_suite_runner_end_to_end_without_azure(tmp_path, assert_sanitized_artifa
         "prompt_template": "Provide feedback for {{ value }}",
         "prompt_fields": ["value"],
         "prompt_defaults": {"audience": "review"},
-        "row_plugin_defs": [{"name": "score_extractor", "security_level": "official"}],
-        "aggregator_plugin_defs": [{"name": "score_stats", "security_level": "official"}],
-        "validation_plugin_defs": [{"name": "regex_match", "security_level": "official", "options": {"pattern": r"(?s).*\[mock\].*"}}],
+        "row_plugin_defs": [{"name": "score_extractor", "security_level": "OFFICIAL", "determinism_level": "guaranteed"}],
+        "aggregator_plugin_defs": [{"name": "score_stats", "security_level": "OFFICIAL", "determinism_level": "guaranteed"}],
+        "validation_plugin_defs": [{"name": "regex_match", "security_level": "OFFICIAL", "determinism_level": "guaranteed", "options": {"pattern": r"(?s).*\[mock\].*"}}],
         "sink_defs": [
             {
                 "plugin": "local_bundle",
-                "security_level": "official",
+                "security_level": "OFFICIAL", "determinism_level": "guaranteed",
                 "options": {
                     "base_path": bundle_root.as_posix(),
                     "timestamped": False,

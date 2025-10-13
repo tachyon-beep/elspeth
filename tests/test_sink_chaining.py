@@ -17,6 +17,7 @@ def configure_sink(
     consumes=None,
     produces=None,
     security_level: str | None = None,
+    determinism_level: str | None = None,
 ):
     setattr(sink, "_elspeth_plugin_name", plugin)
     setattr(sink, "_elspeth_sink_name", alias or plugin)
@@ -30,6 +31,8 @@ def configure_sink(
     )
     if security_level:
         setattr(sink, "_elspeth_security_level", security_level)
+    if determinism_level:
+        setattr(sink, "_elspeth_determinism_level", determinism_level)
 
 
 def test_csv_to_file_copy_pipeline(tmp_path):
@@ -38,8 +41,9 @@ def test_csv_to_file_copy_pipeline(tmp_path):
         csv_sink,
         "csv",
         alias="csv",
-        produces=[{"name": "csv", "type": "file/csv", "persist": True, "security_level": "secret"}],
-        security_level="secret",
+        produces=[{"name": "csv", "type": "file/csv", "persist": True, "security_level": "SECRET", "determinism_level": "guaranteed"}],
+        security_level="SECRET",
+        determinism_level="guaranteed",
     )
 
     copy_sink = FileCopySink(destination=str(tmp_path / "copied.csv"))
@@ -49,12 +53,13 @@ def test_csv_to_file_copy_pipeline(tmp_path):
         alias="copy",
         consumes=["@csv"],
         produces=[{"name": "file", "type": "file/csv", "alias": "copied", "persist": True}],
-        security_level="secret",
+        security_level="SECRET",
+        determinism_level="guaranteed",
     )
 
     bindings = [
-        SinkBinding("copy", "file_copy", copy_sink, copy_sink._elspeth_artifact_config, 1, security_level="secret"),
-        SinkBinding("csv", "csv", csv_sink, csv_sink._elspeth_artifact_config, 0, security_level="secret"),
+        SinkBinding("copy", "file_copy", copy_sink, copy_sink._elspeth_artifact_config, 1, security_level="SECRET"),
+        SinkBinding("csv", "csv", csv_sink, csv_sink._elspeth_artifact_config, 0, security_level="SECRET"),
     ]
 
     pipeline = ArtifactPipeline(bindings)
@@ -63,12 +68,12 @@ def test_csv_to_file_copy_pipeline(tmp_path):
             {"row": {"APPID": "1"}, "response": {"content": "ok"}},
         ]
     }
-    store = pipeline.execute(payload, metadata={"security_level": "secret"})
+    store = pipeline.execute(payload, metadata={"security_level": "SECRET", "determinism_level": "guaranteed"})
 
     assert (tmp_path / "results.csv").exists()
     assert (tmp_path / "copied.csv").exists()
     copied = store.get_by_alias("copied")
-    assert copied is not None and copied.security_level == "secret"
+    assert copied is not None and copied.security_level == "SECRET"
 
 
 def test_runner_chaining(tmp_path):
@@ -77,7 +82,7 @@ def test_runner_chaining(tmp_path):
             return {"content": user_prompt}
 
     csv_sink = CsvResultSink(path=tmp_path / "run.csv")
-    configure_sink(csv_sink, "csv", alias="csv", security_level="secret")
+    configure_sink(csv_sink, "csv", alias="csv", security_level="SECRET", determinism_level="guaranteed")
 
     copy_sink = FileCopySink(destination=str(tmp_path / "copy.csv"))
     configure_sink(
@@ -86,7 +91,8 @@ def test_runner_chaining(tmp_path):
         alias="copy",
         consumes=["@csv"],
         produces=[{"name": "file", "type": "file/csv", "alias": "copy"}],
-        security_level="secret",
+        security_level="SECRET",
+        determinism_level="guaranteed",
     )
 
     runner = ExperimentRunner(
@@ -106,10 +112,10 @@ def test_runner_chaining(tmp_path):
 
 def test_zip_consumes_all_files(tmp_path):
     csv_one = CsvResultSink(path=tmp_path / "one.csv")
-    configure_sink(csv_one, "csv", alias="csv_one", security_level="secret")
+    configure_sink(csv_one, "csv", alias="csv_one", security_level="SECRET", determinism_level="guaranteed")
 
     csv_two = CsvResultSink(path=tmp_path / "two.csv")
-    configure_sink(csv_two, "csv", alias="csv_two", security_level="secret")
+    configure_sink(csv_two, "csv", alias="csv_two", security_level="SECRET", determinism_level="guaranteed")
 
     zip_sink = ZipResultSink(
         base_path=tmp_path,
@@ -122,13 +128,14 @@ def test_zip_consumes_all_files(tmp_path):
         "zip_bundle",
         alias="zip",
         consumes=[{"token": "file/csv", "mode": "all"}],
-        security_level="secret",
+        security_level="SECRET",
+        determinism_level="guaranteed",
     )
 
     bindings = [
-        SinkBinding("csv1", "csv", csv_one, csv_one._elspeth_artifact_config, 0, security_level="secret"),
-        SinkBinding("csv2", "csv", csv_two, csv_two._elspeth_artifact_config, 1, security_level="secret"),
-        SinkBinding("zip", "zip_bundle", zip_sink, zip_sink._elspeth_artifact_config, 2, security_level="secret"),
+        SinkBinding("csv1", "csv", csv_one, csv_one._elspeth_artifact_config, 0, security_level="SECRET"),
+        SinkBinding("csv2", "csv", csv_two, csv_two._elspeth_artifact_config, 1, security_level="SECRET"),
+        SinkBinding("zip", "zip_bundle", zip_sink, zip_sink._elspeth_artifact_config, 2, security_level="SECRET"),
     ]
 
     payload = {
@@ -138,7 +145,7 @@ def test_zip_consumes_all_files(tmp_path):
     }
 
     pipeline = ArtifactPipeline(bindings)
-    pipeline.execute(payload, metadata={"security_level": "secret"})
+    pipeline.execute(payload, metadata={"security_level": "SECRET", "determinism_level": "guaranteed"})
 
     archives = list(tmp_path.glob("bundle_*.zip"))
     assert archives
@@ -147,4 +154,4 @@ def test_zip_consumes_all_files(tmp_path):
         assert "one.csv" in names
         assert "two.csv" in names
         manifest = json.loads(zf.read("manifest.json"))
-        assert manifest["metadata"]["security_level"] == "secret"
+        assert manifest["metadata"]["security_level"] == "SECRET"

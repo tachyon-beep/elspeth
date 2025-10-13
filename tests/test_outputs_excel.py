@@ -66,7 +66,7 @@ def test_excel_result_sink_generates_workbook(tmp_path: Path, monkeypatch: pytes
         }
     )
 
-    sink.write(payload, metadata={"experiment": "suite", "security_level": "secret"})
+    sink.write(payload, metadata={"experiment": "suite", "security_level": "SECRET", "determinism_level": "guaranteed"})
 
     workbook_path = tmp_path / "suite_report.xlsx"
     assert workbook_path.exists()
@@ -79,7 +79,8 @@ def test_excel_result_sink_generates_workbook(tmp_path: Path, monkeypatch: pytes
 
     artifacts = sink.collect_artifacts()
     assert "excel" in artifacts
-    assert artifacts["excel"].security_level == "secret"
+    assert artifacts["excel"].security_level == "SECRET"
+    assert artifacts["excel"].determinism_level == "guaranteed"
     assert artifacts["excel"].metadata["sanitization"]["enabled"] is True
     # Collecting a second time returns nothing (state reset).
     assert sink.collect_artifacts() == {}

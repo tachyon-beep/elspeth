@@ -21,12 +21,12 @@ def test_load_settings_merges_prompt_pack_and_defaults(tmp_path: Path) -> None:
         "default": {
             "datasource": {
                 "plugin": "local_csv",
-                "security_level": "official",
+                "security_level": "OFFICIAL", "determinism_level": "guaranteed",
                 "options": {"path": str(input_csv)},
             },
             "llm": {
                 "plugin": "mock",
-                "security_level": "official",
+                "security_level": "OFFICIAL", "determinism_level": "guaranteed",
                 "options": {"seed": 1},
             },
             "prompt_pack": "packA",
@@ -37,12 +37,12 @@ def test_load_settings_merges_prompt_pack_and_defaults(tmp_path: Path) -> None:
                         "user": "Pack user {{ value }}",
                     },
                     "prompt_defaults": {"tone": "warm"},
-                    "row_plugins": [{"name": "score_extractor", "security_level": "official"}],
-                    "aggregator_plugins": [{"name": "score_stats", "security_level": "official"}],
+                    "row_plugins": [{"name": "score_extractor", "security_level": "OFFICIAL", "determinism_level": "guaranteed"}],
+                    "aggregator_plugins": [{"name": "score_stats", "security_level": "OFFICIAL", "determinism_level": "guaranteed"}],
                     "sinks": [
                         {
                             "plugin": "csv",
-                            "security_level": "official",
+                            "security_level": "OFFICIAL", "determinism_level": "guaranteed",
                             "options": {"path": str(tmp_path / "pack_results.csv")},
                         }
                     ],
@@ -54,11 +54,11 @@ def test_load_settings_merges_prompt_pack_and_defaults(tmp_path: Path) -> None:
                 "sinks": [
                     {
                         "plugin": "csv",
-                        "security_level": "official",
+                        "security_level": "OFFICIAL", "determinism_level": "guaranteed",
                         "options": {"path": str(tmp_path / "suite_results.csv")},
                     }
                 ],
-                "security_level": "secret",
+                "security_level": "SECRET", "determinism_level": "guaranteed",
             },
         }
     }
@@ -80,10 +80,11 @@ def test_load_settings_merges_prompt_pack_and_defaults(tmp_path: Path) -> None:
     assert defaults["prompt_pack"] == "packA"
     assert defaults["row_plugin_defs"][0] == {
         "name": "score_extractor",
-        "security_level": "official",
+        "security_level": "OFFICIAL", "determinism_level": "guaranteed",
     }
     assert "sink_defs" in defaults
-    assert settings.suite_defaults["security_level"] == "secret"
+    assert settings.suite_defaults["security_level"] == "SECRET"
+    assert settings.suite_defaults["determinism_level"] == "guaranteed"
 
 
 def test_validate_settings_flags_missing_profile(tmp_path: Path) -> None:

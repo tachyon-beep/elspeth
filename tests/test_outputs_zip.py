@@ -43,7 +43,7 @@ def test_zip_result_sink_creates_archive(tmp_path: Path) -> None:
         }
     )
 
-    sink.write(_sample_results(), metadata={"experiment": "demo", "security_level": "secret"})
+    sink.write(_sample_results(), metadata={"experiment": "demo", "security_level": "SECRET", "determinism_level": "guaranteed"})
 
     archive_path = tmp_path / "bundle.zip"
     assert archive_path.exists()
@@ -57,7 +57,8 @@ def test_zip_result_sink_creates_archive(tmp_path: Path) -> None:
         assert "'=42" in csv_content  # sanitized dangerous value
 
     artifacts = sink.collect_artifacts()
-    assert artifacts["zip"].metadata["security_level"] == "secret"
+    assert artifacts["zip"].metadata["security_level"] == "SECRET"
+    assert artifacts["zip"].metadata["determinism_level"] == "guaranteed"
     assert artifacts["zip"].metadata["sanitization"]["guard"] == "'"
     # State cleared after collection.
     assert sink.collect_artifacts() == {}

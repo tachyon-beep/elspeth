@@ -69,7 +69,7 @@ def test_blob_result_sink_uploads(tmp_path, monkeypatch, path_template):
             "results": [{"row": {"APPID": "1"}, "response": {"content": "ok"}}],
             "aggregates": {"score": {"mean": 0.8}},
         },
-        metadata={"experiment": "exp1", "security_level": "official"},
+        metadata={"experiment": "exp1", "security_level": "OFFICIAL", "determinism_level": "guaranteed"},
     )
 
     assert len(captured) == 2
@@ -78,11 +78,12 @@ def test_blob_result_sink_uploads(tmp_path, monkeypatch, path_template):
 
     assert payload_entry["payload"]["results"][0]["row"]["APPID"] == "1"
     assert payload_entry["content_type"] == "application/json"
-    assert payload_entry["metadata"] == {"env": "prod", "build": "42", "security_level": "official"}
+    assert payload_entry["metadata"] == {"env": "prod", "build": "42", "security_level": "OFFICIAL", "determinism_level": "guaranteed"}
     manifest = manifest_entry["payload"]
     assert manifest["rows"] == 1
     assert manifest["metadata"]["experiment"] == "exp1"
-    assert manifest["metadata"]["security_level"] == "official"
+    assert manifest["metadata"]["security_level"] == "OFFICIAL"
+    assert manifest["metadata"]["determinism_level"] == "guaranteed"
     assert manifest["aggregates"]["score"]["mean"] == 0.8
 
 
@@ -119,12 +120,12 @@ def test_blob_result_sink_chunked_upload(tmp_path, monkeypatch):
 
     sink.write(
         {"results": [{"row": {"APPID": "1"}, "response": {"content": "x" * 20}}]},
-        metadata={"security_level": "secret"},
+        metadata={"security_level": "SECRET", "determinism_level": "guaranteed"},
     )
 
     assert len(staged) > 1
     assert committed["ids"] == sorted(committed["ids"])
-    assert committed["metadata"] == {"tag": "blue", "build": "7", "security_level": "secret"}
+    assert committed["metadata"] == {"tag": "blue", "build": "7", "security_level": "SECRET", "determinism_level": "guaranteed"}
     settings = committed.get("settings")
     if settings is not None:
         assert getattr(settings, "content_type", None) == "application/json"
@@ -173,7 +174,7 @@ def test_blob_result_sink_prepared_artifacts(tmp_path, monkeypatch):
                     id="a2",
                     type="blob",
                     path=str(artifact_path),
-                    security_level="secret",
+                    security_level="SECRET",
                 ),
             ]
         }
@@ -185,7 +186,7 @@ def test_blob_result_sink_prepared_artifacts(tmp_path, monkeypatch):
         lambda self, name: RecordingClient(name),
     )
 
-    sink.write({}, metadata={"security_level": "official"})
+    sink.write({}, metadata={"security_level": "OFFICIAL", "determinism_level": "guaranteed"})
 
     assert len(uploads) == 2
     first, second = uploads
@@ -194,7 +195,7 @@ def test_blob_result_sink_prepared_artifacts(tmp_path, monkeypatch):
     assert first["content_type"] == "application/vnd.custom+json"
     assert second["name"].split("/")[-1].startswith("results_2")
     assert second["data"] == b"payload-bytes"
-    assert second["metadata"] == {"security_level": "secret"}
+    assert second["metadata"] == {"security_level": "SECRET", "determinism_level": "guaranteed"}
 
 
 def test_blob_result_sink_manifest_template(tmp_path, monkeypatch):

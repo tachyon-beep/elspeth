@@ -89,6 +89,7 @@ class ArtifactDescriptor:  # pylint: disable=too-many-instance-attributes
     persist: bool = False
     alias: str | None = None
     security_level: str | None = None
+    determinism_level: str | None = None
 
 
 @dataclass
@@ -104,6 +105,7 @@ class Artifact:  # pylint: disable=too-many-instance-attributes
     produced_by: str | None = None
     persist: bool = False
     security_level: str | None = None
+    determinism_level: str | None = None
 
 
 __all__ = [

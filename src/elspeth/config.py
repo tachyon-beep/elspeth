@@ -12,7 +12,7 @@ from elspeth.core.controls import create_cost_tracker, create_rate_limiter
 from elspeth.core.experiments.plugin_registry import normalize_early_stop_definitions
 from elspeth.core.orchestrator import OrchestratorConfig
 from elspeth.core.registry import registry
-from elspeth.core.security import coalesce_security_level
+from elspeth.core.security import coalesce_determinism_level, coalesce_security_level
 from elspeth.core.validation import ConfigurationError
 
 
@@ -60,27 +60,41 @@ class PluginDefinitions:
     early_stop_plugin_defs: List[Dict[str, Any]]
 
 
-def _prepare_plugin_definition(definition: Mapping[str, Any], context: str) -> tuple[Dict[str, Any], str, tuple[str, ...]]:
-    """Extract options, normalized security level, and provenance."""
+def _prepare_plugin_definition(definition: Mapping[str, Any], context: str) -> tuple[Dict[str, Any], str, str, tuple[str, ...]]:
+    """Extract options, normalized security level, determinism level, and provenance."""
 
     options = dict(definition.get("options", {}) or {})
-    entry_level = definition.get("security_level")
-    options_level = options.get("security_level")
+
+    # Handle security_level
+    entry_sec_level = definition.get("security_level")
+    options_sec_level = options.get("security_level")
     sources: list[str] = []
-    if entry_level is not None:
+    if entry_sec_level is not None:
         sources.append(f"{context}.definition.security_level")
-    if options_level is not None:
+    if options_sec_level is not None:
         sources.append(f"{context}.options.security_level")
     try:
-        level = coalesce_security_level(entry_level, options_level)
+        sec_level = coalesce_security_level(entry_sec_level, options_sec_level)
     except ValueError as exc:
         raise ConfigurationError(f"{context}: {exc}") from exc
-    # Keep the resolved level inside the options we hand to plugin factories so that
-    # plugin constructors (e.g. CSV/Excel sinks) can normalise it themselves. Removing
-    # it causes them to fall back to their default ("unofficial") security posture.
-    options["security_level"] = level
+
+    # Handle determinism_level
+    entry_det_level = definition.get("determinism_level")
+    options_det_level = options.get("determinism_level")
+    if entry_det_level is not None:
+        sources.append(f"{context}.definition.determinism_level")
+    if options_det_level is not None:
+        sources.append(f"{context}.options.determinism_level")
+    try:
+        det_level = coalesce_determinism_level(entry_det_level, options_det_level)
+    except ValueError as exc:
+        raise ConfigurationError(f"{context}: {exc}") from exc
+
+    # Keep the resolved levels inside the options we hand to plugin factories
+    options["security_level"] = sec_level
+    options["determinism_level"] = det_level
     provenance = tuple(sources or (f"{context}.resolved",))
-    return options, level, provenance
+    return options, sec_level, det_level, provenance
 
 
 def _merge_pack(base: Dict[str, Any], pack: Dict[str, Any]) -> Dict[str, Any]:
@@ -108,16 +122,17 @@ def _instantiate_plugin(
     context: str,
     factory: Callable[..., Any],
 ) -> Any:
-    """Instantiate a plugin and apply the resolved security level attribute."""
+    """Instantiate a plugin and apply the resolved security and determinism levels."""
 
     if not isinstance(definition, Mapping):
         raise ConfigurationError(f"{context} configuration must be a mapping.")
     plugin_name = definition.get("plugin")
     if not plugin_name:
         raise ConfigurationError(f"{context} configuration must define a plugin name.")
-    options, level, provenance = _prepare_plugin_definition(definition, context)
+    options, sec_level, det_level, provenance = _prepare_plugin_definition(definition, context)
     payload = dict(options)
-    payload["security_level"] = level
+    payload["security_level"] = sec_level
+    payload["determinism_level"] = det_level
     return factory(plugin_name, payload, provenance=provenance)
 
 

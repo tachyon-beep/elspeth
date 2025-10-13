@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, Callable, Dict, Iterable, Mapping
 
 from elspeth.core.plugins import PluginContext, apply_plugin_context
-from elspeth.core.security import coalesce_security_level
+from elspeth.core.security import coalesce_determinism_level, coalesce_security_level
 from elspeth.core.validation import ConfigurationError, validate_schema
 
 
@@ -80,6 +80,16 @@ def create_utility_plugin(
         sources.append(f"utility:{name}.definition.security_level")
     if option_level is not None:
         sources.append(f"utility:{name}.options.security_level")
+
+    # Handle determinism_level
+    entry_det_level = definition.get("determinism_level")
+    option_det_level = options.get("determinism_level")
+    parent_det_level = getattr(parent_context, "determinism_level", None)
+    if entry_det_level is not None:
+        sources.append(f"utility:{name}.definition.determinism_level")
+    if option_det_level is not None:
+        sources.append(f"utility:{name}.options.determinism_level")
+
     if provenance:
         sources.extend(provenance)
     try:
@@ -87,14 +97,26 @@ def create_utility_plugin(
     except ValueError as exc:
         raise ConfigurationError(f"utility:{name}: {exc}") from exc
 
+    # For determinism_level: if definition specifies it, use that; otherwise inherit from parent
+    if entry_det_level is not None or option_det_level is not None:
+        try:
+            det_level = coalesce_determinism_level(entry_det_level, option_det_level)
+        except ValueError as exc:
+            raise ConfigurationError(f"utility:{name}: {exc}") from exc
+    else:
+        # No explicit determinism_level in definition, inherit from parent or default to "none"
+        det_level = parent_det_level if parent_det_level is not None else "none"
+
     payload = dict(options)
     payload.pop("security_level", None)
+    payload.pop("determinism_level", None)
     context_sources = tuple(sources or (f"utility:{name}.resolved",))
     if parent_context:
         context = parent_context.derive(
             plugin_name=name,
             plugin_kind="utility",
             security_level=level,
+            determinism_level=det_level,
             provenance=context_sources,
         )
     else:
@@ -102,6 +124,7 @@ def create_utility_plugin(
             plugin_name=name,
             plugin_kind="utility",
             security_level=level,
+            determinism_level=det_level,
             provenance=context_sources,
         )
 
@@ -115,6 +138,7 @@ def create_named_utility(
     options: Mapping[str, Any] | None,
     *,
     security_level: str | None = None,
+    determinism_level: str | None = None,
     parent_context: PluginContext | None = None,
     provenance: Iterable[str] | None = None,
 ) -> Any:
@@ -124,6 +148,7 @@ def create_named_utility(
         "name": name,
         "options": dict(options or {}),
         "security_level": security_level,
+        "determinism_level": determinism_level,
     }
     return create_utility_plugin(definition, parent_context=parent_context, provenance=provenance)
 

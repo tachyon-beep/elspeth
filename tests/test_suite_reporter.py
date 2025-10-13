@@ -53,10 +53,10 @@ def _write_suite(tmp_path: Path) -> ExperimentSuite:
             "enabled": True,
             "is_baseline": is_baseline,
             "criteria": [{"name": "quality"}],
-            "row_plugins": [{"name": "score_extractor", "security_level": "official"}],
-            "aggregator_plugins": [{"name": "score_stats", "security_level": "official"}],
-            "baseline_plugins": [{"name": "score_delta", "security_level": "official"}],
-            "llm_middlewares": [{"name": "audit_logger", "security_level": "official"}],
+            "row_plugins": [{"name": "score_extractor", "security_level": "OFFICIAL", "determinism_level": "guaranteed"}],
+            "aggregator_plugins": [{"name": "score_stats", "security_level": "OFFICIAL", "determinism_level": "guaranteed"}],
+            "baseline_plugins": [{"name": "score_delta", "security_level": "OFFICIAL", "determinism_level": "guaranteed"}],
+            "llm_middlewares": [{"name": "audit_logger", "security_level": "OFFICIAL", "determinism_level": "guaranteed"}],
         }
         (folder / "config.json").write_text(json.dumps(config), encoding="utf-8")
         (folder / "system_prompt.md").write_text("system", encoding="utf-8")

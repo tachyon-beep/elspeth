@@ -1,0 +1,241 @@
+============================= test session starts ==============================
+platform linux -- Python 3.12.3, pytest-8.4.2, pluggy-1.6.0
+rootdir: /home/john/elspeth
+configfile: pyproject.toml
+testpaths: tests
+plugins: cov-7.0.0, asyncio-1.2.0, mock-3.15.1, anyio-4.11.0
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collected 310 items
+
+tests/test_artifact_pipeline.py .........                                [  2%]
+tests/test_artifacts.py ...                                              [  3%]
+tests/test_blob_store.py .......                                         [  6%]
+tests/test_cli.py ......                                                 [  8%]
+tests/test_cli_end_to_end.py .                                           [  8%]
+tests/test_cli_integration.py F                                          [  8%]
+tests/test_cli_suite.py ....                                             [ 10%]
+tests/test_config.py ....                                                [ 11%]
+tests/test_config_merge.py ...                                           [ 12%]
+tests/test_config_suite.py ...                                           [ 13%]
+tests/test_controls.py ....                                              [ 14%]
+tests/test_controls_registry.py ..........                               [ 17%]
+tests/test_datasource_blob_plugin.py ...                                 [ 18%]
+tests/test_datasource_csv.py .........                                   [ 21%]
+tests/test_experiment_metrics_plugins.py ............................... [ 31%]
+.                                                                        [ 31%]
+tests/test_experiment_runner_integration.py F                            [ 32%]
+tests/test_experiments.py ................                               [ 37%]
+tests/test_integration_embeddings_rag.py s                               [ 37%]
+tests/test_integration_visual_suite.py F                                 [ 38%]
+tests/test_llm_azure.py ....                                             [ 39%]
+tests/test_llm_http_openai.py ..                                         [ 40%]
+tests/test_llm_middleware.py .......................                     [ 47%]
+tests/test_llm_mock.py .                                                 [ 47%]
+tests/test_llm_static_plugin.py ..                                       [ 48%]
+tests/test_metrics_structure.py ..                                       [ 49%]
+tests/test_orchestrator.py ...                                           [ 50%]
+tests/test_outputs_analytics_report.py ..                                [ 50%]
+tests/test_outputs_archival.py .....                                     [ 52%]
+tests/test_outputs_blob.py ............                                  [ 56%]
+tests/test_outputs_csv.py ...                                            [ 57%]
+tests/test_outputs_embeddings_store.py F.........                        [ 60%]
+tests/test_outputs_excel.py ..                                           [ 60%]
+tests/test_outputs_local_bundle.py .....                                 [ 62%]
+tests/test_outputs_repo.py ......                                        [ 64%]
+tests/test_outputs_signed.py ....                                        [ 65%]
+tests/test_outputs_visual.py ...                                         [ 66%]
+tests/test_outputs_zip.py ..                                             [ 67%]
+tests/test_processing.py .                                               [ 67%]
+tests/test_prompt_variants_plugin.py ...                                 [ 68%]
+tests/test_prompts.py ......                                             [ 70%]
+tests/test_prompts_loader.py ...                                         [ 71%]
+tests/test_registry.py ............                                      [ 75%]
+tests/test_registry_artifacts.py ..                                      [ 76%]
+tests/test_retrieval_embedding.py ....                                   [ 77%]
+tests/test_retrieval_providers.py ....                                   [ 78%]
+tests/test_retrieval_service.py ....                                     [ 80%]
+tests/test_retrieval_utility.py .....                                    [ 81%]
+tests/test_sanitize_utils.py ......                                      [ 83%]
+tests/test_scaffold.py ..                                                [ 84%]
+tests/test_scenarios.py ..                                               [ 84%]
+tests/test_security_signing.py .                                         [ 85%]
+tests/test_sink_chaining.py ...                                          [ 86%]
+tests/test_suite_reporter.py .....                                       [ 87%]
+tests/test_suite_runner_integration.py F                                 [ 88%]
+tests/test_suite_tools.py .......                                        [ 90%]
+tests/test_utilities_plugin_registry.py F.F.                             [ 91%]
+tests/test_validation_core.py ....                                       [ 92%]
+tests/test_validation_plugins.py .....                                   [ 94%]
+tests/test_validation_settings.py .................                      [100%]
+
+=================================== FAILURES ===================================
+___________________ test_cli_single_run_executes_real_config ___________________
+tests/test_cli_integration.py:60: in test_cli_single_run_executes_real_config
+    cli.main(
+src/elspeth/cli.py:491: in main
+    run(args)
+src/elspeth/cli.py:165: in run
+    settings = _load_settings_from_args(args)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/elspeth/cli.py:328: in _load_settings_from_args
+    settings_report.raise_if_errors()
+src/elspeth/core/validation.py:62: in raise_if_errors
+    raise ConfigurationError(formatted)
+E   elspeth.core.validation.ConfigurationError: datasource:local_csv: datasource:local_csv: determinism_level is required
+E   llm:mock: llm:mock: determinism_level is required
+E   sink:local_bundle: sink:local_bundle: determinism_level is required
+_________ test_experiment_runner_handles_retries_and_artifact_pipeline _________
+tests/test_experiment_runner_integration.py:155: in test_experiment_runner_handles_retries_and_artifact_pipeline
+    assert payload["metadata"]["determinism_level"] == "guaranteed"
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   KeyError: 'determinism_level'
+------------------------------ Captured log call -------------------------------
+WARNING  elspeth.core.experiments.runner:runner.py:648 LLM request exhausted retries for experiment 'integration' after 2 attempts: permanent failure
+_________________ test_integration_visual_and_analytics_sinks __________________
+tests/test_integration_visual_suite.py:107: in test_integration_visual_and_analytics_sinks
+    assert payload["metadata"]["determinism_level"] == "guaranteed"
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   KeyError: 'determinism_level'
+___________ test_embeddings_sink_upserts_records_using_stub_provider ___________
+tests/test_outputs_embeddings_store.py:74: in test_embeddings_sink_upserts_records_using_stub_provider
+    assert namespace == "suite.experiment.official"
+E   AssertionError: assert 'suite.experiment.OFFICIAL' == 'suite.experiment.official'
+E     
+E     - suite.experiment.official
+E     + suite.experiment.OFFICIAL
+______________ test_suite_runner_executes_with_defaults_and_packs ______________
+src/elspeth/core/registry.py:733: in create_llm_from_definition
+    det_level = coalesce_determinism_level(parent_context.determinism_level, entry_det_level, options_det_level)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/elspeth/core/security/__init__.py:122: in coalesce_determinism_level
+    raise ValueError("Conflicting determinism_level values")
+E   ValueError: Conflicting determinism_level values
+
+The above exception was the direct cause of the following exception:
+tests/test_suite_runner_integration.py:140: in test_suite_runner_executes_with_defaults_and_packs
+    results = runner.run(df, defaults=defaults)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/elspeth/core/experiments/suite_runner.py:358: in run
+    runner = self.build_runner(
+src/elspeth/core/experiments/suite_runner.py:156: in build_runner
+    aggregator_plugins = [create_aggregation_plugin(defn, parent_context=experiment_context) for defn in agg_defs] if agg_defs else None
+                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/elspeth/core/experiments/plugin_registry.py:200: in create_aggregation_plugin
+    plugin = _aggregation_plugins[name].create(
+src/elspeth/core/experiments/plugin_registry.py:44: in create
+    return self.factory(options, plugin_context)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+src/elspeth/plugins/experiments/prompt_variants.py:150: in _build_prompt_variants
+    llm = registry.create_llm_from_definition(
+src/elspeth/core/registry.py:735: in create_llm_from_definition
+    raise ConfigurationError(f"llm:{plugin_name}: {exc}") from exc
+E   elspeth.core.validation.ConfigurationError: llm:mock: Conflicting determinism_level values
+______________ test_create_utility_plugin_with_schema_validation _______________
+tests/test_utilities_plugin_registry.py:56: in test_create_utility_plugin_with_schema_validation
+    assert plugin.plugin_context.determinism_level == "guaranteed"
+E   AssertionError: assert 'none' == 'guaranteed'
+E     
+E     - guaranteed
+E     + none
+______________ test_create_named_utility_inherits_parent_context _______________
+tests/test_utilities_plugin_registry.py:82: in test_create_named_utility_inherits_parent_context
+    assert plugin.plugin_context.determinism_level == "guaranteed"
+E   AssertionError: assert 'none' == 'guaranteed'
+E     
+E     - guaranteed
+E     + none
+================================ tests coverage ================================
+_______________ coverage: platform linux, python 3.12.3-final-0 ________________
+
+Name                                                 Stmts   Miss  Cover   Missing
+----------------------------------------------------------------------------------
+src/elspeth/__init__.py                                  0      0   100%
+src/elspeth/cli.py                                     238     15    94%   131, 156, 173, 243, 315, 317, 327, 354-355, 409, 423, 456, 465, 479, 483
+src/elspeth/config.py                                  238     42    82%   75, 78-79, 87, 90-91, 113, 116, 128, 131, 155, 160, 173, 176, 220-222, 224-226, 232-234, 238, 240, 255, 268, 275, 329, 341-343, 345-347, 349-351, 353-355, 357
+src/elspeth/core/__init__.py                             2      0   100%
+src/elspeth/core/artifact_pipeline.py                  234     16    93%   35-36, 43, 47, 54, 118, 128-129, 200, 248, 256, 260-261, 284, 314, 337
+src/elspeth/core/artifacts.py                           19      0   100%
+src/elspeth/core/config_schema.py                       10      2    80%   52-53
+src/elspeth/core/controls/__init__.py                    4      0   100%
+src/elspeth/core/controls/cost_tracker.py               42      6    86%   14, 19, 82, 86, 88, 90
+src/elspeth/core/controls/rate_limit.py                138     15    89%   16-19, 22, 31-32, 66, 115, 117, 131, 158, 169, 191, 198
+src/elspeth/core/controls/registry.py                  138     30    78%   19-23, 120-123, 135-138, 163, 165, 168-169, 174, 216, 218, 221-222, 227, 259, 261, 264-265, 279, 281, 283, 286-287
+src/elspeth/core/experiments/__init__.py                 5      0   100%
+src/elspeth/core/experiments/config.py                 123     11    91%   62-63, 78, 136, 140, 142, 146, 148, 150, 152, 211
+src/elspeth/core/experiments/plugin_registry.py        310     77    75%   117, 167, 171, 178, 181-182, 217, 221, 228, 231-232, 267, 271, 278, 281-282, 318, 322, 332-333, 338, 439, 443, 445, 447, 450-451, 461, 465, 467, 469, 472-473, 483, 487, 489, 491, 494-495, 504-520, 526-542, 560, 576, 591-592
+src/elspeth/core/experiments/plugins.py                 19      0   100%
+src/elspeth/core/experiments/runner.py                 417     15    96%   106, 235-236, 251, 259, 289, 303, 326, 446, 453, 477, 502, 504, 624, 683
+src/elspeth/core/experiments/suite_runner.py           245     36    85%   77, 87, 96, 99, 103, 109, 115, 117, 121, 123, 127, 129, 169, 171-179, 183, 185-193, 197, 203, 209, 211, 215, 217, 221, 223, 235, 239, 286, 291, 294, 350, 352, 417
+src/elspeth/core/experiments/tools.py                   56      1    98%   109
+src/elspeth/core/interfaces.py                          42      3    93%   18, 34, 44
+src/elspeth/core/llm/__init__.py                         3      0   100%
+src/elspeth/core/llm/middleware.py                      15      1    93%   36
+src/elspeth/core/llm/registry.py                        79     14    82%   28, 60, 63, 65, 73, 75, 78-79, 118, 121, 127, 129, 132-133
+src/elspeth/core/orchestrator.py                        70      2    97%   79, 87
+src/elspeth/core/plugins/__init__.py                     2      0   100%
+src/elspeth/core/plugins/context.py                     28      1    96%   69
+src/elspeth/core/processing.py                          12      0   100%
+src/elspeth/core/prompts/__init__.py                     4      0   100%
+src/elspeth/core/prompts/engine.py                      52      3    94%   49-51
+src/elspeth/core/prompts/exceptions.py                  11      0   100%
+src/elspeth/core/prompts/loader.py                      14      0   100%
+src/elspeth/core/prompts/template.py                    25      0   100%
+src/elspeth/core/registry.py                           193     33    83%   572, 579, 585, 612-613, 633-634, 644, 651, 657, 689-697, 700, 704, 714, 722, 729-730, 737-741, 753-754, 774-775, 785, 792, 798, 825-826
+src/elspeth/core/security/__init__.py                   57     10    82%   25, 57, 61, 87, 100-103, 115, 119
+src/elspeth/core/security/signing.py                    23      4    83%   17, 26-28
+src/elspeth/core/types.py                              129     49    62%   28-37, 41, 45-47, 51, 82, 86-88, 114-122, 126, 130-132, 136, 160-162, 245-270, 278-305, 371-395
+src/elspeth/core/utilities/__init__.py                   2      0   100%
+src/elspeth/core/utilities/plugin_registry.py           59      5    92%   63, 67, 71-72, 84
+src/elspeth/core/validation.py                         522    105    80%   31, 54-55, 72, 84-85, 106, 187, 211, 215, 261-263, 290-293, 341-342, 362, 397-398, 402, 406-407, 451-452, 468, 473, 516-517, 521, 632-633, 647-648, 651-652, 664-666, 668-671, 685-686, 689-690, 702-704, 708-709, 744, 748-750, 753-760, 763-767, 771, 823-824, 827-828, 832, 870, 946, 948-949, 951, 971, 990-991, 1024-1025, 1031, 1045, 1051-1060, 1066-1082, 1190
+src/elspeth/datasources/__init__.py                      2      0   100%
+src/elspeth/datasources/blob_store.py                  139     25    82%   65, 67, 69, 94, 97, 101, 105, 120, 127-128, 131, 134-135, 139-142, 145, 186-187, 235-242
+src/elspeth/plugins/datasources/__init__.py              4      0   100%
+src/elspeth/plugins/datasources/blob.py                 32      1    97%   54
+src/elspeth/plugins/datasources/csv_blob.py             41      2    95%   47, 60
+src/elspeth/plugins/datasources/csv_local.py            41      8    80%   51-58
+src/elspeth/plugins/experiments/__init__.py              2      0   100%
+src/elspeth/plugins/experiments/early_stop.py           66     14    79%   25, 28-29, 33, 49, 54, 58-59, 66, 76, 89, 95, 97, 99
+src/elspeth/plugins/experiments/metrics.py             906    149    84%   210, 246, 252, 255-257, 263, 266-270, 314-315, 385, 391, 395, 403, 406, 409, 442, 459, 466, 505, 519, 524, 540-543, 553-556, 565-568, 605, 621, 627, 637, 685, 689, 707, 713, 721, 729, 736-757, 792, 810, 816, 859-860, 864, 883, 900-901, 938-939, 943, 946-947, 949, 954, 999, 1013, 1020, 1023, 1026-1027, 1029, 1051, 1057, 1125, 1139, 1143, 1149, 1226, 1231, 1247, 1253, 1299, 1328-1329, 1334-1335, 1340-1341, 1389, 1403, 1416-1417, 1466, 1469, 1472-1473, 1475, 1494, 1497, 1501-1502, 1504, 1513, 1521, 1523, 1525, 1555, 1569, 1577-1580, 1620, 1642-1646, 1703, 1732-1743
+src/elspeth/plugins/experiments/prompt_variants.py      73      8    89%   42, 123, 142, 149, 156-160
+src/elspeth/plugins/experiments/rag_query.py            12      0   100%
+src/elspeth/plugins/experiments/validation.py           87     21    76%   21, 24, 38-47, 130, 164-177
+src/elspeth/plugins/llms/__init__.py                     7      0   100%
+src/elspeth/plugins/llms/azure_openai.py                62     10    84%   28-35, 45, 48-50, 57, 70
+src/elspeth/plugins/llms/middleware.py                 149      9    94%   106, 120-121, 138, 212, 216, 223, 229, 247
+src/elspeth/plugins/llms/middleware_azure.py           169     23    86%   62-73, 92, 100, 112, 144-145, 171, 183, 227-228, 240, 270-271, 285-286, 300-301
+src/elspeth/plugins/llms/mock.py                        22      0   100%
+src/elspeth/plugins/llms/openai_http.py                 30      0   100%
+src/elspeth/plugins/llms/static.py                      14      0   100%
+src/elspeth/plugins/outputs/__init__.py                 12      0   100%
+src/elspeth/plugins/outputs/_sanitize.py                36      2    94%   34, 48
+src/elspeth/plugins/outputs/analytics_report.py        100      3    97%   41, 143, 145
+src/elspeth/plugins/outputs/blob.py                    194     31    84%   65, 146, 148, 153, 188, 192-194, 237-250, 253-265, 284, 302, 304, 306, 332
+src/elspeth/plugins/outputs/csv_file.py                 69      5    93%   31, 34, 36, 51, 56
+src/elspeth/plugins/outputs/embeddings_store.py        214     34    84%   105, 168-179, 182-198, 296, 332, 347, 364, 377-380, 399, 403, 409-419
+src/elspeth/plugins/outputs/excel.py                   126     10    92%   53, 56, 58, 62, 99, 104, 109, 115, 163, 179
+src/elspeth/plugins/outputs/file_copy.py                42      3    93%   21, 53, 61
+src/elspeth/plugins/outputs/local_bundle.py             69     12    83%   35, 37, 39, 41, 67-71, 77-78, 94
+src/elspeth/plugins/outputs/repository.py              173     30    83%   53, 84, 114, 127, 177, 203-204, 207-211, 290-298, 309, 322-326, 331, 335-336
+src/elspeth/plugins/outputs/signed.py                   83      4    95%   35, 66, 95, 97
+src/elspeth/plugins/outputs/visual_report.py           214     31    86%   43, 46-51, 55, 72-74, 86-87, 95, 150-156, 212, 218-219, 222-223, 238, 253, 261-262, 324
+src/elspeth/plugins/outputs/zip_bundle.py              144     12    92%   51, 54, 56, 105, 124, 168, 181-183, 237, 239, 241
+src/elspeth/plugins/utilities/__init__.py                2      0   100%
+src/elspeth/plugins/utilities/retrieval.py             105     18    83%   72-73, 124-129, 133, 151, 155, 157, 161, 166, 174, 178, 185, 202
+src/elspeth/retrieval/__init__.py                        3      0   100%
+src/elspeth/retrieval/embedding.py                      33      1    97%   60
+src/elspeth/retrieval/providers.py                      77      4    95%   138, 155, 163, 172
+src/elspeth/retrieval/service.py                        27      1    96%   48
+src/elspeth/tools/reporting.py                         217     12    94%   63, 91, 175, 280-281, 297, 300, 303, 309, 318, 331, 346
+----------------------------------------------------------------------------------
+TOTAL                                                 7378    979    87%
+Coverage XML written to file coverage.xml
+=========================== short test summary info ============================
+SKIPPED [1] tests/test_integration_embeddings_rag.py:33: Set ELSPETH_PG_VECTOR_DSN to run pgvector integration test
+FAILED tests/test_cli_integration.py::test_cli_single_run_executes_real_config
+FAILED tests/test_experiment_runner_integration.py::test_experiment_runner_handles_retries_and_artifact_pipeline
+FAILED tests/test_integration_visual_suite.py::test_integration_visual_and_analytics_sinks
+FAILED tests/test_outputs_embeddings_store.py::test_embeddings_sink_upserts_records_using_stub_provider
+FAILED tests/test_suite_runner_integration.py::test_suite_runner_executes_with_defaults_and_packs
+FAILED tests/test_utilities_plugin_registry.py::test_create_utility_plugin_with_schema_validation
+FAILED tests/test_utilities_plugin_registry.py::test_create_named_utility_inherits_parent_context
+=================== 7 failed, 302 passed, 1 skipped in 5.08s ===================

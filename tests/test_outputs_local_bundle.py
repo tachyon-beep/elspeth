@@ -65,12 +65,13 @@ def test_file_copy_sink_happy_path(tmp_path):
             ]
         }
     )
-    sink.write({}, metadata={"security_level": "official"})
+    sink.write({}, metadata={"security_level": "OFFICIAL", "determinism_level": "guaranteed"})
     artifacts = sink.collect_artifacts()
     copied = Path(artifacts["file"].path)
     assert copied.read_text(encoding="utf-8") == "payload"
     assert artifacts["file"].metadata["content_type"] == "text/plain"
-    assert artifacts["file"].security_level == "official"
+    assert artifacts["file"].security_level == "OFFICIAL"
+    assert artifacts["file"].determinism_level == "guaranteed"
 
 
 def test_file_copy_sink_skip_on_missing_artifact(tmp_path, caplog):

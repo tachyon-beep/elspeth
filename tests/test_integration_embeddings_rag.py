@@ -76,7 +76,7 @@ def test_embeddings_pgvector_round_trip(tmp_path: Path) -> None:
                 }
             ]
         }
-        sink.write(results, metadata={"security_level": "official"})
+        sink.write(results, metadata={"security_level": "OFFICIAL", "determinism_level": "guaranteed"})
 
         service = RetrievalService(
             client=PgVectorQueryClient(dsn=dsn, table="elspeth_rag"),

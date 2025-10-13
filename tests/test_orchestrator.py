@@ -141,8 +141,8 @@ def test_orchestrator_single_run_executes_plugins(monkeypatch):
         config=OrchestratorConfig(
             llm_prompt={"system": "sys", "user": "Hello {name}"},
             prompt_fields=["APPID", "name"],
-            row_plugin_defs=[{"name": "single_run_row_plugin", "security_level": "official"}],
-            aggregator_plugin_defs=[{"name": "single_run_agg_plugin", "security_level": "official"}],
+            row_plugin_defs=[{"name": "single_run_row_plugin", "security_level": "OFFICIAL", "determinism_level": "guaranteed"}],
+            aggregator_plugin_defs=[{"name": "single_run_agg_plugin", "security_level": "OFFICIAL", "determinism_level": "guaranteed"}],
         ),
     )
 

@@ -17,16 +17,19 @@ integration:
   datasource:
     plugin: local_csv
     security_level: official
+    determinism_level: guaranteed
     options:
       path: "{data_path.as_posix()}"
   llm:
     plugin: mock
     security_level: official
+    determinism_level: guaranteed
     options:
       seed: 101
   sinks:
     - plugin: local_bundle
       security_level: official
+      determinism_level: guaranteed
       options:
         base_path: "{bundle_root.as_posix()}"
         bundle_name: "cli_run"
@@ -41,6 +44,7 @@ integration:
   aggregator_plugins:
     - name: prompt_variants
       security_level: official
+      determinism_level: guaranteed
       options:
         prompt_template: |
           Rewrite the original prompt while keeping tokens {{ placeholder_tokens | join(', ') }}.
@@ -51,6 +55,7 @@ integration:
         variant_llm:
           plugin: mock
           security_level: official
+          determinism_level: guaranteed
           options:
             seed: 202
 """,

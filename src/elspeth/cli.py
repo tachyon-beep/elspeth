@@ -466,6 +466,8 @@ def _configure_sink_dry_run(settings, enable_live: bool) -> None:
             payload = {"plugin": entry.get("plugin"), "options": options}
             if entry.get("security_level") is not None:
                 payload["security_level"] = entry.get("security_level")
+            if entry.get("determinism_level") is not None:
+                payload["determinism_level"] = entry.get("determinism_level")
             updated.append(payload)
         return updated
 

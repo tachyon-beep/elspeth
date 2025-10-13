@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Dict, Mapping, Sequence, Tuple
 
 from elspeth.core.interfaces import Artifact, ArtifactDescriptor, ResultSink
-from elspeth.core.security import normalize_security_level
+from elspeth.core.security import normalize_determinism_level, normalize_security_level
 
 logger = logging.getLogger(__name__)
 
@@ -59,6 +59,7 @@ class VisualAnalyticsSink(ResultSink):
         self.chart_title = chart_title or "Mean Scores by Criterion"
         self.seaborn_style = seaborn_style
         self._security_level: str | None = None
+        self._determinism_level: str | None = None
         self._last_written_files: list[tuple[list[str], Path, Dict[str, Any]]] = []
         self._plot_modules: tuple[Any, Any, Any] | None = None
 
@@ -144,8 +145,10 @@ class VisualAnalyticsSink(ResultSink):
             self._last_written_files = written
             if metadata:
                 self._security_level = normalize_security_level(metadata.get("security_level"))
+                self._determinism_level = normalize_determinism_level(metadata.get("determinism_level"))
             else:
                 self._security_level = None
+                self._determinism_level = None
         except Exception as exc:
             if self.on_error == "skip":
                 logger.warning("Visual analytics sink failed; skipping output: %s", exc)
@@ -196,6 +199,7 @@ class VisualAnalyticsSink(ResultSink):
                 metadata=metadata,
                 persist=True,
                 security_level=self._security_level,
+                determinism_level=self._determinism_level,
             )
             for key in keys:
                 artifacts[key] = artifact

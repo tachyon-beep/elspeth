@@ -289,8 +289,12 @@ class ExperimentSuiteRunner:
             security_level = entry.get("security_level", raw_options.get("security_level"))
             if security_level is None:
                 raise ConfigurationError(f"sink '{plugin}' requires a security_level")
+            determinism_level = entry.get("determinism_level", raw_options.get("determinism_level"))
+            if determinism_level is None:
+                raise ConfigurationError(f"sink '{plugin}' requires a determinism_level")
             options_with_level = dict(raw_options)
             options_with_level["security_level"] = security_level
+            options_with_level["determinism_level"] = determinism_level
             core_registry.registry.validate_sink(plugin, options_with_level)
             sink = core_registry.registry.create_sink(
                 plugin,

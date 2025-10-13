@@ -141,7 +141,8 @@ def test_experiment_runner_handles_retries_and_artifact_pipeline(tmp_path: Path)
             "utilization_pause": 0.5,
         },
         checkpoint_config={"path": str(tmp_path / "checkpoint.jsonl"), "field": "APPID"},
-        security_level="secret",
+        security_level="SECRET",
+        determinism_level="guaranteed",
         experiment_name="integration",
     )
 
@@ -151,7 +152,8 @@ def test_experiment_runner_handles_retries_and_artifact_pipeline(tmp_path: Path)
     row_ids = {entry["row"]["APPID"] for entry in payload["results"]}
     assert row_ids == {"A1", "A2"}
     assert payload["metadata"]["rows"] == 2
-    assert payload["metadata"]["security_level"] == "secret"
+    assert payload["metadata"]["security_level"] == "SECRET"
+    assert payload["metadata"]["determinism_level"] == "guaranteed"
 
     retry_summary = payload["metadata"]["retry_summary"]
     assert retry_summary["total_requests"] == 3  # two successes + one failure

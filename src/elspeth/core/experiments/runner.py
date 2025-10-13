@@ -20,7 +20,7 @@ from elspeth.core.interfaces import LLMClientProtocol, ResultSink
 from elspeth.core.llm.middleware import LLMMiddleware, LLMRequest
 from elspeth.core.processing import prepare_prompt_context
 from elspeth.core.prompts import PromptEngine, PromptRenderingError, PromptTemplate, PromptValidationError
-from elspeth.core.security import normalize_security_level, resolve_security_level
+from elspeth.core.security import normalize_security_level, resolve_determinism_level, resolve_security_level
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +51,8 @@ class ExperimentRunner:
     concurrency_config: Dict[str, Any] | None = None
     security_level: str | None = None
     _active_security_level: str | None = None
+    determinism_level: str | None = None
+    _active_determinism_level: str | None = None
     early_stop_plugins: List[EarlyStopPlugin] | None = None
     early_stop_config: Dict[str, Any] | None = None
     _active_early_stop_plugins: List[EarlyStopPlugin] | None = None
@@ -204,6 +206,10 @@ class ExperimentRunner:
         df_security_level = getattr(df, "attrs", {}).get("security_level") if hasattr(df, "attrs") else None
         self._active_security_level = resolve_security_level(self.security_level, df_security_level)
         metadata["security_level"] = self._active_security_level
+
+        df_determinism_level = getattr(df, "attrs", {}).get("determinism_level") if hasattr(df, "attrs") else None
+        self._active_determinism_level = resolve_determinism_level(self.determinism_level, df_determinism_level)
+        metadata["determinism_level"] = self._active_determinism_level
 
         if self._early_stop_reason:
             metadata["early_stop"] = dict(self._early_stop_reason)

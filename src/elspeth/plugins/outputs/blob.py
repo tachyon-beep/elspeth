@@ -320,8 +320,14 @@ class BlobResultSink(ResultSink):
         artifact: Artifact | None,
     ) -> Dict[str, Any]:
         metadata: Dict[str, Any] = {}
-        if execution_metadata and execution_metadata.get("security_level"):
-            metadata["security_level"] = execution_metadata["security_level"]
-        if artifact and artifact.security_level:
-            metadata["security_level"] = artifact.security_level
+        if execution_metadata:
+            if execution_metadata.get("security_level"):
+                metadata["security_level"] = execution_metadata["security_level"]
+            if execution_metadata.get("determinism_level"):
+                metadata["determinism_level"] = execution_metadata["determinism_level"]
+        if artifact:
+            if artifact.security_level:
+                metadata["security_level"] = artifact.security_level
+            if artifact.determinism_level:
+                metadata["determinism_level"] = artifact.determinism_level
         return metadata

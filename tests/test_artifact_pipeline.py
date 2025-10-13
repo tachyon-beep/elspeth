@@ -153,13 +153,13 @@ def test_pipeline_denies_insufficient_security():
         type="file/csv",
         path=None,
         persist=True,
-        security_level="secret",
+        security_level="SECRET",
     )
     producer = DummySink(
         "producer",
         produced=[ArtifactDescriptor(name="csv", type="file/csv")],
         produced_artifacts={"csv": artifact},
-        security_level="secret",
+        security_level="SECRET",
     )
     consumer = DummySink(
         "consumer",
@@ -169,7 +169,7 @@ def test_pipeline_denies_insufficient_security():
     with pytest.raises(PermissionError):
         ArtifactPipeline(
             [
-                binding_for(0, producer, security_level="secret"),
+                binding_for(0, producer, security_level="SECRET"),
                 binding_for(1, consumer, security_level="official"),
             ]
         )
@@ -181,13 +181,13 @@ def test_pipeline_skip_setting_still_raises_on_security():
         type="file/csv",
         path=None,
         persist=True,
-        security_level="secret",
+        security_level="SECRET",
     )
     producer = DummySink(
         "producer",
         produced=[ArtifactDescriptor(name="csv", type="file/csv")],
         produced_artifacts={"csv": artifact},
-        security_level="secret",
+        security_level="SECRET",
     )
     consumer = DummySink(
         "consumer",
@@ -198,7 +198,7 @@ def test_pipeline_skip_setting_still_raises_on_security():
     with pytest.raises(PermissionError):
         ArtifactPipeline(
             [
-                binding_for(0, producer, security_level="secret"),
+                binding_for(0, producer, security_level="SECRET"),
                 binding_for(1, consumer, security_level="official"),
             ]
         )
@@ -215,10 +215,10 @@ def test_pipeline_golden_snapshot():
                 type="file/raw",
                 path=None,
                 persist=True,
-                security_level="secret",
+                security_level="SECRET",
             )
         },
-        security_level="secret",
+        security_level="SECRET",
         log=execution_log,
     )
     sanitizer = DummySink(
@@ -234,26 +234,26 @@ def test_pipeline_golden_snapshot():
                 security_level="official",
             )
         },
-        security_level="secret",
+        security_level="SECRET",
         log=execution_log,
         capture_consumed=True,
     )
     consumer = DummySink(
         "consumer",
         consumed=["file/csv"],
-        security_level="secret",
+        security_level="SECRET",
         log=execution_log,
         capture_consumed=True,
     )
 
     pipeline = ArtifactPipeline(
         [
-            binding_for(0, consumer, security_level="secret"),
-            binding_for(1, sanitizer, security_level="secret"),
-            binding_for(2, producer, security_level="secret"),
+            binding_for(0, consumer, security_level="SECRET"),
+            binding_for(1, sanitizer, security_level="SECRET"),
+            binding_for(2, producer, security_level="SECRET"),
         ]
     )
-    store = pipeline.execute({"results": []}, {"security_level": "secret"})
+    store = pipeline.execute({"results": []}, {"security_level": "SECRET", "determinism_level": "guaranteed"})
 
     artifact_snapshot = {
         artifact_id: {

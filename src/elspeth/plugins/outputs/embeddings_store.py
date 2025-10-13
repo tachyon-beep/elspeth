@@ -251,6 +251,7 @@ class EmbeddingsStoreSink(ResultSink):
         namespace = self._resolve_namespace(metadata)
         context: PluginContext | None = getattr(self, "plugin_context", None)
         security_level = metadata.get("security_level", getattr(context, "security_level", "unofficial"))
+        determinism_level = metadata.get("determinism_level", getattr(context, "determinism_level", "none"))
         embeddings: List[VectorRecord] = []
 
         for index, record in enumerate(results.get("results") or []):
@@ -288,6 +289,7 @@ class EmbeddingsStoreSink(ResultSink):
                 "batch_count": len(batches),
                 "duration_seconds": took_total,
                 "security_level": security_level,
+                "determinism_level": determinism_level,
                 "provider": self.provider_name,
             }
         else:
@@ -304,6 +306,7 @@ class EmbeddingsStoreSink(ResultSink):
             metadata=dict(self._last_manifest),
             persist=True,
             security_level=self._last_manifest.get("security_level"),
+            determinism_level=self._last_manifest.get("determinism_level"),
         )
         self._last_manifest = None
         return {"embeddings_manifest": payload}
@@ -333,6 +336,7 @@ class EmbeddingsStoreSink(ResultSink):
         suite = getattr(suite_context, "plugin_name", metadata.get("suite_name", "suite"))
         experiment = getattr(experiment_context, "plugin_name", metadata.get("experiment", "experiment"))
         level = metadata.get("security_level", getattr(context, "security_level", "unofficial"))
+        level = str(level).lower()
         return f"{suite}.{experiment}.{level}"
 
     def _extract_embedding(self, record: Mapping[str, Any]) -> Optional[Sequence[float]]:

@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, Mapping
 
 from elspeth.core.interfaces import Artifact, ArtifactDescriptor, ResultSink
-from elspeth.core.security import normalize_security_level
+from elspeth.core.security import normalize_determinism_level, normalize_security_level
 from elspeth.plugins.outputs._sanitize import sanitize_cell
 
 logger = logging.getLogger(__name__)
@@ -64,6 +64,7 @@ class ExcelResultSink(ResultSink):
         self._workbook_factory = _load_workbook_dependencies()
         self._last_workbook_path: str | None = None
         self._security_level: str | None = None
+        self._determinism_level: str | None = None
         self._sanitization = {
             "enabled": self.sanitize_formulas,
             "guard": self.sanitize_guard,
@@ -90,6 +91,7 @@ class ExcelResultSink(ResultSink):
             self._last_workbook_path = str(path)
             if metadata:
                 self._security_level = normalize_security_level(metadata.get("security_level"))
+                self._determinism_level = normalize_determinism_level(metadata.get("determinism_level"))
         except Exception as exc:
             if self.on_error == "skip":
                 logger.warning("Excel sink failed; skipping workbook creation: %s", exc)
@@ -217,11 +219,14 @@ class ExcelResultSink(ResultSink):
                 "path": self._last_workbook_path,
                 "content_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 "security_level": self._security_level,
+                "determinism_level": self._determinism_level,
                 "sanitization": self._sanitization,
             },
             persist=True,
             security_level=self._security_level,
+            determinism_level=self._determinism_level,
         )
         self._last_workbook_path = None
         self._security_level = None
+        self._determinism_level = None
         return {"excel": artifact}
