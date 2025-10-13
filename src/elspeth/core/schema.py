@@ -100,7 +100,7 @@ class SchemaViolation:
         return f"SchemaViolation(row={self.row_index}, schema={self.schema_name}, fields={error_fields})"
 
 
-def _pandas_dtype_to_python(dtype: pd.api.types.DtypeArg) -> Type:
+def _pandas_dtype_to_python(dtype: Any) -> Type:
     """
     Convert pandas dtype to Python type for Pydantic schema.
 
@@ -165,7 +165,7 @@ def infer_schema_from_dataframe(
             # Pydantic v2 requires explicit Optional for optional fields
             fields[col] = (Optional[python_type], Field(default=None))  # Optional field
 
-    return create_model(
+    return create_model(  # type: ignore[call-overload,no-any-return]
         schema_name,
         __base__=DataFrameSchema,
         __config__=DataFrameSchema.model_config,  # Explicit v2 config inheritance
@@ -279,7 +279,7 @@ def schema_from_config(
         if is_optional:
             field_kwargs["default"] = None
             # Pydantic v2: Make type explicitly Optional
-            python_type = Optional[python_type]
+            python_type = Optional[python_type]  # type: ignore[assignment]
 
         # Numeric constraints
         if "min" in col_spec:
@@ -301,7 +301,7 @@ def schema_from_config(
         else:
             fields[col_name] = (python_type, Field(**field_kwargs))
 
-    return create_model(
+    return create_model(  # type: ignore[call-overload,no-any-return]
         schema_name,
         __base__=DataFrameSchema,
         __config__=DataFrameSchema.model_config,  # Explicit v2 config inheritance
@@ -400,13 +400,13 @@ def validate_dataframe(
         >>> violations[0].row_index
         1
     """
-    violations = []
+    violations: List[SchemaViolation] = []
 
     for idx, (_, row) in enumerate(df.iterrows()):
         row_dict = row.to_dict()
         is_valid, violation = validate_row(row_dict, schema, row_index=idx)
 
-        if not is_valid:
+        if not is_valid and violation is not None:
             violations.append(violation)
             if early_stop:
                 break
