@@ -109,6 +109,9 @@ cython_debug/
 .env
 .env.*
 
+# Config files with secrets
+config/blob_store.yaml
+
 # virtual environments
 .venv/
 venv/

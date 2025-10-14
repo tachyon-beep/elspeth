@@ -1,5 +1,10 @@
 # Blob storage connections used for experiment datasets.
 # Profiles allow switching between environments (dev, staging, prod, etc.).
+#
+# SECURITY WARNING: This file is now in .gitignore. Add your real credentials here.
+# Use the template (blob_store.yaml.template) as a reference.
+#
+# NEVER commit real SAS tokens or credentials to git!
 
 default:
   connection_name: "workspaceblobstore"
@@ -7,4 +12,6 @@ default:
   account_name: "elspethsyntheticdata"
   container_name: "elspethdatasource"
   blob_path: "SyntheticData.csv"
-  sas_token: "sp=rl&st=2025-10-03T02:13:02Z&se=2025-10-03T10:28:02Z&spr=https&sv=2024-11-04&sr=c&sig=vcKOPLIWXlbPlqW3iFJi8qQ%2BAQuKx1qyIuIii5AH3Wc%3D"
+  # Add your SAS token here (this file is now in .gitignore):
+  sas_token: "REPLACE_WITH_YOUR_SAS_TOKEN"
+  # Or use DefaultAzureCredential by omitting sas_token entirely
