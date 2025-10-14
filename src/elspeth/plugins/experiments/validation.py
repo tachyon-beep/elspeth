@@ -9,10 +9,10 @@ from typing import Any
 from jinja2 import Template
 
 from elspeth.core.experiments.plugin_registry import register_validation_plugin
+from elspeth.core.llm_registry import llm_registry
 from elspeth.plugins.orchestrators.experiment.protocols import ValidationError, ValidationPlugin
 from elspeth.core.protocols import LLMClientProtocol
 from elspeth.core.plugins import PluginContext
-from elspeth.core.registry import registry
 
 
 def _extract_content(response: dict[str, Any]) -> str:
@@ -171,7 +171,7 @@ def _build_llm_guard(options: dict[str, Any], context: PluginContext) -> LLMGuar
     llm_spec = options.get("validator_llm") or options.get("llm")
     if llm_spec is None:
         raise ValueError("LLM guard validation plugin requires 'validator_llm'")
-    validator_llm = registry.create_llm_from_definition(
+    validator_llm = llm_registry.create_llm_from_definition(
         llm_spec,
         parent_context=context,
         provenance=("validator_llm",),

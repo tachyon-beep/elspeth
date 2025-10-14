@@ -8,32 +8,23 @@ Created: 2025-10-14
 Purpose: Risk Reduction Phase - Activity 4
 
 Updated: 2025-10-15
-Status: SKIPPED - Circular import remains in registry/__init__.py
-Issue: registry/__init__.py dynamically loads old registry.py which imports
-       datasource_registry, creating a circular import.
-Fix: Remove backward compat registry singleton imports (5 files) or restructure
-     registry/__init__.py to not dynamically load old registry.py
+Status: ENABLED - Circular import resolved
+Fix: Removed backward compat registry singleton imports from 5 files and
+     removed dynamic loading of old registry.py from registry/__init__.py
 """
 
 import time
 import pytest
 
-# Skip all tests due to circular import issue
-pytestmark = pytest.mark.skip(
-    reason="Circular import: registry/__init__.py loads registry.py which imports datasource_registry. "
-    "Fix by removing backward compat 'registry' singleton imports from 5 files."
+from elspeth.core.datasource_registry import datasource_registry
+from elspeth.core.llm_registry import llm_registry
+from elspeth.core.sink_registry import sink_registry
+from elspeth.core.experiments.plugin_registry import (
+    create_row_plugin,
+    create_aggregation_plugin,
+    create_validation_plugin,
 )
-
-# Placeholder imports to make tests syntactically valid
-datasource_registry = None
-llm_registry = None
-sink_registry = None
-create_row_plugin = None
-create_aggregation_plugin = None
-create_validation_plugin = None
-PluginContext = None
-ConfigMerger = None
-ArtifactPipeline = None
+from elspeth.core.plugins import PluginContext
 
 
 class TestRegistryLookupPerformance:
@@ -93,7 +84,7 @@ class TestPluginCreationPerformance:
         start = time.perf_counter()
         plugin = create_row_plugin(
             {"name": "score_extractor", "key": "score", "security_level": "internal", "determinism_level": "guaranteed"},
-            context
+            parent_context=context
         )
         elapsed_ms = (time.perf_counter() - start) * 1000
 
@@ -105,13 +96,13 @@ class TestPluginCreationPerformance:
         context = PluginContext(
             security_level="internal",
             plugin_kind="aggregator",
-            plugin_name="statistics"
+            plugin_name="score_stats"
         )
 
         start = time.perf_counter()
         plugin = create_aggregation_plugin(
-            {"name": "statistics", "source_field": "scores", "security_level": "internal", "determinism_level": "guaranteed"},
-            context
+            {"name": "score_stats", "source_field": "scores", "security_level": "internal", "determinism_level": "guaranteed"},
+            parent_context=context
         )
         elapsed_ms = (time.perf_counter() - start) * 1000
 
@@ -123,13 +114,13 @@ class TestPluginCreationPerformance:
         context = PluginContext(
             security_level="internal",
             plugin_kind="validator",
-            plugin_name="regex"
+            plugin_name="regex_match"
         )
 
         start = time.perf_counter()
         plugin = create_validation_plugin(
-            {"name": "regex", "pattern": "\\d+", "security_level": "internal", "determinism_level": "guaranteed"},
-            context
+            {"name": "regex_match", "options": {"pattern": "\\d+"}, "security_level": "internal", "determinism_level": "guaranteed"},
+            parent_context=context
         )
         elapsed_ms = (time.perf_counter() - start) * 1000
 
