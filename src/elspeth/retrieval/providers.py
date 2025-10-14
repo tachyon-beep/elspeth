@@ -152,21 +152,42 @@ def create_query_client(provider: str, options: Mapping[str, Any]) -> VectorQuer
         dsn = options.get("dsn")
         if not dsn:
             raise ConfigurationError("pgvector retriever requires 'dsn'")
-        return PgVectorQueryClient(dsn=dsn, table=options.get("table", "elspeth_rag"))
+        table = options.get("table")
+        if not table:
+            raise ConfigurationError("pgvector retriever requires 'table' (e.g., 'elspeth_rag')")
+        return PgVectorQueryClient(dsn=dsn, table=table)
     if provider == "azure_search":
         endpoint = options.get("endpoint")
         index = options.get("index")
         api_key = options.get("api_key")
         if not api_key:
-            api_key = os.getenv(options.get("api_key_env", "AZURE_SEARCH_KEY") or "AZURE_SEARCH_KEY")
+            api_key_env = options.get("api_key_env")
+            if not api_key_env:
+                raise ConfigurationError(
+                    "azure_search retriever requires 'api_key' or 'api_key_env'. "
+                    "Provide explicit 'api_key_env' (e.g., 'AZURE_SEARCH_KEY') in configuration."
+                )
+            api_key = os.getenv(api_key_env)
         if not endpoint or not index or not api_key:
             raise ConfigurationError("azure_search retriever requires 'endpoint', 'index', and API key")
+
+        # Require explicit field configuration for security/audit purposes
+        vector_field = options.get("vector_field")
+        if not vector_field:
+            raise ConfigurationError("azure_search retriever requires 'vector_field' (e.g., 'embedding')")
+        namespace_field = options.get("namespace_field")
+        if not namespace_field:
+            raise ConfigurationError("azure_search retriever requires 'namespace_field' (e.g., 'namespace')")
+        content_field = options.get("content_field")
+        if not content_field:
+            raise ConfigurationError("azure_search retriever requires 'content_field' (e.g., 'contents')")
+
         return AzureSearchQueryClient(
             endpoint=endpoint,
             index=index,
             api_key=api_key,
-            vector_field=options.get("vector_field", "embedding"),
-            namespace_field=options.get("namespace_field", "namespace"),
-            content_field=options.get("content_field", "contents"),
+            vector_field=vector_field,
+            namespace_field=namespace_field,
+            content_field=content_field,
         )
     raise ValueError(f"Unsupported retriever provider '{provider}'")

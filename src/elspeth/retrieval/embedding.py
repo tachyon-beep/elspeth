@@ -59,7 +59,12 @@ class AzureOpenAIEmbedder(Embedder):
         if not key:
             raise ConfigurationError("Azure OpenAI embeddings require 'api_key' or AZURE_OPENAI_API_KEY")
 
-        version = api_version or os.getenv("AZURE_OPENAI_API_VERSION", "2024-05-13")
+        version = api_version or os.getenv("AZURE_OPENAI_API_VERSION")
+        if not version:
+            raise ConfigurationError(
+                "Azure OpenAI embeddings require explicit 'api_version' configuration or AZURE_OPENAI_API_VERSION. "
+                "Provide explicit version (e.g., '2024-05-13') for security/audit purposes."
+            )
 
         self._client = AzureOpenAI(
             api_key=key,

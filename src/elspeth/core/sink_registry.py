@@ -33,13 +33,13 @@ from elspeth.plugins.outputs import (
     VisualAnalyticsSink,
     ZipResultSink,
 )
-from elspeth.plugins.outputs.embeddings_store import (
+from elspeth.plugins.nodes.sinks.embeddings_store import (
     DEFAULT_EMBEDDING_FIELD,
     DEFAULT_ID_FIELD,
     DEFAULT_TEXT_FIELD,
     EmbeddingsStoreSink,
 )
-from elspeth.plugins.outputs.enhanced_visual_report import EnhancedVisualAnalyticsSink
+from elspeth.plugins.nodes.sinks.enhanced_visual_report import EnhancedVisualAnalyticsSink
 
 # Create the sink registry with type safety
 sink_registry = BasePluginRegistry[ResultSink]("sink")

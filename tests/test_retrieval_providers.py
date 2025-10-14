@@ -86,7 +86,7 @@ def test_pgvector_query_filters_by_min_score(psycopg_stub, providers_module):
 
 def test_pgvector_vector_literal_format(psycopg_stub, providers_module):
     providers = importlib.reload(providers_module)
-    client = providers.PgVectorQueryClient(dsn="postgresql://example")
+    client = providers.PgVectorQueryClient(dsn="postgresql://example", table="elspeth_rag")
 
     literal = client._vector_literal([0.123456789, 1, 2])
 
@@ -176,6 +176,7 @@ def test_create_query_client_azure_success(monkeypatch, azure_modules, providers
         {
             "endpoint": "https://search.example",
             "index": "experiments",
+            "api_key_env": "AZURE_SEARCH_KEY",
             "vector_field": "embedding",
             "namespace_field": "namespace",
             "content_field": "contents",

@@ -130,12 +130,19 @@ class LLMGuardValidationPlugin(ValidationPlugin):
             raise ValidationError("LLM guard returned unexpected verdict")
 
 
+def _build_regex_validator(options: dict[str, Any], context: PluginContext) -> RegexValidationPlugin:
+    pattern = options.get("pattern")
+    if not pattern:
+        raise ValueError("regex_match validation plugin requires 'pattern' configuration")
+    return RegexValidationPlugin(
+        pattern=pattern,
+        flags=options.get("flags"),
+    )
+
+
 register_validation_plugin(
     "regex_match",
-    lambda options, context: RegexValidationPlugin(
-        pattern=options.get("pattern", ""),
-        flags=options.get("flags"),
-    ),
+    _build_regex_validator,
     schema={
         "type": "object",
         "properties": {

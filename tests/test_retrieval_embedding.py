@@ -74,8 +74,9 @@ def test_azure_openai_embedder_uses_env(openai_stub, monkeypatch):
 
     monkeypatch.setenv("AZURE_OPENAI_ENDPOINT", "https://example")
     monkeypatch.setenv("AZURE_OPENAI_API_KEY", "secret")
+    monkeypatch.setenv("AZURE_OPENAI_API_VERSION", "2024-05-13")
 
-    embedder = embedding_module.AzureOpenAIEmbedder(endpoint=None, deployment="model", api_key=None)
+    embedder = embedding_module.AzureOpenAIEmbedder(endpoint=None, deployment="model", api_key=None, api_version=None)
     vector = embedder.embed("input")
 
     assert vector == [0.1, 0.2]

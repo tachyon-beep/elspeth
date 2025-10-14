@@ -378,24 +378,45 @@ class EmbeddingsStoreSink(ResultSink):
             dsn = options.get("dsn")
             if not dsn:
                 raise ConfigurationError("pgvector provider requires 'dsn' option")
+            table = options.get("table")
+            if not table:
+                raise ConfigurationError("pgvector provider requires 'table' option (e.g., 'elspeth_rag')")
             return PgVectorClient(
-                dsn=dsn, table=options.get("table", "elspeth_rag"), upsert_conflict=options.get("upsert_conflict", "replace")
+                dsn=dsn, table=table, upsert_conflict=options.get("upsert_conflict", "replace")
             )
         if provider == "azure_search":
             endpoint = options.get("endpoint")
             index = options.get("index")
             api_key = options.get("api_key")
             if not api_key:
-                api_key = os.getenv(options.get("api_key_env", "AZURE_SEARCH_KEY") or "AZURE_SEARCH_KEY")
+                api_key_env = options.get("api_key_env")
+                if not api_key_env:
+                    raise ConfigurationError(
+                        "azure_search provider requires 'api_key' or 'api_key_env'. "
+                        "Provide explicit 'api_key_env' (e.g., 'AZURE_SEARCH_KEY') in configuration."
+                    )
+                api_key = os.getenv(api_key_env)
             if not endpoint or not index or not api_key:
                 raise ConfigurationError("azure_search provider requires 'endpoint', 'index', and API key (via 'api_key' or environment)")
+
+            # Require explicit field configuration for security/audit purposes
+            vector_field = options.get("vector_field")
+            if not vector_field:
+                raise ConfigurationError("azure_search provider requires 'vector_field' (e.g., 'embedding')")
+            document_id_field = options.get("id_field")
+            if not document_id_field:
+                raise ConfigurationError("azure_search provider requires 'id_field' (e.g., 'document_id')")
+            namespace_field = options.get("namespace_field")
+            if not namespace_field:
+                raise ConfigurationError("azure_search provider requires 'namespace_field' (e.g., 'namespace')")
+
             return AzureSearchVectorClient(
                 endpoint=endpoint,
                 index=index,
                 api_key=api_key,
-                vector_field=options.get("vector_field", "embedding"),
-                document_id_field=options.get("id_field", "document_id"),
-                namespace_field=options.get("namespace_field", "namespace"),
+                vector_field=vector_field,
+                document_id_field=document_id_field,
+                namespace_field=namespace_field,
             )
         raise ValueError(f"Unsupported embeddings provider '{provider}'")
 
@@ -413,8 +434,14 @@ class EmbeddingsStoreSink(ResultSink):
         if provider == "azure_openai":
             deployment_raw = config.get("deployment")
             deployment = str(deployment_raw) if deployment_raw is not None else ""
+            endpoint = config.get("endpoint")
+            if not endpoint:
+                raise ConfigurationError(
+                    "azure_openai embed_model requires explicit 'endpoint' configuration. "
+                    "Do not rely on AZURE_OPENAI_ENDPOINT environment variable for security/audit purposes."
+                )
             return AzureOpenAIEmbedder(
-                endpoint=config.get("endpoint") or os.getenv("AZURE_OPENAI_ENDPOINT", ""),
+                endpoint=endpoint,
                 deployment=deployment,
                 api_key=config.get("api_key"),
                 api_version=config.get("api_version"),
