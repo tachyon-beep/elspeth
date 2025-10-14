@@ -86,6 +86,31 @@ class ResultSink(Protocol):  # pylint: disable=too-few-public-methods
         return {}
 
 
+@runtime_checkable
+class OrchestratorPlugin(Protocol):
+    """
+    Defines the topology of data flow through processing nodes.
+
+    Orchestrators are 'engines' that define HOW data flows through the system,
+    while nodes (sources, sinks, transforms) define WHAT happens at each vertex.
+
+    Example: ExperimentOrchestrator defines a DAG pattern where data flows from
+    a source through LLM transforms and experiment plugins to multiple sinks.
+    """
+
+    def run(self, context: "ExperimentContext") -> dict[str, Any]:
+        """
+        Execute the orchestrated data flow.
+
+        Args:
+            context: Contains data, configuration, and runtime info
+
+        Returns:
+            Results dictionary containing outputs and metadata
+        """
+        raise NotImplementedError
+
+
 @dataclass
 class ExperimentContext:
     """Data structure passed to orchestrator containing runtime info."""
@@ -127,6 +152,7 @@ __all__ = [
     "DataSource",
     "LLMClientProtocol",
     "ResultSink",
+    "OrchestratorPlugin",
     "ExperimentContext",
     "ArtifactDescriptor",
     "Artifact",
