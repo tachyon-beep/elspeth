@@ -5,11 +5,11 @@ from __future__ import annotations
 from typing import Any
 
 from elspeth.core.experiments.plugin_registry import register_aggregation_plugin
-from elspeth.core.registry import create_llm_from_definition
-from elspeth.plugins.orchestrators.experiment.protocols import AggregationExperimentPlugin
-from elspeth.core.protocols import LLMClientProtocol
 from elspeth.core.plugins import PluginContext
 from elspeth.core.prompts.engine import PromptEngine
+from elspeth.core.protocols import LLMClientProtocol
+from elspeth.core.registry import create_llm_from_definition
+from elspeth.plugins.orchestrators.experiment.protocols import AggregationExperimentPlugin
 
 
 class PromptVariantsAggregator(AggregationExperimentPlugin):

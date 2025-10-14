@@ -13,9 +13,9 @@ from elspeth.core.experiments.plugin_registry import (
     create_validation_plugin,
 )
 from elspeth.core.experiments.runner import ExperimentRunner
-from elspeth.core.protocols import DataSource, LLMClientProtocol, ResultSink
 from elspeth.core.llm.registry import create_middlewares
 from elspeth.core.plugins import PluginContext, apply_plugin_context
+from elspeth.core.protocols import DataSource, LLMClientProtocol, ResultSink
 from elspeth.core.security import resolve_security_level
 
 

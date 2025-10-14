@@ -11,8 +11,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from elspeth.plugins.orchestrators.experiment.protocols import BaselineComparisonPlugin
 from elspeth.core.registry.base import BasePluginRegistry
+from elspeth.plugins.orchestrators.experiment.protocols import BaselineComparisonPlugin
 
 # Initialize the baseline plugin registry
 baseline_plugin_registry = BasePluginRegistry[BaselineComparisonPlugin]("baseline_plugin")

@@ -9,8 +9,8 @@ Migrated from plugin_registry.py as part of Phase 2 registry consolidation.
 
 from __future__ import annotations
 
-from elspeth.plugins.orchestrators.experiment.protocols import ValidationPlugin
 from elspeth.core.registry.base import BasePluginRegistry
+from elspeth.plugins.orchestrators.experiment.protocols import ValidationPlugin
 
 # Initialize the validation plugin registry
 validation_plugin_registry = BasePluginRegistry[ValidationPlugin]("validation_plugin")

@@ -9,8 +9,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
-from elspeth.core.protocols import Artifact, ArtifactDescriptor, ResultSink
 from elspeth.core.plugins import PluginContext
+from elspeth.core.protocols import Artifact, ArtifactDescriptor, ResultSink
 from elspeth.core.validation_base import ConfigurationError
 from elspeth.retrieval.embedding import AzureOpenAIEmbedder, Embedder, OpenAIEmbedder
 

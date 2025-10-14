@@ -7,7 +7,6 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, cast
 
 from elspeth.core.controls import create_cost_tracker, create_rate_limiter
-from elspeth.core.sink_registry import sink_registry
 from elspeth.core.experiments.config import ExperimentConfig, ExperimentSuite
 from elspeth.core.experiments.config_merger import ConfigMerger
 from elspeth.core.experiments.plugin_registry import (
@@ -19,10 +18,11 @@ from elspeth.core.experiments.plugin_registry import (
     normalize_early_stop_definitions,
 )
 from elspeth.core.experiments.runner import ExperimentRunner
-from elspeth.core.protocols import LLMClientProtocol, ResultSink
 from elspeth.core.llm.registry import create_middleware
 from elspeth.core.plugins import PluginContext, apply_plugin_context
+from elspeth.core.protocols import LLMClientProtocol, ResultSink
 from elspeth.core.security import resolve_security_level
+from elspeth.core.sink_registry import sink_registry
 from elspeth.core.validation_base import ConfigurationError
 
 

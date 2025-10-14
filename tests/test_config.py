@@ -3,8 +3,8 @@ from types import SimpleNamespace
 from elspeth.config import load_settings
 from elspeth.core.datasource_registry import datasource_registry
 from elspeth.core.llm_registry import llm_registry
-from elspeth.core.sink_registry import sink_registry
 from elspeth.core.registry.base import BasePluginFactory
+from elspeth.core.sink_registry import sink_registry
 
 
 def test_load_settings(tmp_path, monkeypatch):

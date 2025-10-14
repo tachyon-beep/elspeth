@@ -12,8 +12,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from elspeth.core.protocols import ResultSink
 from elspeth.core.plugins import PluginContext
+from elspeth.core.protocols import ResultSink
 from elspeth.core.registry.base import BasePluginRegistry
 from elspeth.core.registry.schemas import (
     with_artifact_properties,

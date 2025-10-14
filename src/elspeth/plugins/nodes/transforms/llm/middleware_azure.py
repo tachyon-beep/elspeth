@@ -9,8 +9,8 @@ import threading
 import time
 from typing import Any, Iterable, Mapping
 
-from elspeth.core.protocols import LLMMiddleware, LLMRequest
 from elspeth.core.llm.registry import register_middleware
+from elspeth.core.protocols import LLMMiddleware, LLMRequest
 
 logger = logging.getLogger(__name__)
 

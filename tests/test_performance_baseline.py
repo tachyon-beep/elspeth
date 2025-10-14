@@ -14,17 +14,20 @@ Fix: Removed backward compat registry singleton imports from 5 files and
 """
 
 import time
+
 import pytest
 
+from elspeth.core.artifact_pipeline import ArtifactPipeline
 from elspeth.core.datasource_registry import datasource_registry
-from elspeth.core.llm_registry import llm_registry
-from elspeth.core.sink_registry import sink_registry
+from elspeth.core.experiments.config_merger import ConfigMerger
 from elspeth.core.experiments.plugin_registry import (
-    create_row_plugin,
     create_aggregation_plugin,
+    create_row_plugin,
     create_validation_plugin,
 )
+from elspeth.core.llm_registry import llm_registry
 from elspeth.core.plugins import PluginContext
+from elspeth.core.sink_registry import sink_registry
 
 
 class TestRegistryLookupPerformance:
@@ -226,8 +229,6 @@ class TestArtifactPipelinePerformance:
             }
         ]
 
-        results_payload = {"results": sample_dataframe.to_dict("records")}
-
         start = time.perf_counter()
         pipeline = ArtifactPipeline(sink_defs, context)
         sorted_sinks = pipeline.resolve_execution_order()
@@ -308,9 +309,6 @@ class TestPerformanceRegression:
 
     def test_performance_baseline_documented(self):
         """Verify performance baseline is documented."""
-        import pathlib
-        baseline_file = pathlib.Path(__file__).parent.parent / "docs" / "architecture" / "refactoring" / "data-flow-migration" / "PERFORMANCE_BASELINE.md"
-
         # This will be created after running these tests
         # For now, skip if doesn't exist
         pytest.skip("PERFORMANCE_BASELINE.md will be created after baseline tests run")

@@ -12,9 +12,9 @@ from __future__ import annotations
 from typing import Any, Iterable, Mapping
 
 from elspeth.core.datasource_registry import datasource_registry
-from elspeth.core.protocols import DataSource, LLMClientProtocol, ResultSink
 from elspeth.core.llm_registry import llm_registry
 from elspeth.core.plugins import PluginContext, apply_plugin_context
+from elspeth.core.protocols import DataSource, LLMClientProtocol, ResultSink
 from elspeth.core.registry.base import BasePluginFactory
 from elspeth.core.security import (
     coalesce_determinism_level,

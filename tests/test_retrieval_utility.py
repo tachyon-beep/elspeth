@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import pytest
-
 from elspeth.core.plugins import PluginContext, apply_plugin_context
 from elspeth.plugins.utilities.retrieval import RetrievalContextUtility
 from elspeth.retrieval import QueryResult

@@ -9,8 +9,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from elspeth.core.protocols import LLMClientProtocol
 from elspeth.core.plugins import PluginContext
+from elspeth.core.protocols import LLMClientProtocol
 from elspeth.core.registry.base import BasePluginRegistry
 from elspeth.core.registry.schemas import with_security_properties
 from elspeth.plugins.nodes.transforms.llm import AzureOpenAIClient, HttpOpenAIClient, MockLLMClient, StaticLLMClient

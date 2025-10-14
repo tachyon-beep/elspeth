@@ -81,8 +81,7 @@ def create_llm_from_definition(
     registry.create_llm_from_definition(). It delegates to llm_registry.
     """
     from elspeth.core.llm_registry import llm_registry
-    from elspeth.core.plugins import PluginContext
-    from elspeth.core.security import coalesce_security_level, coalesce_determinism_level
+    from elspeth.core.security import coalesce_determinism_level, coalesce_security_level
     from elspeth.core.validation_base import ConfigurationError
 
     if not isinstance(definition, Mapping):

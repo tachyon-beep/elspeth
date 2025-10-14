@@ -9,10 +9,7 @@ Created: 2025-10-14
 Purpose: Risk Reduction Phase - Gate requirement for migration
 """
 
-import os
 import pytest
-from elspeth.core.validation import ConfigurationError
-from elspeth.core.plugins.context import PluginContext
 
 
 class TestCriticalDefaultEnforcement:
@@ -27,7 +24,14 @@ class TestCriticalDefaultEnforcement:
         """Meta-test: Verify critical defaults are documented in audit."""
         # This test passes - it just confirms the audit exists
         import pathlib
-        audit_file = pathlib.Path(__file__).parent.parent / "docs" / "architecture" / "refactoring" / "data-flow-migration" / "SILENT_DEFAULTS_AUDIT.md"
+        audit_file = (
+            pathlib.Path(__file__).parent.parent
+            / "docs"
+            / "architecture"
+            / "refactoring"
+            / "data-flow-migration"
+            / "SILENT_DEFAULTS_AUDIT.md"
+        )
         assert audit_file.exists(), "SILENT_DEFAULTS_AUDIT.md should exist"
 
         content = audit_file.read_text()
