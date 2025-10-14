@@ -32,7 +32,7 @@ from elspeth.core.experiments.row_plugin_registry import row_plugin_registry
 from elspeth.core.experiments.validation_plugin_registry import validation_plugin_registry
 from elspeth.core.plugins import PluginContext
 from elspeth.core.security import coalesce_security_level  # Still needed for validation functions
-from elspeth.core.validation import ConfigurationError
+from elspeth.core.validation_base import ConfigurationError
 
 # Register functions now delegate to the new registries
 

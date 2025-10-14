@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 from typing import Sequence
 
-from elspeth.core.validation import ConfigurationError
+from elspeth.core.validation_base import ConfigurationError
 
 
 class Embedder:

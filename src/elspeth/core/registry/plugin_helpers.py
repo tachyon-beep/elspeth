@@ -24,7 +24,7 @@ from elspeth.core.security import (
     coalesce_security_level,
     normalize_determinism_level,
 )
-from elspeth.core.validation import ConfigurationError
+from elspeth.core.validation_base import ConfigurationError
 
 T = TypeVar("T")
 

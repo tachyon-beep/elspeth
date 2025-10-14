@@ -7,7 +7,7 @@ from typing import Any, Callable, Mapping
 
 from elspeth.core.plugins import PluginContext
 from elspeth.core.utilities import register_utility_plugin
-from elspeth.core.validation import ConfigurationError
+from elspeth.core.validation_base import ConfigurationError
 from elspeth.retrieval import RetrievalService, create_retrieval_service
 
 logger = logging.getLogger(__name__)

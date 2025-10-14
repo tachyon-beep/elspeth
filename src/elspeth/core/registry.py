@@ -21,7 +21,7 @@ from elspeth.core.security import (
     coalesce_security_level,
 )
 from elspeth.core.sink_registry import sink_registry
-from elspeth.core.validation import ConfigurationError
+from elspeth.core.validation_base import ConfigurationError
 
 ON_ERROR_ENUM = {"type": "string", "enum": ["abort", "skip"]}
 

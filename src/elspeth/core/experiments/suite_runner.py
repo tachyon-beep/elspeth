@@ -23,7 +23,7 @@ from elspeth.core.protocols import LLMClientProtocol, ResultSink
 from elspeth.core.llm.registry import create_middleware
 from elspeth.core.plugins import PluginContext, apply_plugin_context
 from elspeth.core.security import resolve_security_level
-from elspeth.core.validation import ConfigurationError
+from elspeth.core.validation_base import ConfigurationError
 
 
 @dataclass

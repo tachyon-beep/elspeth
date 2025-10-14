@@ -15,7 +15,7 @@ from elspeth.core.llm_registry import llm_registry
 from elspeth.core.orchestrator import OrchestratorConfig
 from elspeth.core.security import coalesce_determinism_level, coalesce_security_level
 from elspeth.core.sink_registry import sink_registry
-from elspeth.core.validation import ConfigurationError
+from elspeth.core.validation_base import ConfigurationError
 
 
 @dataclass

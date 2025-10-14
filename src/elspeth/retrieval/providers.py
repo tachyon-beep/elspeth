@@ -7,7 +7,7 @@ import os
 from dataclasses import dataclass
 from typing import Any, Iterable, Mapping, Sequence
 
-from elspeth.core.validation import ConfigurationError
+from elspeth.core.validation_base import ConfigurationError
 
 
 @dataclass

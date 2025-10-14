@@ -15,7 +15,7 @@ from elspeth.core.security import (
     normalize_determinism_level,
     normalize_security_level,
 )
-from elspeth.core.validation import ConfigurationError
+from elspeth.core.validation_base import ConfigurationError
 
 
 def extract_security_levels(
