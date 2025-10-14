@@ -8,9 +8,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
-from elspeth.core.interfaces import Artifact, ArtifactDescriptor, ResultSink
+from elspeth.core.protocols import Artifact, ArtifactDescriptor, ResultSink
 from elspeth.core.security import normalize_determinism_level, normalize_security_level
-from elspeth.plugins.outputs._sanitize import sanitize_cell
+from elspeth.plugins.nodes.sinks._sanitize import sanitize_cell
 
 logger = logging.getLogger(__name__)
 

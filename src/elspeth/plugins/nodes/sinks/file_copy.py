@@ -7,7 +7,7 @@ import shutil
 from pathlib import Path
 from typing import Mapping
 
-from elspeth.core.interfaces import Artifact, ResultSink
+from elspeth.core.protocols import Artifact, ResultSink
 from elspeth.core.security import normalize_determinism_level, normalize_security_level
 
 logger = logging.getLogger(__name__)

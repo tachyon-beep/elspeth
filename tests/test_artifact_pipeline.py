@@ -7,7 +7,7 @@ from typing import Any, Dict
 import pytest
 
 from elspeth.core.artifact_pipeline import ArtifactPipeline, SinkBinding
-from elspeth.core.interfaces import Artifact, ArtifactDescriptor, ResultSink
+from elspeth.core.protocols import Artifact, ArtifactDescriptor, ResultSink
 
 
 class DummySink(ResultSink):

@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from elspeth.core.interfaces import ResultSink
+from elspeth.core.protocols import ResultSink
 from elspeth.core.plugins import PluginContext
 from elspeth.core.registry.base import BasePluginRegistry
 from elspeth.core.registry.schemas import (
@@ -20,7 +20,7 @@ from elspeth.core.registry.schemas import (
     with_error_handling,
     with_security_properties,
 )
-from elspeth.plugins.outputs import (
+from elspeth.plugins.nodes.sinks import (
     AnalyticsReportSink,
     AzureDevOpsRepoSink,
     BlobResultSink,

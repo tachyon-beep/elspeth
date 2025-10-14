@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from elspeth.core.interfaces import Artifact
-from elspeth.plugins.outputs.excel import ExcelResultSink
+from elspeth.core.protocols import Artifact
+from elspeth.plugins.nodes.sinks.excel import ExcelResultSink
 
 
 class StubSheet:
@@ -36,7 +36,7 @@ class StubWorkbook:
 
 
 def test_excel_result_sink_generates_workbook(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("elspeth.plugins.outputs.excel._load_workbook_dependencies", lambda: StubWorkbook)
+    monkeypatch.setattr("elspeth.plugins.nodes.sinks.excel._load_workbook_dependencies", lambda: StubWorkbook)
 
     sink = ExcelResultSink(
         base_path=tmp_path,
@@ -91,7 +91,7 @@ def test_excel_result_sink_skip_on_error(tmp_path: Path, monkeypatch: pytest.Mon
         def save(self, path):
             raise RuntimeError("cannot save")
 
-    monkeypatch.setattr("elspeth.plugins.outputs.excel._load_workbook_dependencies", lambda: FailingWorkbook)
+    monkeypatch.setattr("elspeth.plugins.nodes.sinks.excel._load_workbook_dependencies", lambda: FailingWorkbook)
 
     sink = ExcelResultSink(base_path=tmp_path, workbook_name="failing", timestamped=False, on_error="skip")
     sink.write({"results": []}, metadata={"experiment": "suite"})

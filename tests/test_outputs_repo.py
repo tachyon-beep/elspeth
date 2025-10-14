@@ -1,7 +1,7 @@
 import base64
 import json
 
-from elspeth.plugins.outputs.repository import AzureDevOpsRepoSink, GitHubRepoSink
+from elspeth.plugins.nodes.sinks.repository import AzureDevOpsRepoSink, GitHubRepoSink
 
 
 class DummyResponse:

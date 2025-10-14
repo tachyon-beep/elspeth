@@ -7,7 +7,7 @@ from typing import Any
 
 import requests
 
-from elspeth.core.interfaces import LLMClientProtocol
+from elspeth.core.protocols import LLMClientProtocol
 
 
 class HttpOpenAIClient(LLMClientProtocol):

@@ -3,7 +3,6 @@ from __future__ import annotations
 import pytest
 
 from elspeth.core.plugins import PluginContext, apply_plugin_context
-from elspeth.plugins.experiments.rag_query import RAGQueryPlugin
 from elspeth.plugins.utilities.retrieval import RetrievalContextUtility
 from elspeth.retrieval import QueryResult
 
@@ -69,24 +68,6 @@ def test_retrieval_utility_metadata_only_mode():
 
     assert "retrieved_context" not in payload
     assert payload["metadata"]["retrieved_context"].startswith("Context:")
-    assert payload["metrics"]["retrieval"]["hits"] == 1
-
-
-def test_rag_query_plugin_shim_warns():
-    hits = [QueryResult(document_id="doc-1", text="Only context", score=0.8, metadata={})]
-    service = StubRetrievalService(hits)
-
-    with pytest.warns(DeprecationWarning):
-        plugin = RAGQueryPlugin(
-            provider="pgvector",
-            dsn="postgresql://example",
-            embed_model={"provider": "openai", "model": "irrelevant"},
-            service_factory=lambda config: service,
-        )
-
-    _attach_utility_context(plugin)
-    payload = plugin.process_row({"query": "example"}, {})
-
     assert payload["metrics"]["retrieval"]["hits"] == 1
 
 

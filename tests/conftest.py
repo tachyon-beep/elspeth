@@ -5,7 +5,7 @@ from typing import Callable
 
 import pytest
 
-from elspeth.plugins.outputs._sanitize import DANGEROUS_PREFIXES
+from elspeth.plugins.nodes.sinks._sanitize import DANGEROUS_PREFIXES
 
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:

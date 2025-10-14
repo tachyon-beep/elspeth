@@ -177,7 +177,7 @@ def test_registry_sink_schema_success(tmp_path):
     sink = registry.create_sink(
         "file_copy", {"destination": dest.as_posix(), "security_level": "OFFICIAL", "determinism_level": "guaranteed"}
     )
-    from elspeth.core.interfaces import Artifact
+    from elspeth.core.protocols import Artifact
 
     src = tmp_path / "src.txt"
     src.write_text("hello", encoding="utf-8")

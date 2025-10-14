@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from elspeth.adapters.blob_store import BlobConfig, load_blob_config
-from elspeth.core.interfaces import Artifact, ResultSink
+from elspeth.core.protocols import Artifact, ResultSink
 
 logger = logging.getLogger(__name__)
 

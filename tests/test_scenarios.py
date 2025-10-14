@@ -7,9 +7,9 @@ from elspeth.core.experiments import plugin_registry
 from elspeth.core.experiments.config import ExperimentSuite
 from elspeth.core.experiments.runner import ExperimentRunner
 from elspeth.core.experiments.suite_runner import ExperimentSuiteRunner
-from elspeth.plugins.llms.mock import MockLLMClient
-from elspeth.plugins.outputs.csv_file import CsvResultSink
-from elspeth.plugins.outputs.local_bundle import LocalBundleSink
+from elspeth.plugins.nodes.transforms.llm.mock import MockLLMClient
+from elspeth.plugins.nodes.sinks.csv_file import CsvResultSink
+from elspeth.plugins.nodes.sinks.local_bundle import LocalBundleSink
 
 
 def test_end_to_end_local_pipeline(tmp_path, assert_sanitized_artifact):

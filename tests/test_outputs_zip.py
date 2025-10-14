@@ -8,8 +8,8 @@ from zipfile import ZipFile
 
 import pytest
 
-from elspeth.core.interfaces import Artifact
-from elspeth.plugins.outputs.zip_bundle import ZipResultSink
+from elspeth.core.protocols import Artifact
+from elspeth.plugins.nodes.sinks.zip_bundle import ZipResultSink
 
 
 def _sample_results():
@@ -78,7 +78,7 @@ def test_zip_result_sink_skip_on_error(tmp_path: Path, monkeypatch: pytest.Monke
         def writestr(self, *args, **kwargs):
             raise RuntimeError("zip failure")
 
-    monkeypatch.setattr("elspeth.plugins.outputs.zip_bundle.ZipFile", BrokenZip)
+    monkeypatch.setattr("elspeth.plugins.nodes.sinks.zip_bundle.ZipFile", BrokenZip)
 
     sink = ZipResultSink(base_path=tmp_path, bundle_name="fail", timestamped=False, on_error="skip")
     sink.write({"results": []})

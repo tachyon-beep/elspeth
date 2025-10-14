@@ -8,7 +8,7 @@ from typing import Any, Type
 
 import pandas as pd
 
-from elspeth.core.interfaces import DataSource
+from elspeth.core.protocols import DataSource
 from elspeth.core.schema import DataFrameSchema, infer_schema_from_dataframe, schema_from_config
 from elspeth.core.security import normalize_determinism_level, normalize_security_level
 

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from elspeth.core.experiments.plugins import AggregationExperimentPlugin
+from elspeth.plugins.orchestrators.experiment.protocols import AggregationExperimentPlugin
 from elspeth.core.registry.base import BasePluginRegistry
 
 # Initialize the aggregation plugin registry

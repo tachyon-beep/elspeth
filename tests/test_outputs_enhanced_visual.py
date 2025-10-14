@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from elspeth.plugins.outputs.enhanced_visual_report import EnhancedVisualAnalyticsSink
+from elspeth.plugins.nodes.sinks.enhanced_visual_report import EnhancedVisualAnalyticsSink
 
 pytest.importorskip("matplotlib")  # Skip entire module if matplotlib is unavailable
 

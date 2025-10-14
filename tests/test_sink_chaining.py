@@ -5,9 +5,9 @@ import pandas as pd
 
 from elspeth.core.artifact_pipeline import ArtifactPipeline, SinkBinding
 from elspeth.core.experiments.runner import ExperimentRunner
-from elspeth.plugins.outputs.csv_file import CsvResultSink
-from elspeth.plugins.outputs.file_copy import FileCopySink
-from elspeth.plugins.outputs.zip_bundle import ZipResultSink
+from elspeth.plugins.nodes.sinks.csv_file import CsvResultSink
+from elspeth.plugins.nodes.sinks.file_copy import FileCopySink
+from elspeth.plugins.nodes.sinks.zip_bundle import ZipResultSink
 
 
 def configure_sink(

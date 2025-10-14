@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
-from elspeth.core.interfaces import LLMClientProtocol
+from elspeth.core.protocols import LLMClientProtocol
 
 
 class StaticLLMClient(LLMClientProtocol):

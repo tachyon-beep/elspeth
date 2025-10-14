@@ -1,8 +1,8 @@
 import pandas as pd
 import pytest
 
-from elspeth.plugins.datasources.csv_blob import CSVBlobDataSource
-from elspeth.plugins.datasources.csv_local import CSVDataSource
+from elspeth.plugins.nodes.sources.csv_blob import CSVBlobDataSource
+from elspeth.plugins.nodes.sources.csv_local import CSVDataSource
 
 
 def test_csv_datasource_loads(tmp_path):

@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from elspeth.plugins.datasources.blob import BlobDataSource
+from elspeth.plugins.nodes.sources.blob import BlobDataSource
 
 
 def test_blob_datasource_loads_with_kwargs(monkeypatch, tmp_path):
@@ -13,7 +13,7 @@ def test_blob_datasource_loads_with_kwargs(monkeypatch, tmp_path):
         calls["kwargs"] = pandas_kwargs
         return pd.DataFrame({"value": [1, 2]})
 
-    monkeypatch.setattr("elspeth.plugins.datasources.blob.load_blob_csv", fake_load)
+    monkeypatch.setattr("elspeth.plugins.nodes.sources.blob.load_blob_csv", fake_load)
 
     datasource = BlobDataSource(
         config_path=str(tmp_path / "config.yaml"),
@@ -38,7 +38,7 @@ def test_blob_datasource_skip_on_error(monkeypatch, caplog, tmp_path):
     def boom(*args, **kwargs):
         raise RuntimeError("boom")
 
-    monkeypatch.setattr("elspeth.plugins.datasources.blob.load_blob_csv", boom)
+    monkeypatch.setattr("elspeth.plugins.nodes.sources.blob.load_blob_csv", boom)
 
     datasource = BlobDataSource(
         config_path=str(tmp_path / "config.yaml"),

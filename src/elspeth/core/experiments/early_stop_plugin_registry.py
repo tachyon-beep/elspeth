@@ -9,7 +9,7 @@ Migrated from plugin_registry.py as part of Phase 2 registry consolidation.
 
 from __future__ import annotations
 
-from elspeth.core.experiments.plugins import EarlyStopPlugin
+from elspeth.plugins.orchestrators.experiment.protocols import EarlyStopPlugin
 from elspeth.core.registry.base import BasePluginRegistry
 
 # Initialize the early-stop plugin registry

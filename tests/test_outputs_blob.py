@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from elspeth.plugins.outputs.blob import BlobResultSink
+from elspeth.plugins.nodes.sinks.blob import BlobResultSink
 
 
 def create_blob_config(tmp_path: Path) -> Path:
@@ -132,7 +132,7 @@ def test_blob_result_sink_chunked_upload(tmp_path, monkeypatch):
 
 
 def test_blob_result_sink_prepared_artifacts(tmp_path, monkeypatch):
-    from elspeth.core.interfaces import Artifact
+    from elspeth.core.protocols import Artifact
 
     artifact_path = tmp_path / "artifact.bin"
     artifact_path.write_bytes(b"payload-bytes")
@@ -372,7 +372,7 @@ def test_blob_result_sink_uses_content_settings(tmp_path, monkeypatch):
     )
 
     monkeypatch.setattr(BlobResultSink, "_create_blob_client", lambda self, name: ChunkClient())
-    monkeypatch.setattr("elspeth.plugins.outputs.blob.ContentSettings", DummyContentSettings)
+    monkeypatch.setattr("elspeth.plugins.nodes.sinks.blob.ContentSettings", DummyContentSettings)
 
     sink.write({"results": [{"row": {}, "response": {"content": "abcd" * 4}}]}, metadata={})
 

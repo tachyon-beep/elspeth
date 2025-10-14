@@ -14,7 +14,7 @@ from typing import Any, Sequence
 
 import requests
 
-from elspeth.core.llm.middleware import LLMMiddleware, LLMRequest
+from elspeth.core.protocols import LLMMiddleware, LLMRequest
 from elspeth.core.llm.registry import register_middleware
 from elspeth.core.security.pii_validators import (
     canonicalize_identifier,

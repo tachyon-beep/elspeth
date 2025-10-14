@@ -6,9 +6,9 @@ import pandas as pd
 
 from elspeth.core.experiments.runner import ExperimentRunner
 from elspeth.plugins.experiments.metrics import ScoreExtractorPlugin, ScoreStatsAggregator
-from elspeth.plugins.llms.static import StaticLLMClient
-from elspeth.plugins.outputs.analytics_report import AnalyticsReportSink
-from elspeth.plugins.outputs.visual_report import VisualAnalyticsSink
+from elspeth.plugins.nodes.transforms.llm.static import StaticLLMClient
+from elspeth.plugins.nodes.sinks.analytics_report import AnalyticsReportSink
+from elspeth.plugins.nodes.sinks.visual_report import VisualAnalyticsSink
 
 
 def _make_test_dataframe() -> pd.DataFrame:

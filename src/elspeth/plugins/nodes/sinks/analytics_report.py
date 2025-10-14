@@ -7,7 +7,7 @@ import logging
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-from elspeth.core.interfaces import Artifact, ArtifactDescriptor, ResultSink
+from elspeth.core.protocols import Artifact, ArtifactDescriptor, ResultSink
 from elspeth.core.security import normalize_determinism_level, normalize_security_level
 
 logger = logging.getLogger(__name__)

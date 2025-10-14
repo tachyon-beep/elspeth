@@ -7,7 +7,7 @@ import pandas as pd
 import elspeth.cli as cli
 from elspeth.core.orchestrator import OrchestratorConfig
 from elspeth.core.validation import SuiteValidationReport, ValidationReport
-from elspeth.plugins.outputs.csv_file import CsvResultSink
+from elspeth.plugins.nodes.sinks.csv_file import CsvResultSink
 
 
 def create_suite(root: Path):

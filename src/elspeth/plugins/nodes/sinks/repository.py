@@ -11,7 +11,7 @@ from typing import Any, Mapping
 
 import requests
 
-from elspeth.core.interfaces import ResultSink
+from elspeth.core.protocols import ResultSink
 
 logger = logging.getLogger(__name__)
 

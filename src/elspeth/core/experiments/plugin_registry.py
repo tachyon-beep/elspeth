@@ -21,7 +21,7 @@ from typing import Any, Callable, Sequence
 from elspeth.core.experiments.aggregation_plugin_registry import aggregation_plugin_registry
 from elspeth.core.experiments.baseline_plugin_registry import baseline_plugin_registry
 from elspeth.core.experiments.early_stop_plugin_registry import early_stop_plugin_registry
-from elspeth.core.experiments.plugins import (
+from elspeth.plugins.orchestrators.experiment.protocols import (
     AggregationExperimentPlugin,
     BaselineComparisonPlugin,
     EarlyStopPlugin,

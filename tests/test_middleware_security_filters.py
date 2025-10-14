@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from elspeth.core.llm.middleware import LLMRequest
-from elspeth.plugins.llms.middleware import ClassifiedMaterialMiddleware, PIIShieldMiddleware
+from elspeth.core.protocols import LLMRequest
+from elspeth.plugins.nodes.transforms.llm.middleware import ClassifiedMaterialMiddleware, PIIShieldMiddleware
 
 # =====================================================================
 # PIIShieldMiddleware Tests

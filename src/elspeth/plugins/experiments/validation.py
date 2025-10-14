@@ -9,8 +9,8 @@ from typing import Any
 from jinja2 import Template
 
 from elspeth.core.experiments.plugin_registry import register_validation_plugin
-from elspeth.core.experiments.plugins import ValidationError, ValidationPlugin
-from elspeth.core.interfaces import LLMClientProtocol
+from elspeth.plugins.orchestrators.experiment.protocols import ValidationError, ValidationPlugin
+from elspeth.core.protocols import LLMClientProtocol
 from elspeth.core.plugins import PluginContext
 from elspeth.core.registry import registry
 

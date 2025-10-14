@@ -15,9 +15,9 @@ import pandas as pd
 from elspeth.core.artifact_pipeline import ArtifactPipeline, SinkBinding
 from elspeth.core.controls import CostTracker, RateLimiter
 from elspeth.core.experiments.plugin_registry import create_early_stop_plugin
-from elspeth.core.experiments.plugins import AggregationExperimentPlugin, EarlyStopPlugin, RowExperimentPlugin, ValidationPlugin
-from elspeth.core.interfaces import LLMClientProtocol, ResultSink
-from elspeth.core.llm.middleware import LLMMiddleware, LLMRequest
+from elspeth.plugins.orchestrators.experiment.protocols import AggregationExperimentPlugin, EarlyStopPlugin, RowExperimentPlugin, ValidationPlugin
+from elspeth.core.protocols import LLMClientProtocol, ResultSink
+from elspeth.core.protocols import LLMMiddleware, LLMRequest
 from elspeth.core.processing import prepare_prompt_context
 from elspeth.core.prompts import PromptEngine, PromptRenderingError, PromptTemplate, PromptValidationError
 from elspeth.core.schema import SchemaViolation, validate_schema_compatibility

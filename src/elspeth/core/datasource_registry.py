@@ -9,11 +9,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from elspeth.core.interfaces import DataSource
+from elspeth.core.protocols import DataSource
 from elspeth.core.plugins import PluginContext
 from elspeth.core.registry.base import BasePluginRegistry
 from elspeth.core.registry.schemas import ON_ERROR_ENUM, with_security_properties
-from elspeth.plugins.datasources import BlobDataSource, CSVBlobDataSource, CSVDataSource
+from elspeth.plugins.nodes.sources import BlobDataSource, CSVBlobDataSource, CSVDataSource
 
 # Create the datasource registry with type safety
 datasource_registry = BasePluginRegistry[DataSource]("datasource")

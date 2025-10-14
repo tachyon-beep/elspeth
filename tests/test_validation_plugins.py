@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from elspeth.core.experiments.plugins import ValidationError
+from elspeth.plugins.orchestrators.experiment.protocols import ValidationError
 from elspeth.core.experiments.runner import ExperimentRunner
 from elspeth.plugins.experiments.validation import JsonValidationPlugin, LLMGuardValidationPlugin, RegexValidationPlugin
 

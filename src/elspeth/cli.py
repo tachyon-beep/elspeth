@@ -20,7 +20,7 @@ from elspeth.core.experiments import ExperimentSuite, ExperimentSuiteRunner
 from elspeth.core.experiments.tools import create_experiment_template, export_suite_configuration
 from elspeth.core.orchestrator import ExperimentOrchestrator
 from elspeth.core.validation import validate_settings, validate_suite
-from elspeth.plugins.outputs.csv_file import CsvResultSink
+from elspeth.plugins.nodes.sinks.csv_file import CsvResultSink
 from elspeth.tools.reporting import SuiteReportGenerator
 
 logger = logging.getLogger(__name__)
