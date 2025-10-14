@@ -138,6 +138,8 @@ venv.bak/
 # MCP config files
 .mcp.json
 
+logs/
+coverage.xml
 
 #Ignore vscode AI rules
 .github/instructions/codacy.instructions.md

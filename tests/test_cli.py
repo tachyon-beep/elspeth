@@ -59,6 +59,7 @@ def mock_settings(monkeypatch):
             self.cost_tracker = None
             self.prompt_packs = {}
             self.prompt_pack = None
+            self.config_path = None
 
     def fake_load_settings(path, profile="default"):
         captured["settings_path"] = path
@@ -181,6 +182,7 @@ def test_single_run_output_csv_includes_metrics(tmp_path, monkeypatch):
         cost_tracker=None,
         prompt_packs={},
         prompt_pack=None,
+        config_path=None,
     )
 
     def fake_load_settings(path, profile="default"):
@@ -257,6 +259,7 @@ def test_single_run_logs_failures(tmp_path, monkeypatch, caplog):
         cost_tracker=None,
         prompt_packs={},
         prompt_pack=None,
+        config_path=None,
     )
 
     def fake_load_settings(path, profile="default"):
@@ -330,6 +333,7 @@ def test_disable_metrics_strips_plugins(monkeypatch):
                 }
             }
             self.prompt_pack = None
+            self.config_path = None
 
     settings = DummySettings()
 

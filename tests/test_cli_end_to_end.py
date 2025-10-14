@@ -21,7 +21,7 @@ def test_cli_generates_suite_outputs(tmp_path: Path, monkeypatch) -> None:
                 "plugin": "local_csv",
                 "security_level": "OFFICIAL",
                 "determinism_level": "guaranteed",
-                "options": {"path": str(input_csv)},
+                "options": {"path": str(input_csv), "retain_local": False},
             },
             "llm": {
                 "plugin": "mock",

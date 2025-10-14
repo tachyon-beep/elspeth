@@ -34,6 +34,7 @@ def test_validate_settings_unknown_prompt_pack(tmp_path):
             security_level: OFFICIAL
             determinism_level: guaranteed
             options:
+              retain_local: false
               path: data.csv
           llm:
             plugin: mock
@@ -66,6 +67,7 @@ def test_validate_settings_unknown_middleware(tmp_path):
             security_level: OFFICIAL
             determinism_level: guaranteed
             options:
+              retain_local: false
               path: data.csv
           llm:
             plugin: mock
@@ -102,6 +104,7 @@ def test_validate_settings_valid_configuration(tmp_path):
             security_level: OFFICIAL
             determinism_level: guaranteed
             options:
+              retain_local: false
               path: data.csv
           llm:
             plugin: mock
@@ -130,6 +133,7 @@ def test_validate_settings_requires_sink_security_level(tmp_path):
             security_level: OFFICIAL
             determinism_level: guaranteed
             options:
+              retain_local: false
               path: data.csv
           llm:
             plugin: mock
@@ -158,6 +162,7 @@ def test_validate_settings_rejects_blank_sink_security_level(tmp_path):
             security_level: OFFICIAL
             determinism_level: guaranteed
             options:
+              retain_local: false
               path: input.csv
           llm:
             plugin: mock
@@ -188,6 +193,7 @@ def test_validate_settings_conflicting_sink_security_levels(tmp_path):
             security_level: OFFICIAL
             determinism_level: guaranteed
             options:
+              retain_local: false
               path: input.csv
           llm:
             plugin: mock
@@ -298,6 +304,7 @@ def test_validate_settings_requires_sink_list(tmp_path):
           datasource:
             plugin: local_csv
             options:
+              retain_local: false
               path: data.csv
           llm:
             plugin: mock
@@ -319,6 +326,7 @@ def test_validate_settings_prompt_pack_requires_user_prompt(tmp_path):
           datasource:
             plugin: local_csv
             options:
+              retain_local: false
               path: data.csv
           llm:
             plugin: mock
@@ -346,6 +354,7 @@ def test_validate_settings_prompt_pack_sinks_must_be_list(tmp_path):
           datasource:
             plugin: local_csv
             options:
+              retain_local: false
               path: data.csv
           llm:
             plugin: mock
@@ -376,6 +385,7 @@ def test_validate_settings_suite_defaults_invalid_sink(tmp_path):
           datasource:
             plugin: local_csv
             options:
+              retain_local: false
               path: data.csv
           llm:
             plugin: mock
@@ -403,6 +413,7 @@ def test_validate_settings_suite_defaults_rate_limiter_error(tmp_path):
           datasource:
             plugin: local_csv
             options:
+              retain_local: false
               path: data.csv
           llm:
             plugin: mock
@@ -429,6 +440,7 @@ def test_validate_settings_prompt_pack_invalid_sink_list(tmp_path):
           datasource:
             plugin: local_csv
             options:
+              retain_local: false
               path: data.csv
           llm:
             plugin: mock

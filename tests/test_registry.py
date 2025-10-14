@@ -35,7 +35,7 @@ def test_registry_creates_blob_datasource(tmp_path, monkeypatch):
     monkeypatch.setattr(blob_module, "load_blob_csv", fake_load_blob_csv)
 
     ds = datasource_registry.create(
-        "azure_blob", {"config_path": cfg.as_posix(), "security_level": "OFFICIAL", "determinism_level": "guaranteed"}
+        "azure_blob", {"config_path": cfg.as_posix(), "security_level": "OFFICIAL", "determinism_level": "guaranteed", "retain_local": False}
     )
 
     frame = ds.load()
@@ -55,7 +55,7 @@ def test_registry_creates_csv_blob_datasource(tmp_path):
     pd.DataFrame({"value": [1, 2]}).to_csv(csv_path, index=False)
 
     ds = datasource_registry.create(
-        "csv_blob", {"path": csv_path.as_posix(), "security_level": "OFFICIAL", "determinism_level": "guaranteed"}
+        "csv_blob", {"path": csv_path.as_posix(), "security_level": "OFFICIAL", "determinism_level": "guaranteed", "retain_local": False}
     )
     frame = ds.load()
 

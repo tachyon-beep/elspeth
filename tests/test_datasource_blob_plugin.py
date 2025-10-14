@@ -21,6 +21,7 @@ def test_blob_datasource_loads_with_kwargs(monkeypatch, tmp_path):
         pandas_kwargs={"sep": ";"},
         security_level="Secret",
         determinism_level="guaranteed",
+        retain_local=False,
     )
 
     df = datasource.load()
@@ -45,6 +46,7 @@ def test_blob_datasource_skip_on_error(monkeypatch, caplog, tmp_path):
         on_error="skip",
         security_level="official-sensitive",
         determinism_level="guaranteed",
+        retain_local=False,
     )
 
     with caplog.at_level("WARNING"):
@@ -58,4 +60,4 @@ def test_blob_datasource_skip_on_error(monkeypatch, caplog, tmp_path):
 
 def test_blob_datasource_invalid_on_error(tmp_path):
     with pytest.raises(ValueError):
-        BlobDataSource(config_path=str(tmp_path / "config.yaml"), on_error="ignore")
+        BlobDataSource(config_path=str(tmp_path / "config.yaml"), on_error="ignore", retain_local=False)

@@ -93,6 +93,7 @@ def test_cli_suite_execution(tmp_path, monkeypatch):
         cost_tracker=None,
         prompt_packs={},
         prompt_pack=None,
+        config_path=None,
     )
 
     def fake_load_settings(path, profile="default"):
@@ -172,6 +173,7 @@ def test_cli_suite_prompt_pack_override(tmp_path, monkeypatch):
             }
         },
         prompt_pack=None,
+        config_path=None,
     )
 
     def fake_load_settings(path, profile="default"):
@@ -238,6 +240,7 @@ def test_cli_suite_management_flags(tmp_path, monkeypatch):
         cost_tracker=None,
         prompt_packs={},
         prompt_pack=None,
+        config_path=None,
     )
 
     def fake_load_settings(path, profile="default"):

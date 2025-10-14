@@ -4,6 +4,7 @@ prompt_variants_demo:
     security_level: OFFICIAL
     determinism_level: guaranteed
     options:
+      retain_local: false
       path: config/data/prompt_variants_demo.csv
   llm:
     plugin: mock
