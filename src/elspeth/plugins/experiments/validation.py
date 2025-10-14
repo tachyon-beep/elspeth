@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import re
-from typing import Any, Dict, Optional
+from typing import Any
 
 from jinja2 import Template
 
@@ -15,7 +15,7 @@ from elspeth.core.plugins import PluginContext
 from elspeth.core.registry import registry
 
 
-def _extract_content(response: Dict[str, Any]) -> str:
+def _extract_content(response: dict[str, Any]) -> str:
     content = response.get("content")
     if content is None and "response" in response:
         content = response["response"].get("content")
@@ -48,10 +48,10 @@ class RegexValidationPlugin(ValidationPlugin):
 
     def validate(
         self,
-        response: Dict[str, Any],
+        response: dict[str, Any],
         *,
-        context: Optional[Dict[str, Any]] = None,
-        metadata: Optional[Dict[str, Any]] = None,
+        context: dict[str, Any | None] | None = None,
+        metadata: dict[str, Any | None] | None = None,
     ) -> None:
         text = _extract_content(response)
         if not self._compiled.fullmatch(text):
@@ -66,10 +66,10 @@ class JsonValidationPlugin(ValidationPlugin):
 
     def validate(
         self,
-        response: Dict[str, Any],
+        response: dict[str, Any],
         *,
-        context: Optional[Dict[str, Any]] = None,
-        metadata: Optional[Dict[str, Any]] = None,
+        context: dict[str, Any | None] | None = None,
+        metadata: dict[str, Any | None] | None = None,
     ) -> None:
         text = _extract_content(response)
         try:
@@ -102,10 +102,10 @@ class LLMGuardValidationPlugin(ValidationPlugin):
 
     def validate(
         self,
-        response: Dict[str, Any],
+        response: dict[str, Any],
         *,
-        context: Optional[Dict[str, Any]] = None,
-        metadata: Optional[Dict[str, Any]] = None,
+        context: dict[str, Any | None] | None = None,
+        metadata: dict[str, Any | None] | None = None,
     ) -> None:
         text = _extract_content(response)
         render_ctx = {
@@ -160,7 +160,7 @@ register_validation_plugin(
 )
 
 
-def _build_llm_guard(options: Dict[str, Any], context: PluginContext) -> LLMGuardValidationPlugin:
+def _build_llm_guard(options: dict[str, Any], context: PluginContext) -> LLMGuardValidationPlugin:
     llm_spec = options.get("validator_llm") or options.get("llm")
     if llm_spec is None:
         raise ValueError("LLM guard validation plugin requires 'validator_llm'")

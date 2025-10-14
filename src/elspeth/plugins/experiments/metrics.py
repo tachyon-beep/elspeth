@@ -6,7 +6,7 @@ import json
 import logging
 import math
 from statistics import NormalDist
-from typing import TYPE_CHECKING, Any, Dict, Mapping, Sequence
+from typing import TYPE_CHECKING, Any, Mapping, Sequence
 
 import numpy as np
 
@@ -204,9 +204,9 @@ class ScoreExtractorPlugin:
         self._threshold_mode = threshold_mode
         self._flag_field = flag_field
 
-    def process_row(self, row: Dict[str, Any], responses: Mapping[str, Mapping[str, Any]]) -> Dict[str, Any]:
-        scores: Dict[str, float] = {}
-        flags: Dict[str, bool] = {}
+    def process_row(self, row: dict[str, Any], responses: Mapping[str, Mapping[str, Any]]) -> dict[str, Any]:
+        scores: dict[str, float] = {}
+        flags: dict[str, bool] = {}
 
         for crit_name, response in responses.items():
             if self._criteria and crit_name not in self._criteria:
@@ -220,7 +220,7 @@ class ScoreExtractorPlugin:
             if self._threshold is not None:
                 flags[crit_name] = self._compare_threshold(value)
 
-        derived: Dict[str, Any] = {}
+        derived: dict[str, Any] = {}
         if scores:
             derived.setdefault("scores", {}).update(scores)
         if flags:
@@ -309,8 +309,8 @@ class ScoreStatsAggregator:
         self._flag_field = flag_field
         self._ddof = ddof
 
-    def finalize(self, records: list[Dict[str, Any]]) -> Dict[str, Any]:
-        criteria_values: Dict[str, Dict[str, Any]] = {}
+    def finalize(self, records: list[dict[str, Any]]) -> dict[str, Any]:
+        criteria_values: dict[str, dict[str, Any]] = {}
 
         for record in records:
             metrics = record.get("metrics") or {}
@@ -329,7 +329,7 @@ class ScoreStatsAggregator:
                     if passed:
                         slot["passes"] += 1
 
-        summaries: Dict[str, Any] = {}
+        summaries: dict[str, Any] = {}
         all_values: list[float] = []
         total_missing = 0
         total_pass = 0
@@ -350,10 +350,10 @@ class ScoreStatsAggregator:
             "overall": overall,
         }
 
-    def _summarize_values(self, values: list[float], missing: int, passes: int) -> Dict[str, Any]:
+    def _summarize_values(self, values: list[float], missing: int, passes: int) -> dict[str, Any]:
         count = len(values)
         total = count + missing
-        result: Dict[str, Any] = {
+        result: dict[str, Any] = {
             "count": count,
             "missing": missing,
         }
@@ -390,13 +390,13 @@ class ScoreDeltaBaselinePlugin:
         self._metric = metric
         self._criteria = set(criteria) if criteria else None
 
-    def compare(self, baseline: Dict[str, Any], variant: Dict[str, Any]) -> Dict[str, Any]:
+    def compare(self, baseline: dict[str, Any], variant: dict[str, Any]) -> dict[str, Any]:
         base_stats = self._extract_stats(baseline)
         var_stats = self._extract_stats(variant)
         if not base_stats or not var_stats:
             return {}
 
-        diffs: Dict[str, Any] = {}
+        diffs: dict[str, Any] = {}
         keys = set(base_stats.keys()) & set(var_stats.keys())
         for crit in sorted(keys):
             if self._criteria and crit not in self._criteria:
@@ -409,7 +409,7 @@ class ScoreDeltaBaselinePlugin:
         return diffs
 
     @staticmethod
-    def _extract_stats(payload: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    def _extract_stats(payload: dict[str, Any]) -> dict[str, dict[str, Any]]:
         aggregates = payload.get("aggregates") if isinstance(payload, Mapping) else None
         if not isinstance(aggregates, Mapping):
             return {}
@@ -454,7 +454,7 @@ class ScoreCliffsDeltaPlugin:
             raise ValueError("on_error must be 'abort' or 'skip'")
         self._on_error = on_error
 
-    def compare(self, baseline: Dict[str, Any], variant: Dict[str, Any]) -> Dict[str, Any]:
+    def compare(self, baseline: dict[str, Any], variant: dict[str, Any]) -> dict[str, Any]:
         try:
             return self._compare_impl(baseline, variant)
         except Exception as exc:  # pragma: no cover - defensive guard
@@ -463,14 +463,14 @@ class ScoreCliffsDeltaPlugin:
                 return {}
             raise
 
-    def _compare_impl(self, baseline: Dict[str, Any], variant: Dict[str, Any]) -> Dict[str, Any]:
+    def _compare_impl(self, baseline: dict[str, Any], variant: dict[str, Any]) -> dict[str, Any]:
         base_scores = _collect_scores_by_criterion(baseline)
         var_scores = _collect_scores_by_criterion(variant)
         criteria = sorted(set(base_scores.keys()) & set(var_scores.keys()))
         if self._criteria is not None:
             criteria = [name for name in criteria if name in self._criteria]
 
-        results: Dict[str, Any] = {}
+        results: dict[str, Any] = {}
         for name in criteria:
             group1 = base_scores.get(name, [])
             group2 = var_scores.get(name, [])
@@ -517,7 +517,7 @@ class ScoreAssumptionsBaselinePlugin:
             raise ValueError("on_error must be 'abort' or 'skip'")
         self._on_error = on_error
 
-    def compare(self, baseline: Dict[str, Any], variant: Dict[str, Any]) -> Dict[str, Any]:
+    def compare(self, baseline: dict[str, Any], variant: dict[str, Any]) -> dict[str, Any]:
         try:
             return self._compare_impl(baseline, variant)
         except Exception as exc:  # pragma: no cover
@@ -526,7 +526,7 @@ class ScoreAssumptionsBaselinePlugin:
                 return {}
             raise
 
-    def _compare_impl(self, baseline: Dict[str, Any], variant: Dict[str, Any]) -> Dict[str, Any]:
+    def _compare_impl(self, baseline: dict[str, Any], variant: dict[str, Any]) -> dict[str, Any]:
         if scipy_stats is None:
             return {}
         base_scores = _collect_scores_by_criterion(baseline)
@@ -535,11 +535,11 @@ class ScoreAssumptionsBaselinePlugin:
         if self._criteria is not None:
             criteria = [name for name in criteria if name in self._criteria]
 
-        results: Dict[str, Any] = {}
+        results: dict[str, Any] = {}
         for name in criteria:
             base = base_scores.get(name, [])
             var = var_scores.get(name, [])
-            entry: Dict[str, Any] = {}
+            entry: dict[str, Any] = {}
             if len(base) >= self._min_samples:
                 try:
                     stat, pval = scipy_stats.shapiro(base)
@@ -617,7 +617,7 @@ class ScorePracticalBaselinePlugin:
             raise ValueError("on_error must be 'abort' or 'skip'")
         self._on_error = on_error
 
-    def compare(self, baseline: Dict[str, Any], variant: Dict[str, Any]) -> Dict[str, Any]:
+    def compare(self, baseline: dict[str, Any], variant: dict[str, Any]) -> dict[str, Any]:
         try:
             return self._compare_impl(baseline, variant)
         except Exception as exc:  # pragma: no cover
@@ -626,13 +626,13 @@ class ScorePracticalBaselinePlugin:
                 return {}
             raise
 
-    def _compare_impl(self, baseline: Dict[str, Any], variant: Dict[str, Any]) -> Dict[str, Any]:
+    def _compare_impl(self, baseline: dict[str, Any], variant: dict[str, Any]) -> dict[str, Any]:
         pairs = _collect_paired_scores_by_criterion(baseline, variant)
         criteria = sorted(pairs.keys())
         if self._criteria is not None:
             criteria = [name for name in criteria if name in self._criteria]
 
-        results: Dict[str, Any] = {}
+        results: dict[str, Any] = {}
         for name in criteria:
             paired = pairs.get(name, [])
             if len(paired) < self._min_samples:
@@ -701,7 +701,7 @@ class ScoreSignificanceBaselinePlugin:
             raise ValueError("on_error must be 'abort' or 'skip'")
         self._on_error = on_error
 
-    def compare(self, baseline: Dict[str, Any], variant: Dict[str, Any]) -> Dict[str, Any]:
+    def compare(self, baseline: dict[str, Any], variant: dict[str, Any]) -> dict[str, Any]:
         try:
             return self._compare_impl(baseline, variant)
         except Exception as exc:  # pragma: no cover - defensive guard
@@ -710,8 +710,8 @@ class ScoreSignificanceBaselinePlugin:
                 return {}
             raise
 
-    def _compare_impl(self, baseline: Dict[str, Any], variant: Dict[str, Any]) -> Dict[str, Any]:
-        results: Dict[str, Any] = {}
+    def _compare_impl(self, baseline: dict[str, Any], variant: dict[str, Any]) -> dict[str, Any]:
+        results: dict[str, Any] = {}
         base_scores = _collect_scores_by_criterion(baseline)
         var_scores = _collect_scores_by_criterion(variant)
         criteria = sorted(set(base_scores.keys()) & set(var_scores.keys()))
@@ -804,7 +804,7 @@ class ScoreBayesianBaselinePlugin:
             raise ValueError("on_error must be 'abort' or 'skip'")
         self._on_error = on_error
 
-    def compare(self, baseline: Dict[str, Any], variant: Dict[str, Any]) -> Dict[str, Any]:
+    def compare(self, baseline: dict[str, Any], variant: dict[str, Any]) -> dict[str, Any]:
         try:
             return self._compare_impl(baseline, variant)
         except Exception as exc:  # pragma: no cover - defensive guard
@@ -813,8 +813,8 @@ class ScoreBayesianBaselinePlugin:
                 return {}
             raise
 
-    def _compare_impl(self, baseline: Dict[str, Any], variant: Dict[str, Any]) -> Dict[str, Any]:
-        results: Dict[str, Any] = {}
+    def _compare_impl(self, baseline: dict[str, Any], variant: dict[str, Any]) -> dict[str, Any]:
+        results: dict[str, Any] = {}
         base_scores = _collect_scores_by_criterion(baseline)
         var_scores = _collect_scores_by_criterion(variant)
         criteria = sorted(set(base_scores.keys()) & set(var_scores.keys()))
@@ -861,7 +861,7 @@ class ScoreRecommendationAggregator:
         self._improvement_margin = improvement_margin
         self._stats = ScoreStatsAggregator(source_field=source_field, flag_field=flag_field)
 
-    def finalize(self, records: list[Dict[str, Any]]) -> Dict[str, Any]:
+    def finalize(self, records: list[dict[str, Any]]) -> dict[str, Any]:
         stats = self._stats.finalize(records)
         overall = stats.get("overall", {})
         criteria = stats.get("criteria", {})
@@ -877,7 +877,7 @@ class ScoreRecommendationAggregator:
             else:
                 message = self._build_message(best, criteria[best], overall)
 
-        payload: Dict[str, Any] = {
+        payload: dict[str, Any] = {
             "recommendation": message,
             "summary": overall,
         }
@@ -940,7 +940,7 @@ class ScoreVariantRankingAggregator:
         self._weight_mean = float(weight_mean)
         self._weight_pass = float(weight_pass)
 
-    def finalize(self, records: list[Dict[str, Any]]) -> Dict[str, Any]:
+    def finalize(self, records: list[dict[str, Any]]) -> dict[str, Any]:
         values = []
         pass_count = 0
         for record in records:
@@ -1019,7 +1019,7 @@ class ScoreAgreementAggregator:
             raise ValueError("on_error must be 'abort' or 'skip'")
         self._on_error = on_error
 
-    def finalize(self, records: list[Dict[str, Any]]) -> Dict[str, Any]:
+    def finalize(self, records: list[dict[str, Any]]) -> dict[str, Any]:
         try:
             return self._finalize_impl(records)
         except Exception as exc:  # pragma: no cover - defensive
@@ -1028,11 +1028,11 @@ class ScoreAgreementAggregator:
                 return {}
             raise
 
-    def _finalize_impl(self, records: list[Dict[str, Any]]) -> Dict[str, Any]:
+    def _finalize_impl(self, records: list[dict[str, Any]]) -> dict[str, Any]:
         if not records:
             return {}
 
-        matrix: Dict[str, list[float]] = {}
+        matrix: dict[str, list[float]] = {}
         for record in records:
             metrics = record.get("metrics") or {}
             scores = metrics.get("scores") or {}
@@ -1149,7 +1149,7 @@ class ScorePowerAggregator:
             raise ValueError("on_error must be 'abort' or 'skip'")
         self._on_error = on_error
 
-    def finalize(self, records: list[Dict[str, Any]]) -> Dict[str, Any]:
+    def finalize(self, records: list[dict[str, Any]]) -> dict[str, Any]:
         try:
             return self._finalize_impl(records)
         except Exception as exc:  # pragma: no cover - defensive
@@ -1158,7 +1158,7 @@ class ScorePowerAggregator:
                 return {}
             raise
 
-    def _finalize_impl(self, records: list[Dict[str, Any]]) -> Dict[str, Any]:
+    def _finalize_impl(self, records: list[dict[str, Any]]) -> dict[str, Any]:
         if not records:
             return {}
         scores_by_name = _collect_scores_by_criterion({"results": records})
@@ -1166,7 +1166,7 @@ class ScorePowerAggregator:
         if self._criteria is not None:
             criteria = [name for name in criteria if name in self._criteria]
 
-        power_results: Dict[str, Any] = {}
+        power_results: dict[str, Any] = {}
         for name in criteria:
             values = scores_by_name.get(name, [])
             if len(values) < self._min_samples:
@@ -1254,11 +1254,11 @@ class ScoreDistributionAggregator:
             raise ValueError("on_error must be 'abort' or 'skip'")
         self._on_error = on_error
 
-    def finalize(self, records: list[Dict[str, Any]]) -> Dict[str, Any]:
+    def finalize(self, records: list[dict[str, Any]]) -> dict[str, Any]:
         # This aggregator expects to inspect baseline + variant payloads, so per-run finalize is empty.
         return {}
 
-    def compare(self, baseline: Dict[str, Any], variant: Dict[str, Any]) -> Dict[str, Any]:
+    def compare(self, baseline: dict[str, Any], variant: dict[str, Any]) -> dict[str, Any]:
         try:
             return self._compare_impl(baseline, variant)
         except Exception as exc:  # pragma: no cover - defensive guard
@@ -1267,13 +1267,13 @@ class ScoreDistributionAggregator:
                 return {}
             raise
 
-    def _compare_impl(self, baseline: Dict[str, Any], variant: Dict[str, Any]) -> Dict[str, Any]:
+    def _compare_impl(self, baseline: dict[str, Any], variant: dict[str, Any]) -> dict[str, Any]:
         base_scores = _collect_scores_by_criterion(baseline)
         var_scores = _collect_scores_by_criterion(variant)
         criteria = sorted(set(base_scores.keys()) & set(var_scores.keys()))
         if self._criteria is not None:
             criteria = [name for name in criteria if name in self._criteria]
-        results: Dict[str, Any] = {}
+        results: dict[str, Any] = {}
         for name in criteria:
             base = base_scores.get(name, [])
             var = var_scores.get(name, [])
@@ -1327,7 +1327,7 @@ class CostSummaryAggregator:
             raise ValueError("on_error must be 'abort' or 'skip'")
         self._on_error = on_error
 
-    def finalize(self, records: list[Dict[str, Any]]) -> Dict[str, Any]:
+    def finalize(self, records: list[dict[str, Any]]) -> dict[str, Any]:
         try:
             return self._finalize_impl(records)
         except Exception as exc:  # pragma: no cover - defensive
@@ -1336,7 +1336,7 @@ class CostSummaryAggregator:
                 return {}
             raise
 
-    def _finalize_impl(self, records: list[Dict[str, Any]]) -> Dict[str, Any]:
+    def _finalize_impl(self, records: list[dict[str, Any]]) -> dict[str, Any]:
         if not records:
             return {}
 
@@ -1368,7 +1368,7 @@ class CostSummaryAggregator:
                 except (TypeError, ValueError):
                     pass
 
-        result: Dict[str, Any] = {
+        result: dict[str, Any] = {
             "total_requests": len(records),
             "requests_with_cost": len(cost_list),
         }
@@ -1421,7 +1421,7 @@ class LatencySummaryAggregator:
             raise ValueError("on_error must be 'abort' or 'skip'")
         self._on_error = on_error
 
-    def finalize(self, records: list[Dict[str, Any]]) -> Dict[str, Any]:
+    def finalize(self, records: list[dict[str, Any]]) -> dict[str, Any]:
         try:
             return self._finalize_impl(records)
         except Exception as exc:  # pragma: no cover - defensive
@@ -1430,7 +1430,7 @@ class LatencySummaryAggregator:
                 return {}
             raise
 
-    def _finalize_impl(self, records: list[Dict[str, Any]]) -> Dict[str, Any]:
+    def _finalize_impl(self, records: list[dict[str, Any]]) -> dict[str, Any]:
         if not records:
             return {}
 
@@ -1493,8 +1493,8 @@ register_aggregation_plugin(
 )
 
 
-def _collect_scores_by_criterion(payload: Mapping[str, Any]) -> Dict[str, list[float]]:
-    scores_by_name: Dict[str, list[float]] = {}
+def _collect_scores_by_criterion(payload: Mapping[str, Any]) -> dict[str, list[float]]:
+    scores_by_name: dict[str, list[float]] = {}
     for record in payload.get("results", []) or []:
         metrics = record.get("metrics") or {}
         scores = metrics.get("scores") or {}
@@ -1516,11 +1516,11 @@ def _collect_scores_by_criterion(payload: Mapping[str, Any]) -> Dict[str, list[f
 def _collect_paired_scores_by_criterion(
     baseline: Mapping[str, Any],
     variant: Mapping[str, Any],
-) -> Dict[str, list[tuple[float, float]]]:
+) -> dict[str, list[tuple[float, float]]]:
     baseline_results = baseline.get("results", []) or []
     variant_results = variant.get("results", []) or []
     count = min(len(baseline_results), len(variant_results))
-    pairs: Dict[str, list[tuple[float, float]]] = {}
+    pairs: dict[str, list[tuple[float, float]]] = {}
     for index in range(count):
         base_metrics = (baseline_results[index].get("metrics") if isinstance(baseline_results[index], Mapping) else {}) or {}
         var_metrics = (variant_results[index].get("metrics") if isinstance(variant_results[index], Mapping) else {}) or {}
@@ -1569,7 +1569,7 @@ def _compute_significance(
     variant: Sequence[float],
     *,
     equal_var: bool = False,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     arr_base = np.asarray(list(baseline), dtype=float)
     arr_var = np.asarray(list(variant), dtype=float)
     n_base = arr_base.size
@@ -1641,7 +1641,7 @@ def _compute_bayesian_summary(
     baseline: Sequence[float],
     variant: Sequence[float],
     alpha: float,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     arr_base = np.asarray(list(baseline), dtype=float)
     arr_var = np.asarray(list(variant), dtype=float)
     n_base = arr_base.size
@@ -1695,7 +1695,7 @@ def _compute_bayesian_summary(
 def _compute_distribution_shift(
     baseline: Sequence[float],
     variant: Sequence[float],
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     arr_base = np.asarray(list(baseline), dtype=float)
     arr_var = np.asarray(list(variant), dtype=float)
     n_base = arr_base.size
@@ -1881,7 +1881,7 @@ class RationaleAnalysisAggregator:
             "not",
         }
 
-    def finalize(self, records: list[Dict[str, Any]]) -> Dict[str, Any]:
+    def finalize(self, records: list[dict[str, Any]]) -> dict[str, Any]:
         try:
             return self._finalize_impl(records)
         except Exception as exc:  # pragma: no cover - defensive
@@ -1890,12 +1890,12 @@ class RationaleAnalysisAggregator:
                 return {}
             raise
 
-    def _finalize_impl(self, records: list[Dict[str, Any]]) -> Dict[str, Any]:
+    def _finalize_impl(self, records: list[dict[str, Any]]) -> dict[str, Any]:
         if not records:
             return {}
 
         # Collect rationales and scores by criterion
-        criterion_data: Dict[str, Dict[str, Any]] = {}
+        criterion_data: dict[str, dict[str, Any]] = {}
 
         for record in records:
             responses = record.get("responses") or {}
@@ -1943,8 +1943,8 @@ class RationaleAnalysisAggregator:
                     bucket["high_score_words"].extend(words)
 
         # Analyze each criterion
-        results: Dict[str, Any] = {}
-        overall_stats: Dict[str, Any] = {
+        results: dict[str, Any] = {}
+        overall_stats: dict[str, Any] = {
             "total_rationales": 0,
             "avg_length_chars": 0.0,
             "avg_length_words": 0.0,
@@ -2042,7 +2042,7 @@ class RationaleAnalysisAggregator:
         words = re.findall(r"\b\w+\b", text.lower())
         return [w for w in words if len(w) >= self._min_word_length and w not in self._stop_words]
 
-    def _detect_confidence(self, rationales: list[str]) -> Dict[str, Any]:
+    def _detect_confidence(self, rationales: list[str]) -> dict[str, Any]:
         """Detect confidence indicators in rationales (simple heuristic)."""
         high_confidence_words = {"clearly", "definitely", "certainly", "obviously", "absolutely", "undoubtedly"}
         low_confidence_words = {"maybe", "perhaps", "possibly", "might", "somewhat", "unclear", "uncertain"}
@@ -2130,7 +2130,7 @@ class RefereeAlignmentBaselinePlugin:
         }
         self._value_mapping = {**default_mapping, **(value_mapping or {})}
 
-    def compare(self, baseline: Dict[str, Any], variant: Dict[str, Any]) -> Dict[str, Any]:
+    def compare(self, baseline: dict[str, Any], variant: dict[str, Any]) -> dict[str, Any]:
         try:
             return self._compare_impl(baseline, variant)
         except Exception as exc:  # pragma: no cover - defensive
@@ -2139,7 +2139,7 @@ class RefereeAlignmentBaselinePlugin:
                 return {}
             raise
 
-    def _compare_impl(self, baseline: Dict[str, Any], variant: Dict[str, Any]) -> Dict[str, Any]:
+    def _compare_impl(self, baseline: dict[str, Any], variant: dict[str, Any]) -> dict[str, Any]:
         # Extract scores and referee judgments for both experiments
         baseline_pairs = self._extract_score_pairs(baseline)
         variant_pairs = self._extract_score_pairs(variant)
@@ -2148,7 +2148,7 @@ class RefereeAlignmentBaselinePlugin:
             return {}
 
         # Compute alignment metrics
-        results: Dict[str, Any] = {}
+        results: dict[str, Any] = {}
 
         # Overall alignment
         baseline_alignment = self._compute_alignment_metrics(baseline_pairs)
@@ -2200,14 +2200,16 @@ class RefereeAlignmentBaselinePlugin:
                 ]
 
                 if baseline_crit or variant_crit:
-                    crit_result: Dict[str, Any] = {}
+                    crit_result: dict[str, Any] = {}
                     if baseline_crit:
                         # baseline_crit has already filtered out None values
+                        # Mypy doesn't track type narrowing through list comprehensions
                         crit_result["baseline"] = self._compute_alignment_metrics(
                             [({"score": sv}, rs) for sv, rs in baseline_crit]  # type: ignore[dict-item]
                         )
                     if variant_crit:
                         # variant_crit has already filtered out None values
+                        # Mypy doesn't track type narrowing through list comprehensions
                         crit_result["variant"] = self._compute_alignment_metrics(
                             [({"score": sv}, rs) for sv, rs in variant_crit]  # type: ignore[dict-item]
                         )
@@ -2218,9 +2220,9 @@ class RefereeAlignmentBaselinePlugin:
 
         return results
 
-    def _extract_score_pairs(self, payload: Dict[str, Any]) -> list[tuple[Dict[str, float], float]]:
+    def _extract_score_pairs(self, payload: dict[str, Any]) -> list[tuple[dict[str, float], float]]:
         """Extract (LLM scores dict, referee score) pairs from experiment results."""
-        pairs: list[tuple[Dict[str, float], float]] = []
+        pairs: list[tuple[dict[str, float], float]] = []
 
         for result in payload.get("results", []) or []:
             row = result.get("row") or {}
@@ -2237,7 +2239,7 @@ class RefereeAlignmentBaselinePlugin:
                 continue
 
             # Convert to dict of floats
-            score_dict: Dict[str, float] = {}
+            score_dict: dict[str, float] = {}
             for crit_name, value in llm_scores.items():
                 if self._criteria and crit_name not in self._criteria:
                     continue
@@ -2253,7 +2255,7 @@ class RefereeAlignmentBaselinePlugin:
 
         return pairs
 
-    def _extract_referee_score(self, row: Dict[str, Any]) -> float | None:
+    def _extract_referee_score(self, row: dict[str, Any]) -> float | None:
         """Extract and aggregate referee score from row data."""
         referee_values: list[float] = []
 
@@ -2290,7 +2292,7 @@ class RefereeAlignmentBaselinePlugin:
 
         return None
 
-    def _compute_alignment_metrics(self, pairs: list[tuple[Dict[str, float], float]]) -> Dict[str, Any]:
+    def _compute_alignment_metrics(self, pairs: list[tuple[dict[str, float], float]]) -> dict[str, Any]:
         """Compute alignment metrics from (LLM scores, referee score) pairs."""
         if len(pairs) < self._min_samples:
             return {}
@@ -2399,7 +2401,7 @@ class OutlierDetectionAggregator:
             raise ValueError("on_error must be 'abort' or 'skip'")
         self._on_error = on_error
 
-    def compare(self, baseline: Dict[str, Any], variant: Dict[str, Any]) -> Dict[str, Any]:
+    def compare(self, baseline: dict[str, Any], variant: dict[str, Any]) -> dict[str, Any]:
         try:
             return self._compare_impl(baseline, variant)
         except Exception as exc:  # pragma: no cover - defensive
@@ -2408,13 +2410,13 @@ class OutlierDetectionAggregator:
                 return {}
             raise
 
-    def _compare_impl(self, baseline: Dict[str, Any], variant: Dict[str, Any]) -> Dict[str, Any]:
+    def _compare_impl(self, baseline: dict[str, Any], variant: dict[str, Any]) -> dict[str, Any]:
         baseline_results = baseline.get("results", []) or []
         variant_results = variant.get("results", []) or []
 
         # Create ID mapping for paired comparison
-        baseline_by_id: Dict[Any, Dict[str, Any]] = {}
-        variant_by_id: Dict[Any, Dict[str, Any]] = {}
+        baseline_by_id: dict[Any, dict[str, Any]] = {}
+        variant_by_id: dict[Any, dict[str, Any]] = {}
 
         for result in baseline_results:
             row = result.get("row") or {}
@@ -2433,7 +2435,7 @@ class OutlierDetectionAggregator:
             return {}
 
         # Compute outliers
-        outliers: list[Dict[str, Any]] = []
+        outliers: list[dict[str, Any]] = []
 
         for row_id in common_ids:
             b_result = baseline_by_id[row_id]
@@ -2475,7 +2477,7 @@ class OutlierDetectionAggregator:
             "requested_top_n": self._top_n,
         }
 
-    def _extract_scores(self, result: Dict[str, Any]) -> Dict[str, float]:
+    def _extract_scores(self, result: dict[str, Any]) -> dict[str, float]:
         """Extract scores from result, filtering by criteria if specified."""
         metrics = result.get("metrics") or {}
         scores = metrics.get("scores") or {}
@@ -2483,7 +2485,7 @@ class OutlierDetectionAggregator:
         if not isinstance(scores, Mapping):
             return {}
 
-        extracted: Dict[str, float] = {}
+        extracted: dict[str, float] = {}
         for name, value in scores.items():
             if self._criteria and name not in self._criteria:
                 continue
@@ -2551,7 +2553,7 @@ class ScoreFlipAnalysisAggregator:
             raise ValueError("on_error must be 'abort' or 'skip'")
         self._on_error = on_error
 
-    def compare(self, baseline: Dict[str, Any], variant: Dict[str, Any]) -> Dict[str, Any]:
+    def compare(self, baseline: dict[str, Any], variant: dict[str, Any]) -> dict[str, Any]:
         try:
             return self._compare_impl(baseline, variant)
         except Exception as exc:  # pragma: no cover - defensive
@@ -2560,7 +2562,7 @@ class ScoreFlipAnalysisAggregator:
                 return {}
             raise
 
-    def _compare_impl(self, baseline: Dict[str, Any], variant: Dict[str, Any]) -> Dict[str, Any]:
+    def _compare_impl(self, baseline: dict[str, Any], variant: dict[str, Any]) -> dict[str, Any]:
         # Get paired scores by criterion
         pairs = _collect_paired_scores_by_criterion(baseline, variant)
 
@@ -2575,7 +2577,7 @@ class ScoreFlipAnalysisAggregator:
             return {}
 
         # Aggregate flips across all criteria
-        flips: Dict[str, list[tuple[float, float]]] = {
+        flips: dict[str, list[tuple[float, float]]] = {
             "fail_to_pass": [],
             "pass_to_fail": [],
             "major_drops": [],
@@ -2606,7 +2608,7 @@ class ScoreFlipAnalysisAggregator:
                 flips["major_gains"].append((baseline_score, variant_score))
 
         # Per-criterion breakdown
-        criteria_results: Dict[str, Any] = {}
+        criteria_results: dict[str, Any] = {}
         for crit_name, criterion_pairs in pairs.items():
             crit_flips = {
                 "fail_to_pass_count": 0,
@@ -2701,7 +2703,7 @@ class CategoryEffectsAggregator:
             raise ValueError("on_error must be 'abort' or 'skip'")
         self._on_error = on_error
 
-    def compare(self, baseline: Dict[str, Any], variant: Dict[str, Any]) -> Dict[str, Any]:
+    def compare(self, baseline: dict[str, Any], variant: dict[str, Any]) -> dict[str, Any]:
         try:
             return self._compare_impl(baseline, variant)
         except Exception as exc:  # pragma: no cover - defensive
@@ -2710,7 +2712,7 @@ class CategoryEffectsAggregator:
                 return {}
             raise
 
-    def _compare_impl(self, baseline: Dict[str, Any], variant: Dict[str, Any]) -> Dict[str, Any]:
+    def _compare_impl(self, baseline: dict[str, Any], variant: dict[str, Any]) -> dict[str, Any]:
         # Discover categories from baseline data
         categories = self._discover_categories(baseline)
 
@@ -2718,7 +2720,7 @@ class CategoryEffectsAggregator:
             return {}
 
         # Analyze each category
-        category_impacts: Dict[str, Dict[str, Any]] = {}
+        category_impacts: dict[str, dict[str, Any]] = {}
 
         for category in categories:
             baseline_cat = self._filter_by_category(baseline, category)
@@ -2776,7 +2778,7 @@ class CategoryEffectsAggregator:
             "total_categories": len(category_impacts),
         }
 
-    def _discover_categories(self, payload: Dict[str, Any]) -> set[str]:
+    def _discover_categories(self, payload: dict[str, Any]) -> set[str]:
         """Discover unique category values from baseline data."""
         categories: set[str] = set()
         for result in payload.get("results", []) or []:
@@ -2786,7 +2788,7 @@ class CategoryEffectsAggregator:
                 categories.add(str(category))
         return categories
 
-    def _filter_by_category(self, payload: Dict[str, Any], category: str) -> list[Dict[str, Any]]:
+    def _filter_by_category(self, payload: dict[str, Any], category: str) -> list[dict[str, Any]]:
         """Filter results by category value."""
         filtered = []
         for result in payload.get("results", []) or []:
@@ -2877,7 +2879,7 @@ class CriteriaEffectsBaselinePlugin:
             raise ValueError("on_error must be 'abort' or 'skip'")
         self._on_error = on_error
 
-    def compare(self, baseline: Dict[str, Any], variant: Dict[str, Any]) -> Dict[str, Any]:
+    def compare(self, baseline: dict[str, Any], variant: dict[str, Any]) -> dict[str, Any]:
         try:
             return self._compare_impl(baseline, variant)
         except Exception as exc:  # pragma: no cover - defensive
@@ -2886,7 +2888,7 @@ class CriteriaEffectsBaselinePlugin:
                 return {}
             raise
 
-    def _compare_impl(self, baseline: Dict[str, Any], variant: Dict[str, Any]) -> Dict[str, Any]:
+    def _compare_impl(self, baseline: dict[str, Any], variant: dict[str, Any]) -> dict[str, Any]:
         base_scores = _collect_scores_by_criterion(baseline)
         var_scores = _collect_scores_by_criterion(variant)
 
@@ -2898,7 +2900,7 @@ class CriteriaEffectsBaselinePlugin:
         if not criteria:
             return {}
 
-        results: Dict[str, Any] = {}
+        results: dict[str, Any] = {}
 
         for crit_name in criteria:
             base = base_scores.get(crit_name, [])

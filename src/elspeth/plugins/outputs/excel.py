@@ -6,7 +6,7 @@ import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Iterable, Mapping
+from typing import Any, Iterable, Mapping
 
 from elspeth.core.interfaces import Artifact, ArtifactDescriptor, ResultSink
 from elspeth.core.security import normalize_determinism_level, normalize_security_level
@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 
 def _load_workbook_dependencies():
     try:
+        # openpyxl library lacks type stubs; import treated as untyped by mypy
         from openpyxl import Workbook  # type: ignore[import-untyped]
     except ImportError as exc:  # pragma: no cover - handled during sink initialisation
         raise RuntimeError("ExcelResultSink requires the 'openpyxl' package. Install with 'pip install openpyxl'") from exc
@@ -71,7 +72,7 @@ class ExcelResultSink(ResultSink):
         }
 
     # ------------------------------------------------------------------ public API
-    def write(self, results: Dict[str, Any], *, metadata: Dict[str, Any] | None = None) -> None:
+    def write(self, results: dict[str, Any], *, metadata: dict[str, Any] | None = None) -> None:
         metadata = metadata or {}
         timestamp = datetime.now(timezone.utc)
         try:
@@ -166,8 +167,8 @@ class ExcelResultSink(ResultSink):
             sheet.append([self._sanitize_value(key), self._sanitize_value(rendered)])
 
     @staticmethod
-    def _flatten_result(entry: Mapping[str, Any]) -> Dict[str, Any]:
-        flat: Dict[str, Any] = {}
+    def _flatten_result(entry: Mapping[str, Any]) -> dict[str, Any]:
+        flat: dict[str, Any] = {}
         row = entry.get("row")
         if isinstance(row, Mapping):
             for key, value in row.items():
@@ -186,8 +187,8 @@ class ExcelResultSink(ResultSink):
         results: Mapping[str, Any],
         metadata: Mapping[str, Any],
         timestamp: datetime,
-    ) -> Dict[str, Any]:
-        manifest: Dict[str, Any] = {
+    ) -> dict[str, Any]:
+        manifest: dict[str, Any] = {
             "generated_at": timestamp.isoformat(),
             "rows": (len(results.get("results", [])) if isinstance(results.get("results"), list) else 0),
             "metadata": dict(metadata),
@@ -210,7 +211,7 @@ class ExcelResultSink(ResultSink):
     def finalize(self, artifacts, *, metadata=None):  # pragma: no cover - optional cleanup
         return None
 
-    def collect_artifacts(self) -> Dict[str, Artifact]:  # pragma: no cover
+    def collect_artifacts(self) -> dict[str, Artifact]:  # pragma: no cover
         if not self._last_workbook_path:
             return {}
         artifact = Artifact(

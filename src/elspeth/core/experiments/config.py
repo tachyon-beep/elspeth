@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from elspeth.core.config_schema import validate_experiment_config
 from elspeth.core.experiments.plugin_registry import normalize_early_stop_definitions
@@ -17,52 +18,108 @@ DEFAULT_AVG_INPUT_TOKENS = 2000
 DEFAULT_ROW_COUNT = 100
 
 
-@dataclass
-class ExperimentConfig:
-    """Runtime configuration for a single experiment run."""
+class ExperimentConfig(BaseModel):
+    """Runtime configuration for a single experiment run.
 
+    This Pydantic model provides runtime validation and serialization
+    for experiment configurations loaded from JSON files and prompt files.
+    """
+
+    # Required fields
     name: str
     temperature: float
     max_tokens: int
+
+    # Boolean flags
     enabled: bool = True
     is_baseline: bool = False
+
+    # Metadata
     description: str = ""
     hypothesis: str = ""
     author: str = "unknown"
-    tags: List[str] = field(default_factory=list)
-    options: Dict[str, Any] = field(default_factory=dict)
+    tags: list[str] = Field(default_factory=list)
+    options: dict[str, Any] = Field(default_factory=dict)
+
+    # Prompts
     prompt_system: str = ""
     prompt_template: str = ""
-    prompt_fields: Optional[List[str]] = None
-    criteria: Optional[List[Dict[str, Any]]] = None
-    row_plugin_defs: List[Dict[str, Any]] = field(default_factory=list)
-    aggregator_plugin_defs: List[Dict[str, Any]] = field(default_factory=list)
-    sink_defs: List[Dict[str, Any]] = field(default_factory=list)
-    rate_limiter_def: Optional[Dict[str, Any]] = None
-    cost_tracker_def: Optional[Dict[str, Any]] = None
-    prompt_pack: Optional[str] = None
-    baseline_plugin_defs: List[Dict[str, Any]] = field(default_factory=list)
-    validation_plugin_defs: List[Dict[str, Any]] = field(default_factory=list)
-    prompt_defaults: Optional[Dict[str, Any]] = None
-    llm_middleware_defs: List[Dict[str, Any]] = field(default_factory=list)
-    concurrency_config: Dict[str, Any] | None = None
+    prompt_fields: list[str] | None = None
+    criteria: list[dict[str, Any]] | None = None
+
+    # Plugin definitions
+    row_plugin_defs: list[dict[str, Any]] = Field(default_factory=list)
+    aggregator_plugin_defs: list[dict[str, Any]] = Field(default_factory=list)
+    sink_defs: list[dict[str, Any]] = Field(default_factory=list)
+    baseline_plugin_defs: list[dict[str, Any]] = Field(default_factory=list)
+    validation_plugin_defs: list[dict[str, Any]] = Field(default_factory=list)
+    early_stop_plugin_defs: list[dict[str, Any]] = Field(default_factory=list)
+    llm_middleware_defs: list[dict[str, Any]] = Field(default_factory=list)
+
+    # Control definitions
+    rate_limiter_def: dict[str, Any] | None = None
+    cost_tracker_def: dict[str, Any] | None = None
+
+    # Configuration options
+    prompt_pack: str | None = None
+    prompt_defaults: dict[str, Any] | None = None
+    concurrency_config: dict[str, Any] | None = None
     security_level: str | None = None
-    early_stop_plugin_defs: List[Dict[str, Any]] = field(default_factory=list)
-    early_stop_config: Dict[str, Any] | None = None
+    early_stop_config: dict[str, Any] | None = None
+
+    # Metadata
     path: Path | None = None
+
+    model_config = ConfigDict(
+        # Allow assignment after creation (mutable config objects)
+        frozen=False,
+        # Validate on assignment
+        validate_assignment=True,
+        # Allow arbitrary types (Path, etc.)
+        arbitrary_types_allowed=True,
+        # Be strict about extra fields
+        extra='forbid',
+    )
+
+    @field_validator('temperature')
+    @classmethod
+    def validate_temperature(cls, v: float) -> float:
+        """Validate temperature is within reasonable bounds."""
+        if not 0 <= v <= 2:
+            raise ValueError(f"Temperature must be between 0 and 2, got {v}")
+        return v
+
+    @field_validator('max_tokens')
+    @classmethod
+    def validate_max_tokens(cls, v: int) -> int:
+        """Validate max_tokens is positive."""
+        if v <= 0:
+            raise ValueError(f"max_tokens must be positive, got {v}")
+        return v
 
     @classmethod
     def from_file(cls, path: Path) -> "ExperimentConfig":
-        """Construct an experiment config by reading JSON plus prompt overrides."""
+        """Construct an experiment config by reading JSON plus prompt overrides.
 
+        This method loads configuration from:
+        1. config.json - Primary configuration
+        2. system_prompt.md - System prompt (if not in JSON)
+        3. user_prompt.md - User prompt template (if not in JSON)
+
+        Pydantic v2 automatically validates all fields during construction.
+        """
         config_path = path
         data = json.loads(path.read_text(encoding="utf-8"))
+
+        # Legacy JSON schema validation (will be replaced by Pydantic in future)
         try:
             validate_experiment_config(data)
         except ConfigurationError as exc:
             raise ValueError(f"Invalid experiment config '{config_path}': {exc}") from exc
+
         folder = path.parent
 
+        # Load prompts from files if not in JSON
         prompt_system = data.get("prompt_system")
         if not prompt_system:
             system_path = folder / "system_prompt.md"
@@ -73,84 +130,69 @@ class ExperimentConfig:
             user_path = folder / "user_prompt.md"
             prompt_template = user_path.read_text(encoding="utf-8") if user_path.exists() else ""
 
+        # Normalize early stop definitions
         early_stop_plugin_defs = normalize_early_stop_definitions(data.get("early_stop_plugins")) or []
         if not early_stop_plugin_defs and data.get("early_stop"):
             early_stop_plugin_defs = normalize_early_stop_definitions(data.get("early_stop"))
 
-        return cls(
-            name=data.get("name", path.parent.name),
-            temperature=data.get("temperature", 0.7),
-            max_tokens=data.get("max_tokens", 512),
-            enabled=data.get("enabled", True),
-            is_baseline=data.get("is_baseline", False),
-            description=data.get("description", ""),
-            hypothesis=data.get("hypothesis", ""),
-            author=data.get("author", "unknown"),
-            tags=data.get("tags", []),
-            options=data,
-            prompt_system=prompt_system,
-            prompt_template=prompt_template,
-            prompt_fields=data.get("prompt_fields"),
-            criteria=data.get("criteria"),
-            row_plugin_defs=data.get("row_plugins", []),
-            aggregator_plugin_defs=data.get("aggregator_plugins", []),
-            sink_defs=data.get("sinks", []),
-            rate_limiter_def=data.get("rate_limiter"),
-            cost_tracker_def=data.get("cost_tracker"),
-            prompt_pack=data.get("prompt_pack"),
-            baseline_plugin_defs=data.get("baseline_plugins", []),
-            validation_plugin_defs=data.get("validation_plugins", []),
-            prompt_defaults=data.get("prompt_defaults"),
-            llm_middleware_defs=data.get("llm_middlewares", []),
-            concurrency_config=data.get("concurrency"),
-            security_level=data.get("security_level"),
-            early_stop_plugin_defs=early_stop_plugin_defs,
-            early_stop_config=data.get("early_stop"),
-            path=folder,
-        )
+        # Build config dict with defaults
+        config_data = {
+            "name": data.get("name", path.parent.name),
+            "temperature": data.get("temperature", 0.7),
+            "max_tokens": data.get("max_tokens", 512),
+            "enabled": data.get("enabled", True),
+            "is_baseline": data.get("is_baseline", False),
+            "description": data.get("description", ""),
+            "hypothesis": data.get("hypothesis", ""),
+            "author": data.get("author", "unknown"),
+            "tags": data.get("tags", []),
+            "options": data,
+            "prompt_system": prompt_system,
+            "prompt_template": prompt_template,
+            "prompt_fields": data.get("prompt_fields"),
+            "criteria": data.get("criteria"),
+            "row_plugin_defs": data.get("row_plugins", []),
+            "aggregator_plugin_defs": data.get("aggregator_plugins", []),
+            "sink_defs": data.get("sinks", []),
+            "rate_limiter_def": data.get("rate_limiter"),
+            "cost_tracker_def": data.get("cost_tracker"),
+            "prompt_pack": data.get("prompt_pack"),
+            "baseline_plugin_defs": data.get("baseline_plugins", []),
+            "validation_plugin_defs": data.get("validation_plugins", []),
+            "prompt_defaults": data.get("prompt_defaults"),
+            "llm_middleware_defs": data.get("llm_middlewares", []),
+            "concurrency_config": data.get("concurrency"),
+            "security_level": data.get("security_level"),
+            "early_stop_plugin_defs": early_stop_plugin_defs,
+            "early_stop_config": data.get("early_stop"),
+            "path": folder,
+        }
 
-    def to_export_dict(self) -> Dict[str, Any]:
-        """Serialize the configuration back into a JSON-compatible mapping."""
+        # Use Pydantic v2's model_validate for runtime validation
+        return cls.model_validate(config_data)
 
-        """Return a serializable view of the experiment config and derived fields."""
+    def to_export_dict(self) -> dict[str, Any]:
+        """Serialize the configuration back into a JSON-compatible mapping.
 
+        Uses Pydantic v2's model_dump() for efficient serialization,
+        then merges with options and adds estimated cost.
+        """
+        # Start with options dict (contains original JSON data)
         payload = dict(self.options)
-        payload.update(
-            {
-                "name": self.name,
-                "temperature": self.temperature,
-                "max_tokens": self.max_tokens,
-                "enabled": self.enabled,
-                "is_baseline": self.is_baseline,
-                "description": self.description,
-                "hypothesis": self.hypothesis,
-                "author": self.author,
-                "tags": list(self.tags),
-            }
+
+        # Use Pydantic's model_dump to get all fields (excludes None and defaults)
+        model_data = self.model_dump(
+            exclude={'options', 'path'},  # Don't duplicate options, exclude Path
+            exclude_none=True,  # Skip None values
+            mode='python',  # Python objects, not JSON
         )
-        if self.prompt_system:
-            payload.setdefault("prompt_system", self.prompt_system)
-        if self.prompt_template:
-            payload.setdefault("prompt_template", self.prompt_template)
-        if self.prompt_fields is not None:
-            payload.setdefault("prompt_fields", list(self.prompt_fields))
-        if self.criteria is not None:
-            payload.setdefault("criteria", self.criteria)
-        if self.rate_limiter_def:
-            payload.setdefault("rate_limiter", self.rate_limiter_def)
-        if self.cost_tracker_def:
-            payload.setdefault("cost_tracker", self.cost_tracker_def)
-        if self.llm_middleware_defs:
-            payload.setdefault("llm_middlewares", self.llm_middleware_defs)
-        if self.concurrency_config:
-            payload.setdefault("concurrency", self.concurrency_config)
-        if self.validation_plugin_defs:
-            payload.setdefault("validation_plugins", self.validation_plugin_defs)
-        if self.prompt_defaults:
-            payload.setdefault("prompt_defaults", self.prompt_defaults)
-        if self.sink_defs:
-            payload.setdefault("sinks", self.sink_defs)
-        payload.setdefault("estimated_cost", self.estimated_cost())
+
+        # Update with model data (model fields override options)
+        payload.update(model_data)
+
+        # Add computed field
+        payload["estimated_cost"] = self.estimated_cost()
+
         return payload
 
     def estimated_cost(
@@ -160,7 +202,7 @@ class ExperimentConfig:
         avg_input_tokens: int = DEFAULT_AVG_INPUT_TOKENS,
         input_cost_per_1k: float = DEFAULT_INPUT_COST_PER_1K,
         output_cost_per_1k: float = DEFAULT_OUTPUT_COST_PER_1K,
-    ) -> Dict[str, float]:
+    ) -> dict[str, float]:
         """Estimate token consumption and cost for a representative run."""
 
         criteria_count = len(self.criteria or []) or 1
@@ -176,7 +218,7 @@ class ExperimentConfig:
             "estimated_total_cost": float(input_cost + output_cost),
         }
 
-    def summary(self) -> Dict[str, Any]:
+    def summary(self) -> dict[str, Any]:
         """Provide high-level metadata for reporting and dashboards."""
 
         return {
@@ -190,20 +232,32 @@ class ExperimentConfig:
         }
 
 
-@dataclass
-class ExperimentSuite:
-    """Materialized experiment suite with baseline metadata."""
+class ExperimentSuite(BaseModel):
+    """Materialized experiment suite with baseline metadata.
+
+    This Pydantic model represents a complete suite of experiments
+    loaded from a directory structure.
+    """
 
     root: Path
-    experiments: List[ExperimentConfig]
-    baseline: Optional[ExperimentConfig]
+    experiments: list[ExperimentConfig]
+    baseline: ExperimentConfig | None
+
+    model_config = ConfigDict(
+        frozen=False,
+        validate_assignment=True,
+        arbitrary_types_allowed=True,
+    )
 
     @classmethod
     def load(cls, root: Path) -> "ExperimentSuite":
-        """Load all experiment configs under ``root`` and select a baseline."""
+        """Load all experiment configs under ``root`` and select a baseline.
 
-        experiments: List[ExperimentConfig] = []
-        baseline: Optional[ExperimentConfig] = None
+        Scans the directory for experiment folders, loads their configs,
+        and automatically selects a baseline experiment.
+        """
+        experiments: list[ExperimentConfig] = []
+        baseline: ExperimentConfig | None = None
 
         for folder in sorted(p for p in root.iterdir() if p.is_dir() and not p.name.startswith(".")):
             config_path = folder / "config.json"
@@ -218,4 +272,9 @@ class ExperimentSuite:
         if baseline is None and experiments:
             baseline = experiments[0]
 
-        return cls(root=root, experiments=experiments, baseline=baseline)
+        # Use Pydantic v2's model_validate for validation
+        return cls.model_validate({
+            "root": root,
+            "experiments": experiments,
+            "baseline": baseline,
+        })

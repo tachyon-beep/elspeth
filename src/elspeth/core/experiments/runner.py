@@ -8,7 +8,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping
+from typing import Any, Iterable, Mapping
 
 import pandas as pd
 
@@ -29,42 +29,42 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ExperimentRunner:
     llm_client: LLMClientProtocol
-    sinks: List[ResultSink]
+    sinks: list[ResultSink]
     prompt_system: str
     prompt_template: str
-    prompt_fields: List[str] | None = None
-    criteria: List[Dict[str, Any]] | None = None
-    row_plugins: List[RowExperimentPlugin] | None = None
-    aggregator_plugins: List[AggregationExperimentPlugin] | None = None
-    validation_plugins: List[ValidationPlugin] | None = None
+    prompt_fields: list[str] | None = None
+    criteria: list[dict[str, Any]] | None = None
+    row_plugins: list[RowExperimentPlugin] | None = None
+    aggregator_plugins: list[AggregationExperimentPlugin] | None = None
+    validation_plugins: list[ValidationPlugin] | None = None
     rate_limiter: RateLimiter | None = None
     cost_tracker: CostTracker | None = None
     experiment_name: str | None = None
-    retry_config: Dict[str, Any] | None = None
-    checkpoint_config: Dict[str, Any] | None = None
+    retry_config: dict[str, Any] | None = None
+    checkpoint_config: dict[str, Any] | None = None
     _checkpoint_ids: set[str] | None = None
-    prompt_defaults: Dict[str, Any] | None = None
+    prompt_defaults: dict[str, Any] | None = None
     prompt_engine: PromptEngine | None = None
     _compiled_system_prompt: PromptTemplate | None = None
     _compiled_user_prompt: PromptTemplate | None = None
-    _compiled_criteria_prompts: Dict[str, PromptTemplate] | None = None
+    _compiled_criteria_prompts: dict[str, PromptTemplate] | None = None
     llm_middlewares: list[LLMMiddleware] | None = None
-    concurrency_config: Dict[str, Any] | None = None
+    concurrency_config: dict[str, Any] | None = None
     security_level: str | None = None
     _active_security_level: str | None = None
     determinism_level: str | None = None
     _active_determinism_level: str | None = None
-    early_stop_plugins: List[EarlyStopPlugin] | None = None
-    early_stop_config: Dict[str, Any] | None = None
-    _active_early_stop_plugins: List[EarlyStopPlugin] | None = None
+    early_stop_plugins: list[EarlyStopPlugin] | None = None
+    early_stop_config: dict[str, Any] | None = None
+    _active_early_stop_plugins: list[EarlyStopPlugin] | None = None
     _early_stop_event: threading.Event | None = None
     _early_stop_lock: threading.Lock | None = None
-    _early_stop_reason: Dict[str, Any] | None = None
+    _early_stop_reason: dict[str, Any] | None = None
     on_schema_violation: str = "abort"  # "abort" | "route" | "skip"
     malformed_data_sink: ResultSink | None = None
-    _malformed_rows: List[SchemaViolation] | None = None
+    _malformed_rows: list[SchemaViolation] | None = None
 
-    def run(self, df: pd.DataFrame) -> Dict[str, Any]:
+    def run(self, df: pd.DataFrame) -> dict[str, Any]:
         self._init_early_stop()
         processed_ids: set[str] | None = None
         checkpoint_field = None
@@ -86,7 +86,7 @@ class ExperimentRunner:
             name=f"{self.experiment_name or 'experiment'}:user",
             defaults=self.prompt_defaults or {},
         )
-        criteria_templates: Dict[str, PromptTemplate] = {}
+        criteria_templates: dict[str, PromptTemplate] = {}
         if self.criteria:
             for crit in self.criteria:
                 template_text = crit.get("template", self.prompt_template or "")
@@ -110,7 +110,7 @@ class ExperimentRunner:
         # Initialize malformed data tracking
         self._malformed_rows = []
 
-        rows_to_process: List[tuple[int, pd.Series, Dict[str, Any], str | None]] = []
+        rows_to_process: list[tuple[int, pd.Series, dict[str, Any], str | None]] = []
         for idx, (_, row) in enumerate(df.iterrows()):
             context = prepare_prompt_context(row, include_fields=self.prompt_fields)
             row_id = context.get(checkpoint_field) if checkpoint_field else None
@@ -120,10 +120,10 @@ class ExperimentRunner:
                 break
             rows_to_process.append((idx, row, context, row_id))
 
-        records_with_index: List[tuple[int, Dict[str, Any]]] = []
-        failures: List[Dict[str, Any]] = []
+        records_with_index: list[tuple[int, dict[str, Any]]] = []
+        failures: list[dict[str, Any]] = []
 
-        def handle_success(idx: int, record: Dict[str, Any], row_id: str | None) -> None:
+        def handle_success(idx: int, record: dict[str, Any], row_id: str | None) -> None:
             records_with_index.append((idx, record))
             if checkpoint_path and row_id is not None:
                 if processed_ids is not None:
@@ -131,7 +131,7 @@ class ExperimentRunner:
                 self._append_checkpoint(checkpoint_path, row_id)
             self._maybe_trigger_early_stop(record, row_index=idx)
 
-        def handle_failure(failure: Dict[str, Any]) -> None:
+        def handle_failure(failure: dict[str, Any]) -> None:
             failures.append(failure)
 
         concurrency_cfg = self.concurrency_config or {}
@@ -169,10 +169,10 @@ class ExperimentRunner:
         records_with_index.sort(key=lambda item: item[0])
         results = [record for _, record in records_with_index]
 
-        payload: Dict[str, Any] = {"results": results}
+        payload: dict[str, Any] = {"results": results}
         if failures:
             payload["failures"] = failures
-        aggregates: Dict[str, Any] = {}
+        aggregates: dict[str, Any] = {}
         for plugin in self.aggregator_plugins or []:
             derived = plugin.finalize(results)
             if derived:
@@ -180,11 +180,11 @@ class ExperimentRunner:
         if aggregates:
             payload["aggregates"] = aggregates
 
-        metadata: Dict[str, Any] = {
+        metadata: dict[str, Any] = {
             "rows": len(results),
             "row_count": len(results),
         }
-        retry_summary: Dict[str, int] = {
+        retry_summary: dict[str, int] = {
             "total_requests": len(results) + len(failures),
             "total_retries": 0,
             "exhausted": len(failures),
@@ -236,7 +236,7 @@ class ExperimentRunner:
 
     def _init_early_stop(self) -> None:
         self._early_stop_reason = None
-        plugins: List[EarlyStopPlugin] = []
+        plugins: list[EarlyStopPlugin] = []
         parent_context = getattr(self, "plugin_context", None)
 
         if self.early_stop_plugins:
@@ -260,7 +260,7 @@ class ExperimentRunner:
             self._early_stop_event = None
             self._early_stop_lock = None
 
-    def _maybe_trigger_early_stop(self, record: Dict[str, Any], *, row_index: int | None = None) -> None:
+    def _maybe_trigger_early_stop(self, record: dict[str, Any], *, row_index: int | None = None) -> None:
         event = self._early_stop_event
         if not event or event.is_set():
             return
@@ -268,7 +268,7 @@ class ExperimentRunner:
         if not plugins or self._early_stop_reason:
             return
 
-        metadata: Dict[str, Any] | None = None
+        metadata: dict[str, Any] | None = None
         if row_index is not None:
             metadata = {"row_index": row_index}
 
@@ -311,12 +311,12 @@ class ExperimentRunner:
         engine: PromptEngine,
         system_template: PromptTemplate,
         user_template: PromptTemplate,
-        criteria_templates: Dict[str, PromptTemplate],
-        row_plugins: List[RowExperimentPlugin],
-        context: Dict[str, Any],
+        criteria_templates: dict[str, PromptTemplate],
+        row_plugins: list[RowExperimentPlugin],
+        context: dict[str, Any],
         row: pd.Series,
         row_id: str | None,
-    ) -> tuple[Dict[str, Any] | None, Dict[str, Any] | None]:
+    ) -> tuple[dict[str, Any] | None, dict[str, Any] | None]:
         if self._early_stop_event and self._early_stop_event.is_set():
             return None, None
         try:
@@ -366,7 +366,7 @@ class ExperimentRunner:
         engine: PromptEngine,
         system_template: PromptTemplate,
         user_template: PromptTemplate,
-        context: Dict[str, Any],
+        context: dict[str, Any],
     ) -> tuple[str, str]:
         rendered_system_prompt = engine.render(system_template, context)
         base_user_prompt = engine.render(user_template, context)
@@ -376,11 +376,11 @@ class ExperimentRunner:
         self,
         rendered_system_prompt: str,
         base_user_prompt: str,
-        criteria_templates: Dict[str, PromptTemplate],
-        context: Dict[str, Any],
+        criteria_templates: dict[str, PromptTemplate],
+        context: dict[str, Any],
         row: pd.Series,
         row_id: str | None,
-    ) -> tuple[Dict[str, Any], Dict[str, Any]]:
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
         if self.criteria:
             return self._collect_criteria_responses(
                 rendered_system_prompt,
@@ -394,18 +394,18 @@ class ExperimentRunner:
             system_prompt=rendered_system_prompt,
             row_context=context,
         )
-        record: Dict[str, Any] = {"row": context, "response": response}
+        record: dict[str, Any] = {"row": context, "response": response}
         self._merge_response_metrics(record, [response])
         return record, response
 
     def _collect_criteria_responses(
         self,
         rendered_system_prompt: str,
-        criteria_templates: Dict[str, PromptTemplate],
-        context: Dict[str, Any],
+        criteria_templates: dict[str, PromptTemplate],
+        context: dict[str, Any],
         row: pd.Series,
-    ) -> tuple[Dict[str, Any], Dict[str, Any]]:
-        responses: Dict[str, Dict[str, Any]] = {}
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        responses: dict[str, dict[str, Any]] = {}
         for crit in self.criteria or []:
             crit_name = crit.get("name") or crit.get("template", "criteria")
             prompt_template = criteria_templates[crit_name]
@@ -418,12 +418,12 @@ class ExperimentRunner:
             )
             responses[crit_name] = response
         primary_response = next(iter(responses.values())) if responses else {}
-        record: Dict[str, Any] = {"row": context, "response": primary_response, "responses": responses}
+        record: dict[str, Any] = {"row": context, "response": primary_response, "responses": responses}
         self._merge_response_metrics(record, responses.values())
         return record, primary_response
 
     @staticmethod
-    def _merge_response_metrics(record: Dict[str, Any], responses: Iterable[Mapping[str, Any]]) -> None:
+    def _merge_response_metrics(record: dict[str, Any], responses: Iterable[Mapping[str, Any]]) -> None:
         for resp in responses:
             metrics = resp.get("metrics") if isinstance(resp, Mapping) else None
             if metrics:
@@ -431,7 +431,7 @@ class ExperimentRunner:
 
     @staticmethod
     def _populate_prompt_metadata(
-        record: Dict[str, Any],
+        record: dict[str, Any],
         system_template: PromptTemplate,
         user_template: PromptTemplate,
         rendered_system_prompt: str,
@@ -447,23 +447,23 @@ class ExperimentRunner:
             metadata.setdefault("prompt_user_fields", list(required))
 
     @staticmethod
-    def _attach_retry_metadata(record: Dict[str, Any], response: Mapping[str, Any]) -> None:
+    def _attach_retry_metadata(record: dict[str, Any], response: Mapping[str, Any]) -> None:
         retry_meta = response.get("retry") if isinstance(response, Mapping) else None
         if retry_meta:
             record["retry"] = retry_meta
 
-    def _apply_row_plugins(self, record: Dict[str, Any], row_plugins: List[RowExperimentPlugin]) -> None:
+    def _apply_row_plugins(self, record: dict[str, Any], row_plugins: list[RowExperimentPlugin]) -> None:
         responses = record.get("responses") or {"default": record.get("response")}
         for plugin in row_plugins:
             derived = plugin.process_row(record["row"], responses)
             if derived:
                 record.setdefault("metrics", {}).update(derived)
 
-    def _apply_security_level(self, record: Dict[str, Any]) -> None:
+    def _apply_security_level(self, record: dict[str, Any]) -> None:
         if self._active_security_level:
             record["security_level"] = self._active_security_level
 
-    def _should_run_parallel(self, config: Dict[str, Any], backlog_size: int) -> bool:
+    def _should_run_parallel(self, config: dict[str, Any], backlog_size: int) -> bool:
         if not config or not config.get("enabled"):
             return False
         max_workers = max(int(config.get("max_workers", 1)), 1)
@@ -474,15 +474,15 @@ class ExperimentRunner:
 
     def _run_parallel(
         self,
-        rows_to_process: List[tuple[int, pd.Series, Dict[str, Any], str | None]],
+        rows_to_process: list[tuple[int, pd.Series, dict[str, Any], str | None]],
         engine: PromptEngine,
         system_template: PromptTemplate,
         user_template: PromptTemplate,
-        criteria_templates: Dict[str, PromptTemplate],
-        row_plugins: List[RowExperimentPlugin],
+        criteria_templates: dict[str, PromptTemplate],
+        row_plugins: list[RowExperimentPlugin],
         handle_success,
         handle_failure,
-        config: Dict[str, Any],
+        config: dict[str, Any],
     ) -> None:
         max_workers = max(int(config.get("max_workers", 4)), 1)
         pause_threshold = float(config.get("utilization_pause", 0.8))
@@ -490,7 +490,7 @@ class ExperimentRunner:
 
         lock = threading.Lock()
 
-        def worker(data: tuple[int, pd.Series, Dict[str, Any], str | None]) -> None:
+        def worker(data: tuple[int, pd.Series, dict[str, Any], str | None]) -> None:
             if self._early_stop_event and self._early_stop_event.is_set():
                 return
             idx, row, context, row_id = data
@@ -522,8 +522,8 @@ class ExperimentRunner:
                     break
                 executor.submit(worker, data)
 
-    def _build_sink_bindings(self) -> List[SinkBinding]:
-        bindings: List[SinkBinding] = []
+    def _build_sink_bindings(self) -> list[SinkBinding]:
+        bindings: list[SinkBinding] = []
         for index, sink in enumerate(self.sinks):
             artifact_config = getattr(sink, "_elspeth_artifact_config", {}) or {}
             plugin = getattr(sink, "_elspeth_plugin_name", sink.__class__.__name__)
@@ -547,11 +547,11 @@ class ExperimentRunner:
     def _execute_llm(
         self,
         user_prompt: str,
-        metadata: Dict[str, Any],
+        metadata: dict[str, Any],
         *,
         system_prompt: str | None = None,
-        row_context: Dict[str, Any] | None = None,
-    ) -> Dict[str, Any]:
+        row_context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         delay = 0.0
         max_attempts = 1
         backoff = 0.0
@@ -562,7 +562,7 @@ class ExperimentRunner:
 
         attempt = 0
         last_error: Exception | None = None
-        attempt_history: List[Dict[str, Any]] = []
+        attempt_history: list[dict[str, Any]] = []
         last_request: LLMRequest | None = None
         while attempt < max_attempts:
             attempt += 1
@@ -654,7 +654,7 @@ class ExperimentRunner:
                 logger.debug("Retry exhausted hook raised", exc_info=True)
         raise last_error
 
-    def _notify_retry_exhausted(self, request: LLMRequest, error: Exception, history: List[Dict[str, Any]]) -> None:
+    def _notify_retry_exhausted(self, request: LLMRequest, error: Exception, history: list[dict[str, Any]]) -> None:
         metadata = {
             "experiment": self.experiment_name,
             "attempts": getattr(error, "_elspeth_retry_attempts", len(history)),
@@ -679,10 +679,10 @@ class ExperimentRunner:
 
     def _run_validations(
         self,
-        response: Dict[str, Any],
+        response: dict[str, Any],
         request: LLMRequest,
         *,
-        row_context: Dict[str, Any] | None = None,
+        row_context: dict[str, Any] | None = None,
     ) -> None:
         plugins = self.validation_plugins or []
         if not plugins:
@@ -738,6 +738,7 @@ class ExperimentRunner:
                         raise
 
         # Validate aggregation plugins
+        # Mypy doesn't recognize empty list [] is compatible with list[AggregationExperimentPlugin]
         for plugin in self.aggregator_plugins or []:  # type: ignore[assignment]
             if hasattr(plugin, "input_schema") and callable(plugin.input_schema):
                 plugin_schema = plugin.input_schema()
@@ -761,6 +762,7 @@ class ExperimentRunner:
                         raise
 
         # Validate validation plugins
+        # Mypy doesn't recognize empty list [] is compatible with list[ValidationPlugin]
         for plugin in self.validation_plugins or []:  # type: ignore[assignment]
             if hasattr(plugin, "input_schema") and callable(plugin.input_schema):
                 plugin_schema = plugin.input_schema()

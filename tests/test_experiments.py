@@ -380,24 +380,21 @@ def test_suite_runner_with_plugin_definitions(tmp_path, monkeypatch):
                 "row_plugins": [
                     {
                         "name": "test_row",
-                        "security_level": "OFFICIAL",
-                        "determinism_level": "guaranteed",
+                        "determinism_level": "guaranteed",  # Inherits security_level from parent
                         "options": {"value": 5},
                     }
                 ],
                 "aggregator_plugins": [
                     {
                         "name": "test_agg",
-                        "security_level": "OFFICIAL",
-                        "determinism_level": "guaranteed",
+                        "determinism_level": "guaranteed",  # Inherits security_level from parent
                         "options": {"key": "total"},
                     }
                 ],
                 "baseline_plugins": [
                     {
                         "name": "row_count",
-                        "security_level": "OFFICIAL",
-                        "determinism_level": "guaranteed",
+                        "determinism_level": "guaranteed",  # Inherits security_level from parent
                         "options": {"key": "delta"},
                     }
                 ],

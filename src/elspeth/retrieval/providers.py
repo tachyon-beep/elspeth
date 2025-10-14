@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 from dataclasses import dataclass
-from typing import Any, Dict, Iterable, Mapping, Sequence
+from typing import Any, Iterable, Mapping, Sequence
 
 from elspeth.core.validation import ConfigurationError
 
@@ -15,7 +15,7 @@ class QueryResult:
     document_id: str
     text: str
     score: float
-    metadata: Dict[str, object]
+    metadata: dict[str, object]
 
 
 class VectorQueryClient:

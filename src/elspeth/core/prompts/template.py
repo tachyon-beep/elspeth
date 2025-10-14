@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, Mapping
+from typing import Any, Mapping
 
 from jinja2 import Template, UndefinedError
 
@@ -18,13 +18,13 @@ class PromptTemplate:
     raw: str
     template: Template
     defaults: Mapping[str, Any] = field(default_factory=dict)
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
     required_fields: tuple[str, ...] = field(default_factory=tuple)
 
     def render(self, context: Mapping[str, Any] | None = None, extra: Mapping[str, Any] | None = None) -> str:
         """Render the template using defaults, context, and extra overrides."""
 
-        payload: Dict[str, Any] = {}
+        payload: dict[str, Any] = {}
         if self.defaults:
             payload.update(self.defaults)
         if context:

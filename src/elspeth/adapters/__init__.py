@@ -1,4 +1,4 @@
-"""Data source connectors."""
+"""Blob storage adapters and utilities."""
 
 from .blob_store import BlobConfig, BlobConfigurationError, BlobDataLoader, load_blob_config, load_blob_csv
 

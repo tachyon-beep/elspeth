@@ -6,7 +6,7 @@ import time
 from collections import deque
 from contextlib import contextmanager
 from threading import Lock
-from typing import Any, ContextManager, Deque, Dict, Optional, SupportsFloat, Tuple
+from typing import Any, ContextManager, Deque, SupportsFloat
 
 
 def _coerce_float(value: object, *, context: str) -> float:
@@ -25,7 +25,7 @@ def _coerce_float(value: object, *, context: str) -> float:
 class RateLimiter:
     """Base protocol for rate limiters."""
 
-    def acquire(self, metadata: Optional[Dict[str, object]] = None) -> ContextManager[None]:
+    def acquire(self, metadata: dict[str, object | None] | None = None) -> ContextManager[None]:
         """Return a context manager that enforces the rate limit."""
 
         del metadata  # Unused in base implementation.
@@ -37,7 +37,7 @@ class RateLimiter:
         return 0.0
 
     def update_usage(
-        self, response: Dict[str, Any], metadata: Optional[Dict[str, object]] = None
+        self, response: dict[str, Any], metadata: dict[str, object | None] | None = None
     ) -> None:  # pragma: no cover - optional override
         """Record response metadata to refine future rate limiting."""
 
@@ -47,7 +47,7 @@ class RateLimiter:
 class NoopRateLimiter(RateLimiter):
     """Limiter implementation that performs no throttling."""
 
-    def acquire(self, metadata: Optional[Dict[str, object]] = None) -> ContextManager[None]:  # pragma: no cover - trivial
+    def acquire(self, metadata: dict[str, object | None] | None = None) -> ContextManager[None]:  # pragma: no cover - trivial
         @contextmanager
         def _cm():
             yield
@@ -71,7 +71,7 @@ class FixedWindowRateLimiter(RateLimiter):
         self._count = 0
         self._usage_ratio = 0.0
 
-    def acquire(self, metadata: Optional[Dict[str, object]] = None) -> ContextManager[None]:
+    def acquire(self, metadata: dict[str, object | None] | None = None) -> ContextManager[None]:
         @contextmanager
         def _cm():
             while True:
@@ -120,10 +120,10 @@ class AdaptiveRateLimiter(RateLimiter):
         self.interval = interval_seconds
         self._lock = Lock()
         self._request_times: Deque[float] = deque()
-        self._token_records: Deque[Tuple[float, float]] = deque()
+        self._token_records: Deque[tuple[float, float]] = deque()
         self._last_utilization = 0.0
 
-    def acquire(self, metadata: Optional[Dict[str, object]] = None) -> ContextManager[None]:
+    def acquire(self, metadata: dict[str, object | None] | None = None) -> ContextManager[None]:
         estimated_tokens = 0.0
         if metadata:
             value = metadata.get("estimated_tokens")
@@ -153,7 +153,7 @@ class AdaptiveRateLimiter(RateLimiter):
 
         return _cm()
 
-    def update_usage(self, response: Dict[str, Any], metadata: Optional[Dict[str, object]] = None) -> None:
+    def update_usage(self, response: dict[str, Any], metadata: dict[str, object | None] | None = None) -> None:
         if self.tokens_per_minute is None:
             return
         metrics = response.get("metrics") if isinstance(response, dict) else None

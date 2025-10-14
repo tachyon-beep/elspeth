@@ -2,18 +2,18 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any
 
 
 class CostTracker:
     """Tracks LLM costs per request and aggregates totals."""
 
-    def record(self, response: Dict[str, Any], metadata: Optional[Dict[str, object]] = None) -> Dict[str, Any]:
+    def record(self, response: dict[str, Any], metadata: dict[str, object | None] | None = None) -> dict[str, Any]:
         """Record billing information for a single response."""
 
         raise NotImplementedError
 
-    def summary(self) -> Dict[str, Any]:
+    def summary(self) -> dict[str, Any]:
         """Return aggregate totals accumulated so far."""
 
         raise NotImplementedError
@@ -22,12 +22,12 @@ class CostTracker:
 class NoopCostTracker(CostTracker):  # pragma: no cover - trivial
     """No-op tracker that never accumulates cost."""
 
-    def record(self, response: Dict[str, Any], metadata: Optional[Dict[str, object]] = None) -> Dict[str, Any]:
+    def record(self, response: dict[str, Any], metadata: dict[str, object | None] | None = None) -> dict[str, Any]:
         """Skip tracking but retain the interface contract."""
 
         return {}
 
-    def summary(self) -> Dict[str, Any]:
+    def summary(self) -> dict[str, Any]:
         """Return an empty summary for the noop tracker."""
 
         return {}
@@ -43,7 +43,7 @@ class FixedPriceCostTracker(CostTracker):
         self.total_completion_tokens = 0
         self.total_cost = 0.0
 
-    def record(self, response: Dict[str, Any], metadata: Optional[Dict[str, object]] = None) -> Dict[str, Any]:
+    def record(self, response: dict[str, Any], metadata: dict[str, object | None] | None = None) -> dict[str, Any]:
         """Capture usage metrics from the raw response and compute incremental cost."""
 
         usage = self._extract_usage(response.get("raw"))
@@ -62,7 +62,7 @@ class FixedPriceCostTracker(CostTracker):
             "cost": cost,
         }
 
-    def summary(self) -> Dict[str, Any]:
+    def summary(self) -> dict[str, Any]:
         """Return the cumulative token counts and cost."""
 
         return {
@@ -72,7 +72,7 @@ class FixedPriceCostTracker(CostTracker):
         }
 
     @staticmethod
-    def _extract_usage(raw: Any) -> Dict[str, int]:
+    def _extract_usage(raw: Any) -> dict[str, int]:
         """Extract token usage from various OpenAI/LLM response formats."""
 
         if raw is None:

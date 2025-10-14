@@ -6,7 +6,7 @@ import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Mapping
+from typing import Any, Mapping
 
 from elspeth.core.experiments.config import ExperimentConfig, ExperimentSuite
 from elspeth.core.experiments.tools import export_suite_configuration, summarize_suite
@@ -73,11 +73,11 @@ class SuiteReportGenerator:
             }
             (exp_dir / "stats.json").write_text(json.dumps(data, indent=2), encoding="utf-8")
 
-    def _generate_comparative(self, consolidated: Path) -> Dict[str, Any]:
+    def _generate_comparative(self, consolidated: Path) -> dict[str, Any]:
         baseline_payload = None
         if self.baseline_name:
             baseline_payload = self.results.get(self.baseline_name, {}).get("payload")
-        comparative: Dict[str, Any] = {
+        comparative: dict[str, Any] = {
             "baseline": self.baseline_name,
             "baseline_stats": self._summaries_from_payload(baseline_payload),
             "variants": {},
@@ -96,8 +96,8 @@ class SuiteReportGenerator:
         (consolidated / "comparative_analysis.json").write_text(json.dumps(comparative, indent=2), encoding="utf-8")
         return comparative
 
-    def _generate_recommendations(self, consolidated: Path) -> Dict[str, Any]:
-        recommendations: Dict[str, Any] = {}
+    def _generate_recommendations(self, consolidated: Path) -> dict[str, Any]:
+        recommendations: dict[str, Any] = {}
         for name, entry in self.results.items():
             payload = entry.get("payload") or {}
             aggregates = payload.get("aggregates") or {}
@@ -120,7 +120,7 @@ class SuiteReportGenerator:
         (consolidated / "analysis_config.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
         export_suite_configuration(self.suite, consolidated / "suite_export.json")
 
-    def _collect_plugin_summary(self) -> Dict[str, Any]:
+    def _collect_plugin_summary(self) -> dict[str, Any]:
         row_plugins = set()
         agg_plugins = set()
         baseline_plugins = set()
@@ -160,8 +160,8 @@ class SuiteReportGenerator:
     def _generate_executive_summary(
         self,
         consolidated: Path,
-        comparative: Dict[str, Any],
-        recommendations: Dict[str, Any],
+        comparative: dict[str, Any],
+        recommendations: dict[str, Any],
     ) -> None:
         lines = ["# Executive Summary", ""]
         lines.append(f"- Generated: {datetime.now(timezone.utc).isoformat()}")
@@ -199,8 +199,8 @@ class SuiteReportGenerator:
     def _generate_excel_report(
         self,
         consolidated: Path,
-        comparative: Dict[str, Any],
-        recommendations: Dict[str, Any],
+        comparative: dict[str, Any],
+        recommendations: dict[str, Any],
     ) -> None:
         try:
             import pandas as pd
@@ -250,7 +250,7 @@ class SuiteReportGenerator:
         except ImportError:  # pragma: no cover - optional dependency
             logger.info("Skipping Excel report generation (openpyxl not available)")
 
-    def _generate_visualizations(self, consolidated: Path, comparative: Dict[str, Any]) -> None:
+    def _generate_visualizations(self, consolidated: Path, comparative: dict[str, Any]) -> None:
         try:
             import matplotlib
 
@@ -292,7 +292,7 @@ class SuiteReportGenerator:
 
     # ------------------------------------------------------------------ helpers
 
-    def _summaries_from_payload(self, payload: Mapping[str, Any] | None) -> Dict[str, Any]:
+    def _summaries_from_payload(self, payload: Mapping[str, Any] | None) -> dict[str, Any]:
         if not isinstance(payload, Mapping):
             return {}
         aggregates = payload.get("aggregates")
@@ -304,13 +304,13 @@ class SuiteReportGenerator:
         return dict(stats)
 
     @staticmethod
-    def _config_dict(config: ExperimentConfig | None) -> Dict[str, Any]:
+    def _config_dict(config: ExperimentConfig | None) -> dict[str, Any]:
         if not isinstance(config, ExperimentConfig):
             return {}
         return config.to_export_dict()
 
 
-def _comparisons_dataframe(comparative: Dict[str, Any], pd):
+def _comparisons_dataframe(comparative: dict[str, Any], pd):
     rows = []
     for name, payload in comparative.get("variants", {}).items():
         comparisons = payload.get("comparisons") or {}

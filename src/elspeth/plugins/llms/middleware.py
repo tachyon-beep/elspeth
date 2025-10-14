@@ -10,7 +10,7 @@ import threading
 import time
 import unicodedata
 from collections import deque
-from typing import Any, Dict, Sequence
+from typing import Any, Sequence
 
 import requests
 
@@ -140,13 +140,13 @@ class AuditMiddleware(LLMMiddleware):
         self.channel = channel or "elspeth.audit"
 
     def before_request(self, request: LLMRequest) -> LLMRequest:
-        payload: Dict[str, Any] = {"metadata": request.metadata}
+        payload: dict[str, Any] = {"metadata": request.metadata}
         if self.include_prompts:
             payload.update({"system": request.system_prompt, "user": request.user_prompt})
         logger.info("[%s] LLM request metadata=%s", self.channel, payload)
         return request
 
-    def after_response(self, request: LLMRequest, response: Dict[str, Any]) -> Dict[str, Any]:
+    def after_response(self, request: LLMRequest, response: dict[str, Any]) -> dict[str, Any]:
         logger.info("[%s] LLM response metrics=%s", self.channel, response.get("metrics"))
         if self.include_prompts:
             logger.debug("[%s] LLM response content=%s", self.channel, response.get("content"))
@@ -207,7 +207,7 @@ class HealthMonitorMiddleware(LLMMiddleware):
         self.include_latency = include_latency
         self._lock = threading.Lock()
         self._latencies: deque[float] = deque(maxlen=self.window)
-        self._inflight: Dict[int, float] = {}
+        self._inflight: dict[int, float] = {}
         self._total_requests = 0
         self._total_failures = 0
         self._last_heartbeat = time.monotonic()
@@ -218,7 +218,7 @@ class HealthMonitorMiddleware(LLMMiddleware):
             self._inflight[id(request)] = start
         return request
 
-    def after_response(self, request: LLMRequest, response: Dict[str, Any]) -> Dict[str, Any]:
+    def after_response(self, request: LLMRequest, response: dict[str, Any]) -> dict[str, Any]:
         now = time.monotonic()
         with self._lock:
             start = self._inflight.pop(id(request), None)
@@ -232,7 +232,7 @@ class HealthMonitorMiddleware(LLMMiddleware):
         return response
 
     def _emit(self, now: float) -> None:
-        data: Dict[str, Any] = {
+        data: dict[str, Any] = {
             "requests": self._total_requests,
             "failures": self._total_failures,
         }
@@ -311,7 +311,7 @@ class AzureContentSafetyMiddleware(LLMMiddleware):
                 return request.clone(user_prompt=self.mask)
         return request
 
-    def _analyze_text(self, text: str) -> Dict[str, Any]:
+    def _analyze_text(self, text: str) -> dict[str, Any]:
         url = f"{self.endpoint}/contentsafety/text:analyze?api-version={self.api_version}"
         headers = {
             "Content-Type": "application/json",
@@ -539,7 +539,7 @@ class PIIShieldMiddleware(LLMMiddleware):
     def __init__(
         self,
         *,
-        patterns: Sequence[Dict[str, Any]] | None = None,
+        patterns: Sequence[dict[str, Any]] | None = None,
         on_violation: str = "abort",
         mask: str = "[PII REDACTED]",
         channel: str | None = None,
@@ -593,14 +593,14 @@ class PIIShieldMiddleware(LLMMiddleware):
             all_patterns.extend(patterns)
 
         # Compile regex patterns with metadata
-        self.patterns: list[tuple[str, re.Pattern[str], Dict[str, Any]]] = []
+        self.patterns: list[tuple[str, re.Pattern[str], dict[str, Any]]] = []
         for pattern_def in all_patterns:
             try:
                 # Cast pattern_def values from object to proper types
                 regex_str = str(pattern_def["regex"])
                 name_str = str(pattern_def["name"])
                 compiled = re.compile(regex_str)
-                metadata: Dict[str, Any] = {
+                metadata: dict[str, Any] = {
                     "severity": pattern_def.get("severity", "HIGH"),
                     "validator": pattern_def.get("validator"),
                     "requires_context": pattern_def.get("requires_context", False),
@@ -750,7 +750,7 @@ class PIIShieldMiddleware(LLMMiddleware):
         text = request.user_prompt
 
         # Detection results with metadata
-        findings: list[Dict[str, Any]] = []
+        findings: list[dict[str, Any]] = []
 
         # 1. Pattern-based detection
         for name, pattern, metadata in self.patterns:
@@ -1124,7 +1124,7 @@ class ClassifiedMaterialMiddleware(LLMMiddleware):
             self.markings = list(markings)
 
         # Compile regex patterns if fuzzy matching enabled
-        self.regex_compiled: Dict[str, re.Pattern[str]] = {}
+        self.regex_compiled: dict[str, re.Pattern[str]] = {}
         if self.fuzzy_matching:
             for name, pattern in self.REGEX_PATTERNS.items():
                 try:

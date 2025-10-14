@@ -141,10 +141,16 @@ def test_single_run_output_csv_includes_metrics(tmp_path, monkeypatch):
     sink_path = tmp_path / "sink.csv"
 
     class DummyDatasource:
+        def __init__(self):
+            self._elspeth_security_level = "official"  # Must match row plugin
+
         def load(self):
             return pd.DataFrame({"col": [1]})
 
     class DummyLLM:
+        def __init__(self):
+            self._elspeth_security_level = "official"  # Must match row plugin
+
         def generate(self, *, system_prompt, user_prompt, metadata=None):
             return {"content": user_prompt, "metrics": {"score": 0.5}}
 
@@ -152,14 +158,14 @@ def test_single_run_output_csv_includes_metrics(tmp_path, monkeypatch):
     setattr(csv_sink, "_elspeth_security_level", "official")
 
     settings = argparse.Namespace(
-        datasource=DummyDatasource(),
-        llm=DummyLLM(),
+        datasource=DummyDatasource(),  # Now properly initialized with security level
+        llm=DummyLLM(),  # Now properly initialized with security level
         sinks=[csv_sink],
         orchestrator_config=OrchestratorConfig(
             llm_prompt={"system": "sys", "user": "Prompt {col}"},
             prompt_fields=["col"],
             criteria=None,
-            row_plugin_defs=[{"name": "single_run_row_plugin", "security_level": "OFFICIAL", "determinism_level": "guaranteed"}],
+            row_plugin_defs=[{"name": "single_run_row_plugin", "determinism_level": "guaranteed"}],  # Inherits security_level from parent
             aggregator_plugin_defs=None,
             sink_defs=None,
             prompt_pack=None,

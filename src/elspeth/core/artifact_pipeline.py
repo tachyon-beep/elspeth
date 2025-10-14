@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
-from typing import Any, Dict, Iterable, List, Mapping, Optional, Tuple, cast
+from typing import Any, Iterable, Mapping, cast
 
 from elspeth.core.artifacts import validate_artifact_type
 from elspeth.core.interfaces import Artifact, ArtifactDescriptor, ResultSink
@@ -62,10 +62,10 @@ class SinkBinding:
     id: str
     plugin: str
     sink: ResultSink
-    artifact_config: Dict[str, Any]
+    artifact_config: dict[str, Any]
     original_index: int
-    produces: List[ArtifactDescriptor] = field(default_factory=list)
-    consumes: List[ArtifactRequest] = field(default_factory=list)
+    produces: list[ArtifactDescriptor] = field(default_factory=list)
+    consumes: list[ArtifactRequest] = field(default_factory=list)
     security_level: str | None = None
 
 
@@ -76,9 +76,9 @@ class ArtifactStore:
     def __init__(self) -> None:
         """Initialise internal indexes for artifact lookups."""
 
-        self._by_id: Dict[str, Artifact] = {}
-        self._by_alias: Dict[str, Artifact] = {}
-        self._by_type: Dict[str, List[Artifact]] = defaultdict(list)
+        self._by_id: dict[str, Artifact] = {}
+        self._by_alias: dict[str, Artifact] = {}
+        self._by_type: dict[str, list[Artifact]] = defaultdict(list)
 
     def register(self, binding: SinkBinding, descriptor: ArtifactDescriptor, artifact: Artifact) -> None:
         """Record an artifact emitted by `binding` under the descriptor metadata."""
@@ -103,20 +103,20 @@ class ArtifactStore:
 
         return self._by_alias.get(alias)
 
-    def get_by_type(self, type_name: str) -> List[Artifact]:
+    def get_by_type(self, type_name: str) -> list[Artifact]:
         """Return all artifacts matching a specific type."""
 
         return list(self._by_type.get(type_name, []))
 
-    def resolve_requests(self, requests: Iterable[ArtifactRequest]) -> Dict[str, List[Artifact]]:
+    def resolve_requests(self, requests: Iterable[ArtifactRequest]) -> dict[str, list[Artifact]]:
         """Resolve a list of artifact requests into concrete artifact results."""
 
-        resolved: Dict[str, List[Artifact]] = {}
+        resolved: dict[str, list[Artifact]] = {}
         for request in requests:
             token = request.token
             if not token:
                 continue
-            selected: List[Artifact] = []
+            selected: list[Artifact] = []
             if token.startswith("@"):  # alias lookup
                 alias = token[1:]
                 artifact = self.get_by_alias(alias)
@@ -147,7 +147,7 @@ class ArtifactStore:
 class ArtifactPipeline:  # pylint: disable=too-many-instance-attributes
     """Resolves sink execution order based on declared artifact dependencies."""
 
-    def __init__(self, bindings: List[SinkBinding]) -> None:
+    def __init__(self, bindings: list[SinkBinding]) -> None:
         """Prepare bindings and calculate execution order."""
 
         self._bindings = [self._prepare_binding(binding) for binding in bindings]
@@ -202,7 +202,7 @@ class ArtifactPipeline:  # pylint: disable=too-many-instance-attributes
             raise PermissionError(f"Sink '{consumer.id}' cannot depend on '{producer.id}' due to security level mismatch")
 
     @staticmethod
-    def _resolve_order(bindings: List[SinkBinding]) -> List[SinkBinding]:
+    def _resolve_order(bindings: list[SinkBinding]) -> list[SinkBinding]:
         """Topologically sort bindings based on artifact dependencies."""
 
         if not bindings:
@@ -219,11 +219,11 @@ class ArtifactPipeline:  # pylint: disable=too-many-instance-attributes
         return ordered
 
     @staticmethod
-    def _build_producer_indexes(bindings: Iterable[SinkBinding]) -> Tuple[Dict[str, SinkBinding], Dict[str, List[SinkBinding]]]:
+    def _build_producer_indexes(bindings: Iterable[SinkBinding]) -> tuple[dict[str, SinkBinding], dict[str, list[SinkBinding]]]:
         """Index bindings by produced alias/name and artifact type."""
 
-        producers_by_name: Dict[str, SinkBinding] = {}
-        producers_by_type: Dict[str, List[SinkBinding]] = defaultdict(list)
+        producers_by_name: dict[str, SinkBinding] = {}
+        producers_by_type: dict[str, list[SinkBinding]] = defaultdict(list)
 
         for binding in bindings:
             for descriptor in binding.produces:
@@ -238,8 +238,8 @@ class ArtifactPipeline:  # pylint: disable=too-many-instance-attributes
     def _iter_producers_for_request(
         consumer: SinkBinding,
         request: ArtifactRequest,
-        producers_by_name: Dict[str, SinkBinding],
-        producers_by_type: Dict[str, List[SinkBinding]],
+        producers_by_name: dict[str, SinkBinding],
+        producers_by_type: dict[str, list[SinkBinding]],
     ) -> Iterable[SinkBinding]:
         """Yield producer bindings that satisfy a consume request."""
 
@@ -260,7 +260,7 @@ class ArtifactPipeline:  # pylint: disable=too-many-instance-attributes
         except ValueError:
             return []
 
-        matches: List[SinkBinding] = []
+        matches: list[SinkBinding] = []
         for producer in producers_by_type.get(token, []):
             ArtifactPipeline._enforce_dependency_security(consumer, producer)
             matches.append(producer)
@@ -269,13 +269,13 @@ class ArtifactPipeline:  # pylint: disable=too-many-instance-attributes
     @staticmethod
     def _build_dependency_graph(
         bindings: Iterable[SinkBinding],
-        producers_by_name: Dict[str, SinkBinding],
-        producers_by_type: Dict[str, List[SinkBinding]],
-    ) -> Tuple[Dict[str, set[str]], Dict[str, set[str]]]:
+        producers_by_name: dict[str, SinkBinding],
+        producers_by_type: dict[str, list[SinkBinding]],
+    ) -> tuple[dict[str, set[str]], dict[str, set[str]]]:
         """Map dependencies and dependents between bindings."""
 
-        dependencies: Dict[str, set[str]] = {binding.id: set() for binding in bindings}
-        dependents: Dict[str, set[str]] = {binding.id: set() for binding in bindings}
+        dependencies: dict[str, set[str]] = {binding.id: set() for binding in bindings}
+        dependents: dict[str, set[str]] = {binding.id: set() for binding in bindings}
 
         for binding in bindings:
             for request in binding.consumes:
@@ -290,10 +290,10 @@ class ArtifactPipeline:  # pylint: disable=too-many-instance-attributes
     @staticmethod
     def _topological_sort(
         bindings: Iterable[SinkBinding],
-        dependencies: Dict[str, set[str]],
-        dependents: Dict[str, set[str]],
-        by_id: Dict[str, SinkBinding],
-    ) -> List[SinkBinding]:
+        dependencies: dict[str, set[str]],
+        dependents: dict[str, set[str]],
+        by_id: dict[str, SinkBinding],
+    ) -> list[SinkBinding]:
         """Order bindings based on resolved dependencies."""
 
         ready: deque[SinkBinding] = deque(
@@ -303,7 +303,7 @@ class ArtifactPipeline:  # pylint: disable=too-many-instance-attributes
             )
         )
 
-        ordered: List[SinkBinding] = []
+        ordered: list[SinkBinding] = []
 
         while ready:
             current = ready.popleft()
@@ -321,11 +321,11 @@ class ArtifactPipeline:  # pylint: disable=too-many-instance-attributes
         return ordered
 
     # pylint: disable=too-many-locals
-    def execute(self, payload: Dict[str, Any], metadata: Dict[str, Any] | None = None) -> ArtifactStore:
+    def execute(self, payload: dict[str, Any], metadata: dict[str, Any] | None = None) -> ArtifactStore:
         """Run all sinks in dependency order, producing the final artifact store."""
 
         store = ArtifactStore()
-        metadata_dict: Optional[Dict[str, Any]] = dict(metadata) if metadata is not None else None
+        metadata_dict: dict[str, Any | None] = dict(metadata) if metadata is not None else {}
         for binding in self._ordered_bindings:
             consumed = store.resolve_requests(binding.consumes)
 
@@ -345,12 +345,12 @@ class ArtifactPipeline:  # pylint: disable=too-many-instance-attributes
 
             binding.sink.write(payload, metadata=metadata_dict)
 
-            produced: Dict[str, Artifact] = {}
+            produced: dict[str, Artifact] = {}
             collector = getattr(binding.sink, "collect_artifacts", None)
             if callable(collector):
                 collected = collector()
                 if collected:
-                    produced = cast(Dict[str, Artifact], collected)
+                    produced = cast(dict[str, Artifact], collected)
 
             for descriptor in binding.produces:
                 key = descriptor.name

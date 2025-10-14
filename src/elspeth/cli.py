@@ -11,7 +11,7 @@ import argparse
 import json
 import logging
 from pathlib import Path
-from typing import Any, Dict, Iterable, Mapping
+from typing import Any, Iterable, Mapping
 
 import pandas as pd
 
@@ -119,7 +119,7 @@ def format_preview(df: pd.DataFrame, head: int) -> str:
         return preview.to_string(index=False)
 
 
-def _flatten_value(target: Dict[str, Any], prefix: str, value: Any) -> None:
+def _flatten_value(target: dict[str, Any], prefix: str, value: Any) -> None:
     if isinstance(value, Mapping):
         for key, inner in value.items():
             next_prefix = f"{prefix}_{key}" if prefix else key
@@ -128,7 +128,7 @@ def _flatten_value(target: Dict[str, Any], prefix: str, value: Any) -> None:
         target[prefix] = value
 
 
-def _result_to_row(record: Dict[str, Any]) -> Dict[str, Any]:
+def _result_to_row(record: dict[str, Any]) -> dict[str, Any]:
     row = dict(record.get("row") or {})
 
     def consume_response(prefix: str, response: Mapping[str, Any] | None) -> None:

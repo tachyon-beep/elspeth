@@ -2,109 +2,60 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, Iterable, Mapping
+from typing import Any, Callable, Iterable, Mapping
 
-from elspeth.core.plugins import PluginContext, apply_plugin_context
+from elspeth.core.plugins import PluginContext
+from elspeth.core.registry.base import BasePluginRegistry
 from elspeth.core.security import coalesce_security_level
-from elspeth.core.validation import ConfigurationError, validate_schema
+from elspeth.core.validation import ConfigurationError
 
 from .middleware import LLMMiddleware
 
+# Use base registry infrastructure
+_middleware_registry = BasePluginRegistry[LLMMiddleware]("llm_middleware")
 
-class _Factory:
-    def __init__(
-        self,
-        factory: Callable[[Dict[str, Any], PluginContext], LLMMiddleware],
-        schema: Mapping[str, Any] | None = None,
-    ):
-        self.factory = factory
-        self.schema = schema
-
-    def validate(self, options: Dict[str, Any], *, context: str) -> None:
-        if self.schema is None:
-            return
-        errors = list(validate_schema(options or {}, self.schema, context=context))
-        if errors:
-            raise ConfigurationError("\n".join(msg.format() for msg in errors))
-
-    def create(
-        self,
-        options: Dict[str, Any],
-        *,
-        plugin_context: PluginContext,
-        schema_context: str,
-    ) -> LLMMiddleware:
-        self.validate(options, context=schema_context)
-        return self.factory(options, plugin_context)
-
-
-_middlewares: Dict[str, _Factory] = {}
+# Backward compatibility: expose internal dict for test mocking
+_middlewares = _middleware_registry._plugins
 
 
 def register_middleware(
     name: str,
-    factory: Callable[[Dict[str, Any], PluginContext], LLMMiddleware],
+    factory: Callable[[dict[str, Any], PluginContext], LLMMiddleware],
     *,
     schema: Mapping[str, Any] | None = None,
 ) -> None:
-    _middlewares[name] = _Factory(factory, schema=schema)
+    """Register a middleware plugin with the registry."""
+    _middleware_registry.register(name, factory, schema=schema)
 
 
 def create_middleware(
-    definition: Dict[str, Any],
+    definition: dict[str, Any],
     *,
     parent_context: PluginContext | None = None,
     provenance: Iterable[str] | None = None,
 ) -> LLMMiddleware:
-    if not definition:
-        raise ValueError("Middleware definition cannot be empty")
-    name = definition.get("name") or definition.get("plugin")
-    if not name:
-        raise ValueError("Middleware definition missing 'name' or 'plugin'")
-    if name not in _middlewares:
-        raise ValueError(f"Unknown LLM middleware '{name}'")
-    options = dict(definition.get("options", {}) or {})
-    definition_level = definition.get("security_level")
-    option_level = options.get("security_level")
-    sources: list[str] = []
-    if definition_level is not None:
-        sources.append(f"llm_middleware:{name}.definition.security_level")
-    if option_level is not None:
-        sources.append(f"llm_middleware:{name}.options.security_level")
-    if provenance:
-        sources.extend(provenance)
-    try:
-        level = coalesce_security_level(definition_level, option_level)
-    except ValueError as exc:
-        raise ConfigurationError(f"llm_middleware:{name}: {exc}") from exc
-    payload = dict(options)
-    payload.pop("security_level", None)
-    provenance_sources = tuple(sources or (f"llm_middleware:{name}.resolved",))
-    if parent_context:
-        context = parent_context.derive(
-            plugin_name=name,
-            plugin_kind="llm_middleware",
-            security_level=level,
-            provenance=provenance_sources,
-        )
-    else:
-        context = PluginContext(
-            plugin_name=name,
-            plugin_kind="llm_middleware",
-            security_level=level,
-            provenance=provenance_sources,
-        )
-    middleware = _middlewares[name].create(
-        payload,
-        plugin_context=context,
-        schema_context=f"llm_middleware:{name}",
+    """Create a middleware instance from definition (controls pattern).
+
+    Now uses create_plugin_with_inheritance() helper to eliminate duplication.
+    """
+    from elspeth.core.registry.plugin_helpers import create_plugin_with_inheritance
+
+    result = create_plugin_with_inheritance(
+        _middleware_registry,
+        definition,
+        plugin_kind="llm_middleware",
+        parent_context=parent_context,
+        provenance=provenance,
+        allow_none=False,
     )
-    apply_plugin_context(middleware, context)
-    return middleware
+    # When allow_none=False, create_plugin_with_inheritance never returns None
+    # (it raises ValueError instead), but mypy doesn't track this
+    assert result is not None, "Unreachable: allow_none=False prevents None return"
+    return result
 
 
 def create_middlewares(
-    definitions: list[Dict[str, Any]] | None,
+    definitions: list[dict[str, Any]] | None,
     *,
     parent_context: PluginContext | None = None,
 ) -> list[LLMMiddleware]:
@@ -113,29 +64,43 @@ def create_middlewares(
     return [create_middleware(defn, parent_context=parent_context) for defn in definitions]
 
 
-def validate_middleware_definition(definition: Dict[str, Any]) -> None:
+def validate_middleware_definition(definition: dict[str, Any]) -> None:
+    """Validate middleware definition without instantiation."""
     if not definition:
         raise ConfigurationError("Middleware definition cannot be empty")
+
     name = definition.get("name") or definition.get("plugin")
     if not name:
         raise ConfigurationError("Middleware definition missing 'name' or 'plugin'")
-    if name not in _middlewares:
-        options = ", ".join(sorted(_middlewares)) or "<none>"
-        raise ConfigurationError(f"Unknown LLM middleware '{name}'. Available: {options}")
+
+    # Check if plugin exists
+    try:
+        _middleware_registry._get_factory(name)
+    except ValueError:
+        available = ", ".join(sorted(_middleware_registry.list_plugins())) or "<none>"
+        raise ConfigurationError(f"Unknown LLM middleware '{name}'. Available: {available}")
+
     options_raw = definition.get("options", {})
     if options_raw is None:
-        options_dict: Dict[str, Any] = {}
+        options_dict: dict[str, Any] = {}
     elif not isinstance(options_raw, dict):
         raise ConfigurationError("Middleware options must be a mapping")
     else:
         options_dict = dict(options_raw)
 
+    # Validate security level coalescing
     try:
         coalesce_security_level(definition.get("security_level"), options_dict.get("security_level"))
     except ValueError as exc:
         raise ConfigurationError(f"llm_middleware:{name}: {exc}") from exc
+
+    # Validate options against schema
     options_dict.pop("security_level", None)
-    _middlewares[name].validate(options_dict, context=f"llm_middleware:{name}")
+    try:
+        _middleware_registry.validate(name, options_dict)
+    except ValueError as exc:
+        # Convert ValueError to ConfigurationError for backward compatibility
+        raise ConfigurationError(str(exc)) from exc
 
 
 __all__ = ["register_middleware", "create_middleware", "create_middlewares", "validate_middleware_definition"]

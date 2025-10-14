@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import logging
 import typing
-from typing import Any, Dict, List, Optional, Tuple, Type
+from typing import Any, Type
 
 import pandas as pd
 from pydantic import BaseModel, ConfigDict, Field, create_model
@@ -31,7 +31,7 @@ class SchemaCompatibilityError(ValueError):
     """
 
     def __init__(
-        self, message: str, *, missing_columns: List[str] | None = None, type_mismatches: Dict[str, tuple[str, str]] | None = None
+        self, message: str, *, missing_columns: list[str] | None = None, type_mismatches: dict[str, tuple[str, str]] | None = None
     ):
         super().__init__(message)
         self.missing_columns = missing_columns or []
@@ -75,8 +75,8 @@ class SchemaViolation:
     def __init__(
         self,
         row_index: int,
-        row_data: Dict[str, Any],
-        errors: List[Dict[str, Any]],
+        row_data: dict[str, Any],
+        errors: list[dict[str, Any]],
         schema_name: str,
     ):
         self.row_index = row_index
@@ -85,7 +85,7 @@ class SchemaViolation:
         self.schema_name = schema_name
         self.timestamp = pd.Timestamp.now()
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for sink writing."""
         return {
             "row_index": self.row_index,
@@ -131,7 +131,7 @@ def infer_schema_from_dataframe(
     df: pd.DataFrame,
     schema_name: str = "InferredSchema",
     *,
-    required_columns: Optional[List[str]] = None,
+    required_columns: list[str | None] | None = None,
 ) -> Type[DataFrameSchema]:
     """
     Infer Pydantic schema from DataFrame column dtypes.
@@ -150,7 +150,7 @@ def infer_schema_from_dataframe(
         >>> Schema.__annotations__
         {'name': <class 'str'>, 'age': <class 'int'>}
     """
-    fields: Dict[str, tuple] = {}
+    fields: dict[str, tuple] = {}
 
     for col in df.columns:
         dtype = df[col].dtype
@@ -163,8 +163,10 @@ def infer_schema_from_dataframe(
             fields[col] = (python_type, Field(...))  # Required field
         else:
             # Pydantic v2 requires explicit Optional for optional fields
-            fields[col] = (Optional[python_type], Field(default=None))  # Optional field
+            fields[col] = (python_type | None, Field(default=None))  # Optional field
 
+    # Pydantic's create_model() has complex overloads that mypy cannot fully resolve
+    # when using **fields with dynamic field definitions. This is safe at runtime.
     return create_model(  # type: ignore[call-overload,no-any-return]
         schema_name,
         __base__=DataFrameSchema,
@@ -215,7 +217,7 @@ def _parse_type_string(type_str: str) -> Type:
 
 
 def schema_from_config(
-    schema_dict: Dict[str, str | Dict[str, Any]],
+    schema_dict: dict[str, str | dict[str, Any]],
     schema_name: str = "ConfigSchema",
 ) -> Type[DataFrameSchema]:
     """
@@ -252,7 +254,7 @@ def schema_from_config(
         >>> config = {"name": "str", "age": {"type": "int", "min": 0}}
         >>> Schema = schema_from_config(config, "PersonSchema")
     """
-    fields: Dict[str, tuple] = {}
+    fields: dict[str, tuple] = {}
 
     for col_name, col_spec in schema_dict.items():
         # Handle simple string type
@@ -272,14 +274,15 @@ def schema_from_config(
         python_type = _parse_type_string(col_spec["type"])
 
         # Build Field with constraints
-        field_kwargs: Dict[str, Any] = {}
+        field_kwargs: dict[str, Any] = {}
 
         # Required/optional handling
         is_optional = not col_spec.get("required", True)
         if is_optional:
             field_kwargs["default"] = None
             # Pydantic v2: Make type explicitly Optional
-            python_type = Optional[python_type]  # type: ignore[assignment]
+            # Dynamic type union assignment not recognized by mypy's type narrowing
+            python_type = python_type | None  # type: ignore[assignment]
 
         # Numeric constraints
         if "min" in col_spec:
@@ -301,6 +304,8 @@ def schema_from_config(
         else:
             fields[col_name] = (python_type, Field(**field_kwargs))
 
+    # Pydantic's create_model() has complex overloads that mypy cannot fully resolve
+    # when using **fields with dynamic field definitions. This is safe at runtime.
     return create_model(  # type: ignore[call-overload,no-any-return]
         schema_name,
         __base__=DataFrameSchema,
@@ -310,11 +315,11 @@ def schema_from_config(
 
 
 def validate_row(
-    row: Dict[str, Any],
+    row: dict[str, Any],
     schema: Type[DataFrameSchema],
     *,
     row_index: int = 0,
-) -> Tuple[bool, Optional[SchemaViolation]]:
+) -> tuple[bool, SchemaViolation | None]:
     """
     Validate a single row against a schema.
 
@@ -372,7 +377,7 @@ def validate_dataframe(
     schema: Type[DataFrameSchema],
     *,
     early_stop: bool = True,
-) -> Tuple[bool, List[SchemaViolation]]:
+) -> tuple[bool, list[SchemaViolation]]:
     """
     Validate all rows in a DataFrame against a schema.
 
@@ -400,7 +405,7 @@ def validate_dataframe(
         >>> violations[0].row_index
         1
     """
-    violations: List[SchemaViolation] = []
+    violations: list[SchemaViolation] = []
 
     for idx, (_, row) in enumerate(df.iterrows()):
         row_dict = row.to_dict()
@@ -497,7 +502,7 @@ def validate_schema_compatibility(
 
 def _unwrap_optional(type_hint: Any) -> Any:
     """
-    Unwrap Optional[T] to T, handling Union types.
+    Unwrap T | None to T, handling Union types.
 
     Args:
         type_hint: Type hint potentially wrapped in Optional
@@ -508,7 +513,7 @@ def _unwrap_optional(type_hint: Any) -> Any:
     Note:
         Uses typing.get_origin and typing.get_args for Pydantic v2 compatibility.
     """
-    # Handle Union types (Optional[T] is Union[T, None])
+    # Handle Union types (T | None is T | None)
     origin = typing.get_origin(type_hint)
     if origin is typing.Union:
         # Get the non-None type from Union

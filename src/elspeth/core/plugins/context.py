@@ -2,25 +2,61 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from typing import Any, Iterable, Mapping
 
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-@dataclass(frozen=True, slots=True)
-class PluginContext:
+
+class PluginContext(BaseModel):
     """Metadata propagated to plugin factories during instantiation.
 
     All plugins must declare both security_level and determinism_level.
     These are mandatory first-class attributes that propagate through the plugin hierarchy.
+
+    This Pydantic model is FROZEN (immutable) for security - contexts cannot be modified
+    after creation, preventing accidental security level downgrades or tampering.
     """
 
-    plugin_name: str
-    plugin_kind: str
-    security_level: str
-    determinism_level: str = "none"  # Temporary default during migration
-    provenance: tuple[str, ...] = field(default_factory=tuple)
-    parent: "PluginContext | None" = None
-    metadata: Mapping[str, Any] = field(default_factory=dict)
+    plugin_name: str = Field(..., min_length=1, description="Name of the plugin instance")
+    plugin_kind: str = Field(..., min_length=1, description="Type of plugin (datasource, llm, sink, etc)")
+    security_level: str = Field(..., min_length=1, description="Security classification level")
+    determinism_level: str = Field(default="none", description="Determinism level (none, low, high, guaranteed)")
+    provenance: tuple[str, ...] = Field(default_factory=tuple, description="Chain of plugin sources")
+    parent: "PluginContext | None" = Field(default=None, description="Parent context for nested plugins")
+    metadata: Mapping[str, Any] = Field(default_factory=dict, description="Additional context metadata")
+
+    model_config = ConfigDict(
+        # CRITICAL: Frozen for security - contexts are immutable
+        frozen=True,
+        # Allow arbitrary types (Mapping, etc.)
+        arbitrary_types_allowed=True,
+        # Strict mode - no extra fields
+        extra='forbid',
+        # Validate on assignment (though frozen=True prevents assignment)
+        validate_assignment=True,
+    )
+
+    @field_validator('plugin_name', 'plugin_kind', 'security_level')
+    @classmethod
+    def validate_non_empty(cls, v: str, info) -> str:
+        """Validate that critical fields are non-empty."""
+        if not v or not v.strip():
+            raise ValueError(f"{info.field_name} cannot be empty")
+        return v.strip()
+
+    @field_validator('determinism_level')
+    @classmethod
+    def validate_determinism_level(cls, v: str) -> str:
+        """Validate determinism level is one of the expected values.
+
+        Valid levels: none, low, high, guaranteed
+        (These correspond to the DeterminismLevel enum)
+        """
+        valid_levels = {'none', 'low', 'high', 'guaranteed'}
+        v_lower = v.lower().strip()
+        if v_lower not in valid_levels:
+            raise ValueError(f"determinism_level must be one of {valid_levels}, got '{v}'")
+        return v_lower
 
     def derive(
         self,
@@ -35,21 +71,25 @@ class PluginContext:
         """Create a child context inheriting from this context.
 
         If security_level or determinism_level are not provided, inherits from parent.
-        """
 
+        This method creates a new immutable context (since the model is frozen)
+        using Pydantic's model_validate to ensure all validators run.
+        """
         sec_level = security_level or self.security_level
         det_level = determinism_level or self.determinism_level
         sources = tuple(provenance or ())
         data: Mapping[str, Any] = metadata or {}
-        return PluginContext(
-            plugin_name=plugin_name,
-            plugin_kind=plugin_kind,
-            security_level=sec_level,
-            determinism_level=det_level,
-            provenance=sources,
-            parent=self,
-            metadata=data,
-        )
+
+        # Use model_validate to ensure validators run on derived context
+        return PluginContext.model_validate({
+            "plugin_name": plugin_name,
+            "plugin_kind": plugin_kind,
+            "security_level": sec_level,
+            "determinism_level": det_level,
+            "provenance": sources,
+            "parent": self,
+            "metadata": data,
+        })
 
 
 def apply_plugin_context(instance: Any, context: PluginContext) -> None:

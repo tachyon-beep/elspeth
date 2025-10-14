@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Mapping
+from typing import Any, Mapping
 
 from elspeth.core.interfaces import LLMClientProtocol
 
@@ -26,8 +26,8 @@ class StaticLLMClient(LLMClientProtocol):
         *,
         system_prompt: str,
         user_prompt: str,
-        metadata: Dict[str, Any] | None = None,
-    ) -> Dict[str, Any]:
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         metrics = dict(self.extra_metrics)
         if self.score is not None:
             metrics.setdefault("score", float(self.score))

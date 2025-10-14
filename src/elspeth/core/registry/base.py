@@ -8,7 +8,7 @@ multiple registry implementations.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, Generic, Iterable, Mapping, TypeVar
+from typing import Any, Callable, Generic, Iterable, Mapping, TypeVar
 
 from elspeth.core.plugins import PluginContext, apply_plugin_context
 from elspeth.core.validation import ConfigurationError, validate_schema
@@ -54,11 +54,11 @@ class BasePluginFactory(Generic[T]):
         ... )
     """
 
-    create: Callable[[Dict[str, Any], PluginContext], T]
+    create: Callable[[dict[str, Any], PluginContext], T]
     schema: Mapping[str, Any] | None = None
     plugin_type: str = "plugin"
 
-    def validate(self, options: Dict[str, Any], *, context: str) -> None:
+    def validate(self, options: dict[str, Any], *, context: str) -> None:
         """
         Validate options against the schema.
 
@@ -79,7 +79,7 @@ class BasePluginFactory(Generic[T]):
 
     def instantiate(
         self,
-        options: Dict[str, Any],
+        options: dict[str, Any],
         *,
         plugin_context: PluginContext,
         schema_context: str,
@@ -110,7 +110,7 @@ class BasePluginFactory(Generic[T]):
 
 
 # Type alias for registry dictionaries
-PluginFactoryMap = Dict[str, BasePluginFactory[T]]
+PluginFactoryMap = dict[str, BasePluginFactory[T]]
 
 
 class BasePluginRegistry(Generic[T]):
@@ -155,7 +155,7 @@ class BasePluginRegistry(Generic[T]):
     def register(
         self,
         name: str,
-        factory: Callable[[Dict[str, Any], PluginContext], T],
+        factory: Callable[[dict[str, Any], PluginContext], T],
         *,
         schema: Mapping[str, Any] | None = None,
     ) -> None:
@@ -173,7 +173,7 @@ class BasePluginRegistry(Generic[T]):
             plugin_type=self.plugin_type,
         )
 
-    def validate(self, name: str, options: Dict[str, Any] | None) -> None:
+    def validate(self, name: str, options: dict[str, Any] | None) -> None:
         """
         Validate plugin options without instantiation.
 
@@ -198,7 +198,7 @@ class BasePluginRegistry(Generic[T]):
     def create(
         self,
         name: str,
-        options: Dict[str, Any],
+        options: dict[str, Any],
         *,
         provenance: Iterable[str] | None = None,
         parent_context: PluginContext | None = None,
@@ -267,7 +267,7 @@ class BasePluginRegistry(Generic[T]):
         # Prepare payload (strip framework keys)
         payload = prepare_plugin_payload(options)
 
-        # Instantiate plugin
+        # Instantiate plugin using BasePluginFactory
         return factory.instantiate(
             payload,
             plugin_context=context,
@@ -300,6 +300,91 @@ class BasePluginRegistry(Generic[T]):
             Sorted list of registered plugin names
         """
         return sorted(self._plugins.keys())
+
+    def unregister(self, name: str) -> None:
+        """
+        Unregister a plugin by name (for testing).
+
+        This method removes a plugin from the registry. It's primarily intended
+        for use in tests to clean up after plugin registration or to test
+        error handling for missing plugins.
+
+        Args:
+            name: Plugin name to remove
+
+        Raises:
+            KeyError: If plugin not found
+
+        Example:
+            >>> registry.register("test_plugin", factory)
+            >>> registry.unregister("test_plugin")
+        """
+        del self._plugins[name]
+
+    def clear(self) -> None:
+        """
+        Clear all registered plugins (for testing).
+
+        This method removes all plugins from the registry. It's primarily
+        intended for use in test fixtures to ensure a clean state between tests.
+
+        Example:
+            >>> registry.clear()
+            >>> assert len(registry.list_plugins()) == 0
+        """
+        self._plugins.clear()
+
+    def temporary_override(
+        self,
+        name: str,
+        factory: Callable[[dict[str, Any], PluginContext], T],
+        *,
+        schema: Mapping[str, Any] | None = None,
+    ):
+        """
+        Context manager to temporarily override a plugin factory (for testing).
+
+        This allows tests to temporarily replace a plugin factory with a mock
+        or test implementation. The original factory is automatically restored
+        when the context exits, even if an exception occurs.
+
+        Args:
+            name: Plugin name to override
+            factory: Temporary factory callable
+            schema: Optional schema for temporary factory
+
+        Yields:
+            None
+
+        Example:
+            >>> def mock_factory(opts, ctx):
+            ...     return MockPlugin(**opts)
+            >>> with registry.temporary_override("csv", mock_factory):
+            ...     plugin = registry.create("csv", {})  # Uses mock
+            ...     assert isinstance(plugin, MockPlugin)
+            >>> # Original factory restored
+            >>> plugin = registry.create("csv", {})  # Uses original
+
+        Note:
+            If the plugin doesn't exist before the override, it will be
+            removed when the context exits. This allows testing with
+            completely new plugin names.
+        """
+        from contextlib import contextmanager
+
+        @contextmanager
+        def _override():
+            original = self._plugins.get(name)
+            self.register(name, factory, schema=schema)
+            try:
+                yield
+            finally:
+                if original is not None:
+                    self._plugins[name] = original
+                else:
+                    self._plugins.pop(name, None)
+
+        return _override()
 
 
 __all__ = [

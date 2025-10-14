@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from typing import Any, Dict
+from typing import Any
 
 import requests
 
@@ -38,9 +38,9 @@ class HttpOpenAIClient(LLMClientProtocol):
         *,
         system_prompt: str,
         user_prompt: str,
-        metadata: Dict[str, Any] | None = None,
-    ) -> Dict[str, Any]:
-        payload: Dict[str, Any] = {
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
             "model": self.model,
             "messages": [
                 {"role": "system", "content": system_prompt},

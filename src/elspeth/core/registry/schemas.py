@@ -4,7 +4,7 @@ This module centralizes schema definitions that were previously
 duplicated across multiple registry files.
 """
 
-from typing import Any, Dict
+from typing import Any
 
 # Standard enums
 ON_ERROR_ENUM = {"type": "string", "enum": ["abort", "skip"]}
@@ -60,11 +60,11 @@ ARTIFACTS_SECTION_SCHEMA = {
 
 
 def with_security_properties(
-    schema: Dict[str, Any],
+    schema: dict[str, Any],
     *,
     require_security: bool = False,
     require_determinism: bool = False,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Add standard security and determinism properties to a schema.
 
@@ -87,22 +87,26 @@ def with_security_properties(
         >>> print(enhanced["required"])
         ['security_level']
     """
+    # Create a shallow copy of the schema
     result = dict(schema)
-    properties = result.setdefault("properties", {})
-    properties["security_level"] = SECURITY_LEVEL_SCHEMA
-    properties["determinism_level"] = DETERMINISM_LEVEL_SCHEMA
+    # Create a copy of properties to avoid mutating the original
+    result["properties"] = dict(schema.get("properties", {}))
+    result["properties"]["security_level"] = SECURITY_LEVEL_SCHEMA
+    result["properties"]["determinism_level"] = DETERMINISM_LEVEL_SCHEMA
 
     if require_security or require_determinism:
-        required = result.setdefault("required", [])
+        # Create a copy of required list to avoid mutating the original
+        required: list[str] = list(schema.get("required", []))
         if require_security and "security_level" not in required:
             required.append("security_level")
         if require_determinism and "determinism_level" not in required:
             required.append("determinism_level")
+        result["required"] = required
 
     return result
 
 
-def with_artifact_properties(schema: Dict[str, Any]) -> Dict[str, Any]:
+def with_artifact_properties(schema: dict[str, Any]) -> dict[str, Any]:
     """
     Add artifact section properties to a schema.
 
@@ -121,13 +125,15 @@ def with_artifact_properties(schema: Dict[str, Any]) -> Dict[str, Any]:
         >>> print("artifacts" in enhanced["properties"])
         True
     """
+    # Create a shallow copy of the schema
     result = dict(schema)
-    properties = result.setdefault("properties", {})
-    properties["artifacts"] = ARTIFACTS_SECTION_SCHEMA
+    # Create a copy of properties to avoid mutating the original
+    result["properties"] = dict(schema.get("properties", {}))
+    result["properties"]["artifacts"] = ARTIFACTS_SECTION_SCHEMA
     return result
 
 
-def with_error_handling(schema: Dict[str, Any]) -> Dict[str, Any]:
+def with_error_handling(schema: dict[str, Any]) -> dict[str, Any]:
     """
     Add on_error property to a schema.
 
@@ -146,9 +152,11 @@ def with_error_handling(schema: Dict[str, Any]) -> Dict[str, Any]:
         >>> print(enhanced["properties"]["on_error"])
         {'type': 'string', 'enum': ['abort', 'skip']}
     """
+    # Create a shallow copy of the schema
     result = dict(schema)
-    properties = result.setdefault("properties", {})
-    properties["on_error"] = ON_ERROR_ENUM
+    # Create a copy of properties to avoid mutating the original
+    result["properties"] = dict(schema.get("properties", {}))
+    result["properties"]["on_error"] = ON_ERROR_ENUM
     return result
 
 

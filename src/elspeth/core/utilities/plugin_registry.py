@@ -2,53 +2,26 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, Iterable, Mapping
+from typing import Any, Callable, Iterable, Mapping
 
-from elspeth.core.plugins import PluginContext, apply_plugin_context
-from elspeth.core.security import coalesce_determinism_level, coalesce_security_level
-from elspeth.core.validation import ConfigurationError, validate_schema
+from elspeth.core.plugins import PluginContext
+from elspeth.core.registry.base import BasePluginRegistry
 
+# Use base registry infrastructure
+_utility_registry = BasePluginRegistry[Any]("utility")
 
-class _PluginFactory:
-    """Wrap utility plugin factories with optional schema validation."""
-
-    def __init__(
-        self,
-        factory: Callable[[Dict[str, Any], PluginContext], Any],
-        *,
-        schema: Mapping[str, Any] | None = None,
-    ) -> None:
-        self.factory = factory
-        self.schema = schema
-
-    def validate(self, options: Dict[str, Any], *, context: str) -> None:
-        """Validate plugin options and raise ``ConfigurationError`` on failure."""
-
-        if self.schema is None:
-            return
-        errors = list(validate_schema(options or {}, self.schema, context=context))
-        if errors:
-            raise ConfigurationError("\n".join(msg.format() for msg in errors))
-
-    def create(self, options: Dict[str, Any], *, plugin_context: PluginContext, schema_context: str) -> Any:
-        """Instantiate the plugin after validation."""
-
-        self.validate(options, context=schema_context)
-        return self.factory(options, plugin_context)
-
-
-_utility_plugins: Dict[str, _PluginFactory] = {}
+# Backward compatibility: expose internal dict for test mocking
+_utility_plugins = _utility_registry._plugins
 
 
 def register_utility_plugin(
     name: str,
-    factory: Callable[[Dict[str, Any], PluginContext], Any],
+    factory: Callable[[dict[str, Any], PluginContext], Any],
     *,
     schema: Mapping[str, Any] | None = None,
 ) -> None:
     """Register a named utility plugin."""
-
-    _utility_plugins[name] = _PluginFactory(factory, schema=schema)
+    _utility_registry.register(name, factory, schema=schema)
 
 
 def create_utility_plugin(
@@ -57,80 +30,20 @@ def create_utility_plugin(
     parent_context: PluginContext | None = None,
     provenance: Iterable[str] | None = None,
 ) -> Any:
-    """Instantiate a registered utility plugin from a declarative definition."""
+    """Instantiate a registered utility plugin from a declarative definition (controls pattern).
 
-    if not definition:
-        raise ValueError("Utility plugin definition cannot be empty")
+    Now uses create_plugin_with_inheritance() helper to eliminate duplication.
+    """
+    from elspeth.core.registry.plugin_helpers import create_plugin_with_inheritance
 
-    name = definition.get("name")
-    if not name:
-        raise ConfigurationError("utility plugin definition requires 'name'")
-
-    try:
-        factory = _utility_plugins[name]
-    except KeyError as exc:
-        raise ValueError(f"Unknown utility plugin '{name}'") from exc
-
-    options = dict(definition.get("options", {}) or {})
-    entry_level = definition.get("security_level")
-    option_level = options.get("security_level")
-    parent_level = getattr(parent_context, "security_level", None)
-    sources: list[str] = []
-    if entry_level is not None:
-        sources.append(f"utility:{name}.definition.security_level")
-    if option_level is not None:
-        sources.append(f"utility:{name}.options.security_level")
-
-    # Handle determinism_level
-    entry_det_level = definition.get("determinism_level")
-    option_det_level = options.get("determinism_level")
-    parent_det_level = getattr(parent_context, "determinism_level", None)
-    if entry_det_level is not None:
-        sources.append(f"utility:{name}.definition.determinism_level")
-    if option_det_level is not None:
-        sources.append(f"utility:{name}.options.determinism_level")
-
-    if provenance:
-        sources.extend(provenance)
-    try:
-        level = coalesce_security_level(parent_level, entry_level, option_level)
-    except ValueError as exc:
-        raise ConfigurationError(f"utility:{name}: {exc}") from exc
-
-    # For determinism_level: if definition specifies it, use that; otherwise inherit from parent
-    if entry_det_level is not None or option_det_level is not None:
-        try:
-            det_level = coalesce_determinism_level(entry_det_level, option_det_level)
-        except ValueError as exc:
-            raise ConfigurationError(f"utility:{name}: {exc}") from exc
-    else:
-        # No explicit determinism_level in definition, inherit from parent or default to "none"
-        det_level = parent_det_level if parent_det_level is not None else "none"
-
-    payload = dict(options)
-    payload.pop("security_level", None)
-    payload.pop("determinism_level", None)
-    context_sources = tuple(sources or (f"utility:{name}.resolved",))
-    if parent_context:
-        context = parent_context.derive(
-            plugin_name=name,
-            plugin_kind="utility",
-            security_level=level,
-            determinism_level=det_level,
-            provenance=context_sources,
-        )
-    else:
-        context = PluginContext(
-            plugin_name=name,
-            plugin_kind="utility",
-            security_level=level,
-            determinism_level=det_level,
-            provenance=context_sources,
-        )
-
-    plugin = factory.create(payload, plugin_context=context, schema_context=f"utility:{name}")
-    apply_plugin_context(plugin, context)
-    return plugin
+    return create_plugin_with_inheritance(
+        _utility_registry,
+        dict(definition) if definition else None,  # Convert Mapping to Dict
+        plugin_kind="utility",
+        parent_context=parent_context,
+        provenance=provenance,
+        allow_none=False,
+    )
 
 
 def create_named_utility(

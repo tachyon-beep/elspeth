@@ -6,7 +6,7 @@ import json
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 
 import yaml
 
@@ -53,7 +53,7 @@ def create_experiment_template(
     destination.mkdir(parents=True, exist_ok=True)
 
     base_config = _resolve_base_config(suite, base_experiment)
-    config_payload: Dict[str, Any]
+    config_payload: dict[str, Any]
 
     if base_config and base_config.path:
         _copy_prompt_files(base_config, destination)
@@ -83,7 +83,7 @@ def create_experiment_template(
     return destination
 
 
-def summarize_suite(suite: ExperimentSuite) -> Dict[str, Any]:
+def summarize_suite(suite: ExperimentSuite) -> dict[str, Any]:
     """Return a lightweight summary of suite composition and estimated costs."""
 
     experiments = [exp.summary() for exp in suite.experiments]

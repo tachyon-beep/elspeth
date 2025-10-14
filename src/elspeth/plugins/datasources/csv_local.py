@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any, Dict, Type
+from typing import Any, Type
 
 import pandas as pd
 
@@ -20,12 +20,12 @@ class CSVDataSource(DataSource):
         self,
         *,
         path: str | Path,
-        dtype: Dict[str, Any] | None = None,
+        dtype: dict[str, Any] | None = None,
         encoding: str = "utf-8",
         on_error: str = "abort",
         security_level: str | None = None,
         determinism_level: str | None = None,
-        schema: Dict[str, str | Dict[str, Any]] | None = None,
+        schema: dict[str, str | dict[str, Any]] | None = None,
         infer_schema: bool = True,
     ) -> None:
         self.path = Path(path)
@@ -52,6 +52,7 @@ class CSVDataSource(DataSource):
                 return df
             raise FileNotFoundError(f"CSV datasource file not found: {self.path}")
         try:
+            # Pandas dtype parameter has strict typing; our dict[str, Any] is compatible at runtime
             df = pd.read_csv(self.path, dtype=self.dtype, encoding=self.encoding)  # type: ignore[arg-type]
             df.attrs["security_level"] = self.security_level
             df.attrs["determinism_level"] = self.determinism_level
@@ -99,6 +100,7 @@ class CSVDataSource(DataSource):
             try:
                 # Load DataFrame temporarily for inference if not already loaded
                 if not self._df_loaded:
+                    # Pandas dtype parameter has strict typing; our dict[str, Any] is compatible at runtime
                     df = pd.read_csv(self.path, dtype=self.dtype, encoding=self.encoding, nrows=100)  # type: ignore[arg-type]
                     schema_name = f"{self.path.stem}_InferredSchema"
                     self._cached_schema = infer_schema_from_dataframe(df, schema_name)

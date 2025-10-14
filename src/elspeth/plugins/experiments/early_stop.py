@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any
 
 from elspeth.core.experiments.plugin_registry import register_early_stop_plugin
 
@@ -38,13 +38,13 @@ class ThresholdEarlyStopPlugin:
         self._min_rows = max(int(min_rows or 1), 1)
         self._label = label
         self._rows_observed = 0
-        self._triggered_reason: Optional[Dict[str, Any]] = None
+        self._triggered_reason: dict[str, Any | None] | None = None
 
     def reset(self) -> None:
         self._rows_observed = 0
         self._triggered_reason = None
 
-    def check(self, record: Dict[str, Any], *, metadata: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
+    def check(self, record: dict[str, Any], *, metadata: dict[str, Any | None] | None = None) -> dict[str, Any | None] | None:
         if self._triggered_reason:
             return dict(self._triggered_reason)
 
@@ -65,7 +65,7 @@ class ThresholdEarlyStopPlugin:
         if not self._compare(numeric_value, self._threshold, self._comparison):
             return None
 
-        reason: Dict[str, Any] = {
+        reason: dict[str, Any] = {
             "metric": self._metric,
             "comparison": self._comparison,
             "threshold": self._threshold,
@@ -80,7 +80,7 @@ class ThresholdEarlyStopPlugin:
         return dict(reason)
 
     @staticmethod
-    def _extract_metric(metrics: Dict[str, Any], name: str) -> Any:
+    def _extract_metric(metrics: dict[str, Any], name: str) -> Any:
         current: Any = metrics
         for part in name.split("."):
             if isinstance(current, dict) and part in current:

@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Dict
+from typing import Any
 
 import pandas as pd
 
+from elspeth.adapters import load_blob_csv
 from elspeth.core.interfaces import DataSource
 from elspeth.core.security import normalize_determinism_level, normalize_security_level
-from elspeth.datasources import load_blob_csv
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +20,7 @@ class BlobDataSource(DataSource):
         *,
         config_path: str,
         profile: str = "default",
-        pandas_kwargs: Dict[str, Any] | None = None,
+        pandas_kwargs: dict[str, Any] | None = None,
         on_error: str = "abort",
         security_level: str | None = None,
         determinism_level: str | None = None,
@@ -43,6 +43,7 @@ class BlobDataSource(DataSource):
             )
             df.attrs["security_level"] = self.security_level
             df.attrs["determinism_level"] = self.determinism_level
+            # load_blob_csv return type not fully annotated; returns DataFrame at runtime
             return df  # type: ignore[no-any-return]
         except Exception as exc:
             if self.on_error == "skip":

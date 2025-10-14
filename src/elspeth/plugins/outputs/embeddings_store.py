@@ -7,7 +7,7 @@ import logging
 import os
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, Iterable, List, Mapping, Optional, Sequence
+from typing import Any, Callable, Iterable, Mapping, Sequence
 
 from elspeth.core.interfaces import Artifact, ArtifactDescriptor, ResultSink
 from elspeth.core.plugins import PluginContext
@@ -36,7 +36,7 @@ class VectorRecord:
     document_id: str
     vector: Sequence[float]
     text: str
-    metadata: Dict[str, Any]
+    metadata: dict[str, Any]
     security_level: str
 
 
@@ -47,7 +47,7 @@ class UpsertResponse:
     count: int
     took: float
     namespace: str
-    provider_metadata: Dict[str, Any] = field(default_factory=dict)
+    provider_metadata: dict[str, Any] = field(default_factory=dict)
 
 
 class VectorStoreClient:
@@ -243,16 +243,16 @@ class EmbeddingsStoreSink(ResultSink):
             provider,
             provider_payload,
         )
-        self._embedder: Optional[Embedder] = None
-        self._last_manifest: Dict[str, Any] | None = None
+        self._embedder: Embedder | None = None
+        self._last_manifest: dict[str, Any] | None = None
 
-    def write(self, results: Dict[str, Any], *, metadata: Dict[str, Any] | None = None) -> None:
+    def write(self, results: dict[str, Any], *, metadata: dict[str, Any] | None = None) -> None:
         metadata = metadata or {}
         namespace = self._resolve_namespace(metadata)
         context: PluginContext | None = getattr(self, "plugin_context", None)
         security_level = metadata.get("security_level", getattr(context, "security_level", "unofficial"))
         determinism_level = metadata.get("determinism_level", getattr(context, "determinism_level", "none"))
-        embeddings: List[VectorRecord] = []
+        embeddings: list[VectorRecord] = []
 
         for index, record in enumerate(results.get("results") or []):
             vector = self._extract_embedding(record)
@@ -295,7 +295,7 @@ class EmbeddingsStoreSink(ResultSink):
         else:
             self._last_manifest = None
 
-    def collect_artifacts(self) -> Dict[str, Artifact]:
+    def collect_artifacts(self) -> dict[str, Artifact]:
         if not self._last_manifest:
             return {}
         payload = Artifact(
@@ -311,7 +311,7 @@ class EmbeddingsStoreSink(ResultSink):
         self._last_manifest = None
         return {"embeddings_manifest": payload}
 
-    def produces(self) -> List[ArtifactDescriptor]:  # pragma: no cover - metadata
+    def produces(self) -> list[ArtifactDescriptor]:  # pragma: no cover - metadata
         context: PluginContext | None = getattr(self, "plugin_context", None)
         return [
             ArtifactDescriptor(
@@ -323,7 +323,7 @@ class EmbeddingsStoreSink(ResultSink):
             )
         ]
 
-    def finalize(self, artifacts: Mapping[str, Artifact], *, metadata: Dict[str, Any] | None = None) -> None:
+    def finalize(self, artifacts: Mapping[str, Artifact], *, metadata: dict[str, Any] | None = None) -> None:
         self._client.close()
 
     # ---------------------------------------------------------------- helpers
@@ -339,7 +339,7 @@ class EmbeddingsStoreSink(ResultSink):
         level = str(level).lower()
         return f"{suite}.{experiment}.{level}"
 
-    def _extract_embedding(self, record: Mapping[str, Any]) -> Optional[Sequence[float]]:
+    def _extract_embedding(self, record: Mapping[str, Any]) -> Sequence[float] | None:
         value = self._extract_value(record, self._embedding_field)
         if value is None:
             return None
@@ -347,8 +347,8 @@ class EmbeddingsStoreSink(ResultSink):
             return [float(item) for item in value]
         raise TypeError(f"Embedding at '{self._embedding_field}' must be a list of floats, got {type(value).__name__}")
 
-    def _extract_metadata(self, record: Mapping[str, Any], run_metadata: Mapping[str, Any]) -> Dict[str, Any]:
-        extracted: Dict[str, Any] = {}
+    def _extract_metadata(self, record: Mapping[str, Any], run_metadata: Mapping[str, Any]) -> dict[str, Any]:
+        extracted: dict[str, Any] = {}
         for field_name in self._metadata_fields:
             value = self._extract_value(record, field_name)
             if value is None:

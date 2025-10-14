@@ -7,7 +7,7 @@ import json
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Mapping, Optional
+from typing import Any, Mapping
 
 import requests
 
@@ -16,7 +16,7 @@ from elspeth.core.interfaces import ResultSink
 logger = logging.getLogger(__name__)
 
 
-def _default_context(metadata: Mapping[str, Any], timestamp: datetime) -> Dict[str, Any]:
+def _default_context(metadata: Mapping[str, Any], timestamp: datetime) -> dict[str, Any]:
     context = {k: v for k, v in metadata.items() if isinstance(k, str)}
     context.setdefault("timestamp", timestamp.strftime("%Y%m%dT%H%M%SZ"))
     context.setdefault("date", timestamp.strftime("%Y-%m-%d"))
@@ -25,7 +25,7 @@ def _default_context(metadata: Mapping[str, Any], timestamp: datetime) -> Dict[s
     return context
 
 
-def _json_bytes(payload: Dict[str, Any]) -> bytes:
+def _json_bytes(payload: dict[str, Any]) -> bytes:
     return json.dumps(payload, indent=2, sort_keys=True).encode("utf-8")
 
 
@@ -43,7 +43,7 @@ class _RepoSinkBase(ResultSink):
     include_manifest: bool = True
     dry_run: bool = True
     session: requests.Session | None = None
-    _last_payloads: List[Dict[str, Any]] = field(default_factory=list, init=False)
+    _last_payloads: list[dict[str, Any]] = field(default_factory=list, init=False)
     on_error: str = "abort"
 
     def __post_init__(self) -> None:
@@ -52,7 +52,7 @@ class _RepoSinkBase(ResultSink):
         if self.on_error not in {"abort", "skip"}:
             raise ValueError("on_error must be 'abort' or 'skip'")
 
-    def write(self, results: Dict[str, Any], *, metadata: Dict[str, Any] | None = None) -> None:
+    def write(self, results: dict[str, Any], *, metadata: dict[str, Any] | None = None) -> None:
         metadata = metadata or {}
         timestamp = datetime.now(timezone.utc)
         context = _default_context(metadata, timestamp)
@@ -60,7 +60,7 @@ class _RepoSinkBase(ResultSink):
             prefix = self._resolve_prefix(context)
             files = self._prepare_files(results, metadata, prefix, timestamp)
             commit_message = self.commit_message_template.format(**context)
-            payload: Dict[str, Any] = {
+            payload: dict[str, Any] = {
                 "context": context,
                 "commit_message": commit_message,
                 "files": [
@@ -93,12 +93,12 @@ class _RepoSinkBase(ResultSink):
 
     def _prepare_files(
         self,
-        results: Dict[str, Any],
+        results: dict[str, Any],
         metadata: Mapping[str, Any],
         prefix: str,
         timestamp: datetime,
-    ) -> List[PreparedFile]:
-        files: List[PreparedFile] = []
+    ) -> list[PreparedFile]:
+        files: list[PreparedFile] = []
         results_path = f"{prefix}/results.json"
         manifest_path = f"{prefix}/manifest.json"
         files.append(PreparedFile(path=results_path, content=_json_bytes(results)))
@@ -118,7 +118,7 @@ class _RepoSinkBase(ResultSink):
     # To be implemented by subclasses
     def _upload(
         self,
-        files: List[PreparedFile],
+        files: list[PreparedFile],
         commit_message: str,
         metadata: Mapping[str, Any],
         context: Mapping[str, Any],
@@ -155,12 +155,12 @@ class GitHubRepoSink(_RepoSinkBase):
         self.branch = branch
         self.token_env = token_env
         self.base_url = base_url.rstrip("/")
-        self._headers_cache: Dict[str, str] | None = None
+        self._headers_cache: dict[str, str] | None = None
 
     # Upload implementation -------------------------------------------------
     def _upload(
         self,
-        files: List[PreparedFile],
+        files: list[PreparedFile],
         commit_message: str,
         metadata: Mapping[str, Any],
         context: Mapping[str, Any],
@@ -182,7 +182,7 @@ class GitHubRepoSink(_RepoSinkBase):
             )
 
     # Helpers ----------------------------------------------------------------
-    def _headers(self) -> Dict[str, str]:
+    def _headers(self) -> dict[str, str]:
         if self._headers_cache is not None:
             return self._headers_cache
         headers = {"Accept": "application/vnd.github+json"}
@@ -192,7 +192,7 @@ class GitHubRepoSink(_RepoSinkBase):
         self._headers_cache = headers
         return headers
 
-    def _get_existing_sha(self, path: str) -> Optional[str]:
+    def _get_existing_sha(self, path: str) -> str | None:
         response = self._request(
             "GET",
             f"{self.base_url}/repos/{self.owner}/{self.repo}/contents/{path}",
@@ -201,6 +201,7 @@ class GitHubRepoSink(_RepoSinkBase):
         if response.status_code == 404:
             return None
         data = response.json()
+        # response.json() returns Any, so dict access returns Any despite runtime str value
         return data.get("sha")  # type: ignore[no-any-return]
 
     def _request(self, method: str, url: str, expected_status: set[int] | None = None, **kwargs: Any):
@@ -212,7 +213,7 @@ class GitHubRepoSink(_RepoSinkBase):
         return response
 
     @staticmethod
-    def _read_token(env_var: str) -> Optional[str]:
+    def _read_token(env_var: str) -> str | None:
         token = os.getenv(env_var)
         return token.strip() if token else None
 
@@ -240,12 +241,12 @@ class AzureDevOpsRepoSink(_RepoSinkBase):
         self.token_env = token_env
         self.api_version = api_version
         self.base_url = base_url.rstrip("/")
-        self._headers_cache: Dict[str, str] | None = None
+        self._headers_cache: dict[str, str] | None = None
 
     # Upload implementation -------------------------------------------------
     def _upload(
         self,
-        files: List[PreparedFile],
+        files: list[PreparedFile],
         commit_message: str,
         metadata: Mapping[str, Any],
         context: Mapping[str, Any],
@@ -287,7 +288,7 @@ class AzureDevOpsRepoSink(_RepoSinkBase):
         self._request("POST", url, json=payload, expected_status={200, 201})
 
     # Helpers ----------------------------------------------------------------
-    def _headers(self) -> Dict[str, str]:
+    def _headers(self) -> dict[str, str]:
         if self._headers_cache is not None:
             return self._headers_cache
         headers = {"Content-Type": "application/json"}
@@ -308,6 +309,7 @@ class AzureDevOpsRepoSink(_RepoSinkBase):
         data = response.json()
         if not data.get("value"):
             raise RuntimeError(f"Branch '{self.branch}' not found")
+        # response.json() returns Any, so nested dict/list access returns Any despite runtime str value
         return data["value"][0]["objectId"]  # type: ignore[no-any-return]
 
     def _item_exists(self, path: str) -> bool:
@@ -317,6 +319,7 @@ class AzureDevOpsRepoSink(_RepoSinkBase):
             f"&includeContentMetadata=true&api-version={self.api_version}"
         )
         response = self._request("GET", url, expected_status={200, 404})
+        # Comparison expression inferred as Any due to response type annotation gaps
         return response.status_code == 200  # type: ignore[no-any-return]
 
     def _request(self, method: str, url: str, expected_status: set[int] | None = None, **kwargs: Any):
@@ -333,7 +336,7 @@ class AzureDevOpsRepoSink(_RepoSinkBase):
         return path
 
     @staticmethod
-    def _read_token(env_var: str) -> Optional[str]:
+    def _read_token(env_var: str) -> str | None:
         token = os.getenv(env_var)
         return token.strip() if token else None
 

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Sequence
+from typing import Any, Mapping, Sequence
 
 from elspeth.core.interfaces import Artifact, ArtifactDescriptor, ResultSink
 from elspeth.core.security import normalize_determinism_level, normalize_security_level
@@ -47,7 +47,7 @@ class AnalyticsReportSink(ResultSink):
         self._security_level: str | None = None
         self._determinism_level: str | None = None
 
-    def write(self, results: Dict[str, Any], *, metadata: Dict[str, Any] | None = None) -> None:
+    def write(self, results: dict[str, Any], *, metadata: dict[str, Any] | None = None) -> None:
         try:
             summary = self._build_summary(results, metadata or {})
             self.base_path.mkdir(parents=True, exist_ok=True)
@@ -70,16 +70,16 @@ class AnalyticsReportSink(ResultSink):
                 return
             raise
 
-    def produces(self) -> List[ArtifactDescriptor]:  # pragma: no cover - metadata only
+    def produces(self) -> list[ArtifactDescriptor]:  # pragma: no cover - metadata only
         return [
             ArtifactDescriptor(name="analytics_report", type="application/json", persist=True, alias="analytics"),
         ]
 
-    def consumes(self) -> List[str]:  # pragma: no cover - no dependencies
+    def consumes(self) -> list[str]:  # pragma: no cover - no dependencies
         return []
 
-    def collect_artifacts(self) -> Dict[str, Artifact]:
-        artifacts: Dict[str, Artifact] = {}
+    def collect_artifacts(self) -> dict[str, Artifact]:
+        artifacts: dict[str, Artifact] = {}
         for path in self._last_written_files:
             content_type = "application/json" if path.suffix == ".json" else "text/markdown"
             artifacts[path.name] = Artifact(
@@ -94,10 +94,10 @@ class AnalyticsReportSink(ResultSink):
         self._last_written_files = []
         return artifacts
 
-    def _build_summary(self, payload: Mapping[str, Any], metadata: Mapping[str, Any]) -> Dict[str, Any]:
+    def _build_summary(self, payload: Mapping[str, Any], metadata: Mapping[str, Any]) -> dict[str, Any]:
         results = list(payload.get("results") or [])
         failures = list(payload.get("failures") or [])
-        summary: Dict[str, Any] = {
+        summary: dict[str, Any] = {
             "rows": len(results),
             "failures": len(failures),
         }

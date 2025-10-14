@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import hashlib
-from typing import Any, Dict
+from typing import Any
 
 from elspeth.core.interfaces import LLMClientProtocol
 
@@ -17,8 +17,8 @@ class MockLLMClient(LLMClientProtocol):
         *,
         system_prompt: str,
         user_prompt: str,
-        metadata: Dict[str, Any] | None = None,
-    ) -> Dict[str, Any]:
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         context = metadata or {}
         score = self._derive_score(system_prompt, user_prompt, context)
         return {
@@ -34,7 +34,7 @@ class MockLLMClient(LLMClientProtocol):
             },
         }
 
-    def _derive_score(self, system_prompt: str, user_prompt: str, metadata: Dict[str, Any]) -> float:
+    def _derive_score(self, system_prompt: str, user_prompt: str, metadata: dict[str, Any]) -> float:
         hasher = hashlib.sha256()
         hasher.update(system_prompt.encode("utf-8"))
         hasher.update(user_prompt.encode("utf-8"))

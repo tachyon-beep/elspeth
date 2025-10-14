@@ -8,16 +8,17 @@ import logging
 import os
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Mapping
+from typing import Any, Mapping
 
+from elspeth.adapters.blob_store import BlobConfig, load_blob_config
 from elspeth.core.interfaces import Artifact, ResultSink
-from elspeth.datasources.blob_store import BlobConfig, load_blob_config
 
 logger = logging.getLogger(__name__)
 
 try:  # pragma: no cover - optional dataclasses when azure libs absent
     from azure.storage.blob import ContentSettings
 except Exception:  # pragma: no cover
+    # Optional dependency fallback: ContentSettings class set to None when azure-storage-blob unavailable
     ContentSettings = None  # type: ignore[assignment,misc]
 
 
@@ -64,9 +65,9 @@ class BlobResultSink(ResultSink):
         if on_error not in {"abort", "skip"}:
             raise ValueError("on_error must be 'abort' or 'skip'")
         self.on_error = on_error
-        self._artifact_inputs: List[Artifact] = []
+        self._artifact_inputs: list[Artifact] = []
 
-    def write(self, results: Dict[str, Any], *, metadata: Dict[str, Any] | None = None) -> None:
+    def write(self, results: dict[str, Any], *, metadata: dict[str, Any] | None = None) -> None:
         metadata = metadata or {}
         timestamp = datetime.now(timezone.utc)
         context = self._build_context(metadata, timestamp)
@@ -115,7 +116,7 @@ class BlobResultSink(ResultSink):
             self._artifact_inputs = []
 
     # ------------------------------------------------------------------ helpers
-    def _build_context(self, metadata: Mapping[str, Any], timestamp: datetime) -> Dict[str, Any]:
+    def _build_context(self, metadata: Mapping[str, Any], timestamp: datetime) -> dict[str, Any]:
         context = {k: v for k, v in metadata.items() if isinstance(k, str)}
         context.setdefault("timestamp", timestamp.strftime("%Y%m%dT%H%M%SZ"))
         context.setdefault("date", timestamp.strftime("%Y-%m-%d"))
@@ -165,16 +166,16 @@ class BlobResultSink(ResultSink):
         return f"{target}{self.manifest_suffix}"
 
     @staticmethod
-    def _serialize(results: Dict[str, Any]) -> bytes:
+    def _serialize(results: dict[str, Any]) -> bytes:
         return json.dumps(results, indent=2, sort_keys=True).encode("utf-8")
 
     def _build_manifest(
         self,
-        results: Dict[str, Any],
+        results: dict[str, Any],
         metadata: Mapping[str, Any],
         blob_name: str,
         timestamp: datetime,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         manifest = {
             "generated_at": timestamp.isoformat(),
             "blob": blob_name,
@@ -225,7 +226,7 @@ class BlobResultSink(ResultSink):
                 metadata=metadata,
             )
 
-    def _merge_upload_metadata(self, upload_metadata: Mapping[str, Any] | None) -> Dict[str, Any] | None:
+    def _merge_upload_metadata(self, upload_metadata: Mapping[str, Any] | None) -> dict[str, Any] | None:
         combined = dict(self._blob_metadata)
         if upload_metadata:
             for key, value in upload_metadata.items():
@@ -235,6 +236,7 @@ class BlobResultSink(ResultSink):
 
     def _get_service_client(self):
         if self._blob_service_client is not None:
+            # Lazy initialization pattern; mypy sees unreachable due to None-typed field
             return self._blob_service_client  # type: ignore[unreachable]
 
         try:
@@ -247,6 +249,7 @@ class BlobResultSink(ResultSink):
             account_url=self.config.account_url,
             credential=credential,
         )
+        # Lazy initialization: assigning BlobServiceClient to None-typed field
         self._blob_service_client = client  # type: ignore[assignment]
         return self._blob_service_client
 
@@ -276,18 +279,18 @@ class BlobResultSink(ResultSink):
         return None
 
     @staticmethod
-    def _normalize_metadata(metadata: Mapping[str, Any] | None) -> Dict[str, str]:
+    def _normalize_metadata(metadata: Mapping[str, Any] | None) -> dict[str, str]:
         if not metadata:
             return {}
-        normalized: Dict[str, str] = {}
+        normalized: dict[str, str] = {}
         for key, value in metadata.items():
             if not isinstance(key, str):
                 raise ValueError("Blob metadata keys must be strings")
             normalized[key] = "" if value is None else str(value)
         return normalized
 
-    def prepare_artifacts(self, artifacts: Mapping[str, List[Artifact]]):  # pragma: no cover - optional
-        collected: List[Artifact] = []
+    def prepare_artifacts(self, artifacts: Mapping[str, list[Artifact]]):  # pragma: no cover - optional
+        collected: list[Artifact] = []
         for values in artifacts.values():
             if values:
                 collected.extend(values)
@@ -302,6 +305,7 @@ class BlobResultSink(ResultSink):
             if isinstance(payload, (bytes, bytearray)):
                 return bytes(payload)
             if hasattr(payload, "read"):
+                # File-like object .read() method returns Any without protocol type stub
                 return payload.read()  # type: ignore[no-any-return]
             return json.dumps(payload).encode("utf-8")
         raise ValueError("Artifact is missing payload data")
@@ -319,8 +323,8 @@ class BlobResultSink(ResultSink):
         self,
         execution_metadata: Mapping[str, Any] | None,
         artifact: Artifact | None,
-    ) -> Dict[str, Any]:
-        metadata: Dict[str, Any] = {}
+    ) -> dict[str, Any]:
+        metadata: dict[str, Any] = {}
         if execution_metadata:
             if execution_metadata.get("security_level"):
                 metadata["security_level"] = execution_metadata["security_level"]

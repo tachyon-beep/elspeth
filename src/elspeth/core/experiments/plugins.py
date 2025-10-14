@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Protocol
+from typing import TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:
     from elspeth.core.schema import DataFrameSchema
@@ -19,10 +19,10 @@ class ValidationPlugin(Protocol):
 
     def validate(
         self,
-        response: Dict[str, Any],
+        response: dict[str, Any],
         *,
-        context: Optional[Dict[str, Any]] = None,
-        metadata: Optional[Dict[str, Any]] = None,
+        context: dict[str, Any | None] | None = None,
+        metadata: dict[str, Any | None] | None = None,
     ) -> None:
         """Inspect a response and raise ``ValidationError`` when criteria fail."""
 
@@ -44,7 +44,7 @@ class RowExperimentPlugin(Protocol):
 
     name: str
 
-    def process_row(self, row: Dict[str, Any], responses: Dict[str, Any]) -> Dict[str, Any]:
+    def process_row(self, row: dict[str, Any], responses: dict[str, Any]) -> dict[str, Any]:
         """Return derived metrics or annotations for a single row result."""
 
     def input_schema(self) -> type["DataFrameSchema"] | None:  # pragma: no cover - optional
@@ -65,7 +65,7 @@ class AggregationExperimentPlugin(Protocol):
 
     name: str
 
-    def finalize(self, records: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def finalize(self, records: list[dict[str, Any]]) -> dict[str, Any]:
         """Produce aggregate analytics from the collected row results."""
 
     def input_schema(self) -> type["DataFrameSchema"] | None:  # pragma: no cover - optional
@@ -86,7 +86,7 @@ class BaselineComparisonPlugin(Protocol):
 
     name: str
 
-    def compare(self, baseline: Dict[str, Any], variant: Dict[str, Any]) -> Dict[str, Any]:
+    def compare(self, baseline: dict[str, Any], variant: dict[str, Any]) -> dict[str, Any]:
         """Compute a comparison between baseline and variant payloads."""
 
 
@@ -98,5 +98,5 @@ class EarlyStopPlugin(Protocol):
     def reset(self) -> None:
         """Reset any internal early-stop state."""
 
-    def check(self, record: Dict[str, Any], *, metadata: Optional[Dict[str, Any]] = None) -> Optional[Dict[str, Any]]:
+    def check(self, record: dict[str, Any], *, metadata: dict[str, Any | None] | None = None) -> dict[str, Any | None] | None:
         """Return a reason to trigger early stop, or ``None`` to continue."""

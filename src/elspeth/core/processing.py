@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Iterable
+from typing import Any, Iterable
 
 import pandas as pd
 
@@ -11,8 +11,8 @@ def prepare_prompt_context(
     row: pd.Series,
     *,
     include_fields: Iterable[str] | None = None,
-    alias_map: Dict[str, str] | None = None,
-) -> Dict[str, Any]:
+    alias_map: dict[str, str] | None = None,
+) -> dict[str, Any]:
     """Extract a lightweight context dictionary from a dataframe row.
 
     Parameters

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Callable, Dict, Mapping, Optional
+from typing import Any, Callable, Mapping
 
 from elspeth.core.plugins import PluginContext
 from elspeth.core.utilities import register_utility_plugin
@@ -60,7 +60,7 @@ class RetrievalContextUtility:
         row: Mapping[str, Any] | None = None,
         responses: Mapping[str, Any] | None = None,
         metadata: Mapping[str, Any] | None = None,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Retrieve context and format payload for downstream consumers."""
 
         row = row or {}
@@ -80,7 +80,7 @@ class RetrievalContextUtility:
         context_block = "\n\n".join(hit.text for hit in hits)
         rendered_context = self._template.replace("{{ context }}", context_block)
 
-        payload: Dict[str, Any] = {
+        payload: dict[str, Any] = {
             "retrieval_metadata": {
                 "namespace": resolved_namespace,
                 "hits": [
@@ -114,7 +114,7 @@ class RetrievalContextUtility:
         row: Mapping[str, Any],
         responses: Mapping[str, Any],
         metadata: Mapping[str, Any],
-    ) -> Optional[str]:
+    ) -> str | None:
         """Determine the query text from explicit args, row payload, or responses."""
 
         value = self._extract_from_scope(self._query_field, row=row, responses=responses, metadata=metadata)
@@ -192,8 +192,8 @@ def _build_provider_options(
     dsn: str | None,
     table: str,
     extra: Mapping[str, Any] | None,
-) -> Dict[str, Any]:
-    options: Dict[str, Any] = dict(extra or {})
+) -> dict[str, Any]:
+    options: dict[str, Any] = dict(extra or {})
     provider = (provider or "").lower()
     if provider == "pgvector":
         options.setdefault("dsn", dsn)

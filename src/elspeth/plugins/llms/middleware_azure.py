@@ -7,7 +7,7 @@ import logging
 import os
 import threading
 import time
-from typing import Any, Dict, Iterable, Mapping
+from typing import Any, Iterable, Mapping
 
 from elspeth.core.llm.middleware import LLMMiddleware, LLMRequest
 from elspeth.core.llm.registry import register_middleware
@@ -116,7 +116,7 @@ class AzureEnvironmentMiddleware(LLMMiddleware):
                     logger.info(message)
                 else:
                     raise RuntimeError("AzureEnvironmentMiddleware requires an Azure ML run context when on_error=abort")
-        self._inflight: Dict[str, float] = {}
+        self._inflight: dict[str, float] = {}
         self._lock = threading.Lock()
         self._sequence = 0
         self._suite_logged = False
@@ -148,7 +148,7 @@ class AzureEnvironmentMiddleware(LLMMiddleware):
         updated_metadata["azure_sequence"] = sequence
         return request.clone(metadata=updated_metadata)
 
-    def after_response(self, request: LLMRequest, response: Dict[str, Any]) -> Dict[str, Any]:
+    def after_response(self, request: LLMRequest, response: dict[str, Any]) -> dict[str, Any]:
         sequence = request.metadata.get("azure_sequence")
         duration = None
         if sequence is not None:
@@ -265,7 +265,7 @@ class AzureEnvironmentMiddleware(LLMMiddleware):
             payload["history"] = json.dumps(metadata["history"])
         self._log_row("llm_retry_exhausted", payload)
 
-    def _log_row(self, name: str, payload: Dict[str, Any]) -> None:
+    def _log_row(self, name: str, payload: dict[str, Any]) -> None:
         if not self._run:
             logger.log(self._fallback_level, "[azure_env] %s: %s", name, payload)
             return

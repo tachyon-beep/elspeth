@@ -7,7 +7,7 @@ import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Mapping
+from typing import Any, Mapping
 from zipfile import ZIP_DEFLATED, ZipFile
 
 import pandas as pd
@@ -63,12 +63,12 @@ class ZipResultSink(ResultSink):
             "guard": self.sanitize_guard,
         }
         self._last_archive_path: str | None = None
-        self._last_artifacts: Dict[str, Any] = {}
-        self._additional_inputs: Dict[str, List[Artifact]] = {}
+        self._last_artifacts: dict[str, Any] = {}
+        self._additional_inputs: dict[str, list[Artifact]] = {}
         self._security_level: str | None = None
         self._determinism_level: str | None = None
 
-    def write(self, results: Dict[str, Any], *, metadata: Dict[str, Any] | None = None) -> None:
+    def write(self, results: dict[str, Any], *, metadata: dict[str, Any] | None = None) -> None:
         metadata = metadata or {}
         timestamp = datetime.now(timezone.utc)
         try:
@@ -147,7 +147,7 @@ class ZipResultSink(ResultSink):
         results: Mapping[str, Any],
         metadata: Mapping[str, Any],
         timestamp: datetime,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         manifest = {
             "generated_at": timestamp.isoformat(),
             "rows": (len(results.get("results", [])) if isinstance(results.get("results"), list) else 0),
@@ -166,9 +166,9 @@ class ZipResultSink(ResultSink):
         entries = results.get("results", [])
         if not entries:
             return ""
-        rows: List[Dict[Any, Any]] = []
+        rows: list[dict[Any, Any]] = []
         for item in entries:
-            record: Dict[Any, Any] = {}
+            record: dict[Any, Any] = {}
             row_data = item.get("row", {}) if isinstance(item, Mapping) else {}
             if isinstance(row_data, Mapping):
                 for key, value in row_data.items():
@@ -200,7 +200,7 @@ class ZipResultSink(ResultSink):
     def finalize(self, artifacts, *, metadata=None):  # pragma: no cover - optional cleanup
         return None
 
-    def collect_artifacts(self) -> Dict[str, Artifact]:  # pragma: no cover
+    def collect_artifacts(self) -> dict[str, Artifact]:  # pragma: no cover
         if not self._last_archive_path:
             return {}
         metadata = {key: value for key, value in self._last_artifacts.items() if value}
@@ -221,7 +221,7 @@ class ZipResultSink(ResultSink):
         self._determinism_level = None
         return {"zip": artifact}
 
-    def prepare_artifacts(self, artifacts: Mapping[str, List[Artifact]]):  # pragma: no cover
+    def prepare_artifacts(self, artifacts: Mapping[str, list[Artifact]]):  # pragma: no cover
         self._additional_inputs = {key: list(values) for key, values in artifacts.items() if values}
         if not self._security_level and self._additional_inputs:
             levels = [artifact.security_level for values in self._additional_inputs.values() for artifact in values]
@@ -236,6 +236,7 @@ class ZipResultSink(ResultSink):
             if isinstance(payload, (bytes, bytearray)):
                 return bytes(payload)
             if hasattr(payload, "read"):
+                # File-like object .read() method returns Any without protocol type stub
                 return payload.read()  # type: ignore[no-any-return]
             return json.dumps(payload).encode("utf-8")
         raise ValueError("Artifact is missing payload data")

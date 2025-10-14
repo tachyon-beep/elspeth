@@ -7,7 +7,7 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 
 from elspeth.core.interfaces import ResultSink
 from elspeth.plugins.outputs.csv_file import CsvResultSink
@@ -40,7 +40,7 @@ class LocalBundleSink(ResultSink):
         if not self.sanitize_formulas:
             logger.warning("Local bundle CSV sanitization disabled; outputs may trigger spreadsheet formulas.")
 
-    def write(self, results: Dict[str, Any], *, metadata: Dict[str, Any] | None = None) -> None:
+    def write(self, results: dict[str, Any], *, metadata: dict[str, Any] | None = None) -> None:
         metadata = metadata or {}
         timestamp = datetime.now(timezone.utc)
         try:
@@ -71,7 +71,7 @@ class LocalBundleSink(ResultSink):
             raise
 
     # ------------------------------------------------------------------ helpers
-    def _resolve_bundle_dir(self, metadata: Dict[str, Any], timestamp: datetime) -> Path:
+    def _resolve_bundle_dir(self, metadata: dict[str, Any], timestamp: datetime) -> Path:
         name = self.bundle_name or str(metadata.get("experiment") or metadata.get("name") or "experiment")
         if self.timestamped:
             stamp = timestamp.strftime("%Y%m%dT%H%M%SZ")
@@ -79,7 +79,7 @@ class LocalBundleSink(ResultSink):
         # base_path is guaranteed to be Path after __post_init__
         return Path(self.base_path) / name
 
-    def _build_manifest(self, results: Dict[str, Any], metadata: Dict[str, Any], timestamp: datetime) -> Dict[str, Any]:
+    def _build_manifest(self, results: dict[str, Any], metadata: dict[str, Any], timestamp: datetime) -> dict[str, Any]:
         manifest = {
             "generated_at": timestamp.isoformat(),
             "rows": len(results.get("results", [])),

@@ -7,7 +7,7 @@ import io
 import logging
 import math
 from pathlib import Path
-from typing import Any, Dict, List, Mapping, Sequence, Tuple
+from typing import Any, Mapping, Sequence
 
 from elspeth.core.interfaces import Artifact, ArtifactDescriptor, ResultSink
 from elspeth.core.security import normalize_determinism_level, normalize_security_level
@@ -70,7 +70,7 @@ class EnhancedVisualAnalyticsSink(ResultSink):
             width, height = figure_size
             if width <= 0 or height <= 0:
                 raise ValueError("figure_size values must be positive numbers")
-            self.figure_size: Tuple[float, float] = (float(width), float(height))
+            self.figure_size: tuple[float, float] = (float(width), float(height))
         else:
             self.figure_size = (10.0, 6.0)
 
@@ -82,11 +82,11 @@ class EnhancedVisualAnalyticsSink(ResultSink):
         self.color_palette = color_palette or "Set2"
         self._security_level: str | None = None
         self._determinism_level: str | None = None
-        self._last_written_files: list[tuple[str, Path, Dict[str, Any]]] = []
+        self._last_written_files: list[tuple[str, Path, dict[str, Any]]] = []
         self._plot_modules: tuple[Any, Any, Any] | None = None
 
     # --------------------------------------------------------------------- API
-    def write(self, results: Dict[str, Any], *, metadata: Dict[str, Any] | None = None) -> None:
+    def write(self, results: dict[str, Any], *, metadata: dict[str, Any] | None = None) -> None:
         metadata = metadata or {}
         try:
             # Extract data for visualization
@@ -112,7 +112,7 @@ class EnhancedVisualAnalyticsSink(ResultSink):
                     logger.debug("Seaborn theme unavailable; using matplotlib defaults")
 
             self.base_path.mkdir(parents=True, exist_ok=True)
-            written: list[tuple[str, Path, Dict[str, Any]]] = []
+            written: list[tuple[str, Path, dict[str, Any]]] = []
 
             # Generate each requested chart type
             for chart_type in self.chart_types:
@@ -154,8 +154,8 @@ class EnhancedVisualAnalyticsSink(ResultSink):
     def consumes(self) -> list[str]:  # pragma: no cover - no dependencies
         return []
 
-    def collect_artifacts(self) -> Dict[str, Artifact]:
-        artifacts: Dict[str, Artifact] = {}
+    def collect_artifacts(self) -> dict[str, Artifact]:
+        artifacts: dict[str, Artifact] = {}
         for name, path, extra in self._last_written_files:
             suffix = path.suffix.lower()
             if suffix == ".png":
@@ -197,9 +197,9 @@ class EnhancedVisualAnalyticsSink(ResultSink):
         self._plot_modules = (matplotlib, plt, seaborn)
         return self._plot_modules
 
-    def _extract_score_data(self, payload: Mapping[str, Any]) -> Dict[str, Any]:
+    def _extract_score_data(self, payload: Mapping[str, Any]) -> dict[str, Any]:
         """Extract score data for visualization from experiment payload."""
-        data: Dict[str, Any] = {
+        data: dict[str, Any] = {
             "criteria": [],
             "scores_by_criterion": {},
             "baseline_scores": {},
@@ -247,11 +247,11 @@ class EnhancedVisualAnalyticsSink(ResultSink):
     def _generate_chart(
         self,
         chart_type: str,
-        data: Dict[str, Any],
+        data: dict[str, Any],
         plt: Any,
         seaborn: Any,
-        metadata: Dict[str, Any],
-    ) -> List[Tuple[str, Path, Dict[str, Any]]]:
+        metadata: dict[str, Any],
+    ) -> list[tuple[str, Path, dict[str, Any]]]:
         """Generate a specific chart type and return file references."""
         if chart_type == "violin":
             return self._generate_violin_plot(data, plt, seaborn, metadata)
@@ -268,8 +268,8 @@ class EnhancedVisualAnalyticsSink(ResultSink):
             return []
 
     def _generate_violin_plot(
-        self, data: Dict[str, Any], plt: Any, seaborn: Any, metadata: Dict[str, Any]
-    ) -> List[Tuple[str, Path, Dict[str, Any]]]:
+        self, data: dict[str, Any], plt: Any, seaborn: Any, metadata: dict[str, Any]
+    ) -> list[tuple[str, Path, dict[str, Any]]]:
         """Generate violin plot showing score distributions by criterion."""
         import pandas as pd
 
@@ -305,8 +305,8 @@ class EnhancedVisualAnalyticsSink(ResultSink):
         return self._save_figure(fig, plt, "violin", {"chart_type": "violin"})
 
     def _generate_box_plot(
-        self, data: Dict[str, Any], plt: Any, seaborn: Any, metadata: Dict[str, Any]
-    ) -> List[Tuple[str, Path, Dict[str, Any]]]:
+        self, data: dict[str, Any], plt: Any, seaborn: Any, metadata: dict[str, Any]
+    ) -> list[tuple[str, Path, dict[str, Any]]]:
         """Generate box plot showing score distributions with quartiles."""
         import pandas as pd
 
@@ -340,8 +340,8 @@ class EnhancedVisualAnalyticsSink(ResultSink):
         return self._save_figure(fig, plt, "box", {"chart_type": "box"})
 
     def _generate_heatmap(
-        self, data: Dict[str, Any], plt: Any, seaborn: Any, metadata: Dict[str, Any]
-    ) -> List[Tuple[str, Path, Dict[str, Any]]]:
+        self, data: dict[str, Any], plt: Any, seaborn: Any, metadata: dict[str, Any]
+    ) -> list[tuple[str, Path, dict[str, Any]]]:
         """Generate heatmap for multi-criteria score comparison."""
         import numpy as np
         import pandas as pd
@@ -399,8 +399,8 @@ class EnhancedVisualAnalyticsSink(ResultSink):
         return self._save_figure(fig, plt, "heatmap", {"chart_type": "heatmap"})
 
     def _generate_forest_plot(
-        self, data: Dict[str, Any], plt: Any, seaborn: Any, metadata: Dict[str, Any]
-    ) -> List[Tuple[str, Path, Dict[str, Any]]]:
+        self, data: dict[str, Any], plt: Any, seaborn: Any, metadata: dict[str, Any]
+    ) -> list[tuple[str, Path, dict[str, Any]]]:
         """Generate forest plot showing effect sizes with confidence intervals."""
         effect_sizes = data.get("effect_sizes", {})
         if not effect_sizes:
@@ -444,8 +444,8 @@ class EnhancedVisualAnalyticsSink(ResultSink):
         return self._save_figure(fig, plt, "forest", {"chart_type": "forest"})
 
     def _generate_distribution_overlay(
-        self, data: Dict[str, Any], plt: Any, seaborn: Any, metadata: Dict[str, Any]
-    ) -> List[Tuple[str, Path, Dict[str, Any]]]:
+        self, data: dict[str, Any], plt: Any, seaborn: Any, metadata: dict[str, Any]
+    ) -> list[tuple[str, Path, dict[str, Any]]]:
         """Generate overlaid histogram showing score distributions."""
         criteria = data["criteria"]
         scores_by_criterion = data["scores_by_criterion"]
@@ -476,14 +476,14 @@ class EnhancedVisualAnalyticsSink(ResultSink):
 
         return self._save_figure(fig, plt, "distribution", {"chart_type": "distribution"})
 
-    def _save_figure(self, fig: Any, plt: Any, chart_type: str, extra_metadata: Dict[str, Any]) -> List[Tuple[str, Path, Dict[str, Any]]]:
+    def _save_figure(self, fig: Any, plt: Any, chart_type: str, extra_metadata: dict[str, Any]) -> list[tuple[str, Path, dict[str, Any]]]:
         """Save figure to configured formats and return file references."""
         buffer = io.BytesIO()
         fig.savefig(buffer, format="png", dpi=self.dpi)
         plt.close(fig)
         png_bytes = buffer.getvalue()
 
-        written: list[tuple[str, Path, Dict[str, Any]]] = []
+        written: list[tuple[str, Path, dict[str, Any]]] = []
 
         if "png" in self.formats:
             png_path = self.base_path / f"{self.file_stem}_{chart_type}.png"

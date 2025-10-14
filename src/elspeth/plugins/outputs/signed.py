@@ -8,7 +8,7 @@ import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Literal
+from typing import Any, Literal
 
 from elspeth.core.interfaces import ResultSink
 from elspeth.core.security import generate_signature
@@ -34,7 +34,7 @@ class SignedArtifactSink(ResultSink):
         if self.on_error not in {"abort", "skip"}:
             raise ValueError("on_error must be 'abort' or 'skip'")
 
-    def write(self, results: Dict[str, Any], *, metadata: Dict[str, Any] | None = None) -> None:
+    def write(self, results: dict[str, Any], *, metadata: dict[str, Any] | None = None) -> None:
         metadata = metadata or {}
         timestamp = datetime.now(timezone.utc)
         try:
@@ -65,7 +65,7 @@ class SignedArtifactSink(ResultSink):
                 return
             raise
 
-    def _resolve_bundle_dir(self, metadata: Dict[str, Any], timestamp: datetime) -> Path:
+    def _resolve_bundle_dir(self, metadata: dict[str, Any], timestamp: datetime) -> Path:
         name = self.bundle_name or str(metadata.get("experiment") or metadata.get("name") or "signed")
         if self.timestamped:
             stamp = timestamp.strftime("%Y%m%dT%H%M%SZ")
@@ -75,11 +75,11 @@ class SignedArtifactSink(ResultSink):
 
     def _build_manifest(
         self,
-        results: Dict[str, Any],
-        metadata: Dict[str, Any],
+        results: dict[str, Any],
+        metadata: dict[str, Any],
         timestamp: datetime,
         signature: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         digest = self._hash_results(results)
         manifest = {
             "generated_at": timestamp.isoformat(),
@@ -99,7 +99,7 @@ class SignedArtifactSink(ResultSink):
         return manifest
 
     @staticmethod
-    def _hash_results(results: Dict[str, Any]) -> str:
+    def _hash_results(results: dict[str, Any]) -> str:
         import hashlib
 
         payload = json.dumps(results, sort_keys=True).encode("utf-8")

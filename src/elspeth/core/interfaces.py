@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Dict, List, Mapping, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Mapping, Protocol, runtime_checkable
 
 import pandas as pd
 
@@ -42,8 +42,8 @@ class LLMClientProtocol(Protocol):  # pylint: disable=too-few-public-methods
         *,
         system_prompt: str,
         user_prompt: str,
-        metadata: Dict[str, Any] | None = None,
-    ) -> Dict[str, Any]:
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         """Invoke the model and return a response payload."""
 
         raise NotImplementedError
@@ -53,34 +53,34 @@ class LLMClientProtocol(Protocol):  # pylint: disable=too-few-public-methods
 class ResultSink(Protocol):  # pylint: disable=too-few-public-methods
     """Receives experiment results and persists them externally."""
 
-    def write(self, results: Dict[str, Any], *, metadata: Dict[str, Any] | None = None) -> None:
+    def write(self, results: dict[str, Any], *, metadata: dict[str, Any] | None = None) -> None:
         """Persist experiment results."""
 
         raise NotImplementedError
 
-    def produces(self) -> List["ArtifactDescriptor"]:  # pragma: no cover - optional
+    def produces(self) -> list["ArtifactDescriptor"]:  # pragma: no cover - optional
         """Describe artifacts the sink emits, enabling chaining."""
 
         return []
 
-    def consumes(self) -> List[str]:  # pragma: no cover - optional
+    def consumes(self) -> list[str]:  # pragma: no cover - optional
         """Return artifact names the sink depends on."""
 
         return []
 
     def finalize(
-        self, artifacts: Mapping[str, "Artifact"], *, metadata: Dict[str, Any] | None = None
+        self, artifacts: Mapping[str, "Artifact"], *, metadata: dict[str, Any] | None = None
     ) -> None:  # pragma: no cover - optional
         """Perform cleanup or post-processing once artifacts are available."""
 
         return None
 
-    def prepare_artifacts(self, artifacts: Mapping[str, List["Artifact"]]) -> None:  # pragma: no cover - optional
+    def prepare_artifacts(self, artifacts: Mapping[str, list["Artifact"]]) -> None:  # pragma: no cover - optional
         """Allow the sink to modify artifacts before finalization."""
 
         return None
 
-    def collect_artifacts(self) -> Dict[str, "Artifact"]:  # pragma: no cover - optional
+    def collect_artifacts(self) -> dict[str, "Artifact"]:  # pragma: no cover - optional
         """Expose artifacts generated during `write` for downstream consumers."""
 
         return {}
@@ -91,7 +91,7 @@ class ExperimentContext:
     """Data structure passed to orchestrator containing runtime info."""
 
     data: pd.DataFrame
-    config: Dict[str, Any]
+    config: dict[str, Any]
 
 
 @dataclass
@@ -115,7 +115,7 @@ class Artifact:  # pylint: disable=too-many-instance-attributes
     type: str
     path: str | None = None
     payload: Any | None = None
-    metadata: Dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = field(default_factory=dict)
     schema_id: str | None = None
     produced_by: str | None = None
     persist: bool = False

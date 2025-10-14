@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 
 import pandas as pd
 
@@ -56,7 +56,7 @@ class CsvResultSink(ResultSink):
             return value
         return sanitize_cell(value, guard=self.sanitize_guard)
 
-    def write(self, results: Dict[str, Any], *, metadata: Dict[str, Any] | None = None) -> None:
+    def write(self, results: dict[str, Any], *, metadata: dict[str, Any] | None = None) -> None:
         try:
             entries = results.get("results", [])
             if not entries:
@@ -66,7 +66,7 @@ class CsvResultSink(ResultSink):
                 for item in entries:
                     row = item.get("row", {})
                     response = item.get("response", {})
-                    record: Dict[Any, Any] = {}
+                    record: dict[Any, Any] = {}
                     if isinstance(row, dict):
                         for key, value in row.items():
                             record[self._sanitize_key(key)] = self._sanitize_value(value)
@@ -103,7 +103,7 @@ class CsvResultSink(ResultSink):
     def finalize(self, artifacts, *, metadata=None):  # pragma: no cover - optional cleanup
         return None
 
-    def collect_artifacts(self) -> Dict[str, Artifact]:  # pragma: no cover - optional
+    def collect_artifacts(self) -> dict[str, Artifact]:  # pragma: no cover - optional
         if not self._last_written_path:
             return {}
         artifact = Artifact(

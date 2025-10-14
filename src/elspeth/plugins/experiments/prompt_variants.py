@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from elspeth.core.experiments.plugin_registry import register_aggregation_plugin
 from elspeth.core.experiments.plugins import AggregationExperimentPlugin
@@ -26,7 +26,7 @@ class PromptVariantsAggregator(AggregationExperimentPlugin):
         strip: bool = True,
         metadata_key: str = "prompt_variants",
         max_attempts: int = 3,
-        variant_system_prompt: Optional[str] = None,
+        variant_system_prompt: str | None = None,
     ) -> None:
         self.variant_llm = variant_llm
         self.prompt_template = prompt_template
@@ -37,7 +37,7 @@ class PromptVariantsAggregator(AggregationExperimentPlugin):
         self.variant_system_prompt = variant_system_prompt or "You generate prompt variations that preserve placeholders."
         self.engine = PromptEngine()
 
-    def finalize(self, records: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def finalize(self, records: list[dict[str, Any]]) -> dict[str, Any]:
         if not records:
             return {}
 
@@ -49,7 +49,7 @@ class PromptVariantsAggregator(AggregationExperimentPlugin):
         user_prompt_template = metadata.get("prompt_user_template") or user_prompt
         system_prompt_template = metadata.get("prompt_system_template") or system_prompt
 
-        placeholder_fields: List[str] = []
+        placeholder_fields: list[str] = []
         metadata_fields = metadata.get("prompt_user_fields")
         if isinstance(metadata_fields, list):
             placeholder_fields = [str(field) for field in metadata_fields]
@@ -74,12 +74,12 @@ class PromptVariantsAggregator(AggregationExperimentPlugin):
             "count": self.count,
         }
 
-        generated: List[Dict[str, Any]] = []
-        failures: List[Dict[str, Any]] = []
+        generated: list[dict[str, Any]] = []
+        failures: list[dict[str, Any]] = []
 
         for index in range(self.count):
-            last_result: Dict[str, Any] | None = None
-            missing_tokens: List[str] = []
+            last_result: dict[str, Any] | None = None
+            missing_tokens: list[str] = []
             attempts = 0
             while attempts < self.max_attempts:
                 attempts += 1
@@ -143,7 +143,7 @@ class PromptVariantsAggregator(AggregationExperimentPlugin):
         return payload
 
 
-def _build_prompt_variants(options: Dict[str, Any], context: PluginContext) -> PromptVariantsAggregator:
+def _build_prompt_variants(options: dict[str, Any], context: PluginContext) -> PromptVariantsAggregator:
     spec = options.get("variant_llm") or options.get("llm")
     if spec is None:
         raise ValueError("prompt_variants plugin requires 'variant_llm'")

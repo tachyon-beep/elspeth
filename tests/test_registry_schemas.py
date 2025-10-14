@@ -1,6 +1,5 @@
 """Tests for common registry schemas."""
 
-import pytest
 
 from elspeth.core.registry.schemas import (
     ARTIFACT_DESCRIPTOR_SCHEMA,
@@ -12,7 +11,6 @@ from elspeth.core.registry.schemas import (
     with_error_handling,
     with_security_properties,
 )
-
 
 # Schema constant tests
 

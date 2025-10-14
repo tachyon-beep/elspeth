@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Mapping, Optional
+from typing import Any, Callable, Mapping
 
 import yaml
 
@@ -25,18 +25,18 @@ class Settings:
     sinks: Any
     orchestrator_config: OrchestratorConfig
     suite_root: Path | None = None
-    suite_defaults: Dict[str, Any] = field(default_factory=dict)
+    suite_defaults: dict[str, Any] = field(default_factory=dict)
     rate_limiter: Any | None = None
     cost_tracker: Any | None = None
-    prompt_packs: Dict[str, Any] = field(default_factory=dict)
-    prompt_pack: Optional[str] = None
+    prompt_packs: dict[str, Any] = field(default_factory=dict)
+    prompt_pack: str | None = None
 
 
 @dataclass
 class PromptConfiguration:
     """Encapsulates prompt-related configuration for orchestrator setup."""
 
-    prompts: Dict[str, Any]
+    prompts: dict[str, Any]
     prompt_fields: Any
     prompt_aliases: Any
     criteria: Any
@@ -46,21 +46,21 @@ class PromptConfiguration:
 class PluginDefinitions:
     """Holds plugin definition sections prior to instantiation."""
 
-    row_plugins: List[Dict[str, Any]]
-    aggregator_plugins: List[Dict[str, Any]]
-    baseline_plugins: List[Dict[str, Any]]
-    validation_plugins: List[Dict[str, Any]]
-    sink_defs: List[Dict[str, Any]]
-    llm_middlewares: List[Dict[str, Any]]
-    prompt_defaults: Dict[str, Any] | None
-    concurrency_config: Dict[str, Any] | None
-    rate_limiter_def: Dict[str, Any] | None
-    cost_tracker_def: Dict[str, Any] | None
-    early_stop_config: Dict[str, Any] | None
-    early_stop_plugin_defs: List[Dict[str, Any]]
+    row_plugins: list[dict[str, Any]]
+    aggregator_plugins: list[dict[str, Any]]
+    baseline_plugins: list[dict[str, Any]]
+    validation_plugins: list[dict[str, Any]]
+    sink_defs: list[dict[str, Any]]
+    llm_middlewares: list[dict[str, Any]]
+    prompt_defaults: dict[str, Any] | None
+    concurrency_config: dict[str, Any] | None
+    rate_limiter_def: dict[str, Any] | None
+    cost_tracker_def: dict[str, Any] | None
+    early_stop_config: dict[str, Any] | None
+    early_stop_plugin_defs: list[dict[str, Any]]
 
 
-def _prepare_plugin_definition(definition: Mapping[str, Any], context: str) -> tuple[Dict[str, Any], str, str, tuple[str, ...]]:
+def _prepare_plugin_definition(definition: Mapping[str, Any], context: str) -> tuple[dict[str, Any], str, str, tuple[str, ...]]:
     """Extract options, normalized security level, determinism level, and provenance."""
 
     options = dict(definition.get("options", {}) or {})
@@ -97,7 +97,7 @@ def _prepare_plugin_definition(definition: Mapping[str, Any], context: str) -> t
     return options, sec_level, det_level, provenance
 
 
-def _merge_pack(base: Dict[str, Any], pack: Dict[str, Any]) -> Dict[str, Any]:
+def _merge_pack(base: dict[str, Any], pack: dict[str, Any]) -> dict[str, Any]:
     """Merge prompt pack defaults into an existing dict without mutating inputs."""
 
     merged = dict(pack)
@@ -105,7 +105,7 @@ def _merge_pack(base: Dict[str, Any], pack: Dict[str, Any]) -> Dict[str, Any]:
     return merged
 
 
-def _read_profile_data(config_path: Path, profile: str) -> Dict[str, Any]:
+def _read_profile_data(config_path: Path, profile: str) -> dict[str, Any]:
     """Load YAML configuration and return the selected profile section."""
 
     raw = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
@@ -258,7 +258,7 @@ def _resolve_sink_definitions(
 def _sinks_from_suite_defaults(
     suite_defaults_cfg: Any,
     prompt_packs: Mapping[str, Any],
-) -> List[Dict[str, Any]]:
+) -> list[dict[str, Any]]:
     """Derive sink definitions from suite defaults or referenced prompt packs."""
 
     if not isinstance(suite_defaults_cfg, Mapping):
@@ -276,10 +276,10 @@ def _sinks_from_suite_defaults(
     return []
 
 
-def _instantiate_sinks(sink_defs: List[Dict[str, Any]]) -> List[Any]:
+def _instantiate_sinks(sink_defs: list[dict[str, Any]]) -> list[Any]:
     """Instantiate sink plugins with security level metadata."""
 
-    instances: List[Any] = []
+    instances: list[Any] = []
     for definition in sink_defs:
         instances.append(_instantiate_plugin(definition, "sink", registry.create_sink))
     return instances
@@ -317,7 +317,7 @@ def _build_orchestrator_config(
 def _prepare_suite_defaults(
     suite_defaults_cfg: Any,
     prompt_packs: Mapping[str, Any],
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Merge suite defaults with any referenced prompt pack overrides."""
 
     suite_defaults = dict(suite_defaults_cfg or {})

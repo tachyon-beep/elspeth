@@ -6,7 +6,7 @@ that was repeated in every create_* function across 5 registries.
 
 from __future__ import annotations
 
-from typing import Any, Dict, Iterable
+from typing import Any, Iterable
 
 from elspeth.core.plugins import PluginContext
 from elspeth.core.security import (
@@ -19,15 +19,15 @@ from elspeth.core.validation import ConfigurationError
 
 
 def extract_security_levels(
-    definition: Dict[str, Any],
-    options: Dict[str, Any],
+    definition: dict[str, Any],
+    options: dict[str, Any],
     *,
     plugin_type: str,
     plugin_name: str,
     parent_context: PluginContext | None = None,
     require_security: bool = True,
     require_determinism: bool = True,
-) -> tuple[str, str, list[str]]:
+) -> tuple[str | None, str, list[str]]:
     """
     Extract and normalize security/determinism levels from definition and options.
 
@@ -89,43 +89,45 @@ def extract_security_levels(
         sources.append(f"{plugin_type}:{plugin_name}.options.determinism_level")
 
     # Coalesce security level
+    # Note: coalesce_security_level() always returns str (never None) or raises ValueError
+    # if all arguments are None. When require_security=True, the ValueError provides
+    # the validation. When require_security=False, we catch and allow None result.
+    security_level: str | None
     try:
         if parent_sec_level is not None:
-            security_level = coalesce_security_level(
-                parent_sec_level, entry_sec_level, option_sec_level
-            )
+            security_level = coalesce_security_level(parent_sec_level, entry_sec_level, option_sec_level)
         else:
             security_level = coalesce_security_level(entry_sec_level, option_sec_level)
     except ValueError as exc:
-        raise ConfigurationError(f"{plugin_type}:{plugin_name}: {exc}") from exc
+        # If all levels are None, coalesce raises ValueError
+        if require_security:
+            raise ConfigurationError(f"{plugin_type}:{plugin_name}: {exc}") from exc
+        # If security not required, allow None (will be handled by context creation)
+        security_level = None
 
-    if security_level is None and require_security:
-        raise ConfigurationError(
-            f"{plugin_type}:{plugin_name}: security_level is required"
-        )
-
+    # Normalize if we got a value (coalesce_security_level already normalizes, but be explicit)
     if security_level is not None:
         security_level = normalize_security_level(security_level)
 
     # Coalesce determinism level
+    determinism_level: str | None
     if entry_det_level is not None or option_det_level is not None:
         try:
-            determinism_level = coalesce_determinism_level(
-                entry_det_level, option_det_level
-            )
+            determinism_level = coalesce_determinism_level(entry_det_level, option_det_level)
         except ValueError as exc:
             raise ConfigurationError(f"{plugin_type}:{plugin_name}: {exc}") from exc
     else:
-        # Inherit from parent or default
-        determinism_level = parent_det_level if parent_det_level else "none"
+        # Inherit from parent or default to None
+        determinism_level = str(parent_det_level) if parent_det_level is not None else None
 
-    if determinism_level is None and require_determinism:
-        raise ConfigurationError(
-            f"{plugin_type}:{plugin_name}: determinism_level is required"
-        )
+    if determinism_level is None:
+        if require_determinism:
+            raise ConfigurationError(f"{plugin_type}:{plugin_name}: determinism_level is required")
+        # Default to "none" if not required
+        determinism_level = "none"
 
-    if determinism_level is not None:
-        determinism_level = normalize_determinism_level(determinism_level)
+    # Normalize after ensuring it's not None
+    determinism_level = normalize_determinism_level(determinism_level)
 
     return security_level, determinism_level, sources
 
@@ -133,7 +135,7 @@ def extract_security_levels(
 def create_plugin_context(
     plugin_name: str,
     plugin_kind: str,
-    security_level: str,
+    security_level: str | None,
     determinism_level: str,
     provenance: Iterable[str],
     *,
@@ -168,12 +170,20 @@ def create_plugin_context(
     provenance_tuple = tuple(provenance) if provenance else (f"{plugin_kind}:{plugin_name}.resolved",)
 
     if parent_context:
+        # When deriving from parent, None security_level is OK - will inherit from parent
         return parent_context.derive(
             plugin_name=plugin_name,
             plugin_kind=plugin_kind,
             security_level=security_level,
             determinism_level=determinism_level,
             provenance=provenance_tuple,
+        )
+
+    # Creating new context without parent - security_level must be provided
+    if security_level is None:
+        raise ConfigurationError(
+            f"Cannot create plugin context for {plugin_kind}:{plugin_name} "
+            f"without security_level (no parent context to inherit from)"
         )
 
     return PluginContext(
@@ -186,11 +196,11 @@ def create_plugin_context(
 
 
 def prepare_plugin_payload(
-    options: Dict[str, Any],
+    options: dict[str, Any],
     *,
     strip_security: bool = True,
     strip_determinism: bool = True,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Prepare plugin options by removing framework-level keys.
 

@@ -470,7 +470,7 @@ def test_suite_runner_applies_per_experiment_azure_middleware(monkeypatch):
         prompt_system="sys",
         prompt_template="{{ APPID }}",
         is_baseline=True,
-        llm_middleware_defs=[{"name": "azure_environment", "security_level": "OFFICIAL", "determinism_level": "guaranteed"}],
+        llm_middleware_defs=[{"name": "azure_environment", "determinism_level": "guaranteed"}],  # Inherits security_level from parent
     )
     variant = ExperimentConfig(
         name="variant",
@@ -478,8 +478,8 @@ def test_suite_runner_applies_per_experiment_azure_middleware(monkeypatch):
         max_tokens=10,
         prompt_system="sys",
         prompt_template="{{ APPID }}",
-        llm_middleware_defs=[{"name": "azure_environment", "security_level": "OFFICIAL", "determinism_level": "guaranteed"}],
-        baseline_plugin_defs=[{"name": "row_count", "security_level": "OFFICIAL", "determinism_level": "guaranteed"}],
+        llm_middleware_defs=[{"name": "azure_environment", "determinism_level": "guaranteed"}],  # Inherits security_level from parent
+        baseline_plugin_defs=[{"name": "row_count", "determinism_level": "guaranteed"}],  # Inherits security_level from parent
     )
 
     suite = ExperimentSuite(root=Path("."), experiments=[baseline, variant], baseline=baseline)

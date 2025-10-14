@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any
 
 FILE_PREFIX = "file/"
 DATA_PREFIX = "data/"
@@ -32,7 +32,7 @@ def validate_artifact_type(type_name: str) -> None:
         raise ValueError(f"Artifact type '{type_name}' must include subtype, e.g. 'file/csv'.")
 
 
-def normalize_metadata(metadata: Dict[str, Any] | None) -> Dict[str, Any]:
+def normalize_metadata(metadata: dict[str, Any] | None) -> dict[str, Any]:
     """Return a copy of metadata dictionaries, normalising None to an empty dict."""
 
     return dict(metadata) if metadata else {}

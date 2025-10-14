@@ -3,7 +3,7 @@ import types
 
 import pytest
 
-from elspeth.datasources import BlobConfig, BlobConfigurationError, BlobDataLoader, load_blob_config, load_blob_csv
+from elspeth.adapters import BlobConfig, BlobConfigurationError, BlobDataLoader, load_blob_config, load_blob_csv
 
 
 def test_load_blob_config_success(tmp_path):
@@ -127,7 +127,7 @@ def test_load_blob_csv_convenience(monkeypatch, tmp_path):
 
     captured = {}
 
-    import elspeth.datasources.blob_store as blob_store_module
+    import elspeth.adapters.blob_store as blob_store_module
 
     class DummyLoader:
         def __init__(self, config, credential=None, timeout=60):
@@ -201,7 +201,7 @@ def test_blob_loader_uses_sas_token(monkeypatch):
 
 
 def test_blob_data_loader_download_prevents_overwrite(tmp_path):
-    from elspeth.datasources.blob_store import BlobConfig, BlobDataLoader
+    from elspeth.adapters.blob_store import BlobConfig, BlobDataLoader
 
     config = BlobConfig.from_mapping(
         {

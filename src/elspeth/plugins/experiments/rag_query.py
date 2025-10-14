@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import warnings
-from typing import Any, Dict
+from typing import Any
 
 from elspeth.plugins.utilities.retrieval import RetrievalContextUtility
 
@@ -21,7 +21,7 @@ class RAGQueryPlugin(RetrievalContextUtility):
         )
         super().__init__(*args, **kwargs)
 
-    def process_row(self, row: Dict[str, Any], responses: Dict[str, Any]) -> Dict[str, Any]:
+    def process_row(self, row: dict[str, Any], responses: dict[str, Any]) -> dict[str, Any]:
         """Delegate to :meth:`RetrievalContextUtility.build_payload` for compatibility."""
 
         return self.build_payload(row=row, responses=responses)

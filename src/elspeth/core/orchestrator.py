@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Dict, List
+from typing import Any
 
 from elspeth.core.controls import CostTracker, RateLimiter
 from elspeth.core.experiments.plugin_registry import (
@@ -23,23 +23,23 @@ from elspeth.core.security import resolve_security_level
 class OrchestratorConfig:  # pylint: disable=too-many-instance-attributes
     """Container describing orchestrator runtime configuration values."""
 
-    llm_prompt: Dict[str, str]
-    prompt_fields: List[str] | None = None
-    prompt_aliases: Dict[str, str] | None = None
-    criteria: List[Dict[str, str]] | None = None
-    row_plugin_defs: List[Dict[str, Any]] | None = None
-    aggregator_plugin_defs: List[Dict[str, Any]] | None = None
-    sink_defs: List[Dict[str, Any]] | None = None
+    llm_prompt: dict[str, str]
+    prompt_fields: list[str] | None = None
+    prompt_aliases: dict[str, str] | None = None
+    criteria: list[dict[str, str]] | None = None
+    row_plugin_defs: list[dict[str, Any]] | None = None
+    aggregator_plugin_defs: list[dict[str, Any]] | None = None
+    sink_defs: list[dict[str, Any]] | None = None
     prompt_pack: str | None = None
-    baseline_plugin_defs: List[Dict[str, Any]] | None = None
-    validation_plugin_defs: List[Dict[str, Any]] | None = None
-    retry_config: Dict[str, Any] | None = None
-    checkpoint_config: Dict[str, Any] | None = None
-    llm_middleware_defs: List[Dict[str, Any]] | None = None
-    prompt_defaults: Dict[str, Any] | None = None
-    concurrency_config: Dict[str, Any] | None = None
-    early_stop_config: Dict[str, Any] | None = None
-    early_stop_plugin_defs: List[Dict[str, Any]] | None = None
+    baseline_plugin_defs: list[dict[str, Any]] | None = None
+    validation_plugin_defs: list[dict[str, Any]] | None = None
+    retry_config: dict[str, Any] | None = None
+    checkpoint_config: dict[str, Any] | None = None
+    llm_middleware_defs: list[dict[str, Any]] | None = None
+    prompt_defaults: dict[str, Any] | None = None
+    concurrency_config: dict[str, Any] | None = None
+    early_stop_config: dict[str, Any] | None = None
+    early_stop_plugin_defs: list[dict[str, Any]] | None = None
 
 
 class ExperimentOrchestrator:  # pylint: disable=too-many-instance-attributes,too-few-public-methods
@@ -50,7 +50,7 @@ class ExperimentOrchestrator:  # pylint: disable=too-many-instance-attributes,to
         *,
         datasource: DataSource,
         llm_client: LLMClientProtocol,
-        sinks: List[ResultSink],
+        sinks: list[ResultSink],
         config: OrchestratorConfig,
         experiment_runner: ExperimentRunner | None = None,
         rate_limiter: RateLimiter | None = None,
@@ -141,7 +141,7 @@ class ExperimentOrchestrator:  # pylint: disable=too-many-instance-attributes,to
         )
         setattr(self.experiment_runner, "plugin_context", experiment_context)
 
-    def run(self) -> Dict[str, Any]:
+    def run(self) -> dict[str, Any]:
         """Execute all configured experiments and return the runner payload."""
 
         df = self.datasource.load()

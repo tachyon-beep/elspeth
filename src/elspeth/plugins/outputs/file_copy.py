@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import shutil
 from pathlib import Path
-from typing import Dict, List, Mapping
+from typing import Mapping
 
 from elspeth.core.interfaces import Artifact, ResultSink
 from elspeth.core.security import normalize_determinism_level, normalize_security_level
@@ -26,7 +26,7 @@ class FileCopySink(ResultSink):
         self._security_level: str | None = None
         self._determinism_level: str | None = None
 
-    def prepare_artifacts(self, artifacts: Mapping[str, List[Artifact]]):  # pragma: no cover - optional
+    def prepare_artifacts(self, artifacts: Mapping[str, list[Artifact]]):  # pragma: no cover - optional
         self._source_artifact = None
         self._output_type = None
         for values in artifacts.values():
@@ -44,7 +44,7 @@ class FileCopySink(ResultSink):
                 self._security_level = self._source_artifact.security_level
                 return
 
-    def write(self, results: Dict, *, metadata: Dict | None = None) -> None:
+    def write(self, results: dict, *, metadata: dict | None = None) -> None:
         if not self._source_artifact or not self._source_artifact.path:
             message = "FileCopySink requires an input artifact; configure artifacts.consumes"
             if self.on_error == "skip":
@@ -70,7 +70,7 @@ class FileCopySink(ResultSink):
             self._security_level = normalize_security_level(metadata.get("security_level"))
             self._determinism_level = normalize_determinism_level(metadata.get("determinism_level"))
 
-    def collect_artifacts(self) -> Dict[str, Artifact]:  # pragma: no cover - optional
+    def collect_artifacts(self) -> dict[str, Artifact]:  # pragma: no cover - optional
         if not self._written_path:
             return {}
         metadata = {

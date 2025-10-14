@@ -80,10 +80,14 @@ def test_create_named_utility_inherits_parent_context():
     plugin = create_named_utility("dummy", {"foo": "bar"}, parent_context=child)
 
     assert isinstance(plugin, DummyUtility)
-    assert plugin.plugin_context.security_level == "OFFICIAL"
+    assert plugin.plugin_context.security_level == "OFFICIAL"  # Normalized from lowercase "official"
     assert plugin.plugin_context.determinism_level == "guaranteed"
     assert plugin.plugin_context.parent == child
-    assert plugin.plugin_context.provenance == ("utility:dummy.resolved",)
+    # Provenance should track that levels were inherited from parent
+    assert plugin.plugin_context.provenance == (
+        "utility:dummy.inherited.security_level",
+        "utility:dummy.inherited.determinism_level",
+    )
     assert plugin.options["foo"] == "bar"
 
 

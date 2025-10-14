@@ -3,21 +3,21 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import Any, Dict, Protocol
+from typing import Any, Protocol
 
 
 @dataclass
 class LLMRequest:
     system_prompt: str
     user_prompt: str
-    metadata: Dict[str, Any]
+    metadata: dict[str, Any]
 
     def clone(
         self,
         *,
         system_prompt: str | None = None,
         user_prompt: str | None = None,
-        metadata: Dict[str, Any] | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> "LLMRequest":
         return replace(
             self,
@@ -35,7 +35,7 @@ class LLMMiddleware(Protocol):
     def before_request(self, request: LLMRequest) -> LLMRequest:
         return request
 
-    def after_response(self, request: LLMRequest, response: Dict[str, Any]) -> Dict[str, Any]:  # pragma: no cover - optional override
+    def after_response(self, request: LLMRequest, response: dict[str, Any]) -> dict[str, Any]:  # pragma: no cover - optional override
         return response
 
 

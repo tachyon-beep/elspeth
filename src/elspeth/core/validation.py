@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Dict, Iterable, List, Mapping, Sequence, Tuple
+from typing import Any, Callable, Iterable, Mapping, Sequence
 
 import yaml
 
@@ -35,8 +35,8 @@ class ValidationMessage:
 class ValidationReport:
     """Aggregates validation errors and warnings for a configuration."""
 
-    errors: List[ValidationMessage] = field(default_factory=list)
-    warnings: List[ValidationMessage] = field(default_factory=list)
+    errors: list[ValidationMessage] = field(default_factory=list)
+    warnings: list[ValidationMessage] = field(default_factory=list)
 
     def add_error(self, message: str, context: str | None = None) -> None:
         """Record an error message with optional context."""
@@ -84,7 +84,7 @@ def validate_schema(
         yield ValidationMessage("value is missing", context=context)
         return
 
-    errors: List[tuple[Tuple[object, ...], str]] = []
+    errors: list[tuple[tuple[object, ...], str]] = []
     _validate_node(data, schema, (), errors)
     for path, message in errors:
         pointer = _format_error_path(path)
@@ -97,11 +97,13 @@ def validate_schema(
 def _validate_node(
     value: Any,
     schema: Mapping[str, Any],
-    path: Tuple[object, ...],
-    errors: List[tuple[Tuple[object, ...], str]],
+    path: tuple[object, ...],
+    errors: list[tuple[tuple[object, ...], str]],
 ) -> None:
     """Recursively validate ``value`` against ``schema`` accumulating errors."""
 
+    # Defensive runtime check: schema is typed as Mapping but we guard against None
+    # Mypy considers this unreachable but it's a safety check for untrusted inputs
     if schema is None:
         return  # type: ignore[unreachable]
 
@@ -126,13 +128,13 @@ def _validate_node(
 def _validate_any_of(
     value: Any,
     options: Sequence[Mapping[str, Any]],
-    path: Tuple[object, ...],
-    errors: List[tuple[Tuple[object, ...], str]],
+    path: tuple[object, ...],
+    errors: list[tuple[tuple[object, ...], str]],
 ) -> None:
     """Validate ``value`` matches at least one schema in ``options``."""
 
     for option in options:
-        option_errors: List[tuple[Tuple[object, ...], str]] = []
+        option_errors: list[tuple[tuple[object, ...], str]] = []
         _validate_node(value, option, path, option_errors)
         if not option_errors:
             return
@@ -142,8 +144,8 @@ def _validate_any_of(
 def _validate_object(
     value: Mapping[str, Any],
     schema: Mapping[str, Any],
-    path: Tuple[object, ...],
-    errors: List[tuple[Tuple[object, ...], str]],
+    path: tuple[object, ...],
+    errors: list[tuple[tuple[object, ...], str]],
 ) -> None:
     """Validate object-specific constraints for ``value``."""
 
@@ -161,8 +163,8 @@ def _validate_object(
 def _validate_array(
     value: Sequence[Any],
     schema: Mapping[str, Any],
-    path: Tuple[object, ...],
-    errors: List[tuple[Tuple[object, ...], str]],
+    path: tuple[object, ...],
+    errors: list[tuple[tuple[object, ...], str]],
 ) -> None:
     """Validate array-specific constraints for ``value``."""
 
@@ -177,8 +179,8 @@ def _validate_array(
 def _validate_enum_membership(
     value: Any,
     schema: Mapping[str, Any],
-    path: Tuple[object, ...],
-    errors: List[tuple[Tuple[object, ...], str]],
+    path: tuple[object, ...],
+    errors: list[tuple[tuple[object, ...], str]],
 ) -> None:
     """Ensure ``value`` is one of the allowed enum values if provided."""
 
@@ -190,8 +192,8 @@ def _validate_enum_membership(
 def _validate_numeric_bounds(
     value: Any,
     schema: Mapping[str, Any],
-    path: Tuple[object, ...],
-    errors: List[tuple[Tuple[object, ...], str]],
+    path: tuple[object, ...],
+    errors: list[tuple[tuple[object, ...], str]],
 ) -> None:
     """Validate numeric upper and lower bounds for ``value``."""
 
@@ -420,7 +422,7 @@ def _validate_plugin_reference(
     entry: Any,
     *,
     kind: str,
-    validator: Callable[[str, Dict[str, Any] | None], None],
+    validator: Callable[[str, dict[str, Any] | None], None],
     require_security_level: bool = False,
 ) -> None:
     """Validate a single plugin reference entry."""
@@ -438,7 +440,7 @@ def _validate_plugin_reference(
         return
 
     options = entry.get("options")
-    options_dict: Dict[str, Any] | None
+    options_dict: dict[str, Any] | None
     options_level_raw = None
     options_determinism_raw = None
     if options is None:
@@ -481,7 +483,7 @@ def _validate_plugin_reference(
 def _validate_plugin_list(
     report: ValidationReport,
     entries: Any,
-    validator: Callable[[str, Dict[str, Any] | None], None],
+    validator: Callable[[str, dict[str, Any] | None], None],
     *,
     context: str,
     require_security_level: bool = False,
@@ -636,7 +638,7 @@ def _validate_suite_defaults(
 def _validate_experiment_plugins(
     report: ValidationReport,
     entries: Any,
-    validator: Callable[[Dict[str, Any]], None],
+    validator: Callable[[dict[str, Any]], None],
     context: str,
 ) -> None:
     """Validate experiment plugin definitions using ``validator``."""
@@ -674,7 +676,7 @@ def _validate_experiment_plugins(
 def _validate_middleware_list(
     report: ValidationReport,
     entries: Any,
-    validator: Callable[[Dict[str, Any]], None],
+    validator: Callable[[dict[str, Any]], None],
     *,
     context: str,
 ) -> None:
@@ -721,9 +723,9 @@ def _validate_prompt_files(report: ValidationReport, folder: Path, name: str, co
         report.add_error("Missing or empty user prompt", context=f"experiment:{name}")
 
 
-def _find_duplicates(items: Iterable[str]) -> List[str]:
+def _find_duplicates(items: Iterable[str]) -> list[str]:
     """Return the list of duplicate items found in ``items``."""
-    counts: Dict[str, int] = {}
+    counts: dict[str, int] = {}
     for item in items:
         counts[item] = counts.get(item, 0) + 1
     return [item for item, count in counts.items() if count > 1]
@@ -855,11 +857,11 @@ def _collect_suite_experiments(
     exp_registry,
     llm_registry,
     controls_registry,
-) -> tuple[List[_ExperimentSummary], List[str], str | None, int]:
+) -> tuple[list[_ExperimentSummary], list[str], str | None, int]:
     """Collect and validate experiment summaries from the suite directory."""
 
-    summaries: List[_ExperimentSummary] = []
-    all_names: List[str] = []
+    summaries: list[_ExperimentSummary] = []
+    all_names: list[str] = []
     baseline_name: str | None = None
     baseline_count = 0
 
@@ -882,10 +884,10 @@ def _calculate_preflight(
     baseline_name: str | None,
     row_estimate: int,
     report: ValidationReport,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Compute preflight metadata and register warnings on the report."""
 
-    warnings: List[str] = []
+    warnings: list[str] = []
     enabled = [summary for summary in summaries if summary.enabled]
 
     for summary in enabled:
@@ -978,12 +980,12 @@ def _validate_prompt_pack_section(
     exp_registry,
     llm_registry,
     profile: str,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Validate prompt pack mappings and return a normalized dict."""
 
     prompt_packs_raw = profile_data.get("prompt_packs")
     if prompt_packs_raw is None:
-        prompt_packs: Dict[str, Any] = {}
+        prompt_packs: dict[str, Any] = {}
     elif isinstance(prompt_packs_raw, Mapping):
         prompt_packs = dict(prompt_packs_raw)
     else:
@@ -1182,7 +1184,7 @@ class SuiteValidationReport:
     """Convenience wrapper bundling validation results with preflight data."""
 
     report: ValidationReport
-    preflight: Dict[str, Any] = field(default_factory=dict)
+    preflight: dict[str, Any] = field(default_factory=dict)
 
     def raise_if_errors(self) -> None:
         """Raise ``ConfigurationError`` if any validation errors exist."""

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from typing import Any, Dict, Optional
+from typing import Any
 
 from elspeth.core.interfaces import LLMClientProtocol
 
@@ -13,7 +13,7 @@ class AzureOpenAIClient(LLMClientProtocol):
         self,
         *,
         deployment: str | None = None,
-        config: Dict[str, Any],
+        config: dict[str, Any],
         client: Any | None = None,
     ):
         self.config = config
@@ -38,10 +38,11 @@ class AzureOpenAIClient(LLMClientProtocol):
             azure_endpoint=azure_endpoint,
         )
 
-    def _resolve_deployment(self, deployment: Optional[str]) -> str:
+    def _resolve_deployment(self, deployment: str | None) -> str:
         if deployment:
             return deployment
         if self.config.get("deployment"):
+            # Dict[str, Any] indexing returns Any, but runtime check ensures it's str
             return self.config["deployment"]  # type: ignore[no-any-return]
         env_key = self.config.get("deployment_env")
         if env_key:
@@ -62,8 +63,9 @@ class AzureOpenAIClient(LLMClientProtocol):
             raise ValueError(f"AzureOpenAIClient missing required config value '{key}'")
         return value
 
-    def _resolve_optional(self, key: str) -> Optional[str]:
+    def _resolve_optional(self, key: str) -> str | None:
         if key in self.config and self.config[key]:
+            # Dict[str, Any] indexing returns Any, but runtime check ensures it's str
             return self.config[key]  # type: ignore[no-any-return]
         env_key = self.config.get(f"{key}_env")
         if env_key:
@@ -79,14 +81,14 @@ class AzureOpenAIClient(LLMClientProtocol):
         *,
         system_prompt: str,
         user_prompt: str,
-        metadata: Dict[str, Any] | None = None,
-    ) -> Dict[str, Any]:
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         messages = [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
         ]
 
-        kwargs: Dict[str, Any] = {"model": self.deployment, "messages": messages}
+        kwargs: dict[str, Any] = {"model": self.deployment, "messages": messages}
         if self.temperature is not None:
             kwargs["temperature"] = self.temperature
         if self.max_tokens is not None:

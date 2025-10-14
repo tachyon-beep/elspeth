@@ -6,7 +6,7 @@ import base64
 import io
 import logging
 from pathlib import Path
-from typing import Any, Dict, Mapping, Sequence, Tuple
+from typing import Any, Mapping, Sequence
 
 from elspeth.core.interfaces import Artifact, ArtifactDescriptor, ResultSink
 from elspeth.core.security import normalize_determinism_level, normalize_security_level
@@ -48,7 +48,7 @@ class VisualAnalyticsSink(ResultSink):
             width, height = figure_size
             if width <= 0 or height <= 0:
                 raise ValueError("figure_size values must be positive numbers")
-            self.figure_size: Tuple[float, float] = (float(width), float(height))
+            self.figure_size: tuple[float, float] = (float(width), float(height))
         else:
             self.figure_size = (8.0, 4.5)
         if on_error not in {"abort", "skip"}:
@@ -60,11 +60,11 @@ class VisualAnalyticsSink(ResultSink):
         self.seaborn_style = seaborn_style
         self._security_level: str | None = None
         self._determinism_level: str | None = None
-        self._last_written_files: list[tuple[list[str], Path, Dict[str, Any]]] = []
+        self._last_written_files: list[tuple[list[str], Path, dict[str, Any]]] = []
         self._plot_modules: tuple[Any, Any, Any] | None = None
 
     # --------------------------------------------------------------------- API
-    def write(self, results: Dict[str, Any], *, metadata: Dict[str, Any] | None = None) -> None:
+    def write(self, results: dict[str, Any], *, metadata: dict[str, Any] | None = None) -> None:
         metadata = metadata or {}
         try:
             score_means, pass_rates = self._extract_scores(results)
@@ -90,7 +90,7 @@ class VisualAnalyticsSink(ResultSink):
             fig, ax = plt.subplots(figsize=self.figure_size)
             labels = list(score_means.keys())
             values = [score_means[label] for label in labels]
-            bar_kwargs: Dict[str, Any] = {}
+            bar_kwargs: dict[str, Any] = {}
             if self.bar_color:
                 bar_kwargs["color"] = self.bar_color
             ax.bar(labels, values, **bar_kwargs)
@@ -112,7 +112,7 @@ class VisualAnalyticsSink(ResultSink):
             plt.close(fig)
             png_bytes = buffer.getvalue()
 
-            written: list[tuple[list[str], Path, Dict[str, Any]]] = []
+            written: list[tuple[list[str], Path, dict[str, Any]]] = []
             if "png" in self.formats:
                 png_path = self.base_path / f"{self.file_stem}.png"
                 png_path.write_bytes(png_bytes)
@@ -180,8 +180,8 @@ class VisualAnalyticsSink(ResultSink):
     def consumes(self) -> list[str]:  # pragma: no cover - no dependencies
         return []
 
-    def collect_artifacts(self) -> Dict[str, Artifact]:
-        artifacts: Dict[str, Artifact] = {}
+    def collect_artifacts(self) -> dict[str, Artifact]:
+        artifacts: dict[str, Artifact] = {}
         for keys, path, extra in self._last_written_files:
             suffix = path.suffix.lower()
             if suffix == ".png":
@@ -224,9 +224,9 @@ class VisualAnalyticsSink(ResultSink):
         self._plot_modules = (matplotlib, plt, seaborn)
         return self._plot_modules
 
-    def _extract_scores(self, payload: Mapping[str, Any]) -> tuple[Dict[str, float], Dict[str, float]]:
-        means: Dict[str, float] = {}
-        pass_rates: Dict[str, float] = {}
+    def _extract_scores(self, payload: Mapping[str, Any]) -> tuple[dict[str, float], dict[str, float]]:
+        means: dict[str, float] = {}
+        pass_rates: dict[str, float] = {}
         aggregates = payload.get("aggregates")
         if isinstance(aggregates, Mapping):
             stats = aggregates.get("score_stats")
@@ -246,8 +246,8 @@ class VisualAnalyticsSink(ResultSink):
             return means, pass_rates
 
         # Fallback: compute from individual records
-        score_lists: Dict[str, list[float]] = {}
-        flag_totals: Dict[str, list[int]] = {}
+        score_lists: dict[str, list[float]] = {}
+        flag_totals: dict[str, list[int]] = {}
         for record in payload.get("results") or []:
             if not isinstance(record, Mapping):
                 continue

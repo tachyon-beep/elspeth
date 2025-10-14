@@ -13,7 +13,7 @@ import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 from urllib.parse import urlparse
 
 import yaml
@@ -38,7 +38,7 @@ class BlobConfig:
     sas_token: str | None = None
 
     @classmethod
-    def from_mapping(cls, data: Dict[str, Any]) -> "BlobConfig":
+    def from_mapping(cls, data: dict[str, Any]) -> "BlobConfig":
         """Create a ``BlobConfig`` from a decoded mapping."""
 
         required = ["connection_name", "azureml_datastore_uri"]
@@ -86,7 +86,7 @@ class BlobConfig:
         )
 
 
-def _parse_storage_uri(storage_uri: str) -> Dict[str, str]:
+def _parse_storage_uri(storage_uri: str) -> dict[str, str]:
     """Break a blob URI into account/container/blob components."""
 
     parsed = urlparse(storage_uri)
@@ -195,6 +195,7 @@ class BlobDataLoader:
                 connection_timeout=self.timeout,
                 read_timeout=self.timeout,
             )
+            # Lazy initialization: assigning BlobClient to None-typed field
             self._blob_client = client  # type: ignore[assignment]
         return self._blob_client
 
@@ -222,12 +223,14 @@ class BlobDataLoader:
 
         downloader = self.blob_client.download_blob()
         raw = downloader.readall()
+        # Azure SDK readall() returns Any; .decode() on Any returns Any despite runtime str value
         return raw.decode(encoding)  # type: ignore[no-any-return]
 
     def load_bytes(self) -> bytes:
         """Return the blob contents as raw bytes."""
 
         downloader = self.blob_client.download_blob()
+        # Azure SDK readall() returns Any despite runtime bytes value
         return downloader.readall()  # type: ignore[no-any-return]
 
     def load_csv(self, **pandas_kwargs):
@@ -249,7 +252,7 @@ def load_blob_csv(
     profile: str = "default",
     credential: Any | None = None,
     timeout: int | None = 60,
-    pandas_kwargs: Dict[str, Any] | None = None,
+    pandas_kwargs: dict[str, Any] | None = None,
 ):
     """Convenience helper that downloads a CSV using the configured blob."""
 
