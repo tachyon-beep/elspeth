@@ -28,7 +28,13 @@ sequenceDiagram
 ```
 
 - Datasources attach classification metadata that is later folded into sink metadata (`src/elspeth/plugins/datasources/csv_local.py:35`, `src/elspeth/core/experiments/runner.py:208`).[^df-classification-2025-10-12]
+<!-- UPDATE 2025-10-12: Datasource path alignment -->
+Update 2025-10-12: Datasource implementations are housed under `src/elspeth/plugins/nodes/sources/` (`csv_local.py`, `csv_blob.py`, `blob.py`); behaviour remains unchanged.
+<!-- END UPDATE -->
 - Middleware can veto, mask, or audit prompts before the LLM is contacted, forming the first trust boundary for untrusted input (`src/elspeth/plugins/llms/middleware.py:110`, `src/elspeth/plugins/llms/middleware.py:233`).[^df-middleware-2025-10-12]
+<!-- UPDATE 2025-10-12: Middleware module relocation -->
+Update 2025-10-12: Middleware hooks reside in `src/elspeth/plugins/nodes/transforms/llm/middleware.py` and `middleware_azure.py` after the namespace migration.
+<!-- END UPDATE -->
 - Cost tracking and rate limiting wrap each LLM invocation with deterministic retry state (`src/elspeth/core/experiments/runner.py:498`, `src/elspeth/core/experiments/runner.py:520`, `src/elspeth/core/controls/rate_limit.py:74`).[^df-retry-2025-10-12]
 - The artifact pipeline enforces dependency ordering and classification-aware access before sinks persist or aggregate results (`src/elspeth/core/artifact_pipeline.py:192`, `src/elspeth/core/artifact_pipeline.py:201`).[^df-pipeline-2025-10-12]
 <!-- UPDATE 2025-10-12: Runner metadata -->
@@ -202,6 +208,9 @@ flowchart TD
 
 ### Update 2025-10-12: Artifact Rehydration
 - `ArtifactPipeline` stores produced artifacts and rehydrates them for downstream sinks through `collect_artifacts`, ensuring sanitisation metadata and security levels persist (`src/elspeth/core/artifact_pipeline.py:120`, `src/elspeth/core/interfaces.py:101`).
+<!-- UPDATE 2025-10-12: Artifact descriptor relocation -->
+Update 2025-10-12: Protocol helpers invoked during rehydration are defined in `src/elspeth/core/protocols.py:237-309`; `core/interfaces.py` remains for historical reference.
+<!-- END UPDATE -->
 
 ## Update History
 - 2025-10-12 – Update 2025-10-12: Added suite reporting export flow, expanded artifact lifecycle coverage (analytics/visual/excel/zip/blob), and documented runner metadata propagation for accreditation evidence.

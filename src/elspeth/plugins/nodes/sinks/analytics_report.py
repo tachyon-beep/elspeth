@@ -72,7 +72,7 @@ class AnalyticsReportSink(ResultSink):
 
     def produces(self) -> list[ArtifactDescriptor]:  # pragma: no cover - metadata only
         return [
-            ArtifactDescriptor(name="analytics_report", type="application/json", persist=True, alias="analytics"),
+            ArtifactDescriptor(name="analytics_report", type="file/json", persist=True, alias="analytics"),
         ]
 
     def consumes(self) -> list[str]:  # pragma: no cover - no dependencies

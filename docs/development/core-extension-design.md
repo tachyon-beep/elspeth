@@ -15,8 +15,8 @@ This note sketches early implementation steps for broadening the orchestrator be
 2. **Registry** – Add `TransformCoreRegistry` similar to `PluginRegistry`/`PluginFactory` (new module `src/elspeth/core/transform/registry.py`). Support context-aware factory signature `(options: Dict[str, Any], context: PluginContext)`.
 3. **Configuration Loader** – Extend `src/elspeth/config.py` to recognise `core` sections specifying either an LLM or transform plugin (e.g., `core: { plugin: data_transform/sql, options: {...} }`). Backwards compatibility: default to `llm` when `core` absent.
 4. **Builtin plugins**:
-   - `sql_transform`: executes parameterised SQL using a read-only connection profile; emits DataFrame artifacts.
-   - `python_transform`: loads approved transformation modules (whitelisted via configuration) and executes a `transform(context, payload)` hook.
+   * `sql_transform`: executes parameterised SQL using a read-only connection profile; emits DataFrame artifacts.
+   * `python_transform`: loads approved transformation modules (whitelisted via configuration) and executes a `transform(context, payload)` hook.
 5. **Security** – Enforce allowlists derived from `context.security_level`. For SQL, restrict schemas and require parameter binding. For Python modules, load from signed packages and log module hashes.
 6. **Testing** – Mirror LLM test suites (`tests/test_transform_core.py`) with mock connectors and golden output fixtures.
 7. **Support Classes** – Implement helpers such as `SqlTemplateValidator` (static analysis of templated queries), `TransformSandbox` (controls module execution), and artifact helpers (`TransformArtifact`) capturing code/version digests.
@@ -25,8 +25,8 @@ This note sketches early implementation steps for broadening the orchestrator be
 
 1. **Protocol** – Define `PolicyCoreProtocol` with `evaluate(*, payload, metadata) -> Dict[str, Any]` returning decisions and rationale.
 2. **Plugin ideas**:
-   - `opa_policy`: bundle Open Policy Agent rules; options include `policy_path`, `default_decision`, `data_inputs`.
-   - `rulebook`: YAML/JSON-defined decision tables executed deterministically.
+   * `opa_policy`: bundle Open Policy Agent rules; options include `policy_path`, `default_decision`, `data_inputs`.
+   * `rulebook`: YAML/JSON-defined decision tables executed deterministically.
 3. **Audit** – Persist decision logs alongside experiment artifacts, including policy digests (hashes) and input fingerprints. Use context to gate policy scope (e.g., high security tiers may load additional rule bundles).
 4. **Middleware fit** – PII guards can still scrub inputs before evaluation; add optional middleware to emit structured decision metrics.
 5. **Support Classes** – Add `PolicyCompiler` to pre-compile policies per security level, `PolicyBundleArtifact` to record bundle metadata, and `RuleBookParser` to validate rule schemas before runtime.
@@ -35,8 +35,8 @@ This note sketches early implementation steps for broadening the orchestrator be
 
 1. **Protocol** – Similar to transform core but emphasises deterministic seeding and compute cost reporting.
 2. **Plugins**:
-   - `monte_carlo`: run seeded Monte Carlo scenarios defined in configuration.
-   - `ml_inference`: serve deterministic ML models (ONNX, TensorFlow) with versioned model artifacts.
+   * `monte_carlo`: run seeded Monte Carlo scenarios defined in configuration.
+   * `ml_inference`: serve deterministic ML models (ONNX, TensorFlow) with versioned model artifacts.
 3. **Cost Tracking** – Integrate with existing cost tracker using synthetic “compute units”; middleware can report runtime metrics.
 4. **Reproducibility** – Store seeds and model versions in emitted artifacts; include optional signed manifests.
 5. **Support Classes** – Introduce `SimulationSeedManager` (derive per-run seeds from context), `ModelRegistryClient` for loading signed model binaries, and `SimulationArtifact` capturing run metadata.
@@ -45,8 +45,8 @@ This note sketches early implementation steps for broadening the orchestrator be
 
 1. **Protocol** – Provide `execute(actions: List[Dict[str, Any]], metadata: Dict[str, Any]) -> Dict[str, Any]` semantics.
 2. **Plugins**:
-   - `ticket_workflow`: create/update tickets in ITSM systems.
-   - `remediation_plan`: call approved remediation APIs with templated payloads.
+   * `ticket_workflow`: create/update tickets in ITSM systems.
+   * `remediation_plan`: call approved remediation APIs with templated payloads.
 3. **Safety** – Integrate dry-run toggles and approval middleware; context determines which credentials or endpoints are available.
 4. **Auditing** – Emit signed execution logs (request/response pairs) into artifact pipeline.
 5. **Support Classes** – Provide `ActionDryRunGuard`, `CredentialResolver` (context-aware secret fetcher), and `ActionLogArtifact` to store signed traces.
@@ -61,6 +61,7 @@ This note sketches early implementation steps for broadening the orchestrator be
 ## 7. Configuration & CLI Impacts
 
 * Update CLI and `load_settings` to accept a `core` block, e.g.:
+
   ```yaml
   default:
     core:
@@ -74,6 +75,7 @@ This note sketches early implementation steps for broadening the orchestrator be
       plugin: mock
       security_level: official
   ```
+
 * Ensure sample suites and docs demonstrate both legacy LLM and new cores.
 * Provide migration guidance for users moving from `llm` to `core` blocks.
 
@@ -81,10 +83,10 @@ This note sketches early implementation steps for broadening the orchestrator be
 
 * Unit tests for each new registry/protocol.
 * Integration tests covering:
-  - Context propagation through new cores.
-  - Artifact pipeline interactions.
-  - Middleware compatibility (PII guards, audit logging).
-  - Sample suite exercises invoking non-LLM cores.
+  * Context propagation through new cores.
+  * Artifact pipeline interactions.
+  * Middleware compatibility (PII guards, audit logging).
+  * Sample suite exercises invoking non-LLM cores.
 
 ## 9. Security Review Checklist
 

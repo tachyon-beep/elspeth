@@ -18,6 +18,7 @@ This guide helps teams upgrade from the legacy `old/` implementation to the mode
 | Experiment stats / analytics | Plugins in `src/elspeth/plugins/experiments/metrics.py` | Metrics, practical significance, Cliff’s delta, reporting sink replace legacy `StatsAnalyzer`. |
 | Azure DevOps archiving | Repository sink (`azure_devops_repo`) | Configure in sinks section of settings. |
 | Azure telemetry logging | `azure_environment` middleware | Handles Azure ML run interaction; defaults to skip when no run context. |
+| Retry/cost telemetry | Runner metadata + analytics/reporting sinks | `retry_summary`, `cost_summary`, and `early_stop` metadata surface in payloads and downstream artefacts. |
 | Concurrency / checkpointing | `concurrency` & `checkpoint` settings | Configure thread pool thresholds and resumable IDs to match legacy behaviour. |
 
 ## Configuration Migration
@@ -104,7 +105,13 @@ Refer to `notes/config-migration.md` for key renames. Typical steps:
   ```
 
   Install extras with `pip install -e .[dev,analytics-visual]` to pull `matplotlib`/`seaborn` (`src/elspeth/plugins/outputs/visual_report.py:17`).[^migration-visual-2025-10-12]
+<!-- UPDATE 2025-10-12: Visual sink module relocation -->
+Update 2025-10-12: Visual analytics sink lives in `src/elspeth/plugins/nodes/sinks/visual_report.py`.
+<!-- END UPDATE -->
 - **Suite report exports** – Pass `--reports-dir outputs/sample_suite/reports` to re-create executive summaries, validation JSON, comparative analysis, recommendations, and Excel dashboards without custom notebooks (`src/elspeth/cli.py:392`, `src/elspeth/tools/reporting.py:138`).[^migration-suite-reports-2025-10-12]
+<!-- UPDATE 2025-10-12: Suite report citation refresh -->
+Update 2025-10-12: Report generation dispatch now resides at `src/elspeth/cli.py:395-458` with implementation in `src/elspeth/tools/reporting.py:26-199`.
+<!-- END UPDATE -->
 
 ## Azure-Specific Features
 

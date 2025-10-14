@@ -11,6 +11,7 @@
 All existing configuration files are compatible with the migration. No changes to configuration format or structure are required.
 
 ### Key Findings
+
 - ✅ **6 configuration files** inventoried
 - ✅ **All configs parse** successfully
 - ✅ **CLI loads configs** without errors
@@ -22,11 +23,13 @@ All existing configuration files are compatible with the migration. No changes t
 ## Configuration Inventory
 
 ### Production Configs
+
 1. `config/sample_suite/settings.yaml` - Main sample suite ✅
 2. `config/settings.yaml` - Alternative settings ✅
 3. `config/blob_store.yaml` - Blob storage profiles ✅
 
 ### Variant Configs
+
 4. `config/settings_colour_animals.yaml` - Color/animals variant ✅
 5. `config/settings_prompt_variants.yaml` - Prompt variant demo ✅
 6. `config/sample_suite/secure_azure_workflow.yaml` - Azure secure workflow ✅
@@ -38,6 +41,7 @@ All existing configuration files are compatible with the migration. No changes t
 ## Compatibility Assessment
 
 ### Parsing Validation
+
 ```bash
 # All configs parse successfully
 ✓ config/blob_store.yaml parses OK
@@ -49,6 +53,7 @@ All existing configuration files are compatible with the migration. No changes t
 ```
 
 ### CLI Loading Validation
+
 ```bash
 python -m elspeth.cli \
   --settings config/sample_suite/settings.yaml \
@@ -62,6 +67,7 @@ Result: ✅ Suite loaded successfully, 7 experiments executed
 ## Configuration Structure Analysis
 
 ### Plugin References (Will Not Change)
+
 ```yaml
 # Datasource (no changes needed)
 datasource:
@@ -85,6 +91,7 @@ sinks:
 **Rationale**: Configuration references plugins by **name** (e.g., `csv_local`), not by code location. Registry reorganization is transparent to config files.
 
 ### Configuration Layers (Will Not Change)
+
 ```
 1. Suite defaults (settings.yaml)
 2. Prompt packs (packs/*.yaml)
@@ -116,6 +123,7 @@ Implementation: CSVDataSource (location irrelevant to config)
 ## Verification Tests
 
 ### Test 1: Config Parsing
+
 ```python
 def test_all_configs_parse():
     import yaml
@@ -129,24 +137,29 @@ def test_all_configs_parse():
             data = yaml.safe_load(f)
         assert data is not None
 ```
+
 **Status**: ✅ All pass
 
 ### Test 2: Config Loading
+
 ```python
 def test_suite_loads_from_config():
     from elspeth.config import load_suite_config
     config = load_suite_config("config/sample_suite/settings.yaml")
     assert len(config.experiments) > 0
 ```
+
 **Status**: ✅ Passes
 
 ### Test 3: Experiment Execution
+
 ```bash
 python -m elspeth.cli \
   --settings config/sample_suite/settings.yaml \
   --suite-root config/sample_suite \
   --head 3
 ```
+
 **Status**: ✅ 7 experiments execute successfully
 
 ---
@@ -154,6 +167,7 @@ python -m elspeth.cli \
 ## Migration Checklist for Configs
 
 ### Pre-Migration
+
 - [x] Inventory all configs (6 files)
 - [x] Verify all parse successfully
 - [x] Verify CLI loads configs
@@ -161,12 +175,14 @@ python -m elspeth.cli \
 - [x] Confirm no import path references
 
 ### During Migration
+
 - [ ] Run sample suite after each phase
 - [ ] Verify all experiments still execute
 - [ ] Check no ConfigurationError raised
 - [ ] Monitor for deprecation warnings
 
 ### Post-Migration
+
 - [ ] Re-run all config files
 - [ ] Verify identical outputs
 - [ ] Update documentation examples (if needed)
@@ -176,14 +192,16 @@ python -m elspeth.cli \
 
 ## User Impact
 
-### Users DO NOT Need To:
+### Users DO NOT Need To
+
 - ❌ Update configuration files
 - ❌ Change plugin references
 - ❌ Modify experiment definitions
 - ❌ Update prompt packs
 - ❌ Change sink definitions
 
-### Users MAY Want To (Optional):
+### Users MAY Want To (Optional)
+
 - ✅ Adopt new plugin names (if any added)
 - ✅ Use new features (if migration adds capability)
 - ✅ Update documentation references
@@ -195,21 +213,25 @@ python -m elspeth.cli \
 ## Activity 5 Deliverables
 
 ### ✅ All Existing Configs Inventoried
+
 - 6 YAML files catalogued
 - All parse successfully
 - All load in CLI
 
 ### ✅ All Sample Configs Parse Successfully
+
 - Manual verification: ✅
 - Automated tests: ✅
 - CLI integration: ✅
 
 ### ✅ Configuration Compatibility Layer Designed
+
 - **Design**: No layer needed (plugin names are stable)
 - **Rationale**: Configs reference names, not paths
 - **Verification**: All configs work unchanged
 
 ### ✅ Old Config Formats Will Still Work
+
 - Pre-migration configs: ✅ Work
 - Post-migration configs: ✅ Will work (no changes)
 - Backward compatibility: ✅ 100%
@@ -221,18 +243,21 @@ python -m elspeth.cli \
 ## Recommendations
 
 ### For Migration
+
 1. Run `make sample-suite` after each migration phase
 2. Verify all 7 experiments complete
 3. Check outputs match baseline
 4. No config changes required
 
 ### For Users (Post-Migration)
+
 1. No action required
 2. Existing configs continue to work
 3. New plugin types available (if added)
 4. Documentation updated with new patterns
 
 ### For Documentation
+
 1. Update architecture diagrams (code organization)
 2. Keep configuration examples unchanged
 3. Add note: "Configuration format stable across versions"

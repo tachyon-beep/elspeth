@@ -7,11 +7,13 @@
 ## Current Registry Structure (18 files to consolidate)
 
 ### Main Registry (`src/elspeth/core/registry.py`)
+
 - Singleton pattern: `registry = PluginRegistry()`
 - Has: `_datasources`, `_llms`, `_sinks` dicts
 - Methods: `create_datasource()`, `create_llm()`, `create_sink()`
 
 ### Split Registries
+
 1. `src/elspeth/core/datasource_registry.py` - Datasource registry
 2. `src/elspeth/core/llm_registry.py` - LLM registry
 3. `src/elspeth/core/sink_registry.py` - Sink registry
@@ -35,6 +37,7 @@
 ### Security Level Enforcement (FIXED)
 
 **BAD (Old pattern with silent default)**:
+
 ```python
 def create_plugin(options: dict[str, Any], context: PluginContext) -> Plugin:
     level = options.get("security_level", "OFFICIAL")  # ❌ Silent default
@@ -42,6 +45,7 @@ def create_plugin(options: dict[str, Any], context: PluginContext) -> Plugin:
 ```
 
 **GOOD (Current pattern)**:
+
 ```python
 def create_plugin(options: dict[str, Any], context: PluginContext) -> Plugin:
     level = options.get("security_level")
@@ -53,6 +57,7 @@ def create_plugin(options: dict[str, Any], context: PluginContext) -> Plugin:
 ### Plugin Creation with Context
 
 **Pattern in `plugin_helpers.py`**:
+
 ```python
 from elspeth.core.registry.plugin_helpers import create_plugin_with_inheritance
 
@@ -75,6 +80,7 @@ def create_row_plugin(
 ### Type Narrowing for Mypy
 
 **Pattern for validation functions**:
+
 ```python
 def validate_row_plugin_definition(definition: dict[str, Any]) -> None:
     name = definition.get("name")
@@ -88,6 +94,7 @@ def validate_row_plugin_definition(definition: dict[str, Any]) -> None:
 ### Configuration Merge Pattern (ConfigMerger)
 
 **Usage in `suite_runner.py`**:
+
 ```python
 from elspeth.core.experiments.config_merger import ConfigMerger
 
@@ -109,6 +116,7 @@ row_plugin_defs = merger.merge_plugin_definitions("row_plugin_defs", "row_plugin
 ### Schema Validation Pattern
 
 **GOOD (Required fields explicit)**:
+
 ```python
 AZURE_OPENAI_SCHEMA = {
     "type": "object",
@@ -124,6 +132,7 @@ AZURE_OPENAI_SCHEMA = {
 ### Backward Compatibility Shim Pattern
 
 **Example from current code**:
+
 ```python
 # src/elspeth/core/registry/__init__.py
 import importlib.util
@@ -153,6 +162,7 @@ PluginRegistry = _old_registry_module.PluginRegistry
 ### BasePluginRegistry Usage (Phase 2)
 
 **Current pattern**:
+
 ```python
 from elspeth.core.registry import BasePluginRegistry
 from elspeth.core.interfaces import DataSource
@@ -196,6 +206,7 @@ datasource = registry.create_datasource({
 ## Import Patterns to Map
 
 ### Common Registry Imports (need backward compat)
+
 ```python
 from elspeth.core.registry import registry
 from elspeth.core.datasource_registry import datasource_registry
@@ -209,6 +220,7 @@ from elspeth.core.experiments.plugin_registry import (
 ```
 
 ### Plugin Imports (will move)
+
 ```python
 from elspeth.plugins.datasources.csv_local import create_csv_local_datasource
 from elspeth.plugins.llms.azure_openai import create_azure_openai_client
@@ -279,6 +291,7 @@ def test_registry_lookup_performance():
 ### Current Config Structure (to maintain compatibility)
 
 **Datasource config**:
+
 ```yaml
 datasource:
   plugin: csv_local
@@ -289,6 +302,7 @@ datasource:
 ```
 
 **LLM config**:
+
 ```yaml
 llm:
   plugin: azure_openai
@@ -299,6 +313,7 @@ llm:
 ```
 
 **Experiment config**:
+
 ```yaml
 experiments:
   - name: baseline
@@ -315,6 +330,7 @@ experiments:
 ## File Movement Map (Migration Phase 2)
 
 ### Datasources → Sources
+
 ```
 src/elspeth/plugins/datasources/csv_local.py
   → src/elspeth/plugins/nodes/sources/csv_local.py
@@ -327,12 +343,14 @@ src/elspeth/plugins/datasources/blob.py
 ```
 
 ### Outputs → Sinks
+
 ```
 src/elspeth/plugins/outputs/*
   → src/elspeth/plugins/nodes/sinks/*
 ```
 
 ### LLMs → Transform Nodes
+
 ```
 src/elspeth/plugins/llms/azure_openai.py
   → src/elspeth/plugins/nodes/transforms/llm/clients/azure_openai.py
@@ -348,6 +366,7 @@ src/elspeth/core/controls/cost_tracker.py
 ```
 
 ### Experiments → Orchestrator
+
 ```
 src/elspeth/core/experiments/runner.py
   → src/elspeth/plugins/orchestrators/experiment/runner.py
@@ -363,6 +382,7 @@ src/elspeth/plugins/experiments/metrics.py (split into):
 ## Useful Commands
 
 ### Test & Quality
+
 ```bash
 # Run all tests
 python -m pytest
@@ -382,6 +402,7 @@ make sample-suite
 ```
 
 ### Search Patterns
+
 ```bash
 # Find silent defaults
 rg "\.get\(['\"][^'\"]+['\"],\s*[^)]" src/elspeth/
@@ -394,6 +415,7 @@ rg "plugin:\s*" config/ tests/
 ```
 
 ### Performance Profiling
+
 ```bash
 # Profile CLI
 python -m cProfile -o profile.prof -m elspeth.cli \
@@ -412,6 +434,7 @@ time python -m elspeth.cli \
 ## Key Files Locations
 
 ### Core Registry Files (to refactor)
+
 - `src/elspeth/core/registry.py` - Main singleton
 - `src/elspeth/core/registry/base.py` - BasePluginRegistry
 - `src/elspeth/core/registry/plugin_helpers.py` - create_plugin_with_inheritance
@@ -419,11 +442,13 @@ time python -m elspeth.cli \
 - `src/elspeth/core/registry/schemas.py` - Common schemas
 
 ### Configuration Files
+
 - `src/elspeth/core/experiments/config.py` - ExperimentConfig
 - `src/elspeth/core/experiments/config_merger.py` - ConfigMerger
 - `src/elspeth/config.py` - Top-level config loading
 
 ### Test Files
+
 - `tests/conftest.py` - Shared fixtures
 - `tests/test_experiments.py` - Core experiment tests
 - `tests/test_suite_runner_integration.py` - Suite integration tests
@@ -434,11 +459,13 @@ time python -m elspeth.cli \
 ## Protocol Definitions (to consolidate)
 
 ### Current Locations
+
 - `src/elspeth/core/interfaces.py` - Main protocols
 - `src/elspeth/core/experiments/plugins.py` - Experiment plugins
 - Various files have protocol definitions
 
 ### Target Location (Phase 4)
+
 - `src/elspeth/core/protocols.py` - ALL universal protocols
 - `src/elspeth/plugins/orchestrators/experiment/protocols.py` - Experiment-specific
 

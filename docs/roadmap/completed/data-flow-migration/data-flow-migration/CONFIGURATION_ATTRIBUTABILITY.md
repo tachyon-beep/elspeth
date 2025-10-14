@@ -10,6 +10,7 @@
 **Current issue**: Configuration is scattered across multiple files with complex merge logic, making it impossible to answer "What exactly ran?" without re-executing the merge.
 
 **Compliance requirement**: Every orchestration run must have a **single, self-contained configuration snapshot** that:
+
 1. Fully describes what ran (orchestrator, plugins, security, parameters)
 2. Can be used to reproduce the exact run
 3. Serves as audit trail for compliance/security reviews
@@ -47,6 +48,7 @@ Result:
 **Question**: "What LLM middleware was active for run #1234?"
 
 **Current answer path** (BROKEN):
+
 1. Read `outputs/run_1234/metadata.json` → Get experiment name
 2. Read `config/experiments/sentiment.yaml` → Check for middleware
 3. If not found, read prompt pack → Check pack middleware
@@ -56,12 +58,14 @@ Result:
 7. Hope nothing changed since run #1234
 
 **Problems**:
+
 - ❌ 7 steps to answer simple question
 - ❌ Requires re-executing merge logic
 - ❌ Assumes config files unchanged
 - ❌ No guarantee of accuracy
 
 **Desired answer path** (FIXED):
+
 1. Read `outputs/run_1234/config_snapshot.yaml`
 2. See complete, resolved config
 3. Answer immediately: `middleware: [audit_logger, prompt_shield, health_monitor]`
@@ -493,11 +497,13 @@ llm_middleware:
 ### 1. Single Source of Truth
 
 **Before**:
+
 ```
 "What ran?" → Reconstruct from 3 files + merge logic
 ```
 
 **After**:
+
 ```
 "What ran?" → Read config_snapshot.yaml
 ```
@@ -507,6 +513,7 @@ llm_middleware:
 **Compliance question**: "Prove run #1234 used OFFICIAL security"
 
 **Answer**:
+
 ```bash
 $ cat outputs/run_1234/config_snapshot.yaml | grep security_level
 security_level: OFFICIAL
@@ -522,6 +529,7 @@ provenance:
 ### 3. Reproducibility
 
 **Reproduce exact run**:
+
 ```bash
 # Extract config from old run
 $ cp outputs/run_1234/config_snapshot.yaml reproduce_config.yaml
@@ -533,6 +541,7 @@ $ elspeth run --from-snapshot reproduce_config.yaml
 ### 4. Change Tracking
 
 **See what changed between runs**:
+
 ```bash
 $ diff outputs/run_1234/config_snapshot.yaml \
        outputs/run_1235/config_snapshot.yaml
@@ -544,6 +553,7 @@ $ diff outputs/run_1234/config_snapshot.yaml \
 ### 5. Provenance Transparency
 
 **See where each value came from**:
+
 ```yaml
 provenance:
   temperature:
@@ -558,27 +568,32 @@ provenance:
 ## Implementation Plan
 
 ### Phase 1: Configuration Resolver (2-3 hours)
+
 - [ ] Create `core/configuration/resolver.py`
 - [ ] Implement `ResolvedConfiguration` dataclass
 - [ ] Implement `ConfigurationResolver.resolve()`
 - [ ] Add provenance tracking
 
 ### Phase 2: Config Snapshot Sink (1 hour)
+
 - [ ] Create `plugins/data_output/config_snapshot.py`
 - [ ] Register in sink registry
 - [ ] Make it auto-added to all runs
 
 ### Phase 3: Orchestrator Integration (2-3 hours)
+
 - [ ] Update `ExperimentOrchestrator` to use resolver
 - [ ] Pass resolved config to all plugins via metadata
 - [ ] Update suite runner to resolve before each experiment
 
 ### Phase 4: CLI Support (1-2 hours)
+
 - [ ] Add `--from-snapshot` flag to reproduce from snapshot
 - [ ] Add `--no-snapshot` flag to disable snapshot sink
 - [ ] Add validation for snapshot schema
 
 ### Phase 5: Testing & Docs (2-3 hours)
+
 - [ ] Test snapshot generation for all orchestrators
 - [ ] Test reproduction from snapshot
 - [ ] Document snapshot format and provenance model
@@ -609,6 +624,7 @@ telemetry_config:  # NEW field
 ```
 
 **Backward compatibility**:
+
 ```python
 class SnapshotLoader:
     def load(self, snapshot_path: str) -> ResolvedConfiguration:
@@ -630,20 +646,24 @@ class SnapshotLoader:
 ### Q1: Snapshot Storage Location
 
 **Option A**: With results (proposed)
+
 ```
 outputs/run_1234/
 ├── results.csv
 ├── analytics.json
 └── config_snapshot.yaml  # Co-located with results
 ```
+
 **Pro**: Everything for a run in one place
 **Con**: Duplicates config if multiple experiments in suite
 
 **Option B**: Separate config archive
+
 ```
 configs/snapshots/
 └── run_1234_config_snapshot.yaml
 ```
+
 **Pro**: Centralized config management
 **Con**: Separated from results, harder to find
 
@@ -654,6 +674,7 @@ configs/snapshots/
 **Question**: How to handle secrets in resolved config?
 
 **Option A**: Redact all secrets (proposed)
+
 ```yaml
 llm_client:
   plugin: azure_openai
@@ -663,6 +684,7 @@ llm_client:
 ```
 
 **Option B**: Store encrypted
+
 ```yaml
 llm_client:
   plugin: azure_openai
@@ -678,12 +700,14 @@ llm_client:
 **Question**: Should users be able to WRITE snapshots directly (skip layering)?
 
 **Option A**: Yes, snapshots are valid input
+
 - User can write `config_snapshot.yaml` directly
 - Skip defaults/packs/merge if input is snapshot
 - Pro: Simple, explicit, self-contained
 - Con: Verbose for users
 
 **Option B**: No, snapshots are output-only
+
 - Users must write layered configs
 - Snapshots only for output/reproduction
 - Pro: Keeps user configs concise
@@ -712,12 +736,14 @@ llm_client:
 **Incident**: PII detected in output file
 
 **Questions**:
+
 1. What security level was configured?
 2. What middleware was active?
 3. Was PII redaction enabled?
 4. What datasource was used?
 
 **With snapshots**:
+
 ```bash
 $ cat outputs/run_1234/config_snapshot.yaml | grep security_level
 security_level: OFFICIAL  # ← Should have been PROTECTED
@@ -742,6 +768,7 @@ datasource:
 **Request**: "Re-run experiment from 6 months ago with same config"
 
 **With snapshots**:
+
 ```bash
 # Retrieve snapshot from archive
 $ cp archive/2024-04-14/config_snapshot.yaml reproduce.yaml
@@ -763,6 +790,7 @@ $ elspeth run --from-snapshot reproduce.yaml
 **Question**: "What changed between v1 and v2 of the model?"
 
 **With snapshots**:
+
 ```bash
 $ diff outputs/v1_run/config_snapshot.yaml \
        outputs/v2_run/config_snapshot.yaml

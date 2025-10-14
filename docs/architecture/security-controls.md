@@ -2,18 +2,36 @@
 
 ## Authentication & Authorization
 - **Azure storage ingestion** – Blob datasources accept SAS tokens, explicit credentials, or managed identity through `azure-identity`, failing closed when secrets are absent (`src/elspeth/plugins/datasources/blob.py:17`, `src/elspeth/datasources/blob_store.py:125`).[^sec-azure-ingest-2025-10-12]
+<!-- UPDATE 2025-10-12: Datasource path alignment -->
+Update 2025-10-12: Blob datasource implementations live in `src/elspeth/plugins/nodes/sources/blob.py`; legacy module references are preserved for audits predating the namespace migration.
+<!-- END UPDATE -->
 - **LLM credentials** – Azure OpenAI clients read keys, endpoints, and deployment IDs from configuration or environment variables, ensuring deployments can lock credentials outside source control (`src/elspeth/plugins/llms/azure_openai.py:25`, `src/elspeth/plugins/llms/azure_openai.py:60`).[^sec-llm-2025-10-12]
+<!-- UPDATE 2025-10-12: LLM client path alignment -->
+Update 2025-10-12: Azure OpenAI transport resides at `src/elspeth/plugins/nodes/transforms/llm/azure_openai.py`.
+<!-- END UPDATE -->
 - **Repository sinks** – GitHub and Azure DevOps sinks resolve personal-access tokens on demand and optionally dry-run commits, reducing exposure during review cycles (`src/elspeth/plugins/outputs/repository.py:149`, `src/elspeth/plugins/outputs/repository.py:178`).[^sec-repo-2025-10-12]
+<!-- UPDATE 2025-10-12: Repository sink module relocation -->
+Update 2025-10-12: Repository sinks are implemented in `src/elspeth/plugins/nodes/sinks/repository.py` with identical security semantics.
+<!-- END UPDATE -->
 - **Signed artifacts** – The signing sink enforces key presence (with legacy aliases) and never writes unsigned bundles when secrets are missing (`src/elspeth/plugins/outputs/signed.py:37`, `src/elspeth/plugins/outputs/signed.py:107`).[^sec-signed-auth-2025-10-12]
+<!-- UPDATE 2025-10-12: Signed sink module relocation -->
+Update 2025-10-12: Signed artifact enforcement resides in `src/elspeth/plugins/nodes/sinks/signed.py`.
+<!-- END UPDATE -->
 
 ### Update 2025-10-12: Managed Identity
 - Azure datasources/outputs default to `DefaultAzureCredential`, falling back to SAS tokens when managed identity is unavailable (`src/elspeth/datasources/blob_store.py:125`, `src/elspeth/plugins/outputs/blob.py:210`).
 
 ## Input Validation
 - **Configuration schemas** – Settings profiles, plugin definitions, and suite experiments are validated against JSON-schema-like definitions before execution (`src/elspeth/core/validation.py:271`, `src/elspeth/core/validation.py:1012`, `src/elspeth/core/validation.py:1034`).[^sec-config-validation-2025-10-12]
+<!-- UPDATE 2025-10-12: Validation citation refresh -->
+Update 2025-10-12: Validation helpers span `src/elspeth/core/validation.py:254-512` with suite schema enforcement in `src/elspeth/core/config_schema.py:17-198`.
+<!-- END UPDATE -->
 - **Prompt compilation** – Prompts render with `StrictUndefined`, raising `PromptValidationError` when required variables are missing and preventing silent template failures (`src/elspeth/core/prompts/engine.py:33`, `src/elspeth/core/prompts/template.py:24`).[^sec-prompt-2025-10-12]
 - **Response validation plugins** – Regex, JSON, and LLM-guard validators reject responses that fail format or policy checks, isolating untrusted LLM output from downstream pipelines (`src/elspeth/plugins/experiments/validation.py:20`, `src/elspeth/plugins/experiments/validation.py:47`, `src/elspeth/plugins/experiments/validation.py:100`).[^sec-validation-plugins-2025-10-12]
 - **Suite governance** – Suite validation aggregates experiment metadata, enforces presence of sinks, and reports baseline consistency before any run is accepted (`src/elspeth/core/experiments/suite_runner.py:208`, `src/elspeth/core/validation.py:471`).[^sec-suite-governance-2025-10-12]
+<!-- UPDATE 2025-10-12: Suite governance line update -->
+Update 2025-10-12: Suite validation and baseline checks occur at `src/elspeth/core/experiments/suite_runner.py:295-382` and `src/elspeth/core/validation.py:430-512`.
+<!-- END UPDATE -->
 <!-- Update 2025-10-12: Experiment configs now run through `src/elspeth/core/config_schema.py:17`, ensuring renamed keys (e.g., `prompt_pack`, `concurrency`, `early_stop_plugins`) conform to normalized schemas before execution. -->
 
 ### Update 2025-10-12: Prompt Hygiene
@@ -21,8 +39,17 @@
 
 ## Middleware Safeguards
 - **Prompt shield** – Request prompts are scanned for denied terms and either aborted, masked, or logged based on policy, preventing high-risk inputs from reaching the model (`src/elspeth/plugins/llms/middleware.py:91`, `src/elspeth/plugins/llms/middleware.py:112`).[^sec-prompt-shield-2025-10-12]
+<!-- UPDATE 2025-10-12: Middleware module relocation -->
+Update 2025-10-12: Prompt shield middleware now resides in `src/elspeth/plugins/nodes/transforms/llm/middleware.py`.
+<!-- END UPDATE -->
 - **Azure Content Safety** – Outbound prompts are inspected against Azure categories and severity thresholds; violations can abort or mask, and errors respect configurable `on_error` behaviour (`src/elspeth/plugins/llms/middleware.py:206`, `src/elspeth/plugins/llms/middleware_azure.py:95`).[^sec-content-safety-2025-10-12]
+<!-- UPDATE 2025-10-12: Azure middleware module relocation -->
+Update 2025-10-12: Content safety checks are implemented in `src/elspeth/plugins/nodes/transforms/llm/middleware.py` and `_azure.py`.
+<!-- END UPDATE -->
 - **Audit logger** – Metadata-only logging offers traceability for every LLM call without exposing sensitive prompts unless explicitly enabled (`src/elspeth/plugins/llms/middleware.py:70`, `src/elspeth/plugins/llms/middleware.py:101`).[^sec-audit-2025-10-12]
+<!-- UPDATE 2025-10-12: Middleware module relocation -->
+Update 2025-10-12: Audit logging middleware located at `src/elspeth/plugins/nodes/transforms/llm/middleware.py` retains the same hooks.
+<!-- END UPDATE -->
 - **Health monitor** – Rolling latency/failure metrics provide heartbeat telemetry, making saturation or outage detection observable (`src/elspeth/plugins/llms/middleware.py:120`, `src/elspeth/plugins/llms/middleware.py:144`).[^sec-health-monitor-2025-10-12]
 - **Azure environment telemetry** – When running under Azure ML, middleware writes structured rows/tables (suite inventory, experiment summaries, retry exhaustion) to the run context for immutable audit trails (`src/elspeth/plugins/llms/middleware_azure.py:180`, `src/elspeth/plugins/llms/middleware_azure.py:250`).[^audit-azure-run-2025-10-12]
 - **Retry exhaustion hooks** – `_notify_retry_exhausted` and middleware callbacks emit structured attempt histories whenever retries are exhausted, ensuring SOC teams receive actionable evidence (`src/elspeth/core/experiments/runner.py:520`, `src/elspeth/plugins/llms/middleware_azure.py:233`).[^sec-retry-2025-10-12]
@@ -45,6 +72,9 @@
 - **Prompt Shielding** – Denied term lists can mask or block prompts before model invocation, surfacing violations via structured logs (`src/elspeth/plugins/llms/middleware.py:91`, `src/elspeth/plugins/llms/middleware.py:110`).[^sec-prompt-shield-2025-10-12]
 - **Content Safety** – Azure Content Safety middleware screens prompts with severity thresholds and configurable failure handling, acting as an external policy oracle (`src/elspeth/plugins/llms/middleware.py:206`, `src/elspeth/plugins/llms/middleware.py:232`).[^sec-content-safety-2025-10-12]
 - **Audit Logging & Telemetry** – Middleware publishes request metadata, retry exhaustion, and experiment summaries to logs or Azure ML run tables for defensible evidence (`src/elspeth/plugins/llms/middleware.py:70`, `src/elspeth/plugins/llms/middleware_azure.py:180`, `src/elspeth/core/experiments/runner.py:575`).[^sec-audit-2025-10-12]
+<!-- UPDATE 2025-10-12: Runner retry citation update -->
+Update 2025-10-12: Retry exhaustion handling occurs at `src/elspeth/core/experiments/runner.py:657-678`.
+<!-- END UPDATE -->
 - **Health Monitoring** – Rolling latency and failure metrics are emitted on a heartbeat, aiding blue-team alerting and availability monitoring (`src/elspeth/plugins/llms/middleware.py:124`, `src/elspeth/plugins/llms/middleware.py:178`).[^sec-health-monitor-2025-10-12]
 <!-- Update 2025-10-12: `AzureEnvironmentMiddleware` now logs suite inventories, baseline comparisons, and `llm_retry_exhausted` events, providing structured evidence for accreditation reviews (`src/elspeth/plugins/llms/middleware_azure.py:219`, `src/elspeth/plugins/llms/middleware_azure.py:243`). -->
 
@@ -64,9 +94,18 @@
 
 ## Retry, Error Handling & Observability
 - **Deterministic retries** – The runner records attempt histories, exponential backoff, and final errors, raising structured exceptions when exhaustion occurs (`src/elspeth/core/experiments/runner.py:464`, `src/elspeth/core/experiments/runner.py:544`, `src/elspeth/core/experiments/runner.py:575`).[^sec-retry-2025-10-12]
+<!-- UPDATE 2025-10-12: Retry flow citation refresh -->
+Update 2025-10-12: Core retry loop currently spans `src/elspeth/core/experiments/runner.py:547-676`.
+<!-- END UPDATE -->
 - **Checkpointing** – Long-running suites can resume from checkpoints without reprocessing previously signed rows, limiting attack windows on idempotent outputs (`src/elspeth/core/experiments/runner.py:70`, `src/elspeth/core/experiments/runner.py:624`).[^sec-checkpoint-2025-10-12]
+<!-- UPDATE 2025-10-12: Checkpoint citation refresh -->
+Update 2025-10-12: Checkpoint load/append helpers live at `src/elspeth/core/experiments/runner.py:695-709`.
+<!-- END UPDATE -->
 - **Early-stop governance** – Threshold plugins can halt execution once success/failure criteria are met, reducing unnecessary exposure to external services (`src/elspeth/plugins/experiments/early_stop.py:17`, `src/elspeth/core/experiments/runner.py:223`).[^sec-early-stop-2025-10-12]
 - **Failure containment** – `on_error` policies across plugins downgrade fatal errors to warnings when configured, supporting best-effort runs during accreditation rehearsals (`src/elspeth/plugins/datasources/csv_local.py:30`, `src/elspeth/plugins/outputs/blob.py:64`, `src/elspeth/plugins/outputs/excel.py:52`).[^sec-failure-2025-10-12]
+<!-- UPDATE 2025-10-12: Output sink path alignment -->
+Update 2025-10-12: Output sink implementations referenced above live under `src/elspeth/plugins/nodes/sinks/`.
+<!-- END UPDATE -->
 
 ## Added 2025-10-12 – Telemetry & Analytics Controls
 - **Retry exhaustion evidence** – Middleware invokes `on_retry_exhausted` hooks with serialized history, emitting `llm_retry_exhausted` rows that include attempts, errors, and trace IDs for SOC pipelines (`src/elspeth/core/experiments/runner.py:531`, `src/elspeth/plugins/llms/middleware_azure.py:233`).[^sec-retry-evidence-2025-10-12]
@@ -91,7 +130,7 @@
 [^sec-azure-ingest-2025-10-12]: Update 2025-10-12: Also referenced in docs/architecture/threat-surfaces.md (Update 2025-10-12: Storage Interfaces).
 [^sec-llm-2025-10-12]: Update 2025-10-12: Credential handling aligns with docs/architecture/threat-surfaces.md (Update 2025-10-12: LLM Providers).
 [^sec-repo-2025-10-12]: Update 2025-10-12: Repository hardening further detailed in docs/architecture/plugin-security-model.md (Update 2025-10-12: Output Sinks).
-[^sec-signed-auth-2025-10-12]: Update 2025-10-12: Signing key enforcement tied to docs/architecture/CONTROL_INVENTORY.md.
+[^sec-signed-auth-2025-10-12]: Update 2025-10-12: Signing key enforcement tied to docs/compliance/CONTROL_INVENTORY.md.
 [^sec-config-validation-2025-10-12]: Update 2025-10-12: Schema pipeline shown in docs/architecture/configuration-security.md (Update 2025-10-12: Loader Safeguards).
 [^sec-prompt-2025-10-12]: Update 2025-10-12: Prompt hygiene flow connected to docs/architecture/data-flow-diagrams.md (Update 2025-10-12: Runner Pipeline).
 [^sec-validation-plugins-2025-10-12]: Update 2025-10-12: Validation plugin lifecycle outlined in docs/architecture/plugin-security-model.md (Update 2025-10-12: Validation Plugins).
@@ -106,7 +145,7 @@
 [^sec-content-safety-2025-10-12]: Update 2025-10-12: Content safety trust boundary shown in docs/architecture/data-flow-diagrams.md sequence diagrams.
 [^sec-audit-2025-10-12]: Update 2025-10-12: Audit telemetry recorded in docs/architecture/audit-logging.md (Update 2025-10-12: Middleware Telemetry).
 [^sec-health-monitor-2025-10-12]: Update 2025-10-12: Health metrics referenced in docs/architecture/audit-logging.md (Update 2025-10-12: Health Monitoring).
-[^sec-hmac-2025-10-12]: Update 2025-10-12: Signing implementation expanded in docs/architecture/CONTROL_INVENTORY.md.
+[^sec-hmac-2025-10-12]: Update 2025-10-12: Signing implementation expanded in docs/compliance/CONTROL_INVENTORY.md.
 [^sec-clearance-2025-10-12]: Update 2025-10-12: Clearance model visualised in docs/architecture/component-diagram.md (Update 2025-10-12: Artifact Pipeline).
 [^sec-artifact-deps-2025-10-12]: Update 2025-10-12: Dependency validation sequence in docs/architecture/data-flow-diagrams.md (Update 2025-10-12: Artifact Rehydration).
 [^sec-retry-2025-10-12]: Update 2025-10-12: Retry recording flow tracked in docs/architecture/data-flow-diagrams.md (Update 2025-10-12: Retry, Early Stop, and Telemetry Flow).

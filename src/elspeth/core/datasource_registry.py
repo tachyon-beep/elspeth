@@ -51,8 +51,10 @@ _BLOB_DATASOURCE_SCHEMA = with_security_properties(
             "profile": {"type": "string"},
             "pandas_kwargs": {"type": "object"},
             "on_error": ON_ERROR_ENUM,
+            "retain_local": {"type": "boolean"},  # REQUIRED - audit trail
+            "retain_local_path": {"type": "string"},
         },
-        "required": ["config_path"],
+        "required": ["config_path", "retain_local"],  # Must explicitly set retain_local
         "additionalProperties": True,
     },
     require_security=False,  # Will be enforced by registry
@@ -67,8 +69,10 @@ _CSV_BLOB_DATASOURCE_SCHEMA = with_security_properties(
             "dtype": {"type": "object"},
             "encoding": {"type": "string"},
             "on_error": ON_ERROR_ENUM,
+            "retain_local": {"type": "boolean"},  # REQUIRED - audit trail
+            "retain_local_path": {"type": "string"},
         },
-        "required": ["path"],
+        "required": ["path", "retain_local"],  # Must explicitly set retain_local
         "additionalProperties": True,
     },
     require_security=False,
@@ -83,8 +87,10 @@ _CSV_DATASOURCE_SCHEMA = with_security_properties(
             "dtype": {"type": "object"},
             "encoding": {"type": "string"},
             "on_error": ON_ERROR_ENUM,
+            "retain_local": {"type": "boolean"},  # REQUIRED - audit trail
+            "retain_local_path": {"type": "string"},
         },
-        "required": ["path"],
+        "required": ["path", "retain_local"],  # Must explicitly set retain_local
         "additionalProperties": True,
     },
     require_security=False,

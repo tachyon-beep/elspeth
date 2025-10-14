@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 import pandas as pd
@@ -24,6 +26,8 @@ class BlobDataSource(DataSource):
         on_error: str = "abort",
         security_level: str | None = None,
         determinism_level: str | None = None,
+        retain_local: bool,  # REQUIRED - no default
+        retain_local_path: str | None = None,
     ):
         self.config_path = config_path
         self.profile = profile
@@ -33,6 +37,8 @@ class BlobDataSource(DataSource):
         self.on_error = on_error
         self.security_level = normalize_security_level(security_level)
         self.determinism_level = normalize_determinism_level(determinism_level)
+        self.retain_local = retain_local
+        self.retain_local_path = retain_local_path
 
     def load(self) -> pd.DataFrame:
         try:
@@ -43,6 +49,13 @@ class BlobDataSource(DataSource):
             )
             df.attrs["security_level"] = self.security_level
             df.attrs["determinism_level"] = self.determinism_level
+
+            # Retain local copy if requested
+            if self.retain_local:
+                local_path = self._save_local_copy(df)
+                df.attrs["retained_local_path"] = str(local_path)
+                logger.info("Retained local copy of source data: %s (%d rows)", local_path, len(df))
+
             # load_blob_csv return type not fully annotated; returns DataFrame at runtime
             return df  # type: ignore[no-any-return]
         except Exception as exc:
@@ -53,3 +66,23 @@ class BlobDataSource(DataSource):
                 df.attrs["determinism_level"] = self.determinism_level
                 return df
             raise
+
+    def _save_local_copy(self, df: pd.DataFrame) -> Path:
+        """Save DataFrame to local file for archival/audit purposes."""
+        if self.retain_local_path:
+            # Use explicit path if provided
+            path = Path(self.retain_local_path)
+        else:
+            # Auto-generate path with timestamp
+            timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+            filename = f"source_data_{self.profile}_{timestamp}.csv"
+            path = Path("audit_data") / filename
+
+        # Create parent directory
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Save CSV
+        df.to_csv(path, index=False)
+        logger.debug("Saved %d rows to %s (%d bytes)", len(df), path, path.stat().st_size)
+
+        return path

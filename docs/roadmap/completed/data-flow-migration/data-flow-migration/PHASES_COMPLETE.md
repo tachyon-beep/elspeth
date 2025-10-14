@@ -144,12 +144,14 @@ plugins/
 ### Protocol Organization
 
 **Universal Protocols** (`core/protocols.py`):
+
 - Orchestrators: Define data flow topology
 - Nodes: Processing vertices (sources, sinks, transforms, aggregators)
 - LLM Components: Transform-specific protocols for LLM operations
 - Supporting Types: Data structures used across protocols
 
 **Experiment-Specific Protocols** (`plugins/orchestrators/experiment/protocols.py`):
+
 - Validation, row processing, aggregation, baseline comparison, early stopping
 - Specific to experiment orchestrator topology
 

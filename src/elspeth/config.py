@@ -313,6 +313,7 @@ def _build_orchestrator_config(
         concurrency_config=plugin_defs.concurrency_config,
         early_stop_config=plugin_defs.early_stop_config,
         early_stop_plugin_defs=plugin_defs.early_stop_plugin_defs or None,
+        max_rows=profile_data.get("max_rows"),
     )
 
 

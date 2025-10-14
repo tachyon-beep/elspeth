@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+import shutil
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Type
 
@@ -27,6 +29,8 @@ class CSVDataSource(DataSource):
         determinism_level: str | None = None,
         schema: dict[str, str | dict[str, Any]] | None = None,
         infer_schema: bool = True,
+        retain_local: bool,  # REQUIRED - no default
+        retain_local_path: str | None = None,
     ) -> None:
         self.path = Path(path)
         self.dtype = dtype
@@ -38,6 +42,8 @@ class CSVDataSource(DataSource):
         self.determinism_level = normalize_determinism_level(determinism_level)
         self.schema_config = schema
         self.infer_schema = infer_schema
+        self.retain_local = retain_local
+        self.retain_local_path = retain_local_path
         self._cached_schema: Type[DataFrameSchema] | None = None
         self._df_loaded = False
 
@@ -63,6 +69,12 @@ class CSVDataSource(DataSource):
                 df.attrs["schema"] = schema
                 logger.debug(f"Attached schema {schema.__name__} to DataFrame from {self.path}")
 
+            # Retain local copy if requested
+            if self.retain_local:
+                local_path = self._copy_to_audit_location()
+                df.attrs["retained_local_path"] = str(local_path)
+                logger.info("Retained local copy of source data: %s", local_path)
+
             self._df_loaded = True
             return df
         except Exception as exc:
@@ -74,6 +86,26 @@ class CSVDataSource(DataSource):
                 df.attrs["schema"] = self.output_schema()
                 return df
             raise
+
+    def _copy_to_audit_location(self) -> Path:
+        """Copy source CSV to audit directory for archival purposes."""
+        if self.retain_local_path:
+            # Use explicit path if provided
+            dest_path = Path(self.retain_local_path)
+        else:
+            # Auto-generate path with timestamp
+            timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+            filename = f"source_{self.path.stem}_{timestamp}.csv"
+            dest_path = Path("audit_data") / filename
+
+        # Create parent directory
+        dest_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Copy file
+        shutil.copy2(self.path, dest_path)
+        logger.debug("Copied source file %s to %s (%d bytes)", self.path, dest_path, dest_path.stat().st_size)
+
+        return dest_path
 
     def output_schema(self) -> Type[DataFrameSchema] | None:
         """

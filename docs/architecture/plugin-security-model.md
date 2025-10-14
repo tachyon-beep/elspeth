@@ -2,9 +2,18 @@
 
 ## Registry Architecture
 - **Central factories** – Datasource, LLM, and sink registries wrap constructors with JSON-schema validation, rejecting unknown plugin names or malformed options before instantiation (`src/elspeth/core/registry.py:91`, `src/elspeth/core/registry.py:208`).[^plugin-central-2025-10-12]
+<!-- UPDATE 2025-10-12: Registry namespace -->
+Update 2025-10-12: Central factories delegate to `src/elspeth/core/{datasource_registry,llm_registry,sink_registry}.py` post refactor.
+<!-- END UPDATE -->
 - **Experiment plugins** – Row, aggregation, baseline, validation, and early-stop plugins register via dedicated registries that normalise definitions and check option schemas (`src/elspeth/core/experiments/plugin_registry.py:93`, `src/elspeth/core/experiments/plugin_registry.py:227`).[^plugin-experiment-2025-10-12]
+<!-- UPDATE 2025-10-12: Plugin registry citation refresh -->
+Update 2025-10-12: Experiment registry helpers span `src/elspeth/core/experiments/plugin_registry.py:120-188` and `:400-454`.
+<!-- END UPDATE -->
 - **Control plane plugins** – Rate limiter and cost tracker factories follow the same pattern, providing a consistent extension point for throttle/cost logic while retaining validation hooks (`src/elspeth/core/controls/registry.py:36`, `src/elspeth/core/controls/registry.py:102`).[^plugin-control-2025-10-12]
 - **Reporting sinks** – Analytics, visual, Excel, signed, and bundle sinks are registered through the same registry facade and stamp `_elspeth_security_level`, allowing suite reporting to reuse sanctioned factories rather than constructing sinks manually (`src/elspeth/core/registry.py:120`, `src/elspeth/plugins/outputs/analytics_report.py:17`, `src/elspeth/plugins/outputs/visual_report.py:17`).[^plugin-reporting-2025-10-12]
+<!-- UPDATE 2025-10-12: Reporting sink module relocation -->
+Update 2025-10-12: Analytics/visual/Excel/signed sinks live in `src/elspeth/plugins/nodes/sinks/`.
+<!-- END UPDATE -->
 <!-- Update 2025-10-12: Registry creation paths also stamp `_elspeth_security_level` on plugins, ensuring artifact pipeline enforcement downstream (`src/elspeth/core/experiments/plugin_registry.py:122`, `src/elspeth/core/registry.py:120`). -->
 
 ### Update 2025-10-12: Registry Enforcement
@@ -20,6 +29,9 @@
 - **Try/except guards** – Early-stop plugins are wrapped so unexpected exceptions log and continue rather than crashing the run, isolating custom logic from the core orchestrator (`src/elspeth/core/experiments/runner.py:260`).[^plugin-try-2025-10-12]
 - **Middleware order** – LLM middleware definitions are validated, cached, and shared across experiments to avoid duplicate instantiation and to enforce consistent sequencing (`src/elspeth/core/llm/registry.py:46`, `src/elspeth/core/experiments/suite_runner.py:158`).[^plugin-middleware-2025-10-12]
 - **Retry metadata** – Exceptions from LLM clients are annotated with retry history, enabling middleware hooks (e.g., telemetry) to observe failures without mutating the runner (`src/elspeth/core/experiments/runner.py:565`, `src/elspeth/core/experiments/runner.py:575`).[^plugin-retry-meta-2025-10-12]
+<!-- UPDATE 2025-10-12: Retry metadata citation refresh -->
+Update 2025-10-12: Retry annotations are applied at `src/elspeth/core/experiments/runner.py:547-676`.
+<!-- END UPDATE -->
 
 ### Update 2025-10-12: Early-Stop Lifecycle
 - Early-stop plugins expose `reset` and `check` hooks and are normalised prior to execution, preventing configuration drift (`src/elspeth/plugins/experiments/early_stop.py:17`, `src/elspeth/core/experiments/runner.py:223`).
@@ -28,16 +40,28 @@
 - **Produced/consumed declarations** – Sinks advertise the artifacts they produce and consume, allowing the pipeline to topologically sort execution and prevent improper dependencies (`src/elspeth/core/artifact_pipeline.py:153`, `src/elspeth/core/artifact_pipeline.py:201`).[^plugin-produced-2025-10-12]
 - **Security classification** – Each binding inherits a security level; the pipeline denies access when a consumer lacks sufficient clearance, preventing cross-domain lateral movement (`src/elspeth/core/artifact_pipeline.py:192`).[^plugin-security-2025-10-12]
 - **Sanitisation metadata** – Sinks may augment produced artifacts with sanitisation details or manifest digests, enabling downstream plugins to reason about provenance (`src/elspeth/plugins/outputs/csv_file.py:106`, `src/elspeth/plugins/outputs/excel.py:187`).[^plugin-sanitisation-2025-10-12]
+<!-- UPDATE 2025-10-12: Sink module relocation -->
+Update 2025-10-12: CSV/Excel sinks are located in `src/elspeth/plugins/nodes/sinks/`.
+<!-- END UPDATE -->
 
 ### Update 2025-10-12: Artifact Tokens
 - Sink descriptors map produced artifacts to types and aliases, enabling secure dependency resolution across the pipeline (`src/elspeth/core/interfaces.py:83`, `src/elspeth/core/artifact_pipeline.py:167`).
+<!-- UPDATE 2025-10-12: Artifact descriptor relocation -->
+Update 2025-10-12: Artifact descriptor definitions are located in `src/elspeth/core/protocols.py:237-309`.
+<!-- END UPDATE -->
 
 ## Suite Reporting Integrations
 - **Report generation** – CLI report commands instantiate `SuiteReportGenerator`, which reuses registry-created sinks to emit consolidated analytics, visual, Excel, and signed artifacts while honouring security levels and sanitisation policies (`src/elspeth/cli.py:392`, `src/elspeth/tools/reporting.py:33`, `src/elspeth/tools/reporting.py:138`).[^plugin-suite-reporting-2025-10-12]
+<!-- UPDATE 2025-10-12: Suite reporting citation refresh -->
+Update 2025-10-12: Suite report generation is dispatched from `src/elspeth/cli.py:395-458` and implemented in `src/elspeth/tools/reporting.py:26-199`.
+<!-- END UPDATE -->
 - **Prompt pack & suite defaults** – Prompt packs can pre-register middleware, rate limiters, sinks, and early-stop plugins; suite defaults merge these definitions before experiments override them, ensuring registries receive validated options (`src/elspeth/config.py:78`, `src/elspeth/core/experiments/suite_runner.py:55`).[^plugin-suite-defaults-2025-10-12]
 
 ## Extensibility Controls
 - **Side-effect imports** – Default plugin packages register themselves on import, but alternative registries can be loaded explicitly to constrain available plugins in hardened deployments (`src/elspeth/plugins/experiments/__init__.py:5`, `src/elspeth/plugins/llms/__init__.py:1`).[^plugin-side-effect-2025-10-12]
+<!-- UPDATE 2025-10-12: Plugin namespace alignment -->
+Update 2025-10-12: Namespace packages now extend `src/elspeth/plugins/nodes/` for sinks/sources/transforms.
+<!-- END UPDATE -->
 - **Custom plugin onboarding** – Helper scripts scaffold new plugin skeletons while registries enforce schema validation, reducing the risk of insecure copy/paste code (`scripts/plugin_scaffold.py:19`).[^plugin-onboarding-2025-10-12]
 - **Future hardening** – Consider introducing signed plugin manifests or runtime capability lists (e.g., network, filesystem) to limit the blast radius of third-party plugins.[^plugin-future-2025-10-12]
 

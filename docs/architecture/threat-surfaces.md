@@ -2,23 +2,44 @@
 
 ## Trust Zones
 - **Operator Zone** – Local CLI execution validates configuration before any network activity, acting as the first guard against malformed profiles (`src/elspeth/cli.py:83`, `src/elspeth/core/validation.py:271`).[^threat-operator-2025-10-12]
+<!-- UPDATE 2025-10-12: CLI validation citation refresh -->
+Update 2025-10-12: Configuration validation warnings surface at `src/elspeth/cli.py:369-380`.
+<!-- END UPDATE -->
 - **Core Orchestrator Zone** – Trusted runtime processes data in memory, applies middleware, and enforces retry logic; tampering here would require code execution on the host (`src/elspeth/core/orchestrator.py:43`, `src/elspeth/core/experiments/runner.py:65`).[^threat-orchestrator-2025-10-12]
 - **Plugin Zone** – Pluggable datasources, LLM clients, sinks, and experiment plugins sit at the boundary of trusted code and external services; schema validation and runtime guards constrain their behaviour (`src/elspeth/core/registry.py:91`, `src/elspeth/core/experiments/plugin_registry.py:93`).[^threat-plugin-2025-10-12]
 - **External Service Zone** – Azure storage, Azure/OpenAI endpoints, and repository APIs operate outside ELSPETH’s control and are treated as untrusted data producers/consumers (`src/elspeth/datasources/blob_store.py:200`, `src/elspeth/plugins/llms/azure_openai.py:77`, `src/elspeth/plugins/outputs/repository.py:124`).[^threat-external-2025-10-12]
+<!-- UPDATE 2025-10-12: External service path alignment -->
+Update 2025-10-12: Blob adapters reside in `src/elspeth/adapters/blob_store.py` and datasource/sink edges in `src/elspeth/plugins/nodes/{sources,sinks}/`.
+<!-- END UPDATE -->
 <!-- Update 2025-10-12: Azure ML telemetry (middleware_azure) and analytics report exports introduce additional edges that must be governed via workspace RBAC and report storage ACLs (`src/elspeth/plugins/llms/middleware_azure.py:180`, `src/elspeth/plugins/outputs/analytics_report.py:69`). -->
 
 ### Update 2025-10-12: Storage Interfaces
 - Blob datasources and sinks should rely on managed identity where possible; SAS rotation windows must be short for accreditation deployments (`src/elspeth/plugins/datasources/blob.py:52`, `src/elspeth/plugins/outputs/blob.py:210`).
+<!-- UPDATE 2025-10-12: Storage module relocation -->
+Update 2025-10-12: Blob datasource and sink implementations live in `src/elspeth/plugins/nodes/sources/blob.py` and `src/elspeth/plugins/nodes/sinks/blob.py`.
+<!-- END UPDATE -->
 
 ### Update 2025-10-12: LLM Providers
 - Azure OpenAI adapters inject metadata (`retry`, `cost_summary`) and should be configured with per-deployment rate limits; maintain allowlisted deployments (`src/elspeth/plugins/llms/azure_openai.py:77`, `src/elspeth/core/experiments/runner.py:198`).
+<!-- UPDATE 2025-10-12: LLM adapter path alignment -->
+Update 2025-10-12: Azure OpenAI adapters reside in `src/elspeth/plugins/nodes/transforms/llm/azure_openai.py`.
+<!-- END UPDATE -->
 
 ### Update 2025-10-12: Repository Interfaces
 - Repository sinks require PAT scopes limited to the target path; dry-run paths should be read-only when accreditation packages are prepared (`src/elspeth/plugins/outputs/repository.py:124`, `src/elspeth/plugins/outputs/repository.py:193`).
+<!-- UPDATE 2025-10-12: Repository sink module relocation -->
+Update 2025-10-12: Repository sinks live in `src/elspeth/plugins/nodes/sinks/repository.py` following the namespace migration.
+<!-- END UPDATE -->
 
 ## Input Threats
 - **Poisoned datasets** – CSV/Blob datasources read untrusted files; normalised security levels in dataframe metadata help classify downstream results, but content validation depends on experiment-specific plugins (`src/elspeth/plugins/datasources/csv_blob.py:35`, `src/elspeth/core/experiments/runner.py:208`).[^threat-poisoned-2025-10-12]
+<!-- UPDATE 2025-10-12: Datasource module relocation -->
+Update 2025-10-12: Datasource implementations are under `src/elspeth/plugins/nodes/sources/`.
+<!-- END UPDATE -->
 - **Prompt injection** – User-provided fields can attempt to override instructions. Strict prompt rendering and middleware-based term blocking/content safety mitigate common injection patterns (`src/elspeth/core/prompts/engine.py:33`, `src/elspeth/plugins/llms/middleware.py:110`, `src/elspeth/plugins/llms/middleware.py:232`).[^threat-prompt-2025-10-12]
+<!-- UPDATE 2025-10-12: Middleware module relocation -->
+Update 2025-10-12: Middleware protections now live in `src/elspeth/plugins/nodes/transforms/llm/middleware*.py`.
+<!-- END UPDATE -->
 - **Configuration spoofing** – Invalid plugin names or options are caught before instantiation; however, accreditation deployments should sign configuration bundles to prevent tampering at rest (`src/elspeth/core/validation.py:271`, `src/elspeth/core/registry.py:202`).[^threat-config-2025-10-12]
 - **Suite configuration drift** – Prompt pack merges and suite defaults can silently introduce outdated plugins; monitor `suite_defaults` and prompt pack digests, and sign exported configs (`src/elspeth/config.py:52`, `src/elspeth/core/experiments/suite_runner.py:69`).[^threat-suite-config-2025-10-12]
 
@@ -53,6 +74,7 @@
 ## Added 2025-10-12 – Emerging External Interfaces
 - **Azure ML run logging** – `AzureEnvironmentMiddleware` posts artefacts and comparison tables to the workspace run context. Harden by constraining service principal permissions and auditing `log_table` payloads for sensitive data (`src/elspeth/plugins/llms/middleware_azure.py:219`, `src/elspeth/plugins/llms/middleware_azure.py:250`).[^threat-azureml-2025-10-12]
 - **Suite reporting artefacts** – CLI report generation writes comparative analytics, validation summaries, and recommendations under operator-controlled paths. Treat report directories as sensitive exports and wipe or re-sign before redistribution (`src/elspeth/tools/reporting.py:33`, `src/elspeth/tools/reporting.py:113`).[^threat-suite-report-2025-10-12]
+- **LLM HTTP endpoints** – HTTP clients (e.g., Azure OpenAI, mock/http adapters) operate over TLS but remain untrusted; maintain allowlists and per-endpoint throttles to contain prompt leakage (`src/elspeth/plugins/nodes/transforms/llm/azure_openai.py:77`, `src/elspeth/core/controls/rate_limit.py:118`).[^threat-llm-2025-10-12]
 - **Plugin discovery** – Experiments can request custom plugins via JSON config; ensure registries remain immutable in accreditation builds or gate additions by deploying with a sealed plugin catalogue (`src/elspeth/core/experiments/plugin_registry.py:34`, `src/elspeth/plugins/experiments/__init__.py:1`).[^threat-plugin-discovery-2025-10-12]
 
 ## Update History

@@ -29,6 +29,7 @@ from elspeth.plugins.nodes.sinks import (
     FileCopySink,
     GitHubRepoSink,
     LocalBundleSink,
+    ReproducibilityBundleSink,
     SignedArtifactSink,
     VisualAnalyticsSink,
     ZipResultSink,
@@ -159,6 +160,11 @@ def _create_embeddings_store_sink(options: dict[str, Any], context: PluginContex
             if options.get(key) is not None
         },
     )
+
+
+def _create_reproducibility_bundle_sink(options: dict[str, Any], context: PluginContext) -> ReproducibilityBundleSink:
+    """Create reproducibility bundle sink for complete audit trail."""
+    return ReproducibilityBundleSink(**options)
 
 
 # ============================================================================
@@ -400,6 +406,28 @@ _EMBEDDINGS_STORE_SINK_SCHEMA = with_security_properties(
 )
 _EMBEDDINGS_STORE_SINK_SCHEMA = with_artifact_properties(_EMBEDDINGS_STORE_SINK_SCHEMA)
 
+_REPRODUCIBILITY_BUNDLE_SINK_SCHEMA = _sink_schema(
+    {
+        "base_path": {"type": "string"},
+        "bundle_name": {"type": "string"},
+        "timestamped": {"type": "boolean"},
+        "include_results_json": {"type": "boolean"},
+        "include_results_csv": {"type": "boolean"},
+        "include_source_data": {"type": "boolean"},
+        "include_config": {"type": "boolean"},
+        "include_prompts": {"type": "boolean"},
+        "include_plugins": {"type": "boolean"},
+        "include_framework_code": {"type": "boolean"},
+        "algorithm": {"type": "string", "enum": ["hmac-sha256", "hmac-sha512"]},
+        "key": {"type": "string"},
+        "key_env": {"type": "string"},
+        "compression": {"type": "string", "enum": ["gz", "bz2", "xz", "none"]},
+        "sanitize_formulas": {"type": "boolean"},
+        "sanitize_guard": {"type": "string", "minLength": 1, "maxLength": 1},
+    },
+    ["base_path"],
+)
+
 
 # ============================================================================
 # Register Sinks
@@ -418,6 +446,7 @@ sink_registry.register("analytics_report", _create_analytics_report_sink, schema
 sink_registry.register("analytics_visual", _create_visual_analytics_sink, schema=_VISUAL_ANALYTICS_SINK_SCHEMA)
 sink_registry.register("enhanced_visual", _create_enhanced_visual_sink, schema=_ENHANCED_VISUAL_SINK_SCHEMA)
 sink_registry.register("embeddings_store", _create_embeddings_store_sink, schema=_EMBEDDINGS_STORE_SINK_SCHEMA)
+sink_registry.register("reproducibility_bundle", _create_reproducibility_bundle_sink, schema=_REPRODUCIBILITY_BUNDLE_SINK_SCHEMA)
 
 
 # ============================================================================

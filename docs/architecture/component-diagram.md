@@ -52,6 +52,10 @@ graph TD
     class Operator\ Workstation,External\ Services boundary;
 ```
 
+<!-- UPDATE 2025-10-12: Plugin namespace migration -->
+Update 2025-10-12: Datasource, middleware, and sink nodes correspond to `src/elspeth/plugins/nodes/{sources,transforms,sinks}/` after repository reorganisation; legacy diagram labels are preserved for continuity with prior accreditation artefacts.
+<!-- END UPDATE -->
+
 <!-- Update 2025-10-12: Added suite orchestration, middleware lifecycle, analytics sinks, and artifact chaining -->
 ```mermaid
 graph TD
@@ -84,6 +88,23 @@ graph TD
     RepoSink -.produces data/json.-> ArtifactPipeline
     AnalyticsSink -.produces reports.-> ArtifactPipeline
     VisualSink -.produces image/png.-> ArtifactPipeline
+```
+
+<!-- UPDATE 2025-10-12: Prompt rendering, validation, and signing pipeline -->
+```mermaid
+graph LR
+    Config[Configuration & Prompt Packs] --> Engine[PromptEngine]
+    Engine --> Templates[Compiled Prompt Templates]
+    Templates --> RunnerInputs[Runner Prompt Context]
+    RunnerInputs --> Validators[Validation Plugins]
+    Validators --> RunnerCore[ExperimentRunner]
+    RunnerCore --> Sanitizer[Sanitisation Guards]
+    Sanitizer --> Signing[SignedArtifactSink]
+    RunnerCore --> Analytics[Analytics & Visual Sinks]
+    RunnerCore --> SuiteReports[SuiteReportGenerator]
+    Signing -->|HMAC manifest| AuditTrail[Audit Artefacts]
+    Analytics --> Evidence[Analytics Evidence]
+    SuiteReports --> Evidence
 ```
 
 <!-- Update 2025-10-12: Middleware chain stages, artifact security gates, and reporting components -->
@@ -206,6 +227,9 @@ graph TD
 
 ### Update 2025-10-12: Suite Reporting Pipeline
 - `SuiteReportGenerator.generate_all_reports` materialises consolidated JSON, Markdown, Excel, and visual artifacts derived from suite execution payloads, gated by the `--reports-dir` CLI flag (`src/elspeth/tools/reporting.py:19`, `src/elspeth/cli.py:392`). Outputs align with analytics and visual sink formats so accreditation reviewers can diff pipeline- and suite-generated evidence (`src/elspeth/plugins/nodes/sinks/visual_report.py:11`, `src/elspeth/plugins/nodes/sinks/analytics_report.py:11`, `src/elspeth/plugins/nodes/sinks/excel.py:19`).
+<!-- UPDATE 2025-10-12: CLI dispatch citation refresh -->
+Update 2025-10-12: `--reports-dir` handling currently occurs at `src/elspeth/cli.py:395-458` following suite execution.
+<!-- END UPDATE -->
 
 ### Update 2025-10-12: Registry Boundaries
 - Core, control, middleware, and experiment registries split responsibilities for datasources, sinks, rate/cost controls, and row/aggregation/baseline/early-stop plugins (`src/elspeth/core/registry.py:91`, `src/elspeth/core/controls/registry.py:36`, `src/elspeth/core/llm/registry.py:17`, `src/elspeth/core/experiments/plugin_registry.py:93`). Suite runner normalises configuration entries before delegation, matching the diagram wiring (`src/elspeth/core/experiments/suite_runner.py:69`).
@@ -215,6 +239,9 @@ graph TD
 
 ### Update 2025-10-12: Artifact Tokens
 - Sinks advertise artifacts via `ArtifactDescriptor` and runtime metadata (`src/elspeth/core/interfaces.py:83`, `src/elspeth/core/artifact_pipeline.py:153`), enabling analytics and signing sinks to consume upstream assets. Controls are catalogued in docs/architecture/CONTROL_INVENTORY.md.
+<!-- UPDATE 2025-10-12: Artifact descriptor relocation -->
+Update 2025-10-12: Artifact descriptor definitions reside in `src/elspeth/core/protocols.py:237-309`; request parsing and binding resolution continue in `src/elspeth/core/artifact_pipeline.py:120-219`.
+<!-- END UPDATE -->
 
 ## Update History
 - 2025-10-12 – Added extended component diagram highlighting suite orchestration, concurrency controls, analytics sinks, and Azure telemetry touchpoints.

@@ -40,6 +40,7 @@ class OrchestratorConfig:  # pylint: disable=too-many-instance-attributes
     concurrency_config: dict[str, Any] | None = None
     early_stop_config: dict[str, Any] | None = None
     early_stop_plugin_defs: list[dict[str, Any]] | None = None
+    max_rows: int | None = None
 
 
 class ExperimentOrchestrator:  # pylint: disable=too-many-instance-attributes,too-few-public-methods
@@ -145,6 +146,11 @@ class ExperimentOrchestrator:  # pylint: disable=too-many-instance-attributes,to
         """Execute all configured experiments and return the runner payload."""
 
         df = self.datasource.load()
+
+        # Apply row limit if configured
+        if self.config.max_rows is not None:
+            df = df.head(self.config.max_rows)
+
         system_prompt = self.config.llm_prompt["system"]
         user_prompt_format = self.config.llm_prompt["user"]
 

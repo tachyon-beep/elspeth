@@ -1,6 +1,6 @@
 # Compliance Roadmap & Accreditation Plan
 
-This roadmap expands on the compliance uplift required for Elspeth, mapping documentation, tooling, and governance workstreams to accreditation expectations (e.g., ISM, Essential Eight, IRAP). It complements `FEATURE_ROADMAP.md` by focusing on evidence, policy, and assurance deliverables.
+This roadmap expands on the compliance uplift required for Elspeth, mapping documentation, tooling, and governance workstreams to accreditation expectations (e.g., ISM, Essential Eight, IRAP). It complements `../roadmap/FEATURE_ROADMAP.md` by focusing on evidence, policy, and assurance deliverables.
 
 ## 1. Objectives
 

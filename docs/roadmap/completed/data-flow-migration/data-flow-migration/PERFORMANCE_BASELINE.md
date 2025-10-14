@@ -9,6 +9,7 @@
 ## Executive Summary
 
 ### Baseline Metrics (Established)
+
 - **Suite Execution**: 30.77s for sample suite (10 rows, 7 experiments)
 - **Registry Lookups**: < 1ms (sub-millisecond)
 - **Plugin Creation**: < 10ms (typically 2-5ms)
@@ -16,6 +17,7 @@
 - **Artifact Pipeline**: < 100ms (typically 10-30ms)
 
 ### Regression Thresholds
+
 - Suite execution: **+10s** (33% increase) = FAIL
 - Registry lookups: **+0.5ms** (50% increase) = FAIL
 - Plugin creation: **+5ms** (50% increase) = FAIL
@@ -29,6 +31,7 @@
 ## Methodology
 
 ### Test Environment
+
 - **Platform**: Linux 6.8.0-84-generic
 - **Python**: 3.12.3
 - **Hardware**: (local development machine)
@@ -36,6 +39,7 @@
 - **Timing**: `time` command for end-to-end, `time.perf_counter()` for micro-benchmarks
 
 ### Measurement Commands
+
 ```bash
 # End-to-end suite timing
 time python -m elspeth.cli \
@@ -57,6 +61,7 @@ elapsed_ms = (time.perf_counter() - start) * 1000
 ### 1. End-to-End Suite Execution
 
 #### Sample Suite (10 rows)
+
 ```
 Experiments: 7
 Rows per experiment: 3-10 (some have early stop)
@@ -73,6 +78,7 @@ Threshold: < 40 seconds (33% margin)
 ```
 
 **Breakdown**:
+
 - `baseline`: 3 rows → ~4.4s
 - `early_stop_fast_exit`: 1 row → ~4.3s (early stop)
 - `early_stop_threshold`: 2 rows → ~4.4s (early stop)
@@ -86,32 +92,38 @@ Threshold: < 40 seconds (33% margin)
 ### 2. Registry Lookup Performance
 
 #### Datasource Registry
+
 ```python
 create_datasource(
     {"plugin": "csv_local", "security_level": "internal", "path": "test.csv"},
     context
 )
 ```
+
 - **Baseline**: < 1ms (estimated ~0.5ms)
 - **Threshold**: < 1.5ms
 
 #### LLM Registry
+
 ```python
 create_llm_client(
     {"plugin": "static", "security_level": "internal", "content": "test"},
     context
 )
 ```
+
 - **Baseline**: < 1ms (estimated ~0.5ms)
 - **Threshold**: < 1.5ms
 
 #### Sink Registry
+
 ```python
 create_sink(
     {"plugin": "csv_file", "security_level": "internal", "path": "out.csv"},
     context
 )
 ```
+
 - **Baseline**: < 1ms (estimated ~0.5ms)
 - **Threshold**: < 1.5ms
 
@@ -120,32 +132,38 @@ create_sink(
 ### 3. Plugin Creation Performance
 
 #### Row Plugin
+
 ```python
 create_row_plugin(
     {"name": "score_extractor", "key": "score"},
     context
 )
 ```
+
 - **Baseline**: ~2ms
 - **Threshold**: < 7ms (50% margin)
 
 #### Aggregator Plugin
+
 ```python
 create_aggregator(
     {"name": "statistics", "source_field": "scores"},
     context
 )
 ```
+
 - **Baseline**: ~3ms
 - **Threshold**: < 8ms (50% margin)
 
 #### Validator Plugin
+
 ```python
 create_validator(
     {"name": "regex", "pattern": "\\d+"},
     context
 )
 ```
+
 - **Baseline**: ~2ms
 - **Threshold**: < 7ms (50% margin)
 
@@ -154,6 +172,7 @@ create_validator(
 ### 4. Configuration Merge Performance
 
 #### Simple Merge (3 layers, basic fields)
+
 ```python
 merger.merge(
     {"prompt_system": "default", "row_plugins": [...]},  # defaults
@@ -161,10 +180,12 @@ merger.merge(
     {"prompt_system": "exp", "validation_plugins": [...]}  # experiment
 )
 ```
+
 - **Baseline**: ~5ms
 - **Threshold**: < 30ms (50% margin)
 
 #### Complex Merge (7 keys, multiple plugins, middleware)
+
 ```python
 merger.merge(
     {
@@ -177,6 +198,7 @@ merger.merge(
     {...}   # experiment
 )
 ```
+
 - **Baseline**: ~15ms
 - **Threshold**: < 40ms (50% margin)
 
@@ -185,6 +207,7 @@ merger.merge(
 ### 5. Artifact Pipeline Resolution
 
 #### Simple Pipeline (2 sinks, 1 dependency)
+
 ```python
 sink_defs = [
     {"plugin": "csv_file", "artifacts": {"produces": ["csv_results"]}},
@@ -193,10 +216,12 @@ sink_defs = [
 pipeline = ArtifactPipeline(sink_defs, context)
 sorted_sinks = pipeline.resolve_execution_order()
 ```
+
 - **Baseline**: ~10ms
 - **Threshold**: < 60ms (50% margin)
 
 #### Complex Pipeline (5 sinks, 4 dependencies)
+
 ```python
 sink_defs = [
     {"plugin": "csv_file", "produces": ["csv_results"]},
@@ -208,6 +233,7 @@ sink_defs = [
 pipeline = ArtifactPipeline(sink_defs, context)
 sorted_sinks = pipeline.resolve_execution_order()
 ```
+
 - **Baseline**: ~30ms
 - **Threshold**: < 80ms (50% margin)
 
@@ -218,6 +244,7 @@ sorted_sinks = pipeline.resolve_execution_order()
 ## Component Contributions to Suite Time
 
 ### Time Budget (30.77s total)
+
 ```
 Experiment Execution:  ~30s (97%)
 ├─ LLM API Calls:      ~20s (65%) - Mock LLM with delays
@@ -239,6 +266,7 @@ Setup & Teardown:      ~0.77s (3%)
 ## Hot Paths & Bottlenecks
 
 ### Critical Paths (Profiling Recommended)
+
 1. **LLM API Calls** (65% of time)
    - Mock LLM intentionally adds delay to simulate network
    - Real LLMs would have similar delays
@@ -262,6 +290,7 @@ Setup & Teardown:      ~0.77s (3%)
    - **Optimization**: Plugin caching (already implemented in suite runner)
 
 ### Non-Critical Paths
+
 - Registry lookups: < 1ms per lookup (negligible)
 - Config merge: 5-15ms per experiment (negligible)
 - Artifact pipeline: 10-30ms per experiment (negligible)
@@ -273,7 +302,9 @@ Setup & Teardown:      ~0.77s (3%)
 ## Regression Test Strategy
 
 ### Automated Tests
+
 Performance tests in `tests/test_performance_baseline.py`:
+
 ```python
 def test_registry_lookup_fast():
     assert elapsed_ms < 1.0
@@ -292,6 +323,7 @@ def test_suite_execution_no_regression():
 ```
 
 ### CI Integration
+
 ```yaml
 # .github/workflows/performance.yml
 name: Performance Tests
@@ -311,6 +343,7 @@ jobs:
 ```
 
 ### Manual Verification
+
 ```bash
 # Before migration
 time python -m elspeth.cli \
@@ -334,7 +367,9 @@ time python -m elspeth.cli \
 ## Known Issues
 
 ### Circular Import in Tests
+
 **Issue**: `tests/test_performance_baseline.py` reveals circular import:
+
 ```
 datasource_registry → registry/base → registry/__init__ → registry.py → datasource_registry
 ```
@@ -350,6 +385,7 @@ datasource_registry → registry/base → registry/__init__ → registry.py → 
 ## Activity 4 Deliverables
 
 ### ✅ Performance Baseline Established
+
 - End-to-end suite: 30.77s ✅
 - Registry lookups: < 1ms ✅
 - Plugin creation: < 10ms ✅
@@ -357,6 +393,7 @@ datasource_registry → registry/base → registry/__init__ → registry.py → 
 - Artifact pipeline: < 100ms ✅
 
 ### ✅ Critical Path Timings Recorded
+
 - LLM API calls: 65% of time ✅
 - Data processing: 16% of time ✅
 - Sink writing: 10% of time ✅
@@ -364,12 +401,14 @@ datasource_registry → registry/base → registry/__init__ → registry.py → 
 - Registry overhead: < 1% of time ✅
 
 ### ✅ Regression Tests Created
+
 - `tests/test_performance_baseline.py` created ✅
 - 10 performance tests defined ✅
 - Thresholds documented ✅
 - CI integration strategy defined ✅
 
 ### ✅ Acceptable Thresholds Defined
+
 - Suite execution: < 40s (33% margin) ✅
 - Registry lookups: < 1.5ms (50% margin) ✅
 - Plugin creation: < 15ms (50% margin) ✅
@@ -383,6 +422,7 @@ datasource_registry → registry/base → registry/__init__ → registry.py → 
 ## Next Steps
 
 Proceed to Activity 5: Configuration Audit
+
 - Inventory all configuration files
 - Verify config parsing
 - Design compatibility layer
