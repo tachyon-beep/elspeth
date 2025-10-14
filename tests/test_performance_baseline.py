@@ -7,39 +7,30 @@ and will detect performance regressions during migration.
 Created: 2025-10-14
 Purpose: Risk Reduction Phase - Activity 4
 
-NOTE: These tests currently have circular import issues (pre-existing).
-They will run correctly after migration fixes the circular imports.
+Updated: 2025-10-15
+Status: SKIPPED - Circular import remains in registry/__init__.py
+Issue: registry/__init__.py dynamically loads old registry.py which imports
+       datasource_registry, creating a circular import.
+Fix: Remove backward compat registry singleton imports (5 files) or restructure
+     registry/__init__.py to not dynamically load old registry.py
 """
 
 import time
 import pytest
 
-# NOTE: Circular import prevents these tests from running in current codebase
-# Migration will fix the circular imports and these tests will run correctly
-# For now, skip all tests in this module
-
-pytestmark = pytest.mark.skip(reason="Circular import issue - tests will run after migration fixes imports")
-
-# Imports commented out to avoid circular import at module load time
-# from elspeth.core.datasource_registry import create_datasource
-# from elspeth.core.llm_registry import create_llm_client
-# from elspeth.core.sink_registry import create_sink
-# from elspeth.core.experiments.plugin_registry import (
-#     create_row_plugin,
-#     create_aggregator,
-#     create_validator
-# )
-# from elspeth.core.plugins.context import PluginContext
-# from elspeth.core.experiments.config_merger import ConfigMerger
-# from elspeth.core.artifact_pipeline import ArtifactPipeline
+# Skip all tests due to circular import issue
+pytestmark = pytest.mark.skip(
+    reason="Circular import: registry/__init__.py loads registry.py which imports datasource_registry. "
+    "Fix by removing backward compat 'registry' singleton imports from 5 files."
+)
 
 # Placeholder imports to make tests syntactically valid
-create_datasource = None
-create_llm_client = None
-create_sink = None
+datasource_registry = None
+llm_registry = None
+sink_registry = None
 create_row_plugin = None
-create_aggregator = None
-create_validator = None
+create_aggregation_plugin = None
+create_validation_plugin = None
 PluginContext = None
 ConfigMerger = None
 ArtifactPipeline = None
@@ -50,16 +41,11 @@ class TestRegistryLookupPerformance:
 
     def test_datasource_lookup_fast(self):
         """Datasource lookup should be < 1ms."""
-        context = PluginContext(
-            security_level="internal",
-            plugin_kind="datasource",
-            plugin_name="csv_local"
-        )
-
         start = time.perf_counter()
-        ds = create_datasource(
-            {"plugin": "csv_local", "security_level": "internal", "path": "test.csv"},
-            context
+        ds = datasource_registry.create(
+            name="local_csv",
+            options={"security_level": "internal", "path": "test.csv"},
+            require_determinism=False
         )
         elapsed_ms = (time.perf_counter() - start) * 1000
 
@@ -68,16 +54,11 @@ class TestRegistryLookupPerformance:
 
     def test_llm_client_lookup_fast(self):
         """LLM client lookup should be < 1ms."""
-        context = PluginContext(
-            security_level="internal",
-            plugin_kind="llm",
-            plugin_name="static"
-        )
-
         start = time.perf_counter()
-        llm = create_llm_client(
-            {"plugin": "static", "security_level": "internal", "content": "test"},
-            context
+        llm = llm_registry.create(
+            name="static_test",
+            options={"security_level": "internal", "content": "test"},
+            require_determinism=False
         )
         elapsed_ms = (time.perf_counter() - start) * 1000
 
@@ -86,16 +67,11 @@ class TestRegistryLookupPerformance:
 
     def test_sink_lookup_fast(self):
         """Sink lookup should be < 1ms."""
-        context = PluginContext(
-            security_level="internal",
-            plugin_kind="sink",
-            plugin_name="csv_file"
-        )
-
         start = time.perf_counter()
-        sink = create_sink(
-            {"plugin": "csv_file", "security_level": "internal", "path": "out.csv"},
-            context
+        sink = sink_registry.create(
+            name="csv",
+            options={"security_level": "internal", "path": "out.csv"},
+            require_determinism=False
         )
         elapsed_ms = (time.perf_counter() - start) * 1000
 
@@ -116,7 +92,7 @@ class TestPluginCreationPerformance:
 
         start = time.perf_counter()
         plugin = create_row_plugin(
-            {"name": "score_extractor", "key": "score"},
+            {"name": "score_extractor", "key": "score", "security_level": "internal", "determinism_level": "guaranteed"},
             context
         )
         elapsed_ms = (time.perf_counter() - start) * 1000
@@ -133,8 +109,8 @@ class TestPluginCreationPerformance:
         )
 
         start = time.perf_counter()
-        plugin = create_aggregator(
-            {"name": "statistics", "source_field": "scores"},
+        plugin = create_aggregation_plugin(
+            {"name": "statistics", "source_field": "scores", "security_level": "internal", "determinism_level": "guaranteed"},
             context
         )
         elapsed_ms = (time.perf_counter() - start) * 1000
@@ -151,8 +127,8 @@ class TestPluginCreationPerformance:
         )
 
         start = time.perf_counter()
-        plugin = create_validator(
-            {"name": "regex", "pattern": "\\d+"},
+        plugin = create_validation_plugin(
+            {"name": "regex", "pattern": "\\d+", "security_level": "internal", "determinism_level": "guaranteed"},
             context
         )
         elapsed_ms = (time.perf_counter() - start) * 1000
@@ -161,6 +137,7 @@ class TestPluginCreationPerformance:
         assert elapsed_ms < 10.0, f"Validator creation took {elapsed_ms:.2f}ms (threshold: 10ms)"
 
 
+@pytest.mark.skip(reason="TODO: Rewrite for new ConfigMerger API (merge_list, merge_dict, merge_scalar)")
 class TestConfigMergePerformance:
     """Test configuration merge < 50ms."""
 
@@ -228,6 +205,7 @@ class TestConfigMergePerformance:
         assert elapsed_ms < 50.0, f"Complex config merge took {elapsed_ms:.2f}ms (threshold: 50ms)"
 
 
+@pytest.mark.skip(reason="TODO: Rewrite for new ArtifactPipeline API (SinkBinding, topological sort)")
 class TestArtifactPipelinePerformance:
     """Test artifact pipeline resolution < 100ms."""
 
