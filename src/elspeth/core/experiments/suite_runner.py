@@ -6,8 +6,8 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, Callable, cast
 
-from elspeth.core import registry as core_registry
 from elspeth.core.controls import create_cost_tracker, create_rate_limiter
+from elspeth.core.sink_registry import sink_registry
 from elspeth.core.experiments.config import ExperimentConfig, ExperimentSuite
 from elspeth.core.experiments.config_merger import ConfigMerger
 from elspeth.core.experiments.plugin_registry import (
@@ -245,8 +245,8 @@ class ExperimentSuiteRunner:
             options_with_level = dict(raw_options)
             options_with_level["security_level"] = security_level
             options_with_level["determinism_level"] = determinism_level
-            core_registry.registry.validate_sink(plugin, options_with_level)
-            sink = core_registry.registry.create_sink(
+            sink_registry.validate(plugin, options_with_level)
+            sink = sink_registry.create(
                 plugin,
                 options_with_level,
                 provenance=(f"sink:{plugin}.definition",),
