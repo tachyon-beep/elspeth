@@ -22,7 +22,7 @@ import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, Mapping
 
 from elspeth.core.protocols import Artifact, ArtifactDescriptor, ResultSink
 from elspeth.core.security import generate_signature
@@ -117,12 +117,14 @@ class ReproducibilityBundleSink(ResultSink):
 
             # Generate manifest with file hashes
             manifest = self._build_manifest(results, metadata, timestamp)
+            assert self._temp_dir is not None
             manifest_path = self._temp_dir / self.manifest_name
             manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
             self._file_hashes[self.manifest_name] = self._hash_file(manifest_path)
 
             # Sign the manifest
             signature_data = self._sign_manifest(manifest, timestamp)
+            assert self._temp_dir is not None
             signature_path = self._temp_dir / self.signature_name
             signature_path.write_text(json.dumps(signature_data, indent=2, sort_keys=True), encoding="utf-8")
 
@@ -152,6 +154,7 @@ class ReproducibilityBundleSink(ResultSink):
 
     def _write_results_json(self, results: dict[str, Any]) -> None:
         """Write results as JSON with sorted keys."""
+        assert self._temp_dir is not None
         path = self._temp_dir / self.results_json_name
         # Use custom encoder to handle non-serializable objects
         content = json.dumps(results, indent=2, sort_keys=True, default=self._json_serializer)
@@ -161,6 +164,7 @@ class ReproducibilityBundleSink(ResultSink):
 
     def _write_results_csv(self, results: dict[str, Any], metadata: dict[str, Any]) -> None:
         """Write results as sanitized CSV."""
+        assert self._temp_dir is not None
         path = self._temp_dir / self.results_csv_name
         csv_sink = CsvResultSink(
             path=str(path),
@@ -183,12 +187,15 @@ class ReproducibilityBundleSink(ResultSink):
         retained_path = None
         if source_data is not None:
             import pandas as pd
+
             if isinstance(source_data, pd.DataFrame):
                 retained_path = source_data.attrs.get("retained_local_path")
 
         if retained_path and Path(retained_path).exists():
             # Copy the retained local file
             import shutil
+
+            assert self._temp_dir is not None
             dest_path = self._temp_dir / self.source_data_name
             shutil.copy2(retained_path, dest_path)
             self._file_hashes[self.source_data_name] = self._hash_file(dest_path)
@@ -197,7 +204,9 @@ class ReproducibilityBundleSink(ResultSink):
         elif source_data is not None:
             # DataFrame available but no retained copy - save it now
             import pandas as pd
+
             if isinstance(source_data, pd.DataFrame):
+                assert self._temp_dir is not None
                 path = self._temp_dir / self.source_data_name
                 source_data.to_csv(path, index=False)
                 self._file_hashes[self.source_data_name] = self._hash_file(path)
@@ -206,6 +215,7 @@ class ReproducibilityBundleSink(ResultSink):
 
         if datasource_config:
             # Always save datasource config for reference
+            assert self._temp_dir is not None
             config_path = self._temp_dir / "datasource_config.json"
             config_path.write_text(json.dumps(datasource_config, indent=2, sort_keys=True), encoding="utf-8")
             self._file_hashes["datasource_config.json"] = self._hash_file(config_path)
@@ -219,10 +229,12 @@ class ReproducibilityBundleSink(ResultSink):
         config = metadata.get("config") or metadata.get("experiment_config")
 
         if config:
+            assert self._temp_dir is not None
             path = self._temp_dir / self.config_name
             if isinstance(config, dict):
                 # Convert dict to YAML
                 import yaml
+
                 content = yaml.dump(config, default_flow_style=False, sort_keys=True)
             else:
                 content = str(config)
@@ -241,21 +253,26 @@ class ReproducibilityBundleSink(ResultSink):
             if isinstance(entry, dict):
                 request = entry.get("request") or entry.get("llm_request")
                 if isinstance(request, dict):
-                    prompts.append({
-                        "row_index": idx,
-                        "system_prompt": request.get("system_prompt"),
-                        "user_prompt": request.get("user_prompt"),
-                        "metadata": request.get("metadata", {}),
-                    })
+                    prompts.append(
+                        {
+                            "row_index": idx,
+                            "system_prompt": request.get("system_prompt"),
+                            "user_prompt": request.get("user_prompt"),
+                            "metadata": request.get("metadata", {}),
+                        }
+                    )
 
         # Also check metadata for prompt templates
         if metadata.get("prompt_templates"):
-            prompts.append({
-                "type": "templates",
-                "data": metadata["prompt_templates"],
-            })
+            prompts.append(
+                {
+                    "type": "templates",
+                    "data": metadata["prompt_templates"],
+                }
+            )
 
         if prompts:
+            assert self._temp_dir is not None
             path = self._temp_dir / self.prompts_name
             path.write_text(json.dumps(prompts, indent=2, sort_keys=True), encoding="utf-8")
             self._file_hashes[self.prompts_name] = self._hash_file(path)
@@ -265,6 +282,7 @@ class ReproducibilityBundleSink(ResultSink):
 
     def _write_plugins(self, metadata: dict[str, Any]) -> None:
         """Copy source code of all plugins used in this experiment."""
+        assert self._temp_dir is not None
         plugins_dir = self._temp_dir / "plugins"
         plugins_dir.mkdir(exist_ok=True)
 
@@ -329,6 +347,7 @@ class ReproducibilityBundleSink(ResultSink):
             return
 
         # Create tarball of framework code
+        assert self._temp_dir is not None
         framework_tar = self._temp_dir / "framework_source.tar.gz"
         with tarfile.open(framework_tar, "w:gz") as tar:
             tar.add(framework_dir, arcname="elspeth", filter=self._filter_framework_files)
@@ -351,6 +370,7 @@ class ReproducibilityBundleSink(ResultSink):
         if not self._consumed_artifacts:
             return
 
+        assert self._temp_dir is not None
         artifacts_dir = self._temp_dir / "artifacts"
         artifacts_dir.mkdir(exist_ok=True)
 
@@ -364,6 +384,7 @@ class ReproducibilityBundleSink(ResultSink):
                     rel_path = f"artifacts/{dest_path.name}"
                     self._file_hashes[rel_path] = self._hash_file(dest_path)
                 elif artifact.payload:
+                    assert self._temp_dir is not None
                     dest_path = artifacts_dir / f"{filename}.json"
                     dest_path.write_text(json.dumps(artifact.payload, indent=2, sort_keys=True), encoding="utf-8")
                     rel_path = f"artifacts/{dest_path.name}"
@@ -388,7 +409,8 @@ class ReproducibilityBundleSink(ResultSink):
                 "cost_summary": results.get("cost_summary"),
             },
             "metadata": {
-                k: v for k, v in metadata.items()
+                k: v
+                for k, v in metadata.items()
                 if k not in {"source_data", "config", "plugins"}  # Already captured separately
             },
             "files": {
@@ -413,7 +435,8 @@ class ReproducibilityBundleSink(ResultSink):
         """Cryptographically sign the manifest."""
         key = self._resolve_signing_key()
         manifest_bytes = json.dumps(manifest, sort_keys=True).encode("utf-8")
-        signature = generate_signature(manifest_bytes, key, algorithm=self.algorithm)
+        algo: Literal["hmac-sha256", "hmac-sha512"] = "hmac-sha256" if self.algorithm == "hmac-sha256" else "hmac-sha512"
+        signature = generate_signature(manifest_bytes, key, algorithm=algo)
 
         return {
             "algorithm": self.algorithm,
@@ -431,12 +454,11 @@ class ReproducibilityBundleSink(ResultSink):
             env_value = os.getenv(self.key_env)
             if env_value:
                 return env_value
-        raise ValueError(
-            f"Signing key not provided; set 'key' option or {self.key_env} environment variable"
-        )
+        raise ValueError(f"Signing key not provided; set 'key' option or {self.key_env} environment variable")
 
     def _create_archive(self, metadata: dict[str, Any], timestamp: datetime) -> Path:
         """Create final compressed tarball."""
+        assert self._temp_dir is not None
         name = self.bundle_name or str(metadata.get("experiment") or metadata.get("name") or "experiment")
         if self.timestamped:
             name = f"{name}_{timestamp.strftime('%Y%m%dT%H%M%SZ')}"
@@ -449,10 +471,10 @@ class ReproducibilityBundleSink(ResultSink):
             mode = f"w:{self.compression}"
             ext = f".tar.{self.compression}"
 
-        archive_path = self.base_path / f"{name}{ext}"
+        archive_path = Path(self.base_path) / f"{name}{ext}"
         archive_path.parent.mkdir(parents=True, exist_ok=True)
 
-        with tarfile.open(archive_path, mode) as tar:
+        with tarfile.open(archive_path, mode) as tar:  # type: ignore[call-overload]
             tar.add(self._temp_dir, arcname=name)
 
         return archive_path
@@ -474,11 +496,12 @@ class ReproducibilityBundleSink(ResultSink):
     @staticmethod
     def _format_size(size_bytes: int) -> str:
         """Format file size for logging."""
+        size_float = float(size_bytes)
         for unit in ["B", "KB", "MB", "GB"]:
-            if size_bytes < 1024.0:
-                return f"{size_bytes:.1f} {unit}"
-            size_bytes /= 1024.0
-        return f"{size_bytes:.1f} TB"
+            if size_float < 1024.0:
+                return f"{size_float:.1f} {unit}"
+            size_float /= 1024.0
+        return f"{size_float:.1f} TB"
 
     @staticmethod
     def _json_serializer(obj: Any) -> Any:
@@ -487,16 +510,16 @@ class ReproducibilityBundleSink(ResultSink):
         Handles common non-serializable types from LLM responses, DataFrames, etc.
         """
         # Handle Pydantic models (OpenAI responses use these)
-        if hasattr(obj, 'model_dump'):
+        if hasattr(obj, "model_dump"):
             return obj.model_dump()
 
         # Handle objects with to_dict method
-        if hasattr(obj, 'to_dict'):
+        if hasattr(obj, "to_dict"):
             return obj.to_dict()
 
         # Handle objects with dict representation
-        if hasattr(obj, '__dict__'):
-            return {k: v for k, v in obj.__dict__.items() if not k.startswith('_')}
+        if hasattr(obj, "__dict__"):
+            return {k: v for k, v in obj.__dict__.items() if not k.startswith("_")}
 
         # Fallback to string representation
         return str(obj)
@@ -519,7 +542,7 @@ class ReproducibilityBundleSink(ResultSink):
         """Declare consumed artifact types (consume all)."""
         return []  # Empty means consume all available artifacts
 
-    def prepare_artifacts(self, artifacts: dict[str, list[Artifact]]) -> None:
+    def prepare_artifacts(self, artifacts: Mapping[str, list[Artifact]]) -> None:
         """Receive artifacts from upstream sinks."""
         self._consumed_artifacts = {k: list(v) for k, v in artifacts.items() if v}
 
@@ -543,7 +566,7 @@ class ReproducibilityBundleSink(ResultSink):
         self._last_archive_path = None
         return {"reproducibility_bundle": artifact}
 
-    def finalize(self, artifacts: dict[str, list[Artifact]], *, metadata: dict[str, Any] | None = None) -> None:
+    def finalize(self, artifacts: Mapping[str, Artifact], *, metadata: dict[str, Any] | None = None) -> None:
         """Optional cleanup after sink pipeline completes."""
         pass
 

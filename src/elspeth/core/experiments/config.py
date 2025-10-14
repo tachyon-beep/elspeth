@@ -78,10 +78,10 @@ class ExperimentConfig(BaseModel):
         # Allow arbitrary types (Path, etc.)
         arbitrary_types_allowed=True,
         # Be strict about extra fields
-        extra='forbid',
+        extra="forbid",
     )
 
-    @field_validator('temperature')
+    @field_validator("temperature")
     @classmethod
     def validate_temperature(cls, v: float) -> float:
         """Validate temperature is within reasonable bounds."""
@@ -89,7 +89,7 @@ class ExperimentConfig(BaseModel):
             raise ValueError(f"Temperature must be between 0 and 2, got {v}")
         return v
 
-    @field_validator('max_tokens')
+    @field_validator("max_tokens")
     @classmethod
     def validate_max_tokens(cls, v: int) -> int:
         """Validate max_tokens is positive."""
@@ -182,9 +182,9 @@ class ExperimentConfig(BaseModel):
 
         # Use Pydantic's model_dump to get all fields (excludes None and defaults)
         model_data = self.model_dump(
-            exclude={'options', 'path'},  # Don't duplicate options, exclude Path
+            exclude={"options", "path"},  # Don't duplicate options, exclude Path
             exclude_none=True,  # Skip None values
-            mode='python',  # Python objects, not JSON
+            mode="python",  # Python objects, not JSON
         )
 
         # Update with model data (model fields override options)
@@ -273,8 +273,10 @@ class ExperimentSuite(BaseModel):
             baseline = experiments[0]
 
         # Use Pydantic v2's model_validate for validation
-        return cls.model_validate({
-            "root": root,
-            "experiments": experiments,
-            "baseline": baseline,
-        })
+        return cls.model_validate(
+            {
+                "root": root,
+                "experiments": experiments,
+                "baseline": baseline,
+            }
+        )

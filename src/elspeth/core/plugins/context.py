@@ -34,12 +34,12 @@ class PluginContext(BaseModel):
         # Allow arbitrary types (Mapping, etc.)
         arbitrary_types_allowed=True,
         # Strict mode - no extra fields
-        extra='forbid',
+        extra="forbid",
         # Validate on assignment (though frozen=True prevents assignment)
         validate_assignment=True,
     )
 
-    @field_validator('plugin_name', 'plugin_kind', 'security_level')
+    @field_validator("plugin_name", "plugin_kind", "security_level")
     @classmethod
     def validate_non_empty(cls, v: str, info) -> str:
         """Validate that critical fields are non-empty."""
@@ -47,7 +47,7 @@ class PluginContext(BaseModel):
             raise ValueError(f"{info.field_name} cannot be empty")
         return v.strip()
 
-    @field_validator('determinism_level')
+    @field_validator("determinism_level")
     @classmethod
     def validate_determinism_level(cls, v: str) -> str:
         """Validate determinism level is one of the expected values.
@@ -55,7 +55,7 @@ class PluginContext(BaseModel):
         Valid levels: none, low, high, guaranteed
         (These correspond to the DeterminismLevel enum)
         """
-        valid_levels = {'none', 'low', 'high', 'guaranteed'}
+        valid_levels = {"none", "low", "high", "guaranteed"}
         v_lower = v.lower().strip()
         if v_lower not in valid_levels:
             raise ValueError(f"determinism_level must be one of {valid_levels}, got '{v}'")
@@ -89,17 +89,19 @@ class PluginContext(BaseModel):
         cfg_path = config_path if config_path is not None else self.config_path
 
         # Use model_validate to ensure validators run on derived context
-        return PluginContext.model_validate({
-            "plugin_name": plugin_name,
-            "plugin_kind": plugin_kind,
-            "security_level": sec_level,
-            "determinism_level": det_level,
-            "provenance": sources,
-            "parent": self,
-            "metadata": data,
-            "suite_root": root,
-            "config_path": cfg_path,
-        })
+        return PluginContext.model_validate(
+            {
+                "plugin_name": plugin_name,
+                "plugin_kind": plugin_kind,
+                "security_level": sec_level,
+                "determinism_level": det_level,
+                "provenance": sources,
+                "parent": self,
+                "metadata": data,
+                "suite_root": root,
+                "config_path": cfg_path,
+            }
+        )
 
 
 def apply_plugin_context(instance: Any, context: PluginContext) -> None:
@@ -118,6 +120,7 @@ def apply_plugin_context(instance: Any, context: PluginContext) -> None:
 
     # Attach plugin logger for structured logging
     from elspeth.core.logging import attach_plugin_logger
+
     attach_plugin_logger(instance, context)
 
     hook = getattr(instance, "on_plugin_context", None)

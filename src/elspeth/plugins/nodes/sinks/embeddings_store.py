@@ -381,9 +381,7 @@ class EmbeddingsStoreSink(ResultSink):
             table = options.get("table")
             if not table:
                 raise ConfigurationError("pgvector provider requires 'table' option (e.g., 'elspeth_rag')")
-            return PgVectorClient(
-                dsn=dsn, table=table, upsert_conflict=options.get("upsert_conflict", "replace")
-            )
+            return PgVectorClient(dsn=dsn, table=table, upsert_conflict=options.get("upsert_conflict", "replace"))
         if provider == "azure_search":
             endpoint = options.get("endpoint")
             index = options.get("index")

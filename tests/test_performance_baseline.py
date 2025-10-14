@@ -37,9 +37,7 @@ class TestRegistryLookupPerformance:
         """Datasource lookup should be < 5ms."""
         start = time.perf_counter()
         ds = datasource_registry.create(
-            name="local_csv",
-            options={"security_level": "internal", "path": "test.csv", "retain_local": False},
-            require_determinism=False
+            name="local_csv", options={"security_level": "internal", "path": "test.csv", "retain_local": False}, require_determinism=False
         )
         elapsed_ms = (time.perf_counter() - start) * 1000
 
@@ -49,11 +47,7 @@ class TestRegistryLookupPerformance:
     def test_llm_client_lookup_fast(self):
         """LLM client lookup should be < 5ms."""
         start = time.perf_counter()
-        llm = llm_registry.create(
-            name="static_test",
-            options={"security_level": "internal", "content": "test"},
-            require_determinism=False
-        )
+        llm = llm_registry.create(name="static_test", options={"security_level": "internal", "content": "test"}, require_determinism=False)
         elapsed_ms = (time.perf_counter() - start) * 1000
 
         assert llm is not None
@@ -62,11 +56,7 @@ class TestRegistryLookupPerformance:
     def test_sink_lookup_fast(self):
         """Sink lookup should be < 5ms."""
         start = time.perf_counter()
-        sink = sink_registry.create(
-            name="csv",
-            options={"security_level": "internal", "path": "out.csv"},
-            require_determinism=False
-        )
+        sink = sink_registry.create(name="csv", options={"security_level": "internal", "path": "out.csv"}, require_determinism=False)
         elapsed_ms = (time.perf_counter() - start) * 1000
 
         assert sink is not None
@@ -78,16 +68,12 @@ class TestPluginCreationPerformance:
 
     def test_row_plugin_creation_fast(self):
         """Row plugin creation should be < 20ms."""
-        context = PluginContext(
-            security_level="internal",
-            plugin_kind="row_plugin",
-            plugin_name="score_extractor"
-        )
+        context = PluginContext(security_level="internal", plugin_kind="row_plugin", plugin_name="score_extractor")
 
         start = time.perf_counter()
         plugin = create_row_plugin(
             {"name": "score_extractor", "key": "score", "security_level": "internal", "determinism_level": "guaranteed"},
-            parent_context=context
+            parent_context=context,
         )
         elapsed_ms = (time.perf_counter() - start) * 1000
 
@@ -96,16 +82,12 @@ class TestPluginCreationPerformance:
 
     def test_aggregator_creation_fast(self):
         """Aggregator creation should be < 20ms."""
-        context = PluginContext(
-            security_level="internal",
-            plugin_kind="aggregator",
-            plugin_name="score_stats"
-        )
+        context = PluginContext(security_level="internal", plugin_kind="aggregator", plugin_name="score_stats")
 
         start = time.perf_counter()
         plugin = create_aggregation_plugin(
             {"name": "score_stats", "source_field": "scores", "security_level": "internal", "determinism_level": "guaranteed"},
-            parent_context=context
+            parent_context=context,
         )
         elapsed_ms = (time.perf_counter() - start) * 1000
 
@@ -114,16 +96,12 @@ class TestPluginCreationPerformance:
 
     def test_validator_creation_fast(self):
         """Validator creation should be < 20ms."""
-        context = PluginContext(
-            security_level="internal",
-            plugin_kind="validator",
-            plugin_name="regex_match"
-        )
+        context = PluginContext(security_level="internal", plugin_kind="validator", plugin_name="regex_match")
 
         start = time.perf_counter()
         plugin = create_validation_plugin(
             {"name": "regex_match", "options": {"pattern": "\\d+"}, "security_level": "internal", "determinism_level": "guaranteed"},
-            parent_context=context
+            parent_context=context,
         )
         elapsed_ms = (time.perf_counter() - start) * 1000
 
@@ -139,20 +117,11 @@ class TestConfigMergePerformance:
         """Simple config merge should be < 50ms."""
         merger = ConfigMerger()
 
-        defaults = {
-            "prompt_system": "default system",
-            "row_plugins": [{"name": "noop"}]
-        }
+        defaults = {"prompt_system": "default system", "row_plugins": [{"name": "noop"}]}
 
-        pack = {
-            "prompt_user": "pack user",
-            "aggregator_plugins": [{"name": "statistics"}]
-        }
+        pack = {"prompt_user": "pack user", "aggregator_plugins": [{"name": "statistics"}]}
 
-        experiment = {
-            "prompt_system": "experiment system",
-            "validation_plugins": [{"name": "regex", "pattern": "test"}]
-        }
+        experiment = {"prompt_system": "experiment system", "validation_plugins": [{"name": "regex", "pattern": "test"}]}
 
         start = time.perf_counter()
         merged = merger.merge(defaults, pack, experiment)
@@ -173,20 +142,20 @@ class TestConfigMergePerformance:
             "aggregator_plugins": [{"name": "statistics"}],
             "validation_plugins": [],
             "llm_middlewares": [{"name": "audit_logger"}],
-            "sinks": [{"plugin": "csv_file", "path": "default.csv"}]
+            "sinks": [{"plugin": "csv_file", "path": "default.csv"}],
         }
 
         pack = {
             "prompt_user": "pack prompt",
             "row_plugins": [{"name": "score_extractor", "key": "score"}],
             "aggregator_plugins": [{"name": "recommendations"}],
-            "llm_middlewares": [{"name": "prompt_shield"}]
+            "llm_middlewares": [{"name": "prompt_shield"}],
         }
 
         experiment = {
             "prompt_system": "experiment prompt",
             "validation_plugins": [{"name": "regex", "pattern": "\\d+"}],
-            "sinks": [{"plugin": "json_local_bundle", "path": "exp.json"}]
+            "sinks": [{"plugin": "json_local_bundle", "path": "exp.json"}],
         }
 
         start = time.perf_counter()
@@ -205,28 +174,21 @@ class TestArtifactPipelinePerformance:
 
     def test_simple_pipeline_fast(self, sample_dataframe):
         """Simple artifact pipeline should resolve in < 100ms."""
-        context = PluginContext(
-            security_level="internal",
-            plugin_kind="sink",
-            plugin_name="test"
-        )
+        context = PluginContext(security_level="internal", plugin_kind="sink", plugin_name="test")
 
         sink_defs = [
             {
                 "plugin": "csv_file",
                 "security_level": "internal",
                 "path": "results.csv",
-                "artifacts": {"produces": [{"name": "csv_results", "persist": True}]}
+                "artifacts": {"produces": [{"name": "csv_results", "persist": True}]},
             },
             {
                 "plugin": "json_local_bundle",
                 "security_level": "internal",
                 "path": "bundle.json",
-                "artifacts": {
-                    "consumes": ["csv_results"],
-                    "produces": [{"name": "json_bundle", "persist": True}]
-                }
-            }
+                "artifacts": {"consumes": ["csv_results"], "produces": [{"name": "json_bundle", "persist": True}]},
+            },
         ]
 
         start = time.perf_counter()
@@ -241,55 +203,39 @@ class TestArtifactPipelinePerformance:
 
     def test_complex_pipeline_fast(self):
         """Complex artifact pipeline with 5 sinks should resolve in < 100ms."""
-        context = PluginContext(
-            security_level="internal",
-            plugin_kind="sink",
-            plugin_name="test"
-        )
+        context = PluginContext(security_level="internal", plugin_kind="sink", plugin_name="test")
 
         sink_defs = [
             {
                 "plugin": "csv_file",
                 "security_level": "internal",
                 "path": "results.csv",
-                "artifacts": {"produces": [{"name": "csv_results"}]}
+                "artifacts": {"produces": [{"name": "csv_results"}]},
             },
             {
                 "plugin": "analytics_report",
                 "security_level": "internal",
                 "path": "analytics.json",
-                "artifacts": {
-                    "consumes": ["csv_results"],
-                    "produces": [{"name": "analytics"}]
-                }
+                "artifacts": {"consumes": ["csv_results"], "produces": [{"name": "analytics"}]},
             },
             {
                 "plugin": "visual_report",
                 "security_level": "internal",
                 "path": "visual.png",
-                "artifacts": {
-                    "consumes": ["csv_results", "analytics"],
-                    "produces": [{"name": "visual"}]
-                }
+                "artifacts": {"consumes": ["csv_results", "analytics"], "produces": [{"name": "visual"}]},
             },
             {
                 "plugin": "json_local_bundle",
                 "security_level": "internal",
                 "path": "bundle.json",
-                "artifacts": {
-                    "consumes": ["csv_results", "analytics", "visual"],
-                    "produces": [{"name": "bundle"}]
-                }
+                "artifacts": {"consumes": ["csv_results", "analytics", "visual"], "produces": [{"name": "bundle"}]},
             },
             {
                 "plugin": "signed_artifact",
                 "security_level": "internal",
                 "path": "signed.json",
-                "artifacts": {
-                    "consumes": ["bundle"],
-                    "produces": [{"name": "signature"}]
-                }
-            }
+                "artifacts": {"consumes": ["bundle"], "produces": [{"name": "signature"}]},
+            },
         ]
 
         start = time.perf_counter()
@@ -323,13 +269,20 @@ class TestPerformanceRegression:
 
         start = time.perf_counter()
         result = subprocess.run(
-            ["python", "-m", "elspeth.cli",
-             "--settings", "config/sample_suite/settings.yaml",
-             "--suite-root", "config/sample_suite",
-             "--head", "10"],
+            [
+                "python",
+                "-m",
+                "elspeth.cli",
+                "--settings",
+                "config/sample_suite/settings.yaml",
+                "--suite-root",
+                "config/sample_suite",
+                "--head",
+                "10",
+            ],
             capture_output=True,
             text=True,
-            timeout=120
+            timeout=120,
         )
         elapsed = time.perf_counter() - start
 
@@ -345,11 +298,14 @@ class TestPerformanceRegression:
 def sample_dataframe():
     """Sample DataFrame for testing."""
     import pandas as pd
-    return pd.DataFrame({
-        "prompt": ["test prompt 1", "test prompt 2", "test prompt 3"],
-        "response": ["response 1", "response 2", "response 3"],
-        "score": [0.8, 0.9, 0.7]
-    })
+
+    return pd.DataFrame(
+        {
+            "prompt": ["test prompt 1", "test prompt 2", "test prompt 3"],
+            "response": ["response 1", "response 2", "response 3"],
+            "score": [0.8, 0.9, 0.7],
+        }
+    )
 
 
 # Performance summary

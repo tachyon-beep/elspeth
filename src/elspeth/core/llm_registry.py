@@ -45,8 +45,7 @@ def _create_static_llm(options: dict[str, Any], context: PluginContext) -> Stati
     content = options.get("content")
     if not content:
         raise ConfigurationError(
-            "static_test LLM requires explicit 'content' parameter. "
-            "Provide the test response content explicitly in configuration."
+            "static_test LLM requires explicit 'content' parameter. " "Provide the test response content explicitly in configuration."
         )
     return StaticLLMClient(
         content=content,

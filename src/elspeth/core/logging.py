@@ -82,10 +82,7 @@ class PluginLogger:
         # Try to get options from plugin
         if hasattr(self.plugin_instance, "__dict__"):
             # Filter out private attributes and methods
-            config_data = {
-                k: v for k, v in self.plugin_instance.__dict__.items()
-                if not k.startswith("_") and not callable(v)
-            }
+            config_data = {k: v for k, v in self.plugin_instance.__dict__.items() if not k.startswith("_") and not callable(v)}
 
         # Serialize and hash
         config_str = json.dumps(config_data, sort_keys=True, default=str)
@@ -115,6 +112,7 @@ class PluginLogger:
         # Try package version (for installed packages)
         try:
             import importlib.metadata
+
             module_name = self.plugin_instance.__class__.__module__.split(".")[0]
             return importlib.metadata.version(module_name)
         except Exception:
@@ -160,8 +158,8 @@ class PluginLogger:
             "Plugin initialized: %s (%s) [config_hash=%s, code_hash=%s]",
             self.context.plugin_name,
             self.context.plugin_kind,
-            init_event["plugin"]["config_hash"],
-            init_event["plugin"]["code_hash"],
+            init_event["plugin"]["config_hash"],  # type: ignore[index]
+            init_event["plugin"]["code_hash"],  # type: ignore[index]
         )
 
     def log_event(
@@ -233,7 +231,7 @@ class PluginLogger:
             duration_ms: Duration in milliseconds
             metadata: Additional metadata
         """
-        metrics = {}
+        metrics: dict[str, int | float] = {}
         if rows is not None:
             metrics["rows"] = rows
         if columns is not None:
@@ -273,7 +271,7 @@ class PluginLogger:
             temperature: Temperature setting
             metadata: Additional metadata
         """
-        metrics = {}
+        metrics: dict[str, int | float] = {}
         if prompt_tokens is not None:
             metrics["prompt_tokens"] = prompt_tokens
         if completion_tokens is not None:
@@ -311,7 +309,7 @@ class PluginLogger:
             duration_ms: Duration in milliseconds
             metadata: Additional metadata
         """
-        metrics = {}
+        metrics: dict[str, int | float] = {}
         if rows_written is not None:
             metrics["rows_written"] = rows_written
         if bytes_written is not None:

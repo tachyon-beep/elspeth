@@ -24,6 +24,7 @@ class TestCriticalDefaultEnforcement:
         """Meta-test: Verify critical defaults are documented in audit."""
         # This test passes - it just confirms the audit exists
         import pathlib
+
         audit_file = (
             pathlib.Path(__file__).parent.parent
             / "docs"
@@ -92,17 +93,11 @@ class TestStaticLLMDefaults:
         # Should raise ConfigurationError when content is missing
         # Schema validation catches this before the factory function
         with pytest.raises(ConfigurationError, match="is a required property.*content"):
-            llm_registry.create(
-                name="static_test",
-                options={"security_level": "internal"},
-                require_determinism=False
-            )
+            llm_registry.create(name="static_test", options={"security_level": "internal"}, require_determinism=False)
 
         # Should succeed when content is provided
         llm = llm_registry.create(
-            name="static_test",
-            options={"security_level": "internal", "content": "Explicit test content"},
-            require_determinism=False
+            name="static_test", options={"security_level": "internal", "content": "Explicit test content"}, require_determinism=False
         )
         assert llm is not None
         assert llm.content == "Explicit test content"
@@ -168,13 +163,13 @@ class TestSecurityGateStatus:
     def test_critical_defaults_gate_status(self):
         """Track status of critical defaults removal."""
         critical_defaults_removed = {
-            "azure_search_api_key_env": True,    # ✅ Fixed in providers.py:164
-            "azure_search_field_names": True,    # ✅ Fixed in providers.py:175-183
-            "pgvector_table_name": True,         # ✅ Fixed in providers.py:156
-            "azure_openai_endpoint": True,       # ✅ Fixed in azure_openai.py:28
-            "azure_openai_api_version": True,    # ✅ Fixed in azure_openai.py:27
-            "static_llm_content": True,          # ✅ Fixed in llm_registry.py:47
-            "regex_empty_pattern": True,         # ✅ Already enforced (validation.py:136)
+            "azure_search_api_key_env": True,  # ✅ Fixed in providers.py:164
+            "azure_search_field_names": True,  # ✅ Fixed in providers.py:175-183
+            "pgvector_table_name": True,  # ✅ Fixed in providers.py:156
+            "azure_openai_endpoint": True,  # ✅ Fixed in azure_openai.py:28
+            "azure_openai_api_version": True,  # ✅ Fixed in azure_openai.py:27
+            "static_llm_content": True,  # ✅ Fixed in llm_registry.py:47
+            "regex_empty_pattern": True,  # ✅ Already enforced (validation.py:136)
         }
 
         total = len(critical_defaults_removed)
@@ -183,10 +178,7 @@ class TestSecurityGateStatus:
         print(f"\nCritical Defaults Status: {fixed}/{total} fixed")
 
         # Gate now PASSES - all critical defaults have been removed
-        assert fixed == total, (
-            f"Gate BLOCKED: {total - fixed} critical defaults remain. "
-            f"See SILENT_DEFAULTS_AUDIT.md for details."
-        )
+        assert fixed == total, f"Gate BLOCKED: {total - fixed} critical defaults remain. " f"See SILENT_DEFAULTS_AUDIT.md for details."
 
 
 class TestHighPriorityDefaults:
