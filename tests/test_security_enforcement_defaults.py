@@ -82,15 +82,30 @@ class TestLLMParameterEnforcement:
 class TestStaticLLMDefaults:
     """Test static LLM defaults (used in testing)."""
 
-    def test_static_llm_content_default_documented(self):
-        """Document static LLM content default."""
-        # src/elspeth/core/llm_registry.py:45
-        # content=options.get("content", "STATIC RESPONSE")
-        #
-        # RISK: Fallback to hardcoded response in tests
-        # STATUS: Documented in SILENT_DEFAULTS_AUDIT.md as HIGH priority
-        # ACTION REQUIRED: Require explicit content for static LLM
-        pytest.skip("TODO: Require explicit static LLM content after migration")
+    def test_static_llm_content_requires_explicit_config(self):
+        """Verify static LLM requires explicit content parameter."""
+        # src/elspeth/core/llm_registry.py:47
+        # Validates that content parameter is required
+        from elspeth.core.llm_registry import llm_registry
+        from elspeth.core.validation_base import ConfigurationError
+
+        # Should raise ConfigurationError when content is missing
+        # Schema validation catches this before the factory function
+        with pytest.raises(ConfigurationError, match="is a required property.*content"):
+            llm_registry.create(
+                name="static_test",
+                options={"security_level": "internal"},
+                require_determinism=False
+            )
+
+        # Should succeed when content is provided
+        llm = llm_registry.create(
+            name="static_test",
+            options={"security_level": "internal", "content": "Explicit test content"},
+            require_determinism=False
+        )
+        assert llm is not None
+        assert llm.content == "Explicit test content"
 
 
 class TestRateLimitDefaults:
@@ -153,12 +168,13 @@ class TestSecurityGateStatus:
     def test_critical_defaults_gate_status(self):
         """Track status of critical defaults removal."""
         critical_defaults_removed = {
-            "azure_search_api_key_env": False,  # Still has default
-            "azure_search_field_names": False,  # Still has default
-            "pgvector_table_name": False,       # Still has default
-            "azure_openai_endpoint": False,     # Still has default
-            "azure_openai_api_version": False,  # Still has default
-            "regex_empty_pattern": True,        # Now enforced (validation.py:136)
+            "azure_search_api_key_env": True,    # ✅ Fixed in providers.py:164
+            "azure_search_field_names": True,    # ✅ Fixed in providers.py:175-183
+            "pgvector_table_name": True,         # ✅ Fixed in providers.py:156
+            "azure_openai_endpoint": True,       # ✅ Fixed in azure_openai.py:28
+            "azure_openai_api_version": True,    # ✅ Fixed in azure_openai.py:27
+            "static_llm_content": True,          # ✅ Fixed in llm_registry.py:47
+            "regex_empty_pattern": True,         # ✅ Already enforced (validation.py:136)
         }
 
         total = len(critical_defaults_removed)
@@ -166,13 +182,11 @@ class TestSecurityGateStatus:
 
         print(f"\nCritical Defaults Status: {fixed}/{total} fixed")
 
-        if fixed < total:
-            pytest.skip(
-                f"Gate BLOCKED: {total - fixed} critical defaults remain. "
-                f"See SILENT_DEFAULTS_AUDIT.md for details."
-            )
-
-        # Once all fixed, this test will pass
+        # Gate now PASSES - all critical defaults have been removed
+        assert fixed == total, (
+            f"Gate BLOCKED: {total - fixed} critical defaults remain. "
+            f"See SILENT_DEFAULTS_AUDIT.md for details."
+        )
 
 
 class TestHighPriorityDefaults:

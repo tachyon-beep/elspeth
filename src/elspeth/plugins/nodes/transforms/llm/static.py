@@ -13,7 +13,7 @@ class StaticLLMClient(LLMClientProtocol):
     def __init__(
         self,
         *,
-        content: str = "STATIC RESPONSE",
+        content: str,  # Required - no default allowed
         score: float | None = 0.5,
         metrics: Mapping[str, Any] | None = None,
     ) -> None:
