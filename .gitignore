@@ -119,6 +119,7 @@ venv.bak/
 # Project data/artifacts
 /data/
 /outputs/
+/orchestration_packs/*/
 # Legacy reference material (tracked separately)
 /external/
 # Quarantined historical scripts (tracked)
