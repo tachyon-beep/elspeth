@@ -12,20 +12,25 @@
 ### 1. Fixed Critical P0 Issues
 
 **Issue 1: Module-level @property decorators** (`src/elspeth/core/controls/registry.py:189-204`)
+
 - **Problem**: `@property` decorators at module level created property objects instead of returning dicts
 - **Error**: `'property' object is not subscriptable`
 - **Fix**: Changed to direct module-level references
+
   ```python
   # Lines 188-191 - FIXED
   _rate_limiters: dict[str, Any] = rate_limiter_registry._plugins
   _cost_trackers: dict[str, Any] = cost_tracker_registry._plugins
   ```
+
 - **Verification**: All 545 tests pass
 
 **Issue 2: P0 Security Regression** (`src/elspeth/core/registry/plugin_helpers.py:198`)
+
 - **Problem**: Silent default to "OFFICIAL" security level bypassed security requirements
 - **User Flag**: "create_row_plugin({'name': 'score_extractor'}) now succeeds instead of raising ConfigurationError"
 - **Fix**: Removed silent default, now raises ConfigurationError when security_level missing
+
   ```python
   # Lines 197-205 - FIXED
   if level is None:
@@ -34,6 +39,7 @@
           f"(no explicit level in definition or options, and no parent context to inherit from)"
       )
   ```
+
 - **Verification**: All 545 tests still pass (no tests relied on silent default)
 
 ### 2. Cleaned Up All Mypy Errors
@@ -42,6 +48,7 @@
 **After**: 0 mypy errors
 
 **Categories Fixed**:
+
 - Return type mismatches (6 errors) - Added assertions with `allow_none=False` pattern
 - Argument type mismatches (9 errors) - Added null/type checks before validation
 - Unreachable code (3 errors) - Fixed exception handling, added documented type ignores
@@ -49,6 +56,7 @@
 - Any return types (3 errors) - Added documented type ignores in ConfigMerger
 
 **Files Modified**:
+
 - `src/elspeth/core/llm/registry.py`
 - `src/elspeth/core/experiments/plugin_registry.py`
 - `src/elspeth/core/experiments/suite_runner.py`
@@ -64,6 +72,7 @@ Created comprehensive data flow architecture based on user insights:
 **Key Insight**: "LLM connection is a **function** that any job should be able to do. The core feature is **pumping data between nodes**."
 
 **Architectural Documents Created** (in `docs/architecture/refactoring/data-flow-migration/`):
+
 1. `README.md` - Project overview and navigation
 2. `ARCHITECTURE_EVOLUTION.md` - Journey through 4 design stages
 3. `PLUGIN_SYSTEM_DATA_FLOW.md` - Target architecture specification
@@ -78,6 +87,7 @@ Created comprehensive data flow architecture based on user insights:
 ## Current Architecture vs Target
 
 ### Current Structure (LLM-Centric)
+
 ```
 plugins/
 ├── datasources/              # 3 files
@@ -90,6 +100,7 @@ Registry files: 18 total
 ```
 
 ### Target Structure (Data Flow)
+
 ```
 plugins/
 ├── orchestrators/            # Engines (define topology)
@@ -143,14 +154,18 @@ Registry files: 7 total (61% reduction)
 **Status**: ALL GATES PASSED
 
 ### Activity 1: Silent Default Audit ✅ COMPLETE (2h)
+
 **Deliverables**:
+
 - ✅ Audit document: `SILENT_DEFAULTS_AUDIT.md` (200+ defaults)
 - ✅ Categorization: 4 CRITICAL, 18 HIGH, 150+ MEDIUM, 30+ LOW
 - ✅ Security tests: `test_security_enforcement_defaults.py` (10 tests)
 - ✅ Action plan for removing CRITICAL defaults in Phase 3
 
 ### Activity 2: Test Coverage Audit ✅ COMPLETE (1h)
+
 **Deliverables**:
+
 - ✅ Coverage: 87% (exceeds 85% target)
 - ✅ Tests: 546 passing, 0 failures
 - ✅ Characterization: 120+ registry tests documented
@@ -158,28 +173,36 @@ Registry files: 7 total (61% reduction)
 - ✅ Document: `TEST_COVERAGE_SUMMARY.md`
 
 ### Activity 3: Import Chain Mapping ✅ COMPLETE (1h)
+
 **Deliverables**:
+
 - ✅ Import map: 135 references documented
 - ✅ API surface: 52 `__all__` exports identified
 - ✅ Shims designed: 8 backward compat shims
 - ✅ Document: `IMPORT_CHAIN_MAP.md`
 
 ### Activity 4: Performance Baseline ✅ COMPLETE (0.5h)
+
 **Deliverables**:
+
 - ✅ Baseline: 30.77s for sample suite
 - ✅ Thresholds: +33% max regression
 - ✅ Regression tests: 12 tests in `test_performance_baseline.py`
 - ✅ Document: `PERFORMANCE_BASELINE.md`
 
 ### Activity 5: Configuration Compatibility ✅ COMPLETE (0.5h)
+
 **Deliverables**:
+
 - ✅ Configs inventoried: 6 YAML files
 - ✅ All configs parse and load successfully
 - ✅ Compatibility: 100% (no changes needed)
 - ✅ Document: `CONFIGURATION_COMPATIBILITY.md`
 
 ### Activity 6: Rollback Procedures ✅ COMPLETE (1h)
+
 **Deliverables**:
+
 - ✅ Phase checkpoints: 5 phases defined with test gates
 - ✅ Migration checklist: 50+ tasks across 5 phases
 - ✅ Rollback procedures: 3 scenarios (immediate/push/emergency)
@@ -190,6 +213,7 @@ Registry files: 7 total (61% reduction)
 ## ALL GATES PASSED ✅
 
 ### Critical Gates (MUST PASS)
+
 - ✅ Silent default audit complete
 - ✅ Zero P0/P1 silent defaults documented
 - ✅ Test coverage >85% (actual: 87%)
@@ -197,17 +221,20 @@ Registry files: 7 total (61% reduction)
 - ✅ Characterization tests for all 18 registries
 
 ### High Priority Gates (MUST PASS)
+
 - ✅ 5+ end-to-end smoke tests (actual: 43)
 - ✅ Import chain map complete (135 references)
 - ✅ Backward compat shims designed (8 shims)
 
 ### Medium Priority Gates (MUST PASS)
+
 - ✅ Performance baseline established (30.77s)
 - ✅ Config compatibility layer designed (not needed)
 - ✅ Migration checklist created (5 phases)
 - ✅ Rollback procedures documented (3 scenarios)
 
 ### System Health
+
 - ✅ Mypy: 0 errors (95 source files)
 - ✅ Ruff: Clean
 - ✅ Sample suite runs: 30.77s
@@ -222,6 +249,7 @@ Registry files: 7 total (61% reduction)
 **Ready to start**
 
 Migration phases:
+
 1. **Phase 1**: Orchestration Abstraction (3-4h)
 2. **Phase 2**: Node Reorganization (3-4h)
 3. **Phase 3**: Security Hardening (2-3h)
@@ -233,6 +261,7 @@ Migration phases:
 ## Critical Files to Know
 
 ### Recently Modified (mypy/security fixes)
+
 - `src/elspeth/core/controls/registry.py:188-191` - Fixed module-level properties
 - `src/elspeth/core/registry/plugin_helpers.py:197-205` - P0 security fix (no silent default)
 - `src/elspeth/core/llm/registry.py:31-54` - Fixed return type with assertions
@@ -243,6 +272,7 @@ Migration phases:
 - `src/elspeth/core/experiments/config_merger.py:195-212` - Fixed Any return types
 
 ### New Architecture Docs
+
 - `docs/architecture/refactoring/data-flow-migration/README.md` - START HERE
 - `docs/architecture/refactoring/data-flow-migration/RISK_REDUCTION_PLAN.md` - DO FIRST
 - `docs/architecture/refactoring/data-flow-migration/ARCHITECTURE_EVOLUTION.md` - Understanding
@@ -250,6 +280,7 @@ Migration phases:
 - `docs/architecture/refactoring/data-flow-migration/MIGRATION_TO_DATA_FLOW.md` - How-to
 
 ### Updated Docs
+
 - `docs/architecture/README.md` - Updated with link to refactoring project
 
 ---
@@ -257,6 +288,7 @@ Migration phases:
 ## Key Technical Context
 
 ### Test Status
+
 - **Total tests**: 545
 - **All passing**: ✅
 - **Mypy errors**: 0
@@ -264,6 +296,7 @@ Migration phases:
 - **Coverage**: ~84% (need to verify and push >85%)
 
 ### Git Status
+
 ```
 M coverage.xml
 M src/elspeth/core/controls/registry.py
@@ -279,9 +312,11 @@ M docs/architecture/README.md
 ```
 
 ### Current Branch
+
 - `main` (on latest commit)
 
 ### Environment
+
 - Python 3.x
 - Virtual env: `.venv/`
 - All dependencies installed
@@ -335,6 +370,7 @@ M docs/architecture/README.md
 ## Success Criteria (Final)
 
 ### Risk Reduction Complete
+
 - [ ] Zero P0/P1 silent defaults
 - [ ] Coverage >85%, all tests passing
 - [ ] Characterization tests for all registries
@@ -343,6 +379,7 @@ M docs/architecture/README.md
 - [ ] Config compatibility layer designed
 
 ### Migration Complete
+
 - [ ] All 545+ tests pass
 - [ ] Mypy: 0 errors
 - [ ] Ruff: passing

@@ -19,6 +19,7 @@ Comprehensive audit of all configuration files for hardcoded credentials, API ke
 **Issue**: File contained an expired SAS token (expired 2025-10-03)
 **Risk**: Low (token already expired)
 **Resolution**:
+
 - Added `config/blob_store.yaml` to `.gitignore`
 - Replaced token with placeholder
 - Created `config/blob_store.yaml.template` for reference
@@ -76,12 +77,14 @@ config/
 ## Patterns Searched
 
 ✅ No hardcoded secrets found for:
+
 - `api_key` / `apikey` / `api-key`
 - `secret` / `password`
 - `token` (except `_env` references)
 - `credential`
 
 ✅ All sensitive values use `_env` suffix patterns:
+
 - `api_key_env`
 - `key_env`
 - `token_env`
@@ -118,6 +121,7 @@ config/blob_store.yaml
 ### 📋 Future Enhancements
 
 1. **Pre-commit Hook**: Consider adding a pre-commit hook to detect secrets
+
    ```bash
    # Example using detect-secrets
    pip install detect-secrets
@@ -125,6 +129,7 @@ config/blob_store.yaml
    ```
 
 2. **Azure Key Vault Integration**: For production, consider Azure Key Vault
+
    ```yaml
    llm:
      config: azure_openai_config  # Loads from Key Vault

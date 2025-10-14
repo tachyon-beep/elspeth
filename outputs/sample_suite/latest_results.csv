@@ -1,13 +1,13 @@
 APPID,title,summary,industry,llm_content,llm_analysis,llm_prioritization
-APP-001,Onboarding Assistant,Automates onboarding steps for new hires.,HR,"[mock] score=0.48
-Evaluate APP-001 for adoption in the HR sector. Return JSON {""score"": <0-1>, ""comment"": ""...""}.","[mock] score=0.48
-Evaluate APP-001 for adoption in the HR sector. Return JSON {""score"": <0-1>, ""comment"": ""...""}.","[mock] score=0.79
-Rate priority (0-1) for APP-001 focusing on the opportunity described as 'Automates onboarding steps for new hires.'."
-APP-002,Supply Optimiser,Optimises stock levels for retail stores.,Retail,"[mock] score=0.84
-Evaluate APP-002 for adoption in the Retail sector. Return JSON {""score"": <0-1>, ""comment"": ""...""}.","[mock] score=0.84
-Evaluate APP-002 for adoption in the Retail sector. Return JSON {""score"": <0-1>, ""comment"": ""...""}.","[mock] score=0.58
-Rate priority (0-1) for APP-002 focusing on the opportunity described as 'Optimises stock levels for retail stores.'."
-APP-003,Helpdesk Copilot,Assists support agents with suggested replies.,Support,"[mock] score=0.58
-Evaluate APP-003 for adoption in the Support sector. Return JSON {""score"": <0-1>, ""comment"": ""...""}.","[mock] score=0.58
-Evaluate APP-003 for adoption in the Support sector. Return JSON {""score"": <0-1>, ""comment"": ""...""}.","[mock] score=0.61
-Rate priority (0-1) for APP-003 focusing on the opportunity described as 'Assists support agents with suggested replies.'."
+APP-001,Onboarding Assistant,Automates onboarding steps for new hires.,HR,"[mock] score=0.57
+Provide JSON {""score"": <0-1>, ""comment"": ""<analysis>""} assessing clarity of summary for APP-001.","[mock] score=0.57
+Provide JSON {""score"": <0-1>, ""comment"": ""<analysis>""} assessing clarity of summary for APP-001.","[mock] score=0.80
+Estimate priority (0-1) for APP-001 considering industry ""HR""."
+APP-002,Supply Optimiser,Optimises stock levels for retail stores.,Retail,"[mock] score=0.63
+Provide JSON {""score"": <0-1>, ""comment"": ""<analysis>""} assessing clarity of summary for APP-002.","[mock] score=0.63
+Provide JSON {""score"": <0-1>, ""comment"": ""<analysis>""} assessing clarity of summary for APP-002.","[mock] score=0.85
+Estimate priority (0-1) for APP-002 considering industry ""Retail""."
+APP-003,Helpdesk Copilot,Assists support agents with suggested replies.,Support,"[mock] score=0.67
+Provide JSON {""score"": <0-1>, ""comment"": ""<analysis>""} assessing clarity of summary for APP-003.","[mock] score=0.67
+Provide JSON {""score"": <0-1>, ""comment"": ""<analysis>""} assessing clarity of summary for APP-003.","[mock] score=0.82
+Estimate priority (0-1) for APP-003 considering industry ""Support""."
