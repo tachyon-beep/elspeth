@@ -11,12 +11,14 @@ Elspeth’s architecture documentation is split into focused topics so you can m
 
 ## 2. Architectural Design & Evolution
 
-- [`ARCHITECTURE_EVOLUTION.md`](ARCHITECTURE_EVOLUTION.md) – **START HERE**: Journey from LLM-centric to data flow orchestration model, key insights, and principles.
-- [`PLUGIN_SYSTEM_DATA_FLOW.md`](PLUGIN_SYSTEM_DATA_FLOW.md) – **Target architecture**: Data flow model where orchestrators define topology and nodes provide transformations.
-- [`MIGRATION_TO_DATA_FLOW.md`](MIGRATION_TO_DATA_FLOW.md) – Step-by-step migration guide from current architecture to data flow model (12-17 hours).
-- [`PLUGIN_SYSTEM_ANALYSIS.md`](PLUGIN_SYSTEM_ANALYSIS.md) – Initial analysis identifying organizational debt and proposing functional grouping.
-- [`PLUGIN_SYSTEM_REVISED.md`](PLUGIN_SYSTEM_REVISED.md) – Intermediate design incorporating orchestration-first thinking (superseded by data flow model).
-- [`CONFIGURATION_ATTRIBUTABILITY.md`](CONFIGURATION_ATTRIBUTABILITY.md) – Single configuration snapshot design for compliance and reproducibility.
+**Data Flow Migration Project** (design documents in [`refactoring/data-flow-migration/`](refactoring/data-flow-migration/)):
+
+- [`ARCHITECTURE_EVOLUTION.md`](refactoring/data-flow-migration/ARCHITECTURE_EVOLUTION.md) – **START HERE**: Journey from LLM-centric to data flow orchestration model, key insights, and principles.
+- [`PLUGIN_SYSTEM_DATA_FLOW.md`](refactoring/data-flow-migration/PLUGIN_SYSTEM_DATA_FLOW.md) – **Target architecture**: Data flow model where orchestrators define topology and nodes provide transformations.
+- [`MIGRATION_TO_DATA_FLOW.md`](refactoring/data-flow-migration/MIGRATION_TO_DATA_FLOW.md) – Step-by-step migration guide from current architecture to data flow model (12-17 hours).
+- [`PLUGIN_SYSTEM_ANALYSIS.md`](refactoring/data-flow-migration/PLUGIN_SYSTEM_ANALYSIS.md) – Initial analysis identifying organizational debt and proposing functional grouping.
+- [`PLUGIN_SYSTEM_REVISED.md`](refactoring/data-flow-migration/PLUGIN_SYSTEM_REVISED.md) – Intermediate design incorporating orchestration-first thinking (superseded by data flow model).
+- [`CONFIGURATION_ATTRIBUTABILITY.md`](refactoring/data-flow-migration/CONFIGURATION_ATTRIBUTABILITY.md) – Single configuration snapshot design for compliance and reproducibility.
 
 ## 3. Configuration & Extensibility
 
