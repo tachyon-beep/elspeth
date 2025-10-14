@@ -57,6 +57,8 @@ class ExperimentOrchestrator:  # pylint: disable=too-many-instance-attributes,to
         rate_limiter: RateLimiter | None = None,
         cost_tracker: CostTracker | None = None,
         name: str = "default",
+        suite_root: Any = None,
+        config_path: Any = None,
     ):
         self.datasource = datasource
         self.llm_client = llm_client
@@ -74,6 +76,8 @@ class ExperimentOrchestrator:  # pylint: disable=too-many-instance-attributes,to
             plugin_kind="experiment",
             security_level=security_level,
             provenance=(f"orchestrator:{name}.resolved",),
+            suite_root=suite_root,
+            config_path=config_path,
         )
 
         if self.rate_limiter is not None:

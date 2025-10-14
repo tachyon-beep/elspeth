@@ -27,6 +27,7 @@ class Settings:
     sinks: Any
     orchestrator_config: OrchestratorConfig
     suite_root: Path | None = None
+    config_path: Path | None = None
     suite_defaults: dict[str, Any] = field(default_factory=dict)
     rate_limiter: Any | None = None
     cost_tracker: Any | None = None
@@ -398,6 +399,7 @@ def load_settings(path: str | Path, profile: str = "default") -> Settings:
         sinks=sinks,
         orchestrator_config=orchestrator_config,
         suite_root=Path(suite_root) if suite_root else None,
+        config_path=config_path,
         suite_defaults=suite_defaults,
         rate_limiter=rate_limiter,
         cost_tracker=cost_tracker,

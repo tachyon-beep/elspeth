@@ -31,6 +31,8 @@ class ExperimentSuiteRunner:
     suite: ExperimentSuite
     llm_client: LLMClientProtocol
     sinks: list[ResultSink]
+    suite_root: Any = None
+    config_path: Any = None
     _shared_middlewares: dict[str, Any] = field(default_factory=dict, init=False)
 
     def build_runner(
@@ -115,6 +117,8 @@ class ExperimentSuiteRunner:
             plugin_kind="experiment",
             security_level=security_level,
             provenance=(f"experiment:{config.name}.resolved",),
+            suite_root=self.suite_root,
+            config_path=self.config_path,
         )
 
         # Apply context to sinks
@@ -321,6 +325,8 @@ class ExperimentSuiteRunner:
                         defaults.get("security_level"),
                     ),
                     provenance=(f"experiment:{experiment.name}.fallback",),
+                    suite_root=self.suite_root,
+                    config_path=self.config_path,
                 ),
             )
             middlewares = cast(list[Any], runner.llm_middlewares or [])

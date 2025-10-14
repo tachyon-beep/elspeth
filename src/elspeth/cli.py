@@ -241,6 +241,8 @@ def _run_single(args: argparse.Namespace, settings) -> None:
         config=settings.orchestrator_config,
         rate_limiter=settings.rate_limiter,
         cost_tracker=settings.cost_tracker,
+        suite_root=settings.suite_root,
+        config_path=settings.config_path,
     )
     payload = orchestrator.run()
 
@@ -436,6 +438,8 @@ def _run_suite(
         suite=suite,
         llm_client=settings.llm,
         sinks=settings.sinks,
+        suite_root=settings.suite_root,
+        config_path=settings.config_path,
     )
 
     defaults = _assemble_suite_defaults(settings)

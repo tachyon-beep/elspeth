@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -24,6 +25,8 @@ class PluginContext(BaseModel):
     provenance: tuple[str, ...] = Field(default_factory=tuple, description="Chain of plugin sources")
     parent: "PluginContext | None" = Field(default=None, description="Parent context for nested plugins")
     metadata: Mapping[str, Any] = Field(default_factory=dict, description="Additional context metadata")
+    suite_root: Path | None = Field(default=None, description="Suite root directory (orchestration pack folder)")
+    config_path: Path | None = Field(default=None, description="Configuration file path for this run")
 
     model_config = ConfigDict(
         # CRITICAL: Frozen for security - contexts are immutable
@@ -67,10 +70,13 @@ class PluginContext(BaseModel):
         determinism_level: str | None = None,
         provenance: Iterable[str] | None = None,
         metadata: Mapping[str, Any] | None = None,
+        suite_root: Path | None = None,
+        config_path: Path | None = None,
     ) -> "PluginContext":
         """Create a child context inheriting from this context.
 
-        If security_level or determinism_level are not provided, inherits from parent.
+        If security_level, determinism_level, suite_root, or config_path are not provided,
+        inherits from parent.
 
         This method creates a new immutable context (since the model is frozen)
         using Pydantic's model_validate to ensure all validators run.
@@ -79,6 +85,8 @@ class PluginContext(BaseModel):
         det_level = determinism_level or self.determinism_level
         sources = tuple(provenance or ())
         data: Mapping[str, Any] = metadata or {}
+        root = suite_root if suite_root is not None else self.suite_root
+        cfg_path = config_path if config_path is not None else self.config_path
 
         # Use model_validate to ensure validators run on derived context
         return PluginContext.model_validate({
@@ -89,6 +97,8 @@ class PluginContext(BaseModel):
             "provenance": sources,
             "parent": self,
             "metadata": data,
+            "suite_root": root,
+            "config_path": cfg_path,
         })
 
 
