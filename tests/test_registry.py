@@ -28,7 +28,7 @@ def test_registry_creates_blob_datasource(tmp_path, monkeypatch):
         assert profile == "default"
         return pd.DataFrame({"value": [1]})
 
-    import elspeth.plugins.datasources.blob as blob_module
+    import elspeth.plugins.nodes.sources.blob as blob_module
 
     monkeypatch.setattr(blob_module, "load_blob_csv", fake_load_blob_csv)
 

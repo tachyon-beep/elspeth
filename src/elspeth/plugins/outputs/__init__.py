@@ -1,15 +1,28 @@
-from .analytics_report import AnalyticsReportSink
-from .blob import BlobResultSink
-from .csv_file import CsvResultSink
-from .embeddings_store import EmbeddingsStoreSink
-from .enhanced_visual_report import EnhancedVisualAnalyticsSink
-from .excel import ExcelResultSink
-from .file_copy import FileCopySink
-from .local_bundle import LocalBundleSink
-from .repository import AzureDevOpsRepoSink, GitHubRepoSink
-from .signed import SignedArtifactSink
-from .visual_report import VisualAnalyticsSink
-from .zip_bundle import ZipResultSink
+"""
+Backward compatibility shim for output sinks.
+
+DEPRECATED: This module has moved to elspeth.plugins.nodes.sinks
+This shim will be removed in a future major version.
+"""
+
+import warnings
+
+# Re-export from new location
+from elspeth.plugins.nodes.sinks import (
+    AnalyticsReportSink,
+    AzureDevOpsRepoSink,
+    BlobResultSink,
+    CsvResultSink,
+    EmbeddingsStoreSink,
+    EnhancedVisualAnalyticsSink,
+    ExcelResultSink,
+    FileCopySink,
+    GitHubRepoSink,
+    LocalBundleSink,
+    SignedArtifactSink,
+    VisualAnalyticsSink,
+    ZipResultSink,
+)
 
 __all__ = [
     "BlobResultSink",
@@ -26,3 +39,12 @@ __all__ = [
     "EnhancedVisualAnalyticsSink",
     "EmbeddingsStoreSink",
 ]
+
+# Emit deprecation warning on import
+warnings.warn(
+    "elspeth.plugins.outputs is deprecated. "
+    "Use elspeth.plugins.nodes.sinks instead. "
+    "This compatibility shim will be removed in a future major version.",
+    DeprecationWarning,
+    stacklevel=2,
+)
