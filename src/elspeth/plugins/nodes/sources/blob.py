@@ -41,6 +41,19 @@ class BlobDataSource(DataSource):
         self.retain_local_path = retain_local_path
 
     def load(self) -> pd.DataFrame:
+        import time
+
+        # Log connection attempt
+        plugin_logger = getattr(self, "plugin_logger", None)
+        if plugin_logger:
+            plugin_logger.log_datasource_event(
+                "connecting",
+                source_path=self.config_path,
+                metadata={"profile": self.profile},
+            )
+
+        start_time = time.time()
+
         try:
             df = load_blob_csv(
                 self.config_path,
@@ -50,15 +63,43 @@ class BlobDataSource(DataSource):
             df.attrs["security_level"] = self.security_level
             df.attrs["determinism_level"] = self.determinism_level
 
+            duration_ms = (time.time() - start_time) * 1000
+
+            # Log successful load
+            if plugin_logger:
+                plugin_logger.log_datasource_event(
+                    "loaded",
+                    rows=len(df),
+                    columns=len(df.columns),
+                    source_path=self.config_path,
+                    duration_ms=duration_ms,
+                    metadata={"profile": self.profile},
+                )
+
             # Retain local copy if requested
             if self.retain_local:
                 local_path = self._save_local_copy(df)
                 df.attrs["retained_local_path"] = str(local_path)
                 logger.info("Retained local copy of source data: %s (%d rows)", local_path, len(df))
 
+                if plugin_logger:
+                    plugin_logger.log_event(
+                        "data_retained",
+                        message=f"Retained local copy: {local_path}",
+                        metrics={"rows": len(df), "bytes": local_path.stat().st_size if local_path.exists() else 0},
+                        metadata={"local_path": str(local_path)},
+                    )
+
             # load_blob_csv return type not fully annotated; returns DataFrame at runtime
             return df  # type: ignore[no-any-return]
         except Exception as exc:
+            if plugin_logger:
+                plugin_logger.log_error(
+                    exc,
+                    context="blob datasource load",
+                    recoverable=(self.on_error == "skip"),
+                )
+
             if self.on_error == "skip":
                 logger.warning("Blob datasource failed; returning empty dataset: %s", exc)
                 df = pd.DataFrame()

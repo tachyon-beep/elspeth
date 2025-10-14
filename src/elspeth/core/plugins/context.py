@@ -106,6 +106,7 @@ def apply_plugin_context(instance: Any, context: PluginContext) -> None:
     """Attach context metadata to a plugin instance.
 
     Sets both security_level and determinism_level as mandatory first-class attributes.
+    Also attaches a PluginLogger for structured logging.
     """
 
     setattr(instance, "plugin_context", context)
@@ -114,6 +115,11 @@ def apply_plugin_context(instance: Any, context: PluginContext) -> None:
     setattr(instance, "_elspeth_security_level", context.security_level)
     setattr(instance, "determinism_level", context.determinism_level)
     setattr(instance, "_elspeth_determinism_level", context.determinism_level)
+
+    # Attach plugin logger for structured logging
+    from elspeth.core.logging import attach_plugin_logger
+    attach_plugin_logger(instance, context)
+
     hook = getattr(instance, "on_plugin_context", None)
     if callable(hook):
         hook(context)

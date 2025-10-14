@@ -48,7 +48,25 @@ class CSVDataSource(DataSource):
         self._df_loaded = False
 
     def load(self) -> pd.DataFrame:
+        import time
+
+        # Log file check
+        plugin_logger = getattr(self, "plugin_logger", None)
+        if plugin_logger:
+            plugin_logger.log_datasource_event(
+                "checking_file",
+                source_path=str(self.path),
+                metadata={"encoding": self.encoding},
+            )
+
         if not self.path.exists():
+            if plugin_logger:
+                plugin_logger.log_error(
+                    f"CSV file not found: {self.path}",
+                    context="csv datasource load",
+                    recoverable=(self.on_error == "skip"),
+                )
+
             if self.on_error == "skip":
                 logger.warning("CSV datasource missing file '%s'; returning empty dataset", self.path)
                 df = pd.DataFrame()
@@ -57,11 +75,16 @@ class CSVDataSource(DataSource):
                 df.attrs["schema"] = self.output_schema()
                 return df
             raise FileNotFoundError(f"CSV datasource file not found: {self.path}")
+
+        start_time = time.time()
+
         try:
             # Pandas dtype parameter has strict typing; our dict[str, Any] is compatible at runtime
             df = pd.read_csv(self.path, dtype=self.dtype, encoding=self.encoding)  # type: ignore[arg-type]
             df.attrs["security_level"] = self.security_level
             df.attrs["determinism_level"] = self.determinism_level
+
+            duration_ms = (time.time() - start_time) * 1000
 
             # Attach schema to DataFrame
             schema = self.output_schema()
@@ -69,15 +92,48 @@ class CSVDataSource(DataSource):
                 df.attrs["schema"] = schema
                 logger.debug(f"Attached schema {schema.__name__} to DataFrame from {self.path}")
 
+                if plugin_logger:
+                    plugin_logger.log_datasource_event(
+                        "schema_attached",
+                        schema=schema.__name__,
+                        source_path=str(self.path),
+                    )
+
+            # Log successful load
+            if plugin_logger:
+                plugin_logger.log_datasource_event(
+                    "loaded",
+                    rows=len(df),
+                    columns=len(df.columns),
+                    source_path=str(self.path),
+                    duration_ms=duration_ms,
+                    schema=schema.__name__ if schema else None,
+                )
+
             # Retain local copy if requested
             if self.retain_local:
                 local_path = self._copy_to_audit_location()
                 df.attrs["retained_local_path"] = str(local_path)
                 logger.info("Retained local copy of source data: %s", local_path)
 
+                if plugin_logger:
+                    plugin_logger.log_event(
+                        "data_retained",
+                        message=f"Retained local copy: {local_path}",
+                        metrics={"rows": len(df), "bytes": local_path.stat().st_size if local_path.exists() else 0},
+                        metadata={"local_path": str(local_path)},
+                    )
+
             self._df_loaded = True
             return df
         except Exception as exc:
+            if plugin_logger:
+                plugin_logger.log_error(
+                    exc,
+                    context="csv datasource load",
+                    recoverable=(self.on_error == "skip"),
+                )
+
             if self.on_error == "skip":
                 logger.warning("CSV datasource failed; returning empty dataset: %s", exc)
                 df = pd.DataFrame()

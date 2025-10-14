@@ -153,7 +153,8 @@ class ReproducibilityBundleSink(ResultSink):
     def _write_results_json(self, results: dict[str, Any]) -> None:
         """Write results as JSON with sorted keys."""
         path = self._temp_dir / self.results_json_name
-        content = json.dumps(results, indent=2, sort_keys=True)
+        # Use custom encoder to handle non-serializable objects
+        content = json.dumps(results, indent=2, sort_keys=True, default=self._json_serializer)
         path.write_text(content, encoding="utf-8")
         self._file_hashes[self.results_json_name] = self._hash_string(content)
         logger.debug("Wrote results JSON: %s rows", len(results.get("results", [])))
@@ -478,6 +479,27 @@ class ReproducibilityBundleSink(ResultSink):
                 return f"{size_bytes:.1f} {unit}"
             size_bytes /= 1024.0
         return f"{size_bytes:.1f} TB"
+
+    @staticmethod
+    def _json_serializer(obj: Any) -> Any:
+        """Custom JSON serializer for objects not serializable by default json encoder.
+
+        Handles common non-serializable types from LLM responses, DataFrames, etc.
+        """
+        # Handle Pydantic models (OpenAI responses use these)
+        if hasattr(obj, 'model_dump'):
+            return obj.model_dump()
+
+        # Handle objects with to_dict method
+        if hasattr(obj, 'to_dict'):
+            return obj.to_dict()
+
+        # Handle objects with dict representation
+        if hasattr(obj, '__dict__'):
+            return {k: v for k, v in obj.__dict__.items() if not k.startswith('_')}
+
+        # Fallback to string representation
+        return str(obj)
 
     # Artifact chaining protocol
 
