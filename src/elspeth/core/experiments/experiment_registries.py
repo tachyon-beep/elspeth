@@ -46,6 +46,10 @@ class _NoopRowPlugin:  # pylint: disable=too-few-public-methods
         """Return an empty payload for noop processing."""
         return {}
 
+    def input_schema(self) -> None:  # pragma: no cover - trivial
+        """Return None as noop requires no input schema."""
+        return None
+
 
 class _NoopAggPlugin:  # pylint: disable=too-few-public-methods
     """No-op aggregation plugin that returns empty results."""
@@ -55,6 +59,10 @@ class _NoopAggPlugin:  # pylint: disable=too-few-public-methods
     def finalize(self, _records: list[dict[str, Any]]) -> dict[str, Any]:  # pragma: no cover - trivial
         """Return an empty aggregation result."""
         return {}
+
+    def input_schema(self) -> None:  # pragma: no cover - trivial
+        """Return None as noop requires no input schema."""
+        return None
 
 
 class _NoopBaselinePlugin:  # pylint: disable=too-few-public-methods
