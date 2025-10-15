@@ -94,3 +94,63 @@ def test_csv_blob_datasource_failure_returns_empty(monkeypatch, tmp_path, caplog
 def test_csv_datasource_invalid_on_error(cls, tmp_path):
     with pytest.raises(ValueError):
         cls(path=tmp_path / "data.csv", on_error="ignore", retain_local=False)
+
+
+def test_csv_datasource_with_schema_config(tmp_path):
+    """Test CSV datasource with explicit schema configuration."""
+    csv_path = tmp_path / "sample.csv"
+    df = pd.DataFrame({"name": ["Alice", "Bob"], "age": [30, 25]})
+    df.to_csv(csv_path, index=False)
+
+    schema_config = {
+        "name": {"type": "string", "required": True},
+        "age": {"type": "integer", "required": True},
+    }
+
+    datasource = CSVDataSource(path=csv_path, schema=schema_config, retain_local=False)
+    loaded = datasource.load()
+
+    assert loaded.attrs["schema"] is not None
+    assert loaded.attrs["schema"].__name__ == "sample_ConfigSchema"
+
+
+def test_csv_datasource_schema_inference(tmp_path):
+    """Test CSV datasource with schema inference enabled."""
+    csv_path = tmp_path / "sample.csv"
+    df = pd.DataFrame({"name": ["Alice", "Bob"], "age": [30, 25]})
+    df.to_csv(csv_path, index=False)
+
+    datasource = CSVDataSource(path=csv_path, infer_schema=True, retain_local=False)
+    loaded = datasource.load()
+
+    assert loaded.attrs["schema"] is not None
+    assert "InferredSchema" in loaded.attrs["schema"].__name__
+
+
+def test_csv_datasource_with_retain_local(tmp_path):
+    """Test CSV datasource with local retention enabled."""
+    csv_path = tmp_path / "sample.csv"
+    df = pd.DataFrame({"name": ["Alice"], "value": [100]})
+    df.to_csv(csv_path, index=False)
+
+    retain_dir = tmp_path / "retained"
+
+    datasource = CSVDataSource(path=csv_path, retain_local=True, retain_local_path=str(retain_dir / "custom_name.csv"))
+    loaded = datasource.load()
+
+    assert loaded.attrs["retained_local_path"] == str(retain_dir / "custom_name.csv")
+    assert (retain_dir / "custom_name.csv").exists()
+
+
+def test_csv_datasource_with_retain_local_auto_path(tmp_path):
+    """Test CSV datasource with automatic retention path generation."""
+    csv_path = tmp_path / "sample.csv"
+    df = pd.DataFrame({"name": ["Alice"], "value": [100]})
+    df.to_csv(csv_path, index=False)
+
+    datasource = CSVDataSource(path=csv_path, retain_local=True, retain_local_path=None)
+    loaded = datasource.load()
+
+    # Should have generated automatic path in audit_data/
+    assert "retained_local_path" in loaded.attrs
+    assert "audit_data" in loaded.attrs["retained_local_path"]

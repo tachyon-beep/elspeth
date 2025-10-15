@@ -24,12 +24,14 @@ SCORE_EXTRACTOR_REQUIRED = {
     ],
 )
 def test_score_extractor_basic(response, expected):
-    plugin = create_row_plugin({
-        "name": "score_extractor",
-        "security_level": "OFFICIAL",
-        "determinism_level": "guaranteed",
-        "options": SCORE_EXTRACTOR_REQUIRED,
-    })
+    plugin = create_row_plugin(
+        {
+            "name": "score_extractor",
+            "security_level": "OFFICIAL",
+            "determinism_level": "guaranteed",
+            "options": SCORE_EXTRACTOR_REQUIRED,
+        }
+    )
     derived = plugin.process_row({}, {"crit": response})
     scores = derived["scores"]
     assert "crit" in scores
@@ -74,7 +76,12 @@ def test_score_extractor_allow_missing():
 
 def test_score_stats_aggregator():
     row_plugin = create_row_plugin(
-        {"name": "score_extractor", "security_level": "OFFICIAL", "determinism_level": "guaranteed", "options": {**SCORE_EXTRACTOR_REQUIRED, "threshold": 0.7}}
+        {
+            "name": "score_extractor",
+            "security_level": "OFFICIAL",
+            "determinism_level": "guaranteed",
+            "options": {**SCORE_EXTRACTOR_REQUIRED, "threshold": 0.7},
+        }
     )
     responses = [
         {"critA": {"metrics": {"score": 0.8}}},
@@ -123,7 +130,9 @@ def test_score_delta_baseline_plugin():
 
 
 def test_score_recommendation_aggregator():
-    row_plugin = create_row_plugin({"name": "score_extractor", "security_level": "OFFICIAL", "determinism_level": "guaranteed", "options": SCORE_EXTRACTOR_REQUIRED})
+    row_plugin = create_row_plugin(
+        {"name": "score_extractor", "security_level": "OFFICIAL", "determinism_level": "guaranteed", "options": SCORE_EXTRACTOR_REQUIRED}
+    )
     records = []
     for value in [0.4, 0.6, 0.7, 0.9, 0.85]:
         metrics = row_plugin.process_row({}, {"critA": {"metrics": {"score": value}}})

@@ -74,11 +74,17 @@ _AZURE_OPENAI_SCHEMA = with_security_properties(
                     "deployment_env": {"type": "string", "description": "Environment variable name for deployment"},
                     "temperature": {
                         "type": "number",
-                        "description": "Sampling temperature (0-2). Optional - if not provided, uses Azure OpenAI default. Lower values are more deterministic.",
+                        "description": (
+                            "Sampling temperature (0-2). Optional - if not provided, uses Azure OpenAI default. "
+                            "Lower values are more deterministic."
+                        ),
                     },
                     "max_tokens": {
                         "type": "integer",
-                        "description": "Maximum tokens in response. Optional - if not provided, uses Azure OpenAI default. Set explicit bounds to control costs.",
+                        "description": (
+                            "Maximum tokens in response. Optional - if not provided, uses Azure OpenAI default. "
+                            "Set explicit bounds to control costs."
+                        ),
                     },
                 },
             },
@@ -102,11 +108,17 @@ _HTTP_OPENAI_SCHEMA = with_security_properties(
             "model": {"type": "string"},
             "temperature": {
                 "type": "number",
-                "description": "Sampling temperature (0-2). Optional - if not provided, uses OpenAI API default. Lower values (e.g., 0.2) are more deterministic, higher values (e.g., 1.5) are more creative.",
+                "description": (
+                    "Sampling temperature (0-2). Optional - if not provided, uses OpenAI API default. "
+                    "Lower values (e.g., 0.2) are more deterministic, higher values (e.g., 1.5) are more creative."
+                ),
             },
             "max_tokens": {
                 "type": "integer",
-                "description": "Maximum tokens in response. Optional - if not provided, uses OpenAI API default (typically model's max context length). Set explicit bounds to control costs and response length.",
+                "description": (
+                    "Maximum tokens in response. Optional - if not provided, uses OpenAI API default "
+                    "(typically model's max context length). Set explicit bounds to control costs and response length."
+                ),
             },
             "timeout": {"type": "number", "exclusiveMinimum": 0},
         },

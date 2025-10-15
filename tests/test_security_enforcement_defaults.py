@@ -47,15 +47,30 @@ class TestValidationPatternEnforcement:
 
     def test_regex_validator_requires_pattern(self):
         """Verify regex validator requires explicit pattern configuration."""
-        # src/elspeth/plugins/experiments/validation.py:98, 136
-        # Schema marks pattern as required (line 98), factory validates non-empty (line 136)
-        #
-        # ENFORCEMENT IN PLACE:
-        # - Schema has "required": ["pattern"] (line 98)
-        # - Factory code checks: if not pattern: raise ValueError (line 136)
-        #
-        # TODO: Test needs rewrite for new plugin creation API
-        pytest.skip("Pattern enforcement already in place - test needs rewrite for new API")
+        from elspeth.core.experiments.plugin_registry import create_validation_plugin
+        from elspeth.core.validation_base import ConfigurationError
+
+        # Should fail when pattern is missing
+        with pytest.raises(ConfigurationError, match="is a required property.*pattern"):
+            create_validation_plugin(
+                {
+                    "name": "regex_match",
+                    "security_level": "internal",
+                    "determinism_level": "guaranteed",
+                    "options": {},  # Missing pattern
+                }
+            )
+
+        # Should succeed with explicit pattern
+        plugin = create_validation_plugin(
+            {
+                "name": "regex_match",
+                "security_level": "internal",
+                "determinism_level": "guaranteed",
+                "options": {"pattern": r"\d+"},
+            }
+        )
+        assert plugin is not None
 
 
 class TestLLMParameterEnforcement:
@@ -138,48 +153,116 @@ class TestStaticLLMDefaults:
 class TestRateLimitDefaults:
     """Test rate limiter defaults."""
 
-    def test_rate_limiter_defaults_documented_in_schema(self):
-        """Verify rate limiter defaults are documented in schema."""
-        # src/elspeth/core/controls/rate_limiter_registry.py:63-72
-        # Schema descriptions added documenting defaults:
-        # - requests: Default 1 request
-        # - per_seconds: Default 1.0 second
-        # - requests_per_minute: Default 60
-        #
-        # NOTE: Defaults (1 req/sec) are conservative and ACCEPTABLE
-        # TODO: Rewrite test to use public registry API instead of internal _plugins
-        pytest.skip("Schema documentation added - test needs rewrite for new registry API")
+    def test_rate_limiter_requires_explicit_config(self):
+        """Verify rate limiter requires explicit configuration for all parameters."""
+        from elspeth.core.controls.rate_limiter_registry import rate_limiter_registry
+        from elspeth.core.validation_base import ConfigurationError
+
+        # fixed_window should fail without requests
+        with pytest.raises(ConfigurationError, match="is a required property.*requests"):
+            rate_limiter_registry.create(
+                name="fixed_window",
+                options={"per_seconds": 1.0, "security_level": "internal"},
+                require_security=False,
+                require_determinism=False,
+            )
+
+        # fixed_window should fail without per_seconds
+        with pytest.raises(ConfigurationError, match="is a required property.*per_seconds"):
+            rate_limiter_registry.create(
+                name="fixed_window",
+                options={"requests": 10, "security_level": "internal"},
+                require_security=False,
+                require_determinism=False,
+            )
+
+        # Should succeed with all required fields
+        limiter = rate_limiter_registry.create(
+            name="fixed_window",
+            options={"requests": 10, "per_seconds": 1.0, "security_level": "internal"},
+            require_security=False,
+            require_determinism=False,
+        )
+        assert limiter is not None
 
 
 class TestCostTrackerDefaults:
     """Test cost tracker defaults."""
 
-    def test_cost_tracker_zero_price_documented_in_schema(self):
-        """Verify cost tracker zero price default is documented in schema."""
-        # src/elspeth/core/controls/cost_tracker_registry.py:45-54
-        # Schema descriptions added documenting 0.0 defaults:
-        # - prompt_token_price: Default 0.0 (free/untracked)
-        # - completion_token_price: Default 0.0 (free/untracked)
-        #
-        # NOTE: Zero is intentional for mock/static LLMs (free/untracked) - ACCEPTABLE
-        # TODO: Rewrite test to use public registry API instead of internal _plugins
-        pytest.skip("Schema documentation added - test needs rewrite for new registry API")
+    def test_cost_tracker_requires_explicit_prices(self):
+        """Verify cost tracker requires explicit token price configuration."""
+        from elspeth.core.controls.cost_tracker_registry import cost_tracker_registry
+        from elspeth.core.validation_base import ConfigurationError
+
+        # Should fail without prompt_token_price
+        with pytest.raises(ConfigurationError, match="is a required property.*prompt_token_price"):
+            cost_tracker_registry.create(
+                name="fixed_price",
+                options={"completion_token_price": 0.01, "security_level": "internal"},
+                require_security=False,
+                require_determinism=False,
+            )
+
+        # Should fail without completion_token_price
+        with pytest.raises(ConfigurationError, match="is a required property.*completion_token_price"):
+            cost_tracker_registry.create(
+                name="fixed_price",
+                options={"prompt_token_price": 0.005, "security_level": "internal"},
+                require_security=False,
+                require_determinism=False,
+            )
+
+        # Should succeed with both prices explicit
+        tracker = cost_tracker_registry.create(
+            name="fixed_price",
+            options={"prompt_token_price": 0.005, "completion_token_price": 0.01, "security_level": "internal"},
+            require_security=False,
+            require_determinism=False,
+        )
+        assert tracker is not None
 
 
 class TestDatabaseSchemaDefaults:
     """Test database schema defaults - now enforced."""
 
-    def test_database_field_configuration_required(self):
-        """Verify database field configuration is required (no silent defaults)."""
-        # Enforcement ALREADY IN PLACE:
-        # - src/elspeth/retrieval/providers.py:156-157 (pgvector table)
-        # - src/elspeth/retrieval/providers.py:175-183 (azure search fields)
-        # - src/elspeth/plugins/nodes/sinks/embeddings_store.py:382-383 (pgvector table)
-        # - src/elspeth/plugins/nodes/sinks/embeddings_store.py:401-409 (azure search fields)
-        #
-        # These were already fixed in earlier commits
-        # TODO: Add behavior tests if needed
-        pytest.skip("Enforcement already in place - marked as fixed in gate status test")
+    def test_pgvector_factory_requires_explicit_table(self):
+        """Verify pgvector factory requires explicit table name."""
+        from elspeth.core.validation_base import ConfigurationError
+        from elspeth.retrieval.providers import create_query_client
+
+        # Should fail without table name
+        with pytest.raises(ConfigurationError, match="pgvector retriever requires 'table'"):
+            create_query_client("pgvector", {"dsn": "postgresql://localhost/test"})
+
+        # Should succeed with explicit table name
+        client = create_query_client("pgvector", {"dsn": "postgresql://localhost/test", "table": "explicit_table"})
+        assert client._table == "explicit_table"
+
+    def test_azure_search_factory_requires_explicit_fields(self):
+        """Verify Azure Search factory requires explicit field configuration."""
+        from elspeth.core.validation_base import ConfigurationError
+        from elspeth.retrieval.providers import create_query_client
+
+        base_options = {
+            "endpoint": "https://test.search.windows.net",
+            "index": "test-index",
+            "api_key": "test-key",
+        }
+
+        # Should fail without vector_field
+        with pytest.raises(ConfigurationError, match="azure_search retriever requires 'vector_field'"):
+            create_query_client("azure_search", base_options)
+
+        # Should fail without namespace_field
+        with pytest.raises(ConfigurationError, match="azure_search retriever requires 'namespace_field'"):
+            create_query_client("azure_search", {**base_options, "vector_field": "embedding"})
+
+        # Should fail without content_field
+        with pytest.raises(ConfigurationError, match="azure_search retriever requires 'content_field'"):
+            create_query_client("azure_search", {**base_options, "vector_field": "embedding", "namespace_field": "namespace"})
+
+        # Note: Success case requires azure-search-documents package which is an optional dependency
+        # The validation tests above verify enforcement - that's the security requirement
 
 
 # Gate verification test
@@ -210,31 +293,183 @@ class TestSecurityGateStatus:
 class TestHighPriorityDefaults:
     """Test high priority defaults that need documentation or removal."""
 
-    def test_validation_tokens_documented_in_schema(self):
-        """Verify validation tokens are documented in schema."""
-        # src/elspeth/plugins/experiments/validation.py:205-216
-        # Schema descriptions added documenting defaults:
-        # - valid_token: Default "VALID"
-        # - invalid_token: Default "INVALID"
-        # - strip_whitespace: Default true
-        #
-        # NOTE: Tokens are convention-based and ACCEPTABLE as defaults
-        # TODO: Rewrite test to use public registry API instead of internal _validation_plugins
-        pytest.skip("Schema documentation added - test needs rewrite for new registry API")
+    def test_llm_guard_requires_explicit_tokens(self):
+        """Verify llm_guard validation requires explicit token configuration."""
+        from elspeth.core.experiments.plugin_registry import create_validation_plugin
+        from elspeth.core.validation_base import ConfigurationError
 
-    def test_score_extractor_defaults_documented_in_schema(self):
-        """Verify score extractor defaults are documented in schema."""
-        # src/elspeth/plugins/experiments/metrics.py:40-62
-        # Schema descriptions added documenting defaults:
-        # - key: Default "score"
-        # - parse_json_content: Default true
-        # - allow_missing: Default false
-        # - threshold_mode: Default "gte"
-        # - flag_field: Default "score_flags"
-        #
-        # NOTE: Defaults are standard conventions and ACCEPTABLE
-        # TODO: Rewrite test to use public registry API instead of internal _row_plugins
-        pytest.skip("Schema documentation added - test needs rewrite for new registry API")
+        validator_llm_def = {
+            "plugin": "static_test",
+            "security_level": "internal",
+            "options": {"content": "VALID"},
+        }
+
+        # Should fail without valid_token
+        with pytest.raises(ConfigurationError, match="is a required property.*valid_token"):
+            create_validation_plugin(
+                {
+                    "name": "llm_guard",
+                    "security_level": "internal",
+                    "determinism_level": "guaranteed",
+                    "options": {
+                        "validator_llm": validator_llm_def,
+                        "user_prompt_template": "Check {{ content }}",
+                        "invalid_token": "INVALID",
+                        "strip_whitespace": True,
+                    },
+                }
+            )
+
+        # Should fail without invalid_token
+        with pytest.raises(ConfigurationError, match="is a required property.*invalid_token"):
+            create_validation_plugin(
+                {
+                    "name": "llm_guard",
+                    "security_level": "internal",
+                    "determinism_level": "guaranteed",
+                    "options": {
+                        "validator_llm": validator_llm_def,
+                        "user_prompt_template": "Check {{ content }}",
+                        "valid_token": "VALID",
+                        "strip_whitespace": True,
+                    },
+                }
+            )
+
+        # Should fail without strip_whitespace
+        with pytest.raises(ConfigurationError, match="is a required property.*strip_whitespace"):
+            create_validation_plugin(
+                {
+                    "name": "llm_guard",
+                    "security_level": "internal",
+                    "determinism_level": "guaranteed",
+                    "options": {
+                        "validator_llm": validator_llm_def,
+                        "user_prompt_template": "Check {{ content }}",
+                        "valid_token": "VALID",
+                        "invalid_token": "INVALID",
+                    },
+                }
+            )
+
+        # Should succeed with all required fields
+        plugin = create_validation_plugin(
+            {
+                "name": "llm_guard",
+                "security_level": "internal",
+                "determinism_level": "guaranteed",
+                "options": {
+                    "validator_llm": validator_llm_def,
+                    "user_prompt_template": "Check {{ content }}",
+                    "valid_token": "VALID",
+                    "invalid_token": "INVALID",
+                    "strip_whitespace": True,
+                },
+            }
+        )
+        assert plugin is not None
+
+    def test_score_extractor_requires_all_fields(self):
+        """Verify score extractor requires explicit configuration for all fields."""
+        from elspeth.core.experiments.plugin_registry import create_row_plugin
+        from elspeth.core.validation_base import ConfigurationError
+
+        # Should fail without key
+        with pytest.raises(ConfigurationError, match="is a required property.*key"):
+            create_row_plugin(
+                {
+                    "name": "score_extractor",
+                    "security_level": "internal",
+                    "determinism_level": "guaranteed",
+                    "options": {
+                        "parse_json_content": True,
+                        "allow_missing": False,
+                        "threshold_mode": "gte",
+                        "flag_field": "score_flags",
+                    },
+                }
+            )
+
+        # Should fail without parse_json_content
+        with pytest.raises(ConfigurationError, match="is a required property.*parse_json_content"):
+            create_row_plugin(
+                {
+                    "name": "score_extractor",
+                    "security_level": "internal",
+                    "determinism_level": "guaranteed",
+                    "options": {
+                        "key": "score",
+                        "allow_missing": False,
+                        "threshold_mode": "gte",
+                        "flag_field": "score_flags",
+                    },
+                }
+            )
+
+        # Should fail without allow_missing
+        with pytest.raises(ConfigurationError, match="is a required property.*allow_missing"):
+            create_row_plugin(
+                {
+                    "name": "score_extractor",
+                    "security_level": "internal",
+                    "determinism_level": "guaranteed",
+                    "options": {
+                        "key": "score",
+                        "parse_json_content": True,
+                        "threshold_mode": "gte",
+                        "flag_field": "score_flags",
+                    },
+                }
+            )
+
+        # Should fail without threshold_mode
+        with pytest.raises(ConfigurationError, match="is a required property.*threshold_mode"):
+            create_row_plugin(
+                {
+                    "name": "score_extractor",
+                    "security_level": "internal",
+                    "determinism_level": "guaranteed",
+                    "options": {
+                        "key": "score",
+                        "parse_json_content": True,
+                        "allow_missing": False,
+                        "flag_field": "score_flags",
+                    },
+                }
+            )
+
+        # Should fail without flag_field
+        with pytest.raises(ConfigurationError, match="is a required property.*flag_field"):
+            create_row_plugin(
+                {
+                    "name": "score_extractor",
+                    "security_level": "internal",
+                    "determinism_level": "guaranteed",
+                    "options": {
+                        "key": "score",
+                        "parse_json_content": True,
+                        "allow_missing": False,
+                        "threshold_mode": "gte",
+                    },
+                }
+            )
+
+        # Should succeed with all required fields
+        plugin = create_row_plugin(
+            {
+                "name": "score_extractor",
+                "security_level": "internal",
+                "determinism_level": "guaranteed",
+                "options": {
+                    "key": "score",
+                    "parse_json_content": True,
+                    "allow_missing": False,
+                    "threshold_mode": "gte",
+                    "flag_field": "score_flags",
+                },
+            }
+        )
+        assert plugin is not None
 
 
 # Summary of enforcement actions needed

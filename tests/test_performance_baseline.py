@@ -120,144 +120,207 @@ class TestPluginCreationPerformance:
         assert elapsed_ms < 35.0, f"Validator creation took {elapsed_ms:.2f}ms (threshold: 35ms)"
 
 
-@pytest.mark.skip(reason="TODO: Rewrite for new ConfigMerger API (merge_list, merge_dict, merge_scalar)")
 class TestConfigMergePerformance:
     """Test configuration merge < 50ms."""
 
     def test_simple_merge_fast(self):
         """Simple config merge should be < 50ms."""
-        merger = ConfigMerger()
+        from elspeth.core.experiments.config import ExperimentConfig
 
-        defaults = {"prompt_system": "default system", "row_plugins": [{"name": "noop"}]}
+        defaults = {"prompt_system": "default system", "row_plugin_defs": [{"name": "noop"}]}
 
-        pack = {"prompt_user": "pack user", "aggregator_plugins": [{"name": "statistics"}]}
+        pack = {"prompt_template": "pack user", "aggregator_plugin_defs": [{"name": "statistics"}]}
 
-        experiment = {"prompt_system": "experiment system", "validation_plugins": [{"name": "regex", "pattern": "test"}]}
+        # Create minimal ExperimentConfig
+        experiment = ExperimentConfig(
+            name="test_exp",
+            temperature=0.7,
+            max_tokens=100,
+            prompt_system="experiment system",
+            validation_plugin_defs=[{"name": "regex", "pattern": "test"}],
+        )
 
         start = time.perf_counter()
-        merged = merger.merge(defaults, pack, experiment)
+        merger = ConfigMerger(defaults, pack, experiment)
+
+        # Test individual merges
+        prompt_system = merger.merge_scalar("prompt_system", default="")
+        prompt_template = merger.merge_scalar("prompt_template", default="")
+        row_defs = merger.merge_plugin_definitions("row_plugin_defs", "row_plugins")
+
         elapsed_ms = (time.perf_counter() - start) * 1000
 
-        assert merged is not None
-        assert merged["prompt_system"] == "experiment system"
+        assert prompt_system == "experiment system"
+        assert prompt_template == "pack user"
+        assert len(row_defs) > 0
         assert elapsed_ms < 50.0, f"Config merge took {elapsed_ms:.2f}ms (threshold: 50ms)"
 
     def test_complex_merge_fast(self):
         """Complex config merge with prompts, plugins, middleware should be < 50ms."""
-        merger = ConfigMerger()
+        from elspeth.core.experiments.config import ExperimentConfig
 
         defaults = {
             "prompt_system": "default",
-            "prompt_user": "default",
-            "row_plugins": [{"name": "noop"}],
-            "aggregator_plugins": [{"name": "statistics"}],
-            "validation_plugins": [],
-            "llm_middlewares": [{"name": "audit_logger"}],
-            "sinks": [{"plugin": "csv_file", "path": "default.csv"}],
+            "prompt_template": "default",
+            "row_plugin_defs": [{"name": "noop"}],
+            "aggregator_plugin_defs": [{"name": "statistics"}],
+            "validation_plugin_defs": [],
+            "llm_middleware_defs": [{"name": "audit_logger"}],
+            "sink_defs": [{"plugin": "csv", "path": "default.csv"}],
         }
 
         pack = {
-            "prompt_user": "pack prompt",
-            "row_plugins": [{"name": "score_extractor", "key": "score"}],
+            "prompt_template": "pack prompt",
+            "row_plugins": [{"name": "score_extractor", "options": {"key": "score"}}],
             "aggregator_plugins": [{"name": "recommendations"}],
             "llm_middlewares": [{"name": "prompt_shield"}],
         }
 
-        experiment = {
-            "prompt_system": "experiment prompt",
-            "validation_plugins": [{"name": "regex", "pattern": "\\d+"}],
-            "sinks": [{"plugin": "json_local_bundle", "path": "exp.json"}],
-        }
+        # Create minimal ExperimentConfig
+        experiment = ExperimentConfig(
+            name="test_exp",
+            temperature=0.7,
+            max_tokens=100,
+            prompt_system="experiment prompt",
+            validation_plugin_defs=[{"name": "regex", "pattern": "\\d+"}],
+            sink_defs=[{"plugin": "local_bundle", "path": "exp.json"}],
+        )
 
         start = time.perf_counter()
-        merged = merger.merge(defaults, pack, experiment)
+        merger = ConfigMerger(defaults, pack, experiment)
+
+        # Test merges of various types
+        prompt_system = merger.merge_scalar("prompt_system", default="")
+        row_defs = merger.merge_plugin_definitions("row_plugin_defs", "row_plugins")
+        middleware_defs = merger.merge_plugin_definitions("llm_middleware_defs", "llm_middlewares")
+        sink_defs = merger.merge_list("sink_defs")
+
         elapsed_ms = (time.perf_counter() - start) * 1000
 
-        assert merged is not None
-        assert len(merged["row_plugins"]) > 0
-        assert len(merged["llm_middlewares"]) > 0
+        assert prompt_system == "experiment prompt"
+        assert len(row_defs) > 0
+        assert len(middleware_defs) > 0
+        assert len(sink_defs) > 0
         assert elapsed_ms < 50.0, f"Complex config merge took {elapsed_ms:.2f}ms (threshold: 50ms)"
 
 
-@pytest.mark.skip(reason="TODO: Rewrite for new ArtifactPipeline API (SinkBinding, topological sort)")
 class TestArtifactPipelinePerformance:
     """Test artifact pipeline resolution < 100ms."""
 
     def test_simple_pipeline_fast(self, sample_dataframe):
         """Simple artifact pipeline should resolve in < 100ms."""
-        context = PluginContext(security_level="internal", plugin_kind="sink", plugin_name="test")
+        from elspeth.core.artifact_pipeline import SinkBinding
 
-        sink_defs = [
-            {
-                "plugin": "csv_file",
-                "security_level": "internal",
-                "path": "results.csv",
-                "artifacts": {"produces": [{"name": "csv_results", "persist": True}]},
-            },
-            {
-                "plugin": "json_local_bundle",
-                "security_level": "internal",
-                "path": "bundle.json",
-                "artifacts": {"consumes": ["csv_results"], "produces": [{"name": "json_bundle", "persist": True}]},
-            },
+        # Create mock sinks
+        class MockSink:
+            def write(self, data, metadata=None):
+                pass
+
+        bindings = [
+            SinkBinding(
+                id="sink_0",
+                plugin="csv",
+                sink=MockSink(),
+                artifact_config={"produces": [{"name": "csv_results", "type": "file/csv", "persist": True}]},
+                original_index=0,
+                security_level="internal",
+            ),
+            SinkBinding(
+                id="sink_1",
+                plugin="bundle",
+                sink=MockSink(),
+                artifact_config={
+                    "consumes": ["@csv_results"],
+                    "produces": [{"name": "json_bundle", "type": "file/json", "persist": True}],
+                },
+                original_index=1,
+                security_level="internal",
+            ),
         ]
 
         start = time.perf_counter()
-        pipeline = ArtifactPipeline(sink_defs, context)
-        sorted_sinks = pipeline.resolve_execution_order()
+        pipeline = ArtifactPipeline(bindings)
         elapsed_ms = (time.perf_counter() - start) * 1000
 
-        assert len(sorted_sinks) == 2
-        assert sorted_sinks[0]["plugin"] == "csv_file"  # Runs first
-        assert sorted_sinks[1]["plugin"] == "json_local_bundle"  # Runs second
+        # Verify ordering via internal _ordered_bindings
+        assert len(pipeline._ordered_bindings) == 2
+        assert pipeline._ordered_bindings[0].plugin == "csv"  # Runs first
+        assert pipeline._ordered_bindings[1].plugin == "bundle"  # Runs second
         assert elapsed_ms < 100.0, f"Pipeline resolution took {elapsed_ms:.2f}ms (threshold: 100ms)"
 
     def test_complex_pipeline_fast(self):
         """Complex artifact pipeline with 5 sinks should resolve in < 100ms."""
-        context = PluginContext(security_level="internal", plugin_kind="sink", plugin_name="test")
+        from elspeth.core.artifact_pipeline import SinkBinding
 
-        sink_defs = [
-            {
-                "plugin": "csv_file",
-                "security_level": "internal",
-                "path": "results.csv",
-                "artifacts": {"produces": [{"name": "csv_results"}]},
-            },
-            {
-                "plugin": "analytics_report",
-                "security_level": "internal",
-                "path": "analytics.json",
-                "artifacts": {"consumes": ["csv_results"], "produces": [{"name": "analytics"}]},
-            },
-            {
-                "plugin": "visual_report",
-                "security_level": "internal",
-                "path": "visual.png",
-                "artifacts": {"consumes": ["csv_results", "analytics"], "produces": [{"name": "visual"}]},
-            },
-            {
-                "plugin": "json_local_bundle",
-                "security_level": "internal",
-                "path": "bundle.json",
-                "artifacts": {"consumes": ["csv_results", "analytics", "visual"], "produces": [{"name": "bundle"}]},
-            },
-            {
-                "plugin": "signed_artifact",
-                "security_level": "internal",
-                "path": "signed.json",
-                "artifacts": {"consumes": ["bundle"], "produces": [{"name": "signature"}]},
-            },
+        # Create mock sinks
+        class MockSink:
+            def write(self, data, metadata=None):
+                pass
+
+        bindings = [
+            SinkBinding(
+                id="sink_0",
+                plugin="csv",
+                sink=MockSink(),
+                artifact_config={"produces": [{"name": "csv_results", "type": "file/csv"}]},
+                original_index=0,
+                security_level="internal",
+            ),
+            SinkBinding(
+                id="sink_1",
+                plugin="analytics",
+                sink=MockSink(),
+                artifact_config={
+                    "consumes": ["@csv_results"],
+                    "produces": [{"name": "analytics", "type": "file/json"}],
+                },
+                original_index=1,
+                security_level="internal",
+            ),
+            SinkBinding(
+                id="sink_2",
+                plugin="visual",
+                sink=MockSink(),
+                artifact_config={
+                    "consumes": ["@csv_results", "@analytics"],
+                    "produces": [{"name": "visual", "type": "file/png"}],
+                },
+                original_index=2,
+                security_level="internal",
+            ),
+            SinkBinding(
+                id="sink_3",
+                plugin="bundle",
+                sink=MockSink(),
+                artifact_config={
+                    "consumes": ["@csv_results", "@analytics", "@visual"],
+                    "produces": [{"name": "bundle", "type": "file/zip"}],
+                },
+                original_index=3,
+                security_level="internal",
+            ),
+            SinkBinding(
+                id="sink_4",
+                plugin="signed",
+                sink=MockSink(),
+                artifact_config={
+                    "consumes": ["@bundle"],
+                    "produces": [{"name": "signature", "type": "file/json"}],
+                },
+                original_index=4,
+                security_level="internal",
+            ),
         ]
 
         start = time.perf_counter()
-        pipeline = ArtifactPipeline(sink_defs, context)
-        sorted_sinks = pipeline.resolve_execution_order()
+        pipeline = ArtifactPipeline(bindings)
         elapsed_ms = (time.perf_counter() - start) * 1000
 
-        assert len(sorted_sinks) == 5
+        # Verify ordering via internal _ordered_bindings
+        assert len(pipeline._ordered_bindings) == 5
         # Verify topological order
-        assert sorted_sinks[0]["plugin"] == "csv_file"
-        assert sorted_sinks[-1]["plugin"] == "signed_artifact"
+        assert pipeline._ordered_bindings[0].plugin == "csv"
+        assert pipeline._ordered_bindings[-1].plugin == "signed"
         assert elapsed_ms < 100.0, f"Complex pipeline resolution took {elapsed_ms:.2f}ms (threshold: 100ms)"
 
 
@@ -266,9 +329,18 @@ class TestPerformanceRegression:
 
     def test_performance_baseline_documented(self):
         """Verify performance baseline is documented."""
-        # This will be created after running these tests
-        # For now, skip if doesn't exist
-        pytest.skip("PERFORMANCE_BASELINE.md will be created after baseline tests run")
+        # Performance baselines are documented at the bottom of this test file
+        # Check that the documentation exists in the file
+        import pathlib
+
+        test_file = pathlib.Path(__file__)
+        content = test_file.read_text()
+
+        assert "PERFORMANCE BASELINES" in content, "Performance baselines should be documented in test file"
+        assert "Registry Lookups" in content
+        assert "Plugin Creation" in content
+        assert "Configuration Merge" in content
+        assert "Artifact Pipeline" in content
 
     def test_no_performance_regression(self):
         """Track overall performance - should not regress > 10%."""

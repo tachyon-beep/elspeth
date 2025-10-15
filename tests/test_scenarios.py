@@ -30,18 +30,20 @@ def test_end_to_end_local_pipeline(tmp_path, assert_sanitized_artifact):
         prompt_fields=["value"],
         prompt_defaults={"audience": "quality"},
         row_plugins=[
-            plugin_registry.create_row_plugin({
-                "name": "score_extractor",
-                "security_level": "OFFICIAL",
-                "determinism_level": "guaranteed",
-                "options": {
-                    "key": "score",
-                    "parse_json_content": True,
-                    "allow_missing": False,
-                    "threshold_mode": "gte",
-                    "flag_field": "score_flags",
-                },
-            })
+            plugin_registry.create_row_plugin(
+                {
+                    "name": "score_extractor",
+                    "security_level": "OFFICIAL",
+                    "determinism_level": "guaranteed",
+                    "options": {
+                        "key": "score",
+                        "parse_json_content": True,
+                        "allow_missing": False,
+                        "threshold_mode": "gte",
+                        "flag_field": "score_flags",
+                    },
+                }
+            )
         ],
         aggregator_plugins=[
             plugin_registry.create_aggregation_plugin(
@@ -113,18 +115,20 @@ def test_suite_runner_end_to_end_without_azure(tmp_path, assert_sanitized_artifa
         "prompt_template": "Provide feedback for {{ value }}",
         "prompt_fields": ["value"],
         "prompt_defaults": {"audience": "review"},
-        "row_plugin_defs": [{
-            "name": "score_extractor",
-            "security_level": "OFFICIAL",
-            "determinism_level": "guaranteed",
-            "options": {
-                "key": "score",
-                "parse_json_content": True,
-                "allow_missing": False,
-                "threshold_mode": "gte",
-                "flag_field": "score_flags",
-            },
-        }],
+        "row_plugin_defs": [
+            {
+                "name": "score_extractor",
+                "security_level": "OFFICIAL",
+                "determinism_level": "guaranteed",
+                "options": {
+                    "key": "score",
+                    "parse_json_content": True,
+                    "allow_missing": False,
+                    "threshold_mode": "gte",
+                    "flag_field": "score_flags",
+                },
+            }
+        ],
         "aggregator_plugin_defs": [{"name": "score_stats", "security_level": "OFFICIAL", "determinism_level": "guaranteed"}],
         "validation_plugin_defs": [
             {
