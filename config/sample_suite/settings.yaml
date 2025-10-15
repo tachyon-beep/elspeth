@@ -57,6 +57,10 @@ default:
           determinism_level: guaranteed
           options:
             key: score
+            parse_json_content: true
+            allow_missing: false
+            threshold_mode: gte
+            flag_field: score_flags
             threshold: 0.7
       aggregator_plugins:
         - name: score_stats

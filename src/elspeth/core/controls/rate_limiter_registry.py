@@ -32,18 +32,32 @@ def _create_noop_rate_limiter(options: dict[str, Any], context: PluginContext) -
 
 def _create_fixed_window_rate_limiter(options: dict[str, Any], context: PluginContext) -> FixedWindowRateLimiter:
     """Create a fixed window rate limiter with specified request rate."""
+    from elspeth.core.validation_base import ConfigurationError
+
+    if "requests" not in options:
+        raise ConfigurationError("requests is required for fixed_window rate limiter")
+    if "per_seconds" not in options:
+        raise ConfigurationError("per_seconds is required for fixed_window rate limiter")
+
     return FixedWindowRateLimiter(
-        requests=int(options.get("requests", 1)),
-        per_seconds=float(options.get("per_seconds", 1.0)),
+        requests=int(options["requests"]),
+        per_seconds=float(options["per_seconds"]),
     )
 
 
 def _create_adaptive_rate_limiter(options: dict[str, Any], context: PluginContext) -> AdaptiveRateLimiter:
     """Create an adaptive rate limiter with request and token limits."""
-    requests_per_minute = int(options.get("requests_per_minute", options.get("requests", 60)) or 60)
+    from elspeth.core.validation_base import ConfigurationError
+
+    if "requests_per_minute" not in options:
+        raise ConfigurationError("requests_per_minute is required for adaptive rate limiter")
+    if "interval_seconds" not in options:
+        raise ConfigurationError("interval_seconds is required for adaptive rate limiter")
+
+    requests_per_minute = int(options["requests_per_minute"])
     token_value = options.get("tokens_per_minute")
     tokens_per_minute = int(token_value) if token_value is not None else None
-    interval_seconds = float(options.get("interval_seconds", 60.0))
+    interval_seconds = float(options["interval_seconds"])
     return AdaptiveRateLimiter(
         requests_per_minute=requests_per_minute,
         tokens_per_minute=tokens_per_minute,
@@ -60,20 +74,41 @@ _NOOP_SCHEMA = {
 _FIXED_WINDOW_SCHEMA = {
     "type": "object",
     "properties": {
-        "requests": {"type": "integer", "minimum": 1},
-        "per_seconds": {"type": "number", "exclusiveMinimum": 0},
+        "requests": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Number of requests allowed in the time window (required)",
+        },
+        "per_seconds": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "description": "Time window in seconds (required). Combined with requests, creates 'requests per per_seconds' rate limit.",
+        },
     },
+    "required": ["requests", "per_seconds"],
     "additionalProperties": True,
 }
 
 _ADAPTIVE_SCHEMA = {
     "type": "object",
     "properties": {
-        "requests_per_minute": {"type": "integer", "minimum": 1},
-        "requests": {"type": "integer", "minimum": 1},
-        "tokens_per_minute": {"type": "integer", "minimum": 0},
-        "interval_seconds": {"type": "number", "exclusiveMinimum": 0},
+        "requests_per_minute": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Maximum requests allowed per minute (required)",
+        },
+        "tokens_per_minute": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Maximum tokens allowed per minute (optional - if not provided, no token-based limiting)",
+        },
+        "interval_seconds": {
+            "type": "number",
+            "exclusiveMinimum": 0,
+            "description": "Rate limit check interval in seconds (required)",
+        },
     },
+    "required": ["requests_per_minute", "interval_seconds"],
     "additionalProperties": True,
 }
 

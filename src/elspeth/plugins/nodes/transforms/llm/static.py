@@ -14,7 +14,7 @@ class StaticLLMClient(LLMClientProtocol):
         self,
         *,
         content: str,  # Required - no default allowed
-        score: float | None = 0.5,
+        score: float | None = None,
         metrics: Mapping[str, Any] | None = None,
     ) -> None:
         self.content = content

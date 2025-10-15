@@ -94,6 +94,10 @@ suite:
       row:
         - type: score_extractor
           key: sentiment_score
+          parse_json_content: true
+          allow_missing: false
+          threshold_mode: gte
+          flag_field: score_flags
           criteria:
             - positive_sentiment
             - priority_level

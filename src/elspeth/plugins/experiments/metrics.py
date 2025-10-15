@@ -37,15 +37,32 @@ _ON_ERROR_SCHEMA = {"type": "string", "enum": ["abort", "skip"]}
 _ROW_SCHEMA = {
     "type": "object",
     "properties": {
-        "key": {"type": "string"},
+        "key": {
+            "type": "string",
+            "description": "Field name to extract score from (required)",
+        },
         "criteria": {"type": "array", "items": {"type": "string"}},
-        "parse_json_content": {"type": "boolean"},
-        "allow_missing": {"type": "boolean"},
+        "parse_json_content": {
+            "type": "boolean",
+            "description": "Parse JSON content to extract scores (required)",
+        },
+        "allow_missing": {
+            "type": "boolean",
+            "description": "Allow missing score fields (required)",
+        },
         "threshold": {"type": "number"},
-        "threshold_mode": {"type": "string", "enum": ["gt", "gte", "lt", "lte"]},
-        "flag_field": {"type": "string"},
+        "threshold_mode": {
+            "type": "string",
+            "enum": ["gt", "gte", "lt", "lte"],
+            "description": "Threshold comparison mode (required)",
+        },
+        "flag_field": {
+            "type": "string",
+            "description": "Field name for threshold flags (required)",
+        },
         "on_error": _ON_ERROR_SCHEMA,
     },
+    "required": ["key", "parse_json_content", "allow_missing", "threshold_mode", "flag_field"],
     "additionalProperties": True,
 }
 
@@ -278,17 +295,35 @@ class ScoreExtractorPlugin:
         return None
 
 
+def _create_score_extractor(options: dict[str, Any], context: PluginContext) -> ScoreExtractorPlugin:
+    """Create a score extractor plugin with all required fields."""
+    from elspeth.core.validation_base import ConfigurationError
+
+    if "key" not in options:
+        raise ConfigurationError("key is required for score_extractor plugin")
+    if "parse_json_content" not in options:
+        raise ConfigurationError("parse_json_content is required for score_extractor plugin")
+    if "allow_missing" not in options:
+        raise ConfigurationError("allow_missing is required for score_extractor plugin")
+    if "threshold_mode" not in options:
+        raise ConfigurationError("threshold_mode is required for score_extractor plugin")
+    if "flag_field" not in options:
+        raise ConfigurationError("flag_field is required for score_extractor plugin")
+
+    return ScoreExtractorPlugin(
+        key=options["key"],
+        criteria=options.get("criteria"),
+        parse_json_content=options["parse_json_content"],
+        allow_missing=options["allow_missing"],
+        threshold=options.get("threshold"),
+        threshold_mode=options["threshold_mode"],
+        flag_field=options["flag_field"],
+    )
+
+
 register_row_plugin(
     "score_extractor",
-    lambda options, context: ScoreExtractorPlugin(
-        key=options.get("key", "score"),
-        criteria=options.get("criteria"),
-        parse_json_content=options.get("parse_json_content", True),
-        allow_missing=options.get("allow_missing", False),
-        threshold=options.get("threshold"),
-        threshold_mode=options.get("threshold_mode", "gte"),
-        flag_field=options.get("flag_field", "score_flags"),
-    ),
+    _create_score_extractor,
     schema=_ROW_SCHEMA,
 )
 

@@ -25,7 +25,18 @@ def _build_runner():
             {"name": "analysis", "template": "Give analysis for {{ APPID }}."},
             {"name": "prioritization", "template": "Prioritise {{ APPID }}."},
         ],
-        row_plugins=[create_row_plugin({"name": "score_extractor", "security_level": "OFFICIAL", "determinism_level": "guaranteed"})],
+        row_plugins=[create_row_plugin({
+            "name": "score_extractor",
+            "security_level": "OFFICIAL",
+            "determinism_level": "guaranteed",
+            "options": {
+                "key": "score",
+                "parse_json_content": True,
+                "allow_missing": False,
+                "threshold_mode": "gte",
+                "flag_field": "score_flags",
+            },
+        })],
     )
 
 

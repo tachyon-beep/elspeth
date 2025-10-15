@@ -4,6 +4,15 @@ import pytest
 
 from elspeth.core.experiments.plugin_registry import create_aggregation_plugin, create_baseline_plugin, create_row_plugin
 
+# Required options for score_extractor plugin (no defaults allowed)
+SCORE_EXTRACTOR_REQUIRED = {
+    "key": "score",
+    "parse_json_content": True,
+    "allow_missing": False,
+    "threshold_mode": "gte",
+    "flag_field": "score_flags",
+}
+
 
 @pytest.mark.parametrize(
     "response,expected",
@@ -15,7 +24,12 @@ from elspeth.core.experiments.plugin_registry import create_aggregation_plugin, 
     ],
 )
 def test_score_extractor_basic(response, expected):
-    plugin = create_row_plugin({"name": "score_extractor", "security_level": "OFFICIAL", "determinism_level": "guaranteed"})
+    plugin = create_row_plugin({
+        "name": "score_extractor",
+        "security_level": "OFFICIAL",
+        "determinism_level": "guaranteed",
+        "options": SCORE_EXTRACTOR_REQUIRED,
+    })
     derived = plugin.process_row({}, {"crit": response})
     scores = derived["scores"]
     assert "crit" in scores
@@ -31,7 +45,7 @@ def test_score_extractor_threshold_flag():
             "name": "score_extractor",
             "security_level": "OFFICIAL",
             "determinism_level": "guaranteed",
-            "options": {"threshold": 0.7, "threshold_mode": "gte"},
+            "options": {**SCORE_EXTRACTOR_REQUIRED, "threshold": 0.7},
         }
     )
     responses = {
@@ -51,7 +65,7 @@ def test_score_extractor_allow_missing():
             "name": "score_extractor",
             "security_level": "OFFICIAL",
             "determinism_level": "guaranteed",
-            "options": {"allow_missing": True},
+            "options": {**SCORE_EXTRACTOR_REQUIRED, "allow_missing": True},
         }
     )
     derived = plugin.process_row({}, {"crit": {"content": "{}"}})
@@ -60,7 +74,7 @@ def test_score_extractor_allow_missing():
 
 def test_score_stats_aggregator():
     row_plugin = create_row_plugin(
-        {"name": "score_extractor", "security_level": "OFFICIAL", "determinism_level": "guaranteed", "options": {"threshold": 0.7}}
+        {"name": "score_extractor", "security_level": "OFFICIAL", "determinism_level": "guaranteed", "options": {**SCORE_EXTRACTOR_REQUIRED, "threshold": 0.7}}
     )
     responses = [
         {"critA": {"metrics": {"score": 0.8}}},
@@ -109,7 +123,7 @@ def test_score_delta_baseline_plugin():
 
 
 def test_score_recommendation_aggregator():
-    row_plugin = create_row_plugin({"name": "score_extractor", "security_level": "OFFICIAL", "determinism_level": "guaranteed"})
+    row_plugin = create_row_plugin({"name": "score_extractor", "security_level": "OFFICIAL", "determinism_level": "guaranteed", "options": SCORE_EXTRACTOR_REQUIRED})
     records = []
     for value in [0.4, 0.6, 0.7, 0.9, 0.85]:
         metrics = row_plugin.process_row({}, {"critA": {"metrics": {"score": value}}})

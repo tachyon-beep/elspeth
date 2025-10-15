@@ -27,9 +27,16 @@ def _create_noop_cost_tracker(options: dict[str, Any], context: PluginContext) -
 
 def _create_fixed_price_cost_tracker(options: dict[str, Any], context: PluginContext) -> FixedPriceCostTracker:
     """Create a fixed-price cost tracker with specified token prices."""
+    from elspeth.core.validation_base import ConfigurationError
+
+    if "prompt_token_price" not in options:
+        raise ConfigurationError("prompt_token_price is required for fixed_price cost tracker")
+    if "completion_token_price" not in options:
+        raise ConfigurationError("completion_token_price is required for fixed_price cost tracker")
+
     return FixedPriceCostTracker(
-        prompt_token_price=float(options.get("prompt_token_price", 0.0)),
-        completion_token_price=float(options.get("completion_token_price", 0.0)),
+        prompt_token_price=float(options["prompt_token_price"]),
+        completion_token_price=float(options["completion_token_price"]),
     )
 
 
@@ -42,9 +49,18 @@ _NOOP_SCHEMA = {
 _FIXED_PRICE_SCHEMA = {
     "type": "object",
     "properties": {
-        "prompt_token_price": {"type": "number", "minimum": 0},
-        "completion_token_price": {"type": "number", "minimum": 0},
+        "prompt_token_price": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Cost per prompt token in USD (required)",
+        },
+        "completion_token_price": {
+            "type": "number",
+            "minimum": 0,
+            "description": "Cost per completion token in USD (required)",
+        },
     },
+    "required": ["prompt_token_price", "completion_token_price"],
     "additionalProperties": True,
 }
 

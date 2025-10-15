@@ -101,8 +101,8 @@ class AnalyticsReportSink(ResultSink):
             "rows": len(results),
             "failures": len(failures),
         }
-        if failures:
-            summary["failure_examples"] = failures[:5]
+        if len(failures) > 0:
+            summary["failure_examples"] = failures[: min(len(failures), 5)]
         payload_meta = payload.get("metadata") or {}
         if self.include_metadata:
             summary["metadata"] = {

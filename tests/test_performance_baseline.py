@@ -72,7 +72,18 @@ class TestPluginCreationPerformance:
 
         start = time.perf_counter()
         plugin = create_row_plugin(
-            {"name": "score_extractor", "key": "score", "security_level": "internal", "determinism_level": "guaranteed"},
+            {
+                "name": "score_extractor",
+                "security_level": "internal",
+                "determinism_level": "guaranteed",
+                "options": {
+                    "key": "score",
+                    "parse_json_content": True,
+                    "allow_missing": False,
+                    "threshold_mode": "gte",
+                    "flag_field": "score_flags",
+                },
+            },
             parent_context=context,
         )
         elapsed_ms = (time.perf_counter() - start) * 1000

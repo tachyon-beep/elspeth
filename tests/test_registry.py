@@ -137,7 +137,18 @@ def test_create_row_plugin_inherits_parent_context():
 
     parent_context = PluginContext(plugin_name="suite", plugin_kind="suite", security_level="SECRET", determinism_level="none")
     plugin = plugin_registry.create_row_plugin(
-        {"name": "score_extractor", "security_level": "SECRET", "determinism_level": "guaranteed"},
+        {
+            "name": "score_extractor",
+            "security_level": "SECRET",
+            "determinism_level": "guaranteed",
+            "options": {
+                "key": "score",
+                "parse_json_content": True,
+                "allow_missing": False,
+                "threshold_mode": "gte",
+                "flag_field": "score_flags",
+            },
+        },
         parent_context=parent_context,
     )
     assert plugin.plugin_context.parent == parent_context

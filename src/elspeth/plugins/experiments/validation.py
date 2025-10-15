@@ -168,6 +168,8 @@ register_validation_plugin(
 
 
 def _build_llm_guard(options: dict[str, Any], context: PluginContext) -> LLMGuardValidationPlugin:
+    from elspeth.core.validation_base import ConfigurationError
+
     llm_spec = options.get("validator_llm") or options.get("llm")
     if llm_spec is None:
         raise ValueError("LLM guard validation plugin requires 'validator_llm'")
@@ -181,13 +183,20 @@ def _build_llm_guard(options: dict[str, Any], context: PluginContext) -> LLMGuar
     if not template:
         raise ValueError("LLM guard validation plugin requires 'user_prompt_template'")
 
+    if "valid_token" not in options:
+        raise ConfigurationError("valid_token is required for llm_guard validation plugin")
+    if "invalid_token" not in options:
+        raise ConfigurationError("invalid_token is required for llm_guard validation plugin")
+    if "strip_whitespace" not in options:
+        raise ConfigurationError("strip_whitespace is required for llm_guard validation plugin")
+
     return LLMGuardValidationPlugin(
         validator_llm=validator_llm,
         user_prompt_template=template,
         system_prompt=options.get("system_prompt"),
-        valid_token=options.get("valid_token", "VALID"),
-        invalid_token=options.get("invalid_token", "INVALID"),
-        strip_whitespace=options.get("strip_whitespace", True),
+        valid_token=options["valid_token"],
+        invalid_token=options["invalid_token"],
+        strip_whitespace=options["strip_whitespace"],
     )
 
 
@@ -202,10 +211,20 @@ register_validation_plugin(
             "system_prompt": {"type": "string"},
             "user_prompt_template": {"type": "string"},
             "prompt_template": {"type": "string"},
-            "valid_token": {"type": "string"},
-            "invalid_token": {"type": "string"},
-            "strip_whitespace": {"type": "boolean"},
+            "valid_token": {
+                "type": "string",
+                "description": "Token indicating valid response (required). LLM should return this token for passing validation.",
+            },
+            "invalid_token": {
+                "type": "string",
+                "description": "Token indicating invalid response (required). LLM should return this token for failing validation.",
+            },
+            "strip_whitespace": {
+                "type": "boolean",
+                "description": "Strip whitespace from validator response (required). Takes only first line of response.",
+            },
         },
+        "required": ["valid_token", "invalid_token", "strip_whitespace"],
         "additionalProperties": True,
     },
 )
