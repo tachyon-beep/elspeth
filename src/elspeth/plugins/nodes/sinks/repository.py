@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Mapping
@@ -145,7 +146,6 @@ class _RepoSinkBase(ResultSink):
         Returns:
             Stripped token string or None if not set
         """
-        import os
 
         token = os.getenv(env_var)
         return token.strip() if token else None
@@ -346,4 +346,3 @@ class AzureDevOpsRepoSink(_RepoSinkBase):
         return path
 
 
-import os  # noqa: E402  (keep at end to avoid circular import during module import)

@@ -23,7 +23,6 @@ import pandas as pd
 import pytest
 
 from elspeth.core.security import SecureMode
-from elspeth.core.validation_base import ConfigurationError
 from elspeth.plugins.nodes.sinks import CsvResultSink
 from elspeth.plugins.nodes.sinks._sanitize import sanitize_cell
 
@@ -240,7 +239,7 @@ class TestPathTraversalPrevention:
         from pathlib import Path
 
         try:
-            normalized = Path(malicious_path).resolve()
+            Path(malicious_path).resolve()
             # Should not allow writing outside allowed directory
         except Exception:
             # Path validation correctly rejected
@@ -295,7 +294,6 @@ args: ['calc']
 
     def test_invalid_schema_rejected(self):
         """Test that invalid schemas are rejected."""
-        from elspeth.core.validation_base import ConfigurationError
 
         # Invalid configuration should raise ConfigurationError
         invalid_config = {
@@ -394,7 +392,7 @@ class TestConcurrentAccess:
                     }
                 )
                 results.append(True)
-            except Exception as e:
+            except Exception:
                 results.append(False)
 
         # Create temp file

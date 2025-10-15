@@ -24,8 +24,6 @@ from elspeth.core.registry.schemas import (
 )
 from elspeth.core.security import validate_azure_blob_endpoint
 from elspeth.core.validation_base import ConfigurationError
-
-logger = logging.getLogger(__name__)
 from elspeth.plugins.nodes.sinks import (
     AnalyticsReportSink,
     AzureDevOpsRepoSink,
@@ -47,6 +45,8 @@ from elspeth.plugins.nodes.sinks.embeddings_store import (
     EmbeddingsStoreSink,
 )
 from elspeth.plugins.nodes.sinks.enhanced_visual_report import EnhancedVisualAnalyticsSink
+
+logger = logging.getLogger(__name__)
 
 # Create the sink registry with type safety
 sink_registry = BasePluginRegistry[ResultSink]("sink")

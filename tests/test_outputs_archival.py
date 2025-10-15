@@ -3,8 +3,6 @@ import json
 from pathlib import Path
 from zipfile import ZipFile
 
-import pytest
-
 from elspeth.plugins.nodes.sinks.excel import ExcelResultSink
 from elspeth.plugins.nodes.sinks.zip_bundle import ZipResultSink
 

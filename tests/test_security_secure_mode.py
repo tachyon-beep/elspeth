@@ -1,6 +1,5 @@
 """Tests for secure mode detection and validation."""
 
-import os
 
 import pytest
 
