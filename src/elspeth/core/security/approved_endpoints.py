@@ -67,10 +67,10 @@ APPROVED_PATTERNS: dict[ServiceType, list[str]] = {
     "http_api": [
         # OpenAI public API
         r"https://api\.openai\.com(/.*)?",
-        # Localhost for testing (any port)
-        r"http://localhost(:[0-9]+)?(/.*)?",
-        r"http://127\.0\.0\.1(:[0-9]+)?(/.*)?",
-        r"http://\[::1\](:[0-9]+)?(/.*)?",  # IPv6 localhost
+        # Localhost for testing (any port) - HTTP is safe for localhost as data never leaves host
+        r"http://localhost(:[0-9]+)?(/.*)?",  # NOSONAR - localhost only, data never leaves machine
+        r"http://127\.0\.0\.1(:[0-9]+)?(/.*)?",  # NOSONAR - loopback only, secure for local testing
+        r"http://\[::1\](:[0-9]+)?(/.*)?",  # NOSONAR - IPv6 localhost, data never leaves machine
         # HTTPS localhost for testing
         r"https://localhost(:[0-9]+)?(/.*)?",
         r"https://127\.0\.0\.1(:[0-9]+)?(/.*)?",
