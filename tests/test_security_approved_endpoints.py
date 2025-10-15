@@ -64,11 +64,11 @@ class TestEndpointValidation:
         """Test localhost endpoints are always allowed."""
         # HTTP localhost
         validate_http_api_endpoint("http://localhost:8080", security_level="confidential")
-        validate_http_api_endpoint("http://127.0.0.1:8080", security_level="restricted")
+        validate_http_api_endpoint("http://127.0.0.1:8080", security_level="SECRET")
 
         # HTTPS localhost
         validate_http_api_endpoint("https://localhost:8080", security_level="confidential")
-        validate_http_api_endpoint("https://127.0.0.1:8080", security_level="restricted")
+        validate_http_api_endpoint("https://127.0.0.1:8080", security_level="SECRET")
 
         # IPv6 localhost
         validate_http_api_endpoint("http://[::1]:8080", security_level="confidential")
@@ -217,7 +217,7 @@ class TestEndpointValidation:
         """Test IPv6 localhost addresses are allowed."""
         validate_http_api_endpoint(
             "http://[::1]:8000",
-            security_level="restricted",
+            security_level="SECRET",
         )
 
     def test_error_message_includes_approved_patterns(self):
@@ -255,11 +255,11 @@ class TestEndpointValidation:
             )
 
     def test_openai_public_restricted_blocked(self):
-        """Test OpenAI public API blocks restricted data."""
+        """Test OpenAI public API blocks SECRET data."""
         with pytest.raises(ValueError, match="not approved for security level"):
             validate_http_api_endpoint(
                 "https://api.openai.com",
-                security_level="restricted",
+                security_level="SECRET",
             )
 
     def test_case_insensitive_security_levels(self):
@@ -282,7 +282,7 @@ class TestEndpointValidationRegistry:
     def test_azure_openai_factory_validates_endpoint(self):
         """Test Azure OpenAI factory function validates endpoints."""
         from elspeth.core.llm_registry import _create_azure_openai
-        from elspeth.core.plugins import PluginContext
+        from elspeth.core.plugin_context import PluginContext
         from elspeth.core.validation_base import ConfigurationError
 
         context = PluginContext(
@@ -308,7 +308,7 @@ class TestEndpointValidationRegistry:
     def test_http_openai_factory_validates_endpoint(self):
         """Test HTTP OpenAI factory function validates endpoints."""
         from elspeth.core.llm_registry import _create_http_openai
-        from elspeth.core.plugins import PluginContext
+        from elspeth.core.plugin_context import PluginContext
         from elspeth.core.validation_base import ConfigurationError
 
         context = PluginContext(
@@ -330,10 +330,10 @@ class TestEndpointValidationRegistry:
     def test_http_openai_factory_allows_localhost(self):
         """Test HTTP OpenAI factory allows localhost endpoints."""
         from elspeth.core.llm_registry import _create_http_openai
-        from elspeth.core.plugins import PluginContext
+        from elspeth.core.plugin_context import PluginContext
 
         context = PluginContext(
-            security_level="restricted",
+            security_level="SECRET",
             plugin_kind="llm",
             plugin_name="http_openai",
         )

@@ -42,6 +42,7 @@ def test_orchestrator_runs(monkeypatch):
 
     assert len(payload["results"]) == 2
     assert payload["results"][0]["response"]["prompt"] == "Hello Alice"
+    # Check that metadata includes row count
     assert sink.calls and sink.calls[0][1]["row_count"] == 2
 
 

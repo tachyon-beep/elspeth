@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any, Iterable
 
-from elspeth.core.plugins import PluginContext
+from elspeth.core.plugin_context import PluginContext
 from elspeth.core.security import (
     coalesce_determinism_level,
     coalesce_security_level,

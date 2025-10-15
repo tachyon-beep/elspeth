@@ -19,7 +19,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from elspeth.core.plugins import PluginContext
+from elspeth.core.plugin_context import PluginContext
 
 
 class PluginLogger:

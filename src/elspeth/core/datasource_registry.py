@@ -11,7 +11,7 @@ import logging
 from typing import Any
 
 from elspeth.adapters.blob_store import load_blob_config
-from elspeth.core.plugins import PluginContext
+from elspeth.core.plugin_context import PluginContext
 from elspeth.core.protocols import DataSource
 from elspeth.core.registry.base import BasePluginRegistry
 from elspeth.core.registry.schemas import ON_ERROR_ENUM, with_security_properties
@@ -56,12 +56,11 @@ def _create_blob_datasource(options: dict[str, Any], context: PluginContext) -> 
 
 
 def _create_csv_blob_datasource(options: dict[str, Any], context: PluginContext) -> CSVBlobDataSource:
-    """Create CSV Blob datasource with endpoint validation."""
-    # CSVBlobDataSource also uses blob storage, so validate endpoint
-    # Note: CSVBlobDataSource uses a different parameter structure (path instead of config_path)
-    # The actual blob connection details are embedded in the path parameter
-    # For now, we'll skip validation here as the path format is different
-    # TODO: Add validation when CSVBlobDataSource path format is standardized
+    """Create CSV Blob datasource (local file that mimics blob storage).
+
+    Note: Despite the name, CSVBlobDataSource reads from local files, not actual blob storage.
+    It's used for testing/mocking blob scenarios. No endpoint validation needed.
+    """
     return CSVBlobDataSource(**options)
 
 

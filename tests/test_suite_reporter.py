@@ -88,6 +88,7 @@ def test_suite_report_generator_creates_core_outputs(tmp_path: Path) -> None:
     assert (consolidated / "executive_summary.md").exists()
 
     baseline_stats = json.loads((tmp_path / "reports" / "baseline" / "stats.json").read_text(encoding="utf-8"))
+    # Check that baseline stats include row count
     assert baseline_stats["row_count"] == 1
     analysis_config = json.loads((consolidated / "analysis_config.json").read_text(encoding="utf-8"))
     assert analysis_config["plugin_summary"]["row_plugins"] == ["score_extractor"]

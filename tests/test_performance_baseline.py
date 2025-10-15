@@ -26,7 +26,7 @@ from elspeth.core.experiments.plugin_registry import (
     create_validation_plugin,
 )
 from elspeth.core.llm_registry import llm_registry
-from elspeth.core.plugins import PluginContext
+from elspeth.core.plugin_context import PluginContext
 from elspeth.core.sink_registry import sink_registry
 
 

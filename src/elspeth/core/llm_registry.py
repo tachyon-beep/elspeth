@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from elspeth.core.plugins import PluginContext
+from elspeth.core.plugin_context import PluginContext
 from elspeth.core.protocols import LLMClientProtocol
 from elspeth.core.registry.base import BasePluginRegistry
 from elspeth.core.registry.schemas import with_security_properties

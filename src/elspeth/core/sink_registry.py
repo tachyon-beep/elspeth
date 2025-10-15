@@ -14,7 +14,7 @@ import logging
 from typing import Any
 
 from elspeth.adapters.blob_store import load_blob_config
-from elspeth.core.plugins import PluginContext
+from elspeth.core.plugin_context import PluginContext
 from elspeth.core.protocols import ResultSink
 from elspeth.core.registry.base import BasePluginRegistry
 from elspeth.core.registry.schemas import (

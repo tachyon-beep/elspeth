@@ -9,7 +9,7 @@ from typing import Any
 from jinja2 import Template
 
 from elspeth.core.experiments.plugin_registry import register_validation_plugin
-from elspeth.core.plugins import PluginContext
+from elspeth.core.plugin_context import PluginContext
 from elspeth.core.protocols import LLMClientProtocol
 from elspeth.core.registry import create_llm_from_definition
 from elspeth.plugins.orchestrators.experiment.protocols import ValidationError, ValidationPlugin

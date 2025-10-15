@@ -8,8 +8,6 @@ import pytest
 
 from elspeth.plugins.nodes.sinks.enhanced_visual_report import EnhancedVisualAnalyticsSink
 
-pytest.importorskip("matplotlib")  # Skip entire module if matplotlib is unavailable
-
 
 def _sample_payload_with_scores() -> dict:
     """Create a sample payload with individual row scores."""

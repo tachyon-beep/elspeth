@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any, Mapping, Sequence
 import numpy as np
 
 from elspeth.core.experiments.plugin_registry import register_aggregation_plugin, register_baseline_plugin, register_row_plugin
-from elspeth.core.plugins import PluginContext
+from elspeth.core.plugin_context import PluginContext
 
 if TYPE_CHECKING:
     from elspeth.core.schema import DataFrameSchema

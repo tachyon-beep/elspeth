@@ -17,7 +17,7 @@ from elspeth.core.controls.rate_limit import (
     NoopRateLimiter,
     RateLimiter,
 )
-from elspeth.core.plugins.context import PluginContext
+from elspeth.core.plugin_context import PluginContext
 from elspeth.core.registry.base import BasePluginRegistry
 
 # Initialize the rate limiter registry

@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from typing import Any, Iterable, TypeVar
 
-from elspeth.core.plugins import PluginContext
+from elspeth.core.plugin_context import PluginContext
 from elspeth.core.registry.base import BasePluginRegistry
 from elspeth.core.security import (
     coalesce_determinism_level,

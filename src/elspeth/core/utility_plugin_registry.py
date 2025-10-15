@@ -4,14 +4,14 @@ from __future__ import annotations
 
 from typing import Any, Callable, Iterable, Mapping
 
-from elspeth.core.plugins import PluginContext
+from elspeth.core.plugin_context import PluginContext
 from elspeth.core.registry.base import BasePluginRegistry
 
 # Use base registry infrastructure
 _utility_registry = BasePluginRegistry[Any]("utility")
 
-# Backward compatibility: expose internal dict for test mocking
-_utility_plugins = _utility_registry._plugins
+# Expose registry for external use (e.g., plugin registration)
+utility_plugin_registry = _utility_registry
 
 
 def register_utility_plugin(
@@ -66,4 +66,4 @@ def create_named_utility(
     return create_utility_plugin(definition, parent_context=parent_context, provenance=provenance)
 
 
-__all__ = ["register_utility_plugin", "create_utility_plugin", "create_named_utility"]
+__all__ = ["register_utility_plugin", "create_utility_plugin", "create_named_utility", "utility_plugin_registry"]

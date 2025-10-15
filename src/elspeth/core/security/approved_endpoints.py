@@ -87,12 +87,14 @@ APPROVED_PATTERNS: dict[ServiceType, list[str]] = {
 }
 
 # Security level restrictions by service type
-# Maps service type -> list of allowed security levels
+# Maps service type -> list of allowed security levels (canonical uppercase forms)
 # If not specified, all security levels are allowed
 SECURITY_LEVEL_RESTRICTIONS: dict[ServiceType, dict[str, list[str]]] = {
     "http_api": {
         # OpenAI public API should only be used for public/internal data
-        r"https://api\.openai\.com(/.*)?": ["public", "internal"],
+        # Note: Uses canonical uppercase forms (UNOFFICIAL, OFFICIAL)
+        # Aliases: "public" -> "UNOFFICIAL", "internal" -> "OFFICIAL"
+        r"https://api\.openai\.com(/.*)?": ["UNOFFICIAL", "OFFICIAL"],
         # Localhost is allowed for any security level (data never leaves host)
         # All other patterns: no restrictions
     }
@@ -239,13 +241,19 @@ def validate_endpoint(
     if security_level and service_type in SECURITY_LEVEL_RESTRICTIONS:
         restrictions = SECURITY_LEVEL_RESTRICTIONS[service_type]
 
+        # Normalize security level to canonical form (handles aliases like "internal" -> "OFFICIAL")
+        # Import here to avoid circular dependency
+        from elspeth.core.security import normalize_security_level
+
+        security_level_normalized = normalize_security_level(security_level)
+
         # Check if this specific pattern has security level restrictions
         for pattern, allowed_levels in restrictions.items():
             if _matches_pattern(endpoint_normalized, pattern):
-                if security_level not in allowed_levels:
+                if security_level_normalized not in allowed_levels:
                     error_msg = (
                         f"Endpoint '{endpoint}' (matched pattern '{pattern}') is not approved "
-                        f"for security level '{security_level}'. "
+                        f"for security level '{security_level_normalized}'. "
                         f"Allowed security levels: {allowed_levels}"
                     )
 

@@ -2,7 +2,7 @@
 
 import pytest
 
-from elspeth.core.plugins import PluginContext
+from elspeth.core.plugin_context import PluginContext
 from elspeth.core.registry import BasePluginFactory, BasePluginRegistry
 from elspeth.core.validation import ConfigurationError
 

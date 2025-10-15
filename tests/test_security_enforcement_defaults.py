@@ -16,8 +16,8 @@ class TestCriticalDefaultEnforcement:
     """
     Test that critical defaults are not allowed.
 
-    NOTE: Many of these tests currently DOCUMENT expected behavior after fixes.
-    They are marked with TODO comments showing what should happen after defaults are removed.
+    All critical security-related parameters must be explicitly configured.
+    Silent defaults have been removed to ensure secure-by-default configuration.
     """
 
     def test_audit_critical_defaults_documented(self):
@@ -469,40 +469,3 @@ class TestHighPriorityDefaults:
             }
         )
         assert plugin is not None
-
-
-# Summary of enforcement actions needed
-"""
-SUMMARY: Actions Required to Pass Gates
-
-IMMEDIATE (P0 - This Week):
-1. Remove api_key_env defaults in:
-   - src/elspeth/retrieval/providers.py:161
-   - src/elspeth/plugins/outputs/embeddings_store.py:389
-
-2. Remove endpoint/api_version defaults in:
-   - src/elspeth/plugins/outputs/embeddings_store.py:417
-   - src/elspeth/retrieval/embedding.py:62
-
-3. Require explicit table names in:
-   - src/elspeth/retrieval/providers.py:155
-
-4. Require explicit field names in:
-   - src/elspeth/retrieval/providers.py:168-170
-
-SHORT-TERM (P1 - Next 2 Weeks):
-5. Document all HIGH priority defaults in schemas
-6. Add warnings for empty validation patterns
-7. Document LLM parameter defaults
-8. Add schema descriptions for all metric defaults
-
-TESTS TO ENABLE:
-- Uncomment pytest.raises() assertions after fixes
-- All tests should pass after enforcement
-- Gate status test should pass (not skip)
-
-POLICY:
-- Add "No Silent Defaults" policy to CONTRIBUTING.md
-- Update plugin development guide
-- Add pre-commit hook to detect new defaults
-"""

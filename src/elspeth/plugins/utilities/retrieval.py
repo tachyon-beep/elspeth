@@ -5,8 +5,8 @@ from __future__ import annotations
 import logging
 from typing import Any, Callable, Mapping
 
-from elspeth.core.plugins import PluginContext
-from elspeth.core.utilities import register_utility_plugin
+from elspeth.core.plugin_context import PluginContext
+from elspeth.core.utility_plugin_registry import register_utility_plugin
 from elspeth.core.validation_base import ConfigurationError
 from elspeth.retrieval import RetrievalService, create_retrieval_service
 
