@@ -143,4 +143,5 @@ coverage.xml
 
 #Ignore vscode AI rules
 .github/instructions/codacy.instructions.md
-.codacy/audit_data/
+.codacy/
+audit_data/
