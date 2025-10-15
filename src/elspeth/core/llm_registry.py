@@ -7,14 +7,18 @@ LLM registry logic in registry.py.
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from elspeth.core.plugins import PluginContext
 from elspeth.core.protocols import LLMClientProtocol
 from elspeth.core.registry.base import BasePluginRegistry
 from elspeth.core.registry.schemas import with_security_properties
+from elspeth.core.security import validate_azure_openai_endpoint, validate_http_api_endpoint
 from elspeth.core.validation_base import ConfigurationError
 from elspeth.plugins.nodes.transforms.llm import AzureOpenAIClient, HttpOpenAIClient, MockLLMClient, StaticLLMClient
+
+logger = logging.getLogger(__name__)
 
 # Create the LLM registry with type safety
 llm_registry = BasePluginRegistry[LLMClientProtocol]("llm")
@@ -26,12 +30,47 @@ llm_registry = BasePluginRegistry[LLMClientProtocol]("llm")
 
 
 def _create_azure_openai(options: dict[str, Any], context: PluginContext) -> AzureOpenAIClient:
-    """Create Azure OpenAI LLM client."""
+    """Create Azure OpenAI LLM client with endpoint validation."""
+    # Extract azure_endpoint from config for validation
+    config = options.get("config", {})
+    azure_endpoint = config.get("azure_endpoint")
+
+    if azure_endpoint:
+        # Validate endpoint against approved patterns
+        # Use security_level from context if available
+        security_level = context.security_level if context else None
+        try:
+            validate_azure_openai_endpoint(
+                endpoint=azure_endpoint,
+                security_level=security_level,
+            )
+            logger.debug(f"Azure OpenAI endpoint validated: {azure_endpoint}")
+        except ValueError as exc:
+            logger.error(f"Azure OpenAI endpoint validation failed: {exc}")
+            raise ConfigurationError(f"Azure OpenAI endpoint validation failed: {exc}") from exc
+
     return AzureOpenAIClient(**options)
 
 
 def _create_http_openai(options: dict[str, Any], context: PluginContext) -> HttpOpenAIClient:
-    """Create HTTP OpenAI LLM client."""
+    """Create HTTP OpenAI LLM client with endpoint validation."""
+    # Extract api_base for validation
+    api_base = options.get("api_base")
+
+    if api_base:
+        # Validate endpoint against approved patterns
+        # Use security_level from context if available
+        security_level = context.security_level if context else None
+        try:
+            validate_http_api_endpoint(
+                endpoint=api_base,
+                security_level=security_level,
+            )
+            logger.debug(f"HTTP API endpoint validated: {api_base}")
+        except ValueError as exc:
+            logger.error(f"HTTP API endpoint validation failed: {exc}")
+            raise ConfigurationError(f"HTTP API endpoint validation failed: {exc}") from exc
+
     return HttpOpenAIClient(**options)
 
 

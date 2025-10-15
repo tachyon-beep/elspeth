@@ -1,0 +1,241 @@
+# Production Suite Configuration Template
+#
+# This template demonstrates secure configuration for production use.
+# It follows STRICT mode requirements and best practices.
+#
+# Environment variable: ELSPETH_SECURE_MODE=strict
+#
+# Key Security Requirements:
+# - security_level REQUIRED for all datasources, LLMs, and sinks
+# - retain_local=true REQUIRED for datasources (audit compliance)
+# - Mock LLMs NOT ALLOWED in production
+# - Formula sanitization ENABLED (default)
+# - Audit logging middleware RECOMMENDED
+
+default:
+  # Suite metadata
+  suite_root: experiments/production_suite
+  max_rows: null  # Process all rows (or set a limit for testing)
+
+  # ============================================================================
+  # DATASOURCE CONFIGURATION
+  # ============================================================================
+  datasource:
+    plugin: azure_blob  # Or local_csv for local development
+    security_level: "OFFICIAL"  # REQUIRED: Must match data classification
+    determinism_level: "high"   # Recommended for reproducibility
+    options:
+      # Azure Blob Storage
+      container: "production-data"
+      blob_name: "experiments/input_data.csv"
+      profile: "production"  # References azure_blob_profiles.yaml
+      retain_local: true  # REQUIRED in STRICT mode for audit compliance
+
+      # For local_csv alternative:
+      # path: "data/production/input.csv"
+      # retain_local: true
+
+  # ============================================================================
+  # LLM CONFIGURATION
+  # ============================================================================
+  llm:
+    plugin: azure_openai  # Real LLM required in STRICT mode
+    security_level: "OFFICIAL"  # REQUIRED: Must match or exceed data security
+    determinism_level: "high"   # Recommended for reproducibility
+    options:
+      endpoint: "https://your-resource.openai.azure.com"
+      api_version: "2024-02-15-preview"
+      deployment_name: "gpt-4"  # Or your production deployment
+      api_key_env: "AZURE_OPENAI_API_KEY"  # Read from environment
+      temperature: 0.0  # Deterministic for production
+      max_tokens: 1000  # Adjust as needed
+
+  # ============================================================================
+  # SINKS (OUTPUT) CONFIGURATION
+  # ============================================================================
+  sinks:
+    # CSV export with formula sanitization
+    - plugin: csv
+      security_level: "OFFICIAL"  # REQUIRED: Must match data classification
+      options:
+        path: "outputs/production/results.csv"
+        sanitize_formulas: true  # REQUIRED in STRICT mode (default)
+        sanitize_guard: "'"      # Prefix for potential formulas
+        on_error: "raise"        # Fail fast on errors
+
+    # Excel workbook with sanitization
+    - plugin: excel_workbook
+      security_level: "OFFICIAL"
+      options:
+        path: "outputs/production/results.xlsx"
+        sanitize_formulas: true  # REQUIRED in STRICT mode (default)
+        include_metadata: true
+        on_error: "raise"
+
+    # Analytics report (JSON + Markdown)
+    - plugin: analytics_report
+      security_level: "OFFICIAL"
+      options:
+        output_dir: "outputs/production/reports"
+        formats: ["json", "markdown"]
+        on_error: "raise"
+
+    # Reproducibility bundle (complete audit trail)
+    - plugin: reproducibility_bundle
+      security_level: "OFFICIAL"
+      options:
+        output_dir: "outputs/production/audit"
+        sanitize_formulas: true  # REQUIRED in STRICT mode
+        include_prompts: true
+        include_config: true
+        include_source_data: true
+        on_error: "raise"
+
+  # ============================================================================
+  # LLM MIDDLEWARE (Security & Monitoring)
+  # ============================================================================
+  llm_middlewares:
+    # Audit logging - STRONGLY RECOMMENDED in STRICT mode
+    - type: audit_logger
+      enabled: true
+      output_dir: "outputs/production/audit_logs"
+      log_requests: true
+      log_responses: true
+      log_errors: true
+
+    # Prompt shield - Content safety
+    - type: prompt_shield
+      enabled: true
+      max_prompt_length: 10000
+      blocked_patterns: []  # Add patterns to block if needed
+
+    # Health monitoring
+    - type: health_monitor
+      enabled: true
+      check_interval_seconds: 60
+      failure_threshold: 3
+
+  # ============================================================================
+  # RATE LIMITING & COST TRACKING
+  # ============================================================================
+  rate_limiter:
+    plugin: fixed_window
+    options:
+      max_requests_per_minute: 60  # Adjust based on your quota
+      window_size_seconds: 60
+
+  cost_tracker:
+    plugin: fixed_price
+    options:
+      cost_per_request: 0.01  # USD per request (example)
+      budget_limit: 100.0      # Maximum budget in USD
+      warn_threshold: 0.8      # Warn at 80% of budget
+
+  # ============================================================================
+  # CONCURRENCY & PERFORMANCE
+  # ============================================================================
+  concurrency:
+    max_workers: 5  # Parallel workers for LLM requests
+    batch_size: 10  # Rows to process per batch
+
+  # ============================================================================
+  # RETRY CONFIGURATION
+  # ============================================================================
+  retry:
+    max_attempts: 3
+    initial_delay_seconds: 1.0
+    backoff_multiplier: 2.0
+    max_delay_seconds: 30.0
+
+  # ============================================================================
+  # CHECKPOINT CONFIGURATION
+  # ============================================================================
+  checkpoint:
+    enabled: true
+    checkpoint_dir: "outputs/production/checkpoints"
+    checkpoint_frequency: 100  # Checkpoint every 100 rows
+
+  # ============================================================================
+  # EXPERIMENTS
+  # ============================================================================
+  experiments:
+    - name: baseline_evaluation
+      description: "Baseline evaluation with production data"
+
+      # Prompt configuration
+      prompts:
+        system: "You are a helpful AI assistant."
+        template: "Process this input: {input_text}"
+
+      # Row-level plugins
+      row_plugins:
+        - plugin: score_extractor
+          options:
+            score_field: "score"
+            score_range: [0, 10]
+
+      # Aggregation plugins
+      aggregator_plugins:
+        - plugin: statistics_summary
+          options:
+            fields: ["score"]
+
+      # Validation plugins
+      validation_plugins:
+        - plugin: json_structure
+          options:
+            required_fields: ["score", "response"]
+
+      # Early stopping (optional)
+      early_stop_plugins:
+        - plugin: threshold
+          options:
+            metric: "error_rate"
+            threshold: 0.1  # Stop if error rate > 10%
+            min_samples: 100
+
+# ============================================================================
+# PRODUCTION CHECKLIST
+# ============================================================================
+#
+# Before running in production, verify:
+#
+# 1. Environment Variables:
+#    - ELSPETH_SECURE_MODE=strict
+#    - AZURE_OPENAI_API_KEY=<your-key>
+#    - Any other API keys or credentials
+#
+# 2. Security Levels:
+#    - All datasources have security_level
+#    - All LLMs have security_level
+#    - All sinks have security_level
+#    - Security levels match data classification
+#
+# 3. Data Retention:
+#    - retain_local=true for all datasources
+#    - Audit logs enabled
+#    - Reproducibility bundle included
+#
+# 4. Formula Sanitization:
+#    - sanitize_formulas=true for CSV/Excel sinks (default)
+#    - Never disable in production
+#
+# 5. Middleware:
+#    - Audit logger enabled
+#    - Health monitoring enabled
+#    - Content safety (prompt shield) configured
+#
+# 6. Limits & Quotas:
+#    - Rate limiter configured for your quota
+#    - Cost tracker with budget limit
+#    - Concurrency appropriate for infrastructure
+#
+# 7. Error Handling:
+#    - on_error="raise" for sinks (fail fast)
+#    - Retry configuration appropriate
+#    - Checkpoints enabled for long-running jobs
+#
+# 8. Testing:
+#    - Test with small dataset first (max_rows: 10)
+#    - Verify outputs before full run
+#    - Check audit logs for completeness

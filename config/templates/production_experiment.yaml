@@ -1,0 +1,193 @@
+# Production Experiment Configuration Template
+#
+# This template demonstrates secure configuration for a single production experiment.
+# It follows STANDARD mode requirements and best practices.
+#
+# Environment variable: ELSPETH_SECURE_MODE=standard (default)
+#
+# Key Security Requirements:
+# - security_level REQUIRED for datasources, LLMs, and sinks
+# - retain_local RECOMMENDED for datasources
+# - Formula sanitization ENABLED by default
+# - Audit logging recommended
+
+default:
+  # ============================================================================
+  # DATASOURCE CONFIGURATION
+  # ============================================================================
+  datasource:
+    plugin: local_csv  # Simple CSV for single experiment
+    security_level: "OFFICIAL"  # REQUIRED: Must match data classification
+    determinism_level: "high"   # Optional: For reproducibility
+    options:
+      path: "data/experiment_input.csv"
+      retain_local: true  # Recommended for audit compliance
+
+  # ============================================================================
+  # LLM CONFIGURATION
+  # ============================================================================
+  llm:
+    plugin: azure_openai
+    security_level: "OFFICIAL"  # REQUIRED: Must match or exceed data security
+    determinism_level: "high"   # Optional: For reproducibility
+    options:
+      endpoint: "https://your-resource.openai.azure.com"
+      api_version: "2024-02-15-preview"
+      deployment_name: "gpt-4"
+      api_key_env: "AZURE_OPENAI_API_KEY"
+      temperature: 0.0  # For deterministic results
+      max_tokens: 500
+
+  # ============================================================================
+  # PROMPTS
+  # ============================================================================
+  prompts:
+    system: "You are a professional assistant providing accurate responses."
+    template: |
+      Question: {question}
+
+      Please provide a clear and accurate answer.
+
+  # ============================================================================
+  # PROMPT FIELDS
+  # ============================================================================
+  prompt_fields:
+    - name: question
+      description: "The question to answer"
+      required: true
+
+  # ============================================================================
+  # ROW-LEVEL PROCESSING
+  # ============================================================================
+  row_plugins:
+    # Extract scores from responses
+    - plugin: score_extractor
+      options:
+        score_field: "quality_score"
+        score_range: [1, 5]
+        extract_pattern: "Score: (\\d+)"
+
+  # ============================================================================
+  # AGGREGATION
+  # ============================================================================
+  aggregator_plugins:
+    # Statistical summary
+    - plugin: statistics_summary
+      options:
+        fields: ["quality_score"]
+        percentiles: [25, 50, 75, 95]
+
+    # Recommendations based on scores
+    - plugin: score_recommendation
+      options:
+        score_field: "quality_score"
+        thresholds:
+          excellent: 4.5
+          good: 3.5
+          acceptable: 2.5
+          poor: 0.0
+
+  # ============================================================================
+  # VALIDATION
+  # ============================================================================
+  validation_plugins:
+    # Ensure response structure
+    - plugin: json_structure
+      options:
+        required_fields: ["response", "quality_score"]
+        allow_extra_fields: true
+
+    # Validate response length
+    - plugin: regex_validator
+      options:
+        field: "response"
+        pattern: ".{10,}"  # At least 10 characters
+        error_message: "Response too short"
+
+  # ============================================================================
+  # SINKS (OUTPUT)
+  # ============================================================================
+  sinks:
+    # CSV export with sanitization
+    - plugin: csv
+      security_level: "OFFICIAL"  # REQUIRED
+      options:
+        path: "outputs/experiment_results.csv"
+        sanitize_formulas: true  # Enabled by default (recommended)
+        on_error: "raise"
+
+    # Analytics report
+    - plugin: analytics_report
+      security_level: "OFFICIAL"  # REQUIRED
+      options:
+        output_dir: "outputs/experiment_reports"
+        formats: ["json", "markdown"]
+        on_error: "raise"
+
+  # ============================================================================
+  # MIDDLEWARE (Optional but recommended)
+  # ============================================================================
+  llm_middlewares:
+    # Audit logging for compliance
+    - type: audit_logger
+      enabled: true
+      output_dir: "outputs/audit_logs"
+      log_requests: true
+      log_responses: true
+
+  # ============================================================================
+  # RATE LIMITING (Optional)
+  # ============================================================================
+  rate_limiter:
+    plugin: fixed_window
+    options:
+      max_requests_per_minute: 30
+      window_size_seconds: 60
+
+  # ============================================================================
+  # RETRY CONFIGURATION (Optional)
+  # ============================================================================
+  retry:
+    max_attempts: 3
+    initial_delay_seconds: 1.0
+    backoff_multiplier: 2.0
+
+  # ============================================================================
+  # CONCURRENCY (Optional)
+  # ============================================================================
+  concurrency:
+    max_workers: 3
+    batch_size: 5
+
+# ============================================================================
+# CONFIGURATION CHECKLIST
+# ============================================================================
+#
+# Before running:
+#
+# 1. Security Levels:
+#    ✓ datasource.security_level set
+#    ✓ llm.security_level set
+#    ✓ All sinks have security_level
+#
+# 2. Data Handling:
+#    ✓ datasource.retain_local = true
+#    ✓ Formula sanitization enabled (default)
+#
+# 3. Environment Variables:
+#    ✓ AZURE_OPENAI_API_KEY set
+#    ✓ ELSPETH_SECURE_MODE=standard (or strict for production)
+#
+# 4. Outputs:
+#    ✓ Output directories exist or will be created
+#    ✓ Audit logging enabled for compliance
+#
+# 5. Validation:
+#    ✓ Run with --head 5 first to test
+#    ✓ Verify outputs before full run
+#
+# Example usage:
+#   python -m elspeth.cli \
+#     --settings config/templates/production_experiment.yaml \
+#     --head 5 \
+#     --live-outputs

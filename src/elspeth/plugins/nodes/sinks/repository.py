@@ -135,6 +135,21 @@ class _RepoSinkBase(ResultSink):
     def finalize(self, artifacts, *, metadata=None):  # pragma: no cover - optional cleanup
         return None
 
+    @staticmethod
+    def _read_token(env_var: str) -> str | None:
+        """Read and strip token from environment variable.
+
+        Args:
+            env_var: Environment variable name
+
+        Returns:
+            Stripped token string or None if not set
+        """
+        import os
+
+        token = os.getenv(env_var)
+        return token.strip() if token else None
+
 
 class GitHubRepoSink(_RepoSinkBase):
     """Push experiment artifacts to a GitHub repository via the REST API."""
@@ -211,11 +226,6 @@ class GitHubRepoSink(_RepoSinkBase):
         if response.status_code not in expected_status:
             raise RuntimeError(f"GitHub API call failed ({response.status_code}): {response.text}")
         return response
-
-    @staticmethod
-    def _read_token(env_var: str) -> str | None:
-        token = os.getenv(env_var)
-        return token.strip() if token else None
 
 
 class AzureDevOpsRepoSink(_RepoSinkBase):
@@ -334,11 +344,6 @@ class AzureDevOpsRepoSink(_RepoSinkBase):
         if not path.startswith("/"):
             return f"/{path}"
         return path
-
-    @staticmethod
-    def _read_token(env_var: str) -> str | None:
-        token = os.getenv(env_var)
-        return token.strip() if token else None
 
 
 import os  # noqa: E402  (keep at end to avoid circular import during module import)

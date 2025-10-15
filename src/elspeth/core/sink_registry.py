@@ -10,8 +10,10 @@ will have the biggest impact on code reduction.
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
+from elspeth.adapters.blob_store import load_blob_config
 from elspeth.core.plugins import PluginContext
 from elspeth.core.protocols import ResultSink
 from elspeth.core.registry.base import BasePluginRegistry
@@ -20,6 +22,10 @@ from elspeth.core.registry.schemas import (
     with_error_handling,
     with_security_properties,
 )
+from elspeth.core.security import validate_azure_blob_endpoint
+from elspeth.core.validation_base import ConfigurationError
+
+logger = logging.getLogger(__name__)
 from elspeth.plugins.nodes.sinks import (
     AnalyticsReportSink,
     AzureDevOpsRepoSink,
@@ -52,7 +58,27 @@ sink_registry = BasePluginRegistry[ResultSink]("sink")
 
 
 def _create_azure_blob_sink(options: dict[str, Any], context: PluginContext) -> BlobResultSink:
-    """Create Azure Blob result sink."""
+    """Create Azure Blob result sink with endpoint validation."""
+    # Load blob configuration to validate endpoint
+    config_path = options.get("config_path")
+    profile = options.get("profile", "default")
+
+    if config_path:
+        try:
+            # Load the blob config to extract account_url
+            blob_config = load_blob_config(config_path, profile=profile)
+
+            # Validate endpoint against approved patterns
+            security_level = context.security_level if context else None
+            validate_azure_blob_endpoint(
+                endpoint=blob_config.account_url,
+                security_level=security_level,
+            )
+            logger.debug(f"Azure Blob endpoint validated: {blob_config.account_url}")
+        except ValueError as exc:
+            logger.error(f"Azure Blob endpoint validation failed: {exc}")
+            raise ConfigurationError(f"Azure Blob sink endpoint validation failed: {exc}") from exc
+
     return BlobResultSink(**options)
 
 

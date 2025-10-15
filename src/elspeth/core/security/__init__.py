@@ -1,7 +1,26 @@
-"""Security utilities (signing, classification, etc.)."""
+"""Security utilities (signing, classification, secure mode, etc.)."""
 
 from elspeth.core.types import DeterminismLevel, SecurityLevel
 
+from .approved_endpoints import (
+    ServiceType,
+    get_approved_patterns,
+    validate_azure_blob_endpoint,
+    validate_azure_openai_endpoint,
+    validate_endpoint,
+    validate_http_api_endpoint,
+)
+from .secure_mode import (
+    SecureMode,
+    get_mode_description,
+    get_secure_mode,
+    is_development_mode,
+    is_strict_mode,
+    validate_datasource_config,
+    validate_llm_config,
+    validate_middleware_config,
+    validate_sink_config,
+)
 from .signing import generate_signature, verify_signature
 
 # Export enum types for backward compatibility
@@ -145,4 +164,21 @@ __all__ = [
     "normalize_determinism_level",
     "resolve_determinism_level",
     "coalesce_determinism_level",
+    # Secure mode validation
+    "SecureMode",
+    "get_secure_mode",
+    "is_strict_mode",
+    "is_development_mode",
+    "validate_datasource_config",
+    "validate_llm_config",
+    "validate_sink_config",
+    "validate_middleware_config",
+    "get_mode_description",
+    # Endpoint validation
+    "ServiceType",
+    "validate_endpoint",
+    "validate_azure_openai_endpoint",
+    "validate_http_api_endpoint",
+    "validate_azure_blob_endpoint",
+    "get_approved_patterns",
 ]

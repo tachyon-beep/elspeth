@@ -9,13 +9,14 @@ import math
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-from elspeth.core.protocols import Artifact, ArtifactDescriptor, ResultSink
-from elspeth.core.security import normalize_determinism_level, normalize_security_level
+from elspeth.core.protocols import Artifact, ArtifactDescriptor
+
+from ._visual_base import BaseVisualSink
 
 logger = logging.getLogger(__name__)
 
 
-class EnhancedVisualAnalyticsSink(ResultSink):
+class EnhancedVisualAnalyticsSink(BaseVisualSink):
     """Render advanced experiment visualizations including distribution plots, heatmaps, and effect sizes.
 
     This sink extends basic bar charts with:
@@ -40,18 +41,19 @@ class EnhancedVisualAnalyticsSink(ResultSink):
         color_palette: str | None = "Set2",
         on_error: str = "abort",
     ) -> None:
-        self.base_path = Path(base_path)
-        self.file_stem = file_stem or "enhanced_visual"
+        # Initialize base class with common parameters
+        super().__init__(
+            base_path=base_path,
+            file_stem=file_stem or "enhanced_visual",
+            formats=formats,
+            dpi=dpi,
+            figure_size=figure_size,
+            default_figure_size=(10.0, 6.0),  # Custom default for this sink
+            seaborn_style=seaborn_style,
+            on_error=on_error,
+        )
 
-        # Validate formats
-        selected_formats: list[str] = []
-        for fmt in formats or ["png"]:
-            normalized = (fmt or "").strip().lower()
-            if normalized in {"png", "html"}:
-                selected_formats.append(normalized)
-        self.formats = selected_formats or ["png"]
-
-        # Validate chart types
+        # Sink-specific parameters: chart type validation
         valid_chart_types = {"violin", "box", "heatmap", "forest", "distribution"}
         selected_charts: list[str] = []
         for chart_type in chart_types or ["violin", "heatmap"]:
@@ -60,30 +62,7 @@ class EnhancedVisualAnalyticsSink(ResultSink):
                 selected_charts.append(normalized)
         self.chart_types = selected_charts or ["violin"]
 
-        if dpi <= 0:
-            raise ValueError("dpi must be a positive integer")
-        self.dpi = int(dpi)
-
-        if figure_size:
-            if len(figure_size) != 2:
-                raise ValueError("figure_size must contain exactly two numeric values")
-            width, height = figure_size
-            if width <= 0 or height <= 0:
-                raise ValueError("figure_size values must be positive numbers")
-            self.figure_size: tuple[float, float] = (float(width), float(height))
-        else:
-            self.figure_size = (10.0, 6.0)
-
-        if on_error not in {"abort", "skip"}:
-            raise ValueError("on_error must be 'abort' or 'skip'")
-        self.on_error = on_error
-
-        self.seaborn_style = seaborn_style
         self.color_palette = color_palette or "Set2"
-        self._security_level: str | None = None
-        self._determinism_level: str | None = None
-        self._last_written_files: list[tuple[str, Path, dict[str, Any]]] = []
-        self._plot_modules: tuple[Any, Any, Any] | None = None
 
     # --------------------------------------------------------------------- API
     def write(self, results: dict[str, Any], *, metadata: dict[str, Any] | None = None) -> None:
@@ -125,12 +104,7 @@ class EnhancedVisualAnalyticsSink(ResultSink):
                         raise
 
             self._last_written_files = written
-            if metadata:
-                self._security_level = normalize_security_level(metadata.get("security_level"))
-                self._determinism_level = normalize_determinism_level(metadata.get("determinism_level"))
-            else:
-                self._security_level = None
-                self._determinism_level = None
+            self._update_security_context_from_metadata(metadata)
         except Exception as exc:
             if self.on_error == "skip":
                 logger.warning("Enhanced visual sink failed; skipping output: %s", exc)
@@ -180,22 +154,7 @@ class EnhancedVisualAnalyticsSink(ResultSink):
         return artifacts
 
     # ------------------------------------------------------------------ helpers
-    def _load_plot_modules(self) -> tuple[Any, Any, Any]:
-        if self._plot_modules is not None:
-            return self._plot_modules
-        try:
-            import matplotlib
-
-            matplotlib.use("Agg")
-            import matplotlib.pyplot as plt
-        except Exception as exc:
-            raise RuntimeError("matplotlib is required for enhanced visual sink") from exc
-        try:
-            import seaborn
-        except Exception:
-            seaborn = None
-        self._plot_modules = (matplotlib, plt, seaborn)
-        return self._plot_modules
+    # _load_plot_modules() inherited from BaseVisualSink
 
     def _extract_score_data(self, payload: Mapping[str, Any]) -> dict[str, Any]:
         """Extract score data for visualization from experiment payload."""

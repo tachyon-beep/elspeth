@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Elspeth is a secure, pluggable orchestration framework for responsible LLM experimentation. It bundles a hardened experiment runner, policy-aware plugin registry, and reporting pipeline so teams can run comparative LLM studies without compromising compliance or auditability.
+Elspeth is a secure, pluggable orchestration framework for data processing pipelines. The core capability is pumping data between nodes (datasources → transforms → sinks), with built-in LLM integration, security enforcement, and artifact management. LLM experimentation is one orchestration mode—the framework supports any data flow topology.
 
-**Core Value Proposition:** Composable plugins, security by default, governed suites, analytics-ready outputs, and enterprise observability.
+**Core Value Proposition:** Composable plugins, security by default, governed pipelines, analytics-ready outputs, and enterprise observability.
 
 ## Essential Commands
 
