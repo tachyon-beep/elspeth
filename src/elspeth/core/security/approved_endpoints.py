@@ -53,8 +53,8 @@ ServiceType = Literal[
 ]
 
 # Default approved endpoint patterns by service type
-# Patterns use glob-style wildcards: * matches any characters except /
-# Full regex matching is used for validation
+# Patterns are regular expressions (re), not glob-style wildcards.
+# Full regex matching is used for validation.
 APPROVED_PATTERNS: dict[ServiceType, list[str]] = {
     "azure_openai": [
         # Azure OpenAI public cloud
@@ -115,9 +115,8 @@ def _get_environment_patterns() -> list[str]:
     for pattern_str in env_patterns.split(","):
         pattern_str = pattern_str.strip()
         if pattern_str:
-            # Convert glob-style pattern to regex
-            # For now, just validate it's not empty
-            # More sophisticated pattern conversion could be added
+            # Patterns are treated as raw regex (no glob-to-regex conversion)
+            # Users should provide regex patterns in ELSPETH_APPROVED_ENDPOINTS
             patterns.append(pattern_str)
 
     if patterns:

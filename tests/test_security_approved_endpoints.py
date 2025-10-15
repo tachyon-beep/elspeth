@@ -10,7 +10,6 @@ from elspeth.core.security.approved_endpoints import (
     validate_endpoint,
     validate_http_api_endpoint,
 )
-from elspeth.core.validation_base import ConfigurationError
 
 
 class TestEndpointValidation:
@@ -264,16 +263,16 @@ class TestEndpointValidation:
             )
 
     def test_case_insensitive_security_levels(self):
-        """Test security level comparison is case-sensitive (as designed)."""
-        # Security levels should match exactly
+        """Test security level comparison is case-insensitive (normalized)."""
+        # Security levels are normalized, so lowercase works
         validate_http_api_endpoint(
             "https://api.openai.com",
-            security_level="internal",  # lowercase
+            security_level="internal",  # lowercase - normalized to OFFICIAL
         )
 
         validate_http_api_endpoint(
             "https://api.openai.com",
-            security_level="public",  # lowercase
+            security_level="public",  # lowercase - normalized to UNOFFICIAL
         )
 
 

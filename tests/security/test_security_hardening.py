@@ -23,7 +23,7 @@ import pandas as pd
 import pytest
 
 from elspeth.core.security import SecureMode
-from elspeth.plugins.nodes.sinks import CsvResultSink
+from elspeth.plugins.nodes.sinks import CSVResultSink
 from elspeth.plugins.nodes.sinks._sanitize import sanitize_cell
 
 # Test data directory
@@ -384,7 +384,7 @@ class TestConcurrentAccess:
 
         def write_data(sink_path, data_id):
             try:
-                sink = CsvResultSink(path=sink_path, sanitize_formulas=True)
+                sink = CSVResultSink(path=sink_path, sanitize_formulas=True)
                 sink.write(
                     {
                         "results": [{"id": data_id, "data": f"thread_{data_id}"}],

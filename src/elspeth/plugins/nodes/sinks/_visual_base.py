@@ -232,19 +232,24 @@ class BaseVisualSink(ResultSink):
         Returns:
             HTML string
         """
+        import html
+
+        # Escape title to prevent HTML injection
+        safe_title = html.escape(title)
+
         return f"""<!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>{title}</title>
+    <title>{safe_title}</title>
     <style>
       body {{ font-family: Arial, sans-serif; margin: 1.5rem; }}
       img {{ max-width: 100%; height: auto; }}
     </style>
   </head>
   <body>
-    <h1>{title}</h1>
-    <img src="data:image/png;base64,{encoded_png}" alt="{title}" />
+    <h1>{safe_title}</h1>
+    <img src="data:image/png;base64,{encoded_png}" alt="{safe_title}" />
   </body>
 </html>
 """
