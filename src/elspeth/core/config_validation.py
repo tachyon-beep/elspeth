@@ -136,9 +136,7 @@ def validate_plugin_definition(
             # Unknown plugin type - no specific validation
             logger.debug(f"No specific validation for plugin type: {plugin_type}")
     except ValueError as exc:
-        raise ConfigurationError(
-            f"Plugin '{plugin_type}' validation failed: {exc}"
-        ) from exc
+        raise ConfigurationError(f"Plugin '{plugin_type}' validation failed: {exc}") from exc
 
 
 def validate_suite_configuration(
@@ -178,9 +176,7 @@ def validate_suite_configuration(
                     try:
                         validate_datasource_config(dict(datasource_config), mode=mode)
                     except ValueError as exc:
-                        raise ConfigurationError(
-                            f"Experiment[{idx}] datasource validation failed: {exc}"
-                        ) from exc
+                        raise ConfigurationError(f"Experiment[{idx}] datasource validation failed: {exc}") from exc
 
             # Check for LLM override
             if "llm" in exp_config:
@@ -189,9 +185,7 @@ def validate_suite_configuration(
                     try:
                         validate_llm_config(dict(llm_config), mode=mode)
                     except ValueError as exc:
-                        raise ConfigurationError(
-                            f"Experiment[{idx}] LLM validation failed: {exc}"
-                        ) from exc
+                        raise ConfigurationError(f"Experiment[{idx}] LLM validation failed: {exc}") from exc
 
             # Check for sinks override
             if "sinks" in exp_config:
@@ -202,9 +196,7 @@ def validate_suite_configuration(
                             try:
                                 validate_sink_config(dict(sink_config), mode=mode)
                             except ValueError as exc:
-                                raise ConfigurationError(
-                                    f"Experiment[{idx}] Sink[{sink_idx}] validation failed: {exc}"
-                                ) from exc
+                                raise ConfigurationError(f"Experiment[{idx}] Sink[{sink_idx}] validation failed: {exc}") from exc
 
 
 def validate_prompt_pack(
@@ -233,9 +225,7 @@ def validate_prompt_pack(
                 try:
                     validate_sink_config(dict(sink_config), mode=mode)
                 except ValueError as exc:
-                    raise ConfigurationError(
-                        f"Prompt pack Sink[{idx}] validation failed: {exc}"
-                    ) from exc
+                    raise ConfigurationError(f"Prompt pack Sink[{idx}] validation failed: {exc}") from exc
 
     # Validate middleware if present in pack
     middleware_config = pack_config.get("llm_middlewares", [])

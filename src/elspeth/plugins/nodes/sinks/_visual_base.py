@@ -108,9 +108,7 @@ class BaseVisualSink(ResultSink):
         return int(dpi)
 
     @staticmethod
-    def _validate_figure_size(
-        figure_size: Sequence[float] | None, default: tuple[float, float]
-    ) -> tuple[float, float]:
+    def _validate_figure_size(figure_size: Sequence[float] | None, default: tuple[float, float]) -> tuple[float, float]:
         """Validate figure size or return default.
 
         Args:
@@ -219,9 +217,7 @@ class BaseVisualSink(ResultSink):
 
         return written
 
-    def _render_html_wrapper(
-        self, encoded_png: str, title: str, metadata: dict[str, Any]
-    ) -> str:
+    def _render_html_wrapper(self, encoded_png: str, title: str, metadata: dict[str, Any]) -> str:
         """Render basic HTML wrapper. Override for custom layouts.
 
         Args:

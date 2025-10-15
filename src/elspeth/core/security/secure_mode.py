@@ -43,8 +43,7 @@ class SecureMode(Enum):
             return cls(mode_str)
         except ValueError:
             logger.warning(
-                f"Invalid ELSPETH_SECURE_MODE='{mode_str}', defaulting to STANDARD. "
-                f"Valid values: {', '.join([m.value for m in cls])}"
+                f"Invalid ELSPETH_SECURE_MODE='{mode_str}', defaulting to STANDARD. " f"Valid values: {', '.join([m.value for m in cls])}"
             )
             return cls.STANDARD
 
@@ -122,19 +121,14 @@ def validate_datasource_config(config: dict[str, Any], mode: SecureMode | None =
     if mode == SecureMode.STRICT:
         if retain_local is False:
             raise ValueError(
-                "Datasource has retain_local=False which violates STRICT mode "
-                "(audit requirement: all source data must be retained)"
+                "Datasource has retain_local=False which violates STRICT mode " "(audit requirement: all source data must be retained)"
             )
         if retain_local is None:
-            logger.warning(
-                "Datasource missing 'retain_local' - should be explicit True in STRICT mode"
-            )
+            logger.warning("Datasource missing 'retain_local' - should be explicit True in STRICT mode")
 
     elif mode == SecureMode.STANDARD:
         if retain_local is False:
-            logger.warning(
-                "Datasource has retain_local=False - consider enabling for audit compliance"
-            )
+            logger.warning("Datasource has retain_local=False - consider enabling for audit compliance")
 
 
 def validate_llm_config(config: dict[str, Any], mode: SecureMode | None = None) -> None:
@@ -157,10 +151,7 @@ def validate_llm_config(config: dict[str, Any], mode: SecureMode | None = None) 
     llm_type = config.get("type", "")
 
     if mode == SecureMode.STRICT and llm_type in ["mock", "static_test"]:
-        raise ValueError(
-            f"LLM type '{llm_type}' is not allowed in STRICT mode "
-            "(production requires real LLM clients)"
-        )
+        raise ValueError(f"LLM type '{llm_type}' is not allowed in STRICT mode " "(production requires real LLM clients)")
 
     if mode == SecureMode.STANDARD and llm_type in ["mock", "static_test"]:
         logger.warning(f"Using mock LLM type '{llm_type}' - consider real LLM for production")
@@ -190,15 +181,11 @@ def validate_sink_config(config: dict[str, Any], mode: SecureMode | None = None)
 
         if mode == SecureMode.STRICT and sanitize_formulas is False:
             raise ValueError(
-                f"Sink type '{sink_type}' has sanitize_formulas=False which violates STRICT mode "
-                "(formula injection protection required)"
+                f"Sink type '{sink_type}' has sanitize_formulas=False which violates STRICT mode " "(formula injection protection required)"
             )
 
         if mode == SecureMode.STANDARD and sanitize_formulas is False:
-            logger.warning(
-                f"Sink type '{sink_type}' has sanitize_formulas=False - "
-                "consider enabling for security"
-            )
+            logger.warning(f"Sink type '{sink_type}' has sanitize_formulas=False - " "consider enabling for security")
 
 
 def validate_middleware_config(middleware: list[dict[str, Any]], mode: SecureMode | None = None) -> None:
@@ -220,8 +207,7 @@ def validate_middleware_config(middleware: list[dict[str, Any]], mode: SecureMod
 
         if not has_audit:
             logger.warning(
-                "No 'audit_logger' middleware found - strongly recommended in STRICT mode "
-                "for compliance and audit requirements"
+                "No 'audit_logger' middleware found - strongly recommended in STRICT mode " "for compliance and audit requirements"
             )
 
 

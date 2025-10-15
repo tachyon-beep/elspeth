@@ -120,10 +120,7 @@ def _get_environment_patterns() -> list[str]:
             patterns.append(pattern_str)
 
     if patterns:
-        logger.info(
-            f"Loaded {len(patterns)} additional approved endpoint patterns from "
-            "ELSPETH_APPROVED_ENDPOINTS environment variable"
-        )
+        logger.info(f"Loaded {len(patterns)} additional approved endpoint patterns from " "ELSPETH_APPROVED_ENDPOINTS environment variable")
 
     return patterns
 
@@ -139,7 +136,7 @@ def _matches_pattern(endpoint: str, pattern: str) -> bool:
         True if endpoint matches pattern
     """
     try:
-        return bool(re.match(pattern, endpoint))
+        return bool(re.fullmatch(pattern, endpoint))
     except re.error as exc:
         logger.warning(f"Invalid endpoint pattern '{pattern}': {exc}")
         return False
@@ -224,10 +221,7 @@ def validate_endpoint(
             break
 
     if not matched:
-        error_msg = (
-            f"Endpoint '{endpoint}' is not approved for service type '{service_type}'. "
-            f"Approved patterns: {approved_patterns}"
-        )
+        error_msg = f"Endpoint '{endpoint}' is not approved for service type '{service_type}'. " f"Approved patterns: {approved_patterns}"
 
         if mode == SecureMode.DEVELOPMENT:
             logger.warning(f"{error_msg} (DEVELOPMENT mode - allowing anyway)")
@@ -263,10 +257,7 @@ def validate_endpoint(
                         logger.error(error_msg)
                         raise ValueError(error_msg)
 
-    logger.debug(
-        f"Endpoint '{endpoint}' validated successfully for service '{service_type}' "
-        f"(matched pattern: {matched_pattern})"
-    )
+    logger.debug(f"Endpoint '{endpoint}' validated successfully for service '{service_type}' " f"(matched pattern: {matched_pattern})")
 
 
 def get_approved_patterns(service_type: ServiceType) -> list[str]:
@@ -283,9 +274,7 @@ def get_approved_patterns(service_type: ServiceType) -> list[str]:
     return base_patterns + env_patterns
 
 
-def validate_azure_openai_endpoint(
-    endpoint: str, security_level: str | None = None, mode: SecureMode | None = None
-) -> None:
+def validate_azure_openai_endpoint(endpoint: str, security_level: str | None = None, mode: SecureMode | None = None) -> None:
     """Validate an Azure OpenAI endpoint.
 
     Convenience wrapper for validate_endpoint with service_type="azure_openai".
@@ -306,9 +295,7 @@ def validate_azure_openai_endpoint(
     )
 
 
-def validate_http_api_endpoint(
-    endpoint: str, security_level: str | None = None, mode: SecureMode | None = None
-) -> None:
+def validate_http_api_endpoint(endpoint: str, security_level: str | None = None, mode: SecureMode | None = None) -> None:
     """Validate an HTTP API endpoint.
 
     Convenience wrapper for validate_endpoint with service_type="http_api".
@@ -329,9 +316,7 @@ def validate_http_api_endpoint(
     )
 
 
-def validate_azure_blob_endpoint(
-    endpoint: str, security_level: str | None = None, mode: SecureMode | None = None
-) -> None:
+def validate_azure_blob_endpoint(endpoint: str, security_level: str | None = None, mode: SecureMode | None = None) -> None:
     """Validate an Azure Blob Storage endpoint.
 
     Convenience wrapper for validate_endpoint with service_type="azure_blob".

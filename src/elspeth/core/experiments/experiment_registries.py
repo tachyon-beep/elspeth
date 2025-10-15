@@ -40,9 +40,7 @@ class _NoopRowPlugin:  # pylint: disable=too-few-public-methods
 
     name = "noop"
 
-    def process_row(
-        self, _row: dict[str, Any], _responses: dict[str, Any]
-    ) -> dict[str, Any]:  # pragma: no cover - trivial
+    def process_row(self, _row: dict[str, Any], _responses: dict[str, Any]) -> dict[str, Any]:  # pragma: no cover - trivial
         """Return an empty payload for noop processing."""
         return {}
 
@@ -70,9 +68,7 @@ class _NoopBaselinePlugin:  # pylint: disable=too-few-public-methods
 
     name = "noop"
 
-    def compare(
-        self, _baseline: dict[str, Any], _variant: dict[str, Any]
-    ) -> dict[str, Any]:  # pragma: no cover - trivial
+    def compare(self, _baseline: dict[str, Any], _variant: dict[str, Any]) -> dict[str, Any]:  # pragma: no cover - trivial
         """Return an empty comparison result."""
         return {}
 

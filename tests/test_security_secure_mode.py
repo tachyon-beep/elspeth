@@ -1,6 +1,5 @@
 """Tests for secure mode detection and validation."""
 
-
 import pytest
 
 from elspeth.core.security.secure_mode import (

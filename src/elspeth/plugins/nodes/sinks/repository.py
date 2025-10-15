@@ -344,5 +344,3 @@ class AzureDevOpsRepoSink(_RepoSinkBase):
         if not path.startswith("/"):
             return f"/{path}"
         return path
-
-
