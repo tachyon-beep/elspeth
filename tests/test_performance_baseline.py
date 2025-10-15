@@ -23,12 +23,6 @@ import time
 
 import pytest
 
-# Skip all performance tests in CI - they're too flaky
-pytestmark = pytest.mark.skipif(
-    os.getenv("CI") == "true",
-    reason="Performance tests disabled in CI due to runner inconsistency"
-)
-
 from elspeth.core.artifact_pipeline import ArtifactPipeline
 from elspeth.core.datasource_registry import datasource_registry
 from elspeth.core.experiments.config_merger import ConfigMerger
@@ -40,6 +34,9 @@ from elspeth.core.experiments.plugin_registry import (
 from elspeth.core.llm_registry import llm_registry
 from elspeth.core.plugin_context import PluginContext
 from elspeth.core.sink_registry import sink_registry
+
+# Skip all performance tests in CI - they're too flaky
+pytestmark = pytest.mark.skipif(os.getenv("CI") == "true", reason="Performance tests disabled in CI due to runner inconsistency")
 
 
 class TestRegistryLookupPerformance:
