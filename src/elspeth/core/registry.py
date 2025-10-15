@@ -12,16 +12,16 @@ from __future__ import annotations
 from typing import Any, Iterable, Mapping
 
 from elspeth.core.datasource_registry import datasource_registry
-from elspeth.core.interfaces import DataSource, LLMClientProtocol, ResultSink
 from elspeth.core.llm_registry import llm_registry
 from elspeth.core.plugins import PluginContext, apply_plugin_context
+from elspeth.core.protocols import DataSource, LLMClientProtocol, ResultSink
 from elspeth.core.registry.base import BasePluginFactory
 from elspeth.core.security import (
     coalesce_determinism_level,
     coalesce_security_level,
 )
 from elspeth.core.sink_registry import sink_registry
-from elspeth.core.validation import ConfigurationError
+from elspeth.core.validation_base import ConfigurationError
 
 ON_ERROR_ENUM = {"type": "string", "enum": ["abort", "skip"]}
 

@@ -10,13 +10,22 @@ update as processes evolve.
 1. **Unit tests** – `python -m pytest` (ensure coverage for new code).
 1. **Sample suite** – run `python -m elspeth.cli --settings config/sample_suite/settings.yaml --suite-root config/sample_suite --head 0 --live-outputs` and inspect outputs under `outputs/sample_suite/`.
 1. **Analytics report** – confirm `analytics_report` sink generated JSON/Markdown for at least one experiment.
+<!-- UPDATE 2025-10-12: Analytics sink module relocation -->
+Update 2025-10-12: Analytics sink implementation lives in `src/elspeth/plugins/nodes/sinks/analytics_report.py`.
+<!-- END UPDATE -->
 1. **Safety middleware** – spot-check warning logs for `prompt_shield` / `azure_content_safety` to ensure observability standards are met.
 1. **Dependency audit** – capture `pip list --format=json` (or `pip-audit`) results and attach to release notes for accreditation evidence; verify optional extras (azure, stats, sinks) remain on patched versions.[^release-deps-2025-10-12]
 1. **Concurrency & retry sanity** – run at least one suite with `concurrency.enabled` and `retry.max_attempts>1`, confirming retry summaries and early-stop metadata appear in outputs (`outputs/*/analytics_report.json`).[^release-concurrency-2025-10-12]
 1. **Signed artifact verification** – when signed sink is enabled, execute verification helper (`python -m elspeth.tools.verify_signature <bundle>`) or manual HMAC check to ensure keys rotate correctly.[^release-signed-2025-10-12]
 1. **Visual analytics check** – when `analytics_visual` sink is configured, open the generated PNG/HTML reports, verify embedded metadata (retry/cost summaries) and confirm files reside in a hardened location.[^release-visual-2025-10-12]
 1. **Suite report parity** – run CLI with `--reports-dir` and confirm all consolidated artefacts exist (validation, comparative, recommendations, analytics, visual, Excel); ensure logs list each produced path for audit traceability (`src/elspeth/tools/reporting.py:33`).[^release-suite-report-2025-10-12]
+<!-- UPDATE 2025-10-12: Suite report citation refresh -->
+Update 2025-10-12: Suite report logging spans `src/elspeth/tools/reporting.py:26-199`.
+<!-- END UPDATE -->
 1. **Blob/repository dry-run** – if publishing to external sinks, rerun with `--live-outputs` disabled to confirm dry-run manifests/logs capture target paths without mutating external systems (`src/elspeth/cli.py:344`).[^release-dry-run-2025-10-12]
+<!-- UPDATE 2025-10-12: CLI dry-run citation refresh -->
+Update 2025-10-12: Dry-run toggles are handled at `src/elspeth/cli.py:360-392`.
+<!-- END UPDATE -->
 
 ## Documentation
 
@@ -43,7 +52,7 @@ update as processes evolve.
 - 2025-10-12 – Added dependency audit, concurrency/retry validation, visual analytics verification, and signed artifact verification steps to align with accreditation checkpoints.
 - 2025-10-12 – Update 2025-10-12: Added references to dependency analysis, data-flow concurrency checks, and security controls for signing/visual analytics.
 
-[^release-deps-2025-10-12]: Update 2025-10-12: Dependency audit requirements map to docs/architecture/dependency-analysis.md.
+[^release-deps-2025-10-12]: Update 2025-10-12: Dependency audit requirements map to docs/development/dependency-analysis.md.
 [^release-concurrency-2025-10-12]: Update 2025-10-12: Concurrency validation aligns with docs/architecture/data-flow-diagrams.md (Update 2025-10-12: Parallel Execution Gate).
 [^release-signed-2025-10-12]: Update 2025-10-12: Signed artifact verification ties to docs/architecture/security-controls.md (Update 2025-10-12: Artifact Signing).
 [^release-visual-2025-10-12]: Update 2025-10-12: Visual analytics checks reference docs/architecture/security-controls.md (Update 2025-10-12: Output Sanitisation) and docs/reporting-and-suite-management.md (Update 2025-10-12: Visual Analytics Sink).

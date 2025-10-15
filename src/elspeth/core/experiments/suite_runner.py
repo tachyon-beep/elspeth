@@ -6,7 +6,6 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, Callable, cast
 
-from elspeth.core import registry as core_registry
 from elspeth.core.controls import create_cost_tracker, create_rate_limiter
 from elspeth.core.experiments.config import ExperimentConfig, ExperimentSuite
 from elspeth.core.experiments.config_merger import ConfigMerger
@@ -19,11 +18,12 @@ from elspeth.core.experiments.plugin_registry import (
     normalize_early_stop_definitions,
 )
 from elspeth.core.experiments.runner import ExperimentRunner
-from elspeth.core.interfaces import LLMClientProtocol, ResultSink
 from elspeth.core.llm.registry import create_middleware
 from elspeth.core.plugins import PluginContext, apply_plugin_context
+from elspeth.core.protocols import LLMClientProtocol, ResultSink
 from elspeth.core.security import resolve_security_level
-from elspeth.core.validation import ConfigurationError
+from elspeth.core.sink_registry import sink_registry
+from elspeth.core.validation_base import ConfigurationError
 
 
 @dataclass
@@ -31,6 +31,8 @@ class ExperimentSuiteRunner:
     suite: ExperimentSuite
     llm_client: LLMClientProtocol
     sinks: list[ResultSink]
+    suite_root: Any = None
+    config_path: Any = None
     _shared_middlewares: dict[str, Any] = field(default_factory=dict, init=False)
 
     def build_runner(
@@ -115,6 +117,8 @@ class ExperimentSuiteRunner:
             plugin_kind="experiment",
             security_level=security_level,
             provenance=(f"experiment:{config.name}.resolved",),
+            suite_root=self.suite_root,
+            config_path=self.config_path,
         )
 
         # Apply context to sinks
@@ -131,13 +135,9 @@ class ExperimentSuiteRunner:
 
         # Instantiate plugins
         row_plugins = [create_row_plugin(defn, parent_context=experiment_context) for defn in row_defs] if row_defs else None
-        aggregator_plugins = (
-            [create_aggregation_plugin(defn, parent_context=experiment_context) for defn in agg_defs] if agg_defs else None
-        )
+        aggregator_plugins = [create_aggregation_plugin(defn, parent_context=experiment_context) for defn in agg_defs] if agg_defs else None
         validation_plugins = (
-            [create_validation_plugin(defn, parent_context=experiment_context) for defn in validation_defs]
-            if validation_defs
-            else None
+            [create_validation_plugin(defn, parent_context=experiment_context) for defn in validation_defs] if validation_defs else None
         )
         early_stop_plugins = (
             [create_early_stop_plugin(defn, parent_context=experiment_context) for defn in early_stop_plugin_defs]
@@ -245,8 +245,8 @@ class ExperimentSuiteRunner:
             options_with_level = dict(raw_options)
             options_with_level["security_level"] = security_level
             options_with_level["determinism_level"] = determinism_level
-            core_registry.registry.validate_sink(plugin, options_with_level)
-            sink = core_registry.registry.create_sink(
+            sink_registry.validate(plugin, options_with_level)
+            sink = sink_registry.create(
                 plugin,
                 options_with_level,
                 provenance=(f"sink:{plugin}.definition",),
@@ -321,6 +321,8 @@ class ExperimentSuiteRunner:
                         defaults.get("security_level"),
                     ),
                     provenance=(f"experiment:{experiment.name}.fallback",),
+                    suite_root=self.suite_root,
+                    config_path=self.config_path,
                 ),
             )
             middlewares = cast(list[Any], runner.llm_middlewares or [])

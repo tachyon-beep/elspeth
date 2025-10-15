@@ -15,7 +15,7 @@ from elspeth.core.security import (
     normalize_determinism_level,
     normalize_security_level,
 )
-from elspeth.core.validation import ConfigurationError
+from elspeth.core.validation_base import ConfigurationError
 
 
 def extract_security_levels(
@@ -182,8 +182,7 @@ def create_plugin_context(
     # Creating new context without parent - security_level must be provided
     if security_level is None:
         raise ConfigurationError(
-            f"Cannot create plugin context for {plugin_kind}:{plugin_name} "
-            f"without security_level (no parent context to inherit from)"
+            f"Cannot create plugin context for {plugin_kind}:{plugin_name} " f"without security_level (no parent context to inherit from)"
         )
 
     return PluginContext(

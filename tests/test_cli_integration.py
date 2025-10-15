@@ -20,6 +20,7 @@ integration:
     determinism_level: guaranteed
     options:
       path: "{data_path.as_posix()}"
+      retain_local: false
   llm:
     plugin: mock
     security_level: official

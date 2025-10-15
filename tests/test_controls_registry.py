@@ -44,7 +44,7 @@ def test_create_cost_tracker_validates_schema():
                 "plugin": "fixed_price",
                 "security_level": "OFFICIAL",
                 "determinism_level": "guaranteed",
-                "options": {"prompt_token_price": -1},
+                "options": {"prompt_token_price": -1, "completion_token_price": 0.0},
             }
         )
 
@@ -82,7 +82,7 @@ def test_validate_cost_tracker_success():
             "plugin": "fixed_price",
             "security_level": "OFFICIAL",
             "determinism_level": "guaranteed",
-            "options": {"prompt_token_price": 0.1},
+            "options": {"prompt_token_price": 0.1, "completion_token_price": 0.05},
         }
     )
 

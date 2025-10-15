@@ -1,6 +1,6 @@
 """Core orchestration components for ELSPETH."""
 
-from .interfaces import DataSource, LLMClientProtocol, ResultSink
+from .protocols import DataSource, LLMClientProtocol, ResultSink
 
 __all__ = [
     "DataSource",

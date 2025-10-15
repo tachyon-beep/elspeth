@@ -7,9 +7,9 @@ from elspeth.core.experiments import plugin_registry
 from elspeth.core.experiments.config import ExperimentSuite
 from elspeth.core.experiments.runner import ExperimentRunner
 from elspeth.core.experiments.suite_runner import ExperimentSuiteRunner
-from elspeth.plugins.llms.mock import MockLLMClient
-from elspeth.plugins.outputs.csv_file import CsvResultSink
-from elspeth.plugins.outputs.local_bundle import LocalBundleSink
+from elspeth.plugins.nodes.sinks.csv_file import CsvResultSink
+from elspeth.plugins.nodes.sinks.local_bundle import LocalBundleSink
+from elspeth.plugins.nodes.transforms.llm.mock import MockLLMClient
 
 
 def test_end_to_end_local_pipeline(tmp_path, assert_sanitized_artifact):
@@ -30,7 +30,20 @@ def test_end_to_end_local_pipeline(tmp_path, assert_sanitized_artifact):
         prompt_fields=["value"],
         prompt_defaults={"audience": "quality"},
         row_plugins=[
-            plugin_registry.create_row_plugin({"name": "score_extractor", "security_level": "OFFICIAL", "determinism_level": "guaranteed"})
+            plugin_registry.create_row_plugin(
+                {
+                    "name": "score_extractor",
+                    "security_level": "OFFICIAL",
+                    "determinism_level": "guaranteed",
+                    "options": {
+                        "key": "score",
+                        "parse_json_content": True,
+                        "allow_missing": False,
+                        "threshold_mode": "gte",
+                        "flag_field": "score_flags",
+                    },
+                }
+            )
         ],
         aggregator_plugins=[
             plugin_registry.create_aggregation_plugin(
@@ -102,7 +115,20 @@ def test_suite_runner_end_to_end_without_azure(tmp_path, assert_sanitized_artifa
         "prompt_template": "Provide feedback for {{ value }}",
         "prompt_fields": ["value"],
         "prompt_defaults": {"audience": "review"},
-        "row_plugin_defs": [{"name": "score_extractor", "security_level": "OFFICIAL", "determinism_level": "guaranteed"}],
+        "row_plugin_defs": [
+            {
+                "name": "score_extractor",
+                "security_level": "OFFICIAL",
+                "determinism_level": "guaranteed",
+                "options": {
+                    "key": "score",
+                    "parse_json_content": True,
+                    "allow_missing": False,
+                    "threshold_mode": "gte",
+                    "flag_field": "score_flags",
+                },
+            }
+        ],
         "aggregator_plugin_defs": [{"name": "score_stats", "security_level": "OFFICIAL", "determinism_level": "guaranteed"}],
         "validation_plugin_defs": [
             {

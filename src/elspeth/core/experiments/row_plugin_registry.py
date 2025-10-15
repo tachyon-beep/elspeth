@@ -11,8 +11,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from elspeth.core.experiments.plugins import RowExperimentPlugin
 from elspeth.core.registry.base import BasePluginRegistry
+from elspeth.plugins.orchestrators.experiment.protocols import RowExperimentPlugin
 
 # Initialize the row plugin registry
 row_plugin_registry = BasePluginRegistry[RowExperimentPlugin]("row_plugin")

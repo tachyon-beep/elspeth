@@ -11,6 +11,9 @@ Elspeth bundles a hardened experiment runner, policy-aware plugin registry, and 
 - **Governed suites** – Merge prompt packs, suite defaults, and experiment overrides with validation and dry-run tooling before executing batch comparisons.
 - **Analytics ready** – Generate CSV, Excel, JSON, Markdown, or visual PNG/HTML reports alongside retry/cost summaries for downstream review.
 - **Enterprise observability** – Integrate rate limiting, cost tracking, audit logging, and telemetry middleware while preserving deterministic mocks for offline development.
+<!-- UPDATE 2025-10-12: Resilient execution -->
+- **Resilient execution** – Configure concurrency, retry backoff, and early-stop plugins to mirror production traffic patterns while surfacing structured telemetry (`src/elspeth/core/experiments/runner.py:137-676`, `src/elspeth/core/experiments/plugin_registry.py:282-454`).
+<!-- END UPDATE -->
 
 ## Quick Start
 
@@ -64,10 +67,11 @@ Pass `--live-outputs` to allow repository or blob sinks to write to their target
 | [Usage & Operations](docs/reporting-and-suite-management.md) | Running suites, managing reports, and operational workflows. |
 | [End-to-End Scenarios](docs/end_to_end_scenarios.md) | Guided walkthroughs for typical experimentation pipelines. |
 | [Configuration & Prompt Packs](docs/architecture/configuration-merge.md) | Deep dive into how profiles, packs, and defaults merge. |
+| [Configuration Security](docs/architecture/configuration-security.md) | Validation pipeline, secret handling, concurrency/retry/early-stop settings. |
 | [Plugin Catalogue](docs/architecture/plugin-catalogue.md) | Datasources, LLM clients, middleware, metrics, and sinks. |
 | [Security & Compliance](docs/architecture/security-controls.md) | Controls inventory, threat surfaces, and accreditation notes. |
 | [Architecture Overview](docs/architecture/README.md) | Component diagrams, data flows, and lifecycle documentation. |
-| [Logging & Observability](docs/logging-standards.md) | Standards for audit logs and telemetry integration. |
+| [Logging & Observability](docs/development/logging-standards.md) | Standards for audit logs and telemetry integration. |
 | [Upgrade & Migration Guides](docs/migration-guide.md) | Version-to-version migration checklist and upgrade strategy. |
 
 Prefer a consolidated index? Check `docs/README.md` for a map of every reference.
@@ -75,6 +79,9 @@ Prefer a consolidated index? Check `docs/README.md` for a map of every reference
 ## Architecture Snapshot
 
 - **Ingestion** – Datasources normalise tabular inputs and tag security levels before experimentation (`src/elspeth/plugins/datasources/`).
+<!-- UPDATE 2025-10-12: Datasource path alignment -->
+Update 2025-10-12: Ingestion plugins live under `src/elspeth/plugins/nodes/sources/`.
+<!-- END UPDATE -->
 - **Orchestrator** – `ExperimentOrchestrator` wires datasource, LLM client, sinks, and controls, then dispatches to `ExperimentSuiteRunner` for suites.
 - **Artifact Pipeline** – Sinks declare dependencies and security clearances; the pipeline orchestrates writes, chaining, and signing.
 - **Analytics** – `SuiteReportGenerator` produces combined CSV/Excel/visual artefacts, while the `VisualAnalyticsSink` renders PNG/HTML summaries.

@@ -1,7 +1,7 @@
 import pytest
 
-from elspeth.core import registry
-from elspeth.core.validation import ConfigurationError
+from elspeth.core.sink_registry import sink_registry
+from elspeth.core.validation_base import ConfigurationError
 
 
 def test_sink_accepts_artifact_config():
@@ -17,7 +17,7 @@ def test_sink_accepts_artifact_config():
         },
     }
 
-    registry.registry.validate_sink("csv", config)
+    sink_registry.validate("csv", config)
 
 
 def test_sink_rejects_invalid_artifact_config():
@@ -33,4 +33,4 @@ def test_sink_rejects_invalid_artifact_config():
     }
 
     with pytest.raises(ConfigurationError):
-        registry.registry.validate_sink("csv", config)
+        sink_registry.validate("csv", config)

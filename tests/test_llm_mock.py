@@ -1,4 +1,4 @@
-from elspeth.plugins.llms.mock import MockLLMClient
+from elspeth.plugins.nodes.transforms.llm.mock import MockLLMClient
 
 
 def test_mock_llm_generates_deterministic_scores():

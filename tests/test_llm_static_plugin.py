@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from elspeth.core.registry import registry
-from elspeth.plugins.llms.static import StaticLLMClient
+from elspeth.core.llm_registry import llm_registry
+from elspeth.plugins.nodes.transforms.llm.static import StaticLLMClient
 
 
 def test_static_llm_client_returns_constant_metrics() -> None:
@@ -15,7 +15,7 @@ def test_static_llm_client_returns_constant_metrics() -> None:
 
 
 def test_static_llm_registry_integration() -> None:
-    instance = registry.create_llm(
+    instance = llm_registry.create(
         "static_test",
         {
             "content": "Registry",

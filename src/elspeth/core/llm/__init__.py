@@ -1,6 +1,7 @@
 """LLM middleware utilities."""
 
-from .middleware import LLMMiddleware, LLMRequest
+from elspeth.core.protocols import LLMMiddleware, LLMRequest
+
 from .registry import create_middlewares, register_middleware
 
 __all__ = [

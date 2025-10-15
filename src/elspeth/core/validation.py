@@ -9,248 +9,19 @@ from typing import Any, Callable, Iterable, Mapping, Sequence
 
 import yaml
 
+from elspeth.core.controls import registry as controls_registry
+from elspeth.core.datasource_registry import datasource_registry
+from elspeth.core.experiments import plugin_registry as exp_registry
+from elspeth.core.llm import registry as llm_middleware_registry
+from elspeth.core.llm_registry import llm_registry as llm_reg
 from elspeth.core.security import normalize_security_level
-
-
-class ConfigurationError(RuntimeError):
-    """Raised when configuration validation fails."""
-
-
-@dataclass
-class ValidationMessage:
-    """Represents a single validation outcome with optional context."""
-
-    message: str
-    context: str | None = None
-
-    def format(self) -> str:
-        """Return a human-readable message suitable for user display."""
-
-        if self.context:
-            return f"{self.context}: {self.message}"
-        return self.message
-
-
-@dataclass
-class ValidationReport:
-    """Aggregates validation errors and warnings for a configuration."""
-
-    errors: list[ValidationMessage] = field(default_factory=list)
-    warnings: list[ValidationMessage] = field(default_factory=list)
-
-    def add_error(self, message: str, context: str | None = None) -> None:
-        """Record an error message with optional context."""
-
-        self.errors.append(ValidationMessage(message=message, context=context))
-
-    def add_warning(self, message: str, context: str | None = None) -> None:
-        """Record a warning message with optional context."""
-
-        self.warnings.append(ValidationMessage(message=message, context=context))
-
-    def extend(self, other: "ValidationReport") -> None:
-        """Merge another report into this one."""
-
-        self.errors.extend(other.errors)
-        self.warnings.extend(other.warnings)
-
-    def raise_if_errors(self) -> None:
-        """Raise a ConfigurationError when the report contains errors."""
-
-        if self.errors:
-            formatted = "\n".join(msg.format() for msg in self.errors)
-            raise ConfigurationError(formatted)
-
-    def has_errors(self) -> bool:
-        """Return True if the report contains errors."""
-
-        return bool(self.errors)
-
-    def has_warnings(self) -> bool:
-        """Return True if the report contains warnings."""
-
-        return bool(self.warnings)
-
-
-def validate_schema(
-    data: Mapping[str, object] | None,
-    schema: Mapping[str, object],
-    *,
-    context: str | None = None,
-) -> Iterable[ValidationMessage]:
-    """Validate ``data`` against ``schema`` returning validation messages."""
-
-    if data is None:
-        yield ValidationMessage("value is missing", context=context)
-        return
-
-    errors: list[tuple[tuple[object, ...], str]] = []
-    _validate_node(data, schema, (), errors)
-    for path, message in errors:
-        pointer = _format_error_path(path)
-        details = message
-        if pointer:
-            details = f"{details} (path: {pointer})"
-        yield ValidationMessage(details, context=context)
-
-
-def _validate_node(
-    value: Any,
-    schema: Mapping[str, Any],
-    path: tuple[object, ...],
-    errors: list[tuple[tuple[object, ...], str]],
-) -> None:
-    """Recursively validate ``value`` against ``schema`` accumulating errors."""
-
-    # Defensive runtime check: schema is typed as Mapping but we guard against None
-    # Mypy considers this unreachable but it's a safety check for untrusted inputs
-    if schema is None:
-        return  # type: ignore[unreachable]
-
-    any_of = schema.get("anyOf")
-    if any_of:
-        _validate_any_of(value, any_of, path, errors)
-
-    expected_type = schema.get("type")
-    if expected_type and not _check_type(value, expected_type):
-        errors.append((path, f"must be of type {expected_type}"))
-        return
-
-    if isinstance(value, Mapping):
-        _validate_object(value, schema, path, errors)
-    if isinstance(value, list):
-        _validate_array(value, schema, path, errors)
-
-    _validate_enum_membership(value, schema, path, errors)
-    _validate_numeric_bounds(value, schema, path, errors)
-
-
-def _validate_any_of(
-    value: Any,
-    options: Sequence[Mapping[str, Any]],
-    path: tuple[object, ...],
-    errors: list[tuple[tuple[object, ...], str]],
-) -> None:
-    """Validate ``value`` matches at least one schema in ``options``."""
-
-    for option in options:
-        option_errors: list[tuple[tuple[object, ...], str]] = []
-        _validate_node(value, option, path, option_errors)
-        if not option_errors:
-            return
-    errors.append((path, "did not match any allowed schemas"))
-
-
-def _validate_object(
-    value: Mapping[str, Any],
-    schema: Mapping[str, Any],
-    path: tuple[object, ...],
-    errors: list[tuple[tuple[object, ...], str]],
-) -> None:
-    """Validate object-specific constraints for ``value``."""
-
-    required = schema.get("required", [])
-    for key in required:
-        if key not in value:
-            errors.append((path + (key,), "is a required property"))
-
-    properties = schema.get("properties", {})
-    for key, subschema in properties.items():
-        if key in value:
-            _validate_node(value[key], subschema, path + (key,), errors)
-
-
-def _validate_array(
-    value: Sequence[Any],
-    schema: Mapping[str, Any],
-    path: tuple[object, ...],
-    errors: list[tuple[tuple[object, ...], str]],
-) -> None:
-    """Validate array-specific constraints for ``value``."""
-
-    item_schema = schema.get("items")
-    if not item_schema:
-        return
-
-    for index, item in enumerate(value):
-        _validate_node(item, item_schema, path + (index,), errors)
-
-
-def _validate_enum_membership(
-    value: Any,
-    schema: Mapping[str, Any],
-    path: tuple[object, ...],
-    errors: list[tuple[tuple[object, ...], str]],
-) -> None:
-    """Ensure ``value`` is one of the allowed enum values if provided."""
-
-    enum = schema.get("enum")
-    if enum is not None and value not in enum:
-        errors.append((path, f"must be one of {enum}"))
-
-
-def _validate_numeric_bounds(
-    value: Any,
-    schema: Mapping[str, Any],
-    path: tuple[object, ...],
-    errors: list[tuple[tuple[object, ...], str]],
-) -> None:
-    """Validate numeric upper and lower bounds for ``value``."""
-
-    if not _is_number(value):
-        return
-
-    minimum = schema.get("minimum")
-    if minimum is not None and value < minimum:
-        errors.append((path, f"must be >= {minimum}"))
-
-    exclusive_min = schema.get("exclusiveMinimum")
-    if exclusive_min is not None and value <= exclusive_min:
-        errors.append((path, f"must be > {exclusive_min}"))
-
-    maximum = schema.get("maximum")
-    if maximum is not None and value > maximum:
-        errors.append((path, f"must be <= {maximum}"))
-
-    exclusive_max = schema.get("exclusiveMaximum")
-    if exclusive_max is not None and value >= exclusive_max:
-        errors.append((path, f"must be < {exclusive_max}"))
-
-
-def _check_type(value: Any, expected: str) -> bool:
-    """Return True when ``value`` matches the schema ``expected`` type."""
-
-    if expected == "object":
-        return isinstance(value, Mapping)
-    if expected == "array":
-        return isinstance(value, list)
-    if expected == "string":
-        return isinstance(value, str)
-    if expected == "integer":
-        return isinstance(value, int) and not isinstance(value, bool)
-    if expected == "number":
-        return _is_number(value)
-    if expected == "boolean":
-        return isinstance(value, bool)
-    return True
-
-
-def _is_number(value: Any) -> bool:
-    """Return True for numeric values excluding booleans."""
-
-    return isinstance(value, (int, float)) and not isinstance(value, bool)
-
-
-def _format_error_path(path: Iterable[object]) -> str:
-    parts = []
-    for item in path:
-        if isinstance(item, int):
-            parts.append(f"[{item}]")
-        else:
-            if parts:
-                parts.append(".")
-            parts.append(str(item))
-    return "".join(parts)
+from elspeth.core.sink_registry import sink_registry
+from elspeth.core.validation_base import (
+    ConfigurationError,
+    ValidationMessage,
+    ValidationReport,
+    validate_schema,
+)
 
 
 def validate_settings(path: str | Path, profile: str = "default") -> ValidationReport:
@@ -277,17 +48,10 @@ def validate_settings(path: str | Path, profile: str = "default") -> ValidationR
     if report.has_errors():
         return report
 
-    from elspeth.core import registry as core_registry  # pylint: disable=import-outside-toplevel
-    from elspeth.core.controls import registry as controls_registry  # pylint: disable=import-outside-toplevel
-    from elspeth.core.experiments import plugin_registry as exp_registry  # pylint: disable=import-outside-toplevel
-    from elspeth.core.llm import registry as llm_registry  # pylint: disable=import-outside-toplevel
-
-    registry = core_registry.registry
-
-    _validate_primary_plugins(report, profile_data, registry)
+    _validate_primary_plugins(report, profile_data)
 
     sinks = profile_data.get("sinks")
-    top_level_sinks_valid = _validate_top_level_sinks(report, sinks, registry, profile)
+    top_level_sinks_valid = _validate_top_level_sinks(report, sinks, profile)
     if not top_level_sinks_valid:
         prompt_packs_raw = profile_data.get("prompt_packs")
         suite_defaults_raw = profile_data.get("suite_defaults")
@@ -300,26 +64,19 @@ def validate_settings(path: str | Path, profile: str = "default") -> ValidationR
     prompt_packs = _validate_prompt_pack_section(
         report,
         profile_data,
-        registry,
-        exp_registry,
-        llm_registry,
         profile,
     )
 
     _validate_middleware_list(
         report,
         profile_data.get("llm_middlewares"),
-        llm_registry.validate_middleware_definition,
+        llm_middleware_registry.validate_middleware_definition,
         context=f"settings[{profile}].middleware",
     )
 
     _validate_suite_defaults_section(
         report,
         profile_data.get("suite_defaults"),
-        registry,
-        exp_registry,
-        llm_registry,
-        controls_registry,
         prompt_packs,
         profile,
     )
@@ -343,21 +100,11 @@ def validate_suite(
         report.add_error("Suite root does not exist", context=str(suite_path))
         return SuiteValidationReport(report=report)
 
-    from elspeth.core import registry as core_registry  # pylint: disable=import-outside-toplevel
-    from elspeth.core.controls import registry as controls_registry  # pylint: disable=import-outside-toplevel
-    from elspeth.core.experiments import plugin_registry as exp_registry  # pylint: disable=import-outside-toplevel
-    from elspeth.core.llm import registry as llm_registry  # pylint: disable=import-outside-toplevel
-
-    registry = core_registry.registry
     _ = defaults  # reserved for future suite default overrides
 
     summaries, all_names, baseline_name, baseline_count = _collect_suite_experiments(
         suite_path,
         report,
-        registry,
-        exp_registry,
-        llm_registry,
-        controls_registry,
     )
 
     if not summaries:
@@ -508,9 +255,6 @@ def _validate_prompt_pack(
     report: ValidationReport,
     name: str,
     pack: Any,
-    registry,
-    exp_registry,
-    llm_registry,
 ) -> None:
     """Validate a prompt pack configuration entry."""
     context = f"prompt_pack:{name}"
@@ -561,13 +305,13 @@ def _validate_prompt_pack(
     _validate_middleware_list(
         report,
         pack.get("llm_middlewares"),
-        llm_registry.validate_middleware_definition,
+        llm_middleware_registry.validate_middleware_definition,
         context=f"{context}.middleware",
     )
     _validate_plugin_list(
         report,
         pack.get("sinks"),
-        registry.validate_sink,
+        sink_registry.validate,
         context=f"{context}.sink",
         require_security_level=True,
     )
@@ -576,10 +320,6 @@ def _validate_prompt_pack(
 def _validate_suite_defaults(
     report: ValidationReport,
     defaults: Mapping[str, Any],
-    registry,
-    exp_registry,
-    llm_registry,
-    controls_registry,
 ) -> None:
     """Validate suite-level default configuration entries."""
     _validate_experiment_plugins(
@@ -615,13 +355,13 @@ def _validate_suite_defaults(
     _validate_middleware_list(
         report,
         defaults.get("llm_middlewares"),
-        llm_registry.validate_middleware_definition,
+        llm_middleware_registry.validate_middleware_definition,
         context="suite_defaults.middleware",
     )
     _validate_plugin_list(
         report,
         defaults.get("sinks"),
-        registry.validate_sink,
+        sink_registry.validate,
         context="suite_defaults.sink",
         require_security_level=True,
     )
@@ -734,10 +474,6 @@ def _find_duplicates(items: Iterable[str]) -> list[str]:
 def _load_experiment_summary(
     folder: Path,
     report: ValidationReport,
-    registry,
-    exp_registry,
-    llm_registry,
-    controls_registry,
 ) -> _ExperimentSummary | None:
     """Load and validate an experiment directory returning its summary."""
 
@@ -809,13 +545,13 @@ def _load_experiment_summary(
     _validate_middleware_list(
         report,
         data.get("llm_middlewares"),
-        llm_registry.validate_middleware_definition,
+        llm_middleware_registry.validate_middleware_definition,
         context=f"{experiment_context}.middleware",
     )
     _validate_plugin_list(
         report,
         data.get("sinks"),
-        registry.validate_sink,
+        sink_registry.validate,
         context=f"{experiment_context}.sink",
         require_security_level=True,
     )
@@ -853,10 +589,6 @@ def _load_experiment_summary(
 def _collect_suite_experiments(
     suite_path: Path,
     report: ValidationReport,
-    registry,
-    exp_registry,
-    llm_registry,
-    controls_registry,
 ) -> tuple[list[_ExperimentSummary], list[str], str | None, int]:
     """Collect and validate experiment summaries from the suite directory."""
 
@@ -867,7 +599,7 @@ def _collect_suite_experiments(
 
     folders = sorted(p for p in suite_path.iterdir() if p.is_dir() and not p.name.startswith("."))
     for folder in folders:
-        summary = _load_experiment_summary(folder, report, registry, exp_registry, llm_registry, controls_registry)
+        summary = _load_experiment_summary(folder, report)
         if summary is None:
             continue
         summaries.append(summary)
@@ -916,7 +648,6 @@ def _calculate_preflight(
 def _validate_primary_plugins(
     report: ValidationReport,
     profile_data: Mapping[str, Any],
-    registry,
 ) -> None:
     """Validate datasource and llm entries for a settings profile."""
 
@@ -924,14 +655,14 @@ def _validate_primary_plugins(
         report,
         profile_data.get("datasource"),
         kind="datasource",
-        validator=registry.validate_datasource,
+        validator=datasource_registry.validate,
         require_security_level=True,
     )
     _validate_plugin_reference(
         report,
         profile_data.get("llm"),
         kind="llm",
-        validator=registry.validate_llm,
+        validator=llm_reg.validate,
         require_security_level=True,
     )
 
@@ -939,7 +670,6 @@ def _validate_primary_plugins(
 def _validate_top_level_sinks(
     report: ValidationReport,
     sinks: Any,
-    registry,
     profile: str,
 ) -> bool:
     """Validate sinks defined directly on the profile."""
@@ -957,7 +687,7 @@ def _validate_top_level_sinks(
             report,
             entry,
             kind="sink",
-            validator=registry.validate_sink,
+            validator=sink_registry.validate,
             require_security_level=True,
         )
     return True
@@ -976,9 +706,6 @@ def _has_fallback_sinks(
 def _validate_prompt_pack_section(
     report: ValidationReport,
     profile_data: Mapping[str, Any],
-    registry,
-    exp_registry,
-    llm_registry,
     profile: str,
 ) -> dict[str, Any]:
     """Validate prompt pack mappings and return a normalized dict."""
@@ -993,7 +720,7 @@ def _validate_prompt_pack_section(
         prompt_packs = {}
 
     for name, pack in prompt_packs.items():
-        _validate_prompt_pack(report, name, pack, registry, exp_registry, llm_registry)
+        _validate_prompt_pack(report, name, pack)
 
     prompt_pack_name = profile_data.get("prompt_pack")
     if isinstance(prompt_pack_name, str) and prompt_pack_name and prompt_pack_name not in prompt_packs:
@@ -1009,10 +736,6 @@ def _validate_prompt_pack_section(
 def _validate_suite_defaults_section(
     report: ValidationReport,
     suite_defaults_raw: Any,
-    registry,
-    exp_registry,
-    llm_registry,
-    controls_registry,
     prompt_packs: Mapping[str, Any],
     profile: str,
 ) -> Mapping[str, Any]:
@@ -1026,7 +749,7 @@ def _validate_suite_defaults_section(
         report.add_error("'suite_defaults' must be a mapping", context=f"settings[{profile}]")
         suite_defaults = {}
 
-    _validate_suite_defaults(report, suite_defaults, registry, exp_registry, llm_registry, controls_registry)
+    _validate_suite_defaults(report, suite_defaults)
 
     suite_pack_name = suite_defaults.get("prompt_pack")
     if isinstance(suite_pack_name, str) and suite_pack_name and suite_pack_name not in prompt_packs:

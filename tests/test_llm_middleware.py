@@ -7,10 +7,10 @@ import requests
 from elspeth.core.experiments.config import ExperimentConfig, ExperimentSuite
 from elspeth.core.experiments.runner import ExperimentRunner
 from elspeth.core.experiments.suite_runner import ExperimentSuiteRunner
-from elspeth.core.llm.middleware import LLMRequest
 from elspeth.core.llm.registry import create_middlewares
-from elspeth.plugins.llms.middleware import AuditMiddleware, HealthMonitorMiddleware
-from elspeth.plugins.llms.middleware_azure import AzureEnvironmentMiddleware
+from elspeth.core.protocols import LLMRequest
+from elspeth.plugins.nodes.transforms.llm.middleware import AuditMiddleware, HealthMonitorMiddleware
+from elspeth.plugins.nodes.transforms.llm.middleware_azure import AzureEnvironmentMiddleware
 
 
 class DummyLLM:
@@ -153,7 +153,7 @@ def test_prompt_shield_logs_warning(caplog):
 
 
 def test_azure_content_safety_blocks(monkeypatch):
-    from elspeth.plugins.llms.middleware import AzureContentSafetyMiddleware
+    from elspeth.plugins.nodes.transforms.llm.middleware import AzureContentSafetyMiddleware
 
     class DummyResponse:
         def __init__(self, payload):
@@ -186,7 +186,7 @@ def test_azure_content_safety_blocks(monkeypatch):
 
 
 def test_azure_content_safety_masks(monkeypatch):
-    from elspeth.plugins.llms.middleware import AzureContentSafetyMiddleware
+    from elspeth.plugins.nodes.transforms.llm.middleware import AzureContentSafetyMiddleware
 
     class DummyResponse:
         def raise_for_status(self):
@@ -227,7 +227,7 @@ def test_audit_middleware_logs_prompts(caplog):
 
 def test_health_monitor_emits_heartbeat(monkeypatch, caplog):
     times = iter([0.0, 0.25, 0.5])
-    monkeypatch.setattr("elspeth.plugins.llms.middleware.time.monotonic", lambda: next(times))
+    monkeypatch.setattr("elspeth.plugins.nodes.transforms.llm.middleware.time.monotonic", lambda: next(times))
 
     middleware = HealthMonitorMiddleware(heartbeat_interval=0, stats_window=2, channel="test.health", include_latency=True)
     request = LLMRequest(system_prompt="sys", user_prompt="hello", metadata={})
@@ -241,7 +241,7 @@ def test_health_monitor_emits_heartbeat(monkeypatch, caplog):
 
 
 def test_azure_content_safety_skip_on_error(monkeypatch, caplog):
-    from elspeth.plugins.llms.middleware import AzureContentSafetyMiddleware
+    from elspeth.plugins.nodes.transforms.llm.middleware import AzureContentSafetyMiddleware
 
     def fake_post(*args, **kwargs):
         raise requests.RequestException("boom")
@@ -280,7 +280,7 @@ class DummyAzureRun:
 def test_azure_environment_middleware_logs(monkeypatch):
     run = DummyAzureRun()
     monkeypatch.setattr(
-        "elspeth.plugins.llms.middleware_azure._resolve_azure_run",
+        "elspeth.plugins.nodes.transforms.llm.middleware_azure._resolve_azure_run",
         lambda: run,
     )
 
@@ -310,7 +310,7 @@ def test_azure_environment_middleware_logs(monkeypatch):
 def test_azure_environment_middleware_log_metrics_toggle(monkeypatch):
     run = DummyAzureRun()
     monkeypatch.setattr(
-        "elspeth.plugins.llms.middleware_azure._resolve_azure_run",
+        "elspeth.plugins.nodes.transforms.llm.middleware_azure._resolve_azure_run",
         lambda: run,
     )
 
@@ -325,7 +325,7 @@ def test_azure_environment_middleware_log_metrics_toggle(monkeypatch):
 
 def test_azure_environment_middleware_defaults_to_skip_when_no_run(monkeypatch, caplog):
     monkeypatch.setattr(
-        "elspeth.plugins.llms.middleware_azure._resolve_azure_run",
+        "elspeth.plugins.nodes.transforms.llm.middleware_azure._resolve_azure_run",
         lambda: None,
     )
 
@@ -338,7 +338,7 @@ def test_azure_environment_middleware_defaults_to_skip_when_no_run(monkeypatch, 
 
 def test_azure_environment_middleware_on_error_skip(monkeypatch, caplog):
     monkeypatch.setattr(
-        "elspeth.plugins.llms.middleware_azure._resolve_azure_run",
+        "elspeth.plugins.nodes.transforms.llm.middleware_azure._resolve_azure_run",
         lambda: None,
     )
     monkeypatch.setenv("AZUREML_RUN_ID", "run-123")
@@ -353,7 +353,7 @@ def test_azure_environment_middleware_on_error_skip(monkeypatch, caplog):
 
 def test_azure_environment_middleware_on_error_abort(monkeypatch):
     monkeypatch.setattr(
-        "elspeth.plugins.llms.middleware_azure._resolve_azure_run",
+        "elspeth.plugins.nodes.transforms.llm.middleware_azure._resolve_azure_run",
         lambda: None,
     )
     with pytest.raises(RuntimeError):
@@ -403,7 +403,7 @@ def test_middleware_retry_hook_invoked(monkeypatch):
 
 
 def test_health_monitor_middleware_logs(caplog):
-    from elspeth.plugins.llms.middleware import HealthMonitorMiddleware
+    from elspeth.plugins.nodes.transforms.llm.middleware import HealthMonitorMiddleware
 
     middleware = HealthMonitorMiddleware(heartbeat_interval=0.0, stats_window=5, channel="test.health")
     request = LLMRequest(system_prompt="sys", user_prompt="hello", metadata={})
@@ -416,7 +416,7 @@ def test_health_monitor_middleware_logs(caplog):
 
 
 def test_health_monitor_middleware_tracks_failures(caplog):
-    from elspeth.plugins.llms.middleware import HealthMonitorMiddleware
+    from elspeth.plugins.nodes.transforms.llm.middleware import HealthMonitorMiddleware
 
     middleware = HealthMonitorMiddleware(heartbeat_interval=0.0, stats_window=5, channel="test.health")
     request = LLMRequest(system_prompt="sys", user_prompt="hello", metadata={})
@@ -434,7 +434,7 @@ def test_health_monitor_middleware_tracks_failures(caplog):
 def test_azure_environment_retry_logging(monkeypatch):
     run = DummyAzureRun()
     monkeypatch.setattr(
-        "elspeth.plugins.llms.middleware_azure._resolve_azure_run",
+        "elspeth.plugins.nodes.transforms.llm.middleware_azure._resolve_azure_run",
         lambda: run,
     )
 
@@ -459,7 +459,7 @@ def test_azure_environment_retry_logging(monkeypatch):
 def test_suite_runner_applies_per_experiment_azure_middleware(monkeypatch):
     run = DummyAzureRun()
     monkeypatch.setattr(
-        "elspeth.plugins.llms.middleware_azure._resolve_azure_run",
+        "elspeth.plugins.nodes.transforms.llm.middleware_azure._resolve_azure_run",
         lambda: run,
     )
 
@@ -569,7 +569,7 @@ def test_suite_runner_deduplicates_shared_middleware_multiple_experiments(monkey
 def test_azure_environment_middleware_log_config_diffs_toggle(monkeypatch):
     run = DummyAzureRun()
     monkeypatch.setattr(
-        "elspeth.plugins.llms.middleware_azure._resolve_azure_run",
+        "elspeth.plugins.nodes.transforms.llm.middleware_azure._resolve_azure_run",
         lambda: run,
     )
 
@@ -582,7 +582,7 @@ def test_azure_environment_middleware_log_config_diffs_toggle(monkeypatch):
 def test_azure_environment_middleware_logs_aggregate_table(monkeypatch):
     run = DummyAzureRun()
     monkeypatch.setattr(
-        "elspeth.plugins.llms.middleware_azure._resolve_azure_run",
+        "elspeth.plugins.nodes.transforms.llm.middleware_azure._resolve_azure_run",
         lambda: run,
     )
 

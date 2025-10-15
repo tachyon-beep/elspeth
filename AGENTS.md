@@ -3,6 +3,9 @@
 ## Project Structure & Module Organization
 
 The Python package lives in `src/elspeth/`, with `core/` covering experiment orchestration, `plugins/` hosting metrics and output sinks, and `cli.py` providing the entrypoint. Support material sits in `config/sample_suite/` for runnable demos, `notes/` for decisions and planning, and `scripts/` for bootstrap helpers. Shared tests reside in `tests/`, mirroring module layouts for easy discovery.
+<!-- UPDATE 2025-10-12: Plugin namespace migration -->
+Update 2025-10-12: Plugins are grouped under `src/elspeth/plugins/nodes/{sources,transforms,sinks}/` and `src/elspeth/plugins/experiments/` following the Phase 2 refactor; update import paths accordingly.
+<!-- END UPDATE -->
 
 ## Build, Test, and Development Commands
 

@@ -170,7 +170,10 @@ Located in `config/sample_suite/packs/*.yaml`:
 ### Adding a New Plugin
 
 1. **Choose the plugin type**: datasource, LLM client, middleware, row/aggregator/validation/early-stop, sink
-2. **Implement the protocol**: See `src/elspeth/core/interfaces.py` for contracts
+2. **Implement the protocol**:
+   - Universal protocols (DataSource, ResultSink, LLMClientProtocol, etc.): `src/elspeth/core/protocols.py`
+   - Experiment-specific protocols (ValidationPlugin, RowExperimentPlugin, etc.): `src/elspeth/plugins/orchestrators/experiment/protocols.py`
+   - Legacy imports from `src/elspeth/core/interfaces.py` still work but are deprecated
 3. **Accept PluginContext**: Factory signature must be `create(options: Dict[str, Any], context: PluginContext) -> Plugin`
 4. **Define JSON schema**: Validation schema in registry (`src/elspeth/core/registry.py` or experiment plugin registry)
 5. **Register in registry**: Add to appropriate registry dict (`_datasources`, `_llms`, `_sinks`)
@@ -197,6 +200,28 @@ Registry automatically handles context propagation. Nested plugin creation (e.g.
 - Registry validation enforces this requirement
 - Security levels: `public`, `internal`, `confidential`, `restricted` (or custom strings)
 - Pipeline enforces that sinks cannot read artifacts from higher security tiers
+
+### Protocol Architecture
+
+Elspeth's protocols are organized by responsibility and scope:
+
+**Universal Protocols** (`src/elspeth/core/protocols.py`):
+- **Orchestrators**: `OrchestratorPlugin` - defines data flow topology
+- **Node Protocols**: `DataSource`, `ResultSink`, `TransformNode`, `AggregatorNode` - universal processing contracts
+- **LLM Components**: `LLMClientProtocol`, `LLMMiddleware`, `LLMRequest`, `RateLimiter`, `CostTracker` - LLM-specific transforms
+- **Supporting Types**: `ExperimentContext`, `ArtifactDescriptor`, `Artifact` - shared data structures
+
+**Experiment-Specific Protocols** (`src/elspeth/plugins/orchestrators/experiment/protocols.py`):
+- `ValidationPlugin`, `ValidationError` - experiment validation
+- `RowExperimentPlugin` - per-row processing
+- `AggregationExperimentPlugin` - multi-row aggregation
+- `BaselineComparisonPlugin` - variant comparisons
+- `EarlyStopPlugin` - early stopping conditions
+
+**Backward Compatibility**:
+- Old imports from `src/elspeth/core/interfaces.py` and `src/elspeth/core/llm/middleware.py` still work
+- Deprecation warnings guide developers to new locations
+- All compatibility shims will be removed in a future major version
 
 ## Testing Patterns
 

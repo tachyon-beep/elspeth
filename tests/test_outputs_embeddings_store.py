@@ -7,7 +7,7 @@ import pytest
 
 from elspeth.core.plugins import PluginContext, apply_plugin_context
 from elspeth.core.validation import ConfigurationError
-from elspeth.plugins.outputs.embeddings_store import EmbeddingsStoreSink, UpsertResponse, VectorRecord, VectorStoreClient
+from elspeth.plugins.nodes.sinks.embeddings_store import EmbeddingsStoreSink, UpsertResponse, VectorRecord, VectorStoreClient
 from elspeth.retrieval.embedding import Embedder
 
 
@@ -150,13 +150,20 @@ def test_embeddings_sink_metadata_falls_back_to_run_metadata():
     assert records[0].metadata["metadata.ticket"] == "INC-123"
 
 
-def test_embeddings_sink_azure_provider_requires_key(monkeypatch):
+def test_embeddings_sink_azure_provider_requires_api_key_env(monkeypatch):
+    """Test that azure_search provider requires explicit api_key_env configuration."""
     monkeypatch.delenv("AZURE_SEARCH_KEY", raising=False)
-    with pytest.raises(ConfigurationError):
+    with pytest.raises(ConfigurationError, match="api_key_env"):
         EmbeddingsStoreSink(
             provider="azure_search",
             namespace="suite.ns",
-            provider_options={"endpoint": "https://example", "index": "idx"},
+            provider_options={
+                "endpoint": "https://example",
+                "index": "idx",
+                "vector_field": "embedding",
+                "id_field": "document_id",
+                "namespace_field": "namespace",
+            },
             embed_model={"provider": "openai", "model": "irrelevant"},
             embedder_factory=lambda config: RecordingEmbedder(),
         )
@@ -177,14 +184,21 @@ def test_embeddings_sink_azure_provider_uses_env_key(monkeypatch):
 
     monkeypatch.setenv("AZURE_SEARCH_KEY", "token")
     monkeypatch.setattr(
-        "elspeth.plugins.outputs.embeddings_store.AzureSearchVectorClient",
+        "elspeth.plugins.nodes.sinks.embeddings_store.AzureSearchVectorClient",
         lambda **kwargs: StubAzureClient(**kwargs),
     )
 
     sink = EmbeddingsStoreSink(
         provider="azure_search",
         namespace="suite.ns",
-        provider_options={"endpoint": "https://example", "index": "idx"},
+        provider_options={
+            "endpoint": "https://example",
+            "index": "idx",
+            "api_key_env": "AZURE_SEARCH_KEY",
+            "vector_field": "embedding",
+            "id_field": "document_id",
+            "namespace_field": "namespace",
+        },
         embed_model={"provider": "openai", "model": "irrelevant"},
         embedder_factory=lambda config: RecordingEmbedder(),
     )
@@ -273,7 +287,7 @@ def test_embeddings_sink_finalize_closes_client():
 
 
 def test_pgvector_conflict_clause_skip(monkeypatch):
-    import elspeth.plugins.outputs.embeddings_store as store_module
+    import elspeth.plugins.nodes.sinks.embeddings_store as store_module
 
     stub = types.ModuleType("psycopg")
 

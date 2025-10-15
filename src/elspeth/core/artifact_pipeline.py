@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from typing import Any, Iterable, Mapping, cast
 
 from elspeth.core.artifacts import validate_artifact_type
-from elspeth.core.interfaces import Artifact, ArtifactDescriptor, ResultSink
+from elspeth.core.protocols import Artifact, ArtifactDescriptor, ResultSink
 from elspeth.core.security import is_security_level_allowed, normalize_security_level
 
 VALID_REQUEST_MODES = {"single", "all"}

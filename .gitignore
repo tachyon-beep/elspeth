@@ -109,6 +109,9 @@ cython_debug/
 .env
 .env.*
 
+# Config files with secrets
+config/blob_store.yaml
+
 # virtual environments
 .venv/
 venv/
@@ -119,6 +122,7 @@ venv.bak/
 # Project data/artifacts
 /data/
 /outputs/
+/orchestration_packs/*/
 # Legacy reference material (tracked separately)
 /external/
 # Quarantined historical scripts (tracked)
@@ -134,7 +138,10 @@ venv.bak/
 # MCP config files
 .mcp.json
 
+logs/
+coverage.xml
 
 #Ignore vscode AI rules
 .github/instructions/codacy.instructions.md
 .codacy/
+audit_data/

@@ -3,7 +3,7 @@ import pandas as pd
 from elspeth.cli import _result_to_row
 from elspeth.core.experiments.plugin_registry import create_early_stop_plugin, create_row_plugin
 from elspeth.core.experiments.runner import ExperimentRunner
-from elspeth.plugins.llms.mock import MockLLMClient
+from elspeth.plugins.nodes.transforms.llm.mock import MockLLMClient
 
 
 class DummySink:
@@ -25,7 +25,22 @@ def _build_runner():
             {"name": "analysis", "template": "Give analysis for {{ APPID }}."},
             {"name": "prioritization", "template": "Prioritise {{ APPID }}."},
         ],
-        row_plugins=[create_row_plugin({"name": "score_extractor", "security_level": "OFFICIAL", "determinism_level": "guaranteed"})],
+        row_plugins=[
+            create_row_plugin(
+                {
+                    "name": "score_extractor",
+                    "security_level": "OFFICIAL",
+                    "determinism_level": "guaranteed",
+                    "options": {
+                        "key": "score",
+                        "parse_json_content": True,
+                        "allow_missing": False,
+                        "threshold_mode": "gte",
+                        "flag_field": "score_flags",
+                    },
+                }
+            )
+        ],
     )
 
 

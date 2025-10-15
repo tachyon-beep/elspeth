@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from elspeth.plugins.outputs.analytics_report import AnalyticsReportSink
+from elspeth.plugins.nodes.sinks.analytics_report import AnalyticsReportSink
 
 
 def _sample_payload() -> dict[str, object]:

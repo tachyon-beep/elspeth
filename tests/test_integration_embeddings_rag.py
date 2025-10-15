@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from elspeth.core.plugins import PluginContext, apply_plugin_context
-from elspeth.plugins.outputs.embeddings_store import Embedder, EmbeddingsStoreSink
+from elspeth.plugins.nodes.sinks.embeddings_store import Embedder, EmbeddingsStoreSink
 from elspeth.retrieval.providers import PgVectorQueryClient
 from elspeth.retrieval.service import RetrievalService
 

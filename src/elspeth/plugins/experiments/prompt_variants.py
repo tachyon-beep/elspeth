@@ -5,11 +5,11 @@ from __future__ import annotations
 from typing import Any
 
 from elspeth.core.experiments.plugin_registry import register_aggregation_plugin
-from elspeth.core.experiments.plugins import AggregationExperimentPlugin
-from elspeth.core.interfaces import LLMClientProtocol
 from elspeth.core.plugins import PluginContext
 from elspeth.core.prompts.engine import PromptEngine
-from elspeth.core.registry import registry
+from elspeth.core.protocols import LLMClientProtocol
+from elspeth.core.registry import create_llm_from_definition
+from elspeth.plugins.orchestrators.experiment.protocols import AggregationExperimentPlugin
 
 
 class PromptVariantsAggregator(AggregationExperimentPlugin):
@@ -147,7 +147,7 @@ def _build_prompt_variants(options: dict[str, Any], context: PluginContext) -> P
     spec = options.get("variant_llm") or options.get("llm")
     if spec is None:
         raise ValueError("prompt_variants plugin requires 'variant_llm'")
-    llm = registry.create_llm_from_definition(
+    llm = create_llm_from_definition(
         spec,
         parent_context=context,
         provenance=("variant_llm",),

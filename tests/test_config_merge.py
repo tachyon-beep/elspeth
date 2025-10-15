@@ -23,7 +23,7 @@ def test_load_settings_merges_prompt_pack_and_defaults(tmp_path: Path) -> None:
                 "plugin": "local_csv",
                 "security_level": "OFFICIAL",
                 "determinism_level": "guaranteed",
-                "options": {"path": str(input_csv)},
+                "options": {"path": str(input_csv), "retain_local": False},
             },
             "llm": {
                 "plugin": "mock",

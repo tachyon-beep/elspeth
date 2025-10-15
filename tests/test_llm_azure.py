@@ -2,7 +2,7 @@ import os
 
 import pytest
 
-from elspeth.plugins.llms.azure_openai import AzureOpenAIClient
+from elspeth.plugins.nodes.transforms.llm.azure_openai import AzureOpenAIClient
 
 
 def make_dummy_client():

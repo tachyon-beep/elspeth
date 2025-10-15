@@ -13,9 +13,9 @@ from elspeth.core.experiments.plugin_registry import (
     create_validation_plugin,
 )
 from elspeth.core.experiments.runner import ExperimentRunner
-from elspeth.core.interfaces import DataSource, LLMClientProtocol, ResultSink
 from elspeth.core.llm.registry import create_middlewares
 from elspeth.core.plugins import PluginContext, apply_plugin_context
+from elspeth.core.protocols import DataSource, LLMClientProtocol, ResultSink
 from elspeth.core.security import resolve_security_level
 
 
@@ -40,6 +40,7 @@ class OrchestratorConfig:  # pylint: disable=too-many-instance-attributes
     concurrency_config: dict[str, Any] | None = None
     early_stop_config: dict[str, Any] | None = None
     early_stop_plugin_defs: list[dict[str, Any]] | None = None
+    max_rows: int | None = None
 
 
 class ExperimentOrchestrator:  # pylint: disable=too-many-instance-attributes,too-few-public-methods
@@ -56,6 +57,8 @@ class ExperimentOrchestrator:  # pylint: disable=too-many-instance-attributes,to
         rate_limiter: RateLimiter | None = None,
         cost_tracker: CostTracker | None = None,
         name: str = "default",
+        suite_root: Any = None,
+        config_path: Any = None,
     ):
         self.datasource = datasource
         self.llm_client = llm_client
@@ -73,6 +76,8 @@ class ExperimentOrchestrator:  # pylint: disable=too-many-instance-attributes,to
             plugin_kind="experiment",
             security_level=security_level,
             provenance=(f"orchestrator:{name}.resolved",),
+            suite_root=suite_root,
+            config_path=config_path,
         )
 
         if self.rate_limiter is not None:
@@ -145,6 +150,11 @@ class ExperimentOrchestrator:  # pylint: disable=too-many-instance-attributes,to
         """Execute all configured experiments and return the runner payload."""
 
         df = self.datasource.load()
+
+        # Apply row limit if configured
+        if self.config.max_rows is not None:
+            df = df.head(self.config.max_rows)
+
         system_prompt = self.config.llm_prompt["system"]
         user_prompt_format = self.config.llm_prompt["user"]
 

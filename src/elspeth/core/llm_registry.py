@@ -9,11 +9,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from elspeth.core.interfaces import LLMClientProtocol
 from elspeth.core.plugins import PluginContext
+from elspeth.core.protocols import LLMClientProtocol
 from elspeth.core.registry.base import BasePluginRegistry
 from elspeth.core.registry.schemas import with_security_properties
-from elspeth.plugins.llms import AzureOpenAIClient, HttpOpenAIClient, MockLLMClient, StaticLLMClient
+from elspeth.core.validation_base import ConfigurationError
+from elspeth.plugins.nodes.transforms.llm import AzureOpenAIClient, HttpOpenAIClient, MockLLMClient, StaticLLMClient
 
 # Create the LLM registry with type safety
 llm_registry = BasePluginRegistry[LLMClientProtocol]("llm")
@@ -41,9 +42,14 @@ def _create_mock_llm(options: dict[str, Any], context: PluginContext) -> MockLLM
 
 def _create_static_llm(options: dict[str, Any], context: PluginContext) -> StaticLLMClient:
     """Create static LLM client."""
+    content = options.get("content")
+    if not content:
+        raise ConfigurationError(
+            "static_test LLM requires explicit 'content' parameter. " "Provide the test response content explicitly in configuration."
+        )
     return StaticLLMClient(
-        content=options.get("content", "STATIC RESPONSE"),
-        score=options.get("score", 0.5),
+        content=content,
+        score=options.get("score"),
         metrics=options.get("metrics"),
     )
 
@@ -56,7 +62,32 @@ _AZURE_OPENAI_SCHEMA = with_security_properties(
     {
         "type": "object",
         "properties": {
-            "config": {"type": "object"},
+            "config": {
+                "type": "object",
+                "description": "Azure OpenAI configuration containing endpoint, API keys, and optional model parameters",
+                "properties": {
+                    "azure_endpoint": {"type": "string", "description": "Azure OpenAI service endpoint (required)"},
+                    "api_key": {"type": "string", "description": "API key for authentication"},
+                    "api_key_env": {"type": "string", "description": "Environment variable name for API key"},
+                    "api_version": {"type": "string", "description": "Azure OpenAI API version (required)"},
+                    "deployment": {"type": "string", "description": "Azure deployment name"},
+                    "deployment_env": {"type": "string", "description": "Environment variable name for deployment"},
+                    "temperature": {
+                        "type": "number",
+                        "description": (
+                            "Sampling temperature (0-2). Optional - if not provided, uses Azure OpenAI default. "
+                            "Lower values are more deterministic."
+                        ),
+                    },
+                    "max_tokens": {
+                        "type": "integer",
+                        "description": (
+                            "Maximum tokens in response. Optional - if not provided, uses Azure OpenAI default. "
+                            "Set explicit bounds to control costs."
+                        ),
+                    },
+                },
+            },
             "deployment": {"type": "string"},
             "client": {},
         },
@@ -75,8 +106,20 @@ _HTTP_OPENAI_SCHEMA = with_security_properties(
             "api_key": {"type": "string"},
             "api_key_env": {"type": "string"},
             "model": {"type": "string"},
-            "temperature": {"type": "number"},
-            "max_tokens": {"type": "integer"},
+            "temperature": {
+                "type": "number",
+                "description": (
+                    "Sampling temperature (0-2). Optional - if not provided, uses OpenAI API default. "
+                    "Lower values (e.g., 0.2) are more deterministic, higher values (e.g., 1.5) are more creative."
+                ),
+            },
+            "max_tokens": {
+                "type": "integer",
+                "description": (
+                    "Maximum tokens in response. Optional - if not provided, uses OpenAI API default "
+                    "(typically model's max context length). Set explicit bounds to control costs and response length."
+                ),
+            },
             "timeout": {"type": "number", "exclusiveMinimum": 0},
         },
         "required": ["api_base"],
@@ -102,10 +145,11 @@ _STATIC_LLM_SCHEMA = with_security_properties(
     {
         "type": "object",
         "properties": {
-            "content": {"type": "string"},
-            "score": {"type": "number"},
-            "metrics": {"type": "object"},
+            "content": {"type": "string", "description": "Static response content to return for all requests"},
+            "score": {"type": "number", "description": "Optional score metric"},
+            "metrics": {"type": "object", "description": "Optional additional metrics"},
         },
+        "required": ["content"],  # Enforce explicit content
         "additionalProperties": True,
     },
     require_security=False,

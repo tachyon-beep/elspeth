@@ -38,6 +38,10 @@ python -m elspeth.cli \
   --head 0
 ```
 
+<!-- UPDATE 2025-10-12: Template creation citation refresh -->
+Update 2025-10-12: Template and export flags are defined in `src/elspeth/cli.py:80-105`.
+<!-- END UPDATE -->
+
 The new experiment lives at `config/sample_suite/draft_variant/` with prompts and a disabled
 `config.json`. The command is safe to run repeatedly; change `--template-base` or omit it to
 start from the default template.
@@ -51,6 +55,10 @@ python -m elspeth.cli \
   --export-suite-config outputs/sample_suite_export.json \
   --head 0
 ```
+
+<!-- UPDATE 2025-10-12: Suite export citation refresh -->
+Update 2025-10-12: Suite export and reporting orchestration executes via `_handle_suite_management` at `src/elspeth/cli.py:390-458`.
+<!-- END UPDATE -->
 
 The JSON/YAML file contains the suite metadata, experiment list, and per-experiment configuration
 ready for auditing or versioned backups.
@@ -124,6 +132,9 @@ iterate over directories or use multiple CLI invocations with different `--suite
 
 - Archive the CLI stdout/stderr from report runs; it lists each consolidated artefact and validates
   middleware lifecycle logging expectations (`src/elspeth/tools/reporting.py:33`).[^reporting-logging-2025-10-12]
+<!-- UPDATE 2025-10-12: Suite report logging citation refresh -->
+Update 2025-10-12: Reporting logs are produced across `src/elspeth/tools/reporting.py:26-199`.
+<!-- END UPDATE -->
 - Hash or sign artefacts destined for accreditation packages. Recommended structure:
 
   ```bash
@@ -139,6 +150,9 @@ iterate over directories or use multiple CLI invocations with different `--suite
 - After generating reports, open `consolidated/analysis_config.json` and confirm `plugin_summary` enumerates expected middleware, metrics, and sinks (`src/elspeth/tools/reporting.py:83`).[^reporting-plugin-summary-2025-10-12]
 - Validate that `consolidated/validation_results.json` captures suite warnings or errors emitted by `validate_suite`; accreditation reviewers rely on these logs (`src/elspeth/tools/reporting.py:38`).[^reporting-validation-2025-10-12]
 - If running with `--live-outputs`, confirm repository or blob sinks remained in dry-run mode unless explicitly toggled (`src/elspeth/cli.py:344`).[^reporting-live-outputs-2025-10-12]
+<!-- UPDATE 2025-10-12: CLI dry-run citation refresh -->
+Update 2025-10-12: Dry-run toggles are enforced at `src/elspeth/cli.py:360-392`.
+<!-- END UPDATE -->
 - When the visual analytics sink is enabled, review `analytics_visual.png`/`.html` and ensure HTML outputs remain self-contained (no external asset references) before distribution.[^reporting-visual-2025-10-12]
 
 ## Update History

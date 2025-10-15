@@ -9,11 +9,13 @@ from typing import Any, Callable, Mapping
 import yaml
 
 from elspeth.core.controls import create_cost_tracker, create_rate_limiter
+from elspeth.core.datasource_registry import datasource_registry
 from elspeth.core.experiments.plugin_registry import normalize_early_stop_definitions
+from elspeth.core.llm_registry import llm_registry
 from elspeth.core.orchestrator import OrchestratorConfig
-from elspeth.core.registry import registry
 from elspeth.core.security import coalesce_determinism_level, coalesce_security_level
-from elspeth.core.validation import ConfigurationError
+from elspeth.core.sink_registry import sink_registry
+from elspeth.core.validation_base import ConfigurationError
 
 
 @dataclass
@@ -25,6 +27,7 @@ class Settings:
     sinks: Any
     orchestrator_config: OrchestratorConfig
     suite_root: Path | None = None
+    config_path: Path | None = None
     suite_defaults: dict[str, Any] = field(default_factory=dict)
     rate_limiter: Any | None = None
     cost_tracker: Any | None = None
@@ -281,7 +284,7 @@ def _instantiate_sinks(sink_defs: list[dict[str, Any]]) -> list[Any]:
 
     instances: list[Any] = []
     for definition in sink_defs:
-        instances.append(_instantiate_plugin(definition, "sink", registry.create_sink))
+        instances.append(_instantiate_plugin(definition, "sink", sink_registry.create))
     return instances
 
 
@@ -311,6 +314,7 @@ def _build_orchestrator_config(
         concurrency_config=plugin_defs.concurrency_config,
         early_stop_config=plugin_defs.early_stop_config,
         early_stop_plugin_defs=plugin_defs.early_stop_plugin_defs or None,
+        max_rows=profile_data.get("max_rows"),
     )
 
 
@@ -367,8 +371,8 @@ def load_settings(path: str | Path, profile: str = "default") -> Settings:
     prompt_pack_name = profile_data.get("prompt_pack")
     pack = prompt_packs.get(prompt_pack_name) if prompt_pack_name else None
 
-    datasource = _instantiate_plugin(profile_data["datasource"], "datasource", registry.create_datasource)
-    llm = _instantiate_plugin(profile_data["llm"], "llm", registry.create_llm)
+    datasource = _instantiate_plugin(profile_data["datasource"], "datasource", datasource_registry.create)
+    llm = _instantiate_plugin(profile_data["llm"], "llm", llm_registry.create)
 
     prompt_config = _collect_prompt_configuration(profile_data)
     plugin_defs = _collect_plugin_definitions(profile_data)
@@ -395,6 +399,7 @@ def load_settings(path: str | Path, profile: str = "default") -> Settings:
         sinks=sinks,
         orchestrator_config=orchestrator_config,
         suite_root=Path(suite_root) if suite_root else None,
+        config_path=config_path,
         suite_defaults=suite_defaults,
         rate_limiter=rate_limiter,
         cost_tracker=cost_tracker,

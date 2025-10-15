@@ -5,11 +5,10 @@ from __future__ import annotations
 from typing import Any, Callable, Iterable, Mapping
 
 from elspeth.core.plugins import PluginContext
+from elspeth.core.protocols import LLMMiddleware
 from elspeth.core.registry.base import BasePluginRegistry
 from elspeth.core.security import coalesce_security_level
-from elspeth.core.validation import ConfigurationError
-
-from .middleware import LLMMiddleware
+from elspeth.core.validation_base import ConfigurationError
 
 # Use base registry infrastructure
 _middleware_registry = BasePluginRegistry[LLMMiddleware]("llm_middleware")

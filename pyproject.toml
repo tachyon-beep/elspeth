@@ -117,5 +117,6 @@ module = [
     "seaborn.*",
     "pingouin.*",
     "statsmodels.*",
+    "psycopg",
 ]
 ignore_missing_imports = true

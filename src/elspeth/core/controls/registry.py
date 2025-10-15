@@ -17,7 +17,7 @@ from typing import Any, Callable, Iterable
 
 from elspeth.core.plugins import PluginContext
 from elspeth.core.security import coalesce_security_level  # Still needed for validation functions
-from elspeth.core.validation import ConfigurationError
+from elspeth.core.validation_base import ConfigurationError
 
 from .cost_tracker import CostTracker
 from .cost_tracker_registry import cost_tracker_registry

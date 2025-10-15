@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from elspeth.plugins.outputs.local_bundle import LocalBundleSink
+from elspeth.plugins.nodes.sinks.local_bundle import LocalBundleSink
 
 
 def test_local_bundle_sink_creates_bundle(tmp_path, assert_sanitized_artifact):
@@ -47,8 +47,8 @@ def test_local_bundle_sink_creates_bundle(tmp_path, assert_sanitized_artifact):
 
 
 def test_file_copy_sink_happy_path(tmp_path):
-    from elspeth.core.interfaces import Artifact
-    from elspeth.plugins.outputs.file_copy import FileCopySink
+    from elspeth.core.protocols import Artifact
+    from elspeth.plugins.nodes.sinks.file_copy import FileCopySink
 
     src = tmp_path / "source.txt"
     src.write_text("payload", encoding="utf-8")
@@ -75,7 +75,7 @@ def test_file_copy_sink_happy_path(tmp_path):
 
 
 def test_file_copy_sink_skip_on_missing_artifact(tmp_path, caplog):
-    from elspeth.plugins.outputs.file_copy import FileCopySink
+    from elspeth.plugins.nodes.sinks.file_copy import FileCopySink
 
     sink = FileCopySink(destination=str(tmp_path / "dest.txt"), on_error="skip")
     sink.prepare_artifacts({})
@@ -86,8 +86,8 @@ def test_file_copy_sink_skip_on_missing_artifact(tmp_path, caplog):
 
 
 def test_file_copy_sink_skip_when_source_missing(tmp_path, caplog):
-    from elspeth.core.interfaces import Artifact
-    from elspeth.plugins.outputs.file_copy import FileCopySink
+    from elspeth.core.protocols import Artifact
+    from elspeth.plugins.nodes.sinks.file_copy import FileCopySink
 
     sink = FileCopySink(destination=str(tmp_path / "dest.txt"), on_error="skip")
     sink.prepare_artifacts({"input": [Artifact(id="a1", type="text/plain", path=str(tmp_path / "missing.txt"))]})
@@ -98,8 +98,8 @@ def test_file_copy_sink_skip_when_source_missing(tmp_path, caplog):
 
 
 def test_file_copy_sink_overwrite_protection(tmp_path):
-    from elspeth.core.interfaces import Artifact
-    from elspeth.plugins.outputs.file_copy import FileCopySink
+    from elspeth.core.protocols import Artifact
+    from elspeth.plugins.nodes.sinks.file_copy import FileCopySink
 
     src = tmp_path / "source.txt"
     dest = tmp_path / "dest.txt"

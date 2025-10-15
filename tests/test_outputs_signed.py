@@ -2,7 +2,7 @@ import json
 from datetime import datetime, timezone
 
 from elspeth.core.security import verify_signature
-from elspeth.plugins.outputs.signed import SignedArtifactSink
+from elspeth.plugins.nodes.sinks.signed import SignedArtifactSink
 
 
 def fake_results():
@@ -42,7 +42,7 @@ def test_signed_artifact_sink_env_key_and_timestamp(tmp_path, monkeypatch):
             return cls(2024, 1, 2, 3, 4, 5, tzinfo=timezone.utc)
 
     monkeypatch.setenv("ELSPETH_SIGNING_KEY", "env-secret")
-    monkeypatch.setattr("elspeth.plugins.outputs.signed.datetime", FixedDateTime)
+    monkeypatch.setattr("elspeth.plugins.nodes.sinks.signed.datetime", FixedDateTime)
 
     base = tmp_path / "signed"
     sink = SignedArtifactSink(base_path=base, bundle_name="exp", timestamped=True)

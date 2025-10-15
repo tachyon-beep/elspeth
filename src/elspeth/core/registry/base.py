@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Generic, Iterable, Mapping, TypeVar
 
 from elspeth.core.plugins import PluginContext, apply_plugin_context
-from elspeth.core.validation import ConfigurationError, validate_schema
+from elspeth.core.validation_base import ConfigurationError, validate_schema
 
 # Import context utilities (will be implemented next)
 # from .context_utils import (

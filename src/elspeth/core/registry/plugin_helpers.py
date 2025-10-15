@@ -24,7 +24,7 @@ from elspeth.core.security import (
     coalesce_security_level,
     normalize_determinism_level,
 )
-from elspeth.core.validation import ConfigurationError
+from elspeth.core.validation_base import ConfigurationError
 
 T = TypeVar("T")
 
@@ -156,14 +156,14 @@ def create_plugin_with_inheritance(
 
                 if SECURITY_LEVELS.index(normalized_child) < SECURITY_LEVELS.index(normalized_parent):
                     raise ValueError(
-                        f"Conflicting security_level: child cannot downgrade from "
-                        f"parent's {normalized_parent} to {normalized_child}"
+                        f"Conflicting security_level: child cannot downgrade from " f"parent's {normalized_parent} to {normalized_child}"
                     )
 
                 level = normalized_child  # Use child's level (same or upgrade is allowed)
             else:
                 # No explicit level - inherit from parent
                 from elspeth.core.security import normalize_security_level
+
                 level = normalize_security_level(parent_sec_level)
                 sources.append(f"{plugin_kind}:{name}.inherited.security_level")
         elif definition_sec_level is not None or option_sec_level is not None:
