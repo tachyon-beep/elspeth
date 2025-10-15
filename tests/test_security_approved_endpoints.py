@@ -10,6 +10,7 @@ from elspeth.core.security.approved_endpoints import (
     validate_endpoint,
     validate_http_api_endpoint,
 )
+from elspeth.core.validation_base import ConfigurationError
 
 
 class TestEndpointValidation:
