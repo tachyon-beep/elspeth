@@ -1,0 +1,14 @@
+# Codex Scratch Log
+
+This is an internal scratchpad for ongoing engineering notes. Update freely while keeping entries terse.
+
+## 2025-10-20
+
+- Split `core/validation/validators.py` into `settings.py`, `suite.py`, `rules.py`, `schemas.py`; updated documentation and tests.
+- Test suite (`pytest -m "not slow" --no-cov`) passes via `.venv`.
+- Remaining large modules to tackle next:
+  1. `core/base/schema.py` – break into model factory/inference/helpers.
+  2. `core/utils/logging.py` – isolate serialization/file handling.
+  3. `core/experiments/plugin_registry.py` – extract validation helpers.
+
+> Next session: start with `core/base/schema.py` decomposition; ensure schema inference tests are covered.
