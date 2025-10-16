@@ -371,7 +371,7 @@
 - Authored a top-level `README.md`, refreshed `AGENTS.md`, and documented onboarding/tooling expectations.
 - Introduced LLM middleware (audit logging, prompt shielding) and adaptive rate limiting with threaded execution controls to mirror legacy safety/audit behaviour.
 - Outstanding work: Azure ML telemetry hooks, DevOps/Excel archivers, advanced statistics suite, and schema/preflight validation from legacy runner.
-<!-- UPDATE 2025-10-12: Outstanding items addressed via telemetry middleware, Excel/ZIP sinks, analytics extras, and validation enhancements (`src/elspeth/core/validation/validators.py`). -->
+<!-- UPDATE 2025-10-12: Outstanding items addressed via telemetry middleware, Excel/ZIP sinks, analytics extras, and validation enhancements (`src/elspeth/core/validation/settings.py` and `src/elspeth/core/validation/suite.py`). -->
 
 ## Update History
 - 2025-10-12 – Recorded completion of Phases 5–7 enhancements and noted remaining optional backlog items.

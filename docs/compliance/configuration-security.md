@@ -24,9 +24,9 @@
 
 ## Validation & Fail-fast Behaviour
 
-- **Schema enforcement** – Loader passes raw configuration through schema validators before instantiating plugins, catching typoed plugin names or missing options early (`src/elspeth/core/validation/validators.py:271`, `src/elspeth/core/registries/__init__.py:98`, `src/elspeth/core/controls/registry.py:36`).[^config-schema-2025-10-12]
+- **Schema enforcement** – Loader passes raw configuration through schema validators before instantiating plugins, catching typoed plugin names or missing options early (`src/elspeth/core/validation/settings.py and src/elspeth/core/validation/suite.py`, `src/elspeth/core/registries/__init__.py:98`, `src/elspeth/core/controls/registry.py:36`).[^config-schema-2025-10-12]
 - **Early-stop normalisation** – User-friendly structures are converted into canonical plugin definitions, reducing ambiguity around threshold plugins (`src/elspeth/core/experiments/plugin_registry.py:298`, `src/elspeth/config.py:69`).[^config-early-stop-2025-10-12]
-- **Suite audits** – `validate_suite` collects experiment metadata, checks for duplicate names/baselines, and surfaces aggregate risk estimations before orchestration begins (`src/elspeth/core/validation/validators.py:407`, `src/elspeth/core/experiments/suite_runner.py:74`).[^config-suite-audits-2025-10-12]
+- **Suite audits** – `validate_suite` collects experiment metadata, checks for duplicate names/baselines, and surfaces aggregate risk estimations before orchestration begins (`src/elspeth/core/validation/settings.py and src/elspeth/core/validation/suite.py`, `src/elspeth/core/experiments/suite_runner.py:74`).[^config-suite-audits-2025-10-12]
 
 ### Update 2025-10-12: Suite Defaults
 

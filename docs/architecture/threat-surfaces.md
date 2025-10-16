@@ -1,7 +1,7 @@
 # Threat Surfaces & Trust Boundaries
 
 ## Trust Zones
-- **Operator Zone** – Local CLI execution validates configuration before any network activity, acting as the first guard against malformed profiles (`src/elspeth/cli.py:83`, `src/elspeth/core/validation/validators.py:271`).[^threat-operator-2025-10-12]
+- **Operator Zone** – Local CLI execution validates configuration before any network activity, acting as the first guard against malformed profiles (`src/elspeth/cli.py:83`, `src/elspeth/core/validation/settings.py and src/elspeth/core/validation/suite.py`).[^threat-operator-2025-10-12]
 <!-- UPDATE 2025-10-12: CLI validation citation refresh -->
 Update 2025-10-12: Configuration validation warnings surface at `src/elspeth/cli.py:369-380`.
 <!-- END UPDATE -->
@@ -40,7 +40,7 @@ Update 2025-10-12: Datasource implementations are under `src/elspeth/plugins/nod
 <!-- UPDATE 2025-10-12: Middleware module relocation -->
 Update 2025-10-12: Middleware protections now live in `src/elspeth/plugins/nodes/transforms/llm/middleware*.py`.
 <!-- END UPDATE -->
-- **Configuration spoofing** – Invalid plugin names or options are caught before instantiation; however, accreditation deployments should sign configuration bundles to prevent tampering at rest (`src/elspeth/core/validation/validators.py:271`, `src/elspeth/core/registries/__init__.py:202`).[^threat-config-2025-10-12]
+- **Configuration spoofing** – Invalid plugin names or options are caught before instantiation; however, accreditation deployments should sign configuration bundles to prevent tampering at rest (`src/elspeth/core/validation/settings.py and src/elspeth/core/validation/suite.py`, `src/elspeth/core/registries/__init__.py:202`).[^threat-config-2025-10-12]
 - **Suite configuration drift** – Prompt pack merges and suite defaults can silently introduce outdated plugins; monitor `suite_defaults` and prompt pack digests, and sign exported configs (`src/elspeth/config.py:52`, `src/elspeth/core/experiments/suite_runner.py:69`).[^threat-suite-config-2025-10-12]
 
 ## Output Threats

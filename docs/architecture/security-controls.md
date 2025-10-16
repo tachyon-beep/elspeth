@@ -22,15 +22,15 @@ Update 2025-10-12: Signed artifact enforcement resides in `src/elspeth/plugins/n
 - Azure datasources/outputs default to `DefaultAzureCredential`, falling back to SAS tokens when managed identity is unavailable (`src/elspeth/datasources/blob_store.py:125`, `src/elspeth/plugins/outputs/blob.py:210`).
 
 ## Input Validation
-- **Configuration schemas** – Settings profiles, plugin definitions, and suite experiments are validated against JSON-schema-like definitions before execution (`src/elspeth/core/validation/validators.py:271`, `src/elspeth/core/validation/validators.py:1012`, `src/elspeth/core/validation/validators.py:1034`).[^sec-config-validation-2025-10-12]
+- **Configuration schemas** – Settings profiles, plugin definitions, and suite experiments are validated against JSON-schema-like definitions before execution (`src/elspeth/core/validation/settings.py and src/elspeth/core/validation/suite.py`, `src/elspeth/core/validation/settings.py and src/elspeth/core/validation/suite.py`, `src/elspeth/core/validation/settings.py and src/elspeth/core/validation/suite.py`).[^sec-config-validation-2025-10-12]
 <!-- UPDATE 2025-10-12: Validation citation refresh -->
-Update 2025-10-12: Validation helpers span `src/elspeth/core/validation/validators.py:254-512` with suite schema enforcement in `src/elspeth/core/config/schema.py:17-198`.
+Update 2025-10-12: Validation helpers span `src/elspeth/core/validation/settings.py and src/elspeth/core/validation/suite.py-512` with suite schema enforcement in `src/elspeth/core/config/schema.py:17-198`.
 <!-- END UPDATE -->
 - **Prompt compilation** – Prompts render with `StrictUndefined`, raising `PromptValidationError` when required variables are missing and preventing silent template failures (`src/elspeth/core/prompts/engine.py:33`, `src/elspeth/core/prompts/template.py:24`).[^sec-prompt-2025-10-12]
 - **Response validation plugins** – Regex, JSON, and LLM-guard validators reject responses that fail format or policy checks, isolating untrusted LLM output from downstream pipelines (`src/elspeth/plugins/experiments/validation.py:20`, `src/elspeth/plugins/experiments/validation.py:47`, `src/elspeth/plugins/experiments/validation.py:100`).[^sec-validation-plugins-2025-10-12]
-- **Suite governance** – Suite validation aggregates experiment metadata, enforces presence of sinks, and reports baseline consistency before any run is accepted (`src/elspeth/core/experiments/suite_runner.py:208`, `src/elspeth/core/validation/validators.py:471`).[^sec-suite-governance-2025-10-12]
+- **Suite governance** – Suite validation aggregates experiment metadata, enforces presence of sinks, and reports baseline consistency before any run is accepted (`src/elspeth/core/experiments/suite_runner.py:208`, `src/elspeth/core/validation/settings.py and src/elspeth/core/validation/suite.py`).[^sec-suite-governance-2025-10-12]
 <!-- UPDATE 2025-10-12: Suite governance line update -->
-Update 2025-10-12: Suite validation and baseline checks occur at `src/elspeth/core/experiments/suite_runner.py:295-382` and `src/elspeth/core/validation/validators.py:430-512`.
+Update 2025-10-12: Suite validation and baseline checks occur at `src/elspeth/core/experiments/suite_runner.py:295-382` and `src/elspeth/core/validation/settings.py and src/elspeth/core/validation/suite.py-512`.
 <!-- END UPDATE -->
 <!-- Update 2025-10-12: Experiment configs now run through `src/elspeth/core/config/schema.py:17`, ensuring renamed keys (e.g., `prompt_pack`, `concurrency`, `early_stop_plugins`) conform to normalized schemas before execution. -->
 

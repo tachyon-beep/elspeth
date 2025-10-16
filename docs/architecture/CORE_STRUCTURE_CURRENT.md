@@ -52,7 +52,7 @@ src/elspeth/core/
 - **Schema definitions:** `config/schema.py`
 - **Secure-mode validation:** `config/validation.py`
 - **Base validation classes:** `validation/base.py`
-- **Profile validation entrypoints:** `validation/validators.py`
+- **Profile validation entrypoints:** `validation/settings.py`
 
 ### "I need to work with security/rate limiting/prompts"
 
@@ -65,7 +65,8 @@ src/elspeth/core/
 
 **Large Files** (>10KB - may need refactoring):
 
-- `validation/validators.py` – 31K ⚠️ Very large
+- `validation/settings.py` – 24K ⚠️ Large
+- `validation/suite.py` – 18K
 - `base/schema.py` – 18K
 - `registries/sink.py` – 18K
 - `pipeline/artifact_pipeline.py` – 15K

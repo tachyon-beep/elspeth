@@ -167,7 +167,7 @@ class AggregatorPlugin(Protocol):
 **FR3: Schema Validation Utilities**
 
 ```python
-# src/elspeth/core/validation/validators.py (new functions)
+# src/elspeth/core/validation/settings.py and src/elspeth/core/validation/suite.py (new functions)
 
 from pydantic import ValidationError
 

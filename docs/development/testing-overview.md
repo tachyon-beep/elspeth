@@ -2,7 +2,7 @@
 
 | Area | Key Tests | Focus |
 | --- | --- | --- |
-| Configuration Validation | `tests/test_config.py`, `tests/test_validation_settings.py`, `tests/test_config_suite.py` | Ensures schema enforcement catches missing plugins, bad options, and suite-level inconsistencies before runtime (`src/elspeth/core/validation/validators.py:271`) |
+| Configuration Validation | `tests/test_config.py`, `tests/test_validation_settings.py`, `tests/test_config_suite.py` | Ensures schema enforcement catches missing plugins, bad options, and suite-level inconsistencies before runtime (`src/elspeth/core/validation/settings.py and src/elspeth/core/validation/suite.py`) |
 | Datasource Security | `tests/test_datasource_csv.py`, `tests/test_datasource_blob_plugin.py` | Confirms `on_error` policies, security-level tagging, and blob profile resolution behave deterministically (`src/elspeth/plugins/datasources/csv_blob.py:35`) |
 | Middleware Enforcement | `tests/test_llm_middleware.py:39-199` | Verifies chaining, prompt shielding (abort/mask/log), Azure Content Safety screening, and telemetry channel logging |
 | LLM Client Adapters | `tests/test_llm_azure.py`, `tests/test_llm_http_openai.py`, `tests/test_llm_mock.py` | Mocks external APIs to validate credential resolution, request payloads, and deterministic mock behaviour (`src/elspeth/plugins/llms/azure_openai.py:25`) |

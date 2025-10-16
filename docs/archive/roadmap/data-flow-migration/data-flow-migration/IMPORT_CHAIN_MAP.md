@@ -61,7 +61,7 @@
 
 - `src/elspeth/config.py` (line 66)
 - `src/elspeth/core/orchestrator.py` (line 45)
-- `src/elspeth/core/validation/validators.py` (line 260)
+- `src/elspeth/core/validation/settings.py` and `src/elspeth/core/validation/suite.py` (line 260)
 - `tests/test_datasource_*.py` (12 files)
 
 **Public API**: YES (in `__all__`)
@@ -75,7 +75,7 @@
 - `src/elspeth/config.py` (line 152)
 - `src/elspeth/core/experiments/suite_runner.py` (line 219)
 - `src/elspeth/core/orchestrator.py` (line 67)
-- `src/elspeth/core/validation/validators.py` (line 392)
+- `src/elspeth/core/validation/settings.py` and `src/elspeth/core/validation/suite.py` (line 392)
 - `src/elspeth/plugins/experiments/validation.py` (line 90)
 - `tests/test_llm*.py` (28 files)
 
@@ -89,7 +89,7 @@
 
 - `src/elspeth/core/pipeline/artifact_pipeline.py` (line 114)
 - `src/elspeth/core/orchestrator.py` (line 89)
-- `src/elspeth/core/validation/validators.py` (line 521)
+- `src/elspeth/core/validation/settings.py` and `src/elspeth/core/validation/suite.py` (line 521)
 - `tests/test_outputs_*.py` (19 files)
 
 **Public API**: YES (in `__all__`)
@@ -102,7 +102,7 @@
 
 - `src/elspeth/core/experiments/runner.py` (lines 102, 187, 234, 301)
 - `src/elspeth/core/experiments/suite_runner.py` (lines 178, 225)
-- `src/elspeth/core/validation/validators.py` (lines 612, 689, 744, 801)
+- `src/elspeth/core/validation/settings.py` and `src/elspeth/core/validation/suite.py` (lines 612, 689, 744, 801)
 - `tests/test_experiment*.py` (35 files)
 
 **Public API**: YES (in `__all__`)
@@ -251,7 +251,7 @@ from elspeth.core.datasource_registry import datasource_registry
 from elspeth.core.llm_registry import llm_registry
 from elspeth.core.sink_registry import sink_registry
 
-# src/elspeth/core/validation/validators.py
+# src/elspeth/core/validation/settings.py and src/elspeth/core/validation/suite.py
 from elspeth.core.experiments.plugin_registry import (
     create_row_plugin,
     create_aggregator,

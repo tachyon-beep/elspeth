@@ -25,7 +25,7 @@ The `src/elspeth/core/` directory still places a large number of modules at the 
 - Deprecated `core/plugins/` and `core/llm/` folders deleted
 
 **Remaining Opportunities:**
-- Reduce oversized modules (`validation/validators.py`, `base/schema.py`, `utils/logging.py`) via logical splits
+- Reduce oversized modules (`validation/settings.py`, `validation/suite.py`, `base/schema.py`, `utils/logging.py`) via logical splits
 - Continue trimming historical documentation that references pre-refactor paths
 
 **Recommendation:** Track the residual refactors (file size reductions, doc pruning) as follow-up tidy tasks rather than structural work.
@@ -94,15 +94,17 @@ registry.py                   11K  - Facade (barely used, only 2 real imports)
 - `datasource_registry`: 7 imports
 - `utility_plugin_registry`: 3 imports
 
-#### VALIDATION FILES (2 files, ~39KB)
+#### VALIDATION FILES (3 files, ~39KB)
 ```
-validation.py                 31K  - Main validation logic
-validation_base.py           7.6K  - Base validation classes
+validation/settings.py       24K  - Settings profile validation
+validation/suite.py          18K  - Suite validation and preflight reporting
+validation/base.py          7.6K  - Base validation classes
 ```
 
 **Import Impact:** 54 imports total
-- `validation`: 17 imports
-- `validation_base`: 37 imports
+- `validation.settings`: 12 imports
+- `validation.suite`: 5 imports
+- `validation.base`: 37 imports
 
 #### ORCHESTRATION FILES (4 files, ~24KB)
 ```
@@ -403,7 +405,7 @@ plugin_context.py   34 imports  →  core/base/plugin_context.py
 
 #### Medium-Impact Modules (10-30 imports)
 ```
-validation.py               17 imports  →  core/validation/validators.py
+validation.py               17 imports  →  core/validation/settings.py & core/validation/suite.py
 llm_registry.py             15 imports  →  core/registries/llm.py
 schema.py                   13 imports  →  core/base/schema.py
 llm_middleware_registry.py  10 imports  →  core/registries/middleware.py

@@ -79,7 +79,7 @@ pattern=options.get("pattern", ""),
 **Recommendation**: Make pattern required, fail if empty
 
 ### 6. LLM Temperature Default
-**File**: `src/elspeth/core/validation/validators.py:840`
+**File**: `src/elspeth/core/validation/settings.py and src/elspeth/core/validation/suite.py`
 ```python
 temperature = float(data.get("temperature", 0.0) or 0.0)
 ```
@@ -88,7 +88,7 @@ temperature = float(data.get("temperature", 0.0) or 0.0)
 **Recommendation**: Require explicit temperature in LLM config
 
 ### 7. LLM Max Tokens Default
-**File**: `src/elspeth/core/validation/validators.py:841`
+**File**: `src/elspeth/core/validation/settings.py and src/elspeth/core/validation/suite.py`
 ```python
 max_tokens = int(data.get("max_tokens", 0) or 0)
 ```
@@ -260,7 +260,7 @@ max_attempts=options.get("max_attempts", 3)
 
 ### Feature Flags (2 instances)
 
-**File**: `src/elspeth/core/validation/validators.py:776-777`
+**File**: `src/elspeth/core/validation/settings.py and src/elspeth/core/validation/suite.py-777`
 ```python
 enabled = bool(data.get("enabled", True))
 is_baseline = bool(data.get("is_baseline", False))

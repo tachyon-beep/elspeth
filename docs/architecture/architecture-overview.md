@@ -6,9 +6,9 @@
 <!-- UPDATE 2025-10-12: Core protocol definitions relocated -->
 Update 2025-10-12: Protocol interfaces now live in `src/elspeth/core/base/protocols.py:18-309`; the original `core/interfaces.py` reference is retained for pre-migration audits.
 <!-- END UPDATE -->
-- **Configuration as code** – Profiles are hydrated through validated YAML and merged prompt packs, preventing runtime surprises and enabling fail-fast feedback (`src/elspeth/config.py:41`, `src/elspeth/core/validation/validators.py:271`, `src/elspeth/core/validation/validators.py:1012`).[^config-2025-10-12]
+- **Configuration as code** – Profiles are hydrated through validated YAML and merged prompt packs, preventing runtime surprises and enabling fail-fast feedback (`src/elspeth/config.py:41`, `src/elspeth/core/validation/settings.py and src/elspeth/core/validation/suite.py`, `src/elspeth/core/validation/settings.py and src/elspeth/core/validation/suite.py`).[^config-2025-10-12]
 <!-- UPDATE 2025-10-12: Validation citation refresh -->
-Update 2025-10-12: Configuration validation spans `src/elspeth/config.py:52-210` and `src/elspeth/core/validation/validators.py:254-318`; the validation module tops out at 927 lines after refactors.
+Update 2025-10-12: Configuration validation spans `src/elspeth/config.py:52-210` and `src/elspeth/core/validation/settings.py and src/elspeth/core/validation/suite.py-318`; the validation module tops out at 927 lines after refactors.
 <!-- END UPDATE -->
 - **Traceable execution** – The orchestrator records retries, aggregates, costs, and security classifications on every run so sinks and auditors receive consistent metadata (`src/elspeth/core/experiments/runner.py:162`, `src/elspeth/core/experiments/runner.py:198`, `src/elspeth/core/experiments/runner.py:218`).[^trace-2025-10-12]
 <!-- UPDATE 2025-10-12: Trace metadata now includes `retry_summary`, `cost_summary`, and `early_stop` payloads surfaced to sinks and middleware via `src/elspeth/core/experiments/runner.py:176`, `src/elspeth/core/experiments/runner.py:198`, `src/elspeth/core/experiments/runner.py:212`. -->

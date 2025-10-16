@@ -14,8 +14,12 @@ __all__ = [
 
 
 def __getattr__(name: str):
-    if name in {"SuiteValidationReport", "validate_settings", "validate_suite"}:
-        from . import validators
+    if name == "validate_settings":
+        from .settings import validate_settings as _validate_settings
 
-        return getattr(validators, name)
+        return _validate_settings
+    if name in {"validate_suite", "SuiteValidationReport"}:
+        from .suite import SuiteValidationReport as _SuiteValidationReport, validate_suite as _validate_suite
+
+        return {"validate_suite": _validate_suite, "SuiteValidationReport": _SuiteValidationReport}[name]
     raise AttributeError(f"module 'elspeth.core.validation' has no attribute {name!r}")
