@@ -15,13 +15,15 @@ class SecurityLevel(str, Enum):
 
     Security aggregation rule: MOST restrictive wins.
     Example: OFFICIAL + SECRET → SECRET
+
+    Note: The string "SECRET" below is a classification level name, not a password.
     """
 
     UNOFFICIAL = "UNOFFICIAL"
     OFFICIAL = "OFFICIAL"
     OFFICIAL_SENSITIVE = "OFFICIAL_SENSITIVE"
     PROTECTED = "PROTECTED"
-    SECRET = "SECRET"
+    SECRET = "SECRET"  # noqa: S105 - This is a classification level, not a password
 
     def __lt__(self, other):
         """Support comparison for hierarchy enforcement."""

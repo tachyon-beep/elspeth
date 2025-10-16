@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping
@@ -13,6 +14,23 @@ from elspeth.core.security import normalize_determinism_level, normalize_securit
 from elspeth.plugins.nodes.sinks._sanitize import sanitize_cell
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class ExcelSinkConfig:
+    """Configuration for ExcelResultSink to reduce constructor parameter count."""
+
+    base_path: str | Path
+    workbook_name: str | None = None
+    timestamped: bool = True
+    results_sheet: str = "Results"
+    manifest_sheet: str = "Manifest"
+    aggregates_sheet: str = "Aggregates"
+    include_manifest: bool = True
+    include_aggregates: bool = True
+    on_error: str = "abort"
+    sanitize_formulas: bool = True
+    sanitize_guard: str = "'"
 
 
 def _load_workbook_dependencies():
@@ -41,7 +59,27 @@ class ExcelResultSink(ResultSink):
         on_error: str = "abort",
         sanitize_formulas: bool = True,
         sanitize_guard: str = "'",
+        config: ExcelSinkConfig | None = None,
     ) -> None:
+        """Initialize Excel sink.
+
+        Args can be provided either directly or via config object.
+        If config is provided, it takes precedence over individual args.
+        This supports both legacy and new usage patterns.
+        """
+        # Use config if provided, otherwise use individual args
+        if config is not None:
+            base_path = config.base_path
+            workbook_name = config.workbook_name
+            timestamped = config.timestamped
+            results_sheet = config.results_sheet
+            manifest_sheet = config.manifest_sheet
+            aggregates_sheet = config.aggregates_sheet
+            include_manifest = config.include_manifest
+            include_aggregates = config.include_aggregates
+            on_error = config.on_error
+            sanitize_formulas = config.sanitize_formulas
+            sanitize_guard = config.sanitize_guard
         self.base_path = Path(base_path)
         self.workbook_name = workbook_name
         self.timestamped = timestamped

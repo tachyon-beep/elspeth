@@ -72,10 +72,12 @@ class PgVectorClient(VectorStoreClient):
     ) -> None:
         try:
             import psycopg
+            from psycopg import sql
         except ModuleNotFoundError as exc:  # pragma: no cover - optional dependency
             raise RuntimeError("psycopg package is required for pgvector provider") from exc
 
         self._psycopg = psycopg
+        self._sql = sql
         self._dsn = dsn
         self._table = table
         self._conflict_policy = upsert_conflict
@@ -83,9 +85,10 @@ class PgVectorClient(VectorStoreClient):
     def _ensure_table(self, conn) -> None:
         with conn.cursor() as cur:
             cur.execute("CREATE EXTENSION IF NOT EXISTS vector")
+            # Use sql.Identifier to safely quote table name and prevent SQL injection
             cur.execute(
-                f"""
-                CREATE TABLE IF NOT EXISTS {self._table} (
+                self._sql.SQL("""
+                CREATE TABLE IF NOT EXISTS {} (
                     namespace TEXT NOT NULL,
                     document_id TEXT NOT NULL,
                     embedding VECTOR(1536),
@@ -95,7 +98,7 @@ class PgVectorClient(VectorStoreClient):
                     updated_at TIMESTAMPTZ NOT NULL,
                     PRIMARY KEY (namespace, document_id)
                 )
-                """
+                """).format(self._sql.Identifier(self._table))
             )
 
     def upsert_many(self, namespace: str, records: Iterable[VectorRecord]) -> UpsertResponse:
@@ -107,15 +110,12 @@ class PgVectorClient(VectorStoreClient):
         conn = self._psycopg.connect(self._dsn, autocommit=True)
         try:
             self._ensure_table(conn)
+            # Use sql.SQL and sql.Identifier to safely construct queries and prevent SQL injection
+            query = self._build_insert_query()
             with conn.cursor() as cur:
                 for record in items:
                     vector_literal = self._vector_literal(record.vector)
                     metadata = json.dumps(record.metadata or {})
-                    query = f"""
-                        INSERT INTO {self._table} (namespace, document_id, embedding, contents, metadata, security_level, updated_at)
-                        VALUES (%s, %s, %s::vector, %s, %s::jsonb, %s, NOW())
-                        ON CONFLICT (namespace, document_id) DO {self._resolve_conflict_clause()}
-                    """
                     cur.execute(
                         query,
                         (
@@ -137,19 +137,31 @@ class PgVectorClient(VectorStoreClient):
         values = ",".join(f"{float(value):.12g}" for value in vector)
         return f"[{values}]"
 
-    def _resolve_conflict_clause(self) -> str:
+    def _build_insert_query(self):
+        """Build the INSERT query with safe identifier quoting for table name.
+
+        Returns SQL composed object with parameterized table name to prevent SQL injection.
+        """
         policy = self._conflict_policy.lower()
         if policy not in {"replace", "skip"}:
             policy = "replace"
+
         if policy == "skip":
-            return "NOTHING"
-        return """
+            conflict_clause = self._sql.SQL("NOTHING")
+        else:
+            conflict_clause = self._sql.SQL("""
             UPDATE SET embedding = EXCLUDED.embedding,
                         contents = EXCLUDED.contents,
                         metadata = EXCLUDED.metadata,
                         security_level = EXCLUDED.security_level,
                         updated_at = NOW()
-        """
+            """)
+
+        return self._sql.SQL("""
+            INSERT INTO {} (namespace, document_id, embedding, contents, metadata, security_level, updated_at)
+            VALUES (%s, %s, %s::vector, %s, %s::jsonb, %s, NOW())
+            ON CONFLICT (namespace, document_id) DO {}
+        """).format(self._sql.Identifier(self._table), conflict_clause)
 
 
 class AzureSearchVectorClient(VectorStoreClient):

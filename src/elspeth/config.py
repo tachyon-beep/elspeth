@@ -194,16 +194,8 @@ def _collect_plugin_definitions(profile_data: Mapping[str, Any]) -> PluginDefini
     )
 
 
-def _apply_prompt_pack_overrides(
-    pack: Mapping[str, Any] | None,
-    prompt_config: PromptConfiguration,
-    plugin_defs: PluginDefinitions,
-) -> None:
-    """Apply prompt pack overrides to the prompt configuration and plugin definitions."""
-
-    if not pack or not isinstance(pack, Mapping):
-        return
-
+def _apply_prompt_config_overrides(pack: Mapping[str, Any], prompt_config: PromptConfiguration) -> None:
+    """Apply prompt pack overrides to prompt configuration."""
     if pack_prompts := pack.get("prompts"):
         prompt_config.prompts = _merge_pack(prompt_config.prompts, pack_prompts)
     if not prompt_config.prompt_fields:
@@ -211,36 +203,63 @@ def _apply_prompt_pack_overrides(
     if not prompt_config.criteria:
         prompt_config.criteria = pack.get("criteria")
 
+
+def _apply_plugin_list_overrides(pack: Mapping[str, Any], plugin_defs: PluginDefinitions) -> None:
+    """Apply prompt pack overrides to plugin lists (prepend pack plugins)."""
     plugin_defs.row_plugins = list(pack.get("row_plugins", []) or []) + plugin_defs.row_plugins
     plugin_defs.aggregator_plugins = list(pack.get("aggregator_plugins", []) or []) + plugin_defs.aggregator_plugins
     plugin_defs.baseline_plugins = list(pack.get("baseline_plugins", []) or []) + plugin_defs.baseline_plugins
     plugin_defs.validation_plugins = list(pack.get("validation_plugins", []) or []) + plugin_defs.validation_plugins
     plugin_defs.llm_middlewares = list(pack.get("llm_middlewares", []) or []) + plugin_defs.llm_middlewares
 
+
+def _apply_singleton_config_overrides(pack: Mapping[str, Any], plugin_defs: PluginDefinitions) -> None:
+    """Apply prompt pack overrides to singleton configurations (only if not already set)."""
     if not plugin_defs.sink_defs:
         plugin_defs.sink_defs = list(pack.get("sinks", []) or [])
-    if not plugin_defs.rate_limiter_def and pack.get("rate_limiter"):
-        rate_limiter_override = pack.get("rate_limiter")
-        if isinstance(rate_limiter_override, Mapping):
-            plugin_defs.rate_limiter_def = dict(rate_limiter_override)
-    if not plugin_defs.cost_tracker_def and pack.get("cost_tracker"):
-        cost_tracker_override = pack.get("cost_tracker")
-        if isinstance(cost_tracker_override, Mapping):
-            plugin_defs.cost_tracker_def = dict(cost_tracker_override)
-    if not plugin_defs.prompt_defaults and pack.get("prompt_defaults"):
-        pack_prompt_defaults = pack.get("prompt_defaults")
-        if isinstance(pack_prompt_defaults, Mapping):
-            plugin_defs.prompt_defaults = dict(pack_prompt_defaults)
-    if not plugin_defs.concurrency_config and pack.get("concurrency"):
-        concurrency_override = pack.get("concurrency")
-        if isinstance(concurrency_override, Mapping):
-            plugin_defs.concurrency_config = dict(concurrency_override)
 
+    # Helper to safely copy mapping if exists and target is not set
+    def _set_if_mapping(target_attr: str, pack_key: str) -> None:
+        if not getattr(plugin_defs, target_attr) and pack.get(pack_key):
+            value = pack.get(pack_key)
+            if isinstance(value, Mapping):
+                setattr(plugin_defs, target_attr, dict(value))
+
+    _set_if_mapping("rate_limiter_def", "rate_limiter")
+    _set_if_mapping("cost_tracker_def", "cost_tracker")
+    _set_if_mapping("prompt_defaults", "prompt_defaults")
+    _set_if_mapping("concurrency_config", "concurrency")
+
+
+def _apply_early_stop_overrides(pack: Mapping[str, Any], plugin_defs: PluginDefinitions) -> None:
+    """Apply prompt pack early stop plugin overrides."""
     pack_early_stop_defs = normalize_early_stop_definitions(pack.get("early_stop_plugins")) or []
-    if not pack_early_stop_defs and pack.get("early_stop"):
+    if not pack_early_stop_defs:
         pack_early_stop_defs = normalize_early_stop_definitions(pack.get("early_stop")) or []
     if pack_early_stop_defs:
         plugin_defs.early_stop_plugin_defs = pack_early_stop_defs + plugin_defs.early_stop_plugin_defs
+
+
+def _apply_prompt_pack_overrides(
+    pack: Mapping[str, Any] | None,
+    prompt_config: PromptConfiguration,
+    plugin_defs: PluginDefinitions,
+) -> None:
+    """Apply prompt pack overrides to the prompt configuration and plugin definitions.
+
+    This function delegates to smaller helper functions to reduce complexity:
+    - _apply_prompt_config_overrides: Handles prompt-specific config
+    - _apply_plugin_list_overrides: Handles plugin lists
+    - _apply_singleton_config_overrides: Handles singleton configs
+    - _apply_early_stop_overrides: Handles early stop plugins
+    """
+    if not pack or not isinstance(pack, Mapping):
+        return
+
+    _apply_prompt_config_overrides(pack, prompt_config)
+    _apply_plugin_list_overrides(pack, plugin_defs)
+    _apply_singleton_config_overrides(pack, plugin_defs)
+    _apply_early_stop_overrides(pack, plugin_defs)
 
 
 def _resolve_sink_definitions(

@@ -115,8 +115,9 @@ class PluginLogger:
 
             module_name = self.plugin_instance.__class__.__module__.split(".")[0]
             return importlib.metadata.version(module_name)
-        except Exception:
-            pass
+        except Exception as exc:
+            # Package not installed or metadata unavailable; log debug and return unknown
+            self.logger.debug("Could not determine plugin version for %s: %s", self.context.plugin_name, exc)
 
         return "unknown"
 

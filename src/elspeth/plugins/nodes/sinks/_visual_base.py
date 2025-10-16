@@ -166,12 +166,14 @@ class BaseVisualSink(ResultSink):
 
             matplotlib.use("Agg")
             import matplotlib.pyplot as plt
-        except Exception as exc:
+        except ImportError as exc:
             raise RuntimeError("matplotlib is required for visual analytics") from exc
 
         try:
             import seaborn
-        except Exception:
+        except ImportError as exc:
+            # Seaborn is optional; log warning and continue without enhanced styling
+            logger.warning("seaborn not available; visual plots will use matplotlib defaults: %s", exc)
             seaborn = None
 
         self._plot_modules = (matplotlib, plt, seaborn)

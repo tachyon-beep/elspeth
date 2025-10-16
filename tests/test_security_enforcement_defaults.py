@@ -28,8 +28,8 @@ class TestCriticalDefaultEnforcement:
         audit_file = (
             pathlib.Path(__file__).parent.parent
             / "docs"
+            / "archive"
             / "roadmap"
-            / "completed"
             / "data-flow-migration"
             / "data-flow-migration"
             / "SILENT_DEFAULTS_AUDIT.md"
