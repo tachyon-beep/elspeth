@@ -8,8 +8,8 @@ from typing import Any, Sequence
 
 import requests
 
-from elspeth.core.llm_middleware_registry import register_middleware
 from elspeth.core.protocols import LLMMiddleware, LLMRequest
+from elspeth.core.registries.middleware import register_middleware
 
 logger = logging.getLogger(__name__)
 

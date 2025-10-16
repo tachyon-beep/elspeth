@@ -77,7 +77,7 @@ def create_rate_limiter(
     to eliminate duplication. Returns None if definition is None or empty
     (optional plugin pattern).
     """
-    from elspeth.core.registry.plugin_helpers import create_plugin_with_inheritance
+    from elspeth.core.registries.plugin_helpers import create_plugin_with_inheritance
 
     return create_plugin_with_inheritance(
         rate_limiter_registry,
@@ -101,7 +101,7 @@ def create_cost_tracker(
     to eliminate duplication. Returns None if definition is None or empty
     (optional plugin pattern).
     """
-    from elspeth.core.registry.plugin_helpers import create_plugin_with_inheritance
+    from elspeth.core.registries.plugin_helpers import create_plugin_with_inheritance
 
     return create_plugin_with_inheritance(
         cost_tracker_registry,

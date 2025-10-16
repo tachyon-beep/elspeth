@@ -18,7 +18,7 @@ from elspeth.core.controls.rate_limit import (
     RateLimiter,
 )
 from elspeth.core.plugin_context import PluginContext
-from elspeth.core.registry.base import BasePluginRegistry
+from elspeth.core.registries.base import BasePluginRegistry
 
 # Initialize the rate limiter registry
 rate_limiter_registry = BasePluginRegistry[RateLimiter]("rate_limiter")

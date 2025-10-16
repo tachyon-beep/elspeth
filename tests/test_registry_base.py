@@ -3,7 +3,7 @@
 import pytest
 
 from elspeth.core.plugin_context import PluginContext
-from elspeth.core.registry import BasePluginFactory, BasePluginRegistry
+from elspeth.core.registries import BasePluginFactory, BasePluginRegistry
 from elspeth.core.validation import ConfigurationError
 
 # Test fixtures

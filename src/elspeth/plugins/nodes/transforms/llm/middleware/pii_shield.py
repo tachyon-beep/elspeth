@@ -8,8 +8,8 @@ import os
 import re
 from typing import Any, Sequence
 
-from elspeth.core.llm_middleware_registry import register_middleware
 from elspeth.core.protocols import LLMMiddleware, LLMRequest
+from elspeth.core.registries.middleware import register_middleware
 from elspeth.core.security.pii_validators import (
     canonicalize_identifier,
     validate_abn,

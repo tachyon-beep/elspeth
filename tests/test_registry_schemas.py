@@ -1,6 +1,6 @@
 """Tests for common registry schemas."""
 
-from elspeth.core.registry.schemas import (
+from elspeth.core.registries.schemas import (
     ARTIFACT_DESCRIPTOR_SCHEMA,
     ARTIFACTS_SECTION_SCHEMA,
     DETERMINISM_LEVEL_SCHEMA,

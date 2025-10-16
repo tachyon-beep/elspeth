@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from elspeth.core.plugin_context import PluginContext
-from elspeth.core.utility_plugin_registry import create_named_utility, create_utility_plugin, register_utility_plugin
+from elspeth.core.registries.utility import create_named_utility, create_utility_plugin, register_utility_plugin
 from elspeth.core.validation import ConfigurationError
 
 
@@ -17,7 +17,7 @@ class DummyUtility:
 def reset_registry():
     """Ensure registry state is isolated between tests."""
 
-    from elspeth.core.utility_plugin_registry import utility_plugin_registry
+    from elspeth.core.registries.utility import utility_plugin_registry
 
     original = dict(utility_plugin_registry._plugins)
     utility_plugin_registry._plugins.clear()

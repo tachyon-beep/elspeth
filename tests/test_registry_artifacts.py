@@ -1,6 +1,6 @@
 import pytest
 
-from elspeth.core.sink_registry import sink_registry
+from elspeth.core.registries.sink import sink_registry
 from elspeth.core.validation_base import ConfigurationError
 
 

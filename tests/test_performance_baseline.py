@@ -19,21 +19,22 @@ Reason: GitHub Actions runners have inconsistent performance (100ms+ spikes)
 """
 
 import os
+import sys
 import time
 
 import pytest
 
 from elspeth.core.artifact_pipeline import ArtifactPipeline
-from elspeth.core.datasource_registry import datasource_registry
 from elspeth.core.experiments.config_merger import ConfigMerger
 from elspeth.core.experiments.plugin_registry import (
     create_aggregation_plugin,
     create_row_plugin,
     create_validation_plugin,
 )
-from elspeth.core.llm_registry import llm_registry
 from elspeth.core.plugin_context import PluginContext
-from elspeth.core.sink_registry import sink_registry
+from elspeth.core.registries.datasource import datasource_registry
+from elspeth.core.registries.llm import llm_registry
+from elspeth.core.registries.sink import sink_registry
 
 # Skip all performance tests in CI - they're too flaky
 pytestmark = pytest.mark.skipif(os.getenv("CI") == "true", reason="Performance tests disabled in CI due to runner inconsistency")
@@ -363,7 +364,7 @@ class TestPerformanceRegression:
         start = time.perf_counter()
         result = subprocess.run(
             [
-                "python",
+                sys.executable,
                 "-m",
                 "elspeth.cli",
                 "--settings",

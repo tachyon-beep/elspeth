@@ -1,83 +1,17 @@
-"""
-Unified plugin registry infrastructure.
+"""Deprecated compatibility shim for :mod:`elspeth.core.registry`.
 
-This module provides base classes and utilities for creating consistent
-plugin registries across the Elspeth framework. It consolidates the factory
-pattern previously duplicated across 5 separate registry implementations.
-
-Architecture:
-    - BasePluginFactory: Generic factory for plugin creation and validation
-    - BasePluginRegistry: Generic registry for plugin management
-    - Context utilities: Shared security level and context handling
-    - Common schemas: Reusable validation schemas
-
-Usage:
-    >>> from elspeth.core.registry import BasePluginRegistry
-    >>> registry = BasePluginRegistry[MyPlugin]("my_plugin")
-    >>> registry.register("name", factory_fn, schema=validation_schema)
-    >>> plugin = registry.create("name", options, parent_context=context)
+This package now re-exports symbols from :mod:`elspeth.core.registries` and
+will be removed in a future major release.
 """
 
-from typing import Any, Iterable, Mapping
+from __future__ import annotations
 
-# Import new base framework
-from .base import BasePluginFactory, BasePluginRegistry, PluginFactoryMap
-from .context_utils import (
-    create_plugin_context,
-    extract_security_levels,
-    prepare_plugin_payload,
+import warnings
+
+from elspeth.core.registries import *  # noqa: F401,F403
+
+warnings.warn(
+    "elspeth.core.registry is deprecated; import from elspeth.core.registries instead",
+    DeprecationWarning,
+    stacklevel=2,
 )
-from .plugin_helpers import create_plugin_with_inheritance
-from .schemas import (
-    ARTIFACT_DESCRIPTOR_SCHEMA,
-    ARTIFACTS_SECTION_SCHEMA,
-    DETERMINISM_LEVEL_SCHEMA,
-    ON_ERROR_ENUM,
-    SECURITY_LEVEL_SCHEMA,
-    with_artifact_properties,
-    with_error_handling,
-    with_security_properties,
-)
-
-__all__ = [
-    # Base classes
-    "BasePluginFactory",
-    "BasePluginRegistry",
-    "PluginFactoryMap",
-    # Context utilities
-    "create_plugin_context",
-    "extract_security_levels",
-    "prepare_plugin_payload",
-    # Plugin helpers
-    "create_plugin_with_inheritance",
-    # Schemas
-    "ARTIFACT_DESCRIPTOR_SCHEMA",
-    "ARTIFACTS_SECTION_SCHEMA",
-    "DETERMINISM_LEVEL_SCHEMA",
-    "ON_ERROR_ENUM",
-    "SECURITY_LEVEL_SCHEMA",
-    "with_artifact_properties",
-    "with_error_handling",
-    "with_security_properties",
-    # Compatibility shim
-    "create_llm_from_definition",
-]
-
-__version__ = "0.1.0"
-
-
-def create_llm_from_definition(
-    definition: Mapping[str, Any],
-    *,
-    parent_context: Any,
-    provenance: Iterable[str] | None = None,
-) -> Any:
-    """Backward-compatible shim delegating to ``llm_registry`` helper."""
-
-    from elspeth.core.llm_registry import create_llm_from_definition as _create
-
-    return _create(
-        definition,
-        parent_context=parent_context,
-        provenance=provenance,
-    )

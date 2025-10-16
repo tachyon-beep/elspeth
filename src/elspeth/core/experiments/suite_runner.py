@@ -18,11 +18,11 @@ from elspeth.core.experiments.plugin_registry import (
     normalize_early_stop_definitions,
 )
 from elspeth.core.experiments.runner import ExperimentRunner
-from elspeth.core.llm_middleware_registry import create_middleware
 from elspeth.core.plugin_context import PluginContext, apply_plugin_context
 from elspeth.core.protocols import LLMClientProtocol, ResultSink
+from elspeth.core.registries.middleware import create_middleware
+from elspeth.core.registries.sink import sink_registry
 from elspeth.core.security import resolve_security_level
-from elspeth.core.sink_registry import sink_registry
 from elspeth.core.validation_base import ConfigurationError
 
 

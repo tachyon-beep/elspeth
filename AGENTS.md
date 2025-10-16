@@ -1,46 +1,29 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-
-The Python package lives in `src/elspeth/`, with `core/` covering orchestration, `plugins/` hosting metrics and output sinks, and `cli.py` providing the entrypoint. Support material sits in `config/sample_suite/` for runnable demos, `notes/` for decisions and planning, and `scripts/` for bootstrap helpers. Shared tests reside in `tests/`, mirroring module layouts for easy discovery.
-<!-- UPDATE 2025-10-12: Plugin namespace migration -->
-Update 2025-10-12: Plugins are grouped under `src/elspeth/plugins/nodes/{sources,transforms,sinks}/` and `src/elspeth/plugins/experiments/` following the Phase 2 refactor; update import paths accordingly.
-<!-- END UPDATE -->
+Source code lives in `src/elspeth/`, with `core/` handling orchestration, `plugins/` providing metrics and output sinks, and `cli.py` as the entrypoint. Plugins follow the Phase 2 layout under `src/elspeth/plugins/nodes/{sources,transforms,sinks}/` and `src/elspeth/plugins/experiments/`; update imports to match. Sample configs are in `config/sample_suite/`, scripts in `scripts/`, docs in `notes/`, and tests mirror the package shape under `tests/`.
 
 ## Build, Test, and Development Commands
-
-Run `make bootstrap` (or `scripts/bootstrap.sh`) to create `.venv/`, install extras, and execute the sanity pytest pass. Activate the environment via `source .venv/bin/activate`, then use `pip install -e .[dev,analytics-visual]` when dependencies shift. The sample orchestration flow is validated with `make sample-suite`, which exercises the CSV datasource plus mock LLM path. Use `python -m pytest -m "not slow"` for rapid feedback, and append `--maxfail=1 --disable-warnings` during triage.
-
-When introducing changes that touch analytics, reporting, or suite flows, run the consolidated reporting command to regenerate artefacts and verify logs:
-
-```bash
-python -m elspeth.cli \
-  --settings config/sample_suite/settings.yaml \
-  --suite-root config/sample_suite \
-  --reports-dir outputs/sample_suite_reports \
-  --head 0
-```
-
-Review the resulting artefacts (validation results, analytics/visual reports, Excel workbook) and capture checksum/signature outputs if they form part of accreditation evidence.
+- `make bootstrap` (or `scripts/bootstrap.sh`): create `.venv/`, install extras, run the sanity pytest pass.
+- `source .venv/bin/activate` then `pip install -e .[dev,analytics-visual]`: refresh dependencies.
+- `make sample-suite`: run the CSV datasource + mock LLM demo.
+- ```bash
+  python -m elspeth.cli \
+    --settings config/sample_suite/settings.yaml \
+    --suite-root config/sample_suite \
+    --reports-dir outputs/sample_suite_reports \
+    --head 0
+  ``` regenerates reporting artefacts for analytics/review.
 
 ## Coding Style & Naming Conventions
-
-Code targets Python 3.12 with 4-space indentation, `typing` annotations, and descriptive module names (`metrics_*.py`, `suite_runner.py`). Use `ruff` for formatting and linting, and run `pytype` for static analysis; the Makefile target `lint` installs pinned versions. Prefer snake_case for functions and variables, PascalCase for classes, and keep docstrings concise but informative, especially around plugin hooks.
+Target Python 3.12, 4-space indentation, and type hints across public APIs. Use snake_case for functions and variables, PascalCase for classes, and descriptive module names (`metrics_*.py`, `suite_runner.py`). Format and lint with `ruff`; run `pytype` via `make lint` before submitting.
 
 ## Testing Guidelines
-
-Pytest is the standard; new tests belong under `tests/` using `test_*.py` naming. Mirror package structure (`tests/core/test_runner.py`) to align fixtures with production modules. Aim to maintain the current ~83% coverage; add parametrized cases for concurrency, backoff, and plugin registration edge cases. When adding integration features, supply a CLI exercise under `tests/integration/` and document expected artifacts in assertions.
-<!-- UPDATE 2025-10-12: Include analytics/reporting regression tests when touching SuiteReportGenerator, analytics sinks, or the visual analytics sink; see `tests/test_reporting.py`, `tests/test_outputs_visual.py`, and `tests/test_integration_visual_suite.py`. -->
+Pytest drives the suite, aiming to sustain ~83% coverage. Place new cases in `tests/` mirroring the source layout (e.g., `tests/core/test_runner.py`). Prefer parametrized tests for concurrency, backoff, and plugin registration edges. Use `python -m pytest -m "not slow" --maxfail=1 --disable-warnings` for rapid iterations, and add analytics/reporting regressions when touching suite reporting or visual sinks (`tests/test_reporting.py`, `tests/test_outputs_visual.py`, `tests/test_integration_visual_suite.py`).
+- Always activate the project virtualenv (`source .venv/bin/activate`) before running tests; `pytest` and its plugins are only installed there.
 
 ## Commit & Pull Request Guidelines
-
-Commits follow the existing imperative style (`Add`, `Refine`, `Fix`) and concentrate on one logical change. Include concise body context when touching orchestration flows or configuration formats. Pull requests should link tracking issues or roadmap phases, summarize impact, call out migrations/config changes, and list verification commands (pytest, sample suite, or custom scripts). Attach screenshots or artifact snippets when outputs change.
+Write imperative commits (`Add`, `Refine`, `Fix`) focused on a single logical change, and include context when altering orchestration or configs. Pull requests should link roadmap issues, summarize impact, list verification commands (pytest, sample suite, reporting run), and attach key artefacts or screenshots when outputs differ.
 
 ## Security & Configuration Tips
-
-Secrets and API keys must live outside the repo; use environment variables consumed by the LLM adapters. Treat `config/sample_suite/` as non-sensitive reference material and fork configurations for real deployments. Review `notes/plugin-architecture.md` before introducing new plugins to ensure registration settings and audit logging remain compliant.
-<!-- UPDATE 2025-10-12: When modifying concurrency, retry, early-stop logic, or analytics sinks (JSON/visual), update the corresponding architecture docs and regenerate signed/visual artefacts if output formats change. -->
-
-## Update History
-
-- 2025-10-12 – Update 2025-10-12: Added reporting artefact regeneration guidance and reiterated analytics regression checks for concurrency/early-stop changes.
+Keep secrets outside the repo and feed adapters via environment variables. Treat `config/sample_suite/` as reference-only; create project-specific forks for deployments. When adjusting concurrency, retry, early-stop logic, or analytics sinks, update relevant docs in `notes/` and regenerate signed/visual artefacts for accreditation records.

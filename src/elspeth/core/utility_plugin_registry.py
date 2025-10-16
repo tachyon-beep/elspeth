@@ -1,69 +1,17 @@
-"""Registry for utility plugins used outside experiment flows."""
+"""Deprecated compatibility shim for :mod:`elspeth.core.utility_plugin_registry`."""
 
 from __future__ import annotations
 
-from typing import Any, Callable, Iterable, Mapping
+import importlib
+import warnings
 
-from elspeth.core.plugin_context import PluginContext
-from elspeth.core.registry.base import BasePluginRegistry
+_new_module = importlib.import_module("elspeth.core.registries.utility")
+__all__ = getattr(_new_module, "__all__", [name for name in dir(_new_module) if not name.startswith("_")])
 
-# Use base registry infrastructure
-_utility_registry = BasePluginRegistry[Any]("utility")
+globals().update({name: getattr(_new_module, name) for name in __all__})
 
-# Expose registry for external use (e.g., plugin registration)
-utility_plugin_registry = _utility_registry
-
-
-def register_utility_plugin(
-    name: str,
-    factory: Callable[[dict[str, Any], PluginContext], Any],
-    *,
-    schema: Mapping[str, Any] | None = None,
-) -> None:
-    """Register a named utility plugin."""
-    _utility_registry.register(name, factory, schema=schema)
-
-
-def create_utility_plugin(
-    definition: Mapping[str, Any],
-    *,
-    parent_context: PluginContext | None = None,
-    provenance: Iterable[str] | None = None,
-) -> Any:
-    """Instantiate a registered utility plugin from a declarative definition (controls pattern).
-
-    Now uses create_plugin_with_inheritance() helper to eliminate duplication.
-    """
-    from elspeth.core.registry.plugin_helpers import create_plugin_with_inheritance
-
-    return create_plugin_with_inheritance(
-        _utility_registry,
-        dict(definition) if definition else None,  # Convert Mapping to Dict
-        plugin_kind="utility",
-        parent_context=parent_context,
-        provenance=provenance,
-        allow_none=False,
-    )
-
-
-def create_named_utility(
-    name: str,
-    options: Mapping[str, Any] | None,
-    *,
-    security_level: str | None = None,
-    determinism_level: str | None = None,
-    parent_context: PluginContext | None = None,
-    provenance: Iterable[str] | None = None,
-) -> Any:
-    """Instantiate a utility plugin directly by name."""
-
-    definition = {
-        "name": name,
-        "options": dict(options or {}),
-        "security_level": security_level,
-        "determinism_level": determinism_level,
-    }
-    return create_utility_plugin(definition, parent_context=parent_context, provenance=provenance)
-
-
-__all__ = ["register_utility_plugin", "create_utility_plugin", "create_named_utility", "utility_plugin_registry"]
+warnings.warn(
+    "elspeth.core.utility_plugin_registry is deprecated; import from elspeth.core.registries.utility instead",
+    DeprecationWarning,
+    stacklevel=2,
+)

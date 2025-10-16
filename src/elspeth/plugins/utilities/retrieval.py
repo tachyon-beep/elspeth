@@ -6,7 +6,7 @@ import logging
 from typing import Any, Callable, Mapping
 
 from elspeth.core.plugin_context import PluginContext
-from elspeth.core.utility_plugin_registry import register_utility_plugin
+from elspeth.core.registries.utility import register_utility_plugin
 from elspeth.core.validation_base import ConfigurationError
 from elspeth.retrieval import RetrievalService, create_retrieval_service
 

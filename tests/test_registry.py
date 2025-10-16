@@ -3,10 +3,10 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from elspeth.core.datasource_registry import datasource_registry
 from elspeth.core.experiments import plugin_registry
-from elspeth.core.llm_registry import llm_registry
-from elspeth.core.sink_registry import sink_registry
+from elspeth.core.registries.datasource import datasource_registry
+from elspeth.core.registries.llm import llm_registry
+from elspeth.core.registries.sink import sink_registry
 from elspeth.core.validation import ConfigurationError
 
 
@@ -70,7 +70,7 @@ def test_registry_constructs_llm_and_sink(monkeypatch):
         def __init__(self, **kwargs):
             self.kwargs = kwargs
 
-    from elspeth.core.registry.base import BasePluginFactory
+    from elspeth.core.registries.base import BasePluginFactory
 
     llm_registry._plugins["dummy"] = BasePluginFactory(lambda options, context: DummyLLM(**options))
     sink_registry._plugins["dummy"] = BasePluginFactory(lambda options, context: DummySink(**options))

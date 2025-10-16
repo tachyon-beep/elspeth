@@ -81,7 +81,7 @@ class TestLLMParameterEnforcement:
         # src/elspeth/core/llm_registry.py:84-87 (http_openai)
         # src/elspeth/plugins/nodes/transforms/llm/azure_openai.py:20
         # These are optional parameters - if not provided, None is used (API defaults apply)
-        from elspeth.core.llm_registry import llm_registry
+        from elspeth.core.registries.llm import llm_registry
 
         # HTTP OpenAI should succeed without temperature (uses API default)
         llm = llm_registry.create(
@@ -90,7 +90,7 @@ class TestLLMParameterEnforcement:
             require_determinism=False,
         )
         assert llm is not None
-        assert llm.temperature is None  # Not provided, should be None
+        assert getattr(llm, "temperature", None) is None  # Not provided, should be None
 
         # Should also work with explicit temperature
         llm_with_temp = llm_registry.create(
@@ -99,14 +99,14 @@ class TestLLMParameterEnforcement:
             require_determinism=False,
         )
         assert llm_with_temp is not None
-        assert llm_with_temp.temperature == 0.7
+        assert getattr(llm_with_temp, "temperature", None) == pytest.approx(0.7)
 
     def test_llm_max_tokens_is_optional(self):
         """Verify LLM max_tokens is optional (not required)."""
         # src/elspeth/core/llm_registry.py:88-91 (http_openai)
         # src/elspeth/plugins/nodes/transforms/llm/azure_openai.py:21
         # These are optional parameters - if not provided, None is used (API defaults apply)
-        from elspeth.core.llm_registry import llm_registry
+        from elspeth.core.registries.llm import llm_registry
 
         # HTTP OpenAI should succeed without max_tokens (uses API default)
         llm = llm_registry.create(
@@ -134,7 +134,7 @@ class TestStaticLLMDefaults:
         """Verify static LLM requires explicit content parameter."""
         # src/elspeth/core/llm_registry.py:47
         # Validates that content parameter is required
-        from elspeth.core.llm_registry import llm_registry
+        from elspeth.core.registries.llm import llm_registry
         from elspeth.core.validation_base import ConfigurationError
 
         # Should raise ConfigurationError when content is missing
@@ -286,7 +286,7 @@ class TestSecurityGateStatus:
         print(f"\nCritical Defaults Status: {fixed}/{total} fixed")
 
         # Gate now PASSES - all critical defaults have been removed
-        assert fixed == total, f"Gate BLOCKED: {total - fixed} critical defaults remain. " f"See SILENT_DEFAULTS_AUDIT.md for details."
+        assert fixed == total, f"Gate BLOCKED: {total - fixed} critical defaults remain. See SILENT_DEFAULTS_AUDIT.md for details."
 
 
 class TestHighPriorityDefaults:

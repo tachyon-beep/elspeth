@@ -9,12 +9,12 @@ from typing import Any, Callable, Mapping
 import yaml
 
 from elspeth.core.controls import create_cost_tracker, create_rate_limiter
-from elspeth.core.datasource_registry import datasource_registry
 from elspeth.core.experiments.plugin_registry import normalize_early_stop_definitions
-from elspeth.core.llm_registry import llm_registry
 from elspeth.core.orchestrator import OrchestratorConfig
+from elspeth.core.registries.datasource import datasource_registry
+from elspeth.core.registries.llm import llm_registry
+from elspeth.core.registries.sink import sink_registry
 from elspeth.core.security import coalesce_determinism_level, coalesce_security_level
-from elspeth.core.sink_registry import sink_registry
 from elspeth.core.validation_base import ConfigurationError
 
 
