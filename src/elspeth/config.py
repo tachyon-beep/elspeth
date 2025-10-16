@@ -63,6 +63,34 @@ class PluginDefinitions:
     early_stop_plugin_defs: list[dict[str, Any]]
 
 
+def _extract_optional_mapping(source: Mapping[str, Any], key: str) -> dict[str, Any] | None:
+    """Return a copy of the mapping stored under ``key`` or ``None``."""
+
+    value = source.get(key)
+    if isinstance(value, Mapping):
+        return dict(value)
+    return None
+
+
+def _collect_plugin_list(profile_data: Mapping[str, Any], key: str) -> list[dict[str, Any]]:
+    """Materialize plugin definition lists while handling falsy values."""
+
+    entries = profile_data.get(key) or []
+    if isinstance(entries, list):
+        return list(entries)
+    return [entries]
+
+
+def _resolve_early_stop_sections(profile_data: Mapping[str, Any]) -> tuple[dict[str, Any] | None, list[dict[str, Any]]]:
+    """Resolve early-stop configuration and plugin definitions."""
+
+    early_stop_config = _extract_optional_mapping(profile_data, "early_stop")
+    plugin_defs = normalize_early_stop_definitions(profile_data.get("early_stop_plugins")) or []
+    if not plugin_defs and early_stop_config:
+        plugin_defs = normalize_early_stop_definitions(early_stop_config) or []
+    return early_stop_config, plugin_defs
+
+
 def _prepare_plugin_definition(definition: Mapping[str, Any], context: str) -> tuple[dict[str, Any], str, str, tuple[str, ...]]:
     """Extract options, normalized security level, determinism level, and provenance."""
 
@@ -153,38 +181,19 @@ def _collect_prompt_configuration(profile_data: Mapping[str, Any]) -> PromptConf
 def _collect_plugin_definitions(profile_data: Mapping[str, Any]) -> PluginDefinitions:
     """Capture plugin definition lists and runtime configuration sections."""
 
-    early_stop_config = profile_data.get("early_stop")
-    if isinstance(early_stop_config, Mapping):
-        early_stop_config = dict(early_stop_config)
-    else:
-        early_stop_config = None
-    early_stop_plugin_defs = normalize_early_stop_definitions(profile_data.get("early_stop_plugins")) or []
-    if not early_stop_plugin_defs and early_stop_config:
-        early_stop_plugin_defs = normalize_early_stop_definitions(early_stop_config) or []
-    rate_limiter_def = profile_data.get("rate_limiter")
-    if isinstance(rate_limiter_def, Mapping):
-        rate_limiter_def = dict(rate_limiter_def)
-    else:
-        rate_limiter_def = None
-    cost_tracker_def = profile_data.get("cost_tracker")
-    if isinstance(cost_tracker_def, Mapping):
-        cost_tracker_def = dict(cost_tracker_def)
-    else:
-        cost_tracker_def = None
-    concurrency_config = profile_data.get("concurrency")
-    if isinstance(concurrency_config, Mapping):
-        concurrency_config = dict(concurrency_config)
-    prompt_defaults = profile_data.get("prompt_defaults")
-    if isinstance(prompt_defaults, Mapping):
-        prompt_defaults = dict(prompt_defaults)
+    early_stop_config, early_stop_plugin_defs = _resolve_early_stop_sections(profile_data)
+    rate_limiter_def = _extract_optional_mapping(profile_data, "rate_limiter")
+    cost_tracker_def = _extract_optional_mapping(profile_data, "cost_tracker")
+    concurrency_config = _extract_optional_mapping(profile_data, "concurrency")
+    prompt_defaults = _extract_optional_mapping(profile_data, "prompt_defaults")
 
     return PluginDefinitions(
-        row_plugins=list(profile_data.get("row_plugins", []) or []),
-        aggregator_plugins=list(profile_data.get("aggregator_plugins", []) or []),
-        baseline_plugins=list(profile_data.get("baseline_plugins", []) or []),
-        validation_plugins=list(profile_data.get("validation_plugins", []) or []),
-        sink_defs=list(profile_data.get("sinks", []) or []),
-        llm_middlewares=list(profile_data.get("llm_middlewares", []) or []),
+        row_plugins=_collect_plugin_list(profile_data, "row_plugins"),
+        aggregator_plugins=_collect_plugin_list(profile_data, "aggregator_plugins"),
+        baseline_plugins=_collect_plugin_list(profile_data, "baseline_plugins"),
+        validation_plugins=_collect_plugin_list(profile_data, "validation_plugins"),
+        sink_defs=_collect_plugin_list(profile_data, "sinks"),
+        llm_middlewares=_collect_plugin_list(profile_data, "llm_middlewares"),
         prompt_defaults=prompt_defaults,
         concurrency_config=concurrency_config,
         rate_limiter_def=rate_limiter_def,
@@ -260,6 +269,61 @@ def _apply_prompt_pack_overrides(
     _apply_plugin_list_overrides(pack, plugin_defs)
     _apply_singleton_config_overrides(pack, plugin_defs)
     _apply_early_stop_overrides(pack, plugin_defs)
+
+
+def _resolve_suite_defaults_pack(
+    prompt_packs: Mapping[str, Any],
+    pack_name: Any,
+) -> Mapping[str, Any] | None:
+    """Return the prompt pack mapping referenced by ``pack_name`` if available."""
+
+    if not isinstance(prompt_packs, Mapping) or not pack_name:
+        return None
+    pack = prompt_packs.get(pack_name)
+    return pack if isinstance(pack, Mapping) else None
+
+
+def _merge_suite_default_scalars(suite_defaults: dict[str, Any], pack: Mapping[str, Any]) -> None:
+    """Merge scalar prompt values when absent from suite defaults."""
+
+    for key in ("prompts", "prompt_fields", "criteria"):
+        suite_defaults.setdefault(key, pack.get(key))
+
+
+def _merge_suite_default_lists(suite_defaults: dict[str, Any], pack: Mapping[str, Any]) -> None:
+    """Merge list-based plugin defaults when absent from suite defaults."""
+
+    list_keys = (
+        "row_plugins",
+        "aggregator_plugins",
+        "baseline_plugins",
+        "validation_plugins",
+        "llm_middlewares",
+        "sinks",
+    )
+    for key in list_keys:
+        if key not in suite_defaults:
+            suite_defaults[key] = _collect_plugin_list(pack, key)
+
+
+def _merge_suite_default_mappings(suite_defaults: dict[str, Any], pack: Mapping[str, Any]) -> None:
+    """Merge mapping-based overrides when absent from suite defaults."""
+
+    for key in ("rate_limiter", "cost_tracker", "concurrency", "early_stop"):
+        if key in suite_defaults:
+            continue
+        value = pack.get(key)
+        if isinstance(value, Mapping):
+            suite_defaults[key] = dict(value)
+
+
+def _merge_suite_default_early_stop_plugins(suite_defaults: dict[str, Any], pack: Mapping[str, Any]) -> None:
+    """Merge early-stop plugins override when absent from suite defaults."""
+
+    if "early_stop_plugins" not in suite_defaults:
+        plugins_override = pack.get("early_stop_plugins")
+        if plugins_override:
+            suite_defaults["early_stop_plugins"] = plugins_override
 
 
 def _resolve_sink_definitions(
@@ -344,40 +408,14 @@ def _prepare_suite_defaults(
     """Merge suite defaults with any referenced prompt pack overrides."""
 
     suite_defaults = dict(suite_defaults_cfg or {})
-    pack_name = suite_defaults.get("prompt_pack")
-    if not pack_name:
-        return suite_defaults
-    pack = prompt_packs.get(pack_name)
-    if not isinstance(pack, Mapping):
+    pack = _resolve_suite_defaults_pack(prompt_packs, suite_defaults.get("prompt_pack"))
+    if not pack:
         return suite_defaults
 
-    suite_defaults.setdefault("prompts", pack.get("prompts"))
-    suite_defaults.setdefault("prompt_fields", pack.get("prompt_fields"))
-    suite_defaults.setdefault("criteria", pack.get("criteria"))
-    suite_defaults.setdefault("row_plugins", pack.get("row_plugins", []) or [])
-    suite_defaults.setdefault("aggregator_plugins", pack.get("aggregator_plugins", []) or [])
-    suite_defaults.setdefault("baseline_plugins", pack.get("baseline_plugins", []) or [])
-    suite_defaults.setdefault("validation_plugins", pack.get("validation_plugins", []) or [])
-    suite_defaults.setdefault("llm_middlewares", pack.get("llm_middlewares", []) or [])
-    suite_defaults.setdefault("sinks", pack.get("sinks", []) or [])
-    if pack.get("rate_limiter"):
-        rate_limiter_override = pack.get("rate_limiter")
-        if isinstance(rate_limiter_override, Mapping):
-            suite_defaults.setdefault("rate_limiter", dict(rate_limiter_override))
-    if pack.get("cost_tracker"):
-        cost_tracker_override = pack.get("cost_tracker")
-        if isinstance(cost_tracker_override, Mapping):
-            suite_defaults.setdefault("cost_tracker", dict(cost_tracker_override))
-    if pack.get("concurrency"):
-        concurrency_override = pack.get("concurrency")
-        if isinstance(concurrency_override, Mapping):
-            suite_defaults.setdefault("concurrency", dict(concurrency_override))
-    if pack.get("early_stop"):
-        early_stop_override = pack.get("early_stop")
-        if isinstance(early_stop_override, Mapping):
-            suite_defaults.setdefault("early_stop", dict(early_stop_override))
-    if pack.get("early_stop_plugins"):
-        suite_defaults.setdefault("early_stop_plugins", pack.get("early_stop_plugins"))
+    _merge_suite_default_scalars(suite_defaults, pack)
+    _merge_suite_default_lists(suite_defaults, pack)
+    _merge_suite_default_mappings(suite_defaults, pack)
+    _merge_suite_default_early_stop_plugins(suite_defaults, pack)
     return suite_defaults
 
 

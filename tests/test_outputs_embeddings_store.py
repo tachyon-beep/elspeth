@@ -287,8 +287,6 @@ def test_embeddings_sink_finalize_closes_client():
 
 
 def test_pgvector_conflict_clause_skip(monkeypatch):
-    import elspeth.plugins.nodes.sinks.embeddings_store as store_module
-
     stub = types.ModuleType("psycopg")
 
     # Mock psycopg.sql module for SQL injection protection

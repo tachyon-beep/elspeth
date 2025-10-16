@@ -221,7 +221,7 @@ def test_audit_middleware_logs_prompts(caplog):
 
 def test_health_monitor_emits_heartbeat(monkeypatch, caplog):
     times = iter([0.0, 0.25, 0.5])
-    monkeypatch.setattr("elspeth.plugins.nodes.transforms.llm.middleware.time.monotonic", lambda: next(times))
+    monkeypatch.setattr("elspeth.plugins.nodes.transforms.llm.middleware.health_monitor.time.monotonic", lambda: next(times))
 
     middleware = HealthMonitorMiddleware(heartbeat_interval=0, stats_window=2, channel="test.health", include_latency=True)
     request = LLMRequest(system_prompt="sys", user_prompt="hello", metadata={})

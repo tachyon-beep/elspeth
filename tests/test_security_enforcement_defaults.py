@@ -374,7 +374,7 @@ class TestHighPriorityDefaults:
         from elspeth.core.validation_base import ConfigurationError
 
         # Should fail without key
-        with pytest.raises(ConfigurationError, match="is a required property.*key"):
+        with pytest.raises(ConfigurationError, match="key is required"):
             create_row_plugin(
                 {
                     "name": "score_extractor",
@@ -390,7 +390,7 @@ class TestHighPriorityDefaults:
             )
 
         # Should fail without parse_json_content
-        with pytest.raises(ConfigurationError, match="is a required property.*parse_json_content"):
+        with pytest.raises(ConfigurationError, match="parse_json_content is required"):
             create_row_plugin(
                 {
                     "name": "score_extractor",
@@ -406,7 +406,7 @@ class TestHighPriorityDefaults:
             )
 
         # Should fail without allow_missing
-        with pytest.raises(ConfigurationError, match="is a required property.*allow_missing"):
+        with pytest.raises(ConfigurationError, match="allow_missing is required"):
             create_row_plugin(
                 {
                     "name": "score_extractor",
@@ -422,7 +422,7 @@ class TestHighPriorityDefaults:
             )
 
         # Should fail without threshold_mode
-        with pytest.raises(ConfigurationError, match="is a required property.*threshold_mode"):
+        with pytest.raises(ConfigurationError, match="threshold_mode is required"):
             create_row_plugin(
                 {
                     "name": "score_extractor",
@@ -438,7 +438,7 @@ class TestHighPriorityDefaults:
             )
 
         # Should fail without flag_field
-        with pytest.raises(ConfigurationError, match="is a required property.*flag_field"):
+        with pytest.raises(ConfigurationError, match="flag_field is required"):
             create_row_plugin(
                 {
                     "name": "score_extractor",
