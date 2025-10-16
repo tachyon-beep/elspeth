@@ -9,6 +9,9 @@ from statistics import NormalDist
 from typing import TYPE_CHECKING, Any, Mapping, Sequence
 
 import numpy as np
+import pingouin
+from scipy import stats as scipy_stats
+from statsmodels.stats.power import TTestPower
 
 from elspeth.core.experiments.plugin_registry import register_aggregation_plugin, register_baseline_plugin, register_row_plugin
 from elspeth.core.plugin_context import PluginContext
@@ -17,21 +20,6 @@ if TYPE_CHECKING:
     from elspeth.core.schema import DataFrameSchema
 
 logger = logging.getLogger(__name__)
-
-try:
-    from scipy import stats as scipy_stats
-except Exception:  # pragma: no cover - optional dependency
-    scipy_stats = None
-
-try:
-    import pingouin
-except Exception:  # pragma: no cover - optional dependency
-    pingouin = None
-
-try:
-    from statsmodels.stats.power import TTestPower
-except Exception:  # pragma: no cover - optional dependency
-    TTestPower = None
 
 _ON_ERROR_SCHEMA = {"type": "string", "enum": ["abort", "skip"]}
 

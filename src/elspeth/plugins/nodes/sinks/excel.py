@@ -9,6 +9,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
+from openpyxl import Workbook  # type: ignore[import-untyped]
+
 from elspeth.core.protocols import Artifact, ArtifactDescriptor, ResultSink
 from elspeth.core.security import normalize_determinism_level, normalize_security_level
 from elspeth.plugins.nodes.sinks._sanitize import sanitize_cell
@@ -34,11 +36,11 @@ class ExcelSinkConfig:
 
 
 def _load_workbook_dependencies():
-    try:
-        # openpyxl library lacks type stubs; import treated as untyped by mypy
-        from openpyxl import Workbook  # type: ignore[import-untyped]
-    except ImportError as exc:  # pragma: no cover - handled during sink initialisation
-        raise RuntimeError("ExcelResultSink requires the 'openpyxl' package. Install with 'pip install openpyxl'") from exc
+    """Return the Workbook class for creating Excel files.
+
+    Returns:
+        Workbook class from openpyxl
+    """
     return Workbook
 
 

@@ -93,7 +93,7 @@ class ZipResultSink(ResultSink):
 
                 # Include upstream artifacts
                 counter = 0
-                for key, artifacts in self._additional_inputs.items():
+                for _, artifacts in self._additional_inputs.items():
                     for artifact in artifacts:
                         counter += 1
                         name = None
@@ -184,7 +184,7 @@ class ZipResultSink(ResultSink):
             rows.append(record)
         df = pd.DataFrame(rows)
         if not df.empty:
-            df.columns = [self._sanitize_key(col) for col in df.columns]
+            df.columns = pd.Index([self._sanitize_key(col) for col in df.columns])
         buffer = io.StringIO()
         df.to_csv(buffer, index=False)
         return buffer.getvalue()

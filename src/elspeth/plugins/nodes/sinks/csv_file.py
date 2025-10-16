@@ -16,6 +16,19 @@ logger = logging.getLogger(__name__)
 
 
 class CsvResultSink(ResultSink):
+    """Result sink that writes experiment results to CSV files with formula sanitization.
+
+    Converts experiment results into tabular CSV format with configurable sanitization
+    to prevent formula injection attacks. Extracts row data, LLM responses, and named
+    responses into a flat structure suitable for spreadsheet analysis.
+
+    Features:
+    - Automatic formula sanitization (prefix dangerous characters with guard)
+    - Configurable overwrite behavior
+    - Error handling with abort/skip strategies
+    - Artifact tracking with security metadata
+    """
+
     def __init__(
         self,
         *,
@@ -103,7 +116,9 @@ class CsvResultSink(ResultSink):
         df = pd.DataFrame(rows)
 
         if not df.empty:
-            df.columns = [self._sanitize_key(col) for col in df.columns]
+            # Sanitize column names - use Index constructor for proper typing
+            sanitized_columns = [self._sanitize_key(col) for col in df.columns]
+            df.columns = pd.Index(sanitized_columns)
 
         return df
 

@@ -9,6 +9,9 @@ import math
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+import numpy as np
+import pandas as pd
+
 from elspeth.core.protocols import Artifact, ArtifactDescriptor
 
 from ._visual_base import BaseVisualSink
@@ -76,7 +79,7 @@ class EnhancedVisualAnalyticsSink(BaseVisualSink):
                 return
 
             _matplotlib, plt, seaborn = self._load_plot_modules()
-        except Exception as exc:  # pragma: no cover - defensive guard
+        except (ImportError, RuntimeError) as exc:  # pragma: no cover - defensive guard
             if self.on_error == "skip":
                 logger.warning("Enhanced visual sink cannot initialise plotting backend: %s", exc)
                 return
@@ -87,7 +90,7 @@ class EnhancedVisualAnalyticsSink(BaseVisualSink):
                 try:
                     seaborn.set_theme(style=self.seaborn_style)
                     seaborn.set_palette(self.color_palette)
-                except Exception:
+                except (AttributeError, ValueError, TypeError):
                     logger.debug("Seaborn theme unavailable; using matplotlib defaults")
 
             self.base_path.mkdir(parents=True, exist_ok=True)
@@ -227,11 +230,9 @@ class EnhancedVisualAnalyticsSink(BaseVisualSink):
             return []
 
     def _generate_violin_plot(
-        self, data: dict[str, Any], plt: Any, seaborn: Any, metadata: dict[str, Any]
+        self, data: dict[str, Any], plt: Any, seaborn: Any, _metadata: dict[str, Any]
     ) -> list[tuple[str, Path, dict[str, Any]]]:
         """Generate violin plot showing score distributions by criterion."""
-        import pandas as pd
-
         criteria = data["criteria"]
         scores_by_criterion = data["scores_by_criterion"]
 
@@ -264,11 +265,9 @@ class EnhancedVisualAnalyticsSink(BaseVisualSink):
         return self._save_figure(fig, plt, "violin", {"chart_type": "violin"})
 
     def _generate_box_plot(
-        self, data: dict[str, Any], plt: Any, seaborn: Any, metadata: dict[str, Any]
+        self, data: dict[str, Any], plt: Any, seaborn: Any, _metadata: dict[str, Any]
     ) -> list[tuple[str, Path, dict[str, Any]]]:
         """Generate box plot showing score distributions with quartiles."""
-        import pandas as pd
-
         criteria = data["criteria"]
         scores_by_criterion = data["scores_by_criterion"]
 
@@ -299,12 +298,9 @@ class EnhancedVisualAnalyticsSink(BaseVisualSink):
         return self._save_figure(fig, plt, "box", {"chart_type": "box"})
 
     def _generate_heatmap(
-        self, data: dict[str, Any], plt: Any, seaborn: Any, metadata: dict[str, Any]
+        self, data: dict[str, Any], plt: Any, seaborn: Any, _metadata: dict[str, Any]
     ) -> list[tuple[str, Path, dict[str, Any]]]:
         """Generate heatmap for multi-criteria score comparison."""
-        import numpy as np
-        import pandas as pd
-
         criteria = data["criteria"]
         scores_by_criterion = data["scores_by_criterion"]
 
@@ -358,7 +354,7 @@ class EnhancedVisualAnalyticsSink(BaseVisualSink):
         return self._save_figure(fig, plt, "heatmap", {"chart_type": "heatmap"})
 
     def _generate_forest_plot(
-        self, data: dict[str, Any], plt: Any, seaborn: Any, metadata: dict[str, Any]
+        self, data: dict[str, Any], plt: Any, _seaborn: Any, _metadata: dict[str, Any]
     ) -> list[tuple[str, Path, dict[str, Any]]]:
         """Generate forest plot showing effect sizes with confidence intervals."""
         effect_sizes = data.get("effect_sizes", {})
@@ -403,7 +399,7 @@ class EnhancedVisualAnalyticsSink(BaseVisualSink):
         return self._save_figure(fig, plt, "forest", {"chart_type": "forest"})
 
     def _generate_distribution_overlay(
-        self, data: dict[str, Any], plt: Any, seaborn: Any, metadata: dict[str, Any]
+        self, data: dict[str, Any], plt: Any, _seaborn: Any, _metadata: dict[str, Any]
     ) -> list[tuple[str, Path, dict[str, Any]]]:
         """Generate overlaid histogram showing score distributions."""
         criteria = data["criteria"]

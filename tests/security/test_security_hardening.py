@@ -23,6 +23,7 @@ import pandas as pd
 import pytest
 
 from elspeth.core.security import SecureMode
+from elspeth.core.security.secure_mode import validate_sink_config
 from elspeth.plugins.nodes.sinks import CsvResultSink
 from elspeth.plugins.nodes.sinks._sanitize import sanitize_cell
 
@@ -70,8 +71,6 @@ class TestFormulaInjectionDefense:
         assert any(str(val).startswith("@") for val in df["command"])
 
         # Test sanitization of each formula type
-        from elspeth.plugins.nodes.sinks._sanitize import sanitize_cell
-
         for _, row in df.iterrows():
             cmd = str(row["command"])
             if cmd and cmd[0] in "=+-@":
@@ -81,8 +80,6 @@ class TestFormulaInjectionDefense:
 
     def test_csv_sanitization_cannot_be_disabled_in_strict_mode(self):
         """Test that sanitization cannot be disabled in STRICT mode."""
-        from elspeth.core.security.secure_mode import validate_sink_config
-
         sink_config = {
             "type": "csv",
             "path": "output.csv",
@@ -95,8 +92,6 @@ class TestFormulaInjectionDefense:
 
     def test_llm_response_formula_sanitized(self):
         """Test that LLM responses containing formulas are sanitized."""
-        from elspeth.plugins.nodes.sinks._sanitize import sanitize_cell
-
         # Test formulas that might appear in LLM responses
         test_responses = [
             "=SUM(A1:A10)",
@@ -144,8 +139,6 @@ class TestClassificationEnforcement:
 
     def test_security_level_required_for_sink(self):
         """Test that sinks require security_level."""
-        from elspeth.core.security.secure_mode import validate_sink_config
-
         config = {
             "type": "csv",
             "path": "output.csv",
@@ -236,8 +229,6 @@ class TestPathTraversalPrevention:
         assert ".." in malicious_path
 
         # In practice, sinks should normalize paths and reject traversal
-        from pathlib import Path
-
         try:
             Path(malicious_path).resolve()
             # Should not allow writing outside allowed directory
@@ -259,7 +250,7 @@ class TestPathTraversalPrevention:
         # If a symlink points outside the output directory,
         # following it should be prevented
         # This is a defense-in-depth measure
-        pass
+        ...
 
 
 class TestMalformedConfiguration:
@@ -328,7 +319,7 @@ class TestResourceExhaustion:
 
         # First 3 requests should succeed (not block)
         count = 0
-        for i in range(3):
+        for _ in range(3):
             with limiter.acquire():
                 count += 1
 
@@ -345,7 +336,7 @@ class TestResourceExhaustion:
         tracker = FixedPriceCostTracker(prompt_token_price=0.001, completion_token_price=0.002)
 
         # Simulate 3 requests with token usage
-        for i in range(3):
+        for _ in range(3):
             # Mock response with usage data
             response = {
                 "raw": {
@@ -455,19 +446,17 @@ class TestAuditLogIntegrity:
 
 
 # Summary of test coverage
-"""
-Test Coverage Summary:
-
-AS-1  Formula Injection (CSV):     ✅ 6 tests
-AS-2  Formula Injection (LLM):     ✅ 1 test
-AS-3  Classification Bypass:       ✅ 4 tests
-AS-4  Prompt Injection:            ✅ 2 tests
-AS-5  Path Traversal:              ✅ 3 tests
-AS-6  Malformed Configuration:     ✅ 3 tests
-AS-7  Resource Exhaustion:         ✅ 4 tests
-AS-8  Concurrent Access:           ✅ 1 test
-AS-9  Unapproved Endpoints:        ✅ Tested in test_security_approved_endpoints.py (28 tests)
-AS-10 Audit Log Integrity:         ✅ 2 tests
-
-Total Security Tests: 26 (+ 28 from endpoint validation = 54 total)
-"""
+# Test Coverage Summary:
+#
+# AS-1  Formula Injection (CSV):     ✅ 6 tests
+# AS-2  Formula Injection (LLM):     ✅ 1 test
+# AS-3  Classification Bypass:       ✅ 4 tests
+# AS-4  Prompt Injection:            ✅ 2 tests
+# AS-5  Path Traversal:              ✅ 3 tests
+# AS-6  Malformed Configuration:     ✅ 3 tests
+# AS-7  Resource Exhaustion:         ✅ 4 tests
+# AS-8  Concurrent Access:           ✅ 1 test
+# AS-9  Unapproved Endpoints:        ✅ Tested in test_security_approved_endpoints.py (28 tests)
+# AS-10 Audit Log Integrity:         ✅ 2 tests
+#
+# Total Security Tests: 26 (+ 28 from endpoint validation = 54 total)

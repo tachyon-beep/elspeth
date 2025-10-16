@@ -12,6 +12,7 @@ All logs are written in JSON Lines format for easy parsing and analysis.
 from __future__ import annotations
 
 import hashlib
+import importlib.metadata
 import inspect
 import json
 import logging
@@ -111,15 +112,11 @@ class PluginLogger:
 
         # Try package version (for installed packages)
         try:
-            import importlib.metadata
-
             module_name = self.plugin_instance.__class__.__module__.split(".")[0]
             return importlib.metadata.version(module_name)
-        except Exception as exc:
-            # Package not installed or metadata unavailable; log debug and return unknown
-            self.logger.debug("Could not determine plugin version for %s: %s", self.context.plugin_name, exc)
-
-        return "unknown"
+        except (importlib.metadata.PackageNotFoundError, AttributeError, ValueError):
+            # Package not in metadata or invalid module structure
+            return "unknown"
 
     def _get_plugin_path(self) -> str:
         """Get file path of plugin source code."""
@@ -365,7 +362,7 @@ class PluginLogger:
         try:
             with open(self.log_file, "a", encoding="utf-8") as f:
                 f.write(json.dumps(entry) + "\n")
-        except Exception as exc:
+        except (OSError, IOError) as exc:
             # Fallback to standard logger if file write fails
             self.logger.error("Failed to write log entry: %s", exc)
 

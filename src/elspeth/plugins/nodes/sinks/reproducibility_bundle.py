@@ -193,8 +193,6 @@ class ReproducibilityBundleSink(ResultSink):
 
         if retained_path and Path(retained_path).exists():
             # Copy the retained local file
-            import shutil
-
             assert self._temp_dir is not None
             dest_path = self._temp_dir / self.source_data_name
             shutil.copy2(retained_path, dest_path)
@@ -568,7 +566,7 @@ class ReproducibilityBundleSink(ResultSink):
 
     def finalize(self, artifacts: Mapping[str, Artifact], *, metadata: dict[str, Any] | None = None) -> None:
         """Optional cleanup after sink pipeline completes."""
-        pass
+        ...
 
 
 __all__ = ["ReproducibilityBundleSink"]

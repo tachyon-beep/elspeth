@@ -34,11 +34,8 @@ class VectorQueryClient:
 
 class PgVectorQueryClient(VectorQueryClient):
     def __init__(self, *, dsn: str, table: str = "elspeth_rag") -> None:
-        try:
-            import psycopg
-            from psycopg import sql
-        except ModuleNotFoundError as exc:  # pragma: no cover - optional dependency
-            raise RuntimeError("psycopg package is required for pgvector retrieval") from exc
+        import psycopg
+        from psycopg import sql
 
         self._psycopg = psycopg
         self._sql = sql
@@ -107,11 +104,8 @@ class AzureSearchQueryClient(VectorQueryClient):
         namespace_field: str = "namespace",
         content_field: str = "contents",
     ) -> None:
-        try:
-            from azure.core.credentials import AzureKeyCredential
-            from azure.search.documents import SearchClient
-        except ModuleNotFoundError as exc:  # pragma: no cover - optional dependency
-            raise RuntimeError("azure-search-documents package is required for Azure retrieval") from exc
+        from azure.core.credentials import AzureKeyCredential
+        from azure.search.documents import SearchClient
 
         self._SearchClient = SearchClient
         self._AzureKeyCredential = AzureKeyCredential

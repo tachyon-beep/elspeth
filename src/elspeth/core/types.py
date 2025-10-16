@@ -21,9 +21,10 @@ class SecurityLevel(str, Enum):
 
     UNOFFICIAL = "UNOFFICIAL"
     OFFICIAL = "OFFICIAL"
-    OFFICIAL_SENSITIVE = "OFFICIAL_SENSITIVE"
+    OFFICIAL_SENSITIVE = "OFFICIAL: SENSITIVE"
     PROTECTED = "PROTECTED"
-    SECRET = "SECRET"  # noqa: S105 - This is a classification level, not a password
+    # This is a classification level, not a password
+    SECRET = "SECRET"  # noqa: S105
 
     def __lt__(self, other):
         """Support comparison for hierarchy enforcement."""
@@ -46,7 +47,7 @@ class SecurityLevel(str, Enum):
         """Support comparison for hierarchy enforcement."""
         if not isinstance(other, SecurityLevel):
             return NotImplemented
-        return not self <= other
+        return other < self
 
     def __ge__(self, other):
         """Support comparison for hierarchy enforcement."""
@@ -84,9 +85,9 @@ class SecurityLevel(str, Enum):
             return aliases[normalized]
 
         try:
-            return cls(normalized)
-        except ValueError as exc:
-            valid_levels = ", ".join(level.value for level in list(cls))
+            return cls[normalized]  # Lookup by enum name, not value
+        except KeyError as exc:
+            valid_levels = ", ".join(level.value for level in cls)
             raise ValueError(f"Unknown security level '{value}'. Must be one of: {valid_levels}") from exc
 
 
@@ -131,7 +132,7 @@ class DeterminismLevel(str, Enum):
         """Support comparison for hierarchy enforcement."""
         if not isinstance(other, DeterminismLevel):
             return NotImplemented
-        return not self <= other
+        return other < self
 
     def __ge__(self, other):
         """Support comparison for hierarchy enforcement."""
@@ -160,7 +161,7 @@ class DeterminismLevel(str, Enum):
         try:
             return cls(normalized)
         except ValueError as exc:
-            valid_levels = ", ".join(level.value for level in list(cls))
+            valid_levels = ", ".join(level.value for level in cls)
             raise ValueError(f"Unknown determinism level '{value}'. Must be one of: {valid_levels}") from exc
 
 
@@ -268,7 +269,7 @@ class DataType(str, Enum):
         try:
             return cls(normalized)
         except ValueError as exc:
-            valid_types = ", ".join(dtype.value for dtype in list(cls))
+            valid_types = ", ".join(dtype.value for dtype in cls)
             raise ValueError(f"Unknown data type '{value}'. Must be one of: {valid_types}") from exc
 
     def to_pandas_dtype(self):
@@ -393,7 +394,7 @@ class PluginType(str, Enum):
         try:
             return cls(normalized)
         except ValueError as exc:
-            valid_types = ", ".join(ptype.value for ptype in list(cls))
+            valid_types = ", ".join(ptype.value for ptype in cls)
             raise ValueError(f"Unknown plugin type '{value}'. Must be one of: {valid_types}") from exc
 
 

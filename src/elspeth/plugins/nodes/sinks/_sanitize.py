@@ -29,7 +29,7 @@ def should_sanitize(value: Any, *, guard: str | None = "'", aggressive: bool = F
     if not isinstance(value, str) or value == "":
         return False
     guard_char = _normalize_guard(guard)
-    bom, remainder = _split_bom(value)
+    _, remainder = _split_bom(value)
     if not remainder:
         return False
     if not aggressive and remainder.startswith(guard_char):

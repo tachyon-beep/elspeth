@@ -284,7 +284,6 @@ class TestEndpointValidationRegistry:
         """Test Azure OpenAI factory function validates endpoints."""
         from elspeth.core.llm_registry import _create_azure_openai
         from elspeth.core.plugin_context import PluginContext
-        from elspeth.core.validation_base import ConfigurationError
 
         context = PluginContext(
             security_level="OFFICIAL",
@@ -310,7 +309,6 @@ class TestEndpointValidationRegistry:
         """Test HTTP OpenAI factory function validates endpoints."""
         from elspeth.core.llm_registry import _create_http_openai
         from elspeth.core.plugin_context import PluginContext
-        from elspeth.core.validation_base import ConfigurationError
 
         context = PluginContext(
             security_level="confidential",

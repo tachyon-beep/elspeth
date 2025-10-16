@@ -45,8 +45,6 @@ def test_registry_creates_blob_datasource(tmp_path, monkeypatch):
 
 
 def test_registry_unknown_plugin_raises():
-    import pytest
-
     with pytest.raises(ValueError):
         datasource_registry.create("missing", {})
 
@@ -90,11 +88,11 @@ def test_create_row_plugin_requires_known_name():
 
 
 def test_create_row_plugin_validates_schema():
-    def build_plugin(options, context):
+    def build_plugin(_options, _context):
         class _Plugin:
             name = "limited"
 
-            def process_row(self, row, responses):
+            def process_row(self, _row, _responses):
                 return {}
 
         return _Plugin()

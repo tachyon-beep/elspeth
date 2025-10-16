@@ -9,6 +9,11 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
+import psycopg
+from azure.core.credentials import AzureKeyCredential
+from azure.search.documents import SearchClient
+from psycopg import Connection, sql
+
 from elspeth.core.plugin_context import PluginContext
 from elspeth.core.protocols import Artifact, ArtifactDescriptor, ResultSink
 from elspeth.core.validation_base import ConfigurationError
@@ -54,9 +59,19 @@ class VectorStoreClient:
     """Abstract vector store client interface."""
 
     def upsert_many(self, namespace: str, records: Iterable[VectorRecord]) -> UpsertResponse:  # pragma: no cover - interface
+        """Upsert vector records into the store.
+
+        Args:
+            namespace: Namespace for the records
+            records: Iterable of VectorRecord objects to upsert
+
+        Returns:
+            UpsertResponse with count and timing metadata
+        """
         raise NotImplementedError
 
     def close(self) -> None:  # pragma: no cover - optional
+        """Close the client connection and release resources."""
         return None
 
 
@@ -70,19 +85,13 @@ class PgVectorClient(VectorStoreClient):
         table: str,
         upsert_conflict: str = "replace",
     ) -> None:
-        try:
-            import psycopg
-            from psycopg import sql
-        except ModuleNotFoundError as exc:  # pragma: no cover - optional dependency
-            raise RuntimeError("psycopg package is required for pgvector provider") from exc
-
         self._psycopg = psycopg
         self._sql = sql
         self._dsn = dsn
         self._table = table
         self._conflict_policy = upsert_conflict
 
-    def _ensure_table(self, conn) -> None:
+    def _ensure_table(self, conn: psycopg.Connection) -> None:
         with conn.cursor() as cur:
             cur.execute("CREATE EXTENSION IF NOT EXISTS vector")
             # Use sql.Identifier to safely quote table name and prevent SQL injection
@@ -107,12 +116,12 @@ class PgVectorClient(VectorStoreClient):
         if not items:
             return UpsertResponse(count=0, took=0.0, namespace=namespace)
 
-        conn = self._psycopg.connect(self._dsn, autocommit=True)
-        try:
-            self._ensure_table(conn)
+        with self._psycopg.connect(self._dsn, autocommit=True) as conn:
+            pg_conn: Connection[Any] = conn
+            self._ensure_table(pg_conn)
             # Use sql.SQL and sql.Identifier to safely construct queries and prevent SQL injection
             query = self._build_insert_query()
-            with conn.cursor() as cur:
+            with pg_conn.cursor() as cur:
                 for record in items:
                     vector_literal = self._vector_literal(record.vector)
                     metadata = json.dumps(record.metadata or {})
@@ -127,8 +136,6 @@ class PgVectorClient(VectorStoreClient):
                             record.security_level,
                         ),
                     )
-        finally:
-            conn.close()
 
         took = max(time.time() - start, 0.0)
         return UpsertResponse(count=len(items), took=took, namespace=namespace)
@@ -177,15 +184,9 @@ class AzureSearchVectorClient(VectorStoreClient):
         document_id_field: str = "document_id",
         namespace_field: str = "namespace",
     ) -> None:
-        try:
-            from azure.core.credentials import AzureKeyCredential
-            from azure.search.documents import SearchClient
-        except ModuleNotFoundError as exc:  # pragma: no cover - optional dependency
-            raise RuntimeError("azure-search-documents package is required for azure_search provider") from exc
-
-        self._SearchClient = SearchClient
-        self._AzureKeyCredential = AzureKeyCredential
-        self._client = self._SearchClient(endpoint=endpoint, index_name=index, credential=self._AzureKeyCredential(api_key))
+        self._search_client_class = SearchClient
+        self._azure_key_credential_class = AzureKeyCredential
+        self._client = self._search_client_class(endpoint=endpoint, index_name=index, credential=self._azure_key_credential_class(api_key))
         self._vector_field = vector_field
         self._id_field = document_id_field
         self._namespace_field = namespace_field

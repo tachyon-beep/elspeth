@@ -28,6 +28,13 @@ from elspeth.core.validation_base import ConfigurationError
 
 @dataclass
 class ExperimentSuiteRunner:
+    """Runner for executing experiment suites with shared LLM client and sinks.
+
+    Orchestrates the execution of multiple experiments defined in an ExperimentSuite,
+    managing shared resources like LLM clients and output sinks. Handles experiment
+    initialization, execution, result collection, and artifact management.
+    """
+
     suite: ExperimentSuite
     llm_client: LLMClientProtocol
     sinks: list[ResultSink]
@@ -230,7 +237,7 @@ class ExperimentSuiteRunner:
 
     def _instantiate_sinks(self, defs: list[dict[str, Any]]) -> list[ResultSink]:
         sinks: list[ResultSink] = []
-        for index, entry in enumerate(defs):
+        for _, entry in enumerate(defs):
             plugin = entry.get("plugin")
             if not isinstance(plugin, str) or not plugin:
                 raise ConfigurationError("Each sink definition must include a 'plugin' string")
@@ -266,6 +273,17 @@ class ExperimentSuiteRunner:
         sink_factory: Callable[[ExperimentConfig], list[ResultSink]] | None = None,
         preflight_info: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        """Execute all experiments in the suite.
+
+        Args:
+            df: Input DataFrame for experiments
+            defaults: Default configuration values
+            sink_factory: Optional factory for creating experiment-specific sinks
+            preflight_info: Optional metadata about the run environment
+
+        Returns:
+            Dictionary containing results for all experiments
+        """
         defaults = defaults or {}
         results: dict[str, Any] = {}
         prompt_packs = defaults.get("prompt_packs", {})

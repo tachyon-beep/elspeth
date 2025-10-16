@@ -79,7 +79,7 @@ class BaseCSVDataSource(DataSource):
             schema = self.output_schema()
             if schema:
                 df.attrs["schema"] = schema
-                logger.debug(f"Attached schema {schema.__name__} to DataFrame from {self.path}")
+                logger.debug("Attached schema %s to DataFrame from %s", schema.__name__, self.path)
                 self._log_schema_attached(plugin_logger, schema)
 
             # Log successful load
@@ -94,7 +94,7 @@ class BaseCSVDataSource(DataSource):
 
             self._df_loaded = True
             return df
-        except Exception as exc:
+        except (OSError, ValueError, pd.errors.ParserError, RuntimeError) as exc:
             return self._handle_load_error(plugin_logger, exc)
 
     def _read_csv(self) -> pd.DataFrame:
@@ -121,8 +121,22 @@ class BaseCSVDataSource(DataSource):
 
         raise FileNotFoundError(f"{self.datasource_type} datasource file not found: {self.path}")
 
-    def _handle_load_error(self, plugin_logger, exc: Exception) -> pd.DataFrame:
-        """Handle errors during CSV loading."""
+    def _handle_load_error(self, plugin_logger, exc: OSError | ValueError | pd.errors.ParserError | RuntimeError) -> pd.DataFrame:
+        """Handle errors during CSV loading.
+
+        Args:
+            plugin_logger: Optional plugin logger for error tracking
+            exc: The specific exception that occurred during loading
+
+        Returns:
+            Empty DataFrame if on_error='skip', otherwise re-raises the exception
+
+        Raises:
+            OSError: For file access errors
+            ValueError: For data type conversion errors
+            pd.errors.ParserError: For CSV parsing errors
+            RuntimeError: For other runtime errors during loading
+        """
         if plugin_logger:
             plugin_logger.log_error(
                 exc,
@@ -137,7 +151,7 @@ class BaseCSVDataSource(DataSource):
             df.attrs["determinism_level"] = self.determinism_level
             df.attrs["schema"] = self.output_schema()
             return df
-        raise
+        raise exc
 
     def _copy_to_audit_location(self) -> Path:
         """Copy source CSV to audit directory for archival purposes."""
@@ -154,8 +168,12 @@ class BaseCSVDataSource(DataSource):
         dest_path.parent.mkdir(parents=True, exist_ok=True)
 
         # Copy file
-        shutil.copy2(self.path, dest_path)
-        logger.debug("Copied source file %s to %s (%d bytes)", self.path, dest_path, dest_path.stat().st_size)
+        try:
+            shutil.copy2(self.path, dest_path)
+            logger.debug("Copied source file %s to %s (%d bytes)", self.path, dest_path, dest_path.stat().st_size)
+        except OSError as exc:
+            logger.error("Failed to copy source file to audit location: %s", exc)
+            raise
 
         return dest_path
 
@@ -176,7 +194,7 @@ class BaseCSVDataSource(DataSource):
         if self.schema_config:
             schema_name = f"{self.path.stem}_ConfigSchema"
             self._cached_schema = schema_from_config(self.schema_config, schema_name)
-            logger.debug(f"Built schema from config for {self.path}: {schema_name}")
+            logger.debug("Built schema from config for %s: %s", self.path, schema_name)
             return self._cached_schema
 
         # Priority 2: Infer from DataFrame
@@ -188,10 +206,10 @@ class BaseCSVDataSource(DataSource):
                     df = pd.read_csv(self.path, dtype=self.dtype, encoding=self.encoding, nrows=100)  # type: ignore[arg-type]
                     schema_name = f"{self.path.stem}_InferredSchema"
                     self._cached_schema = infer_schema_from_dataframe(df, schema_name)
-                    logger.debug(f"Inferred schema for {self.path}: {schema_name}")
+                    logger.debug("Inferred schema for %s: %s", self.path, schema_name)
                     return self._cached_schema
-            except Exception as exc:
-                logger.warning(f"Failed to infer schema from {self.path}: {exc}")
+            except (OSError, ValueError, pd.errors.ParserError, RuntimeError) as exc:
+                logger.warning("Failed to infer schema from %s: %s", self.path, exc)
                 return None
 
         # No schema available

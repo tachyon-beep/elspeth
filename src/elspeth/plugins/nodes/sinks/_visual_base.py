@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 import base64
+import html
 import io
 import logging
 from pathlib import Path
 from typing import Any, Sequence
+
+import matplotlib
+import matplotlib.pyplot as plt
+import seaborn as sns
 
 from elspeth.core.protocols import Artifact, ResultSink
 from elspeth.core.security import normalize_determinism_level, normalize_security_level
@@ -42,7 +47,7 @@ class BaseVisualSink(ResultSink):
         default_figure_size: tuple[float, float] = (10.0, 6.0),
         seaborn_style: str | None = "darkgrid",
         on_error: str = "abort",
-        **kwargs: Any,
+        **_kwargs: Any,  # Reserved for future subclass extensions
     ):
         """Initialize base visual sink.
 
@@ -55,7 +60,7 @@ class BaseVisualSink(ResultSink):
             default_figure_size: Default figure size if not specified
             seaborn_style: Seaborn theme style
             on_error: Error handling strategy ("abort" or "skip")
-            **kwargs: Additional arguments for subclasses
+            **_kwargs: Reserved for future subclass extensions
         """
         self.base_path = Path(base_path)
         self.file_stem = file_stem
@@ -161,34 +166,20 @@ class BaseVisualSink(ResultSink):
         if self._plot_modules is not None:
             return self._plot_modules
 
-        try:
-            import matplotlib
-
-            matplotlib.use("Agg")
-            import matplotlib.pyplot as plt
-        except ImportError as exc:
-            raise RuntimeError("matplotlib is required for visual analytics") from exc
-
-        try:
-            import seaborn
-        except ImportError as exc:
-            # Seaborn is optional; log warning and continue without enhanced styling
-            logger.warning("seaborn not available; visual plots will use matplotlib defaults: %s", exc)
-            seaborn = None
-
-        self._plot_modules = (matplotlib, plt, seaborn)
+        matplotlib.use("Agg")
+        self._plot_modules = (matplotlib, plt, sns)
         return self._plot_modules
 
     # Figure saving -----------------------------------------------------------
 
     def _save_figure_to_formats(
-        self, fig: Any, plt: Any, base_name: str, extra_metadata: dict[str, Any]
+        self, fig: Any, pyplot: Any, base_name: str, extra_metadata: dict[str, Any]
     ) -> list[tuple[str, Path, dict[str, Any]]]:
         """Save figure to all configured formats.
 
         Args:
             fig: Matplotlib figure object
-            plt: Matplotlib pyplot module
+            pyplot: Matplotlib pyplot module
             base_name: Base filename (without extension)
             extra_metadata: Additional metadata to attach to artifacts
 
@@ -198,7 +189,7 @@ class BaseVisualSink(ResultSink):
         # Generate PNG bytes
         buffer = io.BytesIO()
         fig.savefig(buffer, format="png", dpi=self.dpi)
-        plt.close(fig)
+        pyplot.close(fig)
         png_bytes = buffer.getvalue()
 
         written: list[tuple[str, Path, dict[str, Any]]] = []
@@ -219,19 +210,17 @@ class BaseVisualSink(ResultSink):
 
         return written
 
-    def _render_html_wrapper(self, encoded_png: str, title: str, metadata: dict[str, Any]) -> str:
+    def _render_html_wrapper(self, encoded_png: str, title: str, _metadata: dict[str, Any]) -> str:
         """Render basic HTML wrapper. Override for custom layouts.
 
         Args:
             encoded_png: Base64-encoded PNG image
             title: Chart title
-            metadata: Additional metadata (ignored in base implementation)
+            _metadata: Additional metadata (reserved for future use)
 
         Returns:
             HTML string
         """
-        import html
-
         # Escape title to prevent HTML injection
         safe_title = html.escape(title)
 

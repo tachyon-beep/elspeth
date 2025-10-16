@@ -233,8 +233,6 @@ def test_experiment_runner_concurrency(monkeypatch):
         },
     )
 
-    import pandas as pd
-
     df = pd.DataFrame({"APPID": ["1", "2", "3", "4"]})
     start = time.perf_counter()
     payload = runner.run(df)
@@ -275,8 +273,6 @@ def test_experiment_suite_runner(tmp_path):
         sinks=[_secure_sink(DummySink())],
     )
 
-    import pandas as pd
-
     df = pd.DataFrame({"APPID": ["1"]})
     results = runner.run(
         df,
@@ -300,8 +296,6 @@ def test_experiment_runner_cost_tracker():
     class DummySink:
         def write(self, results, *, metadata=None):
             self.meta = metadata
-
-    from elspeth.core.controls.cost_tracker import FixedPriceCostTracker
 
     sink = _secure_sink(DummySink())
     tracker = FixedPriceCostTracker(prompt_token_price=0.01, completion_token_price=0.02)
@@ -439,8 +433,6 @@ def test_suite_runner_with_plugin_definitions(tmp_path, monkeypatch):
         sinks=[_secure_sink(DummySink())],
     )
 
-    import pandas as pd
-
     df = pd.DataFrame({"APPID": ["1"]})
     results = runner.run(
         df,
@@ -473,7 +465,11 @@ def test_execute_llm_retry(monkeypatch):
             pass
 
     sleep_calls = []
-    monkeypatch.setattr("elspeth.core.experiments.runner.time.sleep", lambda x: sleep_calls.append(x))
+
+    def track_sleep(x):
+        sleep_calls.append(x)
+
+    monkeypatch.setattr("elspeth.core.experiments.runner.time.sleep", track_sleep)
 
     runner = ExperimentRunner(
         llm_client=FlakyLLM(),

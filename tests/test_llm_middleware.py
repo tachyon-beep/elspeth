@@ -52,8 +52,6 @@ def test_middleware_chain(monkeypatch):
         llm_middlewares=middlewares,
     )
 
-    import pandas as pd
-
     df = pd.DataFrame({"APPID": ["1"]})
     runner.run(df)
 
@@ -81,8 +79,6 @@ def test_prompt_shield_blocks():
         llm_middlewares=middlewares,
     )
 
-    import pandas as pd
-
     df = pd.DataFrame({"text": ["forbidden data"]})
     payload = runner.run(df)
 
@@ -109,8 +105,6 @@ def test_prompt_shield_masks(caplog):
         prompt_template="{{ text }}",
         llm_middlewares=middlewares,
     )
-
-    import pandas as pd
 
     df = pd.DataFrame({"text": ["this is top secret info"]})
     with caplog.at_level("WARNING"):
@@ -393,8 +387,6 @@ def test_middleware_retry_hook_invoked(monkeypatch):
         llm_middlewares=create_middlewares([{"name": "retry_tracker", "security_level": "OFFICIAL", "determinism_level": "guaranteed"}]),
     )
 
-    import pandas as pd
-
     df = pd.DataFrame({"APPID": ["1"]})
     payload = runner.run(df)
 
@@ -403,8 +395,6 @@ def test_middleware_retry_hook_invoked(monkeypatch):
 
 
 def test_health_monitor_middleware_logs(caplog):
-    from elspeth.plugins.nodes.transforms.llm.middleware import HealthMonitorMiddleware
-
     middleware = HealthMonitorMiddleware(heartbeat_interval=0.0, stats_window=5, channel="test.health")
     request = LLMRequest(system_prompt="sys", user_prompt="hello", metadata={})
 
@@ -416,8 +406,6 @@ def test_health_monitor_middleware_logs(caplog):
 
 
 def test_health_monitor_middleware_tracks_failures(caplog):
-    from elspeth.plugins.nodes.transforms.llm.middleware import HealthMonitorMiddleware
-
     middleware = HealthMonitorMiddleware(heartbeat_interval=0.0, stats_window=5, channel="test.health")
     request = LLMRequest(system_prompt="sys", user_prompt="hello", metadata={})
 

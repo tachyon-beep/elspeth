@@ -38,8 +38,11 @@ def openai_stub(monkeypatch):
     module.AzureOpenAI = StubClient
 
     monkeypatch.setitem(sys.modules, "openai", module)
+    # Clear any cached imports of embedding module to force reimport with stub
+    sys.modules.pop("elspeth.retrieval.embedding", None)
     yield module
     sys.modules.pop("openai", None)
+    sys.modules.pop("elspeth.retrieval.embedding", None)
 
 
 def test_openai_embedder_requires_api_key(openai_stub, monkeypatch):

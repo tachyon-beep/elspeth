@@ -223,7 +223,8 @@ class TestArtifactPipelinePerformance:
         # Create mock sinks
         class MockSink:
             def write(self, data, metadata=None):
-                pass
+                """Mock write method for testing."""
+                ...
 
         bindings = [
             SinkBinding(
@@ -264,7 +265,8 @@ class TestArtifactPipelinePerformance:
         # Create mock sinks
         class MockSink:
             def write(self, data, metadata=None):
-                pass
+                """Mock write method for testing."""
+                ...
 
         bindings = [
             SinkBinding(
@@ -343,7 +345,7 @@ class TestPerformanceRegression:
         import pathlib
 
         test_file = pathlib.Path(__file__)
-        content = test_file.read_text()
+        content = test_file.read_text(encoding="utf-8")
 
         assert "PERFORMANCE BASELINES" in content, "Performance baselines should be documented in test file"
         assert "Registry Lookups" in content
@@ -357,7 +359,6 @@ class TestPerformanceRegression:
         # After migration: Should be <= 33s (10% tolerance)
 
         import subprocess
-        import time
 
         start = time.perf_counter()
         result = subprocess.run(
@@ -374,6 +375,7 @@ class TestPerformanceRegression:
             ],
             capture_output=True,
             text=True,
+            check=False,
             timeout=120,
         )
         elapsed = time.perf_counter() - start
@@ -401,39 +403,37 @@ def sample_dataframe():
 
 
 # Performance summary
-"""
-PERFORMANCE BASELINES (updated 2025-10-15):
-
-Registry Lookups: < 7ms (increased from 5ms to accommodate CI environment variability)
-- Datasource: ~2-6ms (local ~2-4ms, CI ~5-6ms)
-- LLM Client: ~2-3ms
-- Sink: ~2-3ms
-
-Plugin Creation: < 35ms (increased from 20ms to accommodate CI environment variability)
-- Row Plugin: ~15-30ms (local ~15ms, CI ~30ms)
-- Aggregator: ~15-30ms (local ~15ms, CI ~30ms)
-- Validator: ~15-30ms (local ~15ms, CI ~30ms)
-
-Configuration Merge: < 50ms
-- Simple (3 layers): ~5ms
-- Complex (7 keys): ~15ms
-
-Artifact Pipeline: < 100ms
-- Simple (2 sinks): ~10ms
-- Complex (5 sinks): ~30ms
-
-End-to-End Suite: ~30-35s
-- Sample suite (10 rows)
-- 7 experiments
-- Multiple sinks per experiment
-- Middleware enabled
-
-REGRESSION THRESHOLDS:
-- Registry lookups: +3.5ms (50% increase from new 7ms baseline) = FAIL
-- Plugin creation: +17.5ms (50% increase from new 35ms baseline) = FAIL
-- Config merge: +25ms (50% increase) = FAIL
-- Artifact pipeline: +50ms (50% increase) = FAIL
-- Suite execution: +10s (33% increase) = FAIL
-
-NOTE: These tests will run automatically in CI to detect regressions.
-"""
+# PERFORMANCE BASELINES (updated 2025-10-15):
+#
+# Registry Lookups: < 7ms (increased from 5ms to accommodate CI environment variability)
+# - Datasource: ~2-6ms (local ~2-4ms, CI ~5-6ms)
+# - LLM Client: ~2-3ms
+# - Sink: ~2-3ms
+#
+# Plugin Creation: < 35ms (increased from 20ms to accommodate CI environment variability)
+# - Row Plugin: ~15-30ms (local ~15ms, CI ~30ms)
+# - Aggregator: ~15-30ms (local ~15ms, CI ~30ms)
+# - Validator: ~15-30ms (local ~15ms, CI ~30ms)
+#
+# Configuration Merge: < 50ms
+# - Simple (3 layers): ~5ms
+# - Complex (7 keys): ~15ms
+#
+# Artifact Pipeline: < 100ms
+# - Simple (2 sinks): ~10ms
+# - Complex (5 sinks): ~30ms
+#
+# End-to-End Suite: ~30-35s
+# - Sample suite (10 rows)
+# - 7 experiments
+# - Multiple sinks per experiment
+# - Middleware enabled
+#
+# REGRESSION THRESHOLDS:
+# - Registry lookups: +3.5ms (50% increase from new 7ms baseline) = FAIL
+# - Plugin creation: +17.5ms (50% increase from new 35ms baseline) = FAIL
+# - Config merge: +25ms (50% increase) = FAIL
+# - Artifact pipeline: +50ms (50% increase) = FAIL
+# - Suite execution: +10s (33% increase) = FAIL
+#
+# NOTE: These tests will run automatically in CI to detect regressions.

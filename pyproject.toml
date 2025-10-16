@@ -14,6 +14,8 @@ dependencies = [
   # Core dependencies (updated to latest stable versions as of 2025-10)
   "azure-identity>=1.25.0",
   "azure-storage-blob>=12.27.0",
+  "azure-search-documents>=11.4.0",  # Azure Cognitive Search for RAG
+  "psycopg>=3.1.0",          # PostgreSQL with pgvector support
   "pandas>=2.3.0",
   "pydantic>=2.0,<3.0",
   "pyyaml>=6.0",
@@ -46,10 +48,6 @@ dev = [
 # Azure ML integration (truly optional - external infrastructure)
 azure = [
   "azureml-core>=1.56.0",
-]
-# PostgreSQL vector storage (truly optional - external database)
-pgvector = [
-  "psycopg>=3.1.0",
 ]
 
 [tool.setuptools.packages.find]
