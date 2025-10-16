@@ -1,6 +1,6 @@
 """Security utilities (signing, classification, secure mode, etc.)."""
 
-from elspeth.core.types import DeterminismLevel, SecurityLevel
+from elspeth.core.base.types import DeterminismLevel, SecurityLevel
 
 from .approved_endpoints import (
     ServiceType,

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
-from elspeth.core.validation_base import ConfigurationError, validate_schema
+from elspeth.core.validation.base import ConfigurationError, validate_schema
 
 _PLUGIN_DEF_SCHEMA = {
     """Base schema for plugin definitions referencing a name and options.""" "type": "object",

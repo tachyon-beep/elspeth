@@ -1,6 +1,6 @@
 ---
 name: registry-schema-validator
-description: Use this agent when you need to validate Elspeth plugin registry schemas, test configuration validation, or ensure security_level enforcement. This agent should be invoked proactively after:\n\n- Adding or modifying plugin schemas in registry files\n- Changing validation logic in create_* methods\n- Adding new plugin types to any registry\n- Modifying security_level enforcement\n- Updating JSONSchema definitions\n- Refactoring plugin instantiation code\n\nExamples:\n\n<example>\nContext: User just added a new datasource plugin to the registry.\nuser: "I've added a new 's3_datasource' plugin to src/elspeth/core/registry.py with schema validation. Can you review it?"\nassistant: "I'll use the registry-schema-validator agent to validate the new datasource schema and test its configuration validation."\n<Uses Task tool to launch registry-schema-validator agent>\n</example>\n\n<example>\nContext: User modified the security_level enforcement in create_llm method.\nuser: "I updated the create_llm method to better handle security_level validation"\nassistant: "Let me use the registry-schema-validator agent to verify the security_level enforcement is working correctly across all LLM plugins."\n<Uses Task tool to launch registry-schema-validator agent>\n</example>\n\n<example>\nContext: User is working on plugin code and hasn't explicitly asked for validation.\nuser: "I've finished implementing the new azure_blob_datasource plugin with its schema"\nassistant: "Great! Now let me proactively validate the schema using the registry-schema-validator agent to ensure it follows Elspeth's validation patterns."\n<Uses Task tool to launch registry-schema-validator agent>\n</example>\n\n<example>\nContext: User reports configuration validation errors.\nuser: "I'm getting weird validation errors when trying to use the csv_file sink"\nassistant: "I'll use the registry-schema-validator agent to analyze the csv_file sink schema and test various configurations to identify the validation issue."\n<Uses Task tool to launch registry-schema-validator agent>\n</example>
+description: Use this agent when you need to validate Elspeth plugin registry schemas, test configuration validation, or ensure security_level enforcement. This agent should be invoked proactively after:\n\n- Adding or modifying plugin schemas in registry files\n- Changing validation logic in create_* methods\n- Adding new plugin types to any registry\n- Modifying security_level enforcement\n- Updating JSONSchema definitions\n- Refactoring plugin instantiation code\n\nExamples:\n\n<example>\nContext: User just added a new datasource plugin to the registry.\nuser: "I've added a new 's3_datasource' plugin to src/elspeth/core/registries/__init__.py with schema validation. Can you review it?"\nassistant: "I'll use the registry-schema-validator agent to validate the new datasource schema and test its configuration validation."\n<Uses Task tool to launch registry-schema-validator agent>\n</example>\n\n<example>\nContext: User modified the security_level enforcement in create_llm method.\nuser: "I updated the create_llm method to better handle security_level validation"\nassistant: "Let me use the registry-schema-validator agent to verify the security_level enforcement is working correctly across all LLM plugins."\n<Uses Task tool to launch registry-schema-validator agent>\n</example>\n\n<example>\nContext: User is working on plugin code and hasn't explicitly asked for validation.\nuser: "I've finished implementing the new azure_blob_datasource plugin with its schema"\nassistant: "Great! Now let me proactively validate the schema using the registry-schema-validator agent to ensure it follows Elspeth's validation patterns."\n<Uses Task tool to launch registry-schema-validator agent>\n</example>\n\n<example>\nContext: User reports configuration validation errors.\nuser: "I'm getting weird validation errors when trying to use the csv_file sink"\nassistant: "I'll use the registry-schema-validator agent to analyze the csv_file sink schema and test various configurations to identify the validation issue."\n<Uses Task tool to launch registry-schema-validator agent>\n</example>
 model: sonnet
 ---
 
@@ -65,11 +65,11 @@ For each validation failure, verify:
 
 ## Key Registry Files You Must Reference
 
-- `src/elspeth/core/registry.py` - Datasource, LLM, sink schemas and validation
+- `src/elspeth/core/registries/__init__.py` - Datasource, LLM, sink schemas and validation
 - `src/elspeth/core/llm/registry.py` - Middleware schemas
 - `src/elspeth/core/experiments/plugin_registry.py` - Experiment plugin schemas
 - `src/elspeth/core/controls/registry.py` - Control schemas
-- `src/elspeth/core/validation.py` - Schema validation utilities
+- `src/elspeth/core/validation/validators.py` - Schema validation utilities
 - `tests/test_registry.py` - Existing validation tests
 - `tests/test_validation_settings.py` - Configuration validation tests
 
@@ -149,14 +149,14 @@ Actual Result: ✅ Rejected with correct error
 ⚠️  Issue: Missing "required" constraint
 Field: encoding
 Problem: Schema declares encoding as optional, but code requires it
-Location: src/elspeth/core/registry.py:125
+Location: src/elspeth/core/registries/__init__.py:125
 Fix: Add "encoding" to "required" array or handle None in code
 
 ⚠️  Issue: Unhelpful error message
 Config: {"path": 123}
 Current Error: "Validation error"
 Better Error: "datasource:local_csv: 'path' must be a string, got integer"
-Location: src/elspeth/core/registry.py:550
+Location: src/elspeth/core/registries/__init__.py:550
 Fix: Use ConfigurationError with context parameter
 ```
 
@@ -181,7 +181,7 @@ Fix: Use ConfigurationError with context parameter
 **ALWAYS start by asking these clarifying questions:**
 
 1. "Which plugin are you validating? (Provide plugin type and name)"
-2. "Which registry file contains the plugin? (datasource/LLM/sink: core/registry.py, middleware: llm/registry.py, etc.)"
+2. "Which registry file contains the plugin? (datasource/LLM/sink: core/registries/__init__.py, middleware: llm/registry.py, etc.)"
 3. "Are you validating a new plugin or an existing one?"
 4. "Do you have a specific configuration that's failing validation?"
 5. "Should I validate all plugins of a type or just this specific one?"
@@ -201,8 +201,8 @@ Fix: Use ConfigurationError with context parameter
 
 ```bash
 # For datasources, LLMs, sinks:
-Read: src/elspeth/core/registry.py
-grep pattern="\"<plugin_name>\": PluginFactory" path="src/elspeth/core/registry.py" output_mode="content" -A 30
+Read: src/elspeth/core/registries/__init__.py
+grep pattern="\"<plugin_name>\": PluginFactory" path="src/elspeth/core/registries/__init__.py" output_mode="content" -A 30
 
 # For middleware:
 Read: src/elspeth/core/llm/registry.py
@@ -226,13 +226,13 @@ grep pattern="_row_plugins\|_aggregator_plugins\|_validation_plugins" path="src/
 ✓ **Required Fields**:
 ```bash
 # Verify required array exists
-grep pattern="\"required\":" path="src/elspeth/core/registry.py" output_mode="content" -A 2
+grep pattern="\"required\":" path="src/elspeth/core/registries/__init__.py" output_mode="content" -A 2
 ```
 
 ✓ **security_level Enforcement** (for datasources/LLMs/sinks):
 ```bash
 # Check create_* method validates security_level
-grep pattern="if.*security_level.*is None\|security_level is required" path="src/elspeth/core/registry.py" output_mode="content" -n
+grep pattern="if.*security_level.*is None\|security_level is required" path="src/elspeth/core/registries/__init__.py" output_mode="content" -n
 ```
 
 ✓ **additionalProperties Setting**:

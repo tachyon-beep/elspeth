@@ -9,7 +9,7 @@ CRITICAL: These tests must NOT be modified or removed without security review.
 
 import pytest
 
-from elspeth.core.plugin_context import PluginContext
+from elspeth.core.base.plugin_context import PluginContext
 from elspeth.core.registries.base import BasePluginRegistry
 from elspeth.core.registries.plugin_helpers import create_plugin_with_inheritance
 from elspeth.core.validation import ConfigurationError

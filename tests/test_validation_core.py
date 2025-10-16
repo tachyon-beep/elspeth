@@ -1,5 +1,5 @@
-import elspeth.core.validation as validation
 from elspeth.core.validation import ValidationReport, validate_schema
+from elspeth.core.validation.validators import _validate_plugin_list, _validate_plugin_reference
 
 
 def test_validate_schema_anyof_failure_reports_context():
@@ -25,10 +25,10 @@ def test_validate_plugin_reference_type_checks():
         if plugin != "known":
             raise ValueError("unknown plugin")
 
-    validation._validate_plugin_reference(report, entry="not-a-mapping", kind="sink", validator=validator)
-    validation._validate_plugin_reference(report, entry={"options": {}}, kind="sink", validator=validator)
-    validation._validate_plugin_reference(report, entry={"plugin": 123}, kind="sink", validator=validator)
-    validation._validate_plugin_reference(report, entry={"plugin": "unknown"}, kind="sink", validator=validator)
+    _validate_plugin_reference(report, entry="not-a-mapping", kind="sink", validator=validator)
+    _validate_plugin_reference(report, entry={"options": {}}, kind="sink", validator=validator)
+    _validate_plugin_reference(report, entry={"plugin": 123}, kind="sink", validator=validator)
+    _validate_plugin_reference(report, entry={"plugin": "unknown"}, kind="sink", validator=validator)
 
     messages = [msg.format() for msg in report.errors]
     assert "sink configuration must be a mapping" in messages[0]
@@ -40,7 +40,7 @@ def test_validate_plugin_reference_type_checks():
 def test_validate_plugin_list_requires_sequence():
     report = ValidationReport()
 
-    validation._validate_plugin_list(report, entries="not-a-list", validator=lambda *_: None, context="validation")
+    _validate_plugin_list(report, entries="not-a-list", validator=lambda *_: None, context="validation")
 
     assert any("Expected a list of plugin definitions" in msg.format() for msg in report.errors)
 
@@ -48,7 +48,7 @@ def test_validate_plugin_list_requires_sequence():
 def test_validate_plugin_reference_requires_security_level():
     report = ValidationReport()
 
-    validation._validate_plugin_reference(
+    _validate_plugin_reference(
         report,
         entry={"plugin": "known", "options": {}},
         kind="sink",

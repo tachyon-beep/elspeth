@@ -12,7 +12,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 import pandas as pd
 
-from elspeth.core.protocols import Artifact, ArtifactDescriptor, ResultSink
+from elspeth.core.base.protocols import Artifact, ArtifactDescriptor, ResultSink
 from elspeth.core.security import normalize_determinism_level, normalize_security_level, resolve_security_level
 from elspeth.plugins.nodes.sinks._sanitize import sanitize_cell
 

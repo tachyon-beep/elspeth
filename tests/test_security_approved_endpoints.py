@@ -10,7 +10,7 @@ from elspeth.core.security.approved_endpoints import (
     validate_endpoint,
     validate_http_api_endpoint,
 )
-from elspeth.core.validation_base import ConfigurationError
+from elspeth.core.validation.base import ConfigurationError
 
 
 class TestEndpointValidation:
@@ -342,7 +342,7 @@ class TestEndpointValidationRegistry:
 
     def test_azure_openai_factory_validates_endpoint(self):
         """Test Azure OpenAI factory function validates endpoints."""
-        from elspeth.core.plugin_context import PluginContext
+        from elspeth.core.base.plugin_context import PluginContext
         from elspeth.core.registries.llm import _create_azure_openai
 
         context = PluginContext(
@@ -367,7 +367,7 @@ class TestEndpointValidationRegistry:
 
     def test_http_openai_factory_validates_endpoint(self):
         """Test HTTP OpenAI factory function validates endpoints."""
-        from elspeth.core.plugin_context import PluginContext
+        from elspeth.core.base.plugin_context import PluginContext
         from elspeth.core.registries.llm import _create_http_openai
 
         context = PluginContext(
@@ -388,7 +388,7 @@ class TestEndpointValidationRegistry:
 
     def test_http_openai_factory_allows_localhost(self):
         """Test HTTP OpenAI factory allows localhost endpoints."""
-        from elspeth.core.plugin_context import PluginContext
+        from elspeth.core.base.plugin_context import PluginContext
         from elspeth.core.registries.llm import _create_http_openai
 
         context = PluginContext(

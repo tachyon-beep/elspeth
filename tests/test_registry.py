@@ -131,7 +131,7 @@ def test_create_row_plugin_conflicting_security_levels():
 
 
 def test_create_row_plugin_inherits_parent_context():
-    from elspeth.core.plugin_context import PluginContext
+    from elspeth.core.base.plugin_context import PluginContext
 
     parent_context = PluginContext(plugin_name="suite", plugin_kind="suite", security_level="SECRET", determinism_level="none")
     plugin = plugin_registry.create_row_plugin(
@@ -189,7 +189,7 @@ def test_registry_sink_schema_success(tmp_path):
     sink = sink_registry.create(
         "file_copy", {"destination": dest.as_posix(), "security_level": "OFFICIAL", "determinism_level": "guaranteed"}
     )
-    from elspeth.core.protocols import Artifact
+    from elspeth.core.base.protocols import Artifact
 
     src = tmp_path / "src.txt"
     src.write_text("hello", encoding="utf-8")

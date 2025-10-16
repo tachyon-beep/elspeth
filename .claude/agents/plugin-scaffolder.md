@@ -30,13 +30,13 @@ Before generating any code, you MUST:
 **Datasources:**
 
 - Implementation: `src/elspeth/plugins/datasources/csv_local.py`
-- Registry: `src/elspeth/core/registry.py` (_datasources dict)
+- Registry: `src/elspeth/core/registries/__init__.py` (_datasources dict)
 - Tests: `tests/test_datasource_csv.py`
 
 **LLM Clients:**
 
 - Implementation: `src/elspeth/plugins/llms/mock.py`
-- Registry: `src/elspeth/core/registry.py` (_llms dict)
+- Registry: `src/elspeth/core/registries/__init__.py` (_llms dict)
 - Tests: `tests/test_llm_mock.py`
 
 **Middleware:**
@@ -48,7 +48,7 @@ Before generating any code, you MUST:
 **Result Sinks:**
 
 - Implementation: `src/elspeth/plugins/outputs/csv_file.py`, `src/elspeth/plugins/outputs/signed.py`
-- Registry: `src/elspeth/core/registry.py` (_sinks dict)
+- Registry: `src/elspeth/core/registries/__init__.py` (_sinks dict)
 - Tests: `tests/test_outputs_csv.py`, `tests/test_outputs_signed.py`
 
 **Experiment Plugins:**

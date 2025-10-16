@@ -24,9 +24,9 @@
 
 ## Validation & Fail-fast Behaviour
 
-- **Schema enforcement** – Loader passes raw configuration through schema validators before instantiating plugins, catching typoed plugin names or missing options early (`src/elspeth/core/validation.py:271`, `src/elspeth/core/registry.py:98`, `src/elspeth/core/controls/registry.py:36`).[^config-schema-2025-10-12]
+- **Schema enforcement** – Loader passes raw configuration through schema validators before instantiating plugins, catching typoed plugin names or missing options early (`src/elspeth/core/validation/validators.py:271`, `src/elspeth/core/registries/__init__.py:98`, `src/elspeth/core/controls/registry.py:36`).[^config-schema-2025-10-12]
 - **Early-stop normalisation** – User-friendly structures are converted into canonical plugin definitions, reducing ambiguity around threshold plugins (`src/elspeth/core/experiments/plugin_registry.py:298`, `src/elspeth/config.py:69`).[^config-early-stop-2025-10-12]
-- **Suite audits** – `validate_suite` collects experiment metadata, checks for duplicate names/baselines, and surfaces aggregate risk estimations before orchestration begins (`src/elspeth/core/validation.py:407`, `src/elspeth/core/experiments/suite_runner.py:74`).[^config-suite-audits-2025-10-12]
+- **Suite audits** – `validate_suite` collects experiment metadata, checks for duplicate names/baselines, and surfaces aggregate risk estimations before orchestration begins (`src/elspeth/core/validation/validators.py:407`, `src/elspeth/core/experiments/suite_runner.py:74`).[^config-suite-audits-2025-10-12]
 
 ### Update 2025-10-12: Suite Defaults
 
@@ -36,7 +36,7 @@
 
 - **Dry-run toggles** – Repository sinks respect `dry_run`, allowing accreditation teams to inspect payloads without mutating upstream repositories (`config/settings.yaml:64`, `src/elspeth/plugins/outputs/repository.py:70`).[^config-dry-run-2025-10-12]
 - **On-error policies** – Datasources and sinks accept `"abort"` or `"skip"` to tailor resilience vs. strictness; combine with telemetry to ensure skipped components are investigated (`src/elspeth/plugins/datasources/csv_local.py:30`, `src/elspeth/plugins/outputs/blob.py:64`, `src/elspeth/plugins/outputs/excel.py:52`).[^config-on-error-2025-10-12]
-- **Security levels** – Datasources, sinks, and suite defaults can specify classifications that propagate through the artifact pipeline, enabling downstream segregation of outputs (`src/elspeth/plugins/datasources/csv_blob.py:25`, `src/elspeth/core/experiments/suite_runner.py:116`, `src/elspeth/core/artifact_pipeline.py:192`).[^config-security-levels-2025-10-12]
+- **Security levels** – Datasources, sinks, and suite defaults can specify classifications that propagate through the artifact pipeline, enabling downstream segregation of outputs (`src/elspeth/plugins/datasources/csv_blob.py:25`, `src/elspeth/core/experiments/suite_runner.py:116`, `src/elspeth/core/pipeline/artifact_pipeline.py:192`).[^config-security-levels-2025-10-12]
 <!-- Update 2025-10-12: `concurrency.enabled`, `max_workers`, and `utilization_pause` settings guard thread pools, while `checkpoint.path`/`field` control resumable runs; ensure these paths point to hardened storage (`src/elspeth/core/experiments/runner.py:365`, `src/elspeth/core/experiments/runner.py:280`). -->
 - **Concurrency & checkpointing** – `concurrency` blocks configure thread pools and rate-limiter backoff, while `checkpoint` paths direct resumable execution to hardened storage locations (`src/elspeth/config.py:97`, `src/elspeth/core/experiments/runner.py:365`, `src/elspeth/core/experiments/runner.py:280`).[^config-concurrency-2025-10-12]
 - **Suite defaults harmonisation** – Suite defaults merge prompt packs (including middleware/rate limiters) before experiments override them, ensuring accreditation-approved stacks remain in effect (`src/elspeth/core/experiments/suite_runner.py:55`, `src/elspeth/core/experiments/suite_runner.py:118`).[^config-suite-defaults-2025-10-12]
@@ -55,7 +55,7 @@
 
 - **Suite exports** – CLI flags `--export-suite-config`, `--create-experiment-template`, and `--reports-dir` reuse hydrated settings to write artefacts under operator-defined paths; treat exported JSON/YAML and analytics reports as configuration evidence requiring signing or checksum capture (`src/elspeth/cli.py:161`, `src/elspeth/cli.py:201`, `src/elspeth/tools/reporting.py:33`).[^config-suite-exports-2025-10-12]
 - **Prompt pack inheritance** – Prompt packs can override concurrency, middleware, sinks, and early-stop defaults; ensure packs shipped for production omit development-only plugins (`src/elspeth/config.py:92`, `src/elspeth/core/experiments/suite_runner.py:55`).[^config-prompt-inheritance-2025-10-12]
-- **Plugin whitelisting** – Registries validate plugin names against in-memory maps. Harden builds by avoiding dynamic imports at runtime and auditing prompt packs/suite defaults for unexpected plugin references (`src/elspeth/core/registry.py:69`, `src/elspeth/core/experiments/plugin_registry.py:52`).[^config-plugin-whitelist-2025-10-12]
+- **Plugin whitelisting** – Registries validate plugin names against in-memory maps. Harden builds by avoiding dynamic imports at runtime and auditing prompt packs/suite defaults for unexpected plugin references (`src/elspeth/core/registries/__init__.py:69`, `src/elspeth/core/experiments/plugin_registry.py:52`).[^config-plugin-whitelist-2025-10-12]
 
 ## Update History
 

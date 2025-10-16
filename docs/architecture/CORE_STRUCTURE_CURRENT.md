@@ -9,61 +9,27 @@
 
 ```
 src/elspeth/core/
-├── Registries (Plugin Factories)
-│   ├── registries/                  - Canonical registry package
-│   │   ├── datasource.py            - Datasource plugin registry
-│   │   ├── llm.py                   - LLM client plugin registry (hosts `create_llm_from_definition`)
-│   │   ├── middleware.py            - LLM middleware registry
-│   │   ├── sink.py                  - Output sink plugin registry
-│   │   ├── utility.py               - Utility plugin registry
-│   │   ├── base.py                  - Base registry infrastructure
-│   │   ├── plugin_helpers.py        - Shared helper functions
-│   │   └── context_utils.py         - Context derivation helpers
-│   ├── registry/                    - Deprecated shim package forwarding to `registries/`
-│   ├── datasource_registry.py       - Deprecated shim → `registries.datasource`
-│   ├── llm_registry.py              - Deprecated shim → `registries.llm`
-│   ├── llm_middleware_registry.py   - Deprecated shim → `registries.middleware`
-│   ├── sink_registry.py             - Deprecated shim → `registries.sink`
-│   └── utility_plugin_registry.py   - Deprecated shim → `registries.utility`
-│
-├── Orchestration & Pipeline
-│   ├── orchestrator.py              - Main experiment orchestrator
-│   ├── artifact_pipeline.py         - Sink dependency resolution
-│   ├── artifacts.py                 - Artifact type definitions
-│   └── processing.py                - Processing utilities
-│
-├── Configuration & Validation
-│   ├── config_schema.py             - Configuration schemas
-│   ├── config_validation.py         - Configuration validation
-│   ├── validation.py                - Main validation logic (31K - large!)
-│   └── validation_base.py           - Base validation classes
-│
-├── Core Abstractions
-│   ├── protocols.py                 - Protocol definitions (DataSource, Sink, etc.)
-│   ├── types.py                     - Core type definitions
-│   ├── schema.py                    - JSON schema utilities
-│   └── plugin_context.py            - Plugin context system
-│
-├── Utilities
-│   ├── logging.py                   - Logging infrastructure
-│   ├── env_helpers.py               - Environment variable helpers
-│   └── utilities/                   - Placeholder package (currently empty; reserved for future shared helpers)
-│
-└── Subsystems (Subdirectories)
-    ├── experiments/                 - Experiment runner, suite runner
-    ├── controls/                    - Rate limiters, cost trackers
-    ├── security/                    - Security controls, PII validation
-    └── prompts/                     - Prompt rendering
+├── base/                      - Protocols, plugin context, schema utilities, core enums
+├── pipeline/                  - Artifact pipeline, artifact models, prompt processing helpers
+├── config/                    - Configuration schemas and secure-mode validation
+├── validation/                - Validation base classes and high-level validators
+├── utils/                     - Logging and environment-variable helpers
+├── registries/                - Canonical plugin registries (datasource, llm, sink, utility, middleware)
+├── orchestrator.py            - Experiment orchestration entry point
+├── controls/                  - Rate limiter and cost tracker implementations
+├── experiments/               - Experiment runner framework
+├── security/                  - Security classification helpers and secure-mode enforcement
+└── prompts/                   - Prompt rendering infrastructure
 ```
 
 ## Navigation Guide
 
 ### "I need to understand the plugin system"
 
-- **Start here:** `protocols.py` - Core protocol definitions
-- **Then:** `plugin_context.py` - How context flows through plugins
-- **Registry base:** `registries/base.py` - Base registry framework
-- **Specific registries:** `registries/*.py` modules (root `*_registry.py` files remain as shims)
+- **Start here:** `base/protocols.py` – Core protocol definitions (DataSource, ResultSink, LLM interfaces)
+- **Then:** `base/plugin_context.py` – How context flows through plugins
+- **Registry base:** `registries/base.py` – Base registry framework shared by all plugin registries
+- **Specific registries:** `registries/*.py` modules (datasource, llm, middleware, sink, utility)
 
 ### "I need to create/register a new plugin"
 
@@ -79,14 +45,14 @@ src/elspeth/core/
 - **Main orchestration:** `orchestrator.py`
 - **Single experiment:** `experiments/runner.py`
 - **Suite of experiments:** `experiments/suite_runner.py`
-- **Sink ordering:** `artifact_pipeline.py`
+- **Sink ordering:** `pipeline/artifact_pipeline.py`
 
 ### "I need to add configuration validation"
 
-- **Schema definitions:** `config_schema.py`
-- **Validation logic:** `config_validation.py`
-- **Base validation classes:** `validation_base.py`
-- **Main validator:** `validation.py` (⚠️ 31K - large file)
+- **Schema definitions:** `config/schema.py`
+- **Secure-mode validation:** `config/validation.py`
+- **Base validation classes:** `validation/base.py`
+- **Profile validation entrypoints:** `validation/validators.py`
 
 ### "I need to work with security/rate limiting/prompts"
 
@@ -99,26 +65,26 @@ src/elspeth/core/
 
 **Large Files** (>10KB - may need refactoring):
 
-- `validation.py` - 31K ⚠️ Very large
-- `schema.py` - 18K
-- `registries/sink.py` - 18K
-- `artifact_pipeline.py` - 15K
-- `logging.py` - 14K
-- `types.py` - 13K
+- `validation/validators.py` – 31K ⚠️ Very large
+- `base/schema.py` – 18K
+- `registries/sink.py` – 18K
+- `pipeline/artifact_pipeline.py` – 15K
+- `utils/logging.py` – 14K
+- `base/types.py` – 13K
 
 **Medium Files** (5-10KB):
 
-- `protocols.py` - 8.9K
-- `config_validation.py` - 9.3K
-- `registries/llm.py` - 8.5K
-- `validation_base.py` - 7.6K
-- `orchestrator.py` - 6.9K
-- `registries/datasource.py` - 6.2K
-- `plugin_context.py` - 5.3K
+- `base/protocols.py` – 8.9K
+- `config/validation.py` – 9.3K
+- `registries/llm.py` – 8.5K
+- `validation/base.py` – 7.6K
+- `orchestrator.py` – 6.9K
+- `registries/datasource.py` – 6.2K
+- `base/plugin_context.py` – 5.3K
 
 **Small Files** (<5KB):
 
-- All others
+- Remaining modules
 
 ## Import Patterns
 
@@ -133,7 +99,7 @@ from elspeth.core.registries.sink import sink_registry
 from elspeth.core.registries.utility import utility_plugin_registry
 
 # Protocols
-from elspeth.core.protocols import (
+from elspeth.core.base.protocols import (
     DataSource,
     ResultSink,
     LLMClientProtocol,
@@ -141,10 +107,10 @@ from elspeth.core.protocols import (
 )
 
 # Plugin Context
-from elspeth.core.plugin_context import PluginContext, apply_plugin_context
+from elspeth.core.base.plugin_context import PluginContext, apply_plugin_context
 
 # Validation
-from elspeth.core.validation_base import ConfigurationError, validate_schema
+from elspeth.core.validation.base import ConfigurationError, validate_schema
 from elspeth.core.validation import validate_experiment_config
 
 # Orchestration
@@ -158,7 +124,7 @@ from elspeth.core.experiments.suite_runner import ExperimentSuiteRunner
 ```python
 # Creating a datasource from configuration
 from elspeth.core.registries.datasource import datasource_registry
-from elspeth.core.plugin_context import PluginContext
+from elspeth.core.base.plugin_context import PluginContext
 
 context = PluginContext(
     security_level="official",
@@ -200,10 +166,9 @@ src/elspeth/
 
 ## Known Issues
 
-1. **Registry Split (in transition):**
-    - Canonical infrastructure and implementations live in the `registries/` package
-    - Legacy root modules (`*_registry.py`) remain temporarily as compatibility shims
-    - Be sure to import from `elspeth.core.registries.*` in new code
+1. **Unified registries:**
+    - All registry infrastructure and implementations live under `registries/`
+    - Legacy root modules have been removed; import exclusively from `elspeth.core.registries.*`
 
 2. **Large Files:**
    - `validation.py` is 31KB - may benefit from splitting
@@ -217,16 +182,16 @@ src/elspeth/
 
 ### Q: Why do we have both `registries/` and the old `*_registry.py` files?
 
-**A:** The new `registries/` package contains both the infrastructure and the canonical implementations. The legacy root-level modules and the `registry/` directory now only forward to the new package to keep older imports working during the migration.
+**A:** The new `registries/` package contains both the infrastructure and the canonical implementations. The legacy root-level modules have been removed as part of the 2025-10 restructure—new code must import from `elspeth.core.registries.*`.
 
 ### Q: Where do I put a new utility function?
 
 **A:**
 
-- If it's logging-related: `logging.py`
-- If it's environment variable-related: `env_helpers.py`
+- If it's logging-related: `utils/logging.py`
+- If it's environment variable-related: `utils/env_helpers.py`
 - If it's registry-related: `registries/plugin_helpers.py`
-- If it doesn't fit: Consider creating a new file or `utilities/` subdirectory
+- If it doesn't fit: Consider adding a focused helper in `utils/`
 
 ### Q: Why are there so many registry files?
 
@@ -234,7 +199,7 @@ src/elspeth/
 
 ### Q: Where do I find the LLM middleware implementations?
 
-**A:** LLM middleware **implementations** are in `src/elspeth/plugins/nodes/transforms/llm/middleware/`. The **registry** now lives in `core/registries/middleware.py` (the root `llm_middleware_registry.py` module remains only as a compatibility shim).
+**A:** LLM middleware **implementations** are in `src/elspeth/plugins/nodes/transforms/llm/middleware/`. The **registry** lives in `core/registries/middleware.py`; the legacy `llm_middleware_registry.py` module was removed during the cleanup.
 
 ### Q: What's the difference between core/experiments/ and plugins/experiments/?
 

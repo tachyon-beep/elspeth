@@ -8,14 +8,14 @@ from __future__ import annotations
 
 from typing import Any, Iterable
 
-from elspeth.core.plugin_context import PluginContext
+from elspeth.core.base.plugin_context import PluginContext
 from elspeth.core.security import (
     coalesce_determinism_level,
     coalesce_security_level,
     normalize_determinism_level,
     normalize_security_level,
 )
-from elspeth.core.validation_base import ConfigurationError
+from elspeth.core.validation.base import ConfigurationError
 
 
 def extract_security_levels(

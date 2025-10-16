@@ -36,14 +36,14 @@
 - `src/elspeth/core/controls/cost_tracker_registry.py` (line 8)
 - `src/elspeth/core/controls/rate_limiter_registry.py` (line 8)
 - `src/elspeth/core/controls/registry.py` (line 21)
-- `src/elspeth/core/datasource_registry.py` (line 14)
+- `src/elspeth/core/registries/datasource.py` (line 14)
 - `src/elspeth/core/experiments/aggregation_plugin_registry.py` (line 13)
 - `src/elspeth/core/experiments/baseline_plugin_registry.py` (line 15)
 - `src/elspeth/core/experiments/early_stop_plugin_registry.py` (line 13)
 - `src/elspeth/core/experiments/row_plugin_registry.py` (line 13)
 - `src/elspeth/core/experiments/validation_plugin_registry.py` (line 13)
-- `src/elspeth/core/llm_registry.py` (line 13)
-- `src/elspeth/core/sink_registry.py` (line 13)
+- `src/elspeth/core/registries/llm.py` (line 13)
+- `src/elspeth/core/registries/sink.py` (line 13)
 - `src/elspeth/core/utilities/plugin_registry.py` (line 8)
 - Plus 3 more internal files
 
@@ -61,7 +61,7 @@
 
 - `src/elspeth/config.py` (line 66)
 - `src/elspeth/core/orchestrator.py` (line 45)
-- `src/elspeth/core/validation.py` (line 260)
+- `src/elspeth/core/validation/validators.py` (line 260)
 - `tests/test_datasource_*.py` (12 files)
 
 **Public API**: YES (in `__all__`)
@@ -75,7 +75,7 @@
 - `src/elspeth/config.py` (line 152)
 - `src/elspeth/core/experiments/suite_runner.py` (line 219)
 - `src/elspeth/core/orchestrator.py` (line 67)
-- `src/elspeth/core/validation.py` (line 392)
+- `src/elspeth/core/validation/validators.py` (line 392)
 - `src/elspeth/plugins/experiments/validation.py` (line 90)
 - `tests/test_llm*.py` (28 files)
 
@@ -87,9 +87,9 @@
 
 **Importers**:
 
-- `src/elspeth/core/artifact_pipeline.py` (line 114)
+- `src/elspeth/core/pipeline/artifact_pipeline.py` (line 114)
 - `src/elspeth/core/orchestrator.py` (line 89)
-- `src/elspeth/core/validation.py` (line 521)
+- `src/elspeth/core/validation/validators.py` (line 521)
 - `tests/test_outputs_*.py` (19 files)
 
 **Public API**: YES (in `__all__`)
@@ -102,7 +102,7 @@
 
 - `src/elspeth/core/experiments/runner.py` (lines 102, 187, 234, 301)
 - `src/elspeth/core/experiments/suite_runner.py` (lines 178, 225)
-- `src/elspeth/core/validation.py` (lines 612, 689, 744, 801)
+- `src/elspeth/core/validation/validators.py` (lines 612, 689, 744, 801)
 - `tests/test_experiment*.py` (35 files)
 
 **Public API**: YES (in `__all__`)
@@ -176,13 +176,13 @@ Plugin implementations rarely import registries directly. They are **registered*
 #### Core Registries
 
 ```python
-# src/elspeth/core/datasource_registry.py
+# src/elspeth/core/registries/datasource.py
 __all__ = ["create_datasource", "register_datasource", "datasource_registry"]
 
-# src/elspeth/core/llm_registry.py
+# src/elspeth/core/registries/llm.py
 __all__ = ["create_llm_client", "register_llm_client", "llm_registry"]
 
-# src/elspeth/core/sink_registry.py
+# src/elspeth/core/registries/sink.py
 __all__ = ["create_sink", "register_sink", "sink_registry"]
 
 # src/elspeth/core/experiments/plugin_registry.py
@@ -251,7 +251,7 @@ from elspeth.core.datasource_registry import datasource_registry
 from elspeth.core.llm_registry import llm_registry
 from elspeth.core.sink_registry import sink_registry
 
-# src/elspeth/core/validation.py
+# src/elspeth/core/validation/validators.py
 from elspeth.core.experiments.plugin_registry import (
     create_row_plugin,
     create_aggregator,
@@ -332,7 +332,7 @@ from elspeth.core.sink_registry import register_sink
 ### Shim Pattern
 
 ```python
-# elspeth/core/datasource_registry.py (LEGACY SHIM)
+# elspeth/core/registries/datasource.py (LEGACY SHIM)
 """
 DEPRECATED: This module is deprecated.
 Use elspeth.plugins.nodes.sources.registry instead.
@@ -362,9 +362,9 @@ warnings.warn(
 
 | Old Location | New Location | Priority |
 |---|---|---|
-| `core/datasource_registry.py` | `plugins/nodes/sources/registry.py` | HIGH |
-| `core/llm_registry.py` | `plugins/nodes/transforms/llm/registry.py` | HIGH |
-| `core/sink_registry.py` | `plugins/nodes/sinks/registry.py` | HIGH |
+| `core/registries/datasource.py` | `plugins/nodes/sources/registry.py` | HIGH |
+| `core/registries/llm.py` | `plugins/nodes/transforms/llm/registry.py` | HIGH |
+| `core/registries/sink.py` | `plugins/nodes/sinks/registry.py` | HIGH |
 | `core/experiments/plugin_registry.py` | `plugins/orchestrators/experiment/plugin_registry.py` | HIGH |
 | `core/llm/registry.py` (middleware) | `plugins/nodes/transforms/llm/middleware_registry.py` | MEDIUM |
 | `core/controls/registry.py` | `plugins/nodes/transforms/controls/registry.py` | MEDIUM |

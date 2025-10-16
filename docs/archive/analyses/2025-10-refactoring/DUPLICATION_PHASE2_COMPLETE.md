@@ -106,7 +106,7 @@ def collect_artifacts(self):
 1. **Updated Inheritance:**
    ```python
    # Before:
-   from elspeth.core.protocols import Artifact, ArtifactDescriptor, ResultSink
+   from elspeth.core.base.protocols import Artifact, ArtifactDescriptor, ResultSink
    class VisualAnalyticsSink(ResultSink):
 
    # After:
@@ -186,12 +186,12 @@ def collect_artifacts(self):
 1. **Updated Inheritance and Imports:**
    ```python
    # Before:
-   from elspeth.core.protocols import Artifact, ArtifactDescriptor, ResultSink
+   from elspeth.core.base.protocols import Artifact, ArtifactDescriptor, ResultSink
    from elspeth.core.security import normalize_determinism_level, normalize_security_level
    class EnhancedVisualAnalyticsSink(ResultSink):
 
    # After:
-   from elspeth.core.protocols import Artifact, ArtifactDescriptor
+   from elspeth.core.base.protocols import Artifact, ArtifactDescriptor
    from ._visual_base import BaseVisualSink
    class EnhancedVisualAnalyticsSink(BaseVisualSink):
    ```

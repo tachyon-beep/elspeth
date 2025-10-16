@@ -41,7 +41,7 @@ Your job is to trace these flows, detect violations, and ensure the security mod
 
 **Then determine the trace starting point:**
 - **Configuration-based trace**: Start from `datasource.security_level` or `llm.security_level` in settings.yaml
-- **Plugin-specific trace**: Start from the plugin's registry creation in `src/elspeth/core/registry.py`
+- **Plugin-specific trace**: Start from the plugin's registry creation in `src/elspeth/core/registries/__init__.py`
 - **Artifact-based trace**: Start from sink `produces` declarations and follow to `consumes`
 - **Error-based trace**: Work backward from the error location to configuration
 
@@ -55,7 +55,7 @@ Your job is to trace these flows, detect violations, and ensure the security mod
 3. Verify each is present and not null
 4. Use Grep to find the schema definition:
    ```bash
-   grep pattern="\"security_level\"" path="src/elspeth/core/registry.py"
+   grep pattern="\"security_level\"" path="src/elspeth/core/registries/__init__.py"
    ```
 5. Confirm `"required"` array includes `"security_level"`
 
@@ -118,7 +118,7 @@ Use these patterns to find critical code:
 **Find plugin creation:**
 
 ```bash
-grep -r "def create_" src/elspeth/core/registry.py
+grep -r "def create_" src/elspeth/core/registries/__init__.py
 grep -r "PluginFactory" src/elspeth/core/
 ```
 
@@ -152,11 +152,11 @@ grep -r "_enforce_dependency_security" src/elspeth/
 
 - `src/elspeth/core/plugins/context.py` - PluginContext definition, derive(), apply_plugin_context()
 - `src/elspeth/core/security/__init__.py` - resolve_security_level(), normalize_security_level(), is_security_level_allowed()
-- `src/elspeth/core/artifact_pipeline.py` - _enforce_dependency_security(), execute()
+- `src/elspeth/core/pipeline/artifact_pipeline.py` - _enforce_dependency_security(), execute()
 
 **Plugin Registries:**
 
-- `src/elspeth/core/registry.py` - create_datasource(), create_llm(), create_sink()
+- `src/elspeth/core/registries/__init__.py` - create_datasource(), create_llm(), create_sink()
 - `src/elspeth/core/llm/registry.py` - create_middleware()
 - `src/elspeth/core/experiments/plugin_registry.py` - create_row_plugin(), create_aggregator()
 

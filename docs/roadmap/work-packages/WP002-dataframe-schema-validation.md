@@ -167,7 +167,7 @@ class AggregatorPlugin(Protocol):
 **FR3: Schema Validation Utilities**
 
 ```python
-# src/elspeth/core/validation.py (new functions)
+# src/elspeth/core/validation/validators.py (new functions)
 
 from pydantic import ValidationError
 
@@ -447,7 +447,7 @@ class ExperimentRunner:
 **FR7: Optional Runtime Validation (Strict Mode)**
 
 ```python
-# src/elspeth/core/processing.py
+# src/elspeth/core/pipeline/processing.py
 
 def prepare_prompt_context(
     row: pd.Series,

@@ -126,7 +126,7 @@
 - [ ] Git commit: `"refactor: migrate experiment plugins registry"`
 
 ### Day 11-13: Main Registry (Most Critical)
-- [ ] Create backup: `cp src/elspeth/core/registry.py{,.bak}`
+- [ ] Create backup: `cp src/elspeth/core/registries/__init__.py{,.bak}`
 - [ ] Refactor `PluginRegistry.__init__()` to use 3 BasePluginRegistry instances
 - [ ] Create `_register_datasources()` method
 - [ ] Create `_register_llms()` method
@@ -293,9 +293,9 @@ git commit -m "rollback: remove registry base framework"
 ### If Phase 2 Issues (per registry)
 ```bash
 # Example: rollback main registry
-git checkout src/elspeth/core/registry.py
+git checkout src/elspeth/core/registries/__init__.py
 # Restore from backup if needed
-cp src/elspeth/core/registry.py.bak src/elspeth/core/registry.py
+cp src/elspeth/core/registries/__init__.py.bak src/elspeth/core/registries/__init__.py
 git commit -m "rollback: revert main registry migration"
 ```
 

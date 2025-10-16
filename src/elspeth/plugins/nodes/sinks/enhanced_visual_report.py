@@ -12,7 +12,7 @@ from typing import Any, Mapping, Sequence
 import numpy as np
 import pandas as pd
 
-from elspeth.core.protocols import Artifact, ArtifactDescriptor
+from elspeth.core.base.protocols import Artifact, ArtifactDescriptor
 
 from ._visual_base import BaseVisualSink
 

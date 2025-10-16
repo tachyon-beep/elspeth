@@ -4,7 +4,7 @@
 |-----------|-----------|------------------------|---------------|
 | Orchestrator Core | src/elspeth/core/orchestrator.py | docs/architecture/architecture-overview.md (Update 2025-10-12: Orchestrator Core), docs/architecture/component-diagram.md (Update 2025-10-12: Orchestrator Core) | 2025-10-12 |
 | Experiment Runner | src/elspeth/core/experiments/runner.py | docs/architecture/data-flow-diagrams.md (Update 2025-10-12: Runner Pipeline), docs/migration-guide.md (Added 2025-10-12 – Concurrency & Early-stop Parity Checklist) | 2025-10-12 |
-| Artifact Pipeline | src/elspeth/core/artifact_pipeline.py | docs/architecture/security-controls.md (Update 2025-10-12: Artifact Clearance), docs/architecture/component-diagram.md (Update 2025-10-12: Artifact Pipeline) | 2025-10-12 |
+| Artifact Pipeline | src/elspeth/core/pipeline/artifact_pipeline.py | docs/architecture/security-controls.md (Update 2025-10-12: Artifact Clearance), docs/architecture/component-diagram.md (Update 2025-10-12: Artifact Pipeline) | 2025-10-12 |
 | Analytics Report Sink | src/elspeth/plugins/outputs/analytics_report.py | docs/architecture/architecture-overview.md (Update 2025-10-12: Early Stop and Baseline Analytics), docs/reporting-and-suite-management.md (Section 2) | 2025-10-12 |
 | Visual Analytics Sink | src/elspeth/plugins/outputs/visual_report.py | docs/architecture/security-controls.md (Update 2025-10-12: Output Sanitisation), docs/examples/colour-animals.md | 2025-10-12 |
 | Azure Environment Middleware | src/elspeth/plugins/llms/middleware_azure.py | docs/architecture/audit-logging.md (Update 2025-10-12: Azure Telemetry), docs/architecture/security-controls.md (Update 2025-10-12: Middleware Safeguards) | 2025-10-12 |

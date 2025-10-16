@@ -634,7 +634,7 @@ class DeterminismPolicyValidator:
 
 ##### Configuration Schema Updates
 
-**File**: `src/elspeth/core/config_schema.py`
+**File**: `src/elspeth/core/config/schema.py`
 
 ```yaml
 # Add to experiment schema
@@ -660,7 +660,7 @@ requirements:
 
 ##### Plugin Registration Updates
 
-**File**: `src/elspeth/core/registry.py`
+**File**: `src/elspeth/core/registries/__init__.py`
 
 ```python
 def register_middleware(
@@ -817,7 +817,7 @@ sinks:
 
 ##### Artifact Pipeline Enforcement
 
-**File**: `src/elspeth/core/artifact_pipeline.py`
+**File**: `src/elspeth/core/pipeline/artifact_pipeline.py`
 
 The artifact pipeline enforces security clearance at every artifact transfer:
 
@@ -887,7 +887,7 @@ class PluginContext:
 
 ##### Configuration Validation
 
-**File**: `src/elspeth/core/config_schema.py`
+**File**: `src/elspeth/core/config/schema.py`
 
 ```python
 _AUSTRALIAN_SECURITY_LEVELS = [
@@ -1686,8 +1686,8 @@ class CSVFileSink:
 **Files Modified**:
 - `src/elspeth/core/validation/policy_validator.py` (new)
 - `src/elspeth/core/validation/__init__.py` (new)
-- `src/elspeth/core/config_schema.py` (schema updates)
-- `src/elspeth/core/registry.py` (add determinism params)
+- `src/elspeth/core/config/schema.py` (schema updates)
+- `src/elspeth/core/registries/__init__.py` (add determinism params)
 - `src/elspeth/core/experiments/plugin_registry.py` (add determinism params)
 - `src/elspeth/plugins/outputs/signed.py` (manifest updates)
 - `tests/test_determinism_policy.py` (new)
@@ -1767,7 +1767,7 @@ class CSVFileSink:
 **Files Modified**:
 - `src/elspeth/plugins/datasources/csv_streaming.py` (new)
 - `src/elspeth/plugins/datasources/adversarial_generator.py` (new)
-- `src/elspeth/core/registry.py` (register new plugins)
+- `src/elspeth/core/registries/__init__.py` (register new plugins)
 - `tests/test_datasource_streaming_csv.py` (new)
 - `tests/test_datasource_adversarial.py` (new)
 
@@ -1791,7 +1791,7 @@ class CSVFileSink:
 **Files Modified**:
 - `src/elspeth/plugins/outputs/csv_file.py`
 - `src/elspeth/plugins/outputs/local_bundle.py`
-- `src/elspeth/core/artifact_pipeline.py` (streaming sink support)
+- `src/elspeth/core/pipeline/artifact_pipeline.py` (streaming sink support)
 - `tests/test_outputs_csv_streaming.py` (new)
 
 **Success Criteria**: CSV sink writes records as they arrive, not at end
@@ -2079,7 +2079,7 @@ except SinkCapacityError as exc:
 
 - Current Datasource Protocol: `src/elspeth/core/interfaces.py:12-17`
 - Current Runner Implementation: `src/elspeth/core/experiments/runner.py:61-217`
-- Artifact Pipeline: `src/elspeth/core/artifact_pipeline.py`
+- Artifact Pipeline: `src/elspeth/core/pipeline/artifact_pipeline.py`
 - Configuration Merge: `docs/architecture/configuration-merge.md`
 
 ## Changelog

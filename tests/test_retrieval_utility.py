@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from elspeth.core.plugin_context import PluginContext, apply_plugin_context
+from elspeth.core.base.plugin_context import PluginContext, apply_plugin_context
 from elspeth.plugins.utilities.retrieval import RetrievalContextUtility
 from elspeth.retrieval import QueryResult
 

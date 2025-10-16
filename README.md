@@ -6,7 +6,7 @@ Elspeth bundles a hardened experiment runner, policy-aware plugin registry, and 
 
 ## Highlights
 
-- **Composable plugin system** – Drop in datasources, LLM adapters, middleware, metrics, and result sinks registered via `src/elspeth/core/registry.py` without touching the orchestrator.
+- **Composable plugin system** – Drop in datasources, LLM adapters, middleware, metrics, and result sinks registered via `src/elspeth/core/registries/__init__.py` without touching the orchestrator.
 - **Security by default** – Strict prompt rendering, retry logging, per-artifact security levels, spreadsheet sanitisation, and optional signed bundles are built into the pipeline.
 - **Governed suites** – Merge prompt packs, suite defaults, and experiment overrides with validation and dry-run tooling before executing batch comparisons.
 - **Analytics ready** – Generate CSV, Excel, JSON, Markdown, or visual PNG/HTML reports alongside retry/cost summaries for downstream review.

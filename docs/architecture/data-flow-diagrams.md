@@ -36,7 +36,7 @@ Update 2025-10-12: Datasource implementations are housed under `src/elspeth/plug
 Update 2025-10-12: Middleware hooks reside in `src/elspeth/plugins/nodes/transforms/llm/middleware.py` and `middleware_azure.py` after the namespace migration.
 <!-- END UPDATE -->
 - Cost tracking and rate limiting wrap each LLM invocation with deterministic retry state (`src/elspeth/core/experiments/runner.py:498`, `src/elspeth/core/experiments/runner.py:520`, `src/elspeth/core/controls/rate_limit.py:74`).[^df-retry-2025-10-12]
-- The artifact pipeline enforces dependency ordering and classification-aware access before sinks persist or aggregate results (`src/elspeth/core/artifact_pipeline.py:192`, `src/elspeth/core/artifact_pipeline.py:201`).[^df-pipeline-2025-10-12]
+- The artifact pipeline enforces dependency ordering and classification-aware access before sinks persist or aggregate results (`src/elspeth/core/pipeline/artifact_pipeline.py:192`, `src/elspeth/core/pipeline/artifact_pipeline.py:201`).[^df-pipeline-2025-10-12]
 <!-- UPDATE 2025-10-12: Runner metadata -->
 - `ExperimentRunner` attaches `retry_summary`, `cost_summary`, and `early_stop` payloads to the execution metadata so sinks, analytics reports, and telemetry consumers can reproduce control decisions (`src/elspeth/core/experiments/runner.py:170`, `src/elspeth/core/experiments/runner.py:198`, `src/elspeth/core/experiments/runner.py:214`).[^df-runner-metadata-2025-10-12]
 <!-- Update 2025-10-12: When concurrency is enabled, rows enter a worker pool governed by `concurrency_config` thresholds, and early-stop plugins can halt submission once metrics breach criteria (`src/elspeth/core/experiments/runner.py:365`, `src/elspeth/core/experiments/runner.py:248`). -->
@@ -128,7 +128,7 @@ flowchart LR
     class SecretStores secret;
 ```
 
-- Loader merges profile and prompt pack settings, then invokes registry factories that validate plugin schemas before instantiation (`src/elspeth/config.py:48`, `src/elspeth/core/registry.py:91`).[^df-config-loader-2025-10-12]
+- Loader merges profile and prompt pack settings, then invokes registry factories that validate plugin schemas before instantiation (`src/elspeth/config.py:48`, `src/elspeth/core/registries/__init__.py:91`).[^df-config-loader-2025-10-12]
 - Blob datasources resolve SAS tokens or managed identity credentials at runtime, preventing raw secrets from living in code paths; the same pattern is used for GitHub/Azure DevOps tokens and signing keys (`config/blob_store.yaml:4`, `src/elspeth/plugins/outputs/repository.py:149`, `src/elspeth/plugins/outputs/signed.py:107`).[^df-blob-2025-10-12]
 - Azure-specific clients rely on `azure-identity` if explicit credentials are absent, aligning with managed identity deployments while still supporting SAS tokens for desktops (`src/elspeth/datasources/blob_store.py:125`, `src/elspeth/plugins/llms/azure_openai.py:25`).[^df-azure-2025-10-12]
 
@@ -203,13 +203,13 @@ flowchart TD
 - Excel outputs consolidate flattened rows, manifests, and aggregate metrics while retaining sanitisation markers (`src/elspeth/plugins/outputs/excel.py:45`, `src/elspeth/plugins/outputs/excel.py:146`).[^df-excel-2025-10-12]
 - ZIP bundle sinks package raw results, manifests, CSV excerpts, and collected upstream artifacts with consistent sanitisation metadata (`src/elspeth/plugins/outputs/zip_bundle.py:45`, `src/elspeth/plugins/outputs/zip_bundle.py:132`).[^df-zip-2025-10-12]
 - Blob sinks mirror artifact payloads into Azure storage, propagating security level metadata and optional manifests for traceability (`src/elspeth/plugins/outputs/blob.py:127`, `src/elspeth/plugins/outputs/blob.py:173`).[^df-blob-sink-2025-10-12]
-<!-- Update 2025-10-12: Analytics sinks and zip bundles now register `produces` descriptors so the pipeline can chain artifacts while enforcing classification gates (`src/elspeth/plugins/outputs/analytics_report.py:62`, `src/elspeth/plugins/outputs/zip_bundle.py:41`, `src/elspeth/core/artifact_pipeline.py:167`). -->
+<!-- Update 2025-10-12: Analytics sinks and zip bundles now register `produces` descriptors so the pipeline can chain artifacts while enforcing classification gates (`src/elspeth/plugins/outputs/analytics_report.py:62`, `src/elspeth/plugins/outputs/zip_bundle.py:41`, `src/elspeth/core/pipeline/artifact_pipeline.py:167`). -->
 <!-- Update 2025-10-12: Visual analytics sink converts score summaries into PNG/HTML charts with inline metadata, inheriting pipeline security levels (`src/elspeth/plugins/outputs/visual_report.py:63`, `src/elspeth/plugins/outputs/visual_report.py:180`). -->
 
 ### Update 2025-10-12: Artifact Rehydration
-- `ArtifactPipeline` stores produced artifacts and rehydrates them for downstream sinks through `collect_artifacts`, ensuring sanitisation metadata and security levels persist (`src/elspeth/core/artifact_pipeline.py:120`, `src/elspeth/core/interfaces.py:101`).
+- `ArtifactPipeline` stores produced artifacts and rehydrates them for downstream sinks through `collect_artifacts`, ensuring sanitisation metadata and security levels persist (`src/elspeth/core/pipeline/artifact_pipeline.py:120`, `src/elspeth/core/interfaces.py:101`).
 <!-- UPDATE 2025-10-12: Artifact descriptor relocation -->
-Update 2025-10-12: Protocol helpers invoked during rehydration are defined in `src/elspeth/core/protocols.py:237-309`; `core/interfaces.py` remains for historical reference.
+Update 2025-10-12: Protocol helpers invoked during rehydration are defined in `src/elspeth/core/base/protocols.py:237-309`; `core/interfaces.py` remains for historical reference.
 <!-- END UPDATE -->
 
 ## Update History

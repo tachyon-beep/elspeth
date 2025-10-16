@@ -152,7 +152,7 @@ class TestClassificationEnforcement:
         """Test that artifact security level concept exists."""
         # This test validates that the security level concept exists in artifacts
         # Actual clearance enforcement is tested in integration tests
-        from elspeth.core.protocols import Artifact
+        from elspeth.core.base.protocols import Artifact
 
         # Create an artifact with security level
         artifact = Artifact(

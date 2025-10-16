@@ -87,7 +87,7 @@ type PluginDict = dict[str, Any]
 
 **Candidates for Conversion:**
 - `src/elspeth/core/registry/base.py` - `BasePluginRegistry[T]`
-- Type aliases in `src/elspeth/core/types.py`
+- Type aliases in `src/elspeth/core/base/types.py`
 
 ---
 

@@ -24,14 +24,14 @@ import time
 
 import pytest
 
-from elspeth.core.artifact_pipeline import ArtifactPipeline
+from elspeth.core.pipeline.artifact_pipeline import ArtifactPipeline
 from elspeth.core.experiments.config_merger import ConfigMerger
 from elspeth.core.experiments.plugin_registry import (
     create_aggregation_plugin,
     create_row_plugin,
     create_validation_plugin,
 )
-from elspeth.core.plugin_context import PluginContext
+from elspeth.core.base.plugin_context import PluginContext
 from elspeth.core.registries.datasource import datasource_registry
 from elspeth.core.registries.llm import llm_registry
 from elspeth.core.registries.sink import sink_registry
@@ -219,7 +219,7 @@ class TestArtifactPipelinePerformance:
 
     def test_simple_pipeline_fast(self, sample_dataframe):
         """Simple artifact pipeline should resolve in < 100ms."""
-        from elspeth.core.artifact_pipeline import SinkBinding
+        from elspeth.core.pipeline.artifact_pipeline import SinkBinding
 
         # Create mock sinks
         class MockSink:
@@ -261,7 +261,7 @@ class TestArtifactPipelinePerformance:
 
     def test_complex_pipeline_fast(self):
         """Complex artifact pipeline with 5 sinks should resolve in < 100ms."""
-        from elspeth.core.artifact_pipeline import SinkBinding
+        from elspeth.core.pipeline.artifact_pipeline import SinkBinding
 
         # Create mock sinks
         class MockSink:

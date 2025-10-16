@@ -19,7 +19,7 @@ Update 2025-10-12: Azure OpenAI adapter located at `src/elspeth/plugins/nodes/tr
 Update 2025-10-12: Middleware HTTP calls live in `src/elspeth/plugins/nodes/transforms/llm/middleware.py`, repository requests in `src/elspeth/plugins/nodes/sinks/repository.py`.
 <!-- END UPDATE -->
 - **jinja2 ≥3.1.0** – Prompt rendering engine; StrictUndefined mitigates template injection but stay current for sandbox fixes (`pyproject.toml:20`, `src/elspeth/core/prompts/engine.py:33`).[^dep-jinja-2025-10-12]
-- **jsonschema ≥4.21.1** – Powers configuration validation; update promptly for schema parsing CVEs (`pyproject.toml:21`, `src/elspeth/core/validation.py:271`).[^dep-jsonschema-2025-10-12]
+- **jsonschema ≥4.21.1** – Powers configuration validation; update promptly for schema parsing CVEs (`pyproject.toml:21`, `src/elspeth/core/validation/validators.py:271`).[^dep-jsonschema-2025-10-12]
 - **pandas ≥2.2.0 / scipy ≥1.10.0** – Data handling and statistical plugins; heavy dependencies that should be scanned for native library vulnerabilities (`pyproject.toml:16`, `pyproject.toml:22`, `src/elspeth/plugins/experiments/metrics.py:14`).[^dep-pandas-scipy-2025-10-12]
 <!-- Update 2025-10-12: Concurrency and analytics features do not add new hard dependencies but rely on optional extras enumerated below; ensure patch cadence covers these optional stacks when enabled. -->
 

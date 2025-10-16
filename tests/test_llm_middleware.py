@@ -8,7 +8,7 @@ import requests
 from elspeth.core.experiments.config import ExperimentConfig, ExperimentSuite
 from elspeth.core.experiments.runner import ExperimentRunner
 from elspeth.core.experiments.suite_runner import ExperimentSuiteRunner
-from elspeth.core.protocols import LLMMiddleware, LLMRequest
+from elspeth.core.base.protocols import LLMMiddleware, LLMRequest
 from elspeth.core.registries.middleware import create_middlewares
 from elspeth.plugins.nodes.transforms.llm.middleware import AuditMiddleware, HealthMonitorMiddleware
 from elspeth.plugins.nodes.transforms.llm.middleware_azure import AzureEnvironmentMiddleware

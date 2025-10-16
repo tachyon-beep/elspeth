@@ -11,7 +11,7 @@ import pytest
 
 from elspeth.core.controls import FixedPriceCostTracker, FixedWindowRateLimiter
 from elspeth.core.experiments.runner import ExperimentRunner
-from elspeth.core.protocols import Artifact, ArtifactDescriptor, LLMRequest, ResultSink
+from elspeth.core.base.protocols import Artifact, ArtifactDescriptor, LLMRequest, ResultSink
 
 
 class FlakyLLM:

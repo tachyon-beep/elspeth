@@ -7,7 +7,7 @@ import re
 import unicodedata
 from typing import Sequence
 
-from elspeth.core.protocols import LLMMiddleware, LLMRequest
+from elspeth.core.base.protocols import LLMMiddleware, LLMRequest
 from elspeth.core.registries.middleware import register_middleware
 
 logger = logging.getLogger(__name__)

@@ -202,7 +202,7 @@ Configuration Flow for [experiment name]:
 When analyzing configurations, you should reference:
 - `src/elspeth/core/experiments/suite_runner.py` - `build_runner()` method (lines 35-264) contains merge logic
 - `src/elspeth/config.py` - Configuration loading and validation
-- `src/elspeth/core/config_schema.py` - Schema definitions
+- `src/elspeth/core/config/schema.py` - Schema definitions
 - `docs/architecture/configuration-merge.md` - Merge semantics documentation
 - `config/sample_suite/settings.yaml` - Example suite configuration
 - `config/sample_suite/packs/*.yaml` - Example prompt packs

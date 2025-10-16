@@ -16,7 +16,7 @@ from elspeth.core.registries.datasource import datasource_registry
 from elspeth.core.registries.llm import llm_registry as llm_reg
 from elspeth.core.registries.sink import sink_registry
 from elspeth.core.security import normalize_security_level
-from elspeth.core.validation_base import (
+from elspeth.core.validation.base import (
     ConfigurationError,
     ValidationMessage,
     ValidationReport,

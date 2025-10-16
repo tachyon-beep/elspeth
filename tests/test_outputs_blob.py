@@ -132,7 +132,7 @@ def test_blob_result_sink_chunked_upload(tmp_path, monkeypatch):
 
 
 def test_blob_result_sink_prepared_artifacts(tmp_path, monkeypatch):
-    from elspeth.core.protocols import Artifact
+    from elspeth.core.base.protocols import Artifact
 
     artifact_path = tmp_path / "artifact.bin"
     artifact_path.write_bytes(b"payload-bytes")

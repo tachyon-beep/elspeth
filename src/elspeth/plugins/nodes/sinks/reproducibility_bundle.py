@@ -24,7 +24,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator, Literal, Mapping
 
-from elspeth.core.protocols import Artifact, ArtifactDescriptor, ResultSink
+from elspeth.core.base.protocols import Artifact, ArtifactDescriptor, ResultSink
 from elspeth.core.security import generate_signature
 from elspeth.plugins.nodes.sinks.csv_file import CsvResultSink
 

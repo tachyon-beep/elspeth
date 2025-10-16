@@ -28,9 +28,9 @@ This migration was completed in **Phase 2** and includes:
 ### Registries Migrated (11 total)
 
 1. **Core Plugin Registries (3)**
-   - Datasource Registry (`core/datasource_registry.py`) - 3 plugins
-   - LLM Registry (`core/llm_registry.py`) - 4 plugins
-   - Sink Registry (`core/sink_registry.py`) - 14 plugins
+   - Datasource Registry (`core/registries/datasource.py`) - 3 plugins
+   - LLM Registry (`core/registries/llm.py`) - 4 plugins
+   - Sink Registry (`core/registries/sink.py`) - 14 plugins
 
 2. **Experiment Plugin Registries (5)**
    - Row Plugin Registry (`core/experiments/row_plugin_registry.py`) - ~10 plugins
@@ -48,7 +48,7 @@ This migration was completed in **Phase 2** and includes:
 
 ### Central Facade Preserved
 
-The central `PluginRegistry` class (`core/registry.py`) now acts as a facade:
+The central `PluginRegistry` class (`core/registries/__init__.py`) now acts as a facade:
 - Delegates to specialized registries
 - Maintains backward compatibility for tests
 - Provides single entry point for all plugin creation
@@ -163,7 +163,7 @@ Each registry follows this consistent pattern:
 ```python
 # 1. Create typed registry with BasePluginRegistry
 from elspeth.core.registry.base import BasePluginRegistry
-from elspeth.core.protocols import DataSource
+from elspeth.core.base.protocols import DataSource
 
 datasource_registry = BasePluginRegistry[DataSource]("datasource")
 
@@ -240,9 +240,9 @@ $ python -m pytest tests/test_registry*.py tests/test_datasource*.py \
 
 ```
 src/elspeth/core/registry/base.py              95%+ coverage
-src/elspeth/core/datasource_registry.py        95%+ coverage
-src/elspeth/core/llm_registry.py               84%+ coverage
-src/elspeth/core/sink_registry.py              80%+ coverage
+src/elspeth/core/registries/datasource.py        95%+ coverage
+src/elspeth/core/registries/llm.py               84%+ coverage
+src/elspeth/core/registries/sink.py              80%+ coverage
 ```
 
 **Result:** ✅ Coverage maintained or improved

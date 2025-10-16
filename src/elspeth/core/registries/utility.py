@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Iterable, Mapping
 
-from elspeth.core.plugin_context import PluginContext
+from elspeth.core.base.plugin_context import PluginContext
 
 from .base import BasePluginRegistry
 

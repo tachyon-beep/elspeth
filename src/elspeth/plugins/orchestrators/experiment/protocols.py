@@ -4,7 +4,7 @@ These protocols are specific to the experiment orchestrator and define
 plugin contracts for experiment-specific processing steps.
 
 Universal protocols (DataSource, ResultSink, TransformNode, etc.) live in
-`elspeth.core.protocols`.
+`elspeth.core.base.protocols`.
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:
-    from elspeth.core.schema import DataFrameSchema
+    from elspeth.core.base.schema import DataFrameSchema
 
 
 class ValidationError(RuntimeError):

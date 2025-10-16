@@ -48,7 +48,7 @@ class TestValidationPatternEnforcement:
     def test_regex_validator_requires_pattern(self):
         """Verify regex validator requires explicit pattern configuration."""
         from elspeth.core.experiments.plugin_registry import create_validation_plugin
-        from elspeth.core.validation_base import ConfigurationError
+        from elspeth.core.validation.base import ConfigurationError
 
         # Should fail when pattern is missing
         with pytest.raises(ConfigurationError, match="is a required property.*pattern"):
@@ -135,7 +135,7 @@ class TestStaticLLMDefaults:
         # src/elspeth/core/llm_registry.py:47
         # Validates that content parameter is required
         from elspeth.core.registries.llm import llm_registry
-        from elspeth.core.validation_base import ConfigurationError
+        from elspeth.core.validation.base import ConfigurationError
 
         # Should raise ConfigurationError when content is missing
         # Schema validation catches this before the factory function
@@ -156,7 +156,7 @@ class TestRateLimitDefaults:
     def test_rate_limiter_requires_explicit_config(self):
         """Verify rate limiter requires explicit configuration for all parameters."""
         from elspeth.core.controls.rate_limiter_registry import rate_limiter_registry
-        from elspeth.core.validation_base import ConfigurationError
+        from elspeth.core.validation.base import ConfigurationError
 
         # fixed_window should fail without requests
         with pytest.raises(ConfigurationError, match="is a required property.*requests"):
@@ -192,7 +192,7 @@ class TestCostTrackerDefaults:
     def test_cost_tracker_requires_explicit_prices(self):
         """Verify cost tracker requires explicit token price configuration."""
         from elspeth.core.controls.cost_tracker_registry import cost_tracker_registry
-        from elspeth.core.validation_base import ConfigurationError
+        from elspeth.core.validation.base import ConfigurationError
 
         # Should fail without prompt_token_price
         with pytest.raises(ConfigurationError, match="is a required property.*prompt_token_price"):
@@ -227,7 +227,7 @@ class TestDatabaseSchemaDefaults:
 
     def test_pgvector_factory_requires_explicit_table(self):
         """Verify pgvector factory requires explicit table name."""
-        from elspeth.core.validation_base import ConfigurationError
+        from elspeth.core.validation.base import ConfigurationError
         from elspeth.retrieval.providers import create_query_client
 
         # Should fail without table name
@@ -239,7 +239,7 @@ class TestDatabaseSchemaDefaults:
 
     def test_azure_search_factory_requires_explicit_fields(self):
         """Verify Azure Search factory requires explicit field configuration."""
-        from elspeth.core.validation_base import ConfigurationError
+        from elspeth.core.validation.base import ConfigurationError
         from elspeth.retrieval.providers import create_query_client
 
         base_options = {
@@ -295,7 +295,7 @@ class TestHighPriorityDefaults:
     def test_llm_guard_requires_explicit_tokens(self):
         """Verify llm_guard validation requires explicit token configuration."""
         from elspeth.core.experiments.plugin_registry import create_validation_plugin
-        from elspeth.core.validation_base import ConfigurationError
+        from elspeth.core.validation.base import ConfigurationError
 
         validator_llm_def = {
             "plugin": "static_test",
@@ -371,7 +371,7 @@ class TestHighPriorityDefaults:
     def test_score_extractor_requires_all_fields(self):
         """Verify score extractor requires explicit configuration for all fields."""
         from elspeth.core.experiments.plugin_registry import create_row_plugin
-        from elspeth.core.validation_base import ConfigurationError
+        from elspeth.core.validation.base import ConfigurationError
 
         # Should fail without key
         with pytest.raises(ConfigurationError, match="key is required"):

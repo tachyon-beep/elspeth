@@ -1,12 +1,12 @@
 # Threat Surfaces & Trust Boundaries
 
 ## Trust Zones
-- **Operator Zone** – Local CLI execution validates configuration before any network activity, acting as the first guard against malformed profiles (`src/elspeth/cli.py:83`, `src/elspeth/core/validation.py:271`).[^threat-operator-2025-10-12]
+- **Operator Zone** – Local CLI execution validates configuration before any network activity, acting as the first guard against malformed profiles (`src/elspeth/cli.py:83`, `src/elspeth/core/validation/validators.py:271`).[^threat-operator-2025-10-12]
 <!-- UPDATE 2025-10-12: CLI validation citation refresh -->
 Update 2025-10-12: Configuration validation warnings surface at `src/elspeth/cli.py:369-380`.
 <!-- END UPDATE -->
 - **Core Orchestrator Zone** – Trusted runtime processes data in memory, applies middleware, and enforces retry logic; tampering here would require code execution on the host (`src/elspeth/core/orchestrator.py:43`, `src/elspeth/core/experiments/runner.py:65`).[^threat-orchestrator-2025-10-12]
-- **Plugin Zone** – Pluggable datasources, LLM clients, sinks, and experiment plugins sit at the boundary of trusted code and external services; schema validation and runtime guards constrain their behaviour (`src/elspeth/core/registry.py:91`, `src/elspeth/core/experiments/plugin_registry.py:93`).[^threat-plugin-2025-10-12]
+- **Plugin Zone** – Pluggable datasources, LLM clients, sinks, and experiment plugins sit at the boundary of trusted code and external services; schema validation and runtime guards constrain their behaviour (`src/elspeth/core/registries/__init__.py:91`, `src/elspeth/core/experiments/plugin_registry.py:93`).[^threat-plugin-2025-10-12]
 - **External Service Zone** – Azure storage, Azure/OpenAI endpoints, and repository APIs operate outside ELSPETH’s control and are treated as untrusted data producers/consumers (`src/elspeth/datasources/blob_store.py:200`, `src/elspeth/plugins/llms/azure_openai.py:77`, `src/elspeth/plugins/outputs/repository.py:124`).[^threat-external-2025-10-12]
 <!-- UPDATE 2025-10-12: External service path alignment -->
 Update 2025-10-12: Blob adapters reside in `src/elspeth/adapters/blob_store.py` and datasource/sink edges in `src/elspeth/plugins/nodes/{sources,sinks}/`.
@@ -40,12 +40,12 @@ Update 2025-10-12: Datasource implementations are under `src/elspeth/plugins/nod
 <!-- UPDATE 2025-10-12: Middleware module relocation -->
 Update 2025-10-12: Middleware protections now live in `src/elspeth/plugins/nodes/transforms/llm/middleware*.py`.
 <!-- END UPDATE -->
-- **Configuration spoofing** – Invalid plugin names or options are caught before instantiation; however, accreditation deployments should sign configuration bundles to prevent tampering at rest (`src/elspeth/core/validation.py:271`, `src/elspeth/core/registry.py:202`).[^threat-config-2025-10-12]
+- **Configuration spoofing** – Invalid plugin names or options are caught before instantiation; however, accreditation deployments should sign configuration bundles to prevent tampering at rest (`src/elspeth/core/validation/validators.py:271`, `src/elspeth/core/registries/__init__.py:202`).[^threat-config-2025-10-12]
 - **Suite configuration drift** – Prompt pack merges and suite defaults can silently introduce outdated plugins; monitor `suite_defaults` and prompt pack digests, and sign exported configs (`src/elspeth/config.py:52`, `src/elspeth/core/experiments/suite_runner.py:69`).[^threat-suite-config-2025-10-12]
 
 ## Output Threats
 - **Spreadsheet exploits** – CSV/Excel sinks neutralise formula prefixes and record sanitiser metadata. For high-assurance contexts, retain sanitisation artifacts alongside exports for auditability (`src/elspeth/plugins/outputs/_sanitize.py:18`, `src/elspeth/plugins/outputs/excel.py:41`).[^threat-spreadsheet-2025-10-12]
-- **Artifact exfiltration** – Artifact pipeline enforces security levels so a sink with lower clearance cannot consume classified outputs; misconfigured security levels remain a residual risk (`src/elspeth/core/security/__init__.py:14`, `src/elspeth/core/artifact_pipeline.py:192`).[^threat-artifact-2025-10-12]
+- **Artifact exfiltration** – Artifact pipeline enforces security levels so a sink with lower clearance cannot consume classified outputs; misconfigured security levels remain a residual risk (`src/elspeth/core/security/__init__.py:14`, `src/elspeth/core/pipeline/artifact_pipeline.py:192`).[^threat-artifact-2025-10-12]
 - **Repository drift** – Dry-run support reduces risk of accidental commits, but enabling live pushes requires rotating PAT tokens and enforcing branch protection server-side (`src/elspeth/plugins/outputs/repository.py:70`, `src/elspeth/plugins/outputs/repository.py:149`).[^threat-repo-2025-10-12]
 - **Suite reporting artefacts** – Consolidated analytics, visual, and Excel outputs reside on local disk before signing; ensure `--reports-dir` targets a restricted path and artefacts are signed or hashed (`src/elspeth/tools/reporting.py:33`, `src/elspeth/tools/reporting.py:170`).[^threat-suite-report-2025-10-12]
 <!-- Update 2025-10-12: Analytics reports and signed bundles persist locally before handoff; ensure filesystem permissions restrict tampering of `outputs/` directories that later feed accreditation packages (`src/elspeth/plugins/outputs/analytics_report.py:92`, `src/elspeth/plugins/outputs/signed.py:64`). -->
@@ -69,7 +69,7 @@ Update 2025-10-12: Middleware protections now live in `src/elspeth/plugins/nodes
 - **Concurrency interactions** – High parallelism combined with strict rate limits can lead to starvation loops; monitor utilisation telemetry and consider circuit-breaker middleware for repeated failures (`src/elspeth/core/experiments/runner.py:126`, `src/elspeth/core/controls/rate_limit.py:126`).[^threat-concurrency-2025-10-12]
 
 ### Update 2025-10-12: Plugin Catalogue
-- Seal plugin registries during accreditation builds and require code review for new entries (`src/elspeth/core/experiments/plugin_registry.py:34`, `src/elspeth/core/registry.py:91`).
+- Seal plugin registries during accreditation builds and require code review for new entries (`src/elspeth/core/experiments/plugin_registry.py:34`, `src/elspeth/core/registries/__init__.py:91`).
 
 ## Added 2025-10-12 – Emerging External Interfaces
 - **Azure ML run logging** – `AzureEnvironmentMiddleware` posts artefacts and comparison tables to the workspace run context. Harden by constraining service principal permissions and auditing `log_table` payloads for sensitive data (`src/elspeth/plugins/llms/middleware_azure.py:219`, `src/elspeth/plugins/llms/middleware_azure.py:250`).[^threat-azureml-2025-10-12]

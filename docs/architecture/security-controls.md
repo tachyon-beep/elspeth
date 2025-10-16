@@ -22,17 +22,17 @@ Update 2025-10-12: Signed artifact enforcement resides in `src/elspeth/plugins/n
 - Azure datasources/outputs default to `DefaultAzureCredential`, falling back to SAS tokens when managed identity is unavailable (`src/elspeth/datasources/blob_store.py:125`, `src/elspeth/plugins/outputs/blob.py:210`).
 
 ## Input Validation
-- **Configuration schemas** – Settings profiles, plugin definitions, and suite experiments are validated against JSON-schema-like definitions before execution (`src/elspeth/core/validation.py:271`, `src/elspeth/core/validation.py:1012`, `src/elspeth/core/validation.py:1034`).[^sec-config-validation-2025-10-12]
+- **Configuration schemas** – Settings profiles, plugin definitions, and suite experiments are validated against JSON-schema-like definitions before execution (`src/elspeth/core/validation/validators.py:271`, `src/elspeth/core/validation/validators.py:1012`, `src/elspeth/core/validation/validators.py:1034`).[^sec-config-validation-2025-10-12]
 <!-- UPDATE 2025-10-12: Validation citation refresh -->
-Update 2025-10-12: Validation helpers span `src/elspeth/core/validation.py:254-512` with suite schema enforcement in `src/elspeth/core/config_schema.py:17-198`.
+Update 2025-10-12: Validation helpers span `src/elspeth/core/validation/validators.py:254-512` with suite schema enforcement in `src/elspeth/core/config/schema.py:17-198`.
 <!-- END UPDATE -->
 - **Prompt compilation** – Prompts render with `StrictUndefined`, raising `PromptValidationError` when required variables are missing and preventing silent template failures (`src/elspeth/core/prompts/engine.py:33`, `src/elspeth/core/prompts/template.py:24`).[^sec-prompt-2025-10-12]
 - **Response validation plugins** – Regex, JSON, and LLM-guard validators reject responses that fail format or policy checks, isolating untrusted LLM output from downstream pipelines (`src/elspeth/plugins/experiments/validation.py:20`, `src/elspeth/plugins/experiments/validation.py:47`, `src/elspeth/plugins/experiments/validation.py:100`).[^sec-validation-plugins-2025-10-12]
-- **Suite governance** – Suite validation aggregates experiment metadata, enforces presence of sinks, and reports baseline consistency before any run is accepted (`src/elspeth/core/experiments/suite_runner.py:208`, `src/elspeth/core/validation.py:471`).[^sec-suite-governance-2025-10-12]
+- **Suite governance** – Suite validation aggregates experiment metadata, enforces presence of sinks, and reports baseline consistency before any run is accepted (`src/elspeth/core/experiments/suite_runner.py:208`, `src/elspeth/core/validation/validators.py:471`).[^sec-suite-governance-2025-10-12]
 <!-- UPDATE 2025-10-12: Suite governance line update -->
-Update 2025-10-12: Suite validation and baseline checks occur at `src/elspeth/core/experiments/suite_runner.py:295-382` and `src/elspeth/core/validation.py:430-512`.
+Update 2025-10-12: Suite validation and baseline checks occur at `src/elspeth/core/experiments/suite_runner.py:295-382` and `src/elspeth/core/validation/validators.py:430-512`.
 <!-- END UPDATE -->
-<!-- Update 2025-10-12: Experiment configs now run through `src/elspeth/core/config_schema.py:17`, ensuring renamed keys (e.g., `prompt_pack`, `concurrency`, `early_stop_plugins`) conform to normalized schemas before execution. -->
+<!-- Update 2025-10-12: Experiment configs now run through `src/elspeth/core/config/schema.py:17`, ensuring renamed keys (e.g., `prompt_pack`, `concurrency`, `early_stop_plugins`) conform to normalized schemas before execution. -->
 
 ### Update 2025-10-12: Prompt Hygiene
 - Prompt defaults and strict templates prevent missing variables, aligning with docs/architecture/architecture-overview.md Core Principles and data flow ingress controls.
@@ -83,14 +83,14 @@ Update 2025-10-12: Retry exhaustion handling occurs at `src/elspeth/core/experim
 
 ## Signing & Verification
 - **HMAC signing** – Signed bundles produce SHA-256 (or SHA-512) digests and store signature manifests alongside results for later verification (`src/elspeth/core/security/signing.py:17`, `src/elspeth/plugins/outputs/signed.py:48`).[^sec-hmac-2025-10-12]
-- **Security level enforcement** – Artifacts inherit classifications and sinks must possess sufficient clearance before consuming upstream outputs (`src/elspeth/core/security/__init__.py:14`, `src/elspeth/core/artifact_pipeline.py:192`).[^sec-clearance-2025-10-12]
-- **Artifact dependency validation** – The pipeline validates declared artifact types and rejects cycles, ensuring that only declared flows are allowed (`src/elspeth/core/artifact_pipeline.py:171`, `src/elspeth/core/artifact_pipeline.py:201`).[^sec-artifact-deps-2025-10-12]
+- **Security level enforcement** – Artifacts inherit classifications and sinks must possess sufficient clearance before consuming upstream outputs (`src/elspeth/core/security/__init__.py:14`, `src/elspeth/core/pipeline/artifact_pipeline.py:192`).[^sec-clearance-2025-10-12]
+- **Artifact dependency validation** – The pipeline validates declared artifact types and rejects cycles, ensuring that only declared flows are allowed (`src/elspeth/core/pipeline/artifact_pipeline.py:171`, `src/elspeth/core/pipeline/artifact_pipeline.py:201`).[^sec-artifact-deps-2025-10-12]
 
 ### Update 2025-10-12: Artifact Signing
 - Signed manifests capture cost summaries, retry metadata, and security levels to support accreditation evidence (`src/elspeth/plugins/outputs/signed.py:67`).
 
 ### Update 2025-10-12: Artifact Clearance
-- `ArtifactPipeline` invokes `is_security_level_allowed` before resolving dependencies, preventing clearance downgrades (`src/elspeth/core/artifact_pipeline.py:205`, `src/elspeth/core/security/__init__.py:32`).
+- `ArtifactPipeline` invokes `is_security_level_allowed` before resolving dependencies, preventing clearance downgrades (`src/elspeth/core/pipeline/artifact_pipeline.py:205`, `src/elspeth/core/security/__init__.py:32`).
 
 ## Retry, Error Handling & Observability
 - **Deterministic retries** – The runner records attempt histories, exponential backoff, and final errors, raising structured exceptions when exhaustion occurs (`src/elspeth/core/experiments/runner.py:464`, `src/elspeth/core/experiments/runner.py:544`, `src/elspeth/core/experiments/runner.py:575`).[^sec-retry-2025-10-12]
@@ -110,7 +110,7 @@ Update 2025-10-12: Output sink implementations referenced above live under `src/
 ## Added 2025-10-12 – Telemetry & Analytics Controls
 - **Retry exhaustion evidence** – Middleware invokes `on_retry_exhausted` hooks with serialized history, emitting `llm_retry_exhausted` rows that include attempts, errors, and trace IDs for SOC pipelines (`src/elspeth/core/experiments/runner.py:531`, `src/elspeth/plugins/llms/middleware_azure.py:233`).[^sec-retry-evidence-2025-10-12]
 - **Analytics provenance** – The analytics report sink consolidates retry summaries, cost totals, early-stop reasons, and baseline comparisons so auditors receive a single tamper-evident package (`src/elspeth/plugins/outputs/analytics_report.py:69`, `src/elspeth/plugins/outputs/analytics_report.py:116`).[^sec-analytics-provenance-2025-10-12]
-- **Classification propagation** – Artifact bindings enforce security level compatibility at dependency resolution time, preventing low-clearance sinks from accessing sensitive artifacts even when chained (`src/elspeth/core/artifact_pipeline.py:167`, `src/elspeth/core/security/__init__.py:27`).[^sec-classification-2025-10-12]
+- **Classification propagation** – Artifact bindings enforce security level compatibility at dependency resolution time, preventing low-clearance sinks from accessing sensitive artifacts even when chained (`src/elspeth/core/pipeline/artifact_pipeline.py:167`, `src/elspeth/core/security/__init__.py:27`).[^sec-classification-2025-10-12]
 
 ## Suite Reporting & Evidence
 - **Consolidated validation** – Suite reporting writes validation results, comparative analysis, failure breakdowns, and executive summaries to immutable files for accreditation reviews (`src/elspeth/tools/reporting.py:33`, `src/elspeth/tools/reporting.py:117`, `src/elspeth/tools/reporting.py:207`).[^sec-suite-reporting-2025-10-12]

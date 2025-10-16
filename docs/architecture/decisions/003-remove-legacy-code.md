@@ -159,7 +159,7 @@ For reference, the new canonical import paths are:
 - **Experiment Plugins:** `from elspeth.plugins.orchestrators.experiment.<type> import ...`
 
 ### Protocols
-- **Core Protocols:** `from elspeth.core.protocols import DataSource, ResultSink, LLMClientProtocol, ...`
+- **Core Protocols:** `from elspeth.core.base.protocols import DataSource, ResultSink, LLMClientProtocol, ...`
 - **Experiment Protocols:** `from elspeth.plugins.orchestrators.experiment.protocols import ValidationPlugin, RowExperimentPlugin, ...`
 
 ### Registries

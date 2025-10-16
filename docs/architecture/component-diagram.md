@@ -201,17 +201,17 @@ graph TD
 ```
 
 ## Diagram Notes
-- **Configuration flow** – The CLI validates settings, merges prompt packs, and instantiates plugins before handing them to the orchestrator (`src/elspeth/cli.py:65`, `src/elspeth/config.py:52`, `src/elspeth/core/validation.py:271`).[^diagram-config-2025-10-12]
+- **Configuration flow** – The CLI validates settings, merges prompt packs, and instantiates plugins before handing them to the orchestrator (`src/elspeth/cli.py:65`, `src/elspeth/config.py:52`, `src/elspeth/core/validation/validators.py:271`).[^diagram-config-2025-10-12]
 - **Orchestration core** – The orchestrator wires datasource, LLM, sinks, middleware, and optional controls into a single runner instance (`src/elspeth/core/orchestrator.py:46`, `src/elspeth/core/orchestrator.py:80`).[^diagram-orchestrator-2025-10-12]
-- **Execution pipeline** – `ExperimentRunner` processes each row, invoking middleware, rate/cost controls, retries, and validation before handing artifacts to the dependency-aware pipeline (`src/elspeth/core/experiments/runner.py:126`, `src/elspeth/core/experiments/runner.py:464`, `src/elspeth/core/artifact_pipeline.py:201`).[^diagram-runner-2025-10-12]
-- **Plugin boundaries** – Plugin registries enforce schema validation for datasources, sinks, LLM clients, and experiment plugins, encapsulating external credentials and behaviours (`src/elspeth/core/registry.py:91`, `src/elspeth/core/experiments/plugin_registry.py:93`, `src/elspeth/core/controls/registry.py:36`).[^diagram-registry-2025-10-12]
+- **Execution pipeline** – `ExperimentRunner` processes each row, invoking middleware, rate/cost controls, retries, and validation before handing artifacts to the dependency-aware pipeline (`src/elspeth/core/experiments/runner.py:126`, `src/elspeth/core/experiments/runner.py:464`, `src/elspeth/core/pipeline/artifact_pipeline.py:201`).[^diagram-runner-2025-10-12]
+- **Plugin boundaries** – Plugin registries enforce schema validation for datasources, sinks, LLM clients, and experiment plugins, encapsulating external credentials and behaviours (`src/elspeth/core/registries/__init__.py:91`, `src/elspeth/core/experiments/plugin_registry.py:93`, `src/elspeth/core/controls/registry.py:36`).[^diagram-registry-2025-10-12]
 - **External integrations** – Datasources and sinks interact with Azure storage, repository APIs, or local file systems, while LLM clients communicate with Azure OpenAI or other HTTP-compatible endpoints (`src/elspeth/plugins/nodes/sources/blob.py:35`, `src/elspeth/plugins/nodes/transforms/llm/azure_openai.py:77`, `src/elspeth/plugins/nodes/sinks/repository.py:137`).[^diagram-integrations-2025-10-12]
-- **Security overlays** – Middleware applies audit logging, prompt shielding, and Azure Content Safety scanning, while security levels propagate into the artifact pipeline to gate downstream consumption (`src/elspeth/plugins/nodes/transforms/llm/middleware.py:70`, `src/elspeth/core/experiments/runner.py:208`, `src/elspeth/core/artifact_pipeline.py:192`).[^diagram-security-2025-10-12]
+- **Security overlays** – Middleware applies audit logging, prompt shielding, and Azure Content Safety scanning, while security levels propagate into the artifact pipeline to gate downstream consumption (`src/elspeth/plugins/nodes/transforms/llm/middleware.py:70`, `src/elspeth/core/experiments/runner.py:208`, `src/elspeth/core/pipeline/artifact_pipeline.py:192`).[^diagram-security-2025-10-12]
 - **Suite reporting outputs** – `SuiteReportGenerator` consolidates suite payloads, writes consolidated/visual/Excel artifacts, and surfaces analytics-ready summaries for accreditation reviewers (`src/elspeth/tools/reporting.py:19`, `src/elspeth/cli.py:392`, `src/elspeth/plugins/nodes/sinks/visual_report.py:11`, `src/elspeth/plugins/nodes/sinks/analytics_report.py:11`, `src/elspeth/plugins/nodes/sinks/excel.py:19`).[^diagram-suite-2025-10-12]
 <!-- Update 2025-10-12: Concurrency, early-stop, analytics-reporting, visual sink, and Azure telemetry flows are captured in the extended diagram above (see `src/elspeth/core/experiments/runner.py:365`, `src/elspeth/plugins/nodes/sinks/analytics_report.py:11`, `src/elspeth/plugins/nodes/sinks/visual_report.py:11`, `src/elspeth/plugins/nodes/transforms/llm/middleware_azure.py:180`). -->
 
 ### Update 2025-10-12: System Interfaces
-- `DataSource`, `LLMClientProtocol`, and `ResultSink` protocols (`src/elspeth/core/protocols.py:11`, `src/elspeth/core/protocols.py:37`) remain the authoritative contracts, matching the module boundaries depicted in the diagrams. Cross-reference docs/architecture/architecture-overview.md Core Principles for rationale.
+- `DataSource`, `LLMClientProtocol`, and `ResultSink` protocols (`src/elspeth/core/base/protocols.py:11`, `src/elspeth/core/base/protocols.py:37`) remain the authoritative contracts, matching the module boundaries depicted in the diagrams. Cross-reference docs/architecture/architecture-overview.md Core Principles for rationale.
 
 ### Update 2025-10-12: Configuration Loader
 - `load_settings` resolves prompt packs, middleware, and early-stop definitions while preserving security levels (`src/elspeth/config.py:52`, `src/elspeth/config.py:146`). Validation flow ties into docs/architecture/configuration-security.md.
@@ -223,7 +223,7 @@ graph TD
 - Middleware sequence (audit logger → prompt shield → content safety → health monitor → Azure environment) is registered via `elspeth.plugins.nodes.transforms.llm.middleware` / `_azure` modules; see docs/architecture/audit-logging.md for telemetry coverage.
 
 ### Update 2025-10-12: Artifact Pipeline
-- `ArtifactPipeline` enforces security gates and resolves sink dependencies via `SinkBinding` ordering (`src/elspeth/core/artifact_pipeline.py:137`, `src/elspeth/core/artifact_pipeline.py:218`). Artifact flow aligns with docs/architecture/data-flow-diagrams.md Update 2025-10-12: Artifact Rehydration.
+- `ArtifactPipeline` enforces security gates and resolves sink dependencies via `SinkBinding` ordering (`src/elspeth/core/pipeline/artifact_pipeline.py:137`, `src/elspeth/core/pipeline/artifact_pipeline.py:218`). Artifact flow aligns with docs/architecture/data-flow-diagrams.md Update 2025-10-12: Artifact Rehydration.
 
 ### Update 2025-10-12: Suite Reporting Pipeline
 - `SuiteReportGenerator.generate_all_reports` materialises consolidated JSON, Markdown, Excel, and visual artifacts derived from suite execution payloads, gated by the `--reports-dir` CLI flag (`src/elspeth/tools/reporting.py:19`, `src/elspeth/cli.py:392`). Outputs align with analytics and visual sink formats so accreditation reviewers can diff pipeline- and suite-generated evidence (`src/elspeth/plugins/nodes/sinks/visual_report.py:11`, `src/elspeth/plugins/nodes/sinks/analytics_report.py:11`, `src/elspeth/plugins/nodes/sinks/excel.py:19`).
@@ -232,15 +232,15 @@ Update 2025-10-12: `--reports-dir` handling currently occurs at `src/elspeth/cli
 <!-- END UPDATE -->
 
 ### Update 2025-10-12: Registry Boundaries
-- Core, control, middleware, and experiment registries split responsibilities for datasources, sinks, rate/cost controls, and row/aggregation/baseline/early-stop plugins (`src/elspeth/core/registry.py:91`, `src/elspeth/core/controls/registry.py:36`, `src/elspeth/core/llm/registry.py:17`, `src/elspeth/core/experiments/plugin_registry.py:93`). Suite runner normalises configuration entries before delegation, matching the diagram wiring (`src/elspeth/core/experiments/suite_runner.py:69`).
+- Core, control, middleware, and experiment registries split responsibilities for datasources, sinks, rate/cost controls, and row/aggregation/baseline/early-stop plugins (`src/elspeth/core/registries/__init__.py:91`, `src/elspeth/core/controls/registry.py:36`, `src/elspeth/core/llm/registry.py:17`, `src/elspeth/core/experiments/plugin_registry.py:93`). Suite runner normalises configuration entries before delegation, matching the diagram wiring (`src/elspeth/core/experiments/suite_runner.py:69`).
 
 ### Update 2025-10-12: Control Registry
 - Rate and cost control registries normalise security levels and schema validation before attaching to the runner (`src/elspeth/core/controls/registry.py:36`, `src/elspeth/core/controls/rate_limit.py:104`). See docs/architecture/plugin-security-model.md Update 2025-10-12: Control Registry.
 
 ### Update 2025-10-12: Artifact Tokens
-- Sinks advertise artifacts via `ArtifactDescriptor` and runtime metadata (`src/elspeth/core/interfaces.py:83`, `src/elspeth/core/artifact_pipeline.py:153`), enabling analytics and signing sinks to consume upstream assets. Controls are catalogued in docs/architecture/CONTROL_INVENTORY.md.
+- Sinks advertise artifacts via `ArtifactDescriptor` and runtime metadata (`src/elspeth/core/interfaces.py:83`, `src/elspeth/core/pipeline/artifact_pipeline.py:153`), enabling analytics and signing sinks to consume upstream assets. Controls are catalogued in docs/architecture/CONTROL_INVENTORY.md.
 <!-- UPDATE 2025-10-12: Artifact descriptor relocation -->
-Update 2025-10-12: Artifact descriptor definitions reside in `src/elspeth/core/protocols.py:237-309`; request parsing and binding resolution continue in `src/elspeth/core/artifact_pipeline.py:120-219`.
+Update 2025-10-12: Artifact descriptor definitions reside in `src/elspeth/core/base/protocols.py:237-309`; request parsing and binding resolution continue in `src/elspeth/core/pipeline/artifact_pipeline.py:120-219`.
 <!-- END UPDATE -->
 
 ## Update History

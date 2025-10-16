@@ -346,7 +346,7 @@ __all__ = ["source_registry"]
 **Backward compatibility shim**: Keep old datasource registry working
 
 ```python
-# src/elspeth/core/datasource_registry.py (keep existing file)
+# src/elspeth/core/registries/datasource.py (keep existing file)
 from elspeth.plugins.nodes.sources.registry import source_registry
 
 # Re-export under old name for backward compatibility
@@ -391,7 +391,7 @@ __all__ = ["sink_registry"]
 **Backward compatibility shim**:
 
 ```python
-# src/elspeth/core/sink_registry.py (keep existing file)
+# src/elspeth/core/registries/sink.py (keep existing file)
 from elspeth.plugins.nodes.sinks.registry import sink_registry
 
 __all__ = ["sink_registry"]
@@ -480,7 +480,7 @@ __all__ = [
 **Backward compatibility shim**:
 
 ```python
-# src/elspeth/core/llm_registry.py (NEW - backward compat)
+# src/elspeth/core/registries/llm.py (NEW - backward compat)
 """Backward compatibility shim for LLM registries."""
 
 from elspeth.plugins.nodes.transforms.llm.registry import (
@@ -719,7 +719,7 @@ def test_llm_requires_temperature():
 
 ### Step 4.1: Create Universal Protocols
 
-**Create**: `src/elspeth/core/protocols.py`
+**Create**: `src/elspeth/core/base/protocols.py`
 
 ```python
 """All universal plugin protocols for Elspeth."""

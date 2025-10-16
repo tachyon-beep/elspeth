@@ -408,7 +408,7 @@ ls docs/architecture/diagrams/*.mermaid | xargs -I {} mermaid-cli -i {}
 
 **Subtasks:**
 1. **Register in Sink Registry** (15 min)
-   - Add to `src/elspeth/core/sink_registry.py`
+   - Add to `src/elspeth/core/registries/sink.py`
    - Create factory function
    - Add schema validation
 
@@ -844,7 +844,7 @@ curl http://localhost:9090/metrics | grep elspeth
 **Subtasks:**
 1. **Define StreamingDataSource Protocol** (1 hour)
    ```python
-   # File: src/elspeth/core/protocols.py
+   # File: src/elspeth/core/base/protocols.py
 
    class StreamingDataSource(Protocol):
        """Protocol for streaming datasources."""

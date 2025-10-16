@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from elspeth.core.protocols import LLMMiddleware, LLMRequest
+from elspeth.core.base.protocols import LLMMiddleware, LLMRequest
 from elspeth.core.registries.middleware import register_middleware
 
 logger = logging.getLogger(__name__)

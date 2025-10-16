@@ -64,10 +64,10 @@ python scripts/modernize_types.py
 ### Files Modified
 
 **Core Modules (34 files):**
-- `src/elspeth/core/artifact_pipeline.py` - 46 changes
+- `src/elspeth/core/pipeline/artifact_pipeline.py` - 46 changes
 - `src/elspeth/core/experiments/runner.py` - 76 changes
 - `src/elspeth/core/experiments/config.py` - 37 changes
-- `src/elspeth/core/validation.py` - 40 changes
+- `src/elspeth/core/validation/validators.py` - 40 changes
 - And 30 more core files...
 
 **Plugin Modules (32 files):**

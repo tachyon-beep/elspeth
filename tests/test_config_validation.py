@@ -2,14 +2,14 @@
 
 import pytest
 
-from elspeth.core.config_validation import (
+from elspeth.core.config.validation import (
     validate_full_configuration,
     validate_plugin_definition,
     validate_prompt_pack,
     validate_suite_configuration,
 )
 from elspeth.core.security.secure_mode import SecureMode
-from elspeth.core.validation_base import ConfigurationError
+from elspeth.core.validation.base import ConfigurationError
 
 
 class TestFullConfigurationValidation:

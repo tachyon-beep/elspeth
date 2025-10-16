@@ -4,15 +4,15 @@
 
 - **Defense by design** – All external integrations are fronted by typed protocols so untrusted components can be swapped without touching orchestration logic (`src/elspeth/core/interfaces.py:11`, `src/elspeth/core/interfaces.py:22`, `src/elspeth/core/interfaces.py:37`).[^defense-2025-10-12]
 <!-- UPDATE 2025-10-12: Core protocol definitions relocated -->
-Update 2025-10-12: Protocol interfaces now live in `src/elspeth/core/protocols.py:18-309`; the original `core/interfaces.py` reference is retained for pre-migration audits.
+Update 2025-10-12: Protocol interfaces now live in `src/elspeth/core/base/protocols.py:18-309`; the original `core/interfaces.py` reference is retained for pre-migration audits.
 <!-- END UPDATE -->
-- **Configuration as code** – Profiles are hydrated through validated YAML and merged prompt packs, preventing runtime surprises and enabling fail-fast feedback (`src/elspeth/config.py:41`, `src/elspeth/core/validation.py:271`, `src/elspeth/core/validation.py:1012`).[^config-2025-10-12]
+- **Configuration as code** – Profiles are hydrated through validated YAML and merged prompt packs, preventing runtime surprises and enabling fail-fast feedback (`src/elspeth/config.py:41`, `src/elspeth/core/validation/validators.py:271`, `src/elspeth/core/validation/validators.py:1012`).[^config-2025-10-12]
 <!-- UPDATE 2025-10-12: Validation citation refresh -->
-Update 2025-10-12: Configuration validation spans `src/elspeth/config.py:52-210` and `src/elspeth/core/validation.py:254-318`; the validation module tops out at 927 lines after refactors.
+Update 2025-10-12: Configuration validation spans `src/elspeth/config.py:52-210` and `src/elspeth/core/validation/validators.py:254-318`; the validation module tops out at 927 lines after refactors.
 <!-- END UPDATE -->
 - **Traceable execution** – The orchestrator records retries, aggregates, costs, and security classifications on every run so sinks and auditors receive consistent metadata (`src/elspeth/core/experiments/runner.py:162`, `src/elspeth/core/experiments/runner.py:198`, `src/elspeth/core/experiments/runner.py:218`).[^trace-2025-10-12]
 <!-- UPDATE 2025-10-12: Trace metadata now includes `retry_summary`, `cost_summary`, and `early_stop` payloads surfaced to sinks and middleware via `src/elspeth/core/experiments/runner.py:176`, `src/elspeth/core/experiments/runner.py:198`, `src/elspeth/core/experiments/runner.py:212`. -->
-- **Least privilege propagation** – Data, middleware, and artifact flows carry explicit security levels allowing downstream sinks to enforce clearance before consuming artifacts (`src/elspeth/core/security/__init__.py:14`, `src/elspeth/core/experiments/runner.py:208`, `src/elspeth/core/artifact_pipeline.py:192`).[^least-privilege-2025-10-12]
+- **Least privilege propagation** – Data, middleware, and artifact flows carry explicit security levels allowing downstream sinks to enforce clearance before consuming artifacts (`src/elspeth/core/security/__init__.py:14`, `src/elspeth/core/experiments/runner.py:208`, `src/elspeth/core/pipeline/artifact_pipeline.py:192`).[^least-privilege-2025-10-12]
 
 ## Component Layers
 
@@ -23,7 +23,7 @@ Update 2025-10-12: Datasource implementations reside under `src/elspeth/plugins/
 - **Configuration Loader** – Profiles compose datasource/LLM/sink stacks, merge prompt packs, and resolve suite defaults before instantiating runtime dependencies (`src/elspeth/config.py:52`, `src/elspeth/config.py:78`, `src/elspeth/config.py:121`).[^config-loader-2025-10-12]
 - **Orchestrator** – Binds a datasource, LLM client, sinks, and optional rate/cost/validation plugins into a cohesive experiment with shared middleware and retry settings (`src/elspeth/core/orchestrator.py:43`, `src/elspeth/core/orchestrator.py:80`).[^orchestrator-2025-10-12]
 - **Experiment Runner** – Compiles prompts with strict rendering, enforces per-row middleware chains, handles concurrency, retries, validation plugins, and aggregates before dispatching results into the artifact pipeline (`src/elspeth/core/experiments/runner.py:65`, `src/elspeth/core/experiments/runner.py:126`, `src/elspeth/core/experiments/runner.py:464`).[^runner-2025-10-12]
-- **Artifact Pipeline** – Orders sinks by declared dependencies, enforces security clearances, and allows chaining of produced artifacts (CSV, signed bundles, repo uploads) for downstream consumers (`src/elspeth/core/artifact_pipeline.py:153`, `src/elspeth/core/artifact_pipeline.py:192`, `src/elspeth/core/artifact_pipeline.py:218`).[^pipeline-2025-10-12]
+- **Artifact Pipeline** – Orders sinks by declared dependencies, enforces security clearances, and allows chaining of produced artifacts (CSV, signed bundles, repo uploads) for downstream consumers (`src/elspeth/core/pipeline/artifact_pipeline.py:153`, `src/elspeth/core/pipeline/artifact_pipeline.py:192`, `src/elspeth/core/pipeline/artifact_pipeline.py:218`).[^pipeline-2025-10-12]
 - **Plugin Controls** – Rate limiting and cost tracking are pluggable, with schema validation guarding misconfiguration and adaptive logic that tracks both requests and token budgets (`src/elspeth/core/controls/registry.py:36`, `src/elspeth/core/controls/rate_limit.py:104`, `src/elspeth/core/controls/cost_tracker.py:36`).[^controls-2025-10-12]
 <!-- UPDATE 2025-10-12: Plugin registries also normalise baseline comparison and early-stop definitions; see `src/elspeth/core/experiments/plugin_registry.py:34` and `src/elspeth/core/experiments/plugin_registry.py:142` for baseline/early-stop creation paths. -->
 <!-- UPDATE 2025-10-12: Registry citation refresh -->
@@ -89,11 +89,11 @@ Update 2025-10-12: Artifact Chaining and Classification Guarantees — Additiona
 
 ## Added 2025-10-12 – Artifact Chaining and Classification Guarantees
 
-- **Artifact descriptors** – Sinks declare produced artifacts (type, alias, persistence) and consume upstream tokens via `ArtifactDescriptor` and `ArtifactRequestParser`, enabling DAG-style execution without breaking existing single-sink flows (`src/elspeth/core/interfaces.py:37`, `src/elspeth/core/artifact_pipeline.py:137`).[^artifact-descriptors-2025-10-12]
+- **Artifact descriptors** – Sinks declare produced artifacts (type, alias, persistence) and consume upstream tokens via `ArtifactDescriptor` and `ArtifactRequestParser`, enabling DAG-style execution without breaking existing single-sink flows (`src/elspeth/core/interfaces.py:37`, `src/elspeth/core/pipeline/artifact_pipeline.py:137`).[^artifact-descriptors-2025-10-12]
 <!-- UPDATE 2025-10-12: Artifact descriptor location -->
-Update 2025-10-12: `ArtifactDescriptor` now lives in `src/elspeth/core/protocols.py:237-309`, while request parsing logic remains in `src/elspeth/core/artifact_pipeline.py:120-194`.
+Update 2025-10-12: `ArtifactDescriptor` now lives in `src/elspeth/core/base/protocols.py:237-309`, while request parsing logic remains in `src/elspeth/core/pipeline/artifact_pipeline.py:120-194`.
 <!-- END UPDATE -->
-- **Security-level enforcement** – The pipeline normalises sink clearances and rejects dependency resolutions that would downgrade data, ensuring classification never escalates silently (`src/elspeth/core/artifact_pipeline.py:167`, `src/elspeth/core/artifact_pipeline.py:205`, `src/elspeth/core/security/__init__.py:27`).[^security-enforcement-2025-10-12]
+- **Security-level enforcement** – The pipeline normalises sink clearances and rejects dependency resolutions that would downgrade data, ensuring classification never escalates silently (`src/elspeth/core/pipeline/artifact_pipeline.py:167`, `src/elspeth/core/pipeline/artifact_pipeline.py:205`, `src/elspeth/core/security/__init__.py:27`).[^security-enforcement-2025-10-12]
 - **Reusable artifacts** – Downstream sinks (e.g., `file_copy`, `zip_bundle`, Azure blob) can request `file/*` or aliased artifacts, and sanitisation metadata rides alongside to maintain audit provenance (`src/elspeth/plugins/outputs/csv_file.py:102`, `src/elspeth/plugins/outputs/blob.py:208`).[^reusable-artifacts-2025-10-12]
 <!-- UPDATE 2025-10-12: Reusable artifact path alignment -->
 Update 2025-10-12: Artifact consumers are under `src/elspeth/plugins/nodes/sinks/` (e.g., `csv_file.py:95-123`, `blob.py:170-228`, `zip_bundle.py`, `local_bundle.py`).

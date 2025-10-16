@@ -114,7 +114,7 @@ from __future__ import annotations
 import <required_imports>
 
 from elspeth.core.experiments.plugin_registry import register_<type>_plugin
-from elspeth.core.plugin_context import PluginContext
+from elspeth.core.base.plugin_context import PluginContext
 
 logger = logging.getLogger(__name__)
 
@@ -147,7 +147,7 @@ from __future__ import annotations
 import <required_imports>
 
 from elspeth.core.llm_middleware_registry import register_middleware
-from elspeth.core.protocols import LLMMiddleware, LLMRequest
+from elspeth.core.base.protocols import LLMMiddleware, LLMRequest
 
 logger = logging.getLogger(__name__)
 

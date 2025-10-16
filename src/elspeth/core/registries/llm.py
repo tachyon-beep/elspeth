@@ -10,15 +10,15 @@ from __future__ import annotations
 import logging
 from typing import Any, Iterable, Mapping
 
-from elspeth.core.plugin_context import PluginContext
-from elspeth.core.protocols import LLMClientProtocol
+from elspeth.core.base.plugin_context import PluginContext
+from elspeth.core.base.protocols import LLMClientProtocol
 from elspeth.core.security import (
     coalesce_determinism_level,
     coalesce_security_level,
     validate_azure_openai_endpoint,
     validate_http_api_endpoint,
 )
-from elspeth.core.validation_base import ConfigurationError
+from elspeth.core.validation.base import ConfigurationError
 from elspeth.plugins.nodes.transforms.llm import AzureOpenAIClient, HttpOpenAIClient, MockLLMClient, StaticLLMClient
 
 from .base import BasePluginRegistry

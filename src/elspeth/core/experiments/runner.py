@@ -12,13 +12,13 @@ from typing import Any, Iterable, Mapping
 
 import pandas as pd
 
-from elspeth.core.artifact_pipeline import ArtifactPipeline, SinkBinding
+from elspeth.core.pipeline.artifact_pipeline import ArtifactPipeline, SinkBinding
 from elspeth.core.controls import CostTracker, RateLimiter
 from elspeth.core.experiments.plugin_registry import create_early_stop_plugin
-from elspeth.core.processing import prepare_prompt_context
+from elspeth.core.pipeline.processing import prepare_prompt_context
 from elspeth.core.prompts import PromptEngine, PromptRenderingError, PromptTemplate, PromptValidationError
-from elspeth.core.protocols import LLMClientProtocol, LLMMiddleware, LLMRequest, ResultSink
-from elspeth.core.schema import SchemaViolation, validate_schema_compatibility
+from elspeth.core.base.protocols import LLMClientProtocol, LLMMiddleware, LLMRequest, ResultSink
+from elspeth.core.base.schema import SchemaViolation, validate_schema_compatibility
 from elspeth.core.security import normalize_security_level, resolve_determinism_level, resolve_security_level
 from elspeth.plugins.orchestrators.experiment.protocols import (
     AggregationExperimentPlugin,

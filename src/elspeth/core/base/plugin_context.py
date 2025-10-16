@@ -119,7 +119,7 @@ def apply_plugin_context(instance: Any, context: PluginContext) -> None:
     setattr(instance, "_elspeth_determinism_level", context.determinism_level)
 
     # Attach plugin logger for structured logging
-    from elspeth.core.logging import attach_plugin_logger
+    from elspeth.core.utils.logging import attach_plugin_logger
 
     attach_plugin_logger(instance, context)
 

@@ -42,9 +42,9 @@
 5. After validation passes, instantiate plugins and proceed with execution.
 
 ## Implementation Steps
-1. Introduce `src/elspeth/core/validation.py` with reusable validators and error types backed by `jsonschema` helpers.
+1. Introduce `src/elspeth/core/validation/validators.py` with reusable validators and error types backed by `jsonschema` helpers.
 2. Define schemas for settings, prompt packs, suite defaults, and per-experiment configs (reuse legacy schema definitions where possible).
-3. Extend plugin registries (`src/elspeth/core/registry.py`, `src/elspeth/core/experiments/plugin_registry.py`, etc.) to store option schemas and validate before instantiation.
+3. Extend plugin registries (`src/elspeth/core/registries/__init__.py`, `src/elspeth/core/experiments/plugin_registry.py`, etc.) to store option schemas and validate before instantiation.
 4. Update CLI to run validation before orchestrator/suite runner invocation; present aggregated error messages when multiple config issues are detected.
 5. Port preflight calculations into new validator, capturing issues/warnings in a structured object.
 6. Write unit tests covering:
@@ -52,7 +52,7 @@
    - Experiment folder missing prompts/config.
    - Duplicate experiment names or missing baseline raising errors.
    - Successful validation path resulting in telemetry logging via middleware (tying into Azure logging for parity).
-<!-- UPDATE 2025-10-12: Validation module, plugin schemas, and CLI integration have been implemented (`src/elspeth/core/validation.py`, `src/elspeth/core/registry.py`, `src/elspeth/cli.py:131`). Tests reside in `tests/test_validation_settings.py` and `tests/test_validation_suite.py`. -->
+<!-- UPDATE 2025-10-12: Validation module, plugin schemas, and CLI integration have been implemented (`src/elspeth/core/validation/validators.py`, `src/elspeth/core/registries/__init__.py`, `src/elspeth/cli.py:131`). Tests reside in `tests/test_validation_settings.py` and `tests/test_validation_suite.py`. -->
 
 ## Notes
 - Keep validation pure: no network/file side effects beyond reading config/prompts. Plugin instantiation should happen only after validation succeeds.

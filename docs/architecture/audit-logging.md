@@ -2,7 +2,7 @@
 
 ## Logging Sources
 
-- **CLI validation** – Configuration validation emits warnings for missing plugins or schema violations before execution begins, ensuring anomalies are captured in operator logs (`src/elspeth/cli.py:83`, `src/elspeth/core/validation.py:271`).[^audit-cli-2025-10-12]
+- **CLI validation** – Configuration validation emits warnings for missing plugins or schema violations before execution begins, ensuring anomalies are captured in operator logs (`src/elspeth/cli.py:83`, `src/elspeth/core/validation/validators.py:271`).[^audit-cli-2025-10-12]
 <!-- UPDATE 2025-10-12: CLI validation citation refresh -->
 Update 2025-10-12: Validation warnings are emitted during `_load_settings_from_args` at `src/elspeth/cli.py:369-380`.
 <!-- END UPDATE -->
