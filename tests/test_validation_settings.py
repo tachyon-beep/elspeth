@@ -120,6 +120,7 @@ def test_validate_settings_valid_configuration(tmp_path):
     )
     report = validate_settings(config_path)
     report.raise_if_errors()
+    assert not report.has_errors()
 
 
 def test_validate_settings_requires_sink_security_level(tmp_path):

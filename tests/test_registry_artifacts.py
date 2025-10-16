@@ -17,7 +17,7 @@ def test_sink_accepts_artifact_config():
         },
     }
 
-    sink_registry.validate("csv", config)
+    assert sink_registry.validate("csv", config) is None
 
 
 def test_sink_rejects_invalid_artifact_config():

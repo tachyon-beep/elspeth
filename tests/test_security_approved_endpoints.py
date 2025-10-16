@@ -19,23 +19,32 @@ class TestEndpointValidation:
     def test_azure_openai_approved_endpoint(self):
         """Test Azure OpenAI approved endpoint validation."""
         # Should pass - valid Azure OpenAI endpoint
-        validate_azure_openai_endpoint(
-            "https://my-resource.openai.azure.com",
-            security_level="OFFICIAL",
+        assert (
+            validate_azure_openai_endpoint(
+                "https://my-resource.openai.azure.com",
+                security_level="OFFICIAL",
+            )
+            is None
         )
 
     def test_azure_openai_gov_cloud(self):
         """Test Azure OpenAI Government cloud endpoint."""
-        validate_azure_openai_endpoint(
-            "https://my-resource.openai.azure.us",
-            security_level="OFFICIAL",
+        assert (
+            validate_azure_openai_endpoint(
+                "https://my-resource.openai.azure.us",
+                security_level="OFFICIAL",
+            )
+            is None
         )
 
     def test_azure_openai_china_cloud(self):
         """Test Azure OpenAI China cloud endpoint."""
-        validate_azure_openai_endpoint(
-            "https://my-resource.openai.azure.cn",
-            security_level="internal",
+        assert (
+            validate_azure_openai_endpoint(
+                "https://my-resource.openai.azure.cn",
+                security_level="internal",
+            )
+            is None
         )
 
     def test_azure_openai_unapproved_endpoint(self):
@@ -48,9 +57,12 @@ class TestEndpointValidation:
 
     def test_http_api_openai_public(self):
         """Test OpenAI public API endpoint."""
-        validate_http_api_endpoint(
-            "https://api.openai.com",
-            security_level="public",
+        assert (
+            validate_http_api_endpoint(
+                "https://api.openai.com",
+                security_level="public",
+            )
+            is None
         )
 
     def test_http_api_openai_security_restriction(self):
@@ -64,15 +76,15 @@ class TestEndpointValidation:
     def test_http_api_localhost(self):
         """Test localhost endpoints are always allowed."""
         # HTTP localhost
-        validate_http_api_endpoint("http://localhost:8080", security_level="confidential")
-        validate_http_api_endpoint("http://127.0.0.1:8080", security_level="SECRET")
+        assert validate_http_api_endpoint("http://localhost:8080", security_level="confidential") is None
+        assert validate_http_api_endpoint("http://127.0.0.1:8080", security_level="SECRET") is None
 
         # HTTPS localhost
-        validate_http_api_endpoint("https://localhost:8080", security_level="confidential")
-        validate_http_api_endpoint("https://127.0.0.1:8080", security_level="SECRET")
+        assert validate_http_api_endpoint("https://localhost:8080", security_level="confidential") is None
+        assert validate_http_api_endpoint("https://127.0.0.1:8080", security_level="SECRET") is None
 
         # IPv6 localhost
-        validate_http_api_endpoint("http://[::1]:8080", security_level="confidential")
+        assert validate_http_api_endpoint("http://[::1]:8080", security_level="confidential") is None
 
     def test_http_api_unapproved_endpoint(self):
         """Test unapproved HTTP API endpoint raises error."""
@@ -85,21 +97,30 @@ class TestEndpointValidation:
     def test_azure_blob_approved_endpoints(self):
         """Test Azure Blob Storage approved endpoints."""
         # Azure public cloud
-        validate_azure_blob_endpoint(
-            "https://myaccount.blob.core.windows.net",
-            security_level="OFFICIAL",
+        assert (
+            validate_azure_blob_endpoint(
+                "https://myaccount.blob.core.windows.net",
+                security_level="OFFICIAL",
+            )
+            is None
         )
 
         # Azure Government cloud
-        validate_azure_blob_endpoint(
-            "https://myaccount.blob.core.usgovcloudapi.net",
-            security_level="OFFICIAL",
+        assert (
+            validate_azure_blob_endpoint(
+                "https://myaccount.blob.core.usgovcloudapi.net",
+                security_level="OFFICIAL",
+            )
+            is None
         )
 
         # Azure China cloud
-        validate_azure_blob_endpoint(
-            "https://myaccount.blob.core.chinacloudapi.cn",
-            security_level="internal",
+        assert (
+            validate_azure_blob_endpoint(
+                "https://myaccount.blob.core.chinacloudapi.cn",
+                security_level="internal",
+            )
+            is None
         )
 
     def test_azure_blob_unapproved_endpoint(self):
@@ -113,11 +134,14 @@ class TestEndpointValidation:
     def test_development_mode_bypass(self):
         """Test development mode allows unapproved endpoints with warning."""
         # Should not raise in development mode
-        validate_endpoint(
-            endpoint="https://totally-unapproved.com",
-            service_type="azure_openai",
-            security_level="OFFICIAL",
-            mode=SecureMode.DEVELOPMENT,
+        assert (
+            validate_endpoint(
+                endpoint="https://totally-unapproved.com",
+                service_type="azure_openai",
+                security_level="OFFICIAL",
+                mode=SecureMode.DEVELOPMENT,
+            )
+            is None
         )
 
     def test_standard_mode_enforcement(self):
@@ -143,21 +167,30 @@ class TestEndpointValidation:
     def test_endpoint_trailing_slash_normalization(self):
         """Test endpoint URLs with trailing slashes are normalized."""
         # Both should pass (trailing slash should be stripped for comparison)
-        validate_azure_openai_endpoint(
-            "https://my-resource.openai.azure.com/",
-            security_level="OFFICIAL",
+        assert (
+            validate_azure_openai_endpoint(
+                "https://my-resource.openai.azure.com/",
+                security_level="OFFICIAL",
+            )
+            is None
         )
-        validate_azure_openai_endpoint(
-            "https://my-resource.openai.azure.com",
-            security_level="OFFICIAL",
+        assert (
+            validate_azure_openai_endpoint(
+                "https://my-resource.openai.azure.com",
+                security_level="OFFICIAL",
+            )
+            is None
         )
 
     def test_endpoint_with_path(self):
         """Test endpoints with paths are validated."""
         # Azure OpenAI endpoint with path should still match
-        validate_azure_openai_endpoint(
-            "https://my-resource.openai.azure.com/openai/deployments/gpt-4",
-            security_level="OFFICIAL",
+        assert (
+            validate_azure_openai_endpoint(
+                "https://my-resource.openai.azure.com/openai/deployments/gpt-4",
+                security_level="OFFICIAL",
+            )
+            is None
         )
 
     def test_get_approved_patterns(self):
@@ -178,9 +211,12 @@ class TestEndpointValidation:
     def test_security_level_none_allowed(self):
         """Test validation works when security_level is None."""
         # Should pass without security_level
-        validate_azure_openai_endpoint(
-            "https://my-resource.openai.azure.com",
-            security_level=None,
+        assert (
+            validate_azure_openai_endpoint(
+                "https://my-resource.openai.azure.com",
+                security_level=None,
+            )
+            is None
         )
 
     def test_environment_override_patterns(self, monkeypatch):
@@ -192,9 +228,12 @@ class TestEndpointValidation:
         )
 
         # Should pass with custom pattern
-        validate_http_api_endpoint(
-            "https://custom-llm.internal.company.com",
-            security_level="OFFICIAL",
+        assert (
+            validate_http_api_endpoint(
+                "https://custom-llm.internal.company.com",
+                security_level="OFFICIAL",
+            )
+            is None
         )
 
     def test_environment_override_multiple_patterns(self, monkeypatch):
@@ -205,20 +244,29 @@ class TestEndpointValidation:
         )
 
         # Both should pass
-        validate_http_api_endpoint(
-            "https://llm1.internal.com",
-            security_level="OFFICIAL",
+        assert (
+            validate_http_api_endpoint(
+                "https://llm1.internal.com",
+                security_level="OFFICIAL",
+            )
+            is None
         )
-        validate_http_api_endpoint(
-            "https://llm2.internal.com",
-            security_level="OFFICIAL",
+        assert (
+            validate_http_api_endpoint(
+                "https://llm2.internal.com",
+                security_level="OFFICIAL",
+            )
+            is None
         )
 
     def test_ipv6_localhost(self):
         """Test IPv6 localhost addresses are allowed."""
-        validate_http_api_endpoint(
-            "http://[::1]:8000",
-            security_level="SECRET",
+        assert (
+            validate_http_api_endpoint(
+                "http://[::1]:8000",
+                security_level="SECRET",
+            )
+            is None
         )
 
     def test_error_message_includes_approved_patterns(self):
@@ -236,15 +284,21 @@ class TestEndpointValidation:
     def test_openai_public_internal_allowed(self):
         """Test OpenAI public API allows public and internal security levels."""
         # public - should pass
-        validate_http_api_endpoint(
-            "https://api.openai.com",
-            security_level="public",
+        assert (
+            validate_http_api_endpoint(
+                "https://api.openai.com",
+                security_level="public",
+            )
+            is None
         )
 
         # internal - should pass
-        validate_http_api_endpoint(
-            "https://api.openai.com",
-            security_level="internal",
+        assert (
+            validate_http_api_endpoint(
+                "https://api.openai.com",
+                security_level="internal",
+            )
+            is None
         )
 
     def test_openai_public_confidential_blocked(self):
@@ -266,14 +320,20 @@ class TestEndpointValidation:
     def test_case_insensitive_security_levels(self):
         """Test security level comparison is case-insensitive (normalized)."""
         # Security levels are normalized, so lowercase works
-        validate_http_api_endpoint(
-            "https://api.openai.com",
-            security_level="internal",  # lowercase - normalized to OFFICIAL
+        assert (
+            validate_http_api_endpoint(
+                "https://api.openai.com",
+                security_level="internal",  # lowercase - normalized to OFFICIAL
+            )
+            is None
         )
 
-        validate_http_api_endpoint(
-            "https://api.openai.com",
-            security_level="public",  # lowercase - normalized to UNOFFICIAL
+        assert (
+            validate_http_api_endpoint(
+                "https://api.openai.com",
+                security_level="public",  # lowercase - normalized to UNOFFICIAL
+            )
+            is None
         )
 
 

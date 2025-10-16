@@ -8,13 +8,18 @@ LLM registry logic in registry.py.
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Iterable, Mapping
 
 from elspeth.core.plugin_context import PluginContext
 from elspeth.core.protocols import LLMClientProtocol
 from elspeth.core.registry.base import BasePluginRegistry
 from elspeth.core.registry.schemas import with_security_properties
-from elspeth.core.security import validate_azure_openai_endpoint, validate_http_api_endpoint
+from elspeth.core.security import (
+    coalesce_determinism_level,
+    coalesce_security_level,
+    validate_azure_openai_endpoint,
+    validate_http_api_endpoint,
+)
 from elspeth.core.validation_base import ConfigurationError
 from elspeth.plugins.nodes.transforms.llm import AzureOpenAIClient, HttpOpenAIClient, MockLLMClient, StaticLLMClient
 
@@ -22,6 +27,69 @@ logger = logging.getLogger(__name__)
 
 # Create the LLM registry with type safety
 llm_registry = BasePluginRegistry[LLMClientProtocol]("llm")
+
+
+def create_llm_from_definition(
+    definition: Mapping[str, Any],
+    *,
+    parent_context: Any,
+    provenance: Iterable[str] | None = None,
+) -> LLMClientProtocol:
+    """Create an LLM instance from a configuration definition.
+
+    This helper mirrors the legacy ``registry.create_llm_from_definition`` API.
+    It merges security and determinism levels from the incoming definition,
+    falling back to the parent context when values are omitted.
+    """
+
+    if not isinstance(definition, Mapping):
+        raise ValueError("LLM definition must be a mapping")
+
+    plugin_name = definition.get("plugin")
+    if not plugin_name:
+        raise ConfigurationError("LLM definition requires 'plugin'")
+
+    options = dict(definition.get("options", {}) or {})
+
+    entry_sec = definition.get("security_level")
+    opts_sec = options.get("security_level")
+    entry_det = definition.get("determinism_level")
+    opts_det = options.get("determinism_level")
+
+    sources = []
+    if entry_sec:
+        sources.append(f"llm:{plugin_name}.definition.security_level")
+    if opts_sec:
+        sources.append(f"llm:{plugin_name}.options.security_level")
+    if entry_det is not None:
+        sources.append(f"llm:{plugin_name}.definition.determinism_level")
+    if opts_det is not None:
+        sources.append(f"llm:{plugin_name}.options.determinism_level")
+    if provenance:
+        sources.extend(provenance)
+
+    try:
+        sec_level = coalesce_security_level(parent_context.security_level, entry_sec, opts_sec)
+    except ValueError as exc:
+        raise ConfigurationError(f"llm:{plugin_name}: {exc}") from exc
+
+    if entry_det is not None or opts_det is not None:
+        try:
+            det_level = coalesce_determinism_level(entry_det, opts_det)
+        except ValueError as exc:
+            raise ConfigurationError(f"llm:{plugin_name}: {exc}") from exc
+    else:
+        det_level = parent_context.determinism_level
+
+    options["security_level"] = sec_level
+    options["determinism_level"] = det_level
+
+    return llm_registry.create(
+        plugin_name,
+        options,
+        provenance=tuple(sources or (f"llm:{plugin_name}.resolved",)),
+        parent_context=parent_context,
+    )
 
 
 # ============================================================================

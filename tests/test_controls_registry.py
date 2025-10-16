@@ -76,14 +76,26 @@ def test_create_cost_tracker_unknown_plugin():
 
 
 def test_validate_cost_tracker_success():
-    controls_registry.validate_cost_tracker({"plugin": "noop", "security_level": "OFFICIAL", "determinism_level": "guaranteed"})
-    controls_registry.validate_cost_tracker(
-        {
-            "plugin": "fixed_price",
-            "security_level": "OFFICIAL",
-            "determinism_level": "guaranteed",
-            "options": {"prompt_token_price": 0.1, "completion_token_price": 0.05},
-        }
+    assert (
+        controls_registry.validate_cost_tracker(
+            {
+                "plugin": "noop",
+                "security_level": "OFFICIAL",
+                "determinism_level": "guaranteed",
+            }
+        )
+        is None
+    )
+    assert (
+        controls_registry.validate_cost_tracker(
+            {
+                "plugin": "fixed_price",
+                "security_level": "OFFICIAL",
+                "determinism_level": "guaranteed",
+                "options": {"prompt_token_price": 0.1, "completion_token_price": 0.05},
+            }
+        )
+        is None
     )
 
 
@@ -93,4 +105,13 @@ def test_create_rate_limiter_unknown_plugin():
 
 
 def test_validate_rate_limiter_success():
-    controls_registry.validate_rate_limiter({"plugin": "noop", "security_level": "OFFICIAL", "determinism_level": "guaranteed"})
+    assert (
+        controls_registry.validate_rate_limiter(
+            {
+                "plugin": "noop",
+                "security_level": "OFFICIAL",
+                "determinism_level": "guaranteed",
+            }
+        )
+        is None
+    )

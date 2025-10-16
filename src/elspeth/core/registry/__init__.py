@@ -66,70 +66,18 @@ __all__ = [
 __version__ = "0.1.0"
 
 
-# Compatibility shim for create_llm_from_definition
-# This function provides the same interface as the old registry.create_llm_from_definition
-# but uses the new llm_registry directly to avoid circular imports
 def create_llm_from_definition(
     definition: Mapping[str, Any],
     *,
     parent_context: Any,
     provenance: Iterable[str] | None = None,
 ) -> Any:
-    """Create LLM from definition with inherited context (compatibility shim).
+    """Backward-compatible shim delegating to ``llm_registry`` helper."""
 
-    This function exists for backward compatibility with code that used
-    registry.create_llm_from_definition(). It delegates to llm_registry.
-    """
-    from elspeth.core.llm_registry import llm_registry
-    from elspeth.core.security import coalesce_determinism_level, coalesce_security_level
-    from elspeth.core.validation_base import ConfigurationError
+    from elspeth.core.llm_registry import create_llm_from_definition as _create
 
-    if not isinstance(definition, Mapping):
-        raise ValueError("LLM definition must be a mapping")
-
-    plugin_name = definition.get("plugin")
-    if not plugin_name:
-        raise ConfigurationError("LLM definition requires 'plugin'")
-
-    options = dict(definition.get("options", {}) or {})
-
-    # Coalesce security and determinism levels
-    entry_sec = definition.get("security_level")
-    opts_sec = options.get("security_level")
-    entry_det = definition.get("determinism_level")
-    opts_det = options.get("determinism_level")
-
-    sources = []
-    if entry_sec:
-        sources.append(f"llm:{plugin_name}.definition.security_level")
-    if opts_sec:
-        sources.append(f"llm:{plugin_name}.options.security_level")
-    if entry_det:
-        sources.append(f"llm:{plugin_name}.definition.determinism_level")
-    if opts_det:
-        sources.append(f"llm:{plugin_name}.options.determinism_level")
-    if provenance:
-        sources.extend(provenance)
-
-    try:
-        sec_level = coalesce_security_level(parent_context.security_level, entry_sec, opts_sec)
-    except ValueError as exc:
-        raise ConfigurationError(f"llm:{plugin_name}: {exc}") from exc
-
-    if entry_det is not None or opts_det is not None:
-        try:
-            det_level = coalesce_determinism_level(entry_det, opts_det)
-        except ValueError as exc:
-            raise ConfigurationError(f"llm:{plugin_name}: {exc}") from exc
-    else:
-        det_level = parent_context.determinism_level
-
-    options["security_level"] = sec_level
-    options["determinism_level"] = det_level
-
-    return llm_registry.create(
-        plugin_name,
-        options,
-        provenance=tuple(sources or (f"llm:{plugin_name}.resolved",)),
+    return _create(
+        definition,
         parent_context=parent_context,
+        provenance=provenance,
     )

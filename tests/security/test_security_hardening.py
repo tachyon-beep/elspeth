@@ -247,10 +247,7 @@ class TestPathTraversalPrevention:
 
     def test_symlink_attack_prevented(self):
         """Test that symlink attacks are prevented."""
-        # If a symlink points outside the output directory,
-        # following it should be prevented
-        # This is a defense-in-depth measure
-        ...
+        pytest.skip("Symlink containment hardening not yet implemented; tracking in SECURITY backlog")
 
 
 class TestMalformedConfiguration:
@@ -416,7 +413,7 @@ class TestConcurrentAccess:
 class TestAuditLogIntegrity:
     """Test audit log integrity (AS-10)."""
 
-    def test_audit_logger_required_in_strict_mode(self):
+    def test_audit_logger_required_in_strict_mode(self, caplog):
         """Test that audit logger is recommended in STRICT mode."""
         from elspeth.core.security.secure_mode import validate_middleware_config
 
@@ -427,9 +424,9 @@ class TestAuditLogIntegrity:
 
         # Should emit warning in STRICT mode (not an error, but logged)
         # Actual implementation validates middleware presence
-        validate_middleware_config(middleware_config, mode=SecureMode.STRICT)
-
-        # Test passes if validation runs (warnings are acceptable)
+        with caplog.at_level("WARNING"):
+            assert validate_middleware_config(middleware_config, mode=SecureMode.STRICT) is None
+        assert "audit_logger" in caplog.text
 
     def test_structured_logging_prevents_injection(self):
         """Test that structured logging prevents log injection."""

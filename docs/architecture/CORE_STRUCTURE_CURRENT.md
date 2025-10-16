@@ -11,11 +11,11 @@
 src/elspeth/core/
 ├── Registries (Plugin Factories)
 │   ├── datasource_registry.py       - Datasource plugin registry
-│   ├── llm_registry.py              - LLM client plugin registry
+│   ├── llm_registry.py              - LLM client plugin registry (now hosts `create_llm_from_definition`)
 │   ├── llm_middleware_registry.py   - Middleware plugin registry
 │   ├── sink_registry.py             - Output sink plugin registry
 │   ├── utility_plugin_registry.py   - Utility plugin registry
-│   └── registry/                    - Base registry infrastructure
+│   └── registry/                    - Base registry infrastructure (base classes, helpers, schemas)
 │
 ├── Orchestration & Pipeline
 │   ├── orchestrator.py              - Main experiment orchestrator
@@ -83,15 +83,16 @@ src/elspeth/core/
 ## File Size Reference
 
 **Large Files** (>10KB - may need refactoring):
+
 - `validation.py` - 31K ⚠️ Very large
 - `schema.py` - 18K
 - `sink_registry.py` - 18K
 - `artifact_pipeline.py` - 15K
 - `logging.py` - 14K
 - `types.py` - 13K
-- `registry.py` - 11K (facade - minimal use)
 
 **Medium Files** (5-10KB):
+
 - `protocols.py` - 8.9K
 - `config_validation.py` - 9.3K
 - `llm_registry.py` - 8.5K
@@ -101,6 +102,7 @@ src/elspeth/core/
 - `plugin_context.py` - 5.3K
 
 **Small Files** (<5KB):
+
 - All others
 
 ## Import Patterns
@@ -158,7 +160,7 @@ datasource = datasource_registry.create(
 
 ## Relationship to Other Directories
 
-```
+```text
 src/elspeth/
 ├── core/              ← You are here (framework infrastructure)
 │   └── registries, orchestration, validation
@@ -175,50 +177,53 @@ src/elspeth/
 ```
 
 **Key Distinction:**
+
 - `core/` = Infrastructure and framework
 - `plugins/` = Concrete implementations
 - `core/` defines protocols, `plugins/` implements them
 
 ## Known Issues
 
-1. **Empty Directories:**
-   - `core/llm/` - Empty (only `__pycache__`)
-   - `core/plugins/` - Empty (only `__pycache__`)
-   - **Action:** Will be deleted after PR #4 merges
-
-2. **Registry Split:**
+1. **Registry Split:**
    - Infrastructure in `registry/` subdirectory
    - Implementations at root level (`*_registry.py`)
    - Can be confusing which is which
 
-3. **Large Files:**
+2. **Large Files:**
    - `validation.py` is 31KB - may benefit from splitting
    - Consider extracting validators to separate files
 
-4. **No Clear Grouping at Root:**
+3. **No Clear Grouping at Root:**
    - 21 files at root level
    - See proposal for future reorganization
 
 ## Frequently Asked Questions
 
 ### Q: Why are some registries at root and some in registry/?
+
 **A:** The `registry/` subdirectory contains the **base infrastructure** (base classes, helpers). The root-level `*_registry.py` files are **specific registry implementations**. This split is a historical artifact and may be consolidated in a future refactoring.
 
 ### Q: Where do I put a new utility function?
+
 **A:**
+
 - If it's logging-related: `logging.py`
 - If it's environment variable-related: `env_helpers.py`
 - If it's registry-related: `registry/plugin_helpers.py`
 - If it doesn't fit: Consider creating a new file or `utilities/` subdirectory
 
 ### Q: Why are there so many registry files?
+
 **A:** Each plugin type has its own registry to keep validation schemas and creation logic separate. This follows the single-responsibility principle.
 
 ### Q: Where do I find the LLM middleware implementations?
+
 **A:** LLM middleware **implementations** are in `src/elspeth/plugins/nodes/transforms/llm/middleware/`. The **registry** is in `core/llm_middleware_registry.py`.
 
 ### Q: What's the difference between core/experiments/ and plugins/experiments/?
+
 **A:**
+
 - `core/experiments/` = Experiment **framework** (runner, suite runner, plugin registry)
 - `plugins/experiments/` = Experiment **plugin implementations** (row processors, aggregators, validators)
 

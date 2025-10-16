@@ -59,9 +59,8 @@ def test_factory_validation_success(simple_schema):
         schema=simple_schema,
         plugin_type="test",
     )
-
     # Should not raise
-    factory.validate({"value": "test", "number": 42}, context="test:mock")
+    assert factory.validate({"value": "test", "number": 42}, context="test:mock") is None
 
 
 def test_factory_validation_failure(simple_schema):
@@ -83,9 +82,8 @@ def test_factory_no_schema_validation():
         schema=None,
         plugin_type="test",
     )
-
     # Should not raise even with extra keys
-    factory.validate({"value": "test", "extra": "allowed"}, context="test:mock")
+    assert factory.validate({"value": "test", "extra": "allowed"}, context="test:mock") is None
 
 
 def test_factory_instantiation(plugin_context):
@@ -307,15 +305,17 @@ def test_registry_validation_strips_framework_keys(simple_schema):
     # Schema does not include security_level or determinism_level
     registry = BasePluginRegistry[MockPlugin]("test_plugin")
     registry.register("mock", create_mock_plugin, schema=simple_schema)
-
     # Should not raise even though schema has additionalProperties: false
-    registry.validate(
-        "mock",
-        {
-            "value": "test",
-            "security_level": "OFFICIAL",
-            "determinism_level": "high",
-        },
+    assert (
+        registry.validate(
+            "mock",
+            {
+                "value": "test",
+                "security_level": "OFFICIAL",
+                "determinism_level": "high",
+            },
+        )
+        is None
     )
 
 
