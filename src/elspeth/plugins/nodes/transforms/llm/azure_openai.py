@@ -52,6 +52,7 @@ class AzureOpenAIClient(LLMClientProtocol):
         value = os.getenv("ELSPETH_AZURE_OPENAI_DEPLOYMENT")
         if value:
             return value
+        # TODO(v2.0): Remove DMP_AZURE_OPENAI_DEPLOYMENT backward compatibility
         legacy = os.getenv("DMP_AZURE_OPENAI_DEPLOYMENT")
         if legacy:
             return legacy
