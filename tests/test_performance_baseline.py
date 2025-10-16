@@ -24,14 +24,14 @@ import time
 
 import pytest
 
-from elspeth.core.pipeline.artifact_pipeline import ArtifactPipeline
+from elspeth.core.base.plugin_context import PluginContext
 from elspeth.core.experiments.config_merger import ConfigMerger
 from elspeth.core.experiments.plugin_registry import (
     create_aggregation_plugin,
     create_row_plugin,
     create_validation_plugin,
 )
-from elspeth.core.base.plugin_context import PluginContext
+from elspeth.core.pipeline.artifact_pipeline import ArtifactPipeline
 from elspeth.core.registries.datasource import datasource_registry
 from elspeth.core.registries.llm import llm_registry
 from elspeth.core.registries.sink import sink_registry

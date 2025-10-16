@@ -13,6 +13,7 @@ from collections.abc import Mapping
 from importlib import import_module
 from typing import Any, Callable, Sequence
 
+from elspeth.core.base.plugin_context import PluginContext
 from elspeth.core.experiments.experiment_registries import (
     aggregation_plugin_registry,
     baseline_plugin_registry,
@@ -20,7 +21,6 @@ from elspeth.core.experiments.experiment_registries import (
     row_plugin_registry,
     validation_plugin_registry,
 )
-from elspeth.core.base.plugin_context import PluginContext
 from elspeth.core.security import coalesce_security_level  # Still needed for validation functions
 from elspeth.core.validation.base import ConfigurationError
 from elspeth.plugins.orchestrators.experiment.protocols import (

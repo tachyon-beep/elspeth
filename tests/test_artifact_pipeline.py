@@ -6,8 +6,8 @@ from typing import Any, Dict
 
 import pytest
 
-from elspeth.core.pipeline.artifact_pipeline import ArtifactPipeline, SinkBinding
 from elspeth.core.base.protocols import Artifact, ArtifactDescriptor, ResultSink
+from elspeth.core.pipeline.artifact_pipeline import ArtifactPipeline, SinkBinding
 
 
 class DummySink(ResultSink):

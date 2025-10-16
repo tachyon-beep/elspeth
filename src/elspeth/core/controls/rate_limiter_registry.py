@@ -11,13 +11,13 @@ from __future__ import annotations
 
 from typing import Any
 
+from elspeth.core.base.plugin_context import PluginContext
 from elspeth.core.controls.rate_limit import (
     AdaptiveRateLimiter,
     FixedWindowRateLimiter,
     NoopRateLimiter,
     RateLimiter,
 )
-from elspeth.core.base.plugin_context import PluginContext
 from elspeth.core.registries.base import BasePluginRegistry
 
 # Initialize the rate limiter registry
