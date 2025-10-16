@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from elspeth.core.plugins import PluginContext
-from elspeth.core.utilities import create_named_utility, create_utility_plugin, register_utility_plugin
+from elspeth.core.plugin_context import PluginContext
+from elspeth.core.utility_plugin_registry import create_named_utility, create_utility_plugin, register_utility_plugin
 from elspeth.core.validation import ConfigurationError
 
 
@@ -17,15 +17,15 @@ class DummyUtility:
 def reset_registry():
     """Ensure registry state is isolated between tests."""
 
-    from elspeth.core.utilities import plugin_registry
+    from elspeth.core.utility_plugin_registry import utility_plugin_registry
 
-    original = dict(plugin_registry._utility_plugins)
-    plugin_registry._utility_plugins.clear()
+    original = dict(utility_plugin_registry._plugins)
+    utility_plugin_registry._plugins.clear()
     try:
         yield
     finally:
-        plugin_registry._utility_plugins.clear()
-        plugin_registry._utility_plugins.update(original)
+        utility_plugin_registry._plugins.clear()
+        utility_plugin_registry._plugins.update(original)
 
 
 def test_create_utility_plugin_with_schema_validation():

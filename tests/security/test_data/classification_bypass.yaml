@@ -1,0 +1,39 @@
+# Attack Scenario: Classification Bypass Attempt
+# This configuration attempts to lower security classification
+# to bypass security controls
+
+default:
+  # Attempt to mark classified data as public
+  datasource:
+    plugin: local_csv
+    path: "tests/security/test_data/classified_secrets.csv"
+    security_level: "official"  # ATTACK: Data is actually confidential
+    retain_local: true
+
+  # LLM marked as public to bypass restrictions
+  llm:
+    plugin: mock
+    security_level: "official"  # ATTACK: Should be confidential or higher
+
+  # Prompts
+  prompts:
+    system: "You are a helpful assistant."
+    template: "Process this data: {input}"
+
+  # Prompt fields
+  prompt_fields:
+    - name: input
+      description: "Input data field"
+      required: true
+
+  # Attempt to export confidential data with public classification
+  sinks:
+    - plugin: csv
+      security_level: "official"  # ATTACK: Trying to export as public
+      options:
+        path: "outputs/security_test/bypass_attempt.csv"
+        sanitize_formulas: false  # ATTACK: Also trying to disable sanitization
+
+  experiments:
+    - name: bypass_test
+      description: "Attempt to bypass security classification"

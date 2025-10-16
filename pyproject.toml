@@ -11,54 +11,45 @@ authors = [
 ]
 requires-python = ">=3.12"
 dependencies = [
-  "azure-identity>=1.15.0",
-  "azure-storage-blob>=12.19.0",
-  "pandas>=2.2.0",
+  # Core dependencies (updated to latest stable versions as of 2025-10)
+  "azure-identity>=1.25.0",
+  "azure-storage-blob>=12.27.0",
+  "pandas>=2.3.0",
   "pydantic>=2.0,<3.0",
   "pyyaml>=6.0",
-  "openai>=1.12.0",
-  "requests>=2.31.0",
+  "openai>=2.0.0",           # Major version update from 1.x
+  "requests>=2.32.0",
   "jinja2>=3.1.0",
-  "jsonschema>=4.21.1",
-  "scipy>=1.10.0",
+  "jsonschema>=4.25.0",
+
+  # Plugin functionality - always available
+  "scipy>=1.16.0",           # Stats core, distribution analysis
+  "openpyxl>=3.1",           # Excel sink plugin
+  "matplotlib>=3.10.0",      # Visual analytics sinks
+  "seaborn>=0.13.0",         # Enhanced visual analytics
+  "pingouin>=0.5",           # Agreement metrics (referee_alignment)
+  "statsmodels>=0.14",       # Power analysis and planning
 ]
 
 [project.optional-dependencies]
 dev = [
-  "pytest>=8.0.0",
+  "pytest>=8.4.0",
   "pytest-mock>=3.10.0",
   "pytest-cov>=5.0.0",
-  "openpyxl>=3.1",
+  "pytest-asyncio>=0.24.0",
   "pandas-stubs>=2.2.0.240807",
-  "ruff>=0.6.2",
-  "mypy>=1.0.0",
-  "types-requests>=2.31.0",
+  "ruff>=0.14.0",
+  "mypy>=1.18.0",
+  "types-requests>=2.32.0",
   "types-PyYAML>=6.0.0",
 ]
+# Azure ML integration (truly optional - external infrastructure)
 azure = [
   "azureml-core>=1.56.0",
 ]
-stats-core = [
-  "scipy>=1.10.0",
-]
-stats-agreement = [
-  "pingouin>=0.5",
-]
-stats-bayesian = [
-  "scipy>=1.10",
-]
-stats-planning = [
-  "statsmodels>=0.14",
-]
-stats-distribution = [
-  "scipy>=1.10",
-]
-sinks-excel = [
-  "openpyxl>=3.1",
-]
-analytics-visual = [
-  "matplotlib>=3.8.0",
-  "seaborn>=0.13.0",
+# PostgreSQL vector storage (truly optional - external database)
+pgvector = [
+  "psycopg>=3.1.0",
 ]
 
 [tool.setuptools.packages.find]
@@ -74,6 +65,7 @@ addopts = "-ra --cov=elspeth --cov-report=term-missing --cov-report=xml:coverage
 testpaths = ["tests"]
 markers = [
   "integration: marks tests that require external services such as pgvector",
+  "slow: marks tests as slow (deselect with '-m \"not slow\"')",
 ]
 
 [tool.ruff]

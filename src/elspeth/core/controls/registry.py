@@ -15,7 +15,7 @@ from __future__ import annotations
 import inspect
 from typing import Any, Callable, Iterable
 
-from elspeth.core.plugins import PluginContext
+from elspeth.core.plugin_context import PluginContext
 from elspeth.core.security import coalesce_security_level  # Still needed for validation functions
 from elspeth.core.validation_base import ConfigurationError
 

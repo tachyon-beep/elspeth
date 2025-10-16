@@ -6,7 +6,7 @@ the "controls pattern" used across multiple registries.
 
 import pytest
 
-from elspeth.core.plugins import PluginContext
+from elspeth.core.plugin_context import PluginContext
 from elspeth.core.registry.base import BasePluginRegistry
 from elspeth.core.registry.plugin_helpers import create_plugin_with_inheritance
 from elspeth.core.validation import ConfigurationError

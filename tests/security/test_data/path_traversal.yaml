@@ -1,0 +1,45 @@
+# Attack Scenario: Path Traversal Attempt
+# This configuration attempts path traversal to write files outside allowed directories
+
+default:
+  datasource:
+    plugin: local_csv
+    path: "data/sample.csv"
+    security_level: "official"
+    retain_local: true
+
+  llm:
+    plugin: mock
+    security_level: "official"
+
+  prompts:
+    system: "You are a helpful assistant."
+    template: "Process: {input}"
+
+  prompt_fields:
+    - name: input
+      required: true
+
+  # Path traversal attempts in sink configurations
+  sinks:
+    # Attempt 1: Parent directory traversal
+    - plugin: csv
+      security_level: "official"
+      options:
+        path: "../../../etc/passwd"  # ATTACK: Try to overwrite system file
+
+    # Attempt 2: Absolute path escape
+    - plugin: csv
+      security_level: "official"
+      options:
+        path: "/tmp/malicious.csv"  # ATTACK: Write to temp directory
+
+    # Attempt 3: Mixed traversal
+    - plugin: csv
+      security_level: "official"
+      options:
+        path: "outputs/../../sensitive/data.csv"  # ATTACK: Escape outputs dir
+
+  experiments:
+    - name: path_traversal_test
+      description: "Attempt path traversal attacks"

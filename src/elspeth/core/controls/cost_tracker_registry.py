@@ -12,7 +12,7 @@ from __future__ import annotations
 from typing import Any
 
 from elspeth.core.controls.cost_tracker import CostTracker, FixedPriceCostTracker, NoopCostTracker
-from elspeth.core.plugins.context import PluginContext
+from elspeth.core.plugin_context import PluginContext
 from elspeth.core.registry.base import BasePluginRegistry
 
 # Initialize the cost tracker registry

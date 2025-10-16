@@ -3,8 +3,6 @@ import json
 from pathlib import Path
 from zipfile import ZipFile
 
-import pytest
-
 from elspeth.plugins.nodes.sinks.excel import ExcelResultSink
 from elspeth.plugins.nodes.sinks.zip_bundle import ZipResultSink
 
@@ -24,7 +22,6 @@ def sample_results():
 
 
 def test_excel_result_sink_writes_workbook(tmp_path, assert_sanitized_artifact):
-    pytest.importorskip("openpyxl")
     from openpyxl import load_workbook
 
     sink = ExcelResultSink(
@@ -65,8 +62,6 @@ def test_excel_result_sink_writes_workbook(tmp_path, assert_sanitized_artifact):
 
 
 def test_excel_sink_skip_on_error(monkeypatch, tmp_path, caplog):
-    pytest.importorskip("openpyxl")
-
     sink = ExcelResultSink(base_path=tmp_path, on_error="skip")
 
     class DummySheet:

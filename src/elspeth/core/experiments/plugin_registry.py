@@ -1,14 +1,9 @@
 """Experiment plugin registry for row and aggregation plugins.
 
 NOTE: This registry has been migrated to use BasePluginRegistry framework (Phase 2).
-The actual plugin registrations are in individual registry files:
-- row_plugin_registry.py
-- aggregation_plugin_registry.py
-- validation_plugin_registry.py
-- baseline_plugin_registry.py
-- early_stop_plugin_registry.py
+All plugin registries are now consolidated in experiment_registries.py to reduce sprawl.
 
-This module now provides facade functions that delegate to the new registries while
+This module provides facade functions that delegate to the consolidated registries while
 preserving the existing API and special handling for experiment plugin patterns.
 """
 
@@ -18,12 +13,14 @@ from collections.abc import Mapping
 from importlib import import_module
 from typing import Any, Callable, Sequence
 
-from elspeth.core.experiments.aggregation_plugin_registry import aggregation_plugin_registry
-from elspeth.core.experiments.baseline_plugin_registry import baseline_plugin_registry
-from elspeth.core.experiments.early_stop_plugin_registry import early_stop_plugin_registry
-from elspeth.core.experiments.row_plugin_registry import row_plugin_registry
-from elspeth.core.experiments.validation_plugin_registry import validation_plugin_registry
-from elspeth.core.plugins import PluginContext
+from elspeth.core.experiments.experiment_registries import (
+    aggregation_plugin_registry,
+    baseline_plugin_registry,
+    early_stop_plugin_registry,
+    row_plugin_registry,
+    validation_plugin_registry,
+)
+from elspeth.core.plugin_context import PluginContext
 from elspeth.core.security import coalesce_security_level  # Still needed for validation functions
 from elspeth.core.validation_base import ConfigurationError
 from elspeth.plugins.orchestrators.experiment.protocols import (

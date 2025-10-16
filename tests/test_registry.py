@@ -133,7 +133,7 @@ def test_create_row_plugin_conflicting_security_levels():
 
 
 def test_create_row_plugin_inherits_parent_context():
-    from elspeth.core.plugins import PluginContext
+    from elspeth.core.plugin_context import PluginContext
 
     parent_context = PluginContext(plugin_name="suite", plugin_kind="suite", security_level="SECRET", determinism_level="none")
     plugin = plugin_registry.create_row_plugin(

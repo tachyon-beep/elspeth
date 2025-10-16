@@ -936,7 +936,7 @@ cli.add_command(validate_schemas, name="validate-schemas")
 @click.group()
 @click.version_option()
 def cli():
-    """Elspeth - Secure LLM experimentation framework with schema validation.
+    """Elspeth - Secure orchestration framework with schema validation.
 
     Commands:
         run                Run experiment suite

@@ -6,8 +6,6 @@ import pytest
 
 from elspeth.plugins.nodes.sinks.visual_report import VisualAnalyticsSink
 
-pytest.importorskip("matplotlib")  # Skip entire module if matplotlib is unavailable
-
 
 def _sample_payload() -> dict:
     return {

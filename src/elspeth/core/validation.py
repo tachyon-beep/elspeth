@@ -9,10 +9,10 @@ from typing import Any, Callable, Iterable, Mapping, Sequence
 
 import yaml
 
+import elspeth.core.llm_middleware_registry as llm_middleware_registry
 from elspeth.core.controls import registry as controls_registry
 from elspeth.core.datasource_registry import datasource_registry
 from elspeth.core.experiments import plugin_registry as exp_registry
-from elspeth.core.llm import registry as llm_middleware_registry
 from elspeth.core.llm_registry import llm_registry as llm_reg
 from elspeth.core.security import normalize_security_level
 from elspeth.core.sink_registry import sink_registry
