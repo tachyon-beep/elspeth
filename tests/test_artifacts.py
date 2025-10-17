@@ -1,6 +1,6 @@
 import pytest
 
-from elspeth.core import artifacts
+from elspeth.core.pipeline import artifacts
 
 
 def test_file_type_helpers():

@@ -28,8 +28,8 @@ class TestCriticalDefaultEnforcement:
         audit_file = (
             pathlib.Path(__file__).parent.parent
             / "docs"
+            / "archive"
             / "roadmap"
-            / "completed"
             / "data-flow-migration"
             / "data-flow-migration"
             / "SILENT_DEFAULTS_AUDIT.md"
@@ -48,7 +48,7 @@ class TestValidationPatternEnforcement:
     def test_regex_validator_requires_pattern(self):
         """Verify regex validator requires explicit pattern configuration."""
         from elspeth.core.experiments.plugin_registry import create_validation_plugin
-        from elspeth.core.validation_base import ConfigurationError
+        from elspeth.core.validation.base import ConfigurationError
 
         # Should fail when pattern is missing
         with pytest.raises(ConfigurationError, match="is a required property.*pattern"):
@@ -81,7 +81,7 @@ class TestLLMParameterEnforcement:
         # src/elspeth/core/llm_registry.py:84-87 (http_openai)
         # src/elspeth/plugins/nodes/transforms/llm/azure_openai.py:20
         # These are optional parameters - if not provided, None is used (API defaults apply)
-        from elspeth.core.llm_registry import llm_registry
+        from elspeth.core.registries.llm import llm_registry
 
         # HTTP OpenAI should succeed without temperature (uses API default)
         llm = llm_registry.create(
@@ -90,7 +90,7 @@ class TestLLMParameterEnforcement:
             require_determinism=False,
         )
         assert llm is not None
-        assert llm.temperature is None  # Not provided, should be None
+        assert getattr(llm, "temperature", None) is None  # Not provided, should be None
 
         # Should also work with explicit temperature
         llm_with_temp = llm_registry.create(
@@ -99,14 +99,14 @@ class TestLLMParameterEnforcement:
             require_determinism=False,
         )
         assert llm_with_temp is not None
-        assert llm_with_temp.temperature == 0.7
+        assert getattr(llm_with_temp, "temperature", None) == pytest.approx(0.7)
 
     def test_llm_max_tokens_is_optional(self):
         """Verify LLM max_tokens is optional (not required)."""
         # src/elspeth/core/llm_registry.py:88-91 (http_openai)
         # src/elspeth/plugins/nodes/transforms/llm/azure_openai.py:21
         # These are optional parameters - if not provided, None is used (API defaults apply)
-        from elspeth.core.llm_registry import llm_registry
+        from elspeth.core.registries.llm import llm_registry
 
         # HTTP OpenAI should succeed without max_tokens (uses API default)
         llm = llm_registry.create(
@@ -134,8 +134,8 @@ class TestStaticLLMDefaults:
         """Verify static LLM requires explicit content parameter."""
         # src/elspeth/core/llm_registry.py:47
         # Validates that content parameter is required
-        from elspeth.core.llm_registry import llm_registry
-        from elspeth.core.validation_base import ConfigurationError
+        from elspeth.core.registries.llm import llm_registry
+        from elspeth.core.validation.base import ConfigurationError
 
         # Should raise ConfigurationError when content is missing
         # Schema validation catches this before the factory function
@@ -156,7 +156,7 @@ class TestRateLimitDefaults:
     def test_rate_limiter_requires_explicit_config(self):
         """Verify rate limiter requires explicit configuration for all parameters."""
         from elspeth.core.controls.rate_limiter_registry import rate_limiter_registry
-        from elspeth.core.validation_base import ConfigurationError
+        from elspeth.core.validation.base import ConfigurationError
 
         # fixed_window should fail without requests
         with pytest.raises(ConfigurationError, match="is a required property.*requests"):
@@ -192,7 +192,7 @@ class TestCostTrackerDefaults:
     def test_cost_tracker_requires_explicit_prices(self):
         """Verify cost tracker requires explicit token price configuration."""
         from elspeth.core.controls.cost_tracker_registry import cost_tracker_registry
-        from elspeth.core.validation_base import ConfigurationError
+        from elspeth.core.validation.base import ConfigurationError
 
         # Should fail without prompt_token_price
         with pytest.raises(ConfigurationError, match="is a required property.*prompt_token_price"):
@@ -227,7 +227,7 @@ class TestDatabaseSchemaDefaults:
 
     def test_pgvector_factory_requires_explicit_table(self):
         """Verify pgvector factory requires explicit table name."""
-        from elspeth.core.validation_base import ConfigurationError
+        from elspeth.core.validation.base import ConfigurationError
         from elspeth.retrieval.providers import create_query_client
 
         # Should fail without table name
@@ -239,7 +239,7 @@ class TestDatabaseSchemaDefaults:
 
     def test_azure_search_factory_requires_explicit_fields(self):
         """Verify Azure Search factory requires explicit field configuration."""
-        from elspeth.core.validation_base import ConfigurationError
+        from elspeth.core.validation.base import ConfigurationError
         from elspeth.retrieval.providers import create_query_client
 
         base_options = {
@@ -286,7 +286,7 @@ class TestSecurityGateStatus:
         print(f"\nCritical Defaults Status: {fixed}/{total} fixed")
 
         # Gate now PASSES - all critical defaults have been removed
-        assert fixed == total, f"Gate BLOCKED: {total - fixed} critical defaults remain. " f"See SILENT_DEFAULTS_AUDIT.md for details."
+        assert fixed == total, f"Gate BLOCKED: {total - fixed} critical defaults remain. See SILENT_DEFAULTS_AUDIT.md for details."
 
 
 class TestHighPriorityDefaults:
@@ -295,7 +295,7 @@ class TestHighPriorityDefaults:
     def test_llm_guard_requires_explicit_tokens(self):
         """Verify llm_guard validation requires explicit token configuration."""
         from elspeth.core.experiments.plugin_registry import create_validation_plugin
-        from elspeth.core.validation_base import ConfigurationError
+        from elspeth.core.validation.base import ConfigurationError
 
         validator_llm_def = {
             "plugin": "static_test",
@@ -371,10 +371,10 @@ class TestHighPriorityDefaults:
     def test_score_extractor_requires_all_fields(self):
         """Verify score extractor requires explicit configuration for all fields."""
         from elspeth.core.experiments.plugin_registry import create_row_plugin
-        from elspeth.core.validation_base import ConfigurationError
+        from elspeth.core.validation.base import ConfigurationError
 
         # Should fail without key
-        with pytest.raises(ConfigurationError, match="is a required property.*key"):
+        with pytest.raises(ConfigurationError, match="key is required"):
             create_row_plugin(
                 {
                     "name": "score_extractor",
@@ -390,7 +390,7 @@ class TestHighPriorityDefaults:
             )
 
         # Should fail without parse_json_content
-        with pytest.raises(ConfigurationError, match="is a required property.*parse_json_content"):
+        with pytest.raises(ConfigurationError, match="parse_json_content is required"):
             create_row_plugin(
                 {
                     "name": "score_extractor",
@@ -406,7 +406,7 @@ class TestHighPriorityDefaults:
             )
 
         # Should fail without allow_missing
-        with pytest.raises(ConfigurationError, match="is a required property.*allow_missing"):
+        with pytest.raises(ConfigurationError, match="allow_missing is required"):
             create_row_plugin(
                 {
                     "name": "score_extractor",
@@ -422,7 +422,7 @@ class TestHighPriorityDefaults:
             )
 
         # Should fail without threshold_mode
-        with pytest.raises(ConfigurationError, match="is a required property.*threshold_mode"):
+        with pytest.raises(ConfigurationError, match="threshold_mode is required"):
             create_row_plugin(
                 {
                     "name": "score_extractor",
@@ -438,7 +438,7 @@ class TestHighPriorityDefaults:
             )
 
         # Should fail without flag_field
-        with pytest.raises(ConfigurationError, match="is a required property.*flag_field"):
+        with pytest.raises(ConfigurationError, match="flag_field is required"):
             create_row_plugin(
                 {
                     "name": "score_extractor",

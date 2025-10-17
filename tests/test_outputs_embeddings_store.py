@@ -5,7 +5,7 @@ import types
 
 import pytest
 
-from elspeth.core.plugin_context import PluginContext, apply_plugin_context
+from elspeth.core.base.plugin_context import PluginContext, apply_plugin_context
 from elspeth.core.validation import ConfigurationError
 from elspeth.plugins.nodes.sinks.embeddings_store import EmbeddingsStoreSink, UpsertResponse, VectorRecord, VectorStoreClient
 from elspeth.retrieval.embedding import Embedder
@@ -185,7 +185,7 @@ def test_embeddings_sink_azure_provider_uses_env_key(monkeypatch):
     monkeypatch.setenv("AZURE_SEARCH_KEY", "token")
     monkeypatch.setattr(
         "elspeth.plugins.nodes.sinks.embeddings_store.AzureSearchVectorClient",
-        lambda **kwargs: StubAzureClient(**kwargs),
+        StubAzureClient,
     )
 
     sink = EmbeddingsStoreSink(
@@ -287,9 +287,33 @@ def test_embeddings_sink_finalize_closes_client():
 
 
 def test_pgvector_conflict_clause_skip(monkeypatch):
-    import elspeth.plugins.nodes.sinks.embeddings_store as store_module
-
     stub = types.ModuleType("psycopg")
+
+    # Mock psycopg.sql module for SQL injection protection
+    class MockSQL:
+        def __init__(self, text):
+            self.text = text
+
+        def format(self, *args):
+            # Replace {} placeholders with arguments in order
+            result = self.text
+            for arg in args:
+                if isinstance(arg, MockIdentifier):
+                    result = result.replace("{}", arg.name, 1)
+                elif isinstance(arg, MockSQL):
+                    result = result.replace("{}", arg.text, 1)
+                else:
+                    result = result.replace("{}", str(arg), 1)
+            return MockSQL(result)  # Return MockSQL object for chaining
+
+    class MockIdentifier:
+        def __init__(self, name):
+            self.name = name
+
+    sql_module = types.ModuleType("sql")
+    sql_module.SQL = MockSQL
+    sql_module.Identifier = MockIdentifier
+    stub.sql = sql_module
 
     class Cursor:
         def __init__(self, module):
@@ -302,7 +326,12 @@ def test_pgvector_conflict_clause_skip(monkeypatch):
             return False
 
         def execute(self, query, params=None):
-            self.module.queries.append((" ".join(query.split()), params))
+            # Handle both string and MockSQL objects
+            if isinstance(query, MockSQL):
+                query_str = query.text
+            else:
+                query_str = query
+            self.module.queries.append((" ".join(query_str.split()), params))
 
         def fetchall(self):  # pragma: no cover - ensure compatibility
             return []
@@ -318,6 +347,13 @@ def test_pgvector_conflict_clause_skip(monkeypatch):
         def close(self):
             self.closed = True
 
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            self.close()
+            return False
+
     stub.queries = []
 
     def connect(dsn, autocommit=True):
@@ -325,17 +361,26 @@ def test_pgvector_conflict_clause_skip(monkeypatch):
         return Connection(stub)
 
     stub.connect = connect
+    stub.Connection = Connection  # Make Connection importable from stub
 
     monkeypatch.setitem(sys.modules, "psycopg", stub)
+    monkeypatch.setitem(sys.modules, "psycopg.sql", sql_module)
+    # Clear cached import to force reimport with stub
+    sys.modules.pop("elspeth.plugins.nodes.sinks.embeddings_store", None)
+    # Re-import with stub in place
+    import elspeth.plugins.nodes.sinks.embeddings_store as store_module_reloaded
 
-    client = store_module.PgVectorClient(dsn="postgresql://example", table="table", upsert_conflict="skip")
+    client = store_module_reloaded.PgVectorClient(dsn="postgresql://example", table="table", upsert_conflict="skip")
     record = VectorRecord(document_id="one", vector=[0.1, 0.2], text="value", metadata={}, security_level="official")
     client.upsert_many("namespace", [record])
 
     assert "NOTHING" in stub.queries[-1][0]
     assert stub.connect_args == ("postgresql://example", True)
 
+    # Test with unknown policy (should default to "replace")
     client._conflict_policy = "unknown"
-    assert "UPDATE SET" in client._resolve_conflict_clause()
+    query = client._build_insert_query()
+    assert "UPDATE SET" in query.text
 
     sys.modules.pop("psycopg", None)
+    sys.modules.pop("psycopg.sql", None)

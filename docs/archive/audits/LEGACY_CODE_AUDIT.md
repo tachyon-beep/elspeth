@@ -132,8 +132,8 @@ warnings.warn(
 Deprecation warnings appear in test output:
 
 ```
-src/elspeth/core/datasource_registry.py:16: DeprecationWarning
-src/elspeth/core/llm_registry.py:16: DeprecationWarning
+src/elspeth/core/registries/datasource.py:16: DeprecationWarning
+src/elspeth/core/registries/llm.py:16: DeprecationWarning
 tests/conftest.py:8: DeprecationWarning
 ```
 
@@ -161,9 +161,9 @@ from elspeth.plugins.nodes.sources.blob import BlobDataSource
 
 **Source Code** (~25 locations):
 - `src/elspeth/cli.py`
-- `src/elspeth/core/datasource_registry.py`
-- `src/elspeth/core/llm_registry.py`
-- `src/elspeth/core/sink_registry.py`
+- `src/elspeth/core/registries/datasource.py`
+- `src/elspeth/core/registries/llm.py`
+- `src/elspeth/core/registries/sink.py`
 - `src/elspeth/plugins/nodes/sinks/local_bundle.py`
 - `src/elspeth/plugins/outputs/local_bundle.py` (duplicate!)
 

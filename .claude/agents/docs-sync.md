@@ -150,13 +150,13 @@ glob pattern="src/elspeth/plugins/**/*.py"
 # git log --since="1 week ago" --name-only --pretty=format: src/elspeth/plugins/ | sort -u
 
 # Check what plugins are registered
-grep pattern="\".*\": PluginFactory" path="src/elspeth/core/registry.py" output_mode="content" -n
+grep pattern="\".*\": PluginFactory" path="src/elspeth/core/registries/__init__.py" output_mode="content" -n
 ```
 
 **Review registry for schema changes:**
 ```bash
 # Read registry to check schemas
-Read: src/elspeth/core/registry.py
+Read: src/elspeth/core/registries/__init__.py
 
 # Find all PluginFactory definitions
 grep pattern="PluginFactory\\(" path="src/elspeth/core/" output_mode="content" -A 15
@@ -166,7 +166,7 @@ grep pattern="PluginFactory\\(" path="src/elspeth/core/" output_mode="content" -
 ```bash
 # Check key architectural files
 Read: src/elspeth/core/orchestrator.py
-Read: src/elspeth/core/artifact_pipeline.py
+Read: src/elspeth/core/pipeline/artifact_pipeline.py
 Read: src/elspeth/core/experiments/suite_runner.py
 
 # Search for security-related changes
@@ -181,7 +181,7 @@ grep pattern="security_level|PluginContext|normalize_security_level" path="src/e
 Read: docs/architecture/plugin-catalogue.md
 
 # Extract all registered plugin names from registry
-grep pattern="\"[a-z_]+\": PluginFactory" path="src/elspeth/core/registry.py" output_mode="content"
+grep pattern="\"[a-z_]+\": PluginFactory" path="src/elspeth/core/registries/__init__.py" output_mode="content"
 
 # Compare: Are all registered plugins documented?
 # Compare: Are all documented plugins still registered?

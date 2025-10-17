@@ -17,7 +17,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from elspeth.core.registry.base import BasePluginRegistry
+from elspeth.core.registries.base import BasePluginRegistry
 from elspeth.plugins.orchestrators.experiment.protocols import (
     AggregationExperimentPlugin,
     BaselineComparisonPlugin,

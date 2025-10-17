@@ -91,8 +91,7 @@ class TestDatasourceValidation:
         """Test DEVELOPMENT mode allows missing security_level."""
         config = {"type": "local_csv", "path": "data.csv"}
 
-        # Should not raise
-        validate_datasource_config(config, mode=SecureMode.DEVELOPMENT)
+        assert validate_datasource_config(config, mode=SecureMode.DEVELOPMENT) is None
 
     def test_datasource_strict_requires_retain_local(self):
         """Test STRICT mode requires retain_local=True."""
@@ -115,10 +114,9 @@ class TestDatasourceValidation:
             "retain_local": True,
         }
 
-        # Should not raise
-        validate_datasource_config(config, mode=SecureMode.STRICT)
+        assert validate_datasource_config(config, mode=SecureMode.STRICT) is None
 
-    def test_datasource_standard_warns_retain_local_false(self):
+    def test_datasource_standard_warns_retain_local_false(self, caplog):
         """Test STANDARD mode warns about retain_local=False."""
         config = {
             "type": "local_csv",
@@ -127,8 +125,9 @@ class TestDatasourceValidation:
             "retain_local": False,
         }
 
-        # Should not raise, but logs warning
-        validate_datasource_config(config, mode=SecureMode.STANDARD)
+        with caplog.at_level("WARNING"):
+            assert validate_datasource_config(config, mode=SecureMode.STANDARD) is None
+        assert "retain_local=False" in caplog.text
 
     def test_datasource_development_allows_retain_local_false(self):
         """Test DEVELOPMENT mode allows retain_local=False."""
@@ -138,8 +137,7 @@ class TestDatasourceValidation:
             "retain_local": False,
         }
 
-        # Should not raise
-        validate_datasource_config(config, mode=SecureMode.DEVELOPMENT)
+        assert validate_datasource_config(config, mode=SecureMode.DEVELOPMENT) is None
 
 
 class TestLLMValidation:
@@ -163,8 +161,7 @@ class TestLLMValidation:
         """Test DEVELOPMENT mode allows missing security_level."""
         config = {"type": "azure_openai", "endpoint": "https://api.openai.com"}
 
-        # Should not raise
-        validate_llm_config(config, mode=SecureMode.DEVELOPMENT)
+        assert validate_llm_config(config, mode=SecureMode.DEVELOPMENT) is None
 
     def test_llm_strict_disallows_mock(self):
         """Test STRICT mode disallows mock LLMs."""
@@ -180,26 +177,25 @@ class TestLLMValidation:
         with pytest.raises(ValueError, match="not allowed in STRICT mode"):
             validate_llm_config(config, mode=SecureMode.STRICT)
 
-    def test_llm_standard_warns_mock(self):
+    def test_llm_standard_warns_mock(self, caplog):
         """Test STANDARD mode warns about mock LLMs."""
         config = {"type": "mock", "security_level": "OFFICIAL"}
 
-        # Should not raise, but logs warning
-        validate_llm_config(config, mode=SecureMode.STANDARD)
+        with caplog.at_level("WARNING"):
+            assert validate_llm_config(config, mode=SecureMode.STANDARD) is None
+        assert "mock" in caplog.text
 
     def test_llm_development_allows_mock(self):
         """Test DEVELOPMENT mode allows mock LLMs."""
         config = {"type": "mock"}
 
-        # Should not raise
-        validate_llm_config(config, mode=SecureMode.DEVELOPMENT)
+        assert validate_llm_config(config, mode=SecureMode.DEVELOPMENT) is None
 
     def test_llm_strict_allows_real_llm(self):
         """Test STRICT mode allows real LLMs."""
         config = {"type": "azure_openai", "endpoint": "https://api.openai.com", "security_level": "OFFICIAL"}
 
-        # Should not raise
-        validate_llm_config(config, mode=SecureMode.STRICT)
+        assert validate_llm_config(config, mode=SecureMode.STRICT) is None
 
 
 class TestSinkValidation:
@@ -223,8 +219,7 @@ class TestSinkValidation:
         """Test DEVELOPMENT mode allows missing security_level."""
         config = {"type": "csv", "path": "output.csv"}
 
-        # Should not raise
-        validate_sink_config(config, mode=SecureMode.DEVELOPMENT)
+        assert validate_sink_config(config, mode=SecureMode.DEVELOPMENT) is None
 
     def test_sink_strict_requires_formula_sanitization(self):
         """Test STRICT mode requires formula sanitization."""
@@ -247,8 +242,7 @@ class TestSinkValidation:
             "sanitize_formulas": True,
         }
 
-        # Should not raise
-        validate_sink_config(config, mode=SecureMode.STRICT)
+        assert validate_sink_config(config, mode=SecureMode.STRICT) is None
 
     def test_sink_strict_defaults_formula_sanitization(self):
         """Test STRICT mode accepts default formula sanitization."""
@@ -259,10 +253,9 @@ class TestSinkValidation:
             # sanitize_formulas not specified, defaults to True
         }
 
-        # Should not raise
-        validate_sink_config(config, mode=SecureMode.STRICT)
+        assert validate_sink_config(config, mode=SecureMode.STRICT) is None
 
-    def test_sink_standard_warns_formula_sanitization_disabled(self):
+    def test_sink_standard_warns_formula_sanitization_disabled(self, caplog):
         """Test STANDARD mode warns about sanitize_formulas=False."""
         config = {
             "type": "csv",
@@ -271,8 +264,9 @@ class TestSinkValidation:
             "sanitize_formulas": False,
         }
 
-        # Should not raise, but logs warning
-        validate_sink_config(config, mode=SecureMode.STANDARD)
+        with caplog.at_level("WARNING"):
+            assert validate_sink_config(config, mode=SecureMode.STANDARD) is None
+        assert "sanitize_formulas=False" in caplog.text
 
     def test_sink_development_allows_formula_sanitization_disabled(self):
         """Test DEVELOPMENT mode allows sanitize_formulas=False."""
@@ -282,8 +276,7 @@ class TestSinkValidation:
             "sanitize_formulas": False,
         }
 
-        # Should not raise
-        validate_sink_config(config, mode=SecureMode.DEVELOPMENT)
+        assert validate_sink_config(config, mode=SecureMode.DEVELOPMENT) is None
 
     def test_sink_formula_validation_for_csv_types(self):
         """Test formula validation applies to CSV, Excel, bundle sinks."""
@@ -309,19 +302,19 @@ class TestSinkValidation:
             # sanitize_formulas not relevant for this sink type
         }
 
-        # Should not raise
-        validate_sink_config(config, mode=SecureMode.STRICT)
+        assert validate_sink_config(config, mode=SecureMode.STRICT) is None
 
 
 class TestMiddlewareValidation:
     """Test middleware configuration validation."""
 
-    def test_middleware_strict_warns_missing_audit(self):
+    def test_middleware_strict_warns_missing_audit(self, caplog):
         """Test STRICT mode warns when audit_logger middleware missing."""
         middleware = [{"type": "prompt_shield", "enabled": True}]
 
-        # Should not raise, but logs warning
-        validate_middleware_config(middleware, mode=SecureMode.STRICT)
+        with caplog.at_level("WARNING"):
+            assert validate_middleware_config(middleware, mode=SecureMode.STRICT) is None
+        assert "audit_logger" in caplog.text
 
     def test_middleware_strict_accepts_audit_logger(self):
         """Test STRICT mode accepts audit_logger middleware."""
@@ -330,22 +323,19 @@ class TestMiddlewareValidation:
             {"type": "prompt_shield", "enabled": True},
         ]
 
-        # Should not raise
-        validate_middleware_config(middleware, mode=SecureMode.STRICT)
+        assert validate_middleware_config(middleware, mode=SecureMode.STRICT) is None
 
     def test_middleware_standard_no_requirements(self):
         """Test STANDARD mode has no middleware requirements."""
         middleware = [{"type": "prompt_shield", "enabled": True}]
 
-        # Should not raise
-        validate_middleware_config(middleware, mode=SecureMode.STANDARD)
+        assert validate_middleware_config(middleware, mode=SecureMode.STANDARD) is None
 
     def test_middleware_development_no_requirements(self):
         """Test DEVELOPMENT mode has no middleware requirements."""
-        middleware = []
+        middleware: list[dict[str, object]] = []
 
-        # Should not raise
-        validate_middleware_config(middleware, mode=SecureMode.DEVELOPMENT)
+        assert validate_middleware_config(middleware, mode=SecureMode.DEVELOPMENT) is None
 
 
 class TestModeDescription:

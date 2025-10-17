@@ -127,7 +127,7 @@
      | `metadata` | Sanitised extra fields requested via configuration. |
 
 4. **Pipeline Integration**
-   - Register sink in `core/registry.py` with schema validation enforcing `security_level`, `base_path`, rotation defaults, and signing payload structure.
+   - Register sink in `core/registries/__init__.py` with schema validation enforcing `security_level`, `base_path`, rotation defaults, and signing payload structure.
    - Ensure artifact pipeline exposes produced artifacts (bundles + manifest) for chained sinks (e.g., signing, archiving).
    - Update documentation/CLI samples to show middleware + sink configuration for audit-ready deployments.
 

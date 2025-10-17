@@ -153,14 +153,14 @@ def test_score_recommendation_aggregator():
 
 
 def test_score_significance_baseline_plugin(monkeypatch):
-    import elspeth.plugins.experiments.metrics as metrics_mod
+    import elspeth.plugins.experiments._stats_helpers as stats_helpers
 
     class DummyT:
         @staticmethod
         def sf(value, df):
             return 0.2  # arbitrary
 
-    monkeypatch.setattr(metrics_mod, "scipy_stats", type("DummyStats", (), {"t": DummyT})())
+    monkeypatch.setattr(stats_helpers, "scipy_stats", type("DummyStats", (), {"t": DummyT})())
 
     baseline_payload = {
         "results": [
@@ -314,14 +314,15 @@ def test_score_variant_ranking():
 
 
 def test_score_significance_on_error_skip(monkeypatch):
-    import elspeth.plugins.experiments.metrics as metrics_mod
+    import elspeth.plugins.experiments._stats_helpers as stats_helpers
+    from elspeth.plugins.experiments.baseline.score_significance import ScoreSignificanceBaselinePlugin
 
-    plugin = metrics_mod.ScoreSignificanceBaselinePlugin(on_error="skip")
+    plugin = ScoreSignificanceBaselinePlugin(on_error="skip")
 
     def boom(*args, **kwargs):
         raise RuntimeError("boom")
 
-    monkeypatch.setattr(metrics_mod, "_collect_scores_by_criterion", boom)
+    monkeypatch.setattr(stats_helpers, "_collect_scores_by_criterion", boom)
     assert plugin.compare({"results": []}, {"results": []}) == {}
 
 
@@ -337,14 +338,14 @@ def test_score_agreement_aggregator(monkeypatch):
         records.append({"metrics": metrics})
 
     # monkeypatch pingouin response
-    import elspeth.plugins.experiments.metrics as metrics_mod
+    import elspeth.plugins.experiments.aggregators.score_agreement as score_agreement_mod
 
     class DummyPingouin:
         @staticmethod
         def krippendorff_alpha(df, reliability_data=True):
             return 0.5
 
-    monkeypatch.setattr(metrics_mod, "pingouin", DummyPingouin())
+    monkeypatch.setattr(score_agreement_mod, "pingouin", DummyPingouin())
     result = plugin.finalize(records)
     assert "cronbach_alpha" in result
     assert result["criteria"] == ["critA", "critB"]
@@ -352,19 +353,20 @@ def test_score_agreement_aggregator(monkeypatch):
 
 
 def test_score_agreement_on_error_skip(monkeypatch):
-    import elspeth.plugins.experiments.metrics as metrics_mod
+    import elspeth.plugins.experiments._stats_helpers as stats_helpers
+    from elspeth.plugins.experiments.aggregators.score_agreement import ScoreAgreementAggregator
 
-    plugin = metrics_mod.ScoreAgreementAggregator(on_error="skip")
+    plugin = ScoreAgreementAggregator(on_error="skip")
 
     def boom(*args, **kwargs):
         raise RuntimeError("boom")
 
-    monkeypatch.setattr(metrics_mod, "_collect_scores_by_criterion", boom)
+    monkeypatch.setattr(stats_helpers, "_collect_scores_by_criterion", boom)
     assert plugin.finalize([{}]) == {}
 
 
 def test_score_bayes_baseline_plugin(monkeypatch):
-    import elspeth.plugins.experiments.metrics as metrics_mod
+    import elspeth.plugins.experiments._stats_helpers as stats_helpers
 
     baseline = {
         "results": [
@@ -395,7 +397,7 @@ def test_score_bayes_baseline_plugin(monkeypatch):
         def t(df, loc=0.0, scale=1.0):
             return DummyT()
 
-    monkeypatch.setattr(metrics_mod, "scipy_stats", DummyStats())
+    monkeypatch.setattr(stats_helpers, "scipy_stats", DummyStats())
 
     plugin = create_baseline_plugin(
         {"name": "score_bayes", "security_level": "OFFICIAL", "determinism_level": "guaranteed", "options": {"credible_interval": 0.9}}
@@ -407,19 +409,20 @@ def test_score_bayes_baseline_plugin(monkeypatch):
 
 
 def test_score_bayes_on_error_skip(monkeypatch):
-    import elspeth.plugins.experiments.metrics as metrics_mod
+    import elspeth.plugins.experiments._stats_helpers as stats_helpers
+    from elspeth.plugins.experiments.baseline.score_bayesian import ScoreBayesianBaselinePlugin
 
-    plugin = metrics_mod.ScoreBayesianBaselinePlugin(on_error="skip")
+    plugin = ScoreBayesianBaselinePlugin(on_error="skip")
 
     def boom(*args, **kwargs):
         raise RuntimeError("boom")
 
-    monkeypatch.setattr(metrics_mod, "_collect_scores_by_criterion", boom)
+    monkeypatch.setattr(stats_helpers, "_collect_scores_by_criterion", boom)
     assert plugin.compare({"results": []}, {"results": []}) == {}
 
 
 def test_score_power_aggregator(monkeypatch):
-    import elspeth.plugins.experiments.metrics as metrics_mod
+    import elspeth.plugins.experiments.aggregators.score_power as score_power_mod
 
     records = [
         {"metrics": {"scores": {"crit": 0.6}}},
@@ -433,7 +436,7 @@ def test_score_power_aggregator(monkeypatch):
                 return 42
             return 0.75
 
-    monkeypatch.setattr(metrics_mod, "TTestPower", DummyTest)
+    monkeypatch.setattr(score_power_mod, "TTestPower", DummyTest)
     plugin = create_aggregation_plugin(
         {
             "name": "score_power",
@@ -449,19 +452,20 @@ def test_score_power_aggregator(monkeypatch):
 
 
 def test_score_power_on_error_skip(monkeypatch):
-    import elspeth.plugins.experiments.metrics as metrics_mod
+    import elspeth.plugins.experiments._stats_helpers as stats_helpers
+    from elspeth.plugins.experiments.aggregators.score_power import ScorePowerAggregator
 
-    plugin = metrics_mod.ScorePowerAggregator(on_error="skip")
+    plugin = ScorePowerAggregator(on_error="skip")
 
     def boom(*args, **kwargs):
         raise RuntimeError("boom")
 
-    monkeypatch.setattr(metrics_mod, "_collect_scores_by_criterion", boom)
+    monkeypatch.setattr(stats_helpers, "_collect_scores_by_criterion", boom)
     assert plugin.finalize([{}]) == {}
 
 
 def test_score_distribution_baseline_plugin(monkeypatch):
-    import elspeth.plugins.experiments.metrics as metrics_mod
+    import elspeth.plugins.experiments._stats_helpers as stats_helpers
 
     baseline = {
         "results": [
@@ -495,7 +499,7 @@ def test_score_distribution_baseline_plugin(monkeypatch):
         def mannwhitneyu(a, b, alternative="two-sided"):
             return DummyMW()
 
-    monkeypatch.setattr(metrics_mod, "scipy_stats", DummyStats())
+    monkeypatch.setattr(stats_helpers, "scipy_stats", DummyStats())
 
     plugin = create_baseline_plugin({"name": "score_distribution", "security_level": "OFFICIAL", "determinism_level": "guaranteed"})
     result = plugin.compare(baseline, variant)
@@ -506,14 +510,15 @@ def test_score_distribution_baseline_plugin(monkeypatch):
 
 
 def test_score_distribution_on_error_skip(monkeypatch):
-    import elspeth.plugins.experiments.metrics as metrics_mod
+    import elspeth.plugins.experiments._stats_helpers as stats_helpers
+    from elspeth.plugins.experiments.baseline.score_distribution import ScoreDistributionAggregator
 
-    plugin = metrics_mod.ScoreDistributionAggregator(on_error="skip")
+    plugin = ScoreDistributionAggregator(on_error="skip")
 
     def boom(*args, **kwargs):
         raise RuntimeError("boom")
 
-    monkeypatch.setattr(metrics_mod, "_collect_scores_by_criterion", boom)
+    monkeypatch.setattr(stats_helpers, "_collect_scores_by_criterion", boom)
     assert plugin.compare({"results": []}, {"results": []}) == {}
 
 
@@ -615,9 +620,9 @@ def test_latency_summary_aggregator_no_latency():
 
 
 def test_cost_summary_on_error_skip(monkeypatch):
-    import elspeth.plugins.experiments.metrics as metrics_mod
+    from elspeth.plugins.experiments.aggregators.cost_summary import CostSummaryAggregator
 
-    plugin = metrics_mod.CostSummaryAggregator(on_error="skip")
+    plugin = CostSummaryAggregator(on_error="skip")
 
     def boom(*args, **kwargs):
         raise RuntimeError("boom")
@@ -627,9 +632,9 @@ def test_cost_summary_on_error_skip(monkeypatch):
 
 
 def test_latency_summary_on_error_skip(monkeypatch):
-    import elspeth.plugins.experiments.metrics as metrics_mod
+    from elspeth.plugins.experiments.aggregators.latency_summary import LatencySummaryAggregator
 
-    plugin = metrics_mod.LatencySummaryAggregator(on_error="skip")
+    plugin = LatencySummaryAggregator(on_error="skip")
 
     def boom(*args, **kwargs):
         raise RuntimeError("boom")
@@ -920,9 +925,9 @@ def test_rationale_analysis_empty_records():
 
 def test_rationale_analysis_on_error_skip():
     """Test on_error='skip' behavior."""
-    import elspeth.plugins.experiments.metrics as metrics_mod
+    from elspeth.plugins.experiments.aggregators.rationale_analysis import RationaleAnalysisAggregator
 
-    plugin = metrics_mod.RationaleAnalysisAggregator(on_error="skip")
+    plugin = RationaleAnalysisAggregator(on_error="skip")
 
     # Mock to raise an error
     def boom(*args, **kwargs):
@@ -934,9 +939,9 @@ def test_rationale_analysis_on_error_skip():
 
 def test_rationale_analysis_on_error_abort():
     """Test on_error='abort' behavior (default)."""
-    import elspeth.plugins.experiments.metrics as metrics_mod
+    from elspeth.plugins.experiments.aggregators.rationale_analysis import RationaleAnalysisAggregator
 
-    plugin = metrics_mod.RationaleAnalysisAggregator(on_error="abort")
+    plugin = RationaleAnalysisAggregator(on_error="abort")
 
     # Mock to raise an error
     def boom(*args, **kwargs):
@@ -1310,9 +1315,9 @@ def test_referee_alignment_missing_referee_scores():
 
 def test_referee_alignment_on_error_skip():
     """Test on_error='skip' behavior."""
-    import elspeth.plugins.experiments.metrics as metrics_mod
+    from elspeth.plugins.experiments.baseline.referee_alignment import RefereeAlignmentBaselinePlugin
 
-    plugin = metrics_mod.RefereeAlignmentBaselinePlugin(on_error="skip")
+    plugin = RefereeAlignmentBaselinePlugin(on_error="skip")
 
     def boom(*args, **kwargs):
         raise RuntimeError("boom")
@@ -1323,9 +1328,9 @@ def test_referee_alignment_on_error_skip():
 
 def test_referee_alignment_on_error_abort():
     """Test on_error='abort' behavior (default)."""
-    import elspeth.plugins.experiments.metrics as metrics_mod
+    from elspeth.plugins.experiments.baseline.referee_alignment import RefereeAlignmentBaselinePlugin
 
-    plugin = metrics_mod.RefereeAlignmentBaselinePlugin(on_error="abort")
+    plugin = RefereeAlignmentBaselinePlugin(on_error="abort")
 
     def boom(*args, **kwargs):
         raise RuntimeError("boom")

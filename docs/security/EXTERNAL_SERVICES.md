@@ -457,7 +457,7 @@ Changes to approved endpoint patterns require:
 - **ATO Work Program:** [docs/ATO_REMEDIATION_WORK_PROGRAM.md](../../ATO_REMEDIATION_WORK_PROGRAM.md)
 - **Security Controls:** [docs/architecture/security-controls.md](../architecture/security-controls.md)
 - **Secure Mode Documentation:** [src/elspeth/core/security/secure_mode.py](../../src/elspeth/core/security/secure_mode.py)
-- **Configuration Validation:** [src/elspeth/core/config_validation.py](../../src/elspeth/core/config_validation.py)
+- **Configuration Validation:** [src/elspeth/core/config/validation.py](../../src/elspeth/core/config/validation.py)
 - **Plugin Catalogue:** [docs/architecture/plugin-catalogue.md](../architecture/plugin-catalogue.md)
 
 ---

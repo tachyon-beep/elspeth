@@ -99,7 +99,7 @@ Key output directories:
 
 **2. Plugin System** (`src/elspeth/plugins/`, `src/elspeth/core/experiments/plugin_registry.py`)
 
-- **Registry**: Central factory (`src/elspeth/core/registry.py`) for datasources, LLM clients, and sinks
+- **Registry**: Central factory (`src/elspeth/core/registries/__init__.py`) for datasources, LLM clients, and sinks
 - **Datasources**: CSV (local/blob), Azure Blob with profiles (`plugins/datasources/`)
 - **LLM Clients**: Azure OpenAI, HTTP OpenAI, Mock, Static (`plugins/llms/`)
 - **Middleware**: Audit logging, prompt shields, Azure Content Safety, health monitoring (`plugins/llms/middleware*.py`)
@@ -118,7 +118,7 @@ Key output directories:
 - Artifact pipeline enforces "read-up" restrictions: sinks cannot consume artifacts from higher security classifications
 - Signing and sanitization are built into pipelines (formula guards in CSV/Excel, artifact signatures in `signed_artifact` sink)
 
-**4. Configuration & Validation** (`src/elspeth/config.py`, `src/elspeth/core/config_schema.py`)
+**4. Configuration & Validation** (`src/elspeth/config.py`, `src/elspeth/core/config/schema.py`)
 
 - YAML-based configuration with schema validation
 - Three-layer merge: defaults → prompt packs → experiment config
@@ -171,11 +171,11 @@ Located in `config/sample_suite/packs/*.yaml`:
 
 1. **Choose the plugin type**: datasource, LLM client, middleware, row/aggregator/validation/early-stop, sink
 2. **Implement the protocol**:
-   - Universal protocols (DataSource, ResultSink, LLMClientProtocol, etc.): `src/elspeth/core/protocols.py`
+   - Universal protocols (DataSource, ResultSink, LLMClientProtocol, etc.): `src/elspeth/core/base/protocols.py`
    - Experiment-specific protocols (ValidationPlugin, RowExperimentPlugin, etc.): `src/elspeth/plugins/orchestrators/experiment/protocols.py`
    - Legacy imports from `src/elspeth/core/interfaces.py` still work but are deprecated
 3. **Accept PluginContext**: Factory signature must be `create(options: Dict[str, Any], context: PluginContext) -> Plugin`
-4. **Define JSON schema**: Validation schema in registry (`src/elspeth/core/registry.py` or experiment plugin registry)
+4. **Define JSON schema**: Validation schema in registry (`src/elspeth/core/registries/__init__.py` or experiment plugin registry)
 5. **Register in registry**: Add to appropriate registry dict (`_datasources`, `_llms`, `_sinks`)
 6. **Write tests**: Mirror package structure in `tests/` (e.g., `tests/test_outputs_mysink.py`)
 7. **Document**: Add entry to `docs/architecture/plugin-catalogue.md`
@@ -205,7 +205,7 @@ Registry automatically handles context propagation. Nested plugin creation (e.g.
 
 Elspeth's protocols are organized by responsibility and scope:
 
-**Universal Protocols** (`src/elspeth/core/protocols.py`):
+**Universal Protocols** (`src/elspeth/core/base/protocols.py`):
 - **Orchestrators**: `OrchestratorPlugin` - defines data flow topology
 - **Node Protocols**: `DataSource`, `ResultSink`, `TransformNode`, `AggregatorNode` - universal processing contracts
 - **LLM Components**: `LLMClientProtocol`, `LLMMiddleware`, `LLMRequest`, `RateLimiter`, `CostTracker` - LLM-specific transforms
@@ -302,8 +302,8 @@ Verify:
 - `src/elspeth/config.py` - Configuration loading and validation
 - `src/elspeth/core/orchestrator.py` - Single experiment orchestrator
 - `src/elspeth/core/experiments/suite_runner.py` - Suite orchestration
-- `src/elspeth/core/registry.py` - Central plugin registry
-- `src/elspeth/core/artifact_pipeline.py` - Sink dependency resolution
+- `src/elspeth/core/registries/__init__.py` - Central plugin registry
+- `src/elspeth/core/pipeline/artifact_pipeline.py` - Sink dependency resolution
 - `src/elspeth/plugins/` - All plugin implementations
 
 ### Configuration

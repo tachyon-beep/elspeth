@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Mapping
 
-from jinja2 import Environment, StrictUndefined
+from jinja2 import Environment, StrictUndefined, select_autoescape
 from jinja2 import meta as jinja_meta
 
 from .exceptions import PromptValidationError
@@ -28,13 +28,18 @@ def _auto_convert(text: str) -> str:
 
 
 def _create_environment() -> Environment:
-    """Create a strict Jinja environment with helpful defaults."""
+    """Create a strict Jinja environment with helpful defaults.
+
+    Security Note: Autoescape is explicitly disabled because this engine generates
+    plain-text LLM prompts, not HTML. All prompt content is internal and not exposed
+    to web contexts. Use select_autoescape() to be explicit about this decision.
+    """
 
     env = Environment(
         undefined=StrictUndefined,
         trim_blocks=True,
         lstrip_blocks=True,
-        autoescape=False,
+        autoescape=select_autoescape(enabled_extensions=()),  # Explicitly disable for plain text
     )
     env.filters.setdefault("default", _default_filter)
     env.filters.setdefault("upper", lambda value: value.upper() if isinstance(value, str) else value)

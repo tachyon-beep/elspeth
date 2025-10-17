@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from elspeth.core.llm_registry import llm_registry
+from elspeth.core.registries.llm import llm_registry
 from elspeth.plugins.nodes.transforms.llm.static import StaticLLMClient
 
 

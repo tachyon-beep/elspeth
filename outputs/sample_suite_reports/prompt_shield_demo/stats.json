@@ -92,6 +92,28 @@
     "hypothesis": "",
     "author": "unknown",
     "tags": [],
+    "prompt_system": "",
+    "prompt_template": "",
+    "row_plugin_defs": [],
+    "aggregator_plugin_defs": [],
+    "sink_defs": [],
+    "baseline_plugin_defs": [],
+    "validation_plugin_defs": [],
+    "early_stop_plugin_defs": [],
+    "llm_middleware_defs": [
+      {
+        "name": "prompt_shield",
+        "security_level": "official",
+        "options": {
+          "denied_terms": [
+            "classified",
+            "top secret"
+          ],
+          "on_violation": "mask",
+          "mask": "[REDACTED]"
+        }
+      }
+    ],
     "estimated_cost": {
       "estimated_requests": 100.0,
       "estimated_input_cost": 6.0,
@@ -99,5 +121,5 @@
       "estimated_total_cost": 7.536
     }
   },
-  "timestamp": "2025-10-12T08:09:15.282118+00:00"
+  "timestamp": "2025-10-17T03:17:56.635629+00:00"
 }

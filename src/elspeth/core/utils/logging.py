@@ -1,0 +1,398 @@
+"""Comprehensive plugin logging system for audit and observability.
+
+This module provides structured logging for all Elspeth plugins, capturing:
+- Plugin initialization (name, version, path, configuration hash)
+- Lifecycle events (load, execute, write, etc.)
+- Data flow metrics (rows loaded, tokens used, files written)
+- Error conditions and warnings
+
+All logs are written in JSON Lines format for easy parsing and analysis.
+"""
+
+from __future__ import annotations
+
+import hashlib
+import importlib.metadata
+import inspect
+import json
+import logging
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, cast
+
+from elspeth.core.base.plugin_context import PluginContext
+
+
+class PluginLogger:
+    """Structured logger for plugin lifecycle events and metrics.
+
+    Each plugin receives a PluginLogger instance that automatically logs:
+    - Initialization with version, path, and configuration hash
+    - Lifecycle events (load, execute, write, etc.)
+    - Data flow metrics
+    - Errors and warnings
+
+    Logs are written in JSON Lines format to a per-run log file.
+    """
+
+    def __init__(
+        self,
+        *,
+        plugin_instance: Any,
+        context: PluginContext,
+        log_dir: Path | None = None,
+    ):
+        """Initialize plugin logger.
+
+        Args:
+            plugin_instance: The plugin instance being logged
+            context: Plugin context with metadata
+            log_dir: Override log directory (defaults to suite_root/logs)
+        """
+        self.plugin_instance = plugin_instance
+        self.context = context
+
+        # Determine log directory
+        if log_dir:
+            self.log_dir = Path(log_dir)
+        elif context.suite_root:
+            self.log_dir = Path(context.suite_root) / "logs"
+        else:
+            self.log_dir = Path("logs")
+
+        # Create log directory
+        self.log_dir.mkdir(parents=True, exist_ok=True)
+
+        # Generate run timestamp (shared across all plugins in this run)
+        self.run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+
+        # Log file path
+        self.log_file = self.log_dir / f"run_{self.run_id}.jsonl"
+
+        # Standard Python logger for traditional logging
+        self.logger = logging.getLogger(f"elspeth.{context.plugin_kind}.{context.plugin_name}")
+
+        # Log initialization
+        self._log_initialization()
+
+    def _compute_config_hash(self) -> str:
+        """Compute SHA256 hash of plugin configuration."""
+        # Extract configuration from context metadata or plugin attributes
+        config_data = {}
+
+        # Try to get options from plugin
+        if hasattr(self.plugin_instance, "__dict__"):
+            # Filter out private attributes and methods
+            config_data = {k: v for k, v in self.plugin_instance.__dict__.items() if not k.startswith("_") and not callable(v)}
+
+        # Serialize and hash
+        config_str = json.dumps(config_data, sort_keys=True, default=str)
+        return hashlib.sha256(config_str.encode()).hexdigest()[:16]
+
+    def _compute_code_hash(self) -> str:
+        """Compute SHA256 hash of plugin source code."""
+        try:
+            source = inspect.getsource(self.plugin_instance.__class__)
+            return hashlib.sha256(source.encode()).hexdigest()[:16]
+        except (OSError, TypeError):
+            # If we can't get source (e.g., built-in class), use class name
+            class_name = self.plugin_instance.__class__.__name__
+            return hashlib.sha256(class_name.encode()).hexdigest()[:16]
+
+    def _get_plugin_version(self) -> str:
+        """Extract plugin version from class or module."""
+        # Try class attribute
+        if hasattr(self.plugin_instance.__class__, "__version__"):
+            return str(self.plugin_instance.__class__.__version__)
+
+        # Try module attribute
+        module = inspect.getmodule(self.plugin_instance.__class__)
+        if module and hasattr(module, "__version__"):
+            return str(module.__version__)
+
+        # Try package version (for installed packages)
+        try:
+            module_name = self.plugin_instance.__class__.__module__.split(".")[0]
+            return importlib.metadata.version(module_name)
+        except (importlib.metadata.PackageNotFoundError, AttributeError, ValueError):
+            # Package not in metadata or invalid module structure
+            return "unknown"
+
+    def _get_plugin_path(self) -> str:
+        """Get file path of plugin source code."""
+        try:
+            return inspect.getfile(self.plugin_instance.__class__)
+        except (OSError, TypeError):
+            return "unknown"
+
+    def _log_initialization(self) -> None:
+        """Log plugin initialization with full metadata."""
+        init_event = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "run_id": self.run_id,
+            "event_type": "plugin_initialization",
+            "plugin": {
+                "name": self.context.plugin_name,
+                "kind": self.context.plugin_kind,
+                "class": self.plugin_instance.__class__.__name__,
+                "version": self._get_plugin_version(),
+                "path": self._get_plugin_path(),
+                "config_hash": self._compute_config_hash(),
+                "code_hash": self._compute_code_hash(),
+            },
+            "context": {
+                "security_level": self.context.security_level,
+                "determinism_level": self.context.determinism_level,
+                "provenance": list(self.context.provenance),
+                "suite_root": str(self.context.suite_root) if self.context.suite_root else None,
+                "config_path": str(self.context.config_path) if self.context.config_path else None,
+            },
+        }
+
+        self._write_log_entry(init_event)
+
+        # Also log to standard logger
+        plugin_meta = cast(dict[str, Any], init_event.get("plugin", {}))
+        config_hash = str(plugin_meta.get("config_hash", "unknown"))
+        code_hash = str(plugin_meta.get("code_hash", "unknown"))
+
+        self.logger.info(
+            "Plugin initialized: %s (%s) [config_hash=%s, code_hash=%s]",
+            self.context.plugin_name,
+            self.context.plugin_kind,
+            config_hash,
+            code_hash,
+        )
+
+    def log_event(
+        self,
+        event_type: str,
+        *,
+        message: str | None = None,
+        metrics: dict[str, Any] | None = None,
+        metadata: dict[str, Any] | None = None,
+        level: str = "info",
+    ) -> None:
+        """Log a plugin lifecycle event.
+
+        Args:
+            event_type: Type of event (e.g., "data_loaded", "llm_request", "sink_write")
+            message: Human-readable message
+            metrics: Numeric metrics (rows, tokens, bytes, duration, etc.)
+            metadata: Additional structured metadata
+            level: Log level (debug, info, warning, error)
+        """
+        event = {
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "run_id": self.run_id,
+            "event_type": event_type,
+            "plugin": {
+                "name": self.context.plugin_name,
+                "kind": self.context.plugin_kind,
+            },
+            "level": level,
+        }
+
+        if message:
+            event["message"] = message
+
+        if metrics:
+            event["metrics"] = metrics
+
+        if metadata:
+            event["metadata"] = metadata
+
+        self._write_log_entry(event)
+
+        # Also log to standard logger
+        log_func = getattr(self.logger, level, self.logger.info)
+        msg = message or event_type
+        if metrics:
+            msg += f" | metrics: {metrics}"
+        log_func(msg)
+
+    def log_datasource_event(
+        self,
+        event: str,
+        *,
+        rows: int | None = None,
+        columns: int | None = None,
+        schema: str | None = None,
+        source_path: str | None = None,
+        duration_ms: float | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        """Log datasource-specific event.
+
+        Args:
+            event: Event type (connected, loaded, schema_validated, etc.)
+            rows: Number of rows
+            columns: Number of columns
+            schema: Schema name
+            source_path: Source file/connection path
+            duration_ms: Duration in milliseconds
+            metadata: Additional metadata
+        """
+        metrics: dict[str, int | float] = {}
+        if rows is not None:
+            metrics["rows"] = rows
+        if columns is not None:
+            metrics["columns"] = columns
+        if duration_ms is not None:
+            metrics["duration_ms"] = duration_ms
+
+        meta = metadata or {}
+        if schema:
+            meta["schema"] = schema
+        if source_path:
+            meta["source_path"] = source_path
+
+        self.log_event(f"datasource_{event}", metrics=metrics, metadata=meta)
+
+    def log_llm_event(
+        self,
+        event: str,
+        *,
+        model: str | None = None,
+        prompt_tokens: int | None = None,
+        completion_tokens: int | None = None,
+        total_tokens: int | None = None,
+        duration_ms: float | None = None,
+        temperature: float | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        """Log LLM-specific event.
+
+        Args:
+            event: Event type (request_sent, response_received, etc.)
+            model: Model name
+            prompt_tokens: Prompt token count
+            completion_tokens: Completion token count
+            total_tokens: Total token count
+            duration_ms: Duration in milliseconds
+            temperature: Temperature setting
+            metadata: Additional metadata
+        """
+        metrics: dict[str, int | float] = {}
+        if prompt_tokens is not None:
+            metrics["prompt_tokens"] = prompt_tokens
+        if completion_tokens is not None:
+            metrics["completion_tokens"] = completion_tokens
+        if total_tokens is not None:
+            metrics["total_tokens"] = total_tokens
+        if duration_ms is not None:
+            metrics["duration_ms"] = duration_ms
+
+        meta = metadata or {}
+        if model:
+            meta["model"] = model
+        if temperature is not None:
+            meta["temperature"] = temperature
+
+        self.log_event(f"llm_{event}", metrics=metrics, metadata=meta)
+
+    def log_sink_event(
+        self,
+        event: str,
+        *,
+        output_path: str | None = None,
+        rows_written: int | None = None,
+        bytes_written: int | None = None,
+        duration_ms: float | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        """Log sink-specific event.
+
+        Args:
+            event: Event type (write_started, write_completed, etc.)
+            output_path: Output file/location path
+            rows_written: Number of rows written
+            bytes_written: Number of bytes written
+            duration_ms: Duration in milliseconds
+            metadata: Additional metadata
+        """
+        metrics: dict[str, int | float] = {}
+        if rows_written is not None:
+            metrics["rows_written"] = rows_written
+        if bytes_written is not None:
+            metrics["bytes_written"] = bytes_written
+        if duration_ms is not None:
+            metrics["duration_ms"] = duration_ms
+
+        meta = metadata or {}
+        if output_path:
+            meta["output_path"] = output_path
+
+        self.log_event(f"sink_{event}", metrics=metrics, metadata=meta)
+
+    def log_error(
+        self,
+        error: Exception | str,
+        *,
+        context: str | None = None,
+        recoverable: bool = False,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        """Log an error event.
+
+        Args:
+            error: Exception or error message
+            context: Context where error occurred
+            recoverable: Whether the error is recoverable
+            metadata: Additional metadata
+        """
+        meta = metadata or {}
+        meta["recoverable"] = recoverable
+
+        if isinstance(error, Exception):
+            meta["error_type"] = error.__class__.__name__
+            message = f"{context}: {error}" if context else str(error)
+        else:
+            message = f"{context}: {error}" if context else error
+
+        self.log_event(
+            "error",
+            message=message,
+            metadata=meta,
+            level="error",
+        )
+
+    def _write_log_entry(self, entry: dict[str, Any]) -> None:
+        """Write a log entry to the JSON Lines log file.
+
+        Args:
+            entry: Log entry dictionary
+        """
+        try:
+            with open(self.log_file, "a", encoding="utf-8") as f:
+                f.write(json.dumps(entry) + "\n")
+        except (OSError, IOError) as exc:
+            # Fallback to standard logger if file write fails
+            self.logger.error("Failed to write log entry: %s", exc)
+
+
+def attach_plugin_logger(instance: Any, context: PluginContext) -> PluginLogger:
+    """Attach a PluginLogger to a plugin instance.
+
+    This function is called automatically by apply_plugin_context().
+
+    Args:
+        instance: Plugin instance
+        context: Plugin context
+
+    Returns:
+        The created PluginLogger
+    """
+    plugin_logger = PluginLogger(
+        plugin_instance=instance,
+        context=context,
+    )
+
+    # Attach to plugin instance
+    setattr(instance, "_elspeth_logger", plugin_logger)
+    setattr(instance, "plugin_logger", plugin_logger)
+
+    return plugin_logger
+
+
+__all__ = ["PluginLogger", "attach_plugin_logger"]

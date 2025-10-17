@@ -10,7 +10,7 @@ from typing import Any
 import pandas as pd
 
 from elspeth.adapters import load_blob_csv
-from elspeth.core.protocols import DataSource
+from elspeth.core.base.protocols import DataSource
 from elspeth.core.security import normalize_determinism_level, normalize_security_level
 
 logger = logging.getLogger(__name__)

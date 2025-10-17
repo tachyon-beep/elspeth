@@ -95,6 +95,19 @@
     "hypothesis": "",
     "author": "unknown",
     "tags": [],
+    "prompt_system": "",
+    "row_plugin_defs": [],
+    "aggregator_plugin_defs": [],
+    "sink_defs": [],
+    "baseline_plugin_defs": [
+      {
+        "name": "score_delta",
+        "security_level": "official"
+      }
+    ],
+    "validation_plugin_defs": [],
+    "early_stop_plugin_defs": [],
+    "llm_middleware_defs": [],
     "estimated_cost": {
       "estimated_requests": 200.0,
       "estimated_input_cost": 12.0,
@@ -102,5 +115,5 @@
       "estimated_total_cost": 15.072
     }
   },
-  "timestamp": "2025-10-12T08:09:15.282118+00:00"
+  "timestamp": "2025-10-17T03:17:56.635629+00:00"
 }

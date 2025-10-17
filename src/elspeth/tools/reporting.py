@@ -24,6 +24,19 @@ class SuiteReportGenerator:
         self.baseline_name = suite.baseline.name if suite.baseline else None
 
     def generate_all_reports(self, output_root: Path | str) -> None:
+        """Generate comprehensive suite reports including validation, stats, and visualizations.
+
+        Creates a consolidated directory with multiple report formats:
+        - validation_results.json: Suite validation errors and warnings
+        - comparative_analysis.json: Baseline vs variant comparisons
+        - recommendations.json: Score recommendations and rankings
+        - executive_summary.md: High-level markdown summary
+        - analysis.xlsx: Excel workbook with multiple sheets
+        - analysis_summary.png: Bar chart visualization
+
+        Args:
+            output_root: Root directory for all output files
+        """
         root = Path(output_root)
         consolidated = root / "consolidated"
         consolidated.mkdir(parents=True, exist_ok=True)
@@ -50,8 +63,16 @@ class SuiteReportGenerator:
         self._export_analysis_config(consolidated)
         self._generate_failure_report(consolidated)
         self._generate_executive_summary(consolidated, comparative, recommendations)
-        self._generate_excel_report(consolidated, comparative, recommendations)
-        self._generate_visualizations(consolidated, comparative)
+
+        try:
+            self._generate_excel_report(consolidated, comparative, recommendations)
+        except ImportError as exc:
+            logger.warning("Skipping Excel report generation; pandas/openpyxl not available: %s", exc)
+
+        try:
+            self._generate_visualizations(consolidated, comparative)
+        except ImportError as exc:
+            logger.warning("Skipping visualization generation; matplotlib not available: %s", exc)
 
     # ------------------------------------------------------------------ helpers
 
@@ -202,11 +223,7 @@ class SuiteReportGenerator:
         comparative: dict[str, Any],
         recommendations: dict[str, Any],
     ) -> None:
-        try:
-            import pandas as pd
-        except ImportError:  # pragma: no cover - optional dependency
-            logger.info("Skipping Excel report generation (pandas not available)")
-            return
+        import pandas as pd
 
         summary_rows = []
         baseline_mean = _safe_get(comparative.get("baseline_stats"), ("overall", "mean"))
@@ -228,7 +245,7 @@ class SuiteReportGenerator:
             )
 
         summary_df = pd.DataFrame(summary_rows)
-        comparisons_df = _comparisons_dataframe(comparative, pd)
+        comparisons_df = _comparisons_dataframe(comparative)
         recommendation_rows = []
         for name, payload in recommendations.items():
             rec = payload.get("recommendation", {})
@@ -242,23 +259,16 @@ class SuiteReportGenerator:
         recommendations_df = pd.DataFrame(recommendation_rows)
 
         excel_path = consolidated / "analysis.xlsx"
-        try:
-            with pd.ExcelWriter(excel_path, engine="openpyxl") as writer:
-                summary_df.to_excel(writer, sheet_name="Summary", index=False)
-                comparisons_df.to_excel(writer, sheet_name="Comparisons", index=False)
-                recommendations_df.to_excel(writer, sheet_name="Recommendations", index=False)
-        except ImportError:  # pragma: no cover - optional dependency
-            logger.info("Skipping Excel report generation (openpyxl not available)")
+        with pd.ExcelWriter(excel_path, engine="openpyxl") as writer:
+            summary_df.to_excel(writer, sheet_name="Summary", index=False)
+            comparisons_df.to_excel(writer, sheet_name="Comparisons", index=False)
+            recommendations_df.to_excel(writer, sheet_name="Recommendations", index=False)
 
     def _generate_visualizations(self, consolidated: Path, comparative: dict[str, Any]) -> None:
-        try:
-            import matplotlib
+        import matplotlib
+        import matplotlib.pyplot as plt
 
-            matplotlib.use("Agg")
-            import matplotlib.pyplot as plt
-        except ImportError:  # pragma: no cover - optional dependency
-            logger.info("Skipping visualizations (matplotlib not available)")
-            return
+        matplotlib.use("Agg")
 
         names = []
         means = []
@@ -310,7 +320,17 @@ class SuiteReportGenerator:
         return config.to_export_dict()
 
 
-def _comparisons_dataframe(comparative: dict[str, Any], pd):
+def _comparisons_dataframe(comparative: dict[str, Any]):
+    """Build DataFrame of baseline comparison deltas across experiments.
+
+    Args:
+        comparative: Comparative analysis dictionary with variants
+
+    Returns:
+        DataFrame with columns: experiment, plugin, metric, delta
+    """
+    import pandas as pd
+
     rows = []
     for name, payload in comparative.get("variants", {}).items():
         comparisons = payload.get("comparisons") or {}

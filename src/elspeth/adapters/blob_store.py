@@ -174,10 +174,7 @@ class BlobDataLoader:
         """Instantiate the BlobClient lazily to avoid import costs."""
 
         if self._blob_client is None:
-            try:
-                from azure.storage.blob import BlobClient  # pylint: disable=import-outside-toplevel
-            except ImportError as exc:  # pragma: no cover - environment specific
-                raise BlobConfigurationError("azure-storage-blob is required to access Azure Blob Storage") from exc
+            from azure.storage.blob import BlobClient  # pylint: disable=import-outside-toplevel
 
             credential = self.credential or self.config.sas_token
             if credential is None:
@@ -236,10 +233,7 @@ class BlobDataLoader:
     def load_csv(self, **pandas_kwargs):
         """Load the blob as a Pandas DataFrame."""
 
-        try:
-            import pandas as pd  # pylint: disable=import-outside-toplevel
-        except ImportError as exc:  # pragma: no cover - optional dependency
-            raise BlobConfigurationError("pandas is required to read blob contents as CSV") from exc
+        import pandas as pd  # pylint: disable=import-outside-toplevel
 
         downloader = self.blob_client.download_blob()
         buffer = io.BytesIO(downloader.readall())

@@ -3,8 +3,8 @@ import zipfile
 
 import pandas as pd
 
-from elspeth.core.artifact_pipeline import ArtifactPipeline, SinkBinding
 from elspeth.core.experiments.runner import ExperimentRunner
+from elspeth.core.pipeline.artifact_pipeline import ArtifactPipeline, SinkBinding
 from elspeth.plugins.nodes.sinks.csv_file import CsvResultSink
 from elspeth.plugins.nodes.sinks.file_copy import FileCopySink
 from elspeth.plugins.nodes.sinks.zip_bundle import ZipResultSink

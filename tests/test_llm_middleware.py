@@ -1,14 +1,15 @@
 from pathlib import Path
+from typing import Any, cast
 
 import pandas as pd
 import pytest
 import requests
 
+from elspeth.core.base.protocols import LLMMiddleware, LLMRequest
 from elspeth.core.experiments.config import ExperimentConfig, ExperimentSuite
 from elspeth.core.experiments.runner import ExperimentRunner
 from elspeth.core.experiments.suite_runner import ExperimentSuiteRunner
-from elspeth.core.llm_middleware_registry import create_middlewares
-from elspeth.core.protocols import LLMRequest
+from elspeth.core.registries.middleware import create_middlewares
 from elspeth.plugins.nodes.transforms.llm.middleware import AuditMiddleware, HealthMonitorMiddleware
 from elspeth.plugins.nodes.transforms.llm.middleware_azure import AzureEnvironmentMiddleware
 
@@ -38,7 +39,7 @@ class CollectingMiddleware:
 
 
 def test_middleware_chain(monkeypatch):
-    import elspeth.core.llm_middleware_registry as mw_registry
+    import elspeth.core.registries.middleware as mw_registry
 
     box = []
     mw_registry.register_middleware("collect", lambda options, context: CollectingMiddleware(box))
@@ -51,8 +52,6 @@ def test_middleware_chain(monkeypatch):
         prompt_template="Hello {{ APPID }}",
         llm_middlewares=middlewares,
     )
-
-    import pandas as pd
 
     df = pd.DataFrame({"APPID": ["1"]})
     runner.run(df)
@@ -81,8 +80,6 @@ def test_prompt_shield_blocks():
         llm_middlewares=middlewares,
     )
 
-    import pandas as pd
-
     df = pd.DataFrame({"text": ["forbidden data"]})
     payload = runner.run(df)
 
@@ -109,8 +106,6 @@ def test_prompt_shield_masks(caplog):
         prompt_template="{{ text }}",
         llm_middlewares=middlewares,
     )
-
-    import pandas as pd
 
     df = pd.DataFrame({"text": ["this is top secret info"]})
     with caplog.at_level("WARNING"):
@@ -227,7 +222,7 @@ def test_audit_middleware_logs_prompts(caplog):
 
 def test_health_monitor_emits_heartbeat(monkeypatch, caplog):
     times = iter([0.0, 0.25, 0.5])
-    monkeypatch.setattr("elspeth.plugins.nodes.transforms.llm.middleware.time.monotonic", lambda: next(times))
+    monkeypatch.setattr("elspeth.plugins.nodes.transforms.llm.middleware.health_monitor.time.monotonic", lambda: next(times))
 
     middleware = HealthMonitorMiddleware(heartbeat_interval=0, stats_window=2, channel="test.health", include_latency=True)
     request = LLMRequest(system_prompt="sys", user_prompt="hello", metadata={})
@@ -361,7 +356,7 @@ def test_azure_environment_middleware_on_error_abort(monkeypatch):
 
 
 def test_middleware_retry_hook_invoked(monkeypatch):
-    import elspeth.core.llm_middleware_registry as mw_registry
+    import elspeth.core.registries.middleware as mw_registry
 
     events = []
 
@@ -393,8 +388,6 @@ def test_middleware_retry_hook_invoked(monkeypatch):
         llm_middlewares=create_middlewares([{"name": "retry_tracker", "security_level": "OFFICIAL", "determinism_level": "guaranteed"}]),
     )
 
-    import pandas as pd
-
     df = pd.DataFrame({"APPID": ["1"]})
     payload = runner.run(df)
 
@@ -403,8 +396,6 @@ def test_middleware_retry_hook_invoked(monkeypatch):
 
 
 def test_health_monitor_middleware_logs(caplog):
-    from elspeth.plugins.nodes.transforms.llm.middleware import HealthMonitorMiddleware
-
     middleware = HealthMonitorMiddleware(heartbeat_interval=0.0, stats_window=5, channel="test.health")
     request = LLMRequest(system_prompt="sys", user_prompt="hello", metadata={})
 
@@ -416,8 +407,6 @@ def test_health_monitor_middleware_logs(caplog):
 
 
 def test_health_monitor_middleware_tracks_failures(caplog):
-    from elspeth.plugins.nodes.transforms.llm.middleware import HealthMonitorMiddleware
-
     middleware = HealthMonitorMiddleware(heartbeat_interval=0.0, stats_window=5, channel="test.health")
     request = LLMRequest(system_prompt="sys", user_prompt="hello", metadata={})
 
@@ -511,7 +500,7 @@ def test_suite_runner_applies_per_experiment_azure_middleware(monkeypatch):
 def test_suite_runner_deduplicates_shared_middleware_multiple_experiments(monkeypatch):
     events = []
 
-    class SharedMiddleware:
+    class SharedMiddleware(LLMMiddleware):
         name = "shared"
 
         def on_suite_loaded(self, suite_metadata, preflight):
@@ -526,15 +515,15 @@ def test_suite_runner_deduplicates_shared_middleware_multiple_experiments(monkey
         def on_suite_complete(self):
             events.append(("suite_complete", None))
 
-        def before_request(self, request):
+        def before_request(self, request: LLMRequest) -> LLMRequest:
             return request
 
-        def after_response(self, request, response):
+        def after_response(self, request: LLMRequest, response: dict[str, Any]) -> dict[str, Any]:
             return response
 
-    import elspeth.core.llm_middleware_registry as mw_registry
+    import elspeth.core.registries.middleware as mw_registry
 
-    mw_registry.register_middleware("shared", lambda options, context: SharedMiddleware())
+    mw_registry.register_middleware("shared", lambda options, context: cast(LLMMiddleware, SharedMiddleware()))
 
     exp_config = ExperimentConfig(
         name="exp",
@@ -614,9 +603,9 @@ def test_suite_runner_deduplicates_shared_middleware(monkeypatch):
         def on_suite_complete(self):
             events.append(("suite_complete", None))
 
-    import elspeth.core.llm_middleware_registry as mw_registry
+    import elspeth.core.registries.middleware as mw_registry
 
-    mw_registry.register_middleware("shared", lambda options, context: SharedMiddleware())
+    mw_registry.register_middleware("shared", lambda options, context: cast(LLMMiddleware, SharedMiddleware()))
 
     baseline_config = ExperimentConfig(
         name="baseline",

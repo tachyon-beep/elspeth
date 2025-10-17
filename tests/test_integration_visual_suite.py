@@ -5,7 +5,8 @@ from pathlib import Path
 import pandas as pd
 
 from elspeth.core.experiments.runner import ExperimentRunner
-from elspeth.plugins.experiments.metrics import ScoreExtractorPlugin, ScoreStatsAggregator
+from elspeth.plugins.experiments.aggregators.score_stats import ScoreStatsAggregator
+from elspeth.plugins.experiments.row.score_extractor import ScoreExtractorPlugin
 from elspeth.plugins.nodes.sinks.analytics_report import AnalyticsReportSink
 from elspeth.plugins.nodes.sinks.visual_report import VisualAnalyticsSink
 from elspeth.plugins.nodes.transforms.llm.static import StaticLLMClient

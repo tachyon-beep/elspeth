@@ -37,7 +37,7 @@ The core streaming architecture described in WP001 is **not implemented**. The c
      - ✅ `apply_plugin_context()` sets `_elspeth_determinism_level` attribute
 
 2. **Australian Government PSPF Security Classification System** ✅ COMPLETE
-   - **File**: `src/elspeth/core/types.py` (lines 10-89)
+   - **File**: `src/elspeth/core/base/types.py` (lines 10-89)
    - **Status**: Fully implemented as specified in WP001
    - **Evidence**:
      ```python
@@ -56,7 +56,7 @@ The core streaming architecture described in WP001 is **not implemented**. The c
      - ✅ Documentation matches WP001 specification
 
 3. **Determinism Level Enum and Resolution** ✅ COMPLETE
-   - **File**: `src/elspeth/core/types.py` (lines 91-162)
+   - **File**: `src/elspeth/core/base/types.py` (lines 91-162)
    - **Status**: Fully implemented as specified in WP001
    - **Evidence**:
      ```python
@@ -198,7 +198,7 @@ The Pydantic-based schema validation system described in WP002 is **fully implem
 #### ✅ **IMPLEMENTED Features** (Core WP002 Requirements)
 
 1. **Pydantic v2 Schema System** ✅ COMPLETE
-   - **File**: `src/elspeth/core/schema.py`
+   - **File**: `src/elspeth/core/base/schema.py`
    - **Status**: Fully implemented with Pydantic v2.12.0
    - **Evidence**:
      ```python
@@ -371,7 +371,7 @@ grep -r "determinism_level" src/elspeth/core/plugins/context.py
 # Result: Found (line 20)
 
 # Check for PSPF security levels (SHOULD FIND)
-grep -r "UNOFFICIAL\|OFFICIAL\|PROTECTED\|SECRET" src/elspeth/core/types.py
+grep -r "UNOFFICIAL\|OFFICIAL\|PROTECTED\|SECRET" src/elspeth/core/base/types.py
 # Result: Found (lines 20-24)
 ```
 

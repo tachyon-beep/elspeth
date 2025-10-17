@@ -4,12 +4,10 @@ from __future__ import annotations
 
 import pytest
 
-from elspeth.plugins.experiments.metrics import (
-    CategoryEffectsAggregator,
-    CriteriaEffectsBaselinePlugin,
-    OutlierDetectionAggregator,
-    ScoreFlipAnalysisAggregator,
-)
+from elspeth.plugins.experiments.baseline.category_effects import CategoryEffectsAggregator
+from elspeth.plugins.experiments.baseline.criteria_effects import CriteriaEffectsBaselinePlugin
+from elspeth.plugins.experiments.baseline.outlier_detection import OutlierDetectionAggregator
+from elspeth.plugins.experiments.baseline.score_flip_analysis import ScoreFlipAnalysisAggregator
 
 # =====================================================================
 # Outlier Detection Tests

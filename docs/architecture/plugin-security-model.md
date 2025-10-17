@@ -1,7 +1,7 @@
 # Plugin Security Model
 
 ## Registry Architecture
-- **Central factories** – Datasource, LLM, and sink registries wrap constructors with JSON-schema validation, rejecting unknown plugin names or malformed options before instantiation (`src/elspeth/core/registry.py:91`, `src/elspeth/core/registry.py:208`).[^plugin-central-2025-10-12]
+- **Central factories** – Datasource, LLM, and sink registries wrap constructors with JSON-schema validation, rejecting unknown plugin names or malformed options before instantiation (`src/elspeth/core/registries/__init__.py:91`, `src/elspeth/core/registries/__init__.py:208`).[^plugin-central-2025-10-12]
 <!-- UPDATE 2025-10-12: Registry namespace -->
 Update 2025-10-12: Central factories delegate to `src/elspeth/core/{datasource_registry,llm_registry,sink_registry}.py` post refactor.
 <!-- END UPDATE -->
@@ -10,11 +10,11 @@ Update 2025-10-12: Central factories delegate to `src/elspeth/core/{datasource_r
 Update 2025-10-12: Experiment registry helpers span `src/elspeth/core/experiments/plugin_registry.py:120-188` and `:400-454`.
 <!-- END UPDATE -->
 - **Control plane plugins** – Rate limiter and cost tracker factories follow the same pattern, providing a consistent extension point for throttle/cost logic while retaining validation hooks (`src/elspeth/core/controls/registry.py:36`, `src/elspeth/core/controls/registry.py:102`).[^plugin-control-2025-10-12]
-- **Reporting sinks** – Analytics, visual, Excel, signed, and bundle sinks are registered through the same registry facade and stamp `_elspeth_security_level`, allowing suite reporting to reuse sanctioned factories rather than constructing sinks manually (`src/elspeth/core/registry.py:120`, `src/elspeth/plugins/outputs/analytics_report.py:17`, `src/elspeth/plugins/outputs/visual_report.py:17`).[^plugin-reporting-2025-10-12]
+- **Reporting sinks** – Analytics, visual, Excel, signed, and bundle sinks are registered through the same registry facade and stamp `_elspeth_security_level`, allowing suite reporting to reuse sanctioned factories rather than constructing sinks manually (`src/elspeth/core/registries/__init__.py:120`, `src/elspeth/plugins/outputs/analytics_report.py:17`, `src/elspeth/plugins/outputs/visual_report.py:17`).[^plugin-reporting-2025-10-12]
 <!-- UPDATE 2025-10-12: Reporting sink module relocation -->
 Update 2025-10-12: Analytics/visual/Excel/signed sinks live in `src/elspeth/plugins/nodes/sinks/`.
 <!-- END UPDATE -->
-<!-- Update 2025-10-12: Registry creation paths also stamp `_elspeth_security_level` on plugins, ensuring artifact pipeline enforcement downstream (`src/elspeth/core/experiments/plugin_registry.py:122`, `src/elspeth/core/registry.py:120`). -->
+<!-- Update 2025-10-12: Registry creation paths also stamp `_elspeth_security_level` on plugins, ensuring artifact pipeline enforcement downstream (`src/elspeth/core/experiments/plugin_registry.py:122`, `src/elspeth/core/registries/__init__.py:120`). -->
 
 ### Update 2025-10-12: Registry Enforcement
 - Registries attach `_elspeth_security_level` attributes and validate schemas before plugin instantiation, aligning with artifact clearance checks.
@@ -37,17 +37,17 @@ Update 2025-10-12: Retry annotations are applied at `src/elspeth/core/experiment
 - Early-stop plugins expose `reset` and `check` hooks and are normalised prior to execution, preventing configuration drift (`src/elspeth/plugins/experiments/early_stop.py:17`, `src/elspeth/core/experiments/runner.py:223`).
 
 ## Artifact Governance
-- **Produced/consumed declarations** – Sinks advertise the artifacts they produce and consume, allowing the pipeline to topologically sort execution and prevent improper dependencies (`src/elspeth/core/artifact_pipeline.py:153`, `src/elspeth/core/artifact_pipeline.py:201`).[^plugin-produced-2025-10-12]
-- **Security classification** – Each binding inherits a security level; the pipeline denies access when a consumer lacks sufficient clearance, preventing cross-domain lateral movement (`src/elspeth/core/artifact_pipeline.py:192`).[^plugin-security-2025-10-12]
+- **Produced/consumed declarations** – Sinks advertise the artifacts they produce and consume, allowing the pipeline to topologically sort execution and prevent improper dependencies (`src/elspeth/core/pipeline/artifact_pipeline.py:153`, `src/elspeth/core/pipeline/artifact_pipeline.py:201`).[^plugin-produced-2025-10-12]
+- **Security classification** – Each binding inherits a security level; the pipeline denies access when a consumer lacks sufficient clearance, preventing cross-domain lateral movement (`src/elspeth/core/pipeline/artifact_pipeline.py:192`).[^plugin-security-2025-10-12]
 - **Sanitisation metadata** – Sinks may augment produced artifacts with sanitisation details or manifest digests, enabling downstream plugins to reason about provenance (`src/elspeth/plugins/outputs/csv_file.py:106`, `src/elspeth/plugins/outputs/excel.py:187`).[^plugin-sanitisation-2025-10-12]
 <!-- UPDATE 2025-10-12: Sink module relocation -->
 Update 2025-10-12: CSV/Excel sinks are located in `src/elspeth/plugins/nodes/sinks/`.
 <!-- END UPDATE -->
 
 ### Update 2025-10-12: Artifact Tokens
-- Sink descriptors map produced artifacts to types and aliases, enabling secure dependency resolution across the pipeline (`src/elspeth/core/interfaces.py:83`, `src/elspeth/core/artifact_pipeline.py:167`).
+- Sink descriptors map produced artifacts to types and aliases, enabling secure dependency resolution across the pipeline (`src/elspeth/core/interfaces.py:83`, `src/elspeth/core/pipeline/artifact_pipeline.py:167`).
 <!-- UPDATE 2025-10-12: Artifact descriptor relocation -->
-Update 2025-10-12: Artifact descriptor definitions are located in `src/elspeth/core/protocols.py:237-309`.
+Update 2025-10-12: Artifact descriptor definitions are located in `src/elspeth/core/base/protocols.py:237-309`.
 <!-- END UPDATE -->
 
 ## Suite Reporting Integrations
@@ -71,7 +71,7 @@ Update 2025-10-12: Namespace packages now extend `src/elspeth/plugins/nodes/` fo
 ## Added 2025-10-12 – Lifecycle Hooks & Shared Middleware
 - **Middleware lifecycle** – Shared middleware instances receive suite lifecycle callbacks (`on_suite_loaded`, `on_experiment_start`, `on_experiment_complete`, `on_retry_exhausted`), centralising telemetry while avoiding per-run duplication (`src/elspeth/core/experiments/suite_runner.py:177`, `src/elspeth/plugins/llms/middleware_azure.py:180`).[^plugin-middleware-lifecycle-2025-10-12]
 - **Plugin normalisation** – Early-stop, baseline, and concurrency-aware plugins are normalised through helper functions such as `normalize_early_stop_definitions`, guaranteeing consistent option shapes regardless of legacy shorthand (`src/elspeth/core/experiments/plugin_registry.py:282`, `src/elspeth/config.py:66`).[^plugin-normalisation-2025-10-12]
-- **Artifact-aware sinks** – The registry records sink artifact descriptors and binds security levels, enabling downstream pipeline enforcement without granting sinks arbitrary filesystem access (`src/elspeth/core/registry.py:120`, `src/elspeth/core/artifact_pipeline.py:153`).[^plugin-artifact-aware-2025-10-12]
+- **Artifact-aware sinks** – The registry records sink artifact descriptors and binds security levels, enabling downstream pipeline enforcement without granting sinks arbitrary filesystem access (`src/elspeth/core/registries/__init__.py:120`, `src/elspeth/core/pipeline/artifact_pipeline.py:153`).[^plugin-artifact-aware-2025-10-12]
 
 ## Update History
 - 2025-10-12 – Update 2025-10-12: Added suite reporting integration notes, reporting sink registry coverage, and prompt pack default harmonisation guidance.

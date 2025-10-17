@@ -12,7 +12,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 import pandas as pd
 
-from elspeth.core.protocols import Artifact, ArtifactDescriptor, ResultSink
+from elspeth.core.base.protocols import Artifact, ArtifactDescriptor, ResultSink
 from elspeth.core.security import normalize_determinism_level, normalize_security_level, resolve_security_level
 from elspeth.plugins.nodes.sinks._sanitize import sanitize_cell
 
@@ -93,7 +93,7 @@ class ZipResultSink(ResultSink):
 
                 # Include upstream artifacts
                 counter = 0
-                for key, artifacts in self._additional_inputs.items():
+                for _, artifacts in self._additional_inputs.items():
                     for artifact in artifacts:
                         counter += 1
                         name = None
@@ -184,7 +184,7 @@ class ZipResultSink(ResultSink):
             rows.append(record)
         df = pd.DataFrame(rows)
         if not df.empty:
-            df.columns = [self._sanitize_key(col) for col in df.columns]
+            df.columns = pd.Index([self._sanitize_key(col) for col in df.columns])
         buffer = io.StringIO()
         df.to_csv(buffer, index=False)
         return buffer.getvalue()

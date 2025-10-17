@@ -8,7 +8,7 @@ import logging
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-from elspeth.core.protocols import Artifact, ArtifactDescriptor
+from elspeth.core.base.protocols import Artifact, ArtifactDescriptor
 
 from ._visual_base import BaseVisualSink
 

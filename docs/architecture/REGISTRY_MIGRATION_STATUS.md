@@ -20,9 +20,9 @@ All registries have been migrated in Phase 2:
 
 | Registry | Status | File | Plugin Count | Migration Date |
 |----------|--------|------|--------------|----------------|
-| Datasource Registry | ✅ Complete | `core/datasource_registry.py` | 3 | Phase 2 |
-| LLM Registry | ✅ Complete | `core/llm_registry.py` | 4 | Phase 2 |
-| Sink Registry | ✅ Complete | `core/sink_registry.py` | 14 | Phase 2 |
+| Datasource Registry | ✅ Complete | `core/registries/datasource.py` | 3 | Phase 2 |
+| LLM Registry | ✅ Complete | `core/registries/llm.py` | 4 | Phase 2 |
+| Sink Registry | ✅ Complete | `core/registries/sink.py` | 14 | Phase 2 |
 | Row Plugin Registry | ✅ Complete | `core/experiments/row_plugin_registry.py` | ~10 | Phase 2 |
 | Aggregation Plugin Registry | ✅ Complete | `core/experiments/aggregation_plugin_registry.py` | ~15 | Phase 2 |
 | Validation Plugin Registry | ✅ Complete | `core/experiments/validation_plugin_registry.py` | ~5 | Phase 2 |
@@ -82,7 +82,7 @@ datasource_registry.register(
 
 ### 1. Datasource Registry ✅
 
-**File:** `src/elspeth/core/datasource_registry.py`
+**File:** `src/elspeth/core/registries/datasource.py`
 **Plugins:** 3
 - `azure_blob` - Azure Blob Storage datasource
 - `csv_blob` - CSV from Azure Blob
@@ -95,7 +95,7 @@ datasource_registry.register(
 
 ### 2. LLM Registry ✅
 
-**File:** `src/elspeth/core/llm_registry.py`
+**File:** `src/elspeth/core/registries/llm.py`
 **Plugins:** 4
 - `azure_openai` - Azure OpenAI client
 - `http_openai` - HTTP OpenAI client
@@ -109,7 +109,7 @@ datasource_registry.register(
 
 ### 3. Sink Registry ✅
 
-**File:** `src/elspeth/core/sink_registry.py`
+**File:** `src/elspeth/core/registries/sink.py`
 **Plugins:** 14
 - `azure_blob` - Azure Blob result sink
 - `csv` - CSV file output
@@ -182,7 +182,7 @@ datasource_registry.register(
 
 ## Central Registry Facade
 
-**File:** `src/elspeth/core/registry.py`
+**File:** `src/elspeth/core/registries/__init__.py`
 
 The central `PluginRegistry` class now acts as a facade:
 - Delegates `create_datasource()` → `datasource_registry.create()`

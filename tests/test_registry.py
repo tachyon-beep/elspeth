@@ -3,10 +3,10 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from elspeth.core.datasource_registry import datasource_registry
 from elspeth.core.experiments import plugin_registry
-from elspeth.core.llm_registry import llm_registry
-from elspeth.core.sink_registry import sink_registry
+from elspeth.core.registries.datasource import datasource_registry
+from elspeth.core.registries.llm import llm_registry
+from elspeth.core.registries.sink import sink_registry
 from elspeth.core.validation import ConfigurationError
 
 
@@ -45,8 +45,6 @@ def test_registry_creates_blob_datasource(tmp_path, monkeypatch):
 
 
 def test_registry_unknown_plugin_raises():
-    import pytest
-
     with pytest.raises(ValueError):
         datasource_registry.create("missing", {})
 
@@ -72,7 +70,7 @@ def test_registry_constructs_llm_and_sink(monkeypatch):
         def __init__(self, **kwargs):
             self.kwargs = kwargs
 
-    from elspeth.core.registry.base import BasePluginFactory
+    from elspeth.core.registries.base import BasePluginFactory
 
     llm_registry._plugins["dummy"] = BasePluginFactory(lambda options, context: DummyLLM(**options))
     sink_registry._plugins["dummy"] = BasePluginFactory(lambda options, context: DummySink(**options))
@@ -90,11 +88,11 @@ def test_create_row_plugin_requires_known_name():
 
 
 def test_create_row_plugin_validates_schema():
-    def build_plugin(options, context):
+    def build_plugin(_options, _context):
         class _Plugin:
             name = "limited"
 
-            def process_row(self, row, responses):
+            def process_row(self, _row, _responses):
                 return {}
 
         return _Plugin()
@@ -133,7 +131,7 @@ def test_create_row_plugin_conflicting_security_levels():
 
 
 def test_create_row_plugin_inherits_parent_context():
-    from elspeth.core.plugin_context import PluginContext
+    from elspeth.core.base.plugin_context import PluginContext
 
     parent_context = PluginContext(plugin_name="suite", plugin_kind="suite", security_level="SECRET", determinism_level="none")
     plugin = plugin_registry.create_row_plugin(
@@ -191,7 +189,7 @@ def test_registry_sink_schema_success(tmp_path):
     sink = sink_registry.create(
         "file_copy", {"destination": dest.as_posix(), "security_level": "OFFICIAL", "determinism_level": "guaranteed"}
     )
-    from elspeth.core.protocols import Artifact
+    from elspeth.core.base.protocols import Artifact
 
     src = tmp_path / "src.txt"
     src.write_text("hello", encoding="utf-8")

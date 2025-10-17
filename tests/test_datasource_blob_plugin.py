@@ -53,7 +53,7 @@ def test_blob_datasource_skip_on_error(monkeypatch, caplog, tmp_path):
         df = datasource.load()
 
     assert df.empty
-    assert df.attrs["security_level"] == "OFFICIAL_SENSITIVE"
+    assert df.attrs["security_level"] == "OFFICIAL: SENSITIVE"
     assert df.attrs["determinism_level"] == "guaranteed"
     assert any("Blob datasource failed" in record.message for record in caplog.records)
 

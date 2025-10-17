@@ -1,6 +1,6 @@
 import pandas as pd
 
-from elspeth.core.processing import prepare_prompt_context
+from elspeth.core.pipeline.processing import prepare_prompt_context
 
 
 def test_prepare_prompt_context_filters_and_aliases():

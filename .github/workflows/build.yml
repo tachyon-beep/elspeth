@@ -38,7 +38,8 @@ jobs:
 
       - name: SonarQube Scan
         if: env.SONAR_PROJECT_KEY != '' && env.SONAR_ORGANIZATION != ''
-        uses: SonarSource/sonarqube-scan-action@v6
+        # Pin to specific commit SHA for security (v6.1.0 - latest stable as of 2025-10)
+        uses: SonarSource/sonarqube-scan-action@884b79409bbd464b2a59edc326a4b77dc56b2195
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

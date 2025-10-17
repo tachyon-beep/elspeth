@@ -118,7 +118,7 @@ As you work through the program, you'll create these files:
 
 #### Week 2
 - [ ] `src/elspeth/core/security/secure_mode.py` (MF-3)
-- [ ] `src/elspeth/core/config_validation.py` (MF-3)
+- [ ] `src/elspeth/core/config/validation.py` (MF-3)
 - [ ] `config/templates/production-*.yaml` (MF-3)
 - [ ] `docs/security/EXTERNAL_SERVICES.md` (MF-4)
 - [ ] `src/elspeth/core/security/approved_endpoints.py` (MF-4)

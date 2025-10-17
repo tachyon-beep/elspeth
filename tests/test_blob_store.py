@@ -201,8 +201,6 @@ def test_blob_loader_uses_sas_token(monkeypatch):
 
 
 def test_blob_data_loader_download_prevents_overwrite(tmp_path):
-    from elspeth.adapters.blob_store import BlobConfig, BlobDataLoader
-
     config = BlobConfig.from_mapping(
         {
             "connection_name": "workspaceblobstore",

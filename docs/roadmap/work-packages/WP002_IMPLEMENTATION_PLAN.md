@@ -25,7 +25,7 @@
 **Goal**: Get basic Pydantic schemas working with CSV datasource
 
 #### Task 1.1: Pydantic Base Classes (30 min)
-**File**: `src/elspeth/core/schema.py` (NEW)
+**File**: `src/elspeth/core/base/schema.py` (NEW)
 
 ```python
 """DataFrame schema validation using Pydantic."""
@@ -190,7 +190,7 @@ class DataSource(Protocol):
 **File**: `src/elspeth/plugins/datasources/csv_local.py` (MODIFY)
 
 ```python
-from elspeth.core.schema import (
+from elspeth.core.base.schema import (
     DataFrameSchema,
     infer_schema_from_dataframe,
     schema_from_config
@@ -315,7 +315,7 @@ class AggregatorPlugin(Protocol):
 ### Phase 2: Validation Engine (Day 1 Afternoon - 3 hours)
 
 #### Task 2.1: Schema Compatibility Checker (1 hour)
-**File**: `src/elspeth/core/schema.py` (ADD)
+**File**: `src/elspeth/core/base/schema.py` (ADD)
 
 ```python
 class SchemaCompatibilityError(Exception):
@@ -426,7 +426,7 @@ def _is_type_compatible(source_type: type, required_type: type) -> bool:
 **File**: `src/elspeth/core/experiments/runner.py` (MODIFY)
 
 ```python
-from elspeth.core.schema import validate_schema_compatibility, SchemaCompatibilityError
+from elspeth.core.base.schema import validate_schema_compatibility, SchemaCompatibilityError
 
 class ExperimentRunner:
     """Execute single experiment with schema validation."""
@@ -504,7 +504,7 @@ class ExperimentRunner:
 ---
 
 #### Task 2.3: Row-Level Runtime Validation with Malformed Data Routing (1 hour)
-**File**: `src/elspeth/core/schema.py` (ADD)
+**File**: `src/elspeth/core/base/schema.py` (ADD)
 
 ```python
 from pydantic import ValidationError as PydanticValidationError
@@ -724,7 +724,7 @@ experiments:
 **Files**: `src/elspeth/plugins/experiments/metrics.py`, `validation.py` (MODIFY)
 
 ```python
-from elspeth.core.schema import DataFrameSchema
+from elspeth.core.base.schema import DataFrameSchema
 from pydantic import Field
 from typing import Optional
 
@@ -858,7 +858,7 @@ def validate_schemas(settings: str, suite_root: str | None) -> None:
     Exits with code 0 if valid, 1 if issues found.
     """
     from elspeth.config import load_settings
-    from elspeth.core.schema import validate_schema_compatibility, SchemaCompatibilityError
+    from elspeth.core.base.schema import validate_schema_compatibility, SchemaCompatibilityError
 
     click.echo("🔍 Validating experiment schemas...\n")
 
@@ -1119,7 +1119,7 @@ datasource:
 
 ### Plugin Schema Declaration
 ```python
-from elspeth.core.schema import DataFrameSchema
+from elspeth.core.base.schema import DataFrameSchema
 from pydantic import Field
 
 class MyPluginSchema(DataFrameSchema):

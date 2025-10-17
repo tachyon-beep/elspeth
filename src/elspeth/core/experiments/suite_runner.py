@@ -6,6 +6,8 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, Callable, cast
 
+from elspeth.core.base.plugin_context import PluginContext, apply_plugin_context
+from elspeth.core.base.protocols import LLMClientProtocol, ResultSink
 from elspeth.core.controls import create_cost_tracker, create_rate_limiter
 from elspeth.core.experiments.config import ExperimentConfig, ExperimentSuite
 from elspeth.core.experiments.config_merger import ConfigMerger
@@ -18,16 +20,21 @@ from elspeth.core.experiments.plugin_registry import (
     normalize_early_stop_definitions,
 )
 from elspeth.core.experiments.runner import ExperimentRunner
-from elspeth.core.llm_middleware_registry import create_middleware
-from elspeth.core.plugin_context import PluginContext, apply_plugin_context
-from elspeth.core.protocols import LLMClientProtocol, ResultSink
+from elspeth.core.registries.middleware import create_middleware
+from elspeth.core.registries.sink import sink_registry
 from elspeth.core.security import resolve_security_level
-from elspeth.core.sink_registry import sink_registry
-from elspeth.core.validation_base import ConfigurationError
+from elspeth.core.validation.base import ConfigurationError
 
 
 @dataclass
 class ExperimentSuiteRunner:
+    """Runner for executing experiment suites with shared LLM client and sinks.
+
+    Orchestrates the execution of multiple experiments defined in an ExperimentSuite,
+    managing shared resources like LLM clients and output sinks. Handles experiment
+    initialization, execution, result collection, and artifact management.
+    """
+
     suite: ExperimentSuite
     llm_client: LLMClientProtocol
     sinks: list[ResultSink]
@@ -101,8 +108,8 @@ class ExperimentSuiteRunner:
         validation_defs = merger.merge_plugin_definitions("validation_plugin_defs", "validation_plugins")
 
         # Merge control definitions (scalar - last wins)
-        rate_limiter_def = merger.merge_scalar("rate_limiter_def", "rate_limiter")
-        cost_tracker_def = merger.merge_scalar("cost_tracker_def", "cost_tracker")
+        rate_limiter_def = cast(dict[str, Any] | None, merger.merge_scalar("rate_limiter_def", "rate_limiter"))
+        cost_tracker_def = cast(dict[str, Any] | None, merger.merge_scalar("cost_tracker_def", "cost_tracker"))
 
         # Resolve security level (most restrictive wins)
         security_level = resolve_security_level(
@@ -149,8 +156,7 @@ class ExperimentSuiteRunner:
         # Instantiate controls
         rate_limiter: Any | None = None
         if rate_limiter_def:
-            # Mypy false positive: merge_scalar returns Any which is truthy, but mypy can't prove this
-            rate_limiter = create_rate_limiter(rate_limiter_def, parent_context=experiment_context)  # type: ignore[unreachable]
+            rate_limiter = create_rate_limiter(rate_limiter_def, parent_context=experiment_context)
         elif defaults.get("rate_limiter") is not None:
             base = defaults["rate_limiter"]
             apply_plugin_context(
@@ -164,8 +170,7 @@ class ExperimentSuiteRunner:
 
         cost_tracker: Any | None = None
         if cost_tracker_def:
-            # Mypy false positive: merge_scalar returns Any which is truthy, but mypy can't prove this
-            cost_tracker = create_cost_tracker(cost_tracker_def, parent_context=experiment_context)  # type: ignore[unreachable]
+            cost_tracker = create_cost_tracker(cost_tracker_def, parent_context=experiment_context)
         elif defaults.get("cost_tracker") is not None:
             base_tracker = defaults["cost_tracker"]
             apply_plugin_context(
@@ -230,7 +235,7 @@ class ExperimentSuiteRunner:
 
     def _instantiate_sinks(self, defs: list[dict[str, Any]]) -> list[ResultSink]:
         sinks: list[ResultSink] = []
-        for index, entry in enumerate(defs):
+        for _, entry in enumerate(defs):
             plugin = entry.get("plugin")
             if not isinstance(plugin, str) or not plugin:
                 raise ConfigurationError("Each sink definition must include a 'plugin' string")
@@ -266,6 +271,17 @@ class ExperimentSuiteRunner:
         sink_factory: Callable[[ExperimentConfig], list[ResultSink]] | None = None,
         preflight_info: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        """Execute all experiments in the suite.
+
+        Args:
+            df: Input DataFrame for experiments
+            defaults: Default configuration values
+            sink_factory: Optional factory for creating experiment-specific sinks
+            preflight_info: Optional metadata about the run environment
+
+        Returns:
+            Dictionary containing results for all experiments
+        """
         defaults = defaults or {}
         results: dict[str, Any] = {}
         prompt_packs = defaults.get("prompt_packs", {})

@@ -19,21 +19,22 @@ Reason: GitHub Actions runners have inconsistent performance (100ms+ spikes)
 """
 
 import os
+import sys
 import time
 
 import pytest
 
-from elspeth.core.artifact_pipeline import ArtifactPipeline
-from elspeth.core.datasource_registry import datasource_registry
+from elspeth.core.base.plugin_context import PluginContext
 from elspeth.core.experiments.config_merger import ConfigMerger
 from elspeth.core.experiments.plugin_registry import (
     create_aggregation_plugin,
     create_row_plugin,
     create_validation_plugin,
 )
-from elspeth.core.llm_registry import llm_registry
-from elspeth.core.plugin_context import PluginContext
-from elspeth.core.sink_registry import sink_registry
+from elspeth.core.pipeline.artifact_pipeline import ArtifactPipeline
+from elspeth.core.registries.datasource import datasource_registry
+from elspeth.core.registries.llm import llm_registry
+from elspeth.core.registries.sink import sink_registry
 
 # Skip all performance tests in CI - they're too flaky
 pytestmark = pytest.mark.skipif(os.getenv("CI") == "true", reason="Performance tests disabled in CI due to runner inconsistency")
@@ -218,12 +219,13 @@ class TestArtifactPipelinePerformance:
 
     def test_simple_pipeline_fast(self, sample_dataframe):
         """Simple artifact pipeline should resolve in < 100ms."""
-        from elspeth.core.artifact_pipeline import SinkBinding
+        from elspeth.core.pipeline.artifact_pipeline import SinkBinding
 
         # Create mock sinks
         class MockSink:
             def write(self, data, metadata=None):
-                pass
+                """Mock write method for testing."""
+                ...
 
         bindings = [
             SinkBinding(
@@ -259,12 +261,13 @@ class TestArtifactPipelinePerformance:
 
     def test_complex_pipeline_fast(self):
         """Complex artifact pipeline with 5 sinks should resolve in < 100ms."""
-        from elspeth.core.artifact_pipeline import SinkBinding
+        from elspeth.core.pipeline.artifact_pipeline import SinkBinding
 
         # Create mock sinks
         class MockSink:
             def write(self, data, metadata=None):
-                pass
+                """Mock write method for testing."""
+                ...
 
         bindings = [
             SinkBinding(
@@ -343,7 +346,7 @@ class TestPerformanceRegression:
         import pathlib
 
         test_file = pathlib.Path(__file__)
-        content = test_file.read_text()
+        content = test_file.read_text(encoding="utf-8")
 
         assert "PERFORMANCE BASELINES" in content, "Performance baselines should be documented in test file"
         assert "Registry Lookups" in content
@@ -357,12 +360,11 @@ class TestPerformanceRegression:
         # After migration: Should be <= 33s (10% tolerance)
 
         import subprocess
-        import time
 
         start = time.perf_counter()
         result = subprocess.run(
             [
-                "python",
+                sys.executable,
                 "-m",
                 "elspeth.cli",
                 "--settings",
@@ -374,6 +376,7 @@ class TestPerformanceRegression:
             ],
             capture_output=True,
             text=True,
+            check=False,
             timeout=120,
         )
         elapsed = time.perf_counter() - start
@@ -401,39 +404,37 @@ def sample_dataframe():
 
 
 # Performance summary
-"""
-PERFORMANCE BASELINES (updated 2025-10-15):
-
-Registry Lookups: < 7ms (increased from 5ms to accommodate CI environment variability)
-- Datasource: ~2-6ms (local ~2-4ms, CI ~5-6ms)
-- LLM Client: ~2-3ms
-- Sink: ~2-3ms
-
-Plugin Creation: < 35ms (increased from 20ms to accommodate CI environment variability)
-- Row Plugin: ~15-30ms (local ~15ms, CI ~30ms)
-- Aggregator: ~15-30ms (local ~15ms, CI ~30ms)
-- Validator: ~15-30ms (local ~15ms, CI ~30ms)
-
-Configuration Merge: < 50ms
-- Simple (3 layers): ~5ms
-- Complex (7 keys): ~15ms
-
-Artifact Pipeline: < 100ms
-- Simple (2 sinks): ~10ms
-- Complex (5 sinks): ~30ms
-
-End-to-End Suite: ~30-35s
-- Sample suite (10 rows)
-- 7 experiments
-- Multiple sinks per experiment
-- Middleware enabled
-
-REGRESSION THRESHOLDS:
-- Registry lookups: +3.5ms (50% increase from new 7ms baseline) = FAIL
-- Plugin creation: +17.5ms (50% increase from new 35ms baseline) = FAIL
-- Config merge: +25ms (50% increase) = FAIL
-- Artifact pipeline: +50ms (50% increase) = FAIL
-- Suite execution: +10s (33% increase) = FAIL
-
-NOTE: These tests will run automatically in CI to detect regressions.
-"""
+# PERFORMANCE BASELINES (updated 2025-10-15):
+#
+# Registry Lookups: < 7ms (increased from 5ms to accommodate CI environment variability)
+# - Datasource: ~2-6ms (local ~2-4ms, CI ~5-6ms)
+# - LLM Client: ~2-3ms
+# - Sink: ~2-3ms
+#
+# Plugin Creation: < 35ms (increased from 20ms to accommodate CI environment variability)
+# - Row Plugin: ~15-30ms (local ~15ms, CI ~30ms)
+# - Aggregator: ~15-30ms (local ~15ms, CI ~30ms)
+# - Validator: ~15-30ms (local ~15ms, CI ~30ms)
+#
+# Configuration Merge: < 50ms
+# - Simple (3 layers): ~5ms
+# - Complex (7 keys): ~15ms
+#
+# Artifact Pipeline: < 100ms
+# - Simple (2 sinks): ~10ms
+# - Complex (5 sinks): ~30ms
+#
+# End-to-End Suite: ~30-35s
+# - Sample suite (10 rows)
+# - 7 experiments
+# - Multiple sinks per experiment
+# - Middleware enabled
+#
+# REGRESSION THRESHOLDS:
+# - Registry lookups: +3.5ms (50% increase from new 7ms baseline) = FAIL
+# - Plugin creation: +17.5ms (50% increase from new 35ms baseline) = FAIL
+# - Config merge: +25ms (50% increase) = FAIL
+# - Artifact pipeline: +50ms (50% increase) = FAIL
+# - Suite execution: +10s (33% increase) = FAIL
+#
+# NOTE: These tests will run automatically in CI to detect regressions.

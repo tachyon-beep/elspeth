@@ -5,13 +5,23 @@ from __future__ import annotations
 import os
 from typing import Sequence
 
-from elspeth.core.validation_base import ConfigurationError
+from openai import AzureOpenAI, OpenAI
+
+from elspeth.core.validation.base import ConfigurationError
 
 
 class Embedder:
     """Base embedding provider."""
 
     def embed(self, text: str) -> Sequence[float]:  # pragma: no cover - interface
+        """Generate embedding vector for the given text.
+
+        Args:
+            text: Input text to embed
+
+        Returns:
+            Embedding vector as a sequence of floats
+        """
         raise NotImplementedError
 
 
@@ -19,11 +29,6 @@ class OpenAIEmbedder(Embedder):
     """OpenAI embedding provider."""
 
     def __init__(self, *, model: str, api_key: str | None = None):
-        try:
-            from openai import OpenAI
-        except ModuleNotFoundError as exc:  # pragma: no cover - optional dependency
-            raise RuntimeError("openai package is required for OpenAI embeddings") from exc
-
         key = api_key or os.getenv("OPENAI_API_KEY")
         if not key:
             raise ConfigurationError("OpenAI embeddings require an API key via 'api_key' or OPENAI_API_KEY")
@@ -46,11 +51,6 @@ class AzureOpenAIEmbedder(Embedder):
         api_key: str | None = None,
         api_version: str | None = None,
     ) -> None:
-        try:
-            from openai import AzureOpenAI
-        except ModuleNotFoundError as exc:  # pragma: no cover - optional dependency
-            raise RuntimeError("openai package >=1.0 with Azure support is required for Azure embeddings") from exc
-
         endpoint = endpoint or os.getenv("AZURE_OPENAI_ENDPOINT")
         if not endpoint:
             raise ConfigurationError("Azure OpenAI embeddings require 'endpoint' or AZURE_OPENAI_ENDPOINT")

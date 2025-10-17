@@ -61,7 +61,7 @@
 
 ## Progress 2024-05
 - Created `src/elspeth/core/interfaces.py` defining `DataSource`, `LLMClientProtocol`, `ResultSink`, and `ExperimentContext` dataclass.
-- Added blob datasource plugin (`src/elspeth/plugins/datasources/blob.py`) wrapping existing loader plus registry entry (`src/elspeth/core/registry.py`).
+- Added blob datasource plugin (`src/elspeth/plugins/datasources/blob.py`) wrapping existing loader plus registry entry (`src/elspeth/core/registries/__init__.py`).
 - Tests (`tests/test_registry.py`) ensure registry resolves the blob datasource via config options; pytest suite now at 10 passing tests.
 - Extended plugin registry to cover LLM (`azure_openai`) and result sinks (placeholder `BlobResultSink`); interfaces updated to capture structured prompts.
 - Registry tests now validate error handling and custom plugin registration (total pytest count 12).
@@ -88,7 +88,7 @@
 - Tests expanded (`tests/test_processing.py`, updated orchestrator/CLI/config tests); suite now 15 passing with coverage ~87%.
 - Implemented functional Azure OpenAI plugin (`src/elspeth/plugins/llms/azure_openai.py`) with config/env credential resolution and chat.completions invocation; new tests in `tests/test_llm_azure.py` verify prompt wiring and error handling.
 - Updated dependencies to include `openai`.
-- Added CSV result sink plugin (`src/elspeth/plugins/outputs/csv_file.py`) and registry support (`src/elspeth/core/registry.py`) plus tests (`tests/test_outputs_csv.py`).
+- Added CSV result sink plugin (`src/elspeth/plugins/outputs/csv_file.py`) and registry support (`src/elspeth/core/registries/__init__.py`) plus tests (`tests/test_outputs_csv.py`).
 - Suite now 20 passing tests; coverage ~89%.
 
 ## Lexicon Update (User Guidance)
@@ -371,7 +371,7 @@
 - Authored a top-level `README.md`, refreshed `AGENTS.md`, and documented onboarding/tooling expectations.
 - Introduced LLM middleware (audit logging, prompt shielding) and adaptive rate limiting with threaded execution controls to mirror legacy safety/audit behaviour.
 - Outstanding work: Azure ML telemetry hooks, DevOps/Excel archivers, advanced statistics suite, and schema/preflight validation from legacy runner.
-<!-- UPDATE 2025-10-12: Outstanding items addressed via telemetry middleware, Excel/ZIP sinks, analytics extras, and validation enhancements (`src/elspeth/core/validation.py`). -->
+<!-- UPDATE 2025-10-12: Outstanding items addressed via telemetry middleware, Excel/ZIP sinks, analytics extras, and validation enhancements (`src/elspeth/core/validation/settings.py` and `src/elspeth/core/validation/suite.py`). -->
 
 ## Update History
 - 2025-10-12 – Recorded completion of Phases 5–7 enhancements and noted remaining optional backlog items.

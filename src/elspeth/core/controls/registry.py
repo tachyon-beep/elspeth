@@ -15,9 +15,9 @@ from __future__ import annotations
 import inspect
 from typing import Any, Callable, Iterable
 
-from elspeth.core.plugin_context import PluginContext
+from elspeth.core.base.plugin_context import PluginContext
 from elspeth.core.security import coalesce_security_level  # Still needed for validation functions
-from elspeth.core.validation_base import ConfigurationError
+from elspeth.core.validation.base import ConfigurationError
 
 from .cost_tracker import CostTracker
 from .cost_tracker_registry import cost_tracker_registry
@@ -77,7 +77,7 @@ def create_rate_limiter(
     to eliminate duplication. Returns None if definition is None or empty
     (optional plugin pattern).
     """
-    from elspeth.core.registry.plugin_helpers import create_plugin_with_inheritance
+    from elspeth.core.registries.plugin_helpers import create_plugin_with_inheritance
 
     return create_plugin_with_inheritance(
         rate_limiter_registry,
@@ -101,7 +101,7 @@ def create_cost_tracker(
     to eliminate duplication. Returns None if definition is None or empty
     (optional plugin pattern).
     """
-    from elspeth.core.registry.plugin_helpers import create_plugin_with_inheritance
+    from elspeth.core.registries.plugin_helpers import create_plugin_with_inheritance
 
     return create_plugin_with_inheritance(
         cost_tracker_registry,

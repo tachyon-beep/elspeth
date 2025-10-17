@@ -8,10 +8,10 @@ from typing import Any
 
 from jinja2 import Template
 
+from elspeth.core.base.plugin_context import PluginContext
+from elspeth.core.base.protocols import LLMClientProtocol
 from elspeth.core.experiments.plugin_registry import register_validation_plugin
-from elspeth.core.plugin_context import PluginContext
-from elspeth.core.protocols import LLMClientProtocol
-from elspeth.core.registry import create_llm_from_definition
+from elspeth.core.registries.llm import create_llm_from_definition
 from elspeth.plugins.orchestrators.experiment.protocols import ValidationError, ValidationPlugin
 
 
@@ -168,7 +168,7 @@ register_validation_plugin(
 
 
 def _build_llm_guard(options: dict[str, Any], context: PluginContext) -> LLMGuardValidationPlugin:
-    from elspeth.core.validation_base import ConfigurationError
+    from elspeth.core.validation.base import ConfigurationError
 
     llm_spec = options.get("validator_llm") or options.get("llm")
     if llm_spec is None:

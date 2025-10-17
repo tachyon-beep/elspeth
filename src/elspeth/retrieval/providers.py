@@ -7,7 +7,7 @@ import os
 from dataclasses import dataclass
 from typing import Any, Iterable, Mapping, Sequence
 
-from elspeth.core.validation_base import ConfigurationError
+from elspeth.core.validation.base import ConfigurationError
 
 
 @dataclass
@@ -34,12 +34,11 @@ class VectorQueryClient:
 
 class PgVectorQueryClient(VectorQueryClient):
     def __init__(self, *, dsn: str, table: str = "elspeth_rag") -> None:
-        try:
-            import psycopg
-        except ModuleNotFoundError as exc:  # pragma: no cover - optional dependency
-            raise RuntimeError("psycopg package is required for pgvector retrieval") from exc
+        import psycopg
+        from psycopg import sql
 
         self._psycopg = psycopg
+        self._sql = sql
         self._dsn = dsn
         self._table = table
 
@@ -54,18 +53,20 @@ class PgVectorQueryClient(VectorQueryClient):
         vector_literal = self._vector_literal(query_vector)
         conn = self._psycopg.connect(self._dsn, autocommit=True)
         try:
+            # Use sql.Identifier to safely quote table name and prevent SQL injection
             with conn.cursor() as cur:
-                cur.execute(
-                    f"""
+                query_sql = self._sql.SQL("""
                     SELECT document_id,
                            contents,
                            metadata::text,
                            1.0 - (embedding <=> %s::vector) AS score
-                    FROM {self._table}
+                    FROM {}
                     WHERE namespace = %s
                     ORDER BY embedding <=> %s::vector ASC
                     LIMIT %s
-                    """,
+                    """).format(self._sql.Identifier(self._table))
+                cur.execute(
+                    query_sql,
                     (vector_literal, namespace, vector_literal, top_k),
                 )
                 for document_id, contents, metadata, score in cur.fetchall():
@@ -103,11 +104,8 @@ class AzureSearchQueryClient(VectorQueryClient):
         namespace_field: str = "namespace",
         content_field: str = "contents",
     ) -> None:
-        try:
-            from azure.core.credentials import AzureKeyCredential
-            from azure.search.documents import SearchClient
-        except ModuleNotFoundError as exc:  # pragma: no cover - optional dependency
-            raise RuntimeError("azure-search-documents package is required for Azure retrieval") from exc
+        from azure.core.credentials import AzureKeyCredential
+        from azure.search.documents import SearchClient
 
         self._SearchClient = SearchClient
         self._AzureKeyCredential = AzureKeyCredential

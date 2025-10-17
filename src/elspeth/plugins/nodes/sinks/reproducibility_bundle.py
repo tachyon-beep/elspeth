@@ -22,9 +22,9 @@ import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Literal, Mapping
+from typing import Any, Iterator, Literal, Mapping
 
-from elspeth.core.protocols import Artifact, ArtifactDescriptor, ResultSink
+from elspeth.core.base.protocols import Artifact, ArtifactDescriptor, ResultSink
 from elspeth.core.security import generate_signature
 from elspeth.plugins.nodes.sinks.csv_file import CsvResultSink
 
@@ -193,8 +193,6 @@ class ReproducibilityBundleSink(ResultSink):
 
         if retained_path and Path(retained_path).exists():
             # Copy the retained local file
-            import shutil
-
             assert self._temp_dir is not None
             dest_path = self._temp_dir / self.source_data_name
             shutil.copy2(retained_path, dest_path)
@@ -286,30 +284,59 @@ class ReproducibilityBundleSink(ResultSink):
         plugins_dir = self._temp_dir / "plugins"
         plugins_dir.mkdir(exist_ok=True)
 
-        plugin_info = metadata.get("plugins") or {}
+        plugin_info_raw = metadata.get("plugins")
+        plugin_info = plugin_info_raw if isinstance(plugin_info_raw, Mapping) else {}
         copied = 0
 
-        for plugin_type, plugin_list in plugin_info.items():
-            if not isinstance(plugin_list, list):
-                plugin_list = [plugin_list]
-
-            for plugin_name in plugin_list:
-                if isinstance(plugin_name, dict):
-                    plugin_name = plugin_name.get("name") or plugin_name.get("plugin")
-
-                # Find plugin source file
-                source_path = self._find_plugin_source(plugin_name, plugin_type)
-                if source_path and source_path.exists():
-                    dest_path = plugins_dir / f"{plugin_type}_{plugin_name}.py"
-                    shutil.copy2(source_path, dest_path)
-                    rel_path = f"plugins/{dest_path.name}"
-                    self._file_hashes[rel_path] = self._hash_file(dest_path)
-                    copied += 1
+        for plugin_type, plugin_name in self._iter_plugin_metadata(plugin_info):
+            source_path = self._find_plugin_source(plugin_name, plugin_type)
+            if source_path and source_path.exists():
+                dest_path = plugins_dir / f"{plugin_type}_{plugin_name}.py"
+                shutil.copy2(source_path, dest_path)
+                rel_path = f"plugins/{dest_path.name}"
+                self._file_hashes[rel_path] = self._hash_file(dest_path)
+                copied += 1
 
         if copied > 0:
             logger.debug("Copied %d plugin source files", copied)
         else:
             logger.warning("No plugin source files found; skipping")
+
+    def _iter_plugin_metadata(self, plugin_info: Mapping[str, Any]) -> Iterator[tuple[str, str]]:
+        """Yield normalized plugin metadata entries as (type, name) pairs."""
+        for plugin_type, plugin_list in plugin_info.items():
+            for entry in self._iter_plugin_values(plugin_list):
+                normalized_name = self._extract_plugin_name(entry)
+                if normalized_name is not None:
+                    yield plugin_type, normalized_name
+
+    def _iter_plugin_values(self, plugin_list: Any) -> Iterator[Any]:
+        """Iterate over plugin metadata entries regardless of container type."""
+        if not plugin_list:
+            return
+        if isinstance(plugin_list, list):
+            for entry in plugin_list:
+                if entry:
+                    yield entry
+            return
+        yield plugin_list
+
+    def _extract_plugin_name(self, entry: Any) -> str | None:
+        """Return normalized plugin name or None if not resolvable."""
+        candidate = entry
+        if isinstance(candidate, Mapping):
+            candidate = candidate.get("name") or candidate.get("plugin")
+
+        if not isinstance(candidate, str):
+            logger.warning("Skipping plugin entry with unsupported type: %r", entry)
+            return None
+
+        normalized_name = candidate.strip()
+        if not normalized_name:
+            logger.warning("Skipping plugin entry with empty name: %r", entry)
+            return None
+
+        return normalized_name
 
     def _find_plugin_source(self, plugin_name: str, plugin_type: str) -> Path | None:
         """Locate plugin source file by name and type."""
@@ -568,7 +595,7 @@ class ReproducibilityBundleSink(ResultSink):
 
     def finalize(self, artifacts: Mapping[str, Artifact], *, metadata: dict[str, Any] | None = None) -> None:
         """Optional cleanup after sink pipeline completes."""
-        pass
+        return None
 
 
 __all__ = ["ReproducibilityBundleSink"]

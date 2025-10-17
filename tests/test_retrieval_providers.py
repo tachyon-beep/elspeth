@@ -16,6 +16,32 @@ def psycopg_stub(monkeypatch):
     module._queries: list[tuple[str, tuple]] = []
     module._connect_calls: list[tuple[str, bool]] = []
 
+    # Mock psycopg.sql module for SQL injection protection
+    class MockSQL:
+        def __init__(self, text):
+            self.text = text
+
+        def format(self, *args):
+            # Replace {} placeholders with arguments in order
+            result = self.text
+            for arg in args:
+                if isinstance(arg, MockIdentifier):
+                    result = result.replace("{}", arg.name, 1)
+                elif isinstance(arg, MockSQL):
+                    result = result.replace("{}", arg.text, 1)
+                else:
+                    result = result.replace("{}", str(arg), 1)
+            return MockSQL(result)  # Return MockSQL object for chaining
+
+    class MockIdentifier:
+        def __init__(self, name):
+            self.name = name
+
+    sql_module = types.ModuleType("sql")
+    sql_module.SQL = MockSQL
+    sql_module.Identifier = MockIdentifier
+    module.sql = sql_module
+
     class FakeCursor:
         def __init__(self, parent):
             self._parent = parent
@@ -27,7 +53,12 @@ def psycopg_stub(monkeypatch):
             return False
 
         def execute(self, query, params):
-            normalized = " ".join(query.split())
+            # Handle both string and MockSQL objects
+            if isinstance(query, MockSQL):
+                query_str = query.text
+            else:
+                query_str = query
+            normalized = " ".join(query_str.split())
             self._parent._queries.append((normalized, params))
 
         def fetchall(self):
@@ -51,10 +82,12 @@ def psycopg_stub(monkeypatch):
     module.connect = connect
 
     monkeypatch.setitem(sys.modules, "psycopg", module)
+    monkeypatch.setitem(sys.modules, "psycopg.sql", sql_module)
     try:
         yield module
     finally:
         sys.modules.pop("psycopg", None)
+        sys.modules.pop("psycopg.sql", None)
         importlib.reload(sys.modules["elspeth.retrieval.providers"])
 
 
@@ -122,12 +155,12 @@ def azure_modules(monkeypatch):
             self.credential = credential
             self.calls: list[dict[str, object]] = []
 
-        def search(self, *, search_text, filter, vector, top_k, vector_fields):
+        def search(self, *, search_text, filter=None, vector=None, top_k=None, vector_fields=None, **kwargs):
             self.calls.append(
                 {
                     "search_text": search_text,
                     "filter": filter,
-                    "vector": list(vector),
+                    "vector": list(vector) if vector is not None else [],
                     "top_k": top_k,
                     "vector_fields": vector_fields,
                 }

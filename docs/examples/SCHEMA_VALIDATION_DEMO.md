@@ -543,7 +543,7 @@ datasource:
 ## Files Delivered
 
 ### Implementation
-1. `/home/john/elspeth/src/elspeth/core/schema.py` - Core Pydantic schema system (537 lines)
+1. `/home/john/elspeth/src/elspeth/core/base/schema.py` - Core Pydantic schema system (537 lines)
 2. `/home/john/elspeth/src/elspeth/core/interfaces.py` - DataSource protocol with `output_schema()` method
 3. `/home/john/elspeth/src/elspeth/plugins/datasources/csv_local.py` - CSV datasource with schema support
 4. `/home/john/elspeth/src/elspeth/plugins/datasources/csv_blob.py` - Blob CSV datasource with schema support

@@ -2,8 +2,8 @@
 
 import pytest
 
-from elspeth.core.plugin_context import PluginContext
-from elspeth.core.registry.context_utils import (
+from elspeth.core.base.plugin_context import PluginContext
+from elspeth.core.registries.context_utils import (
     create_plugin_context,
     extract_security_levels,
     prepare_plugin_payload,
@@ -59,7 +59,7 @@ def test_extract_with_parent_context():
         provenance=("parent",),
     )
 
-    security, determinism, sources = extract_security_levels(
+    security, determinism, _ = extract_security_levels(
         definition={},
         options={},
         plugin_type="utility",
@@ -111,7 +111,7 @@ def test_extract_conflicting_security_levels():
 
 def test_extract_determinism_defaults_to_none():
     """Determinism defaults to 'none' when not specified."""
-    security, determinism, sources = extract_security_levels(
+    _, determinism, _ = extract_security_levels(
         definition={},
         options={"security_level": "OFFICIAL"},
         plugin_type="datasource",
@@ -124,7 +124,7 @@ def test_extract_determinism_defaults_to_none():
 
 def test_extract_provenance_tracking():
     """Build correct provenance source list."""
-    security, determinism, sources = extract_security_levels(
+    _, _, sources = extract_security_levels(
         definition={"security_level": "OFFICIAL"},
         options={"determinism_level": "high"},
         plugin_type="llm",
@@ -138,7 +138,7 @@ def test_extract_provenance_tracking():
 
 def test_extract_normalizes_levels():
     """Security and determinism levels are normalized."""
-    security, determinism, sources = extract_security_levels(
+    security, determinism, _ = extract_security_levels(
         definition={},
         options={
             "security_level": "confidential",  # lowercase

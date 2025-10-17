@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from elspeth.core.protocols import ResultSink
+from elspeth.core.base.protocols import ResultSink
 from elspeth.plugins.nodes.sinks.csv_file import CsvResultSink
 
 logger = logging.getLogger(__name__)

@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
 
-from elspeth.core.protocols import ResultSink
+from elspeth.core.base.protocols import ResultSink
 from elspeth.core.security import generate_signature
 
 logger = logging.getLogger(__name__)
@@ -114,6 +114,7 @@ class SignedArtifactSink(ResultSink):
                 self.key = env_value
                 return env_value
             # Legacy fallback for pre-rebrand deployments
+            # TODO(v2.0): Remove DMP_SIGNING_KEY backward compatibility
             if self.key_env == "ELSPETH_SIGNING_KEY":
                 legacy_env = os.getenv("DMP_SIGNING_KEY")
                 if legacy_env:

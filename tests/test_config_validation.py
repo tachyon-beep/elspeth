@@ -2,14 +2,14 @@
 
 import pytest
 
-from elspeth.core.config_validation import (
+from elspeth.core.config.validation import (
     validate_full_configuration,
     validate_plugin_definition,
     validate_prompt_pack,
     validate_suite_configuration,
 )
 from elspeth.core.security.secure_mode import SecureMode
-from elspeth.core.validation_base import ConfigurationError
+from elspeth.core.validation.base import ConfigurationError
 
 
 class TestFullConfigurationValidation:
@@ -39,7 +39,7 @@ class TestFullConfigurationValidation:
         }
 
         # Should not raise
-        validate_full_configuration(config, mode=SecureMode.STANDARD)
+        assert validate_full_configuration(config, mode=SecureMode.STANDARD) is None
 
     def test_missing_datasource_security_level_standard(self):
         """Test missing datasource security_level in STANDARD mode raises error."""
@@ -119,7 +119,7 @@ class TestFullConfigurationValidation:
         }
 
         # Should not raise
-        validate_full_configuration(config, mode=SecureMode.DEVELOPMENT)
+        assert validate_full_configuration(config, mode=SecureMode.DEVELOPMENT) is None
 
     def test_strict_mode_disallows_mock_llm(self):
         """Test STRICT mode disallows mock LLMs."""
@@ -204,7 +204,7 @@ class TestFullConfigurationValidation:
         }
 
         # Should not raise (middleware validation is mostly warnings)
-        validate_full_configuration(config, mode=SecureMode.STRICT)
+        assert validate_full_configuration(config, mode=SecureMode.STRICT) is None
 
     def test_invalid_datasource_type(self):
         """Test non-mapping datasource configuration raises error."""
@@ -267,7 +267,7 @@ class TestPluginDefinitionValidation:
         }
 
         # Should not raise
-        validate_plugin_definition(definition, "datasource", mode=SecureMode.STANDARD)
+        assert validate_plugin_definition(definition, "datasource", mode=SecureMode.STANDARD) is None
 
     def test_validate_llm_plugin(self):
         """Test LLM plugin definition validation."""
@@ -278,7 +278,7 @@ class TestPluginDefinitionValidation:
         }
 
         # Should not raise
-        validate_plugin_definition(definition, "llm", mode=SecureMode.STANDARD)
+        assert validate_plugin_definition(definition, "llm", mode=SecureMode.STANDARD) is None
 
     def test_validate_sink_plugin(self):
         """Test sink plugin definition validation."""
@@ -289,7 +289,7 @@ class TestPluginDefinitionValidation:
         }
 
         # Should not raise
-        validate_plugin_definition(definition, "sink", mode=SecureMode.STANDARD)
+        assert validate_plugin_definition(definition, "sink", mode=SecureMode.STANDARD) is None
 
     def test_validate_plugin_with_options(self):
         """Test plugin definition with separate options block."""
@@ -303,7 +303,7 @@ class TestPluginDefinitionValidation:
         }
 
         # Should not raise (merged config validated)
-        validate_plugin_definition(definition, "datasource", mode=SecureMode.STANDARD)
+        assert validate_plugin_definition(definition, "datasource", mode=SecureMode.STANDARD) is None
 
     def test_validate_unknown_plugin_type(self):
         """Test unknown plugin type logs debug message."""
@@ -313,7 +313,7 @@ class TestPluginDefinitionValidation:
         }
 
         # Should not raise (no specific validation)
-        validate_plugin_definition(definition, "unknown", mode=SecureMode.STANDARD)
+        assert validate_plugin_definition(definition, "unknown", mode=SecureMode.STANDARD) is None
 
     def test_validate_plugin_missing_security_level(self):
         """Test plugin missing security_level in STANDARD mode."""
@@ -348,7 +348,7 @@ class TestSuiteConfigurationValidation:
         }
 
         # Should not raise
-        validate_suite_configuration(suite_config, mode=SecureMode.STANDARD)
+        assert validate_suite_configuration(suite_config, mode=SecureMode.STANDARD) is None
 
     def test_validate_suite_with_experiments(self):
         """Test suite configuration with experiment overrides."""
@@ -374,7 +374,7 @@ class TestSuiteConfigurationValidation:
         }
 
         # Should not raise
-        validate_suite_configuration(suite_config, mode=SecureMode.STANDARD)
+        assert validate_suite_configuration(suite_config, mode=SecureMode.STANDARD) is None
 
     def test_validate_suite_experiment_missing_security_level(self):
         """Test suite experiment with missing security_level."""
@@ -411,7 +411,7 @@ class TestSuiteConfigurationValidation:
         }
 
         # Should not raise
-        validate_suite_configuration(suite_config, mode=SecureMode.STANDARD)
+        assert validate_suite_configuration(suite_config, mode=SecureMode.STANDARD) is None
 
     def test_validate_suite_experiment_sink_missing_security_level(self):
         """Test suite experiment sink with missing security_level."""
@@ -449,7 +449,7 @@ class TestPromptPackValidation:
         }
 
         # Should not raise
-        validate_prompt_pack(pack_config, mode=SecureMode.STANDARD)
+        assert validate_prompt_pack(pack_config, mode=SecureMode.STANDARD) is None
 
     def test_validate_prompt_pack_sink_missing_security_level(self):
         """Test prompt pack sink with missing security_level."""
@@ -475,11 +475,11 @@ class TestPromptPackValidation:
         }
 
         # Should not raise
-        validate_prompt_pack(pack_config, mode=SecureMode.STRICT)
+        assert validate_prompt_pack(pack_config, mode=SecureMode.STRICT) is None
 
     def test_validate_empty_prompt_pack(self):
         """Test empty prompt pack validation."""
         pack_config = {}
 
         # Should not raise
-        validate_prompt_pack(pack_config, mode=SecureMode.STANDARD)
+        assert validate_prompt_pack(pack_config, mode=SecureMode.STANDARD) is None

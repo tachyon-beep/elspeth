@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from elspeth.core.protocols import Artifact
+from elspeth.core.base.protocols import Artifact
 from elspeth.plugins.nodes.sinks.excel import ExcelResultSink
 
 

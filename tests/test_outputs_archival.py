@@ -83,7 +83,7 @@ def test_excel_sink_skip_on_error(monkeypatch, tmp_path, caplog):
         def save(self, path):
             raise RuntimeError("boom")
 
-    sink._workbook_factory = lambda: DummyWorkbook()  # type: ignore[assignment]
+    sink._workbook_factory = DummyWorkbook  # type: ignore[assignment]
 
     with caplog.at_level("WARNING"):
         sink.write(sample_results(), metadata={"experiment": "exp1"})
