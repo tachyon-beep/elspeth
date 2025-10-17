@@ -100,6 +100,36 @@
     "hypothesis": "",
     "author": "unknown",
     "tags": [],
+    "prompt_system": "",
+    "prompt_template": "",
+    "row_plugin_defs": [],
+    "aggregator_plugin_defs": [],
+    "sink_defs": [],
+    "baseline_plugin_defs": [
+      {
+        "name": "score_delta",
+        "security_level": "official"
+      }
+    ],
+    "validation_plugin_defs": [],
+    "early_stop_plugin_defs": [],
+    "llm_middleware_defs": [],
+    "rate_limiter_def": {
+      "plugin": "fixed_window",
+      "security_level": "official",
+      "options": {
+        "requests": 1,
+        "per_seconds": 1
+      }
+    },
+    "cost_tracker_def": {
+      "plugin": "fixed_price",
+      "security_level": "official",
+      "options": {
+        "prompt_token_price": 0.0001,
+        "completion_token_price": 0.00015
+      }
+    },
     "estimated_cost": {
       "estimated_requests": 100.0,
       "estimated_input_cost": 6.0,
@@ -107,5 +137,5 @@
       "estimated_total_cost": 7.536
     }
   },
-  "timestamp": "2025-10-12T08:09:15.282118+00:00"
+  "timestamp": "2025-10-17T03:17:56.635629+00:00"
 }

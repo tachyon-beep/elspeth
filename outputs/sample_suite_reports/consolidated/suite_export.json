@@ -2,7 +2,7 @@
   "suite_metadata": {
     "experiment_count": 7,
     "baseline": "baseline",
-    "exported_at": "2025-10-12T08:09:15.285387+00:00"
+    "exported_at": "2025-10-17T03:17:56.637351+00:00"
   },
   "experiments": [
     {
@@ -16,6 +16,15 @@
       "hypothesis": "",
       "author": "unknown",
       "tags": [],
+      "prompt_system": "",
+      "prompt_template": "",
+      "row_plugin_defs": [],
+      "aggregator_plugin_defs": [],
+      "sink_defs": [],
+      "baseline_plugin_defs": [],
+      "validation_plugin_defs": [],
+      "early_stop_plugin_defs": [],
+      "llm_middleware_defs": [],
       "estimated_cost": {
         "estimated_requests": 100.0,
         "estimated_input_cost": 6.0,
@@ -47,6 +56,27 @@
       "hypothesis": "",
       "author": "unknown",
       "tags": [],
+      "prompt_system": "",
+      "prompt_template": "",
+      "row_plugin_defs": [],
+      "aggregator_plugin_defs": [],
+      "sink_defs": [],
+      "baseline_plugin_defs": [],
+      "validation_plugin_defs": [],
+      "early_stop_plugin_defs": [
+        {
+          "name": "threshold",
+          "options": {
+            "metric": "score",
+            "threshold": 0.55,
+            "comparison": "gte",
+            "min_rows": 1,
+            "label": "first_row_high",
+            "security_level": "official"
+          }
+        }
+      ],
+      "llm_middleware_defs": [],
       "estimated_cost": {
         "estimated_requests": 100.0,
         "estimated_input_cost": 6.0,
@@ -89,6 +119,38 @@
       "hypothesis": "",
       "author": "unknown",
       "tags": [],
+      "prompt_system": "",
+      "prompt_template": "",
+      "row_plugin_defs": [],
+      "aggregator_plugin_defs": [],
+      "sink_defs": [],
+      "baseline_plugin_defs": [],
+      "validation_plugin_defs": [],
+      "early_stop_plugin_defs": [
+        {
+          "name": "threshold",
+          "options": {
+            "metric": "scores.analysis",
+            "threshold": 0.63,
+            "comparison": "gte",
+            "min_rows": 2,
+            "label": "analysis_high",
+            "security_level": "official"
+          }
+        },
+        {
+          "name": "threshold",
+          "options": {
+            "metric": "score",
+            "threshold": 0.6,
+            "comparison": "gte",
+            "min_rows": 2,
+            "label": "overall_high_guardrail",
+            "security_level": "official"
+          }
+        }
+      ],
+      "llm_middleware_defs": [],
       "estimated_cost": {
         "estimated_requests": 100.0,
         "estimated_input_cost": 6.0,
@@ -121,6 +183,28 @@
       "hypothesis": "",
       "author": "unknown",
       "tags": [],
+      "prompt_system": "",
+      "prompt_template": "",
+      "row_plugin_defs": [],
+      "aggregator_plugin_defs": [],
+      "sink_defs": [],
+      "baseline_plugin_defs": [],
+      "validation_plugin_defs": [],
+      "early_stop_plugin_defs": [],
+      "llm_middleware_defs": [
+        {
+          "name": "prompt_shield",
+          "security_level": "official",
+          "options": {
+            "denied_terms": [
+              "classified",
+              "top secret"
+            ],
+            "on_violation": "mask",
+            "mask": "[REDACTED]"
+          }
+        }
+      ],
       "estimated_cost": {
         "estimated_requests": 100.0,
         "estimated_input_cost": 6.0,
@@ -164,6 +248,39 @@
       "hypothesis": "",
       "author": "unknown",
       "tags": [],
+      "prompt_system": "",
+      "prompt_template": "",
+      "row_plugin_defs": [],
+      "aggregator_plugin_defs": [],
+      "sink_defs": [],
+      "baseline_plugin_defs": [
+        {
+          "name": "score_delta",
+          "security_level": "official"
+        }
+      ],
+      "validation_plugin_defs": [],
+      "early_stop_plugin_defs": [],
+      "llm_middleware_defs": [],
+      "rate_limiter_def": {
+        "plugin": "fixed_window",
+        "security_level": "official",
+        "options": {
+          "requests": 1,
+          "per_seconds": 5
+        }
+      },
+      "cost_tracker_def": {
+        "plugin": "fixed_price",
+        "security_level": "official",
+        "options": {
+          "prompt_token_price": 0.0001,
+          "completion_token_price": 0.00015
+        }
+      },
+      "concurrency_config": {
+        "enabled": false
+      },
       "estimated_cost": {
         "estimated_requests": 100.0,
         "estimated_input_cost": 6.0,
@@ -199,6 +316,19 @@
       "hypothesis": "",
       "author": "unknown",
       "tags": [],
+      "prompt_system": "",
+      "row_plugin_defs": [],
+      "aggregator_plugin_defs": [],
+      "sink_defs": [],
+      "baseline_plugin_defs": [
+        {
+          "name": "score_delta",
+          "security_level": "official"
+        }
+      ],
+      "validation_plugin_defs": [],
+      "early_stop_plugin_defs": [],
+      "llm_middleware_defs": [],
       "estimated_cost": {
         "estimated_requests": 200.0,
         "estimated_input_cost": 12.0,
@@ -239,6 +369,36 @@
       "hypothesis": "",
       "author": "unknown",
       "tags": [],
+      "prompt_system": "",
+      "prompt_template": "",
+      "row_plugin_defs": [],
+      "aggregator_plugin_defs": [],
+      "sink_defs": [],
+      "baseline_plugin_defs": [
+        {
+          "name": "score_delta",
+          "security_level": "official"
+        }
+      ],
+      "validation_plugin_defs": [],
+      "early_stop_plugin_defs": [],
+      "llm_middleware_defs": [],
+      "rate_limiter_def": {
+        "plugin": "fixed_window",
+        "security_level": "official",
+        "options": {
+          "requests": 1,
+          "per_seconds": 1
+        }
+      },
+      "cost_tracker_def": {
+        "plugin": "fixed_price",
+        "security_level": "official",
+        "options": {
+          "prompt_token_price": 0.0001,
+          "completion_token_price": 0.00015
+        }
+      },
       "estimated_cost": {
         "estimated_requests": 100.0,
         "estimated_input_cost": 6.0,
