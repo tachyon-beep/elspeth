@@ -15,3 +15,8 @@ This is an internal scratchpad for ongoing engineering notes. Update freely whil
 - Ran lint pass (`ruff check --fix`), committed `Sort imports via ruff`.
 - Verified `mypy --config-file pyproject.toml src` clean; refined ignores in logging/config_merger/security.
 - Confirmed lint configs (ruff & mypy) enforced, no unreasonable disables.
+
+## 2025-10-21
+
+- Converted `core/base/schema.py` into a package with `base.py`, `inference.py`, `model_factory.py`, and `validation.py`; `__init__` re-exports maintain public imports.
+- Deferred pytest run until virtualenv bootstrap; next pass should cover schema inference/compat tests once `.venv` is ready.

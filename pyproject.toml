@@ -58,6 +58,9 @@ exclude = ["tests", "old", "notes", "config"]
 [tool.setuptools.package-dir]
 "" = "src"
 
+[tool.setuptools.package-data]
+elspeth = ["py.typed"]
+
 [tool.pytest.ini_options]
 addopts = "-ra --cov=elspeth --cov-report=term-missing --cov-report=xml:coverage.xml"
 testpaths = ["tests"]

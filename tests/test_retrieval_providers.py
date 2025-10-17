@@ -155,12 +155,12 @@ def azure_modules(monkeypatch):
             self.credential = credential
             self.calls: list[dict[str, object]] = []
 
-        def search(self, *, search_text, filter, vector, top_k, vector_fields):
+        def search(self, *, search_text, filter=None, vector=None, top_k=None, vector_fields=None, **kwargs):
             self.calls.append(
                 {
                     "search_text": search_text,
                     "filter": filter,
-                    "vector": list(vector),
+                    "vector": list(vector) if vector is not None else [],
                     "top_k": top_k,
                     "vector_fields": vector_fields,
                 }

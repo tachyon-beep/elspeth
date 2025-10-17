@@ -4,37 +4,34 @@ Version: 0.1.0
 Summary: ELSPETH secure LLM orchestration platform
 Author: ELSPETH Team
 Requires-Python: >=3.12
-Requires-Dist: azure-identity>=1.15.0
-Requires-Dist: azure-storage-blob>=12.19.0
-Requires-Dist: pandas>=2.2.0
+License-File: LICENSE
+Requires-Dist: azure-identity>=1.25.0
+Requires-Dist: azure-storage-blob>=12.27.0
+Requires-Dist: azure-search-documents>=11.4.0
+Requires-Dist: psycopg>=3.1.0
+Requires-Dist: pandas>=2.3.0
+Requires-Dist: pydantic<3.0,>=2.0
 Requires-Dist: pyyaml>=6.0
-Requires-Dist: openai>=1.12.0
-Requires-Dist: requests>=2.31.0
+Requires-Dist: openai>=2.0.0
+Requires-Dist: requests>=2.32.0
 Requires-Dist: jinja2>=3.1.0
-Requires-Dist: jsonschema>=4.21.1
-Requires-Dist: scipy>=1.10.0
+Requires-Dist: jsonschema>=4.25.0
+Requires-Dist: scipy>=1.16.0
+Requires-Dist: openpyxl>=3.1
+Requires-Dist: matplotlib>=3.10.0
+Requires-Dist: seaborn>=0.13.0
+Requires-Dist: pingouin>=0.5
+Requires-Dist: statsmodels>=0.14
 Provides-Extra: dev
-Requires-Dist: pytest>=8.0.0; extra == "dev"
+Requires-Dist: pytest>=8.4.0; extra == "dev"
 Requires-Dist: pytest-mock>=3.10.0; extra == "dev"
 Requires-Dist: pytest-cov>=5.0.0; extra == "dev"
-Requires-Dist: openpyxl>=3.1; extra == "dev"
+Requires-Dist: pytest-asyncio>=0.24.0; extra == "dev"
 Requires-Dist: pandas-stubs>=2.2.0.240807; extra == "dev"
-Requires-Dist: black>=24.3.0; extra == "dev"
-Requires-Dist: isort>=5.13.2; extra == "dev"
+Requires-Dist: ruff>=0.14.0; extra == "dev"
+Requires-Dist: mypy>=1.18.0; extra == "dev"
+Requires-Dist: types-requests>=2.32.0; extra == "dev"
+Requires-Dist: types-PyYAML>=6.0.0; extra == "dev"
 Provides-Extra: azure
 Requires-Dist: azureml-core>=1.56.0; extra == "azure"
-Provides-Extra: stats-core
-Requires-Dist: scipy>=1.10.0; extra == "stats-core"
-Provides-Extra: stats-agreement
-Requires-Dist: pingouin>=0.5; extra == "stats-agreement"
-Provides-Extra: stats-bayesian
-Requires-Dist: scipy>=1.10; extra == "stats-bayesian"
-Provides-Extra: stats-planning
-Requires-Dist: statsmodels>=0.14; extra == "stats-planning"
-Provides-Extra: stats-distribution
-Requires-Dist: scipy>=1.10; extra == "stats-distribution"
-Provides-Extra: sinks-excel
-Requires-Dist: openpyxl>=3.1; extra == "sinks-excel"
-Provides-Extra: analytics-visual
-Requires-Dist: matplotlib>=3.8.0; extra == "analytics-visual"
-Requires-Dist: seaborn>=0.13.0; extra == "analytics-visual"
+Dynamic: license-file

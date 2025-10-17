@@ -4,6 +4,7 @@
 Source code lives in `src/elspeth/`, with `core/` handling orchestration, `plugins/` providing metrics and output sinks, and `cli.py` as the entrypoint. Plugins follow the Phase 2 layout under `src/elspeth/plugins/nodes/{sources,transforms,sinks}/` and `src/elspeth/plugins/experiments/`; update imports to match. Sample configs are in `config/sample_suite/`, scripts in `scripts/`, docs in `notes/`, and tests mirror the package shape under `tests/`.
 
 ## Build, Test, and Development Commands
+- Always activate the project virtualenv (`source .venv/bin/activate`) before running `make`, CLI entrypoints, or scripts; all tooling assumes execution inside `.venv/`.
 - `make bootstrap` (or `scripts/bootstrap.sh`): create `.venv/`, install extras, run the sanity pytest pass.
 - `source .venv/bin/activate` then `pip install -e .[dev,analytics-visual]`: refresh dependencies.
 - `make sample-suite`: run the CSV datasource + mock LLM demo.
