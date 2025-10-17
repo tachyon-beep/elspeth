@@ -31,11 +31,11 @@
 **Deliverables:** Green pytest report, updated tests, changelog entry.
 
 ### Workstream B: Endpoint Hardening (Lead: Security Eng)
-1. Integrate `validate_azure_openai_endpoint`/`validate_http_api_endpoint` in `_create_embedder` (`src/elspeth/retrieval/service.py`).  
-2. Add Azure Search patterns to `APPROVED_PATTERNS` and enforce validation in `create_query_client` (`src/elspeth/retrieval/providers.py`).  
-3. Implement secure-mode regression tests (positive/negative cases).  
-4. Document runbooks for rejected endpoints (`docs/operations/`).  
-**Deliverables:** Hardened retrieval code, passing tests, security approval note.
+1. Integrate `validate_azure_openai_endpoint` in `_create_embedder` (`src/elspeth/retrieval/service.py`). ✅  
+2. Add Azure Search patterns to `APPROVED_PATTERNS` and enforce validation in `create_query_client` (`src/elspeth/retrieval/providers.py`). ✅  
+3. Implement regression tests covering allowlist success/failure paths (`tests/test_retrieval_service.py`, `tests/test_retrieval_providers.py`, `tests/test_security_approved_endpoints.py`). ✅  
+4. Document runbooks for rejected endpoints (`docs/operations/retrieval-endpoints.md`). ✅  
+**Deliverables:** Hardened retrieval code, passing tests, runbook & audit references.
 
 ### Workstream C: Deterministic Supply Chain (Lead: DevOps)
 1. Generate pinned requirement files (e.g., `requirements.lock`, `requirements-dev.lock`) via pip-compile with hashes. ✅  

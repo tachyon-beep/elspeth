@@ -1,7 +1,7 @@
 **Quick wins (days)**
 
-- Enforce retrieval endpoint validation (AUD-0002, Effort S, Risk ↓ High): Call the existing `validate_*_endpoint` functions from `_create_embedder` so embeddings cannot be sent to unapproved URLs.
-- Add Azure Search allowlist checks (AUD-0003, Effort M, Risk ↓ High): Extend `approved_endpoints` with Azure Search patterns and guard `create_query_client` before client construction.
+- Enforce retrieval endpoint validation (AUD-0002, Effort S, Risk ↓ High): ✅ Called validators from `_create_embedder`; tests added in `tests/test_retrieval_service.py`.
+- Add Azure Search allowlist checks (AUD-0003, Effort M, Risk ↓ High): ✅ Added patterns, enforced validation in `create_query_client`, and documented runbook in `docs/operations/retrieval-endpoints.md`.
 - Document and wire automated secret/vulnerability scans in CI (supports gates, Effort S, Risk ↓ Medium): Add gitleaks and pip-audit steps so future audits have artefacts.
 
 **Deep work (weeks)**

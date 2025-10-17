@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Iterable, Mapping
 
+from elspeth.core.security import validate_azure_openai_endpoint
 from elspeth.retrieval.embedding import AzureOpenAIEmbedder, Embedder, OpenAIEmbedder
 from elspeth.retrieval.providers import QueryResult, VectorQueryClient, create_query_client
 
@@ -58,6 +59,8 @@ def _create_embedder(config: Mapping[str, object]) -> Embedder:
         api_key = str(api_key_raw) if api_key_raw is not None else None
         api_version_raw = config.get("api_version")
         api_version = str(api_version_raw) if api_version_raw is not None else None
+        if endpoint:
+            validate_azure_openai_endpoint(endpoint)
         return AzureOpenAIEmbedder(
             endpoint=endpoint,
             deployment=deployment,

@@ -50,6 +50,7 @@ ServiceType = Literal[
     "azure_openai",
     "http_api",
     "azure_blob",
+    "azure_search",
 ]
 
 # Default approved endpoint patterns by service type
@@ -83,6 +84,14 @@ APPROVED_PATTERNS: dict[ServiceType, list[str]] = {
         r"https://[^/]+\.blob\.core\.usgovcloudapi\.net(/.*)?",
         # Azure Blob Storage China cloud
         r"https://[^/]+\.blob\.core\.chinacloudapi\.cn(/.*)?",
+    ],
+    "azure_search": [
+        # Azure Cognitive Search public cloud
+        r"https://[^/]+\.search\.windows\.net(/.*)?",
+        # Azure Cognitive Search Government cloud
+        r"https://[^/]+\.search\.azure\.us(/.*)?",
+        # Azure Cognitive Search China cloud
+        r"https://[^/]+\.search\.azure\.cn(/.*)?",
     ],
 }
 
@@ -337,11 +346,25 @@ def validate_azure_blob_endpoint(endpoint: str, security_level: str | None = Non
     )
 
 
+def validate_azure_search_endpoint(endpoint: str, security_level: str | None = None, mode: SecureMode | None = None) -> None:
+    """Validate an Azure Cognitive Search endpoint.
+
+    Convenience wrapper for validate_endpoint with service_type="azure_search".
+    """
+    validate_endpoint(
+        endpoint=endpoint,
+        service_type="azure_search",
+        security_level=security_level,
+        mode=mode,
+    )
+
+
 __all__ = [
     "ServiceType",
     "validate_endpoint",
     "validate_azure_openai_endpoint",
     "validate_http_api_endpoint",
     "validate_azure_blob_endpoint",
+    "validate_azure_search_endpoint",
     "get_approved_patterns",
 ]

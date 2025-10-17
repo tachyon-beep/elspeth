@@ -13,6 +13,7 @@ Decision: **REJECT** (confidence: Highly likely). The platform cannot be accepte
 - Documentation and onboarding remain strong (quick start, security playbooks, and logging standards in `README.md:1-140`), which will help once blocking issues are resolved.
 - Line coverage remains high at 89.9% with branch coverage 67.4%, indicating broad unit and integration exercise once regressions are fixed (`coverage.xml:2`).
 - Dependency lockfiles and reproducible bootstrap commands (`requirements.lock`, `requirements-dev.lock`, `scripts/bootstrap.sh`) now exist, enabling consistent env recreation alongside SBOM (`make sbom`) and audit (`make audit`) routines.
+- Retrieval components now enforce endpoint allowlists for Azure OpenAI embeddings and Azure Cognitive Search clients, with runbooks under `docs/operations/retrieval-endpoints.md`.
 
 **Implications**
 - The failing tests expose correctness and policy regressions (determinism metadata, namespace normalization) that likely surfaced after recent refactors; accepting the code now would push known defects into production pipelines.

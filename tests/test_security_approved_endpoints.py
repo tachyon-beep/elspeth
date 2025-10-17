@@ -7,6 +7,7 @@ from elspeth.core.security.approved_endpoints import (
     get_approved_patterns,
     validate_azure_blob_endpoint,
     validate_azure_openai_endpoint,
+    validate_azure_search_endpoint,
     validate_endpoint,
     validate_http_api_endpoint,
 )
@@ -131,6 +132,36 @@ class TestEndpointValidation:
                 security_level="OFFICIAL",
             )
 
+    def test_azure_search_approved_endpoints(self):
+        assert (
+            validate_azure_search_endpoint(
+                "https://mysearch.search.windows.net",
+                security_level="OFFICIAL",
+            )
+            is None
+        )
+        assert (
+            validate_azure_search_endpoint(
+                "https://federal.search.azure.us",
+                security_level="OFFICIAL",
+            )
+            is None
+        )
+        assert (
+            validate_azure_search_endpoint(
+                "https://china.search.azure.cn",
+                security_level="OFFICIAL",
+            )
+            is None
+        )
+
+    def test_azure_search_unapproved_endpoint(self):
+        with pytest.raises(ValueError, match="not approved"):
+            validate_azure_search_endpoint(
+                "https://search.notazure.example.com",
+                security_level="OFFICIAL",
+            )
+
     def test_development_mode_bypass(self):
         """Test development mode allows unapproved endpoints with warning."""
         # Should not raise in development mode
@@ -207,6 +238,10 @@ class TestEndpointValidation:
         patterns = get_approved_patterns("azure_blob")
         assert len(patterns) > 0
         assert any("blob" in p and "windows" in p for p in patterns)
+
+        patterns = get_approved_patterns("azure_search")
+        assert len(patterns) > 0
+        assert any("search" in p and "windows" in p for p in patterns)
 
     def test_security_level_none_allowed(self):
         """Test validation works when security_level is None."""
