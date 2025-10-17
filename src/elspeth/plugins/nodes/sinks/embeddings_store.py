@@ -350,7 +350,7 @@ class EmbeddingsStoreSink(ResultSink):
         experiment = getattr(experiment_context, "plugin_name", metadata.get("experiment", "experiment"))
         level = metadata.get("security_level", getattr(context, "security_level", "unofficial"))
         level = str(level).lower()
-        return f"{suite}.{experiment}.{level}"
+        return f"{str(suite).lower()}.{str(experiment).lower()}.{level}"
 
     def _extract_embedding(self, record: Mapping[str, Any]) -> Sequence[float] | None:
         value = self._extract_value(record, self._embedding_field)

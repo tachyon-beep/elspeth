@@ -131,47 +131,38 @@ def test_create_plugin_none_without_allow_none(mock_registry):
 # Inheritance tests
 
 
-def test_create_plugin_inherits_security_from_parent(mock_registry, parent_context):
-    """Helper inherits security_level from parent when not specified."""
+def test_create_plugin_requires_security_even_with_parent(mock_registry, parent_context):
+    """Helper refuses to inherit security_level; plugin must declare it."""
     definition = {
         "name": "test",
         "options": {"value": "test_value"},
-        # No security_level specified
         "determinism_level": "high",
     }
 
-    plugin = create_plugin_with_inheritance(
-        mock_registry,
-        definition,
-        plugin_kind="test_plugin",
-        parent_context=parent_context,
-    )
-
-    # Should inherit PROTECTED from parent
-    assert plugin._elspeth_context.security_level == "PROTECTED"
-    assert plugin._elspeth_context.determinism_level == "high"
-    assert plugin._elspeth_context.parent == parent_context
+    with pytest.raises(ConfigurationError, match="security_level must be declared"):
+        create_plugin_with_inheritance(
+            mock_registry,
+            definition,
+            plugin_kind="test_plugin",
+            parent_context=parent_context,
+        )
 
 
-def test_create_plugin_inherits_determinism_from_parent(mock_registry, parent_context):
-    """Helper inherits determinism_level from parent when not specified."""
+def test_create_plugin_requires_determinism_even_with_parent(mock_registry, parent_context):
+    """Helper refuses to inherit determinism_level; plugin must declare it."""
     definition = {
         "name": "test",
         "options": {"value": "test_value"},
-        # No security_level specified - will inherit PROTECTED from parent
-        # No determinism_level specified - will inherit from parent
+        "security_level": "PROTECTED",
     }
 
-    plugin = create_plugin_with_inheritance(
-        mock_registry,
-        definition,
-        plugin_kind="test_plugin",
-        parent_context=parent_context,
-    )
-
-    assert plugin._elspeth_context.security_level == "PROTECTED"  # Inherited from parent
-    # Should inherit "high" from parent
-    assert plugin._elspeth_context.determinism_level == "high"
+    with pytest.raises(ConfigurationError, match="determinism_level must be declared"):
+        create_plugin_with_inheritance(
+            mock_registry,
+            definition,
+            plugin_kind="test_plugin",
+            parent_context=parent_context,
+        )
 
 
 def test_create_plugin_overrides_parent_security(mock_registry, parent_context):
@@ -195,24 +186,21 @@ def test_create_plugin_overrides_parent_security(mock_registry, parent_context):
     assert plugin._elspeth_context.parent == parent_context
 
 
-def test_create_plugin_defaults_determinism_to_none(mock_registry):
-    """Helper defaults determinism_level to 'none' when not specified."""
+def test_create_plugin_requires_determinism_when_no_parent(mock_registry):
+    """Helper enforces determinism_level even without parent."""
     definition = {
         "name": "test",
         "options": {"value": "test_value"},
         "security_level": "OFFICIAL",
-        # No determinism_level, no parent
     }
 
-    plugin = create_plugin_with_inheritance(
-        mock_registry,
-        definition,
-        plugin_kind="test_plugin",
-        parent_context=None,
-    )
-
-    # Should default to "none"
-    assert plugin._elspeth_context.determinism_level == "none"
+    with pytest.raises(ConfigurationError, match="determinism_level must be declared"):
+        create_plugin_with_inheritance(
+            mock_registry,
+            definition,
+            plugin_kind="test_plugin",
+            parent_context=None,
+        )
 
 
 # Options coalescing tests
@@ -341,24 +329,20 @@ def test_create_plugin_provenance_from_options(mock_registry):
     assert "test_plugin:test.options.determinism_level" in provenance
 
 
-def test_create_plugin_provenance_inheritance(mock_registry, parent_context):
-    """Helper tracks provenance when inheriting from parent."""
+def test_create_plugin_missing_levels_raises(mock_registry, parent_context):
+    """Plugins without explicit security/determinism fail to instantiate."""
     definition = {
         "name": "test",
         "options": {"value": "test_value"},
-        # No security_level - will inherit
     }
 
-    plugin = create_plugin_with_inheritance(
-        mock_registry,
-        definition,
-        plugin_kind="test_plugin",
-        parent_context=parent_context,
-    )
-
-    provenance = plugin._elspeth_context.provenance
-    assert "test_plugin:test.inherited.security_level" in provenance
-    assert "test_plugin:test.inherited.determinism_level" in provenance
+    with pytest.raises(ConfigurationError, match="security_level must be declared"):
+        create_plugin_with_inheritance(
+            mock_registry,
+            definition,
+            plugin_kind="test_plugin",
+            parent_context=parent_context,
+        )
 
 
 def test_create_plugin_additional_provenance(mock_registry):
@@ -494,7 +478,7 @@ def test_create_plugin_derives_from_parent(mock_registry, parent_context):
     definition = {
         "name": "test",
         "options": {"value": "test_value"},
-        # No explicit security_level - will inherit PROTECTED from parent
+        "security_level": "PROTECTED",
         "determinism_level": "high",
     }
 
@@ -509,7 +493,7 @@ def test_create_plugin_derives_from_parent(mock_registry, parent_context):
     assert plugin._elspeth_context.parent == parent_context
     assert plugin._elspeth_context.plugin_name == "test"
     assert plugin._elspeth_context.plugin_kind == "test_plugin"
-    assert plugin._elspeth_context.security_level == "PROTECTED"  # Inherited from parent
+    assert plugin._elspeth_context.security_level == "PROTECTED"
 
 
 def test_create_plugin_creates_root_context(mock_registry):
@@ -538,8 +522,8 @@ def test_create_plugin_creates_root_context(mock_registry):
 
 
 def test_create_plugin_rate_limiter_pattern(mock_registry):
-    """Helper works with rate_limiter pattern (optional, inherits security)."""
-    # Rate limiters are optional and inherit security from parent
+    """Helper enforces explicit levels for rate_limiter pattern."""
+    # Rate limiters are optional but must declare their own levels
     parent = PluginContext(
         plugin_name="experiment",
         plugin_kind="experiment",
@@ -558,13 +542,23 @@ def test_create_plugin_rate_limiter_pattern(mock_registry):
     )
     assert plugin is None
 
-    # With definition - should inherit security
+    # With definition missing levels - should raise
     definition = {
         "name": "test",
         "options": {"rate": 100},
-        # No explicit security_level - should inherit
     }
 
+    with pytest.raises(ConfigurationError, match="security_level must be declared"):
+        create_plugin_with_inheritance(
+            mock_registry,
+            definition,
+            plugin_kind="rate_limiter",
+            parent_context=parent,
+            allow_none=True,
+        )
+
+    # Providing explicit levels allows instantiation
+    definition.update({"security_level": "PROTECTED", "determinism_level": "high"})
     plugin = create_plugin_with_inheritance(
         mock_registry,
         definition,
@@ -575,7 +569,8 @@ def test_create_plugin_rate_limiter_pattern(mock_registry):
 
     assert plugin is not None
     assert plugin.rate == 100
-    assert plugin._elspeth_context.security_level == "PROTECTED"  # Inherited
+    assert plugin._elspeth_context.security_level == "PROTECTED"
+    assert plugin._elspeth_context.determinism_level == "high"
 
 
 def test_create_plugin_experiment_plugin_pattern(mock_registry):
@@ -591,6 +586,7 @@ def test_create_plugin_experiment_plugin_pattern(mock_registry):
     definition = {
         "name": "test",
         "security_level": "SECRET",  # Experiment plugins often specify explicitly
+        "determinism_level": "high",
         "options": {"threshold": 0.5},
     }
 
@@ -605,4 +601,4 @@ def test_create_plugin_experiment_plugin_pattern(mock_registry):
     assert plugin is not None
     assert plugin.threshold == 0.5
     assert plugin._elspeth_context.security_level == "SECRET"  # Explicit, not inherited
-    assert plugin._elspeth_context.determinism_level == "high"  # Inherited
+    assert plugin._elspeth_context.determinism_level == "high"

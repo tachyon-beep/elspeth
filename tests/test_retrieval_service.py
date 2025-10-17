@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+import elspeth.retrieval.service as service_module
 from elspeth.retrieval.providers import QueryResult
 from elspeth.retrieval.service import RetrievalService, _create_embedder, create_retrieval_service
 
@@ -66,6 +67,52 @@ def test_create_retrieval_service_requires_embed_model():
 def test_create_embedder_unsupported_provider():
     with pytest.raises(ValueError):
         _create_embedder({"provider": "unknown"})
+
+
+def test_create_embedder_validates_azure_endpoint(monkeypatch):
+    captured = {}
+
+    def fake_validate(endpoint, security_level=None, mode=None):
+        captured["endpoint"] = endpoint
+
+    def fake_embedder(**kwargs):
+        captured["kwargs"] = kwargs
+        return "EMBEDDER"
+
+    monkeypatch.setattr(service_module, "validate_azure_openai_endpoint", fake_validate)
+    monkeypatch.setattr(service_module, "AzureOpenAIEmbedder", fake_embedder)
+
+    config = {
+        "provider": "azure_openai",
+        "endpoint": "https://my-resource.openai.azure.com",
+        "deployment": "embedding",
+        "api_key": "secret",
+        "api_version": "2024-05-13",
+    }
+
+    embedder = _create_embedder(config)
+
+    assert embedder == "EMBEDDER"
+    assert captured["endpoint"] == "https://my-resource.openai.azure.com"
+    assert captured["kwargs"]["endpoint"] == config["endpoint"]
+
+
+def test_create_embedder_rejects_unapproved_azure_endpoint(monkeypatch):
+    def fake_validate(endpoint, security_level=None, mode=None):
+        raise ValueError("not approved")
+
+    monkeypatch.setattr(service_module, "validate_azure_openai_endpoint", fake_validate)
+
+    with pytest.raises(ValueError, match="not approved"):
+        _create_embedder(
+            {
+                "provider": "azure_openai",
+                "endpoint": "https://evil.example.com",
+                "deployment": "embedding",
+                "api_key": "key",
+                "api_version": "2024-05-13",
+            }
+        )
 
 
 def test_retrieval_service_passthrough_calls():

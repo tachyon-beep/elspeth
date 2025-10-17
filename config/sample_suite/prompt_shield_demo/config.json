@@ -9,6 +9,7 @@
     {
       "name": "prompt_shield",
       "security_level": "official",
+      "determinism_level": "guaranteed",
       "options": {
         "denied_terms": ["classified", "top secret"],
         "on_violation": "mask",

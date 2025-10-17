@@ -50,6 +50,7 @@ ServiceType = Literal[
     "azure_openai",
     "http_api",
     "azure_blob",
+    "azure_search",
 ]
 
 # Default approved endpoint patterns by service type
@@ -57,12 +58,8 @@ ServiceType = Literal[
 # Full regex matching is used for validation.
 APPROVED_PATTERNS: dict[ServiceType, list[str]] = {
     "azure_openai": [
-        # Azure OpenAI public cloud
+        # Azure OpenAI (public cloud) - includes Australian regions
         r"https://[^/]+\.openai\.azure\.com(/.*)?",
-        # Azure OpenAI Government cloud
-        r"https://[^/]+\.openai\.azure\.us(/.*)?",
-        # Azure OpenAI China cloud
-        r"https://[^/]+\.openai\.azure\.cn(/.*)?",
     ],
     "http_api": [
         # OpenAI public API
@@ -77,12 +74,12 @@ APPROVED_PATTERNS: dict[ServiceType, list[str]] = {
         r"https://\[::1\](:[0-9]+)?(/.*)?",
     ],
     "azure_blob": [
-        # Azure Blob Storage public cloud
+        # Azure Blob Storage (public cloud) - includes Australian regions
         r"https://[^/]+\.blob\.core\.windows\.net(/.*)?",
-        # Azure Blob Storage Government cloud
-        r"https://[^/]+\.blob\.core\.usgovcloudapi\.net(/.*)?",
-        # Azure Blob Storage China cloud
-        r"https://[^/]+\.blob\.core\.chinacloudapi\.cn(/.*)?",
+    ],
+    "azure_search": [
+        # Azure Cognitive Search (public cloud) - includes Australian regions
+        r"https://[^/]+\.search\.windows\.net(/.*)?",
     ],
 }
 
@@ -120,7 +117,7 @@ def _get_environment_patterns() -> list[str]:
             patterns.append(pattern_str)
 
     if patterns:
-        logger.info(f"Loaded {len(patterns)} additional approved endpoint patterns from " "ELSPETH_APPROVED_ENDPOINTS environment variable")
+        logger.info(f"Loaded {len(patterns)} additional approved endpoint patterns from ELSPETH_APPROVED_ENDPOINTS environment variable")
 
     return patterns
 
@@ -221,7 +218,7 @@ def validate_endpoint(
             break
 
     if not matched:
-        error_msg = f"Endpoint '{endpoint}' is not approved for service type '{service_type}'. " f"Approved patterns: {approved_patterns}"
+        error_msg = f"Endpoint '{endpoint}' is not approved for service type '{service_type}'. Approved patterns: {approved_patterns}"
 
         if mode == SecureMode.DEVELOPMENT:
             logger.warning(f"{error_msg} (DEVELOPMENT mode - allowing anyway)")
@@ -257,7 +254,7 @@ def validate_endpoint(
                         logger.error(error_msg)
                         raise ValueError(error_msg)
 
-    logger.debug(f"Endpoint '{endpoint}' validated successfully for service '{service_type}' " f"(matched pattern: {matched_pattern})")
+    logger.debug(f"Endpoint '{endpoint}' validated successfully for service '{service_type}' (matched pattern: {matched_pattern})")
 
 
 def get_approved_patterns(service_type: ServiceType) -> list[str]:
@@ -337,11 +334,25 @@ def validate_azure_blob_endpoint(endpoint: str, security_level: str | None = Non
     )
 
 
+def validate_azure_search_endpoint(endpoint: str, security_level: str | None = None, mode: SecureMode | None = None) -> None:
+    """Validate an Azure Cognitive Search endpoint.
+
+    Convenience wrapper for validate_endpoint with service_type="azure_search".
+    """
+    validate_endpoint(
+        endpoint=endpoint,
+        service_type="azure_search",
+        security_level=security_level,
+        mode=mode,
+    )
+
+
 __all__ = [
     "ServiceType",
     "validate_endpoint",
     "validate_azure_openai_endpoint",
     "validate_http_api_endpoint",
     "validate_azure_blob_endpoint",
+    "validate_azure_search_endpoint",
     "get_approved_patterns",
 ]

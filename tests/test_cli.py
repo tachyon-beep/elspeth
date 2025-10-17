@@ -1,5 +1,6 @@
 import argparse
 from pathlib import Path
+from types import SimpleNamespace
 
 import pandas as pd
 import pytest
@@ -144,6 +145,7 @@ def test_single_run_output_csv_includes_metrics(tmp_path, monkeypatch):
     class DummyDatasource:
         def __init__(self):
             self._elspeth_security_level = "official"  # Must match row plugin
+            self._elspeth_determinism_level = "guaranteed"
 
         def load(self):
             return pd.DataFrame({"col": [1]})
@@ -151,12 +153,15 @@ def test_single_run_output_csv_includes_metrics(tmp_path, monkeypatch):
     class DummyLLM:
         def __init__(self):
             self._elspeth_security_level = "official"  # Must match row plugin
+            self._elspeth_determinism_level = "guaranteed"
 
         def generate(self, *, system_prompt, user_prompt, metadata=None):
             return {"content": user_prompt, "metrics": {"score": 0.5}}
 
     csv_sink = CsvResultSink(path=sink_path)
     setattr(csv_sink, "_elspeth_security_level", "official")
+    setattr(csv_sink, "_elspeth_determinism_level", "guaranteed")
+    setattr(csv_sink, "determinism_level", "guaranteed")
 
     settings = argparse.Namespace(
         datasource=DummyDatasource(),  # Now properly initialized with security level
@@ -166,7 +171,13 @@ def test_single_run_output_csv_includes_metrics(tmp_path, monkeypatch):
             llm_prompt={"system": "sys", "user": "Prompt {col}"},
             prompt_fields=["col"],
             criteria=None,
-            row_plugin_defs=[{"name": "single_run_row_plugin", "determinism_level": "guaranteed"}],  # Inherits security_level from parent
+            row_plugin_defs=[
+                {
+                    "name": "single_run_row_plugin",
+                    "security_level": "OFFICIAL",
+                    "determinism_level": "guaranteed",
+                }
+            ],
             aggregator_plugin_defs=None,
             sink_defs=None,
             prompt_pack=None,
@@ -222,6 +233,77 @@ def test_single_run_output_csv_includes_metrics(tmp_path, monkeypatch):
     assert df.loc[0, "metric_custom_metric"] == 9
     assert df.loc[0, "retry_attempts"] == 1
     assert isinstance(df.loc[0, "retry_history"], str)
+
+
+def test_clone_suite_sinks_propagates_determinism(tmp_path):
+    csv_path = tmp_path / "results.csv"
+    csv_sink = CsvResultSink(path=str(csv_path))
+    setattr(csv_sink, "_elspeth_security_level", "OFFICIAL")
+    setattr(csv_sink, "_elspeth_determinism_level", "guaranteed")
+    setattr(csv_sink, "determinism_level", "guaranteed")
+
+    class DummySink:
+        def __init__(self):
+            self._elspeth_security_level = "OFFICIAL"
+            self._elspeth_determinism_level = "low"
+            self.determinism_level = "low"
+
+    base_sinks = [csv_sink, DummySink()]
+    clones = cli._clone_suite_sinks(base_sinks, "experiment")
+
+    cloned_csv = clones[0]
+    assert cloned_csv is not csv_sink
+    assert cloned_csv.determinism_level == "guaranteed"
+    assert getattr(cloned_csv, "_elspeth_determinism_level") == "guaranteed"
+    assert Path(cloned_csv.path).name == "experiment_results.csv"
+
+    passthrough_sink = clones[1]
+    assert passthrough_sink is base_sinks[1]
+    assert passthrough_sink.determinism_level == "low"
+    assert getattr(passthrough_sink, "_elspeth_determinism_level") == "low"
+
+
+def test_assemble_suite_defaults_merges_controls():
+    orchestrator_config = SimpleNamespace(
+        llm_prompt={"system": "sys", "user": "usr"},
+        prompt_fields=["field"],
+        criteria=None,
+        row_plugin_defs=[{"name": "cfg_row"}],
+        aggregator_plugin_defs=None,
+        baseline_plugin_defs=None,
+        validation_plugin_defs=None,
+        sink_defs=None,
+        prompt_pack="config_pack",
+        llm_middleware_defs=None,
+        prompt_defaults=None,
+        concurrency_config=None,
+        early_stop_plugin_defs=None,
+        early_stop_config=None,
+    )
+
+    settings = SimpleNamespace(
+        orchestrator_config=orchestrator_config,
+        prompt_packs={"config_pack": {}, "suite_pack": {}},
+        suite_defaults={
+            "prompt_pack": "suite_pack",
+            "row_plugins": [{"name": "suite_row"}],
+            "rate_limiter": {"plugin": "fixed"},
+            "cost_tracker": {"plugin": "cost"},
+            "determinism_level": "high",
+        },
+        rate_limiter=SimpleNamespace(tag="rate"),
+        cost_tracker=SimpleNamespace(tag="cost"),
+    )
+
+    defaults = cli._assemble_suite_defaults(settings)
+
+    assert defaults["prompt_pack"] == "suite_pack"
+    assert defaults["row_plugin_defs"] == [{"name": "suite_row"}]
+    assert defaults["rate_limiter_def"] == {"plugin": "fixed"}
+    assert defaults["cost_tracker_def"] == {"plugin": "cost"}
+    assert defaults["rate_limiter"].tag == "rate"
+    assert defaults["cost_tracker"].tag == "cost"
+    assert defaults["determinism_level"] == "high"
 
 
 def test_single_run_logs_failures(tmp_path, monkeypatch, caplog):

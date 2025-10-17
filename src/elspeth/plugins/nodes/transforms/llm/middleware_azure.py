@@ -104,7 +104,7 @@ class AzureEnvironmentMiddleware(LLMMiddleware):
         if enable_run_logging and self._run is None:
             if env_detected:
                 message = (
-                    "AzureEnvironmentMiddleware requires an Azure ML run context; " "ensure azureml-core is installed and the run is active"
+                    "AzureEnvironmentMiddleware requires an Azure ML run context; ensure azureml-core is installed and the run is active"
                 )
                 if self.on_error == "skip":
                     logger.warning("%s. Continuing without run context due to on_error=skip", message)

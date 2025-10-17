@@ -22,7 +22,7 @@ from elspeth.core.experiments.plugin_registry import (
 from elspeth.core.experiments.runner import ExperimentRunner
 from elspeth.core.registries.middleware import create_middleware
 from elspeth.core.registries.sink import sink_registry
-from elspeth.core.security import resolve_security_level
+from elspeth.core.security import resolve_determinism_level, resolve_security_level
 from elspeth.core.validation.base import ConfigurationError
 
 
@@ -118,11 +118,18 @@ class ExperimentSuiteRunner:
             defaults.get("security_level"),
         )
 
+        determinism_level = resolve_determinism_level(
+            config.determinism_level,
+            pack.get("determinism_level") if pack else None,
+            defaults.get("determinism_level"),
+        )
+
         # Create experiment context
         experiment_context = PluginContext(
             plugin_name=config.name,
             plugin_kind="experiment",
             security_level=security_level,
+            determinism_level=determinism_level,
             provenance=(f"experiment:{config.name}.resolved",),
             suite_root=self.suite_root,
             config_path=self.config_path,
@@ -132,10 +139,12 @@ class ExperimentSuiteRunner:
         for sink in sinks:
             sink_name = getattr(sink, "_elspeth_sink_name", getattr(sink, "_elspeth_plugin_name", sink.__class__.__name__))
             sink_level = getattr(sink, "security_level", experiment_context.security_level)
+            sink_det_level = getattr(sink, "determinism_level", experiment_context.determinism_level)
             sink_context = experiment_context.derive(
                 plugin_name=str(sink_name),
                 plugin_kind="sink",
                 security_level=sink_level,
+                determinism_level=sink_det_level,
                 provenance=(f"sink:{sink_name}.resolved",),
             )
             apply_plugin_context(sink, sink_context)
@@ -212,6 +221,7 @@ class ExperimentSuiteRunner:
             llm_middlewares=middlewares or None,
             concurrency_config=concurrency_config,
             security_level=security_level,
+            determinism_level=experiment_context.determinism_level,
             early_stop_plugins=early_stop_plugins,
             early_stop_config=early_stop_config,
         )

@@ -35,7 +35,20 @@ Activate the environment when working manually:
 
 ```bash
 source .venv/bin/activate
-pip install -e .[dev,analytics-visual]
+pip install --require-hashes -r requirements-dev.lock
+pip install -e . --no-deps
+```
+
+For Azure ML workflows, use the dedicated lockfiles:
+
+```bash
+# Runtime only
+pip install --require-hashes -r requirements-azure.lock
+pip install -e . --no-deps
+
+# Developer tooling + Azure extras
+python -m piptools sync requirements-dev-azure.lock
+pip install -e . --no-deps
 ```
 
 ### Run the sample suite
@@ -93,6 +106,8 @@ For diagrams and deep detail, see `docs/architecture/architecture-overview.md`, 
 - Run `python -m pytest -m "not slow"` (or `make test`) for fast feedback.
 - Use `python -m pytest --maxfail=1 --disable-warnings` during triage.
 - Lint/format with `make lint` (runs `ruff` formatting/checks plus `pytype`).
+- Validate dependencies with `make audit` (pip-audit against `requirements.lock`).
+- Generate an SBOM with `make sbom` (outputs `sbom.json` from the locked requirements).
 - Regenerate analytics artefacts after reporting or sink changes:
 
   ```bash

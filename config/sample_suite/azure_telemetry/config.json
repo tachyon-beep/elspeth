@@ -9,6 +9,7 @@
     {
       "name": "azure_environment",
       "security_level": "official",
+      "determinism_level": "guaranteed",
       "options": {
         "log_prompts": false
       }

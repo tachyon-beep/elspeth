@@ -16,7 +16,7 @@ from elspeth.core.experiments.plugin_registry import (
 )
 from elspeth.core.experiments.runner import ExperimentRunner
 from elspeth.core.registries.middleware import create_middlewares
-from elspeth.core.security import resolve_security_level
+from elspeth.core.security import resolve_determinism_level, resolve_security_level
 
 
 @dataclass
@@ -71,10 +71,16 @@ class ExperimentOrchestrator:  # pylint: disable=too-many-instance-attributes,to
             getattr(datasource, "security_level", None),
             getattr(llm_client, "security_level", None),
         )
+        determinism_level = resolve_determinism_level(
+            getattr(datasource, "determinism_level", None),
+            getattr(llm_client, "determinism_level", None),
+            *[getattr(sink, "determinism_level", None) for sink in sinks],
+        )
         experiment_context = PluginContext(
             plugin_name=name,
             plugin_kind="experiment",
             security_level=security_level,
+            determinism_level=determinism_level,
             provenance=(f"orchestrator:{name}.resolved",),
             suite_root=suite_root,
             config_path=config_path,
@@ -141,6 +147,7 @@ class ExperimentOrchestrator:  # pylint: disable=too-many-instance-attributes,to
             prompt_defaults=config.prompt_defaults,
             concurrency_config=config.concurrency_config,
             security_level=experiment_context.security_level,
+            determinism_level=experiment_context.determinism_level,
             early_stop_plugins=early_stop_plugins,
             early_stop_config=config.early_stop_config,
         )

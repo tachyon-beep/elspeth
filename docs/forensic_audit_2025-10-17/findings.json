@@ -1,0 +1,61 @@
+{
+  "$schema": "https://example.com/forensic-audit.schema.json",
+  "metadata": {
+    "repo": "elspeth/main",
+    "commit": "1520db677805e25f4e19823e8ba8b669bd372cc6",
+    "generated_at": "2025-10-17T20:52:01Z",
+    "auditor": "Forensic Code Auditor",
+    "overall_verdict": "ACCEPT"
+  },
+  "scores": {
+    "security": 8,
+    "reliability": 7,
+    "maintainability": 6,
+    "test_hygiene": 8,
+    "operations": 8,
+    "build_release": 8,
+    "documentation": 7
+  },
+  "gates": [
+    {
+      "gate": "tests_pass",
+      "status": "PASS",
+      "evidence": "Full regression suite green (698 passed, 2 skipped) — see `test_results.txt:1-12`."
+    },
+    {
+      "gate": "coverage_threshold",
+      "status": "PASS",
+      "target": "≥85% line coverage",
+      "observed": "85.0% line / 71.7% branch (`coverage.xml:2`)."
+    },
+    {
+      "gate": "secrets_scan_clean",
+      "status": "PASS",
+      "evidence": "GitHub Actions `ci.yml` secrets-scan job publishes gitleaks SARIF artefact for every run (`.github/workflows/ci.yml:15`)."
+    },
+    {
+      "gate": "sbom_vulns",
+      "status": "PASS",
+      "summary": "CycloneDX SBOM (`sbom.json`) and pip-audit outputs generated from locked requirements (`requirements.lock`, `requirements-dev.lock`)."
+    },
+    {
+      "gate": "reproducible_build",
+      "status": "PASS",
+      "evidence": "`scripts/bootstrap.sh` installs hash-locked dependencies via `python -m piptools sync`; editable install uses `--no-deps`."
+    },
+    {
+      "gate": "container_hygiene",
+      "status": "N/A",
+      "evidence": "Repository ships no container manifests; gate not applicable."
+    },
+    {
+      "gate": "observability_minimums",
+      "status": "PASS",
+      "evidence": "Retry exhaustion surfaces structured warnings with cost telemetry (`src/elspeth/core/experiments/runner.py:661-682`)."
+    }
+  ],
+  "findings": [],
+  "quick_wins": [],
+  "blockers": [],
+  "conditions_for_acceptance": []
+}

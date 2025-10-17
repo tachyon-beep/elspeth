@@ -16,3 +16,9 @@ lint:
 	@.venv/bin/python -m ruff format docs src tests
 	@.venv/bin/python -m ruff check docs src tests
 	@.venv/bin/python -m mypy src/elspeth
+
+sbom:
+	@.venv/bin/cyclonedx-py requirements requirements.lock --pyproject pyproject.toml --output-file sbom.json --output-format JSON --output-reproducible
+
+audit:
+	@.venv/bin/pip-audit -r requirements.lock --require-hashes

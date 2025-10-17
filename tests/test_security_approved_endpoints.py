@@ -7,6 +7,7 @@ from elspeth.core.security.approved_endpoints import (
     get_approved_patterns,
     validate_azure_blob_endpoint,
     validate_azure_openai_endpoint,
+    validate_azure_search_endpoint,
     validate_endpoint,
     validate_http_api_endpoint,
 )
@@ -29,23 +30,19 @@ class TestEndpointValidation:
 
     def test_azure_openai_gov_cloud(self):
         """Test Azure OpenAI Government cloud endpoint."""
-        assert (
+        with pytest.raises(ValueError, match="not approved"):
             validate_azure_openai_endpoint(
                 "https://my-resource.openai.azure.us",
                 security_level="OFFICIAL",
             )
-            is None
-        )
 
     def test_azure_openai_china_cloud(self):
         """Test Azure OpenAI China cloud endpoint."""
-        assert (
+        with pytest.raises(ValueError, match="not approved"):
             validate_azure_openai_endpoint(
                 "https://my-resource.openai.azure.cn",
                 security_level="internal",
             )
-            is None
-        )
 
     def test_azure_openai_unapproved_endpoint(self):
         """Test Azure OpenAI unapproved endpoint raises error."""
@@ -106,28 +103,50 @@ class TestEndpointValidation:
         )
 
         # Azure Government cloud
-        assert (
+        with pytest.raises(ValueError, match="not approved"):
             validate_azure_blob_endpoint(
                 "https://myaccount.blob.core.usgovcloudapi.net",
                 security_level="OFFICIAL",
             )
-            is None
-        )
 
         # Azure China cloud
-        assert (
+        with pytest.raises(ValueError, match="not approved"):
             validate_azure_blob_endpoint(
                 "https://myaccount.blob.core.chinacloudapi.cn",
                 security_level="internal",
             )
-            is None
-        )
 
     def test_azure_blob_unapproved_endpoint(self):
         """Test unapproved Azure Blob endpoint raises error."""
         with pytest.raises(ValueError, match="not approved"):
             validate_azure_blob_endpoint(
                 "https://not-azure.com",
+                security_level="OFFICIAL",
+            )
+
+    def test_azure_search_approved_endpoints(self):
+        assert (
+            validate_azure_search_endpoint(
+                "https://mysearch.search.windows.net",
+                security_level="OFFICIAL",
+            )
+            is None
+        )
+        with pytest.raises(ValueError, match="not approved"):
+            validate_azure_search_endpoint(
+                "https://federal.search.azure.us",
+                security_level="OFFICIAL",
+            )
+        with pytest.raises(ValueError, match="not approved"):
+            validate_azure_search_endpoint(
+                "https://china.search.azure.cn",
+                security_level="OFFICIAL",
+            )
+
+    def test_azure_search_unapproved_endpoint(self):
+        with pytest.raises(ValueError, match="not approved"):
+            validate_azure_search_endpoint(
+                "https://search.notazure.example.com",
                 security_level="OFFICIAL",
             )
 
@@ -207,6 +226,10 @@ class TestEndpointValidation:
         patterns = get_approved_patterns("azure_blob")
         assert len(patterns) > 0
         assert any("blob" in p and "windows" in p for p in patterns)
+
+        patterns = get_approved_patterns("azure_search")
+        assert len(patterns) > 0
+        assert any("search" in p and "windows" in p for p in patterns)
 
     def test_security_level_none_allowed(self):
         """Test validation works when security_level is None."""

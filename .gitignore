@@ -42,6 +42,11 @@ coverage.xml
 .hypothesis/
 .pytest_cache/
 coverage.json
+.mypy_cache/
+.ruff_cache/
+.vscode/
+.claude/
+
 
 # Translations
 *.mo

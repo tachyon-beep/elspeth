@@ -207,7 +207,7 @@ def test_create_query_client_azure_success(monkeypatch, azure_modules, providers
     client = providers.create_query_client(
         "azure_search",
         {
-            "endpoint": "https://search.example",
+            "endpoint": "https://search-example.search.windows.net",
             "index": "experiments",
             "api_key_env": "AZURE_SEARCH_KEY",
             "vector_field": "embedding",
@@ -221,3 +221,56 @@ def test_create_query_client_azure_success(monkeypatch, azure_modules, providers
     assert len(results) == 1
     assert results[0].metadata == {"region": "test"}
     assert results[0].score == pytest.approx(0.83)
+
+
+def test_create_query_client_validates_azure_endpoint(monkeypatch, providers_module):
+    providers = importlib.reload(providers_module)
+    captured: dict[str, object] = {}
+
+    def fake_validate(endpoint, security_level=None, mode=None):
+        captured["endpoint"] = endpoint
+
+    def fake_client(**kwargs):
+        captured["kwargs"] = kwargs
+        return "CLIENT"
+
+    monkeypatch.setattr(providers, "validate_azure_search_endpoint", fake_validate)
+    monkeypatch.setattr(providers, "AzureSearchQueryClient", fake_client)
+
+    client = providers.create_query_client(
+        "azure_search",
+        {
+            "endpoint": "https://search-example.search.windows.net",
+            "index": "experiments",
+            "api_key": "token",
+            "vector_field": "embedding",
+            "namespace_field": "namespace",
+            "content_field": "contents",
+        },
+    )
+
+    assert client == "CLIENT"
+    assert captured["endpoint"] == "https://search-example.search.windows.net"
+    assert captured["kwargs"]["endpoint"] == "https://search-example.search.windows.net"
+
+
+def test_create_query_client_rejects_unapproved_azure_search(monkeypatch, providers_module):
+    providers = importlib.reload(providers_module)
+
+    def fake_validate(endpoint, security_level=None, mode=None):
+        raise ValueError("not approved")
+
+    monkeypatch.setattr(providers, "validate_azure_search_endpoint", fake_validate)
+
+    with pytest.raises(ConfigurationError, match="endpoint validation failed"):
+        providers.create_query_client(
+            "azure_search",
+            {
+                "endpoint": "https://malicious.example.com",
+                "index": "experiments",
+                "api_key": "token",
+                "vector_field": "embedding",
+                "namespace_field": "namespace",
+                "content_field": "contents",
+            },
+        )

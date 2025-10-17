@@ -1,10 +1,19 @@
+from contextlib import ExitStack, contextmanager
 from types import SimpleNamespace
 
 from elspeth.config import load_settings
-from elspeth.core.registries.base import BasePluginFactory
 from elspeth.core.registries.datasource import datasource_registry
 from elspeth.core.registries.llm import llm_registry
 from elspeth.core.registries.sink import sink_registry
+
+
+@contextmanager
+def registry_overrides(overrides):
+    """Temporarily override plugin registries without mutating global state."""
+    with ExitStack() as stack:
+        for registry, name, factory in overrides:
+            stack.enter_context(registry.temporary_override(name, factory))
+        yield
 
 
 def test_load_settings(tmp_path, monkeypatch):
@@ -52,27 +61,26 @@ def test_load_settings(tmp_path, monkeypatch):
         encoding="utf-8",
     )
 
-    # patch registries to return simple objects
-    orig_ds = datasource_registry._plugins["azure_blob"]
-    orig_llm = llm_registry._plugins["azure_openai"]
-    orig_sink = sink_registry._plugins["csv"]
-
-    datasource_registry._plugins["azure_blob"] = BasePluginFactory(
-        lambda options, context: SimpleNamespace(kind="datasource", options=options, context=context)
-    )
-    llm_registry._plugins["azure_openai"] = BasePluginFactory(
-        lambda options, context: SimpleNamespace(kind="llm", options=options, context=context)
-    )
-    sink_registry._plugins["csv"] = BasePluginFactory(
-        lambda options, context: SimpleNamespace(kind="sink", options=options, context=context)
-    )
-
-    try:
+    with registry_overrides(
+        [
+            (
+                datasource_registry,
+                "azure_blob",
+                lambda options, context: SimpleNamespace(kind="datasource", options=options, context=context),
+            ),
+            (
+                llm_registry,
+                "azure_openai",
+                lambda options, context: SimpleNamespace(kind="llm", options=options, context=context),
+            ),
+            (
+                sink_registry,
+                "csv",
+                lambda options, context: SimpleNamespace(kind="sink", options=options, context=context),
+            ),
+        ]
+    ):
         settings = load_settings(config_file)
-    finally:
-        datasource_registry._plugins["azure_blob"] = orig_ds
-        llm_registry._plugins["azure_openai"] = orig_llm
-        sink_registry._plugins["csv"] = orig_sink
 
     assert settings.datasource.kind == "datasource"
     assert settings.llm.kind == "llm"
@@ -109,29 +117,26 @@ def test_load_settings_missing_prompts_defaults_to_blank(tmp_path):
         encoding="utf-8",
     )
 
-    orig_ds = datasource_registry._plugins.get("local_csv")
-    orig_llm = llm_registry._plugins.get("mock")
-    orig_sink = sink_registry._plugins.get("csv")
-
-    datasource_registry._plugins["local_csv"] = BasePluginFactory(
-        lambda options, context: SimpleNamespace(kind="ds", options=options, context=context)
-    )
-    llm_registry._plugins["mock"] = BasePluginFactory(
-        lambda options, context: SimpleNamespace(kind="llm", options=options, context=context)
-    )
-    sink_registry._plugins["csv"] = BasePluginFactory(
-        lambda options, context: SimpleNamespace(kind="sink", options=options, context=context)
-    )
-
-    try:
+    with registry_overrides(
+        [
+            (
+                datasource_registry,
+                "local_csv",
+                lambda options, context: SimpleNamespace(kind="ds", options=options, context=context),
+            ),
+            (
+                llm_registry,
+                "mock",
+                lambda options, context: SimpleNamespace(kind="llm", options=options, context=context),
+            ),
+            (
+                sink_registry,
+                "csv",
+                lambda options, context: SimpleNamespace(kind="sink", options=options, context=context),
+            ),
+        ]
+    ):
         settings = load_settings(config_file)
-    finally:
-        if orig_ds is not None:
-            datasource_registry._plugins["local_csv"] = orig_ds
-        if orig_llm is not None:
-            llm_registry._plugins["mock"] = orig_llm
-        if orig_sink is not None:
-            sink_registry._plugins["csv"] = orig_sink
 
     assert settings.orchestrator_config.llm_prompt.get("system", "") == ""
     assert settings.orchestrator_config.llm_prompt.get("user", "") == ""
@@ -187,29 +192,26 @@ def test_load_settings_prompt_pack_merges_overrides(tmp_path, monkeypatch):
         encoding="utf-8",
     )
 
-    orig_ds = datasource_registry._plugins.get("local_csv")
-    orig_llm = llm_registry._plugins.get("mock")
-    orig_sink = sink_registry._plugins.get("csv")
-
-    datasource_registry._plugins["local_csv"] = BasePluginFactory(
-        lambda options, context: SimpleNamespace(kind="ds", options=options, context=context)
-    )
-    llm_registry._plugins["mock"] = BasePluginFactory(
-        lambda options, context: SimpleNamespace(kind="llm", options=options, context=context)
-    )
-    sink_registry._plugins["csv"] = BasePluginFactory(
-        lambda options, context: SimpleNamespace(kind="sink", options=options, context=context)
-    )
-
-    try:
+    with registry_overrides(
+        [
+            (
+                datasource_registry,
+                "local_csv",
+                lambda options, context: SimpleNamespace(kind="ds", options=options, context=context),
+            ),
+            (
+                llm_registry,
+                "mock",
+                lambda options, context: SimpleNamespace(kind="llm", options=options, context=context),
+            ),
+            (
+                sink_registry,
+                "csv",
+                lambda options, context: SimpleNamespace(kind="sink", options=options, context=context),
+            ),
+        ]
+    ):
         settings = load_settings(config_file, profile="default")
-    finally:
-        if orig_ds is not None:
-            datasource_registry._plugins["local_csv"] = orig_ds
-        if orig_llm is not None:
-            llm_registry._plugins["mock"] = orig_llm
-        if orig_sink is not None:
-            sink_registry._plugins["csv"] = orig_sink
 
     assert settings.orchestrator_config.llm_prompt["system"] == "Sample sys"
     assert settings.orchestrator_config.llm_prompt["user"] == "Inline {{ name }}"
@@ -260,23 +262,21 @@ def test_load_settings_suite_defaults_inherit_pack(tmp_path, monkeypatch):
         encoding="utf-8",
     )
 
-    orig_ds = datasource_registry._plugins.get("local_csv")
-    orig_llm = llm_registry._plugins.get("mock")
-
-    datasource_registry._plugins["local_csv"] = BasePluginFactory(
-        lambda options, context: SimpleNamespace(kind="ds", options=options, context=context)
-    )
-    llm_registry._plugins["mock"] = BasePluginFactory(
-        lambda options, context: SimpleNamespace(kind="llm", options=options, context=context)
-    )
-
-    try:
+    with registry_overrides(
+        [
+            (
+                datasource_registry,
+                "local_csv",
+                lambda options, context: SimpleNamespace(kind="ds", options=options, context=context),
+            ),
+            (
+                llm_registry,
+                "mock",
+                lambda options, context: SimpleNamespace(kind="llm", options=options, context=context),
+            ),
+        ]
+    ):
         settings = load_settings(config_file)
-    finally:
-        if orig_ds is not None:
-            datasource_registry._plugins["local_csv"] = orig_ds
-        if orig_llm is not None:
-            llm_registry._plugins["mock"] = orig_llm
 
     assert settings.suite_defaults["prompts"]["system"] == "Pack system"
     assert settings.suite_defaults["prompt_fields"] == ["id"]

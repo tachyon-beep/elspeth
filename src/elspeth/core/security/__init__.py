@@ -7,6 +7,7 @@ from .approved_endpoints import (
     get_approved_patterns,
     validate_azure_blob_endpoint,
     validate_azure_openai_endpoint,
+    validate_azure_search_endpoint,
     validate_endpoint,
     validate_http_api_endpoint,
 )
@@ -174,5 +175,6 @@ __all__ = [
     "validate_azure_openai_endpoint",
     "validate_http_api_endpoint",
     "validate_azure_blob_endpoint",
+    "validate_azure_search_endpoint",
     "get_approved_patterns",
 ]

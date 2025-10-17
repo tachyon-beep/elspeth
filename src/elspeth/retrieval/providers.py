@@ -7,6 +7,7 @@ import os
 from dataclasses import dataclass
 from typing import Any, Iterable, Mapping, Sequence
 
+from elspeth.core.security import validate_azure_search_endpoint
 from elspeth.core.validation.base import ConfigurationError
 
 
@@ -168,6 +169,11 @@ def create_query_client(provider: str, options: Mapping[str, Any]) -> VectorQuer
             api_key = os.getenv(api_key_env)
         if not endpoint or not index or not api_key:
             raise ConfigurationError("azure_search retriever requires 'endpoint', 'index', and API key")
+
+        try:
+            validate_azure_search_endpoint(endpoint)
+        except ValueError as exc:
+            raise ConfigurationError(f"azure_search retriever endpoint validation failed: {exc}") from exc
 
         # Require explicit field configuration for security/audit purposes
         vector_field = options.get("vector_field")

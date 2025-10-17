@@ -9,6 +9,7 @@
     {
       "name": "threshold",
       "security_level": "official",
+      "determinism_level": "guaranteed",
       "options": {
         "metric": "score",
         "threshold": 0.55,

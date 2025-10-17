@@ -41,9 +41,10 @@ def test_child_plugin_cannot_downgrade_parent_security_official_to_public():
     definition = {
         "name": "test",
         "security_level": "public",  # ❌ Attempting downgrade
+        "determinism_level": "none",
     }
 
-    with pytest.raises(ConfigurationError, match="Conflicting security_level"):
+    with pytest.raises(ConfigurationError, match="security_level 'UNOFFICIAL' cannot downgrade parent level 'OFFICIAL'"):
         create_plugin_with_inheritance(
             registry,
             definition,
@@ -71,9 +72,10 @@ def test_child_plugin_cannot_downgrade_parent_security_confidential_to_internal(
     definition = {
         "name": "test",
         "security_level": "internal",  # ❌ Attempting downgrade
+        "determinism_level": "none",
     }
 
-    with pytest.raises(ConfigurationError, match="Conflicting security_level"):
+    with pytest.raises(ConfigurationError, match="security_level 'OFFICIAL' cannot downgrade parent level 'PROTECTED'"):
         create_plugin_with_inheritance(
             registry,
             definition,
@@ -101,9 +103,10 @@ def test_child_plugin_cannot_downgrade_parent_security_secret_to_protected():
     definition = {
         "name": "test",
         "security_level": "protected",  # ❌ Attempting downgrade
+        "determinism_level": "none",
     }
 
-    with pytest.raises(ConfigurationError, match="Conflicting security_level"):
+    with pytest.raises(ConfigurationError, match="security_level 'PROTECTED' cannot downgrade parent level 'SECRET'"):
         create_plugin_with_inheritance(
             registry,
             definition,
@@ -135,6 +138,7 @@ def test_child_plugin_can_match_parent_security_level():
     definition = {
         "name": "test",
         "security_level": "official",  # ✅ Same as parent
+        "determinism_level": "none",
     }
 
     plugin = create_plugin_with_inheritance(
@@ -172,6 +176,7 @@ def test_child_plugin_can_upgrade_parent_security_level():
     definition = {
         "name": "test",
         "security_level": "confidential",  # ✅ Upgrade to higher classification (alias for PROTECTED)
+        "determinism_level": "none",
     }
 
     plugin = create_plugin_with_inheritance(
@@ -211,16 +216,13 @@ def test_child_plugin_inherits_when_no_explicit_level():
         # No security_level specified
     }
 
-    plugin = create_plugin_with_inheritance(
-        registry,
-        definition,
-        plugin_kind="test_plugin",
-        parent_context=parent_context,
-    )
-
-    assert plugin is not None
-    assert hasattr(plugin, "_elspeth_security_level")
-    assert plugin._elspeth_security_level == "OFFICIAL"  # Inherits parent's canonical form
+    with pytest.raises(ConfigurationError, match="security_level must be declared"):
+        create_plugin_with_inheritance(
+            registry,
+            definition,
+            plugin_kind="test_plugin",
+            parent_context=parent_context,
+        )
 
 
 def test_multiple_child_plugins_cannot_downgrade():
@@ -244,7 +246,7 @@ def test_multiple_child_plugins_cannot_downgrade():
     )
 
     # Level 2: Child inherits from root
-    definition_level2 = {"name": "test"}  # Inherits CONFIDENTIAL (PROTECTED)
+    definition_level2 = {"name": "test", "security_level": "confidential", "determinism_level": "none"}
     child1 = create_plugin_with_inheritance(
         registry,
         definition_level2,
@@ -266,9 +268,10 @@ def test_multiple_child_plugins_cannot_downgrade():
     definition_level3 = {
         "name": "test",
         "security_level": "internal",  # ❌ Attempting downgrade in chain
+        "determinism_level": "none",
     }
 
-    with pytest.raises(ConfigurationError, match="Conflicting security_level"):
+    with pytest.raises(ConfigurationError, match="security_level 'OFFICIAL' cannot downgrade parent level 'PROTECTED'"):
         create_plugin_with_inheritance(
             registry,
             definition_level3,
@@ -299,12 +302,13 @@ def test_security_enforcement_in_options_dict():
     # Child attempts downgrade via options dict - must be rejected
     definition = {
         "name": "test",
+        "determinism_level": "none",
         "options": {
             "security_level": "public",  # ❌ Downgrade in options
         },
     }
 
-    with pytest.raises(ConfigurationError, match="Conflicting security_level"):
+    with pytest.raises(ConfigurationError, match="security_level 'UNOFFICIAL' cannot downgrade parent level 'OFFICIAL'"):
         create_plugin_with_inheritance(
             registry,
             definition,
@@ -336,6 +340,7 @@ def test_security_enforcement_with_both_definition_and_options():
     definition = {
         "name": "test",
         "security_level": "internal",  # ❌ Conflicts with parent
+        "determinism_level": "none",
         "options": {
             "security_level": "public",  # ❌ Also conflicts
         },
