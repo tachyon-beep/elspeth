@@ -39,7 +39,7 @@
 
 ### Workstream C: Deterministic Supply Chain (Lead: DevOps)
 1. Generate pinned requirement files (e.g., `requirements.lock`, `requirements-dev.lock`) via pip-compile with hashes. ✅  
-2. Update `scripts/bootstrap.sh` and Make targets to consume locks using `piptools sync` without ad-hoc upgrades. ✅  
+2. Update `scripts/bootstrap.sh` and Make targets to consume locks using `python -m piptools sync` without ad-hoc upgrades. ✅  
 3. Configure SBOM generation (`make sbom` using CycloneDX) & vulnerability scans (`make audit` via `pip-audit`); retain artefacts. ✅  
 4. Draft supply-chain policy and add to `docs/operations/dependency-governance.md`. ✅  
 **Deliverables:** Lockfiles checked in, bootstrap updated, SBOM (`sbom.json`) and audit workflows documented. ✅

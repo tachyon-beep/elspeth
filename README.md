@@ -47,7 +47,7 @@ pip install --require-hashes -r requirements-azure.lock
 pip install -e . --no-deps
 
 # Developer tooling + Azure extras
-piptools sync requirements-dev-azure.lock
+python -m piptools sync requirements-dev-azure.lock
 pip install -e . --no-deps
 ```
 

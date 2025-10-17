@@ -41,7 +41,7 @@
     {
       "gate": "reproducible_build",
       "status": "PASS",
-      "evidence": "`scripts/bootstrap.sh` installs hash-locked dependencies via `piptools sync`; editable install uses `--no-deps`."
+      "evidence": "`scripts/bootstrap.sh` installs hash-locked dependencies via `python -m piptools sync`; editable install uses `--no-deps`."
     },
     {
       "gate": "container_hygiene",

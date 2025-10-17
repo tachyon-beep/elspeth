@@ -11,19 +11,19 @@ dependencies and generating compliance artefacts.
   pip-compile --resolver=backtracking --generate-hashes pyproject.toml
   pip-compile --resolver=backtracking --generate-hashes --extra dev pyproject.toml
   ```
-- `scripts/bootstrap.sh` uses `piptools sync` to install the dev lockfile,
+- `scripts/bootstrap.sh` uses `python -m piptools sync` to install the dev lockfile,
   ensuring local virtualenvs match the pinned set exactly.
 - When dependencies change, regenerate both lockfiles and rerun
   `make sbom` + `make audit` before committing.
 - Optional extras receive their own locks:
   * `requirements-azure.lock` captures runtime deps + Azure ML extras.
   * `requirements-dev-azure.lock` combines dev tooling with Azure ML extras.
-  Use `piptools sync` (or `pip install --require-hashes`) against the
+  Use `python -m piptools sync` (or `pip install --require-hashes`) against the
   appropriate lockfile before installing the editable package.
 
 ## CI Automation
 
-- `.github/workflows/ci.yml` installs dependencies with `piptools sync
+- `.github/workflows/ci.yml` installs dependencies with `python -m piptools sync
   requirements-dev.lock`, runs `make lint`, `pytest` (coverage enabled),
   `make sbom`, and `pip-audit -r requirements.lock`.
 - Generated artefacts (`coverage.xml`, `sbom.json`, `pip-audit.json`) are
