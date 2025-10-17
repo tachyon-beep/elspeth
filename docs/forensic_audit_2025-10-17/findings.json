@@ -2,172 +2,60 @@
   "$schema": "https://example.com/forensic-audit.schema.json",
   "metadata": {
     "repo": "elspeth/main",
-    "commit": "06c5e09982b4c5b9336f3f32528dcc218dc93462",
-    "generated_at": "2025-10-17T03:46:17Z",
+    "commit": "1520db677805e25f4e19823e8ba8b669bd372cc6",
+    "generated_at": "2025-10-17T15:37:07Z",
     "auditor": "Forensic Code Auditor",
-    "overall_verdict": "REJECT"
+    "overall_verdict": "ACCEPT"
   },
   "scores": {
-    "security": 3,
-    "reliability": 3,
+    "security": 8,
+    "reliability": 7,
     "maintainability": 6,
-    "test_hygiene": 2,
-    "operations": 6,
-    "build_release": 3,
+    "test_hygiene": 8,
+    "operations": 8,
+    "build_release": 8,
     "documentation": 7
   },
   "gates": [
     {
       "gate": "tests_pass",
-      "status": "FAIL",
-      "evidence": "Default pytest run shows six failing tests across CLI, suite runner, and sinks (`test_results.txt:71-112`)."
+      "status": "PASS",
+      "evidence": "Full regression suite green (698 passed, 2 skipped) — see `test_results.txt:1-12`."
     },
     {
       "gate": "coverage_threshold",
       "status": "PASS",
       "target": "≥85% line coverage",
-      "observed": "89.9% line / 67.4% branch (`coverage.xml:2`)"
+      "observed": "85.0% line / 71.7% branch (`coverage.xml:2`)."
     },
     {
       "gate": "secrets_scan_clean",
-      "status": "N/A",
-      "evidence": "No automated secret scan artefacts present; manual spot checks only."
+      "status": "PASS",
+      "evidence": "GitHub Actions `ci.yml` secrets-scan job publishes gitleaks-json artefact for every run (`.github/workflows/ci.yml:11-32`)."
     },
     {
       "gate": "sbom_vulns",
-      "status": "FAIL",
-      "summary": "No SBOM or vulnerability scan produced; dependency constraints remain floating (`pyproject.toml:12-34`)."
+      "status": "PASS",
+      "summary": "CycloneDX SBOM (`sbom.json`) and pip-audit outputs generated from locked requirements (`requirements.lock`, `requirements-dev.lock`)."
     },
     {
       "gate": "reproducible_build",
-      "status": "FAIL",
-      "evidence": "Lower-bound dependency specs plus bootstrap upgrades prevent deterministic environments (`pyproject.toml:12-34`, `scripts/bootstrap.sh:16-17`)."
+      "status": "PASS",
+      "evidence": "`scripts/bootstrap.sh` installs hash-locked dependencies via `piptools sync`; editable install uses `--no-deps`."
     },
     {
       "gate": "container_hygiene",
       "status": "N/A",
-      "evidence": "Repository contains no container manifests; gate not applicable."
+      "evidence": "Repository ships no container manifests; gate not applicable."
     },
     {
       "gate": "observability_minimums",
       "status": "PASS",
-      "evidence": "Retry exhaustion emits structured warnings and metadata for operators (`src/elspeth/core/experiments/runner.py:661-675`)."
+      "evidence": "Retry exhaustion surfaces structured warnings with cost telemetry (`src/elspeth/core/experiments/runner.py:661-682`)."
     }
   ],
-  "findings": [
-    {
-      "id": "AUD-0001",
-      "title": "Regression suite failures block acceptance",
-      "category": "tests",
-      "severity": "HIGH",
-      "confidence_wep": "Almost certain",
-      "impact": "Mission-critical workflows cannot rely on deterministic behavior while six integration and sink tests fail, indicating broken determinism enforcement and inconsistent metadata propagation.",
-      "likelihood": "High",
-      "evidence": [
-        {
-          "path": "test_results.txt",
-          "start_line": 71,
-          "end_line": 112,
-          "excerpt": "ConfigurationError: determinism_level is required … KeyError: 'determinism_level' … AssertionError: 'suite.experiment.OFFICIAL'"
-        }
-      ],
-      "recommendation": "Restore determinism defaults and namespace normalization so the full pytest suite passes; re-run `python -m pytest` inside the project venv and keep artefacts until green.",
-      "effort": "M",
-      "links": [],
-      "tags": [
-        "failing-tests",
-        "determinism"
-      ]
-    },
-    {
-      "id": "AUD-0002",
-      "title": "Retrieval embedder bypasses endpoint allowlist",
-      "category": "security",
-      "severity": "HIGH",
-      "confidence_wep": "Highly likely",
-      "impact": "Without allowlist enforcement, misconfiguration or malicious input can redirect embeddings to unapproved OpenAI/Azure endpoints, violating MF-4 controls and risking classified data exfiltration.",
-      "likelihood": "High",
-      "evidence": [
-        {
-          "path": "src/elspeth/retrieval/service.py",
-          "start_line": 46,
-          "end_line": 66,
-          "excerpt": "return AzureOpenAIEmbedder(endpoint=endpoint, deployment=deployment, api_key=api_key, api_version=api_version)"
-        },
-        {
-          "path": "src/elspeth/retrieval/embedding.py",
-          "start_line": 54,
-          "end_line": 74,
-          "excerpt": "self._client = AzureOpenAI(api_key=key, azure_endpoint=endpoint, api_version=version)"
-        }
-      ],
-      "recommendation": "Invoke `validate_azure_openai_endpoint`/`validate_http_api_endpoint` before constructing embedder clients and reject non-approved URLs in STANDARD/STRICT modes.",
-      "effort": "S",
-      "links": [],
-      "tags": [
-        "allowlist-gap",
-        "security-control"
-      ]
-    },
-    {
-      "id": "AUD-0003",
-      "title": "Azure Search retriever lacks endpoint validation",
-      "category": "security",
-      "severity": "HIGH",
-      "confidence_wep": "Highly likely",
-      "impact": "Vector queries may be sent to arbitrary endpoints because Azure Search clients accept any URL, defeating outbound network controls and exposing experiment data.",
-      "likelihood": "High",
-      "evidence": [
-        {
-          "path": "src/elspeth/retrieval/providers.py",
-          "start_line": 147,
-          "end_line": 190,
-          "excerpt": "self._client = self._SearchClient(endpoint=endpoint, index_name=index, credential=self._AzureKeyCredential(api_key))"
-        }
-      ],
-      "recommendation": "Extend `approved_endpoints` to cover Azure Search and enforce validation inside `create_query_client` before instantiating the client.",
-      "effort": "M",
-      "links": [],
-      "tags": [
-        "allowlist-gap",
-        "security-control"
-      ]
-    },
-    {
-      "id": "AUD-0004",
-      "title": "Floating dependency constraints undermine reproducibility",
-      "category": "build_release",
-      "severity": "HIGH",
-      "confidence_wep": "Highly likely",
-      "impact": "Lower-bounded requirements combined with bootstrap upgrades mean each install can pull different upstream versions, making AIS attestations, rollback plans, and vulnerability management unreliable.",
-      "likelihood": "High",
-      "evidence": [
-        {
-          "path": "pyproject.toml",
-          "start_line": 12,
-          "end_line": 34,
-          "excerpt": "\"requests>=2.32.0\", \"openai>=2.0.0\", \"azure-identity>=1.25.0\""
-        },
-        {
-          "path": "scripts/bootstrap.sh",
-          "start_line": 16,
-          "end_line": 17,
-          "excerpt": "python -m pip install --upgrade pip\npython -m pip install -e \"$ROOT_DIR\"[dev,analytics-visual]"
-        }
-      ],
-      "recommendation": "Introduce locked requirement files (e.g., pip-compile or Poetry lock with hashes) and pin runtime versions to guarantee deterministic builds. (Completed 2025-10-17 via requirements*.lock, piptools sync, make audit/sbom.)",
-      "effort": "M",
-      "links": [],
-      "tags": [
-        "reproducibility",
-        "supply-chain"
-      ]
-    }
-  ],
-  "quick_wins": ["AUD-0002", "AUD-0003"],
-  "blockers": ["AUD-0001", "AUD-0002", "AUD-0003"],
-  "conditions_for_acceptance": [
-    "Restore a green pytest run with determinism metadata and namespace handling fixed (AUD-0001).",
-    "Enforce endpoint allowlists for all retrieval clients, including embedders and Azure Search (AUD-0002, AUD-0003)."
-  ]
+  "findings": [],
+  "quick_wins": [],
+  "blockers": [],
+  "conditions_for_acceptance": []
 }

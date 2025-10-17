@@ -117,7 +117,7 @@ def _get_environment_patterns() -> list[str]:
             patterns.append(pattern_str)
 
     if patterns:
-        logger.info(f"Loaded {len(patterns)} additional approved endpoint patterns from " "ELSPETH_APPROVED_ENDPOINTS environment variable")
+        logger.info(f"Loaded {len(patterns)} additional approved endpoint patterns from ELSPETH_APPROVED_ENDPOINTS environment variable")
 
     return patterns
 
@@ -218,7 +218,7 @@ def validate_endpoint(
             break
 
     if not matched:
-        error_msg = f"Endpoint '{endpoint}' is not approved for service type '{service_type}'. " f"Approved patterns: {approved_patterns}"
+        error_msg = f"Endpoint '{endpoint}' is not approved for service type '{service_type}'. Approved patterns: {approved_patterns}"
 
         if mode == SecureMode.DEVELOPMENT:
             logger.warning(f"{error_msg} (DEVELOPMENT mode - allowing anyway)")
@@ -254,7 +254,7 @@ def validate_endpoint(
                         logger.error(error_msg)
                         raise ValueError(error_msg)
 
-    logger.debug(f"Endpoint '{endpoint}' validated successfully for service '{service_type}' " f"(matched pattern: {matched_pattern})")
+    logger.debug(f"Endpoint '{endpoint}' validated successfully for service '{service_type}' (matched pattern: {matched_pattern})")
 
 
 def get_approved_patterns(service_type: ServiceType) -> list[str]:

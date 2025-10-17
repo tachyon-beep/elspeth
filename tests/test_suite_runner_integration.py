@@ -2,9 +2,11 @@ import json
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
-from elspeth.core.experiments.config import ExperimentSuite
+from elspeth.core.experiments.config import ExperimentConfig, ExperimentSuite
 from elspeth.core.experiments.suite_runner import ExperimentSuiteRunner
+from elspeth.core.validation import ConfigurationError
 from elspeth.plugins.nodes.transforms.llm.mock import MockLLMClient
 
 
@@ -102,7 +104,7 @@ def test_suite_runner_executes_with_defaults_and_packs(tmp_path):
                 "determinism_level": "guaranteed",
                 "options": {
                     "prompt_template": (
-                        "Provide a variation that keeps {{ placeholder_tokens | join(', ') }}.\\n" "Base prompt: {{ user_prompt_template }}"
+                        "Provide a variation that keeps {{ placeholder_tokens | join(', ') }}.\\nBase prompt: {{ user_prompt_template }}"
                     ),
                     "count": 2,
                     "max_attempts": 1,
@@ -165,3 +167,60 @@ def test_suite_runner_executes_with_defaults_and_packs(tmp_path):
     assert variant_manifest.exists()
     manifest_data = json.loads(variant_manifest.read_text(encoding="utf-8"))
     assert manifest_data["aggregates"]["prompt_variants"]["variants"]
+    assert manifest_data["metadata"]["determinism_level"] == variant_payload["metadata"]["determinism_level"]
+
+    baseline_manifest_data = json.loads(baseline_manifest.read_text(encoding="utf-8"))
+    assert baseline_manifest_data["metadata"]["determinism_level"] == baseline_payload["metadata"]["determinism_level"]
+
+
+def test_suite_runner_requires_prompts_when_missing(tmp_path):
+    config = ExperimentConfig(name="empty", temperature=0.0, max_tokens=64)
+    suite = ExperimentSuite(root=tmp_path, experiments=[config], baseline=config)
+    runner = ExperimentSuiteRunner(suite=suite, llm_client=MockLLMClient(seed=1), sinks=[])
+
+    with pytest.raises(ConfigurationError, match="no system prompt"):
+        runner.build_runner(config, defaults={"prompt_packs": {}}, sinks=[])
+
+
+def test_suite_runner_builds_controls_and_early_stop(tmp_path):
+    config = ExperimentConfig(
+        name="demo",
+        temperature=0.0,
+        max_tokens=32,
+        prompt_system="",  # Provided by defaults
+        prompt_template="",
+        determinism_level="high",
+    )
+    suite = ExperimentSuite(root=tmp_path, experiments=[config], baseline=config)
+    runner = ExperimentSuiteRunner(suite=suite, llm_client=MockLLMClient(seed=2), sinks=[])
+
+    defaults = {
+        "prompt_packs": {},
+        "prompt_system": "System prompt",
+        "prompt_template": "Hello {value}",
+        "prompt_fields": ["value"],
+        "rate_limiter_def": {
+            "plugin": "fixed_window",
+            "security_level": "OFFICIAL",
+            "determinism_level": "guaranteed",
+            "options": {"requests": 1, "per_seconds": 1},
+        },
+        "cost_tracker_def": {
+            "plugin": "fixed_price",
+            "security_level": "OFFICIAL",
+            "determinism_level": "guaranteed",
+            "options": {"prompt_token_price": 0.0, "completion_token_price": 0.0},
+        },
+        "early_stop_config": {
+            "name": "threshold",
+            "security_level": "OFFICIAL",
+            "determinism_level": "guaranteed",
+            "options": {"metric": "score", "threshold": 0.5, "comparison": "gte", "min_rows": 1},
+        },
+    }
+
+    runner_instance = runner.build_runner(config, defaults=defaults, sinks=[])
+
+    assert runner_instance.rate_limiter is not None
+    assert runner_instance.cost_tracker is not None
+    assert runner_instance.early_stop_plugins is not None and len(runner_instance.early_stop_plugins) == 1

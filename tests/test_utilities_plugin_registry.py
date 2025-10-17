@@ -67,23 +67,32 @@ def test_create_utility_plugin_conflicting_security_levels():
         utility_plugin_registry.unregister("dummy")
 
 
-def test_create_named_utility_inherits_parent_context():
+def test_create_named_utility_requires_explicit_levels():
     register_utility_plugin("dummy", lambda options, context: DummyUtility(context=context, options=options))
 
     parent = PluginContext(plugin_name="suite", plugin_kind="suite", security_level="official", determinism_level="guaranteed")
     child = parent.derive(plugin_name="experiment", plugin_kind="experiment")
 
     try:
-        plugin = create_named_utility("dummy", {"foo": "bar"}, parent_context=child)
+        with pytest.raises(ConfigurationError):
+            create_named_utility("dummy", {"foo": "bar"}, parent_context=child)
+
+        plugin = create_named_utility(
+            "dummy",
+            {"foo": "bar"},
+            security_level="OFFICIAL",
+            determinism_level="guaranteed",
+            parent_context=child,
+        )
 
         assert isinstance(plugin, DummyUtility)
-        assert plugin.plugin_context.security_level == "OFFICIAL"  # Normalized from lowercase "official"
+        assert plugin.plugin_context.security_level == "OFFICIAL"
         assert plugin.plugin_context.determinism_level == "guaranteed"
         assert plugin.plugin_context.parent == child
-        # Provenance should track that levels were inherited from parent
+        # Provenance should reflect explicit declarations, not inheritance
         assert plugin.plugin_context.provenance == (
-            "utility:dummy.inherited.security_level",
-            "utility:dummy.inherited.determinism_level",
+            "utility:dummy.definition.security_level",
+            "utility:dummy.definition.determinism_level",
         )
         assert plugin.options["foo"] == "bar"
     finally:

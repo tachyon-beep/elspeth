@@ -273,8 +273,8 @@ args: ['calc']
         deep_config = {"level1": {}}
         current = deep_config["level1"]
         for i in range(100):
-            current[f"level{i+2}"] = {}
-            current = current[f"level{i+2}"]
+            current[f"level{i + 2}"] = {}
+            current = current[f"level{i + 2}"]
 
         # System should handle this gracefully (not crash)
         # May reject if exceeds reasonable depth

@@ -75,9 +75,7 @@ def test_registry_constructs_llm_and_sink(monkeypatch):
         sink_registry.temporary_override("dummy", lambda options, context: DummySink(**options)),
     ):
         llm = llm_registry.create("dummy", {"name": "llm", "security_level": "OFFICIAL", "determinism_level": "guaranteed"})
-        sink = sink_registry.create(
-            "dummy", {"name": "sink", "security_level": "OFFICIAL", "determinism_level": "guaranteed"}
-        )
+        sink = sink_registry.create("dummy", {"name": "sink", "security_level": "OFFICIAL", "determinism_level": "guaranteed"})
 
     assert isinstance(llm, DummyLLM)
     assert isinstance(sink, DummySink)

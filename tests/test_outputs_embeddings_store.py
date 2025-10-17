@@ -122,6 +122,27 @@ def test_embeddings_sink_embeds_text_when_vector_missing():
     assert embedder.calls == ["raw text"]
 
 
+def test_embeddings_sink_namespace_normalizes_case():
+    provider = StubVectorStore()
+    sink = EmbeddingsStoreSink(
+        provider="pgvector",
+        dsn="postgresql://example",
+        provider_factory=lambda name, _: provider,
+    )
+    suite_ctx = PluginContext(plugin_name="SuiteName", plugin_kind="suite", security_level="official", determinism_level="none")
+    experiment_ctx = suite_ctx.derive(plugin_name="ExperimentA", plugin_kind="experiment")
+    sink_ctx = experiment_ctx.derive(plugin_name="Embeddings", plugin_kind="sink")
+    apply_plugin_context(sink, sink_ctx)
+
+    sink.write(
+        {"results": [{"row": {"APPID": "1"}, "response": {"content": "text", "metrics": {"embedding": [0.1, 0.2, 0.3]}}}]},
+        metadata={"security_level": "OFFICIAL"},
+    )
+
+    namespace, _ = provider.calls[0]
+    assert namespace == "suitename.experimenta.official"
+
+
 def test_embeddings_sink_metadata_falls_back_to_run_metadata():
     provider = StubVectorStore()
     sink = EmbeddingsStoreSink(

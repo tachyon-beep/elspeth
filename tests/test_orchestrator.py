@@ -156,3 +156,46 @@ def test_orchestrator_single_run_executes_plugins(monkeypatch):
     assert sink.calls, "Sink should receive payload"
     sink_metadata = sink.calls[0][1]
     assert sink_metadata["aggregates"]["single_run_agg_plugin"]["count"] == 1
+
+
+def test_orchestrator_resolves_determinism_from_components():
+    class DeterministicDatasource:
+        security_level = "OFFICIAL"
+        determinism_level = "guaranteed"
+
+        def load(self):
+            return pd.DataFrame([{"APPID": "1"}])
+
+    class LowDeterminismLLM:
+        security_level = "OFFICIAL"
+        determinism_level = "low"
+
+        def generate(self, *, system_prompt, user_prompt, metadata=None):
+            return {"content": user_prompt}
+
+    class HighSink:
+        def __init__(self):
+            self.calls = []
+            self._elspeth_security_level = "OFFICIAL"
+            self._elspeth_determinism_level = "high"
+            self.determinism_level = "high"
+
+        def write(self, results, *, metadata=None):
+            self.calls.append(metadata)
+
+    sink = HighSink()
+    orchestrator = ExperimentOrchestrator(
+        datasource=DeterministicDatasource(),
+        llm_client=LowDeterminismLLM(),
+        sinks=[sink],
+        config=OrchestratorConfig(
+            llm_prompt={"system": "sys", "user": "Hi {APPID}"},
+            prompt_fields=["APPID"],
+        ),
+    )
+
+    payload = orchestrator.run()
+
+    assert payload["metadata"]["determinism_level"] == "low"
+    assert sink.calls and sink.calls[0]["determinism_level"] == "low"
+    assert orchestrator.experiment_runner.determinism_level == "low"

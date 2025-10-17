@@ -80,6 +80,7 @@ integration:
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     assert manifest["rows"] == 2
     assert "aggregates" in manifest
+    assert manifest["metadata"]["determinism_level"] == "guaranteed"
     variants = manifest["aggregates"]["prompt_variants"]["variants"]
     assert len(variants) == 2
 

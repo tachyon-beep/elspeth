@@ -90,7 +90,7 @@ class VisualAnalyticsSink(BaseVisualSink):
             for index, label in enumerate(labels):
                 rate = pass_rates.get(label)
                 if rate is not None:
-                    ax.text(index, values[index], f"{rate*100:.1f}%", ha="center", va="bottom", fontsize=8)
+                    ax.text(index, values[index], f"{rate * 100:.1f}%", ha="center", va="bottom", fontsize=8)
             fig.tight_layout()
 
             buffer = io.BytesIO()
@@ -267,13 +267,10 @@ class VisualAnalyticsSink(BaseVisualSink):
             rows: list[str] = []
             for name, value in means.items():
                 rate = pass_rates.get(name)
-                rate_text = f"{rate*100:.1f}%" if rate is not None else "n/a"
+                rate_text = f"{rate * 100:.1f}%" if rate is not None else "n/a"
                 rows.append(f"<tr><td>{name}</td><td>{value:.4f}</td><td>{rate_text}</td></tr>")
             table_html = (
-                "<table>"
-                "<thead><tr><th>Criterion</th><th>Mean</th><th>Pass Rate</th></tr></thead>"
-                f"<tbody>{''.join(rows)}</tbody>"
-                "</table>"
+                f"<table><thead><tr><th>Criterion</th><th>Mean</th><th>Pass Rate</th></tr></thead><tbody>{''.join(rows)}</tbody></table>"
             )
 
         metadata_section = ""

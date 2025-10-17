@@ -120,7 +120,6 @@ def create_plugin_with_inheritance(
 
     definition_det_level = definition.get("determinism_level")
     option_det_level = options.get("determinism_level")
-    parent_det_level = getattr(parent_context, "determinism_level", None)
 
     # Build provenance tracking
     sources: list[str] = []
@@ -137,73 +136,34 @@ def create_plugin_with_inheritance(
     if provenance:
         sources.extend(provenance)
 
+    if definition_sec_level is None and option_sec_level is None:
+        raise ConfigurationError(f"{plugin_kind}:{name}: security_level must be declared on the plugin definition or options")
+    if definition_det_level is None and option_det_level is None:
+        raise ConfigurationError(f"{plugin_kind}:{name}: determinism_level must be declared on the plugin definition or options")
+
     # Coalesce security level with downgrade prevention
     # Security enforcement: child plugins CANNOT downgrade parent's security classification
     # but CAN upgrade or match it
-    level: str | None
     try:
-        if parent_sec_level is not None:
-            # Parent has a security level
-            if definition_sec_level is not None or option_sec_level is not None:
-                # Child is explicitly specifying a level - check for downgrades
-                child_level = coalesce_security_level(definition_sec_level, option_sec_level)
-
-                # Import here to avoid circular dependency
-                from elspeth.core.security import SECURITY_LEVELS, normalize_security_level
-
-                # Check for downgrade attempt
-                normalized_parent = normalize_security_level(parent_sec_level)
-                normalized_child = normalize_security_level(child_level)
-
-                if SECURITY_LEVELS.index(normalized_child) < SECURITY_LEVELS.index(normalized_parent):
-                    raise ValueError(
-                        f"Conflicting security_level: child cannot downgrade from parent's {normalized_parent} to {normalized_child}"
-                    )
-
-                level = normalized_child  # Use child's level (same or upgrade is allowed)
-            else:
-                # No explicit level - inherit from parent
-                from elspeth.core.security import normalize_security_level
-
-                level = normalize_security_level(parent_sec_level)
-                sources.append(f"{plugin_kind}:{name}.inherited.security_level")
-        elif definition_sec_level is not None or option_sec_level is not None:
-            # No parent - just coalesce definition and options
-            level = coalesce_security_level(definition_sec_level, option_sec_level)
-        else:
-            # No levels specified anywhere
-            level = None
+        child_sec_level = coalesce_security_level(definition_sec_level, option_sec_level)
     except ValueError as exc:
         raise ConfigurationError(f"{plugin_kind}:{name}: {exc}") from exc
 
-    # Coalesce determinism level from definition and options
-    # Note: Determinism level doesn't have the same security implications as security level,
-    # so we don't need to enforce parent precedence
-    det_level: str | None
-    if definition_det_level is not None or option_det_level is not None:
-        try:
-            det_level = coalesce_determinism_level(definition_det_level, option_det_level)
-        except ValueError as exc:
-            raise ConfigurationError(f"{plugin_kind}:{name}: {exc}") from exc
-    else:
-        # No explicit determinism level, will inherit from parent
-        det_level = None
+    # Import inside to avoid circular dependency
+    from elspeth.core.security import SECURITY_LEVELS, normalize_security_level
 
-    # Inherit determinism level from parent if not explicitly specified
-    # (Security level inheritance is handled by coalesce above to prevent downgrades)
-    if det_level is None and parent_det_level is not None:
-        det_level = normalize_determinism_level(parent_det_level)
-        sources.append(f"{plugin_kind}:{name}.inherited.determinism_level")
+    level = normalize_security_level(child_sec_level)
+    if parent_sec_level is not None:
+        normalized_parent = normalize_security_level(parent_sec_level)
+        if SECURITY_LEVELS.index(level) < SECURITY_LEVELS.index(normalized_parent):
+            raise ConfigurationError(f"{plugin_kind}:{name}: security_level '{level}' cannot downgrade parent level '{normalized_parent}'")
 
-    # Validate required levels are present
-    if level is None:
-        raise ConfigurationError(
-            f"{plugin_kind}:{name}: security_level is required but not provided "
-            f"(no explicit level in definition or options, and no parent context to inherit from)"
-        )
-    if det_level is None:
-        # Determinism level has a safe default
-        det_level = "none"
+    try:
+        det_level = coalesce_determinism_level(definition_det_level, option_det_level)
+    except ValueError as exc:
+        raise ConfigurationError(f"{plugin_kind}:{name}: {exc}") from exc
+
+    det_level = normalize_determinism_level(det_level)
 
     provenance_tuple = tuple(sources or (f"{plugin_kind}:{name}.resolved",))
 

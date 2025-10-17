@@ -19,7 +19,8 @@
   "baseline_plugins": [
     {
       "name": "score_delta",
-      "security_level": "official"
+      "security_level": "official",
+      "determinism_level": "guaranteed"
     }
   ]
 }

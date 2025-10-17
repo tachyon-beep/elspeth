@@ -65,6 +65,7 @@ class ExperimentConfig(BaseModel):
     prompt_defaults: dict[str, Any] | None = None
     concurrency_config: dict[str, Any] | None = None
     security_level: str | None = None
+    determinism_level: str | None = None
     early_stop_config: dict[str, Any] | None = None
 
     # Metadata
@@ -163,6 +164,7 @@ class ExperimentConfig(BaseModel):
             "llm_middleware_defs": data.get("llm_middlewares", []),
             "concurrency_config": data.get("concurrency"),
             "security_level": data.get("security_level"),
+            "determinism_level": data.get("determinism_level"),
             "early_stop_plugin_defs": early_stop_plugin_defs,
             "early_stop_config": data.get("early_stop"),
             "path": folder,

@@ -42,9 +42,7 @@ def _parse_type_string(type_str: str) -> Type:
     }
 
     if type_lower not in type_map:
-        raise ValueError(
-            f"Unsupported type '{type_str}'. Supported types: {list(type_map.keys())}"
-        )
+        raise ValueError(f"Unsupported type '{type_str}'. Supported types: {list(type_map.keys())}")
 
     return type_map[type_lower]
 

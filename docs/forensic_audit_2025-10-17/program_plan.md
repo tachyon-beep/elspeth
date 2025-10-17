@@ -23,12 +23,12 @@
 ## 4. Workstreams & Tasks
 
 ### Workstream A: Test Suite Recovery (Lead: QA Eng)
-1. Analyse regression failures (`test_results.txt:71-112`), draft remediation PR.  
-2. Reinstate determinism defaults in CLI & suite runner (`src/elspeth/cli.py`, `src/elspeth/core/experiments/suite_runner.py`).  
-3. Normalise sink namespace casing (`src/elspeth/plugins/nodes/sinks/embeddings_store.py`).  
-4. Fix utility registry determinism inheritance (`src/elspeth/plugins/utilities`).  
-5. Extend tests to prevent regressions; run `python -m pytest --maxfail=1 --disable-warnings`.  
-**Deliverables:** Green pytest report, updated tests, changelog entry.
+1. Analyse regression failures (`test_results.txt:71-112`), draft remediation PR. ✅  
+2. Reinstate determinism defaults in CLI & suite runner (`src/elspeth/cli.py`, `src/elspeth/core/experiments/suite_runner.py`). ✅  
+3. Normalise sink namespace casing (`src/elspeth/plugins/nodes/sinks/embeddings_store.py`). ✅  
+4. Fix utility registry determinism inheritance (`src/elspeth/plugins/utilities`). ✅  
+5. Extend tests to prevent regressions; run `python -m pytest --maxfail=1 --disable-warnings`. ✅  
+**Deliverables:** Green pytest report, updated tests, changelog entry. ✅
 
 ### Workstream B: Endpoint Hardening (Lead: Security Eng)
 1. Integrate `validate_azure_openai_endpoint` in `_create_embedder` (`src/elspeth/retrieval/service.py`). ✅  
@@ -41,8 +41,8 @@
 1. Generate pinned requirement files (e.g., `requirements.lock`, `requirements-dev.lock`) via pip-compile with hashes. ✅  
 2. Update `scripts/bootstrap.sh` and Make targets to consume locks using `piptools sync` without ad-hoc upgrades. ✅  
 3. Configure SBOM generation (`make sbom` using CycloneDX) & vulnerability scans (`make audit` via `pip-audit`); retain artefacts. ✅  
-4. Draft supply-chain policy and add to `docs/operations/dependency-governance.md`.  
-**Deliverables:** Lockfiles checked in, bootstrap updated, SBOM (`sbom.json`) and audit workflows documented.
+4. Draft supply-chain policy and add to `docs/operations/dependency-governance.md`. ✅  
+**Deliverables:** Lockfiles checked in, bootstrap updated, SBOM (`sbom.json`) and audit workflows documented. ✅
 
 ### Workstream D: Quality Gates Automation (Lead: Platform Eng)
 1. Extend CI to run pytest, coverage, gitleaks, pip-audit, SBOM generation; publish reports. ✅  
@@ -71,7 +71,7 @@
 - Final readiness review at end of Week 4 with sign-off recorded in `docs/forensic_audit_2025-10-17/`.
 
 ## 7. Acceptance Criteria
-- All readiness gates (tests, coverage ≥85%, secrets, SBOM, reproducible build) show PASS with artefacts.  
+- All readiness gates (tests, coverage ≥85%, secrets, SBOM, reproducible build) show PASS with artefacts. *(Coverage now 85.0% line / 71.7% branch.)*  
 - Findings AUD-0001 through AUD-0004 closed with verified fixes and regression tests.  
 - CI remains green across two consecutive mainline builds post-merge.  
 - AIS packet approved by Security and Platform stakeholders.

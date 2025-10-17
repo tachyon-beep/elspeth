@@ -274,6 +274,7 @@ def _clone_suite_sinks(base_sinks: list, experiment_name: str) -> list:
     cloned = []
     for sink in base_sinks:
         security_level = getattr(sink, "_elspeth_security_level", None)
+        determinism_level = getattr(sink, "_elspeth_determinism_level", getattr(sink, "determinism_level", None))
         if isinstance(sink, CsvResultSink):
             base_path = Path(sink.path)
             new_path = base_path.with_name(f"{experiment_name}_{base_path.name}")
@@ -288,8 +289,14 @@ def _clone_suite_sinks(base_sinks: list, experiment_name: str) -> list:
             )
             if security_level:
                 setattr(cloned[-1], "_elspeth_security_level", security_level)
+            if determinism_level:
+                setattr(cloned[-1], "_elspeth_determinism_level", determinism_level)
+                setattr(cloned[-1], "determinism_level", determinism_level)
         else:
             cloned.append(sink)
+            if determinism_level:
+                setattr(cloned[-1], "_elspeth_determinism_level", determinism_level)
+                setattr(cloned[-1], "determinism_level", determinism_level)
     return cloned
 
 
