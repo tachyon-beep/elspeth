@@ -5,11 +5,12 @@
 Retrieval components now enforce endpoint allowlists at runtime:
 
 - Azure OpenAI embedders validate the `endpoint` against the certified regex
-  patterns (public, Gov, China clouds). Validation failures raise `ValueError`
-  in STANDARD/STRICT secure modes.
+  pattern for the Australian/public Azure cloud (`*.openai.azure.com`).
+  Validation failures raise `ValueError` in STANDARD/STRICT secure modes.
 - Azure Cognitive Search clients validate the `endpoint` before instantiating
-  `SearchClient`. Rejections are surfaced as `ConfigurationError` with guidance
-  to use an approved domain.
+  `SearchClient`. Only public Azure domains (`*.search.windows.net`) are
+  accepted. Rejections are surfaced as `ConfigurationError` with guidance to
+  use an approved domain.
 - Legacy HTTP/OpenAI clients continue to rely on the central `http_api`
   allowlist (unchanged).
 
@@ -32,7 +33,8 @@ If a deployment requires additional Azure endpoints:
 
 For temporary overrides (e.g., pre-production sandboxes), set the
 `ELSPETH_APPROVED_ENDPOINTS` environment variable with a comma-separated list of
-regex patterns. This should only be used in DEVELOPMENT secure mode.
+regex patterns. This should only be used in DEVELOPMENT secure mode and must
+not be promoted to STANDARD/STRICT without formal approval.
 
 ## Operator Playbook
 

@@ -58,12 +58,8 @@ ServiceType = Literal[
 # Full regex matching is used for validation.
 APPROVED_PATTERNS: dict[ServiceType, list[str]] = {
     "azure_openai": [
-        # Azure OpenAI public cloud
+        # Azure OpenAI (public cloud) - includes Australian regions
         r"https://[^/]+\.openai\.azure\.com(/.*)?",
-        # Azure OpenAI Government cloud
-        r"https://[^/]+\.openai\.azure\.us(/.*)?",
-        # Azure OpenAI China cloud
-        r"https://[^/]+\.openai\.azure\.cn(/.*)?",
     ],
     "http_api": [
         # OpenAI public API
@@ -78,20 +74,12 @@ APPROVED_PATTERNS: dict[ServiceType, list[str]] = {
         r"https://\[::1\](:[0-9]+)?(/.*)?",
     ],
     "azure_blob": [
-        # Azure Blob Storage public cloud
+        # Azure Blob Storage (public cloud) - includes Australian regions
         r"https://[^/]+\.blob\.core\.windows\.net(/.*)?",
-        # Azure Blob Storage Government cloud
-        r"https://[^/]+\.blob\.core\.usgovcloudapi\.net(/.*)?",
-        # Azure Blob Storage China cloud
-        r"https://[^/]+\.blob\.core\.chinacloudapi\.cn(/.*)?",
     ],
     "azure_search": [
-        # Azure Cognitive Search public cloud
+        # Azure Cognitive Search (public cloud) - includes Australian regions
         r"https://[^/]+\.search\.windows\.net(/.*)?",
-        # Azure Cognitive Search Government cloud
-        r"https://[^/]+\.search\.azure\.us(/.*)?",
-        # Azure Cognitive Search China cloud
-        r"https://[^/]+\.search\.azure\.cn(/.*)?",
     ],
 }
 
