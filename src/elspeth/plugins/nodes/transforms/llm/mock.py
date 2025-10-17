@@ -5,7 +5,7 @@ from __future__ import annotations
 import hashlib
 from typing import Any
 
-from elspeth.core.protocols import LLMClientProtocol
+from elspeth.core.base.protocols import LLMClientProtocol
 
 
 class MockLLMClient(LLMClientProtocol):

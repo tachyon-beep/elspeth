@@ -264,7 +264,7 @@ This report documents the results of comprehensive penetration testing conducted
 - `src/elspeth/core/security/approved_endpoints.py`: 23% (endpoint validation - covered by separate test suite with 91% coverage)
 - `src/elspeth/core/controls/cost_tracker.py`: 83% (cost tracking)
 - `src/elspeth/core/controls/rate_limit.py`: 35% (rate limiting)
-- `src/elspeth/core/protocols.py`: 84% (artifact security levels)
+- `src/elspeth/core/base/protocols.py`: 84% (artifact security levels)
 
 **Note:** Low overall coverage (16%) is expected for security-only test suite. Security-critical paths have 58-91% coverage when including integration tests.
 

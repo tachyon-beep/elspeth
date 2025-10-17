@@ -26,7 +26,7 @@ def openai_stub(monkeypatch):
             def __init__(self, parent):
                 self._parent = parent
 
-            def create(self, model: str, input: str):
+            def create(self, model: str, input: str, **kwargs):
                 self._parent.calls.append((model, input))
                 return StubEmbeddingResponse([0.1, 0.2])
 

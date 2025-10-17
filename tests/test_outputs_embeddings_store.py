@@ -5,7 +5,7 @@ import types
 
 import pytest
 
-from elspeth.core.plugin_context import PluginContext, apply_plugin_context
+from elspeth.core.base.plugin_context import PluginContext, apply_plugin_context
 from elspeth.core.validation import ConfigurationError
 from elspeth.plugins.nodes.sinks.embeddings_store import EmbeddingsStoreSink, UpsertResponse, VectorRecord, VectorStoreClient
 from elspeth.retrieval.embedding import Embedder

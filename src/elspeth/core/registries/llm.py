@@ -10,18 +10,19 @@ from __future__ import annotations
 import logging
 from typing import Any, Iterable, Mapping
 
-from elspeth.core.plugin_context import PluginContext
-from elspeth.core.protocols import LLMClientProtocol
-from elspeth.core.registry.base import BasePluginRegistry
-from elspeth.core.registry.schemas import with_security_properties
+from elspeth.core.base.plugin_context import PluginContext
+from elspeth.core.base.protocols import LLMClientProtocol
 from elspeth.core.security import (
     coalesce_determinism_level,
     coalesce_security_level,
     validate_azure_openai_endpoint,
     validate_http_api_endpoint,
 )
-from elspeth.core.validation_base import ConfigurationError
+from elspeth.core.validation.base import ConfigurationError
 from elspeth.plugins.nodes.transforms.llm import AzureOpenAIClient, HttpOpenAIClient, MockLLMClient, StaticLLMClient
+
+from .base import BasePluginRegistry
+from .schemas import with_security_properties
 
 logger = logging.getLogger(__name__)
 
@@ -152,7 +153,7 @@ def _create_static_llm(options: dict[str, Any], context: PluginContext) -> Stati
     content = options.get("content")
     if not content:
         raise ConfigurationError(
-            "static_test LLM requires explicit 'content' parameter. " "Provide the test response content explicitly in configuration."
+            "static_test LLM requires explicit 'content' parameter. Provide the test response content explicitly in configuration."
         )
     return StaticLLMClient(
         content=content,
@@ -299,4 +300,9 @@ llm_registry.register(
 
 __all__ = [
     "llm_registry",
+    "create_llm_from_definition",
+    "_create_azure_openai",
+    "_create_http_openai",
+    "_create_mock_llm",
+    "_create_static_llm",
 ]

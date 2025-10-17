@@ -11,7 +11,7 @@ from typing import Any, Iterable, Mapping
 
 from openpyxl import Workbook  # type: ignore[import-untyped]
 
-from elspeth.core.protocols import Artifact, ArtifactDescriptor, ResultSink
+from elspeth.core.base.protocols import Artifact, ArtifactDescriptor, ResultSink
 from elspeth.core.security import normalize_determinism_level, normalize_security_level
 from elspeth.plugins.nodes.sinks._sanitize import sanitize_cell
 

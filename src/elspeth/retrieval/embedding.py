@@ -7,7 +7,7 @@ from typing import Sequence
 
 from openai import AzureOpenAI, OpenAI
 
-from elspeth.core.validation_base import ConfigurationError
+from elspeth.core.validation.base import ConfigurationError
 
 
 class Embedder:

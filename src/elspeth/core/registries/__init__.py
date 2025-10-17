@@ -12,7 +12,7 @@ Architecture:
     - Common schemas: Reusable validation schemas
 
 Usage:
-    >>> from elspeth.core.registry import BasePluginRegistry
+    >>> from elspeth.core.registries import BasePluginRegistry
     >>> registry = BasePluginRegistry[MyPlugin]("my_plugin")
     >>> registry.register("name", factory_fn, schema=validation_schema)
     >>> plugin = registry.create("name", options, parent_context=context)
@@ -74,7 +74,7 @@ def create_llm_from_definition(
 ) -> Any:
     """Backward-compatible shim delegating to ``llm_registry`` helper."""
 
-    from elspeth.core.llm_registry import create_llm_from_definition as _create
+    from .llm import create_llm_from_definition as _create
 
     return _create(
         definition,

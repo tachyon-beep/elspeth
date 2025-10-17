@@ -6,7 +6,7 @@
 
 ## Current Registry Structure (18 files to consolidate)
 
-### Main Registry (`src/elspeth/core/registry.py`)
+### Main Registry (`src/elspeth/core/registries/__init__.py`)
 
 - Singleton pattern: `registry = PluginRegistry()`
 - Has: `_datasources`, `_llms`, `_sinks` dicts
@@ -14,9 +14,9 @@
 
 ### Split Registries
 
-1. `src/elspeth/core/datasource_registry.py` - Datasource registry
-2. `src/elspeth/core/llm_registry.py` - LLM registry
-3. `src/elspeth/core/sink_registry.py` - Sink registry
+1. `src/elspeth/core/registries/datasource.py` - Datasource registry
+2. `src/elspeth/core/registries/llm.py` - LLM registry
+3. `src/elspeth/core/registries/sink.py` - Sink registry
 4. `src/elspeth/core/controls/registry.py` - Controls registry
 5. `src/elspeth/core/controls/cost_tracker_registry.py` - Cost tracker registry
 6. `src/elspeth/core/controls/rate_limiter_registry.py` - Rate limiter registry
@@ -435,7 +435,7 @@ time python -m elspeth.cli \
 
 ### Core Registry Files (to refactor)
 
-- `src/elspeth/core/registry.py` - Main singleton
+- `src/elspeth/core/registries/__init__.py` - Main singleton
 - `src/elspeth/core/registry/base.py` - BasePluginRegistry
 - `src/elspeth/core/registry/plugin_helpers.py` - create_plugin_with_inheritance
 - `src/elspeth/core/registry/context_utils.py` - Context utilities
@@ -466,7 +466,7 @@ time python -m elspeth.cli \
 
 ### Target Location (Phase 4)
 
-- `src/elspeth/core/protocols.py` - ALL universal protocols
+- `src/elspeth/core/base/protocols.py` - ALL universal protocols
 - `src/elspeth/plugins/orchestrators/experiment/protocols.py` - Experiment-specific
 
 ---

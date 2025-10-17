@@ -261,7 +261,7 @@ DUPLICATION: ~0 lines (0%)
 
 **Before:**
 ```python
-# src/elspeth/core/registry.py (50+ lines)
+# src/elspeth/core/registries/__init__.py (50+ lines)
 
 def create_datasource(
     self,
@@ -324,7 +324,7 @@ def create_datasource(
 
 **After:**
 ```python
-# src/elspeth/core/registry.py (10 lines)
+# src/elspeth/core/registries/__init__.py (10 lines)
 
 def create_datasource(
     self,

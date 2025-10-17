@@ -79,7 +79,7 @@ pattern=options.get("pattern", ""),
 **Recommendation**: Make pattern required, fail if empty
 
 ### 6. LLM Temperature Default
-**File**: `src/elspeth/core/validation.py:840`
+**File**: `src/elspeth/core/validation/settings.py and src/elspeth/core/validation/suite.py`
 ```python
 temperature = float(data.get("temperature", 0.0) or 0.0)
 ```
@@ -88,7 +88,7 @@ temperature = float(data.get("temperature", 0.0) or 0.0)
 **Recommendation**: Require explicit temperature in LLM config
 
 ### 7. LLM Max Tokens Default
-**File**: `src/elspeth/core/validation.py:841`
+**File**: `src/elspeth/core/validation/settings.py and src/elspeth/core/validation/suite.py`
 ```python
 max_tokens = int(data.get("max_tokens", 0) or 0)
 ```
@@ -97,7 +97,7 @@ max_tokens = int(data.get("max_tokens", 0) or 0)
 **Recommendation**: Require explicit max_tokens with reasonable upper bound
 
 ### 8. Static LLM Content
-**File**: `src/elspeth/core/llm_registry.py:45`
+**File**: `src/elspeth/core/registries/llm.py:45`
 ```python
 content=options.get("content", "STATIC RESPONSE"),
 ```
@@ -106,7 +106,7 @@ content=options.get("content", "STATIC RESPONSE"),
 **Recommendation**: Make content required for static LLM
 
 ### 9. Static LLM Score
-**File**: `src/elspeth/core/llm_registry.py:46`
+**File**: `src/elspeth/core/registries/llm.py:46`
 ```python
 score=options.get("score", 0.5),
 ```
@@ -135,7 +135,7 @@ content_field=options.get("content_field", "contents"),
 **Recommendation**: Require explicit field names in config
 
 ### 14-18. Embeddings Store Defaults
-**File**: `src/elspeth/core/sink_registry.py:140-147`
+**File**: `src/elspeth/core/registries/sink.py:140-147`
 ```python
 table=options.get("table", "elspeth_rag"),
 text_field=options.get("text_field", DEFAULT_TEXT_FIELD),
@@ -181,7 +181,7 @@ threshold=float(options.get("threshold", 1.0))
 
 ### Visual Analytics Defaults (10 instances)
 
-**File**: `src/elspeth/core/sink_registry.py:107-130`
+**File**: `src/elspeth/core/registries/sink.py:107-130`
 ```python
 dpi=int(options.get("dpi", 150))
 seaborn_style=options.get("seaborn_style", "darkgrid")
@@ -234,7 +234,7 @@ strip_whitespace=options.get("strip_whitespace", True)
 
 ### File Naming Defaults (2 instances)
 
-**File**: `src/elspeth/core/sink_registry.py:107, 123`
+**File**: `src/elspeth/core/registries/sink.py:107, 123`
 ```python
 file_stem=options.get("file_stem", "analytics_visual")
 file_stem=options.get("file_stem", "enhanced_visual")
@@ -260,7 +260,7 @@ max_attempts=options.get("max_attempts", 3)
 
 ### Feature Flags (2 instances)
 
-**File**: `src/elspeth/core/validation.py:776-777`
+**File**: `src/elspeth/core/validation/settings.py and src/elspeth/core/validation/suite.py-777`
 ```python
 enabled = bool(data.get("enabled", True))
 is_baseline = bool(data.get("is_baseline", False))

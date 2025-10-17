@@ -14,9 +14,9 @@ from azure.core.credentials import AzureKeyCredential
 from azure.search.documents import SearchClient
 from psycopg import Connection, sql
 
-from elspeth.core.plugin_context import PluginContext
-from elspeth.core.protocols import Artifact, ArtifactDescriptor, ResultSink
-from elspeth.core.validation_base import ConfigurationError
+from elspeth.core.base.plugin_context import PluginContext
+from elspeth.core.base.protocols import Artifact, ArtifactDescriptor, ResultSink
+from elspeth.core.validation.base import ConfigurationError
 from elspeth.retrieval.embedding import AzureOpenAIEmbedder, Embedder, OpenAIEmbedder
 
 logger = logging.getLogger(__name__)

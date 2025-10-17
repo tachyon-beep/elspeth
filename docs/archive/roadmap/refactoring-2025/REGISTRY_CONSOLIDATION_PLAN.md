@@ -956,7 +956,7 @@ _early_stop_registry = BasePluginRegistry[EarlyStopPlugin]("early_stop_plugin")
 ---
 
 ### 2.5 Migrate Main Registry
-**Target:** `src/elspeth/core/registry.py`
+**Target:** `src/elspeth/core/registries/__init__.py`
 **Estimated Time:** 10 hours (most critical, test thoroughly)
 
 **Current:** 887 lines, handles datasources, LLMs, and sinks

@@ -4,7 +4,7 @@
 |-----------|-----------|-------------------------|---------------|
 | ExperimentOrchestrator | `src/elspeth/core/orchestrator.py:22-144` | docs/architecture/architecture-overview.md (Component Layers) | 2025-10-12 |
 | ExperimentRunner | `src/elspeth/core/experiments/runner.py:52-709` | docs/architecture/data-flow-diagrams.md (Runner Pipeline) | 2025-10-12 |
-| ArtifactPipeline | `src/elspeth/core/artifact_pipeline.py:147-219` | docs/architecture/component-diagram.md (Artifact Pipeline) | 2025-10-12 |
+| ArtifactPipeline | `src/elspeth/core/pipeline/artifact_pipeline.py:147-219` | docs/architecture/component-diagram.md (Artifact Pipeline) | 2025-10-12 |
 | SuiteReportGenerator | `src/elspeth/tools/reporting.py:18-199` | docs/reporting-and-suite-management.md (Section 2) | 2025-10-12 |
 | Configuration Loader | `src/elspeth/config.py:52-210` | docs/architecture/configuration-security.md (Validation Pipeline) | 2025-10-12 |
 | AzureEnvironmentMiddleware | `src/elspeth/plugins/nodes/transforms/llm/middleware_azure.py:180-259` | docs/architecture/audit-logging.md (Azure Telemetry) | 2025-10-12 |

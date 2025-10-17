@@ -113,7 +113,7 @@ plugins/
 
 ### What Changed
 
-- Created unified protocol hub: `src/elspeth/core/protocols.py`
+- Created unified protocol hub: `src/elspeth/core/base/protocols.py`
   - Orchestrator protocols: `OrchestratorPlugin`
   - Node protocols: `DataSource`, `ResultSink`, `TransformNode`, `AggregatorNode`
   - LLM protocols: `LLMClientProtocol`, `LLMMiddleware`, `LLMRequest`, `RateLimiter`, `CostTracker`
@@ -135,7 +135,7 @@ plugins/
 
 ### Key Files
 
-- `src/elspeth/core/protocols.py` (NEW) - Unified universal protocols
+- `src/elspeth/core/base/protocols.py` (NEW) - Unified universal protocols
 - `src/elspeth/plugins/orchestrators/experiment/protocols.py` (NEW) - Experiment-specific protocols
 - `src/elspeth/core/interfaces.py` (MODIFIED) - Backward compatibility shim
 - `src/elspeth/core/llm/middleware.py` (MODIFIED) - Backward compatibility shim
@@ -194,10 +194,10 @@ All phases maintain full test coverage:
 
 The following deprecation warnings are **expected** and indicate backward compatibility is working:
 
-1. `elspeth.core.interfaces is deprecated. Use elspeth.core.protocols instead.`
+1. `elspeth.core.interfaces is deprecated. Use elspeth.core.base.protocols instead.`
 2. `elspeth.plugins.outputs is deprecated. Use elspeth.plugins.nodes.sinks instead.`
 3. `elspeth.plugins.datasources is deprecated. Use elspeth.plugins.nodes.sources instead.`
-4. `elspeth.core.llm.middleware is deprecated. Use elspeth.core.protocols instead.`
+4. `elspeth.core.llm.middleware is deprecated. Use elspeth.core.base.protocols instead.`
 5. `elspeth.plugins.llms is deprecated. Use elspeth.plugins.nodes.transforms.llm instead.`
 6. `elspeth.core.experiments.plugins is deprecated. Use elspeth.plugins.orchestrators.experiment.protocols instead.`
 
@@ -289,7 +289,7 @@ make sample-suite
 python -c "import elspeth; print('OK')"
 
 # Verify protocol imports
-python -c "from elspeth.core.protocols import DataSource, LLMClientProtocol; print('OK')"
+python -c "from elspeth.core.base.protocols import DataSource, LLMClientProtocol; print('OK')"
 python -c "from elspeth.plugins.orchestrators.experiment.protocols import ValidationPlugin; print('OK')"
 ```
 

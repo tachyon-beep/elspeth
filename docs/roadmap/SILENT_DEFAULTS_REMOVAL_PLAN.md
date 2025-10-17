@@ -52,7 +52,7 @@
 
 6. **Static LLM Content Default** ❌
    - **Location**:
-     - `src/elspeth/core/llm_registry.py:45`
+     - `src/elspeth/core/registries/llm.py:45`
      - `src/elspeth/plugins/nodes/transforms/llm/static.py:16`
    - **Current Behavior**: Defaults to `"STATIC RESPONSE"` if not provided
    - **Risk**: Tests may pass with implicit defaults, hiding missing configuration
@@ -67,9 +67,9 @@
 **Objective**: Require explicit `content` parameter for static_test LLM
 
 **Files to Modify**:
-1. `src/elspeth/core/llm_registry.py`
+1. `src/elspeth/core/registries/llm.py`
 2. `src/elspeth/plugins/nodes/transforms/llm/static.py`
-3. Schema definition in `src/elspeth/core/llm_registry.py:101-113`
+3. Schema definition in `src/elspeth/core/registries/llm.py:101-113`
 
 **Changes**:
 
@@ -89,7 +89,7 @@ content: str,  # Required parameter - no default
 
 #### 2. Remove default from factory function
 
-**File**: `src/elspeth/core/llm_registry.py`
+**File**: `src/elspeth/core/registries/llm.py`
 
 **Current** (lines 44-48):
 ```python
@@ -121,12 +121,12 @@ def _create_static_llm(options: dict[str, Any], context: PluginContext) -> Stati
 
 **Import needed**:
 ```python
-from elspeth.core.validation_base import ConfigurationError
+from elspeth.core.validation.base import ConfigurationError
 ```
 
 #### 3. Update schema to mark content as required
 
-**File**: `src/elspeth/core/llm_registry.py`
+**File**: `src/elspeth/core/registries/llm.py`
 
 **Current** (lines 101-113):
 ```python
@@ -228,7 +228,7 @@ def test_static_llm_content_default_documented(self):
 def test_static_llm_content_requires_explicit_config(self):
     """Verify static LLM requires explicit content parameter."""
     from elspeth.core.llm_registry import llm_registry
-    from elspeth.core.validation_base import ConfigurationError
+    from elspeth.core.validation.base import ConfigurationError
 
     # Should raise ConfigurationError when content is missing
     with pytest.raises(ConfigurationError, match="static_test LLM requires explicit 'content'"):

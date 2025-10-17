@@ -13,7 +13,7 @@ import numpy as np
 from elspeth.core.experiments.plugin_registry import register_aggregation_plugin
 
 if TYPE_CHECKING:
-    from elspeth.core.schema import DataFrameSchema
+    from elspeth.core.base.schema import DataFrameSchema
 
 logger = logging.getLogger(__name__)
 

@@ -18,9 +18,9 @@ import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
-from elspeth.core.plugin_context import PluginContext
+from elspeth.core.base.plugin_context import PluginContext
 
 
 class PluginLogger:
@@ -152,12 +152,16 @@ class PluginLogger:
         self._write_log_entry(init_event)
 
         # Also log to standard logger
+        plugin_meta = cast(dict[str, Any], init_event.get("plugin", {}))
+        config_hash = str(plugin_meta.get("config_hash", "unknown"))
+        code_hash = str(plugin_meta.get("code_hash", "unknown"))
+
         self.logger.info(
             "Plugin initialized: %s (%s) [config_hash=%s, code_hash=%s]",
             self.context.plugin_name,
             self.context.plugin_kind,
-            init_event["plugin"]["config_hash"],  # type: ignore[index]
-            init_event["plugin"]["code_hash"],  # type: ignore[index]
+            config_hash,
+            code_hash,
         )
 
     def log_event(

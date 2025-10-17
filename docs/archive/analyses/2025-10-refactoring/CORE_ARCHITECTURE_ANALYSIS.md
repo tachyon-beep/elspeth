@@ -127,8 +127,8 @@ src/elspeth/core/
 **Recommendation:** **FLATTEN TO CORE ROOT**
 
 **Actions:**
-1. Move `env_helpers.py` → `src/elspeth/core/env_helpers.py`
-2. Move `plugin_registry.py` → `src/elspeth/core/utility_plugin_registry.py`
+1. Move `env_helpers.py` → `src/elspeth/core/utils/env_helpers.py`
+2. Move `plugin_registry.py` → `src/elspeth/core/registries/utility.py`
 3. Update imports in `core/__init__.py`
 4. Delete `core/utilities/` directory
 
@@ -148,7 +148,7 @@ src/elspeth/core/
 **Recommendation:** **FLATTEN TO CORE ROOT**
 
 **Actions:**
-1. Move `context.py` → `src/elspeth/core/plugin_context.py`
+1. Move `context.py` → `src/elspeth/core/base/plugin_context.py`
 2. Update imports throughout codebase
 3. Delete `core/plugins/` directory
 
@@ -171,9 +171,9 @@ src/elspeth/core/
 
 **Options:**
 1. **Flatten:** Move `registry.py` → `src/elspeth/core/llm_registry_helpers.py`
-2. **Merge:** Incorporate into `core/llm_registry.py` (already exists at root)
+2. **Merge:** Incorporate into `core/registries/llm.py` (already exists at root)
 
-**Recommendation:** **MERGE** into `core/llm_registry.py`
+**Recommendation:** **MERGE** into `core/registries/llm.py`
 
 **Actions:**
 1. Merge content from `llm/registry.py` into root `llm_registry.py`
@@ -229,7 +229,7 @@ core/plugin_context.py (128 lines)
 from elspeth.core.plugins import PluginContext
 
 # New import:
-from elspeth.core.plugin_context import PluginContext
+from elspeth.core.base.plugin_context import PluginContext
 # OR
 from elspeth.core import PluginContext  # if exported in core/__init__.py
 ```
@@ -249,7 +249,7 @@ core/llm/
 
 **After:**
 ```
-core/llm_registry.py (existing file, merge content)
+core/registries/llm.py (existing file, merge content)
 ```
 
 **Changes:**
@@ -280,7 +280,7 @@ core/utilities/
 **After:**
 ```
 core/env_helpers.py (71 lines)
-core/utility_plugin_registry.py (69 lines)
+core/registries/utility.py (69 lines)
 ```
 
 **Changes:**
@@ -290,7 +290,7 @@ from elspeth.core.utilities import require_env_var, get_env_var
 from elspeth.core.utilities.plugin_registry import create_utility_plugin
 
 # New imports:
-from elspeth.core.env_helpers import require_env_var, get_env_var
+from elspeth.core.utils.env_helpers import require_env_var, get_env_var
 from elspeth.core.utility_plugin_registry import create_utility_plugin
 # OR (if exported in core/__init__.py):
 from elspeth.core import require_env_var, get_env_var
@@ -422,9 +422,9 @@ core/
 
 **Tasks:**
 1. Move `plugins/context.py` → `core/plugin_context.py`
-2. Merge `llm/registry.py` → `core/llm_registry.py`
+2. Merge `llm/registry.py` → `core/registries/llm.py`
 3. Move `utilities/env_helpers.py` → `core/env_helpers.py`
-4. Move `utilities/plugin_registry.py` → `core/utility_plugin_registry.py`
+4. Move `utilities/plugin_registry.py` → `core/registries/utility.py`
 5. Update all imports (grep + replace)
 6. Update `core/__init__.py` exports
 7. Delete empty subdirectories

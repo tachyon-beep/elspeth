@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any, ContextManager, Mapping, Protocol, runtim
 import pandas as pd
 
 if TYPE_CHECKING:
-    from elspeth.core.schema import DataFrameSchema
+    from elspeth.core.base.schema import DataFrameSchema
 
 
 # ============================================================================

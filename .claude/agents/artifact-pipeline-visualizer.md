@@ -83,7 +83,7 @@ Read: config/sample_suite/settings.yaml
 grep pattern="sinks:" path="config/sample_suite/" -A 20
 
 # Check sink registry for available sink plugins
-grep pattern="\".*\": PluginFactory" path="src/elspeth/core/registry.py" output_mode="content" -n
+grep pattern="\".*\": PluginFactory" path="src/elspeth/core/registries/__init__.py" output_mode="content" -n
 ```
 
 **Extract for each sink:**
@@ -157,14 +157,14 @@ grep pattern="\".*\": PluginFactory" path="src/elspeth/core/registry.py" output_
 
 ```bash
 # Check topological sort implementation
-Read: src/elspeth/core/artifact_pipeline.py
+Read: src/elspeth/core/pipeline/artifact_pipeline.py
 # Focus on lines ~200-400 for dependency resolution
 
 # Check security enforcement
-grep pattern="_enforce_dependency_security" path="src/elspeth/core/artifact_pipeline.py" output_mode="content" -A 20
+grep pattern="_enforce_dependency_security" path="src/elspeth/core/pipeline/artifact_pipeline.py" output_mode="content" -A 20
 
 # Check artifact matching logic
-grep pattern="def _resolve_artifact" path="src/elspeth/core/artifact_pipeline.py" output_mode="content" -A 30
+grep pattern="def _resolve_artifact" path="src/elspeth/core/pipeline/artifact_pipeline.py" output_mode="content" -A 30
 ```
 
 ## Output Format Standards
@@ -270,10 +270,10 @@ You understand these critical aspects:
 
 You have deep knowledge of these implementation files:
 
-- `src/elspeth/core/artifact_pipeline.py`: Main pipeline logic, topological sort, security enforcement
-- `src/elspeth/core/artifacts.py`: Artifact types and validation
+- `src/elspeth/core/pipeline/artifact_pipeline.py`: Main pipeline logic, topological sort, security enforcement
+- `src/elspeth/core/pipeline/artifacts.py`: Artifact types and validation
 - `src/elspeth/core/interfaces.py`: `Artifact` and `ArtifactDescriptor` protocols
-- `src/elspeth/core/registry.py`: Artifact schema definitions
+- `src/elspeth/core/registries/__init__.py`: Artifact schema definitions
 - `tests/test_artifact_pipeline.py`: Dependency resolution test cases
 - `tests/test_sink_chaining.py`: Integration tests for sink dependencies
 

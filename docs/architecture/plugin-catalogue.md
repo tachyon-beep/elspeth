@@ -136,7 +136,7 @@ All built-in plugins now receive a `PluginContext` instance during construction.
 
 ## Validation & Hardening
 
-Plugin registrations remain schema-validated at instantiation time (`src/elspeth/core/registry.py`, `src/elspeth/core/experiments/plugin_registry.py`, `src/elspeth/core/controls/registry.py`). Harden deployments by importing only approved plugin modules before CLI invocation or by wrapping registries to limit the exposed keys.
+Plugin registrations remain schema-validated at instantiation time (`src/elspeth/core/registries/__init__.py`, `src/elspeth/core/experiments/plugin_registry.py`, `src/elspeth/core/controls/registry.py`). Harden deployments by importing only approved plugin modules before CLI invocation or by wrapping registries to limit the exposed keys.
 
 ## Proposed Plugin Backlog
 

@@ -1,25 +1,69 @@
 # Core Directory Restructure Proposal
 
-**Status:** Deferred
+**Status:** Completed (Phase 1 + Phase 2 delivered 2025-10-20)
 **Created:** 2025-10-17
+**Last Reviewed:** 2025-10-20
 **Context:** Post plugin-split refactoring
-**Decision:** Defer until current PR (#4) merges and stabilizes
+**Decision:** Defer full restructure until follow-up roadmap slot; continue incremental cleanup
+
+> **2025-10-20 Status Update:** The full restructure outlined below has now shipped:
+> - Empty `core/plugins/` and `core/llm/` directories were removed.
+> - Canonical registries live in `core/registries/` with the legacy modules retired.
+> - Core abstractions moved under `core/base/`; pipeline helpers live in `core/pipeline/`.
+> - Configuration, validation, and utility code now reside in `core/config/`, `core/validation/`, and `core/utils/`.
+> - Compatibility shims (`*_registry.py`, `core/registry/`) have been deleted and all imports updated.
+>
+> The sections marked “Historical Snapshot (2025-10-17)” below capture the original analysis and are preserved for context.
 
 ## Executive Summary
 
-The `src/elspeth/core/` directory currently has **21 Python files at the root level** and inconsistent organization. This document proposes a restructure to improve navigability and logical grouping, while documenting the current state for future reference.
+The `src/elspeth/core/` directory still places a large number of modules at the package root, which hinders discoverability. This proposal documents the historical state, the cleanup already performed, and the remaining steps required to complete the restructure.
 
-**Key Findings:**
-- 2 empty directories serving no purpose (`core/plugins/`, `core/llm/`)
-- Registry infrastructure split between `registry/` subdirectory and root-level `*_registry.py` files
-- No clear grouping for 21 root-level files
-- **Impact of full restructure: 205 import statements** across codebase
+**Phase 1 Outcomes (Shipped 2025-10-20):**
+- Registry infrastructure consolidated under `core/registries/`
+- Legacy `*_registry.py` modules replaced with compatibility shims
+- Deprecated `core/plugins/` and `core/llm/` folders deleted
 
-**Recommendation:** Minimal cleanup now (delete empty dirs), full restructure as separate future effort.
+**Remaining Opportunities:**
+- Reduce oversized modules (`validation/settings.py`, `validation/suite.py`, `base/schema.py`, `utils/logging.py`) via logical splits
+- Continue trimming historical documentation that references pre-refactor paths
+
+**Recommendation:** Track the residual refactors (file size reductions, doc pruning) as follow-up tidy tasks rather than structural work.
 
 ---
 
-## Current State Analysis
+## Current Structure Snapshot (2025-10-20)
+
+```
+src/elspeth/core/
+├── registries/                # Canonical registry implementations (Phase 1)
+├── registry/                  # Compatibility shim package (to remove post-migration)
+├── controls/, experiments/, prompts/, security/
+├── artifact_pipeline.py, validation.py, ...
+├── logging.py, env_helpers.py
+├── utilities/                 # Empty placeholder introduced for future helpers
+└── *_registry.py              # Compatibility shims mirroring `registries/`
+```
+
+### Quick Progress Checklist
+
+| Area                           | Status | Notes |
+| ----------------------------- | ------ | ----- |
+| Remove empty `core/plugins/` and `core/llm/` dirs | ✅ | Completed in Phase 1 cleanup |
+| Consolidate registry implementations | ✅ | `core/registries/` now authoritative |
+| Update downstream imports (`prompt_variants`, `validation`, etc.) | ✅ | Imports target `core.registries.*` |
+| Document current structure    | ✅ | `docs/architecture/CORE_STRUCTURE_CURRENT.md` refreshed |
+| Introduce new subpackages (`validation/`, `pipeline/`, `config/`, `utils/`) | ⬜ | Pending |
+| Split oversized modules       | ⬜ | Pending (identify cut points) |
+| Remove registry compatibility shims | ⬜ | Pending downstream adoption |
+
+---
+
+## Historical Snapshot (2025-10-17)
+
+> The following sections preserve the original analysis prior to the 2025-10-20 cleanup. Figures and file counts reflect that earlier state and are retained for traceability.
+
+### Current State Analysis (Historical)
 
 ### Directory Statistics
 
@@ -50,15 +94,17 @@ registry.py                   11K  - Facade (barely used, only 2 real imports)
 - `datasource_registry`: 7 imports
 - `utility_plugin_registry`: 3 imports
 
-#### VALIDATION FILES (2 files, ~39KB)
+#### VALIDATION FILES (3 files, ~39KB)
 ```
-validation.py                 31K  - Main validation logic
-validation_base.py           7.6K  - Base validation classes
+validation/settings.py       24K  - Settings profile validation
+validation/suite.py          18K  - Suite validation and preflight reporting
+validation/base.py          7.6K  - Base validation classes
 ```
 
 **Import Impact:** 54 imports total
-- `validation`: 17 imports
-- `validation_base`: 37 imports
+- `validation.settings`: 12 imports
+- `validation.suite`: 5 imports
+- `validation.base`: 37 imports
 
 #### ORCHESTRATION FILES (4 files, ~24KB)
 ```
@@ -115,7 +161,7 @@ security/     - Security controls, PII validators, signing (5 files)
 prompts/      - Prompt rendering (3 files)
 registry/     - Base registry infrastructure (5 files)
               ❌ BUT actual *_registry.py implementations are at ROOT!
-utilities/    - Miscellaneous utilities (doesn't exist despite utility files at root)
+utilities/    - Miscellaneous utilities (proposal to introduce; placeholder added in Phase 1)
 ```
 
 #### Empty (Should Delete)
@@ -149,10 +195,8 @@ context.py  # This file was moved to core/plugin_context.py
 ## Problems Identified
 
 ### 1. Empty Directories with No Purpose
-- `core/plugins/` and `core/llm/` exist but contain no code
-- Only `__pycache__` remains
-- No imports reference these directories
-- Causes confusion when navigating codebase
+- (Resolved 2025-10-20) `core/plugins/` and `core/llm/` no longer exist
+- Original issue retained here for historical context
 
 ### 2. Registry Organization Inconsistency
 - **Infrastructure** lives in `core/registry/` subdirectory:
@@ -219,7 +263,7 @@ src/elspeth/core/
 │   ├── middleware.py                 # MOVE llm_middleware_registry.py → middleware.py
 │   ├── sink.py                       # MOVE sink_registry.py → sink.py
 │   └── utility.py                    # MOVE utility_plugin_registry.py → utility.py
-│   # DELETE core/registry.py facade
+│   # DELETE core/registries/__init__.py facade
 │
 ├── validation/                        # NEW - unified validation code
 │   ├── __init__.py
@@ -290,7 +334,7 @@ src/elspeth/core/
 **Actions:**
 1. Delete `core/llm/` directory (empty)
 2. Delete `core/plugins/` directory (empty)
-3. Delete `core/registry.py` facade (barely used - only 2 imports)
+3. Delete `core/registries/__init__.py` facade (barely used - only 2 imports)
 4. Update those 2 imports to use specific registries directly
 5. Add comments to top-level files explaining grouping
 
@@ -361,7 +405,7 @@ plugin_context.py   34 imports  →  core/base/plugin_context.py
 
 #### Medium-Impact Modules (10-30 imports)
 ```
-validation.py               17 imports  →  core/validation/validators.py
+validation.py               17 imports  →  core/validation/settings.py & core/validation/suite.py
 llm_registry.py             15 imports  →  core/registries/llm.py
 schema.py                   13 imports  →  core/base/schema.py
 llm_middleware_registry.py  10 imports  →  core/registries/middleware.py
@@ -384,7 +428,7 @@ env_helpers.py              0 imports  →  core/utils/env_helpers.py
 
 ```bash
 # Commands used for analysis:
-grep -r "from elspeth.core.protocols import" src/ tests/ --include="*.py" | wc -l
+grep -r "from elspeth.core.base.protocols import" src/ tests/ --include="*.py" | wc -l
 # Repeat for each module...
 
 # Total across all moved modules:
@@ -397,9 +441,9 @@ grep -r "from elspeth.core.protocols import" src/ tests/ --include="*.py" | wc -
 ```python
 from elspeth.core.llm_registry import llm_registry
 from elspeth.core.sink_registry import sink_registry
-from elspeth.core.protocols import DataSource, ResultSink
-from elspeth.core.validation_base import ConfigurationError
-from elspeth.core.plugin_context import PluginContext
+from elspeth.core.base.protocols import DataSource, ResultSink
+from elspeth.core.validation.base import ConfigurationError
+from elspeth.core.base.plugin_context import PluginContext
 ```
 
 #### After (Proposed)
@@ -450,8 +494,8 @@ sys.modules['elspeth.core.sink_registry'] = sys.modules['elspeth.core.registries
 2. **Copy files to new locations** (don't delete originals yet)
    ```bash
    # Example:
-   cp src/elspeth/core/llm_registry.py src/elspeth/core/registries/llm.py
-   cp src/elspeth/core/protocols.py src/elspeth/core/base/protocols.py
+   cp src/elspeth/core/registries/llm.py src/elspeth/core/registries/llm.py
+   cp src/elspeth/core/base/protocols.py src/elspeth/core/base/protocols.py
    # ... etc
    ```
 
@@ -467,7 +511,7 @@ sys.modules['elspeth.core.sink_registry'] = sys.modules['elspeth.core.registries
 
 2. **Create compatibility shims** in old locations:
    ```python
-   # src/elspeth/core/llm_registry.py (temporary compatibility shim)
+   # src/elspeth/core/registries/llm.py (temporary compatibility shim)
    """
    DEPRECATED: This module has moved to elspeth.core.registries.llm
    This compatibility shim will be removed in v2.0.0
@@ -509,8 +553,8 @@ sys.modules['elspeth.core.sink_registry'] = sys.modules['elspeth.core.registries
 
 2. **Delete old files and compatibility shims**
    ```bash
-   git rm src/elspeth/core/llm_registry.py
-   git rm src/elspeth/core/sink_registry.py
+   git rm src/elspeth/core/registries/llm.py
+   git rm src/elspeth/core/registries/sink.py
    # ... etc
    ```
 
@@ -668,7 +712,7 @@ Instead of all-at-once, migrate one subsystem at a time:
 
 1. Delete `src/elspeth/core/llm/` (empty directory)
 2. Delete `src/elspeth/core/plugins/` (empty directory)
-3. Delete `src/elspeth/core/registry.py` facade
+3. Delete `src/elspeth/core/registries/__init__.py` facade
 4. Update 2 imports that use the facade
 5. Add comments to core-level files explaining grouping
 6. Document current structure in architecture docs
@@ -682,7 +726,7 @@ git checkout -b cleanup/remove-empty-core-dirs
 
 rm -rf src/elspeth/core/llm/
 rm -rf src/elspeth/core/plugins/
-git rm src/elspeth/core/registry.py
+git rm src/elspeth/core/registries/__init__.py
 
 # Update imports in:
 # - src/elspeth/plugins/experiments/prompt_variants.py
@@ -925,7 +969,7 @@ Team,
 
 I've completed an analysis of our core/ directory structure and identified
 opportunities for improvement. The full proposal is in:
-docs/archive/roadmap/CORE_DIRECTORY_RESTRUCTURE_PROPOSAL.md
+docs/roadmap/CORE_DIRECTORY_RESTRUCTURE_PROPOSAL.md
 
 TL;DR:
 - Current state: 21 files at core/ root, 2 empty directories

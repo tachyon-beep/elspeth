@@ -18,7 +18,7 @@ from elspeth.core.security.secure_mode import (
     validate_middleware_config,
     validate_sink_config,
 )
-from elspeth.core.validation_base import ConfigurationError
+from elspeth.core.validation.base import ConfigurationError
 
 logger = logging.getLogger(__name__)
 

@@ -17,7 +17,7 @@ from scipy import stats as scipy_stats
 
 def _create_score_extractor_factory(options: dict[str, Any]) -> dict[str, Any]:
     """Factory helper for score extractor plugin creation."""
-    from elspeth.core.validation_base import ConfigurationError
+    from elspeth.core.validation.base import ConfigurationError
 
     if "key" not in options:
         raise ConfigurationError("key is required for score_extractor plugin")

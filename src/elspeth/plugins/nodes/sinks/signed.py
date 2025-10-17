@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
 
-from elspeth.core.protocols import ResultSink
+from elspeth.core.base.protocols import ResultSink
 from elspeth.core.security import generate_signature
 
 logger = logging.getLogger(__name__)

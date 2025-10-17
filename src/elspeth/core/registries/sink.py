@@ -14,16 +14,10 @@ import logging
 from typing import Any
 
 from elspeth.adapters.blob_store import load_blob_config
-from elspeth.core.plugin_context import PluginContext
-from elspeth.core.protocols import ResultSink
-from elspeth.core.registry.base import BasePluginRegistry
-from elspeth.core.registry.schemas import (
-    with_artifact_properties,
-    with_error_handling,
-    with_security_properties,
-)
+from elspeth.core.base.plugin_context import PluginContext
+from elspeth.core.base.protocols import ResultSink
 from elspeth.core.security import validate_azure_blob_endpoint
-from elspeth.core.validation_base import ConfigurationError
+from elspeth.core.validation.base import ConfigurationError
 from elspeth.plugins.nodes.sinks import (
     AnalyticsReportSink,
     AzureDevOpsRepoSink,
@@ -45,6 +39,13 @@ from elspeth.plugins.nodes.sinks.embeddings_store import (
     EmbeddingsStoreSink,
 )
 from elspeth.plugins.nodes.sinks.enhanced_visual_report import EnhancedVisualAnalyticsSink
+
+from .base import BasePluginRegistry
+from .schemas import (
+    with_artifact_properties,
+    with_error_handling,
+    with_security_properties,
+)
 
 logger = logging.getLogger(__name__)
 

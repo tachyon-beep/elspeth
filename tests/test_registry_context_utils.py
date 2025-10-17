@@ -2,8 +2,8 @@
 
 import pytest
 
-from elspeth.core.plugin_context import PluginContext
-from elspeth.core.registry.context_utils import (
+from elspeth.core.base.plugin_context import PluginContext
+from elspeth.core.registries.context_utils import (
     create_plugin_context,
     extract_security_levels,
     prepare_plugin_payload,

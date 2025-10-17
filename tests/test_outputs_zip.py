@@ -8,7 +8,7 @@ from zipfile import ZipFile
 
 import pytest
 
-from elspeth.core.protocols import Artifact
+from elspeth.core.base.protocols import Artifact
 from elspeth.plugins.nodes.sinks.zip_bundle import ZipResultSink
 
 

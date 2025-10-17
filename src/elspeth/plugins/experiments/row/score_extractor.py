@@ -8,12 +8,12 @@ from typing import TYPE_CHECKING, Any, Mapping
 
 import numpy as np
 
+from elspeth.core.base.plugin_context import PluginContext
 from elspeth.core.experiments.plugin_registry import register_row_plugin
-from elspeth.core.plugin_context import PluginContext
 from elspeth.plugins.experiments._stats_helpers import _create_score_extractor_factory
 
 if TYPE_CHECKING:
-    from elspeth.core.schema import DataFrameSchema
+    from elspeth.core.base.schema import DataFrameSchema
 
 logger = logging.getLogger(__name__)
 

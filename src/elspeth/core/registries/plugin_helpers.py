@@ -17,14 +17,15 @@ from __future__ import annotations
 
 from typing import Any, Iterable, TypeVar
 
-from elspeth.core.plugin_context import PluginContext
-from elspeth.core.registry.base import BasePluginRegistry
+from elspeth.core.base.plugin_context import PluginContext
 from elspeth.core.security import (
     coalesce_determinism_level,
     coalesce_security_level,
     normalize_determinism_level,
 )
-from elspeth.core.validation_base import ConfigurationError
+from elspeth.core.validation.base import ConfigurationError
+
+from .base import BasePluginRegistry
 
 T = TypeVar("T")
 
@@ -156,7 +157,7 @@ def create_plugin_with_inheritance(
 
                 if SECURITY_LEVELS.index(normalized_child) < SECURITY_LEVELS.index(normalized_parent):
                     raise ValueError(
-                        f"Conflicting security_level: child cannot downgrade from " f"parent's {normalized_parent} to {normalized_child}"
+                        f"Conflicting security_level: child cannot downgrade from parent's {normalized_parent} to {normalized_child}"
                     )
 
                 level = normalized_child  # Use child's level (same or upgrade is allowed)

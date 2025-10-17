@@ -8,9 +8,9 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from elspeth.core.config_schema import validate_experiment_config
+from elspeth.core.config.schema import validate_experiment_config
 from elspeth.core.experiments.plugin_registry import normalize_early_stop_definitions
-from elspeth.core.validation_base import ConfigurationError
+from elspeth.core.validation.base import ConfigurationError
 
 DEFAULT_INPUT_COST_PER_1K = 0.03
 DEFAULT_OUTPUT_COST_PER_1K = 0.06

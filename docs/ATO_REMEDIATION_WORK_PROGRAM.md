@@ -143,20 +143,20 @@ grep -r "BasePluginRegistry" src/elspeth/core/
    - [ ] File: `docs/architecture/REGISTRY_MIGRATION_STATUS.md`
 
 2. **Migrate datasource registry** (3 hours)
-   - [ ] Update `src/elspeth/core/datasource_registry.py` to use `BasePluginRegistry`
+   - [ ] Update `src/elspeth/core/registries/datasource.py` to use `BasePluginRegistry`
    - [ ] Migrate all datasource plugin registrations
    - [ ] Update factory functions to new signature
    - [ ] Add tests for new registry
    - [ ] Verify backward compatibility during transition
 
 3. **Migrate LLM registry** (3 hours)
-   - [ ] Update `src/elspeth/core/llm_registry.py` (already done, verify complete)
+   - [ ] Update `src/elspeth/core/registries/llm.py` (already done, verify complete)
    - [ ] Ensure all LLM plugins use new pattern
    - [ ] Remove any old facade functions
    - [ ] Update tests
 
 4. **Migrate sink registry** (3 hours)
-   - [ ] Update `src/elspeth/core/sink_registry.py` to use `BasePluginRegistry`
+   - [ ] Update `src/elspeth/core/registries/sink.py` to use `BasePluginRegistry`
    - [ ] Migrate all sink plugin registrations
    - [ ] Update factory functions
    - [ ] Add tests for new registry
@@ -242,7 +242,7 @@ Implement safeguards to prevent users from accidentally disabling security featu
 
 2. **Add configuration validation guards** (3 hours)
    ```python
-   # Add to src/elspeth/core/config_validation.py
+   # Add to src/elspeth/core/config/validation.py
 
    from elspeth.core.security.secure_mode import get_secure_mode, is_production
 
@@ -291,7 +291,7 @@ Implement safeguards to prevent users from accidentally disabling security featu
    ```python
    # Update src/elspeth/cli.py
 
-   from elspeth.core.config_validation import validate_secure_settings
+   from elspeth.core.config.validation import validate_secure_settings
 
    def main():
        # ... existing code ...
@@ -527,7 +527,7 @@ Perform code-assisted penetration testing and threat modeling before final ATO s
    # Create tests/security/test_security_hardening.py
 
    import pytest
-   from elspeth.core.validation_base import ConfigurationError
+   from elspeth.core.validation.base import ConfigurationError
 
    class TestFormulaInjectionDefense:
        """Test that formula injection is prevented."""

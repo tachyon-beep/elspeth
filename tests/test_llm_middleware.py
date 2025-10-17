@@ -1,14 +1,15 @@
 from pathlib import Path
+from typing import Any, cast
 
 import pandas as pd
 import pytest
 import requests
 
+from elspeth.core.base.protocols import LLMMiddleware, LLMRequest
 from elspeth.core.experiments.config import ExperimentConfig, ExperimentSuite
 from elspeth.core.experiments.runner import ExperimentRunner
 from elspeth.core.experiments.suite_runner import ExperimentSuiteRunner
-from elspeth.core.llm_middleware_registry import create_middlewares
-from elspeth.core.protocols import LLMRequest
+from elspeth.core.registries.middleware import create_middlewares
 from elspeth.plugins.nodes.transforms.llm.middleware import AuditMiddleware, HealthMonitorMiddleware
 from elspeth.plugins.nodes.transforms.llm.middleware_azure import AzureEnvironmentMiddleware
 
@@ -38,7 +39,7 @@ class CollectingMiddleware:
 
 
 def test_middleware_chain(monkeypatch):
-    import elspeth.core.llm_middleware_registry as mw_registry
+    import elspeth.core.registries.middleware as mw_registry
 
     box = []
     mw_registry.register_middleware("collect", lambda options, context: CollectingMiddleware(box))
@@ -355,7 +356,7 @@ def test_azure_environment_middleware_on_error_abort(monkeypatch):
 
 
 def test_middleware_retry_hook_invoked(monkeypatch):
-    import elspeth.core.llm_middleware_registry as mw_registry
+    import elspeth.core.registries.middleware as mw_registry
 
     events = []
 
@@ -499,7 +500,7 @@ def test_suite_runner_applies_per_experiment_azure_middleware(monkeypatch):
 def test_suite_runner_deduplicates_shared_middleware_multiple_experiments(monkeypatch):
     events = []
 
-    class SharedMiddleware:
+    class SharedMiddleware(LLMMiddleware):
         name = "shared"
 
         def on_suite_loaded(self, suite_metadata, preflight):
@@ -514,15 +515,15 @@ def test_suite_runner_deduplicates_shared_middleware_multiple_experiments(monkey
         def on_suite_complete(self):
             events.append(("suite_complete", None))
 
-        def before_request(self, request):
+        def before_request(self, request: LLMRequest) -> LLMRequest:
             return request
 
-        def after_response(self, request, response):
+        def after_response(self, request: LLMRequest, response: dict[str, Any]) -> dict[str, Any]:
             return response
 
-    import elspeth.core.llm_middleware_registry as mw_registry
+    import elspeth.core.registries.middleware as mw_registry
 
-    mw_registry.register_middleware("shared", lambda options, context: SharedMiddleware())
+    mw_registry.register_middleware("shared", lambda options, context: cast(LLMMiddleware, SharedMiddleware()))
 
     exp_config = ExperimentConfig(
         name="exp",
@@ -602,9 +603,9 @@ def test_suite_runner_deduplicates_shared_middleware(monkeypatch):
         def on_suite_complete(self):
             events.append(("suite_complete", None))
 
-    import elspeth.core.llm_middleware_registry as mw_registry
+    import elspeth.core.registries.middleware as mw_registry
 
-    mw_registry.register_middleware("shared", lambda options, context: SharedMiddleware())
+    mw_registry.register_middleware("shared", lambda options, context: cast(LLMMiddleware, SharedMiddleware()))
 
     baseline_config = ExperimentConfig(
         name="baseline",

@@ -141,7 +141,7 @@ MF-2 Acceptance Criteria:
 **MF-3: Secure Configuration - COMPLETE** 🎉
 - ✅ Verified formula sanitization ALREADY IMPLEMENTED
 - ✅ Created `src/elspeth/core/security/secure_mode.py` (environment-based security modes)
-- ✅ Created `src/elspeth/core/config_validation.py` (validation guards)
+- ✅ Created `src/elspeth/core/config/validation.py` (validation guards)
 - ✅ Created production config templates (3 templates with documentation)
 - ✅ All tests passing (69 tests: 42 secure_mode + 27 config_validation)
 - ✅ Coverage: 95% secure_mode, 90% config_validation
@@ -388,8 +388,8 @@ $ ls -la src/elspeth/core/security/secure_mode.py
 ✓ Three modes: STRICT, STANDARD, DEVELOPMENT
 ✓ Environment variable: ELSPETH_SECURE_MODE
 
-$ ls -la src/elspeth/core/config_validation.py
--rw-rw-r-- 1 john john 7856 Oct 15 21:15 src/elspeth/core/config_validation.py
+$ ls -la src/elspeth/core/config/validation.py
+-rw-rw-r-- 1 john john 7856 Oct 15 21:15 src/elspeth/core/config/validation.py
 
 ✓ Config validation guards IMPLEMENTED
 ✓ Full configuration validation
@@ -529,9 +529,9 @@ $ .venv/bin/python -m pytest tests/test_security_approved_endpoints.py -v
 
 $ grep -l "validate.*endpoint" src/elspeth/core/*_registry.py
 
-src/elspeth/core/llm_registry.py
-src/elspeth/core/datasource_registry.py
-src/elspeth/core/sink_registry.py
+src/elspeth/core/registries/llm.py
+src/elspeth/core/registries/datasource.py
+src/elspeth/core/registries/sink.py
 
 ✓ Endpoint validation integrated into all relevant registries
 ✓ All 28 tests passing

@@ -155,15 +155,15 @@
 
 - [x] For each moved module, design shim:
   - [x] Old: `elspeth.core.datasource_registry` → New: `elspeth.plugins.nodes.sources.registry`
-    - [x] Shim location: `src/elspeth/core/datasource_registry.py`
+    - [x] Shim location: `src/elspeth/core/registries/datasource.py`
     - [x] Re-export strategy: `from new_location import *; warnings.warn(DeprecationWarning)`
 
   - [x] Old: `elspeth.core.llm_registry` → New: `elspeth.plugins.nodes.transforms.llm.registry`
-    - [x] Shim location: `src/elspeth/core/llm_registry.py`
+    - [x] Shim location: `src/elspeth/core/registries/llm.py`
     - [x] Re-export strategy: `from new_location import *; warnings.warn(DeprecationWarning)`
 
   - [x] Old: `elspeth.core.sink_registry` → New: `elspeth.plugins.nodes.sinks.registry`
-    - [x] Shim location: `src/elspeth/core/sink_registry.py`
+    - [x] Shim location: `src/elspeth/core/registries/sink.py`
     - [x] Re-export strategy: `from new_location import *; warnings.warn(DeprecationWarning)`
 
 - [x] Document shim creation in migration plan (8 shims total)

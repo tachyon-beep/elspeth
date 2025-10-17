@@ -20,7 +20,7 @@
 
 ## Classification & Data Segregation
 
-- **Security levels propagate** – Datasources and sinks normalise classification labels (`src/elspeth/plugins/datasources/csv_local.py:35`, `src/elspeth/core/artifact_pipeline.py:192`). Assign clearance to sink definitions via `security_level` and ensure pipeline consumers cannot escalate privileges.
+- **Security levels propagate** – Datasources and sinks normalise classification labels (`src/elspeth/plugins/datasources/csv_local.py:35`, `src/elspeth/core/pipeline/artifact_pipeline.py:192`). Assign clearance to sink definitions via `security_level` and ensure pipeline consumers cannot escalate privileges.
 - **Prompt packs with classified sinks** – The `archival` prompt pack demonstrates concurrent signed, bundle, and repository sinks for high-assurance exports (`config/settings.yaml:34-75`). Adapt this model for sensitive suites and confirm each sink inherits the appropriate classification.
 
 ## Middleware & Validation Defaults

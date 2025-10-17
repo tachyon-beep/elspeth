@@ -79,7 +79,7 @@ src/elspeth/cli.py:165: in run
                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 src/elspeth/cli.py:328: in _load_settings_from_args
     settings_report.raise_if_errors()
-src/elspeth/core/validation.py:62: in raise_if_errors
+src/elspeth/core/validation/validators.py:62: in raise_if_errors
     raise ConfigurationError(formatted)
 E   elspeth.core.validation.ConfigurationError: datasource:local_csv: datasource:local_csv: determinism_level is required
 E   llm:mock: llm:mock: determinism_level is required
@@ -104,7 +104,7 @@ E
 E     - suite.experiment.official
 E     + suite.experiment.OFFICIAL
 ______________ test_suite_runner_executes_with_defaults_and_packs ______________
-src/elspeth/core/registry.py:733: in create_llm_from_definition
+src/elspeth/core/registries/__init__.py:733: in create_llm_from_definition
     det_level = coalesce_determinism_level(parent_context.determinism_level, entry_det_level, options_det_level)
                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 src/elspeth/core/security/__init__.py:122: in coalesce_determinism_level
@@ -127,7 +127,7 @@ src/elspeth/core/experiments/plugin_registry.py:44: in create
            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 src/elspeth/plugins/experiments/prompt_variants.py:150: in _build_prompt_variants
     llm = registry.create_llm_from_definition(
-src/elspeth/core/registry.py:735: in create_llm_from_definition
+src/elspeth/core/registries/__init__.py:735: in create_llm_from_definition
     raise ConfigurationError(f"llm:{plugin_name}: {exc}") from exc
 E   elspeth.core.validation.ConfigurationError: llm:mock: Conflicting determinism_level values
 ______________ test_create_utility_plugin_with_schema_validation _______________
@@ -153,9 +153,9 @@ src/elspeth/__init__.py                                  0      0   100%
 src/elspeth/cli.py                                     238     15    94%   131, 156, 173, 243, 315, 317, 327, 354-355, 409, 423, 456, 465, 479, 483
 src/elspeth/config.py                                  238     42    82%   75, 78-79, 87, 90-91, 113, 116, 128, 131, 155, 160, 173, 176, 220-222, 224-226, 232-234, 238, 240, 255, 268, 275, 329, 341-343, 345-347, 349-351, 353-355, 357
 src/elspeth/core/__init__.py                             2      0   100%
-src/elspeth/core/artifact_pipeline.py                  234     16    93%   35-36, 43, 47, 54, 118, 128-129, 200, 248, 256, 260-261, 284, 314, 337
-src/elspeth/core/artifacts.py                           19      0   100%
-src/elspeth/core/config_schema.py                       10      2    80%   52-53
+src/elspeth/core/pipeline/artifact_pipeline.py                  234     16    93%   35-36, 43, 47, 54, 118, 128-129, 200, 248, 256, 260-261, 284, 314, 337
+src/elspeth/core/pipeline/artifacts.py                           19      0   100%
+src/elspeth/core/config/schema.py                       10      2    80%   52-53
 src/elspeth/core/controls/__init__.py                    4      0   100%
 src/elspeth/core/controls/cost_tracker.py               42      6    86%   14, 19, 82, 86, 88, 90
 src/elspeth/core/controls/rate_limit.py                138     15    89%   16-19, 22, 31-32, 66, 115, 117, 131, 158, 169, 191, 198
@@ -174,19 +174,19 @@ src/elspeth/core/llm/registry.py                        79     14    82%   28, 6
 src/elspeth/core/orchestrator.py                        70      2    97%   79, 87
 src/elspeth/core/plugins/__init__.py                     2      0   100%
 src/elspeth/core/plugins/context.py                     28      1    96%   69
-src/elspeth/core/processing.py                          12      0   100%
+src/elspeth/core/pipeline/processing.py                          12      0   100%
 src/elspeth/core/prompts/__init__.py                     4      0   100%
 src/elspeth/core/prompts/engine.py                      52      3    94%   49-51
 src/elspeth/core/prompts/exceptions.py                  11      0   100%
 src/elspeth/core/prompts/loader.py                      14      0   100%
 src/elspeth/core/prompts/template.py                    25      0   100%
-src/elspeth/core/registry.py                           193     33    83%   572, 579, 585, 612-613, 633-634, 644, 651, 657, 689-697, 700, 704, 714, 722, 729-730, 737-741, 753-754, 774-775, 785, 792, 798, 825-826
+src/elspeth/core/registries/__init__.py                           193     33    83%   572, 579, 585, 612-613, 633-634, 644, 651, 657, 689-697, 700, 704, 714, 722, 729-730, 737-741, 753-754, 774-775, 785, 792, 798, 825-826
 src/elspeth/core/security/__init__.py                   57     10    82%   25, 57, 61, 87, 100-103, 115, 119
 src/elspeth/core/security/signing.py                    23      4    83%   17, 26-28
-src/elspeth/core/types.py                              129     49    62%   28-37, 41, 45-47, 51, 82, 86-88, 114-122, 126, 130-132, 136, 160-162, 245-270, 278-305, 371-395
+src/elspeth/core/base/types.py                              129     49    62%   28-37, 41, 45-47, 51, 82, 86-88, 114-122, 126, 130-132, 136, 160-162, 245-270, 278-305, 371-395
 src/elspeth/core/utilities/__init__.py                   2      0   100%
 src/elspeth/core/utilities/plugin_registry.py           59      5    92%   63, 67, 71-72, 84
-src/elspeth/core/validation.py                         522    105    80%   31, 54-55, 72, 84-85, 106, 187, 211, 215, 261-263, 290-293, 341-342, 362, 397-398, 402, 406-407, 451-452, 468, 473, 516-517, 521, 632-633, 647-648, 651-652, 664-666, 668-671, 685-686, 689-690, 702-704, 708-709, 744, 748-750, 753-760, 763-767, 771, 823-824, 827-828, 832, 870, 946, 948-949, 951, 971, 990-991, 1024-1025, 1031, 1045, 1051-1060, 1066-1082, 1190
+src/elspeth/core/validation/validators.py                         522    105    80%   31, 54-55, 72, 84-85, 106, 187, 211, 215, 261-263, 290-293, 341-342, 362, 397-398, 402, 406-407, 451-452, 468, 473, 516-517, 521, 632-633, 647-648, 651-652, 664-666, 668-671, 685-686, 689-690, 702-704, 708-709, 744, 748-750, 753-760, 763-767, 771, 823-824, 827-828, 832, 870, 946, 948-949, 951, 971, 990-991, 1024-1025, 1031, 1045, 1051-1060, 1066-1082, 1190
 src/elspeth/datasources/__init__.py                      2      0   100%
 src/elspeth/datasources/blob_store.py                  139     25    82%   65, 67, 69, 94, 97, 101, 105, 120, 127-128, 131, 134-135, 139-142, 145, 186-187, 235-242
 src/elspeth/plugins/datasources/__init__.py              4      0   100%

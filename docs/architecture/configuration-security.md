@@ -9,9 +9,9 @@ secret material during orchestration.
   overrides while instantiating configured plugins (`src/elspeth/config.py:52-210`).
 - **Schema enforcement** – `validate_settings` and supporting helpers enforce structural rules,
   coercing security/determinism levels and catching unknown plugin options before execution
-  (`src/elspeth/core/validation.py:254-512`, `src/elspeth/core/config_schema.py:17-198`).
+  (`src/elspeth/core/validation/settings.py and src/elspeth/core/validation/suite.py-512`, `src/elspeth/core/config/schema.py:17-198`).
 - **Suite validation** – `validate_suite` inspects exported suites for missing experiments, sinks,
-  or inconsistent defaults prior to runtime (`src/elspeth/core/validation.py:430-512`).
+  or inconsistent defaults prior to runtime (`src/elspeth/core/validation/settings.py and src/elspeth/core/validation/suite.py-512`).
 
 <!-- UPDATE 2025-10-12: Validation pipeline cross-referenced with docs/architecture/data-flow-diagrams.md (Update 2025-10-12: Ingress Classification Flow). -->
 

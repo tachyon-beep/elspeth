@@ -27,10 +27,10 @@ Elspeth currently has **12 distinct plugin types**:
 
 | Plugin Type | Protocol/Base Class | Registry Location | Purpose |
 |-------------|---------------------|-------------------|---------|
-| **DataSource** | `DataSource` (Protocol) | `core/datasource_registry.py` | Load experiment input data |
-| **LLM Client** | `LLMClientProtocol` (Protocol) | `core/llm_registry.py` | Generate LLM responses |
+| **DataSource** | `DataSource` (Protocol) | `core/registries/datasource.py` | Load experiment input data |
+| **LLM Client** | `LLMClientProtocol` (Protocol) | `core/registries/llm.py` | Generate LLM responses |
 | **LLM Middleware** | `LLMMiddleware` (Protocol) | `core/llm/registry.py` | Intercept LLM requests/responses |
-| **Result Sink** | `ResultSink` (Protocol) | `core/sink_registry.py` | Persist experiment results |
+| **Result Sink** | `ResultSink` (Protocol) | `core/registries/sink.py` | Persist experiment results |
 | **Row Plugin** | `RowExperimentPlugin` (Protocol) | `core/experiments/row_plugin_registry.py` | Process single experiment rows |
 | **Aggregation Plugin** | `AggregationExperimentPlugin` (Protocol) | `core/experiments/aggregation_plugin_registry.py` | Compute aggregates across rows |
 | **Validation Plugin** | `ValidationPlugin` (Protocol) | `core/experiments/validation_plugin_registry.py` | Validate LLM responses |
@@ -45,16 +45,16 @@ Elspeth currently has **12 distinct plugin types**:
 **Current registry files** (18 total):
 
 ```
-core/registry.py                           # OLD monolithic registry (backward compat)
+core/registries/__init__.py                           # OLD monolithic registry (backward compat)
 core/registry/                             # NEW base framework (Phase 2)
   ├── base.py                              # BasePluginRegistry infrastructure
   ├── context_utils.py                     # Security/context handling
   ├── plugin_helpers.py                    # create_plugin_with_inheritance()
   └── schemas.py                           # Reusable schemas
 
-core/datasource_registry.py                # Datasource facade over BasePluginRegistry
-core/llm_registry.py                       # LLM client facade
-core/sink_registry.py                      # Sink facade
+core/registries/datasource.py                # Datasource facade over BasePluginRegistry
+core/registries/llm.py                       # LLM client facade
+core/registries/sink.py                      # Sink facade
 core/llm/registry.py                       # Middleware registry
 core/controls/registry.py                  # Controls facade (rate_limiter + cost_tracker)
 core/controls/rate_limiter_registry.py     # Rate limiter specific
@@ -429,9 +429,9 @@ src/elspeth/
 
 | Old Registries (18 files) | New Registries (6 files) |
 |---------------------------|--------------------------|
-| `core/datasource_registry.py` | `plugins/data_input/registry.py` |
-| `core/sink_registry.py` | `plugins/data_output/registry.py` |
-| `core/llm_registry.py` | `plugins/llm_integration/clients/registry.py` |
+| `core/registries/datasource.py` | `plugins/data_input/registry.py` |
+| `core/registries/sink.py` | `plugins/data_output/registry.py` |
+| `core/registries/llm.py` | `plugins/llm_integration/clients/registry.py` |
 | `core/llm/registry.py` | `plugins/llm_integration/middleware/registry.py` |
 | `core/experiments/row_plugin_registry.py`<br>`core/experiments/aggregation_plugin_registry.py`<br>`core/experiments/validation_plugin_registry.py`<br>`core/experiments/baseline_plugin_registry.py`<br>`core/experiments/early_stop_plugin_registry.py`<br>`core/controls/rate_limiter_registry.py`<br>`core/controls/cost_tracker_registry.py` | `plugins/experiment_lifecycle/registry.py`<br>(unified with sub-registries per lifecycle phase) |
 | `core/utilities/plugin_registry.py` | `plugins/utilities/registry.py` |

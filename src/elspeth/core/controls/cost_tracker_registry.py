@@ -11,9 +11,9 @@ from __future__ import annotations
 
 from typing import Any
 
+from elspeth.core.base.plugin_context import PluginContext
 from elspeth.core.controls.cost_tracker import CostTracker, FixedPriceCostTracker, NoopCostTracker
-from elspeth.core.plugin_context import PluginContext
-from elspeth.core.registry.base import BasePluginRegistry
+from elspeth.core.registries.base import BasePluginRegistry
 
 # Initialize the cost tracker registry
 cost_tracker_registry = BasePluginRegistry[CostTracker]("cost_tracker")
@@ -27,7 +27,7 @@ def _create_noop_cost_tracker(options: dict[str, Any], context: PluginContext) -
 
 def _create_fixed_price_cost_tracker(options: dict[str, Any], context: PluginContext) -> FixedPriceCostTracker:
     """Create a fixed-price cost tracker with specified token prices."""
-    from elspeth.core.validation_base import ConfigurationError
+    from elspeth.core.validation.base import ConfigurationError
 
     if "prompt_token_price" not in options:
         raise ConfigurationError("prompt_token_price is required for fixed_price cost tracker")

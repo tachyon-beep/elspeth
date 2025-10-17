@@ -4,11 +4,12 @@ from __future__ import annotations
 
 from typing import Any, Callable, Iterable, Mapping
 
-from elspeth.core.plugin_context import PluginContext
-from elspeth.core.protocols import LLMMiddleware
-from elspeth.core.registry.base import BasePluginRegistry
+from elspeth.core.base.plugin_context import PluginContext
+from elspeth.core.base.protocols import LLMMiddleware
 from elspeth.core.security import coalesce_security_level
-from elspeth.core.validation_base import ConfigurationError
+from elspeth.core.validation.base import ConfigurationError
+
+from .base import BasePluginRegistry
 
 # Use base registry infrastructure
 _middleware_registry = BasePluginRegistry[LLMMiddleware]("llm_middleware")
@@ -37,7 +38,7 @@ def create_middleware(
 
     Now uses create_plugin_with_inheritance() helper to eliminate duplication.
     """
-    from elspeth.core.registry.plugin_helpers import create_plugin_with_inheritance
+    from .plugin_helpers import create_plugin_with_inheritance
 
     result = create_plugin_with_inheritance(
         _middleware_registry,
