@@ -12,3 +12,6 @@ This is an internal scratchpad for ongoing engineering notes. Update freely whil
   3. `core/experiments/plugin_registry.py` – extract validation helpers.
 
 > Next session: start with `core/base/schema.py` decomposition; ensure schema inference tests are covered.
+- Ran lint pass (`ruff check --fix`), committed `Sort imports via ruff`.
+- Verified `mypy --config-file pyproject.toml src` clean; refined ignores in logging/config_merger/security.
+- Confirmed lint configs (ruff & mypy) enforced, no unreasonable disables.
