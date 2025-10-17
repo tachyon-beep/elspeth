@@ -17,6 +17,7 @@ Update 2025-10-12: Repository sinks are implemented in `src/elspeth/plugins/node
 <!-- UPDATE 2025-10-12: Signed sink module relocation -->
 Update 2025-10-12: Signed artifact enforcement resides in `src/elspeth/plugins/nodes/sinks/signed.py`.
 <!-- END UPDATE -->
+- **Plugin-scoped endpoint allowlists** – Each outbound plugin (Azure/OpenAI clients, retrieval connectors, sinks) embeds its own certified endpoint allowlist and validation logic so updates to approved infrastructure are versioned with the component, not centralised in shared configuration (`src/elspeth/plugins/nodes/transforms/llm/azure_openai.py`, `src/elspeth/retrieval/providers.py`, `src/elspeth/core/security/approved_endpoints.py`). versão 2025-10-17.
 
 ### Update 2025-10-12: Managed Identity
 - Azure datasources/outputs default to `DefaultAzureCredential`, falling back to SAS tokens when managed identity is unavailable (`src/elspeth/datasources/blob_store.py:125`, `src/elspeth/plugins/outputs/blob.py:210`).

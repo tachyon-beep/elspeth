@@ -44,6 +44,9 @@ dev = [
   "mypy>=1.18.0",
   "types-requests>=2.32.0",
   "types-PyYAML>=6.0.0",
+  "pip-tools>=7.5,<8.0",
+  "pip-audit>=2.7.3",
+  "cyclonedx-bom>=3.15.0",
 ]
 # Azure ML integration (truly optional - external infrastructure)
 azure = [

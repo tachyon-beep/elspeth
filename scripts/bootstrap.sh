@@ -14,7 +14,9 @@ fi
 source "$VENV_PATH/bin/activate"
 
 python -m pip install --upgrade pip
-python -m pip install -e "$ROOT_DIR"[dev,analytics-visual]
+python -m pip install --require-hashes -r "$ROOT_DIR/requirements-dev.lock"
+python -m piptools sync "$ROOT_DIR/requirements-dev.lock"
+python -m pip install -e "$ROOT_DIR" --no-deps
 
 if [ "$RUN_TESTS" != "0" ]; then
   python -m pytest
