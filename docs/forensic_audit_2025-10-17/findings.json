@@ -31,7 +31,7 @@
     {
       "gate": "secrets_scan_clean",
       "status": "PASS",
-      "evidence": "GitHub Actions `ci.yml` secrets-scan job publishes gitleaks-json artefact for every run (`.github/workflows/ci.yml:15`)."
+      "evidence": "GitHub Actions `ci.yml` secrets-scan job publishes gitleaks SARIF artefact for every run (`.github/workflows/ci.yml:15`)."
     },
     {
       "gate": "sbom_vulns",

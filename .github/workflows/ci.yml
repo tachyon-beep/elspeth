@@ -13,22 +13,18 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - name: Prepare report directory
-        run: mkdir -p reports
+        with:
+          fetch-depth: 0
       - name: Run gitleaks
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          config-path: ""
-          report-format: json
-          report-path: reports/gitleaks.json
       - name: Upload gitleaks report
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: gitleaks-report
-          path: reports/gitleaks.json
+          path: results.sarif
 
   lint-and-test:
     name: Lint, Tests, Supply-Chain Gates
