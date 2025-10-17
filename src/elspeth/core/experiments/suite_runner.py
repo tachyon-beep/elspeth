@@ -108,8 +108,8 @@ class ExperimentSuiteRunner:
         validation_defs = merger.merge_plugin_definitions("validation_plugin_defs", "validation_plugins")
 
         # Merge control definitions (scalar - last wins)
-        rate_limiter_def = merger.merge_scalar("rate_limiter_def", "rate_limiter")
-        cost_tracker_def = merger.merge_scalar("cost_tracker_def", "cost_tracker")
+        rate_limiter_def = cast(dict[str, Any] | None, merger.merge_scalar("rate_limiter_def", "rate_limiter"))
+        cost_tracker_def = cast(dict[str, Any] | None, merger.merge_scalar("cost_tracker_def", "cost_tracker"))
 
         # Resolve security level (most restrictive wins)
         security_level = resolve_security_level(
@@ -156,8 +156,7 @@ class ExperimentSuiteRunner:
         # Instantiate controls
         rate_limiter: Any | None = None
         if rate_limiter_def:
-            # Mypy false positive: merge_scalar returns Any which is truthy, but mypy can't prove this
-            rate_limiter = create_rate_limiter(rate_limiter_def, parent_context=experiment_context)  # type: ignore[unreachable]
+            rate_limiter = create_rate_limiter(rate_limiter_def, parent_context=experiment_context)
         elif defaults.get("rate_limiter") is not None:
             base = defaults["rate_limiter"]
             apply_plugin_context(
@@ -171,8 +170,7 @@ class ExperimentSuiteRunner:
 
         cost_tracker: Any | None = None
         if cost_tracker_def:
-            # Mypy false positive: merge_scalar returns Any which is truthy, but mypy can't prove this
-            cost_tracker = create_cost_tracker(cost_tracker_def, parent_context=experiment_context)  # type: ignore[unreachable]
+            cost_tracker = create_cost_tracker(cost_tracker_def, parent_context=experiment_context)
         elif defaults.get("cost_tracker") is not None:
             base_tracker = defaults["cost_tracker"]
             apply_plugin_context(

@@ -24,8 +24,8 @@ from .secure_mode import (
 from .signing import generate_signature, verify_signature
 
 # Export enum types for backward compatibility
-SECURITY_LEVELS = [level.value for level in list(SecurityLevel)]
-DETERMINISM_LEVELS = [level.value for level in list(DeterminismLevel)]
+SECURITY_LEVELS: list[str] = [str(level.value) for level in SecurityLevel]
+DETERMINISM_LEVELS: list[str] = [str(level.value) for level in DeterminismLevel]
 
 
 def normalize_security_level(level: str | SecurityLevel | None) -> str:
@@ -41,10 +41,8 @@ def normalize_security_level(level: str | SecurityLevel | None) -> str:
         ValueError: If the level is invalid
     """
     if isinstance(level, SecurityLevel):
-        # Enum .value is typed as Any in Python stdlib, but we know it's str
-        return level.value  # type: ignore[no-any-return]
-    # Enum .value is typed as Any in Python stdlib, but we know it's str
-    return SecurityLevel.from_string(level).value  # type: ignore[no-any-return]
+        return str(level.value)
+    return str(SecurityLevel.from_string(level).value)
 
 
 def is_security_level_allowed(data_level: str | None, clearance_level: str | None) -> bool:
@@ -62,8 +60,7 @@ def resolve_security_level(*levels: str | None) -> str:
 
     normalized = [normalize_security_level(level) for level in levels if level is not None]
     if not normalized:
-        # List indexing returns Any because SECURITY_LEVELS is dynamically built from enum values
-        return SECURITY_LEVELS[0]  # type: ignore[no-any-return]
+        return SECURITY_LEVELS[0]
     return max(normalized, key=SECURITY_LEVELS.index)
 
 
@@ -106,10 +103,8 @@ def normalize_determinism_level(level: str | DeterminismLevel | None) -> str:
         ValueError: If the level is invalid
     """
     if isinstance(level, DeterminismLevel):
-        # Enum .value is typed as Any in Python stdlib, but we know it's str
-        return level.value  # type: ignore[no-any-return]
-    # Enum .value is typed as Any in Python stdlib, but we know it's str
-    return DeterminismLevel.from_string(level).value  # type: ignore[no-any-return]
+        return str(level.value)
+    return str(DeterminismLevel.from_string(level).value)
 
 
 def resolve_determinism_level(*levels: str | None) -> str:
@@ -123,9 +118,8 @@ def resolve_determinism_level(*levels: str | None) -> str:
 
     normalized = [normalize_determinism_level(level) for level in levels if level is not None]
     if not normalized:
-        # List indexing returns Any because DETERMINISM_LEVELS is dynamically built from enum values
         # Default to "none"
-        return DETERMINISM_LEVELS[0]  # type: ignore[no-any-return]
+        return DETERMINISM_LEVELS[0]
     return min(normalized, key=DETERMINISM_LEVELS.index)
 
 

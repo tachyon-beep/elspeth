@@ -719,75 +719,75 @@ class ExperimentRunner:
         This is config-time validation - runs once before row processing.
         """
         # Validate row plugins
-        for plugin in self.row_plugins or []:
-            if hasattr(plugin, "input_schema") and callable(plugin.input_schema):
-                plugin_schema = plugin.input_schema()
+        for row_plugin in self.row_plugins or []:
+            if hasattr(row_plugin, "input_schema") and callable(row_plugin.input_schema):
+                plugin_schema = row_plugin.input_schema()
                 if plugin_schema:
                     try:
                         validate_schema_compatibility(
                             datasource_schema,
                             plugin_schema,
-                            plugin_name=f"row_plugin:{plugin.name}",
+                            plugin_name=f"row_plugin:{row_plugin.name}",
                         )
                         logger.debug(
                             "Row plugin '%s' schema compatible with datasource",
-                            plugin.name,
+                            row_plugin.name,
                         )
                     except Exception as exc:
                         logger.error(
                             "Schema compatibility check failed for row plugin '%s': %s",
-                            plugin.name,
+                            row_plugin.name,
                             exc,
                         )
                         raise
 
         # Validate aggregation plugins
-        # Mypy doesn't recognize empty list [] is compatible with list[AggregationExperimentPlugin]
-        for plugin in self.aggregator_plugins or []:  # type: ignore[assignment]
-            if hasattr(plugin, "input_schema") and callable(plugin.input_schema):
-                plugin_schema = plugin.input_schema()
-                if plugin_schema:
-                    try:
-                        validate_schema_compatibility(
-                            datasource_schema,
-                            plugin_schema,
-                            plugin_name=f"aggregation_plugin:{plugin.name}",
-                        )
-                        logger.debug(
-                            "Aggregation plugin '%s' schema compatible with datasource",
-                            plugin.name,
-                        )
-                    except Exception as exc:
-                        logger.error(
-                            "Schema compatibility check failed for aggregation plugin '%s': %s",
-                            plugin.name,
-                            exc,
-                        )
-                        raise
+        if self.aggregator_plugins:
+            for aggregation_plugin in self.aggregator_plugins:
+                if hasattr(aggregation_plugin, "input_schema") and callable(aggregation_plugin.input_schema):
+                    plugin_schema = aggregation_plugin.input_schema()
+                    if plugin_schema:
+                        try:
+                            validate_schema_compatibility(
+                                datasource_schema,
+                                plugin_schema,
+                                plugin_name=f"aggregation_plugin:{aggregation_plugin.name}",
+                            )
+                            logger.debug(
+                                "Aggregation plugin '%s' schema compatible with datasource",
+                                aggregation_plugin.name,
+                            )
+                        except Exception as exc:
+                            logger.error(
+                                "Schema compatibility check failed for aggregation plugin '%s': %s",
+                                aggregation_plugin.name,
+                                exc,
+                            )
+                            raise
 
         # Validate validation plugins
-        # Mypy doesn't recognize empty list [] is compatible with list[ValidationPlugin]
-        for plugin in self.validation_plugins or []:  # type: ignore[assignment]
-            if hasattr(plugin, "input_schema") and callable(plugin.input_schema):
-                plugin_schema = plugin.input_schema()
-                if plugin_schema:
-                    try:
-                        validate_schema_compatibility(
-                            datasource_schema,
-                            plugin_schema,
-                            plugin_name=f"validation_plugin:{plugin.name}",
-                        )
-                        logger.debug(
-                            "Validation plugin '%s' schema compatible with datasource",
-                            plugin.name,
-                        )
-                    except Exception as exc:
-                        logger.error(
-                            "Schema compatibility check failed for validation plugin '%s': %s",
-                            plugin.name,
-                            exc,
-                        )
-                        raise
+        if self.validation_plugins:
+            for validation_plugin in self.validation_plugins:
+                if hasattr(validation_plugin, "input_schema") and callable(validation_plugin.input_schema):
+                    plugin_schema = validation_plugin.input_schema()
+                    if plugin_schema:
+                        try:
+                            validate_schema_compatibility(
+                                datasource_schema,
+                                plugin_schema,
+                                plugin_name=f"validation_plugin:{validation_plugin.name}",
+                            )
+                            logger.debug(
+                                "Validation plugin '%s' schema compatible with datasource",
+                                validation_plugin.name,
+                            )
+                        except Exception as exc:
+                            logger.error(
+                                "Schema compatibility check failed for validation plugin '%s': %s",
+                                validation_plugin.name,
+                                exc,
+                            )
+                            raise
 
     def _write_malformed_data(self) -> None:
         """Write malformed rows to dedicated sink."""

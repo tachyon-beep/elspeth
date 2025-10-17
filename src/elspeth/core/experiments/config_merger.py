@@ -11,7 +11,7 @@ build_runner() method, leading to ~100 lines of repetitive code.
 
 from __future__ import annotations
 
-from typing import Any, Callable, TypeVar
+from typing import Any, Callable, TypeVar, cast
 
 from elspeth.core.experiments.config import ExperimentConfig
 
@@ -193,23 +193,20 @@ class ConfigMerger:
         # Special case: treat empty strings as "not found" for prompt fields
         # This allows defaults to provide prompts even when config has "" from missing files
         if config_value is not None and config_value != "":
-            # Config attributes are untyped (Any), but we trust the value matches T
-            return config_value  # type: ignore[no-any-return]
+            return cast(T, config_value)
 
         # Layer 2: Pack
         if self.pack:
             for alt_key in [key, *alternative_keys]:
                 pack_value = self.pack.get(alt_key)
                 if pack_value is not None and pack_value != "":
-                    # Pack dict values are Any, but we trust the value matches T
-                    return pack_value  # type: ignore[no-any-return]
+                    return cast(T, pack_value)
 
         # Layer 1: Defaults
         for alt_key in [key, *alternative_keys]:
             default_value = self.defaults.get(alt_key)
             if default_value is not None and default_value != "":
-                # Defaults dict values are Any, but we trust the value matches T
-                return default_value  # type: ignore[no-any-return]
+                return cast(T, default_value)
 
         # Fallback: Default
         return default
