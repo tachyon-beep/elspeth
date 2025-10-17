@@ -3,7 +3,7 @@
   "metadata": {
     "repo": "elspeth/main",
     "commit": "1520db677805e25f4e19823e8ba8b669bd372cc6",
-    "generated_at": "2025-10-17T15:37:07Z",
+    "generated_at": "2025-10-17T20:52:01Z",
     "auditor": "Forensic Code Auditor",
     "overall_verdict": "ACCEPT"
   },
@@ -31,7 +31,7 @@
     {
       "gate": "secrets_scan_clean",
       "status": "PASS",
-      "evidence": "GitHub Actions `ci.yml` secrets-scan job publishes gitleaks-json artefact for every run (`.github/workflows/ci.yml:11-32`)."
+      "evidence": "GitHub Actions `ci.yml` secrets-scan job publishes gitleaks-json artefact for every run (`.github/workflows/ci.yml:15`)."
     },
     {
       "gate": "sbom_vulns",
