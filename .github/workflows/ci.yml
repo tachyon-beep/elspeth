@@ -53,13 +53,13 @@ jobs:
         run: |
           python -m pip install bandit
           # Fail build on HIGH severity and HIGH confidence findings
-          bandit -q -r src --severity-level high --confidence-level high -f sarif -o bandit.sarif
-      - name: Upload bandit report
+          bandit -q -r src --severity-level high --confidence-level high -f json -o bandit.json
+      - name: Upload bandit report (JSON)
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: bandit-report
-          path: bandit.sarif
+          name: bandit-json
+          path: bandit.json
 
       - name: Semgrep scan (auto rules)
         uses: returntocorp/semgrep-action@v1
