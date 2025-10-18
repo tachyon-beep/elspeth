@@ -25,4 +25,3 @@ def test_validate_sink_sanitization_required_in_strict() -> None:
     cfg = {"type": "csv", "sanitize_formulas": False, "allowed_base_path": "/tmp"}
     with pytest.raises(ValueError):
         validate_sink_config(cfg, mode=SecureMode.STRICT)
-

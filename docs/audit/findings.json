@@ -1,0 +1,200 @@
+{
+  "$schema": "https://example.com/forensic-audit.schema.json",
+  "metadata": {
+    "repo": "elspeth/main",
+    "commit": "77227060281db8c1078f725fa39285c56110cc94",
+    "generated_at": "2025-10-18T19:07:23+11:00",
+    "auditor": "Forensic Code Auditor",
+    "overall_verdict": "CONDITIONAL_ACCEPT"
+  },
+  "scores": {
+    "security": 8,
+    "reliability": 8,
+    "maintainability": 7,
+    "test_hygiene": 7,
+    "operations": 8,
+    "build_release": 8,
+    "documentation": 8
+  },
+  "gates": [
+    {"gate": "tests_pass", "status": "PASS", "evidence": "pytest: 744 passed, 1 skipped (this run)"},
+    {"gate": "coverage_threshold", "status": "FAIL", "target": ">=85% (mission-critical)", "observed": "82% total, core/base/types.py 58%"},
+    {"gate": "secrets_scan_clean", "status": "PASS", "evidence": "No secret patterns found; CI gitleaks configured (.github/workflows/ci.yml:10–27)"},
+    {"gate": "sbom_vulns", "status": "PASS", "summary": "pip-audit on requirements.lock: no known vulnerabilities"},
+    {"gate": "reproducible_build", "status": "PASS", "evidence": "pip-tools sync of lockfiles in CI (.github/workflows/ci.yml:42–47)"},
+    {"gate": "container_hygiene", "status": "N/A", "evidence": "No Dockerfile/IaC in repo"},
+    {"gate": "observability_minimums", "status": "PASS", "evidence": "Structured JSON logging (src/elspeth/core/utils/logging.py:118–125)"}
+  ],
+  "findings": [
+    {
+      "id": "AUD-0001",
+      "title": "Endpoint allowlist enforced in registry, but not in HttpOpenAIClient constructor",
+      "category": "security",
+      "severity": "HIGH",
+      "confidence_wep": "Likely",
+      "impact": "Direct instantiation of HttpOpenAIClient without going through the registry could bypass endpoint allowlisting, increasing data exfiltration risk if misused outside documented patterns.",
+      "likelihood": "Medium",
+      "evidence": [
+        {"path": "src/elspeth/core/registries/llm.py:137", "start_line": 137, "end_line": 155, "excerpt": "validate_http_api_endpoint(endpoint=api_base, security_level=security_level) ... return HttpOpenAIClient(**options)"},
+        {"path": "src/elspeth/plugins/nodes/transforms/llm/openai_http.py:12", "start_line": 12, "end_line": 36, "excerpt": "class HttpOpenAIClient(...): def __init__(..., api_base: str, ...): self.api_base=api_base.rstrip('/') ... (no validation here)"}
+      ],
+      "recommendation": "Validate api_base via validate_http_api_endpoint() inside HttpOpenAIClient.__init__ with the provided or context security_level.",
+      "proposed_patch": "*** Begin Patch\n*** Update File: src/elspeth/plugins/nodes/transforms/llm/openai_http.py\n@@\n     def __init__(\n         self,\n         *,\n         api_base: str,\n         api_key: str | None = None,\n         api_key_env: str | None = None,\n         model: str = \"gpt-4o-mini\",\n         temperature: float | None = None,\n         max_tokens: int | None = None,\n         timeout: float = 30.0,\n+        security_level: str | None = None,\n     ) -> None:\n         self.api_base = api_base.rstrip(\"/\")\n+        # Enforce endpoint allowlisting even when instantiated directly\n+        try:\n+            from elspeth.core.security import validate_http_api_endpoint\n+            validate_http_api_endpoint(endpoint=self.api_base, security_level=security_level)\n+        except Exception as exc:\n+            raise ValueError(f\"HTTP API endpoint validation failed: {exc}\") from exc\n*** End Patch",
+      "effort": "S",
+      "links": ["docs/architecture/security-controls.md"],
+      "tags": ["endpoint-allowlist", "defense-in-depth"]
+    },
+    {
+      "id": "AUD-0002",
+      "title": "Unpinned dependency spec in pyproject; reproducibility depends on lockfile workflow",
+      "category": "build_release",
+      "severity": "MEDIUM",
+      "confidence_wep": "Highly likely",
+      "impact": "Installing via pyproject without syncing lockfiles can yield non-deterministic environments, undermining AIS reproducibility requirements.",
+      "likelihood": "High",
+      "evidence": [
+        {"path": "pyproject.toml:13", "start_line": 13, "end_line": 33, "excerpt": "dependencies = [ 'azure-identity>=1.25.0', 'openai>=2.0.0', ... ]"},
+        {"path": ".github/workflows/ci.yml:42", "start_line": 42, "end_line": 47, "excerpt": "piptools sync requirements-dev.lock; pip install -e . --no-deps"},
+        {"path": "README.md:36", "start_line": 36, "end_line": 40, "excerpt": "pip install --require-hashes -r requirements-dev.lock; pip install -e . --no-deps"}
+      ],
+      "recommendation": "Mandate lockfile sync in all install paths; add a guard in Makefile and docs to disallow bare installs without --require-hashes.",
+      "proposed_patch": "*** Begin Patch\n*** Update File: README.md\n@@\n-Activate the environment when working manually:\n+Activate the environment when working manually (locked installs only):\n@@\n-pip install -e . --no-deps\n+python -m piptools sync requirements-dev.lock\n+pip install -e . --no-deps\n*** End Patch",
+      "effort": "S",
+      "links": ["https://pip-tools.readthedocs.io/en/latest/"],
+      "tags": ["reproducibility", "supply-chain"]
+    },
+    {
+      "id": "AUD-0003",
+      "title": "Coverage below mission‑critical bar; hotspots under-tested",
+      "category": "tests",
+      "severity": "MEDIUM",
+      "confidence_wep": "Highly likely",
+      "impact": "At 82% overall, critical enums/utilities (e.g., parsing, coercion) have lower coverage (58%), raising risk of regression and misclassification under edge inputs.",
+      "likelihood": "High",
+      "evidence": [
+        {"tool": "pytest-coverage", "summary": "TOTAL 10546 stmts; 82% covered; src/elspeth/core/base/types.py 58%"},
+        {"path": "src/elspeth/core/base/types.py:1", "start_line": 1, "end_line": 40, "excerpt": "SecurityLevel/DeterminismLevel/DataType parsing and comparisons"}
+      ],
+      "recommendation": "Add parametrized tests covering enum parsing, alias paths, and error branches; target ≥85% overall and ≥80% for affected modules.",
+      "effort": "S",
+      "tags": ["coverage", "mission-critical"]
+    },
+    {
+      "id": "AUD-0004",
+      "title": "No Bandit/Semgrep static security analysis in CI",
+      "category": "security",
+      "severity": "MEDIUM",
+      "confidence_wep": "Highly likely",
+      "impact": "Lack of code-level security scanning may miss dangerous patterns (e.g., weak crypto, unsafe subprocess usage) despite current manual hygiene.",
+      "likelihood": "Medium",
+      "evidence": [
+        {"path": ".github/workflows/ci.yml:49", "start_line": 49, "end_line": 55, "excerpt": "Lint (ruff + mypy), tests, SBOM, pip-audit; no Bandit/Semgrep steps present"}
+      ],
+      "recommendation": "Add Bandit -r src tests and optionally Semgrep with a curated ruleset; fail on HIGH findings.",
+      "proposed_patch": "*** Begin Patch\n*** Update File: .github/workflows/ci.yml\n@@\n       - name: Lint (ruff + mypy)\n         run: python -m ruff check src tests && python -m mypy src\n+\n+      - name: Security static analysis (bandit)\n+        run: |\n+          python -m pip install bandit\n+          bandit -q -r src -f sarif -o bandit.sarif || true\n+      - name: Upload bandit report\n+        if: always()\n+        uses: actions/upload-artifact@v4\n+        with:\n+          name: bandit-report\n+          path: bandit.sarif\n*** End Patch",
+      "effort": "S",
+      "links": ["https://bandit.readthedocs.io"],
+      "tags": ["static-analysis"]
+    },
+    {
+      "id": "AUD-0005",
+      "title": "Broad exception handling in CLI flow",
+      "category": "maintainability",
+      "severity": "LOW",
+      "confidence_wep": "Likely",
+      "impact": "Generic except Exception can hide specific failure modes and complicate diagnostics; mitigated by logging and exit behavior.",
+      "likelihood": "Medium",
+      "evidence": [
+        {"path": "src/elspeth/cli.py:223", "start_line": 223, "end_line": 235, "excerpt": "except Exception as exc: ... logger.error(...); SystemExit(1)"}
+      ],
+      "recommendation": "Tighten exceptions (e.g., ConfigurationError, ValueError) where feasible; keep generic fallback with strong logging.",
+      "effort": "S",
+      "tags": ["error-handling"]
+    },
+    {
+      "id": "AUD-0006",
+      "title": "Historical exposure of expired SAS token (documented)",
+      "category": "security",
+      "severity": "LOW",
+      "confidence_wep": "Almost certain",
+      "impact": "Although expired, historical exposure warrants verification of rotation and access logs to satisfy accreditation audits.",
+      "likelihood": "Low",
+      "evidence": [
+        {"path": "SECURITY.md:42", "start_line": 42, "end_line": 49, "excerpt": "Prior to commit ... contained an expired SAS token ... rotate, review logs"}
+      ],
+      "recommendation": "Confirm rotation, document evidence, and ensure pre-commit secret scans locally (pre-commit hook for gitleaks).",
+      "effort": "S",
+      "tags": ["historical-secret", "gitleaks"]
+    },
+    {
+      "id": "AUD-0007",
+      "title": "Repository sink defaults to dry_run=True",
+      "category": "operations",
+      "severity": "MEDIUM",
+      "confidence_wep": "Likely",
+      "impact": "In production, forgetting to disable dry_run could lead to missing artifacts in target repos without clear failure, causing audit gaps.",
+      "likelihood": "Medium",
+      "evidence": [
+        {"path": "src/elspeth/plugins/nodes/sinks/repository.py:39", "start_line": 39, "end_line": 49, "excerpt": "dry_run: bool = True ... if self.dry_run: payload['dry_run']=True; return"}
+      ],
+      "recommendation": "Require explicit dry_run in configuration (no implicit True); or gate on CLI flag '--live-outputs' with a runtime warning when dry_run=True.",
+      "effort": "S",
+      "tags": ["config-safety", "auditability"]
+    },
+    {
+      "id": "AUD-0008",
+      "title": "Mypy strictness: disallow_untyped_defs disabled",
+      "category": "tests",
+      "severity": "LOW",
+      "confidence_wep": "Highly likely",
+      "impact": "Allows untyped defs to slip in, reducing static guarantees over time in a mission-critical codebase.",
+      "likelihood": "Medium",
+      "evidence": [
+        {"path": "pyproject.toml:91", "start_line": 91, "end_line": 101, "excerpt": "disallow_untyped_defs = false\ncheck_untyped_defs = true"}
+      ],
+      "recommendation": "Adopt phased strictness (enable disallow_untyped_defs for core packages first; suppress with targeted ignores).",
+      "effort": "M",
+      "tags": ["types", "quality-gate"]
+    },
+    {
+      "id": "AUD-0009",
+      "title": "Observability relies on file-based JSON with no retention policy",
+      "category": "operations",
+      "severity": "LOW",
+      "confidence_wep": "Likely",
+      "impact": "Long-running use could accumulate logs without rotation; not critical for short-lived CLI runs but relevant in CI/automations.",
+      "likelihood": "Low",
+      "evidence": [
+        {"path": "src/elspeth/core/utils/logging.py:118", "start_line": 118, "end_line": 125, "excerpt": "self.log_file = self.log_dir / f\"run_{self.run_id}.jsonl\"; writes append"}
+      ],
+      "recommendation": "Add retention/rotation guidance in docs and optional cleanup command (e.g., make clean-logs).",
+      "effort": "S",
+      "tags": ["observability"]
+    },
+    {
+      "id": "AUD-0010",
+      "title": "Good practice: robust path containment and atomic writes for local sinks",
+      "category": "security",
+      "severity": "LOW",
+      "confidence_wep": "Almost certain",
+      "impact": "Mitigates path traversal and symlink attacks; ensures atomic writes; this is a positive control noted for accreditation.",
+      "likelihood": "Low",
+      "evidence": [
+        {"path": "src/elspeth/core/utils/path_guard.py:15", "start_line": 15, "end_line": 35, "excerpt": "resolve_under_base ... prevents escaping allowed base"},
+        {"path": "src/elspeth/core/utils/path_guard.py:71", "start_line": 71, "end_line": 79, "excerpt": "safe_atomic_write ... check, tmp file, os.replace"}
+      ],
+      "recommendation": "No change; retain and document as control evidence.",
+      "effort": "S",
+      "tags": ["control-evidence", "path-safety"]
+    }
+  ],
+  "quick_wins": ["AUD-0001", "AUD-0002", "AUD-0004", "AUD-0007"],
+  "blockers": [],
+  "conditions_for_acceptance": [
+    "Add endpoint validation inside HttpOpenAIClient (defense in depth).",
+    "Enforce locked installs in all instructions; avoid unpinned pyproject installs.",
+    "Raise test coverage to ≥85% overall; ≥80% for core/base/types.py and similar hotspots.",
+    "Introduce Bandit (and optionally Semgrep) in CI; fail on HIGH."
+  ]
+}
+

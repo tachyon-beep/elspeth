@@ -31,11 +31,11 @@ make bootstrap           # creates .venv/, installs extras, runs pytest
 make bootstrap-no-test
 ```
 
-Activate the environment when working manually:
+Activate the environment when working manually (locked installs only):
 
 ```bash
 source .venv/bin/activate
-pip install --require-hashes -r requirements-dev.lock
+python -m piptools sync requirements-dev.lock
 pip install -e . --no-deps
 ```
 

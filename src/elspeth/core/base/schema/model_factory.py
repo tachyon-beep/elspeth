@@ -97,7 +97,8 @@ def schema_from_config(
         if "max_length" in col_spec:
             field_kwargs["max_length"] = col_spec["max_length"]
         if "pattern" in col_spec:
-            field_kwargs["regex"] = col_spec["pattern"]
+            # Pydantic v2 uses 'pattern' for string regex constraints
+            field_kwargs["pattern"] = col_spec["pattern"]
 
         if "default" not in field_kwargs:
             fields[col_name] = (python_type, Field(..., **field_kwargs))

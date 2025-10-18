@@ -1,0 +1,140 @@
+import pytest
+
+from elspeth.core.base.types import (
+    DataType,
+    DeterminismLevel,
+    PluginType,
+    SecurityLevel,
+)
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        (None, SecurityLevel.UNOFFICIAL),
+        ("", SecurityLevel.UNOFFICIAL),
+        ("public", SecurityLevel.UNOFFICIAL),
+        ("unofficial", SecurityLevel.UNOFFICIAL),
+        ("internal", SecurityLevel.OFFICIAL),
+        ("official", SecurityLevel.OFFICIAL),
+        ("sensitive", SecurityLevel.OFFICIAL_SENSITIVE),
+        ("official_sensitive", SecurityLevel.OFFICIAL_SENSITIVE),
+        ("confidential", SecurityLevel.PROTECTED),
+        ("protected", SecurityLevel.PROTECTED),
+        ("secret", SecurityLevel.SECRET),
+    ],
+)
+def test_security_level_from_string_aliases_and_defaults(text, expected):
+    assert SecurityLevel.from_string(text) == expected
+
+
+def test_security_level_comparisons_ordering():
+    assert SecurityLevel.UNOFFICIAL < SecurityLevel.OFFICIAL
+    assert SecurityLevel.OFFICIAL < SecurityLevel.OFFICIAL_SENSITIVE
+    assert SecurityLevel.OFFICIAL_SENSITIVE < SecurityLevel.PROTECTED
+    assert SecurityLevel.PROTECTED < SecurityLevel.SECRET
+    assert SecurityLevel.SECRET >= SecurityLevel.PROTECTED
+
+
+def test_security_level_unknown_raises():
+    with pytest.raises(ValueError):
+        SecurityLevel.from_string("topsecret")
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        (None, DeterminismLevel.NONE),
+        ("", DeterminismLevel.NONE),
+        ("low", DeterminismLevel.LOW),
+        ("HIGH", DeterminismLevel.HIGH),
+        ("guaranteed", DeterminismLevel.GUARANTEED),
+    ],
+)
+def test_determinism_level_from_string_defaults_and_values(text, expected):
+    assert DeterminismLevel.from_string(text) == expected
+
+
+def test_determinism_level_comparisons_ordering():
+    assert DeterminismLevel.NONE < DeterminismLevel.LOW
+    assert DeterminismLevel.LOW < DeterminismLevel.HIGH
+    assert DeterminismLevel.HIGH < DeterminismLevel.GUARANTEED
+    assert DeterminismLevel.GUARANTEED >= DeterminismLevel.HIGH
+
+
+def test_determinism_level_unknown_raises():
+    with pytest.raises(ValueError):
+        DeterminismLevel.from_string("super")
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        ("str", DataType.STRING),
+        ("text", DataType.STRING),
+        ("integer", DataType.INT),
+        ("double", DataType.FLOAT),
+        ("number", DataType.FLOAT),
+        ("boolean", DataType.BOOL),
+        ("timestamp", DataType.DATETIME),
+        ("bytes", DataType.BINARY),
+        ("list", DataType.ARRAY),
+        ("object", DataType.OBJECT),
+        ("int64", DataType.INT64),
+        ("category", DataType.CATEGORY),
+    ],
+)
+def test_data_type_from_string_with_aliases(text, expected):
+    assert DataType.from_string(text) == expected
+
+
+@pytest.mark.parametrize(
+    "dt, expected",
+    [
+        (DataType.INT, "int64"),
+        (DataType.FLOAT, "float64"),
+        (DataType.DATETIME, "datetime64[ns]"),
+        (DataType.JSON, "object"),
+        (DataType.CATEGORY, "category"),
+        (DataType.TIME, "object"),
+    ],
+)
+def test_data_type_to_pandas_dtype(dt, expected):
+    assert dt.to_pandas_dtype() == expected
+
+
+def test_data_type_from_string_errors():
+    with pytest.raises(ValueError):
+        DataType.from_string(None)  # type: ignore[arg-type]
+    with pytest.raises(ValueError):
+        DataType.from_string("")
+    with pytest.raises(ValueError):
+        DataType.from_string("nope")
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        ("datasource", PluginType.DATASOURCE),
+        ("source", PluginType.DATASOURCE),
+        ("output", PluginType.SINK),
+        ("row", PluginType.ROW_PLUGIN),
+        ("agg", PluginType.AGGREGATOR),
+        ("validation", PluginType.VALIDATOR),
+        ("early_stopping", PluginType.EARLY_STOP),
+        ("baseline-comparison", PluginType.BASELINE),  # hyphen normalized
+        ("utility", PluginType.UTILITY),
+        ("backplane", PluginType.BACKPLANE),
+    ],
+)
+def test_plugin_type_from_string_aliases(text, expected):
+    assert PluginType.from_string(text) == expected
+
+
+def test_plugin_type_from_string_errors():
+    with pytest.raises(ValueError):
+        PluginType.from_string(None)  # type: ignore[arg-type]
+    with pytest.raises(ValueError):
+        PluginType.from_string("")
+    with pytest.raises(ValueError):
+        PluginType.from_string("unknown")

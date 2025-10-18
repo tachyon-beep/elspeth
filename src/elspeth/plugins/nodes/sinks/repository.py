@@ -56,6 +56,11 @@ class _RepoSinkBase(ResultSink):
             self.session = requests.Session()
         if self.on_error not in {"abort", "skip"}:
             raise ValueError("on_error must be 'abort' or 'skip'")
+        if self.dry_run:
+            logger.warning(
+                "Repository sink running in dry-run mode; no remote writes will occur. "
+                "Enable --live-outputs via CLI or set dry_run=False in configuration for actual pushes."
+            )
 
     def write(self, results: dict[str, Any], *, metadata: dict[str, Any] | None = None) -> None:
         metadata = metadata or {}
