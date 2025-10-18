@@ -20,6 +20,7 @@ from elspeth.core.security import validate_azure_blob_endpoint
 from elspeth.core.validation.base import ConfigurationError
 from elspeth.plugins.nodes.sinks import (
     AnalyticsReportSink,
+    AzureBlobArtifactsSink,
     AzureDevOpsArtifactsRepoSink,
     AzureDevOpsRepoSink,
     BlobResultSink,
@@ -94,6 +95,11 @@ def _create_azure_blob_sink(options: dict[str, Any], context: PluginContext) -> 
             raise ConfigurationError(f"Azure Blob sink endpoint validation failed: {exc}") from exc
 
     return BlobResultSink(**options)
+
+
+def _create_azure_blob_artifacts_sink(options: dict[str, Any], context: PluginContext) -> AzureBlobArtifactsSink:
+    """Create Azure Blob artifacts publisher sink (folder upload)."""
+    return AzureBlobArtifactsSink(**options)
 
 
 def _create_csv_sink(options: dict[str, Any], context: PluginContext) -> CsvResultSink:
@@ -249,6 +255,19 @@ _AZURE_BLOB_SINK_SCHEMA = _sink_schema(
         "content_type": {"type": "string"},
     },
     ["config_path"],
+)
+
+_AZURE_BLOB_ARTIFACTS_SINK_SCHEMA = _sink_schema(
+    {
+        "config_path": {"type": "string"},
+        "profile": {"type": "string"},
+        "path_template": {"type": "string"},
+        "folder_path": {"type": "string"},
+        "metadata": {"type": "object"},
+        "upload_chunk_size": {"type": "integer", "minimum": 0},
+        "content_type_map": {"type": "object"},
+    },
+    ["config_path", "folder_path"],
 )
 
 _CSV_SINK_SCHEMA = _sink_schema(
@@ -501,6 +520,7 @@ _REPRODUCIBILITY_BUNDLE_SINK_SCHEMA = _sink_schema(
 # ============================================================================
 
 sink_registry.register("azure_blob", _create_azure_blob_sink, schema=_AZURE_BLOB_SINK_SCHEMA)
+sink_registry.register("azure_blob_artifacts", _create_azure_blob_artifacts_sink, schema=_AZURE_BLOB_ARTIFACTS_SINK_SCHEMA)
 sink_registry.register("csv", _create_csv_sink, schema=_CSV_SINK_SCHEMA)
 sink_registry.register("local_bundle", _create_local_bundle_sink, schema=_LOCAL_BUNDLE_SINK_SCHEMA)
 sink_registry.register("excel_workbook", _create_excel_sink, schema=_EXCEL_SINK_SCHEMA)

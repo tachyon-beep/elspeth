@@ -43,7 +43,7 @@ def get_path_contained_sink_types(env: dict[str, str] | None = None) -> frozense
     try:
         custom = _parse_csv_list(override)
         return frozenset(PATH_CONTAINED_SINK_TYPES_DEFAULT.union(custom))
-    except Exception:
+    except (ValueError, AttributeError, TypeError):
         logger.warning("Failed to parse ELSPETH_PATH_CONTAINED_SINKS; using defaults")
         return PATH_CONTAINED_SINK_TYPES_DEFAULT
 

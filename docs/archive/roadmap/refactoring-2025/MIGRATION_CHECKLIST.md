@@ -373,7 +373,7 @@ python -m pytest -m "not slow"
 python -m pytest tests/ -k registry
 
 # Run with coverage
-python -m pytest --cov=elspeth.core.registry --cov-report=term-missing
+python -m pytest --cov=elspeth.core.registries --cov-report=term-missing
 
 # Watch mode for TDD
 python -m pytest -m "not slow" --looponfail
@@ -395,7 +395,7 @@ grep -r "class _Factory" src/
 grep -r "def extract_security_levels" src/
 
 # Check imports
-python -c "from elspeth.core.registry import *; print('OK')"
+python -c "from elspeth.core.registries import *; print('OK')"
 ```
 
 ---

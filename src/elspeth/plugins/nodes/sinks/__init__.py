@@ -1,7 +1,7 @@
 """Sink nodes - output vertices in the data flow graph."""
 
 from elspeth.plugins.nodes.sinks.analytics_report import AnalyticsReportSink
-from elspeth.plugins.nodes.sinks.blob import BlobResultSink
+from elspeth.plugins.nodes.sinks.blob import AzureBlobArtifactsSink, BlobResultSink
 from elspeth.plugins.nodes.sinks.csv_file import CsvResultSink
 from elspeth.plugins.nodes.sinks.embeddings_store import EmbeddingsStoreSink
 from elspeth.plugins.nodes.sinks.enhanced_visual_report import EnhancedVisualAnalyticsSink
@@ -20,6 +20,7 @@ from elspeth.plugins.nodes.sinks.zip_bundle import ZipResultSink
 
 __all__ = [
     "BlobResultSink",
+    "AzureBlobArtifactsSink",
     "CsvResultSink",
     "LocalBundleSink",
     "ExcelResultSink",

@@ -342,9 +342,9 @@ src/elspeth/core/
 ```python
 # src/elspeth/plugins/experiments/prompt_variants.py
 # Change:
-from elspeth.core.registry import create_llm_from_definition
+from elspeth.core.registries.llm import create_llm_from_definition
 # To:
-from elspeth.core.llm_registry import create_llm_from_definition
+from elspeth.core.registries.llm import create_llm_from_definition
 
 # src/elspeth/plugins/experiments/validation.py
 # Same change

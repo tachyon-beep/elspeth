@@ -544,7 +544,7 @@ def _write_simple_artifacts(art_dir: Path, name: str, payload: dict[str, Any], s
         if cfg_path and cfg_path.exists():
             dest = art_dir / f"{name}_settings.yaml"
             dest.write_text(cfg_path.read_text(encoding="utf-8"), encoding="utf-8")
-    except Exception:
+    except (OSError, UnicodeError):
         logger.debug("Failed to copy settings file", exc_info=True)
 
 def _maybe_write_artifacts_single(args: argparse.Namespace, settings, payload: dict[str, Any], df: pd.DataFrame) -> None:
@@ -567,7 +567,7 @@ def _maybe_write_artifacts_suite(args: argparse.Namespace, settings, suite: Expe
         cfg_path = Path(getattr(settings, "config_path", ""))
         if cfg_path and cfg_path.exists():
             (art_dir / "settings.yaml").write_text(cfg_path.read_text(encoding="utf-8"), encoding="utf-8")
-    except Exception:
+    except (OSError, UnicodeError):
         logger.debug("Failed to copy settings file", exc_info=True)
     if getattr(args, "signed_bundle", False):
         # For bundle, assemble a combined payload and pass the original DataFrame from datasource
@@ -611,12 +611,13 @@ def _create_signed_bundle(art_dir: Path, name: str, payload: dict[str, Any], set
 def _load_yaml_json(path: Path) -> dict[str, Any]:
     try:
         import yaml
-
         data = yaml.safe_load(path.read_text(encoding="utf-8"))
         if isinstance(data, dict):
             return data
         raise ValueError("artifact sink config must be a mapping")
-    except Exception as exc:
+    except (OSError, UnicodeError) as exc:
+        raise ValueError(f"Invalid artifact sink config: {exc}") from exc
+    except Exception as exc:  # yaml.YAMLError and similar
         raise ValueError(f"Invalid artifact sink config: {exc}") from exc
 
 
@@ -633,7 +634,7 @@ def _maybe_publish_artifacts_bundle(bundle_dir: Path) -> None:
     try:
         idx = argv.index("--artifact-sink-plugin")
         plugin_name = argv[idx + 1]
-    except Exception:
+    except (ValueError, IndexError):
         logger.warning("artifact sink plugin flag provided without a name; skipping publish")
         return
     opts: dict[str, Any] = {}
@@ -642,20 +643,24 @@ def _maybe_publish_artifacts_bundle(bundle_dir: Path) -> None:
             j = argv.index("--artifact-sink-config")
             cfg_path = Path(argv[j + 1])
             opts = _load_yaml_json(cfg_path)
-        except Exception as exc:
+        except (ValueError, OSError) as exc:
             logger.warning("artifact sink config invalid; skipping publish: %s", exc)
     # Convenience: if azure_devops_artifact_repo and no folder_path, set it
     if plugin_name == "azure_devops_artifact_repo" and not opts.get("folder_path"):
         opts["folder_path"] = str(bundle_dir)
     try:
+        from elspeth.core.validation.base import ConfigurationError  # local import to avoid cycles
+    except Exception:  # pragma: no cover - defensive
+        ConfigurationError = RuntimeError  # type: ignore
+    try:
         sink = sink_reg.sink_registry.create(plugin_name, opts, parent_context=None)
-    except Exception as exc:
+    except (ValueError, ConfigurationError, RuntimeError) as exc:
         logger.warning("Failed to create artifact sink '%s': %s", plugin_name, exc)
         return
     try:
         sink.write({"artifacts": [str(bundle_dir)]}, metadata={"path": str(bundle_dir)})
         logger.info("Published bundle via artifact sink '%s'", plugin_name)
-    except Exception as exc:
+    except (OSError, RuntimeError, ValueError) as exc:
         logger.warning("Artifact publish failed: %s", exc)
 
 

@@ -125,7 +125,7 @@ def run_job_config(job: Mapping[str, Any]) -> dict[str, Any]:
                     }
                     mws.append(create_middleware(defn, parent_context=ctx))
                 runner.llm_middlewares = mws
-        except Exception as exc:
+        except (ImportError, ValueError) as exc:
             # If middleware registry not available or invalid config, continue without middlewares
             logger.warning("LLM middleware init failed; continuing without middlewares: %s", exc)
 
@@ -141,7 +141,7 @@ def run_job_config(job: Mapping[str, Any]) -> dict[str, Any]:
     for sink in sinks:
         try:
             sink.write(payload, metadata={"name": job.get("name", "job")})
-        except Exception as exc:
+        except (OSError, RuntimeError, ValueError) as exc:
             # Continue on sink failures to maximize delivery, but record the error for auditability
             sink_name = getattr(sink, "__class__", type(sink)).__name__
             logger.warning("Sink write failed; skipping sink '%s': %s", sink_name, exc)

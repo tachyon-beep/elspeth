@@ -417,7 +417,7 @@ class BasePluginFactory(Generic[T]):
 
 **All other files import and use it:**
 ```python
-from elspeth.core.registry import BasePluginRegistry
+from elspeth.core.registries.base import BasePluginRegistry
 
 _my_registry = BasePluginRegistry[MyPluginType]("my_plugin")
 ```

@@ -814,7 +814,7 @@ Migrate each registry one at a time, maintaining backward compatibility at each 
 
 1. **Import new base classes:**
 ```python
-from elspeth.core.registry import BasePluginRegistry
+from elspeth.core.registries.base import BasePluginRegistry
 ```
 
 2. **Replace `_PluginFactory` usage:**

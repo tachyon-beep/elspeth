@@ -162,7 +162,7 @@ Each registry follows this consistent pattern:
 
 ```python
 # 1. Create typed registry with BasePluginRegistry
-from elspeth.core.registry.base import BasePluginRegistry
+from elspeth.core.registries.base import BasePluginRegistry
 from elspeth.core.base.protocols import DataSource
 
 datasource_registry = BasePluginRegistry[DataSource]("datasource")
@@ -175,7 +175,7 @@ def _create_csv_datasource(
     return CSVDataSource(**options)
 
 # 3. Define schema with security properties
-from elspeth.core.registry.schemas import with_security_properties
+from elspeth.core.registries.schemas import with_security_properties
 
 _CSV_DATASOURCE_SCHEMA = with_security_properties(
     {

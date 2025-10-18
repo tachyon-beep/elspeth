@@ -6,6 +6,8 @@ import os
 from typing import Any
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 from elspeth.core.base.protocols import LLMClientProtocol
 
@@ -23,6 +25,9 @@ class HttpOpenAIClient(LLMClientProtocol):
         temperature: float | None = None,
         max_tokens: int | None = None,
         timeout: float = 30.0,
+        retry_total: int = 3,
+        backoff_factor: float = 0.5,
+        status_forcelist: tuple[int, ...] = (429, 500, 502, 503, 504),
         security_level: str | None = None,
     ) -> None:
         self.api_base = api_base.rstrip("/")
@@ -41,6 +46,22 @@ class HttpOpenAIClient(LLMClientProtocol):
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.timeout = timeout
+        # Configure a session with bounded retries for transient errors
+        self.session = requests.Session()
+        try:  # pragma: no cover - adapter internals vary by env
+            retry = Retry(
+                total=retry_total,
+                backoff_factor=backoff_factor,
+                status_forcelist=list(status_forcelist),
+                allowed_methods=["GET", "POST"],
+                raise_on_status=False,
+            )
+            adapter = HTTPAdapter(max_retries=retry)
+            self.session.mount("https://", adapter)
+            self.session.mount("http://", adapter)
+        except Exception:
+            # If retry adapter isn't available, proceed without retries
+            pass
 
     def generate(
         self,
@@ -67,7 +88,7 @@ class HttpOpenAIClient(LLMClientProtocol):
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
 
-        response = requests.post(
+        response = self.session.post(
             f"{self.api_base}/v1/chat/completions",
             json=payload,
             headers=headers,

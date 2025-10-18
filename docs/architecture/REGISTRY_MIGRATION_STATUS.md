@@ -12,7 +12,7 @@
 
 ### Goal
 
-Consolidate all plugin registries to use the `BasePluginRegistry` framework from `src/elspeth/core/registry/base.py`, eliminating duplicate registration logic and improving maintainability.
+Consolidate all plugin registries to use the `BasePluginRegistry` framework from `src/elspeth/core/registries/base.py`, eliminating duplicate registration logic and improving maintainability.
 
 ### Status: Complete ✅
 
@@ -38,7 +38,7 @@ All registries have been migrated in Phase 2:
 
 ### BasePluginRegistry Framework
 
-**Location:** `src/elspeth/core/registry/base.py`
+**Location:** `src/elspeth/core/registries/base.py`
 
 **Key Features:**
 1. **Type Safety:** Generic type parameter `BasePluginRegistry[T]` ensures type correctness
@@ -331,9 +331,9 @@ PLUS 8 experiment registries using same BasePluginRegistry
 ## References
 
 - **ATO Work Program:** `docs/ATO_REMEDIATION_WORK_PROGRAM.md` (MF-2)
-- **BasePluginRegistry:** `src/elspeth/core/registry/base.py`
-- **Registry Schemas:** `src/elspeth/core/registry/schemas.py`
-- **Plugin Helpers:** `src/elspeth/core/registry/plugin_helpers.py`
+- **BasePluginRegistry:** `src/elspeth/core/registries/base.py`
+- **Registry Schemas:** `src/elspeth/core/registries/schemas.py`
+- **Plugin Helpers:** `src/elspeth/core/registries/plugin_helpers.py`
 
 ## Conclusion
 

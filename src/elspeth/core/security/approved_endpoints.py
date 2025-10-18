@@ -164,23 +164,20 @@ def _is_localhost(endpoint: str) -> bool:
     Returns:
         True if endpoint is localhost or loopback address
     """
-    try:
-        parsed = urlparse(endpoint)
-        hostname = parsed.hostname
-        if not hostname:
-            return False
-
-        # Check common localhost patterns
-        localhost_patterns = [
-            "localhost",
-            "127.0.0.1",
-            "::1",
-            "[::1]",
-        ]
-
-        return hostname.lower() in localhost_patterns
-    except Exception:
+    parsed = urlparse(endpoint)
+    hostname = parsed.hostname
+    if not hostname:
         return False
+
+    # Check common localhost patterns
+    localhost_patterns = [
+        "localhost",
+        "127.0.0.1",
+        "::1",
+        "[::1]",
+    ]
+
+    return hostname.lower() in localhost_patterns
 
 
 def validate_endpoint(

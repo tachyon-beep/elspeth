@@ -163,7 +163,7 @@ For reference, the new canonical import paths are:
 - **Experiment Protocols:** `from elspeth.plugins.orchestrators.experiment.protocols import ValidationPlugin, RowExperimentPlugin, ...`
 
 ### Registries
-- **Plugin Registry:** `from elspeth.core.registry import registry` (centralized)
+- **Plugin Registry:** `from elspeth.core.registries import *` (dedicated registries)
 
 ## References
 

@@ -217,7 +217,7 @@ This directory contains all documentation for the registry consolidation refacto
 The core abstraction that eliminates duplication:
 
 ```python
-from elspeth.core.registry import BasePluginRegistry
+from elspeth.core.registries.base import BasePluginRegistry
 
 # Create a type-safe registry for any plugin type
 _my_registry = BasePluginRegistry[MyPluginType]("my_plugin_type")
@@ -238,7 +238,7 @@ plugin = _my_registry.create(
 Consolidates 30-40 line pattern into single function:
 
 ```python
-from elspeth.core.registry import extract_security_levels, create_plugin_context
+from elspeth.core.registries.context_utils import extract_security_levels, create_plugin_context
 
 # Extract and normalize security levels with provenance tracking
 security_level, determinism_level, sources = extract_security_levels(
@@ -256,7 +256,7 @@ context = create_plugin_context(
 Reusable schema composition:
 
 ```python
-from elspeth.core.registry import with_security_properties, with_error_handling
+from elspeth.core.registries.schemas import with_security_properties, with_error_handling
 
 schema = {
     "type": "object",

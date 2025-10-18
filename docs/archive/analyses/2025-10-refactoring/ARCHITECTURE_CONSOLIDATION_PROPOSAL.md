@@ -44,7 +44,7 @@ src/elspeth/plugins/experiments/   (~3583 lines)
 
 ```python
 # validation_plugin_registry.py (17 lines, mostly docstring)
-from elspeth.core.registry.base import BasePluginRegistry
+from elspeth.core.registries.base import BasePluginRegistry
 from elspeth.plugins.orchestrators.experiment.protocols import ValidationPlugin
 
 validation_plugin_registry = BasePluginRegistry[ValidationPlugin]("validation_plugin")

@@ -242,7 +242,7 @@ class ExperimentOrchestrator:
 ```python
 """Orchestrator registry."""
 
-from elspeth.core.registry import BasePluginRegistry
+from elspeth.core.registries.base import BasePluginRegistry
 from elspeth.plugins.orchestrators.experiment.runner import ExperimentOrchestrator
 
 # Create orchestrator registry

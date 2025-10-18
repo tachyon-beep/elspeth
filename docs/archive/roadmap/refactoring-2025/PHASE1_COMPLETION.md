@@ -154,7 +154,7 @@ Coverage:
 
 ### Generic Type Safety
 ```python
-from elspeth.core.registry import BasePluginRegistry
+from elspeth.core.registries.base import BasePluginRegistry
 from pandas import DataFrame
 
 # Type-safe registry
@@ -219,13 +219,15 @@ All existing code continues to work unchanged:
 
 ```python
 # Old code still works
-from elspeth.core.registry import registry
-registry.create_llm(...)
-registry.create_datasource(...)
-registry.create_sink(...)
+from elspeth.core.registries.llm import llm_registry
+from elspeth.core.registries.datasource import datasource_registry
+from elspeth.core.registries.sink import sink_registry
+llm_registry.create(...)
+datasource_registry.create(...)
+sink_registry.create(...)
 
 # New base framework available
-from elspeth.core.registry import BasePluginRegistry
+from elspeth.core.registries.base import BasePluginRegistry
 my_registry = BasePluginRegistry[MyType]("my_plugin")
 ```
 

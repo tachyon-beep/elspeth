@@ -78,7 +78,7 @@ class PgVectorQueryClient(VectorQueryClient):
                     if metadata:
                         try:
                             metadata_payload = json.loads(metadata)
-                        except Exception:  # pragma: no cover - best effort
+                        except (json.JSONDecodeError, TypeError):  # pragma: no cover - best effort
                             metadata_payload = {}
                     yield QueryResult(
                         document_id=document_id,

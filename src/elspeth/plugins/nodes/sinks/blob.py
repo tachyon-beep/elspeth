@@ -250,25 +250,6 @@ class BlobResultSink(ResultSink):
                     combined[key] = value
         return combined or None
 
-    def _get_service_client(self) -> Any:
-        if self._blob_service_client is not None:
-            # Lazy initialization pattern; mypy sees unreachable due to None-typed field
-            return self._blob_service_client  # type: ignore[unreachable]
-
-        try:
-            from azure.storage.blob import BlobServiceClient
-        except ImportError as exc:  # pragma: no cover - optional dependency missing
-            raise RuntimeError("azure-storage-blob is required for BlobResultSink") from exc
-
-        credential = self._resolve_credential(self.config)
-        client = BlobServiceClient(
-            account_url=self.config.account_url,
-            credential=credential,
-        )
-        # Lazy initialization: assigning BlobServiceClient to None-typed field
-        self._blob_service_client = client  # type: ignore[assignment]
-        return self._blob_service_client
-
     def _resolve_credential(self, config: BlobConfig) -> Any:
         if self.credential is not None:
             return self.credential
@@ -352,3 +333,80 @@ class BlobResultSink(ResultSink):
             if artifact.determinism_level:
                 metadata["determinism_level"] = artifact.determinism_level
         return metadata
+
+    def _get_service_client(self) -> Any:
+        if self._blob_service_client is not None:
+            # Lazy initialization pattern; mypy sees unreachable due to None-typed field
+            return self._blob_service_client  # type: ignore[unreachable]
+
+        try:
+            from azure.storage.blob import BlobServiceClient
+        except ImportError as exc:  # pragma: no cover - optional dependency missing
+            raise RuntimeError("azure-storage-blob is required for BlobResultSink") from exc
+
+        credential = self._resolve_credential(self.config)
+        client = BlobServiceClient(
+            account_url=self.config.account_url,
+            credential=credential,
+        )
+        # Lazy initialization: assigning BlobServiceClient to None-typed field
+        self._blob_service_client = client  # type: ignore[assignment]
+        return self._blob_service_client
+
+
+class AzureBlobArtifactsSink(BlobResultSink):
+    """Publish local folders or archives to Azure Blob Storage under a prefix.
+
+    Options:
+      - folder_path: local directory to upload
+      - path_template: optional blob path prefix template (defaults to blob_path in config)
+      - content_type_map: optional mapping of file extensions to content types
+    """
+
+    def __init__(
+        self,
+        *,
+        folder_path: str | Path,
+        content_type_map: Mapping[str, str] | None = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(**kwargs)
+        self.folder_path = Path(folder_path)
+        self.content_type_map = dict(content_type_map or {})
+
+    def write(self, results: dict[str, Any], *, metadata: dict[str, Any] | None = None) -> None:
+        metadata = metadata or {}
+        timestamp = datetime.now(timezone.utc)
+        context = self._build_context(metadata, timestamp)
+
+        if not self.folder_path.exists() or not self.folder_path.is_dir():
+            logger.info("No artifacts found to publish at %s", self.folder_path)
+            return
+
+        prefix = self.path_template.format(**context) if self.path_template else (self.config.blob_path or "")
+        if prefix and not prefix.endswith("/"):
+            prefix = f"{prefix}/"
+
+        for path in self.folder_path.rglob("*"):
+            if path.is_dir():
+                continue
+            rel = path.relative_to(self.folder_path).as_posix()
+            blob_name = f"{prefix}{rel}" if prefix else rel
+            data = path.read_bytes()
+            content_type = self._infer_content_type(path)
+            upload_metadata = self._build_upload_metadata(metadata, None)
+            self._upload_bytes(blob_name, data, content_type=content_type or self.content_type, upload_metadata=upload_metadata)
+
+    def _infer_content_type(self, path: Path) -> str | None:
+        ct = self.content_type_map.get(path.suffix.lower()) if self.content_type_map else None
+        if ct:
+            return ct
+        try:
+            import mimetypes
+
+            guessed, _ = mimetypes.guess_type(path.name)
+            return guessed
+        except Exception:
+            return None
+
+    # Uses credential resolution and artifact helpers from BlobResultSink
