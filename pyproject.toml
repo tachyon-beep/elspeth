@@ -196,6 +196,14 @@ disallow_incomplete_defs = true
 
 [[tool.mypy.overrides]]
 module = [
+  "elspeth.plugins.nodes.transforms.llm.*",
+  "elspeth.plugins.nodes.transforms.llm.middleware.*",
+]
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+
+[[tool.mypy.overrides]]
+module = [
   "elspeth.plugins.utilities.retrieval",
 ]
 disallow_untyped_defs = true

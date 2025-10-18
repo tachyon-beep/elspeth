@@ -22,7 +22,7 @@ class AzureOpenAIClient(LLMClientProtocol):
         self.deployment = self._resolve_deployment(deployment)
         self._client = client or self._create_client()
 
-    def _create_client(self):
+    def _create_client(self) -> Any:
         api_key = self._resolve_required("api_key")
         api_version = self._resolve_required("api_version")
         azure_endpoint = self._resolve_required("azure_endpoint")
@@ -74,7 +74,7 @@ class AzureOpenAIClient(LLMClientProtocol):
         return None
 
     @property
-    def client(self):
+    def client(self) -> Any:
         return self._client
 
     def generate(
