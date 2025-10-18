@@ -33,6 +33,7 @@ job:
 from __future__ import annotations
 
 from pathlib import Path
+import logging
 from typing import Any, Mapping, Sequence
 
 import yaml
@@ -43,6 +44,8 @@ from elspeth.core.registries.datasource import datasource_registry
 from elspeth.core.registries.llm import create_llm_from_definition
 from elspeth.core.registries.sink import sink_registry
 from elspeth.core.security import normalize_determinism_level, normalize_security_level
+
+logger = logging.getLogger(__name__)
 
 
 def _context_from_defaults(job: Mapping[str, Any]) -> PluginContext:
@@ -122,9 +125,9 @@ def run_job_config(job: Mapping[str, Any]) -> dict[str, Any]:
                     }
                     mws.append(create_middleware(defn, parent_context=ctx))
                 runner.llm_middlewares = mws
-        except Exception:
+        except Exception as exc:
             # If middleware registry not available or invalid config, continue without middlewares
-            pass
+            logger.warning("LLM middleware init failed; continuing without middlewares: %s", exc)
 
         payload_out = runner.run(df)
         return payload_out
@@ -138,9 +141,10 @@ def run_job_config(job: Mapping[str, Any]) -> dict[str, Any]:
     for sink in sinks:
         try:
             sink.write(payload, metadata={"name": job.get("name", "job")})
-        except Exception:
-            # Continue on sink failures to maximize delivery
-            pass
+        except Exception as exc:
+            # Continue on sink failures to maximize delivery, but record the error for auditability
+            sink_name = getattr(sink, "__class__", type(sink)).__name__
+            logger.warning("Sink write failed; skipping sink '%s': %s", sink_name, exc)
     return payload
 
 

@@ -19,6 +19,11 @@ class AzureOpenAIClient(LLMClientProtocol):
         self.config = config
         self.temperature = config.get("temperature")
         self.max_tokens = config.get("max_tokens")
+        # Bounded request timeouts for operational resilience
+        try:
+            self.request_timeout = float(config.get("timeout", 30.0))
+        except Exception:
+            self.request_timeout = 30.0
         self.deployment = self._resolve_deployment(deployment)
         self._client = client or self._create_client()
 
@@ -95,7 +100,8 @@ class AzureOpenAIClient(LLMClientProtocol):
         if self.max_tokens is not None:
             kwargs["max_tokens"] = self.max_tokens
 
-        response = self.client.chat.completions.create(**kwargs)
+        # Apply request timeout; openai SDK accepts per-request timeout
+        response = self.client.chat.completions.create(timeout=self.request_timeout, **kwargs)
         content = None
         try:
             content = response.choices[0].message.content
