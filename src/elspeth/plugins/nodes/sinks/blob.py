@@ -74,6 +74,13 @@ class BlobResultSink(ResultSink):
 
         try:
             blob_name = self._resolve_blob_name(context)
+            plugin_logger = getattr(self, "plugin_logger", None)
+            if plugin_logger:
+                plugin_logger.log_event(
+                    "sink_write_attempt",
+                    message=f"Blob write attempt: {self.config.container_name}/{blob_name}",
+                    metadata={"container": self.config.container_name, "blob": blob_name},
+                )
             if self._artifact_inputs:
                 for idx, artifact in enumerate(self._artifact_inputs, start=1):
                     target_name = blob_name if idx == 1 else self._append_suffix(blob_name, idx)
@@ -107,9 +114,18 @@ class BlobResultSink(ResultSink):
                         content_type="application/json",
                         upload_metadata=self._build_upload_metadata(metadata, None),
                     )
+            if plugin_logger:
+                plugin_logger.log_event(
+                    "sink_write",
+                    message=f"Blob write completed: {self.config.container_name}/{blob_name}",
+                    metadata={"container": self.config.container_name, "blob": blob_name},
+                )
         except Exception as exc:
             if self.on_error == "skip":
                 logger.warning("Blob sink failed; skipping upload: %s", exc)
+                plugin_logger = getattr(self, "plugin_logger", None)
+                if plugin_logger:
+                    plugin_logger.log_error(exc, context="blob sink write", recoverable=True)
                 return
             raise
         finally:

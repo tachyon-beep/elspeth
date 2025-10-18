@@ -1,4 +1,5 @@
 import pandas as pd
+import pytest
 
 from elspeth.plugins.nodes.sinks.csv_file import CsvResultSink
 
@@ -56,3 +57,15 @@ def test_csv_result_sink_skip_on_error(tmp_path, monkeypatch):
 
     sink.write({"results": []})
     assert not path.exists()
+
+
+def test_csv_sanitize_guard_defaults_when_empty(tmp_path):
+    path = tmp_path / "results.csv"
+    sink = CsvResultSink(path=path, sanitize_guard="")
+    assert sink.sanitize_guard == "'"
+
+
+def test_csv_sanitize_guard_rejects_multi_char(tmp_path):
+    path = tmp_path / "results.csv"
+    with pytest.raises(ValueError):
+        CsvResultSink(path=path, sanitize_guard="xx")

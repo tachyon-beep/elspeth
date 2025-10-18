@@ -13,8 +13,9 @@ Experiment-specific protocols live in `plugins/orchestrators/experiment/protocol
 
 from __future__ import annotations
 
+from contextlib import AbstractContextManager
 from dataclasses import dataclass, field, replace
-from typing import TYPE_CHECKING, Any, ContextManager, Mapping, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Mapping, Protocol, runtime_checkable
 
 import pandas as pd
 
@@ -192,7 +193,7 @@ class LLMMiddleware(Protocol):
 class RateLimiter:
     """Rate limiting for LLM transforms (base class, not protocol)."""
 
-    def acquire(self, metadata: dict[str, object | None] | None = None) -> ContextManager[None]:
+    def acquire(self, metadata: dict[str, object | None] | None = None) -> AbstractContextManager[None]:
         """Return a context manager that enforces the rate limit."""
         del metadata  # Unused in base implementation.
         raise NotImplementedError

@@ -13,6 +13,7 @@ from openpyxl import Workbook  # type: ignore[import-untyped]
 
 from elspeth.core.base.protocols import Artifact, ArtifactDescriptor, ResultSink
 from elspeth.core.security import normalize_determinism_level, normalize_security_level
+from elspeth.core.utils.path_guard import resolve_under_base, safe_atomic_write
 from elspeth.plugins.nodes.sinks._sanitize import sanitize_cell
 
 logger = logging.getLogger(__name__)
@@ -62,6 +63,7 @@ class ExcelResultSink(ResultSink):
         sanitize_formulas: bool = True,
         sanitize_guard: str = "'",
         config: ExcelSinkConfig | None = None,
+        allowed_base_path: str | Path | None = None,
     ) -> None:
         """Initialize Excel sink.
 
@@ -110,6 +112,12 @@ class ExcelResultSink(ResultSink):
             "enabled": self.sanitize_formulas,
             "guard": self.sanitize_guard,
         }
+        # Allowed base directory for writes; default to ./outputs
+        try:
+            default_base = Path(base_path).resolve()
+            self._allowed_base = Path(allowed_base_path).resolve() if allowed_base_path is not None else default_base
+        except Exception:  # pragma: no cover - defensive
+            self._allowed_base = Path.cwd().resolve()
 
     # ------------------------------------------------------------------ public API
     def write(self, results: dict[str, Any], *, metadata: dict[str, Any] | None = None) -> None:
@@ -117,7 +125,15 @@ class ExcelResultSink(ResultSink):
         timestamp = datetime.now(timezone.utc)
         try:
             path = self._resolve_path(metadata, timestamp)
-            path.parent.mkdir(parents=True, exist_ok=True)
+            target = resolve_under_base(path, self._allowed_base)
+
+            plugin_logger = getattr(self, "plugin_logger", None)
+            if plugin_logger:
+                plugin_logger.log_event(
+                    "sink_write_attempt",
+                    message=f"Excel write attempt: {target}",
+                    metadata={"path": str(target)},
+                )
 
             workbook = self._workbook_factory()
             self._populate_results_sheet(workbook, results.get("results", []))
@@ -130,14 +146,31 @@ class ExcelResultSink(ResultSink):
                 if isinstance(aggregates, Mapping):
                     self._populate_aggregates_sheet(workbook, aggregates)
 
-            workbook.save(path)
-            self._last_workbook_path = str(path)
+            def _writer(tmp_path: Path) -> None:
+                workbook.save(tmp_path)
+
+            safe_atomic_write(target, _writer)
+            self._last_workbook_path = str(target)
             if metadata:
                 self._security_level = normalize_security_level(metadata.get("security_level"))
                 self._determinism_level = normalize_determinism_level(metadata.get("determinism_level"))
+            if plugin_logger:
+                try:
+                    size = Path(self._last_workbook_path).stat().st_size if self._last_workbook_path else 0
+                except Exception:
+                    size = 0
+                plugin_logger.log_event(
+                    "sink_write",
+                    message=f"Excel written to {target}",
+                    metrics={"bytes": size},
+                    metadata={"path": str(target)},
+                )
         except Exception as exc:
             if self.on_error == "skip":
                 logger.warning("Excel sink failed; skipping workbook creation: %s", exc)
+                plugin_logger = getattr(self, "plugin_logger", None)
+                if plugin_logger:
+                    plugin_logger.log_error(exc, context="excel sink write", recoverable=True)
                 return
             raise
 

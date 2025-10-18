@@ -17,6 +17,36 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+# Default set of local filesystem sinks that must enforce path containment and
+# (where applicable) output sanitization. Can be extended via the
+# ELSPETH_PATH_CONTAINED_SINKS environment variable (comma-separated list).
+#
+# Example:
+#   ELSPETH_PATH_CONTAINED_SINKS="csv,excel_workbook,local_bundle,zip_bundle,file_copy,parquet"
+PATH_CONTAINED_SINK_TYPES_DEFAULT: frozenset[str] = frozenset({"csv", "excel_workbook", "local_bundle", "zip_bundle", "file_copy"})
+
+
+def _parse_csv_list(value: str) -> frozenset[str]:
+    return frozenset(chunk.strip().lower() for chunk in value.split(",") if chunk.strip())
+
+
+def get_path_contained_sink_types(env: dict[str, str] | None = None) -> frozenset[str]:
+    """Return the set of sink ``type`` identifiers requiring path containment.
+
+    Allows extension via the ``ELSPETH_PATH_CONTAINED_SINKS`` environment
+    variable, which is merged with the default set.
+    """
+    environ = env if env is not None else os.environ
+    override = environ.get("ELSPETH_PATH_CONTAINED_SINKS")
+    if not override:
+        return PATH_CONTAINED_SINK_TYPES_DEFAULT
+    try:
+        custom = _parse_csv_list(override)
+        return frozenset(PATH_CONTAINED_SINK_TYPES_DEFAULT.union(custom))
+    except Exception:
+        logger.warning("Failed to parse ELSPETH_PATH_CONTAINED_SINKS; using defaults")
+        return PATH_CONTAINED_SINK_TYPES_DEFAULT
+
 
 class SecureMode(Enum):
     """Security enforcement modes."""
@@ -173,10 +203,9 @@ def validate_sink_config(config: dict[str, Any], mode: SecureMode | None = None)
     # Validate security_level requirement
     _validate_security_level_required(config, "Sink", mode)
 
-    # Check formula sanitization for CSV/Excel sinks
-    sink_type = config.get("type", "")
-
-    if sink_type in ["csv", "excel_workbook", "local_bundle", "zip_bundle"]:
+    # Enforce path containment and sanitization requirements for local sinks
+    sink_type = (config.get("type", "") or "").strip().lower()
+    if sink_type in get_path_contained_sink_types():
         sanitize_formulas = config.get("sanitize_formulas", True)
 
         if mode == SecureMode.STRICT and sanitize_formulas is False:
@@ -186,6 +215,11 @@ def validate_sink_config(config: dict[str, Any], mode: SecureMode | None = None)
 
         if mode == SecureMode.STANDARD and sanitize_formulas is False:
             logger.warning(f"Sink type '{sink_type}' has sanitize_formulas=False - consider enabling for security")
+
+        # Enforce explicit base-path containment for local filesystem sinks in STRICT
+        allowed_base = config.get("allowed_base_path")
+        if mode == SecureMode.STRICT and not allowed_base:
+            raise ValueError(f"Sink type '{sink_type}' requires explicit 'allowed_base_path' in STRICT mode (path containment enforcement)")
 
 
 def validate_middleware_config(middleware: list[dict[str, Any]], mode: SecureMode | None = None) -> None:

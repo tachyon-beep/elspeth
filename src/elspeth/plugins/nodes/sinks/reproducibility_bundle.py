@@ -87,6 +87,13 @@ class ReproducibilityBundleSink(ResultSink):
         timestamp = datetime.now(timezone.utc)
 
         try:
+            plugin_logger = getattr(self, "plugin_logger", None)
+            if plugin_logger:
+                plugin_logger.log_event(
+                    "sink_write_attempt",
+                    message=f"Reproducibility bundle attempt: {self.base_path}/{self.bundle_name or 'bundle'}",
+                    metadata={"path": str(self.base_path)},
+                )
             # Create temporary directory for bundle contents
             self._temp_dir = Path(tempfile.mkdtemp(prefix="elspeth_repro_"))
 
@@ -132,16 +139,24 @@ class ReproducibilityBundleSink(ResultSink):
             archive_path = self._create_archive(metadata, timestamp)
             self._last_archive_path = str(archive_path)
 
-            logger.info(
-                "Reproducibility bundle created: %s (%d files, %s)",
-                archive_path.name,
-                len(self._file_hashes),
-                self._format_size(archive_path.stat().st_size),
-            )
+            if plugin_logger:
+                try:
+                    size = archive_path.stat().st_size
+                except Exception:
+                    size = 0
+                plugin_logger.log_event(
+                    "sink_write",
+                    message=f"Reproducibility bundle created: {archive_path.name}",
+                    metrics={"files": len(self._file_hashes), "bytes": size},
+                    metadata={"path": str(archive_path)},
+                )
 
         except Exception as exc:
             if self.on_error == "skip":
                 logger.warning("Reproducibility bundle creation failed; skipping: %s", exc)
+                plugin_logger = getattr(self, "plugin_logger", None)
+                if plugin_logger:
+                    plugin_logger.log_error(exc, context="reproducibility bundle write", recoverable=True)
                 return
             raise
         finally:

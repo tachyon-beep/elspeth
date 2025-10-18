@@ -14,6 +14,7 @@ import pandas as pd
 
 from elspeth.core.base.protocols import Artifact, ArtifactDescriptor, ResultSink
 from elspeth.core.security import normalize_determinism_level, normalize_security_level, resolve_security_level
+from elspeth.core.utils.path_guard import resolve_under_base, safe_atomic_write
 from elspeth.plugins.nodes.sinks._sanitize import sanitize_cell
 
 logger = logging.getLogger(__name__)
@@ -37,6 +38,7 @@ class ZipResultSink(ResultSink):
         on_error: str = "abort",
         sanitize_formulas: bool = True,
         sanitize_guard: str = "'",
+        allowed_base_path: str | Path | None = None,
     ) -> None:
         self.base_path = Path(base_path)
         self.bundle_name = bundle_name
@@ -67,47 +69,82 @@ class ZipResultSink(ResultSink):
         self._additional_inputs: dict[str, list[Artifact]] = {}
         self._security_level: str | None = None
         self._determinism_level: str | None = None
+        # Allowed base directory for writes; default to ./outputs
+        try:
+            default_base = Path(base_path).resolve()
+            self._allowed_base = Path(allowed_base_path).resolve() if allowed_base_path is not None else default_base
+        except Exception:  # pragma: no cover - defensive
+            self._allowed_base = Path.cwd().resolve()
 
     def write(self, results: dict[str, Any], *, metadata: dict[str, Any] | None = None) -> None:
         metadata = metadata or {}
         timestamp = datetime.now(timezone.utc)
         try:
+            plugin_logger = getattr(self, "plugin_logger", None)
             archive_path = self._resolve_path(metadata, timestamp)
-            archive_path.parent.mkdir(parents=True, exist_ok=True)
+            target = resolve_under_base(archive_path, self._allowed_base)
 
-            with ZipFile(archive_path, mode="w", compression=ZIP_DEFLATED) as bundle:
-                if self.include_results:
-                    payload = json.dumps(results, indent=2, sort_keys=True)
-                    bundle.writestr(self.results_name, payload)
+            if plugin_logger:
+                plugin_logger.log_event(
+                    "sink_write_attempt",
+                    message=f"ZIP write attempt: {target}",
+                    metadata={"path": str(target)},
+                )
 
-                if self.include_manifest:
-                    manifest = self._build_manifest(results, metadata, timestamp)
-                    bundle.writestr(
-                        self.manifest_name,
-                        json.dumps(manifest, indent=2, sort_keys=True),
-                    )
+            def _safe_name(name: str) -> str:
+                """Return a sanitized ZIP entry name.
 
-                if self.include_csv:
-                    csv_data = self._render_csv(results)
-                    bundle.writestr(self.csv_name, csv_data)
+                - Drops any directory components
+                - Rejects NUL bytes (\x00)
+                - Replaces characters outside [A-Za-z0-9._-] with '_'
+                - Avoids empty/bad names by falling back to 'artifact'
+                """
+                if "\x00" in name:
+                    raise ValueError("ZIP entry name contains NUL byte")
+                base = Path(name).name
+                if not base or base in {".", ".."}:
+                    base = "artifact"
+                allowed = set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-")
+                sanitized = "".join(c if c in allowed else "_" for c in base)
+                # Ensure we didn't strip the entire name
+                return sanitized or "artifact"
 
-                # Include upstream artifacts
-                counter = 0
-                for _, artifacts in self._additional_inputs.items():
-                    for artifact in artifacts:
-                        counter += 1
-                        name = None
-                        if artifact.metadata:
-                            name = artifact.metadata.get("filename") or artifact.metadata.get("path")
-                            if name and Path(name).is_absolute():
-                                name = Path(name).name
-                        if not name and artifact.path:
-                            name = Path(artifact.path).name
-                        if not name:
-                            name = f"artifact_{counter}"
-                        data = self._read_artifact(artifact)
-                        bundle.writestr(name, data)
-            self._last_archive_path = str(archive_path)
+            def _writer(tmp_path: Path) -> None:
+                with ZipFile(tmp_path, mode="w", compression=ZIP_DEFLATED) as bundle:
+                    if self.include_results:
+                        payload = json.dumps(results, indent=2, sort_keys=True)
+                        bundle.writestr(_safe_name(self.results_name), payload)
+
+                    if self.include_manifest:
+                        manifest = self._build_manifest(results, metadata, timestamp)
+                        bundle.writestr(
+                            _safe_name(self.manifest_name),
+                            json.dumps(manifest, indent=2, sort_keys=True),
+                        )
+
+                    if self.include_csv:
+                        csv_data = self._render_csv(results)
+                        bundle.writestr(_safe_name(self.csv_name), csv_data)
+
+                    # Include upstream artifacts
+                    counter = 0
+                    for _, artifacts in self._additional_inputs.items():
+                        for artifact in artifacts:
+                            counter += 1
+                            name = None
+                            if artifact.metadata:
+                                name = artifact.metadata.get("filename") or artifact.metadata.get("path")
+                                if name:
+                                    name = _safe_name(str(name))
+                            if not name and artifact.path:
+                                name = _safe_name(str(artifact.path))
+                            if not name:
+                                name = f"artifact_{counter}"
+                            data = self._read_artifact(artifact)
+                            bundle.writestr(name, data)
+
+            safe_atomic_write(target, _writer)
+            self._last_archive_path = str(target)
             self._last_artifacts = {
                 "results": self.results_name if self.include_results else None,
                 "manifest": self.manifest_name if self.include_manifest else None,
@@ -120,6 +157,9 @@ class ZipResultSink(ResultSink):
         except Exception as exc:
             if self.on_error == "skip":
                 logger.warning("ZIP sink failed; skipping archive creation: %s", exc)
+                plugin_logger = getattr(self, "plugin_logger", None)
+                if plugin_logger:
+                    plugin_logger.log_error(exc, context="zip sink write", recoverable=True)
                 return
             raise
         finally:

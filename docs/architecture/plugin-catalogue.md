@@ -6,16 +6,16 @@ All built-in plugins now receive a `PluginContext` instance during construction.
 
 | Name | Implementation | Purpose | Notable Options | Context Status | Coverage |
 | --- | --- | --- | --- | --- | --- |
-| `azure_blob` | `src/elspeth/plugins/datasources/blob.py` | Load CSV data from Azure Blob Storage profiles. | `config_path`, `profile`, `pandas_kwargs`, `on_error`. | ✔ Inherits classification from context. | `tests/test_datasource_blob_plugin.py` |
-| `csv_blob` | `src/elspeth/plugins/datasources/csv_blob.py` | Fetch CSV directly from blob URIs with retry-aware skips. | `path`, `dtype`, `encoding`, `on_error`. | ✔ Adds DataFrame `security_level` from context. | `tests/test_datasource_csv.py` |
-| `local_csv` | `src/elspeth/plugins/datasources/csv_local.py` | Local filesystem CSV reader with skip-on-error mode. | `path`, `dtype`, `encoding`, `on_error`. | ✔ Propagates context level into DataFrame attrs. | `tests/test_datasource_csv.py` |
+| `azure_blob` | `src/elspeth/plugins/nodes/sources/blob.py` | Load CSV data from Azure Blob Storage profiles. | `config_path`, `profile`, `pandas_kwargs`, `on_error`. | ✔ Inherits classification from context. | `tests/test_datasource_blob_plugin.py` |
+| `csv_blob` | `src/elspeth/plugins/nodes/sources/csv_blob.py` | Fetch CSV directly from blob URIs with retry-aware skips. | `path`, `dtype`, `encoding`, `on_error`. | ✔ Adds DataFrame `security_level` from context. | `tests/test_datasource_csv.py` |
+| `local_csv` | `src/elspeth/plugins/nodes/sources/csv_local.py` | Local filesystem CSV reader with skip-on-error mode. | `path`, `dtype`, `encoding`, `on_error`. | ✔ Propagates context level into DataFrame attrs. | `tests/test_datasource_csv.py` |
 
 ## LLM Clients
 
 | Name | Implementation | Purpose | Notable Options | Context Status | Coverage |
 | --- | --- | --- | --- | --- | --- |
-| `azure_openai` | `src/elspeth/plugins/llms/azure_openai.py` | Azure-hosted OpenAI-compatible client. | `config`, `deployment`, `temperature`, `max_tokens`. | ✔ Context sets `security_level` attribute. | `tests/test_llm_azure.py` |
-| `http_openai` | `src/elspeth/plugins/llms/openai_http.py` | Generic OpenAI HTTP client. | `api_base`, `api_key/_env`, `model`, `timeout`. | ✔ Context captured for policy enforcement. | `tests/test_llm_http_openai.py` |
+| `azure_openai` | `src/elspeth/plugins/nodes/transforms/llm/azure_openai.py` | Azure-hosted OpenAI-compatible client. | `config`, `deployment`, `temperature`, `max_tokens`. | ✔ Context sets `security_level` attribute. | `tests/test_llm_azure.py` |
+| `http_openai` | `src/elspeth/plugins/nodes/transforms/llm/openai_http.py` | Generic OpenAI HTTP client. | `api_base`, `api_key/_env`, `model`, `timeout`. | ✔ Context captured for policy enforcement. | `tests/test_llm_http_openai.py` |
 | `mock` | `src/elspeth/plugins/llms/mock.py` | Deterministic mock LLM for suites/tests. | `seed`. | ✔ Context stored for downstream audits. | `tests/test_llm_mock.py` |
 | `static_test` | `src/elspeth/plugins/llms/static.py` | Returns canned responses/metrics. | `content`, `score`, `metrics`. | ✔ Context attaches classification metadata. | `tests/test_llm_static_plugin.py` |
 
@@ -109,14 +109,14 @@ All built-in plugins now receive a `PluginContext` instance during construction.
 | `enhanced_visual` | `src/elspeth/plugins/outputs/enhanced_visual_report.py` | Advanced visualizations: violin plots, box plots, heatmaps, forest plots, distribution overlays. | `base_path`, `chart_types` (violin/box/heatmap/forest/distribution), `formats`, `figure_size`, `color_palette`. | ✔ Context drives artifact security. | `tests/test_outputs_enhanced_visual.py` |
 | `azure_blob` | `src/elspeth/plugins/outputs/blob.py` | Upload results to Azure Blob Storage. | `config_path`, `profile`, `path_template`, `include_manifest`, `credential`. | ✔ | `tests/test_outputs_blob.py` |
 | `azure_devops_repo` | `src/elspeth/plugins/outputs/repository.py` | Commit artifacts into Azure DevOps repo. | Repo identifiers, `token_env`, `dry_run`. | ✔ | `tests/test_outputs_repo.py` |
-| `csv` | `src/elspeth/plugins/outputs/csv_file.py` | Flat CSV export with sanitisation. | `path`, `sanitize_formulas`, `sanitize_guard`, `overwrite`. | ✔ | `tests/test_outputs_csv.py` |
-| `excel_workbook` | `src/elspeth/plugins/outputs/excel.py` | Excel workbook export. | `base_path`, `timestamped`, `include_manifest`, `sanitize_formulas`. | ✔ | `tests/test_outputs_excel.py` |
+| `csv` | `src/elspeth/plugins/outputs/csv_file.py` | Flat CSV export with sanitisation. | `path`, `sanitize_formulas`, `sanitize_guard`, `overwrite`, `allowed_base_path`. | ✔ | `tests/test_outputs_csv.py` |
+| `excel_workbook` | `src/elspeth/plugins/outputs/excel.py` | Excel workbook export. | `base_path`, `timestamped`, `include_manifest`, `sanitize_formulas`, `allowed_base_path`. | ✔ | `tests/test_outputs_excel.py` |
 | `embeddings_store` | `src/elspeth/plugins/outputs/embeddings_store.py` | Persist experiment payloads as vector embeddings (pgvector/Azure Search). | `provider`, `namespace`, `dsn/endpoint`, `embed_model`, `metadata_fields`. | ✔ Context-derived namespaces prevent cross-tier reuse; Azure provider respects key-rotation guidance. | `tests/test_outputs_embeddings_store.py` |
 | `file_copy` | `src/elspeth/plugins/outputs/file_copy.py` | Copy artifacts to filesystem destinations. | `destination`, `overwrite`. | ✔ | `tests/test_sink_chaining.py` |
 | `github_repo` | `src/elspeth/plugins/outputs/repository.py` | Commit artifacts into GitHub repository. | `owner`, `repo`, `branch`, `token_env`, `dry_run`. | ✔ | `tests/test_outputs_repo.py` |
-| `local_bundle` | `src/elspeth/plugins/outputs/local_bundle.py` | Create local JSON/CSV bundle directories. | `base_path`, `bundle_name`, `timestamped`, `write_json/csv`. | ✔ | `tests/test_outputs_local_bundle.py` |
+| `local_bundle` | `src/elspeth/plugins/outputs/local_bundle.py` | Create local JSON/CSV bundle directories. | `base_path`, `bundle_name`, `timestamped`, `write_json/csv`, `allowed_base_path`. | ✔ | `tests/test_outputs_local_bundle.py` |
 | `signed_artifact` | `src/elspeth/plugins/outputs/signed.py` | Generate signed artifacts with manifest. | `base_path`, `bundle_name`, `key/_env`, `algorithm`, `on_error`. | ✔ | `tests/test_outputs_signed.py` |
-| `zip_bundle` | `src/elspeth/plugins/outputs/zip_bundle.py` | Package results & manifests into zip. | `base_path`, `bundle_name`, `include_manifest`, `include_results`. | ✔ | `tests/test_outputs_archival.py` |
+| `zip_bundle` | `src/elspeth/plugins/outputs/zip_bundle.py` | Package results & manifests into zip. | `base_path`, `bundle_name`, `include_manifest`, `include_results`, `allowed_base_path`. | ✔ | `tests/test_outputs_archival.py` |
 
 ## Controls
 

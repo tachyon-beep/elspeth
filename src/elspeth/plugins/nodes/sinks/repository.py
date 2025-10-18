@@ -16,6 +16,8 @@ from elspeth.core.base.protocols import ResultSink
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_REQUEST_TIMEOUT = 15
+
 
 def _default_context(metadata: Mapping[str, Any], timestamp: datetime) -> dict[str, Any]:
     context = {k: v for k, v in metadata.items() if isinstance(k, str)}
@@ -44,6 +46,8 @@ class _RepoSinkBase(ResultSink):
     include_manifest: bool = True
     dry_run: bool = True
     session: requests.Session | None = None
+    # Network behavior
+    request_timeout: int = DEFAULT_REQUEST_TIMEOUT
     _last_payloads: list[dict[str, Any]] = field(default_factory=list, init=False)
     on_error: str = "abort"
 
@@ -73,14 +77,39 @@ class _RepoSinkBase(ResultSink):
                     for file in files
                 ],
             }
+            plugin_logger = getattr(self, "plugin_logger", None)
+            if plugin_logger:
+                plugin_logger.log_event(
+                    "sink_write_attempt",
+                    message=f"Repo write attempt: {prefix}",
+                    metrics={"files": len(files)},
+                    metadata={"repo_path": prefix, "commit_message": commit_message},
+                )
             if self.dry_run:
                 payload["dry_run"] = True
                 self._last_payloads.append(payload)
+                if plugin_logger:
+                    plugin_logger.log_event(
+                        "sink_write",
+                        message=f"Repo dry-run payload prepared: {prefix}",
+                        metrics={"files": len(files)},
+                        metadata={"repo_path": prefix},
+                    )
                 return
             self._upload(files, commit_message, metadata, context, timestamp)
+            if plugin_logger:
+                plugin_logger.log_event(
+                    "sink_write",
+                    message=f"Repo write completed: {prefix}",
+                    metrics={"files": len(files)},
+                    metadata={"repo_path": prefix},
+                )
         except Exception as exc:
             if self.on_error == "skip":
                 logger.warning("Repository sink failed; skipping upload: %s", exc)
+                plugin_logger = getattr(self, "plugin_logger", None)
+                if plugin_logger:
+                    plugin_logger.log_error(exc, context="repo sink write", recoverable=True)
                 return
             raise
 
@@ -222,7 +251,8 @@ class GitHubRepoSink(_RepoSinkBase):
     def _request(self, method: str, url: str, expected_status: set[int] | None = None, **kwargs: Any):
         expected_status = expected_status or {200, 201}
         assert self.session is not None, "session must be initialized"
-        response = self.session.request(method, url, headers=self._headers(), **kwargs)
+        timeout = kwargs.pop("timeout", self.request_timeout)
+        response = self.session.request(method, url, headers=self._headers(), timeout=timeout, **kwargs)
         if response.status_code not in expected_status:
             raise RuntimeError(f"GitHub API call failed ({response.status_code}): {response.text}")
         return response
@@ -335,7 +365,8 @@ class AzureDevOpsRepoSink(_RepoSinkBase):
     def _request(self, method: str, url: str, expected_status: set[int] | None = None, **kwargs: Any):
         expected_status = expected_status or {200, 201}
         assert self.session is not None, "session must be initialized"
-        response = self.session.request(method, url, headers=self._headers(), **kwargs)
+        timeout = kwargs.pop("timeout", self.request_timeout)
+        response = self.session.request(method, url, headers=self._headers(), timeout=timeout, **kwargs)
         if response.status_code not in expected_status:
             raise RuntimeError(f"Azure DevOps API call failed ({response.status_code}): {response.text}")
         return response

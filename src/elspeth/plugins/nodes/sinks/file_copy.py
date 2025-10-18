@@ -9,12 +9,13 @@ from typing import Mapping
 
 from elspeth.core.base.protocols import Artifact, ResultSink
 from elspeth.core.security import normalize_determinism_level, normalize_security_level
+from elspeth.core.utils.path_guard import resolve_under_base, safe_atomic_write
 
 logger = logging.getLogger(__name__)
 
 
 class FileCopySink(ResultSink):
-    def __init__(self, *, destination: str, overwrite: bool = True, on_error: str = "abort") -> None:
+    def __init__(self, *, destination: str, overwrite: bool = True, on_error: str = "abort", allowed_base_path: str | None = None) -> None:
         self.destination = Path(destination)
         self.overwrite = overwrite
         if on_error not in {"abort", "skip"}:
@@ -25,6 +26,12 @@ class FileCopySink(ResultSink):
         self._output_type: str | None = None
         self._security_level: str | None = None
         self._determinism_level: str | None = None
+        # Configure allowed base path for containment checks
+        try:
+            default_base = self.destination.parent.resolve()
+            self._allowed_base = Path(allowed_base_path).resolve() if allowed_base_path is not None else default_base
+        except Exception:  # pragma: no cover - defensive
+            self._allowed_base = self.destination.parent.resolve()
 
     def prepare_artifacts(self, artifacts: Mapping[str, list[Artifact]]):  # pragma: no cover - optional
         self._source_artifact = None
@@ -63,9 +70,35 @@ class FileCopySink(ResultSink):
         if self.destination.exists() and not self.overwrite:
             raise FileExistsError(f"Destination exists: {self.destination}")
 
-        self.destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(src_path, self.destination)
-        self._written_path = self.destination
+        # Resolve destination under allowed base (default to destination parent)
+        default_base = self.destination.parent.resolve()
+        allowed_base = getattr(self, "_allowed_base", None)
+        base_to_use = allowed_base if allowed_base is not None else default_base
+        target = resolve_under_base(self.destination, Path(base_to_use))
+        plugin_logger = getattr(self, "plugin_logger", None)
+        if plugin_logger:
+            plugin_logger.log_event(
+                "sink_write_attempt",
+                message=f"File copy attempt: {src_path} -> {target}",
+                metadata={"source": str(src_path), "dest": str(target)},
+            )
+
+        def _copy_to_tmp(tmp: Path) -> None:
+            shutil.copyfile(src_path, tmp)
+
+        safe_atomic_write(target, _copy_to_tmp)
+        self._written_path = target
+        if plugin_logger:
+            try:
+                size = target.stat().st_size
+            except Exception:
+                size = 0
+            plugin_logger.log_event(
+                "sink_write",
+                message=f"File copied to {target}",
+                metrics={"bytes": size},
+                metadata={"source": str(src_path), "dest": str(target)},
+            )
         if metadata and metadata.get("security_level"):
             self._security_level = normalize_security_level(metadata.get("security_level"))
             self._determinism_level = normalize_determinism_level(metadata.get("determinism_level"))

@@ -104,7 +104,7 @@ Refer to `notes/config-migration.md` for key renames. Typical steps:
         chart_title: "Mean Scores by Criterion"
   ```
 
-  Install extras with `pip install -e .[dev,analytics-visual]` to pull `matplotlib`/`seaborn` (`src/elspeth/plugins/outputs/visual_report.py:17`).[^migration-visual-2025-10-12]
+  Install extras with `pip install -e .[dev,analytics-visual]` to pull `matplotlib`/`seaborn` (`src/elspeth/plugins/nodes/sinks/visual_report.py:17`).[^migration-visual-2025-10-12]
 <!-- UPDATE 2025-10-12: Visual sink module relocation -->
 Update 2025-10-12: Visual analytics sink lives in `src/elspeth/plugins/nodes/sinks/visual_report.py`.
 <!-- END UPDATE -->
@@ -118,7 +118,7 @@ Update 2025-10-12: Report generation dispatch now resides at `src/elspeth/cli.py
 - **Azure ML telemetry**: Use `azure_environment` middleware in specific experiments or suite defaults. Set `on_error` to `skip` for local runs.
 - **Azure DevOps repository sink**: Add `azure_devops_repo` to sinks with organization/project/repository options. Works best with `--live-outputs`.
 - **Content Safety**: Set `AZURE_CONTENT_SAFETY_ENDPOINT` and `AZURE_CONTENT_SAFETY_KEY` env variables for middleware to authenticate.
-- **Credential migration**: Replace legacy hard-coded SAS/keys with environment variables referenced via `_env` options, or rely on managed identity defaults added in the plugin refactor (`src/elspeth/plugins/outputs/blob.py:210`, `src/elspeth/plugins/outputs/signed.py:107`).[^migration-azure-creds-2025-10-12]
+- **Credential migration**: Replace legacy hard-coded SAS/keys with environment variables referenced via `_env` options, or rely on managed identity defaults added in the plugin refactor (`src/elspeth/plugins/nodes/sinks/blob.py:210`, `src/elspeth/plugins/nodes/sinks/signed.py:107`).[^migration-azure-creds-2025-10-12]
 
 ## Sample Migration Steps
 

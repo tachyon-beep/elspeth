@@ -10,6 +10,10 @@ import pandas as pd
 
 from elspeth.core.base.protocols import Artifact, ArtifactDescriptor, ResultSink
 from elspeth.core.security import normalize_security_level
+from elspeth.core.utils.path_guard import (
+    resolve_under_base,
+    safe_atomic_write,
+)
 from elspeth.plugins.nodes.sinks._sanitize import sanitize_cell
 
 logger = logging.getLogger(__name__)
@@ -37,6 +41,7 @@ class CsvResultSink(ResultSink):
         on_error: str = "abort",
         sanitize_formulas: bool = True,
         sanitize_guard: str = "'",
+        allowed_base_path: str | Path | None = None,
     ) -> None:
         self.path = Path(path)
         self.overwrite = overwrite
@@ -57,6 +62,12 @@ class CsvResultSink(ResultSink):
             "enabled": self.sanitize_formulas,
             "guard": self.sanitize_guard,
         }
+        # Allowed base directory for writes; default to ./outputs
+        try:
+            default_base = self.path.parent.resolve()
+            self._allowed_base = Path(allowed_base_path).resolve() if allowed_base_path is not None else default_base
+        except Exception:  # pragma: no cover - defensive
+            self._allowed_base = Path.cwd().resolve()
 
     # ------------------------------------------------------------------ helpers
     def _sanitize_key(self, key: Any) -> Any:
@@ -130,16 +141,51 @@ class CsvResultSink(ResultSink):
             if self.path.exists() and not self.overwrite:
                 raise FileExistsError(f"CSV sink destination exists: {self.path}")
 
-            self.path.parent.mkdir(parents=True, exist_ok=True)
-            df.to_csv(self.path, index=False)
-            self._last_written_path = str(self.path)
+            # Resolve and enforce write under allowed base; then atomic replace
+            target = resolve_under_base(self.path, self._allowed_base)
+
+            # Emit attempt event if plugin_logger available
+            plugin_logger = getattr(self, "plugin_logger", None)
+            if plugin_logger:
+                plugin_logger.log_event(
+                    "sink_write_attempt",
+                    message=f"CSV write attempt: {target}",
+                    metrics={"rows": len(df)},
+                    metadata={"path": str(target)},
+                )
+
+            def _writer(tmp_path: Path) -> None:
+                df.to_csv(tmp_path, index=False)
+
+            safe_atomic_write(target, _writer)
+            self._last_written_path = str(target)
 
             if metadata:
                 self._security_level = normalize_security_level(metadata.get("security_level"))
+            # Emit success event
+            if plugin_logger:
+                try:
+                    size = Path(self._last_written_path).stat().st_size if self._last_written_path else 0
+                except Exception:
+                    size = 0
+                plugin_logger.log_event(
+                    "sink_write",
+                    message=f"CSV written to {target}",
+                    metrics={"rows": len(df), "bytes": size},
+                    metadata={"path": str(target)},
+                )
         except Exception as exc:
             if self.on_error == "skip":
                 logger.warning("CSV sink failed; skipping write to '%s': %s", self.path, exc)
+                # Emit error event (recoverable)
+                plugin_logger = getattr(self, "plugin_logger", None)
+                if plugin_logger:
+                    plugin_logger.log_error(exc, context="csv sink write", recoverable=True)
                 return
+            # Emit error event (fatal)
+            plugin_logger = getattr(self, "plugin_logger", None)
+            if plugin_logger:
+                plugin_logger.log_error(exc, context="csv sink write", recoverable=False)
             raise
 
     def produces(self):  # pragma: no cover - placeholder for artifact chaining

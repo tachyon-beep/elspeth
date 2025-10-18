@@ -51,6 +51,14 @@ class AnalyticsReportSink(ResultSink):
         try:
             summary = self._build_summary(results, metadata or {})
             self.base_path.mkdir(parents=True, exist_ok=True)
+            plugin_logger = getattr(self, "plugin_logger", None)
+            if plugin_logger:
+                plugin_logger.log_event(
+                    "sink_write_attempt",
+                    message=f"Analytics report write attempt: {self.base_path}/{self.file_stem}",
+                    metrics={"rows": summary.get("rows", 0)},
+                    metadata={"path": str(self.base_path)},
+                )
             written: list[Path] = []
             if "json" in self.formats:
                 path = self.base_path / f"{self.file_stem}.json"
@@ -64,9 +72,25 @@ class AnalyticsReportSink(ResultSink):
             if metadata:
                 self._security_level = normalize_security_level(metadata.get("security_level"))
                 self._determinism_level = normalize_determinism_level(metadata.get("determinism_level"))
+            if plugin_logger:
+                total_bytes = 0
+                for p in written:
+                    try:
+                        total_bytes += p.stat().st_size
+                    except Exception:
+                        pass
+                plugin_logger.log_event(
+                    "sink_write",
+                    message=f"Analytics report written under {self.base_path}",
+                    metrics={"bytes": total_bytes, "files": len(written)},
+                    metadata={"path": str(self.base_path)},
+                )
         except Exception as exc:  # pragma: no cover - error handling path
             if self.on_error == "skip":
                 logger.warning("Analytics report sink failed; skipping write: %s", exc)
+                plugin_logger = getattr(self, "plugin_logger", None)
+                if plugin_logger:
+                    plugin_logger.log_error(exc, context="analytics report sink write", recoverable=True)
                 return
             raise
 

@@ -354,6 +354,7 @@ class TestPerformanceRegression:
         assert "Configuration Merge" in content
         assert "Artifact Pipeline" in content
 
+    @pytest.mark.slow
     def test_no_performance_regression(self):
         """Track overall performance - should not regress > 10%."""
         # Baseline: Sample suite (10 rows) = ~30s

@@ -40,8 +40,11 @@ Update 2025-10-12: Azure environment middleware lives in `src/elspeth/plugins/no
 
 ## Sinks
 
-- **Success** – Log the resolved path or destination (`outputs/...`, blob URL,
-  repo path) at INFO once write completes.[^logging-sink-success-2025-10-12]
+- **Attempt/Success** – Emit structured PluginLogger events:
+  - `sink_write_attempt` before writing with `metadata.path` and optional `metrics.rows`.
+  - `sink_write` after success with `metrics.bytes` (and `rows` where applicable) and `metadata.path`.
+  - `sink_finalize` when applicable (artifact pipeline chaining).
+  Use INFO level.[^logging-sink-success-2025-10-12]
 - **Skip / dry run** – When `on_error=skip` or `--live-outputs` disabled,
   include the reason in the log message.
 - **Failures** – Log at WARNING or ERROR with at least `path`, `exception`

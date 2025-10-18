@@ -65,11 +65,11 @@ exclude = ["tests", "old", "notes", "config"]
 elspeth = ["py.typed"]
 
 [tool.pytest.ini_options]
-addopts = "-ra --cov=elspeth --cov-report=term-missing --cov-report=xml:coverage.xml"
+addopts = "-ra --cov=elspeth --cov-branch --cov-report=term-missing --cov-report=xml:coverage.xml"
 testpaths = ["tests"]
 markers = [
   "integration: marks tests that require external services such as pgvector",
-  "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+  "slow: marks tests that are slow to run and may be excluded from CI",
 ]
 
 [tool.ruff]

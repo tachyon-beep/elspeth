@@ -287,6 +287,15 @@ class EmbeddingsStoreSink(ResultSink):
                 )
             )
 
+        plugin_logger = getattr(self, "plugin_logger", None)
+        if plugin_logger:
+            plugin_logger.log_event(
+                "sink_write_attempt",
+                message=f"Embeddings upsert attempt: provider={self.provider_name}, namespace={namespace}",
+                metrics={"rows": len(embeddings)},
+                metadata={"namespace": namespace, "provider": self.provider_name},
+            )
+
         batches = [embeddings[i : i + self._batch_size] for i in range(0, len(embeddings), self._batch_size)]
         upsert_total = 0
         took_total = 0.0
@@ -307,6 +316,13 @@ class EmbeddingsStoreSink(ResultSink):
             }
         else:
             self._last_manifest = None
+        if plugin_logger:
+            plugin_logger.log_event(
+                "sink_write",
+                message=f"Embeddings upserted: provider={self.provider_name}, namespace={namespace}",
+                metrics={"count": upsert_total, "duration_seconds": took_total, "batches": len(batches)},
+                metadata={"namespace": namespace, "provider": self.provider_name},
+            )
 
     def collect_artifacts(self) -> dict[str, Artifact]:
         if not self._last_manifest:
