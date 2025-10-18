@@ -54,7 +54,7 @@ clean-logs:
 	@rm -f logs/run_*.jsonl || true
 
 sbom:
-	@.venv/bin/python -m cyclonedx_py requirements --input-file requirements.lock --output sbom.json --format json
+	@.venv/bin/python -m cyclonedx_py requirements requirements.lock --output-format JSON --output-file sbom.json --output-reproducible
 
 audit:
 	@.venv/bin/pip-audit -r requirements.lock --require-hashes
