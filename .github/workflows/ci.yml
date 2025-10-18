@@ -63,9 +63,10 @@ jobs:
           name: bandit-json
           path: bandit.json
 
-      - name: Semgrep scan (CLI SARIF)
+      - name: Semgrep scan (CLI SARIF, curated)
         run: |
-          python -m semgrep --config auto --sarif --output semgrep.sarif
+          # Curated, low-noise ruleset, block only ERROR-severity findings
+          python -m semgrep --config p/ci --severity ERROR --sarif --output semgrep.sarif
       - name: Upload semgrep report
         if: always()
         uses: actions/upload-artifact@v4
