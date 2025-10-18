@@ -38,6 +38,7 @@ class ZipResultSink(ResultSink):
         on_error: str = "abort",
         sanitize_formulas: bool = True,
         sanitize_guard: str = "'",
+        allowed_base_path: str | Path | None = None,
     ) -> None:
         self.base_path = Path(base_path)
         self.bundle_name = bundle_name
@@ -70,7 +71,9 @@ class ZipResultSink(ResultSink):
         self._determinism_level: str | None = None
         # Allowed base directory for writes; default to ./outputs
         try:
-            self._allowed_base = Path("outputs").resolve()
+            self._allowed_base = (
+                Path(allowed_base_path).resolve() if allowed_base_path is not None else Path("outputs").resolve()
+            )
         except Exception:  # pragma: no cover - defensive
             self._allowed_base = Path.cwd().resolve()
 

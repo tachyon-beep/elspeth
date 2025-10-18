@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Callable
 from typing import Any
 
 import pandas as pd
@@ -42,6 +41,7 @@ class CsvResultSink(ResultSink):
         on_error: str = "abort",
         sanitize_formulas: bool = True,
         sanitize_guard: str = "'",
+        allowed_base_path: str | Path | None = None,
     ) -> None:
         self.path = Path(path)
         self.overwrite = overwrite
@@ -64,7 +64,9 @@ class CsvResultSink(ResultSink):
         }
         # Allowed base directory for writes; default to ./outputs
         try:
-            self._allowed_base = Path("outputs").resolve()
+            self._allowed_base = (
+                Path(allowed_base_path).resolve() if allowed_base_path is not None else Path("outputs").resolve()
+            )
         except Exception:  # pragma: no cover - defensive
             self._allowed_base = Path.cwd().resolve()
 

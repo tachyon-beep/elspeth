@@ -30,6 +30,8 @@ class LocalBundleSink(ResultSink):
     sanitize_formulas: bool = True
     sanitize_guard: str = "'"
 
+    allowed_base_path: str | None = None
+
     def __post_init__(self) -> None:
         self.base_path: Path = Path(self.base_path)
         if self.on_error not in {"abort", "skip"}:
@@ -42,7 +44,9 @@ class LocalBundleSink(ResultSink):
             logger.warning("Local bundle CSV sanitization disabled; outputs may trigger spreadsheet formulas.")
         # Allowed base directory for writes; default to ./outputs
         try:
-            self._allowed_base = Path("outputs").resolve()
+            self._allowed_base = (
+                Path(self.allowed_base_path).resolve() if self.allowed_base_path else Path("outputs").resolve()
+            )
         except Exception:  # pragma: no cover - defensive
             self._allowed_base = Path.cwd().resolve()
 

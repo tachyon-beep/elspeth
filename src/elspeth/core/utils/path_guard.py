@@ -13,30 +13,28 @@ from typing import Callable
 
 
 def resolve_under_base(target: Path, base: Path) -> Path:
-    """Resolve `target` and ensure it resides under `base`.
+    """Resolve `target` under `base` without following the final component.
 
-    Args:
-        target: Destination path (may be relative)
-        base: Allowed base directory
-
-    Returns:
-        The resolved absolute target path
-
-    Raises:
-        ValueError: If resolved target is not under the resolved base
+    Ensures the parent directory of the destination is within the allowed base
+    (preventing traversal), while leaving the final path component as-is so
+    symlink checks can be applied explicitly downstream.
     """
     base_resolved = base.resolve()
-    target_resolved = (base_resolved / target) if not target.is_absolute() else target
-    target_resolved = target_resolved.resolve()
+    candidate = target if target.is_absolute() else base_resolved / target
+    # Normalize dot segments without following symlinks
+    candidate = Path(os.path.normpath(str(candidate)))
+    parent_resolved = candidate.parent.resolve()
 
     try:
-        common = Path(os.path.commonpath([str(base_resolved), str(target_resolved)]))
+        common = Path(os.path.commonpath([str(base_resolved), str(parent_resolved)]))
     except Exception:
         raise ValueError(f"Invalid path resolution for target '{target}' under base '{base}'")
 
     if common != base_resolved:
-        raise ValueError(f"Path '{target_resolved}' escapes allowed base '{base_resolved}'")
-    return target_resolved
+        raise ValueError(
+            f"Path parent '{parent_resolved}' escapes allowed base '{base_resolved}'"
+        )
+    return parent_resolved / candidate.name
 
 
 def ensure_no_symlinks_in_ancestors(path: Path) -> None:
@@ -115,4 +113,3 @@ __all__ = [
     "check_and_prepare_dir",
     "safe_atomic_write",
 ]
-

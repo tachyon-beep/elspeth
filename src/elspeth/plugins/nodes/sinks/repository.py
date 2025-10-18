@@ -73,14 +73,39 @@ class _RepoSinkBase(ResultSink):
                     for file in files
                 ],
             }
+            plugin_logger = getattr(self, "plugin_logger", None)
+            if plugin_logger:
+                plugin_logger.log_event(
+                    "sink_write_attempt",
+                    message=f"Repo write attempt: {prefix}",
+                    metrics={"files": len(files)},
+                    metadata={"repo_path": prefix, "commit_message": commit_message},
+                )
             if self.dry_run:
                 payload["dry_run"] = True
                 self._last_payloads.append(payload)
+                if plugin_logger:
+                    plugin_logger.log_event(
+                        "sink_write",
+                        message=f"Repo dry-run payload prepared: {prefix}",
+                        metrics={"files": len(files)},
+                        metadata={"repo_path": prefix},
+                    )
                 return
             self._upload(files, commit_message, metadata, context, timestamp)
+            if plugin_logger:
+                plugin_logger.log_event(
+                    "sink_write",
+                    message=f"Repo write completed: {prefix}",
+                    metrics={"files": len(files)},
+                    metadata={"repo_path": prefix},
+                )
         except Exception as exc:
             if self.on_error == "skip":
                 logger.warning("Repository sink failed; skipping upload: %s", exc)
+                plugin_logger = getattr(self, "plugin_logger", None)
+                if plugin_logger:
+                    plugin_logger.log_error(exc, context="repo sink write", recoverable=True)
                 return
             raise
 

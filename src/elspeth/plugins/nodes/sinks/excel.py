@@ -63,6 +63,7 @@ class ExcelResultSink(ResultSink):
         sanitize_formulas: bool = True,
         sanitize_guard: str = "'",
         config: ExcelSinkConfig | None = None,
+        allowed_base_path: str | Path | None = None,
     ) -> None:
         """Initialize Excel sink.
 
@@ -113,7 +114,9 @@ class ExcelResultSink(ResultSink):
         }
         # Allowed base directory for writes; default to ./outputs
         try:
-            self._allowed_base = Path("outputs").resolve()
+            self._allowed_base = (
+                Path(allowed_base_path).resolve() if allowed_base_path is not None else Path("outputs").resolve()
+            )
         except Exception:  # pragma: no cover - defensive
             self._allowed_base = Path.cwd().resolve()
 

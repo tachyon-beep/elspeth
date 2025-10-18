@@ -245,9 +245,25 @@ class TestPathTraversalPrevention:
 
         # Implementation should validate against allowed base paths
 
-    def test_symlink_attack_prevented(self):
-        """Test that symlink attacks are prevented."""
-        pytest.skip("Symlink containment hardening not yet implemented; tracking in SECURITY backlog")
+    def test_symlink_attack_prevented(self, tmp_path: Path):
+        """Test that symlink attacks are prevented for local sinks."""
+        base = tmp_path / "outputs"
+        base.mkdir()
+        real = base / "real.csv"
+        real.write_text("a,b\n1,x\n", encoding="utf-8")
+        link = base / "link.csv"
+        try:
+            os.symlink(real, link)
+        except (OSError, NotImplementedError):
+            pytest.skip("Symlinks not supported by platform/user")
+
+        from elspeth.plugins.nodes.sinks.csv_file import CsvResultSink
+
+        sink = CsvResultSink(path=str(link), overwrite=True)
+        # Narrow allowed base to tmp outputs to avoid touching repo outputs
+        sink._allowed_base = base.resolve()  # type: ignore[attr-defined]
+        with pytest.raises(ValueError):
+            sink.write({"results": []}, metadata={"experiment": "e"})
 
 
 class TestMalformedConfiguration:
@@ -370,9 +386,9 @@ class TestConcurrentAccess:
 
         results = []
 
-        def write_data(sink_path, data_id):
+        def write_data(sink_path, base_dir, data_id):
             try:
-                sink = CsvResultSink(path=sink_path, sanitize_formulas=True)
+                sink = CsvResultSink(path=sink_path, sanitize_formulas=True, allowed_base_path=base_dir)
                 sink.write(
                     {
                         "results": [{"id": data_id, "data": f"thread_{data_id}"}],
@@ -383,15 +399,16 @@ class TestConcurrentAccess:
             except Exception:
                 results.append(False)
 
-        # Create temp file
-        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".csv") as tmp:
+        # Create temp directory and file within it
+        base_dir = tempfile.mkdtemp()
+        with tempfile.NamedTemporaryFile(mode="w", delete=False, suffix=".csv", dir=base_dir) as tmp:
             tmp_path = tmp.name
 
         try:
             # Launch 5 concurrent writes
             threads = []
             for i in range(5):
-                t = threading.Thread(target=write_data, args=(tmp_path, i))
+                t = threading.Thread(target=write_data, args=(tmp_path, base_dir, i))
                 threads.append(t)
                 t.start()
 

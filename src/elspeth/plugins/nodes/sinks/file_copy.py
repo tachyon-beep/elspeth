@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Mapping
 
 from elspeth.core.base.protocols import Artifact, ResultSink
+from elspeth.core.utils.path_guard import resolve_under_base, safe_atomic_write
 from elspeth.core.security import normalize_determinism_level, normalize_security_level
 
 logger = logging.getLogger(__name__)
@@ -63,9 +64,28 @@ class FileCopySink(ResultSink):
         if self.destination.exists() and not self.overwrite:
             raise FileExistsError(f"Destination exists: {self.destination}")
 
-        self.destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(src_path, self.destination)
-        self._written_path = self.destination
+        # Resolve destination under default outputs/ base; orchestrator can override via context-wrapped sink in future
+        target = resolve_under_base(self.destination, Path("outputs").resolve())
+        plugin_logger = getattr(self, "plugin_logger", None)
+        if plugin_logger:
+            plugin_logger.log_event(
+                "sink_write_attempt",
+                message=f"File copy attempt: {src_path} -> {target}",
+                metadata={"source": str(src_path), "dest": str(target)},
+            )
+        safe_atomic_write(target, lambda tmp: shutil.copyfile(src_path, tmp))
+        self._written_path = target
+        if plugin_logger:
+            try:
+                size = target.stat().st_size
+            except Exception:
+                size = 0
+            plugin_logger.log_event(
+                "sink_write",
+                message=f"File copied to {target}",
+                metrics={"bytes": size},
+                metadata={"source": str(src_path), "dest": str(target)},
+            )
         if metadata and metadata.get("security_level"):
             self._security_level = normalize_security_level(metadata.get("security_level"))
             self._determinism_level = normalize_determinism_level(metadata.get("determinism_level"))
