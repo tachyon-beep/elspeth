@@ -11,10 +11,14 @@
   - Next: ensure Makefile/docs consistently reference lockfile sync in all paths
   - Ref: `README.md`, `.github/workflows/ci.yml`
 
-- Add Bandit to CI — COMPLETED (baseline mode)
-  - Implemented: Added Bandit with SARIF upload; currently not failing builds (|| true)
-  - Next: flip to fail on HIGH after baseline review
+- Add Bandit to CI — COMPLETED (fail-on-HIGH)
+  - Implemented: Bandit enforced in CI with `--severity-level high --confidence-level high`; SARIF uploaded
   - Ref: `.github/workflows/ci.yml`
+
+- Remove runtime asserts in production code — COMPLETED
+  - Change: Replaced `assert` with explicit guards and exceptions in core registries, runner, suite runner, repository sinks, and reproducibility bundle sink.
+  - Impact: Avoids B101 and ensures checks are effective under optimized bytecode.
+  - Ref: `src/elspeth/core/registries/middleware.py`, `src/elspeth/core/experiments/plugin_registry.py`, `src/elspeth/core/experiments/runner.py`, `src/elspeth/core/experiments/suite_runner.py`, `src/elspeth/plugins/nodes/sinks/repository.py`, `src/elspeth/plugins/nodes/sinks/reproducibility_bundle.py`, `src/elspeth/plugins/experiments/row/score_extractor.py`
 
 - Clarify repository sink dry_run semantics
   - Change: Require explicit `dry_run` in production configs or warn when `True` and not in explicit smoke test
@@ -22,9 +26,9 @@
 
 ## Deep Work (weeks)
 
-- Elevate coverage to ≥85% overall; ≥80% in hotspots — IN PROGRESS (83% overall)
-  - Completed: Added tests for enums/types; schema inference/model factory; path safety; LLM registry conflicts/unapproved endpoints; blob datasource; visual/excel/csv/zip sinks (skip/sanitize/containment); Azure middleware (env + Content Safety) including retry‑exhausted and mask/abort; reporting helpers/viz skip.
-  - Next: Expand analytics/visual sinks HTML/table branches; additional middleware branches; comprehensive reporting generate_all_reports paths.
+- Maintain ≥85% overall coverage; expand targeted branch coverage — COMPLETED (threshold), CONTINUE (branches)
+  - Completed: Coverage now 86.8% lines (71.7% branches). Tests added for enums/types; schema inference/model factory; path safety; LLM registry conflicts/unapproved endpoints; blob datasource; visual/excel/csv/zip sinks (skip/sanitize/containment); Azure middleware (env + Content Safety) including retry‑exhausted and mask/abort; reporting helpers/viz skip.
+  - Next: Exercise remaining branches in visual sinks (HTML/table metadata, seaborn fallbacks) and Azure middleware logging/table fallbacks; broaden generate_all_reports cases.
   - Ref: `tests/core/`, `tests/plugins/`, `tests/middleware/`, `tests/tools/`
 
 - Gradual mypy strictness uplift
@@ -52,7 +56,4 @@
 
 ## Conditions for Acceptance (Summary)
 
-1) Add endpoint validation in HttpOpenAIClient constructor.
-2) Enforce locked installs in all documented workflows.
-3) Raise coverage to ≥85% overall (≥80% in hotspots).
-4) Add Bandit (and optionally Semgrep) to CI; fail on HIGH.
+1) Add Bandit (and optionally Semgrep) to CI; fail on HIGH.

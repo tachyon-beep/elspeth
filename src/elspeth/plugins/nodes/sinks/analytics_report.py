@@ -77,7 +77,7 @@ class AnalyticsReportSink(ResultSink):
                 for p in written:
                     try:
                         total_bytes += p.stat().st_size
-                    except Exception:
+                    except Exception:  # nosec B110 - tolerate stat() errors to avoid blocking artifact write
                         pass
                 plugin_logger.log_event(
                     "sink_write",

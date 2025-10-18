@@ -71,7 +71,7 @@ class SignedArtifactSink(ResultSink):
                 for p in (results_path, signature_path, manifest_path):
                     try:
                         total_bytes += p.stat().st_size
-                    except Exception:
+                    except Exception:  # nosec B110 - tolerate stat() errors; do not block artifact write
                         pass
                 plugin_logger.log_event(
                     "sink_write",

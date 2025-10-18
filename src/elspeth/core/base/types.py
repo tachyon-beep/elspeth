@@ -24,7 +24,7 @@ class SecurityLevel(str, Enum):
     OFFICIAL_SENSITIVE = "OFFICIAL: SENSITIVE"
     PROTECTED = "PROTECTED"
     # This is a classification level, not a password
-    SECRET = "SECRET"  # noqa: S105
+    SECRET = "SECRET"  # noqa: S105  # nosec B105: classification level label, not a password/secret
 
     def __lt__(self, other):
         """Support comparison for hierarchy enforcement."""

@@ -52,7 +52,8 @@ jobs:
       - name: Security static analysis (bandit)
         run: |
           python -m pip install bandit
-          bandit -q -r src -f sarif -o bandit.sarif || true
+          # Fail build on HIGH severity and HIGH confidence findings
+          bandit -q -r src --severity-level high --confidence-level high -f sarif -o bandit.sarif
       - name: Upload bandit report
         if: always()
         uses: actions/upload-artifact@v4

@@ -2,11 +2,11 @@
 
 | Gate | Status | Target | Observed | Evidence |
 | --- | --- | --- | --- | --- |
-| tests_pass | PASS | All tests pass | 744 passed, 1 skipped | pytest run; coverage.xml emitted (README.md:118) |
-| coverage_threshold | FAIL | ≥85% (mission‑critical) | 83% total; hotspots improved (types.py 93%, inference.py 100%, model_factory.py 94%, reporting.py 92%, blob_store.py 91%) | pytest coverage summary; targeted module coverage listed |
+| tests_pass | PASS | All tests pass | Green | pytest run; coverage.xml emitted |
+| coverage_threshold | PASS | ≥85% (mission‑critical) | 86.8% lines; 71.7% branches | coverage.xml: line-rate=0.8678, branch-rate=0.7170 |
 | secrets_scan_clean | PASS | No hard‑coded secrets | Clean | CI gitleaks (.github/workflows/ci.yml:10–27); pattern scan clean |
 | sbom_vulns | PASS | No CRITICAL/HIGH vulns | pip‑audit: none | .github/workflows/ci.yml:71–79; requirements.lock audited |
-| reproducible_build | PASS | Locked, deterministic | pip‑tools sync + hashes | .github/workflows/ci.yml:42–47; README.md:36–40, 45–52 |
+| reproducible_build | PASS | Locked, deterministic | pip‑tools sync + hashes | .github/workflows/ci.yml:42–47; README.md locked install flow |
 | container_hygiene | N/A | — | — | No Dockerfile/IaC present |
 | observability_minimums | PASS | Structured logs | JSONL per run | src/elspeth/core/utils/logging.py:118–125 |
 

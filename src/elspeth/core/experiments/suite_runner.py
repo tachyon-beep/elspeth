@@ -201,8 +201,10 @@ class ExperimentSuiteRunner:
             )
 
         # After validation, we know these are not None (ConfigurationError would have been raised)
-        assert prompt_system is not None, "prompt_system validated as non-empty above"
-        assert prompt_template is not None, "prompt_template validated as non-empty above"
+        if prompt_system is None:  # pragma: no cover - defensive, should be unreachable
+            raise RuntimeError("prompt_system was None after validation")
+        if prompt_template is None:  # pragma: no cover - defensive, should be unreachable
+            raise RuntimeError("prompt_template was None after validation")
 
         runner_instance = ExperimentRunner(
             llm_client=self.llm_client,

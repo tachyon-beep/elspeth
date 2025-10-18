@@ -136,7 +136,8 @@ class ScoreExtractorPlugin:
         return None
 
     def _compare_threshold(self, value: float) -> bool:
-        assert self._threshold is not None, "threshold must not be None"
+        if self._threshold is None:  # pragma: no cover - defensive
+            raise RuntimeError("threshold must not be None")
         mode = self._threshold_mode
         threshold = float(self._threshold)
         if mode == "gt":

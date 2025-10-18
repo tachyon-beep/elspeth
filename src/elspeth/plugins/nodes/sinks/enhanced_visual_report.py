@@ -120,7 +120,7 @@ class EnhancedVisualAnalyticsSink(BaseVisualSink):
                 for _, path, _ in written:
                     try:
                         total_bytes += path.stat().st_size
-                    except Exception:
+                    except Exception:  # nosec B110 - tolerate stat() errors; do not block artifact write
                         pass
                 plugin_logger.log_event(
                     "sink_write",

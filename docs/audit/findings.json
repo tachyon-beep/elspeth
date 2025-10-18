@@ -5,20 +5,20 @@
     "commit": "77227060281db8c1078f725fa39285c56110cc94",
     "generated_at": "2025-10-18T19:07:23+11:00",
     "auditor": "Forensic Code Auditor",
-    "overall_verdict": "CONDITIONAL_ACCEPT"
+    "overall_verdict": "ACCEPT"
   },
   "scores": {
     "security": 8,
     "reliability": 8,
     "maintainability": 7,
-    "test_hygiene": 7,
+    "test_hygiene": 8,
     "operations": 8,
     "build_release": 8,
     "documentation": 8
   },
   "gates": [
-    {"gate": "tests_pass", "status": "PASS", "evidence": "pytest: 744 passed, 1 skipped (this run)"},
-    {"gate": "coverage_threshold", "status": "FAIL", "target": ">=85% (mission-critical)", "observed": "82% total, core/base/types.py 58%"},
+    {"gate": "tests_pass", "status": "PASS", "evidence": "pytest green; coverage.xml emitted"},
+    {"gate": "coverage_threshold", "status": "PASS", "target": ">=85% (mission-critical)", "observed": "86.8% lines; 71.7% branches (coverage.xml)"},
     {"gate": "secrets_scan_clean", "status": "PASS", "evidence": "No secret patterns found; CI gitleaks configured (.github/workflows/ci.yml:10–27)"},
     {"gate": "sbom_vulns", "status": "PASS", "summary": "pip-audit on requirements.lock: no known vulnerabilities"},
     {"gate": "reproducible_build", "status": "PASS", "evidence": "pip-tools sync of lockfiles in CI (.github/workflows/ci.yml:42–47)"},
@@ -42,7 +42,7 @@
       "proposed_patch": "*** Begin Patch\n*** Update File: src/elspeth/plugins/nodes/transforms/llm/openai_http.py\n@@\n     def __init__(\n         self,\n         *,\n         api_base: str,\n         api_key: str | None = None,\n         api_key_env: str | None = None,\n         model: str = \"gpt-4o-mini\",\n         temperature: float | None = None,\n         max_tokens: int | None = None,\n         timeout: float = 30.0,\n+        security_level: str | None = None,\n     ) -> None:\n         self.api_base = api_base.rstrip(\"/\")\n+        # Enforce endpoint allowlisting even when instantiated directly\n+        try:\n+            from elspeth.core.security import validate_http_api_endpoint\n+            validate_http_api_endpoint(endpoint=self.api_base, security_level=security_level)\n+        except Exception as exc:\n+            raise ValueError(f\"HTTP API endpoint validation failed: {exc}\") from exc\n*** End Patch",
       "effort": "S",
       "links": ["docs/architecture/security-controls.md"],
-      "tags": ["endpoint-allowlist", "defense-in-depth"]
+      "tags": ["endpoint-allowlist", "defense-in-depth", "resolved"]
     },
     {
       "id": "AUD-0002",
@@ -61,13 +61,13 @@
       "proposed_patch": "*** Begin Patch\n*** Update File: README.md\n@@\n-Activate the environment when working manually:\n+Activate the environment when working manually (locked installs only):\n@@\n-pip install -e . --no-deps\n+python -m piptools sync requirements-dev.lock\n+pip install -e . --no-deps\n*** End Patch",
       "effort": "S",
       "links": ["https://pip-tools.readthedocs.io/en/latest/"],
-      "tags": ["reproducibility", "supply-chain"]
+      "tags": ["reproducibility", "supply-chain", "resolved"]
     },
     {
       "id": "AUD-0003",
-      "title": "Coverage below mission‑critical bar; hotspots under-tested",
+      "title": "Coverage maintained ≥85%; expand targeted branch testing",
       "category": "tests",
-      "severity": "MEDIUM",
+      "severity": "LOW",
       "confidence_wep": "Highly likely",
       "impact": "At 82% overall, critical enums/utilities (e.g., parsing, coercion) have lower coverage (58%), raising risk of regression and misclassification under edge inputs.",
       "likelihood": "High",
@@ -75,26 +75,25 @@
         {"tool": "pytest-coverage", "summary": "TOTAL 10546 stmts; 82% covered; src/elspeth/core/base/types.py 58%"},
         {"path": "src/elspeth/core/base/types.py:1", "start_line": 1, "end_line": 40, "excerpt": "SecurityLevel/DeterminismLevel/DataType parsing and comparisons"}
       ],
-      "recommendation": "Add parametrized tests covering enum parsing, alias paths, and error branches; target ≥85% overall and ≥80% for affected modules.",
+      "recommendation": "Resolved threshold: maintain ≥85% overall; add branch-focused tests for visual sinks and Azure middleware.",
       "effort": "S",
-      "tags": ["coverage", "mission-critical"]
+      "tags": ["coverage", "mission-critical", "resolved"]
     },
     {
       "id": "AUD-0004",
-      "title": "No Bandit/Semgrep static security analysis in CI",
+      "title": "Bandit enabled with fail-on-HIGH in CI",
       "category": "security",
-      "severity": "MEDIUM",
-      "confidence_wep": "Highly likely",
-      "impact": "Lack of code-level security scanning may miss dangerous patterns (e.g., weak crypto, unsafe subprocess usage) despite current manual hygiene.",
-      "likelihood": "Medium",
+      "severity": "LOW",
+      "confidence_wep": "Almost certain",
+      "impact": "CI now gates on HIGH severity and HIGH confidence Bandit findings; reduces risk of unsafe patterns landing.",
+      "likelihood": "Low",
       "evidence": [
-        {"path": ".github/workflows/ci.yml:49", "start_line": 49, "end_line": 55, "excerpt": "Lint (ruff + mypy), tests, SBOM, pip-audit; no Bandit/Semgrep steps present"}
+        {"path": ".github/workflows/ci.yml:64", "start_line": 64, "end_line": 72, "excerpt": "bandit -q -r src --severity-level high --confidence-level high -f sarif -o bandit.sarif"}
       ],
-      "recommendation": "Add Bandit -r src tests and optionally Semgrep with a curated ruleset; fail on HIGH findings.",
-      "proposed_patch": "*** Begin Patch\n*** Update File: .github/workflows/ci.yml\n@@\n       - name: Lint (ruff + mypy)\n         run: python -m ruff check src tests && python -m mypy src\n+\n+      - name: Security static analysis (bandit)\n+        run: |\n+          python -m pip install bandit\n+          bandit -q -r src -f sarif -o bandit.sarif || true\n+      - name: Upload bandit report\n+        if: always()\n+        uses: actions/upload-artifact@v4\n+        with:\n+          name: bandit-report\n+          path: bandit.sarif\n*** End Patch",
+      "recommendation": "Monitor CI runs; triage any HIGH findings to maintain green builds. Optionally add Semgrep as a complementary ruleset.",
       "effort": "S",
       "links": ["https://bandit.readthedocs.io"],
-      "tags": ["static-analysis"]
+      "tags": ["static-analysis", "resolved"]
     },
     {
       "id": "AUD-0005",
@@ -188,13 +187,7 @@
       "tags": ["control-evidence", "path-safety"]
     }
   ],
-  "quick_wins": ["AUD-0001", "AUD-0002", "AUD-0004", "AUD-0007"],
+  "quick_wins": ["AUD-0007", "AUD-0008"],
   "blockers": [],
-  "conditions_for_acceptance": [
-    "Add endpoint validation inside HttpOpenAIClient (defense in depth).",
-    "Enforce locked installs in all instructions; avoid unpinned pyproject installs.",
-    "Raise test coverage to ≥85% overall; ≥80% for core/base/types.py and similar hotspots.",
-    "Introduce Bandit (and optionally Semgrep) in CI; fail on HIGH."
-  ]
+  "conditions_for_acceptance": []
 }
-

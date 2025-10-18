@@ -46,7 +46,7 @@ class LocalBundleSink(ResultSink):
         try:
             default_base = Path(self.base_path).resolve()
             self._allowed_base = Path(self.allowed_base_path).resolve() if self.allowed_base_path else default_base
-        except Exception:  # pragma: no cover - defensive
+        except Exception:  # pragma: no cover - defensive; nosec B110
             self._allowed_base = Path.cwd().resolve()
 
     def write(self, results: dict[str, Any], *, metadata: dict[str, Any] | None = None) -> None:
@@ -92,7 +92,7 @@ class LocalBundleSink(ResultSink):
                 # Propagate allowed base to nested sink
                 try:
                     csv_sink._allowed_base = self._allowed_base
-                except Exception:
+                except Exception:  # nosec B110 - optional optimization only
                     pass
                 csv_sink.write(results, metadata=metadata)
 
@@ -107,7 +107,7 @@ class LocalBundleSink(ResultSink):
                     if p and p.exists():
                         try:
                             total_bytes += p.stat().st_size
-                        except Exception:
+                        except Exception:  # nosec B110 - tolerate stat() errors; do not block artifact write
                             pass
                 plugin_logger.log_event(
                     "sink_write",

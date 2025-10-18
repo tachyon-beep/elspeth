@@ -647,7 +647,8 @@ class ExperimentRunner:
                 if backoff and backoff > 0:
                     delay = delay * backoff if delay else backoff
 
-        assert last_error is not None
+        if last_error is None:  # pragma: no cover - defensive, should be unreachable
+            raise RuntimeError("Retry loop terminated without capturing an error")
         if last_request is not None:
             setattr(last_error, "_elspeth_retry_history", attempt_history)
             setattr(last_error, "_elspeth_retry_attempts", attempt)

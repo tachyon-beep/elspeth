@@ -124,14 +124,16 @@ class ReproducibilityBundleSink(ResultSink):
 
             # Generate manifest with file hashes
             manifest = self._build_manifest(results, metadata, timestamp)
-            assert self._temp_dir is not None
+            if self._temp_dir is None:  # pragma: no cover - defensive
+                raise RuntimeError("temporary directory not initialized")
             manifest_path = self._temp_dir / self.manifest_name
             manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
             self._file_hashes[self.manifest_name] = self._hash_file(manifest_path)
 
             # Sign the manifest
             signature_data = self._sign_manifest(manifest, timestamp)
-            assert self._temp_dir is not None
+            if self._temp_dir is None:  # pragma: no cover - defensive
+                raise RuntimeError("temporary directory not initialized")
             signature_path = self._temp_dir / self.signature_name
             signature_path.write_text(json.dumps(signature_data, indent=2, sort_keys=True), encoding="utf-8")
 
@@ -169,7 +171,8 @@ class ReproducibilityBundleSink(ResultSink):
 
     def _write_results_json(self, results: dict[str, Any]) -> None:
         """Write results as JSON with sorted keys."""
-        assert self._temp_dir is not None
+        if self._temp_dir is None:  # pragma: no cover - defensive
+            raise RuntimeError("temporary directory not initialized")
         path = self._temp_dir / self.results_json_name
         # Use custom encoder to handle non-serializable objects
         content = json.dumps(results, indent=2, sort_keys=True, default=self._json_serializer)
@@ -179,7 +182,8 @@ class ReproducibilityBundleSink(ResultSink):
 
     def _write_results_csv(self, results: dict[str, Any], metadata: dict[str, Any]) -> None:
         """Write results as sanitized CSV."""
-        assert self._temp_dir is not None
+        if self._temp_dir is None:  # pragma: no cover - defensive
+            raise RuntimeError("temporary directory not initialized")
         path = self._temp_dir / self.results_csv_name
         csv_sink = CsvResultSink(
             path=str(path),
@@ -208,7 +212,8 @@ class ReproducibilityBundleSink(ResultSink):
 
         if retained_path and Path(retained_path).exists():
             # Copy the retained local file
-            assert self._temp_dir is not None
+            if self._temp_dir is None:  # pragma: no cover - defensive
+                raise RuntimeError("temporary directory not initialized")
             dest_path = self._temp_dir / self.source_data_name
             shutil.copy2(retained_path, dest_path)
             self._file_hashes[self.source_data_name] = self._hash_file(dest_path)
@@ -219,7 +224,8 @@ class ReproducibilityBundleSink(ResultSink):
             import pandas as pd
 
             if isinstance(source_data, pd.DataFrame):
-                assert self._temp_dir is not None
+                if self._temp_dir is None:  # pragma: no cover - defensive
+                    raise RuntimeError("temporary directory not initialized")
                 path = self._temp_dir / self.source_data_name
                 source_data.to_csv(path, index=False)
                 self._file_hashes[self.source_data_name] = self._hash_file(path)
@@ -228,7 +234,8 @@ class ReproducibilityBundleSink(ResultSink):
 
         if datasource_config:
             # Always save datasource config for reference
-            assert self._temp_dir is not None
+            if self._temp_dir is None:  # pragma: no cover - defensive
+                raise RuntimeError("temporary directory not initialized")
             config_path = self._temp_dir / "datasource_config.json"
             config_path.write_text(json.dumps(datasource_config, indent=2, sort_keys=True), encoding="utf-8")
             self._file_hashes["datasource_config.json"] = self._hash_file(config_path)
@@ -242,7 +249,8 @@ class ReproducibilityBundleSink(ResultSink):
         config = metadata.get("config") or metadata.get("experiment_config")
 
         if config:
-            assert self._temp_dir is not None
+            if self._temp_dir is None:  # pragma: no cover - defensive
+                raise RuntimeError("temporary directory not initialized")
             path = self._temp_dir / self.config_name
             if isinstance(config, dict):
                 # Convert dict to YAML
@@ -285,7 +293,8 @@ class ReproducibilityBundleSink(ResultSink):
             )
 
         if prompts:
-            assert self._temp_dir is not None
+            if self._temp_dir is None:  # pragma: no cover - defensive
+                raise RuntimeError("temporary directory not initialized")
             path = self._temp_dir / self.prompts_name
             path.write_text(json.dumps(prompts, indent=2, sort_keys=True), encoding="utf-8")
             self._file_hashes[self.prompts_name] = self._hash_file(path)
@@ -295,7 +304,8 @@ class ReproducibilityBundleSink(ResultSink):
 
     def _write_plugins(self, metadata: dict[str, Any]) -> None:
         """Copy source code of all plugins used in this experiment."""
-        assert self._temp_dir is not None
+        if self._temp_dir is None:  # pragma: no cover - defensive
+            raise RuntimeError("temporary directory not initialized")
         plugins_dir = self._temp_dir / "plugins"
         plugins_dir.mkdir(exist_ok=True)
 
@@ -389,7 +399,8 @@ class ReproducibilityBundleSink(ResultSink):
             return
 
         # Create tarball of framework code
-        assert self._temp_dir is not None
+        if self._temp_dir is None:  # pragma: no cover - defensive
+            raise RuntimeError("temporary directory not initialized")
         framework_tar = self._temp_dir / "framework_source.tar.gz"
         with tarfile.open(framework_tar, "w:gz") as tar:
             tar.add(framework_dir, arcname="elspeth", filter=self._filter_framework_files)
@@ -412,7 +423,8 @@ class ReproducibilityBundleSink(ResultSink):
         if not self._consumed_artifacts:
             return
 
-        assert self._temp_dir is not None
+        if self._temp_dir is None:  # pragma: no cover - defensive
+            raise RuntimeError("temporary directory not initialized")
         artifacts_dir = self._temp_dir / "artifacts"
         artifacts_dir.mkdir(exist_ok=True)
 
@@ -426,7 +438,8 @@ class ReproducibilityBundleSink(ResultSink):
                     rel_path = f"artifacts/{dest_path.name}"
                     self._file_hashes[rel_path] = self._hash_file(dest_path)
                 elif artifact.payload:
-                    assert self._temp_dir is not None
+                    if self._temp_dir is None:  # pragma: no cover - defensive
+                        raise RuntimeError("temporary directory not initialized")
                     dest_path = artifacts_dir / f"{filename}.json"
                     dest_path.write_text(json.dumps(artifact.payload, indent=2, sort_keys=True), encoding="utf-8")
                     rel_path = f"artifacts/{dest_path.name}"
@@ -500,7 +513,8 @@ class ReproducibilityBundleSink(ResultSink):
 
     def _create_archive(self, metadata: dict[str, Any], timestamp: datetime) -> Path:
         """Create final compressed tarball."""
-        assert self._temp_dir is not None
+        if self._temp_dir is None:  # pragma: no cover - defensive
+            raise RuntimeError("temporary directory not initialized")
         name = self.bundle_name or str(metadata.get("experiment") or metadata.get("name") or "experiment")
         if self.timestamped:
             name = f"{name}_{timestamp.strftime('%Y%m%dT%H%M%SZ')}"

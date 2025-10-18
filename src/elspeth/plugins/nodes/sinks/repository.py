@@ -255,7 +255,8 @@ class GitHubRepoSink(_RepoSinkBase):
 
     def _request(self, method: str, url: str, expected_status: set[int] | None = None, **kwargs: Any):
         expected_status = expected_status or {200, 201}
-        assert self.session is not None, "session must be initialized"
+        if self.session is None:  # pragma: no cover - defensive
+            raise RuntimeError("session must be initialized")
         timeout = kwargs.pop("timeout", self.request_timeout)
         response = self.session.request(method, url, headers=self._headers(), timeout=timeout, **kwargs)
         if response.status_code not in expected_status:
@@ -369,7 +370,8 @@ class AzureDevOpsRepoSink(_RepoSinkBase):
 
     def _request(self, method: str, url: str, expected_status: set[int] | None = None, **kwargs: Any):
         expected_status = expected_status or {200, 201}
-        assert self.session is not None, "session must be initialized"
+        if self.session is None:  # pragma: no cover - defensive
+            raise RuntimeError("session must be initialized")
         timeout = kwargs.pop("timeout", self.request_timeout)
         response = self.session.request(method, url, headers=self._headers(), timeout=timeout, **kwargs)
         if response.status_code not in expected_status:
