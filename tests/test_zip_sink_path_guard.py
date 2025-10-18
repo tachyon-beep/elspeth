@@ -34,7 +34,6 @@ def test_zip_sink_rejects_escape_outside_base(tmp_path: Path) -> None:
     base.mkdir()
     allowed = tmp_path / "outputs"
     allowed.mkdir()
-    sink = ZipResultSink(base_path=base, bundle_name="bundle", timestamped=False)
-    # No direct hook to override allowed base like CSV; rely on default 'outputs' enforced in resolver
+    sink = ZipResultSink(base_path=base, bundle_name="bundle", timestamped=False, allowed_base_path=str(allowed))
     with pytest.raises(ValueError):
         sink.write(_results(), metadata={"experiment": "e"})

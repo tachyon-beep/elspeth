@@ -240,6 +240,7 @@ class TestSinkValidation:
             "path": "output.csv",
             "security_level": "OFFICIAL",
             "sanitize_formulas": True,
+            "allowed_base_path": "outputs",
         }
 
         assert validate_sink_config(config, mode=SecureMode.STRICT) is None
@@ -250,6 +251,7 @@ class TestSinkValidation:
             "type": "csv",
             "path": "output.csv",
             "security_level": "OFFICIAL",
+            "allowed_base_path": "outputs",
             # sanitize_formulas not specified, defaults to True
         }
 

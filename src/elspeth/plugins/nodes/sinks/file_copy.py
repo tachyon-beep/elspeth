@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 
 class FileCopySink(ResultSink):
-    def __init__(self, *, destination: str, overwrite: bool = True, on_error: str = "abort") -> None:
+    def __init__(self, *, destination: str, overwrite: bool = True, on_error: str = "abort", allowed_base_path: str | None = None) -> None:
         self.destination = Path(destination)
         self.overwrite = overwrite
         if on_error not in {"abort", "skip"}:
@@ -26,6 +26,14 @@ class FileCopySink(ResultSink):
         self._output_type: str | None = None
         self._security_level: str | None = None
         self._determinism_level: str | None = None
+        # Configure allowed base path for containment checks
+        try:
+            default_base = self.destination.parent.resolve()
+            self._allowed_base = (
+                Path(allowed_base_path).resolve() if allowed_base_path is not None else default_base
+            )
+        except Exception:  # pragma: no cover - defensive
+            self._allowed_base = self.destination.parent.resolve()
 
     def prepare_artifacts(self, artifacts: Mapping[str, list[Artifact]]):  # pragma: no cover - optional
         self._source_artifact = None
@@ -64,8 +72,9 @@ class FileCopySink(ResultSink):
         if self.destination.exists() and not self.overwrite:
             raise FileExistsError(f"Destination exists: {self.destination}")
 
-        # Resolve destination under default outputs/ base; orchestrator can override via context-wrapped sink in future
-        target = resolve_under_base(self.destination, Path("outputs").resolve())
+        # Resolve destination under allowed base (default to destination parent)
+        default_base = self.destination.parent.resolve()
+        target = resolve_under_base(self.destination, Path(allowed_base if (allowed_base := getattr(self, "_allowed_base", None)) else default_base))
         plugin_logger = getattr(self, "plugin_logger", None)
         if plugin_logger:
             plugin_logger.log_event(

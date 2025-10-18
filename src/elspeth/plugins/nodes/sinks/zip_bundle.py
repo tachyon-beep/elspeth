@@ -71,8 +71,9 @@ class ZipResultSink(ResultSink):
         self._determinism_level: str | None = None
         # Allowed base directory for writes; default to ./outputs
         try:
+            default_base = Path(base_path).resolve()
             self._allowed_base = (
-                Path(allowed_base_path).resolve() if allowed_base_path is not None else Path("outputs").resolve()
+                Path(allowed_base_path).resolve() if allowed_base_path is not None else default_base
             )
         except Exception:  # pragma: no cover - defensive
             self._allowed_base = Path.cwd().resolve()

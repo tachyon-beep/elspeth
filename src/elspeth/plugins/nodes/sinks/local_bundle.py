@@ -44,8 +44,9 @@ class LocalBundleSink(ResultSink):
             logger.warning("Local bundle CSV sanitization disabled; outputs may trigger spreadsheet formulas.")
         # Allowed base directory for writes; default to ./outputs
         try:
+            default_base = Path(self.base_path).resolve()
             self._allowed_base = (
-                Path(self.allowed_base_path).resolve() if self.allowed_base_path else Path("outputs").resolve()
+                Path(self.allowed_base_path).resolve() if self.allowed_base_path else default_base
             )
         except Exception:  # pragma: no cover - defensive
             self._allowed_base = Path.cwd().resolve()

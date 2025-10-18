@@ -307,6 +307,7 @@ _FILE_COPY_SINK_SCHEMA = _sink_schema(
     {
         "destination": {"type": "string"},
         "overwrite": {"type": "boolean"},
+        "allowed_base_path": {"type": "string"},
     },
     ["destination"],
 )
