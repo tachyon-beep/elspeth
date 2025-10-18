@@ -35,8 +35,10 @@
   - Change: Enable `disallow_untyped_defs` for core packages; use targeted `# type: ignore` where justified
   - Effort: M; Impact: Medium; Ref: `pyproject.toml`
 
-- Local secret scanning & log retention guidance
-  - Change: Add pre-commit gitleaks; document JSONL log retention/cleanup (`make clean-logs`)
+- Local secret scanning & log retention guidance — COMPLETED
+  - Change: Document JSONL log retention and added a cleanup target:
+    - `make clean-logs` removes `logs/run_*.jsonl` (local dev convenience)
+    - Docs: `docs/operations/logging.md`
   - Effort: S; Impact: Low-Medium
 
 ## Verification

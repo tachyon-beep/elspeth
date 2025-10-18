@@ -127,18 +127,19 @@
     },
     {
       "id": "AUD-0007",
-      "title": "Repository sink defaults to dry_run=True",
+      "title": "Repository sink dry_run gated via CLI and warnings",
       "category": "operations",
-      "severity": "MEDIUM",
-      "confidence_wep": "Likely",
-      "impact": "In production, forgetting to disable dry_run could lead to missing artifacts in target repos without clear failure, causing audit gaps.",
-      "likelihood": "Medium",
+      "severity": "LOW",
+      "confidence_wep": "Almost certain",
+      "impact": "Accidental no-op writes are now mitigated: dry_run is explicitly set from the CLI flag --live-outputs and the sink warns when dry_run=True.",
+      "likelihood": "Low",
       "evidence": [
-        {"path": "src/elspeth/plugins/nodes/sinks/repository.py:39", "start_line": 39, "end_line": 49, "excerpt": "dry_run: bool = True ... if self.dry_run: payload['dry_run']=True; return"}
+        {"path": "src/elspeth/plugins/nodes/sinks/repository.py:47", "start_line": 47, "end_line": 66, "excerpt": "dry_run: bool = True ... logger.warning(\"Repository sink running in dry-run mode; no remote writes will occur.\")"},
+        {"path": "src/elspeth/cli.py:507", "start_line": 507, "end_line": 524, "excerpt": "_configure_sink_dry_run(...); options['dry_run'] = not enable_live"}
       ],
-      "recommendation": "Require explicit dry_run in configuration (no implicit True); or gate on CLI flag '--live-outputs' with a runtime warning when dry_run=True.",
+      "recommendation": "Document the --live-outputs flag (done) and keep the runtime warning in place to prevent silent no-ops.",
       "effort": "S",
-      "tags": ["config-safety", "auditability"]
+      "tags": ["config-safety", "auditability", "resolved"]
     },
     {
       "id": "AUD-0008",
@@ -157,18 +158,20 @@
     },
     {
       "id": "AUD-0009",
-      "title": "Observability relies on file-based JSON with no retention policy",
+      "title": "Observability retention documented with cleanup target",
       "category": "operations",
       "severity": "LOW",
-      "confidence_wep": "Likely",
-      "impact": "Long-running use could accumulate logs without rotation; not critical for short-lived CLI runs but relevant in CI/automations.",
+      "confidence_wep": "Almost certain",
+      "impact": "Retention and cleanup guidance reduces log bloat risks for long-running or repeated local runs.",
       "likelihood": "Low",
       "evidence": [
-        {"path": "src/elspeth/core/utils/logging.py:118", "start_line": 118, "end_line": 125, "excerpt": "self.log_file = self.log_dir / f\"run_{self.run_id}.jsonl\"; writes append"}
+        {"path": "src/elspeth/core/utils/logging.py:118", "start_line": 118, "end_line": 125, "excerpt": "self.log_file = self.log_dir / f\"run_{self.run_id}.jsonl\""},
+        {"path": "Makefile:1", "start_line": 1, "end_line": 40, "excerpt": "clean-logs: rm -f logs/run_*.jsonl"},
+        {"path": "docs/operations/logging.md:1", "start_line": 1, "end_line": 40, "excerpt": "Logging and Retention ... make clean-logs"}
       ],
-      "recommendation": "Add retention/rotation guidance in docs and optional cleanup command (e.g., make clean-logs).",
+      "recommendation": "Keep docs current; consider rotation if logs become large in non-ephemeral environments.",
       "effort": "S",
-      "tags": ["observability"]
+      "tags": ["observability", "resolved"]
     },
     {
       "id": "AUD-0010",

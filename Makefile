@@ -1,4 +1,4 @@
-.PHONY: bootstrap test sample-suite lint
+.PHONY: bootstrap test sample-suite lint clean-logs
 
 bootstrap:
 	@bash scripts/bootstrap.sh
@@ -16,6 +16,10 @@ lint:
 	@.venv/bin/python -m ruff format docs src tests
 	@.venv/bin/python -m ruff check docs src tests
 	@.venv/bin/python -m mypy src/elspeth
+
+clean-logs:
+	@echo "Removing JSONL run logs under ./logs..."
+	@rm -f logs/run_*.jsonl || true
 
 sbom:
 	@.venv/bin/cyclonedx-py requirements requirements.lock --pyproject pyproject.toml --output-file sbom.json --output-format JSON --output-reproducible
