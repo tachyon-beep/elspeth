@@ -38,6 +38,13 @@ class SignedArtifactSink(ResultSink):
         metadata = metadata or {}
         timestamp = datetime.now(timezone.utc)
         try:
+            plugin_logger = getattr(self, "plugin_logger", None)
+            if plugin_logger:
+                plugin_logger.log_event(
+                    "sink_write_attempt",
+                    message=f"Signed artifact write attempt: {self.base_path}/{self.bundle_name or 'signed'}",
+                    metadata={"path": str(self.base_path)},
+                )
             bundle_dir = self._resolve_bundle_dir(metadata, timestamp)
             bundle_dir.mkdir(parents=True, exist_ok=True)
 
@@ -59,9 +66,25 @@ class SignedArtifactSink(ResultSink):
             manifest = self._build_manifest(results, metadata, timestamp, signature_value)
             manifest_path = bundle_dir / self.manifest_name
             manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+            if plugin_logger:
+                total_bytes = 0
+                for p in (results_path, signature_path, manifest_path):
+                    try:
+                        total_bytes += p.stat().st_size
+                    except Exception:
+                        pass
+                plugin_logger.log_event(
+                    "sink_write",
+                    message=f"Signed artifact written under {bundle_dir}",
+                    metrics={"bytes": total_bytes, "files": 3},
+                    metadata={"path": str(bundle_dir)},
+                )
         except Exception as exc:
             if self.on_error == "skip":
                 logger.warning("Signed artifact sink failed; skipping bundle creation: %s", exc)
+                plugin_logger = getattr(self, "plugin_logger", None)
+                if plugin_logger:
+                    plugin_logger.log_error(exc, context="signed artifact sink write", recoverable=True)
                 return
             raise
 

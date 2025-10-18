@@ -86,6 +86,13 @@ class EnhancedVisualAnalyticsSink(BaseVisualSink):
             raise
 
         try:
+            plugin_logger = getattr(self, "plugin_logger", None)
+            if plugin_logger:
+                plugin_logger.log_event(
+                    "sink_write_attempt",
+                    message=f"Enhanced visual write attempt: {self.base_path}/{self.file_stem}",
+                    metadata={"path": str(self.base_path), "charts": list(self.chart_types)},
+                )
             if seaborn is not None and self.seaborn_style:
                 try:
                     seaborn.set_theme(style=self.seaborn_style)
@@ -108,9 +115,25 @@ class EnhancedVisualAnalyticsSink(BaseVisualSink):
 
             self._last_written_files = written
             self._update_security_context_from_metadata(metadata)
+            if plugin_logger:
+                total_bytes = 0
+                for _, path, _ in written:
+                    try:
+                        total_bytes += path.stat().st_size
+                    except Exception:
+                        pass
+                plugin_logger.log_event(
+                    "sink_write",
+                    message=f"Enhanced visual written under {self.base_path}",
+                    metrics={"bytes": total_bytes, "files": len(written)},
+                    metadata={"path": str(self.base_path)},
+                )
         except Exception as exc:
             if self.on_error == "skip":
                 logger.warning("Enhanced visual sink failed; skipping output: %s", exc)
+                plugin_logger = getattr(self, "plugin_logger", None)
+                if plugin_logger:
+                    plugin_logger.log_error(exc, context="enhanced visual sink write", recoverable=True)
                 return
             raise
 
