@@ -141,3 +141,12 @@ module = [
 ]
 disallow_untyped_defs = true
 disallow_incomplete_defs = true
+
+# Core experiments (phase in config and registries first)
+[[tool.mypy.overrides]]
+module = [
+  "elspeth.core.experiments.config",
+  "elspeth.core.experiments.experiment_registries",
+]
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
