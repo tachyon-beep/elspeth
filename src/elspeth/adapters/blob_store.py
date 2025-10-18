@@ -38,7 +38,7 @@ class BlobConfig:
     sas_token: str | None = None
 
     @classmethod
-    def from_mapping(cls, data: dict[str, Any]) -> "BlobConfig":
+    def from_mapping(cls, data: dict[str, Any]) -> BlobConfig:
         """Create a ``BlobConfig`` from a decoded mapping."""
 
         required = ["connection_name", "azureml_datastore_uri"]

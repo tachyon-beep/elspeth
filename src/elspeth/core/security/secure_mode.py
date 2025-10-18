@@ -27,12 +27,7 @@ PATH_CONTAINED_SINK_TYPES_DEFAULT: frozenset[str] = frozenset({"csv", "excel_wor
 
 
 def _parse_csv_list(value: str) -> frozenset[str]:
-    items: list[str] = []
-    for chunk in value.split(","):
-        cleaned = chunk.strip().lower()
-        if cleaned:
-            items.append(cleaned)
-    return frozenset(items)
+    return frozenset(chunk.strip().lower() for chunk in value.split(",") if chunk.strip())
 
 
 def get_path_contained_sink_types(env: dict[str, str] | None = None) -> frozenset[str]:

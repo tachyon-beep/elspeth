@@ -7,7 +7,7 @@ Focus areas:
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any
 
 import pytest
 import requests
@@ -19,12 +19,12 @@ from elspeth.plugins.nodes.sinks.repository import (
 
 
 class _FakeResponse:
-    def __init__(self, status_code: int = 200, json_data: Dict[str, Any] | None = None, text: str = "OK") -> None:
+    def __init__(self, status_code: int = 200, json_data: dict[str, Any] | None = None, text: str = "OK") -> None:
         self.status_code = status_code
         self._json_data = json_data or {}
         self.text = text
 
-    def json(self) -> Dict[str, Any]:  # pragma: no cover - thin helper
+    def json(self) -> dict[str, Any]:  # pragma: no cover - thin helper
         return dict(self._json_data)
 
 
@@ -32,7 +32,7 @@ class _CaptureSession:
     """Capture outgoing request kwargs for assertion."""
 
     def __init__(self) -> None:
-        self.calls: List[Dict[str, Any]] = []
+        self.calls: list[dict[str, Any]] = []
 
     def request(self, method: str, url: str, **kwargs: Any) -> _FakeResponse:
         """Record the request and return a default OK response."""
