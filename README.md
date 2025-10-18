@@ -91,10 +91,7 @@ Prefer a consolidated index? Check `docs/README.md` for a map of every reference
 
 ## Architecture Snapshot
 
-- **Ingestion** – Datasources normalise tabular inputs and tag security levels before experimentation (`src/elspeth/plugins/datasources/`).
-<!-- UPDATE 2025-10-12: Datasource path alignment -->
-Update 2025-10-12: Ingestion plugins live under `src/elspeth/plugins/nodes/sources/`.
-<!-- END UPDATE -->
+- **Ingestion** – Datasources normalise tabular inputs and tag security levels before experimentation (`src/elspeth/plugins/nodes/sources/`).
 - **Orchestrator** – `ExperimentOrchestrator` wires datasource, LLM client, sinks, and controls, then dispatches to `ExperimentSuiteRunner` for suites.
 - **Artifact Pipeline** – Sinks declare dependencies and security clearances; the pipeline orchestrates writes, chaining, and signing.
 - **Analytics** – `SuiteReportGenerator` produces combined CSV/Excel/visual artefacts, while the `VisualAnalyticsSink` renders PNG/HTML summaries.

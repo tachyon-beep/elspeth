@@ -10,7 +10,7 @@ If you discover a security vulnerability in Elspeth, please email the maintainer
 
 **⚠️ CRITICAL**: Never commit real SAS tokens or credentials to git.
 
-The `config/blob_store.yaml` file is **now in `.gitignore`** to prevent accidental commits of credentials.
+The repository includes a tracked placeholder at `config/blob_store.yaml` for reference only (contains no valid secrets). Actual, environment-specific credentials must not be committed and should live in a local override that is ignored by git. The path `config/blob_store.yaml` is listed in `.gitignore` to prevent accidental commits of real credentials.
 
 **To configure blob storage securely**:
 
@@ -19,7 +19,7 @@ The `config/blob_store.yaml` file is **now in `.gitignore`** to prevent accident
    cp config/blob_store.yaml.template config/blob_store.yaml
    ```
 
-2. Add your credentials to `config/blob_store.yaml` (this file is ignored by git)
+2. Add your credentials to a local `config/blob_store.yaml` (ignored by git). Do not modify the placeholder in version control.
 
 3. **Recommended**: Use Azure DefaultAzureCredential (no SAS token needed):
    ```yaml

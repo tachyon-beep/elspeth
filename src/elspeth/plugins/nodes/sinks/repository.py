@@ -222,7 +222,8 @@ class GitHubRepoSink(_RepoSinkBase):
     def _request(self, method: str, url: str, expected_status: set[int] | None = None, **kwargs: Any):
         expected_status = expected_status or {200, 201}
         assert self.session is not None, "session must be initialized"
-        response = self.session.request(method, url, headers=self._headers(), **kwargs)
+        timeout = kwargs.pop("timeout", 15)
+        response = self.session.request(method, url, headers=self._headers(), timeout=timeout, **kwargs)
         if response.status_code not in expected_status:
             raise RuntimeError(f"GitHub API call failed ({response.status_code}): {response.text}")
         return response
@@ -335,7 +336,8 @@ class AzureDevOpsRepoSink(_RepoSinkBase):
     def _request(self, method: str, url: str, expected_status: set[int] | None = None, **kwargs: Any):
         expected_status = expected_status or {200, 201}
         assert self.session is not None, "session must be initialized"
-        response = self.session.request(method, url, headers=self._headers(), **kwargs)
+        timeout = kwargs.pop("timeout", 15)
+        response = self.session.request(method, url, headers=self._headers(), timeout=timeout, **kwargs)
         if response.status_code not in expected_status:
             raise RuntimeError(f"Azure DevOps API call failed ({response.status_code}): {response.text}")
         return response

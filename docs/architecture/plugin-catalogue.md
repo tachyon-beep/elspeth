@@ -6,16 +6,16 @@ All built-in plugins now receive a `PluginContext` instance during construction.
 
 | Name | Implementation | Purpose | Notable Options | Context Status | Coverage |
 | --- | --- | --- | --- | --- | --- |
-| `azure_blob` | `src/elspeth/plugins/datasources/blob.py` | Load CSV data from Azure Blob Storage profiles. | `config_path`, `profile`, `pandas_kwargs`, `on_error`. | ✔ Inherits classification from context. | `tests/test_datasource_blob_plugin.py` |
-| `csv_blob` | `src/elspeth/plugins/datasources/csv_blob.py` | Fetch CSV directly from blob URIs with retry-aware skips. | `path`, `dtype`, `encoding`, `on_error`. | ✔ Adds DataFrame `security_level` from context. | `tests/test_datasource_csv.py` |
-| `local_csv` | `src/elspeth/plugins/datasources/csv_local.py` | Local filesystem CSV reader with skip-on-error mode. | `path`, `dtype`, `encoding`, `on_error`. | ✔ Propagates context level into DataFrame attrs. | `tests/test_datasource_csv.py` |
+| `azure_blob` | `src/elspeth/plugins/nodes/sources/blob.py` | Load CSV data from Azure Blob Storage profiles. | `config_path`, `profile`, `pandas_kwargs`, `on_error`. | ✔ Inherits classification from context. | `tests/test_datasource_blob_plugin.py` |
+| `csv_blob` | `src/elspeth/plugins/nodes/sources/csv_blob.py` | Fetch CSV directly from blob URIs with retry-aware skips. | `path`, `dtype`, `encoding`, `on_error`. | ✔ Adds DataFrame `security_level` from context. | `tests/test_datasource_csv.py` |
+| `local_csv` | `src/elspeth/plugins/nodes/sources/csv_local.py` | Local filesystem CSV reader with skip-on-error mode. | `path`, `dtype`, `encoding`, `on_error`. | ✔ Propagates context level into DataFrame attrs. | `tests/test_datasource_csv.py` |
 
 ## LLM Clients
 
 | Name | Implementation | Purpose | Notable Options | Context Status | Coverage |
 | --- | --- | --- | --- | --- | --- |
-| `azure_openai` | `src/elspeth/plugins/llms/azure_openai.py` | Azure-hosted OpenAI-compatible client. | `config`, `deployment`, `temperature`, `max_tokens`. | ✔ Context sets `security_level` attribute. | `tests/test_llm_azure.py` |
-| `http_openai` | `src/elspeth/plugins/llms/openai_http.py` | Generic OpenAI HTTP client. | `api_base`, `api_key/_env`, `model`, `timeout`. | ✔ Context captured for policy enforcement. | `tests/test_llm_http_openai.py` |
+| `azure_openai` | `src/elspeth/plugins/nodes/transforms/llm/azure_openai.py` | Azure-hosted OpenAI-compatible client. | `config`, `deployment`, `temperature`, `max_tokens`. | ✔ Context sets `security_level` attribute. | `tests/test_llm_azure.py` |
+| `http_openai` | `src/elspeth/plugins/nodes/transforms/llm/openai_http.py` | Generic OpenAI HTTP client. | `api_base`, `api_key/_env`, `model`, `timeout`. | ✔ Context captured for policy enforcement. | `tests/test_llm_http_openai.py` |
 | `mock` | `src/elspeth/plugins/llms/mock.py` | Deterministic mock LLM for suites/tests. | `seed`. | ✔ Context stored for downstream audits. | `tests/test_llm_mock.py` |
 | `static_test` | `src/elspeth/plugins/llms/static.py` | Returns canned responses/metrics. | `content`, `score`, `metrics`. | ✔ Context attaches classification metadata. | `tests/test_llm_static_plugin.py` |
 
