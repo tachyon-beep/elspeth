@@ -31,7 +31,11 @@ LOCK_RE = re.compile(r"^(?P<name>[A-Za-z0-9_.-]+)==(?P<version>[^\\\s#]+)")
 
 
 def _norm(name: str) -> str:
-    return name.lower().replace("_", "-")
+    """PEP 503 normalization: lowercase and replace non-alphanumerics with '-'."""
+    s = name.strip().lower()
+    # Replace any run of non [a-z0-9] with '-'
+    s = re.sub(r"[^a-z0-9]+", "-", s)
+    return s.strip("-")
 
 
 def parse_lockfile(path: Path) -> Dict[str, str]:
@@ -113,4 +117,3 @@ def main() -> int:
 
 if __name__ == "__main__":  # pragma: no cover
     raise SystemExit(main())
-
