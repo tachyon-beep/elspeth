@@ -22,6 +22,12 @@ sample-suite-artifacts:
 		--signed-bundle \
 		--head 0
 
+.PHONY: job
+job:
+	@JOB?=config/jobs/sample_job.yaml; \
+	ARTDIR?=artifacts; \
+	.venv/bin/python -m elspeth.cli --job-config $$JOB --head 0 --artifacts-dir $$ARTDIR --signed-bundle
+
 lint:
 	@.venv/bin/python -m ruff format docs src tests
 	@.venv/bin/python -m ruff check docs src tests

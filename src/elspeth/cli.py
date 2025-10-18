@@ -117,6 +117,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Validate datasource schema compatibility with plugins without running experiments",
     )
+    parser.add_argument(
+        "--job-config",
+        type=Path,
+        help="Run an ad-hoc job from a YAML config (datasource -> optional LLM transform -> sinks)",
+    )
     return parser
 
 
@@ -183,6 +188,26 @@ def run(args: argparse.Namespace) -> None:
 
     log_level = getattr(args, "log_level", "INFO")
     configure_logging(log_level)
+    # If an ad-hoc job config is specified, run it and exit
+    if getattr(args, "job_config", None):
+        try:
+            from elspeth.core.experiments.job_runner import run_job_file
+
+            payload = run_job_file(args.job_config)
+            # Emit preview and optional artifacts
+            rows = [
+                _result_to_row(record)
+                for record in payload.get("results", [])
+            ]
+            df = pd.DataFrame(rows)
+            if args.head and args.head > 0 and not df.empty:
+                print(format_preview(df, args.head))
+            _maybe_write_artifacts_single(args, _AdHoc(settings_path=args.job_config), payload, df)
+            return
+        except Exception as exc:
+            logger.error("Job execution failed: %s", exc, exc_info=True)
+            raise SystemExit(1)
+
     settings = _load_settings_from_args(args)
     suite_root = _resolve_suite_root(args, settings)
 
@@ -404,6 +429,13 @@ def _load_settings_from_args(args: argparse.Namespace):
         _strip_metrics_plugins(settings)
     _configure_sink_dry_run(settings, enable_live=args.live_outputs)
     return settings
+
+
+class _AdHoc:
+    """Lightweight shim to carry config_path for artifact writing."""
+
+    def __init__(self, *, settings_path: Path) -> None:
+        self.config_path = settings_path
 
 
 def _resolve_suite_root(args: argparse.Namespace, settings) -> Path | None:
