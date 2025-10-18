@@ -1,6 +1,7 @@
 # syntax=docker/dockerfile:1.7
 
-# NOTE: Pin to a specific patch tag. Digest pinning can be enabled later.
+# NOTE: Default to a specific patch tag. In CI, pass a digest-pinned image via:
+#   --build-arg PYTHON_IMAGE=python:3.12.12-slim@sha256:<digest>
 ARG PYTHON_IMAGE=python:3.12.12-slim
 
 FROM ${PYTHON_IMAGE} AS base
@@ -57,4 +58,3 @@ WORKDIR /workspace
 
 # Default entrypoint for CLI usage (override as needed)
 CMD ["python", "-m", "elspeth.cli", "--help"]
-

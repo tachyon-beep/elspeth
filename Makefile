@@ -12,6 +12,16 @@ test:
 sample-suite:
 	@.venv/bin/python -m elspeth.cli --settings config/sample_suite/settings.yaml --suite-root config/sample_suite --head 0 --live-outputs
 
+.PHONY: sample-suite-artifacts
+sample-suite-artifacts:
+	@.venv/bin/python -m elspeth.cli \
+		--settings config/sample_suite/settings.yaml \
+		--suite-root config/sample_suite \
+		--reports-dir outputs/sample_suite_reports \
+		--artifacts-dir artifacts \
+		--signed-bundle \
+		--head 0
+
 lint:
 	@.venv/bin/python -m ruff format docs src tests
 	@.venv/bin/python -m ruff check docs src tests

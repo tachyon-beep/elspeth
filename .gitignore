@@ -127,6 +127,7 @@ venv.bak/
 # Project data/artifacts
 /data/
 /outputs/
+/artifacts/
 /orchestration_packs/*/
 # Legacy reference material (tracked separately)
 /external/

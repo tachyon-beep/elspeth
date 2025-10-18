@@ -98,6 +98,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="Directory to write analytics reports when running a suite",
     )
     parser.add_argument(
+        "--artifacts-dir",
+        type=Path,
+        help="Directory to write persistent artifacts (results, configs, signed bundles)",
+    )
+    parser.add_argument(
+        "--signed-bundle",
+        action="store_true",
+        help="Create a signed reproducibility bundle under --artifacts-dir",
+    )
+    parser.add_argument(
+        "--signing-key-env",
+        default="ELSPETH_SIGNING_KEY",
+        help="Environment variable name for the HMAC signing key (for --signed-bundle)",
+    )
+    parser.add_argument(
         "--validate-schemas",
         action="store_true",
         help="Validate datasource schema compatibility with plugins without running experiments",
@@ -266,6 +281,8 @@ def _run_single(args: argparse.Namespace, settings) -> None:
 
     if args.head and args.head > 0 and not df.empty:
         print(format_preview(df, args.head))
+
+    _maybe_write_artifacts_single(args, settings, payload, df)
 
 
 def _clone_suite_sinks(base_sinks: list, experiment_name: str) -> list:
@@ -467,6 +484,86 @@ def _run_suite(
             logger.warning("Report generation skipped: reports require suite execution.")
         else:
             SuiteReportGenerator(suite, results).generate_all_reports(reports_dir)
+
+    _maybe_write_artifacts_suite(args, settings, suite, results)
+    
+def _ensure_artifacts_dir(base: Path | None) -> Path:
+    ts = pd.Timestamp.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    root = base if base else Path("artifacts")
+    path = root / ts
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+def _write_simple_artifacts(art_dir: Path, name: str, payload: dict[str, Any], settings) -> None:
+    # Results JSON
+    (art_dir / f"{name}_results.json").write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    # Settings YAML snapshot
+    try:
+        cfg_path = Path(getattr(settings, "config_path", ""))
+        if cfg_path and cfg_path.exists():
+            dest = art_dir / f"{name}_settings.yaml"
+            dest.write_text(cfg_path.read_text(encoding="utf-8"), encoding="utf-8")
+    except Exception:
+        logger.debug("Failed to copy settings file", exc_info=True)
+
+def _maybe_write_artifacts_single(args: argparse.Namespace, settings, payload: dict[str, Any], df: pd.DataFrame) -> None:
+    art_base = getattr(args, "artifacts_dir", None)
+    if art_base is None and not getattr(args, "signed_bundle", False):
+        return
+    art_dir = _ensure_artifacts_dir(art_base)
+    _write_simple_artifacts(art_dir, "single", payload, settings)
+    if getattr(args, "signed_bundle", False):
+        _create_signed_bundle(art_dir, "single", payload, settings, df, signing_key_env=getattr(args, "signing_key_env", "ELSPETH_SIGNING_KEY"))
+
+def _maybe_write_artifacts_suite(args: argparse.Namespace, settings, suite: ExperimentSuite, results: dict[str, Any]) -> None:
+    art_base = getattr(args, "artifacts_dir", None)
+    if art_base is None and not getattr(args, "signed_bundle", False):
+        return
+    art_dir = _ensure_artifacts_dir(art_base)
+    # Write each experiment payload and the suite config
+    (art_dir / "suite.json").write_text(json.dumps({k: v["payload"] for k, v in results.items()}, indent=2, sort_keys=True), encoding="utf-8")
+    try:
+        cfg_path = Path(getattr(settings, "config_path", ""))
+        if cfg_path and cfg_path.exists():
+            (art_dir / "settings.yaml").write_text(cfg_path.read_text(encoding="utf-8"), encoding="utf-8")
+    except Exception:
+        logger.debug("Failed to copy settings file", exc_info=True)
+    if getattr(args, "signed_bundle", False):
+        # For bundle, assemble a combined payload and pass the original DataFrame from datasource
+        combined: dict[str, Any] = {"results": []}
+        for _, entry in results.items():
+            combined["results"].extend(entry["payload"].get("results", []))
+        try:
+            df = settings.datasource.load()
+        except Exception:
+            df = pd.DataFrame()
+        _create_signed_bundle(art_dir, "suite", combined, settings, df, signing_key_env=getattr(args, "signing_key_env", "ELSPETH_SIGNING_KEY"))
+
+def _create_signed_bundle(art_dir: Path, name: str, payload: dict[str, Any], settings, df: pd.DataFrame, *, signing_key_env: str) -> None:
+    try:
+        from elspeth.plugins.nodes.sinks.reproducibility_bundle import ReproducibilityBundleSink
+    except Exception as exc:  # pragma: no cover - optional import
+        logger.warning("Reproducibility bundle unavailable: %s", exc)
+        return
+    bundle_dir = art_dir / f"{name}_bundle"
+    bundle_dir.mkdir(parents=True, exist_ok=True)
+    sink = ReproducibilityBundleSink(
+        base_path=str(bundle_dir),
+        bundle_name=f"{name}",
+        timestamped=False,
+        include_framework_code=False,
+        key_env=signing_key_env,
+    )
+    metadata = {
+        "security_level": getattr(settings, "security_level", None),
+        "datasource_config": getattr(settings, "datasource_config", None),
+        "source_data": df,
+    }
+    try:
+        sink.write(payload, metadata=metadata)
+        logger.info("Created signed reproducibility bundle at %s", bundle_dir)
+    except Exception as exc:
+        logger.error("Failed to create reproducibility bundle: %s", exc)
 
 
 def _strip_metrics_plugins(settings) -> None:

@@ -151,12 +151,15 @@ jobs:
     timeout-minutes: 30
     permissions:
       security-events: write
+    env:
+      # Set to a digest-pinned image for reproducibility (override in repo/Org env if needed)
+      DOCKER_PYTHON_IMAGE: python:3.12.12-slim
     steps:
       - uses: actions/checkout@v4
 
       - name: Build dev/test image
         run: |
-          docker build --target dev -t elspeth:devtest .
+          docker build --build-arg PYTHON_IMAGE=${{ env.DOCKER_PYTHON_IMAGE }} --target dev -t elspeth:devtest .
 
       - name: Run tests in container
         run: |
@@ -164,7 +167,7 @@ jobs:
 
       - name: Build runtime image
         run: |
-          docker build --target runtime -t elspeth:runtime .
+          docker build --build-arg PYTHON_IMAGE=${{ env.DOCKER_PYTHON_IMAGE }} --target runtime -t elspeth:runtime .
 
       - name: Generate runtime SBOM (app graph) inside container
         run: |
