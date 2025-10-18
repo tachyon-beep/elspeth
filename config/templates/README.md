@@ -45,6 +45,20 @@ This directory contains secure configuration templates for production use of Els
 - Testing production configurations
 - Standard operational work
 
+### retrieval_pgvector_example.yaml
+**Use Case:** Demonstrate pgvector retrieval with a bounded connection timeout.
+
+**Notes:**
+- Shows `connect_timeout` to avoid long DB connect stalls.
+- Reference-only; merge fields into your suite configs as needed.
+
+### retrieval_azure_search_example.yaml
+**Use Case:** Demonstrate Azure Cognitive Search retrieval with a per-request timeout.
+
+**Notes:**
+- Shows `request_timeout` (alias `timeout`) to bound query latency.
+- Reference-only; merge fields into your suite configs as needed.
+
 ## Quick Start
 
 ### 1. Copy Template

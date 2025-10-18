@@ -1,0 +1,14 @@
+# Example: pgvector retrieval with connect_timeout
+
+retrieval:
+  provider: pgvector
+  dsn: postgresql://db.example.org/elspeth?sslmode=require
+  table: elspeth_rag
+  # New option: bound connection attempts (seconds)
+  connect_timeout: 5
+  # Query parameters
+  top_k: 5
+  min_score: 0.3
+  text_field: response.content
+  namespace: ${SUITE}.${EXPERIMENT}.official
+

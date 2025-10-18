@@ -45,6 +45,10 @@ lint:
 verify-locked:
 	@.venv/bin/python scripts/verify_locked_install.py -r requirements-dev.lock
 
+.PHONY: validate-templates
+validate-templates:
+	@.venv/bin/python scripts/validate_templates.py
+
 clean-logs:
 	@echo "Removing JSONL run logs under ./logs..."
 	@rm -f logs/run_*.jsonl || true

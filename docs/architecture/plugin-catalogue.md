@@ -112,6 +112,13 @@ All built-in plugins now receive a `PluginContext` instance during construction.
 | `csv` | `src/elspeth/plugins/outputs/csv_file.py` | Flat CSV export with sanitisation. | `path`, `sanitize_formulas`, `sanitize_guard`, `overwrite`, `allowed_base_path`. | ✔ | `tests/test_outputs_csv.py` |
 | `excel_workbook` | `src/elspeth/plugins/outputs/excel.py` | Excel workbook export. | `base_path`, `timestamped`, `include_manifest`, `sanitize_formulas`, `allowed_base_path`. | ✔ | `tests/test_outputs_excel.py` |
 | `embeddings_store` | `src/elspeth/plugins/outputs/embeddings_store.py` | Persist experiment payloads as vector embeddings (pgvector/Azure Search). | `provider`, `namespace`, `dsn/endpoint`, `embed_model`, `metadata_fields`. | ✔ Context-derived namespaces prevent cross-tier reuse; Azure provider respects key-rotation guidance. | `tests/test_outputs_embeddings_store.py` |
+
+## Retrieval Clients
+
+| Name | Implementation | Purpose | Notable Options | Context Status | Coverage |
+| --- | --- | --- | --- | --- | --- |
+| `pgvector` | `src/elspeth/retrieval/providers.py` | Query vectors stored in PostgreSQL (pgvector). | `dsn`, `table`, `top_k`, `min_score`, `connect_timeout` (optional). | ✔ Namespace derived from context recommended; logs omit sensitive content. | `tests/test_retrieval_providers.py` |
+| `azure_search` | `src/elspeth/retrieval/providers.py` | Query vectors via Azure Cognitive Search. | `endpoint`, `index`, `api_key/_env`, `vector_field`, `namespace_field`, `content_field`, `request_timeout`/`timeout` (optional). | ✔ Endpoint allowlisted; context controls classification. | `tests/test_retrieval_providers.py` |
 | `file_copy` | `src/elspeth/plugins/outputs/file_copy.py` | Copy artifacts to filesystem destinations. | `destination`, `overwrite`. | ✔ | `tests/test_sink_chaining.py` |
 | `github_repo` | `src/elspeth/plugins/outputs/repository.py` | Commit artifacts into GitHub repository. | `owner`, `repo`, `branch`, `token_env`, `dry_run`. | ✔ | `tests/test_outputs_repo.py` |
 | `local_bundle` | `src/elspeth/plugins/outputs/local_bundle.py` | Create local JSON/CSV bundle directories. | `base_path`, `bundle_name`, `timestamped`, `write_json/csv`, `allowed_base_path`. | ✔ | `tests/test_outputs_local_bundle.py` |
