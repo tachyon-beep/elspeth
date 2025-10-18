@@ -251,6 +251,7 @@ _CSV_SINK_SCHEMA = _sink_schema(
         "overwrite": {"type": "boolean"},
         "sanitize_formulas": {"type": "boolean"},
         "sanitize_guard": {"type": "string", "minLength": 1, "maxLength": 1},
+        "allowed_base_path": {"type": "string"},
     },
     ["path"],
 )
@@ -264,6 +265,7 @@ _LOCAL_BUNDLE_SINK_SCHEMA = _sink_schema(
         "write_csv": {"type": "boolean"},
         "sanitize_formulas": {"type": "boolean"},
         "sanitize_guard": {"type": "string", "minLength": 1, "maxLength": 1},
+        "allowed_base_path": {"type": "string"},
     },
     ["base_path"],
 )
@@ -280,6 +282,7 @@ _EXCEL_SINK_SCHEMA = _sink_schema(
         "include_aggregates": {"type": "boolean"},
         "sanitize_formulas": {"type": "boolean"},
         "sanitize_guard": {"type": "string", "minLength": 1, "maxLength": 1},
+        "allowed_base_path": {"type": "string"},
     },
     ["base_path"],
 )
@@ -295,6 +298,7 @@ _ZIP_BUNDLE_SINK_SCHEMA = _sink_schema(
         "manifest_name": {"type": "string"},
         "results_name": {"type": "string"},
         "csv_name": {"type": "string"},
+        "allowed_base_path": {"type": "string"},
     },
     ["base_path"],
 )

@@ -187,6 +187,13 @@ def validate_sink_config(config: dict[str, Any], mode: SecureMode | None = None)
         if mode == SecureMode.STANDARD and sanitize_formulas is False:
             logger.warning(f"Sink type '{sink_type}' has sanitize_formulas=False - consider enabling for security")
 
+        # Enforce explicit base-path containment for local filesystem sinks in STRICT
+        allowed_base = config.get("allowed_base_path")
+        if mode == SecureMode.STRICT and not allowed_base:
+            raise ValueError(
+                f"Sink type '{sink_type}' requires explicit 'allowed_base_path' in STRICT mode (path containment enforcement)"
+            )
+
 
 def validate_middleware_config(middleware: list[dict[str, Any]], mode: SecureMode | None = None) -> None:
     """Validate middleware configuration according to secure mode.
