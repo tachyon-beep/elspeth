@@ -51,6 +51,8 @@
 | `upsert_conflict` | string | `replace`, `skip`, or `merge`. |
 | `metadata_fields` | list | Dot-paths to include alongside the vector (e.g., `row.APPID`, `metadata.cost_summary.total_cost`). |
 | `retry` | mapping | Reuses standard retry schema (`max_attempts`, `initial_delay`, `backoff_multiplier`). |
+| `connect_timeout` | int | For pgvector: optional PostgreSQL connection timeout (seconds). |
+| `request_timeout` | int | For Azure Search: optional per-request timeout (seconds); alias `timeout`. |
 
 ### Official (Open Source) Profile
 

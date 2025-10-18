@@ -44,6 +44,20 @@ not be promoted to STANDARD/STRICT without formal approval.
 | `ValueError: Endpoint '...' is not approved for service type 'azure_openai'` | Azure OpenAI endpoint mismatch | Ensure Azure portal shows matching host; update config or submit allowlist change. |
 | Validation passes in DEVELOPMENT but fails in STANDARD | Custom endpoint added via `ELSPETH_APPROVED_ENDPOINTS` env var | Promote the regex to the codebase before switching to STANDARD/STRICT modes. |
 
+## Timeouts and Retries
+
+Retrieval components support bounded operations to avoid hangs during incidents:
+
+- pgvector (PostgreSQL):
+  - `connect_timeout` can be supplied to `PgVectorQueryClient` (either as a DSN parameter or via the new `connect_timeout` option). Example DSN: `postgresql://host/db?connect_timeout=5`.
+  - Impact: prevents long connection stalls; recommended 3–10s in production.
+
+- Azure Cognitive Search:
+  - `request_timeout` (alias `timeout`) can be provided in the retriever options; it is passed to `SearchClient.search(timeout=...)`.
+  - Impact: bounds per-query latency; recommended initial value 10–30s depending on index size.
+
+Note: The generic HTTP/OpenAI client already applies a per-request `timeout` and bounded retries (429/5xx) with exponential backoff.
+
 ## Audit Evidence
 
 - Tests: `tests/test_retrieval_service.py::test_create_embedder_validates_azure_endpoint`,
