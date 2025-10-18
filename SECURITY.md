@@ -171,3 +171,12 @@ Major security improvements:
 ## Questions?
 
 For security-related questions, contact the maintainers directly.
+### 6. Path Containment & Atomic Writes
+
+- Local sinks (CSV, Excel, local bundle, ZIP bundle) enforce write-path allowlists
+  (default base: `./outputs`) and reject symlinked ancestors/targets to prevent
+  path traversal and symlink attacks.
+- Files are written atomically via a temporary file followed by `os.replace` to
+  avoid partially written artefacts on failure.
+- In STRICT deployments, configure sink base directories explicitly and audit
+  them in CI.

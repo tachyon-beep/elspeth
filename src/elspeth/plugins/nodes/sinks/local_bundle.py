@@ -11,6 +11,7 @@ from typing import Any
 
 from elspeth.core.base.protocols import ResultSink
 from elspeth.plugins.nodes.sinks.csv_file import CsvResultSink
+from elspeth.core.utils.path_guard import resolve_under_base, safe_atomic_write
 
 logger = logging.getLogger(__name__)
 
@@ -39,34 +40,71 @@ class LocalBundleSink(ResultSink):
             raise ValueError("sanitize_guard must be a single character")
         if not self.sanitize_formulas:
             logger.warning("Local bundle CSV sanitization disabled; outputs may trigger spreadsheet formulas.")
+        # Allowed base directory for writes; default to ./outputs
+        try:
+            self._allowed_base = Path("outputs").resolve()
+        except Exception:  # pragma: no cover - defensive
+            self._allowed_base = Path.cwd().resolve()
 
     def write(self, results: dict[str, Any], *, metadata: dict[str, Any] | None = None) -> None:
         metadata = metadata or {}
         timestamp = datetime.now(timezone.utc)
         try:
+            plugin_logger = getattr(self, "plugin_logger", None)
             bundle_dir = self._resolve_bundle_dir(metadata, timestamp)
-            bundle_dir.mkdir(parents=True, exist_ok=True)
+            # Enforce allowed base for directory; use placeholder technique to leverage resolver
+            target_dir = resolve_under_base(bundle_dir / ".dir", self._allowed_base).parent
+
+            if plugin_logger:
+                plugin_logger.log_event(
+                    "sink_write_attempt",
+                    message=f"Bundle write attempt: {target_dir}",
+                    metadata={"path": str(target_dir)},
+                )
 
             manifest = self._build_manifest(results, metadata, timestamp)
-            manifest_path = bundle_dir / self.manifest_name
-            manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+            manifest_path = target_dir / self.manifest_name
+            safe_atomic_write(manifest_path, lambda tmp: tmp.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8"))
 
             if self.write_json:
-                results_path = bundle_dir / self.results_name
-                results_path.write_text(json.dumps(results, indent=2, sort_keys=True), encoding="utf-8")
+                results_path = target_dir / self.results_name
+                safe_atomic_write(results_path, lambda tmp: tmp.write_text(json.dumps(results, indent=2, sort_keys=True), encoding="utf-8"))
 
             if self.write_csv:
-                csv_path = bundle_dir / self.csv_name
+                csv_path = target_dir / self.csv_name
                 csv_sink = CsvResultSink(
                     path=str(csv_path),
                     overwrite=True,
                     sanitize_formulas=self.sanitize_formulas,
                     sanitize_guard=self.sanitize_guard,
                 )
+                # Propagate allowed base to nested sink
+                try:
+                    csv_sink._allowed_base = self._allowed_base  # type: ignore[attr-defined]
+                except Exception:
+                    pass
                 csv_sink.write(results, metadata=metadata)
+
+            if plugin_logger:
+                total_bytes = 0
+                for p in [manifest_path, target_dir / self.results_name if self.write_json else None, target_dir / self.csv_name if self.write_csv else None]:
+                    if p and p.exists():
+                        try:
+                            total_bytes += p.stat().st_size
+                        except Exception:
+                            pass
+                plugin_logger.log_event(
+                    "sink_write",
+                    message=f"Bundle written under {target_dir}",
+                    metrics={"bytes": total_bytes},
+                    metadata={"path": str(target_dir)},
+                )
         except Exception as exc:
             if self.on_error == "skip":
                 logger.warning("Local bundle sink failed; skipping bundle creation: %s", exc)
+                plugin_logger = getattr(self, "plugin_logger", None)
+                if plugin_logger:
+                    plugin_logger.log_error(exc, context="local bundle sink write", recoverable=True)
                 return
             raise
 
