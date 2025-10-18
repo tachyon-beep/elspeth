@@ -13,6 +13,11 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    env:
+      COSIGN_KEY: ${{ secrets.COSIGN_KEY }}
+      COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+      COSIGN_OIDC_AUDIENCE: ${{ secrets.COSIGN_OIDC_AUDIENCE }}
+      COSIGN_ID_TOKEN: ${{ secrets.COSIGN_ID_TOKEN }}
     steps:
       - uses: actions/checkout@v4
 
@@ -68,31 +73,28 @@ jobs:
             grype.sarif
 
       - name: Install Cosign
-        if: ${{ secrets.COSIGN_KEY != '' || (secrets.COSIGN_OIDC_AUDIENCE != '' && secrets.COSIGN_ID_TOKEN != '') }}
+        if: ${{ env.COSIGN_KEY != '' || (env.COSIGN_OIDC_AUDIENCE != '' && env.COSIGN_ID_TOKEN != '') }}
         uses: sigstore/cosign-installer@v3
 
       - name: Cosign keyless sign (optional)
-        if: ${{ secrets.COSIGN_KEY == '' }}
+        if: ${{ env.COSIGN_KEY == '' }}
         env:
           COSIGN_EXPERIMENTAL: "1"
         run: |
           cosign sign ghcr.io/${{ github.repository }}:${GITHUB_REF_NAME} || true
 
       - name: Cosign key sign (optional)
-        if: ${{ secrets.COSIGN_KEY != '' }}
-        env:
-          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+        if: ${{ env.COSIGN_KEY != '' }}
         run: |
-          echo "${{ secrets.COSIGN_KEY }}" > cosign.key
+          echo "${{ env.COSIGN_KEY }}" > cosign.key
+          export COSIGN_PASSWORD="${{ env.COSIGN_PASSWORD }}"
           cosign sign --key cosign.key ghcr.io/${{ github.repository }}:${GITHUB_REF_NAME}
           rm -f cosign.key
 
       - name: Cosign attest SBOM (optional)
-        if: ${{ secrets.COSIGN_KEY != '' }}
-        env:
-          COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
+        if: ${{ env.COSIGN_KEY != '' }}
         run: |
-          echo "${{ secrets.COSIGN_KEY }}" > cosign.key
+          echo "${{ env.COSIGN_KEY }}" > cosign.key
+          export COSIGN_PASSWORD="${{ env.COSIGN_PASSWORD }}"
           cosign attest --key cosign.key --predicate sbom-image.json --type cyclonedx ghcr.io/${{ github.repository }}:${GITHUB_REF_NAME}
           rm -f cosign.key
-
