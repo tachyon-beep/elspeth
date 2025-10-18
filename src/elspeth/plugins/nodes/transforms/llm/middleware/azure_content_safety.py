@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import logging
 import os
+import random
+import time
 from typing import Any, Sequence
 
 import requests
@@ -110,7 +112,6 @@ class AzureContentSafetyMiddleware(LLMMiddleware):
             except Exception:  # pragma: no cover - network failure path
                 if attempts >= 3:
                     raise
-                import time, random
                 time.sleep(delay + random.random() * 0.2)
                 delay *= 2
         data = response.json()

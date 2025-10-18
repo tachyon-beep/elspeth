@@ -6,7 +6,7 @@ import time
 from collections import deque
 from contextlib import contextmanager
 from threading import Lock
-from typing import Any, ContextManager, Deque, SupportsFloat, Iterator
+from typing import Any, ContextManager, Deque, Iterator, SupportsFloat
 
 
 def _coerce_float(value: object, *, context: str) -> float:

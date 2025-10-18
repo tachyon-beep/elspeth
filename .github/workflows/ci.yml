@@ -65,6 +65,8 @@ jobs:
         uses: returntocorp/semgrep-action@v1
         with:
           config: auto
+          generateSarif: true
+          sarifFile: semgrep.sarif
       - name: Upload semgrep report
         if: always()
         uses: actions/upload-artifact@v4

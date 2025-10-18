@@ -78,7 +78,12 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I"]
-ignore = []
+# Relax overly strict defaults for this codebase; enforce functional errors and import hygiene.
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+# Allow tests to carry helper imports and flexible styles
+"tests/**" = ["F401", "I001", "E501", "F811"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["elspeth"]

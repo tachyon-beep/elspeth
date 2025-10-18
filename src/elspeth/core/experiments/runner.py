@@ -8,7 +8,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable, Mapping, Callable, Type
+from typing import Any, Callable, Iterable, Mapping, Type
 
 import pandas as pd
 
@@ -713,8 +713,8 @@ class ExperimentRunner:
         # Serialise appends to avoid interleaved lines under parallel execution
         if not hasattr(self, "_checkpoint_lock"):
             import threading
-            self._checkpoint_lock = threading.Lock()  # type: ignore[attr-defined]
-        with self._checkpoint_lock:  # type: ignore[attr-defined]
+            self._checkpoint_lock = threading.Lock()
+        with self._checkpoint_lock:
             with path.open("a", encoding="utf-8") as handle:
                 handle.write(f"{row_id}\n")
 
