@@ -93,7 +93,7 @@ jobs:
 
       - name: Generate SBOM (requirements.lock)
         run: |
-          cyclonedx-bom -r requirements.lock -F json -o sbom.json \
+          python -m cyclonedx_bom -r requirements.lock -F json -o sbom.json \
             --project-name elspeth --project-version 0.1.0
 
       - name: Upload SBOM artefact
