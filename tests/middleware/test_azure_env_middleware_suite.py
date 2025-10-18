@@ -43,4 +43,3 @@ def test_azure_env_suite_lifecycle_with_run():
     assert any(name == "experiment_start" for name, _ in mw._run.rows)
     assert any(name.startswith("baseline_") for name, _ in mw._run.tables)
     assert any(name == "experiment_count" for name, _ in mw._run.metrics)
-

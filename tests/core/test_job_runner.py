@@ -8,10 +8,12 @@ from elspeth.core.experiments.job_runner import run_job_config, run_job_file
 
 
 def _make_csv(tmp_path: Path) -> Path:
-    df = pd.DataFrame([
-        {"APPID": "A1", "title": "T1", "summary": "S1"},
-        {"APPID": "A2", "title": "T2", "summary": "S2"},
-    ])
+    df = pd.DataFrame(
+        [
+            {"APPID": "A1", "title": "T1", "summary": "S1"},
+            {"APPID": "A2", "title": "T2", "summary": "S2"},
+        ]
+    )
     path = tmp_path / "input.csv"
     df.to_csv(path, index=False)
     return path

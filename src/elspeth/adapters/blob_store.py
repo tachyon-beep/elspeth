@@ -247,7 +247,7 @@ def load_blob_csv(
     credential: Any | None = None,
     timeout: int | None = 60,
     pandas_kwargs: dict[str, Any] | None = None,
-)-> Any:
+) -> Any:
     """Convenience helper that downloads a CSV using the configured blob."""
 
     config = load_blob_config(config_path, profile=profile)

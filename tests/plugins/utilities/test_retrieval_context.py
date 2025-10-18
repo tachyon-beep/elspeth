@@ -70,7 +70,9 @@ def test_retrieval_context_no_query_returns_empty():
 def test_namespace_resolution_with_context_and_metadata():
     util = RetrievalContextUtility(provider="pgvector", dsn="postgres://", service_factory=_factory, query_field="row.q")
     # Build nested parent contexts to populate suite/experiment names
-    suite_ctx = PluginContext(plugin_name="mysuite", plugin_kind="suite", security_level="OFFICIAL", determinism_level="low", provenance=("root",))
+    suite_ctx = PluginContext(
+        plugin_name="mysuite", plugin_kind="suite", security_level="OFFICIAL", determinism_level="low", provenance=("root",)
+    )
     exp_ctx = suite_ctx.derive(plugin_name="myexp", plugin_kind="experiment")
     util_ctx = exp_ctx.derive(plugin_name="retrieval_context", plugin_kind="utility")
     util.plugin_context = util_ctx  # attach like registry does

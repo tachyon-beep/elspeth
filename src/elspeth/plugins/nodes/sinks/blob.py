@@ -272,7 +272,9 @@ class BlobResultSink(ResultSink):
     def consumes(self) -> list[str]:  # pragma: no cover - to be overridden when chaining enabled
         return []
 
-    def finalize(self, artifacts: Mapping[str, Artifact], *, metadata: dict[str, Any] | None = None) -> None:  # pragma: no cover - optional cleanup
+    def finalize(
+        self, artifacts: Mapping[str, Artifact], *, metadata: dict[str, Any] | None = None
+    ) -> None:  # pragma: no cover - optional cleanup
         return None
 
     @staticmethod

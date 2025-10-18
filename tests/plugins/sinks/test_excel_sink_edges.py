@@ -18,6 +18,7 @@ def _results():
 def test_excel_skip_on_error(monkeypatch, tmp_path, caplog):
     base = tmp_path / "excel"
     base.mkdir()
+
     class DummyWorkbook:
         def __init__(self):
             pass

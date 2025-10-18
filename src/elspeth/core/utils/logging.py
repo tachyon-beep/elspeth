@@ -74,6 +74,7 @@ class PluginLogger:
 
         # Serialise file appends across threads (must exist before first write)
         import threading
+
         self._file_lock = threading.Lock()
         # Log initialization
         self._log_initialization()

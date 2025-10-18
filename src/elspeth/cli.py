@@ -204,10 +204,7 @@ def run(args: argparse.Namespace) -> None:
 
             payload = run_job_file(args.job_config)
             # Emit preview and optional artifacts
-            rows = [
-                _result_to_row(record)
-                for record in payload.get("results", [])
-            ]
+            rows = [_result_to_row(record) for record in payload.get("results", [])]
             df = pd.DataFrame(rows)
             if args.head and args.head > 0 and not df.empty:
                 print(format_preview(df, args.head))
@@ -527,13 +524,15 @@ def _run_suite(
             SuiteReportGenerator(suite, results).generate_all_reports(reports_dir)
 
     _maybe_write_artifacts_suite(args, settings, suite, results)
-    
+
+
 def _ensure_artifacts_dir(base: Path | None) -> Path:
     ts = pd.Timestamp.utcnow().strftime("%Y%m%dT%H%M%SZ")
     root = base if base else Path("artifacts")
     path = root / ts
     path.mkdir(parents=True, exist_ok=True)
     return path
+
 
 def _write_simple_artifacts(art_dir: Path, name: str, payload: dict[str, Any], settings) -> None:
     # Results JSON
@@ -547,6 +546,7 @@ def _write_simple_artifacts(art_dir: Path, name: str, payload: dict[str, Any], s
     except (OSError, UnicodeError):
         logger.debug("Failed to copy settings file", exc_info=True)
 
+
 def _maybe_write_artifacts_single(args: argparse.Namespace, settings, payload: dict[str, Any], df: pd.DataFrame) -> None:
     art_base = getattr(args, "artifacts_dir", None)
     if art_base is None and not getattr(args, "signed_bundle", False):
@@ -554,7 +554,10 @@ def _maybe_write_artifacts_single(args: argparse.Namespace, settings, payload: d
     art_dir = _ensure_artifacts_dir(art_base)
     _write_simple_artifacts(art_dir, "single", payload, settings)
     if getattr(args, "signed_bundle", False):
-        _create_signed_bundle(art_dir, "single", payload, settings, df, signing_key_env=getattr(args, "signing_key_env", "ELSPETH_SIGNING_KEY"))
+        _create_signed_bundle(
+            art_dir, "single", payload, settings, df, signing_key_env=getattr(args, "signing_key_env", "ELSPETH_SIGNING_KEY")
+        )
+
 
 def _maybe_write_artifacts_suite(args: argparse.Namespace, settings, suite: ExperimentSuite, results: dict[str, Any]) -> None:
     art_base = getattr(args, "artifacts_dir", None)
@@ -562,7 +565,9 @@ def _maybe_write_artifacts_suite(args: argparse.Namespace, settings, suite: Expe
         return
     art_dir = _ensure_artifacts_dir(art_base)
     # Write each experiment payload and the suite config
-    (art_dir / "suite.json").write_text(json.dumps({k: v["payload"] for k, v in results.items()}, indent=2, sort_keys=True), encoding="utf-8")
+    (art_dir / "suite.json").write_text(
+        json.dumps({k: v["payload"] for k, v in results.items()}, indent=2, sort_keys=True), encoding="utf-8"
+    )
     try:
         cfg_path = Path(getattr(settings, "config_path", ""))
         if cfg_path and cfg_path.exists():
@@ -578,7 +583,10 @@ def _maybe_write_artifacts_suite(args: argparse.Namespace, settings, suite: Expe
             df = settings.datasource.load()
         except Exception:
             df = pd.DataFrame()
-        _create_signed_bundle(art_dir, "suite", combined, settings, df, signing_key_env=getattr(args, "signing_key_env", "ELSPETH_SIGNING_KEY"))
+        _create_signed_bundle(
+            art_dir, "suite", combined, settings, df, signing_key_env=getattr(args, "signing_key_env", "ELSPETH_SIGNING_KEY")
+        )
+
 
 def _create_signed_bundle(art_dir: Path, name: str, payload: dict[str, Any], settings, df: pd.DataFrame, *, signing_key_env: str) -> None:
     try:
@@ -611,6 +619,7 @@ def _create_signed_bundle(art_dir: Path, name: str, payload: dict[str, Any], set
 def _load_yaml_json(path: Path) -> dict[str, Any]:
     try:
         import yaml
+
         data = yaml.safe_load(path.read_text(encoding="utf-8"))
         if isinstance(data, dict):
             return data

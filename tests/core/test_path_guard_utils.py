@@ -59,4 +59,3 @@ def test_safe_atomic_write_success_and_failure(tmp_path: Path):
     with pytest.raises(RuntimeError):
         safe_atomic_write(out2, writer_fail)
     assert not out2.exists()
-

@@ -52,4 +52,3 @@ def test_visual_sink_seaborn_style_fallback(tmp_path: Path, monkeypatch: pytest.
 
     sink.write(_payload_with_aggregates(), metadata={})
     assert (tmp_path / "analytics_visual.png").exists()
-

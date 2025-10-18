@@ -33,4 +33,3 @@ def test_infer_schema_unknown_dtype_defaults_to_str():
     # Should accept strings for category column (mapped to str)
     row = Schema(c="value")
     assert row.c == "value"
-

@@ -15,4 +15,3 @@ def test_safe_get_and_comparisons_dataframe():
     df = _comparisons_dataframe(comparative)
     assert set(df.columns) == {"experiment", "plugin", "metric", "delta"}
     assert len(df) == 3
-

@@ -11,4 +11,3 @@ def test_generate_visualizations_skips_when_no_experiments(tmp_path: Path):
     out = tmp_path
     gen._generate_visualizations(out, {"variants": {}})
     assert not (out / "analysis_summary.png").exists()
-

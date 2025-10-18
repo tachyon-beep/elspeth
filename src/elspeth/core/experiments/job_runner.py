@@ -32,8 +32,8 @@ job:
 
 from __future__ import annotations
 
-from pathlib import Path
 import logging
+from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 import yaml
@@ -98,7 +98,10 @@ def run_job_config(job: Mapping[str, Any]) -> dict[str, Any]:
         user = prompt.get("user", "")
         fields = list(prompt.get("fields", []))
 
-        llm = create_llm_from_definition({"plugin": llm_def.get("plugin"), "options": llm_def.get("options", {}), "security_level": llm_def.get("security_level")}, parent_context=ctx)
+        llm = create_llm_from_definition(
+            {"plugin": llm_def.get("plugin"), "options": llm_def.get("options", {}), "security_level": llm_def.get("security_level")},
+            parent_context=ctx,
+        )
 
         runner = ExperimentRunner(
             llm_client=llm,

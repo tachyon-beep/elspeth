@@ -22,4 +22,3 @@ def test_azure_env_logs_table_fallback_without_run(caplog: pytest.LogCaptureFixt
         )
     # Fallback logging path should include the table tag
     assert any("azure_env-table" in rec.message for rec in caplog.records)
-

@@ -62,7 +62,20 @@ def test_load_blob_config_invalid_yaml(tmp_path: Path):
 
 def test_load_blob_config_profile_missing(tmp_path: Path):
     p = tmp_path / "config.yaml"
-    p.write_text(json.dumps({"default": {"connection_name": "c", "azureml_datastore_uri": "x", "account_name": "a", "container_name": "c", "blob_path": "b"}}), encoding="utf-8")
+    p.write_text(
+        json.dumps(
+            {
+                "default": {
+                    "connection_name": "c",
+                    "azureml_datastore_uri": "x",
+                    "account_name": "a",
+                    "container_name": "c",
+                    "blob_path": "b",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
     with pytest.raises(BlobConfigurationError):
         load_blob_config(p, profile="other")
 
@@ -73,4 +86,3 @@ def test_load_blob_config_profile_string_invalid_json(tmp_path: Path):
     p.write_text(json.dumps({"default": "{not json}"}), encoding="utf-8")
     with pytest.raises(BlobConfigurationError):
         load_blob_config(p)
-

@@ -57,4 +57,3 @@ def test_content_safety_skip_on_error(monkeypatch, caplog):
     out = mw.before_request(req)
     assert out.user_prompt == "ok"
     assert any("Content Safety call failed; skipping" in rec.message for rec in caplog.records)
-

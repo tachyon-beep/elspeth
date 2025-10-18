@@ -48,6 +48,11 @@ def test_cli_artifact_publish_dry_run(monkeypatch, tmp_path: Path) -> None:
                 "determinism_level": "guaranteed",
                 "options": {"seed": 1},
             },
+            "prompts": {
+                "system": "System",
+                "user": "User {{ payload }}",
+            },
+            "prompt_fields": ["payload"],
             "sinks": [
                 {
                     "plugin": "csv",
@@ -117,4 +122,3 @@ def test_cli_artifact_publish_dry_run(monkeypatch, tmp_path: Path) -> None:
     results, metadata = DummyPublishSink.calls[-1]
     bundle_path = Path(metadata.get("path") or results.get("artifacts", [None])[0])
     assert bundle_path and bundle_path.exists(), "bundle path should exist on disk"
-

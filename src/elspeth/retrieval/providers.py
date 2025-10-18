@@ -34,7 +34,7 @@ class VectorQueryClient:
 
 
 class PgVectorQueryClient(VectorQueryClient):
-    def __init__(self, *, dsn: str, table: str = "elspeth_rag") -> None:
+    def __init__(self, *, dsn: str, table: str = "elspeth_rag", connect_timeout: float | int | None = None) -> None:
         import psycopg
         from psycopg import sql
 
@@ -42,6 +42,7 @@ class PgVectorQueryClient(VectorQueryClient):
         self._sql = sql
         self._dsn = dsn
         self._table = table
+        self._connect_timeout = int(connect_timeout) if connect_timeout is not None else None
 
     def query(
         self,
@@ -52,7 +53,12 @@ class PgVectorQueryClient(VectorQueryClient):
         min_score: float,
     ) -> Iterable[QueryResult]:
         vector_literal = self._vector_literal(query_vector)
-        conn = self._psycopg.connect(self._dsn, autocommit=True)
+        dsn = self._dsn
+        if self._connect_timeout is not None:
+            # Append connect_timeout to DSN without disturbing existing params
+            sep = "&" if ("?" in dsn) else "?"
+            dsn = f"{dsn}{sep}connect_timeout={self._connect_timeout}"
+        conn = self._psycopg.connect(dsn, autocommit=True)
         try:
             # Use sql.Identifier to safely quote table name and prevent SQL injection
             with conn.cursor() as cur:
@@ -104,6 +110,7 @@ class AzureSearchQueryClient(VectorQueryClient):
         vector_field: str = "embedding",
         namespace_field: str = "namespace",
         content_field: str = "contents",
+        request_timeout: float | int | None = None,
     ) -> None:
         from azure.core.credentials import AzureKeyCredential
         from azure.search.documents import SearchClient
@@ -114,6 +121,7 @@ class AzureSearchQueryClient(VectorQueryClient):
         self._vector_field = vector_field
         self._namespace_field = namespace_field
         self._content_field = content_field
+        self._timeout = float(request_timeout) if request_timeout is not None else None
 
     def query(
         self,
@@ -124,12 +132,16 @@ class AzureSearchQueryClient(VectorQueryClient):
         min_score: float,
     ) -> Iterable[QueryResult]:
         filter_clause = f"{self._namespace_field} eq '{namespace}'"
+        search_kwargs: dict[str, Any] = {}
+        if self._timeout is not None:
+            search_kwargs["timeout"] = self._timeout
         results = self._client.search(
             search_text="",
             filter=filter_clause,
             vector=list(query_vector),
             top_k=top_k,
             vector_fields=self._vector_field,
+            **search_kwargs,
         )
         for doc in results:
             score = float(getattr(doc, "@search.score", 0.0))
@@ -193,5 +205,6 @@ def create_query_client(provider: str, options: Mapping[str, Any]) -> VectorQuer
             vector_field=vector_field,
             namespace_field=namespace_field,
             content_field=content_field,
+            request_timeout=options.get("request_timeout") or options.get("timeout"),
         )
     raise ValueError(f"Unsupported retriever provider '{provider}'")

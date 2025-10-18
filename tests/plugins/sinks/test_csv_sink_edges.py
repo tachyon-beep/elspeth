@@ -30,4 +30,3 @@ def test_csv_path_outside_allowed_base_skip(tmp_path, caplog):
     # Write should be skipped due to path containment error
     assert not dest.exists()
     assert any("CSV sink failed; skipping write" in rec.message for rec in caplog.records)
-

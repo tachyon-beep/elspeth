@@ -44,7 +44,7 @@ class BaseCSVDataSource(DataSource):
             base = None
             if base_path is not None:
                 base = Path(base_path)
-            elif (inp := os.environ.get("ELSPETH_INPUTS_DIR")):
+            elif inp := os.environ.get("ELSPETH_INPUTS_DIR"):
                 base = Path(inp)
             if base is not None:
                 raw_path = (base / raw_path).resolve()
@@ -55,9 +55,7 @@ class BaseCSVDataSource(DataSource):
                 if raw_path.is_absolute():
                     common = Path(os.path.commonpath([str(self.allowed_base_path.resolve()), str(raw_path.parent.resolve())]))
                     if common != self.allowed_base_path.resolve():
-                        raise ValueError(
-                            f"CSV datasource path '{raw_path}' escapes allowed base '{self.allowed_base_path}'"
-                        )
+                        raise ValueError(f"CSV datasource path '{raw_path}' escapes allowed base '{self.allowed_base_path}'")
             except Exception as exc:
                 raise ValueError(f"Invalid CSV datasource path resolution: {exc}") from exc
         self.path = raw_path

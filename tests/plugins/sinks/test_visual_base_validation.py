@@ -29,4 +29,3 @@ def test_visual_base_validation_errors():
 def test_visual_base_validate_formats_normalizes():
     d = _Dummy(base_path=".", file_stem="x", formats=["PNG", "bad", "html"])
     assert d.formats == ["png", "html"]
-

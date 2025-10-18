@@ -19,9 +19,7 @@ def test_static_llm_requires_content_and_respects_parent_levels():
         create_llm_from_definition({"plugin": "static_test", "options": {}}, parent_context=parent)
 
     # Provide content; should succeed and return plugin instance
-    plugin = create_llm_from_definition(
-        {"plugin": "static_test", "options": {"content": "ok"}}, parent_context=parent
-    )
+    plugin = create_llm_from_definition({"plugin": "static_test", "options": {"content": "ok"}}, parent_context=parent)
     assert plugin.generate(system_prompt="", user_prompt="")["content"] == "ok"
 
 

@@ -23,4 +23,3 @@ def test_experiment_config_valid_minimal():
 def test_experiment_config_invalid_cases(bad_cfg):
     with pytest.raises(ConfigurationError):
         validate_experiment_config(bad_cfg)
-
