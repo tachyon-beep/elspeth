@@ -23,8 +23,17 @@ class HttpOpenAIClient(LLMClientProtocol):
         temperature: float | None = None,
         max_tokens: int | None = None,
         timeout: float = 30.0,
+        security_level: str | None = None,
     ) -> None:
         self.api_base = api_base.rstrip("/")
+        # Defense-in-depth: validate endpoint even when instantiated directly
+        try:
+            from elspeth.core.security import validate_http_api_endpoint
+
+            validate_http_api_endpoint(endpoint=self.api_base, security_level=security_level)
+        except Exception as exc:  # pragma: no cover - validation path exercised via registry tests
+            # Raise a clear error for misconfiguration/bypasses
+            raise ValueError(f"HTTP API endpoint validation failed: {exc}") from exc
         if not api_key and api_key_env:
             api_key = os.getenv(api_key_env)
         self.api_key = api_key

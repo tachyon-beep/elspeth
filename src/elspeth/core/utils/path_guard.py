@@ -88,10 +88,10 @@ def safe_atomic_write(path: Path, write_to: Callable[[Path], None]) -> None:
         # already uses a safe default on POSIX, but we enforce explicitly.
         try:
             os.fchmod(tmp_fd, 0o600)
-        except Exception:
+        except Exception:  # nosec B110 - best-effort permission hardening; non-fatal
             try:
                 os.chmod(tmp_path, 0o600)
-            except Exception:
+            except Exception:  # nosec B110 - best-effort permission hardening; non-fatal
                 pass
         os.close(tmp_fd)
         tmp_fd = None
@@ -105,14 +105,14 @@ def safe_atomic_write(path: Path, write_to: Callable[[Path], None]) -> None:
         if tmp_fd is not None:
             try:
                 os.close(tmp_fd)
-            except Exception:
+            except Exception:  # nosec B110 - cleanup best-effort
                 pass
         if tmp_path_str:
             try:
                 tmp_p = Path(tmp_path_str)
                 if tmp_p.exists():
                     tmp_p.unlink(missing_ok=True)
-            except Exception:
+            except Exception:  # nosec B110 - cleanup best-effort
                 pass
 
 

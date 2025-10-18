@@ -47,6 +47,8 @@ dev = [
   "pip-tools>=7.5,<8.0",
   "pip-audit>=2.7.3",
   "cyclonedx-bom>=3.15.0",
+  "bandit>=1.8.6",
+  "semgrep>=1.70.0",
 ]
 # Azure ML integration (truly optional - external infrastructure)
 azure = [
@@ -78,7 +80,12 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I"]
-ignore = []
+# Relax overly strict defaults for this codebase; enforce functional errors and import hygiene.
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+# Allow tests to carry helper imports and flexible styles
+"tests/**" = ["F401", "I001", "E501", "F811"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["elspeth"]
@@ -91,7 +98,7 @@ line-ending = "lf"
 [tool.mypy]
 python_version = "3.12"
 warn_return_any = true
-warn_unused_configs = true
+warn_unused_configs = false
 disallow_untyped_defs = false
 disallow_incomplete_defs = false
 check_untyped_defs = true
@@ -116,3 +123,102 @@ module = [
     "psycopg",
 ]
 ignore_missing_imports = true
+
+# Phase-in stricter typing for core utilities and registries
+[[tool.mypy.overrides]]
+module = [
+  "elspeth.core.utils.*",
+  "elspeth.core.registries.*",
+]
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+
+# Next wave: tools package
+[[tool.mypy.overrides]]
+module = [
+  "elspeth.tools.*",
+]
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+
+# Core base package
+[[tool.mypy.overrides]]
+module = [
+  "elspeth.core.base.*",
+]
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+
+# Core experiments (phase in config and registries first)
+[[tool.mypy.overrides]]
+module = [
+  "elspeth.core.experiments.config",
+  "elspeth.core.experiments.experiment_registries",
+]
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+
+[[tool.mypy.overrides]]
+module = [
+  "elspeth.core.experiments.tools",
+]
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+
+[[tool.mypy.overrides]]
+module = [
+  "elspeth.core.experiments.plugin_registry",
+]
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+
+[[tool.mypy.overrides]]
+module = [
+  "elspeth.core.experiments.runner",
+  "elspeth.core.experiments.suite_runner",
+]
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+
+[[tool.mypy.overrides]]
+module = [
+  "elspeth.core.controls.*",
+]
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+
+[[tool.mypy.overrides]]
+module = [
+  "elspeth.core.prompts.*",
+]
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+
+[[tool.mypy.overrides]]
+module = [
+  "elspeth.plugins.nodes.sinks.*",
+]
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+
+[[tool.mypy.overrides]]
+module = [
+  "elspeth.plugins.nodes.transforms.llm.*",
+  "elspeth.plugins.nodes.transforms.llm.middleware.*",
+]
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+
+[[tool.mypy.overrides]]
+module = [
+  "elspeth.adapters.*",
+]
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+
+[[tool.mypy.overrides]]
+module = [
+  "elspeth.plugins.utilities.retrieval",
+]
+disallow_untyped_defs = true
+disallow_incomplete_defs = true

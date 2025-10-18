@@ -8,11 +8,12 @@ import logging
 import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Mapping
 
 import requests
 
-from elspeth.core.base.protocols import ResultSink
+from elspeth.core.base.protocols import Artifact, ArtifactDescriptor, ResultSink
 
 logger = logging.getLogger(__name__)
 
@@ -54,8 +55,30 @@ class _RepoSinkBase(ResultSink):
     def __post_init__(self) -> None:
         if self.session is None:
             self.session = requests.Session()
+            # Mount retry adapter to improve resilience on transient failures
+            try:  # pragma: no cover - adapter import/availability varies by env
+                from requests.adapters import HTTPAdapter
+                from urllib3.util.retry import Retry
+
+                retry = Retry(
+                    total=3,
+                    backoff_factor=0.5,
+                    status_forcelist=[429, 500, 502, 503, 504],
+                    allowed_methods=["GET", "PUT", "POST"],
+                )
+                adapter = HTTPAdapter(max_retries=retry)
+                self.session.mount("https://", adapter)
+                self.session.mount("http://", adapter)
+            except Exception:
+                # Non-fatal if retry adapter isn't available
+                pass
         if self.on_error not in {"abort", "skip"}:
             raise ValueError("on_error must be 'abort' or 'skip'")
+        if self.dry_run:
+            logger.warning(
+                "Repository sink running in dry-run mode; no remote writes will occur. "
+                "Enable --live-outputs via CLI or set dry_run=False in configuration for actual pushes."
+            )
 
     def write(self, results: dict[str, Any], *, metadata: dict[str, Any] | None = None) -> None:
         metadata = metadata or {}
@@ -156,13 +179,13 @@ class _RepoSinkBase(ResultSink):
     ) -> None:
         raise NotImplementedError
 
-    def produces(self):  # pragma: no cover - placeholder for artifact chaining
+    def produces(self) -> list[ArtifactDescriptor]:  # pragma: no cover - placeholder for artifact chaining
         return []
 
-    def consumes(self):  # pragma: no cover - placeholder for artifact chaining
+    def consumes(self) -> list[str]:  # pragma: no cover - placeholder for artifact chaining
         return []
 
-    def finalize(self, artifacts, *, metadata=None):  # pragma: no cover - optional cleanup
+    def finalize(self, artifacts: Mapping[str, Artifact], *, metadata: dict[str, Any] | None = None) -> None:  # pragma: no cover - optional cleanup
         return None
 
     @staticmethod
@@ -248,9 +271,10 @@ class GitHubRepoSink(_RepoSinkBase):
         # response.json() returns Any, so dict access returns Any despite runtime str value
         return data.get("sha")  # type: ignore[no-any-return]
 
-    def _request(self, method: str, url: str, expected_status: set[int] | None = None, **kwargs: Any):
+    def _request(self, method: str, url: str, expected_status: set[int] | None = None, **kwargs: Any) -> Any:
         expected_status = expected_status or {200, 201}
-        assert self.session is not None, "session must be initialized"
+        if self.session is None:  # pragma: no cover - defensive
+            raise RuntimeError("session must be initialized")
         timeout = kwargs.pop("timeout", self.request_timeout)
         response = self.session.request(method, url, headers=self._headers(), timeout=timeout, **kwargs)
         if response.status_code not in expected_status:
@@ -362,9 +386,10 @@ class AzureDevOpsRepoSink(_RepoSinkBase):
         # Comparison expression inferred as Any due to response type annotation gaps
         return response.status_code == 200  # type: ignore[no-any-return]
 
-    def _request(self, method: str, url: str, expected_status: set[int] | None = None, **kwargs: Any):
+    def _request(self, method: str, url: str, expected_status: set[int] | None = None, **kwargs: Any) -> Any:
         expected_status = expected_status or {200, 201}
-        assert self.session is not None, "session must be initialized"
+        if self.session is None:  # pragma: no cover - defensive
+            raise RuntimeError("session must be initialized")
         timeout = kwargs.pop("timeout", self.request_timeout)
         response = self.session.request(method, url, headers=self._headers(), timeout=timeout, **kwargs)
         if response.status_code not in expected_status:
@@ -375,3 +400,98 @@ class AzureDevOpsRepoSink(_RepoSinkBase):
         if not path.startswith("/"):
             return f"/{path}"
         return path
+
+
+class AzureDevOpsArtifactsRepoSink(AzureDevOpsRepoSink):
+    """Publish local folders or archives to an Azure DevOps Git repository.
+
+    This sink uploads all files under a local `folder_path` into the target
+    repository under `dest_prefix_template` (defaults to artifacts/{timestamp}).
+    Files are committed in a single push. Binary files are uploaded using
+    base64-encoded content.
+    """
+
+    def __init__(
+        self,
+        *,
+        folder_path: str,
+        dest_prefix_template: str = "artifacts/{timestamp}",
+        commit_message_template: str = "Publish artifacts for {experiment}",
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(commit_message_template=commit_message_template, **kwargs)
+        self.folder_path = folder_path
+        self.dest_prefix_template = dest_prefix_template
+
+    def write(self, results: dict[str, Any], *, metadata: dict[str, Any] | None = None) -> None:
+        metadata = metadata or {}
+        timestamp = datetime.now(timezone.utc)
+        context = _default_context(metadata, timestamp)
+        prefix = self._resolve_prefix(context)
+        commit_message = self.commit_message_template.format(**context)
+        try:
+            changes = self._collect_changes(prefix)
+            if not changes:
+                logger.info("No files found to publish from %s", self.folder_path)
+                return
+            payload = {
+                "refUpdates": [
+                    {
+                        "name": f"refs/heads/{self.branch}",
+                        "oldObjectId": self._get_branch_ref(),
+                    }
+                ],
+                "commits": [
+                    {
+                        "comment": commit_message,
+                        "changes": changes,
+                    }
+                ],
+            }
+            url = (
+                f"{self.base_url}/{self.organization}/{self.project}/_apis/git"
+                f"/repositories/{self.repository}/pushes?api-version={self.api_version}"
+            )
+            if not self.dry_run:
+                self._request("POST", url, json=payload, expected_status={200, 201})
+            else:
+                logger.warning("AzureDevOpsArtifactsRepoSink in dry-run mode; not pushing changes.")
+        except Exception as exc:
+            if self.on_error == "skip":
+                logger.warning("Artifacts repo sink failed; skipping upload: %s", exc)
+                return
+            raise
+
+    def _resolve_prefix(self, context: Mapping[str, Any]) -> str:
+        template = self.dest_prefix_template or "artifacts/{timestamp}"
+        try:
+            return template.format(**context)
+        except KeyError as exc:
+            missing = exc.args[0]
+            raise ValueError(f"Missing placeholder '{missing}' in dest prefix template") from exc
+
+    def _collect_changes(self, prefix: str) -> list[dict[str, Any]]:
+        root = Path(self.folder_path)
+        if not root.exists() or not root.is_dir():
+            return []
+        changes: list[dict[str, Any]] = []
+        for path in root.rglob("*"):
+            if path.is_dir():
+                continue
+            rel = path.relative_to(root).as_posix()
+            dest = f"/{prefix}/{rel}"
+            b = path.read_bytes()
+            # Use base64encoded to handle binaries safely
+            encoded = base64.b64encode(b).decode("ascii")
+            change_type = "edit" if self._item_exists(dest) else "add"
+            changes.append(
+                {
+                    "changeType": change_type,
+                    "item": {"path": dest},
+                    "newContent": {
+                        "content": encoded,
+                        "contentType": "base64encoded",
+                    },
+                }
+            )
+        return changes

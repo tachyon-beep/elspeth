@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import logging
 import os
+import random
+import time
 from typing import Any, Sequence
 
 import requests
@@ -99,8 +101,19 @@ class AzureContentSafetyMiddleware(LLMMiddleware):
             "text": text,
             "categories": self.categories,
         }
-        response = requests.post(url, headers=headers, json=payload, timeout=10)
-        response.raise_for_status()
+        # Best-effort, bounded retries with exponential backoff + jitter
+        attempts, delay = 0, 0.5
+        while True:
+            attempts += 1
+            try:
+                response = requests.post(url, headers=headers, json=payload, timeout=10)
+                response.raise_for_status()
+                break
+            except Exception:  # pragma: no cover - network failure path
+                if attempts >= 3:
+                    raise
+                time.sleep(delay + random.random() * 0.2)
+                delay *= 2
         data = response.json()
         flagged = False
         max_severity = 0

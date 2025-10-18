@@ -13,7 +13,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-from elspeth.core.base.protocols import Artifact, ResultSink
+from elspeth.core.base.protocols import Artifact, ArtifactDescriptor, ResultSink
 from elspeth.core.security import normalize_determinism_level, normalize_security_level
 
 logger = logging.getLogger(__name__)
@@ -293,15 +293,15 @@ class BaseVisualSink(ResultSink):
         """Generate and save visualizations. Must be implemented by subclasses."""
         raise NotImplementedError("Subclasses must implement write()")
 
-    def produces(self):
+    def produces(self) -> list[ArtifactDescriptor]:
         """Declare produced artifacts. Must be implemented by subclasses."""
         raise NotImplementedError("Subclasses must implement produces()")
 
-    def consumes(self):
+    def consumes(self) -> list[str]:
         """Declare consumed artifacts. Must be implemented by subclasses."""
         raise NotImplementedError("Subclasses must implement consumes()")
 
-    def collect_artifacts(self):
+    def collect_artifacts(self) -> dict[str, Artifact]:
         """Return artifacts created by write(). Must be implemented by subclasses."""
         raise NotImplementedError("Subclasses must implement collect_artifacts()")
 

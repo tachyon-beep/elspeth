@@ -320,7 +320,7 @@ class SuiteReportGenerator:
         return config.to_export_dict()
 
 
-def _comparisons_dataframe(comparative: dict[str, Any]):
+def _comparisons_dataframe(comparative: dict[str, Any]) -> Any:
     """Build DataFrame of baseline comparison deltas across experiments.
 
     Args:

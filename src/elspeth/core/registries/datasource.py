@@ -109,6 +109,8 @@ _CSV_BLOB_DATASOURCE_SCHEMA = with_security_properties(
         "type": "object",
         "properties": {
             "path": {"type": "string"},
+            "base_path": {"type": "string"},
+            "allowed_base_path": {"type": "string"},
             "dtype": {"type": "object"},
             "encoding": {"type": "string"},
             "on_error": ON_ERROR_ENUM,
@@ -127,6 +129,8 @@ _CSV_DATASOURCE_SCHEMA = with_security_properties(
         "type": "object",
         "properties": {
             "path": {"type": "string"},
+            "base_path": {"type": "string"},
+            "allowed_base_path": {"type": "string"},
             "dtype": {"type": "object"},
             "encoding": {"type": "string"},
             "on_error": ON_ERROR_ENUM,

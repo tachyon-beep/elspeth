@@ -170,7 +170,7 @@ class BlobDataLoader:
         self._blob_client = None
 
     @property
-    def blob_client(self):
+    def blob_client(self) -> Any:
         """Instantiate the BlobClient lazily to avoid import costs."""
 
         if self._blob_client is None:
@@ -230,7 +230,7 @@ class BlobDataLoader:
         # Azure SDK readall() returns Any despite runtime bytes value
         return downloader.readall()  # type: ignore[no-any-return]
 
-    def load_csv(self, **pandas_kwargs):
+    def load_csv(self, **pandas_kwargs: Any) -> Any:
         """Load the blob as a Pandas DataFrame."""
 
         import pandas as pd  # pylint: disable=import-outside-toplevel
@@ -247,7 +247,7 @@ def load_blob_csv(
     credential: Any | None = None,
     timeout: int | None = 60,
     pandas_kwargs: dict[str, Any] | None = None,
-):
+)-> Any:
     """Convenience helper that downloads a CSV using the configured blob."""
 
     config = load_blob_config(config_path, profile=profile)

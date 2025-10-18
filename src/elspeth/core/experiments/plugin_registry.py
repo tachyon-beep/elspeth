@@ -124,8 +124,9 @@ def create_row_plugin(
             allow_none=False,
         )
         # When allow_none=False, create_plugin_with_inheritance never returns None
-        # (it raises ValueError instead), but mypy doesn't track this
-        assert result is not None, "Unreachable: allow_none=False prevents None return"
+        # (it raises ValueError instead). Add a defensive runtime check.
+        if result is None:  # pragma: no cover - defensive, should be unreachable
+            raise RuntimeError("Unexpected None from row plugin factory with allow_none=False")
         return result
     except ValueError as exc:
         # Re-raise with backward-compatible error message for tests
@@ -156,7 +157,8 @@ def create_aggregation_plugin(
         allow_none=False,
     )
     # When allow_none=False, create_plugin_with_inheritance never returns None
-    assert result is not None, "Unreachable: allow_none=False prevents None return"
+    if result is None:  # pragma: no cover - defensive, should be unreachable
+        raise RuntimeError("Unexpected None from baseline plugin factory with allow_none=False")
     return result
 
 
@@ -181,7 +183,8 @@ def create_baseline_plugin(
         allow_none=False,
     )
     # When allow_none=False, create_plugin_with_inheritance never returns None
-    assert result is not None, "Unreachable: allow_none=False prevents None return"
+    if result is None:  # pragma: no cover - defensive, should be unreachable
+        raise RuntimeError("Unexpected None from validation plugin factory with allow_none=False")
     return result
 
 
@@ -206,7 +209,8 @@ def create_validation_plugin(
         allow_none=False,
     )
     # When allow_none=False, create_plugin_with_inheritance never returns None
-    assert result is not None, "Unreachable: allow_none=False prevents None return"
+    if result is None:  # pragma: no cover - defensive, should be unreachable
+        raise RuntimeError("Unexpected None from early-stop plugin factory with allow_none=False")
     return result
 
 
@@ -231,7 +235,8 @@ def create_early_stop_plugin(
         allow_none=False,
     )
     # When allow_none=False, create_plugin_with_inheritance never returns None
-    assert result is not None, "Unreachable: allow_none=False prevents None return"
+    if result is None:  # pragma: no cover - defensive, should be unreachable
+        raise RuntimeError("Unexpected None from early-stop plugin factory with allow_none=False")
     return result
 
 

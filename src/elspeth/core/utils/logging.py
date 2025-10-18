@@ -72,6 +72,9 @@ class PluginLogger:
         # Standard Python logger for traditional logging
         self.logger = logging.getLogger(f"elspeth.{context.plugin_kind}.{context.plugin_name}")
 
+        # Serialise file appends across threads (must exist before first write)
+        import threading
+        self._file_lock = threading.Lock()
         # Log initialization
         self._log_initialization()
 
@@ -364,8 +367,9 @@ class PluginLogger:
             entry: Log entry dictionary
         """
         try:
-            with open(self.log_file, "a", encoding="utf-8") as f:
-                f.write(json.dumps(entry) + "\n")
+            with self._file_lock:
+                with open(self.log_file, "a", encoding="utf-8") as f:
+                    f.write(json.dumps(entry) + "\n")
         except (OSError, IOError) as exc:
             # Fallback to standard logger if file write fails
             self.logger.error("Failed to write log entry: %s", exc)

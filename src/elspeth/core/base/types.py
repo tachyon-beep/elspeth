@@ -5,6 +5,7 @@ and data types used throughout the framework.
 """
 
 from enum import Enum
+from typing import Any
 
 
 class SecurityLevel(str, Enum):
@@ -24,9 +25,9 @@ class SecurityLevel(str, Enum):
     OFFICIAL_SENSITIVE = "OFFICIAL: SENSITIVE"
     PROTECTED = "PROTECTED"
     # This is a classification level, not a password
-    SECRET = "SECRET"  # noqa: S105
+    SECRET = "SECRET"  # noqa: S105  # nosec B105: classification level label, not a password/secret
 
-    def __lt__(self, other):
+    def __lt__(self, other: str) -> Any:
         """Support comparison for hierarchy enforcement."""
         if not isinstance(other, SecurityLevel):
             return NotImplemented
@@ -39,17 +40,17 @@ class SecurityLevel(str, Enum):
         ]
         return order.index(self) < order.index(other)
 
-    def __le__(self, other):
+    def __le__(self, other: str) -> Any:
         """Support comparison for hierarchy enforcement."""
         return self == other or self < other
 
-    def __gt__(self, other):
+    def __gt__(self, other: str) -> Any:
         """Support comparison for hierarchy enforcement."""
         if not isinstance(other, SecurityLevel):
             return NotImplemented
         return other < self
 
-    def __ge__(self, other):
+    def __ge__(self, other: str) -> Any:
         """Support comparison for hierarchy enforcement."""
         return self == other or self > other
 
@@ -112,7 +113,7 @@ class DeterminismLevel(str, Enum):
     HIGH = "high"
     GUARANTEED = "guaranteed"
 
-    def __lt__(self, other):
+    def __lt__(self, other: str) -> Any:
         """Support comparison for hierarchy enforcement."""
         if not isinstance(other, DeterminismLevel):
             return NotImplemented
@@ -124,17 +125,17 @@ class DeterminismLevel(str, Enum):
         ]
         return order.index(self) < order.index(other)
 
-    def __le__(self, other):
+    def __le__(self, other: str) -> Any:
         """Support comparison for hierarchy enforcement."""
         return self == other or self < other
 
-    def __gt__(self, other):
+    def __gt__(self, other: str) -> Any:
         """Support comparison for hierarchy enforcement."""
         if not isinstance(other, DeterminismLevel):
             return NotImplemented
         return other < self
 
-    def __ge__(self, other):
+    def __ge__(self, other: str) -> Any:
         """Support comparison for hierarchy enforcement."""
         return self == other or self > other
 
@@ -272,7 +273,7 @@ class DataType(str, Enum):
             valid_types = ", ".join(dtype.value for dtype in cls)
             raise ValueError(f"Unknown data type '{value}'. Must be one of: {valid_types}") from exc
 
-    def to_pandas_dtype(self):
+    def to_pandas_dtype(self) -> str:
         """Convert DataType enum to Pandas dtype string.
 
         Returns:

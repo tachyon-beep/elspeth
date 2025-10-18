@@ -25,4 +25,3 @@ def test_enhanced_visual_heatmap_skips_on_one_criterion(tmp_path: Path) -> None:
     sink.write({"results": [{"metrics": {"scores": {"critA": 0.5}}}]}, metadata={"experiment": "e"})
     # No heatmap generated with only one criterion; ensure no file
     assert not (tmp_path / "enhanced_visual_heatmap.png").exists()
-

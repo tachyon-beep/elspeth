@@ -66,7 +66,7 @@ class PgVectorQueryClient(VectorQueryClient):
                     ORDER BY embedding <=> %s::vector ASC
                     LIMIT %s
                     """).format(self._sql.Identifier(self._table))
-                cur.execute(
+                cur.execute(  # nosemgrep: python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query
                     query_sql,
                     (vector_literal, namespace, vector_literal, top_k),
                 )

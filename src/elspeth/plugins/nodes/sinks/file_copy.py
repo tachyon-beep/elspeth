@@ -33,7 +33,7 @@ class FileCopySink(ResultSink):
         except Exception:  # pragma: no cover - defensive
             self._allowed_base = self.destination.parent.resolve()
 
-    def prepare_artifacts(self, artifacts: Mapping[str, list[Artifact]]):  # pragma: no cover - optional
+    def prepare_artifacts(self, artifacts: Mapping[str, list[Artifact]]) -> None:  # pragma: no cover - optional
         self._source_artifact = None
         self._output_type = None
         for values in artifacts.values():

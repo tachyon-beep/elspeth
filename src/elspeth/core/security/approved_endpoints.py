@@ -101,14 +101,21 @@ SECURITY_LEVEL_RESTRICTIONS: dict[ServiceType, dict[str, list[str]]] = {
 def _get_environment_patterns() -> list[str]:
     """Get additional approved patterns from environment variable.
 
+    Only enabled in DEVELOPMENT mode to avoid policy drift in stricter modes.
+
     Returns:
         List of regex patterns from ELSPETH_APPROVED_ENDPOINTS env var.
     """
+    # Restrict overrides in STRICT mode; allow in STANDARD and DEVELOPMENT
+    mode = get_secure_mode()
+    if mode == SecureMode.STRICT:
+        return []
+
     env_patterns = os.environ.get("ELSPETH_APPROVED_ENDPOINTS", "").strip()
     if not env_patterns:
         return []
 
-    patterns = []
+    patterns: list[str] = []
     for pattern_str in env_patterns.split(","):
         pattern_str = pattern_str.strip()
         if pattern_str:
@@ -117,7 +124,16 @@ def _get_environment_patterns() -> list[str]:
             patterns.append(pattern_str)
 
     if patterns:
-        logger.info(f"Loaded {len(patterns)} additional approved endpoint patterns from ELSPETH_APPROVED_ENDPOINTS environment variable")
+        if mode == SecureMode.DEVELOPMENT:
+            logger.info(
+                "Loaded %d additional approved endpoint patterns from ELSPETH_APPROVED_ENDPOINTS (DEVELOPMENT mode)",
+                len(patterns),
+            )
+        else:
+            logger.warning(
+                "Loaded %d additional approved endpoint patterns from ELSPETH_APPROVED_ENDPOINTS (STANDARD mode)",
+                len(patterns),
+            )
 
     return patterns
 

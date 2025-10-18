@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import shutil
 import time
 from datetime import datetime, timezone
@@ -25,6 +26,8 @@ class BaseCSVDataSource(DataSource):
         self,
         *,
         path: str | Path,
+        base_path: str | Path | None = None,
+        allowed_base_path: str | Path | None = None,
         dtype: dict[str, Any] | None = None,
         encoding: str = "utf-8",
         on_error: str = "abort",
@@ -35,7 +38,29 @@ class BaseCSVDataSource(DataSource):
         retain_local: bool,  # REQUIRED - no default
         retain_local_path: str | None = None,
     ):
-        self.path = Path(path) if isinstance(path, str) else path
+        # Resolve input path relative to base_path or ELSPETH_INPUTS_DIR when provided
+        raw_path = Path(path) if isinstance(path, str) else path
+        if not raw_path.is_absolute():
+            base = None
+            if base_path is not None:
+                base = Path(base_path)
+            elif (inp := os.environ.get("ELSPETH_INPUTS_DIR")):
+                base = Path(inp)
+            if base is not None:
+                raw_path = (base / raw_path).resolve()
+        self.allowed_base_path = Path(allowed_base_path) if allowed_base_path else None
+        if self.allowed_base_path is not None:
+            try:
+                # Only enforce when path is absolute; otherwise allow relative then resolve at load time
+                if raw_path.is_absolute():
+                    common = Path(os.path.commonpath([str(self.allowed_base_path.resolve()), str(raw_path.parent.resolve())]))
+                    if common != self.allowed_base_path.resolve():
+                        raise ValueError(
+                            f"CSV datasource path '{raw_path}' escapes allowed base '{self.allowed_base_path}'"
+                        )
+            except Exception as exc:
+                raise ValueError(f"Invalid CSV datasource path resolution: {exc}") from exc
+        self.path = raw_path
         self.dtype = dtype
         self.encoding = encoding
         if on_error not in {"abort", "skip"}:

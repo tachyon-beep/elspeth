@@ -6,6 +6,8 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, Callable, cast
 
+import pandas as pd
+
 from elspeth.core.base.plugin_context import PluginContext, apply_plugin_context
 from elspeth.core.base.protocols import LLMClientProtocol, ResultSink
 from elspeth.core.controls import create_cost_tracker, create_rate_limiter
@@ -201,8 +203,10 @@ class ExperimentSuiteRunner:
             )
 
         # After validation, we know these are not None (ConfigurationError would have been raised)
-        assert prompt_system is not None, "prompt_system validated as non-empty above"
-        assert prompt_template is not None, "prompt_template validated as non-empty above"
+        if prompt_system is None:  # pragma: no cover - defensive, should be unreachable
+            raise RuntimeError("prompt_system was None after validation")
+        if prompt_template is None:  # pragma: no cover - defensive, should be unreachable
+            raise RuntimeError("prompt_template was None after validation")
 
         runner_instance = ExperimentRunner(
             llm_client=self.llm_client,
@@ -276,7 +280,7 @@ class ExperimentSuiteRunner:
 
     def run(
         self,
-        df,
+        df: pd.DataFrame,
         defaults: dict[str, Any] | None = None,
         sink_factory: Callable[[ExperimentConfig], list[ResultSink]] | None = None,
         preflight_info: dict[str, Any] | None = None,

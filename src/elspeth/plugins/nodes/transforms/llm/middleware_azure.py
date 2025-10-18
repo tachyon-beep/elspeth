@@ -252,7 +252,7 @@ class AzureEnvironmentMiddleware(LLMMiddleware):
         summary["timestamp"] = int(time.time())
         self._log_row("suite_summary", summary)
 
-    def on_retry_exhausted(self, request, metadata, error) -> None:
+    def on_retry_exhausted(self, request: LLMRequest, metadata: Mapping[str, Any], error: Exception) -> None:
         payload = {
             "timestamp": time.time(),
             "sequence": request.metadata.get("azure_sequence"),

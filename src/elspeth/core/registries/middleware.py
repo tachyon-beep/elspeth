@@ -49,8 +49,9 @@ def create_middleware(
         allow_none=False,
     )
     # When allow_none=False, create_plugin_with_inheritance never returns None
-    # (it raises ValueError instead), but mypy doesn't track this
-    assert result is not None, "Unreachable: allow_none=False prevents None return"
+    # (it raises ValueError instead), but add a runtime guard for safety in optimized runs
+    if result is None:  # pragma: no cover - defensive, should be unreachable
+        raise RuntimeError("Unexpected None from middleware factory with allow_none=False")
     return result
 
 

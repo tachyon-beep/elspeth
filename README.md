@@ -31,12 +31,14 @@ make bootstrap           # creates .venv/, installs extras, runs pytest
 make bootstrap-no-test
 ```
 
-Activate the environment when working manually:
+Activate the environment with locked installs (mandatory for all environments):
 
 ```bash
 source .venv/bin/activate
-pip install --require-hashes -r requirements-dev.lock
+python -m piptools sync requirements-dev.lock
 pip install -e . --no-deps
+
+Note: Do not install directly from `pyproject.toml` constraints (e.g., via unpinned `>=` ranges). Always sync from the lockfile with `piptools sync` to ensure reproducible builds and AIS compliance.
 ```
 
 For Azure ML workflows, use the dedicated lockfiles:
@@ -105,6 +107,7 @@ For diagrams and deep detail, see `docs/architecture/architecture-overview.md`, 
 - Lint/format with `make lint` (runs `ruff` formatting/checks plus `pytype`).
 - Validate dependencies with `make audit` (pip-audit against `requirements.lock`).
 - Generate an SBOM with `make sbom` (outputs `sbom.json` from the locked requirements).
+- Persistent artifacts and audit bundles are written under `artifacts/` when enabled via the CLI (see `--artifacts-dir` and `--signed-bundle`). This directory is git‑ignored by default.
 - Regenerate analytics artefacts after reporting or sink changes:
 
   ```bash

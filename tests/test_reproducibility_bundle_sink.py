@@ -64,4 +64,3 @@ def test_repro_bundle_on_error_skip(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(sink, "_create_archive", _boom)
     sink.write(_results(), metadata={"experiment": "e"})
     assert not (tmp_path / "fail.tar.gz").exists()
-

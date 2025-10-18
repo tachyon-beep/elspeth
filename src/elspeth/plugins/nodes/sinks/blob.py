@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from elspeth.adapters.blob_store import BlobConfig, load_blob_config
-from elspeth.core.base.protocols import Artifact, ResultSink
+from elspeth.core.base.protocols import Artifact, ArtifactDescriptor, ResultSink
 
 logger = logging.getLogger(__name__)
 
@@ -205,7 +205,7 @@ class BlobResultSink(ResultSink):
             manifest["cost_summary"] = results["cost_summary"]
         return manifest
 
-    def _create_blob_client(self, blob_name: str):
+    def _create_blob_client(self, blob_name: str) -> Any:
         service = self._get_service_client()
         container_client = service.get_container_client(self.config.container_name)
         return container_client.get_blob_client(blob_name)
@@ -250,7 +250,7 @@ class BlobResultSink(ResultSink):
                     combined[key] = value
         return combined or None
 
-    def _get_service_client(self):
+    def _get_service_client(self) -> Any:
         if self._blob_service_client is not None:
             # Lazy initialization pattern; mypy sees unreachable due to None-typed field
             return self._blob_service_client  # type: ignore[unreachable]
@@ -269,7 +269,7 @@ class BlobResultSink(ResultSink):
         self._blob_service_client = client  # type: ignore[assignment]
         return self._blob_service_client
 
-    def _resolve_credential(self, config: BlobConfig):
+    def _resolve_credential(self, config: BlobConfig) -> Any:
         if self.credential is not None:
             return self.credential
         if self.credential_env:
@@ -285,13 +285,13 @@ class BlobResultSink(ResultSink):
         return DefaultAzureCredential()
 
     # Artifact contract ---------------------------------------------------
-    def produces(self):  # pragma: no cover - to be overridden when chaining enabled
+    def produces(self) -> list[ArtifactDescriptor]:  # pragma: no cover - to be overridden when chaining enabled
         return []
 
-    def consumes(self):  # pragma: no cover - to be overridden when chaining enabled
+    def consumes(self) -> list[str]:  # pragma: no cover - to be overridden when chaining enabled
         return []
 
-    def finalize(self, artifacts, *, metadata=None):  # pragma: no cover - optional cleanup
+    def finalize(self, artifacts: Mapping[str, Artifact], *, metadata: dict[str, Any] | None = None) -> None:  # pragma: no cover - optional cleanup
         return None
 
     @staticmethod
@@ -305,7 +305,7 @@ class BlobResultSink(ResultSink):
             normalized[key] = "" if value is None else str(value)
         return normalized
 
-    def prepare_artifacts(self, artifacts: Mapping[str, list[Artifact]]):  # pragma: no cover - optional
+    def prepare_artifacts(self, artifacts: Mapping[str, list[Artifact]]) -> None:  # pragma: no cover - optional
         collected: list[Artifact] = []
         for values in artifacts.values():
             if values:

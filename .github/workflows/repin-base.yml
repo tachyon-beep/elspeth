@@ -1,0 +1,33 @@
+name: Repin Base Image Digest
+
+on:
+  schedule:
+    - cron: '0 3 * * 1'  # Mondays at 03:00 UTC
+  workflow_dispatch:
+
+jobs:
+  repin:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve latest digest
+        id: digest
+        run: |
+          docker pull --platform=linux/amd64 python:3.12.12-slim
+          DIGEST=$(docker inspect --format='{{range .RepoDigests}}{{println .}}{{end}}' python:3.12.12-slim | grep '^python@sha256:' | head -n1 | cut -d'@' -f2)
+          echo "digest=$DIGEST" >> $GITHUB_OUTPUT
+
+      - name: Update pin file
+        run: |
+          echo "python:3.12.12-slim@${{ steps.digest.outputs.digest }}" > .github/base-image.txt
+
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v6
+        with:
+          commit-message: "chore: repin base image digest to ${{ steps.digest.outputs.digest }}"
+          title: "Repin base image digest"
+          body: "Updates .github/base-image.txt to latest linux/amd64 digest for python:3.12.12-slim."
+          branch: chore/repin-base-digest
+          delete-branch: true
+
