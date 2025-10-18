@@ -8,12 +8,12 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any, Iterable, Mapping, Callable, Type
 
 import pandas as pd
 
 from elspeth.core.base.protocols import LLMClientProtocol, LLMMiddleware, LLMRequest, ResultSink
-from elspeth.core.base.schema import SchemaViolation, validate_schema_compatibility
+from elspeth.core.base.schema import DataFrameSchema, SchemaViolation, validate_schema_compatibility
 from elspeth.core.controls import CostTracker, RateLimiter
 from elspeth.core.experiments.plugin_registry import create_early_stop_plugin
 from elspeth.core.pipeline.artifact_pipeline import ArtifactPipeline, SinkBinding
@@ -484,8 +484,8 @@ class ExperimentRunner:
         user_template: PromptTemplate,
         criteria_templates: dict[str, PromptTemplate],
         row_plugins: list[RowExperimentPlugin],
-        handle_success,
-        handle_failure,
+        handle_success: Callable[[int, dict[str, Any], str | None], None],
+        handle_failure: Callable[[dict[str, Any]], None],
         config: dict[str, Any],
     ) -> None:
         max_workers = max(int(config.get("max_workers", 4)), 1)
@@ -713,7 +713,7 @@ class ExperimentRunner:
         with path.open("a", encoding="utf-8") as handle:
             handle.write(f"{row_id}\n")
 
-    def _validate_plugin_schemas(self, datasource_schema):
+    def _validate_plugin_schemas(self, datasource_schema: Type[DataFrameSchema]) -> None:
         """
         Validate that all plugins are compatible with datasource schema.
 

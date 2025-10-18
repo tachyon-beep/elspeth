@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from typing import Any, Callable, cast
+import pandas as pd
 
 from elspeth.core.base.plugin_context import PluginContext, apply_plugin_context
 from elspeth.core.base.protocols import LLMClientProtocol, ResultSink
@@ -278,7 +279,7 @@ class ExperimentSuiteRunner:
 
     def run(
         self,
-        df,
+        df: pd.DataFrame,
         defaults: dict[str, Any] | None = None,
         sink_factory: Callable[[ExperimentConfig], list[ResultSink]] | None = None,
         preflight_info: dict[str, Any] | None = None,
