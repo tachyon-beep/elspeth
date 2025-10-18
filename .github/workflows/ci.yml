@@ -151,11 +151,14 @@ jobs:
     timeout-minutes: 30
     permissions:
       security-events: write
-    env:
-      # Set to a digest-pinned image for reproducibility (override in repo/Org env if needed)
-      DOCKER_PYTHON_IMAGE: python:3.12.12-slim
     steps:
       - uses: actions/checkout@v4
+
+      - name: Resolve base image digest (linux/amd64)
+        run: |
+          docker pull --platform=linux/amd64 python:3.12.12-slim
+          DIGEST=$(docker inspect --format='{{range .RepoDigests}}{{println .}}{{end}}' python:3.12.12-slim | grep '^python@sha256:' | head -n1 | cut -d'@' -f2)
+          echo "DOCKER_PYTHON_IMAGE=python:3.12.12-slim@${DIGEST}" >> $GITHUB_ENV
 
       - name: Build dev/test image
         run: |
