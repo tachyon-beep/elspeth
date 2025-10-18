@@ -116,3 +116,12 @@ module = [
     "psycopg",
 ]
 ignore_missing_imports = true
+
+# Phase-in stricter typing for core utilities and registries
+[[tool.mypy.overrides]]
+module = [
+  "elspeth.core.utils.*",
+  "elspeth.core.registries.*",
+]
+disallow_untyped_defs = true
+disallow_incomplete_defs = true

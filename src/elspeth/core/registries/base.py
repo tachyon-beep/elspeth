@@ -8,7 +8,7 @@ multiple registry implementations.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable, Generic, Iterable, Mapping, TypeVar
+from typing import Any, Callable, ContextManager, Generic, Iterable, Iterator, Mapping, TypeVar
 
 from elspeth.core.base.plugin_context import PluginContext, apply_plugin_context
 from elspeth.core.validation.base import ConfigurationError, validate_schema
@@ -340,7 +340,7 @@ class BasePluginRegistry(Generic[T]):
         factory: Callable[[dict[str, Any], PluginContext], T],
         *,
         schema: Mapping[str, Any] | None = None,
-    ):
+    ) -> ContextManager[None]:
         """
         Context manager to temporarily override a plugin factory (for testing).
 
@@ -373,7 +373,7 @@ class BasePluginRegistry(Generic[T]):
         from contextlib import contextmanager
 
         @contextmanager
-        def _override():
+        def _override() -> Iterator[None]:
             original = self._plugins.get(name)
             self.register(name, factory, schema=schema)
             try:
