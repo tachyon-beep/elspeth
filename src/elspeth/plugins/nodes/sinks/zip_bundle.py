@@ -92,7 +92,22 @@ class ZipResultSink(ResultSink):
                 )
 
             def _safe_name(name: str) -> str:
-                return Path(name).name
+                """Return a sanitized ZIP entry name.
+
+                - Drops any directory components
+                - Rejects NUL bytes (\x00)
+                - Replaces characters outside [A-Za-z0-9._-] with '_'
+                - Avoids empty/bad names by falling back to 'artifact'
+                """
+                if "\x00" in name:
+                    raise ValueError("ZIP entry name contains NUL byte")
+                base = Path(name).name
+                if not base or base in {".", ".."}:
+                    base = "artifact"
+                allowed = set("ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789._-")
+                sanitized = "".join(c if c in allowed else "_" for c in base)
+                # Ensure we didn't strip the entire name
+                return sanitized or "artifact"
 
             def _writer(tmp_path: Path) -> None:
                 with ZipFile(tmp_path, mode="w", compression=ZIP_DEFLATED) as bundle:
