@@ -16,6 +16,8 @@ from elspeth.core.base.protocols import ResultSink
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_REQUEST_TIMEOUT = 15
+
 
 def _default_context(metadata: Mapping[str, Any], timestamp: datetime) -> dict[str, Any]:
     context = {k: v for k, v in metadata.items() if isinstance(k, str)}
@@ -247,7 +249,7 @@ class GitHubRepoSink(_RepoSinkBase):
     def _request(self, method: str, url: str, expected_status: set[int] | None = None, **kwargs: Any):
         expected_status = expected_status or {200, 201}
         assert self.session is not None, "session must be initialized"
-        timeout = kwargs.pop("timeout", 15)
+        timeout = kwargs.pop("timeout", DEFAULT_REQUEST_TIMEOUT)
         response = self.session.request(method, url, headers=self._headers(), timeout=timeout, **kwargs)
         if response.status_code not in expected_status:
             raise RuntimeError(f"GitHub API call failed ({response.status_code}): {response.text}")
@@ -361,7 +363,7 @@ class AzureDevOpsRepoSink(_RepoSinkBase):
     def _request(self, method: str, url: str, expected_status: set[int] | None = None, **kwargs: Any):
         expected_status = expected_status or {200, 201}
         assert self.session is not None, "session must be initialized"
-        timeout = kwargs.pop("timeout", 15)
+        timeout = kwargs.pop("timeout", DEFAULT_REQUEST_TIMEOUT)
         response = self.session.request(method, url, headers=self._headers(), timeout=timeout, **kwargs)
         if response.status_code not in expected_status:
             raise RuntimeError(f"Azure DevOps API call failed ({response.status_code}): {response.text}")

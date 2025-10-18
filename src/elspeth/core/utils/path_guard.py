@@ -27,7 +27,7 @@ def resolve_under_base(target: Path, base: Path) -> Path:
 
     try:
         common = Path(os.path.commonpath([str(base_resolved), str(parent_resolved)]))
-    except Exception:
+    except (ValueError, TypeError):
         raise ValueError(f"Invalid path resolution for target '{target}' under base '{base}'")
 
     if common != base_resolved:

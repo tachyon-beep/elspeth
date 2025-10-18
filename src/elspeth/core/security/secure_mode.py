@@ -176,7 +176,7 @@ def validate_sink_config(config: dict[str, Any], mode: SecureMode | None = None)
     # Check formula sanitization for CSV/Excel sinks
     sink_type = config.get("type", "")
 
-    if sink_type in ["csv", "excel_workbook", "local_bundle", "zip_bundle"]:
+    if sink_type in ["csv", "excel_workbook", "local_bundle", "zip_bundle", "file_copy"]:
         sanitize_formulas = config.get("sanitize_formulas", True)
 
         if mode == SecureMode.STRICT and sanitize_formulas is False:

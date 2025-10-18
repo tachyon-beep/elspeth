@@ -10,8 +10,8 @@ from pathlib import Path
 from typing import Any
 
 from elspeth.core.base.protocols import ResultSink
-from elspeth.plugins.nodes.sinks.csv_file import CsvResultSink
 from elspeth.core.utils.path_guard import resolve_under_base, safe_atomic_write
+from elspeth.plugins.nodes.sinks.csv_file import CsvResultSink
 
 logger = logging.getLogger(__name__)
 
@@ -92,7 +92,12 @@ class LocalBundleSink(ResultSink):
 
             if plugin_logger:
                 total_bytes = 0
-                for p in [manifest_path, target_dir / self.results_name if self.write_json else None, target_dir / self.csv_name if self.write_csv else None]:
+                paths: list[Path | None] = [
+                    manifest_path,
+                    (target_dir / self.results_name) if self.write_json else None,
+                    (target_dir / self.csv_name) if self.write_csv else None,
+                ]
+                for p in paths:
                     if p and p.exists():
                         try:
                             total_bytes += p.stat().st_size

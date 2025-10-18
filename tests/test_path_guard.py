@@ -6,7 +6,6 @@ from pathlib import Path
 import pytest
 
 from elspeth.core.utils.path_guard import (
-    check_and_prepare_dir,
     ensure_destination_is_not_symlink,
     ensure_no_symlinks_in_ancestors,
     resolve_under_base,

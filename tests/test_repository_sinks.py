@@ -7,7 +7,6 @@ Focus areas:
 
 from __future__ import annotations
 
-import types
 from typing import Any, Dict, List
 
 import pytest
@@ -35,17 +34,17 @@ class _CaptureSession:
     def __init__(self) -> None:
         self.calls: List[Dict[str, Any]] = []
 
-    def request(self, method: str, url: str, **kwargs: Any) -> _FakeResponse:  # noqa: D401
-        # Record the call for later inspection
+    def request(self, method: str, url: str, **kwargs: Any) -> _FakeResponse:
+        """Record the request and return a default OK response."""
         self.calls.append({"method": method, "url": url, **kwargs})
-        # Return a simple OK response by default
         return _FakeResponse(200, json_data={})
 
 
 class _TimeoutSession:
     """Simulate a session that always times out."""
 
-    def request(self, method: str, url: str, **kwargs: Any) -> _FakeResponse:  # noqa: D401
+    def request(self, method: str, url: str, **kwargs: Any) -> _FakeResponse:
+        """Raise a requests.Timeout to simulate network stall."""
         raise requests.Timeout(f"Simulated timeout calling {method} {url}")
 
 
@@ -98,4 +97,3 @@ def test_repo_sink_timeout_skip_vs_abort(sink_factory) -> None:
     sink_abort.on_error = "abort"
     with pytest.raises(requests.Timeout):
         sink_abort.write({"results": []}, metadata={"experiment": "e"})
-

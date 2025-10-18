@@ -8,8 +8,8 @@ from pathlib import Path
 from typing import Mapping
 
 from elspeth.core.base.protocols import Artifact, ResultSink
-from elspeth.core.utils.path_guard import resolve_under_base, safe_atomic_write
 from elspeth.core.security import normalize_determinism_level, normalize_security_level
+from elspeth.core.utils.path_guard import resolve_under_base, safe_atomic_write
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +74,9 @@ class FileCopySink(ResultSink):
 
         # Resolve destination under allowed base (default to destination parent)
         default_base = self.destination.parent.resolve()
-        target = resolve_under_base(self.destination, Path(allowed_base if (allowed_base := getattr(self, "_allowed_base", None)) else default_base))
+        allowed_base = getattr(self, "_allowed_base", None)
+        base_to_use = allowed_base if allowed_base is not None else default_base
+        target = resolve_under_base(self.destination, Path(base_to_use))
         plugin_logger = getattr(self, "plugin_logger", None)
         if plugin_logger:
             plugin_logger.log_event(
