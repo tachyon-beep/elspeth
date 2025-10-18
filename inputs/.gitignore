@@ -1,0 +1,5 @@
+# Ignore all files by default; keep documentation and placeholder
+*
+!.gitignore
+!.gitkeep
+!README.md

@@ -113,6 +113,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="Environment variable name for the HMAC signing key (for --signed-bundle)",
     )
     parser.add_argument(
+        "--artifact-sink-plugin",
+        help="Optional artifact publisher sink plugin (e.g., azure_devops_artifact_repo)",
+    )
+    parser.add_argument(
+        "--artifact-sink-config",
+        type=Path,
+        help="Path to YAML/JSON with options for the artifact sink plugin",
+    )
+    parser.add_argument(
         "--validate-schemas",
         action="store_true",
         help="Validate datasource schema compatibility with plugins without running experiments",
@@ -594,8 +603,60 @@ def _create_signed_bundle(art_dir: Path, name: str, payload: dict[str, Any], set
     try:
         sink.write(payload, metadata=metadata)
         logger.info("Created signed reproducibility bundle at %s", bundle_dir)
+        _maybe_publish_artifacts_bundle(bundle_dir)
     except Exception as exc:
         logger.error("Failed to create reproducibility bundle: %s", exc)
+
+
+def _load_yaml_json(path: Path) -> dict[str, Any]:
+    try:
+        import yaml
+
+        data = yaml.safe_load(path.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            return data
+        raise ValueError("artifact sink config must be a mapping")
+    except Exception as exc:
+        raise ValueError(f"Invalid artifact sink config: {exc}") from exc
+
+
+def _maybe_publish_artifacts_bundle(bundle_dir: Path) -> None:
+    # Fetch current CLI args via a closure of run(); else skip if not available
+    import sys
+
+    import elspeth.core.registries.sink as sink_reg
+
+    # Simple args parsing from sys.argv for late publishing path; safe no-op if flags absent
+    argv = sys.argv
+    if "--artifact-sink-plugin" not in argv:
+        return
+    try:
+        idx = argv.index("--artifact-sink-plugin")
+        plugin_name = argv[idx + 1]
+    except Exception:
+        logger.warning("artifact sink plugin flag provided without a name; skipping publish")
+        return
+    opts: dict[str, Any] = {}
+    if "--artifact-sink-config" in argv:
+        try:
+            j = argv.index("--artifact-sink-config")
+            cfg_path = Path(argv[j + 1])
+            opts = _load_yaml_json(cfg_path)
+        except Exception as exc:
+            logger.warning("artifact sink config invalid; skipping publish: %s", exc)
+    # Convenience: if azure_devops_artifact_repo and no folder_path, set it
+    if plugin_name == "azure_devops_artifact_repo" and not opts.get("folder_path"):
+        opts["folder_path"] = str(bundle_dir)
+    try:
+        sink = sink_reg.sink_registry.create(plugin_name, opts, parent_context=None)
+    except Exception as exc:
+        logger.warning("Failed to create artifact sink '%s': %s", plugin_name, exc)
+        return
+    try:
+        sink.write({"artifacts": [str(bundle_dir)]}, metadata={"path": str(bundle_dir)})
+        logger.info("Published bundle via artifact sink '%s'", plugin_name)
+    except Exception as exc:
+        logger.warning("Artifact publish failed: %s", exc)
 
 
 def _strip_metrics_plugins(settings) -> None:

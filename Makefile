@@ -28,6 +28,14 @@ job:
 	ARTDIR?=artifacts; \
 	.venv/bin/python -m elspeth.cli --job-config $$JOB --head 0 --artifacts-dir $$ARTDIR --signed-bundle
 
+.PHONY: docker-build-dev
+docker-build-dev:
+	@docker build --target dev -t elspeth:devtest .
+
+.PHONY: test-container
+test-container: docker-build-dev
+	@docker run --rm elspeth:devtest pytest -m "not slow" --maxfail=1 --disable-warnings
+
 lint:
 	@.venv/bin/python -m ruff format docs src tests
 	@.venv/bin/python -m ruff check docs src tests

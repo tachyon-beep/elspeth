@@ -8,7 +8,11 @@ from elspeth.plugins.nodes.sinks.enhanced_visual_report import EnhancedVisualAna
 from elspeth.plugins.nodes.sinks.excel import ExcelResultSink
 from elspeth.plugins.nodes.sinks.file_copy import FileCopySink
 from elspeth.plugins.nodes.sinks.local_bundle import LocalBundleSink
-from elspeth.plugins.nodes.sinks.repository import AzureDevOpsRepoSink, GitHubRepoSink
+from elspeth.plugins.nodes.sinks.repository import (
+    AzureDevOpsArtifactsRepoSink,
+    AzureDevOpsRepoSink,
+    GitHubRepoSink,
+)
 from elspeth.plugins.nodes.sinks.reproducibility_bundle import ReproducibilityBundleSink
 from elspeth.plugins.nodes.sinks.signed import SignedArtifactSink
 from elspeth.plugins.nodes.sinks.visual_report import VisualAnalyticsSink
@@ -23,6 +27,7 @@ __all__ = [
     "FileCopySink",
     "GitHubRepoSink",
     "AzureDevOpsRepoSink",
+    "AzureDevOpsArtifactsRepoSink",
     "SignedArtifactSink",
     "AnalyticsReportSink",
     "VisualAnalyticsSink",

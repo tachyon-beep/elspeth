@@ -20,6 +20,7 @@ from elspeth.core.security import validate_azure_blob_endpoint
 from elspeth.core.validation.base import ConfigurationError
 from elspeth.plugins.nodes.sinks import (
     AnalyticsReportSink,
+    AzureDevOpsArtifactsRepoSink,
     AzureDevOpsRepoSink,
     BlobResultSink,
     CsvResultSink,
@@ -128,6 +129,11 @@ def _create_github_repo_sink(options: dict[str, Any], context: PluginContext) ->
 def _create_azure_devops_repo_sink(options: dict[str, Any], context: PluginContext) -> AzureDevOpsRepoSink:
     """Create Azure DevOps repository sink."""
     return AzureDevOpsRepoSink(**options)
+
+
+def _create_azure_devops_artifacts_repo_sink(options: dict[str, Any], context: PluginContext) -> AzureDevOpsArtifactsRepoSink:
+    """Create Azure DevOps Artifacts repo publisher sink (folder upload)."""
+    return AzureDevOpsArtifactsRepoSink(**options)
 
 
 def _create_signed_artifact_sink(options: dict[str, Any], context: PluginContext) -> SignedArtifactSink:
@@ -343,6 +349,23 @@ _AZURE_DEVOPS_REPO_SINK_SCHEMA = _sink_schema(
     ["organization", "project", "repository"],
 )
 
+_AZURE_DEVOPS_ARTIFACTS_REPO_SINK_SCHEMA = _sink_schema(
+    {
+        "folder_path": {"type": "string"},
+        "dest_prefix_template": {"type": "string"},
+        "commit_message_template": {"type": "string"},
+        "organization": {"type": "string"},
+        "project": {"type": "string"},
+        "repository": {"type": "string"},
+        "branch": {"type": "string"},
+        "token_env": {"type": "string"},
+        "api_version": {"type": "string"},
+        "base_url": {"type": "string"},
+        "dry_run": {"type": "boolean"},
+    },
+    ["folder_path", "organization", "project", "repository"],
+)
+
 _SIGNED_ARTIFACT_SINK_SCHEMA = _sink_schema(
     {
         "base_path": {"type": "string"},
@@ -485,6 +508,11 @@ sink_registry.register("zip_bundle", _create_zip_bundle_sink, schema=_ZIP_BUNDLE
 sink_registry.register("file_copy", _create_file_copy_sink, schema=_FILE_COPY_SINK_SCHEMA)
 sink_registry.register("github_repo", _create_github_repo_sink, schema=_GITHUB_REPO_SINK_SCHEMA)
 sink_registry.register("azure_devops_repo", _create_azure_devops_repo_sink, schema=_AZURE_DEVOPS_REPO_SINK_SCHEMA)
+sink_registry.register(
+    "azure_devops_artifact_repo",
+    _create_azure_devops_artifacts_repo_sink,
+    schema=_AZURE_DEVOPS_ARTIFACTS_REPO_SINK_SCHEMA,
+)
 sink_registry.register("signed_artifact", _create_signed_artifact_sink, schema=_SIGNED_ARTIFACT_SINK_SCHEMA)
 sink_registry.register("analytics_report", _create_analytics_report_sink, schema=_ANALYTICS_REPORT_SINK_SCHEMA)
 sink_registry.register("analytics_visual", _create_visual_analytics_sink, schema=_VISUAL_ANALYTICS_SINK_SCHEMA)

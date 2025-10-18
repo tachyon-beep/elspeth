@@ -47,3 +47,25 @@ This produces results and optional signed bundle under `artifacts/<timestamp>/`.
 - Sinks use the standard sink registry and may include local CSV/Excel/ZIP, repository, blob, etc.
 - Use `ELSPETH_SIGNING_KEY` (or `--signing-key-env`) to sign bundles.
 
+## Container usage
+
+Build and run using the multi-stage Dockerfile.
+
+```bash
+# Build devtest image (runs pytest by default)
+docker build --target dev -t elspeth:devtest .
+
+# Run tests in container (explicit)
+docker run --rm elspeth:devtest pytest -m "not slow" --maxfail=1 --disable-warnings
+
+# Build runtime image
+docker build --target runtime -t elspeth:runtime .
+
+# Use runtime image to execute the CLI with a mounted workspace
+docker run --rm \
+  -e ELSPETH_SIGNING_KEY="$ELSPETH_SIGNING_KEY" \
+  -v "$PWD:/workspace" -w /workspace \
+  elspeth:runtime \
+  python -m elspeth.cli --job-config config/jobs/sample_job.yaml \
+    --artifacts-dir artifacts --signed-bundle --head 0
+```
