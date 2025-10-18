@@ -61,11 +61,15 @@ jobs:
           name: bandit-json
           path: bandit.json
 
-      - name: Semgrep scan (auto rules)
-        uses: returntocorp/semgrep-action@v1
+      - name: Semgrep scan (CLI SARIF)
+        run: |
+          python -m semgrep --config auto --sarif --output semgrep.sarif || true
+      - name: Upload semgrep report
+        if: always()
+        uses: actions/upload-artifact@v4
         with:
-          config: auto
-        continue-on-error: true
+          name: semgrep-sarif
+          path: semgrep.sarif
 
       - name: Unit tests with coverage
         run: python -m pytest -m "not slow" --maxfail=1 --disable-warnings
