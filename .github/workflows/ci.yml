@@ -31,6 +31,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     needs: secrets-scan
+    permissions:
+      security-events: write
 
     steps:
       - uses: actions/checkout@v4
@@ -63,13 +65,19 @@ jobs:
 
       - name: Semgrep scan (CLI SARIF)
         run: |
-          python -m semgrep --config auto --sarif --output semgrep.sarif || true
+          python -m semgrep --config auto --sarif --output semgrep.sarif
       - name: Upload semgrep report
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: semgrep-sarif
           path: semgrep.sarif
+      - name: Upload semgrep SARIF to code scanning
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: semgrep.sarif
+          category: semgrep
 
       - name: Unit tests with coverage
         run: python -m pytest -m "not slow" --maxfail=1 --disable-warnings
