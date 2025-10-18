@@ -23,9 +23,7 @@ logger = logging.getLogger(__name__)
 #
 # Example:
 #   ELSPETH_PATH_CONTAINED_SINKS="csv,excel_workbook,local_bundle,zip_bundle,file_copy,parquet"
-PATH_CONTAINED_SINK_TYPES_DEFAULT: frozenset[str] = frozenset(
-    {"csv", "excel_workbook", "local_bundle", "zip_bundle", "file_copy"}
-)
+PATH_CONTAINED_SINK_TYPES_DEFAULT: frozenset[str] = frozenset({"csv", "excel_workbook", "local_bundle", "zip_bundle", "file_copy"})
 
 
 def _parse_csv_list(value: str) -> frozenset[str]:
@@ -53,6 +51,7 @@ def get_path_contained_sink_types(env: dict[str, str] | None = None) -> frozense
     except Exception:
         logger.warning("Failed to parse ELSPETH_PATH_CONTAINED_SINKS; using defaults")
         return PATH_CONTAINED_SINK_TYPES_DEFAULT
+
 
 class SecureMode(Enum):
     """Security enforcement modes."""

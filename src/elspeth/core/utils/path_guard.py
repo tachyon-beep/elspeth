@@ -84,6 +84,15 @@ def safe_atomic_write(path: Path, write_to: Callable[[Path], None]) -> None:
     try:
         tmp_fd, tmp_path_str = tempfile.mkstemp(prefix=".tmp_", dir=str(path.parent))
         tmp_path = Path(tmp_path_str)
+        # Ensure owner-only permissions (0600) on the temporary file; mkstemp
+        # already uses a safe default on POSIX, but we enforce explicitly.
+        try:
+            os.fchmod(tmp_fd, 0o600)
+        except Exception:
+            try:
+                os.chmod(tmp_path, 0o600)
+            except Exception:
+                pass
         os.close(tmp_fd)
         tmp_fd = None
 
