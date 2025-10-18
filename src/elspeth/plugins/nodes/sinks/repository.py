@@ -46,6 +46,8 @@ class _RepoSinkBase(ResultSink):
     include_manifest: bool = True
     dry_run: bool = True
     session: requests.Session | None = None
+    # Network behavior
+    request_timeout: int = DEFAULT_REQUEST_TIMEOUT
     _last_payloads: list[dict[str, Any]] = field(default_factory=list, init=False)
     on_error: str = "abort"
 
@@ -249,7 +251,7 @@ class GitHubRepoSink(_RepoSinkBase):
     def _request(self, method: str, url: str, expected_status: set[int] | None = None, **kwargs: Any):
         expected_status = expected_status or {200, 201}
         assert self.session is not None, "session must be initialized"
-        timeout = kwargs.pop("timeout", DEFAULT_REQUEST_TIMEOUT)
+        timeout = kwargs.pop("timeout", self.request_timeout)
         response = self.session.request(method, url, headers=self._headers(), timeout=timeout, **kwargs)
         if response.status_code not in expected_status:
             raise RuntimeError(f"GitHub API call failed ({response.status_code}): {response.text}")
@@ -363,7 +365,7 @@ class AzureDevOpsRepoSink(_RepoSinkBase):
     def _request(self, method: str, url: str, expected_status: set[int] | None = None, **kwargs: Any):
         expected_status = expected_status or {200, 201}
         assert self.session is not None, "session must be initialized"
-        timeout = kwargs.pop("timeout", DEFAULT_REQUEST_TIMEOUT)
+        timeout = kwargs.pop("timeout", self.request_timeout)
         response = self.session.request(method, url, headers=self._headers(), timeout=timeout, **kwargs)
         if response.status_code not in expected_status:
             raise RuntimeError(f"Azure DevOps API call failed ({response.status_code}): {response.text}")

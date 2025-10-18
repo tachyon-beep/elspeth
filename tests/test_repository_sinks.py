@@ -76,6 +76,27 @@ def test_azure_devops_repo_sink_default_timeout_applied() -> None:
     assert session.calls[-1]["timeout"] == 15, "Default timeout should be 15s for Azure DevOps sink"
 
 
+def test_repo_sinks_respect_custom_request_timeout() -> None:
+    session = _CaptureSession()
+    gh = GitHubRepoSink(owner="o", repo="r", session=session, dry_run=True, request_timeout=5)
+    resp = gh._request("GET", "https://api.github.com/_probe", expected_status={200})  # type: ignore[attr-defined]
+    assert isinstance(resp, _FakeResponse)
+    assert session.calls[-1]["timeout"] == 5
+
+    session2 = _CaptureSession()
+    az = AzureDevOpsRepoSink(
+        organization="org",
+        project="proj",
+        repository="repo",
+        session=session2,
+        dry_run=True,
+        request_timeout=7,
+    )
+    resp2 = az._request("GET", "https://dev.azure.com/_probe", expected_status={200})  # type: ignore[attr-defined]
+    assert isinstance(resp2, _FakeResponse)
+    assert session2.calls[-1]["timeout"] == 7
+
+
 @pytest.mark.parametrize(
     "sink_factory",
     [
