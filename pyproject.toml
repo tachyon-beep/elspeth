@@ -160,6 +160,13 @@ disallow_incomplete_defs = true
 
 [[tool.mypy.overrides]]
 module = [
+  "elspeth.core.experiments.plugin_registry",
+]
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+
+[[tool.mypy.overrides]]
+module = [
   "elspeth.plugins.utilities.retrieval",
 ]
 disallow_untyped_defs = true
