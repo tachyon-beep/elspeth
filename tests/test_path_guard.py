@@ -70,4 +70,3 @@ def test_destination_symlink_rejected(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError):
         ensure_destination_is_not_symlink(link)
-

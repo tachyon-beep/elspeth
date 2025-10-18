@@ -31,9 +31,7 @@ def resolve_under_base(target: Path, base: Path) -> Path:
         raise ValueError(f"Invalid path resolution for target '{target}' under base '{base}'")
 
     if common != base_resolved:
-        raise ValueError(
-            f"Path parent '{parent_resolved}' escapes allowed base '{base_resolved}'"
-        )
+        raise ValueError(f"Path parent '{parent_resolved}' escapes allowed base '{base_resolved}'")
     return parent_resolved / candidate.name
 
 
@@ -45,8 +43,11 @@ def ensure_no_symlinks_in_ancestors(path: Path) -> None:
     """
     p = path if path.is_dir() else path.parent
     for ancestor in [p, *p.parents]:
+        # Skip filesystem root entries (their parent is themselves)
+        if ancestor.parent == ancestor:
+            continue
         # Path.is_symlink() uses lstat (does not follow the final component)
-        if ancestor != ancestor.root and ancestor.is_symlink():
+        if ancestor.is_symlink():
             raise ValueError(f"Symlinked ancestor not permitted: {ancestor}")
 
 

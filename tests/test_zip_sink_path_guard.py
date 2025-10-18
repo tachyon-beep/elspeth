@@ -9,11 +9,7 @@ from elspeth.plugins.nodes.sinks.zip_bundle import ZipResultSink
 
 
 def _results(n: int = 2) -> dict:
-    return {
-        "results": [
-            {"row": {"a": i}, "response": {"content": "ok"}} for i in range(n)
-        ]
-    }
+    return {"results": [{"row": {"a": i}, "response": {"content": "ok"}} for i in range(n)]}
 
 
 def test_zip_sink_writes_under_allowed_base(tmp_path: Path) -> None:

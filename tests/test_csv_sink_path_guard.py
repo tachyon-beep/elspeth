@@ -10,11 +10,7 @@ from elspeth.plugins.nodes.sinks.csv_file import CsvResultSink
 
 
 def _results_with_rows(n: int = 3) -> dict:
-    return {
-        "results": [
-            {"row": {"a": i, "b": f"v{i}"}, "response": {"content": "ok"}} for i in range(n)
-        ]
-    }
+    return {"results": [{"row": {"a": i, "b": f"v{i}"}, "response": {"content": "ok"}} for i in range(n)]}
 
 
 def test_csv_sink_writes_under_allowed_base(tmp_path: Path) -> None:
@@ -60,4 +56,3 @@ def test_csv_sink_rejects_symlink_destination(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError):
         sink.write(_results_with_rows(), metadata={"experiment": "e"})
-

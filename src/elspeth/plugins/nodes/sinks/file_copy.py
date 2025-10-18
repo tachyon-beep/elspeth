@@ -29,9 +29,7 @@ class FileCopySink(ResultSink):
         # Configure allowed base path for containment checks
         try:
             default_base = self.destination.parent.resolve()
-            self._allowed_base = (
-                Path(allowed_base_path).resolve() if allowed_base_path is not None else default_base
-            )
+            self._allowed_base = Path(allowed_base_path).resolve() if allowed_base_path is not None else default_base
         except Exception:  # pragma: no cover - defensive
             self._allowed_base = self.destination.parent.resolve()
 
@@ -84,7 +82,11 @@ class FileCopySink(ResultSink):
                 message=f"File copy attempt: {src_path} -> {target}",
                 metadata={"source": str(src_path), "dest": str(target)},
             )
-        safe_atomic_write(target, lambda tmp: shutil.copyfile(src_path, tmp))
+
+        def _copy_to_tmp(tmp: Path) -> None:
+            shutil.copyfile(src_path, tmp)
+
+        safe_atomic_write(target, _copy_to_tmp)
         self._written_path = target
         if plugin_logger:
             try:

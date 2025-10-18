@@ -62,4 +62,3 @@ def test_file_copy_rejects_symlink_destination(tmp_path: Path) -> None:
     sink.prepare_artifacts({"in": [_make_artifact(src)]})
     with pytest.raises(ValueError):
         sink.write({"results": []})
-

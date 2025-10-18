@@ -9,11 +9,7 @@ from elspeth.plugins.nodes.sinks.excel import ExcelResultSink
 
 
 def _results(n: int = 3) -> dict:
-    return {
-        "results": [
-            {"row": {"a": i, "b": f"v{i}"}, "response": {"content": "ok"}} for i in range(n)
-        ]
-    }
+    return {"results": [{"row": {"a": i, "b": f"v{i}"}, "response": {"content": "ok"}} for i in range(n)]}
 
 
 def test_excel_sink_writes_under_allowed_base(tmp_path: Path) -> None:
@@ -37,4 +33,3 @@ def test_excel_sink_rejects_escape_outside_base(tmp_path: Path) -> None:
     sink._allowed_base = outputs.resolve()  # type: ignore[attr-defined]
     with pytest.raises(ValueError):
         sink.write(_results(), metadata={"experiment": "e"})
-

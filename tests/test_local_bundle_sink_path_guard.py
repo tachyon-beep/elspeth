@@ -8,11 +8,7 @@ from elspeth.plugins.nodes.sinks.local_bundle import LocalBundleSink
 
 
 def _results(n: int = 2) -> dict:
-    return {
-        "results": [
-            {"row": {"a": i}, "response": {"content": "ok"}} for i in range(n)
-        ]
-    }
+    return {"results": [{"row": {"a": i}, "response": {"content": "ok"}} for i in range(n)]}
 
 
 def test_local_bundle_writes_under_allowed_base(tmp_path: Path) -> None:
@@ -36,4 +32,3 @@ def test_local_bundle_rejects_escape_outside_base(tmp_path: Path) -> None:
     sink._allowed_base = allowed.resolve()  # type: ignore[attr-defined]
     with pytest.raises(ValueError):
         sink.write(_results(), metadata={"experiment": "e"})
-

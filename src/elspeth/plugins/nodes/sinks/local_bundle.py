@@ -45,9 +45,7 @@ class LocalBundleSink(ResultSink):
         # Allowed base directory for writes; default to ./outputs
         try:
             default_base = Path(self.base_path).resolve()
-            self._allowed_base = (
-                Path(self.allowed_base_path).resolve() if self.allowed_base_path else default_base
-            )
+            self._allowed_base = Path(self.allowed_base_path).resolve() if self.allowed_base_path else default_base
         except Exception:  # pragma: no cover - defensive
             self._allowed_base = Path.cwd().resolve()
 
@@ -69,11 +67,19 @@ class LocalBundleSink(ResultSink):
 
             manifest = self._build_manifest(results, metadata, timestamp)
             manifest_path = target_dir / self.manifest_name
-            safe_atomic_write(manifest_path, lambda tmp: tmp.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8"))
+
+            def _write_manifest(tmp: Path) -> None:
+                tmp.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
+
+            safe_atomic_write(manifest_path, _write_manifest)
 
             if self.write_json:
                 results_path = target_dir / self.results_name
-                safe_atomic_write(results_path, lambda tmp: tmp.write_text(json.dumps(results, indent=2, sort_keys=True), encoding="utf-8"))
+
+                def _write_results(tmp: Path) -> None:
+                    tmp.write_text(json.dumps(results, indent=2, sort_keys=True), encoding="utf-8")
+
+                safe_atomic_write(results_path, _write_results)
 
             if self.write_csv:
                 csv_path = target_dir / self.csv_name
@@ -85,7 +91,7 @@ class LocalBundleSink(ResultSink):
                 )
                 # Propagate allowed base to nested sink
                 try:
-                    csv_sink._allowed_base = self._allowed_base  # type: ignore[attr-defined]
+                    csv_sink._allowed_base = self._allowed_base
                 except Exception:
                     pass
                 csv_sink.write(results, metadata=metadata)
