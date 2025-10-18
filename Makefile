@@ -54,13 +54,8 @@ clean-logs:
 	@rm -f logs/run_*.jsonl || true
 
 sbom:
-	@.venv/bin/cyclonedx-py requirements requirements.lock \
-		--pyproject pyproject.toml \
-		--project-name elspeth \
-		--project-version 0.1.0 \
-		--output-file sbom.json \
-		--output-format JSON \
-		--output-reproducible
+	@.venv/bin/cyclonedx-bom -r requirements.lock -F json -o sbom.json \
+		--project-name elspeth --project-version 0.1.0
 
 audit:
 	@.venv/bin/pip-audit -r requirements.lock --require-hashes
