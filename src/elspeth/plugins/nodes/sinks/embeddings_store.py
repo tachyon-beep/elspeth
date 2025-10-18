@@ -144,7 +144,7 @@ class PgVectorClient(VectorStoreClient):
         values = ",".join(f"{float(value):.12g}" for value in vector)
         return f"[{values}]"
 
-    def _build_insert_query(self):
+    def _build_insert_query(self) -> Any:
         """Build the INSERT query with safe identifier quoting for table name.
 
         Returns SQL composed object with parameterized table name to prevent SQL injection.

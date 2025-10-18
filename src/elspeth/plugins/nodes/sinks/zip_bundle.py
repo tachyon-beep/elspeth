@@ -229,15 +229,15 @@ class ZipResultSink(ResultSink):
         df.to_csv(buffer, index=False)
         return buffer.getvalue()
 
-    def produces(self):  # pragma: no cover - placeholder for artifact chaining
+    def produces(self) -> list[ArtifactDescriptor]:  # pragma: no cover - placeholder for artifact chaining
         return [
             ArtifactDescriptor(name="zip", type="file/zip", persist=True, alias="zip"),
         ]
 
-    def consumes(self):  # pragma: no cover - placeholder for artifact chaining
+    def consumes(self) -> list[str]:  # pragma: no cover - placeholder for artifact chaining
         return []
 
-    def finalize(self, artifacts, *, metadata=None):  # pragma: no cover - optional cleanup
+    def finalize(self, artifacts: Mapping[str, Artifact], *, metadata: dict[str, Any] | None = None) -> None:  # pragma: no cover - optional cleanup
         return None
 
     def collect_artifacts(self) -> dict[str, Artifact]:  # pragma: no cover
@@ -261,7 +261,7 @@ class ZipResultSink(ResultSink):
         self._determinism_level = None
         return {"zip": artifact}
 
-    def prepare_artifacts(self, artifacts: Mapping[str, list[Artifact]]):  # pragma: no cover
+    def prepare_artifacts(self, artifacts: Mapping[str, list[Artifact]]) -> None:  # pragma: no cover
         self._additional_inputs = {key: list(values) for key, values in artifacts.items() if values}
         if not self._security_level and self._additional_inputs:
             levels = [artifact.security_level for values in self._additional_inputs.values() for artifact in values]

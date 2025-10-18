@@ -12,7 +12,7 @@ from typing import Any, Mapping
 
 import requests
 
-from elspeth.core.base.protocols import ResultSink
+from elspeth.core.base.protocols import Artifact, ArtifactDescriptor, ResultSink
 
 logger = logging.getLogger(__name__)
 
@@ -161,13 +161,13 @@ class _RepoSinkBase(ResultSink):
     ) -> None:
         raise NotImplementedError
 
-    def produces(self):  # pragma: no cover - placeholder for artifact chaining
+    def produces(self) -> list[ArtifactDescriptor]:  # pragma: no cover - placeholder for artifact chaining
         return []
 
-    def consumes(self):  # pragma: no cover - placeholder for artifact chaining
+    def consumes(self) -> list[str]:  # pragma: no cover - placeholder for artifact chaining
         return []
 
-    def finalize(self, artifacts, *, metadata=None):  # pragma: no cover - optional cleanup
+    def finalize(self, artifacts: Mapping[str, Artifact], *, metadata: dict[str, Any] | None = None) -> None:  # pragma: no cover - optional cleanup
         return None
 
     @staticmethod
@@ -253,7 +253,7 @@ class GitHubRepoSink(_RepoSinkBase):
         # response.json() returns Any, so dict access returns Any despite runtime str value
         return data.get("sha")  # type: ignore[no-any-return]
 
-    def _request(self, method: str, url: str, expected_status: set[int] | None = None, **kwargs: Any):
+    def _request(self, method: str, url: str, expected_status: set[int] | None = None, **kwargs: Any) -> Any:
         expected_status = expected_status or {200, 201}
         if self.session is None:  # pragma: no cover - defensive
             raise RuntimeError("session must be initialized")
@@ -368,7 +368,7 @@ class AzureDevOpsRepoSink(_RepoSinkBase):
         # Comparison expression inferred as Any due to response type annotation gaps
         return response.status_code == 200  # type: ignore[no-any-return]
 
-    def _request(self, method: str, url: str, expected_status: set[int] | None = None, **kwargs: Any):
+    def _request(self, method: str, url: str, expected_status: set[int] | None = None, **kwargs: Any) -> Any:
         expected_status = expected_status or {200, 201}
         if self.session is None:  # pragma: no cover - defensive
             raise RuntimeError("session must be initialized")

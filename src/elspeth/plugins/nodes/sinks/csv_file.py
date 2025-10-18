@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 import pandas as pd
 
@@ -188,15 +188,15 @@ class CsvResultSink(ResultSink):
                 plugin_logger.log_error(exc, context="csv sink write", recoverable=False)
             raise
 
-    def produces(self):  # pragma: no cover - placeholder for artifact chaining
+    def produces(self) -> list[ArtifactDescriptor]:  # pragma: no cover - placeholder for artifact chaining
         return [
             ArtifactDescriptor(name="csv", type="file/csv", persist=True, alias="csv"),
         ]
 
-    def consumes(self):  # pragma: no cover - placeholder for artifact chaining
+    def consumes(self) -> list[str]:  # pragma: no cover - placeholder for artifact chaining
         return []
 
-    def finalize(self, artifacts, *, metadata=None):  # pragma: no cover - optional cleanup
+    def finalize(self, artifacts: Mapping[str, Artifact], *, metadata: dict[str, Any] | None = None) -> None:  # pragma: no cover - optional cleanup
         return None
 
     def collect_artifacts(self) -> dict[str, Artifact]:  # pragma: no cover - optional

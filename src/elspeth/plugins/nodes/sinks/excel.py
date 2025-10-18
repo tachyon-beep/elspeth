@@ -36,7 +36,7 @@ class ExcelSinkConfig:
     sanitize_guard: str = "'"
 
 
-def _load_workbook_dependencies():
+def _load_workbook_dependencies() -> Any:
     """Return the Workbook class for creating Excel files.
 
     Returns:
@@ -193,7 +193,7 @@ class ExcelResultSink(ResultSink):
             name = f"{name}_{timestamp.strftime('%Y%m%dT%H%M%SZ')}"
         return self.base_path / f"{name}.xlsx"
 
-    def _populate_results_sheet(self, workbook, entries: Iterable[Mapping[str, Any]]) -> None:
+    def _populate_results_sheet(self, workbook: Any, entries: Iterable[Mapping[str, Any]]) -> None:
         sheet = workbook.active
         sheet.title = self.results_sheet
 
@@ -209,7 +209,7 @@ class ExcelResultSink(ResultSink):
 
     def _populate_manifest_sheet(
         self,
-        workbook,
+        workbook: Any,
         results: Mapping[str, Any],
         metadata: Mapping[str, Any],
         timestamp: datetime,
@@ -224,7 +224,7 @@ class ExcelResultSink(ResultSink):
                 rendered = value
             sheet.append([self._sanitize_value(key), self._sanitize_value(rendered)])
 
-    def _populate_aggregates_sheet(self, workbook, aggregates: Mapping[str, Any]) -> None:
+    def _populate_aggregates_sheet(self, workbook: Any, aggregates: Mapping[str, Any]) -> None:
         sheet = workbook.create_sheet(self.aggregates_sheet)
         sheet.append(
             [
@@ -273,15 +273,15 @@ class ExcelResultSink(ResultSink):
             manifest["failures"] = results["failures"]
         return manifest
 
-    def produces(self):  # pragma: no cover - placeholder for artifact chaining
+    def produces(self) -> list[ArtifactDescriptor]:  # pragma: no cover - placeholder for artifact chaining
         return [
             ArtifactDescriptor(name="excel", type="file/xlsx", persist=True, alias="excel"),
         ]
 
-    def consumes(self):  # pragma: no cover - placeholder for artifact chaining
+    def consumes(self) -> list[str]:  # pragma: no cover - placeholder for artifact chaining
         return []
 
-    def finalize(self, artifacts, *, metadata=None):  # pragma: no cover - optional cleanup
+    def finalize(self, artifacts: Mapping[str, Artifact], *, metadata: dict[str, Any] | None = None) -> None:  # pragma: no cover - optional cleanup
         return None
 
     def collect_artifacts(self) -> dict[str, Artifact]:  # pragma: no cover
