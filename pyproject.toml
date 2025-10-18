@@ -150,3 +150,10 @@ module = [
 ]
 disallow_untyped_defs = true
 disallow_incomplete_defs = true
+
+[[tool.mypy.overrides]]
+module = [
+  "elspeth.core.experiments.tools",
+]
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
