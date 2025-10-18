@@ -125,3 +125,19 @@ module = [
 ]
 disallow_untyped_defs = true
 disallow_incomplete_defs = true
+
+# Next wave: tools package
+[[tool.mypy.overrides]]
+module = [
+  "elspeth.tools.*",
+]
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+
+# Core base package
+[[tool.mypy.overrides]]
+module = [
+  "elspeth.core.base.*",
+]
+disallow_untyped_defs = true
+disallow_incomplete_defs = true

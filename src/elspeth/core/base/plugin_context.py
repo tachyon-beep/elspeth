@@ -41,7 +41,7 @@ class PluginContext(BaseModel):
 
     @field_validator("plugin_name", "plugin_kind", "security_level")
     @classmethod
-    def validate_non_empty(cls, v: str, info) -> str:
+    def validate_non_empty(cls, v: str, info: Any) -> str:
         """Validate that critical fields are non-empty."""
         if not v or not v.strip():
             raise ValueError(f"{info.field_name} cannot be empty")
