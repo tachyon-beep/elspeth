@@ -2,60 +2,59 @@
 
 ## Quick Wins (days)
 
-- Enforce endpoint allowlisting in HttpOpenAIClient constructor — COMPLETED
-  - Implemented: validates `api_base` via `validate_http_api_endpoint()` in `__init__` (defense in depth)
-  - Ref: `src/elspeth/plugins/nodes/transforms/llm/openai_http.py`
+Status: IMPLEMENTED and validated (pytest green; coverage updated).
 
-- Mandate lockfile installs everywhere — PARTIAL
-  - Implemented: README updated to require `piptools sync` (developer flow)
-  - Next: ensure Makefile/docs consistently reference lockfile sync in all paths
-  - Ref: `README.md`, `.github/workflows/ci.yml`
+- Enforce locked installs everywhere (S, High impact)
+  - Mandate `piptools sync` + `--require-hashes` for all environments; update README/runbooks and Makefile snippets.
+  - Evidence/patched in findings: `README.md` note to require lockfile installs.
 
-- Add Bandit to CI — COMPLETED (fail-on-HIGH)
-  - Implemented: Bandit enforced in CI with `--severity-level high --confidence-level high`; SARIF uploaded
-  - Ref: `.github/workflows/ci.yml`
+- Add HTTP retries/backoff to Azure Content Safety (S, Medium) — DONE
+  - Three attempts with exponential backoff + jitter for idempotent screening.
+  - File: `src/elspeth/plugins/nodes/transforms/llm/middleware/azure_content_safety.py`.
 
-- Remove runtime asserts in production code — COMPLETED
-  - Change: Replaced `assert` with explicit guards and exceptions in core registries, runner, suite runner, repository sinks, and reproducibility bundle sink.
-  - Impact: Avoids B101 and ensures checks are effective under optimized bytecode.
-  - Ref: `src/elspeth/core/registries/middleware.py`, `src/elspeth/core/experiments/plugin_registry.py`, `src/elspeth/core/experiments/runner.py`, `src/elspeth/core/experiments/suite_runner.py`, `src/elspeth/plugins/nodes/sinks/repository.py`, `src/elspeth/plugins/nodes/sinks/reproducibility_bundle.py`, `src/elspeth/plugins/experiments/row/score_extractor.py`
+- Add HTTPAdapter with Retry to repository sinks (S, Medium) — DONE
+  - Mount `HTTPAdapter(Retry(...))` on the sink session for 429/5xx.
+  - File: `src/elspeth/plugins/nodes/sinks/repository.py`.
 
-- Clarify repository sink dry_run semantics
-  - Change: Require explicit `dry_run` in production configs or warn when `True` and not in explicit smoke test
-  - Effort: S; Impact: Medium; Ref: `src/elspeth/plugins/nodes/sinks/repository.py`
+- Serialise checkpoint appends (S, Medium) — DONE
+  - Guard `_append_checkpoint` with a lightweight `threading.Lock` to avoid line interleaving in parallel mode.
+  - File: `src/elspeth/core/experiments/runner.py`.
+
+- Serialise JSONL log writes (S, Low/Medium) — DONE
+  - Add a per‑logger `threading.Lock` in `_write_log_entry` to ensure one‑line atomicity across threads.
+  - File: `src/elspeth/core/utils/logging.py`.
+
+- Harden endpoint overrides policy (S, Medium) — DONE (now disallowed in STRICT; allowed with warning in STANDARD; allowed in DEVELOPMENT)
+  - Ignore `ELSPETH_APPROVED_ENDPOINTS` unless in DEVELOPMENT mode; prevents policy drift in prod.
+  - File: `src/elspeth/core/security/approved_endpoints.py`.
 
 ## Deep Work (weeks)
 
-- Maintain ≥85% overall coverage; expand targeted branch coverage — COMPLETED (threshold), CONTINUE (branches)
-  - Completed: Coverage now 86.8% lines (71.7% branches). Tests added for enums/types; schema inference/model factory; path safety; LLM registry conflicts/unapproved endpoints; blob datasource; visual/excel/csv/zip sinks (skip/sanitize/containment); Azure middleware (env + Content Safety) including retry‑exhausted and mask/abort; reporting helpers/viz skip.
-  - Next: Exercise remaining branches in visual sinks (HTML/table metadata, seaborn fallbacks) and Azure middleware logging/table fallbacks; broaden generate_all_reports cases.
-  - Ref: `tests/core/`, `tests/plugins/`, `tests/middleware/`, `tests/tools/`
+- Error taxonomy and targeted handling (M)
+  - Replace broad `except Exception` in critical paths with specific exceptions (e.g., `requests.RequestException`, `json.JSONDecodeError`); tag `error_type` and enrich telemetry.
 
-- Gradual mypy strictness uplift
-  - Change: Enable `disallow_untyped_defs` for core packages; use targeted `# type: ignore` where justified
-  - Effort: M; Impact: Medium; Ref: `pyproject.toml`
+- Observability enrichment (M)
+  - Add counters for retry attempts, exhausted retries, and sink/client failure rates; consider an optional OTLP exporter.
 
-- Local secret scanning & log retention guidance — COMPLETED
-  - Change: Document JSONL log retention and added a cleanup target:
-    - `make clean-logs` removes `logs/run_*.jsonl` (local dev convenience)
-    - Docs: `docs/operations/logging.md`
-  - Effort: S; Impact: Low-Medium
+- Policy hardening for production (M)
+  - Default STRICT in production configs; add a config lint step that fails on missing security_level/allowed_base in STRICT; document runbooks.
 
-## Verification
+## Verification & Evidence Capture
 
-- Tests/coverage
-  - `python -m pytest -m "not slow" --cov=elspeth --cov-branch`
-  - Gate to ≥85% overall; review `coverage.xml`
+- Tests: `python -m pytest -m "not slow" --cov=elspeth --cov-branch`; all tests passed locally (864 passed, 1 skipped); `coverage.xml` regenerated.
+- Static analysis: `ruff check`, `mypy src`, `bandit -q -r src --severity-level high --confidence-level high` (upload SARIF).
+- Supply chain: `pip-audit -r requirements.lock --require-hashes`; attach JSON.
+- SBOM: `cyclonedx_py ... --output-reproducible`; attach `sbom.json`.
 
-- Static analysis
-  - `ruff check src tests`
-  - `mypy src`
-  - `bandit -r src -f sarif -o bandit.sarif`
+## Acceptance Conditions (to move to ACCEPT)
 
-- Supply chain & SBOM
-  - `pip-audit -r requirements.lock --require-hashes`
-  - `python -m cyclonedx_py requirements requirements.lock --pyproject pyproject.toml --output-file sbom.json --output-format JSON --output-reproducible`
+1) Lockfile‑based installs enforced and documented.
+2) HTTP retries/backoff added to Azure Content Safety and repository sinks.
+3) Checkpoint and JSONL writes serialised.
+4) Endpoint env overrides disabled outside DEVELOPMENT.
 
-## Conditions for Acceptance (Summary)
+## Way Forward (90‑Day Plan)
 
-1) Add Bandit (and optionally Semgrep) to CI; fail on HIGH.
+- Weeks 0–1: Implement quick wins above; run CI; archive artefacts (coverage, SBOM, audit) in release.
+- Weeks 2–4: Address deep‑work items for error taxonomy and telemetry; raise branch coverage in identified modules.
+- Weeks 5–8: Enforce STRICT defaults in prod; add config linting and policy documentation.

@@ -54,6 +54,23 @@ class _RepoSinkBase(ResultSink):
     def __post_init__(self) -> None:
         if self.session is None:
             self.session = requests.Session()
+            # Mount retry adapter to improve resilience on transient failures
+            try:  # pragma: no cover - adapter import/availability varies by env
+                from requests.adapters import HTTPAdapter
+                from urllib3.util.retry import Retry
+
+                retry = Retry(
+                    total=3,
+                    backoff_factor=0.5,
+                    status_forcelist=[429, 500, 502, 503, 504],
+                    allowed_methods=["GET", "PUT", "POST"],
+                )
+                adapter = HTTPAdapter(max_retries=retry)
+                self.session.mount("https://", adapter)
+                self.session.mount("http://", adapter)
+            except Exception:
+                # Non-fatal if retry adapter isn't available
+                pass
         if self.on_error not in {"abort", "skip"}:
             raise ValueError("on_error must be 'abort' or 'skip'")
         if self.dry_run:

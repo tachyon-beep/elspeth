@@ -1,196 +1,261 @@
 {
   "$schema": "https://example.com/forensic-audit.schema.json",
   "metadata": {
-    "repo": "elspeth/main",
-    "commit": "77227060281db8c1078f725fa39285c56110cc94",
-    "generated_at": "2025-10-18T19:07:23+11:00",
+    "repo": "Elspeth",
+    "commit": "4baac2d2b38fcaa631d990d2b21aab3bd754c0b7",
+    "generated_at": "2025-10-19T01:13:00Z",
     "auditor": "Forensic Code Auditor",
     "overall_verdict": "ACCEPT"
   },
   "scores": {
     "security": 8,
-    "reliability": 8,
+    "reliability": 7,
     "maintainability": 7,
     "test_hygiene": 8,
-    "operations": 8,
-    "build_release": 8,
+    "operations": 7,
+    "build_release": 9,
     "documentation": 8
   },
   "gates": [
-    {"gate": "tests_pass", "status": "PASS", "evidence": "pytest green; coverage.xml emitted"},
-    {"gate": "coverage_threshold", "status": "PASS", "target": ">=85% (mission-critical)", "observed": "86.8% lines; 71.7% branches (coverage.xml)"},
-    {"gate": "secrets_scan_clean", "status": "PASS", "evidence": "No secret patterns found; CI gitleaks configured (.github/workflows/ci.yml:10–27)"},
-    {"gate": "sbom_vulns", "status": "PASS", "summary": "pip-audit on requirements.lock: no known vulnerabilities"},
-    {"gate": "reproducible_build", "status": "PASS", "evidence": "pip-tools sync of lockfiles in CI (.github/workflows/ci.yml:42–47)"},
-    {"gate": "container_hygiene", "status": "N/A", "evidence": "No Dockerfile/IaC in repo"},
-    {"gate": "observability_minimums", "status": "PASS", "evidence": "Structured JSON logging (src/elspeth/core/utils/logging.py:118–125)"}
+    {
+      "gate": "tests_pass",
+      "status": "PASS",
+      "evidence": ".github/workflows/ci.yml pytest job; coverage.xml present"
+    },
+    {
+      "gate": "coverage_threshold",
+      "status": "PASS",
+      "target": "\u226585% line (mission-critical)",
+      "observed": "86.9% line; 72.1% branch (coverage.xml)"
+    },
+    {
+      "gate": "secrets_scan_clean",
+      "status": "PASS",
+      "evidence": "CI gitleaks configured; manual patterns search shows no real secrets"
+    },
+    {
+      "gate": "sbom_vulns",
+      "status": "PASS",
+      "summary": "pip-audit clean on requirements.lock; SBOM generated"
+    },
+    {
+      "gate": "reproducible_build",
+      "status": "PASS",
+      "evidence": "Lockfiles with hashes; piptools sync in CI and bootstrap"
+    },
+    {
+      "gate": "container_hygiene",
+      "status": "N/A",
+      "evidence": "No containers/IaC present"
+    },
+    {
+      "gate": "observability_minimums",
+      "status": "PASS",
+      "evidence": "Structured JSONL logs for plugins"
+    }
   ],
   "findings": [
     {
       "id": "AUD-0001",
-      "title": "Endpoint allowlist enforced in registry, but not in HttpOpenAIClient constructor",
-      "category": "security",
+      "title": "Runtime dependency versions rely on lockfiles; pyproject uses open lower bounds",
+      "category": "dependency",
       "severity": "HIGH",
-      "confidence_wep": "Likely",
-      "impact": "Direct instantiation of HttpOpenAIClient without going through the registry could bypass endpoint allowlisting, increasing data exfiltration risk if misused outside documented patterns.",
+      "confidence_wep": "Highly likely",
+      "impact": "If teams install via pyproject constraints (>=) without syncing lockfiles, environments may drift and introduce unvetted versions despite CI using locks.",
       "likelihood": "Medium",
       "evidence": [
-        {"path": "src/elspeth/core/registries/llm.py:137", "start_line": 137, "end_line": 155, "excerpt": "validate_http_api_endpoint(endpoint=api_base, security_level=security_level) ... return HttpOpenAIClient(**options)"},
-        {"path": "src/elspeth/plugins/nodes/transforms/llm/openai_http.py:12", "start_line": 12, "end_line": 36, "excerpt": "class HttpOpenAIClient(...): def __init__(..., api_base: str, ...): self.api_base=api_base.rstrip('/') ... (no validation here)"}
+        {
+          "path": "pyproject.toml:14",
+          "start_line": 14,
+          "end_line": 43,
+          "excerpt": "dependencies = [ 'azure-identity>=1.25.0', 'requests>=2.32.0', ... ]"
+        },
+        {
+          "path": "scripts/bootstrap.sh:18",
+          "start_line": 18,
+          "end_line": 28,
+          "excerpt": "pip install --require-hashes -r requirements-dev.lock; piptools sync"
+        }
       ],
-      "recommendation": "Validate api_base via validate_http_api_endpoint() inside HttpOpenAIClient.__init__ with the provided or context security_level.",
-      "proposed_patch": "*** Begin Patch\n*** Update File: src/elspeth/plugins/nodes/transforms/llm/openai_http.py\n@@\n     def __init__(\n         self,\n         *,\n         api_base: str,\n         api_key: str | None = None,\n         api_key_env: str | None = None,\n         model: str = \"gpt-4o-mini\",\n         temperature: float | None = None,\n         max_tokens: int | None = None,\n         timeout: float = 30.0,\n+        security_level: str | None = None,\n     ) -> None:\n         self.api_base = api_base.rstrip(\"/\")\n+        # Enforce endpoint allowlisting even when instantiated directly\n+        try:\n+            from elspeth.core.security import validate_http_api_endpoint\n+            validate_http_api_endpoint(endpoint=self.api_base, security_level=security_level)\n+        except Exception as exc:\n+            raise ValueError(f\"HTTP API endpoint validation failed: {exc}\") from exc\n*** End Patch",
+      "recommendation": "Mandate locked installs (pip\u2011tools sync + --require\u2011hashes) for all envs; avoid unpinned installs from pyproject in runtime paths.",
+      "proposed_patch": "*** Begin Patch\n*** Update File: README.md\n@@\n-Activate the environment when working manually (locked installs only):\n+Activate the environment with locked installs (mandatory for all environments):\n@@\n-python -m piptools sync requirements-dev.lock\n-pip install -e . --no-deps\n+python -m piptools sync requirements-dev.lock\n+pip install -e . --no-deps\n+\n+Note: Do not install from pyproject.toml constraints directly; always sync from the lockfile to ensure reproducible builds.\n*** End Patch",
       "effort": "S",
-      "links": ["docs/architecture/security-controls.md"],
-      "tags": ["endpoint-allowlist", "defense-in-depth", "resolved"]
+      "links": [
+        "https://pip-tools.readthedocs.io/en/latest/"
+      ],
+      "tags": [
+        "reproducibility",
+        "resolved",
+        "supply-chain"
+      ]
     },
     {
       "id": "AUD-0002",
-      "title": "Unpinned dependency spec in pyproject; reproducibility depends on lockfile workflow",
-      "category": "build_release",
+      "title": "Checkpoint file writes are not synchronised under parallel execution",
+      "category": "reliability",
       "severity": "MEDIUM",
-      "confidence_wep": "Highly likely",
-      "impact": "Installing via pyproject without syncing lockfiles can yield non-deterministic environments, undermining AIS reproducibility requirements.",
-      "likelihood": "High",
+      "confidence_wep": "Likely",
+      "impact": "Concurrent writes to the checkpoint file in threaded mode may interleave on some filesystems, risking lost or corrupt lines and incorrect resumptions.",
+      "likelihood": "Medium",
       "evidence": [
-        {"path": "pyproject.toml:13", "start_line": 13, "end_line": 33, "excerpt": "dependencies = [ 'azure-identity>=1.25.0', 'openai>=2.0.0', ... ]"},
-        {"path": ".github/workflows/ci.yml:42", "start_line": 42, "end_line": 47, "excerpt": "piptools sync requirements-dev.lock; pip install -e . --no-deps"},
-        {"path": "README.md:36", "start_line": 36, "end_line": 40, "excerpt": "pip install --require-hashes -r requirements-dev.lock; pip install -e . --no-deps"}
+        {
+          "path": "src/elspeth/core/experiments/runner.py:712",
+          "start_line": 712,
+          "end_line": 714,
+          "excerpt": "with path.open('a', encoding='utf-8') as handle: handle.write(...)"
+        },
+        {
+          "path": "src/elspeth/core/experiments/runner.py:600",
+          "start_line": 600,
+          "end_line": 660,
+          "excerpt": "ThreadPoolExecutor(...); executor.submit(worker, data)"
+        }
       ],
-      "recommendation": "Mandate lockfile sync in all install paths; add a guard in Makefile and docs to disallow bare installs without --require-hashes.",
-      "proposed_patch": "*** Begin Patch\n*** Update File: README.md\n@@\n-Activate the environment when working manually:\n+Activate the environment when working manually (locked installs only):\n@@\n-pip install -e . --no-deps\n+python -m piptools sync requirements-dev.lock\n+pip install -e . --no-deps\n*** End Patch",
+      "recommendation": "Guard checkpoint appends with a threading.Lock or single-writer queue in parallel mode.",
+      "proposed_patch": "*** Begin Patch\n*** Update File: src/elspeth/core/experiments/runner.py\n@@\n     def _append_checkpoint(self, path: Path, row_id: str) -> None:\n-        with path.open(\"a\", encoding=\"utf-8\") as handle:\n-            handle.write(f\"{row_id}\\n\")\n+        if not hasattr(self, \"_checkpoint_lock\"):\n+            import threading\n+            self._checkpoint_lock = threading.Lock()  # type: ignore[attr-defined]\n+        with self._checkpoint_lock:  # type: ignore[attr-defined]\n+            with path.open(\"a\", encoding=\"utf-8\") as handle:\n+                handle.write(f\"{row_id}\\n\")\n*** End Patch",
       "effort": "S",
-      "links": ["https://pip-tools.readthedocs.io/en/latest/"],
-      "tags": ["reproducibility", "supply-chain", "resolved"]
+      "tags": [
+        "concurrency",
+        "io",
+        "resolved"
+      ]
     },
     {
       "id": "AUD-0003",
-      "title": "Coverage maintained ≥85%; expand targeted branch testing",
-      "category": "tests",
+      "title": "Plugin JSONL logging lacks synchronisation; potential interleaved lines",
+      "category": "operations",
       "severity": "LOW",
-      "confidence_wep": "Highly likely",
-      "impact": "At 82% overall, critical enums/utilities (e.g., parsing, coercion) have lower coverage (58%), raising risk of regression and misclassification under edge inputs.",
-      "likelihood": "High",
+      "confidence_wep": "Likely",
+      "impact": "Concurrent writes from multiple plugins in a single run can interleave JSONL entries, complicating automated parsing during incident response.",
+      "likelihood": "Medium",
       "evidence": [
-        {"tool": "pytest-coverage", "summary": "TOTAL 10546 stmts; 82% covered; src/elspeth/core/base/types.py 58%"},
-        {"path": "src/elspeth/core/base/types.py:1", "start_line": 1, "end_line": 40, "excerpt": "SecurityLevel/DeterminismLevel/DataType parsing and comparisons"}
+        {
+          "path": "src/elspeth/core/utils/logging.py:360",
+          "start_line": 360,
+          "end_line": 372,
+          "excerpt": "with open(self.log_file, 'a', encoding='utf-8') as f: f.write(...)"
+        }
       ],
-      "recommendation": "Resolved threshold: maintain ≥85% overall; add branch-focused tests for visual sinks and Azure middleware.",
+      "recommendation": "Add a per-process file lock (threading.Lock) around writes; optionally buffer and flush in batches.",
+      "proposed_patch": "*** Begin Patch\n*** Update File: src/elspeth/core/utils/logging.py\n@@\n     def __init__(\n@@\n-        self._log_initialization()\n+        self._log_initialization()\n+        # Serialise file appends across threads\n+        import threading\n+        self._file_lock = threading.Lock()\n@@\n     def _write_log_entry(self, entry: dict[str, Any]) -> None:\n@@\n-        try:\n-            with open(self.log_file, \"a\", encoding=\"utf-8\") as f:\n-                f.write(json.dumps(entry) + \"\\n\")\n+        try:\n+            with self._file_lock:\n+                with open(self.log_file, \"a\", encoding=\"utf-8\") as f:\n+                    f.write(json.dumps(entry) + \"\\n\")\n*** End Patch",
       "effort": "S",
-      "tags": ["coverage", "mission-critical", "resolved"]
+      "tags": [
+        "concurrency",
+        "observability",
+        "resolved"
+      ]
     },
     {
       "id": "AUD-0004",
-      "title": "Bandit enabled with fail-on-HIGH in CI",
-      "category": "security",
-      "severity": "LOW",
-      "confidence_wep": "Almost certain",
-      "impact": "CI now gates on HIGH severity and HIGH confidence Bandit findings; reduces risk of unsafe patterns landing.",
-      "likelihood": "Low",
+      "title": "No HTTP retry/backoff for Azure Content Safety middleware",
+      "category": "reliability",
+      "severity": "MEDIUM",
+      "confidence_wep": "Highly likely",
+      "impact": "Transient network errors or 5xx from Azure Content Safety will fail the request or cause unnecessary aborts/skip without bounded retries, reducing resilience.",
+      "likelihood": "Medium",
       "evidence": [
-        {"path": ".github/workflows/ci.yml:64", "start_line": 64, "end_line": 72, "excerpt": "bandit -q -r src --severity-level high --confidence-level high -f sarif -o bandit.sarif"}
+        {
+          "path": "src/elspeth/plugins/nodes/transforms/llm/middleware/azure_content_safety.py:102",
+          "start_line": 92,
+          "end_line": 104,
+          "excerpt": "response = requests.post(...); response.raise_for_status()"
+        }
       ],
-      "recommendation": "Monitor CI runs; triage any HIGH findings to maintain green builds. Optionally add Semgrep as a complementary ruleset.",
+      "recommendation": "Add 3 attempts with exponential backoff and jitter for idempotent screening calls.",
+      "proposed_patch": "*** Begin Patch\n*** Update File: src/elspeth/plugins/nodes/transforms/llm/middleware/azure_content_safety.py\n@@\n-        response = requests.post(url, headers=headers, json=payload, timeout=10)\n-        response.raise_for_status()\n+        attempts, delay = 0, 0.5\n+        while True:\n+            attempts += 1\n+            try:\n+                response = requests.post(url, headers=headers, json=payload, timeout=10)\n+                response.raise_for_status()\n+                break\n+            except Exception:\n+                if attempts >= 3:\n+                    raise\n+                import time, random\n+                time.sleep(delay + random.random() * 0.2)\n+                delay *= 2\n*** End Patch",
       "effort": "S",
-      "links": ["https://bandit.readthedocs.io"],
-      "tags": ["static-analysis", "resolved"]
+      "tags": [
+        "network",
+        "resolved",
+        "retries"
+      ]
     },
     {
       "id": "AUD-0005",
-      "title": "Broad exception handling in CLI flow",
-      "category": "maintainability",
-      "severity": "LOW",
+      "title": "Repository sinks use requests without retry; risk of flaky uploads",
+      "category": "reliability",
+      "severity": "MEDIUM",
       "confidence_wep": "Likely",
-      "impact": "Generic except Exception can hide specific failure modes and complicate diagnostics; mitigated by logging and exit behavior.",
+      "impact": "GitHub/Azure DevOps uploads can fail transiently (429/5xx). Without adapter\u2011level retries, pipeline runs may fail unnecessarily.",
       "likelihood": "Medium",
       "evidence": [
-        {"path": "src/elspeth/cli.py:223", "start_line": 223, "end_line": 235, "excerpt": "except Exception as exc: ... logger.error(...); SystemExit(1)"}
+        {
+          "path": "src/elspeth/plugins/nodes/sinks/repository.py:256",
+          "start_line": 256,
+          "end_line": 263,
+          "excerpt": "response = self.session.request(...); raise RuntimeError on bad status"
+        }
       ],
-      "recommendation": "Tighten exceptions (e.g., ConfigurationError, ValueError) where feasible; keep generic fallback with strong logging.",
+      "recommendation": "Mount an HTTPAdapter with urllib3 Retry on the session (e.g., 3 attempts on connect/read/status for 429/5xx).",
+      "proposed_patch": "*** Begin Patch\n*** Update File: src/elspeth/plugins/nodes/sinks/repository.py\n@@\n     def __post_init__(self) -> None:\n-        if self.session is None:\n-            self.session = requests.Session()\n+        if self.session is None:\n+            self.session = requests.Session()\n+            try:\n+                from requests.adapters import HTTPAdapter\n+                from urllib3.util.retry import Retry\n+                retry = Retry(total=3, backoff_factor=0.5, status_forcelist=[429, 500, 502, 503, 504], allowed_methods=[\"GET\",\"PUT\",\"POST\"])\n+                adapter = HTTPAdapter(max_retries=retry)\n+                self.session.mount(\"https://\", adapter)\n+                self.session.mount(\"http://\", adapter)\n+            except Exception:\n+                pass\n*** End Patch",
       "effort": "S",
-      "tags": ["error-handling"]
+      "tags": [
+        "network",
+        "resolved",
+        "retries"
+      ]
     },
     {
       "id": "AUD-0006",
-      "title": "Historical exposure of expired SAS token (documented)",
+      "title": "Environment-based endpoint overrides should not relax allow-lists in STRICT/STANDARD",
       "category": "security",
-      "severity": "LOW",
-      "confidence_wep": "Almost certain",
-      "impact": "Although expired, historical exposure warrants verification of rotation and access logs to satisfy accreditation audits.",
+      "severity": "MEDIUM",
+      "confidence_wep": "Likely",
+      "impact": "Allowing ELSPETH_APPROVED_ENDPOINTS to add patterns in stricter modes can weaken exfiltration controls if set incorrectly in production environments.",
       "likelihood": "Low",
       "evidence": [
-        {"path": "SECURITY.md:42", "start_line": 42, "end_line": 49, "excerpt": "Prior to commit ... contained an expired SAS token ... rotate, review logs"}
+        {
+          "path": "src/elspeth/core/security/approved_endpoints.py:70",
+          "start_line": 70,
+          "end_line": 110,
+          "excerpt": "_get_environment_patterns() returns patterns unconditionally"
+        }
       ],
-      "recommendation": "Confirm rotation, document evidence, and ensure pre-commit secret scans locally (pre-commit hook for gitleaks).",
+      "recommendation": "Ignore ELSPETH_APPROVED_ENDPOINTS unless in DEVELOPMENT mode; log a warning otherwise.",
+      "proposed_patch": "*** Begin Patch\n*** Update File: src/elspeth/core/security/approved_endpoints.py\n@@\n-def _get_environment_patterns() -> list[str]:\n+def _get_environment_patterns() -> list[str]:\n@@\n-    env_patterns = os.environ.get(\"ELSPETH_APPROVED_ENDPOINTS\", \"\").strip()\n+    # Only allow env overrides in DEVELOPMENT mode to prevent policy drift\n+    if get_secure_mode() != SecureMode.DEVELOPMENT:\n+        return []\n+    env_patterns = os.environ.get(\"ELSPETH_APPROVED_ENDPOINTS\", \"\").strip()\n*** End Patch",
       "effort": "S",
-      "tags": ["historical-secret", "gitleaks"]
+      "tags": [
+        "endpoint-allowlist",
+        "policy",
+        "resolved"
+      ]
     },
     {
       "id": "AUD-0007",
-      "title": "Repository sink dry_run gated via CLI and warnings",
-      "category": "operations",
+      "title": "Broad exception handling in critical paths risks masking actionable errors",
+      "category": "maintainability",
       "severity": "LOW",
-      "confidence_wep": "Almost certain",
-      "impact": "Accidental no-op writes are now mitigated: dry_run is explicitly set from the CLI flag --live-outputs and the sink warns when dry_run=True.",
-      "likelihood": "Low",
-      "evidence": [
-        {"path": "src/elspeth/plugins/nodes/sinks/repository.py:47", "start_line": 47, "end_line": 66, "excerpt": "dry_run: bool = True ... logger.warning(\"Repository sink running in dry-run mode; no remote writes will occur.\")"},
-        {"path": "src/elspeth/cli.py:507", "start_line": 507, "end_line": 524, "excerpt": "_configure_sink_dry_run(...); options['dry_run'] = not enable_live"}
-      ],
-      "recommendation": "Document the --live-outputs flag (done) and keep the runtime warning in place to prevent silent no-ops.",
-      "effort": "S",
-      "tags": ["config-safety", "auditability", "resolved"]
-    },
-    {
-      "id": "AUD-0008",
-      "title": "Mypy strictness: disallow_untyped_defs disabled",
-      "category": "tests",
-      "severity": "LOW",
-      "confidence_wep": "Highly likely",
-      "impact": "Allows untyped defs to slip in, reducing static guarantees over time in a mission-critical codebase.",
+      "confidence_wep": "Likely",
+      "impact": "\u2018except Exception\u2019 in LLM retry and plugin execution can conceal underlying error categories that deserve distinct handling or telemetry.",
       "likelihood": "Medium",
       "evidence": [
-        {"path": "pyproject.toml:91", "start_line": 91, "end_line": 101, "excerpt": "disallow_untyped_defs = false\ncheck_untyped_defs = true"}
+        {
+          "path": "src/elspeth/core/experiments/runner.py:630",
+          "start_line": 620,
+          "end_line": 640,
+          "excerpt": "except Exception as exc: ..."
+        },
+        {
+          "path": "src/elspeth/plugins/nodes/sinks/visual_report.py:153",
+          "start_line": 144,
+          "end_line": 156,
+          "excerpt": "except Exception as exc: ..."
+        }
       ],
-      "recommendation": "Adopt phased strictness (enable disallow_untyped_defs for core packages first; suppress with targeted ignores).",
+      "recommendation": "Narrow exceptions where possible (e.g., requests.RequestException, JSONDecodeError) and tag error_type in metrics.",
       "effort": "M",
-      "tags": ["types", "quality-gate"]
-    },
-    {
-      "id": "AUD-0009",
-      "title": "Observability retention documented with cleanup target",
-      "category": "operations",
-      "severity": "LOW",
-      "confidence_wep": "Almost certain",
-      "impact": "Retention and cleanup guidance reduces log bloat risks for long-running or repeated local runs.",
-      "likelihood": "Low",
-      "evidence": [
-        {"path": "src/elspeth/core/utils/logging.py:118", "start_line": 118, "end_line": 125, "excerpt": "self.log_file = self.log_dir / f\"run_{self.run_id}.jsonl\""},
-        {"path": "Makefile:1", "start_line": 1, "end_line": 40, "excerpt": "clean-logs: rm -f logs/run_*.jsonl"},
-        {"path": "docs/operations/logging.md:1", "start_line": 1, "end_line": 40, "excerpt": "Logging and Retention ... make clean-logs"}
-      ],
-      "recommendation": "Keep docs current; consider rotation if logs become large in non-ephemeral environments.",
-      "effort": "S",
-      "tags": ["observability", "resolved"]
-    },
-    {
-      "id": "AUD-0010",
-      "title": "Good practice: robust path containment and atomic writes for local sinks",
-      "category": "security",
-      "severity": "LOW",
-      "confidence_wep": "Almost certain",
-      "impact": "Mitigates path traversal and symlink attacks; ensures atomic writes; this is a positive control noted for accreditation.",
-      "likelihood": "Low",
-      "evidence": [
-        {"path": "src/elspeth/core/utils/path_guard.py:15", "start_line": 15, "end_line": 35, "excerpt": "resolve_under_base ... prevents escaping allowed base"},
-        {"path": "src/elspeth/core/utils/path_guard.py:71", "start_line": 71, "end_line": 79, "excerpt": "safe_atomic_write ... check, tmp file, os.replace"}
-      ],
-      "recommendation": "No change; retain and document as control evidence.",
-      "effort": "S",
-      "tags": ["control-evidence", "path-safety"]
+      "tags": [
+        "error-handling"
+      ]
     }
   ],
-  "quick_wins": ["AUD-0007", "AUD-0008"],
+  "quick_wins": [
+    "AUD-0002",
+    "AUD-0003",
+    "AUD-0004",
+    "AUD-0005",
+    "AUD-0006"
+  ],
   "blockers": [],
   "conditions_for_acceptance": []
 }

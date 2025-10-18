@@ -710,8 +710,13 @@ class ExperimentRunner:
         return processed
 
     def _append_checkpoint(self, path: Path, row_id: str) -> None:
-        with path.open("a", encoding="utf-8") as handle:
-            handle.write(f"{row_id}\n")
+        # Serialise appends to avoid interleaved lines under parallel execution
+        if not hasattr(self, "_checkpoint_lock"):
+            import threading
+            self._checkpoint_lock = threading.Lock()  # type: ignore[attr-defined]
+        with self._checkpoint_lock:  # type: ignore[attr-defined]
+            with path.open("a", encoding="utf-8") as handle:
+                handle.write(f"{row_id}\n")
 
     def _validate_plugin_schemas(self, datasource_schema: Type[DataFrameSchema]) -> None:
         """

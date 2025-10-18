@@ -31,12 +31,14 @@ make bootstrap           # creates .venv/, installs extras, runs pytest
 make bootstrap-no-test
 ```
 
-Activate the environment when working manually (locked installs only):
+Activate the environment with locked installs (mandatory for all environments):
 
 ```bash
 source .venv/bin/activate
 python -m piptools sync requirements-dev.lock
 pip install -e . --no-deps
+
+Note: Do not install directly from `pyproject.toml` constraints (e.g., via unpinned `>=` ranges). Always sync from the lockfile with `piptools sync` to ensure reproducible builds and AIS compliance.
 ```
 
 For Azure ML workflows, use the dedicated lockfiles:
