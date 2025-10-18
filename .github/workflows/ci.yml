@@ -48,6 +48,10 @@ jobs:
           python -m piptools sync requirements-dev.lock
           python -m pip install -e . --no-deps
 
+      - name: Verify environment matches lockfile (dev)
+        run: |
+          python scripts/verify_locked_install.py -r requirements-dev.lock
+
       - name: Lint (ruff + mypy)
         run: python -m ruff check src tests && python -m mypy src
 

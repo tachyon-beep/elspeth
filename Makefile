@@ -41,6 +41,10 @@ lint:
 	@.venv/bin/python -m ruff check docs src tests
 	@.venv/bin/python -m mypy src/elspeth
 
+.PHONY: verify-locked
+verify-locked:
+	@.venv/bin/python scripts/verify_locked_install.py -r requirements-dev.lock
+
 clean-logs:
 	@echo "Removing JSONL run logs under ./logs..."
 	@rm -f logs/run_*.jsonl || true
