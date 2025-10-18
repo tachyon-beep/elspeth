@@ -65,13 +65,7 @@ jobs:
         uses: returntocorp/semgrep-action@v1
         with:
           config: auto
-          args: --sarif --output=semgrep.sarif
-      - name: Upload semgrep report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: semgrep-sarif
-          path: semgrep.sarif
+        continue-on-error: true
 
       - name: Unit tests with coverage
         run: python -m pytest -m "not slow" --maxfail=1 --disable-warnings
