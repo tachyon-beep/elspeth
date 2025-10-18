@@ -6,7 +6,7 @@ import time
 from collections import deque
 from contextlib import contextmanager
 from threading import Lock
-from typing import Any, ContextManager, Deque, SupportsFloat
+from typing import Any, ContextManager, Deque, SupportsFloat, Iterator
 
 
 def _coerce_float(value: object, *, context: str) -> float:
@@ -49,7 +49,7 @@ class NoopRateLimiter(RateLimiter):
 
     def acquire(self, metadata: dict[str, object | None] | None = None) -> ContextManager[None]:  # pragma: no cover - trivial
         @contextmanager
-        def _cm():
+        def _cm() -> Iterator[None]:
             yield
 
         return _cm()
@@ -73,7 +73,7 @@ class FixedWindowRateLimiter(RateLimiter):
 
     def acquire(self, metadata: dict[str, object | None] | None = None) -> ContextManager[None]:
         @contextmanager
-        def _cm():
+        def _cm() -> Iterator[None]:
             while True:
                 with self._lock:
                     now = time.time()
@@ -133,7 +133,7 @@ class AdaptiveRateLimiter(RateLimiter):
                 estimated_tokens = _coerce_float(value, context="estimated tokens")
 
         @contextmanager
-        def _cm():
+        def _cm() -> Iterator[None]:
             while True:
                 with self._lock:
                     now = time.time()
