@@ -56,6 +56,11 @@ def schema_from_config(
 
     Supports both shorthand type strings and extended dicts that include
     constraints such as `required`, `min`, and `max`.
+
+    Notes:
+    - For string constraints, use `pattern` (Pydantic v2). The legacy `regex`
+      key is not supported and will raise a ValueError to avoid pre-release
+      tech debt.
     """
     fields: dict[str, tuple[Any, Any]] = {}
 
@@ -96,12 +101,16 @@ def schema_from_config(
             field_kwargs["min_length"] = col_spec["min_length"]
         if "max_length" in col_spec:
             field_kwargs["max_length"] = col_spec["max_length"]
-        # Regex/pattern constraints (Pydantic v2 uses 'pattern')
+        # String pattern constraints (Pydantic v2 uses 'pattern' only)
         if "pattern" in col_spec:
             field_kwargs["pattern"] = col_spec["pattern"]
-        elif "regex" in col_spec:
-            # Backward-compat alias: accept 'regex' if present
-            field_kwargs["pattern"] = col_spec["regex"]
+        if "regex" in col_spec:
+            # No backward-compat in pre-release: fail fast to avoid tech debt
+            # Require 'pattern' for Pydantic v2; reject legacy 'regex' key.
+            raise ValueError(
+                "Column '%s' uses deprecated 'regex'; use 'pattern' for Pydantic v2"
+                % col_name
+            )
 
         if "default" not in field_kwargs:
             fields[col_name] = (python_type, Field(..., **field_kwargs))

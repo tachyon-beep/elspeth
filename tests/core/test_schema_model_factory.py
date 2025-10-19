@@ -55,3 +55,11 @@ def test_schema_from_config_required_optional_and_constraints():
 
     with pytest.raises(ValidationError):
         Schema(name="Bob", age=20, nickname="nick_1", ts=pd.Timestamp("2024-03-01"))
+
+
+def test_schema_from_config_rejects_regex_key():
+    cfg = {
+        "nickname": {"type": "string", "regex": r"^[A-Za-z]+$"},
+    }
+    with pytest.raises(ValueError):
+        schema_from_config(cfg)
