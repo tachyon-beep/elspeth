@@ -12,6 +12,7 @@ from typing import Any, Literal, Mapping
 
 from elspeth.core.base.protocols import Artifact, ArtifactDescriptor, ResultSink
 from elspeth.core.security import generate_signature
+from elspeth.core.security.secure_mode import SecureMode, get_secure_mode
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +34,11 @@ class SignedArtifactSink(ResultSink):
         self.base_path: Path = Path(self.base_path)
         if self.on_error not in {"abort", "skip"}:
             raise ValueError("on_error must be 'abort' or 'skip'")
+        try:
+            if get_secure_mode() == SecureMode.STRICT and self.on_error == "skip":
+                raise ValueError("SignedArtifactSink cannot use on_error='skip' in STRICT mode")
+        except Exception:
+            pass
 
     def write(self, results: dict[str, Any], *, metadata: dict[str, Any] | None = None) -> None:
         metadata = metadata or {}

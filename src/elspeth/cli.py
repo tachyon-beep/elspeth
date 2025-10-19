@@ -19,6 +19,7 @@ from elspeth.config import load_settings
 from elspeth.core.experiments import ExperimentSuite, ExperimentSuiteRunner
 from elspeth.core.experiments.tools import create_experiment_template, export_suite_configuration
 from elspeth.core.orchestrator import ExperimentOrchestrator
+from elspeth.core.security import SecureMode, get_secure_mode
 from elspeth.core.validation import validate_settings, validate_suite
 from elspeth.plugins.nodes.sinks.csv_file import CsvResultSink
 from elspeth.tools.reporting import SuiteReportGenerator
@@ -314,6 +315,14 @@ def _run_single(args: argparse.Namespace, settings) -> None:
         print(format_preview(df, args.head))
 
     _maybe_write_artifacts_single(args, settings, payload, df)
+    # STRICT mode: fail closed if any sink failures were recorded
+    try:
+        if get_secure_mode() == SecureMode.STRICT and payload.get("failures"):
+            logger.error("STRICT mode: sink failures detected; aborting with non-zero exit")
+            raise SystemExit(1)
+    except Exception:
+        # If secure mode utilities unavailable, do nothing
+        pass
 
 
 def _clone_suite_sinks(base_sinks: list, experiment_name: str) -> list:
@@ -524,6 +533,15 @@ def _run_suite(
             SuiteReportGenerator(suite, results).generate_all_reports(reports_dir)
 
     _maybe_write_artifacts_suite(args, settings, suite, results)
+    # STRICT mode: fail closed if any experiment recorded sink failures
+    try:
+        if get_secure_mode() == SecureMode.STRICT:
+            any_failures = any((entry.get("payload", {}) or {}).get("failures") for entry in results.values())
+            if any_failures:
+                logger.error("STRICT mode: sink failures detected in suite; aborting with non-zero exit")
+                raise SystemExit(1)
+    except Exception:
+        pass
 
 
 def _ensure_artifacts_dir(base: Path | None) -> Path:

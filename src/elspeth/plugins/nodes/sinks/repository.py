@@ -136,6 +136,13 @@ class _RepoSinkBase(ResultSink):
                     metadata={"repo_path": prefix},
                 )
         except (requests.RequestException, OSError, RuntimeError) as exc:
+            # If this is a classified request error and transient, honor on_error='skip' for non-STRICT modes
+            if isinstance(exc, _RepoRequestError) and exc.transient and self.on_error == "skip":
+                logger.warning("Transient repo error; skipping (on_error=skip): %s", exc)
+                plugin_logger = getattr(self, "plugin_logger", None)
+                if plugin_logger:
+                    plugin_logger.log_error(exc, context="repo sink write", recoverable=True)
+                return
             if self.on_error == "skip":
                 logger.warning("Repository sink failed; skipping upload: %s", exc)
                 plugin_logger = getattr(self, "plugin_logger", None)
@@ -292,7 +299,9 @@ class GitHubRepoSink(_RepoSinkBase):
         timeout = kwargs.pop("timeout", self.request_timeout)
         response = self.session.request(method, url, headers=self._headers(), timeout=timeout, **kwargs)
         if response.status_code not in expected_status:
-            raise RuntimeError(f"GitHub API call failed ({response.status_code}): {response.text}")
+            status = response.status_code
+            transient = status in {429, 500, 502, 503, 504}
+            raise _RepoRequestError(f"GitHub API call failed ({status}): {response.text}", status=status, transient=transient)
         return response
 
 
@@ -412,7 +421,9 @@ class AzureDevOpsRepoSink(_RepoSinkBase):
         timeout = kwargs.pop("timeout", self.request_timeout)
         response = self.session.request(method, url, headers=self._headers(), timeout=timeout, **kwargs)
         if response.status_code not in expected_status:
-            raise RuntimeError(f"Azure DevOps API call failed ({response.status_code}): {response.text}")
+            status = response.status_code
+            transient = status in {429, 500, 502, 503, 504}
+            raise _RepoRequestError(f"Azure DevOps API call failed ({status}): {response.text}", status=status, transient=transient)
         return response
 
     def _ensure_path(self, path: str) -> str:
@@ -476,6 +487,10 @@ class AzureDevOpsArtifactsRepoSink(AzureDevOpsRepoSink):
             else:
                 logger.warning("AzureDevOpsArtifactsRepoSink in dry-run mode; not pushing changes.")
         except (requests.RequestException, OSError, RuntimeError) as exc:
+            # Classify transient vs permanent failures for artifacts repo sink
+            if isinstance(exc, _RepoRequestError) and exc.transient and self.on_error == "skip":
+                logger.warning("Transient artifacts repo error; skipping (on_error=skip): %s", exc)
+                return
             if self.on_error == "skip":
                 logger.warning("Artifacts repo sink failed; skipping upload: %s", exc)
                 return
@@ -514,3 +529,8 @@ class AzureDevOpsArtifactsRepoSink(AzureDevOpsRepoSink):
                 }
             )
         return changes
+class _RepoRequestError(RuntimeError):
+    def __init__(self, message: str, *, status: int | None = None, transient: bool = False) -> None:
+        super().__init__(message)
+        self.status = status
+        self.transient = transient

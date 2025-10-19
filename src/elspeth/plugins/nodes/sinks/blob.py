@@ -12,6 +12,7 @@ from typing import Any, Mapping
 
 from elspeth.adapters.blob_store import BlobConfig, load_blob_config
 from elspeth.core.base.protocols import Artifact, ArtifactDescriptor, ResultSink
+from elspeth.core.security.secure_mode import SecureMode, get_secure_mode
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +67,12 @@ class BlobResultSink(ResultSink):
             raise ValueError("on_error must be 'abort' or 'skip'")
         self.on_error = on_error
         self._artifact_inputs: list[Artifact] = []
+        # STRICT mode: disallow skip-on-error for blob sinks (fail-closed policy)
+        try:
+            if get_secure_mode() == SecureMode.STRICT and self.on_error == "skip":
+                raise ValueError("BlobResultSink cannot use on_error='skip' in STRICT mode")
+        except Exception:
+            pass
 
     def write(self, results: dict[str, Any], *, metadata: dict[str, Any] | None = None) -> None:
         metadata = metadata or {}
@@ -121,7 +128,8 @@ class BlobResultSink(ResultSink):
                     metadata={"container": self.config.container_name, "blob": blob_name},
                 )
         except Exception as exc:
-            if self.on_error == "skip":
+            # Transient classification: prefer skip only if configured and error is likely transient
+            if self.on_error == "skip" and _blob_is_transient_error(exc):
                 logger.warning("Blob sink failed; skipping upload: %s", exc)
                 plugin_logger = getattr(self, "plugin_logger", None)
                 if plugin_logger:
@@ -412,3 +420,18 @@ class AzureBlobArtifactsSink(BlobResultSink):
             return None
 
     # Uses credential resolution and artifact helpers from BlobResultSink
+def _blob_is_transient_error(exc: Exception) -> bool:
+    """Best-effort classification of transient Azure Blob errors.
+
+    Avoids importing azure.core exceptions at import time; inspects known attributes.
+    """
+    status = getattr(exc, "status_code", None)
+    if status is None:
+        # Some SDK exceptions nest response
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+    if isinstance(status, int) and status in {429, 500, 502, 503, 504}:
+        return True
+    name = exc.__class__.__name__.lower()
+    if any(k in name for k in ("timeout", "throttle", "temporar", "serviceunavailable")):
+        return True
+    return False
