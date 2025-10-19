@@ -102,24 +102,27 @@ class PluginLogger:
         except ValueError:
             max_age_days = None
 
-        candidates = sorted(self.log_dir.glob("run_*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True)
+        # Cache (path, mtime) to avoid repeated stat() calls
+        candidates = [(p, p.stat().st_mtime) for p in self.log_dir.glob("run_*.jsonl")]
+        candidates.sort(key=lambda x: x[1], reverse=True)
         now = datetime.now(timezone.utc)
         # Age-based pruning
         if max_age_days and max_age_days > 0:
             cutoff = now - timedelta(days=max_age_days)
-            for p in list(candidates):
+            for p, mtime in list(candidates):
                 try:
-                    mtime = datetime.fromtimestamp(p.stat().st_mtime, tz=timezone.utc)
-                    if mtime < cutoff:
+                    mtime_dt = datetime.fromtimestamp(mtime, tz=timezone.utc)
+                    if mtime_dt < cutoff:
                         p.unlink(missing_ok=True)
                 except Exception:
                     # Ignore deletion errors
                     pass
             # Refresh candidate list after age-based deletions
-            candidates = sorted(self.log_dir.glob("run_*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True)
+            candidates = [(p, p.stat().st_mtime) for p in self.log_dir.glob("run_*.jsonl")]
+            candidates.sort(key=lambda x: x[1], reverse=True)
         # Count-based pruning
         if max_files and max_files > 0 and len(candidates) > max_files:
-            for p in candidates[max_files:]:
+            for p, _ in candidates[max_files:]:
                 try:
                     p.unlink(missing_ok=True)
                 except Exception:

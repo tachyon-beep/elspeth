@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from dataclasses import dataclass
 from typing import Any, Iterable, Mapping, Sequence
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 from elspeth.core.security import validate_azure_search_endpoint
 from elspeth.core.validation.base import ConfigurationError
@@ -43,6 +45,7 @@ class PgVectorQueryClient(VectorQueryClient):
         self._dsn = dsn
         self._table = table
         self._connect_timeout = int(connect_timeout) if connect_timeout is not None else None
+        self._logger = logging.getLogger(__name__)
 
     def query(
         self,
@@ -55,9 +58,22 @@ class PgVectorQueryClient(VectorQueryClient):
         vector_literal = self._vector_literal(query_vector)
         dsn = self._dsn
         if self._connect_timeout is not None:
-            # Append connect_timeout to DSN without disturbing existing params
-            sep = "&" if ("?" in dsn) else "?"
-            dsn = f"{dsn}{sep}connect_timeout={self._connect_timeout}"
+            # Append connect_timeout to DSN for both URI and key-value DSN styles
+            try:
+                if "://" in dsn:
+                    parsed = urlparse(dsn)
+                    q = dict(parse_qsl(parsed.query, keep_blank_values=True))
+                    q["connect_timeout"] = str(self._connect_timeout)
+                    new_query = urlencode(q, doseq=True)
+                    dsn = urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, new_query, parsed.fragment))
+                else:
+                    # libpq key-value DSN: append as space-delimited parameter
+                    sep = " " if dsn and not dsn.endswith(" ") else ""
+                    dsn = f"{dsn}{sep}connect_timeout={self._connect_timeout}"
+            except Exception:
+                # Fallback to safe whitespace-delimited append
+                sep = " " if dsn and not dsn.endswith(" ") else ""
+                dsn = f"{dsn}{sep}connect_timeout={self._connect_timeout}"
         conn = self._psycopg.connect(dsn, autocommit=True)
         try:
             # Use sql.Identifier to safely quote table name and prevent SQL injection
@@ -84,7 +100,8 @@ class PgVectorQueryClient(VectorQueryClient):
                     if metadata:
                         try:
                             metadata_payload = json.loads(metadata)
-                        except (json.JSONDecodeError, TypeError):  # pragma: no cover - best effort
+                        except (json.JSONDecodeError, TypeError) as exc:  # pragma: no cover - best effort
+                            self._logger.debug("Failed to parse metadata JSON for document_id=%s: %s", document_id, exc)
                             metadata_payload = {}
                     yield QueryResult(
                         document_id=document_id,

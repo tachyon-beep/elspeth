@@ -127,7 +127,7 @@ class _RepoSinkBase(ResultSink):
                     metrics={"files": len(files)},
                     metadata={"repo_path": prefix},
                 )
-        except (requests.RequestException, OSError, ValueError, RuntimeError) as exc:
+        except (requests.RequestException, OSError) as exc:
             if self.on_error == "skip":
                 logger.warning("Repository sink failed; skipping upload: %s", exc)
                 plugin_logger = getattr(self, "plugin_logger", None)
@@ -258,7 +258,7 @@ class GitHubRepoSink(_RepoSinkBase):
         token = self._read_token(self.token_env)
         if token:
             headers["Authorization"] = f"Bearer {token}"
-        elif not self.dry_run and isinstance(self.session, requests.Session):
+        elif not self.dry_run and not token:
             # Fail fast in typical execution when using a real requests.Session.
             # Custom sessions (e.g., tests) proceed to allow simulated failures (timeouts, etc.).
             raise RuntimeError(f"GitHub token missing; set '{self.token_env}' or enable dry-run")
@@ -366,8 +366,11 @@ class AzureDevOpsRepoSink(_RepoSinkBase):
         if token:
             auth = base64.b64encode(f":{token}".encode("utf-8")).decode("ascii")
             headers["Authorization"] = f"Basic {auth}"
-        elif not self.dry_run and isinstance(self.session, requests.Session):
-            raise RuntimeError(f"Azure DevOps PAT missing; set '{self.token_env}' or enable dry-run")
+        elif not self.dry_run and not token:
+            raise RuntimeError(
+                "Azure DevOps PAT missing; set 'AZURE_DEVOPS_PAT' or set "
+                f"'{self.token_env}' or enable dry-run"
+            )
         self._headers_cache = headers
         return headers
 
@@ -464,7 +467,7 @@ class AzureDevOpsArtifactsRepoSink(AzureDevOpsRepoSink):
                 self._request("POST", url, json=payload, expected_status={200, 201})
             else:
                 logger.warning("AzureDevOpsArtifactsRepoSink in dry-run mode; not pushing changes.")
-        except (requests.RequestException, OSError, ValueError, RuntimeError) as exc:
+        except (requests.RequestException, OSError) as exc:
             if self.on_error == "skip":
                 logger.warning("Artifacts repo sink failed; skipping upload: %s", exc)
                 return

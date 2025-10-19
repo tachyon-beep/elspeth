@@ -97,6 +97,7 @@ class PgVectorClient(VectorStoreClient):
         with conn.cursor() as cur:
             cur.execute("CREATE EXTENSION IF NOT EXISTS vector")
             # Use sql.Identifier to safely quote table name and prevent SQL injection
+            # Safe: table name via sql.Identifier; values are parameterized placeholders
             cur.execute(  # nosemgrep: python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query
                 self._sql.SQL("""
                 CREATE TABLE IF NOT EXISTS {} (
@@ -127,6 +128,7 @@ class PgVectorClient(VectorStoreClient):
                 for record in items:
                     vector_literal = self._vector_literal(record.vector)
                     metadata = json.dumps(record.metadata or {})
+                    # Safe: table name via sql.Identifier; values provided as parameters
                     cur.execute(  # nosemgrep: parameterized psycopg with sql.Identifier and placeholders
                         query,
                         (

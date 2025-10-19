@@ -109,7 +109,7 @@ def __getattr__(name: str) -> Any:  # pragma: no cover - import-time behavior
     module_path, attr = target
     try:
         module = importlib.import_module(module_path)
-    except Exception as exc:  # keep the original error for debugging
+    except (ImportError, ModuleNotFoundError) as exc:  # keep the original error for debugging
         raise ImportError(
             f"Cannot import {name} from {module_path}: {exc}"
         ) from exc

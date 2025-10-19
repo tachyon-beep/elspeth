@@ -140,6 +140,7 @@ def run_job_config(job: Mapping[str, Any]) -> dict[str, Any]:
     for _, row in df.iterrows():
         results.append({"row": row.to_dict()})
     payload: dict[str, Any] = {"results": results, "metadata": {"rows": len(results)}}
+    failures: list[dict[str, Any]] = []
     # Directly write to sinks
     for sink in sinks:
         try:
@@ -148,6 +149,10 @@ def run_job_config(job: Mapping[str, Any]) -> dict[str, Any]:
             # Continue on sink failures to maximize delivery, but record the error for auditability
             sink_name = getattr(sink, "__class__", type(sink)).__name__
             logger.warning("Sink write failed; skipping sink '%s': %s", sink_name, exc)
+            failures.append({"sink": sink_name, "error": str(exc)})
+    if failures:
+        payload["failures"] = failures
+        logger.warning("%d sink(s) failed during job write: %s", len(failures), ", ".join(f["sink"] for f in failures))
     return payload
 
 

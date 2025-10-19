@@ -11,7 +11,8 @@ authors = [
 ]
 requires-python = ">=3.12"
 dependencies = [
-  # Core dependencies pinned to latest stable/LTS as of current lockfiles
+  # Core dependencies: versions pinned for reference only (latest stable/LTS as of current lockfiles).
+  # For reproducible installs, always sync from the lockfile (requirements*.lock); do not rely on these pins.
   "azure-identity==1.25.1",
   "azure-storage-blob==12.27.0",
   "azure-search-documents==11.6.0",  # Azure Cognitive Search for RAG
@@ -80,7 +81,8 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I"]
-# Relax overly strict defaults for this codebase; enforce functional errors and import hygiene.
+# Relax overly strict defaults for this codebase; ignore line length (E501) to accommodate long URLs,
+# LLM prompt templates, and other cases where longer lines are necessary; enforce functional errors and import hygiene.
 ignore = ["E501"]
 
 [tool.ruff.lint.per-file-ignores]
@@ -98,7 +100,7 @@ line-ending = "lf"
 [tool.mypy]
 python_version = "3.12"
 warn_return_any = true
-warn_unused_configs = false
+warn_unused_configs = true
 disallow_untyped_defs = false
 disallow_incomplete_defs = false
 check_untyped_defs = true

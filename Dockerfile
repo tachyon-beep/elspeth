@@ -7,7 +7,9 @@ ARG PYTHON_IMAGE=python:3.12.12-slim
 FROM ${PYTHON_IMAGE} AS base
 ARG PYTHON_IMAGE
 # Enforce digest-pinned base image for reproducibility (CI passes a pinned digest)
-RUN sh -lc 'case "${PYTHON_IMAGE}" in *@sha256:*) echo "[base] Using digest-pinned image: ${PYTHON_IMAGE}" ;; * ) echo "ERROR: PYTHON_IMAGE not digest-pinned (${PYTHON_IMAGE}). Pass --build-arg PYTHON_IMAGE=image@sha256:<digest>" >&2; exit 1 ;; esac'
+COPY scripts/validate-digest.sh /usr/local/bin/validate-digest.sh
+RUN chmod +x /usr/local/bin/validate-digest.sh \
+ && /usr/local/bin/validate-digest.sh "${PYTHON_IMAGE}"
 ENV PIP_NO_CACHE_DIR=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PATH="/opt/venv/bin:${PATH}"

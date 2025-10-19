@@ -632,6 +632,8 @@ def _load_yaml_json(path: Path) -> dict[str, Any]:
 
 def _maybe_publish_artifacts_bundle(bundle_dir: Path) -> None:
     # Fetch current CLI args via a closure of run(); else skip if not available
+    # TODO: Accept an argparse.Namespace (args) instead of reading sys.argv directly
+    # to improve testability and encapsulation.
     import sys
 
     import elspeth.core.registries.sink as sink_reg

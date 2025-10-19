@@ -38,7 +38,7 @@ class HttpOpenAIClient(LLMClientProtocol):
             validate_http_api_endpoint(endpoint=self.api_base, security_level=security_level)
         except Exception as exc:  # pragma: no cover - validation path exercised via registry tests
             # Raise a clear error for misconfiguration/bypasses
-            raise ValueError(f"HTTP API endpoint validation failed: {exc}") from exc
+            raise ValueError(f"HTTP API endpoint validation failed for '{self.api_base}': {exc}") from exc
         if not api_key and api_key_env:
             api_key = os.getenv(api_key_env)
         self.api_key = api_key

@@ -23,7 +23,7 @@ from typing import Dict, Tuple
 try:
     # Python 3.12
     from importlib import metadata as ilmd
-except Exception:  # pragma: no cover - legacy fallback
+except ImportError:  # pragma: no cover - legacy fallback
     import importlib_metadata as ilmd  # type: ignore
 
 

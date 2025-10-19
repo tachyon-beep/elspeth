@@ -124,16 +124,10 @@ def _get_environment_patterns() -> list[str]:
             patterns.append(pattern_str)
 
     if patterns:
-        if mode == SecureMode.DEVELOPMENT:
-            logger.info(
-                "Loaded %d additional approved endpoint patterns from ELSPETH_APPROVED_ENDPOINTS (DEVELOPMENT mode)",
-                len(patterns),
-            )
-        else:
-            logger.warning(
-                "Loaded %d additional approved endpoint patterns from ELSPETH_APPROVED_ENDPOINTS (STANDARD mode)",
-                len(patterns),
-            )
+        logger.info(
+            "Loaded %d additional approved endpoint patterns from ELSPETH_APPROVED_ENDPOINTS (DEVELOPMENT mode)",
+            len(patterns),
+        )
 
     return patterns
 
@@ -164,8 +158,13 @@ def _is_localhost(endpoint: str) -> bool:
     Returns:
         True if endpoint is localhost or loopback address
     """
-    parsed = urlparse(endpoint)
-    hostname = parsed.hostname
+    try:
+        parsed = urlparse(endpoint)
+        hostname = parsed.hostname
+    except Exception as exc:  # pragma: no cover - ultra-defensive
+        logger.warning("Failed to parse endpoint '%s' in _is_localhost: %s", endpoint, exc)
+        return False
+
     if not hostname:
         return False
 
