@@ -120,6 +120,7 @@ mypy_path = ["src"]
 branch = true
 relative_files = true
 source = ["src/elspeth"]
+disable_warnings = ["module-not-measured"]
 
 [tool.coverage.report]
 skip_empty = true
