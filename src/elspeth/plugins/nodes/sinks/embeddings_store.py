@@ -93,7 +93,7 @@ class PgVectorClient(VectorStoreClient):
         self._table = table
         self._conflict_policy = upsert_conflict
 
-    def _ensure_table(self, conn) -> None:
+    def _ensure_table(self, conn: Any) -> None:
         with conn.cursor() as cur:
             cur.execute("CREATE EXTENSION IF NOT EXISTS vector")
             # Use sql.Identifier to safely quote table name and prevent SQL injection
@@ -188,8 +188,8 @@ class AzureSearchVectorClient(VectorStoreClient):
     ) -> None:
         # Local imports to avoid hard dependency at module import time
         try:
-            from azure.search.documents import SearchClient as _SearchClient
             from azure.core.credentials import AzureKeyCredential as _AzureKeyCredential
+            from azure.search.documents import SearchClient as _SearchClient
         except Exception as exc:  # pragma: no cover - exercised in integration
             raise ImportError(
                 "azure_search provider requires 'azure-search-documents' and 'azure-core' packages"
