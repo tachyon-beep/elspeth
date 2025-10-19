@@ -9,11 +9,6 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
-import psycopg
-from azure.core.credentials import AzureKeyCredential
-from azure.search.documents import SearchClient
-from psycopg import Connection, sql
-
 from elspeth.core.base.plugin_context import PluginContext
 from elspeth.core.base.protocols import Artifact, ArtifactDescriptor, ResultSink
 from elspeth.core.validation.base import ConfigurationError
@@ -85,13 +80,20 @@ class PgVectorClient(VectorStoreClient):
         table: str,
         upsert_conflict: str = "replace",
     ) -> None:
-        self._psycopg = psycopg
-        self._sql = sql
+        try:
+            import psycopg as _psycopg  # local import to avoid hard dependency at module import time
+            from psycopg import sql as _sql
+        except Exception as exc:  # pragma: no cover - exercised in integration
+            raise ImportError(
+                "pgvector provider requires psycopg/libpq. Install 'psycopg' and ensure libpq is available."
+            ) from exc
+        self._psycopg = _psycopg
+        self._sql = _sql
         self._dsn = dsn
         self._table = table
         self._conflict_policy = upsert_conflict
 
-    def _ensure_table(self, conn: psycopg.Connection) -> None:
+    def _ensure_table(self, conn) -> None:
         with conn.cursor() as cur:
             cur.execute("CREATE EXTENSION IF NOT EXISTS vector")
             # Use sql.Identifier to safely quote table name and prevent SQL injection
@@ -117,7 +119,7 @@ class PgVectorClient(VectorStoreClient):
             return UpsertResponse(count=0, took=0.0, namespace=namespace)
 
         with self._psycopg.connect(self._dsn, autocommit=True) as conn:
-            pg_conn: Connection[Any] = conn
+            pg_conn = conn
             self._ensure_table(pg_conn)
             # Use sql.SQL and sql.Identifier to safely construct queries and prevent SQL injection
             query = self._build_insert_query()
@@ -184,8 +186,16 @@ class AzureSearchVectorClient(VectorStoreClient):
         document_id_field: str = "document_id",
         namespace_field: str = "namespace",
     ) -> None:
-        self._search_client_class = SearchClient
-        self._azure_key_credential_class = AzureKeyCredential
+        # Local imports to avoid hard dependency at module import time
+        try:
+            from azure.search.documents import SearchClient as _SearchClient
+            from azure.core.credentials import AzureKeyCredential as _AzureKeyCredential
+        except Exception as exc:  # pragma: no cover - exercised in integration
+            raise ImportError(
+                "azure_search provider requires 'azure-search-documents' and 'azure-core' packages"
+            ) from exc
+        self._search_client_class = _SearchClient
+        self._azure_key_credential_class = _AzureKeyCredential
         self._client = self._search_client_class(endpoint=endpoint, index_name=index, credential=self._azure_key_credential_class(api_key))
         self._vector_field = vector_field
         self._id_field = document_id_field
