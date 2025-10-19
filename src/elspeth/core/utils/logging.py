@@ -16,7 +16,8 @@ import importlib.metadata
 import inspect
 import json
 import logging
-from datetime import datetime, timezone
+import os
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, cast
 
@@ -63,6 +64,15 @@ class PluginLogger:
         # Create log directory
         self.log_dir.mkdir(parents=True, exist_ok=True)
 
+        # Apply simple retention policy if configured via environment
+        # ELSPETH_LOG_MAX_FILES: keep at most N newest files (int > 0)
+        # ELSPETH_LOG_MAX_AGE_DAYS: delete files older than given days (int > 0)
+        try:
+            self._apply_retention()
+        except Exception:
+            # Retention is best-effort and should never block execution
+            pass
+
         # Generate run timestamp (shared across all plugins in this run)
         self.run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
@@ -78,6 +88,42 @@ class PluginLogger:
         self._file_lock = threading.Lock()
         # Log initialization
         self._log_initialization()
+
+    # ------------------------------------------------------------------ retention
+    def _apply_retention(self) -> None:
+        max_files_raw = os.getenv("ELSPETH_LOG_MAX_FILES")
+        max_age_days_raw = os.getenv("ELSPETH_LOG_MAX_AGE_DAYS")
+        try:
+            max_files = int(max_files_raw) if max_files_raw else None
+        except ValueError:
+            max_files = None
+        try:
+            max_age_days = int(max_age_days_raw) if max_age_days_raw else None
+        except ValueError:
+            max_age_days = None
+
+        candidates = sorted(self.log_dir.glob("run_*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True)
+        now = datetime.now(timezone.utc)
+        # Age-based pruning
+        if max_age_days and max_age_days > 0:
+            cutoff = now - timedelta(days=max_age_days)
+            for p in list(candidates):
+                try:
+                    mtime = datetime.fromtimestamp(p.stat().st_mtime, tz=timezone.utc)
+                    if mtime < cutoff:
+                        p.unlink(missing_ok=True)
+                except Exception:
+                    # Ignore deletion errors
+                    pass
+            # Refresh candidate list after age-based deletions
+            candidates = sorted(self.log_dir.glob("run_*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True)
+        # Count-based pruning
+        if max_files and max_files > 0 and len(candidates) > max_files:
+            for p in candidates[max_files:]:
+                try:
+                    p.unlink(missing_ok=True)
+                except Exception:
+                    pass
 
     def _compute_config_hash(self) -> str:
         """Compute SHA256 hash of plugin configuration."""

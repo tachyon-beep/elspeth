@@ -27,10 +27,10 @@ jobs:
           DIGEST=$(docker inspect --format='{{range .RepoDigests}}{{println .}}{{end}}' python:3.12.12-slim | grep '^python@sha256:' | head -n1 | cut -d'@' -f2)
           echo "DOCKER_PYTHON_IMAGE=python:3.12.12-slim@${DIGEST}" >> $GITHUB_ENV
 
-      - name: Build runtime image
+      - name: Build runtime image (version tag only)
         run: |
           VERSION=${GITHUB_REF_NAME}
-          docker build --build-arg PYTHON_IMAGE=${{ env.DOCKER_PYTHON_IMAGE }} --target runtime -t ghcr.io/${{ github.repository }}:${VERSION} -t ghcr.io/${{ github.repository }}:latest .
+          docker build --build-arg PYTHON_IMAGE=${{ env.DOCKER_PYTHON_IMAGE }} --target runtime -t ghcr.io/${{ github.repository }}:${VERSION} .
 
       - name: Login to GHCR
         uses: docker/login-action@v3
@@ -39,11 +39,10 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Push runtime image
+      - name: Push runtime image (version tag only)
         run: |
           VERSION=${GITHUB_REF_NAME}
           docker push ghcr.io/${{ github.repository }}:${VERSION}
-          docker push ghcr.io/${{ github.repository }}:latest
 
       - name: Install Syft and Grype
         run: |

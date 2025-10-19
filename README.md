@@ -108,6 +108,10 @@ For diagrams and deep detail, see `docs/architecture/architecture-overview.md`, 
 - Validate dependencies with `make audit` (pip-audit against `requirements.lock`).
 - Generate an SBOM with `make sbom` (outputs `sbom.json` from the locked requirements).
 - Persistent artifacts and audit bundles are written under `artifacts/` when enabled via the CLI (see `--artifacts-dir` and `--signed-bundle`). This directory is git‑ignored by default.
+- JSONL audit logs are written under `logs/` per run. You can enable simple retention with:
+  - `ELSPETH_LOG_MAX_FILES` (keep newest N files)
+  - `ELSPETH_LOG_MAX_AGE_DAYS` (delete files older than N days)
+  Both are optional and best‑effort; logging never blocks execution.
 - Regenerate analytics artefacts after reporting or sink changes:
 
   ```bash

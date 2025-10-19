@@ -106,9 +106,9 @@ def _get_environment_patterns() -> list[str]:
     Returns:
         List of regex patterns from ELSPETH_APPROVED_ENDPOINTS env var.
     """
-    # Restrict overrides in STRICT mode; allow in STANDARD and DEVELOPMENT
+    # Restrict overrides: only allow in DEVELOPMENT to prevent policy drift
     mode = get_secure_mode()
-    if mode == SecureMode.STRICT:
+    if mode in (SecureMode.STRICT, SecureMode.STANDARD):
         return []
 
     env_patterns = os.environ.get("ELSPETH_APPROVED_ENDPOINTS", "").strip()

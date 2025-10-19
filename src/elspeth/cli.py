@@ -210,7 +210,7 @@ def run(args: argparse.Namespace) -> None:
                 print(format_preview(df, args.head))
             _maybe_write_artifacts_single(args, _AdHoc(settings_path=args.job_config), payload, df)
             return
-        except Exception as exc:
+        except (ImportError, OSError, ValueError, RuntimeError) as exc:
             logger.error("Job execution failed: %s", exc, exc_info=True)
             raise SystemExit(1)
 
@@ -581,7 +581,7 @@ def _maybe_write_artifacts_suite(args: argparse.Namespace, settings, suite: Expe
             combined["results"].extend(entry["payload"].get("results", []))
         try:
             df = settings.datasource.load()
-        except Exception:
+        except (OSError, RuntimeError, ValueError):
             df = pd.DataFrame()
         _create_signed_bundle(
             art_dir, "suite", combined, settings, df, signing_key_env=getattr(args, "signing_key_env", "ELSPETH_SIGNING_KEY")
@@ -591,7 +591,7 @@ def _maybe_write_artifacts_suite(args: argparse.Namespace, settings, suite: Expe
 def _create_signed_bundle(art_dir: Path, name: str, payload: dict[str, Any], settings, df: pd.DataFrame, *, signing_key_env: str) -> None:
     try:
         from elspeth.plugins.nodes.sinks.reproducibility_bundle import ReproducibilityBundleSink
-    except Exception as exc:  # pragma: no cover - optional import
+    except ImportError as exc:  # pragma: no cover - optional import
         logger.warning("Reproducibility bundle unavailable: %s", exc)
         return
     bundle_dir = art_dir / f"{name}_bundle"
@@ -612,7 +612,7 @@ def _create_signed_bundle(art_dir: Path, name: str, payload: dict[str, Any], set
         sink.write(payload, metadata=metadata)
         logger.info("Created signed reproducibility bundle at %s", bundle_dir)
         _maybe_publish_artifacts_bundle(bundle_dir)
-    except Exception as exc:
+    except (OSError, RuntimeError, ValueError) as exc:
         logger.error("Failed to create reproducibility bundle: %s", exc)
 
 
@@ -626,7 +626,7 @@ def _load_yaml_json(path: Path) -> dict[str, Any]:
         raise ValueError("artifact sink config must be a mapping")
     except (OSError, UnicodeError) as exc:
         raise ValueError(f"Invalid artifact sink config: {exc}") from exc
-    except Exception as exc:  # yaml.YAMLError and similar
+    except yaml.YAMLError as exc:
         raise ValueError(f"Invalid artifact sink config: {exc}") from exc
 
 
@@ -659,7 +659,7 @@ def _maybe_publish_artifacts_bundle(bundle_dir: Path) -> None:
         opts["folder_path"] = str(bundle_dir)
     try:
         from elspeth.core.validation.base import ConfigurationError  # local import to avoid cycles
-    except Exception:  # pragma: no cover - defensive
+    except ImportError:  # pragma: no cover - defensive
         ConfigurationError = RuntimeError  # type: ignore
     try:
         sink = sink_reg.sink_registry.create(plugin_name, opts, parent_context=None)

@@ -127,7 +127,7 @@ class _RepoSinkBase(ResultSink):
                     metrics={"files": len(files)},
                     metadata={"repo_path": prefix},
                 )
-        except Exception as exc:
+        except (requests.RequestException, OSError, ValueError, RuntimeError) as exc:
             if self.on_error == "skip":
                 logger.warning("Repository sink failed; skipping upload: %s", exc)
                 plugin_logger = getattr(self, "plugin_logger", None)
@@ -464,7 +464,7 @@ class AzureDevOpsArtifactsRepoSink(AzureDevOpsRepoSink):
                 self._request("POST", url, json=payload, expected_status={200, 201})
             else:
                 logger.warning("AzureDevOpsArtifactsRepoSink in dry-run mode; not pushing changes.")
-        except Exception as exc:
+        except (requests.RequestException, OSError, ValueError, RuntimeError) as exc:
             if self.on_error == "skip":
                 logger.warning("Artifacts repo sink failed; skipping upload: %s", exc)
                 return

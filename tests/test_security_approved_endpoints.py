@@ -244,6 +244,8 @@ class TestEndpointValidation:
 
     def test_environment_override_patterns(self, monkeypatch):
         """Test ELSPETH_APPROVED_ENDPOINTS environment variable."""
+        # Enable overrides only in DEVELOPMENT mode
+        monkeypatch.setenv("ELSPETH_SECURE_MODE", "development")
         # Add a custom approved pattern
         monkeypatch.setenv(
             "ELSPETH_APPROVED_ENDPOINTS",
@@ -261,6 +263,8 @@ class TestEndpointValidation:
 
     def test_environment_override_multiple_patterns(self, monkeypatch):
         """Test multiple patterns in ELSPETH_APPROVED_ENDPOINTS."""
+        # Enable overrides only in DEVELOPMENT mode
+        monkeypatch.setenv("ELSPETH_SECURE_MODE", "development")
         monkeypatch.setenv(
             "ELSPETH_APPROVED_ENDPOINTS",
             r"https://llm1\.internal\.com(/.*)?, https://llm2\.internal\.com(/.*)?",

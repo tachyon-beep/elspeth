@@ -28,6 +28,8 @@ RUN python -m pip install --upgrade pip pip-tools \
 # Copy source and install package in editable mode
 COPY src/ src/
 COPY tests/ tests/
+COPY scripts/ scripts/
+COPY docs/ docs/
 COPY README.md README.md
 COPY LICENSE LICENSE
 RUN python -m pip install -e . --no-deps
@@ -36,8 +38,12 @@ FROM base AS dev
 COPY --from=builder-dev /opt/venv /opt/venv
 COPY --from=builder-dev /workspace/src /workspace/src
 COPY --from=builder-dev /workspace/tests /workspace/tests
+COPY --from=builder-dev /workspace/scripts /workspace/scripts
+COPY --from=builder-dev /workspace/docs /workspace/docs
 COPY --from=builder-dev /workspace/README.md /workspace/README.md
 COPY --from=builder-dev /workspace/LICENSE /workspace/LICENSE
+RUN chown -R appuser:appuser /workspace \
+ && chmod -R go+rX /workspace/src /workspace/tests /workspace/scripts
 USER appuser
 WORKDIR /workspace
 
