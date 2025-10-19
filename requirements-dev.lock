@@ -1988,9 +1988,9 @@ rfc3987==1.3.8 \
     --hash=sha256:10702b1e51e5658843460b189b185c0366d2cf4cff716f13111b0ea9fd2dce53 \
     --hash=sha256:d3c4d257a560d544e9826b38bc81db676890c79ab9d7ac92b39c7a253d5ca733
     # via jsonschema
-rich==14.2.0 \
-    --hash=sha256:73ff50c7c0c1c77c8243079283f4edb376f0f6442433aecb8ce7e6d0b92d1fe4 \
-    --hash=sha256:76bc51fe2e57d2b1be1f96c524b890b816e334ab4c1e45888799bfaab0021edd
+rich==13.5.3 \
+    --hash=sha256:87b43e0543149efa1253f485cd845bb7ee54df16c9617b8a893650ab84b4acb6 \
+    --hash=sha256:9257b468badc3d347e146a4faa268ff229039d4c2d176ab0cffb4c4fbc73d5d9
     # via
     #   bandit
     #   pip-audit
@@ -2342,12 +2342,12 @@ seaborn==0.13.2 \
     # via
     #   elspeth (pyproject.toml)
     #   pingouin
-semgrep==1.85.0 \
-    --hash=sha256:0a6b5d509576bbe0d68245d9ee2973ccecb485ca5907e85a7a8793552bf622cb \
-    --hash=sha256:157b7724c35a8bda972921abfaaf252bdb754bbda004b2a82aaa38ac8099e176 \
-    --hash=sha256:1a321cca4c5da84eb466ca1a4ceda10223e806225e371c4fef710cfe4b4b1df7 \
-    --hash=sha256:91fab3a0aa7f987a6605e01617179a363338350cca51174905d6ad0080a8d08e \
-    --hash=sha256:a63055b392da70c46947780f43fecf54064fb60d8de11a16902e0cc149350a3e
+semgrep==1.92.0 \
+    --hash=sha256:11da564419a15eb408999b497779743f179e43f75ecfba657c35d813a848dab9 \
+    --hash=sha256:7cd1929c9d1fe70697813a24b52d374c034657efb5f0adc25dfe6b74fc140f15 \
+    --hash=sha256:983dcc5aefd957d61758e8f24be82468c60e30210bd4cdcdfd150825eff3433a \
+    --hash=sha256:9aa2d64b4a4a9a85b038cf356ed8536a2cafaa0c8ca1c760815a65bae2033a88 \
+    --hash=sha256:a7a0b5d121e9a86953e57cd9ddd00e257190fbdaee9e6612ddda7ba597f71e70
     # via elspeth (pyproject.toml)
 six==1.17.0 \
     --hash=sha256:4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274 \
