@@ -228,6 +228,10 @@ jobs:
           severity-cutoff: high
           fail-build: true
           output-format: sarif
+          grype-version: v0.83.0
+        env:
+          GRYPE_DB_CACHE_DIR: ${{ runner.temp }}/grype-db
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload Grype SARIF to code scanning
         if: always()
