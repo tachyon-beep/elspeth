@@ -27,7 +27,7 @@ class SignedArtifactSink(ResultSink):
     signature_name: str = "signature.json"
     manifest_name: str = "manifest.json"
     algorithm: Literal["hmac-sha256", "hmac-sha512", "rsa-pss-sha256", "ecdsa-p256-sha256"] = "hmac-sha256"
-    key: str | None = None
+    key: str | bytes | None = None
     key_env: str | None = "ELSPETH_SIGNING_KEY"
     public_key_env: str | None = None
     key_vault_secret_uri: str | None = None
@@ -68,8 +68,17 @@ class SignedArtifactSink(ResultSink):
             if self.algorithm.startswith("rsa-") or self.algorithm.startswith("ecdsa-"):
                 pub_pem = os.getenv(self.public_key_env) if self.public_key_env else None
                 # If public key not provided, attempt to derive from private PEM (best-effort)
-                if not pub_pem and "BEGIN PUBLIC KEY" in key:
-                    pub_pem = key
+                if not pub_pem:
+                    try:
+                        if isinstance(key, (bytes, bytearray)):
+                            if b"BEGIN PUBLIC KEY" in key:
+                                pub_pem = key  # bytes OK
+                        else:
+                            if "BEGIN PUBLIC KEY" in key:
+                                pub_pem = key  # str OK
+                    except TypeError:
+                        # If key type is unexpected, skip fingerprint derivation gracefully
+                        pub_pem = None
                 if pub_pem:
                     try:
                         key_fp = public_key_fingerprint(pub_pem)
@@ -151,7 +160,7 @@ class SignedArtifactSink(ResultSink):
         payload = json.dumps(results, sort_keys=True).encode("utf-8")
         return hashlib.sha256(payload).hexdigest()
 
-    def _resolve_key(self) -> str:
+    def _resolve_key(self) -> str | bytes:
         if self.key:
             return self.key
         if self.key_env:

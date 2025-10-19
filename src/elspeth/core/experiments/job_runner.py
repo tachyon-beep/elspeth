@@ -43,13 +43,38 @@ from elspeth.core.experiments.runner import ExperimentRunner
 from elspeth.core.registries.datasource import datasource_registry
 from elspeth.core.registries.llm import create_llm_from_definition
 from elspeth.core.registries.sink import sink_registry
-from elspeth.core.security import normalize_determinism_level, normalize_security_level
+from elspeth.core.security import (
+    SECURITY_LEVELS,
+    normalize_determinism_level,
+    normalize_security_level,
+)
 
 logger = logging.getLogger(__name__)
 
 
 def _context_from_defaults(job: Mapping[str, Any]) -> PluginContext:
-    sec = normalize_security_level(job.get("security_level"))
+    # If job-level security not specified, infer the most restrictive level
+    # declared by any plugin in the job to avoid false "conflict" errors when
+    # per-plugin overrides are stricter than the default.
+    job_sec = job.get("security_level")
+    if job_sec is None:
+        candidates: list[str] = []
+        ds = job.get("datasource") or {}
+        if ds.get("security_level") is not None:
+            candidates.append(normalize_security_level(ds.get("security_level")))
+        llm = job.get("llm") or {}
+        if llm.get("security_level") is not None:
+            candidates.append(normalize_security_level(llm.get("security_level")))
+        for entry in list(job.get("sinks", []) or []):
+            if entry.get("security_level") is not None:
+                candidates.append(normalize_security_level(entry.get("security_level")))
+        if candidates:
+            # Choose the most restrictive level
+            sec = max(candidates, key=SECURITY_LEVELS.index)
+        else:
+            sec = normalize_security_level(None)
+    else:
+        sec = normalize_security_level(job_sec)
     det = normalize_determinism_level(job.get("determinism_level"))
     return PluginContext(
         plugin_name="job",
@@ -64,7 +89,13 @@ def _create_datasource(defn: Mapping[str, Any], ctx: PluginContext):
     name = defn.get("plugin")
     if not isinstance(name, str) or not name:
         raise ValueError("datasource.plugin must be a non-empty string")
-    return datasource_registry.create(name, defn.get("options", {}), parent_context=ctx)
+    # Merge top-level security/determinism overrides into options before registry
+    opts = dict(defn.get("options", {}) or {})
+    if defn.get("security_level") is not None:
+        opts["security_level"] = defn.get("security_level")
+    if defn.get("determinism_level") is not None:
+        opts["determinism_level"] = defn.get("determinism_level")
+    return datasource_registry.create(name, opts, parent_context=ctx)
 
 
 def _create_sinks(defs: Sequence[Mapping[str, Any]], ctx: PluginContext):
@@ -73,7 +104,12 @@ def _create_sinks(defs: Sequence[Mapping[str, Any]], ctx: PluginContext):
         name = entry.get("plugin") or entry.get("name")
         if not isinstance(name, str) or not name:
             raise ValueError("sink.plugin must be a non-empty string")
-        opts = entry.get("options", {})
+        # Merge top-level security/determinism overrides into options before registry
+        opts = dict(entry.get("options", {}) or {})
+        if entry.get("security_level") is not None:
+            opts["security_level"] = entry.get("security_level")
+        if entry.get("determinism_level") is not None:
+            opts["determinism_level"] = entry.get("determinism_level")
         sinks.append(sink_registry.create(name, opts, parent_context=ctx))
     return sinks
 
@@ -99,7 +135,12 @@ def run_job_config(job: Mapping[str, Any]) -> dict[str, Any]:
         fields = list(prompt.get("fields", []))
 
         llm = create_llm_from_definition(
-            {"plugin": llm_def.get("plugin"), "options": llm_def.get("options", {}), "security_level": llm_def.get("security_level")},
+            {
+                "plugin": llm_def.get("plugin"),
+                "options": llm_def.get("options", {}),
+                "security_level": llm_def.get("security_level"),
+                "determinism_level": llm_def.get("determinism_level"),
+            },
             parent_context=ctx,
         )
 
