@@ -43,7 +43,12 @@ def test_cli_strict_mode_exits_on_sink_failure(monkeypatch, tmp_path: Path):
             "prompts": {"system": "S", "user": "U {{ payload }}"},
             "prompt_fields": ["payload"],
             "sinks": [
-                {"plugin": "csv", "security_level": "OFFICIAL", "determinism_level": "guaranteed", "options": {"path": str(tmp_path / "out.csv")}},
+                {
+                    "plugin": "csv",
+                    "security_level": "OFFICIAL",
+                    "determinism_level": "guaranteed",
+                    "options": {"path": str(tmp_path / "out.csv")},
+                },
             ],
         }
     }
@@ -59,6 +64,7 @@ def test_cli_strict_mode_exits_on_sink_failure(monkeypatch, tmp_path: Path):
             raise RuntimeError("boom")
 
     from elspeth.plugins.nodes.sinks import csv_file as csv_mod
+
     monkeypatch.setattr(csv_mod, "CsvResultSink", BoomCsv)
 
     # Monkeypatch LLM factory to return a no-op client
@@ -68,7 +74,9 @@ def test_cli_strict_mode_exits_on_sink_failure(monkeypatch, tmp_path: Path):
 
     from elspeth.core.registries import llm as llm_reg_mod
 
-    monkeypatch.setattr(llm_reg_mod, "llm_registry", type("R", (), {"create": staticmethod(lambda name, opts, parent_context=None: DummyLLM())})())
+    monkeypatch.setattr(
+        llm_reg_mod, "llm_registry", type("R", (), {"create": staticmethod(lambda name, opts, parent_context=None: DummyLLM())})()
+    )
 
     args = cli.build_parser().parse_args(
         [

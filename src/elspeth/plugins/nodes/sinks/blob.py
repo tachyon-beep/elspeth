@@ -420,6 +420,8 @@ class AzureBlobArtifactsSink(BlobResultSink):
             return None
 
     # Uses credential resolution and artifact helpers from BlobResultSink
+
+
 def _blob_is_transient_error(exc: Exception) -> bool:
     """Best-effort classification of transient Azure Blob errors.
 

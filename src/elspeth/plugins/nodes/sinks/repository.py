@@ -394,10 +394,7 @@ class AzureDevOpsRepoSink(_RepoSinkBase):
             # Fail fast only when using a real requests.Session. Custom sessions (e.g., tests)
             # proceed to allow simulated failures (timeouts, etc.).
             if isinstance(self.session, requests.Session):
-                raise RuntimeError(
-                    "Azure DevOps PAT missing; set 'AZURE_DEVOPS_PAT' or set "
-                    f"'{self.token_env}' or enable dry-run"
-                )
+                raise RuntimeError(f"Azure DevOps PAT missing; set 'AZURE_DEVOPS_PAT' or set '{self.token_env}' or enable dry-run")
         self._headers_cache = headers
         return headers
 
@@ -539,6 +536,8 @@ class AzureDevOpsArtifactsRepoSink(AzureDevOpsRepoSink):
                 }
             )
         return changes
+
+
 class _RepoRequestError(RuntimeError):
     def __init__(self, message: str, *, status: int | None = None, transient: bool = False) -> None:
         super().__init__(message)

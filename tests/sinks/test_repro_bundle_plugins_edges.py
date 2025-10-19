@@ -34,4 +34,3 @@ def test_plugins_copy_handles_unknown_entries(tmp_path: Path, caplog) -> None:
     assert (tmp_path / "plug.tar.gz").exists()
     assert any("Skipping plugin entry" in rec.message for rec in caplog.records)
     assert any("No plugin source files found" in rec.message for rec in caplog.records)
-

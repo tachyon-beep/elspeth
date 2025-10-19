@@ -16,4 +16,3 @@ def test_strict_mode_disallows_skip_on_error(monkeypatch, sink_cfg):
     monkeypatch.setenv("ELSPETH_SECURE_MODE", SecureMode.STRICT.value)
     with pytest.raises(ValueError, match="on_error='skip' is not permitted"):
         validate_sink_config(dict(sink_cfg), mode=SecureMode.STRICT)
-

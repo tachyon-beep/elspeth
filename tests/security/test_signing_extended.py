@@ -35,10 +35,14 @@ def test_ecdsa_sign_verify_and_unsupported_algo():
         format=serialization.PrivateFormat.PKCS8,
         encryption_algorithm=serialization.NoEncryption(),
     ).decode("utf-8")
-    pub_pem = private_key.public_key().public_bytes(
-        encoding=serialization.Encoding.PEM,
-        format=serialization.PublicFormat.SubjectPublicKeyInfo,
-    ).decode("utf-8")
+    pub_pem = (
+        private_key.public_key()
+        .public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo,
+        )
+        .decode("utf-8")
+    )
 
     data = b"payload"
     sig = signing.generate_signature(data, priv_pem, algorithm="ecdsa-p256-sha256")
@@ -48,4 +52,3 @@ def test_ecdsa_sign_verify_and_unsupported_algo():
     # Unsupported verify algorithm path
     with pytest.raises(ValueError):
         signing.verify_signature(data, base64.b64encode(b"x").decode("ascii"), pub_pem, algorithm="ecdsa-unknown")
-

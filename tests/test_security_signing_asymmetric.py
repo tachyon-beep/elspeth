@@ -67,4 +67,3 @@ def test_signed_artifact_sink_with_rsa_pss(tmp_path: Path, monkeypatch: pytest.M
     sig = sig_payload["signature"]
     raw = res_path.read_bytes()
     assert verify_signature(raw, sig, pub_pem, algorithm="rsa-pss-sha256")
-

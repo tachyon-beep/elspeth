@@ -16,10 +16,14 @@ def _make_rsa_keypair_pem() -> tuple[str, str]:
         format=serialization.PrivateFormat.PKCS8,
         encryption_algorithm=serialization.NoEncryption(),
     ).decode("utf-8")
-    pub_pem = private_key.public_key().public_bytes(
-        encoding=serialization.Encoding.PEM,
-        format=serialization.PublicFormat.SubjectPublicKeyInfo,
-    ).decode("utf-8")
+    pub_pem = (
+        private_key.public_key()
+        .public_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PublicFormat.SubjectPublicKeyInfo,
+        )
+        .decode("utf-8")
+    )
     return priv_pem, pub_pem
 
 
@@ -32,6 +36,7 @@ def test_signed_artifact_sink_fetches_key_from_keyvault(monkeypatch, tmp_path: P
 
     # Monkeypatch at the sink module import site
     import elspeth.plugins.nodes.sinks.signed as signed_mod
+
     monkeypatch.setattr(signed_mod, "fetch_secret_from_keyvault", _fake_fetch)
 
     sink = SignedArtifactSink(

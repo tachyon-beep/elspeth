@@ -53,4 +53,3 @@ def test_job_runner_accumulates_sink_failures(monkeypatch):
     assert "failures" in payload and len(payload["failures"]) == 1
     assert payload["failures"][0]["sink"].lower().endswith("badsink")
     assert calls and calls[0][0] == "good"
-

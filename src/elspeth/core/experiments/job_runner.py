@@ -66,7 +66,7 @@ def _context_from_defaults(job: Mapping[str, Any]) -> PluginContext:
         llm = job.get("llm") or {}
         if llm.get("security_level") is not None:
             candidates.append(normalize_security_level(llm.get("security_level")))
-        for entry in (job.get("sinks", []) or []):
+        for entry in job.get("sinks", []) or []:
             if entry.get("security_level") is not None:
                 candidates.append(normalize_security_level(entry.get("security_level")))
         if candidates:

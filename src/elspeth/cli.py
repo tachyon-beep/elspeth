@@ -200,27 +200,22 @@ def run(args: argparse.Namespace) -> None:
     configure_logging(log_level)
     # If an ad-hoc job config is specified, run it and exit
     if getattr(args, "job_config", None):
-        try:
-            from elspeth.core.experiments.job_runner import run_job_file
+        from elspeth.core.cli.job import execute_job_file
 
-            payload = run_job_file(args.job_config)
-            # Emit preview and optional artifacts
-            rows = [_result_to_row(record) for record in payload.get("results", [])]
-            df = pd.DataFrame(rows)
-            if args.head and args.head > 0 and not df.empty:
-                print(format_preview(df, args.head))
-            _maybe_write_artifacts_single(args, _AdHoc(settings_path=args.job_config), payload, df)
-            return
-        except (ImportError, OSError, ValueError, RuntimeError) as exc:
-            logger.error("Job execution failed: %s", exc, exc_info=True)
-            raise SystemExit(1)
+        payload, df = execute_job_file(args.job_config)
+        if args.head and args.head > 0 and not df.empty:
+            print(format_preview(df, args.head))
+        _maybe_write_artifacts_single(args, _AdHoc(settings_path=args.job_config), payload, df)
+        return
 
     settings = _load_settings_from_args(args)
     suite_root = _resolve_suite_root(args, settings)
 
     # Handle schema validation mode
     if getattr(args, "validate_schemas", False):
-        _validate_schemas(args, settings, suite_root)
+        from elspeth.core.cli.validate import validate_schemas_command
+
+        validate_schemas_command(args, settings, suite_root)
         return
 
     suite_instance = _handle_suite_management(args, suite_root)
@@ -242,39 +237,8 @@ def run(args: argparse.Namespace) -> None:
         _run_single(args, settings)
 
 
-def _validate_schemas(args: argparse.Namespace, settings, suite_root: Path | None) -> None:
-    """Validate datasource schema compatibility without running experiments."""
-    logger.info("Validating datasource schema compatibility...")
-
-    try:
-        # Load DataFrame from datasource
-        df = settings.datasource.load()
-        logger.info("✓ Datasource loaded successfully: %d rows, %d columns", len(df), len(df.columns))
-
-        # Check if schema is attached
-        datasource_schema = df.attrs.get("schema") if hasattr(df, "attrs") else None
-
-        if datasource_schema:
-            logger.info("✓ Schema found: %s", datasource_schema.__name__)
-            logger.info("  Columns: %s", list(datasource_schema.__annotations__.keys()))
-
-            # For now, just report success - actual plugin validation would happen
-            # during experiment runner initialization
-            logger.info("✓ Schema validation passed")
-            print("\n✅ Schema validation successful!")
-            print(f"   Datasource: {settings.datasource.__class__.__name__}")
-            print(f"   Schema: {datasource_schema.__name__}")
-            print(f"   Columns: {', '.join(datasource_schema.__annotations__.keys())}")
-        else:
-            logger.warning("⚠ No schema defined - validation skipped")
-            logger.warning("  Consider adding a schema declaration to your datasource configuration")
-            print("\n⚠️  No schema validation performed")
-            print("   Tip: Add a 'schema' section to your datasource configuration for type safety")
-
-    except Exception as exc:
-        logger.error("✗ Schema validation failed: %s", exc, exc_info=True)
-        print(f"\n❌ Schema validation failed: {exc}")
-        raise SystemExit(1)
+## moved to elspeth.core.cli.validate.validate_schemas_command
+## kept import indirection in run() to reduce cli.py size
 
 
 def _run_single(args: argparse.Namespace, settings) -> None:

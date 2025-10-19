@@ -113,15 +113,11 @@ def __getattr__(name: str) -> Any:  # pragma: no cover - import-time behavior
     try:
         module = importlib.import_module(module_path)
     except ImportError as exc:  # keep the original error for debugging
-        raise ImportError(
-            f"Cannot import {name} from {module_path}: {exc}"
-        ) from exc
+        raise ImportError(f"Cannot import {name} from {module_path}: {exc}") from exc
     try:
         return getattr(module, attr)
     except AttributeError as exc:
-        raise ImportError(
-            f"Module {module_path!r} does not define attribute {attr!r}"
-        ) from exc
+        raise ImportError(f"Module {module_path!r} does not define attribute {attr!r}") from exc
 
 
 def __dir__() -> list[str]:  # pragma: no cover - trivial

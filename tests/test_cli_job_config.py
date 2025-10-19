@@ -65,4 +65,3 @@ def test_run_with_job_config_identity_pipeline(tmp_path: Path):
 
     out_csvs = list(tmp_path.glob("results.csv"))
     assert out_csvs, "expected job sink output file"
-

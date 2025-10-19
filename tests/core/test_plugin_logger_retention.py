@@ -74,4 +74,3 @@ def test_plugin_logger_error_and_specialized_events(tmp_path: Path) -> None:
     # Ensure log file created and contains JSON lines
     run_file = next((p for p in (tmp_path / "logs").glob("run_*.jsonl")), None)
     assert run_file and run_file.read_text(encoding="utf-8").strip()
-

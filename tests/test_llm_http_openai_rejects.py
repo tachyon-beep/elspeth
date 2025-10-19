@@ -9,4 +9,3 @@ def test_http_openai_rejects_non_local_http_endpoint():
     # Non-local HTTP endpoints must be rejected by endpoint validation
     with pytest.raises(ValueError):
         HttpOpenAIClient(api_base="http://example.com", model="test")
-

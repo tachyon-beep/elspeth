@@ -209,9 +209,7 @@ class ReproducibilityBundleSink(ResultSink):
         elif self._is_dataframe(source_data):
             # DataFrame available but no retained copy - save it now
             self._write_source_dataframe(source_data)
-            logger.warning(
-                "Source data was not retained locally by datasource; saved from DataFrame (may lose original formatting)"
-            )
+            logger.warning("Source data was not retained locally by datasource; saved from DataFrame (may lose original formatting)")
 
         if datasource_config:
             # Always save datasource config for reference

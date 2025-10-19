@@ -30,4 +30,3 @@ def test_safe_atomic_write_permission_hardening_branches(monkeypatch, tmp_path: 
     assert dest.read_text(encoding="utf-8") == "ok"
     assert calls["fchmod"] == 1
     assert calls["chmod"] == 1
-

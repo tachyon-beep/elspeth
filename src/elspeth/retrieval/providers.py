@@ -56,11 +56,18 @@ class PgVectorQueryClient(VectorQueryClient):
     ) -> Iterable[QueryResult]:
         # Import psycopg here to allow initialization without libpq in minimal test envs.
         if self._psycopg is None and self._sql is None:  # pragma: no cover - trivial path
-            import psycopg
-            from psycopg import sql
-
+            try:
+                import psycopg
+            except Exception as exc:  # pragma: no cover - environment missing psycopg
+                raise RuntimeError("psycopg unavailable; cannot perform pgvector queries") from exc
             self._psycopg = psycopg
-            self._sql = sql
+            try:
+                from psycopg import sql
+
+                self._sql = sql
+            except Exception:
+                # Keep self._sql = None; downstream will refuse raw SQL fallback
+                self._sql = None
 
         vector_literal = self._vector_literal(query_vector)
         dsn = self._dsn
@@ -98,18 +105,8 @@ class PgVectorQueryClient(VectorQueryClient):
                         """).format(self._sql.Identifier(self._table))
                     args = (vector_literal, namespace, vector_literal, top_k)
                 else:
-                    # Fallback for test shim: basic string query (unsafe for production)
-                    query_sql = f"""
-                        SELECT document_id,
-                               contents,
-                               metadata::text,
-                               1.0 - (embedding <=> %s::vector) AS score
-                        FROM {self._table}
-                        WHERE namespace = %s
-                        ORDER BY embedding <=> %s::vector ASC
-                        LIMIT %s
-                    """
-                    args = (vector_literal, namespace, vector_literal, top_k)
+                    # Disallow raw SQL fallback to avoid injection risks if psycopg.sql isn't available
+                    raise RuntimeError("psycopg.sql unavailable; refusing to execute raw SQL fallback")
                 cur.execute(  # nosemgrep: python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query
                     query_sql,
                     args,

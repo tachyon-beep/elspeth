@@ -37,10 +37,13 @@ def test_github_upload_base64_and_sha(monkeypatch):
 
     def _fake_request(method: str, url: str, **kwargs: Any):  # noqa: D401
         calls.append((method, url, kwargs))
+
         class R:
             status_code = 201
+
             def json(self):  # noqa: D401
                 return {}
+
         return R()
 
     # First file should include sha; second should not
@@ -69,4 +72,3 @@ def test_github_upload_base64_and_sha(monkeypatch):
     # First includes sha, second does not
     assert kw1["json"].get("sha") == "deadbeef"
     assert "sha" not in kw2["json"]
-

@@ -22,4 +22,3 @@ def test_embeddings_azure_openai_embedder_requires_endpoint(tmp_path: Path):
             # Missing endpoint should raise when vector is absent and embedder is needed
             embed_model={"provider": "azure_openai", "deployment": "dep"},
         ).write({"results": [{"row": {"APPID": "1"}, "response": {"content": "text"}}]}, metadata={})
-

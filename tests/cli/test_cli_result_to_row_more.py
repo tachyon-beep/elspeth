@@ -41,4 +41,3 @@ def test_result_to_row_flattens_responses_and_metrics():
     assert row["retry_max_attempts"] == 3
     assert json.loads(row["retry_history"]) == [{"e": "boom"}]
     assert row["security_level"] == "OFFICIAL"
-

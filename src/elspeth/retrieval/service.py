@@ -50,7 +50,16 @@ def _create_embedder(config: Mapping[str, object]) -> Embedder:
         model = str(config.get("model") or "text-embedding-3-large")
         api_key_raw = config.get("api_key")
         api_key = str(api_key_raw) if api_key_raw is not None else None
-        return OpenAIEmbedder(model=model, api_key=api_key)
+        timeout_raw = config.get("timeout")
+        timeout: float | int | None
+        if isinstance(timeout_raw, (int, float, str)):
+            try:
+                timeout = float(timeout_raw)
+            except Exception:
+                timeout = None
+        else:
+            timeout = None
+        return OpenAIEmbedder(model=model, api_key=api_key, timeout=timeout)
     if provider == "azure_openai":
         endpoint_raw = config.get("endpoint")
         endpoint = str(endpoint_raw) if endpoint_raw is not None else None
@@ -59,6 +68,14 @@ def _create_embedder(config: Mapping[str, object]) -> Embedder:
         api_key = str(api_key_raw) if api_key_raw is not None else None
         api_version_raw = config.get("api_version")
         api_version = str(api_version_raw) if api_version_raw is not None else None
+        timeout_raw = config.get("timeout")
+        if isinstance(timeout_raw, (int, float, str)):
+            try:
+                timeout_val = float(timeout_raw)
+            except Exception:
+                timeout_val = None
+        else:
+            timeout_val = None
         if endpoint:
             validate_azure_openai_endpoint(endpoint)
         return AzureOpenAIEmbedder(
@@ -66,5 +83,6 @@ def _create_embedder(config: Mapping[str, object]) -> Embedder:
             deployment=deployment,
             api_key=api_key,
             api_version=api_version,
+            timeout=timeout_val,
         )
     raise ValueError(f"Unsupported embed_model provider '{provider}'")

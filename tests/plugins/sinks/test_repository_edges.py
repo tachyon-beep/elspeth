@@ -65,4 +65,3 @@ def test_github_get_existing_sha_handles_404_and_200(monkeypatch):
     # Second call: 200 with sha
     sink.session = _FakeSession(status_code=200, json_payload={"sha": "abc123"})
     assert sink._get_existing_sha("path.txt") == "abc123"  # type: ignore[attr-defined]
-

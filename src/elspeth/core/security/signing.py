@@ -19,6 +19,7 @@ from typing import Literal
 try:  # asymmetric crypto is optional at runtime, but available in dev/test
     from cryptography.hazmat.primitives import hashes, serialization
     from cryptography.hazmat.primitives.asymmetric import ec, padding
+
     _ASYM_AVAILABLE = True
 except Exception:  # pragma: no cover - optional dependency guard
     _ASYM_AVAILABLE = False

@@ -27,4 +27,3 @@ def test_signed_sink_on_error_skip_swallows_exceptions(tmp_path: Path, monkeypat
 
     # File write may have started; at least ensure it did not crash
     assert (tmp_path / "signed" / "x").exists()
-

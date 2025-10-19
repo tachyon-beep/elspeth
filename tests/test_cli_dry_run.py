@@ -93,4 +93,3 @@ def test_configure_sink_dry_run_enables_and_disables(monkeypatch):
     assert any(d.get("options", {}).get("dry_run") is False for d in out2.orchestrator_config.sink_defs)
     assert out2.suite_defaults["sinks"][0]["options"]["dry_run"] is False
     assert out2.prompt_packs["pack"]["sinks"][0]["options"]["dry_run"] is False
-

@@ -25,10 +25,7 @@ def _results(n: int = 3) -> dict:
             return {"m": 3}
 
     return {
-        "results": [
-            {"row": {"idx": i}, "response": {"content": f"ok-{i}"}, "meta": ObjA(), "obj": ObjB(), "m": ObjC()}
-            for i in range(n)
-        ],
+        "results": [{"row": {"idx": i}, "response": {"content": f"ok-{i}"}, "meta": ObjA(), "obj": ObjB(), "m": ObjC()} for i in range(n)],
         "aggregates": {"score": {"mean": 0.9}},
     }
 
@@ -111,14 +108,15 @@ def test_repro_bundle_framework_and_artifacts_payload(tmp_path: Path) -> None:
         compression="gz",
     )
 
-    sink.prepare_artifacts({
-        "bundle": [
-            Artifact(id="a1", type="blob", payload={"k": 1}),
-            Artifact(id="a2", type="blob", path=str(extra)),
-        ]
-    })
+    sink.prepare_artifacts(
+        {
+            "bundle": [
+                Artifact(id="a1", type="blob", payload={"k": 1}),
+                Artifact(id="a2", type="blob", path=str(extra)),
+            ]
+        }
+    )
 
     sink.write({"results": []}, metadata={"experiment": "e"})
     tar_path = tmp_path / "bundle2.tar.gz"
     assert tar_path.exists()
-

@@ -60,4 +60,3 @@ def test_csv_factory_fallback_to_export(monkeypatch, tmp_path):
 
     # The real CsvResultSink does not define the "marker" attribute
     assert not hasattr(sink, "marker")
-

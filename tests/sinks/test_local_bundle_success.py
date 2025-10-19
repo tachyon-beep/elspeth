@@ -24,4 +24,3 @@ def test_local_bundle_writes_manifest_results_and_csv(tmp_path: Path):
     assert set(manifest.get("columns", [])) == {"a", "b"}
     assert (target / "results.json").exists()
     assert (target / "results.csv").exists()
-

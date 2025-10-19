@@ -107,10 +107,7 @@ def schema_from_config(
         if "regex" in col_spec:
             # No backward-compat in pre-release: fail fast to avoid tech debt
             # Require 'pattern' for Pydantic v2; reject legacy 'regex' key.
-            raise ValueError(
-                "Column '%s' uses deprecated 'regex'; use 'pattern' for Pydantic v2"
-                % col_name
-            )
+            raise ValueError("Column '%s' uses deprecated 'regex'; use 'pattern' for Pydantic v2" % col_name)
 
         if "default" not in field_kwargs:
             fields[col_name] = (python_type, Field(..., **field_kwargs))

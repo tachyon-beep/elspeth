@@ -19,4 +19,3 @@ def test_get_retained_path_non_string_ignored(tmp_path):
 
     sink = ReproducibilityBundleSink(base_path=str(tmp_path))
     assert sink._get_retained_path(df) is None
-

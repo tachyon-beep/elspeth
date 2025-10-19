@@ -14,4 +14,3 @@ def test_filter_framework_files_excludes_pycache_and_tests():
     assert ReproducibilityBundleSink._filter_framework_files(keep) is keep
     assert ReproducibilityBundleSink._filter_framework_files(drop_pyc) is None
     assert ReproducibilityBundleSink._filter_framework_files(drop_test) is None
-

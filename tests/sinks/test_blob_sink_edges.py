@@ -45,7 +45,7 @@ def test_blob_resolve_blob_name_variants_and_error(tmp_path: Path) -> None:
         "default": {
             "connection_name": "c",
             "azureml_datastore_uri": "azureml://fake",
-        "storage_uri": "https://example.blob.core.windows.net/container/out/",
+            "storage_uri": "https://example.blob.core.windows.net/container/out/",
             "blob_path": "prefix/path/",
         }
     }

@@ -84,9 +84,7 @@ class PgVectorClient(VectorStoreClient):
             import psycopg as _psycopg  # local import to avoid hard dependency at module import time
             from psycopg import sql as _sql
         except Exception as exc:  # pragma: no cover - exercised in integration
-            raise ImportError(
-                "pgvector provider requires psycopg/libpq. Install 'psycopg' and ensure libpq is available."
-            ) from exc
+            raise ImportError("pgvector provider requires psycopg/libpq. Install 'psycopg' and ensure libpq is available.") from exc
         self._psycopg = _psycopg
         self._sql = _sql
         self._dsn = dsn
@@ -193,9 +191,7 @@ class AzureSearchVectorClient(VectorStoreClient):
             from azure.core.credentials import AzureKeyCredential as _AzureKeyCredential
             from azure.search.documents import SearchClient as _SearchClient
         except Exception as exc:  # pragma: no cover - exercised in integration
-            raise ImportError(
-                "azure_search provider requires 'azure-search-documents' and 'azure-core' packages"
-            ) from exc
+            raise ImportError("azure_search provider requires 'azure-search-documents' and 'azure-core' packages") from exc
         self._search_client_class = _SearchClient
         self._azure_key_credential_class = _AzureKeyCredential
         self._client = self._search_client_class(endpoint=endpoint, index_name=index, credential=self._azure_key_credential_class(api_key))

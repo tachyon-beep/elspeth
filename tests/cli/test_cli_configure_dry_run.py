@@ -14,13 +14,17 @@ class _Cfg:
 class _Settings:
     def __init__(self) -> None:
         self.sinks = []
-        self.orchestrator_config = _Cfg(sink_defs=[
-            {"plugin": "github_repo", "options": {}},
-            {"plugin": "other", "options": {"dry_run": True}, "security_level": "OFFICIAL"},
-        ])
-        self.suite_defaults = {"sinks": [
-            {"plugin": "azure_devops_repo", "options": {}},
-        ]}
+        self.orchestrator_config = _Cfg(
+            sink_defs=[
+                {"plugin": "github_repo", "options": {}},
+                {"plugin": "other", "options": {"dry_run": True}, "security_level": "OFFICIAL"},
+            ]
+        )
+        self.suite_defaults = {
+            "sinks": [
+                {"plugin": "azure_devops_repo", "options": {}},
+            ]
+        }
         self.prompt_packs = {
             "p": {"sinks": [{"plugin": "github_repo", "options": {}}]},
         }
@@ -50,4 +54,3 @@ def test_configure_sink_dry_run_toggles_everywhere():
             # security_level/other fields preserved when present
             if entry.get("plugin") == "other":
                 assert entry.get("security_level") == "OFFICIAL"
-

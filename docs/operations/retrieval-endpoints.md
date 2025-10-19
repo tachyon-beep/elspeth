@@ -56,6 +56,27 @@ Retrieval components support bounded operations to avoid hangs during incidents:
   - `request_timeout` (alias `timeout`) can be provided in the retriever options; it is passed to `SearchClient.search(timeout=...)`.
   - Impact: bounds per-query latency; recommended initial value 10–30s depending on index size.
 
+- OpenAI / Azure OpenAI Embedders:
+  - Embedding calls are bounded by a per-request timeout.
+  - Configure via the `embed_model.timeout` setting or the environment variable `ELSPETH_EMBEDDING_TIMEOUT` (seconds) as a fallback.
+  - YAML examples:
+    ```yaml
+    # OpenAI
+    embed_model:
+      provider: openai
+      model: text-embedding-3-large
+      timeout: 30  # seconds
+
+    # Azure OpenAI
+    embed_model:
+      provider: azure_openai
+      endpoint: https://<resource>.openai.azure.com
+      deployment: my-embedding
+      api_version: 2024-05-13
+      timeout: 30  # seconds
+    ```
+  - Impact: prevents embedding calls from hanging during upstream incidents; recommended 20–60s based on workload.
+
 Note: The generic HTTP/OpenAI client already applies a per-request `timeout` and bounded retries (429/5xx) with exponential backoff.
 
 ## Audit Evidence

@@ -83,4 +83,3 @@ def test_pgvector_dsn_appends_timeout_for_kv_dsn(monkeypatch):
     assert "connect_timeout=7" in dsn
     # ensure space-delimited param (kv-style)
     assert " connect_timeout=7" in dsn or dsn.endswith("connect_timeout=7")
-
