@@ -128,8 +128,8 @@ class BlobResultSink(ResultSink):
                     metadata={"container": self.config.container_name, "blob": blob_name},
                 )
         except Exception as exc:
-            # Transient classification: prefer skip only if configured and error is likely transient
-            if self.on_error == "skip" and _blob_is_transient_error(exc):
+            # Honor on_error='skip' in non-STRICT modes to maximize delivery; STRICT mode disallowed via __init__ guard
+            if self.on_error == "skip":
                 logger.warning("Blob sink failed; skipping upload: %s", exc)
                 plugin_logger = getattr(self, "plugin_logger", None)
                 if plugin_logger:
