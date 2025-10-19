@@ -321,47 +321,77 @@ class ArtifactPipeline:  # pylint: disable=too-many-instance-attributes
         return ordered
 
     # pylint: disable=too-many-locals
-    def execute(self, payload: dict[str, Any], metadata: dict[str, Any] | None = None) -> ArtifactStore:
-        """Run all sinks in dependency order, producing the final artifact store."""
+    def execute(
+        self,
+        payload: dict[str, Any],
+        metadata: dict[str, Any] | None = None,
+        *,
+        on_error: str = "raise",
+        failures: list[dict[str, Any]] | None = None,
+    ) -> ArtifactStore:
+        """Run all sinks in dependency order, producing the final artifact store.
+
+        Args:
+            payload: Experiment/job payload passed to sinks
+            metadata: Metadata to pass alongside payload
+            on_error: Error handling strategy: "raise" (default) or "continue"
+            failures: Optional list to append failure dicts when continuing on errors
+
+        Returns:
+            ArtifactStore with all registered artifacts
+        """
+
+        if on_error not in {"raise", "continue"}:  # pragma: no cover - defensive guard
+            raise ValueError("on_error must be 'raise' or 'continue'")
 
         store = ArtifactStore()
         metadata_dict: dict[str, Any | None] = dict(metadata) if metadata is not None else {}
         for binding in self._ordered_bindings:
-            consumed = store.resolve_requests(binding.consumes)
+            try:
+                consumed = store.resolve_requests(binding.consumes)
 
-            clearance = binding.security_level
-            if clearance:
-                for artifacts in consumed.values():
-                    for artifact in artifacts:
-                        if not is_security_level_allowed(artifact.security_level, clearance):
-                            raise PermissionError(
-                                f"Sink '{binding.id}' with clearance '{clearance}' cannot consume "
-                                f"artifact '{artifact.id}' at level '{normalize_security_level(artifact.security_level)}'"
-                            )
+                clearance = binding.security_level
+                if clearance:
+                    for artifacts in consumed.values():
+                        for artifact in artifacts:
+                            if not is_security_level_allowed(artifact.security_level, clearance):
+                                raise PermissionError(
+                                    f"Sink '{binding.id}' with clearance '{clearance}' cannot consume "
+                                    f"artifact '{artifact.id}' at level '{normalize_security_level(artifact.security_level)}'"
+                                )
 
-            prepare = getattr(binding.sink, "prepare_artifacts", None)
-            if callable(prepare):
-                prepare(consumed)
+                prepare = getattr(binding.sink, "prepare_artifacts", None)
+                if callable(prepare):
+                    prepare(consumed)
 
-            binding.sink.write(payload, metadata=metadata_dict)
+                binding.sink.write(payload, metadata=metadata_dict)
 
-            produced: dict[str, Artifact] = {}
-            collector = getattr(binding.sink, "collect_artifacts", None)
-            if callable(collector):
-                collected = collector()
-                if collected:
-                    produced = cast(dict[str, Artifact], collected)
+                produced: dict[str, Artifact] = {}
+                collector = getattr(binding.sink, "collect_artifacts", None)
+                if callable(collector):
+                    collected = collector()
+                    if collected:
+                        produced = cast(dict[str, Artifact], collected)
 
-            for descriptor in binding.produces:
-                key = descriptor.name
-                candidate = produced.get(key)
-                if not candidate and descriptor.alias:
-                    candidate = produced.get(descriptor.alias)
-                if candidate:
-                    store.register(binding, descriptor, candidate)
+                for descriptor in binding.produces:
+                    key = descriptor.name
+                    candidate = produced.get(key)
+                    if not candidate and descriptor.alias:
+                        candidate = produced.get(descriptor.alias)
+                    if candidate:
+                        store.register(binding, descriptor, candidate)
 
-            finalize = getattr(binding.sink, "finalize", None)
-            if callable(finalize):
-                finalize(dict(store.items()), metadata=metadata_dict)
+                finalize = getattr(binding.sink, "finalize", None)
+                if callable(finalize):
+                    finalize(dict(store.items()), metadata=metadata_dict)
+            except Exception as exc:  # pylint: disable=broad-except
+                if on_error == "continue":
+                    sink_name = getattr(getattr(binding.sink, "__class__", type(binding.sink)), "__name__", binding.plugin or binding.id)
+                    failure = {"sink": sink_name, "error": str(exc)}
+                    if failures is not None:
+                        failures.append(failure)
+                    # Continue to next binding to maximize delivery
+                    continue
+                raise
 
         return store

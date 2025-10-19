@@ -49,7 +49,7 @@ def test_retention_age_and_count_pruning(monkeypatch, tmp_path: Path):
 
     # Create logger - triggers retention and initialization
     ctx = _make_context(tmp_path)
-    logger = PluginLogger(plugin_instance=DummyPlugin(), context=ctx)
+    PluginLogger(plugin_instance=DummyPlugin(), context=ctx)
     # 'old' should be pruned by age. After age prune, count-prune should reduce fresh files to 1.
     remaining = sorted(p.name for p in logs_dir.glob("run_*.jsonl"))
     assert len(remaining) <= 2  # includes the new run file from this logger
@@ -76,4 +76,3 @@ def test_event_apis_and_fallback_open(monkeypatch, tmp_path: Path):
     monkeypatch.setattr(builtins, "open", _boom)
     # Should not raise
     plog.log_event("another", message="should fallback", metrics=None, metadata=None)
-

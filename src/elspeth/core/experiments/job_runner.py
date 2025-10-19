@@ -40,6 +40,7 @@ import yaml
 
 from elspeth.core.base.plugin_context import PluginContext
 from elspeth.core.experiments.runner import ExperimentRunner
+from elspeth.core.pipeline.artifact_pipeline import ArtifactPipeline, SinkBinding
 from elspeth.core.registries.datasource import datasource_registry
 from elspeth.core.registries.llm import create_llm_from_definition
 from elspeth.core.registries.sink import sink_registry
@@ -101,17 +102,51 @@ def _create_datasource(defn: Mapping[str, Any], ctx: PluginContext):
 def _create_sinks(defs: Sequence[Mapping[str, Any]], ctx: PluginContext):
     sinks = []
     for entry in defs:
-        name = entry.get("plugin") or entry.get("name")
-        if not isinstance(name, str) or not name:
+        plugin = entry.get("plugin") or entry.get("name")
+        if not isinstance(plugin, str) or not plugin:
             raise ValueError("sink.plugin must be a non-empty string")
         # Merge top-level security/determinism overrides into options before registry
-        opts = dict(entry.get("options", {}) or {})
+        raw_options = dict(entry.get("options", {}) or {})
+        # Extract artifacts section so it doesn't get passed to constructor
+        artifacts_cfg = raw_options.pop("artifacts", None)
         if entry.get("security_level") is not None:
-            opts["security_level"] = entry.get("security_level")
+            raw_options["security_level"] = entry.get("security_level")
         if entry.get("determinism_level") is not None:
-            opts["determinism_level"] = entry.get("determinism_level")
-        sinks.append(sink_registry.create(name, opts, parent_context=ctx))
+            raw_options["determinism_level"] = entry.get("determinism_level")
+        sink = sink_registry.create(plugin, raw_options, parent_context=ctx)
+        # Attach artifact metadata used by ArtifactPipeline binding preparation
+        setattr(sink, "_elspeth_artifact_config", artifacts_cfg or {})
+        setattr(sink, "_elspeth_plugin_name", plugin)
+        base_name = entry.get("name") if isinstance(entry.get("name"), str) and entry.get("name") else plugin
+        setattr(sink, "_elspeth_sink_name", base_name)
+        sinks.append(sink)
     return sinks
+
+
+def _build_sink_bindings(sinks: Sequence[Any], *, default_context: PluginContext) -> list[SinkBinding]:
+    bindings: list[SinkBinding] = []
+    for index, sink in enumerate(sinks):
+        artifact_config = getattr(sink, "_elspeth_artifact_config", {}) or {}
+        plugin = getattr(sink, "_elspeth_plugin_name", sink.__class__.__name__)
+        base_id = getattr(sink, "_elspeth_sink_name", plugin)
+        sink_id = f"{base_id}:{index}"
+        security_level = getattr(sink, "_elspeth_security_level", None)
+        if security_level is None:
+            # Fall back to plugin context if present; otherwise use job-level
+            security_level = getattr(getattr(sink, "plugin_context", None), "security_level", default_context.security_level)
+        if security_level is not None:
+            security_level = normalize_security_level(security_level)
+        bindings.append(
+            SinkBinding(
+                id=sink_id,
+                plugin=plugin,
+                sink=sink,
+                artifact_config=artifact_config,
+                original_index=index,
+                security_level=security_level,
+            )
+        )
+    return bindings
 
 
 def run_job_config(job: Mapping[str, Any]) -> dict[str, Any]:
@@ -176,24 +211,28 @@ def run_job_config(job: Mapping[str, Any]) -> dict[str, Any]:
         payload_out = runner.run(df)
         return payload_out
 
-    # Identity: no LLM present -> write rows as-is
-    results = []
-    for _, row in df.iterrows():
-        results.append({"row": row.to_dict()})
-    payload: dict[str, Any] = {"results": results, "metadata": {"rows": len(results)}}
+    # Identity: no LLM present -> write rows as-is via ArtifactPipeline
+    results = [{"row": row.to_dict()} for _, row in df.iterrows()]
+    payload: dict[str, Any] = {"results": results}
+    metadata: dict[str, Any] = {
+        "rows": len(results),
+        "name": job.get("name", "job"),
+        "security_level": ctx.security_level,
+        "determinism_level": ctx.determinism_level,
+    }
+    payload["metadata"] = metadata
+
     failures: list[dict[str, Any]] = []
-    # Directly write to sinks
-    for sink in sinks:
-        try:
-            sink.write(payload, metadata={"name": job.get("name", "job")})
-        except (OSError, RuntimeError, ValueError) as exc:
-            # Continue on sink failures to maximize delivery, but record the error for auditability
-            sink_name = getattr(sink, "__class__", type(sink)).__name__
-            logger.warning("Sink write failed; skipping sink '%s': %s", sink_name, exc)
-            failures.append({"sink": sink_name, "error": str(exc)})
+    bindings = _build_sink_bindings(sinks, default_context=ctx)
+    pipeline = ArtifactPipeline(bindings)
+    pipeline.execute(payload, metadata, on_error="continue", failures=failures)
     if failures:
         payload["failures"] = failures
-        logger.warning("%d sink(s) failed during job write: %s", len(failures), ", ".join(f["sink"] for f in failures))
+        logger.warning(
+            "%d sink(s) failed during job write: %s",
+            len(failures),
+            ", ".join(f["sink"] for f in failures),
+        )
     return payload
 
 

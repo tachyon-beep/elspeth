@@ -66,7 +66,7 @@ class SignedArtifactSink(ResultSink):
             key_fp = None
             # For asymmetric signing, compute a public key fingerprint if possible
             if self.algorithm.startswith("rsa-") or self.algorithm.startswith("ecdsa-"):
-                pub_pem = os.getenv(self.public_key_env) if self.public_key_env else None
+                pub_pem: str | bytes | None = os.getenv(self.public_key_env) if self.public_key_env else None
                 # If public key not provided, attempt to derive from private PEM (best-effort)
                 if not pub_pem:
                     try:
