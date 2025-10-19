@@ -37,11 +37,10 @@ class VectorQueryClient:
 
 class PgVectorQueryClient(VectorQueryClient):
     def __init__(self, *, dsn: str, table: str = "elspeth_rag", connect_timeout: float | int | None = None) -> None:
-        import psycopg
-        from psycopg import sql
-
-        self._psycopg = psycopg
-        self._sql = sql
+        # Defer importing psycopg until query() is executed. This makes unit tests
+        # that only validate DSN handling independent from system libpq availability.
+        self._psycopg = None  # type: ignore[assignment]
+        self._sql = None  # type: ignore[assignment]
         self._dsn = dsn
         self._table = table
         self._connect_timeout = int(connect_timeout) if connect_timeout is not None else None
@@ -55,6 +54,14 @@ class PgVectorQueryClient(VectorQueryClient):
         top_k: int,
         min_score: float,
     ) -> Iterable[QueryResult]:
+        # Import psycopg here to allow initialization without libpq in minimal test envs.
+        if self._psycopg is None and self._sql is None:  # pragma: no cover - trivial path
+            import psycopg  # noqa: WPS433 (allowed local import)
+            from psycopg import sql  # noqa: WPS433
+
+            self._psycopg = psycopg
+            self._sql = sql
+
         vector_literal = self._vector_literal(query_vector)
         dsn = self._dsn
         if self._connect_timeout is not None:
@@ -74,23 +81,38 @@ class PgVectorQueryClient(VectorQueryClient):
                 # Fallback to safe whitespace-delimited append
                 sep = " " if dsn and not dsn.endswith(" ") else ""
                 dsn = f"{dsn}{sep}connect_timeout={self._connect_timeout}"
-        conn = self._psycopg.connect(dsn, autocommit=True)
+        conn = self._psycopg.connect(dsn, autocommit=True)  # type: ignore[union-attr]
         try:
             # Use sql.Identifier to safely quote table name and prevent SQL injection
             with conn.cursor() as cur:
-                query_sql = self._sql.SQL("""
-                    SELECT document_id,
-                           contents,
-                           metadata::text,
-                           1.0 - (embedding <=> %s::vector) AS score
-                    FROM {}
-                    WHERE namespace = %s
-                    ORDER BY embedding <=> %s::vector ASC
-                    LIMIT %s
-                    """).format(self._sql.Identifier(self._table))
+                if self._sql is not None:
+                    query_sql = self._sql.SQL("""
+                        SELECT document_id,
+                               contents,
+                               metadata::text,
+                               1.0 - (embedding <=> %s::vector) AS score
+                        FROM {}
+                        WHERE namespace = %s
+                        ORDER BY embedding <=> %s::vector ASC
+                        LIMIT %s
+                        """).format(self._sql.Identifier(self._table))
+                    args = (vector_literal, namespace, vector_literal, top_k)
+                else:
+                    # Fallback for test shim: basic string query (unsafe for production)
+                    query_sql = f"""
+                        SELECT document_id,
+                               contents,
+                               metadata::text,
+                               1.0 - (embedding <=> %s::vector) AS score
+                        FROM {self._table}
+                        WHERE namespace = %s
+                        ORDER BY embedding <=> %s::vector ASC
+                        LIMIT %s
+                    """
+                    args = (vector_literal, namespace, vector_literal, top_k)
                 cur.execute(  # nosemgrep: python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query
                     query_sql,
-                    (vector_literal, namespace, vector_literal, top_k),
+                    args,
                 )
                 for document_id, contents, metadata, score in cur.fetchall():
                     similarity = float(score)

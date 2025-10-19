@@ -49,7 +49,7 @@ dev = [
   "pip-audit==2.9.0",
   "cyclonedx-bom==7.2.0",
   "bandit==1.8.6",
-  "semgrep==1.85.0",
+  "semgrep==1.92.0",
 ]
 # Azure ML integration (truly optional - external infrastructure)
 azure = [
