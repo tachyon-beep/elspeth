@@ -22,7 +22,7 @@ import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterator, Literal, Mapping
+from typing import Any, Iterator, Literal, Mapping, cast
 
 from elspeth.core.base.protocols import Artifact, ArtifactDescriptor, ResultSink
 from elspeth.core.security import generate_signature
@@ -208,7 +208,7 @@ class ReproducibilityBundleSink(ResultSink):
             self._copy_retained_file(retained_path)
         elif self._is_dataframe(source_data):
             # DataFrame available but no retained copy - save it now
-            self._write_source_dataframe(source_data)  # type: ignore[arg-type]
+            self._write_source_dataframe(source_data)
             logger.warning(
                 "Source data was not retained locally by datasource; saved from DataFrame (may lose original formatting)"
             )
@@ -239,7 +239,8 @@ class ReproducibilityBundleSink(ResultSink):
         if not self._is_dataframe(source_data):
             return None
         try:
-            return source_data.attrs.get("retained_local_path")  # type: ignore[union-attr]
+            value = cast(str | None, source_data.attrs.get("retained_local_path"))
+            return value if isinstance(value, str) or value is None else None
         except Exception:
             return None
 
@@ -254,10 +255,10 @@ class ReproducibilityBundleSink(ResultSink):
         temp_dir = self._ensure_temp_dir()
         path = temp_dir / self.source_data_name
         # pandas import handled in _is_dataframe
-        df.to_csv(path, index=False)  # type: ignore[call-arg]
+        df.to_csv(path, index=False)
         self._file_hashes[self.source_data_name] = self._hash_file(path)
         try:
-            rows = len(df)  # type: ignore[arg-type]
+            rows = len(df)
         except Exception:
             rows = 0
         logger.debug("Wrote source data snapshot: %d rows", rows)
