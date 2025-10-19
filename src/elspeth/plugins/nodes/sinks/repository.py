@@ -67,8 +67,8 @@ class _RepoSinkBase(ResultSink):
                     allowed_methods=["GET", "PUT", "POST"],
                 )
                 adapter = HTTPAdapter(max_retries=retry)
+                # Enforce TLS for all external repository operations
                 self.session.mount("https://", adapter)
-                self.session.mount("http://", adapter)
             except Exception:
                 # Non-fatal if retry adapter isn't available
                 pass

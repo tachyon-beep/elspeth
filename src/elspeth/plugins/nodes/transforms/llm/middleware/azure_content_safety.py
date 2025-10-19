@@ -112,7 +112,11 @@ class AzureContentSafetyMiddleware(LLMMiddleware):
             except Exception:  # pragma: no cover - network failure path
                 if attempts >= 3:
                     raise
-                time.sleep(delay + random.random() * 0.2)
+                # Non-cryptographic jitter: safe for backoff; avoids thundering herd.
+                # Disable jitter for high/guaranteed determinism to preserve reproducibility.
+                det = getattr(self, "_elspeth_determinism_level", getattr(self, "determinism_level", "none"))
+                jitter = 0.0 if str(det).lower() in ("high", "guaranteed") else (random.random() * 0.2)  # nosec B311
+                time.sleep(delay + jitter)
                 delay *= 2
         data = response.json()
         flagged = False
