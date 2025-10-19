@@ -112,6 +112,18 @@ warn_no_return = true
 warn_unreachable = true
 strict_equality = true
 show_error_codes = true
+explicit_package_bases = true
+mypy_path = ["src"]
+
+# Coverage.py configuration to make report paths relative for CI importers (SonarCloud)
+[tool.coverage.run]
+branch = true
+relative_files = true
+source = ["src/elspeth"]
+
+[tool.coverage.report]
+skip_empty = true
+show_missing = false
 
 [[tool.mypy.overrides]]
 module = [

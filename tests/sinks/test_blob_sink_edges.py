@@ -63,3 +63,25 @@ def test_blob_resolve_blob_name_variants_and_error(tmp_path: Path) -> None:
     assert name2 == "runs/e/results.json"
 
     # No further assertions; missing placeholder error path already covered elsewhere
+
+
+def test_blob_upload_respects_overwrite_false(tmp_path: Path, monkeypatch) -> None:
+    cfg = _blob_cfg(tmp_path)
+    sink = BlobResultSink(config_path=cfg, include_manifest=False)
+    sink.overwrite = False
+
+    class ExistsClient:
+        def exists(self):  # pragma: no cover - simple stub executed in branch guard
+            return True
+
+        def upload_blob(self, *a, **k):  # pragma: no cover - should not be called
+            raise AssertionError("upload_blob should not be called when exists and overwrite=False")
+
+    monkeypatch.setattr(BlobResultSink, "_create_blob_client", lambda self, name: ExistsClient())
+
+    try:
+        sink.write({"results": [{"row": {}}]}, metadata={})
+    except FileExistsError:
+        pass
+    else:  # pragma: no cover - ensure branch raised
+        raise AssertionError("expected FileExistsError when blob exists and overwrite is disabled")
