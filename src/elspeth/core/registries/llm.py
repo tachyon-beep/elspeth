@@ -100,10 +100,6 @@ def create_llm_from_definition(
 
 def _create_azure_openai(options: dict[str, Any], context: PluginContext) -> AzureOpenAIClient:
     """Create Azure OpenAI LLM client with endpoint validation."""
-    # Ensure a config block exists to satisfy client constructor
-    if "config" not in options or options["config"] is None:
-        options["config"] = {}
-
     # Extract azure_endpoint from config for validation
     config = options.get("config", {})
     azure_endpoint = config.get("azure_endpoint")
@@ -203,14 +199,10 @@ _AZURE_OPENAI_SCHEMA = with_security_properties(
             "deployment": {"type": "string"},
             "client": {},
         },
-        # Allow either a full config block or a minimal deployment-only definition.
-        # The factory will synthesize an empty config when absent to satisfy
-        # the client constructor and rely on environment variables for required
-        # values (api_key, api_version, azure_endpoint) if desired.
-        "oneOf": [
-            {"required": ["config"]},
-            {"required": ["deployment"]},
-        ],
+        # Require explicit config block to match factory/client contract.
+        # Users must provide configuration explicitly; environment-only setup
+        # is not permitted at the registry layer.
+        "required": ["config"],
         "additionalProperties": True,
     },
     require_security=False,  # Will be enforced by registry

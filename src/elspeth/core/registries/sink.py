@@ -11,6 +11,7 @@ will have the biggest impact on code reduction.
 from __future__ import annotations
 
 import logging
+from sys import modules as _modules
 from typing import Any
 
 from elspeth.adapters.blob_store import load_blob_config
@@ -104,15 +105,27 @@ def _create_azure_blob_artifacts_sink(options: dict[str, Any], context: PluginCo
 
 def _create_csv_sink(options: dict[str, Any], context: PluginContext) -> CsvResultSink:
     """Create CSV result sink."""
-    # Resolve class dynamically so tests can monkeypatch CsvResultSink in module scope
-    try:
-        from elspeth.plugins.nodes.sinks import csv_file as _csv_mod
+    # Fast-path: prefer already-loaded module to avoid import overhead
+    mod = _modules.get("elspeth.plugins.nodes.sinks.csv_file")
+    if mod is not None:
+        try:
+            klass = getattr(mod, "CsvResultSink", CsvResultSink)
+            return klass(**options)
+        except Exception:
+            return CsvResultSink(**options)
 
-        klass = getattr(_csv_mod, "CsvResultSink", CsvResultSink)
-        return klass(**options)
-    except Exception:
-        # Fallback to direct reference if dynamic import fails
+    # Fallback: use package export (lazy import via __getattr__ may load the module)
+    try:
         return CsvResultSink(**options)
+    except Exception:
+        # As a last resort, attempt an explicit import
+        try:
+            from elspeth.plugins.nodes.sinks import csv_file as _csv_mod
+
+            klass = getattr(_csv_mod, "CsvResultSink", CsvResultSink)
+            return klass(**options)
+        except Exception:
+            return CsvResultSink(**options)
 
 
 def _create_local_bundle_sink(options: dict[str, Any], context: PluginContext) -> LocalBundleSink:

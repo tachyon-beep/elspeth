@@ -31,7 +31,14 @@ def test_cli_strict_mode_exits_on_sink_failure(monkeypatch, tmp_path: Path):
                 "plugin": "azure_openai",
                 "security_level": "OFFICIAL",
                 "determinism_level": "guaranteed",
-                "options": {"deployment": "dummy"},
+                "options": {
+                    "deployment": "dummy",
+                    "config": {
+                        # Minimal config to satisfy schema; instantiation is monkeypatched
+                        "azure_endpoint": "https://example.openai.azure.com",
+                        "api_version": "2024-05-01",
+                    },
+                },
             },
             "prompts": {"system": "S", "user": "U {{ payload }}"},
             "prompt_fields": ["payload"],

@@ -16,7 +16,7 @@ jobs:
         with:
           fetch-depth: 0
       - name: Run gitleaks
-        uses: gitleaks/gitleaks-action@v2
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Upload gitleaks report
@@ -92,7 +92,7 @@ jobs:
 
       - name: Upload semgrep SARIF to code scanning
         if: always()
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@42213152a85ae7569bdb6bec7bcd74cd691bfe41 # v3.30.9
         with:
           sarif_file: semgrep.sarif
           category: semgrep-oss
@@ -189,7 +189,7 @@ jobs:
 
       - name: Build dev/test image
         run: |
-          docker build --build-arg PYTHON_IMAGE=${{ env.DOCKER_PYTHON_IMAGE }} --target dev -t elspeth:devtest .
+          docker build --build-arg PYTHON_IMAGE=$DOCKER_PYTHON_IMAGE --target dev -t elspeth:devtest .
 
       - name: Run tests in container
         run: |
@@ -197,7 +197,7 @@ jobs:
 
       - name: Build runtime image
         run: |
-          docker build --build-arg PYTHON_IMAGE=${{ env.DOCKER_PYTHON_IMAGE }} --target runtime -t elspeth:runtime .
+          docker build --build-arg PYTHON_IMAGE=$DOCKER_PYTHON_IMAGE --target runtime -t elspeth:runtime .
 
       - name: Generate runtime SBOM (app graph) inside container
         run: |
@@ -209,7 +209,7 @@ jobs:
 
       # Replace curl|sh installers with pinned GitHub Actions for Syft and Grype
       - name: Generate image SBOM (CycloneDX JSON)
-        uses: anchore/sbom-action@v0.17.4
+        uses: anchore/sbom-action@8d0a6505bf28ced3e85154d13dc6af83299e13f1 # v0.17.4
         with:
           image: elspeth:runtime
           format: cyclonedx-json
@@ -219,24 +219,21 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: container-sboms
-          path: |
-            sbom-runtime.json
-            sbom-image.json
-
-      - name: Vulnerability scan (Grype) — block on HIGH
-        uses: anchore/scan-action@v3
+          path: "sbom-runtime.json\nsbom-image.json"
+      - name: Vulnerability scan (Grype) - block on HIGH
+        id: grype
+        uses: anchore/scan-action@4be3c24559b430723e51858969965e163b196957 # v3.3.5
         with:
           image: elspeth:runtime
           severity-cutoff: high
           fail-build: true
           output-format: sarif
-          output-file: grype.sarif
 
       - name: Upload Grype SARIF to code scanning
         if: always()
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@42213152a85ae7569bdb6bec7bcd74cd691bfe41 # v3.30.9
         with:
-          sarif_file: grype.sarif
+          sarif_file: ${{ steps.grype.outputs.sarif }}
           category: grype
 
       - name: Upload Grype SARIF artifact
@@ -244,4 +241,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: grype-sarif
-          path: grype.sarif
+          path: ${{ steps.grype.outputs.sarif }}
