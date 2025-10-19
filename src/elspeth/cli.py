@@ -21,7 +21,6 @@ from elspeth.core.experiments.tools import create_experiment_template, export_su
 from elspeth.core.orchestrator import ExperimentOrchestrator
 from elspeth.core.security import SecureMode, get_secure_mode
 from elspeth.core.validation import validate_settings, validate_suite
-from elspeth.plugins.nodes.sinks.csv_file import CsvResultSink
 from elspeth.tools.reporting import SuiteReportGenerator
 
 logger = logging.getLogger(__name__)
@@ -31,6 +30,7 @@ def build_parser() -> argparse.ArgumentParser:
     """Define CLI arguments for ELSPETH orchestration workflows."""
 
     parser = argparse.ArgumentParser(description="ELSPETH orchestration CLI")
+    subparsers = parser.add_subparsers(dest="command")
     parser.add_argument(
         "--settings",
         default="config/settings.yaml",
@@ -132,6 +132,54 @@ def build_parser() -> argparse.ArgumentParser:
         type=Path,
         help="Run an ad-hoc job from a YAML config (datasource -> optional LLM transform -> sinks)",
     )
+
+    # -------------------------- Subcommands (optional) --------------------------
+    # validate-schemas
+    cmd_validate = subparsers.add_parser(
+        "validate-schemas",
+        help="Validate datasource schema compatibility without running experiments",
+    )
+    cmd_validate.add_argument("--settings", default="config/settings.yaml")
+    cmd_validate.add_argument("--profile", default="default")
+
+    # run-job
+    cmd_job = subparsers.add_parser(
+        "run-job",
+        help="Execute an ad-hoc job config and optionally write artifacts",
+    )
+    cmd_job.add_argument("--job-config", type=Path, required=True)
+    cmd_job.add_argument("--head", type=int, default=5)
+    cmd_job.add_argument("--artifacts-dir", type=Path)
+    cmd_job.add_argument("--signed-bundle", action="store_true")
+    cmd_job.add_argument("--signing-key-env", default="ELSPETH_SIGNING_KEY")
+
+    # run-suite
+    cmd_suite = subparsers.add_parser(
+        "run-suite",
+        help="Run all experiments declared in a suite configuration",
+    )
+    cmd_suite.add_argument("--settings", default="config/settings.yaml")
+    cmd_suite.add_argument("--profile", default="default")
+    cmd_suite.add_argument("--suite-root", type=Path, required=True)
+    cmd_suite.add_argument("--reports-dir", type=Path)
+    cmd_suite.add_argument("--head", type=int, default=0)
+    cmd_suite.add_argument("--live-outputs", action="store_true")
+    cmd_suite.add_argument("--signed-bundle", action="store_true")
+    cmd_suite.add_argument("--signing-key-env", default="ELSPETH_SIGNING_KEY")
+
+    # run-single
+    cmd_single = subparsers.add_parser(
+        "run-single",
+        help="Run a single experiment from settings without a suite",
+    )
+    cmd_single.add_argument("--settings", default="config/settings.yaml")
+    cmd_single.add_argument("--profile", default="default")
+    cmd_single.add_argument("--output-csv", type=Path)
+    cmd_single.add_argument("--head", type=int, default=5)
+    cmd_single.add_argument("--live-outputs", action="store_true")
+    cmd_single.add_argument("--signed-bundle", action="store_true")
+    cmd_single.add_argument("--artifacts-dir", type=Path)
+    cmd_single.add_argument("--signing-key-env", default="ELSPETH_SIGNING_KEY")
     return parser
 
 
@@ -198,7 +246,47 @@ def run(args: argparse.Namespace) -> None:
 
     log_level = getattr(args, "log_level", "INFO")
     configure_logging(log_level)
-    # If an ad-hoc job config is specified, run it and exit
+    # Subcommands take precedence if specified
+    if getattr(args, "command", None) == "run-job":
+        from elspeth.core.cli.job import execute_job_file
+
+        payload, df = execute_job_file(args.job_config)
+        if args.head and args.head > 0 and not df.empty:
+            print(format_preview(df, args.head))
+        _maybe_write_artifacts_single(args, _AdHoc(settings_path=args.job_config), payload, df)
+        return
+
+    if getattr(args, "command", None) == "validate-schemas":
+        from elspeth.core.cli.validate import validate_schemas_command
+
+        settings = _load_settings_from_args(args)
+        suite_root = _resolve_suite_root(args, settings)
+        validate_schemas_command(args, settings, suite_root)
+        return
+
+    if getattr(args, "command", None) == "run-suite":
+        settings = _load_settings_from_args(args)
+        suite_root = _resolve_suite_root(args, settings)
+        if not suite_root:
+            raise SystemExit("--suite-root is required for run-suite")
+        suite_validation = validate_suite(suite_root)
+        for warning in suite_validation.report.warnings:
+            logger.warning(warning.format())
+        suite_validation.report.raise_if_errors()
+        _run_suite(
+            args,
+            settings,
+            suite_root,
+            preflight=suite_validation.preflight,
+            suite=_handle_suite_management(args, suite_root),
+        )
+        return
+
+    if getattr(args, "command", None) == "run-single":
+        settings = _load_settings_from_args(args)
+        _run_single(args, settings)
+        return
+    # Legacy path: If an ad-hoc job config is specified, run it and exit
     if getattr(args, "job_config", None):
         from elspeth.core.cli.job import execute_job_file
 
@@ -211,7 +299,7 @@ def run(args: argparse.Namespace) -> None:
     settings = _load_settings_from_args(args)
     suite_root = _resolve_suite_root(args, settings)
 
-    # Handle schema validation mode
+    # Legacy path: Handle schema validation mode
     if getattr(args, "validate_schemas", False):
         from elspeth.core.cli.validate import validate_schemas_command
 
@@ -301,110 +389,14 @@ def _run_single(args: argparse.Namespace, settings) -> None:
 
 
 def _clone_suite_sinks(base_sinks: list, experiment_name: str) -> list:
-    """Create experiment-scoped sink instances for suite execution."""
-
-    cloned = []
-    for sink in base_sinks:
-        security_level = getattr(sink, "_elspeth_security_level", None)
-        determinism_level = getattr(sink, "_elspeth_determinism_level", getattr(sink, "determinism_level", None))
-        if isinstance(sink, CsvResultSink):
-            base_path = Path(sink.path)
-            new_path = base_path.with_name(f"{experiment_name}_{base_path.name}")
-            cloned.append(
-                CsvResultSink(
-                    path=str(new_path),
-                    overwrite=sink.overwrite,
-                    on_error=sink.on_error,
-                    sanitize_formulas=sink.sanitize_formulas,
-                    sanitize_guard=sink.sanitize_guard,
-                )
-            )
-            if security_level:
-                setattr(cloned[-1], "_elspeth_security_level", security_level)
-            if determinism_level:
-                setattr(cloned[-1], "_elspeth_determinism_level", determinism_level)
-                setattr(cloned[-1], "determinism_level", determinism_level)
-        else:
-            cloned.append(sink)
-            if determinism_level:
-                setattr(cloned[-1], "_elspeth_determinism_level", determinism_level)
-                setattr(cloned[-1], "determinism_level", determinism_level)
-    return cloned
+    # Delegate to extracted helper for maintainability
+    from elspeth.core.cli.suite import clone_suite_sinks as _impl
+    return _impl(base_sinks, experiment_name)
 
 
 def _assemble_suite_defaults(settings) -> dict:
-    """Merge orchestrator, suite, and runtime defaults for suite execution."""
-
-    config = settings.orchestrator_config
-    defaults: dict[str, Any] = {
-        "prompt_system": config.llm_prompt.get("system", ""),
-        "prompt_template": config.llm_prompt.get("user", ""),
-        "prompt_fields": config.prompt_fields,
-        "criteria": config.criteria,
-        "prompt_packs": settings.prompt_packs,
-    }
-
-    optional_overrides = {
-        "prompt_pack": config.prompt_pack,
-        "row_plugin_defs": config.row_plugin_defs,
-        "aggregator_plugin_defs": config.aggregator_plugin_defs,
-        "baseline_plugin_defs": config.baseline_plugin_defs,
-        "validation_plugin_defs": config.validation_plugin_defs,
-        "sink_defs": config.sink_defs,
-        "llm_middleware_defs": config.llm_middleware_defs,
-        "prompt_defaults": config.prompt_defaults,
-        "concurrency_config": config.concurrency_config,
-        "early_stop_plugin_defs": config.early_stop_plugin_defs,
-        "early_stop_config": config.early_stop_config,
-    }
-    for key, value in optional_overrides.items():
-        if value:
-            defaults[key] = value
-
-    suite_defaults = settings.suite_defaults or {}
-    passthrough_keys = {
-        k: v
-        for k, v in suite_defaults.items()
-        if k
-        not in {
-            "row_plugins",
-            "aggregator_plugins",
-            "sinks",
-            "baseline_plugins",
-            "llm_middlewares",
-            "early_stop_plugins",
-            "early_stop_plugin_defs",
-        }
-    }
-    defaults.update(passthrough_keys)
-
-    plugin_mappings = {
-        "row_plugin_defs": ["row_plugins"],
-        "aggregator_plugin_defs": ["aggregator_plugins"],
-        "baseline_plugin_defs": ["baseline_plugins"],
-        "validation_plugin_defs": ["validation_plugins"],
-        "llm_middleware_defs": ["llm_middlewares"],
-        "prompt_defaults": ["prompt_defaults"],
-        "concurrency_config": ["concurrency"],
-        "early_stop_plugin_defs": ["early_stop_plugin_defs", "early_stop_plugins"],
-        "early_stop_config": ["early_stop"],
-        "sink_defs": ["sinks"],
-        "prompt_pack": ["prompt_pack"],
-        "rate_limiter_def": ["rate_limiter"],
-        "cost_tracker_def": ["cost_tracker"],
-    }
-    for target, sources in plugin_mappings.items():
-        for candidate in sources:
-            if candidate in suite_defaults:
-                defaults[target] = suite_defaults[candidate]
-                break
-
-    if settings.rate_limiter:
-        defaults["rate_limiter"] = settings.rate_limiter
-    if settings.cost_tracker:
-        defaults["cost_tracker"] = settings.cost_tracker
-
-    return defaults
+    from elspeth.core.cli.suite import assemble_suite_defaults as _impl
+    return _impl(settings)
 
 
 def _load_settings_from_args(args: argparse.Namespace):
@@ -520,153 +512,38 @@ def _run_suite(
 
 
 def _ensure_artifacts_dir(base: Path | None) -> Path:
-    ts = pd.Timestamp.utcnow().strftime("%Y%m%dT%H%M%SZ")
-    root = base if base else Path("artifacts")
-    path = root / ts
-    path.mkdir(parents=True, exist_ok=True)
-    return path
+    from elspeth.core.cli.common import ensure_artifacts_dir as _impl
+    return _impl(base)
 
 
 def _write_simple_artifacts(art_dir: Path, name: str, payload: dict[str, Any], settings) -> None:
-    # Results JSON
-    (art_dir / f"{name}_results.json").write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
-    # Settings YAML snapshot
-    try:
-        cfg_path = Path(getattr(settings, "config_path", ""))
-        if cfg_path and cfg_path.exists():
-            dest = art_dir / f"{name}_settings.yaml"
-            dest.write_text(cfg_path.read_text(encoding="utf-8"), encoding="utf-8")
-    except (OSError, UnicodeError):
-        logger.debug("Failed to copy settings file", exc_info=True)
+    from elspeth.core.cli.common import write_simple_artifacts as _impl
+    _impl(art_dir, name, payload, settings)
 
 
 def _maybe_write_artifacts_single(args: argparse.Namespace, settings, payload: dict[str, Any], df: pd.DataFrame) -> None:
-    art_base = getattr(args, "artifacts_dir", None)
-    if art_base is None and not getattr(args, "signed_bundle", False):
-        return
-    art_dir = _ensure_artifacts_dir(art_base)
-    _write_simple_artifacts(art_dir, "single", payload, settings)
-    if getattr(args, "signed_bundle", False):
-        _create_signed_bundle(
-            art_dir, "single", payload, settings, df, signing_key_env=getattr(args, "signing_key_env", "ELSPETH_SIGNING_KEY")
-        )
+    from elspeth.core.cli.single import maybe_write_artifacts_single as _impl
+    _impl(args, settings, payload, df)
 
 
 def _maybe_write_artifacts_suite(args: argparse.Namespace, settings, suite: ExperimentSuite, results: dict[str, Any]) -> None:
-    art_base = getattr(args, "artifacts_dir", None)
-    if art_base is None and not getattr(args, "signed_bundle", False):
-        return
-    art_dir = _ensure_artifacts_dir(art_base)
-    # Write each experiment payload and the suite config
-    (art_dir / "suite.json").write_text(
-        json.dumps({k: v["payload"] for k, v in results.items()}, indent=2, sort_keys=True), encoding="utf-8"
-    )
-    try:
-        cfg_path = Path(getattr(settings, "config_path", ""))
-        if cfg_path and cfg_path.exists():
-            (art_dir / "settings.yaml").write_text(cfg_path.read_text(encoding="utf-8"), encoding="utf-8")
-    except (OSError, UnicodeError):
-        logger.debug("Failed to copy settings file", exc_info=True)
-    if getattr(args, "signed_bundle", False):
-        # For bundle, assemble a combined payload and pass the original DataFrame from datasource
-        combined: dict[str, Any] = {"results": []}
-        for _, entry in results.items():
-            combined["results"].extend(entry["payload"].get("results", []))
-        try:
-            df = settings.datasource.load()
-        except (OSError, RuntimeError, ValueError):
-            df = pd.DataFrame()
-        _create_signed_bundle(
-            art_dir, "suite", combined, settings, df, signing_key_env=getattr(args, "signing_key_env", "ELSPETH_SIGNING_KEY")
-        )
+    from elspeth.core.cli.suite import maybe_write_artifacts_suite as _impl
+    _impl(args, settings, suite, results)
 
 
 def _create_signed_bundle(art_dir: Path, name: str, payload: dict[str, Any], settings, df: pd.DataFrame, *, signing_key_env: str) -> None:
-    try:
-        from elspeth.plugins.nodes.sinks.reproducibility_bundle import ReproducibilityBundleSink
-    except ImportError as exc:  # pragma: no cover - optional import
-        logger.warning("Reproducibility bundle unavailable: %s", exc)
-        return
-    bundle_dir = art_dir / f"{name}_bundle"
-    bundle_dir.mkdir(parents=True, exist_ok=True)
-    sink = ReproducibilityBundleSink(
-        base_path=str(bundle_dir),
-        bundle_name=f"{name}",
-        timestamped=False,
-        include_framework_code=False,
-        key_env=signing_key_env,
-    )
-    metadata = {
-        "security_level": getattr(settings, "security_level", None),
-        "datasource_config": getattr(settings, "datasource_config", None),
-        "source_data": df,
-    }
-    try:
-        sink.write(payload, metadata=metadata)
-        logger.info("Created signed reproducibility bundle at %s", bundle_dir)
-        _maybe_publish_artifacts_bundle(bundle_dir)
-    except (OSError, RuntimeError, ValueError) as exc:
-        logger.error("Failed to create reproducibility bundle: %s", exc)
+    from elspeth.core.cli.common import create_signed_bundle as _impl
+    _impl(art_dir, name, payload, settings, df, signing_key_env=signing_key_env)
 
 
 def _load_yaml_json(path: Path) -> dict[str, Any]:
-    try:
-        import yaml
-
-        data = yaml.safe_load(path.read_text(encoding="utf-8"))
-        if isinstance(data, dict):
-            return data
-        raise ValueError("artifact sink config must be a mapping")
-    except (OSError, UnicodeError) as exc:
-        raise ValueError(f"Invalid artifact sink config: {exc}") from exc
-    except yaml.YAMLError as exc:
-        raise ValueError(f"Invalid artifact sink config: {exc}") from exc
+    from elspeth.core.cli.common import load_yaml_json as _impl
+    return _impl(path)
 
 
 def _maybe_publish_artifacts_bundle(bundle_dir: Path) -> None:
-    # Fetch current CLI args via a closure of run(); else skip if not available
-    # TODO: Accept an argparse.Namespace (args) instead of reading sys.argv directly
-    # to improve testability and encapsulation.
-    import sys
-
-    import elspeth.core.registries.sink as sink_reg
-
-    # Simple args parsing from sys.argv for late publishing path; safe no-op if flags absent
-    argv = sys.argv
-    if "--artifact-sink-plugin" not in argv:
-        return
-    try:
-        idx = argv.index("--artifact-sink-plugin")
-        plugin_name = argv[idx + 1]
-    except (ValueError, IndexError):
-        logger.warning("artifact sink plugin flag provided without a name; skipping publish")
-        return
-    opts: dict[str, Any] = {}
-    if "--artifact-sink-config" in argv:
-        try:
-            j = argv.index("--artifact-sink-config")
-            cfg_path = Path(argv[j + 1])
-            opts = _load_yaml_json(cfg_path)
-        except (ValueError, OSError) as exc:
-            logger.warning("artifact sink config invalid; skipping publish: %s", exc)
-    # Convenience: if azure_devops_artifact_repo and no folder_path, set it
-    if plugin_name == "azure_devops_artifact_repo" and not opts.get("folder_path"):
-        opts["folder_path"] = str(bundle_dir)
-    try:
-        # Local alias in snake_case to satisfy naming convention
-        from elspeth.core.validation.base import ConfigurationError as configuration_error  # local import to avoid cycles
-    except ImportError:  # pragma: no cover - defensive
-        configuration_error = RuntimeError  # type: ignore
-    try:
-        sink = sink_reg.sink_registry.create(plugin_name, opts, parent_context=None)
-    except (ValueError, configuration_error, RuntimeError) as exc:
-        logger.warning("Failed to create artifact sink '%s': %s", plugin_name, exc)
-        return
-    try:
-        sink.write({"artifacts": [str(bundle_dir)]}, metadata={"path": str(bundle_dir)})
-        logger.info("Published bundle via artifact sink '%s'", plugin_name)
-    except (OSError, RuntimeError, ValueError) as exc:
-        logger.warning("Artifact publish failed: %s", exc)
+    from elspeth.core.cli.common import maybe_publish_artifacts_bundle as _impl
+    _impl(bundle_dir)
 
 
 def _strip_metrics_plugins(settings) -> None:
