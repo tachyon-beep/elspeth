@@ -9,6 +9,7 @@ permissions:
   contents: read
   packages: write
   security-events: write
+  id-token: write  # required for cosign keyless (OIDC) signing
 
 jobs:
   publish:
@@ -16,8 +17,7 @@ jobs:
     env:
       COSIGN_KEY: ${{ secrets.COSIGN_KEY }}
       COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
-      COSIGN_OIDC_AUDIENCE: ${{ secrets.COSIGN_OIDC_AUDIENCE }}
-      COSIGN_ID_TOKEN: ${{ secrets.COSIGN_ID_TOKEN }}
+      COSIGN_KMS_URI: ${{ secrets.COSIGN_KMS_URI }} # optional: e.g., awskms://..., gcpkms://..., azurekeyvault://...
     steps:
       - uses: actions/checkout@v4
 
@@ -72,28 +72,45 @@ jobs:
             grype.sarif
 
       - name: Install Cosign
-        if: ${{ env.COSIGN_KEY != '' || (env.COSIGN_OIDC_AUDIENCE != '' && env.COSIGN_ID_TOKEN != '') }}
         uses: sigstore/cosign-installer@v3
 
-      - name: Cosign keyless sign (optional)
-        if: ${{ env.COSIGN_KEY == '' }}
+      - name: Sign image (required: prefer KMS/key if provided, else keyless OIDC)
+        env:
+          COSIGN_EXPERIMENTAL: "1"  # enable keyless OIDC flow
+        run: |
+          set -euo pipefail
+          IMAGE="ghcr.io/${{ github.repository }}:${GITHUB_REF_NAME}"
+          if [ -n "${COSIGN_KMS_URI:-}" ]; then
+            echo "Signing with KMS: ${COSIGN_KMS_URI}"
+            cosign sign --yes --key "${COSIGN_KMS_URI}" "${IMAGE}"
+          elif [ -n "${COSIGN_KEY:-}" ]; then
+            echo "Signing with provided key material"
+            echo "${COSIGN_KEY}" > cosign.key
+            export COSIGN_PASSWORD="${COSIGN_PASSWORD:-}"
+            cosign sign --yes --key cosign.key "${IMAGE}"
+            rm -f cosign.key
+          else
+            echo "Signing keylessly via GitHub OIDC"
+            cosign sign --yes "${IMAGE}"
+          fi
+
+      - name: Attest SBOM (required: prefer KMS/key if provided, else keyless OIDC)
         env:
           COSIGN_EXPERIMENTAL: "1"
         run: |
-          cosign sign ghcr.io/${{ github.repository }}:${GITHUB_REF_NAME} || true
-
-      - name: Cosign key sign (optional)
-        if: ${{ env.COSIGN_KEY != '' }}
-        run: |
-          echo "${{ env.COSIGN_KEY }}" > cosign.key
-          export COSIGN_PASSWORD="${{ env.COSIGN_PASSWORD }}"
-          cosign sign --key cosign.key ghcr.io/${{ github.repository }}:${GITHUB_REF_NAME}
-          rm -f cosign.key
-
-      - name: Cosign attest SBOM (optional)
-        if: ${{ env.COSIGN_KEY != '' }}
-        run: |
-          echo "${{ env.COSIGN_KEY }}" > cosign.key
-          export COSIGN_PASSWORD="${{ env.COSIGN_PASSWORD }}"
-          cosign attest --key cosign.key --predicate sbom-image.json --type cyclonedx ghcr.io/${{ github.repository }}:${GITHUB_REF_NAME}
-          rm -f cosign.key
+          set -euo pipefail
+          IMAGE="ghcr.io/${{ github.repository }}:${GITHUB_REF_NAME}"
+          test -s sbom-image.json
+          if [ -n "${COSIGN_KMS_URI:-}" ]; then
+            echo "Attesting with KMS: ${COSIGN_KMS_URI}"
+            cosign attest --yes --key "${COSIGN_KMS_URI}" --predicate sbom-image.json --type cyclonedx "${IMAGE}"
+          elif [ -n "${COSIGN_KEY:-}" ]; then
+            echo "Attesting with provided key material"
+            echo "${COSIGN_KEY}" > cosign.key
+            export COSIGN_PASSWORD="${COSIGN_PASSWORD:-}"
+            cosign attest --yes --key cosign.key --predicate sbom-image.json --type cyclonedx "${IMAGE}"
+            rm -f cosign.key
+          else
+            echo "Attesting keylessly via GitHub OIDC"
+            cosign attest --yes --predicate sbom-image.json --type cyclonedx "${IMAGE}"
+          fi

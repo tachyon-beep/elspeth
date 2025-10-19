@@ -112,6 +112,35 @@ For diagrams and deep detail, see `docs/architecture/architecture-overview.md`, 
   - `ELSPETH_LOG_MAX_FILES` (keep newest N files)
   - `ELSPETH_LOG_MAX_AGE_DAYS` (delete files older than N days)
   Both are optional and best‑effort; logging never blocks execution.
+
+## Container Signing & Attestation
+
+Elspeth images published by the workflow are signed with Sigstore Cosign and include a CycloneDX SBOM attestation.
+
+- Default: keyless GitHub OIDC signing (no private key required). The workflow has `permissions: id-token: write` and uses `cosign sign` and `cosign attest`.
+- Optional internal keys: provide either a cloud KMS URI or a key pair to add an additional signature/attestation without rebuilding the image.
+  - `COSIGN_KMS_URI`: e.g., `awskms://...`, `gcpkms://...`, or `azurekeyvault://...`
+  - or `COSIGN_KEY` + `COSIGN_PASSWORD`: PEM key material from a secret
+
+Verification examples (replace `OWNER/REPO:TAG`):
+
+```bash
+# Keyless (GitHub OIDC) signature
+cosign verify \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --certificate-identity-regexp "https://github.com/OWNER/REPO/.*" \
+  ghcr.io/OWNER/REPO:TAG
+
+# Internal KMS/key signature
+cosign verify --key awskms://arn:aws:kms:... ghcr.io/OWNER/REPO:TAG
+
+# SBOM attestation (CycloneDX)
+cosign verify-attestation --type cyclonedx ghcr.io/OWNER/REPO:TAG | jq
+```
+
+Migration guidance:
+
+- You can dual‑sign during transition (keyless + internal). OCI registries store multiple signatures per digest. Tighten admission policy to “internal only” when ready.
 - Regenerate analytics artefacts after reporting or sink changes:
 
   ```bash

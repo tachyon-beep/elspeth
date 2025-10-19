@@ -186,7 +186,10 @@ jobs:
 
       - name: Generate runtime SBOM (app graph) inside container
         run: |
-          docker run --rm elspeth:devtest sh -lc 'cyclonedx-bom -e -F json --project-name elspeth --project-version 0.1.0 -o /tmp/sbom-runtime.json && cat /tmp/sbom-runtime.json' > sbom-runtime.json
+          docker run --rm elspeth:devtest sh -lc '
+            python -m cyclonedx_bom -e -F json --project-name elspeth --project-version 0.1.0 -o /tmp/sbom-runtime.json \
+            || python -m cyclonedx_py -e -F json --project-name elspeth --project-version 0.1.0 -o /tmp/sbom-runtime.json ; \
+            cat /tmp/sbom-runtime.json' > sbom-runtime.json
 
       - name: Install Syft and Grype
         run: |

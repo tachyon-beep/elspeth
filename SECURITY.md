@@ -160,6 +160,31 @@ Elspeth is designed for responsible LLM experimentation with built-in security c
 - `docs/architecture/threat-surfaces.md` - Threat model
 - `docs/TRACEABILITY_MATRIX.md` - Requirements traceability
 
+### Container Signing & SBOM Attestation
+
+All release images are signed with Sigstore Cosign and include a CycloneDX SBOM attestation.
+
+- Default: Keyless signing via GitHub OIDC (no private key required). The CI workflow grants `id-token: write` and treats signing/attestation as hard gates.
+- Internal signing (optional/dual‑sign): Provide either `COSIGN_KMS_URI` (e.g., `awskms://…`, `gcpkms://…`, `azurekeyvault://…`) or `COSIGN_KEY` + `COSIGN_PASSWORD`. CI will prefer KMS/key when present, otherwise it uses keyless.
+
+Verification examples:
+
+```bash
+# Keyless (GitHub OIDC)
+cosign verify \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --certificate-identity-regexp "https://github.com/OWNER/REPO/.*" \
+  ghcr.io/OWNER/REPO:TAG
+
+# Internal KMS/key
+cosign verify --key awskms://arn:aws:kms:... ghcr.io/OWNER/REPO:TAG
+
+# SBOM attestation (CycloneDX)
+cosign verify-attestation --type cyclonedx ghcr.io/OWNER/REPO:TAG | jq
+```
+
+Policy: During migration you may accept either signature; eventually enforce internal signing only via your admission policy (e.g., Gatekeeper/Kyverno).
+
 ## Security Audit Trail
 
 Major security improvements:
