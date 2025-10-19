@@ -16,12 +16,16 @@ from typing import Any, Iterable, Mapping
 import pandas as pd
 
 from elspeth.config import load_settings
-from elspeth.core.experiments import ExperimentSuite, ExperimentSuiteRunner
-from elspeth.core.experiments.tools import create_experiment_template, export_suite_configuration
+from elspeth.core.cli.config_utils import (
+    configure_sink_dry_run as _configure_sink_dry_run,
+)
+from elspeth.core.cli.config_utils import (
+    strip_metrics_plugins as _strip_metrics_plugins,
+)
+from elspeth.core.experiments import ExperimentSuite
 from elspeth.core.orchestrator import ExperimentOrchestrator
 from elspeth.core.security import SecureMode, get_secure_mode
 from elspeth.core.validation import validate_settings, validate_suite
-from elspeth.tools.reporting import SuiteReportGenerator
 
 logger = logging.getLogger(__name__)
 
@@ -391,11 +395,13 @@ def _run_single(args: argparse.Namespace, settings) -> None:
 def _clone_suite_sinks(base_sinks: list, experiment_name: str) -> list:
     # Delegate to extracted helper for maintainability
     from elspeth.core.cli.suite import clone_suite_sinks as _impl
+
     return _impl(base_sinks, experiment_name)
 
 
 def _assemble_suite_defaults(settings) -> dict:
     from elspeth.core.cli.suite import assemble_suite_defaults as _impl
+
     return _impl(settings)
 
 
@@ -428,194 +434,63 @@ def _resolve_suite_root(args: argparse.Namespace, settings) -> Path | None:
 
 
 def _handle_suite_management(args: argparse.Namespace, suite_root: Path | None) -> ExperimentSuite | None:
-    """Process template/export/report requests before running experiments."""
+    from elspeth.core.cli.suite import handle_suite_management as _impl
 
-    export_path = getattr(args, "export_suite_config", None)
-    template_name = getattr(args, "create_experiment_template", None)
-    reports_dir = getattr(args, "reports_dir", None)
-    template_base = getattr(args, "template_base", None)
-    management_requested = any([export_path, template_name, reports_dir])
-    if not management_requested:
-        return None
-    if suite_root is None:
-        message = "Suite root is required for template creation, export, or report generation."
-        raise SystemExit(message)
-
-    suite_instance = ExperimentSuite.load(suite_root)
-
-    if template_name:
-        destination = create_experiment_template(
-            suite_instance,
-            template_name,
-            base_experiment=template_base,
-        )
-        logger.info("Created experiment template at %s", destination)
-        suite_instance = ExperimentSuite.load(suite_root)
-
-    if export_path:
-        export_suite_configuration(suite_instance, export_path)
-        logger.info("Exported suite configuration to %s", export_path)
-
-    return suite_instance
+    return _impl(args, suite_root)
 
 
 def _run_suite(
-    args: argparse.Namespace,
-    settings,
-    suite_root: Path,
-    *,
-    preflight: dict | None = None,
-    suite: ExperimentSuite | None = None,
+    args: argparse.Namespace, settings, suite_root: Path, *, preflight: dict | None = None, suite: ExperimentSuite | None = None
 ) -> None:
-    """Execute all experiments declared in a suite configuration."""
+    from elspeth.core.cli.suite import run_suite as _impl
 
-    logger.info("Running suite at %s", suite_root)
-    suite = suite or ExperimentSuite.load(suite_root)
-    df = settings.datasource.load()
-    suite_runner = ExperimentSuiteRunner(
-        suite=suite,
-        llm_client=settings.llm,
-        sinks=settings.sinks,
-        suite_root=settings.suite_root,
-        config_path=settings.config_path,
-    )
-
-    defaults = _assemble_suite_defaults(settings)
-
-    results = suite_runner.run(
-        df,
-        defaults=defaults,
-        sink_factory=lambda exp: _clone_suite_sinks(settings.sinks, exp.name),
-        preflight_info=preflight,
-    )
-
-    for name, entry in results.items():
-        logger.info("Experiment %s completed with %s rows", name, len(entry["payload"]["results"]))
-
-    reports_dir = getattr(args, "reports_dir", None)
-    if reports_dir:
-        if args.single_run:
-            logger.warning("Report generation skipped: reports require suite execution.")
-        else:
-            SuiteReportGenerator(suite, results).generate_all_reports(reports_dir)
-
-    _maybe_write_artifacts_suite(args, settings, suite, results)
-    # STRICT mode: fail closed if any experiment recorded sink failures
-    try:
-        if get_secure_mode() == SecureMode.STRICT:
-            any_failures = any((entry.get("payload", {}) or {}).get("failures") for entry in results.values())
-            if any_failures:
-                logger.error("STRICT mode: sink failures detected in suite; aborting with non-zero exit")
-                raise SystemExit(1)
-    except Exception:
-        pass
+    return _impl(args, settings, suite_root, preflight=preflight, suite=suite)
 
 
 def _ensure_artifacts_dir(base: Path | None) -> Path:
     from elspeth.core.cli.common import ensure_artifacts_dir as _impl
+
     return _impl(base)
 
 
 def _write_simple_artifacts(art_dir: Path, name: str, payload: dict[str, Any], settings) -> None:
     from elspeth.core.cli.common import write_simple_artifacts as _impl
+
     _impl(art_dir, name, payload, settings)
 
 
 def _maybe_write_artifacts_single(args: argparse.Namespace, settings, payload: dict[str, Any], df: pd.DataFrame) -> None:
     from elspeth.core.cli.single import maybe_write_artifacts_single as _impl
+
     _impl(args, settings, payload, df)
 
 
 def _maybe_write_artifacts_suite(args: argparse.Namespace, settings, suite: ExperimentSuite, results: dict[str, Any]) -> None:
     from elspeth.core.cli.suite import maybe_write_artifacts_suite as _impl
+
     _impl(args, settings, suite, results)
 
 
 def _create_signed_bundle(art_dir: Path, name: str, payload: dict[str, Any], settings, df: pd.DataFrame, *, signing_key_env: str) -> None:
     from elspeth.core.cli.common import create_signed_bundle as _impl
+
     _impl(art_dir, name, payload, settings, df, signing_key_env=signing_key_env)
 
 
 def _load_yaml_json(path: Path) -> dict[str, Any]:
     from elspeth.core.cli.common import load_yaml_json as _impl
+
     return _impl(path)
 
 
 def _maybe_publish_artifacts_bundle(bundle_dir: Path) -> None:
     from elspeth.core.cli.common import maybe_publish_artifacts_bundle as _impl
+
     _impl(bundle_dir)
 
 
-def _strip_metrics_plugins(settings) -> None:
-    """Remove metrics plugins from settings and prompt packs when disabled."""
-
-    row_names = {"score_extractor"}
-    agg_names = {"score_stats", "score_recommendation"}
-    baseline_names = {"score_delta"}
-
-    def _filter(defs, names):
-        if not defs:
-            return defs
-        return [entry for entry in defs if entry.get("name") not in names]
-
-    cfg = settings.orchestrator_config
-    cfg.row_plugin_defs = _filter(cfg.row_plugin_defs, row_names)
-    cfg.aggregator_plugin_defs = _filter(cfg.aggregator_plugin_defs, agg_names)
-    cfg.baseline_plugin_defs = _filter(cfg.baseline_plugin_defs, baseline_names)
-
-    defaults = settings.suite_defaults or {}
-    if "row_plugins" in defaults:
-        defaults["row_plugins"] = _filter(defaults.get("row_plugins"), row_names)
-    if "aggregator_plugins" in defaults:
-        defaults["aggregator_plugins"] = _filter(defaults.get("aggregator_plugins"), agg_names)
-    if "baseline_plugins" in defaults:
-        defaults["baseline_plugins"] = _filter(defaults.get("baseline_plugins"), baseline_names)
-
-    for pack in settings.prompt_packs.values():
-        if isinstance(pack, dict):
-            if "row_plugins" in pack:
-                pack["row_plugins"] = _filter(pack.get("row_plugins"), row_names)
-            if "aggregator_plugins" in pack:
-                pack["aggregator_plugins"] = _filter(pack.get("aggregator_plugins"), agg_names)
-            if "baseline_plugins" in pack:
-                pack["baseline_plugins"] = _filter(pack.get("baseline_plugins"), baseline_names)
-
-
-def _configure_sink_dry_run(settings, enable_live: bool) -> None:
-    """Toggle dry-run behaviour for sinks supporting remote writes."""
-
-    dry_run = not enable_live
-
-    for sink in settings.sinks:
-        if hasattr(sink, "dry_run"):
-            setattr(sink, "dry_run", dry_run)
-
-    def _update_defs(defs):
-        if not defs:
-            return defs
-        updated = []
-        for entry in defs:
-            options = dict(entry.get("options", {}))
-            if entry.get("plugin") in {"github_repo", "azure_devops_repo"} or "dry_run" in options:
-                options["dry_run"] = dry_run
-            payload = {"plugin": entry.get("plugin"), "options": options}
-            if entry.get("security_level") is not None:
-                payload["security_level"] = entry.get("security_level")
-            if entry.get("determinism_level") is not None:
-                payload["determinism_level"] = entry.get("determinism_level")
-            updated.append(payload)
-        return updated
-
-    config = settings.orchestrator_config
-    config.sink_defs = _update_defs(config.sink_defs)
-
-    suite_defaults = settings.suite_defaults or {}
-    if "sinks" in suite_defaults:
-        suite_defaults["sinks"] = _update_defs(suite_defaults.get("sinks"))
-
-    for pack in settings.prompt_packs.values():
-        if isinstance(pack, dict) and pack.get("sinks"):
-            pack["sinks"] = _update_defs(pack.get("sinks"))
+## Note: _strip_metrics_plugins and _configure_sink_dry_run are delegated via
+## direct imports at module top (see _load_settings_from_args usage)
 
 
 def main(argv: Iterable[str] | None = None) -> None:

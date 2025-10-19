@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 import pandas as pd
 
+from elspeth.core.experiments import ExperimentSuite, ExperimentSuiteRunner
+from elspeth.core.security.secure_mode import SecureMode, get_secure_mode
 from elspeth.plugins.nodes.sinks.csv_file import CsvResultSink
+from elspeth.tools.reporting import SuiteReportGenerator
 
 from .common import create_signed_bundle, ensure_artifacts_dir
 
@@ -141,5 +145,86 @@ def maybe_write_artifacts_suite(args: Any, settings: Any, suite: Any, results: d
         )
 
 
-__all__ = ["clone_suite_sinks", "assemble_suite_defaults", "maybe_write_artifacts_suite"]
+__all__ = [
+    "clone_suite_sinks",
+    "assemble_suite_defaults",
+    "maybe_write_artifacts_suite",
+    "handle_suite_management",
+    "run_suite",
+]
 
+
+def handle_suite_management(args: Any, suite_root: Path | None) -> ExperimentSuite | None:
+    """Process template/export/report requests before running experiments."""
+    from elspeth.core.experiments.tools import create_experiment_template, export_suite_configuration
+
+    logger = logging.getLogger(__name__)
+    export_path = getattr(args, "export_suite_config", None)
+    template_name = getattr(args, "create_experiment_template", None)
+    reports_dir = getattr(args, "reports_dir", None)
+    template_base = getattr(args, "template_base", None)
+    management_requested = any([export_path, template_name, reports_dir])
+    if not management_requested:
+        return None
+    if suite_root is None:
+        raise SystemExit("Suite root is required for template creation, export, or report generation.")
+
+    suite_instance = ExperimentSuite.load(suite_root)
+    if template_name:
+        destination = create_experiment_template(
+            suite_instance,
+            template_name,
+            base_experiment=template_base,
+        )
+        logger.info("Created experiment template at %s", destination)
+        suite_instance = ExperimentSuite.load(suite_root)
+    if export_path:
+        export_suite_configuration(suite_instance, export_path)
+        logger.info("Exported suite configuration to %s", export_path)
+    return suite_instance
+
+
+def run_suite(
+    args: Any,
+    settings: Any,
+    suite_root: Path,
+    *,
+    preflight: Mapping[str, Any] | None = None,
+    suite: ExperimentSuite | None = None,
+) -> None:
+    """Execute all experiments declared in a suite configuration."""
+    logger = logging.getLogger(__name__)
+    logger.info("Running suite at %s", suite_root)
+    suite = suite or ExperimentSuite.load(suite_root)
+    df = settings.datasource.load()
+    suite_runner = ExperimentSuiteRunner(
+        suite=suite,
+        llm_client=settings.llm,
+        sinks=settings.sinks,
+        suite_root=settings.suite_root,
+        config_path=settings.config_path,
+    )
+    defaults = assemble_suite_defaults(settings)
+    results = suite_runner.run(
+        df,
+        defaults=defaults,
+        sink_factory=lambda exp: clone_suite_sinks(settings.sinks, exp.name),
+        preflight_info=dict(preflight) if isinstance(preflight, Mapping) else preflight,
+    )
+    for name, entry in results.items():
+        logger.info("Experiment %s completed with %s rows", name, len(entry["payload"].get("results", [])))
+    reports_dir = getattr(args, "reports_dir", None)
+    if reports_dir:
+        if getattr(args, "single_run", False):
+            logger.warning("Report generation skipped: reports require suite execution.")
+        else:
+            SuiteReportGenerator(suite, results).generate_all_reports(reports_dir)
+    maybe_write_artifacts_suite(args, settings, suite, results)
+    try:
+        if get_secure_mode() == SecureMode.STRICT:
+            any_failures = any((entry.get("payload", {}) or {}).get("failures") for entry in results.values())
+            if any_failures:
+                logger.error("STRICT mode: sink failures detected in suite; aborting with non-zero exit")
+                raise SystemExit(1)
+    except Exception:
+        pass
