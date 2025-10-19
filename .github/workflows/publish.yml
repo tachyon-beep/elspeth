@@ -19,7 +19,7 @@ jobs:
       COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
       COSIGN_KMS_URI: ${{ secrets.COSIGN_KMS_URI }} # optional: e.g., awskms://..., gcpkms://..., azurekeyvault://...
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
 
       - name: Resolve base image digest (linux/amd64)
         run: |
@@ -45,7 +45,7 @@ jobs:
           docker push ghcr.io/${{ github.repository }}:${VERSION}
 
       - name: Generate image SBOM (CycloneDX JSON)
-        uses: anchore/sbom-action@8d0a6505bf28ced3e85154d13dc6af83299e13f1 # v0.17.4
+        uses: anchore/sbom-action@aa0e114b2e19480f157109b9922bda359bd98b90 # v0.20.8
         with:
           image: ghcr.io/${{ github.repository }}:${{ github.ref_name }}
           format: cyclonedx-json
@@ -53,19 +53,19 @@ jobs:
 
       - name: "Vulnerability scan (Grype) — block on HIGH"
         id: grype
-        uses: anchore/scan-action@4be3c24559b430723e51858969965e163b196957 # v3.3.5
+        uses: anchore/scan-action@a5605eb0943e46279cb4fbd9d44297355d3520ab # v7.0.2
         with:
           image: ghcr.io/${{ github.repository }}:${{ github.ref_name }}
           severity-cutoff: high
           fail-build: true
           output-format: sarif
-          grype-version: v0.83.0
+          grype-version: v0.101.1
         env:
           GRYPE_DB_CACHE_DIR: ${{ runner.temp }}/grype-db
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload Grype SARIF to code scanning
-        uses: github/codeql-action/upload-sarif@42213152a85ae7569bdb6bec7bcd74cd691bfe41 # v3.30.9
+        uses: github/codeql-action/upload-sarif@16140ae1a102900babc80a33c44059580f687047 # v4.30.9
         with:
           sarif_file: ${{ steps.grype.outputs.sarif }}
           category: grype
@@ -79,7 +79,7 @@ jobs:
             ${{ steps.grype.outputs.sarif }}
 
       - name: Install Cosign
-        uses: sigstore/cosign-installer@7e8b541eb2e61bf99390e1afd4be13a184e9ebc5 # v3.10.1
+        uses: sigstore/cosign-installer@faadad0cce49287aee09b3a48701e75088a2c6ad # v4.0.0
 
       - name: "Sign image (required: prefer KMS/key if provided, else keyless OIDC)"
         env:
