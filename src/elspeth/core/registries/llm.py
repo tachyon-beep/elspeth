@@ -199,11 +199,10 @@ _AZURE_OPENAI_SCHEMA = with_security_properties(
             "deployment": {"type": "string"},
             "client": {},
         },
-        # Allow either a full config block or a minimal deployment-only definition.
-        "oneOf": [
-            {"required": ["config"]},
-            {"required": ["deployment"]},
-        ],
+        # Require explicit config block to match factory/client contract.
+        # The client requires `config` at runtime, so allowing deployment-only
+        # definitions would validate but fail at instantiation time.
+        "required": ["config"],
         "additionalProperties": True,
     },
     require_security=False,  # Will be enforced by registry
