@@ -46,12 +46,45 @@ python -m elspeth.cli \
 
 ## Signing
 
-- Provide the signing key via environment variable (default `ELSPETH_SIGNING_KEY`).
-- The signature file includes the algorithm, signature value (base64), and target.
-- The manifest lists file paths and SHA256 digests.
+Elspeth supports both HMAC and asymmetric signatures for local bundles.
 
-To verify:
-- Recreate the manifest digests and compare, then check HMAC over the manifest with the shared key.
+Algorithms:
+
+- HMAC: `hmac-sha256` (default), `hmac-sha512`
+- Asymmetric: `rsa-pss-sha256`, `ecdsa-p256-sha256`
+
+Key sources (priority order):
+
+1) `key_vault_secret_uri` option or env `ELSPETH_SIGNING_KEY_VAULT_SECRET_URI` / `AZURE_KEYVAULT_SECRET_URI` (Azure Key Vault URI)
+2) `key_env` (default: `ELSPETH_SIGNING_KEY`) — HMAC key or PEM private key
+3) `COSIGN_KEY` (PEM)
+
+If you use Key Vault, ensure the runtime has `azure-identity` and `azure-keyvault-secrets` and an identity chain for `DefaultAzureCredential`.
+
+Example sink snippet (settings YAML):
+
+```yaml
+sinks:
+  - plugin: signed
+    security_level: OFFICIAL
+    options:
+      base_path: artifacts/signed
+      algorithm: rsa-pss-sha256
+      key_vault_secret_uri: ${ELSPETH_SIGNING_KEY_VAULT_SECRET_URI}
+      public_key_env: SIGNED_PUBLIC_KEY_PEM
+```
+
+Signature file (signature.json) includes:
+
+- `algorithm` (one of the above)
+- `signature` (base64)
+- `target` (e.g., results.json)
+- Optional `key_fingerprint` (SHA256 over the public key in asymmetric modes)
+
+Verification:
+
+- HMAC: recompute over the target with the shared key and compare
+- Asymmetric: verify with the corresponding public key (see `verify_signature` in `src/elspeth/core/security/signing.py`)
 
 ## Containerized Workflows
 
@@ -72,4 +105,3 @@ These complement local artifacts and bundles for full supply‑chain transparenc
 
 - “Signing key not provided”: set `ELSPETH_SIGNING_KEY` or pass `--signing-key-env`.
 - “No retained source data”: the bundle will serialize the in‑memory DataFrame; prefer enabling datasource retention for perfect fidelity.
-

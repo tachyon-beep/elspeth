@@ -6,8 +6,10 @@ Produce a traceable evidence bundle containing signed results, manifests, and dr
 
 ## Prerequisites
 
-- Environment variables set for secrets:
-  - `ELSPETH_SIGNING_KEY` – signing secret for `signed_artifact` sink (`src/elspeth/plugins/nodes/sinks/signed.py:107`, validated by `tests/test_outputs_signed.py:40`).
+- Environment variables set for secrets (choose one):
+  - `ELSPETH_SIGNING_KEY` – HMAC key or PEM-encoded private key for the signed sink
+  - `ELSPETH_SIGNING_KEY_VAULT_SECRET_URI` – Azure Key Vault secret URI to fetch the PEM
+  - Optional: `SIGNED_PUBLIC_KEY_PEM` – PEM public key to embed a fingerprint in signature.json
   - Optional: `GITHUB_TOKEN` / `AZDO_TOKEN` if converting dry-run sinks to live commits (`src/elspeth/plugins/nodes/sinks/repository.py:149`).
 - Dataset available locally (mock CSV) as configured in sample suite (`config/sample_suite/settings.yaml:4`).
 - Virtual environment bootstrapped via `make bootstrap` (`scripts/bootstrap.sh:16`).

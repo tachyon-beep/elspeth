@@ -160,6 +160,60 @@ Elspeth is designed for responsible LLM experimentation with built-in security c
 - `docs/architecture/threat-surfaces.md` - Threat model
 - `docs/TRACEABILITY_MATRIX.md` - Requirements traceability
 
+### Signed Artifacts (Local) — HMAC and Asymmetric
+
+Elspeth can produce a signed local artifact bundle for evidence trails. The `SignedArtifactSink` supports:
+
+- HMAC (shared secret): `hmac-sha256` (default), `hmac-sha512`
+- Asymmetric (private/public key): `rsa-pss-sha256`, `ecdsa-p256-sha256`
+
+Keys can be provided directly (env var with PEM contents) or fetched from Azure Key Vault.
+
+Environment variables (any of the following):
+
+- `ELSPETH_SIGNING_KEY` — HMAC key, or PEM-encoded private key for asymmetric modes
+- `COSIGN_KEY` — Alternative PEM source (for CI parity)
+- `ELSPETH_SIGNING_KEY_VAULT_SECRET_URI` or `AZURE_KEYVAULT_SECRET_URI` — Full Key Vault secret URI
+  - Example: `https://myvault.vault.azure.net/secrets/elspeth-private/abcd1234`
+  - Requires `azure-identity` and `azure-keyvault-secrets` in the runtime environment
+
+Optional public key (to embed a fingerprint in signature.json):
+
+- `SIGNED_PUBLIC_KEY_PEM` (set `public_key_env: SIGNED_PUBLIC_KEY_PEM` on the sink) — PEM-encoded public key
+
+Signed sink options (YAML):
+
+```yaml
+  - plugin: signed
+    security_level: OFFICIAL
+    options:
+      base_path: artifacts/signed
+      algorithm: rsa-pss-sha256   # or hmac-sha256, ecdsa-p256-sha256, hmac-sha512
+      # Direct env key (PEM or HMAC)
+      key_env: ELSPETH_SIGNING_KEY
+      # or fetch from Key Vault when present (takes precedence if set)
+      key_vault_secret_uri: ${ELSPETH_SIGNING_KEY_VAULT_SECRET_URI}
+      # Optional: embed public key fingerprint
+      public_key_env: SIGNED_PUBLIC_KEY_PEM
+```
+
+CLI usage:
+
+```bash
+# HMAC example
+export ELSPETH_SIGNING_KEY="super-secret-key"
+
+# Asymmetric (RSA) example — PEM as env var
+export ELSPETH_SIGNING_KEY="$(cat private.pem)"
+
+# Azure Key Vault example (requires azure-identity + azure-keyvault-secrets)
+export ELSPETH_SIGNING_KEY_VAULT_SECRET_URI="https://myvault.vault.azure.net/secrets/elspeth-private/abcd1234"
+
+python -m elspeth.cli --signed-bundle --artifacts-dir artifacts ...
+```
+
+Verification: signature.json contains algorithm, signature (base64), target, and an optional `key_fingerprint` (SHA256 over SubjectPublicKeyInfo) for asymmetric modes. You can verify with the matching public key using the `verify_signature` helper (see `src/elspeth/core/security/signing.py`).
+
 ### Container Signing & SBOM Attestation
 
 All release images are signed with Sigstore Cosign and include a CycloneDX SBOM attestation.

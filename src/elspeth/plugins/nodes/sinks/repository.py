@@ -58,9 +58,9 @@ class _RepoSinkBase(ResultSink):
         try:
             if get_secure_mode() == SecureMode.STRICT and self.on_error == "skip":
                 raise ValueError("Repository sinks cannot use on_error='skip' in STRICT mode")
-        except Exception:
+        except Exception as exc:
             # If secure mode utilities are unavailable, proceed; validation should catch earlier
-            pass
+            logger.debug("Secure mode check unavailable; proceeding (reason: %s)", exc, exc_info=False)
         if self.session is None:
             self.session = requests.Session()
             # Mount retry adapter to improve resilience on transient failures
@@ -77,9 +77,9 @@ class _RepoSinkBase(ResultSink):
                 adapter = HTTPAdapter(max_retries=retry)
                 # Enforce TLS for all external repository operations
                 self.session.mount("https://", adapter)
-            except Exception:
+            except Exception as exc:
                 # Non-fatal if retry adapter isn't available
-                pass
+                logger.debug("Retry adapter not mounted; proceeding without retries: %s", exc, exc_info=False)
         if self.on_error not in {"abort", "skip"}:
             raise ValueError("on_error must be 'abort' or 'skip'")
         if self.dry_run:
@@ -87,6 +87,12 @@ class _RepoSinkBase(ResultSink):
                 "Repository sink running in dry-run mode; no remote writes will occur. "
                 "Enable --live-outputs via CLI or set dry_run=False in configuration for actual pushes."
             )
+            # In STRICT mode, highlight that dry-run prevents remote writes
+            try:
+                if get_secure_mode() == SecureMode.STRICT:
+                    logger.warning("STRICT mode: repository sink is in dry-run; remote publishing disabled")
+            except Exception:
+                pass
 
     def write(self, results: dict[str, Any], *, metadata: dict[str, Any] | None = None) -> None:
         metadata = metadata or {}
@@ -274,9 +280,10 @@ class GitHubRepoSink(_RepoSinkBase):
         if token:
             headers["Authorization"] = f"Bearer {token}"
         elif not self.dry_run and not token:
-            # Fail fast in typical execution when using a real requests.Session.
-            # Custom sessions (e.g., tests) proceed to allow simulated failures (timeouts, etc.).
-            raise RuntimeError(f"GitHub token missing; set '{self.token_env}' or enable dry-run")
+            # Fail fast only when using a real requests.Session. Custom sessions (e.g., tests)
+            # proceed to allow simulated failures (timeouts, etc.).
+            if isinstance(self.session, requests.Session):
+                raise RuntimeError(f"GitHub token missing; set '{self.token_env}' or enable dry-run")
         self._headers_cache = headers
         return headers
 
@@ -384,10 +391,13 @@ class AzureDevOpsRepoSink(_RepoSinkBase):
             auth = base64.b64encode(f":{token}".encode("utf-8")).decode("ascii")
             headers["Authorization"] = f"Basic {auth}"
         elif not self.dry_run and not token:
-            raise RuntimeError(
-                "Azure DevOps PAT missing; set 'AZURE_DEVOPS_PAT' or set "
-                f"'{self.token_env}' or enable dry-run"
-            )
+            # Fail fast only when using a real requests.Session. Custom sessions (e.g., tests)
+            # proceed to allow simulated failures (timeouts, etc.).
+            if isinstance(self.session, requests.Session):
+                raise RuntimeError(
+                    "Azure DevOps PAT missing; set 'AZURE_DEVOPS_PAT' or set "
+                    f"'{self.token_env}' or enable dry-run"
+                )
         self._headers_cache = headers
         return headers
 

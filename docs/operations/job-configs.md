@@ -45,7 +45,12 @@ This produces results and optional signed bundle under `artifacts/<timestamp>/`.
 
 - Middlewares are supported via the existing registry (`llm_middlewares`).
 - Sinks use the standard sink registry and may include local CSV/Excel/ZIP, repository, blob, etc.
-- Use `ELSPETH_SIGNING_KEY` (or `--signing-key-env`) to sign bundles.
+- Signing options for bundles:
+  - HMAC: `export ELSPETH_SIGNING_KEY="super-secret"`
+  - Asymmetric (RSA/ECDSA): `export ELSPETH_SIGNING_KEY="$(cat private.pem)"`
+  - Azure Key Vault: `export ELSPETH_SIGNING_KEY_VAULT_SECRET_URI="https://<vault>.vault.azure.net/secrets/<name>/<version?>"`
+    - Requires `azure-identity` and `azure-keyvault-secrets` installed
+  - Optional public key for fingerprint: `export SIGNED_PUBLIC_KEY_PEM="$(cat public.pem)"` and set `public_key_env: SIGNED_PUBLIC_KEY_PEM` in sink options.
 
 ## Container usage
 

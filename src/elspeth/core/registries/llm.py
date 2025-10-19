@@ -199,7 +199,11 @@ _AZURE_OPENAI_SCHEMA = with_security_properties(
             "deployment": {"type": "string"},
             "client": {},
         },
-        "required": ["config"],
+        # Allow either a full config block or a minimal deployment-only definition.
+        "oneOf": [
+            {"required": ["config"]},
+            {"required": ["deployment"]},
+        ],
         "additionalProperties": True,
     },
     require_security=False,  # Will be enforced by registry

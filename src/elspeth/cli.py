@@ -291,7 +291,18 @@ def _run_single(args: argparse.Namespace, settings) -> None:
         suite_root=settings.suite_root,
         config_path=settings.config_path,
     )
-    payload = orchestrator.run()
+    try:
+        payload = orchestrator.run()
+    except Exception as exc:  # sink or pipeline failure
+        # STRICT mode: fail-closed on any sink error during run
+        try:
+            if get_secure_mode() == SecureMode.STRICT:
+                logger.error("STRICT mode: sink error during run; aborting with non-zero exit: %s", exc)
+                raise SystemExit(1)
+        except Exception:
+            # If secure mode utilities unavailable, re-raise original error
+            pass
+        raise
 
     for failure in payload.get("failures", []):
         retry = failure.get("retry") or {}

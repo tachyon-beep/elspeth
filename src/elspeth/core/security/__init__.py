@@ -22,7 +22,7 @@ from .secure_mode import (
     validate_middleware_config,
     validate_sink_config,
 )
-from .signing import generate_signature, verify_signature
+from .signing import generate_signature, public_key_fingerprint, verify_signature
 
 # Export enum types for backward compatibility
 SECURITY_LEVELS: list[str] = [str(level.value) for level in SecurityLevel]
@@ -148,6 +148,7 @@ def coalesce_determinism_level(*levels: str | None) -> str:
 __all__ = [
     "generate_signature",
     "verify_signature",
+    "public_key_fingerprint",
     "SecurityLevel",
     "DeterminismLevel",
     "SECURITY_LEVELS",

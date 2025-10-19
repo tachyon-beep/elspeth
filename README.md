@@ -91,6 +91,12 @@ Pass `--live-outputs` to allow repository or blob sinks to write to their target
 
 Prefer a consolidated index? Check `docs/README.md` for a map of every reference.
 
+Signed evidence bundles
+- Create a signed reproducibility bundle by passing `--signed-bundle` and `--artifacts-dir`.
+- Algorithms: `hmac-sha256` (default), `hmac-sha512`, `rsa-pss-sha256`, `ecdsa-p256-sha256`.
+- Keys can be supplied via `ELSPETH_SIGNING_KEY` (HMAC or PEM), `COSIGN_KEY` (PEM), or fetched from Azure Key Vault via `ELSPETH_SIGNING_KEY_VAULT_SECRET_URI`.
+- For asymmetric modes, you can embed a public key fingerprint in the signature by setting `public_key_env` on the sink (see docs/operations/artifacts.md).
+
 ## Architecture Snapshot
 
 - **Ingestion** – Datasources normalise tabular inputs and tag security levels before experimentation (`src/elspeth/plugins/nodes/sources/`).

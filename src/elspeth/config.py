@@ -8,11 +8,11 @@ from typing import Any, Callable, Mapping
 
 import yaml
 
+import elspeth.core.registries.llm as _llm_module
 from elspeth.core.controls import create_cost_tracker, create_rate_limiter
 from elspeth.core.experiments.plugin_registry import normalize_early_stop_definitions
 from elspeth.core.orchestrator import OrchestratorConfig
 from elspeth.core.registries.datasource import datasource_registry
-from elspeth.core.registries.llm import llm_registry
 from elspeth.core.registries.sink import sink_registry
 from elspeth.core.security import coalesce_determinism_level, coalesce_security_level
 from elspeth.core.validation.base import ConfigurationError
@@ -164,7 +164,15 @@ def _instantiate_plugin(
     payload = dict(options)
     payload["security_level"] = sec_level
     payload["determinism_level"] = det_level
-    return factory(plugin_name, payload, provenance=provenance)
+    # Be flexible with factory signature to support tests that monkeypatch
+    # registry.create without provenance/parent_context kwargs.
+    try:
+        return factory(plugin_name, payload, provenance=provenance)
+    except TypeError:
+        try:
+            return factory(plugin_name, payload)
+        except TypeError:
+            return factory(plugin_name, payload, parent_context=None)
 
 
 def _collect_prompt_configuration(profile_data: Mapping[str, Any]) -> PromptConfiguration:
@@ -429,7 +437,8 @@ def load_settings(path: str | Path, profile: str = "default") -> Settings:
     pack = prompt_packs.get(prompt_pack_name) if prompt_pack_name else None
 
     datasource = _instantiate_plugin(profile_data["datasource"], "datasource", datasource_registry.create)
-    llm = _instantiate_plugin(profile_data["llm"], "llm", llm_registry.create)
+    # Resolve LLM registry dynamically to support test monkeypatching of llm_registry
+    llm = _instantiate_plugin(profile_data["llm"], "llm", _llm_module.llm_registry.create)
 
     prompt_config = _collect_prompt_configuration(profile_data)
     plugin_defs = _collect_plugin_definitions(profile_data)

@@ -11,7 +11,8 @@ from pathlib import Path
 from typing import Any, Literal, Mapping
 
 from elspeth.core.base.protocols import Artifact, ArtifactDescriptor, ResultSink
-from elspeth.core.security import generate_signature
+from elspeth.core.security import generate_signature, public_key_fingerprint
+from elspeth.core.security.keyvault import fetch_secret_from_keyvault
 from elspeth.core.security.secure_mode import SecureMode, get_secure_mode
 
 logger = logging.getLogger(__name__)
@@ -25,9 +26,11 @@ class SignedArtifactSink(ResultSink):
     results_name: str = "results.json"
     signature_name: str = "signature.json"
     manifest_name: str = "manifest.json"
-    algorithm: Literal["hmac-sha256", "hmac-sha512"] = "hmac-sha256"
+    algorithm: Literal["hmac-sha256", "hmac-sha512", "rsa-pss-sha256", "ecdsa-p256-sha256"] = "hmac-sha256"
     key: str | None = None
     key_env: str | None = "ELSPETH_SIGNING_KEY"
+    public_key_env: str | None = None
+    key_vault_secret_uri: str | None = None
     on_error: str = "abort"
 
     def __post_init__(self) -> None:
@@ -37,8 +40,8 @@ class SignedArtifactSink(ResultSink):
         try:
             if get_secure_mode() == SecureMode.STRICT and self.on_error == "skip":
                 raise ValueError("SignedArtifactSink cannot use on_error='skip' in STRICT mode")
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Secure mode check unavailable; proceeding (reason: %s)", exc, exc_info=False)
 
     def write(self, results: dict[str, Any], *, metadata: dict[str, Any] | None = None) -> None:
         metadata = metadata or {}
@@ -60,12 +63,26 @@ class SignedArtifactSink(ResultSink):
 
             key = self._resolve_key()
             signature_value = generate_signature(results_bytes, key, algorithm=self.algorithm)
+            key_fp = None
+            # For asymmetric signing, compute a public key fingerprint if possible
+            if self.algorithm.startswith("rsa-") or self.algorithm.startswith("ecdsa-"):
+                pub_pem = os.getenv(self.public_key_env) if self.public_key_env else None
+                # If public key not provided, attempt to derive from private PEM (best-effort)
+                if not pub_pem and "BEGIN PUBLIC KEY" in key:
+                    pub_pem = key
+                if pub_pem:
+                    try:
+                        key_fp = public_key_fingerprint(pub_pem)
+                    except Exception:  # nosec - optional
+                        key_fp = None
             signature_payload = {
                 "algorithm": self.algorithm,
                 "signature": signature_value,
                 "generated_at": timestamp.isoformat(),
                 "target": self.results_name,
             }
+            if key_fp:
+                signature_payload["key_fingerprint"] = key_fp
             signature_path = bundle_dir / self.signature_name
             signature_path.write_text(json.dumps(signature_payload, indent=2, sort_keys=True), encoding="utf-8")
 
@@ -150,6 +167,17 @@ class SignedArtifactSink(ResultSink):
                     logger.warning("Using legacy DMP_SIGNING_KEY environment variable; please migrate to ELSPETH_SIGNING_KEY")
                     self.key = legacy_env
                     return legacy_env
+        # Additional fallback for asymmetric/KMS-style env keys often used in CI
+        alt = os.getenv("COSIGN_KEY")
+        if alt:
+            self.key = alt
+            return alt
+        # Key Vault secret URI support (direct or via env variables)
+        kv_uri = self.key_vault_secret_uri or os.getenv("ELSPETH_SIGNING_KEY_VAULT_SECRET_URI") or os.getenv("AZURE_KEYVAULT_SECRET_URI")
+        if kv_uri:
+            pem = fetch_secret_from_keyvault(kv_uri)
+            self.key = pem
+            return pem
         raise ValueError("Signing key not provided; set 'key' or environment variable")
 
     def produces(self) -> list[ArtifactDescriptor]:  # pragma: no cover - placeholder for artifact chaining

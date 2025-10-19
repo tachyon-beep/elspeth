@@ -64,14 +64,17 @@ class PluginLogger:
         # Create log directory
         self.log_dir.mkdir(parents=True, exist_ok=True)
 
+        # Standard Python logger for traditional logging (set early for retention logs)
+        self.logger = logging.getLogger(f"elspeth.{context.plugin_kind}.{context.plugin_name}")
+
         # Apply simple retention policy if configured via environment
         # ELSPETH_LOG_MAX_FILES: keep at most N newest files (int > 0)
         # ELSPETH_LOG_MAX_AGE_DAYS: delete files older than given days (int > 0)
         try:
             self._apply_retention()
-        except Exception:
+        except Exception as exc:
             # Retention is best-effort and should never block execution
-            pass
+            self.logger.debug("Log retention maintenance skipped: %s", exc, exc_info=False)
 
         # Generate run timestamp (shared across all plugins in this run)
         self.run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
@@ -79,7 +82,8 @@ class PluginLogger:
         # Log file path
         self.log_file = self.log_dir / f"run_{self.run_id}.jsonl"
 
-        # Standard Python logger for traditional logging
+        # Standard Python logger already set above; recompute name if needed
+        # (kept for clarity, but reference is identical)
         self.logger = logging.getLogger(f"elspeth.{context.plugin_kind}.{context.plugin_name}")
 
         # Serialise file appends across threads (must exist before first write)
@@ -107,6 +111,8 @@ class PluginLogger:
         candidates.sort(key=lambda x: x[1], reverse=True)
         now = datetime.now(timezone.utc)
         # Age-based pruning
+        deleted_age = 0
+        errors_age = 0
         if max_age_days and max_age_days > 0:
             cutoff = now - timedelta(days=max_age_days)
             for p, mtime in list(candidates):
@@ -114,19 +120,31 @@ class PluginLogger:
                     mtime_dt = datetime.fromtimestamp(mtime, tz=timezone.utc)
                     if mtime_dt < cutoff:
                         p.unlink(missing_ok=True)
-                except Exception:
-                    # Ignore deletion errors
-                    pass
+                        deleted_age += 1
+                except Exception as exc:
+                    # Ignore deletion errors but record for diagnostics
+                    errors_age += 1
+                    self.logger.debug("Retention age-prune failed for %s: %s", p, exc, exc_info=False)
             # Refresh candidate list after age-based deletions
             candidates = [(p, p.stat().st_mtime) for p in self.log_dir.glob("run_*.jsonl")]
             candidates.sort(key=lambda x: x[1], reverse=True)
+            if deleted_age or errors_age:
+                level = logging.WARNING if errors_age else logging.DEBUG
+                self.logger.log(level, "Retention age-pruned files: %d (errors: %d)", deleted_age, errors_age)
         # Count-based pruning
+        deleted_count = 0
+        errors_count = 0
         if max_files and max_files > 0 and len(candidates) > max_files:
             for p, _ in candidates[max_files:]:
                 try:
                     p.unlink(missing_ok=True)
-                except Exception:
-                    pass
+                    deleted_count += 1
+                except Exception as exc:
+                    errors_count += 1
+                    self.logger.debug("Retention count-prune failed for %s: %s", p, exc, exc_info=False)
+            if deleted_count or errors_count:
+                level = logging.WARNING if errors_count else logging.DEBUG
+                self.logger.log(level, "Retention count-pruned files: %d (errors: %d)", deleted_count, errors_count)
 
     def _compute_config_hash(self) -> str:
         """Compute SHA256 hash of plugin configuration."""

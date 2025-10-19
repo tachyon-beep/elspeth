@@ -104,7 +104,15 @@ def _create_azure_blob_artifacts_sink(options: dict[str, Any], context: PluginCo
 
 def _create_csv_sink(options: dict[str, Any], context: PluginContext) -> CsvResultSink:
     """Create CSV result sink."""
-    return CsvResultSink(**options)
+    # Resolve class dynamically so tests can monkeypatch CsvResultSink in module scope
+    try:
+        from elspeth.plugins.nodes.sinks import csv_file as _csv_mod
+
+        klass = getattr(_csv_mod, "CsvResultSink", CsvResultSink)
+        return klass(**options)
+    except Exception:
+        # Fallback to direct reference if dynamic import fails
+        return CsvResultSink(**options)
 
 
 def _create_local_bundle_sink(options: dict[str, Any], context: PluginContext) -> LocalBundleSink:

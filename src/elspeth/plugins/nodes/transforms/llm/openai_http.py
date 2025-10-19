@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from typing import Any
 
@@ -10,6 +11,8 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 from elspeth.core.base.protocols import LLMClientProtocol
+
+logger = logging.getLogger(__name__)
 
 
 class HttpOpenAIClient(LLMClientProtocol):
@@ -62,9 +65,9 @@ class HttpOpenAIClient(LLMClientProtocol):
             if self.api_base.startswith("http://"):
                 # Endpoint validation already restricts HTTP to localhost/loopback only.
                 self.session.mount("http://", adapter)  # NOSONAR: localhost-only by policy
-        except Exception:
+        except Exception as exc:
             # If retry adapter isn't available, proceed without retries
-            pass
+            logger.debug("HTTP retry adapter not mounted; proceeding without retries: %s", exc, exc_info=False)
 
     def generate(
         self,
