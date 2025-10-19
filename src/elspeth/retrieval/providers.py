@@ -39,8 +39,8 @@ class PgVectorQueryClient(VectorQueryClient):
     def __init__(self, *, dsn: str, table: str = "elspeth_rag", connect_timeout: float | int | None = None) -> None:
         # Defer importing psycopg until query() is executed. This makes unit tests
         # that only validate DSN handling independent from system libpq availability.
-        self._psycopg = None  # type: ignore[assignment]
-        self._sql = None  # type: ignore[assignment]
+        self._psycopg: Any = None
+        self._sql: Any = None
         self._dsn = dsn
         self._table = table
         self._connect_timeout = int(connect_timeout) if connect_timeout is not None else None
@@ -56,8 +56,8 @@ class PgVectorQueryClient(VectorQueryClient):
     ) -> Iterable[QueryResult]:
         # Import psycopg here to allow initialization without libpq in minimal test envs.
         if self._psycopg is None and self._sql is None:  # pragma: no cover - trivial path
-            import psycopg  # noqa: WPS433 (allowed local import)
-            from psycopg import sql  # noqa: WPS433
+            import psycopg
+            from psycopg import sql
 
             self._psycopg = psycopg
             self._sql = sql
@@ -81,7 +81,7 @@ class PgVectorQueryClient(VectorQueryClient):
                 # Fallback to safe whitespace-delimited append
                 sep = " " if dsn and not dsn.endswith(" ") else ""
                 dsn = f"{dsn}{sep}connect_timeout={self._connect_timeout}"
-        conn = self._psycopg.connect(dsn, autocommit=True)  # type: ignore[union-attr]
+        conn = self._psycopg.connect(dsn, autocommit=True)
         try:
             # Use sql.Identifier to safely quote table name and prevent SQL injection
             with conn.cursor() as cur:
