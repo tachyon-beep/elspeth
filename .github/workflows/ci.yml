@@ -61,7 +61,8 @@ jobs:
 
       - name: Security static analysis (bandit)
         run: |
-          python -m pip install bandit
+          # Pin bandit to a specific version to avoid tool drift
+          python -m pip install bandit==1.8.6
           # Fail build on HIGH severity and HIGH confidence findings
           bandit -q -r src --severity-level high --confidence-level high -f json -o bandit.json
       - name: Upload bandit report (JSON)
@@ -70,6 +71,11 @@ jobs:
         with:
           name: bandit-json
           path: bandit.json
+
+      - name: Install Semgrep (pinned)
+        run: |
+          # Pin semgrep to a specific version for deterministic results
+          python -m pip install semgrep==1.92.0
 
       - name: Semgrep scan (CLI, curated)
         run: |
@@ -195,14 +201,13 @@ jobs:
               /opt/venv/bin/cyclonedx-py environment --pyproject /tmp/pyproject.toml --of JSON --output-reproducible -o /tmp/sbom-runtime.json && \
               cat /tmp/sbom-runtime.json' > sbom-runtime.json
 
-      - name: Install Syft and Grype
-        run: |
-          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b /usr/local/bin
-          curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b /usr/local/bin
-
+      # Replace curl|sh installers with pinned GitHub Actions for Syft and Grype
       - name: Generate image SBOM (CycloneDX JSON)
-        run: |
-          syft packages docker:elspeth:runtime -o cyclonedx-json > sbom-image.json
+        uses: anchore/sbom-action@v0.17.4
+        with:
+          image: elspeth:runtime
+          format: cyclonedx-json
+          output-file: sbom-image.json
 
       - name: Upload SBOM artifacts
         uses: actions/upload-artifact@v4
@@ -213,8 +218,13 @@ jobs:
             sbom-image.json
 
       - name: Vulnerability scan (Grype) — block on HIGH
-        run: |
-          grype elspeth:runtime -o sarif --fail-on high > grype.sarif
+        uses: anchore/scan-action@v3
+        with:
+          image: elspeth:runtime
+          severity-cutoff: high
+          fail-build: true
+          output-format: sarif
+          output-file: grype.sarif
 
       - name: Upload Grype SARIF to code scanning
         if: always()

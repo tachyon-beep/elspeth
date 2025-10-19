@@ -200,51 +200,74 @@ class ReproducibilityBundleSink(ResultSink):
 
     def _write_source_data(self, metadata: dict[str, Any]) -> None:
         """Write source data snapshot from datasource."""
-        # Priority 1: Check if datasource retained a local copy (preferred)
         source_data = metadata.get("source_data")
         datasource_config = metadata.get("datasource_config")
 
-        # Check DataFrame attrs for retained_local_path
-        retained_path = None
-        if source_data is not None:
-            import pandas as pd
-
-            if isinstance(source_data, pd.DataFrame):
-                retained_path = source_data.attrs.get("retained_local_path")
-
+        retained_path = self._get_retained_path(source_data)
         if retained_path and Path(retained_path).exists():
-            # Copy the retained local file
-            if self._temp_dir is None:  # pragma: no cover - defensive
-                raise RuntimeError(_TEMP_DIR_NOT_INITIALIZED)
-            dest_path = self._temp_dir / self.source_data_name
-            shutil.copy2(retained_path, dest_path)
-            self._file_hashes[self.source_data_name] = self._hash_file(dest_path)
-            logger.debug("Copied retained source data from %s (%d bytes)", retained_path, dest_path.stat().st_size)
-
-        elif source_data is not None:
+            self._copy_retained_file(retained_path)
+        elif self._is_dataframe(source_data):
             # DataFrame available but no retained copy - save it now
-            import pandas as pd
-
-            if isinstance(source_data, pd.DataFrame):
-                if self._temp_dir is None:  # pragma: no cover - defensive
-                    raise RuntimeError(_TEMP_DIR_NOT_INITIALIZED)
-                path = self._temp_dir / self.source_data_name
-                source_data.to_csv(path, index=False)
-                self._file_hashes[self.source_data_name] = self._hash_file(path)
-                logger.debug("Wrote source data snapshot: %d rows", len(source_data))
-                logger.warning("Source data was not retained locally by datasource; saved from DataFrame (may lose original formatting)")
+            self._write_source_dataframe(source_data)  # type: ignore[arg-type]
+            logger.warning(
+                "Source data was not retained locally by datasource; saved from DataFrame (may lose original formatting)"
+            )
 
         if datasource_config:
             # Always save datasource config for reference
-            if self._temp_dir is None:  # pragma: no cover - defensive
-                raise RuntimeError(_TEMP_DIR_NOT_INITIALIZED)
-            config_path = self._temp_dir / "datasource_config.json"
-            config_path.write_text(json.dumps(datasource_config, indent=2, sort_keys=True), encoding="utf-8")
-            self._file_hashes["datasource_config.json"] = self._hash_file(config_path)
-            logger.debug("Wrote datasource config")
+            self._write_datasource_config(datasource_config)
 
         if not retained_path and source_data is None:
             logger.warning("Source data not available; skipping snapshot")
+
+    # ---- helpers for source data writing ---------------------------------
+    def _ensure_temp_dir(self) -> Path:
+        if self._temp_dir is None:  # pragma: no cover - defensive
+            raise RuntimeError(_TEMP_DIR_NOT_INITIALIZED)
+        return self._temp_dir
+
+    @staticmethod
+    def _is_dataframe(obj: Any) -> bool:
+        try:
+            import pandas as pd  # local import to avoid hard dependency at import-time
+
+            return isinstance(obj, pd.DataFrame)
+        except Exception:
+            return False
+
+    def _get_retained_path(self, source_data: Any) -> str | None:
+        if not self._is_dataframe(source_data):
+            return None
+        try:
+            return source_data.attrs.get("retained_local_path")  # type: ignore[union-attr]
+        except Exception:
+            return None
+
+    def _copy_retained_file(self, retained_path: str) -> None:
+        temp_dir = self._ensure_temp_dir()
+        dest_path = temp_dir / self.source_data_name
+        shutil.copy2(retained_path, dest_path)
+        self._file_hashes[self.source_data_name] = self._hash_file(dest_path)
+        logger.debug("Copied retained source data from %s (%d bytes)", retained_path, dest_path.stat().st_size)
+
+    def _write_source_dataframe(self, df: Any) -> None:
+        temp_dir = self._ensure_temp_dir()
+        path = temp_dir / self.source_data_name
+        # pandas import handled in _is_dataframe
+        df.to_csv(path, index=False)  # type: ignore[call-arg]
+        self._file_hashes[self.source_data_name] = self._hash_file(path)
+        try:
+            rows = len(df)  # type: ignore[arg-type]
+        except Exception:
+            rows = 0
+        logger.debug("Wrote source data snapshot: %d rows", rows)
+
+    def _write_datasource_config(self, datasource_config: Any) -> None:
+        temp_dir = self._ensure_temp_dir()
+        config_path = temp_dir / "datasource_config.json"
+        config_path.write_text(json.dumps(datasource_config, indent=2, sort_keys=True), encoding="utf-8")
+        self._file_hashes["datasource_config.json"] = self._hash_file(config_path)
+        logger.debug("Wrote datasource config")
 
     def _write_config(self, metadata: dict[str, Any]) -> None:
         """Write complete experiment configuration."""
