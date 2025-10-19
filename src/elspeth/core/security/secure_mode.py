@@ -203,6 +203,11 @@ def validate_sink_config(config: dict[str, Any], mode: SecureMode | None = None)
     # Validate security_level requirement
     _validate_security_level_required(config, "Sink", mode)
 
+    # Enforce fail-closed behavior in STRICT mode: skip-on-error is not permitted
+    on_error = (config.get("on_error") or "").strip().lower()
+    if mode == SecureMode.STRICT and on_error == "skip":
+        raise ValueError("Sink on_error='skip' is not permitted in STRICT mode (fail-closed policy)")
+
     # Enforce path containment and sanitization requirements for local sinks
     sink_type = (config.get("type", "") or "").strip().lower()
     if sink_type in get_path_contained_sink_types():

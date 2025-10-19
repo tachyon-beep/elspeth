@@ -14,6 +14,7 @@ from typing import Any, Mapping
 import requests
 
 from elspeth.core.base.protocols import Artifact, ArtifactDescriptor, ResultSink
+from elspeth.core.security.secure_mode import SecureMode, get_secure_mode
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +54,13 @@ class _RepoSinkBase(ResultSink):
     on_error: str = "abort"
 
     def __post_init__(self) -> None:
+        # Enforce STRICT mode policy: skip-on-error not permitted for repository sinks
+        try:
+            if get_secure_mode() == SecureMode.STRICT and self.on_error == "skip":
+                raise ValueError("Repository sinks cannot use on_error='skip' in STRICT mode")
+        except Exception:
+            # If secure mode utilities are unavailable, proceed; validation should catch earlier
+            pass
         if self.session is None:
             self.session = requests.Session()
             # Mount retry adapter to improve resilience on transient failures
@@ -127,7 +135,7 @@ class _RepoSinkBase(ResultSink):
                     metrics={"files": len(files)},
                     metadata={"repo_path": prefix},
                 )
-        except (requests.RequestException, OSError) as exc:
+        except (requests.RequestException, OSError, RuntimeError) as exc:
             if self.on_error == "skip":
                 logger.warning("Repository sink failed; skipping upload: %s", exc)
                 plugin_logger = getattr(self, "plugin_logger", None)
@@ -467,7 +475,7 @@ class AzureDevOpsArtifactsRepoSink(AzureDevOpsRepoSink):
                 self._request("POST", url, json=payload, expected_status={200, 201})
             else:
                 logger.warning("AzureDevOpsArtifactsRepoSink in dry-run mode; not pushing changes.")
-        except (requests.RequestException, OSError) as exc:
+        except (requests.RequestException, OSError, RuntimeError) as exc:
             if self.on_error == "skip":
                 logger.warning("Artifacts repo sink failed; skipping upload: %s", exc)
                 return
