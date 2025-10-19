@@ -115,7 +115,7 @@ class PluginLogger:
         errors_age = 0
         if max_age_days and max_age_days > 0:
             cutoff = now - timedelta(days=max_age_days)
-            for p, mtime in list(candidates):
+            for p, mtime in candidates:
                 try:
                     mtime_dt = datetime.fromtimestamp(mtime, tz=timezone.utc)
                     if mtime_dt < cutoff:

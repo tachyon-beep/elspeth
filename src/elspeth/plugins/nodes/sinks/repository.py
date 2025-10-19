@@ -141,7 +141,7 @@ class _RepoSinkBase(ResultSink):
                     metrics={"files": len(files)},
                     metadata={"repo_path": prefix},
                 )
-        except (requests.RequestException, OSError, RuntimeError) as exc:
+        except (OSError, RuntimeError) as exc:
             # If this is a classified request error and transient, honor on_error='skip' for non-STRICT modes
             if isinstance(exc, _RepoRequestError) and exc.transient and self.on_error == "skip":
                 logger.warning("Transient repo error; skipping (on_error=skip): %s", exc)
@@ -496,7 +496,7 @@ class AzureDevOpsArtifactsRepoSink(AzureDevOpsRepoSink):
                 self._request("POST", url, json=payload, expected_status={200, 201})
             else:
                 logger.warning("AzureDevOpsArtifactsRepoSink in dry-run mode; not pushing changes.")
-        except (requests.RequestException, OSError, RuntimeError) as exc:
+        except (OSError, RuntimeError) as exc:
             # Classify transient vs permanent failures for artifacts repo sink
             if isinstance(exc, _RepoRequestError) and exc.transient and self.on_error == "skip":
                 logger.warning("Transient artifacts repo error; skipping (on_error=skip): %s", exc)

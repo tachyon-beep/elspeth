@@ -64,7 +64,7 @@ class HttpOpenAIClient(LLMClientProtocol):
             # Mount HTTP only when explicitly using localhost endpoints; never for external traffic.
             if self.api_base.startswith("http://"):
                 # Endpoint validation already restricts HTTP to localhost/loopback only.
-                self.session.mount("http://", adapter)  # NOSONAR: localhost-only by policy
+                self.session.mount("http://", adapter)  # NOSONAR - localhost-only by policy
         except Exception as exc:
             # If retry adapter isn't available, proceed without retries
             logger.debug("HTTP retry adapter not mounted; proceeding without retries: %s", exc, exc_info=False)

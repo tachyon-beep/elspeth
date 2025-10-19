@@ -689,12 +689,13 @@ def _maybe_publish_artifacts_bundle(bundle_dir: Path) -> None:
     if plugin_name == "azure_devops_artifact_repo" and not opts.get("folder_path"):
         opts["folder_path"] = str(bundle_dir)
     try:
-        from elspeth.core.validation.base import ConfigurationError  # local import to avoid cycles
+        # Local alias in snake_case to satisfy naming convention
+        from elspeth.core.validation.base import ConfigurationError as configuration_error  # local import to avoid cycles
     except ImportError:  # pragma: no cover - defensive
-        ConfigurationError = RuntimeError  # type: ignore
+        configuration_error = RuntimeError  # type: ignore
     try:
         sink = sink_reg.sink_registry.create(plugin_name, opts, parent_context=None)
-    except (ValueError, ConfigurationError, RuntimeError) as exc:
+    except (ValueError, configuration_error, RuntimeError) as exc:
         logger.warning("Failed to create artifact sink '%s': %s", plugin_name, exc)
         return
     try:

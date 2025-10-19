@@ -15,6 +15,9 @@ from __future__ import annotations
 import importlib
 from typing import Any
 
+# Common module paths used across multiple sink mappings
+_REPOSITORY_MODULE = "elspeth.plugins.nodes.sinks.repository"
+
 __all__ = [
     "BlobResultSink",
     "AzureBlobArtifactsSink",
@@ -72,15 +75,15 @@ _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
         "LocalBundleSink",
     ),
     "AzureDevOpsArtifactsRepoSink": (
-        "elspeth.plugins.nodes.sinks.repository",
+        _REPOSITORY_MODULE,
         "AzureDevOpsArtifactsRepoSink",
     ),
     "AzureDevOpsRepoSink": (
-        "elspeth.plugins.nodes.sinks.repository",
+        _REPOSITORY_MODULE,
         "AzureDevOpsRepoSink",
     ),
     "GitHubRepoSink": (
-        "elspeth.plugins.nodes.sinks.repository",
+        _REPOSITORY_MODULE,
         "GitHubRepoSink",
     ),
     "ReproducibilityBundleSink": (
@@ -109,7 +112,7 @@ def __getattr__(name: str) -> Any:  # pragma: no cover - import-time behavior
     module_path, attr = target
     try:
         module = importlib.import_module(module_path)
-    except (ImportError, ModuleNotFoundError) as exc:  # keep the original error for debugging
+    except ImportError as exc:  # keep the original error for debugging
         raise ImportError(
             f"Cannot import {name} from {module_path}: {exc}"
         ) from exc

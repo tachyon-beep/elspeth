@@ -65,7 +65,8 @@ RUN python -m piptools sync requirements.lock
 COPY src/ src/
 COPY README.md README.md
 COPY LICENSE LICENSE
-RUN python -m pip install -e . --no-deps
+# Install the package non-editably so code is baked into site-packages
+RUN python -m pip install . --no-deps
 
 FROM base AS runtime
 COPY --from=builder-runtime /opt/venv /opt/venv
