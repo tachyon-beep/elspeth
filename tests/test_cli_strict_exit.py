@@ -26,7 +26,15 @@ def test_cli_strict_mode_exits_on_sink_failure(monkeypatch, tmp_path: Path):
                 "determinism_level": "guaranteed",
                 "options": {"path": str(input_csv), "retain_local": True},
             },
-            # No LLM → identity flow
+            # LLM required in STRICT: use azure_openai type to pass validation; we'll monkeypatch the factory
+            "llm": {
+                "plugin": "azure_openai",
+                "security_level": "OFFICIAL",
+                "determinism_level": "guaranteed",
+                "options": {"deployment": "dummy"},
+            },
+            "prompts": {"system": "S", "user": "U {{ payload }}"},
+            "prompt_fields": ["payload"],
             "sinks": [
                 {"plugin": "csv", "security_level": "OFFICIAL", "determinism_level": "guaranteed", "options": {"path": str(tmp_path / "out.csv")}},
             ],
@@ -44,8 +52,16 @@ def test_cli_strict_mode_exits_on_sink_failure(monkeypatch, tmp_path: Path):
             raise RuntimeError("boom")
 
     from elspeth.plugins.nodes.sinks import csv_file as csv_mod
-
     monkeypatch.setattr(csv_mod, "CsvResultSink", BoomCsv)
+
+    # Monkeypatch LLM factory to return a no-op client
+    class DummyLLM:
+        def generate(self, *, system_prompt, user_prompt, metadata=None):
+            return {"content": "ok", "raw": {}, "metadata": metadata or {}}
+
+    from elspeth.core.registries import llm as llm_reg_mod
+
+    monkeypatch.setattr(llm_reg_mod, "llm_registry", type("R", (), {"create": staticmethod(lambda name, opts, parent_context=None: DummyLLM())})())
 
     args = cli.build_parser().parse_args(
         [
@@ -64,4 +80,3 @@ def test_cli_strict_mode_exits_on_sink_failure(monkeypatch, tmp_path: Path):
     with pytest.raises(SystemExit) as se:
         cli.run(args)
     assert se.value.code == 1
-
