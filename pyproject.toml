@@ -127,111 +127,36 @@ show_missing = false
 
 [[tool.mypy.overrides]]
 module = [
-    "azure.*",
-    "azureml.*",
-    "scipy.*",
-    "matplotlib.*",
-    "seaborn.*",
-    "pingouin.*",
-    "statsmodels.*",
-    "psycopg",
+  "azure.*",
+  "azureml.*",
+  "scipy.*",
+  "matplotlib.*",
+  "seaborn.*",
+  "pingouin.*",
+  "statsmodels.*",
+  "psycopg",
 ]
 ignore_missing_imports = true
 
-# Phase-in stricter typing for core utilities and registries
+# Enforce stricter typing uniformly across our codebase
 [[tool.mypy.overrides]]
 module = [
   "elspeth.core.utils.*",
   "elspeth.core.registries.*",
-]
-disallow_untyped_defs = true
-disallow_incomplete_defs = true
-
-# Next wave: tools package
-[[tool.mypy.overrides]]
-module = [
   "elspeth.tools.*",
-]
-disallow_untyped_defs = true
-disallow_incomplete_defs = true
-
-# Core base package
-[[tool.mypy.overrides]]
-module = [
   "elspeth.core.base.*",
-]
-disallow_untyped_defs = true
-disallow_incomplete_defs = true
-
-# Core experiments (phase in config and registries first)
-[[tool.mypy.overrides]]
-module = [
   "elspeth.core.experiments.config",
   "elspeth.core.experiments.experiment_registries",
-]
-disallow_untyped_defs = true
-disallow_incomplete_defs = true
-
-[[tool.mypy.overrides]]
-module = [
   "elspeth.core.experiments.tools",
-]
-disallow_untyped_defs = true
-disallow_incomplete_defs = true
-
-[[tool.mypy.overrides]]
-module = [
   "elspeth.core.experiments.plugin_registry",
-]
-disallow_untyped_defs = true
-disallow_incomplete_defs = true
-
-[[tool.mypy.overrides]]
-module = [
   "elspeth.core.experiments.runner",
   "elspeth.core.experiments.suite_runner",
-]
-disallow_untyped_defs = true
-disallow_incomplete_defs = true
-
-[[tool.mypy.overrides]]
-module = [
   "elspeth.core.controls.*",
-]
-disallow_untyped_defs = true
-disallow_incomplete_defs = true
-
-[[tool.mypy.overrides]]
-module = [
   "elspeth.core.prompts.*",
-]
-disallow_untyped_defs = true
-disallow_incomplete_defs = true
-
-[[tool.mypy.overrides]]
-module = [
   "elspeth.plugins.nodes.sinks.*",
-]
-disallow_untyped_defs = true
-disallow_incomplete_defs = true
-
-[[tool.mypy.overrides]]
-module = [
   "elspeth.plugins.nodes.transforms.llm.*",
   "elspeth.plugins.nodes.transforms.llm.middleware.*",
-]
-disallow_untyped_defs = true
-disallow_incomplete_defs = true
-
-[[tool.mypy.overrides]]
-module = [
   "elspeth.adapters.*",
-]
-disallow_untyped_defs = true
-disallow_incomplete_defs = true
-
-[[tool.mypy.overrides]]
-module = [
   "elspeth.plugins.utilities.retrieval",
 ]
 disallow_untyped_defs = true
