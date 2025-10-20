@@ -59,6 +59,11 @@ jobs:
       - name: Lint (ruff + mypy)
         run: python -m ruff check src tests && python -m mypy src
 
+      - name: Install vulture (pinned)
+        run: |
+          # Pin vulture to a specific version for deterministic results
+          python -m pip install vulture==2.13
+
       - name: Dead code detection (vulture)
         run: |
           # Detect unused code with high confidence threshold
