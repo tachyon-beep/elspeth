@@ -36,6 +36,9 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
+  # NOTE: pip 25.2 has CVE-2025-8869 (tarfile extraction vulnerability, LOW severity, dev-only)
+  # Update to pip>=25.3 when available. See docs/security/DEPENDENCY_VULNERABILITIES.md
+  # Tracked: 2025-10-20, Status: Monitoring upstream release
   "pytest==8.4.2",
   "pytest-mock==3.15.1",
   "pytest-cov==7.0.0",

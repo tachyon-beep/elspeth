@@ -5,10 +5,10 @@ from __future__ import annotations
 import json
 import logging
 import os
+import types
 from dataclasses import dataclass
 from typing import Any, Iterable, Mapping, Sequence
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
-import types
 
 from elspeth.core.security import validate_azure_search_endpoint
 from elspeth.core.validation.base import ConfigurationError

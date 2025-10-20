@@ -10,11 +10,6 @@ import pandas as pd
 from elspeth.core.experiments import ExperimentSuite, ExperimentSuiteRunner
 from elspeth.core.security.secure_mode import SecureMode, get_secure_mode
 from elspeth.plugins.nodes.sinks.csv_file import CsvResultSink
-# Prefer cli-level symbol to allow tests to monkeypatch cli.SuiteReportGenerator
-try:  # pragma: no cover - import indirection for testability
-    from elspeth.cli import SuiteReportGenerator  # type: ignore
-except Exception:  # pragma: no cover - fallback path
-    from elspeth.tools.reporting import SuiteReportGenerator
 
 from .common import create_signed_bundle, ensure_artifacts_dir
 
@@ -223,7 +218,7 @@ def run_suite(
             logger.warning("Report generation skipped: reports require suite execution.")
         else:
             try:  # import late to allow test monkeypatching cli.SuiteReportGenerator
-                from elspeth.cli import SuiteReportGenerator as _SRG  # type: ignore
+                from elspeth.cli import SuiteReportGenerator as _SRG
             except Exception:  # pragma: no cover - fallback
                 from elspeth.tools.reporting import SuiteReportGenerator as _SRG
             _SRG(suite, results).generate_all_reports(reports_dir)

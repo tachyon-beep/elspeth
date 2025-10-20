@@ -4,6 +4,16 @@ Performance baseline and regression tests.
 These tests establish performance baselines for critical operations
 and will detect performance regressions during migration.
 
+**Documentation:** See docs/testing/PERFORMANCE_BASELINES.md for:
+- Expected baselines for local vs CI environments
+- Rationale for threshold values
+- Troubleshooting guidance for test failures
+- Performance regression workflow
+
+**Note:** Performance tests are environment-sensitive and may fail on CI runners
+due to shared infrastructure and variable system load. See documentation for
+recommended handling strategies (skip in CI, configurable thresholds, or xfail).
+
 Created: 2025-10-14
 Purpose: Risk Reduction Phase - Activity 4
 
@@ -16,6 +26,9 @@ Updated: 2025-10-15
 CI Status: DISABLED - Performance tests are too flaky on CI runners
 Reason: GitHub Actions runners have inconsistent performance (100ms+ spikes)
         Tests pass locally but fail randomly in CI due to resource contention
+
+Updated: 2025-10-20
+Documentation: Added comprehensive baseline documentation (see link above)
 """
 
 import os
