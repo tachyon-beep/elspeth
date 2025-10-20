@@ -39,6 +39,7 @@ def _norm(name: str) -> str:
 
 
 def parse_lockfile(path: Path) -> Dict[str, str]:
+    """Parse pip-tools lockfile and extract package==version pins."""
     pinned: Dict[str, str] = {}
     for raw in path.read_text(encoding="utf-8").splitlines():
         raw = raw.strip()
@@ -54,12 +55,14 @@ def parse_lockfile(path: Path) -> Dict[str, str]:
 
 
 def get_installed() -> Dict[str, str]:
+    """Get all installed packages and versions from the active environment."""
     installed: Dict[str, str] = {}
     for dist in ilmd.distributions():
         try:
-            name = _norm(dist.metadata["Name"])  # type: ignore[index]
+            name = _norm(dist.metadata["Name"])
             version = dist.version
-        except Exception:  # pragma: no cover - defensive
+        except (KeyError, AttributeError):  # pragma: no cover - defensive
+            # Malformed distribution metadata; skip
             continue
         installed[name] = version
     return installed
@@ -67,11 +70,14 @@ def get_installed() -> Dict[str, str]:
 
 @dataclass
 class Diff:
+    """Result of comparing installed packages against lockfile pins."""
+
     missing: Dict[str, str]
     mismatched: Dict[str, Tuple[str, str]]  # name -> (installed, locked)
 
 
 def diff_env(pinned: Dict[str, str], installed: Dict[str, str]) -> Diff:
+    """Compare installed packages against lockfile pins and return differences."""
     missing: Dict[str, str] = {}
     mismatched: Dict[str, Tuple[str, str]] = {}
     for name, locked_version in pinned.items():
@@ -85,6 +91,7 @@ def diff_env(pinned: Dict[str, str], installed: Dict[str, str]) -> Diff:
 
 
 def main() -> int:
+    """Main entry point: verify active environment matches lockfile versions."""
     ap = argparse.ArgumentParser(description="Verify environment matches lockfile versions")
     ap.add_argument("-r", "--requirements", required=True, help="Path to pip-tools lockfile")
     args = ap.parse_args()
