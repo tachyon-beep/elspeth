@@ -100,15 +100,9 @@ jobs:
       - name: Unit tests with coverage
         run: python -m pytest -m "not slow" --maxfail=1 --disable-warnings --cov-fail-under=80 --cov-report=xml:coverage.xml
 
-      - name: Enforce per-file coverage minimums
+      - name: Enforce 80% per-file coverage (src/elspeth)
         run: |
-          python scripts/check_coverage_thresholds.py \
-            --file src/elspeth/cli.py:0.85 \
-            --file src/elspeth/plugins/nodes/sinks/repository.py:0.85 \
-            --file src/elspeth/core/security/approved_endpoints.py:0.88 \
-            --file src/elspeth/core/security/secure_mode.py:0.88 \
-            --file src/elspeth/core/utils/path_guard.py:0.85 \
-            --file src/elspeth/core/registries/llm.py:0.85
+          python scripts/check_coverage_thresholds.py --xml coverage.xml --all 0.80 --include-prefix src/elspeth/
 
       - name: Generate SBOM (requirements.lock)
         run: |

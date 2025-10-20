@@ -75,6 +75,22 @@ python -m elspeth.cli \
 
 Pass `--live-outputs` to allow repository or blob sinks to write to their targets and `--head 0` to skip preview tables.
 
+#### Validate Schemas (pre‑flight)
+
+Fail fast on datasource ↔ plugin schema mismatches without running experiments:
+
+```bash
+python -m elspeth.cli validate-schemas \
+  --settings config/sample_suite/settings.yaml \
+  --profile default
+```
+
+Troubleshooting:
+- “No schema validation performed”: attach a schema to your datasource via config (e.g., CSV `schema:` block) or enable inference.
+- “Schema compatibility check failed”: a plugin declared `input_schema()` requiring columns/types your datasource doesn’t provide; fix the datasource schema or adjust the plugin.
+- “Missing prompt_fields in datasource schema”: add the missing columns to your datasource schema or adjust `prompt_fields`.
+- “Sink must implement produces()/consumes()”: ensure each sink class implements these methods and returns lists for chaining metadata.
+
 ## Documentation Hub
 
 | Topic | Description |
@@ -84,6 +100,7 @@ Pass `--live-outputs` to allow repository or blob sinks to write to their target
 | [Configuration & Prompt Packs](docs/architecture/configuration-merge.md) | Deep dive into how profiles, packs, and defaults merge. |
 | [Configuration Security](docs/architecture/configuration-security.md) | Validation pipeline, secret handling, concurrency/retry/early-stop settings. |
 | [Plugin Catalogue](docs/architecture/plugin-catalogue.md) | Datasources, LLM clients, middleware, metrics, and sinks. |
+| [Plugin Authoring Guide](docs/development/plugin-authoring.md) | Build, register, secure, and test plugins (WP002-aware). |
 | [Security & Compliance](docs/architecture/security-controls.md) | Controls inventory, threat surfaces, and accreditation notes. |
 | [Architecture Overview](docs/architecture/README.md) | Component diagrams, data flows, and lifecycle documentation. |
 | [Logging & Observability](docs/development/logging-standards.md) | Standards for audit logs and telemetry integration. |

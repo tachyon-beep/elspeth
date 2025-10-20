@@ -57,6 +57,7 @@ class BasePluginFactory(Generic[T]):
     create: Callable[[dict[str, Any], PluginContext], T]
     schema: Mapping[str, Any] | None = None
     plugin_type: str = "plugin"
+    requires_input_schema: bool = False
 
     def validate(self, options: dict[str, Any], *, context: str) -> None:
         """
@@ -105,6 +106,11 @@ class BasePluginFactory(Generic[T]):
         """
         self.validate(options, context=schema_context)
         plugin = self.create(options, plugin_context)
+        # Attach factory metadata for downstream enforcement (e.g., input_schema requirement)
+        try:
+            setattr(plugin, "_elspeth_requires_input_schema", bool(self.requires_input_schema))
+        except Exception:  # pragma: no cover - best effort
+            pass
         apply_plugin_context(plugin, plugin_context)
         return plugin
 
@@ -158,6 +164,7 @@ class BasePluginRegistry(Generic[T]):
         factory: Callable[[dict[str, Any], PluginContext], T],
         *,
         schema: Mapping[str, Any] | None = None,
+        requires_input_schema: bool = False,
     ) -> None:
         """
         Register a plugin factory.
@@ -171,6 +178,7 @@ class BasePluginRegistry(Generic[T]):
             create=factory,
             schema=schema,
             plugin_type=self.plugin_type,
+            requires_input_schema=requires_input_schema,
         )
 
     def validate(self, name: str, options: dict[str, Any] | None) -> None:

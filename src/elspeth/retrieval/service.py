@@ -59,7 +59,12 @@ def _create_embedder(config: Mapping[str, object]) -> Embedder:
                 timeout = None
         else:
             timeout = None
-        return OpenAIEmbedder(model=model, api_key=api_key, timeout=timeout)
+        kwargs: dict[str, object] = {}
+        if api_key is not None:
+            kwargs["api_key"] = api_key
+        if timeout is not None:
+            kwargs["timeout"] = timeout
+        return OpenAIEmbedder(model=model, **kwargs)
     if provider == "azure_openai":
         endpoint_raw = config.get("endpoint")
         endpoint = str(endpoint_raw) if endpoint_raw is not None else None
@@ -78,11 +83,15 @@ def _create_embedder(config: Mapping[str, object]) -> Embedder:
             timeout_val = None
         if endpoint:
             validate_azure_openai_endpoint(endpoint)
-        return AzureOpenAIEmbedder(
-            endpoint=endpoint,
-            deployment=deployment,
-            api_key=api_key,
-            api_version=api_version,
-            timeout=timeout_val,
-        )
+        kwargs_az: dict[str, object] = {
+            "endpoint": endpoint,
+            "deployment": deployment,
+        }
+        if api_key is not None:
+            kwargs_az["api_key"] = api_key
+        if api_version is not None:
+            kwargs_az["api_version"] = api_version
+        if timeout_val is not None:
+            kwargs_az["timeout"] = timeout_val
+        return AzureOpenAIEmbedder(**kwargs_az)
     raise ValueError(f"Unsupported embed_model provider '{provider}'")

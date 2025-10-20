@@ -1,5 +1,4 @@
 """Simplified experiment runner ported from legacy implementation."""
-
 from __future__ import annotations
 
 import logging
@@ -13,9 +12,10 @@ from typing import Any, Callable, Iterable, Mapping, Type
 import pandas as pd
 
 from elspeth.core.base.protocols import LLMClientProtocol, LLMMiddleware, LLMRequest, ResultSink
-from elspeth.core.base.schema import DataFrameSchema, SchemaViolation, validate_schema_compatibility
+from elspeth.core.base.schema import DataFrameSchema, SchemaViolation
 from elspeth.core.controls import CostTracker, RateLimiter
 from elspeth.core.experiments.plugin_registry import create_early_stop_plugin
+from elspeth.core.experiments.validation import validate_plugin_schemas
 from elspeth.core.pipeline.artifact_pipeline import ArtifactPipeline, SinkBinding
 from elspeth.core.pipeline.processing import prepare_prompt_context
 from elspeth.core.prompts import PromptEngine, PromptRenderingError, PromptTemplate, PromptValidationError
@@ -720,81 +720,16 @@ class ExperimentRunner:
                 handle.write(f"{row_id}\n")
 
     def _validate_plugin_schemas(self, datasource_schema: Type[DataFrameSchema]) -> None:
-        """
-        Validate that all plugins are compatible with datasource schema.
+        """Validate plugin compatibility with public helper.
 
         This is config-time validation - runs once before row processing.
         """
-        # Validate row plugins
-        for row_plugin in self.row_plugins or []:
-            if hasattr(row_plugin, "input_schema") and callable(row_plugin.input_schema):
-                plugin_schema = row_plugin.input_schema()
-                if plugin_schema:
-                    try:
-                        validate_schema_compatibility(
-                            datasource_schema,
-                            plugin_schema,
-                            plugin_name=f"row_plugin:{row_plugin.name}",
-                        )
-                        logger.debug(
-                            "Row plugin '%s' schema compatible with datasource",
-                            row_plugin.name,
-                        )
-                    except Exception as exc:
-                        logger.error(
-                            "Schema compatibility check failed for row plugin '%s': %s",
-                            row_plugin.name,
-                            exc,
-                        )
-                        raise
-
-        # Validate aggregation plugins
-        if self.aggregator_plugins:
-            for aggregation_plugin in self.aggregator_plugins:
-                if hasattr(aggregation_plugin, "input_schema") and callable(aggregation_plugin.input_schema):
-                    plugin_schema = aggregation_plugin.input_schema()
-                    if plugin_schema:
-                        try:
-                            validate_schema_compatibility(
-                                datasource_schema,
-                                plugin_schema,
-                                plugin_name=f"aggregation_plugin:{aggregation_plugin.name}",
-                            )
-                            logger.debug(
-                                "Aggregation plugin '%s' schema compatible with datasource",
-                                aggregation_plugin.name,
-                            )
-                        except Exception as exc:
-                            logger.error(
-                                "Schema compatibility check failed for aggregation plugin '%s': %s",
-                                aggregation_plugin.name,
-                                exc,
-                            )
-                            raise
-
-        # Validate validation plugins
-        if self.validation_plugins:
-            for validation_plugin in self.validation_plugins:
-                if hasattr(validation_plugin, "input_schema") and callable(validation_plugin.input_schema):
-                    plugin_schema = validation_plugin.input_schema()
-                    if plugin_schema:
-                        try:
-                            validate_schema_compatibility(
-                                datasource_schema,
-                                plugin_schema,
-                                plugin_name=f"validation_plugin:{validation_plugin.name}",
-                            )
-                            logger.debug(
-                                "Validation plugin '%s' schema compatible with datasource",
-                                validation_plugin.name,
-                            )
-                        except Exception as exc:
-                            logger.error(
-                                "Schema compatibility check failed for validation plugin '%s': %s",
-                                validation_plugin.name,
-                                exc,
-                            )
-                            raise
+        validate_plugin_schemas(
+            datasource_schema,
+            row_plugins=self.row_plugins or [],
+            aggregator_plugins=self.aggregator_plugins or [],
+            validation_plugins=self.validation_plugins or [],
+        )
 
     def _write_malformed_data(self) -> None:
         """Write malformed rows to dedicated sink."""

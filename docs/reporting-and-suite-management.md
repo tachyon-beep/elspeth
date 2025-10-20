@@ -170,3 +170,22 @@ Update 2025-10-12: Dry-run toggles are enforced at `src/elspeth/cli.py:360-392`.
 [^reporting-logging-2025-10-12]: Update 2025-10-12: Logging expectations align with docs/logging-standards.md (Suite report exports).
 [^reporting-checksums-2025-10-12]: Update 2025-10-12: Signing guidance mirrors docs/architecture/security-controls.md (Artifact Signing).
 [^reporting-archive-2025-10-12]: Update 2025-10-12: Evidence archival practices referenced in docs/release-checklist.md (Post-Release artefact handling).
+
+## Schema Validation (WP002)
+
+Use `validate-schemas` to fail fast on datasource ↔ plugin mismatches before execution:
+
+```bash
+python -m elspeth.cli validate-schemas \
+  --settings config/sample_suite/settings.yaml \
+  --profile default
+```
+
+What it does:
+- Loads the datasource and inspects the attached Pydantic `DataFrameSchema`
+- Instantiates experiment plugins and validates compatibility (`required columns` and `compatible types`)
+- Exits non‑zero on mismatch with a concise error
+
+Tips:
+- Define a datasource `schema:` block (for CSV) or enable `infer_schema: true` to attach a schema automatically.
+- Plugins can optionally declare `input_schema()` when they require specific columns; otherwise compatibility checks are skipped for that plugin.

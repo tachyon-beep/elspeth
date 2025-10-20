@@ -9,7 +9,7 @@ ARG PYTHON_IMAGE
 # Enforce digest-pinned base image for reproducibility (CI passes a pinned digest)
 COPY scripts/validate-digest.sh /usr/local/bin/validate-digest.sh
 RUN chmod +x /usr/local/bin/validate-digest.sh \
- && /usr/local/bin/validate-digest.sh "${PYTHON_IMAGE}"
+    && /usr/local/bin/validate-digest.sh "${PYTHON_IMAGE}"
 ENV PIP_NO_CACHE_DIR=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PATH="/opt/venv/bin:${PATH}"
@@ -25,7 +25,7 @@ WORKDIR /workspace
 COPY requirements-dev.lock requirements-dev.lock
 COPY pyproject.toml pyproject.toml
 RUN python -m pip install --upgrade pip pip-tools \
- && python -m piptools sync requirements-dev.lock
+    && python -m piptools sync requirements-dev.lock
 
 # Copy source and install package in editable mode
 COPY src/ src/
@@ -45,7 +45,7 @@ COPY --from=builder-dev /workspace/docs /workspace/docs
 COPY --from=builder-dev /workspace/README.md /workspace/README.md
 COPY --from=builder-dev /workspace/LICENSE /workspace/LICENSE
 RUN chown -R appuser:appuser /workspace \
- && chmod -R go+rX /workspace/src /workspace/tests /workspace/scripts
+    && chmod -R go+rX /workspace/src /workspace/tests /workspace/scripts
 USER appuser
 WORKDIR /workspace
 
@@ -58,7 +58,7 @@ WORKDIR /workspace
 
 COPY requirements.lock requirements.lock
 COPY pyproject.toml pyproject.toml
-RUN python -m pip install --upgrade pip pip-tools 
+RUN python -m pip install --upgrade pip pip-tools
 # Install only runtime dependencies
 RUN python -m piptools sync requirements.lock
 

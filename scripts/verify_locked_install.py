@@ -108,7 +108,7 @@ def main() -> int:
             print("  Version mismatches:")
             for name, (have, want) in sorted(diff.mismatched.items()):
                 print(f"    - {name}: installed {have}, locked {want}")
-        print("\nRemediation: run 'piptools sync <lockfile>' to restore the environment.")
+        print("\nRemediation: run 'pip-sync <lockfile>' to restore the environment.")
         return 1
 
     print(f"✓ Environment matches lockfile ({lock_path.name}) for {len(pinned)} packages")

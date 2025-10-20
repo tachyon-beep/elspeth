@@ -39,12 +39,13 @@ def register_row_plugin(
     factory: Callable[[dict[str, Any], PluginContext], RowExperimentPlugin],
     *,
     schema: dict[str, Any] | None = None,
+    requires_input_schema: bool = False,
 ) -> None:
     """Register a row-level experiment plugin.
 
     NOTE: This function now delegates to the migrated row_plugin_registry.
     """
-    row_plugin_registry.register(name, factory, schema=schema)
+    row_plugin_registry.register(name, factory, schema=schema, requires_input_schema=requires_input_schema)
 
 
 def register_aggregation_plugin(
@@ -52,12 +53,13 @@ def register_aggregation_plugin(
     factory: Callable[[dict[str, Any], PluginContext], AggregationExperimentPlugin],
     *,
     schema: dict[str, Any] | None = None,
+    requires_input_schema: bool = False,
 ) -> None:
     """Register an aggregation experiment plugin.
 
     NOTE: This function now delegates to the migrated aggregation_plugin_registry.
     """
-    aggregation_plugin_registry.register(name, factory, schema=schema)
+    aggregation_plugin_registry.register(name, factory, schema=schema, requires_input_schema=requires_input_schema)
 
 
 def register_baseline_plugin(
@@ -78,12 +80,13 @@ def register_validation_plugin(
     factory: Callable[[dict[str, Any], PluginContext], ValidationPlugin],
     *,
     schema: dict[str, Any] | None = None,
+    requires_input_schema: bool = False,
 ) -> None:
     """Register a suite validation plugin.
 
     NOTE: This function now delegates to the migrated validation_plugin_registry.
     """
-    validation_plugin_registry.register(name, factory, schema=schema)
+    validation_plugin_registry.register(name, factory, schema=schema, requires_input_schema=requires_input_schema)
 
 
 def register_early_stop_plugin(

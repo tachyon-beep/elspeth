@@ -26,6 +26,7 @@ from elspeth.core.experiments import ExperimentSuite
 from elspeth.core.orchestrator import ExperimentOrchestrator
 from elspeth.core.security import SecureMode, get_secure_mode
 from elspeth.core.validation import validate_settings, validate_suite
+from elspeth.tools.reporting import SuiteReportGenerator  # Back-compat for tests expecting cli.SuiteReportGenerator
 
 logger = logging.getLogger(__name__)
 

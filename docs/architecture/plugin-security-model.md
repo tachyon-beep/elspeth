@@ -19,6 +19,29 @@ Update 2025-10-12: Analytics/visual/Excel/signed sinks live in `src/elspeth/plug
 ### Update 2025-10-12: Registry Enforcement
 - Registries attach `_elspeth_security_level` attributes and validate schemas before plugin instantiation, aligning with artifact clearance checks.
 
+### Update 2025-10-20: Mandatory Input Schemas (opt-in per plugin)
+- Experiment registries can mark plugins as requiring a declared input schema via `requires_input_schema=True` at registration time.
+- When set, the plugin must implement `input_schema()` returning a `DataFrameSchema` describing the required columns and types; preflight (`validate-schemas`) and the runner will fail if missing.
+- Example:
+  ```python
+  from elspeth.core.experiments.plugin_registry import register_row_plugin
+
+  def factory(options, context):
+      class ScoreGate:
+          name = "score_gate"
+          def input_schema(self):
+              from elspeth.core.base.schema import DataFrameSchema
+              class RequireScore(DataFrameSchema):
+                  score: float
+              return RequireScore
+          def process_row(self, row, responses):
+              return {}
+      return ScoreGate()
+
+  register_row_plugin("score_gate", factory, requires_input_schema=True)
+  ```
+  This improves safety by ensuring data-dependent plugins declare their interfaces explicitly.
+
 ### Update 2025-10-12: Validation Plugins
 - Validation plugins (regex/JSON/LLM guard) must declare schemas and security levels, ensuring untrusted responses are filtered consistently (`src/elspeth/plugins/experiments/validation.py:20`, `src/elspeth/core/experiments/plugin_registry.py:227`).
 

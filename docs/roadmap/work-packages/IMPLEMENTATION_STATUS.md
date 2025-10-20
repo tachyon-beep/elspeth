@@ -211,7 +211,7 @@ The Pydantic-based schema validation system described in WP002 is **fully implem
    - **Migration**: Uses v2 patterns (`model_config`, `model_validate`, explicit `Optional` types)
    - **Test Coverage**: 81% coverage with 26 dedicated v2 migration tests
 
-2. **Datasource Schema Protocol** ❌ MISSING
+2. **Datasource Schema Protocol** ✅ COMPLETE
    - **Required**: `output_schema()` method returning `Type[DataFrameSchema]`
    - **Current**: Datasource only has `load() → pd.DataFrame`
    - **Evidence**:
@@ -224,28 +224,27 @@ The Pydantic-based schema validation system described in WP002 is **fully implem
      ```
    - **Impact**: Datasources cannot declare what columns they produce
 
-3. **Plugin Input Schema Protocol** ❌ MISSING
+3. **Plugin Input Schema Protocol** ✅ AVAILABLE (optional)
    - **Required**: `input_schema()` method on all plugins
    - **Current**: Plugins have no schema declaration
    - **Impact**: Plugins cannot declare required columns
 
-4. **Schema Validation Utilities** ❌ MISSING
+4. **Schema Validation Utilities** ✅ COMPLETE
    - **Required**: `validate_schema_compatibility()`, `SchemaCompatibilityError`
    - **Current**: No validation utilities
    - **Evidence**: Searched for `validate_schema`, `SchemaCompatibilityError` - **0 matches**
    - **Impact**: No config-time validation
 
-5. **Schema Inference** ❌ MISSING
+5. **Schema Inference** ✅ COMPLETE
    - **Required**: Automatic schema inference from CSV headers
    - **Current**: No inference mechanism
    - **Impact**: Must manually declare schemas for all datasources
 
-6. **CLI Schema Validation Command** ❌ MISSING
-   - **Required**: `elspeth validate-schemas --settings config.yaml`
-   - **Current**: No CLI command
-   - **Impact**: No pre-flight validation tool
+6. **CLI Schema Validation Command** ✅ COMPLETE (phase 1)
+   - `elspeth validate-schemas --settings config.yaml` loads the datasource and reports attached schema columns.
+   - Enhancement pending: perform full plugin compatibility checks (tracked below).
 
-7. **Configuration Schema Extensions** ❌ MISSING
+7. **Configuration Schema Extensions** ✅ COMPLETE (datasource schema block)
    - **Required**: `schema:` blocks in YAML configs
    - **Current**: No schema configuration
    - **Impact**: Cannot declare schemas in config files
@@ -273,14 +272,12 @@ datasource:
     # No schema support
 ```
 
-### Critical Gaps
+### Current Gaps (post‑implementation)
 
 | Gap | Severity | User Impact |
 |-----|----------|-------------|
-| No schema declarations | **CRITICAL** | Experiments crash at runtime (row 501) instead of config-time |
-| No type safety | **HIGH** | `Dict[str, Any]` provides zero guarantees |
-| No config-time validation | **HIGH** | Late failures waste time and resources |
-| No interface contracts | **HIGH** | Plugins cannot programmatically declare requirements |
+| CLI validate-schemas does not yet run full plugin compatibility checks | MEDIUM | Developers may miss plugin/datasource mismatches until run-time |
+| Some plugins do not declare `input_schema()` (optional) | LOW | Compatibility checks are skipped when plugin does not declare schema |
 
 ### User Requirement (From WP002)
 
@@ -288,17 +285,10 @@ datasource:
 
 **Status**: ❌ **NOT MET** - No schema system exists
 
-### Estimated Effort to Complete WP002
+### Remaining Enhancements for WP002
 
-Based on WP002 work breakdown:
-
-- Phase 1: Core Schema Infrastructure - **1 day** → ❌ **NOT STARTED**
-- Phase 2: Validation Integration - **1 day** → ❌ **NOT STARTED**
-- Phase 3: Plugin Schema Implementations - **1 day** → ❌ **NOT STARTED**
-- Phase 4: CLI and Tooling - **0.5 days** → ❌ **NOT STARTED**
-- Phase 5: Documentation and Migration - **0.5 days** → ❌ **NOT STARTED**
-
-**Total Effort**: ~4 days (1 FTE)
+- Phase 4: CLI and Tooling – extend `validate-schemas` to run plugin compatibility checks (≈ 0.5 day)
+- Phase 3: Plugin Schema Implementations – add `input_schema()` to plugins that have strict column needs (≈ 1 day)
 
 ---
 
@@ -315,7 +305,7 @@ Based on WP002 work breakdown:
 | Work Package | Status | Features Implemented | Features Missing | Effort to Complete |
 |--------------|--------|---------------------|------------------|-------------------|
 | **WP001** | ⚠️ **PARTIALLY STARTED** | 5 / 12 (42%) | 7 major features | ~4.5 days (1 FTE) |
-| **WP002** | ❌ **NOT STARTED** | 0 / 7 (0%) | All features | ~4 days (1 FTE) |
+| **WP002** | ✅ **IMPLEMENTED** | 6 / 7 (86%) | CLI plugin compatibility reporting; some plugin schemas optional | ~1.5 days |
 
 ---
 

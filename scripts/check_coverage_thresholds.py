@@ -16,6 +16,18 @@ def parse_args() -> argparse.Namespace:
         default=[],
         help="File threshold in the form path:threshold (e.g., src/elspeth/cli.py:0.85)",
     )
+    p.add_argument(
+        "--all",
+        type=float,
+        default=None,
+        help="Minimum coverage to enforce for ALL files in the report (e.g., 0.80)",
+    )
+    p.add_argument(
+        "--include-prefix",
+        action="append",
+        default=[],
+        help="Optional filename prefix to filter which files are considered by --all (repeatable)",
+    )
     return p.parse_args()
 
 
@@ -44,6 +56,17 @@ def main() -> int:
                 continue
 
     failures: list[str] = []
+
+    # Optional global per-file threshold across report entries
+    if ns.all is not None:
+        for path, observed in sorted(rates.items()):
+            if ns.include_prefix:
+                if not any(path.startswith(prefix) for prefix in ns.include_prefix):
+                    continue
+            if observed + 1e-9 < ns.all:
+                failures.append(f"{path}: observed {observed:.4f} < required {ns.all:.4f}")
+            else:
+                print(f"[coverage] OK {path}: {observed:.4f} >= {ns.all:.4f}")
     for spec in ns.file:
         if ":" not in spec:
             print(f"[coverage] Invalid --file spec (expected path:threshold): {spec}", file=sys.stderr)
@@ -73,4 +96,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

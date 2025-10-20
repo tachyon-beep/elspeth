@@ -83,7 +83,7 @@ target-version = "py312"
 select = ["E", "F", "I"]
 # Relax overly strict defaults for this codebase; ignore line length (E501) to accommodate long URLs,
 # LLM prompt templates, and other cases where longer lines are necessary; enforce functional errors and import hygiene.
-ignore = ["E501"]
+
 
 [tool.ruff.lint.per-file-ignores]
 # Allow tests to carry helper imports and flexible styles
