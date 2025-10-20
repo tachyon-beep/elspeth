@@ -34,7 +34,10 @@ def write_simple_artifacts(art_dir: Path, name: str, payload: dict[str, Any], se
 def load_yaml_json(path: Path) -> dict[str, Any]:
     try:
         import yaml
+    except ImportError as exc:  # pragma: no cover - PyYAML should be present in CLI env
+        raise ValueError("PyYAML is required to load artifact sink configs") from exc
 
+    try:
         data = yaml.safe_load(path.read_text(encoding="utf-8"))
         if isinstance(data, dict):
             return data
@@ -53,7 +56,7 @@ def create_signed_bundle(
     df: pd.DataFrame,
     *,
     signing_key_env: str,
-) -> None:
+) -> Path | None:
     try:
         from elspeth.plugins.nodes.sinks.reproducibility_bundle import ReproducibilityBundleSink
     except ImportError as exc:  # pragma: no cover - optional import
@@ -76,34 +79,31 @@ def create_signed_bundle(
     try:
         sink.write(payload, metadata=metadata)
         logger.info("Created signed reproducibility bundle at %s", bundle_dir)
-        maybe_publish_artifacts_bundle(bundle_dir)
+        return bundle_dir
     except (OSError, RuntimeError, ValueError) as exc:
         logger.error("Failed to create reproducibility bundle: %s", exc)
+        return None
 
 
-def maybe_publish_artifacts_bundle(bundle_dir: Path) -> None:
-    # Fetch current CLI args via sys.argv; safe no-op if flags absent
-    import sys
-
+def maybe_publish_artifacts_bundle(
+    bundle_dir: Path,
+    *,
+    plugin_name: str | None,
+    config_path: Path | str | None,
+) -> None:
     import elspeth.core.registries.sink as sink_reg
 
-    argv = sys.argv
-    if "--artifact-sink-plugin" not in argv:
+    if not plugin_name:
         return
-    try:
-        idx = argv.index("--artifact-sink-plugin")
-        plugin_name = argv[idx + 1]
-    except (ValueError, IndexError):
-        logger.warning("artifact sink plugin flag provided without a name; skipping publish")
-        return
+
+    cfg_path = Path(config_path) if config_path is not None else None
     opts: dict[str, Any] = {}
-    if "--artifact-sink-config" in argv:
+    if cfg_path is not None:
         try:
-            j = argv.index("--artifact-sink-config")
-            cfg_path = Path(argv[j + 1])
             opts = load_yaml_json(cfg_path)
-        except (ValueError, OSError) as exc:
+        except ValueError as exc:
             logger.warning("artifact sink config invalid; skipping publish: %s", exc)
+            return
     if plugin_name == "azure_devops_artifact_repo" and not opts.get("folder_path"):
         opts["folder_path"] = str(bundle_dir)
     try:

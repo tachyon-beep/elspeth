@@ -4,7 +4,12 @@ from typing import Any
 
 import pandas as pd
 
-from .common import create_signed_bundle, ensure_artifacts_dir, write_simple_artifacts
+from .common import (
+    create_signed_bundle,
+    ensure_artifacts_dir,
+    maybe_publish_artifacts_bundle,
+    write_simple_artifacts,
+)
 
 
 def run_single(args: Any, settings: Any) -> None:
@@ -81,7 +86,7 @@ def maybe_write_artifacts_single(args: Any, settings: Any, payload: dict[str, An
     art_dir = ensure_artifacts_dir(art_base)
     write_simple_artifacts(art_dir, "single", payload, settings)
     if getattr(args, "signed_bundle", False):
-        create_signed_bundle(
+        bundle_dir = create_signed_bundle(
             art_dir,
             "single",
             payload,
@@ -89,6 +94,12 @@ def maybe_write_artifacts_single(args: Any, settings: Any, payload: dict[str, An
             df,
             signing_key_env=getattr(args, "signing_key_env", "ELSPETH_SIGNING_KEY"),
         )
+        if bundle_dir:
+            maybe_publish_artifacts_bundle(
+                bundle_dir,
+                plugin_name=getattr(args, "artifact_sink_plugin", None),
+                config_path=getattr(args, "artifact_sink_config", None),
+            )
 
 
 __all__ = ["maybe_write_artifacts_single", "run_single"]

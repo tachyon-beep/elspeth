@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 import pandas as pd
-import pytest
 import yaml
 
 from elspeth import cli
@@ -57,36 +55,30 @@ def test_publish_missing_plugin_name(monkeypatch, tmp_path: Path):
         def write(self, results, *, metadata=None):
             DummyPublishSink.calls.append((results, metadata))
 
-    # Bad argv: missing plugin name after flag
-    orig_argv = sys.argv[:]
-    sys.argv = ["elspeth-cli", "--artifact-sink-plugin"]
     monkeypatch.setenv("ELSPETH_SIGNING_KEY", "test-key")
 
-    try:
-        with sink_registry.temporary_override(
-            "azure_devops_artifact_repo",
-            lambda options, context: DummyPublishSink(**options),
-            schema=None,
-        ):
-            args = cli.build_parser().parse_args(
-                [
-                    "--settings",
-                    str(tmp_settings),
-                    "--profile",
-                    "default",
-                    "--head",
-                    "0",
-                    "--single-run",
-                    "--artifacts-dir",
-                    str(tmp_path / "artifacts"),
-                    "--signed-bundle",
-                    "--log-level",
-                    "ERROR",
-                ]
-            )
-            cli.run(args)
-    finally:
-        sys.argv = orig_argv
+    with sink_registry.temporary_override(
+        "azure_devops_artifact_repo",
+        lambda options, context: DummyPublishSink(**options),  # type: ignore[arg-type]
+        schema=None,
+    ):
+        args = cli.build_parser().parse_args(
+            [
+                "--settings",
+                str(tmp_settings),
+                "--profile",
+                "default",
+                "--head",
+                "0",
+                "--single-run",
+                "--artifacts-dir",
+                str(tmp_path / "artifacts"),
+                "--signed-bundle",
+                "--log-level",
+                "ERROR",
+            ]
+        )
+        cli.run(args)
 
     assert not DummyPublishSink.calls, "no publish expected when plugin arg missing"
 
@@ -105,42 +97,34 @@ def test_publish_bad_config_path(monkeypatch, tmp_path: Path):
         def write(self, results, *, metadata=None):
             DummyPublishSink.calls.append((results, metadata))
 
-    # argv: plugin present, config path invalid
-    orig_argv = sys.argv[:]
-    sys.argv = [
-        "elspeth-cli",
-        "--artifact-sink-plugin",
-        "azure_devops_artifact_repo",
-        "--artifact-sink-config",
-        str(tmp_path / "does-not-exist.yaml"),
-    ]
     monkeypatch.setenv("ELSPETH_SIGNING_KEY", "test-key")
 
-    try:
-        with sink_registry.temporary_override(
-            "azure_devops_artifact_repo",
-            lambda options, context: DummyPublishSink(**options),
-            schema=None,
-        ):
-            args = cli.build_parser().parse_args(
-                [
-                    "--settings",
-                    str(tmp_settings),
-                    "--profile",
-                    "default",
-                    "--head",
-                    "0",
-                    "--single-run",
-                    "--artifacts-dir",
-                    str(tmp_path / "artifacts"),
-                    "--signed-bundle",
-                    "--log-level",
-                    "ERROR",
-                ]
-            )
-            cli.run(args)
-    finally:
-        sys.argv = orig_argv
+    with sink_registry.temporary_override(
+        "azure_devops_artifact_repo",
+        lambda options, context: DummyPublishSink(**options),  # type: ignore[arg-type]
+        schema=None,
+    ):
+        args = cli.build_parser().parse_args(
+            [
+                "--settings",
+                str(tmp_settings),
+                "--profile",
+                "default",
+                "--head",
+                "0",
+                "--single-run",
+                "--artifacts-dir",
+                str(tmp_path / "artifacts"),
+                "--signed-bundle",
+                "--artifact-sink-plugin",
+                "azure_devops_artifact_repo",
+                "--artifact-sink-config",
+                str(tmp_path / "does-not-exist.yaml"),
+                "--log-level",
+                "ERROR",
+            ]
+        )
+        cli.run(args)
 
     # With invalid config the CLI skips publish gracefully
     assert not DummyPublishSink.calls, "no publish expected when config path invalid"

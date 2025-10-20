@@ -6,12 +6,9 @@ network calls and asserts that the sink receives the bundle path.
 
 from __future__ import annotations
 
-import json
-import sys
 from pathlib import Path
 
 import pandas as pd
-import pytest
 import yaml
 
 from elspeth import cli
@@ -79,43 +76,33 @@ def test_cli_artifact_publish_dry_run(monkeypatch, tmp_path: Path) -> None:
     # Ensure signing key exists for reproducibility bundle creation
     monkeypatch.setenv("ELSPETH_SIGNING_KEY", "test-key")
 
-    # Inject CLI flags via sys.argv (the publisher path parses argv directly)
-    orig_argv = sys.argv[:]
-    monkeypatch.setenv("PYTHONWARNINGS", "ignore")
-    sys.argv = [
-        "elspeth-cli-test",
-        "--artifact-sink-plugin",
+    with sink_registry.temporary_override(
         "azure_devops_artifact_repo",
-        "--artifact-sink-config",
-        str(cfg_path),
-    ]
-
-    try:
-        with sink_registry.temporary_override(
-            "azure_devops_artifact_repo",
-            lambda options, context: DummyPublishSink(**options),
-            schema=None,
-        ):
-            parser = cli.build_parser()
-            args = parser.parse_args(
-                [
-                    "--settings",
-                    str(tmp_settings),
-                    "--profile",
-                    "default",
-                    "--head",
-                    "0",
-                    "--single-run",
-                    "--artifacts-dir",
-                    str(tmp_path / "artifacts"),
-                    "--signed-bundle",
-                    "--log-level",
-                    "ERROR",
-                ]
-            )
-            cli.run(args)
-    finally:
-        sys.argv = orig_argv
+        lambda options, context: DummyPublishSink(**options),  # type: ignore[arg-type]
+        schema=None,
+    ):
+        parser = cli.build_parser()
+        args = parser.parse_args(
+            [
+                "--settings",
+                str(tmp_settings),
+                "--profile",
+                "default",
+                "--head",
+                "0",
+                "--single-run",
+                "--artifacts-dir",
+                str(tmp_path / "artifacts"),
+                "--signed-bundle",
+                "--artifact-sink-plugin",
+                "azure_devops_artifact_repo",
+                "--artifact-sink-config",
+                str(cfg_path),
+                "--log-level",
+                "ERROR",
+            ]
+        )
+        cli.run(args)
 
     # Assert that the dummy publisher sink was invoked with the bundle path
     assert DummyPublishSink.calls, "expected artifact publisher sink to be called"

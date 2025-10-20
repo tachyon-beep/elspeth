@@ -6,11 +6,7 @@ from typing import Any
 
 import pytest
 
-from elspeth.plugins.nodes.sinks.repository import (
-    AzureDevOpsArtifactsRepoSink,
-    AzureDevOpsRepoSink,
-    _RepoRequestError,
-)
+from elspeth.plugins.nodes.sinks.repository import AzureDevOpsArtifactsRepoSink, AzureDevOpsRepoSink
 
 
 class _Resp:
@@ -23,18 +19,6 @@ class _Resp:
         return self._json
 
 
-class _FakeSession:
-    def __init__(self, status_code: int = 200, json_payload: Any | None = None, text: str = "ok") -> None:
-        self.status_code = status_code
-        self.json_payload = json_payload
-        self.text = text
-        self.requests: list[tuple[str, str, dict]] = []
-
-    def request(self, method: str, url: str, **kwargs: Any) -> _Resp:  # noqa: D401
-        self.requests.append((method, url, kwargs))
-        return _Resp(self.status_code, self.text, self.json_payload)
-
-
 def test_azure_headers_build_with_token(monkeypatch):
     monkeypatch.setenv("AZURE_DEVOPS_PAT", "t0ken")
     sink = AzureDevOpsRepoSink(
@@ -43,7 +27,6 @@ def test_azure_headers_build_with_token(monkeypatch):
         repository="r",
         dry_run=False,
     )
-    sink.session = _FakeSession()
     headers = sink._headers()  # type: ignore[attr-defined]
     assert headers["Authorization"].startswith("Basic ")
     # Validate prefix encoding of ":<token>"
@@ -67,7 +50,12 @@ def test_azure_headers_missing_token_raises(monkeypatch):
 def test_azure_get_branch_ref_handles_not_found(monkeypatch):
     # value = [] triggers branch not found
     sink = AzureDevOpsRepoSink(organization="o", project="p", repository="r")
-    sink.session = _FakeSession(status_code=200, json_payload={"value": []})
+    resp = _Resp(200, json_payload={"value": []})
+
+    def fake_request(method: str, url: str, **kwargs: Any) -> _Resp:
+        return resp
+
+    monkeypatch.setattr(sink.session, "request", fake_request, raising=False)
     with pytest.raises(RuntimeError):
         sink._get_branch_ref()  # type: ignore[attr-defined]
 
@@ -75,10 +63,21 @@ def test_azure_get_branch_ref_handles_not_found(monkeypatch):
 def test_azure_item_exists_true_false(monkeypatch):
     sink = AzureDevOpsRepoSink(organization="o", project="p", repository="r")
     # 200 => exists
-    sink.session = _FakeSession(status_code=200, json_payload={})
+    resp_true = _Resp(200, json_payload={})
+
+    def request_true(method: str, url: str, **kwargs: Any) -> _Resp:
+        return resp_true
+
+    monkeypatch.setattr(sink.session, "request", request_true, raising=False)
     assert sink._item_exists("/x") is True  # type: ignore[attr-defined]
     # 404 => not exists
-    sink.session = _FakeSession(status_code=404, json_payload={})
+    sink = AzureDevOpsRepoSink(organization="o", project="p", repository="r")
+    resp_false = _Resp(404, json_payload={})
+
+    def request_false(method: str, url: str, **kwargs: Any) -> _Resp:
+        return resp_false
+
+    monkeypatch.setattr(sink.session, "request", request_false, raising=False)
     assert sink._item_exists("/x") is False  # type: ignore[attr-defined]
 
 

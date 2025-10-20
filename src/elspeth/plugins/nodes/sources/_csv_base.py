@@ -40,22 +40,28 @@ class BaseCSVDataSource(DataSource):
     ):
         # Resolve input path relative to base_path or ELSPETH_INPUTS_DIR when provided
         raw_path = Path(path) if isinstance(path, str) else path
-        if not raw_path.is_absolute():
-            base = None
-            if base_path is not None:
-                base = Path(base_path)
-            elif inp := os.environ.get("ELSPETH_INPUTS_DIR"):
-                base = Path(inp)
-            if base is not None:
-                raw_path = (base / raw_path).resolve()
-        self.allowed_base_path = Path(allowed_base_path) if allowed_base_path else None
+        base_candidate: Path | None = None
+        if base_path is not None:
+            base_candidate = Path(base_path)
+        elif inp := os.environ.get("ELSPETH_INPUTS_DIR"):
+            base_candidate = Path(inp)
+        elif allowed_base_path is not None:
+            base_candidate = Path(allowed_base_path)
+
+        if raw_path.is_absolute():
+            raw_path = raw_path.resolve()
+        else:
+            if base_candidate is None:
+                base_candidate = Path.cwd()
+            raw_path = (base_candidate / raw_path).resolve()
+
+        self.allowed_base_path = Path(allowed_base_path).resolve() if allowed_base_path else None
         if self.allowed_base_path is not None:
             try:
-                # Only enforce when path is absolute; otherwise allow relative then resolve at load time
-                if raw_path.is_absolute():
-                    common = Path(os.path.commonpath([str(self.allowed_base_path.resolve()), str(raw_path.parent.resolve())]))
-                    if common != self.allowed_base_path.resolve():
-                        raise ValueError(f"CSV datasource path '{raw_path}' escapes allowed base '{self.allowed_base_path}'")
+                if not raw_path.is_relative_to(self.allowed_base_path):
+                    raise ValueError(
+                        f"CSV datasource path '{raw_path}' escapes allowed base '{self.allowed_base_path}'",
+                    )
             except Exception as exc:
                 raise ValueError(f"Invalid CSV datasource path resolution: {exc}") from exc
         self.path = raw_path

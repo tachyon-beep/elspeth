@@ -11,7 +11,7 @@ from elspeth.core.experiments import ExperimentSuite, ExperimentSuiteRunner
 from elspeth.core.security.secure_mode import SecureMode, get_secure_mode
 from elspeth.plugins.nodes.sinks.csv_file import CsvResultSink
 
-from .common import create_signed_bundle, ensure_artifacts_dir
+from .common import create_signed_bundle, ensure_artifacts_dir, maybe_publish_artifacts_bundle
 
 
 def clone_suite_sinks(base_sinks: list, experiment_name: str) -> list:
@@ -134,7 +134,7 @@ def maybe_write_artifacts_suite(args: Any, settings: Any, suite: Any, results: d
             df = settings.datasource.load()
         except (OSError, RuntimeError, ValueError):
             df = pd.DataFrame()
-        create_signed_bundle(
+        bundle_dir = create_signed_bundle(
             art_dir,
             "suite",
             combined,
@@ -142,6 +142,12 @@ def maybe_write_artifacts_suite(args: Any, settings: Any, suite: Any, results: d
             df,
             signing_key_env=getattr(args, "signing_key_env", "ELSPETH_SIGNING_KEY"),
         )
+        if bundle_dir:
+            maybe_publish_artifacts_bundle(
+                bundle_dir,
+                plugin_name=getattr(args, "artifact_sink_plugin", None),
+                config_path=getattr(args, "artifact_sink_config", None),
+            )
 
 
 __all__ = [

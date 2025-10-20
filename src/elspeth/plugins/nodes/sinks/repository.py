@@ -17,8 +17,16 @@ from elspeth.core.base.protocols import Artifact, ArtifactDescriptor, ResultSink
 from elspeth.core.security.secure_mode import SecureMode, get_secure_mode
 
 logger = logging.getLogger(__name__)
-
 DEFAULT_REQUEST_TIMEOUT = 15
+
+
+class _RepoRequestError(RuntimeError):
+    """Error raised when a repository API request fails."""
+
+    def __init__(self, message: str, *, status: int | None = None, transient: bool = False) -> None:
+        super().__init__(message)
+        self.status = status
+        self.transient = transient
 
 
 def _default_context(metadata: Mapping[str, Any], timestamp: datetime) -> dict[str, Any]:
@@ -52,6 +60,7 @@ class _RepoSinkBase(ResultSink):
     request_timeout: int = DEFAULT_REQUEST_TIMEOUT
     _last_payloads: list[dict[str, Any]] = field(default_factory=list, init=False)
     on_error: str = "abort"
+    _allow_missing_token: bool = field(default=False, init=False, repr=False)
 
     def __post_init__(self) -> None:
         # Enforce STRICT mode policy: skip-on-error not permitted for repository sinks
@@ -85,7 +94,7 @@ class _RepoSinkBase(ResultSink):
         if self.dry_run:
             logger.warning(
                 "Repository sink running in dry-run mode; no remote writes will occur. "
-                "Enable --live-outputs via CLI or set dry_run=False in configuration for actual pushes."
+                "Set dry_run=False in configuration (or via CLI flag) to enable remote publishing."
             )
             # In STRICT mode, highlight that dry-run prevents remote writes
             try:
@@ -93,6 +102,14 @@ class _RepoSinkBase(ResultSink):
                     logger.warning("STRICT mode: repository sink is in dry-run; remote publishing disabled")
             except Exception:
                 pass
+
+    def allow_missing_token(self) -> None:
+        """Permit missing auth tokens for testing or dry-run scaffolding."""
+
+        self._allow_missing_token = True
+
+    def _should_require_auth_token(self) -> bool:
+        return not self.dry_run and not self._allow_missing_token
 
     def write(self, results: dict[str, Any], *, metadata: dict[str, Any] | None = None) -> None:
         metadata = metadata or {}
@@ -279,11 +296,8 @@ class GitHubRepoSink(_RepoSinkBase):
         token = self._read_token(self.token_env)
         if token:
             headers["Authorization"] = f"Bearer {token}"
-        elif not self.dry_run and not token:
-            # Fail fast only when using a real requests.Session. Custom sessions (e.g., tests)
-            # proceed to allow simulated failures (timeouts, etc.).
-            if isinstance(self.session, requests.Session):
-                raise RuntimeError(f"GitHub token missing; set '{self.token_env}' or enable dry-run")
+        elif self._should_require_auth_token():
+            raise RuntimeError(f"GitHub token missing; set '{self.token_env}' or enable dry-run mode")
         self._headers_cache = headers
         return headers
 
@@ -390,11 +404,10 @@ class AzureDevOpsRepoSink(_RepoSinkBase):
         if token:
             auth = base64.b64encode(f":{token}".encode("utf-8")).decode("ascii")
             headers["Authorization"] = f"Basic {auth}"
-        elif not self.dry_run and not token:
-            # Fail fast only when using a real requests.Session. Custom sessions (e.g., tests)
-            # proceed to allow simulated failures (timeouts, etc.).
-            if isinstance(self.session, requests.Session):
-                raise RuntimeError(f"Azure DevOps PAT missing; set 'AZURE_DEVOPS_PAT' or set '{self.token_env}' or enable dry-run")
+        elif self._should_require_auth_token():
+            raise RuntimeError(
+                f"Azure DevOps PAT missing; set 'AZURE_DEVOPS_PAT' (or override via '{self.token_env}') or enable dry-run mode"
+            )
         self._headers_cache = headers
         return headers
 
@@ -536,10 +549,3 @@ class AzureDevOpsArtifactsRepoSink(AzureDevOpsRepoSink):
                 }
             )
         return changes
-
-
-class _RepoRequestError(RuntimeError):
-    def __init__(self, message: str, *, status: int | None = None, transient: bool = False) -> None:
-        super().__init__(message)
-        self.status = status
-        self.transient = transient

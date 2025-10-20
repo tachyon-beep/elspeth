@@ -7,6 +7,7 @@ runtime Pydantic models backed by `DataFrameSchema`.
 
 from __future__ import annotations
 
+import warnings
 from typing import Any, Type
 
 import pandas as pd
@@ -101,13 +102,21 @@ def schema_from_config(
             field_kwargs["min_length"] = col_spec["min_length"]
         if "max_length" in col_spec:
             field_kwargs["max_length"] = col_spec["max_length"]
-        # String pattern constraints (Pydantic v2 uses 'pattern' only)
+        # Pydantic v2 renamed string regex -> pattern; retain temporary compatibility
+        # for existing configs while signaling deprecation of the old name.
+        pattern_value = None
         if "pattern" in col_spec:
-            field_kwargs["pattern"] = col_spec["pattern"]
-        if "regex" in col_spec:
-            # No backward-compat in pre-release: fail fast to avoid tech debt
-            # Require 'pattern' for Pydantic v2; reject legacy 'regex' key.
-            raise ValueError("Column '%s' uses deprecated 'regex'; use 'pattern' for Pydantic v2" % col_name)
+            pattern_value = col_spec["pattern"]
+        elif "regex" in col_spec:
+            warnings.warn(
+                f"Column '{col_name}' uses deprecated 'regex'; use 'pattern' for Pydantic v2",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            # Backward-compat alias; remove after v0.6.0 (June 2025) once configs migrate fully.
+            pattern_value = col_spec["regex"]
+        if pattern_value is not None:
+            field_kwargs["pattern"] = pattern_value
 
         if "default" not in field_kwargs:
             fields[col_name] = (python_type, Field(..., **field_kwargs))
@@ -116,7 +125,7 @@ def schema_from_config(
 
     # Pydantic's create_model() has complex overloads that mypy cannot fully resolve
     # when using **fields with dynamic field definitions. This is safe at runtime.
-    return create_model(  # type: ignore[call-overload,no-any-return]
+    return create_model(  # type: ignore[arg-type,call-overload,no-any-return]
         schema_name,
         __base__=DataFrameSchema,
         __config__=DataFrameSchema.model_config,  # Explicit v2 config inheritance

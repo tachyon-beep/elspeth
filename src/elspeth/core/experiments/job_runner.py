@@ -233,6 +233,13 @@ def run_job_config(job: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def run_job_file(path: str | Path) -> dict[str, Any]:
-    data = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
+    try:
+        text = Path(path).read_text(encoding="utf-8")
+    except OSError as exc:
+        raise RuntimeError(f"Failed to read job config file: {path}") from exc
+    try:
+        data = yaml.safe_load(text) or {}
+    except yaml.YAMLError as exc:
+        raise RuntimeError(f"Failed to parse YAML job config file: {path}") from exc
     job = data.get("job") or data
     return run_job_config(job)

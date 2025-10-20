@@ -14,17 +14,13 @@ def test_azure_devops_ensure_path_leading_slash():
 
 
 def test_github_request_error_non_transient(monkeypatch):
-    class _Resp:
-        def __init__(self, status_code: int, text: str = "err") -> None:
-            self.status_code = status_code
-            self.text = text
-
-    class _S:
-        def request(self, method, url, **kwargs):  # noqa: D401
-            return _Resp(404, "not found")
-
     sink = GitHubRepoSink(owner="o", repo="r", dry_run=False)
-    sink.session = _S()
+    resp = type("_Resp", (), {"status_code": 404, "text": "not found"})()
+
+    def fake_request(method, url, **kwargs):  # noqa: D401
+        return resp
+
+    monkeypatch.setattr(sink.session, "request", fake_request, raising=False)
     with pytest.raises(_RepoRequestError) as exc:
         sink._request("GET", "https://api.github.com/repos/o/r/contents/x")  # type: ignore[attr-defined]
     assert exc.value.status == 404

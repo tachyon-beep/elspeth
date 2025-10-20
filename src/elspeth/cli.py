@@ -472,10 +472,18 @@ def _maybe_write_artifacts_suite(args: argparse.Namespace, settings, suite: Expe
     _impl(args, settings, suite, results)
 
 
-def _create_signed_bundle(art_dir: Path, name: str, payload: dict[str, Any], settings, df: pd.DataFrame, *, signing_key_env: str) -> None:
+def _create_signed_bundle(
+    art_dir: Path,
+    name: str,
+    payload: dict[str, Any],
+    settings,
+    df: pd.DataFrame,
+    *,
+    signing_key_env: str,
+) -> Path | None:
     from elspeth.core.cli.common import create_signed_bundle as _impl
 
-    _impl(art_dir, name, payload, settings, df, signing_key_env=signing_key_env)
+    return _impl(art_dir, name, payload, settings, df, signing_key_env=signing_key_env)
 
 
 def _load_yaml_json(path: Path) -> dict[str, Any]:
@@ -484,10 +492,15 @@ def _load_yaml_json(path: Path) -> dict[str, Any]:
     return _impl(path)
 
 
-def _maybe_publish_artifacts_bundle(bundle_dir: Path) -> None:
+def _maybe_publish_artifacts_bundle(
+    bundle_dir: Path,
+    *,
+    plugin_name: str | None,
+    config_path: Path | None,
+) -> None:
     from elspeth.core.cli.common import maybe_publish_artifacts_bundle as _impl
 
-    _impl(bundle_dir)
+    _impl(bundle_dir, plugin_name=plugin_name, config_path=config_path)
 
 
 ## Note: _strip_metrics_plugins and _configure_sink_dry_run are delegated via

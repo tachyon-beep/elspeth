@@ -21,7 +21,11 @@ def _results_payload() -> dict:
     }
 
 
-def test_zip_includes_manifest_results_and_csv(monkeypatch, tmp_path, caplog):
+def test_zip_includes_manifest_results_and_csv(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     base = tmp_path / "out"
     base.mkdir()
     sink = ZipResultSink(
@@ -53,7 +57,7 @@ def test_zip_includes_manifest_results_and_csv(monkeypatch, tmp_path, caplog):
     assert any("ZIP sink sanitization disabled" in rec.message for rec in caplog.records)
 
 
-def test_zip_safe_name_nul_raises_and_skip_on_error(tmp_path, caplog):
+def test_zip_safe_name_nul_raises_and_skip_on_error(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     base = tmp_path / "out"
     base.mkdir()
     sink = ZipResultSink(base_path=base, bundle_name="exp", timestamped=False, include_csv=False, on_error="skip", allowed_base_path=base)
@@ -66,7 +70,7 @@ def test_zip_safe_name_nul_raises_and_skip_on_error(tmp_path, caplog):
     assert any("ZIP sink failed; skipping archive" in rec.message for rec in caplog.records)
 
 
-def test_zip_additional_inputs_sanitize_and_write(tmp_path):
+def test_zip_additional_inputs_sanitize_and_write(tmp_path: Path) -> None:
     base = tmp_path / "out"
     base.mkdir()
     sink = ZipResultSink(base_path=base, bundle_name="exp", timestamped=False, include_csv=False, allowed_base_path=base)
