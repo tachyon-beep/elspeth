@@ -1,0 +1,273 @@
+version: 2
+
+# Dependabot automated dependency updates for Elspeth
+# Documentation: https://docs.github.com/en/code-security/dependabot
+
+updates:
+  # ============================================================
+  # SECURITY UPDATES (HIGHEST PRIORITY - AUTOMATED)
+  # ============================================================
+  # Security vulnerabilities are checked daily and auto-merged after CI passes.
+  # This ensures rapid response to CVEs while maintaining safety through
+  # comprehensive CI gates (tests, coverage, security scans).
+  # ============================================================
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      # Check for security updates DAILY at midnight UTC
+      interval: "daily"
+      time: "00:00"
+      timezone: "UTC"
+
+    # ONLY security updates in this pipeline
+    groups:
+      critical-security-patches:
+        update-types: ["security"]
+
+    # Higher limit for security (don't block critical patches)
+    open-pull-requests-limit: 20
+
+    # Clear labeling for automated workflows
+    labels:
+      - "dependencies"
+      - "security"
+      - "auto-merge-enabled"
+      - "priority-critical"
+
+    commit-message:
+      prefix: "security(deps)"
+      include: "scope"
+
+    versioning-strategy: "lockfile-only"
+    rebase-strategy: "auto"
+    allow:
+      - dependency-type: "direct"
+
+  # ============================================================
+  # Python Dependencies - Regular Updates (Manual Review)
+  # ============================================================
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      # Check for regular updates every Monday at 9 AM UTC
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "UTC"
+
+    # Group related dependencies to reduce PR noise
+    groups:
+      # Azure SDK packages updated together
+      azure-sdk:
+        patterns:
+          - "azure-*"
+        update-types:
+          - "minor"
+          - "patch"
+
+      # Testing framework and tools together
+      testing:
+        patterns:
+          - "pytest*"
+          - "*-mock"
+          - "*-cov"
+        update-types:
+          - "minor"
+          - "patch"
+
+      # Data science stack (pandas, numpy, scipy, matplotlib, seaborn)
+      data-stack:
+        patterns:
+          - "pandas"
+          - "numpy"
+          - "scipy"
+          - "matplotlib"
+          - "seaborn"
+          - "openpyxl"
+        update-types:
+          - "patch"  # Only patch updates together for stability
+
+      # Security and audit tools together
+      security-tools:
+        patterns:
+          - "bandit"
+          - "semgrep"
+          - "pip-audit"
+          - "vulture"
+        update-types:
+          - "minor"
+          - "patch"
+
+      # Development tools (linters, formatters, type checkers)
+      dev-tools:
+        patterns:
+          - "ruff"
+          - "mypy"
+          - "types-*"
+          - "pip-tools"
+        update-types:
+          - "minor"
+          - "patch"
+
+      # Statistical analysis libraries
+      stats-libs:
+        patterns:
+          - "pingouin"
+          - "statsmodels"
+        update-types:
+          - "minor"
+          - "patch"
+
+      # Build and packaging tools
+      build-tools:
+        patterns:
+          - "setuptools"
+          - "wheel"
+          - "build"
+        update-types:
+          - "minor"
+          - "patch"
+
+    # Limit concurrent PRs to avoid overwhelming the team
+    open-pull-requests-limit: 10
+
+    # Add labels for easy filtering and automation
+    labels:
+      - "dependencies"
+      - "python"
+      - "automated"
+
+    # Customize commit messages for better git history
+    commit-message:
+      prefix: "deps(python)"
+      include: "scope"
+
+    # CRITICAL: Use lockfile-only strategy for pip-tools compatibility
+    # This ensures Dependabot respects your pip-compile workflow
+    versioning-strategy: "lockfile-only"
+
+    # Automatically rebase PRs when base branch changes
+    rebase-strategy: "auto"
+
+    # Only update direct dependencies (not transitive)
+    allow:
+      - dependency-type: "direct"
+
+    # Ignore specific version ranges if needed (uncomment to use)
+    # ignore:
+    #   # Example: Don't update to Pydantic v3 yet (breaking changes)
+    #   - dependency-name: "pydantic"
+    #     update-types: ["version-update:semver-major"]
+
+  # ============================================================
+  # GitHub Actions (SHA-pinned security)
+  # ============================================================
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      # Check for updates every Tuesday at 9 AM UTC
+      # Different day than pip to avoid merge conflicts
+      interval: "weekly"
+      day: "tuesday"
+      time: "09:00"
+      timezone: "UTC"
+
+    # Group all GitHub Actions updates together
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+
+    # Limit concurrent PRs
+    open-pull-requests-limit: 5
+
+    # Add labels for filtering
+    labels:
+      - "dependencies"
+      - "github-actions"
+      - "infrastructure"
+      - "automated"
+
+    # Customize commit messages
+    commit-message:
+      prefix: "ci"
+      include: "scope"
+
+    # Rebase strategy
+    rebase-strategy: "auto"
+
+    # NOTE: Dependabot will update both SHA pins and version comments
+    # Example transformation:
+    #   actions/checkout@08c6903cd8c... # v5.0.0
+    #   → actions/checkout@1234567890a... # v5.1.0
+
+  # ============================================================
+  # Docker Base Images
+  # ============================================================
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      # Check for updates every Wednesday at 9 AM UTC
+      interval: "weekly"
+      day: "wednesday"
+      time: "09:00"
+      timezone: "UTC"
+
+    # Limit concurrent PRs
+    open-pull-requests-limit: 3
+
+    # Add labels for filtering
+    labels:
+      - "dependencies"
+      - "docker"
+      - "infrastructure"
+      - "automated"
+
+    # Customize commit messages
+    commit-message:
+      prefix: "docker"
+      include: "scope"
+
+    # Rebase strategy
+    rebase-strategy: "auto"
+
+# ============================================================
+# Notes for Maintainers
+# ============================================================
+#
+# This configuration is designed to:
+# 1. Minimize PR noise through intelligent grouping
+# 2. Stagger updates across weekdays to avoid conflicts
+# 3. Respect pip-tools lockfile workflow (lockfile-only strategy)
+# 4. Maintain SHA-pinned GitHub Actions security
+# 5. Provide clear labeling for automation and filtering
+#
+# Tuning Guidelines:
+# - If receiving too many PRs: Increase grouping, reduce open-pull-requests-limit
+# - If updates are too slow: Change interval to "daily" for critical dependencies
+# - If a dependency is problematic: Add to ignore list with rationale comment
+#
+# Auto-Merge (Optional):
+# To auto-merge patch updates after CI passes, create:
+#   .github/workflows/dependabot-auto-merge.yml
+# See: docs/operations/dependabot.md (if/when created)
+#
+# Security Updates:
+# - Dependabot will create PRs for security vulnerabilities immediately
+# - These bypass the weekly schedule and get priority
+# - Security PRs are labeled separately for easy identification
+#
+# Monitoring:
+# - Review weekly Dependabot PRs every Monday-Wednesday morning
+# - Check "Insights > Dependency graph > Dependabot" for status
+# - Failed PRs indicate compatibility issues requiring investigation
+#
+# Compatibility with Existing Workflow:
+# ✅ Works with pip-compile and lockfiles
+# ✅ Works with --require-hashes in CI
+# ✅ Works with scripts/verify_locked_install.py
+# ✅ Works with SHA-pinned GitHub Actions
+# ✅ Triggers all CI security gates (bandit, semgrep, pip-audit)

@@ -110,11 +110,13 @@ def test_repo_sinks_respect_custom_request_timeout() -> None:
 def test_repo_sink_timeout_skip_vs_abort(sink_factory) -> None:
     # on_error=skip: should not raise
     sink_skip = sink_factory(_TimeoutSession())
+    sink_skip.allow_missing_token()  # Required for dry_run=False without token
     sink_skip.on_error = "skip"
     sink_skip.write({"results": []}, metadata={"experiment": "e"})
 
     # on_error=abort: should raise original timeout
     sink_abort = sink_factory(_TimeoutSession())
+    sink_abort.allow_missing_token()  # Required for dry_run=False without token
     sink_abort.on_error = "abort"
     with pytest.raises(requests.Timeout):
         sink_abort.write({"results": []}, metadata={"experiment": "e"})

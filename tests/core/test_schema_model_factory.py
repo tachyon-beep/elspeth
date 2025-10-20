@@ -58,8 +58,22 @@ def test_schema_from_config_required_optional_and_constraints():
 
 
 def test_schema_from_config_rejects_regex_key():
+    """'regex' key is deprecated in favor of 'pattern' for Pydantic v2.
+
+    For backward compatibility, we now issue a DeprecationWarning and accept 'regex',
+    translating it to 'pattern' internally. This test verifies the warning is issued.
+    """
     cfg = {
         "nickname": {"type": "string", "regex": r"^[A-Za-z]+$"},
     }
-    with pytest.raises(ValueError):
-        schema_from_config(cfg)
+    # Changed behavior: now issues DeprecationWarning instead of raising ValueError
+    with pytest.warns(DeprecationWarning, match=r"deprecated 'regex'; use 'pattern'"):
+        Schema = schema_from_config(cfg)  # noqa: N806
+
+    # Verify it still works (backward compatibility)
+    obj = Schema(nickname="Alice")
+    assert obj.nickname == "Alice"
+
+    # Verify pattern validation still works
+    with pytest.raises(ValidationError):
+        Schema(nickname="Alice123")  # Should fail pattern validation

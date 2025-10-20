@@ -1,0 +1,70 @@
+name: Dependency Review
+
+# This workflow analyzes dependency changes in pull requests to detect:
+# - New security vulnerabilities
+# - License compliance issues
+# - Supply chain risks
+#
+# Runs on ALL pull requests (including Dependabot PRs) as an additional
+# safety gate before any code is merged.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  dependency-review:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Dependency Review
+        uses: actions/dependency-review-action@4081bf99e2866ebe428fc0173b4f98c58547b7b9 # v4.5.0
+        with:
+          # Fail PR if HIGH or CRITICAL vulnerabilities are introduced
+          fail-on-severity: high
+
+          # Deny problematic licenses
+          # GPL/AGPL can be problematic for proprietary software
+          deny-licenses: GPL-3.0, GPL-2.0, AGPL-3.0, LGPL-3.0
+
+          # Comment results on PR for visibility
+          comment-summary-in-pr: always
+
+          # Check both runtime and development dependencies
+          fail-on-scopes: runtime, development
+
+          # Additional configuration
+          allow-ghsas: []  # Don't allow any GitHub Security Advisories
+
+          # Base ref for comparison (usually main branch)
+          base-ref: ${{ github.event.pull_request.base.sha }}
+          head-ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Post summary for security PRs
+        if: contains(github.event.pull_request.labels.*.name, 'security')
+        run: |
+          cat >> $GITHUB_STEP_SUMMARY << EOF
+          ## 🔒 Security PR Dependency Review
+
+          This security patch PR has been analyzed for:
+          - ✅ No HIGH/CRITICAL vulnerabilities introduced
+          - ✅ License compliance maintained
+          - ✅ No supply chain risks detected
+
+          **PR Details:**
+          - Number: #${{ github.event.pull_request.number }}
+          - Author: ${{ github.event.pull_request.user.login }}
+          - Labels: $(echo '${{ toJSON(github.event.pull_request.labels.*.name) }}' | jq -r 'join(", ")')
+
+          **Next Gates:**
+          - CI tests and coverage
+          - Security scans (bandit, semgrep, pip-audit)
+          - Auto-merge eligibility check
+          EOF

@@ -19,10 +19,18 @@ make bootstrap
 # Bootstrap without running tests
 make bootstrap-no-test
 
-# Activate environment for manual work
+# Activate environment for manual work with locked dependencies
 source .venv/bin/activate
-pip install -e .[dev,analytics-visual]
+python -m pip install pip-tools
+python -m piptools sync requirements-dev.lock
+pip install -e . --no-deps
+
+# For Azure ML workflows, use the Azure lockfiles
+python -m piptools sync requirements-dev-azure.lock
+pip install -e . --no-deps
 ```
+
+**Important**: Always use lockfiles (`requirements*.lock`) for reproducible builds. Never install directly from `pyproject.toml` with unpinned ranges.
 
 ### Testing
 
@@ -51,13 +59,13 @@ Test coverage data is written to `coverage.xml` for SonarQube/SonarCloud integra
 ### Linting & Type Checking
 
 ```bash
-# Run all lint checks (ruff format, ruff check, pytype)
+# Run all lint checks (ruff format, ruff check, mypy)
 make lint
 
 # Individual tools
 .venv/bin/python -m ruff format docs src tests
 .venv/bin/python -m ruff check docs src tests
-.venv/bin/python -m pytype src/elspeth
+.venv/bin/python -m mypy src/elspeth
 ```
 
 ### Running Experiments
@@ -65,6 +73,9 @@ make lint
 ```bash
 # Run the sample suite (exercises CSV datasource, mock LLM, analytics)
 make sample-suite
+
+# Run sample suite with artifacts and signing
+make sample-suite-artifacts
 
 # Full CLI invocation with options
 python -m elspeth.cli \
@@ -79,12 +90,35 @@ python -m elspeth.cli \
   --settings config/sample_suite/settings.yaml \
   --suite-root config/sample_suite \
   --head 5
+
+# Validate schemas before running (pre-flight checks)
+python -m elspeth.cli validate-schemas \
+  --settings config/sample_suite/settings.yaml \
+  --profile default
+
+# Run jobs (multi-suite workflows)
+make job  # Uses config/jobs/sample_job.yaml by default
+JOB=config/jobs/my_job.yaml ARTDIR=artifacts make job
 ```
 
 Key output directories:
 
 - `outputs/sample_suite/` - Experiment CSV exports
 - `outputs/sample_suite_reports/` - Analytics reports (JSON, Markdown, Excel, PNG/HTML visuals)
+- `artifacts/` - Signed bundles and persistent artifacts (git-ignored)
+- `logs/` - JSONL audit logs
+
+### Additional Make Targets
+
+```bash
+make audit          # Run pip-audit on requirements.lock
+make sbom          # Generate CycloneDX SBOM (sbom.json)
+make verify-locked # Verify lockfile integrity
+make validate-templates # Validate config templates
+make clean-logs    # Remove JSONL logs under ./logs
+make docker-build-dev # Build dev Docker image
+make test-container # Run tests in container
+```
 
 ## High-Level Architecture
 
@@ -95,23 +129,24 @@ Key output directories:
 - `orchestrator.py`: `ExperimentOrchestrator` wires datasource → LLM client → sinks
 - `experiments/suite_runner.py`: `ExperimentSuiteRunner` manages multi-experiment suites with configuration merging (defaults → prompt packs → experiment overrides)
 - `experiments/runner.py`: `ExperimentRunner` executes single experiments with row/aggregation plugins, concurrency, retries, and early stopping
-- `artifact_pipeline.py`: `ArtifactPipeline` resolves sink dependencies, topologically sorts execution order, enforces security clearances
+- `experiments/job_runner.py`: `JobRunner` executes jobs (multi-suite workflows with shared configuration)
+- `pipeline/artifact_pipeline.py`: `ArtifactPipeline` resolves sink dependencies, topologically sorts execution order, enforces security clearances
 
 **2. Plugin System** (`src/elspeth/plugins/`, `src/elspeth/core/experiments/plugin_registry.py`)
 
 - **Registry**: Central factory (`src/elspeth/core/registries/__init__.py`) for datasources, LLM clients, and sinks
-- **Datasources**: CSV (local/blob), Azure Blob with profiles (`plugins/datasources/`)
-- **LLM Clients**: Azure OpenAI, HTTP OpenAI, Mock, Static (`plugins/llms/`)
-- **Middleware**: Audit logging, prompt shields, Azure Content Safety, health monitoring (`plugins/llms/middleware*.py`)
+- **Datasources**: CSV (local/blob), Azure Blob with profiles (`plugins/nodes/sources/`)
+- **LLM Clients**: Azure OpenAI, HTTP OpenAI, Mock, Static (`plugins/nodes/transforms/llm/`)
+- **Middleware**: Audit logging, prompt shields, Azure Content Safety, PII shield, health monitoring (`plugins/nodes/transforms/llm/middleware/`)
 - **Experiment Plugins**:
-  - Row-level: Score extraction, RAG query, noop (`plugins/experiments/metrics.py`, `rag_query.py`)
-  - Aggregators: Statistics, recommendations, variant ranking, agreement, power analysis (`plugins/experiments/metrics.py`)
+  - Row-level: Score extraction, noop, prompt variants (`plugins/experiments/row/`)
+  - Aggregators: Statistics, recommendations, variant ranking, agreement, power analysis, cost/latency summaries (`plugins/experiments/aggregators/`)
+  - Baseline Comparisons: Score deltas, effect sizes, distribution analysis, Bayesian analysis, referee alignment (`plugins/experiments/baseline/`)
   - Validation: Regex, JSON structure, LLM guard (`plugins/experiments/validation.py`)
   - Early Stop: Threshold triggers (`plugins/experiments/early_stop.py`)
-  - Baseline Comparisons: Row count, score deltas, effect sizes, significance tests (`plugins/experiments/metrics.py`)
-- **Sinks**: CSV, Excel, JSON bundles, signed artifacts, Azure Blob, GitHub/Azure DevOps repos, analytics reports (JSON/Markdown), visual analytics (PNG/HTML), embeddings stores (pgvector/Azure Search) (`plugins/outputs/`)
+- **Sinks**: CSV, Excel, JSON bundles, signed artifacts, Azure Blob, GitHub/Azure DevOps repos, analytics reports (JSON/Markdown), visual analytics (PNG/HTML), embeddings stores (pgvector/Azure Search), reproducibility bundles (`plugins/nodes/sinks/`)
 
-**3. Security & Context System** (`src/elspeth/core/plugins/context.py`, `src/elspeth/core/security/`)
+**3. Security & Context System** (`src/elspeth/core/base/protocols.py`, `src/elspeth/core/security/`)
 
 - Every plugin receives a `PluginContext` with `security_level`, `provenance`, `plugin_kind`, `plugin_name`
 - Security levels flow: datasource + LLM → experiment context → sinks
@@ -235,10 +270,10 @@ Elspeth's protocols are organized by responsibility and scope:
 
 ### Test Organization
 
-- Mirror source structure: `src/elspeth/plugins/outputs/csv_file.py` → `tests/test_outputs_csv.py`
-- Use `test_*.py` naming convention
-- Parametrize tests for edge cases (see `tests/test_experiment_metrics_plugins.py` for examples)
-- Integration tests should exercise full CLI or suite runner flows (see `tests/test_cli_end_to_end.py`)
+- Mirror source structure: `src/elspeth/plugins/nodes/sinks/csv_file.py` → `tests/test_outputs_csv.py`
+- Use `test_*.py` naming convention (prefix with descriptive category like `test_outputs_`, `test_datasource_`)
+- Parametrize tests for edge cases (see parametrized tests in various test files)
+- Integration tests should exercise full CLI or suite runner flows (see `tests/test_cli_end_to_end.py`, `tests/test_cli_suite.py`)
 
 ### Markers
 
@@ -304,7 +339,10 @@ Verify:
 - `src/elspeth/core/experiments/suite_runner.py` - Suite orchestration
 - `src/elspeth/core/registries/__init__.py` - Central plugin registry
 - `src/elspeth/core/pipeline/artifact_pipeline.py` - Sink dependency resolution
-- `src/elspeth/plugins/` - All plugin implementations
+- `src/elspeth/plugins/nodes/` - Node plugins (datasources, transforms/LLMs, sinks)
+- `src/elspeth/plugins/experiments/` - Experiment-specific plugins (row, aggregators, baseline, validation, early stop)
+- `src/elspeth/plugins/orchestrators/` - Orchestrator implementations
+- `src/elspeth/plugins/utilities/` - Utility plugins (e.g., retrieval context)
 
 ### Configuration
 
@@ -323,9 +361,9 @@ Verify:
 ### Tests
 
 - `tests/conftest.py` - Shared fixtures
-- `tests/test_experiments.py` - Core experiment runner tests
-- `tests/test_suite_runner_integration.py` - Suite integration tests
-- `tests/test_artifact_pipeline.py` - Sink dependency tests
+- `tests/test_cli_end_to_end.py` - End-to-end CLI tests
+- `tests/test_suite_runner_integration.py` - Suite integration tests (deprecated test naming)
+- `tests/test_artifact_pipeline.py` - Sink dependency tests (deprecated test naming)
 
 ## Development Workflow
 
