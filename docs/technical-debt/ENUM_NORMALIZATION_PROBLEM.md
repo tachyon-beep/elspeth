@@ -1,23 +1,20 @@
-# Security/Determinism Level Normalization Technical Debt
+# Security/Determinism Level Normalization
 
 **Date**: 2025-10-20
-**Status**: IDENTIFIED - NOT FIXED
+**Resolution Date**: 2025-10-21
+**Status**: RESOLVED
 **Severity**: Medium (Code Quality & Maintainability)
-**Impact**: ~16 files, 90+ normalize_* function calls, entire codebase architecture
+**Impact (pre‑fix)**: ~16 files, 90+ normalize_* calls, wide architectural usage
 
 ---
 
 ## Executive Summary
 
-The codebase has **redundant normalization functions** (`normalize_security_level()`, `normalize_determinism_level()`) that duplicate functionality already built into the `SecurityLevel` and `DeterminismLevel` enums. This creates unnecessary complexity, type safety issues, and confusion about the "canonical" way to handle these values.
-
-**Core Problem**: We have well-designed type-safe enums but treat them as strings throughout the entire codebase.
-
-**Root Cause**: Legacy design decision to use `str` types instead of enum types, combined with wrapper functions that hide the enums.
+The system now uses `SecurityLevel` and `DeterminismLevel` enums end‑to‑end. Legacy string normalizers have been removed. All internal code paths (contexts, registries, pipeline, plugins, helpers, endpoint validation) operate on enums. Canonical PSPF strings are produced via `enum.value` only at boundaries that require strings.
 
 ---
 
-## The Architecture We Have (Current State)
+## The Architecture We Have (Post‑Fix)
 
 ### Type Definitions
 
@@ -57,36 +54,11 @@ class DeterminismLevel(str, Enum):
     # Comparison operators for hierarchy enforcement
 ```
 
-### Normalization Layer (Redundant)
+### Normalization Layer
 
-Located in `src/elspeth/core/security/__init__.py`:
+The legacy `normalize_security_level()` and `normalize_determinism_level()` functions have been removed. Use `SecurityLevel.from_string()` / `DeterminismLevel.from_string()` and operate on enums directly.
 
-```python
-def normalize_security_level(level: str | SecurityLevel | None) -> str:
-    """Coerce user-supplied levels to canonical PSPF format (uppercase)."""
-    if isinstance(level, SecurityLevel):
-        return str(level.value)
-    return str(SecurityLevel.from_string(level).value)
-    # ^^^ This is literally just SecurityLevel.from_string(level).value
-    #     The enum ALREADY does all the normalization!
-
-def normalize_determinism_level(level: str | DeterminismLevel | None) -> str:
-    """Coerce user-supplied determinism levels to canonical lowercase format."""
-    if isinstance(level, DeterminismLevel):
-        return str(level.value)
-    return str(DeterminismLevel.from_string(level).value)
-    # ^^^ Same problem - enum already does this
-```
-
-**Analysis**: These functions add no value. They:
-1. Accept enum or string
-2. Convert to enum via `.from_string()` if needed
-3. Immediately convert back to string via `.value`
-4. Return string
-
-**What they should do**: Just return the enum. Let the enum's `__str__` method handle string conversion when needed.
-
-### Helper Functions (Also Operate on Strings)
+### Helper Functions (Enum‑Based)
 
 Also in `src/elspeth/core/security/__init__.py`:
 
@@ -109,14 +81,11 @@ def resolve_determinism_level(*levels: str | None) -> str: ...
 def coalesce_determinism_level(*levels: str | None) -> str: ...
 ```
 
-**Analysis**: These functions do real work (aggregation logic) but:
-1. Operate on strings instead of enums
-2. Use index-based comparison instead of enum operators
-3. Return strings instead of enums
+All helper functions now accept and return enums; comparison uses enum ordering.
 
 ---
 
-## Current Type Signatures Across Codebase
+## Type Signatures Across Codebase (Post‑Fix)
 
 ### PluginContext (Core Data Structure)
 
@@ -138,10 +107,7 @@ class PluginContext(BaseModel):
         return v_lower
 ```
 
-**Problem**:
-- Typed as `str` instead of `SecurityLevel` / `DeterminismLevel`
-- Manual validator duplicates enum's `.from_string()` validation
-- No type safety - can assign any string at runtime (Pydantic validates but type checker doesn't catch errors)
+PluginContext fields are enums with before‑validators to auto‑convert strings from YAML.
 
 ### Plugin Implementations
 
@@ -174,30 +140,30 @@ class Artifact:
     determinism_level: str | None = None
 ```
 
-**Problem**: No type safety at protocol boundaries. Anything can pass a string.
+Protocols and artifacts now carry enums, ensuring type‑safe boundaries.
 
 ---
 
-## Scope of Impact
+## Resolution Summary
 
-### Files Using normalize_* Functions (16 files)
+Key changes
+- Removed normalize_* functions; removed SECURITY_LEVELS/DETERMINISM_LEVELS constants.
+- PluginContext uses enums; validators convert strings → enums.
+- Protocols, pipeline artifacts, and sink bindings now carry enums.
+- Helper functions (resolve/coalesce/is_allowed) use enums.
+- Plugins (sources/sinks/utilities) parse metadata into enums and store enums.
+- Endpoint validation accepts enums/strings and normalizes using .value.
 
-1. `src/elspeth/core/experiments/job_runner.py`
-2. `src/elspeth/core/experiments/runner.py`
-3. `src/elspeth/core/pipeline/artifact_pipeline.py`
-4. `src/elspeth/core/registries/context_utils.py`
-5. `src/elspeth/core/registries/plugin_helpers.py`
-6. `src/elspeth/core/security/approved_endpoints.py`
-7. `src/elspeth/core/security/__init__.py` (defines them)
-8. `src/elspeth/core/validation/rules.py`
-9. `src/elspeth/plugins/nodes/sinks/analytics_report.py`
-10. `src/elspeth/plugins/nodes/sinks/csv_file.py`
-11. `src/elspeth/plugins/nodes/sinks/excel.py`
-12. `src/elspeth/plugins/nodes/sinks/file_copy.py`
-13. `src/elspeth/plugins/nodes/sinks/_visual_base.py`
-14. `src/elspeth/plugins/nodes/sinks/zip_bundle.py`
-15. `src/elspeth/plugins/nodes/sources/blob.py`
-16. `src/elspeth/plugins/nodes/sources/_csv_base.py`
+All tests updated and passing; coverage ≥ 80% per file.
+
+### Migration Guide (Plugin Authors)
+
+- Accept enums in factories; read `ctx.security_level` / `ctx.determinism_level` directly.
+- Convert free‑form input via `.from_string()` when needed.
+- Compare using enum ordering; serialize via `.value`.
+- Remove usage of `normalize_*` and `SECURITY_LEVELS`/`DETERMINISM_LEVELS`.
+
+YAML configs stay the same (strings), Pydantic converts to enums at load.
 
 **Total Uses**: 90 function calls across these 16 files
 

@@ -119,11 +119,7 @@ def test_min_rows_threshold():
 
 def test_label_and_metadata_in_reason():
     """Test label and metadata are added to reason - lines 76-79."""
-    plugin = ThresholdEarlyStopPlugin(
-        metric="score",
-        threshold=10,
-        label="accuracy_check"
-    )
+    plugin = ThresholdEarlyStopPlugin(metric="score", threshold=10, label="accuracy_check")
 
     metadata = {"experiment": "test_exp", "variant": "A"}
     result = plugin.check({"metrics": {"score": 15}}, metadata=metadata)

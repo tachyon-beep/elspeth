@@ -25,77 +25,65 @@ from elspeth.core.validation.base import ConfigurationError
 
 def test_register_rate_limiter_single_param_factory():
     """Test backward compatibility with single-parameter factory - lines 39-42."""
+
     # Old-style factory (only options parameter)
     def old_factory(options):
         from elspeth.core.controls.rate_limit import NoopRateLimiter
+
         return NoopRateLimiter()
 
     # Should work with old-style factory
     register_rate_limiter("test_old_rl", old_factory, schema={"type": "object"})
 
     # Should be able to create with it (need security_level and determinism_level)
-    result = create_rate_limiter({
-        "name": "test_old_rl",
-        "security_level": "internal",
-        "determinism_level": "guaranteed",
-        "options": {}
-    })
+    result = create_rate_limiter({"name": "test_old_rl", "security_level": "internal", "determinism_level": "guaranteed", "options": {}})
     assert result is not None
 
 
 def test_register_rate_limiter_two_param_factory():
     """Test new-style factory with context parameter."""
+
     # New-style factory (options and context)
     def new_factory(options, context):
         from elspeth.core.controls.rate_limit import NoopRateLimiter
+
         limiter = NoopRateLimiter()
         return limiter
 
     register_rate_limiter("test_new_rl", new_factory, schema={"type": "object"})
 
-    result = create_rate_limiter({
-        "name": "test_new_rl",
-        "security_level": "internal",
-        "determinism_level": "guaranteed",
-        "options": {}
-    })
+    result = create_rate_limiter({"name": "test_new_rl", "security_level": "internal", "determinism_level": "guaranteed", "options": {}})
     assert result is not None
 
 
 def test_register_cost_tracker_single_param_factory():
     """Test backward compatibility with single-parameter factory - lines 59-62."""
+
     # Old-style factory (only options parameter)
     def old_factory(options):
         from elspeth.core.controls.cost_tracker import NoopCostTracker
+
         return NoopCostTracker()
 
     register_cost_tracker("test_old_ct", old_factory, schema={"type": "object"})
 
-    result = create_cost_tracker({
-        "name": "test_old_ct",
-        "security_level": "internal",
-        "determinism_level": "guaranteed",
-        "options": {}
-    })
+    result = create_cost_tracker({"name": "test_old_ct", "security_level": "internal", "determinism_level": "guaranteed", "options": {}})
     assert result is not None
 
 
 def test_register_cost_tracker_two_param_factory():
     """Test new-style factory with context parameter."""
+
     # New-style factory (options and context)
     def new_factory(options, context):
         from elspeth.core.controls.cost_tracker import NoopCostTracker
+
         tracker = NoopCostTracker()
         return tracker
 
     register_cost_tracker("test_new_ct", new_factory, schema={"type": "object"})
 
-    result = create_cost_tracker({
-        "name": "test_new_ct",
-        "security_level": "internal",
-        "determinism_level": "guaranteed",
-        "options": {}
-    })
+    result = create_cost_tracker({"name": "test_new_ct", "security_level": "internal", "determinism_level": "guaranteed", "options": {}})
     assert result is not None
 
 
@@ -142,11 +130,7 @@ def test_validate_rate_limiter_invalid_options_type():
 def test_validate_rate_limiter_unknown_plugin():
     """Test validation with unknown plugin raises ConfigurationError - line 152."""
     with pytest.raises(ConfigurationError):
-        validate_rate_limiter({
-            "name": "totally_unknown_plugin",
-            "options": {},
-            "security_level": "internal"
-        })
+        validate_rate_limiter({"name": "totally_unknown_plugin", "options": {}, "security_level": "internal"})
 
 
 def test_validate_cost_tracker_none_definition():
@@ -192,31 +176,31 @@ def test_validate_cost_tracker_invalid_options_type():
 def test_validate_cost_tracker_unknown_plugin():
     """Test validation with unknown plugin raises ConfigurationError - line 191."""
     with pytest.raises(ConfigurationError):
-        validate_cost_tracker({
-            "name": "totally_unknown_plugin",
-            "options": {},
-            "security_level": "internal"
-        })
+        validate_cost_tracker({"name": "totally_unknown_plugin", "options": {}, "security_level": "internal"})
 
 
 def test_validate_rate_limiter_conflicting_security_levels():
     """Test validation with conflicting security levels - line 140."""
     with pytest.raises(ConfigurationError, match="rate_limiter:noop"):
-        validate_rate_limiter({
-            "name": "noop",
-            "security_level": "public",
-            "options": {"security_level": "restricted"}  # Conflict
-        })
+        validate_rate_limiter(
+            {
+                "name": "noop",
+                "security_level": "public",
+                "options": {"security_level": "restricted"},  # Conflict
+            }
+        )
 
 
 def test_validate_cost_tracker_conflicting_security_levels():
     """Test validation with conflicting security levels - line 179."""
     with pytest.raises(ConfigurationError, match="cost_tracker:noop"):
-        validate_cost_tracker({
-            "name": "noop",
-            "security_level": "public",
-            "options": {"security_level": "restricted"}  # Conflict
-        })
+        validate_cost_tracker(
+            {
+                "name": "noop",
+                "security_level": "public",
+                "options": {"security_level": "restricted"},  # Conflict
+            }
+        )
 
 
 def test_create_rate_limiter_none():

@@ -18,10 +18,10 @@ from __future__ import annotations
 from typing import Any, Iterable, TypeVar
 
 from elspeth.core.base.plugin_context import PluginContext
+from elspeth.core.base.types import SecurityLevel
 from elspeth.core.security import (
     coalesce_determinism_level,
     coalesce_security_level,
-    normalize_determinism_level,
 )
 from elspeth.core.validation.base import ConfigurationError
 
@@ -149,21 +149,20 @@ def create_plugin_with_inheritance(
     except ValueError as exc:
         raise ConfigurationError(f"{plugin_kind}:{name}: {exc}") from exc
 
-    # Import inside to avoid circular dependency
-    from elspeth.core.security import SECURITY_LEVELS, normalize_security_level
-
-    level = normalize_security_level(child_sec_level)
+    level = coalesce_security_level(child_sec_level)
     if parent_sec_level is not None:
-        normalized_parent = normalize_security_level(parent_sec_level)
-        if SECURITY_LEVELS.index(level) < SECURITY_LEVELS.index(normalized_parent):
-            raise ConfigurationError(f"{plugin_kind}:{name}: security_level '{level}' cannot downgrade parent level '{normalized_parent}'")
+        parent_level = parent_sec_level if isinstance(parent_sec_level, SecurityLevel) else SecurityLevel.from_string(parent_sec_level)
+        if level < parent_level:
+            child_text = level.value if isinstance(level, SecurityLevel) else str(level)
+            parent_text = parent_level.value if isinstance(parent_level, SecurityLevel) else str(parent_level)
+            raise ConfigurationError(f"{plugin_kind}:{name}: security_level '{child_text}' cannot downgrade parent level '{parent_text}'")
 
     try:
         det_level = coalesce_determinism_level(definition_det_level, option_det_level)
     except ValueError as exc:
         raise ConfigurationError(f"{plugin_kind}:{name}: {exc}") from exc
 
-    det_level = normalize_determinism_level(det_level)
+    # det_level already normalized by coalesce_determinism_level
 
     provenance_tuple = tuple(sources or (f"{plugin_kind}:{name}.resolved",))
 

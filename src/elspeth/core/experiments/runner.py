@@ -1,4 +1,5 @@
 """Simplified experiment runner ported from legacy implementation."""
+
 from __future__ import annotations
 
 import logging
@@ -13,13 +14,14 @@ import pandas as pd
 
 from elspeth.core.base.protocols import LLMClientProtocol, LLMMiddleware, LLMRequest, ResultSink
 from elspeth.core.base.schema import DataFrameSchema, SchemaViolation
+from elspeth.core.base.types import SecurityLevel
 from elspeth.core.controls import CostTracker, RateLimiter
 from elspeth.core.experiments.plugin_registry import create_early_stop_plugin
 from elspeth.core.experiments.validation import validate_plugin_schemas
 from elspeth.core.pipeline.artifact_pipeline import ArtifactPipeline, SinkBinding
 from elspeth.core.pipeline.processing import prepare_prompt_context
 from elspeth.core.prompts import PromptEngine, PromptRenderingError, PromptTemplate, PromptValidationError
-from elspeth.core.security import normalize_security_level, resolve_determinism_level, resolve_security_level
+from elspeth.core.security import resolve_determinism_level, resolve_security_level
 from elspeth.plugins.orchestrators.experiment.protocols import (
     AggregationExperimentPlugin,
     EarlyStopPlugin,
@@ -534,8 +536,8 @@ class ExperimentRunner:
             base_id = getattr(sink, "_elspeth_sink_name", plugin)
             sink_id = f"{base_id}:{index}"
             security_level = getattr(sink, "_elspeth_security_level", None)
-            if security_level is not None:
-                security_level = normalize_security_level(security_level)
+            if security_level is not None and not isinstance(security_level, SecurityLevel):
+                security_level = SecurityLevel.from_string(security_level)
             bindings.append(
                 SinkBinding(
                     id=sink_id,

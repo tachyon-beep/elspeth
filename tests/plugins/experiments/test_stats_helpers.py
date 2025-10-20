@@ -63,4 +63,3 @@ def test_bh_correction_and_factory():
         }
     )
     assert cfg["key"] == "scores"
-

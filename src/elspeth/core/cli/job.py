@@ -69,4 +69,3 @@ def _record_to_row(record: dict[str, Any]) -> dict[str, Any]:
 
 
 __all__ = ["execute_job_file"]
-

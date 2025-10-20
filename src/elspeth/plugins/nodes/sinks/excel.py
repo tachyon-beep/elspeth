@@ -12,7 +12,7 @@ from typing import Any, Iterable, Mapping
 from openpyxl import Workbook  # type: ignore[import-untyped]
 
 from elspeth.core.base.protocols import Artifact, ArtifactDescriptor, ResultSink
-from elspeth.core.security import normalize_determinism_level, normalize_security_level
+from elspeth.core.base.types import DeterminismLevel, SecurityLevel
 from elspeth.core.utils.path_guard import resolve_under_base, safe_atomic_write
 from elspeth.plugins.nodes.sinks._sanitize import sanitize_cell
 
@@ -106,8 +106,8 @@ class ExcelResultSink(ResultSink):
         # Ensure dependency availability early for fast failure when configured incorrectly.
         self._workbook_factory = _load_workbook_dependencies()
         self._last_workbook_path: str | None = None
-        self._security_level: str | None = None
-        self._determinism_level: str | None = None
+        self._security_level: SecurityLevel | None = None
+        self._determinism_level: DeterminismLevel | None = None
         self._sanitization = {
             "enabled": self.sanitize_formulas,
             "guard": self.sanitize_guard,
@@ -152,8 +152,10 @@ class ExcelResultSink(ResultSink):
             safe_atomic_write(target, _writer)
             self._last_workbook_path = str(target)
             if metadata:
-                self._security_level = normalize_security_level(metadata.get("security_level"))
-                self._determinism_level = normalize_determinism_level(metadata.get("determinism_level"))
+                level = metadata.get("security_level")
+                det = metadata.get("determinism_level")
+                self._security_level = level if isinstance(level, SecurityLevel) else SecurityLevel.from_string(level)
+                self._determinism_level = det if isinstance(det, DeterminismLevel) else DeterminismLevel.from_string(det)
             if plugin_logger:
                 try:
                     size = Path(self._last_workbook_path).stat().st_size if self._last_workbook_path else 0

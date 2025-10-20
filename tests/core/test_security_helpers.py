@@ -2,25 +2,23 @@ from __future__ import annotations
 
 import pytest
 
+from elspeth.core.base.types import DeterminismLevel, SecurityLevel
 from elspeth.core.security import (
-    SECURITY_LEVELS,
     coalesce_determinism_level,
     coalesce_security_level,
     is_security_level_allowed,
-    normalize_determinism_level,
-    normalize_security_level,
     resolve_determinism_level,
     resolve_security_level,
 )
 
 
-def test_normalize_security_level_aliases_and_canonical_values():
-    # Aliases map to PSPF canonical strings
-    assert normalize_security_level("internal") == "OFFICIAL"
-    assert normalize_security_level("public") == "UNOFFICIAL"
+def test_security_level_from_string_aliases_and_canonical_values():
+    # Aliases map to PSPF canonical enums/strings
+    assert SecurityLevel.from_string("internal") == SecurityLevel.OFFICIAL
+    assert SecurityLevel.from_string("public") == SecurityLevel.UNOFFICIAL
     # Already canonical strings remain unchanged (case-insensitive input)
-    assert normalize_security_level("official") == "OFFICIAL"
-    assert normalize_security_level("PROTECTED") == "PROTECTED"
+    assert SecurityLevel.from_string("official") == SecurityLevel.OFFICIAL
+    assert SecurityLevel.from_string("PROTECTED") == SecurityLevel.PROTECTED
 
 
 def test_is_security_level_allowed_hierarchy():
@@ -33,10 +31,10 @@ def test_is_security_level_allowed_hierarchy():
 
 def test_resolve_security_level_picks_most_restrictive():
     # Most restrictive wins among provided levels
-    assert resolve_security_level("OFFICIAL", "PROTECTED") == "PROTECTED"
-    assert resolve_security_level("UNOFFICIAL", "OFFICIAL") == "OFFICIAL"
-    # When nothing provided, default to least restrictive entry in SECURITY_LEVELS
-    assert resolve_security_level() == SECURITY_LEVELS[0]
+    assert resolve_security_level("OFFICIAL", "PROTECTED") == SecurityLevel.PROTECTED
+    assert resolve_security_level("UNOFFICIAL", "OFFICIAL") == SecurityLevel.OFFICIAL
+    # When nothing provided, default to least restrictive
+    assert resolve_security_level() == SecurityLevel.UNOFFICIAL
 
 
 def test_coalesce_security_level_agrees_or_raises():
@@ -50,10 +48,9 @@ def test_coalesce_security_level_agrees_or_raises():
         coalesce_security_level(None, None)
 
 
-def test_determinism_normalize_resolve_and_coalesce():
-    assert normalize_determinism_level("HIGH") == "high"
-    assert resolve_determinism_level("guaranteed", "high") == "high"  # least deterministic wins
-    assert coalesce_determinism_level("guaranteed", "GUARANTEED") == "guaranteed"
+def test_determinism_resolve_and_coalesce():
+    assert DeterminismLevel.from_string("HIGH") == DeterminismLevel.HIGH
+    assert resolve_determinism_level("guaranteed", "high") == DeterminismLevel.HIGH  # least deterministic wins
+    assert coalesce_determinism_level("guaranteed", "GUARANTEED") == DeterminismLevel.GUARANTEED
     with pytest.raises(ValueError):
         coalesce_determinism_level(None, None)
-

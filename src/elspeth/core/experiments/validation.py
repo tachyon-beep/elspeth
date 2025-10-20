@@ -24,9 +24,7 @@ def validate_plugin_schemas(
         requires = bool(getattr(row_plugin, "_elspeth_requires_input_schema", False))
         plugin_schema = row_plugin.input_schema() if hasattr(row_plugin, "input_schema") and callable(row_plugin.input_schema) else None
         if requires and plugin_schema is None:
-            raise ValueError(
-                f"Row plugin '{getattr(row_plugin, 'name', row_plugin)}' requires input_schema() but none was provided"
-            )
+            raise ValueError(f"Row plugin '{getattr(row_plugin, 'name', row_plugin)}' requires input_schema() but none was provided")
         if plugin_schema is not None:
             validate_schema_compatibility(
                 datasource_schema,
@@ -54,9 +52,7 @@ def validate_plugin_schemas(
         requires = bool(getattr(v_plugin, "_elspeth_requires_input_schema", False))
         plugin_schema = v_plugin.input_schema() if hasattr(v_plugin, "input_schema") and callable(v_plugin.input_schema) else None
         if requires and plugin_schema is None:
-            raise ValueError(
-                f"Validation plugin '{getattr(v_plugin, 'name', v_plugin)}' requires input_schema() but none was provided"
-            )
+            raise ValueError(f"Validation plugin '{getattr(v_plugin, 'name', v_plugin)}' requires input_schema() but none was provided")
         if plugin_schema is not None:
             validate_schema_compatibility(
                 datasource_schema,
@@ -66,4 +62,3 @@ def validate_plugin_schemas(
 
 
 __all__ = ["validate_plugin_schemas"]
-

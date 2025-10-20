@@ -13,7 +13,8 @@ from zipfile import ZIP_DEFLATED, ZipFile
 import pandas as pd
 
 from elspeth.core.base.protocols import Artifact, ArtifactDescriptor, ResultSink
-from elspeth.core.security import normalize_determinism_level, normalize_security_level, resolve_security_level
+from elspeth.core.base.types import DeterminismLevel, SecurityLevel
+from elspeth.core.security import resolve_security_level
 from elspeth.core.utils.path_guard import resolve_under_base, safe_atomic_write
 from elspeth.plugins.nodes.sinks._sanitize import sanitize_cell
 
@@ -67,8 +68,8 @@ class ZipResultSink(ResultSink):
         self._last_archive_path: str | None = None
         self._last_artifacts: dict[str, Any] = {}
         self._additional_inputs: dict[str, list[Artifact]] = {}
-        self._security_level: str | None = None
-        self._determinism_level: str | None = None
+        self._security_level: SecurityLevel | None = None
+        self._determinism_level: DeterminismLevel | None = None
         # Allowed base directory for writes; default to ./outputs
         try:
             default_base = Path(base_path).resolve()
@@ -152,8 +153,10 @@ class ZipResultSink(ResultSink):
                 "sanitization": self._sanitization,
             }
             if metadata:
-                self._security_level = normalize_security_level(metadata.get("security_level"))
-                self._determinism_level = normalize_determinism_level(metadata.get("determinism_level"))
+                level = metadata.get("security_level")
+                det = metadata.get("determinism_level")
+                self._security_level = level if isinstance(level, SecurityLevel) else SecurityLevel.from_string(level)
+                self._determinism_level = det if isinstance(det, DeterminismLevel) else DeterminismLevel.from_string(det)
         except Exception as exc:
             if self.on_error == "skip":
                 logger.warning("ZIP sink failed; skipping archive creation: %s", exc)

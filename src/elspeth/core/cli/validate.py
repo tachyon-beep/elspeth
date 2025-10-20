@@ -74,10 +74,7 @@ def validate_schemas_command(args: Any, settings: Any, suite_root: Path | None) 
         if prompt_fields:
             missing = [f for f in prompt_fields if f not in fields]
             if missing:
-                msg = (
-                    "Missing prompt_fields in datasource schema: "
-                    f"{missing}. Declared fields: {fields}"
-                )
+                msg = f"Missing prompt_fields in datasource schema: {missing}. Declared fields: {fields}"
                 logger.error(msg)
                 print(f"\n❌ {msg}")
                 raise SystemExit(1)
@@ -87,9 +84,7 @@ def validate_schemas_command(args: Any, settings: Any, suite_root: Path | None) 
             produces = getattr(sink, "produces", None)
             consumes = getattr(sink, "consumes", None)
             if not callable(produces) or not callable(consumes):
-                msg = (
-                    f"Sink '{getattr(sink, 'name', sink.__class__.__name__)}' must implement produces() and consumes()."
-                )
+                msg = f"Sink '{getattr(sink, 'name', sink.__class__.__name__)}' must implement produces() and consumes()."
                 logger.error(msg)
                 print(f"\n❌ {msg}")
                 raise SystemExit(1)
@@ -97,16 +92,12 @@ def validate_schemas_command(args: Any, settings: Any, suite_root: Path | None) 
                 prod = produces()
                 cons = consumes()
             except Exception as exc:  # pragma: no cover - defensive
-                msg = (
-                    f"Sink '{getattr(sink, 'name', sink.__class__.__name__)}' produces()/consumes() raised: {exc}"
-                )
+                msg = f"Sink '{getattr(sink, 'name', sink.__class__.__name__)}' produces()/consumes() raised: {exc}"
                 logger.error(msg)
                 print(f"\n❌ {msg}")
                 raise SystemExit(1)
             if not isinstance(prod, list) or not isinstance(cons, list):
-                msg = (
-                    f"Sink '{getattr(sink, 'name', sink.__class__.__name__)}' produces()/consumes() must return lists."
-                )
+                msg = f"Sink '{getattr(sink, 'name', sink.__class__.__name__)}' produces()/consumes() must return lists."
                 logger.error(msg)
                 print(f"\n❌ {msg}")
                 raise SystemExit(1)

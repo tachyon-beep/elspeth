@@ -111,9 +111,7 @@ class PgVectorQueryClient(VectorQueryClient):
                     # directly assigned to `self._psycopg` (non-module), return no results
                     # to allow DSN handling assertions without executing SQL.
                     if isinstance(self._psycopg, types.ModuleType):
-                        raise RuntimeError(
-                            "psycopg.sql unavailable; refusing to execute raw SQL fallback"
-                        )
+                        raise RuntimeError("psycopg.sql unavailable; refusing to execute raw SQL fallback")
                     return
                 cur.execute(  # nosemgrep: python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query
                     query_sql,

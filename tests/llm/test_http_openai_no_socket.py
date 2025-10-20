@@ -20,6 +20,7 @@ def test_http_openai_client_generate_without_socket(monkeypatch):
     # Patch requests.Session in the module to avoid real network sockets
     def _fake_session():  # noqa: D401
         obj = SimpleNamespace()
+
         # Simulate a successful chat/completions response
         def _post(url, json, headers, timeout):  # noqa: D401, ARG001
             assert url.endswith("/v1/chat/completions")
@@ -33,6 +34,7 @@ def test_http_openai_client_generate_without_socket(monkeypatch):
             return _FakeResponse(payload)
 
         obj.post = _post
+
         def _mount(*_args, **_kwargs):  # noqa: D401
             return None
 

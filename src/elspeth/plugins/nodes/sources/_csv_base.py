@@ -14,7 +14,7 @@ import pandas as pd
 
 from elspeth.core.base.protocols import DataSource
 from elspeth.core.base.schema import DataFrameSchema, infer_schema_from_dataframe, schema_from_config
-from elspeth.core.security import normalize_determinism_level, normalize_security_level
+from elspeth.core.base.types import DeterminismLevel, SecurityLevel
 
 logger = logging.getLogger(__name__)
 
@@ -31,8 +31,8 @@ class BaseCSVDataSource(DataSource):
         dtype: dict[str, Any] | None = None,
         encoding: str = "utf-8",
         on_error: str = "abort",
-        security_level: str | None = None,
-        determinism_level: str | None = None,
+        security_level: str | SecurityLevel | None = None,
+        determinism_level: str | DeterminismLevel | None = None,
         schema: dict[str, str | dict[str, Any]] | None = None,
         infer_schema: bool = True,
         retain_local: bool,  # REQUIRED - no default
@@ -64,8 +64,8 @@ class BaseCSVDataSource(DataSource):
         if on_error not in {"abort", "skip"}:
             raise ValueError("on_error must be 'abort' or 'skip'")
         self.on_error = on_error
-        self.security_level = normalize_security_level(security_level)
-        self.determinism_level = normalize_determinism_level(determinism_level)
+        self.security_level = SecurityLevel.from_string(security_level)
+        self.determinism_level = DeterminismLevel.from_string(determinism_level)
         self.schema_config = schema
         self.infer_schema = infer_schema
         self.retain_local = retain_local

@@ -66,6 +66,7 @@ def test_datasource_registry_azure_blob_validation_error(monkeypatch, tmp_path):
 
     # Stub loader and force validator to raise
     monkeypatch.setattr(mod, "load_blob_config", lambda *a, **k: SimpleNamespace(account_url="https://bad.example.com"))
+
     def _raise(**_k):  # noqa: D401
         raise ValueError("not approved")
 

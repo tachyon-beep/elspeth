@@ -78,4 +78,3 @@ def configure_sink_dry_run(settings: Any, *, enable_live: bool) -> None:
 
 
 __all__ = ["strip_metrics_plugins", "configure_sink_dry_run"]
-

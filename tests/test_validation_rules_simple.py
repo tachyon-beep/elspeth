@@ -72,11 +72,7 @@ def test_validate_plugin_reference_valid():
     def mock_validator(name, options):
         pass  # No errors
 
-    entry = {
-        "plugin": "test_plugin",
-        "security_level": "internal",
-        "options": {}
-    }
+    entry = {"plugin": "test_plugin", "security_level": "internal", "options": {}}
     _validate_plugin_reference(
         report,
         entry,

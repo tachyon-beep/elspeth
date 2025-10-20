@@ -9,7 +9,7 @@ from typing import Any, Mapping
 import pandas as pd
 
 from elspeth.core.base.protocols import Artifact, ArtifactDescriptor, ResultSink
-from elspeth.core.security import normalize_security_level
+from elspeth.core.base.types import SecurityLevel
 from elspeth.core.utils.path_guard import (
     resolve_under_base,
     safe_atomic_write,
@@ -57,7 +57,7 @@ class CsvResultSink(ResultSink):
         if not self.sanitize_formulas:
             logger.warning("CSV sink sanitization disabled; outputs may trigger spreadsheet formulas.")
         self._last_written_path: str | None = None
-        self._security_level: str | None = None
+        self._security_level: SecurityLevel | None = None
         self._sanitization = {
             "enabled": self.sanitize_formulas,
             "guard": self.sanitize_guard,
@@ -161,7 +161,8 @@ class CsvResultSink(ResultSink):
             self._last_written_path = str(target)
 
             if metadata:
-                self._security_level = normalize_security_level(metadata.get("security_level"))
+                level = metadata.get("security_level")
+                self._security_level = level if isinstance(level, SecurityLevel) else SecurityLevel.from_string(level)
             # Emit success event
             if plugin_logger:
                 try:

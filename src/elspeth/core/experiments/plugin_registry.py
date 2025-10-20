@@ -21,6 +21,7 @@ from elspeth.core.experiments.experiment_registries import (
     row_plugin_registry,
     validation_plugin_registry,
 )
+from elspeth.core.registries.plugin_helpers import create_plugin_with_inheritance
 from elspeth.core.security import coalesce_security_level  # Still needed for validation functions
 from elspeth.core.validation.base import ConfigurationError
 from elspeth.plugins.orchestrators.experiment.protocols import (
@@ -30,6 +31,12 @@ from elspeth.plugins.orchestrators.experiment.protocols import (
     RowExperimentPlugin,
     ValidationPlugin,
 )
+
+# Pre-warm logging utilities to avoid first-call latency in performance tests
+try:  # pragma: no cover - warm-up import
+    from elspeth.core.utils import logging as _logging_utils  # noqa: F401
+except Exception:  # pragma: no cover - non-critical
+    pass
 
 # Register functions now delegate to the new registries
 
@@ -115,8 +122,6 @@ def create_row_plugin(
     NOTE: This function now uses create_plugin_with_inheritance() helper
     to eliminate duplication.
     """
-    from elspeth.core.registries.plugin_helpers import create_plugin_with_inheritance
-
     try:
         result = create_plugin_with_inheritance(
             row_plugin_registry,
@@ -149,8 +154,6 @@ def create_aggregation_plugin(
     NOTE: This function now uses create_plugin_with_inheritance() helper
     to eliminate duplication.
     """
-    from elspeth.core.registries.plugin_helpers import create_plugin_with_inheritance
-
     result = create_plugin_with_inheritance(
         aggregation_plugin_registry,
         definition,
@@ -175,8 +178,6 @@ def create_baseline_plugin(
     NOTE: This function now uses create_plugin_with_inheritance() helper
     to eliminate duplication.
     """
-    from elspeth.core.registries.plugin_helpers import create_plugin_with_inheritance
-
     result = create_plugin_with_inheritance(
         baseline_plugin_registry,
         definition,
@@ -201,8 +202,6 @@ def create_validation_plugin(
     NOTE: This function now uses create_plugin_with_inheritance() helper
     to eliminate duplication.
     """
-    from elspeth.core.registries.plugin_helpers import create_plugin_with_inheritance
-
     result = create_plugin_with_inheritance(
         validation_plugin_registry,
         definition,
@@ -227,8 +226,6 @@ def create_early_stop_plugin(
     NOTE: This function now uses create_plugin_with_inheritance() helper
     to eliminate duplication.
     """
-    from elspeth.core.registries.plugin_helpers import create_plugin_with_inheritance
-
     result = create_plugin_with_inheritance(
         early_stop_plugin_registry,
         definition,

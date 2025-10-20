@@ -55,4 +55,3 @@ def test_visual_base_invalid_params():
     # Invalid on_error
     with pytest.raises(ValueError):
         BaseVisualSink(base_path=".", file_stem="x", on_error="noop")
-

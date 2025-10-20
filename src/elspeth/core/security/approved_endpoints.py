@@ -245,9 +245,12 @@ def validate_endpoint(
 
         # Normalize security level to canonical form (handles aliases like "internal" -> "OFFICIAL")
         # Import here to avoid circular dependency
-        from elspeth.core.security import normalize_security_level
+        from elspeth.core.base.types import SecurityLevel
 
-        security_level_normalized = normalize_security_level(security_level)
+        if isinstance(security_level, SecurityLevel):
+            security_level_normalized = security_level.value
+        else:
+            security_level_normalized = SecurityLevel.from_string(security_level).value
 
         # Check if this specific pattern has security level restrictions
         for pattern, allowed_levels in restrictions.items():

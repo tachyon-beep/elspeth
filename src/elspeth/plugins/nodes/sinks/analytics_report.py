@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from elspeth.core.base.protocols import Artifact, ArtifactDescriptor, ResultSink
-from elspeth.core.security import normalize_determinism_level, normalize_security_level
+from elspeth.core.base.types import DeterminismLevel, SecurityLevel
 
 logger = logging.getLogger(__name__)
 
@@ -44,8 +44,8 @@ class AnalyticsReportSink(ResultSink):
         self.include_aggregates = include_aggregates
         self.include_comparisons = include_comparisons
         self._last_written_files: list[Path] = []
-        self._security_level: str | None = None
-        self._determinism_level: str | None = None
+        self._security_level: SecurityLevel | None = None
+        self._determinism_level: DeterminismLevel | None = None
 
     def write(self, results: dict[str, Any], *, metadata: dict[str, Any] | None = None) -> None:
         try:
@@ -70,8 +70,10 @@ class AnalyticsReportSink(ResultSink):
                 written.append(path)
             self._last_written_files = written
             if metadata:
-                self._security_level = normalize_security_level(metadata.get("security_level"))
-                self._determinism_level = normalize_determinism_level(metadata.get("determinism_level"))
+                level = metadata.get("security_level")
+                det = metadata.get("determinism_level")
+                self._security_level = level if isinstance(level, SecurityLevel) else SecurityLevel.from_string(level)
+                self._determinism_level = det if isinstance(det, DeterminismLevel) else DeterminismLevel.from_string(det)
             if plugin_logger:
                 total_bytes = 0
                 for p in written:

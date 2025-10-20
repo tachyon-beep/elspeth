@@ -8,8 +8,9 @@ from dataclasses import dataclass, field
 from typing import Any, Iterable, Mapping, cast
 
 from elspeth.core.base.protocols import Artifact, ArtifactDescriptor, ResultSink
+from elspeth.core.base.types import SecurityLevel
 from elspeth.core.pipeline.artifacts import validate_artifact_type
-from elspeth.core.security import is_security_level_allowed, normalize_security_level
+from elspeth.core.security import is_security_level_allowed
 
 VALID_REQUEST_MODES = {"single", "all"}
 logger = logging.getLogger(__name__)
@@ -66,7 +67,7 @@ class SinkBinding:
     original_index: int
     produces: list[ArtifactDescriptor] = field(default_factory=list)
     consumes: list[ArtifactRequest] = field(default_factory=list)
-    security_level: str | None = None
+    security_level: SecurityLevel | None = None
 
 
 # pylint: disable=too-few-public-methods
@@ -89,7 +90,7 @@ class ArtifactStore:
         artifact.persist = descriptor.persist or artifact.persist
         artifact.schema_id = artifact.schema_id or descriptor.schema_id
         level = artifact.security_level or descriptor.security_level or binding.security_level
-        artifact.security_level = normalize_security_level(level)
+        artifact.security_level = level if isinstance(level, SecurityLevel) else SecurityLevel.from_string(level)
         self._by_id[artifact_id] = artifact
 
         alias_key = descriptor.alias or descriptor.name
@@ -159,7 +160,11 @@ class ArtifactPipeline:  # pylint: disable=too-many-instance-attributes
 
         if binding.security_level is None or not str(binding.security_level).strip():
             raise ValueError(f"Sink '{binding.id}' must declare a security_level")
-        binding.security_level = normalize_security_level(binding.security_level)
+        binding.security_level = (
+            binding.security_level
+            if isinstance(binding.security_level, SecurityLevel)
+            else SecurityLevel.from_string(binding.security_level)
+        )
         artifact_section = binding.artifact_config or {}
         produces_config = artifact_section.get("produces", []) or []
         for entry in produces_config:
@@ -169,7 +174,11 @@ class ArtifactPipeline:  # pylint: disable=too-many-instance-attributes
                 schema_id=entry.get("schema_id"),
                 persist=entry.get("persist", False),
                 alias=entry.get("alias"),
-                security_level=normalize_security_level(entry.get("security_level")),
+                security_level=(
+                    entry.get("security_level")
+                    if isinstance(entry.get("security_level"), SecurityLevel)
+                    else SecurityLevel.from_string(entry.get("security_level"))
+                ),
             )
             validate_artifact_type(descriptor.type)
             binding.produces.append(descriptor)
@@ -180,7 +189,11 @@ class ArtifactPipeline:  # pylint: disable=too-many-instance-attributes
             if produced_iterable:
                 for descriptor in cast(Iterable[ArtifactDescriptor], produced_iterable):
                     validate_artifact_type(descriptor.type)
-                    descriptor.security_level = normalize_security_level(descriptor.security_level)
+                    descriptor.security_level = (
+                        descriptor.security_level
+                        if isinstance(descriptor.security_level, SecurityLevel)
+                        else SecurityLevel.from_string(descriptor.security_level)
+                    )
                     binding.produces.append(descriptor)
 
         consumes_config = list(artifact_section.get("consumes", []) or [])
@@ -357,7 +370,7 @@ class ArtifactPipeline:  # pylint: disable=too-many-instance-attributes
                             if not is_security_level_allowed(artifact.security_level, clearance):
                                 raise PermissionError(
                                     f"Sink '{binding.id}' with clearance '{clearance}' cannot consume "
-                                    f"artifact '{artifact.id}' at level '{normalize_security_level(artifact.security_level)}'"
+                                    f"artifact '{artifact.id}' at level '{artifact.security_level}'"
                                 )
 
                 prepare = getattr(binding.sink, "prepare_artifacts", None)

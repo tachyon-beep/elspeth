@@ -39,15 +39,7 @@ def test_score_delta_empty_stats(context):
     assert result == {}
 
     # Only baseline has stats
-    baseline = {
-        "aggregates": {
-            "score_stats": {
-                "criteria": {
-                    "accuracy": {"mean": 0.8}
-                }
-            }
-        }
-    }
+    baseline = {"aggregates": {"score_stats": {"criteria": {"accuracy": {"mean": 0.8}}}}}
     variant = {"aggregates": {}}
     result = plugin.compare(baseline, variant)
     assert result == {}

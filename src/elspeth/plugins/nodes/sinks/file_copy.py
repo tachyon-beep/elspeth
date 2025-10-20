@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Mapping
 
 from elspeth.core.base.protocols import Artifact, ResultSink
-from elspeth.core.security import normalize_determinism_level, normalize_security_level
+from elspeth.core.base.types import DeterminismLevel, SecurityLevel
 from elspeth.core.utils.path_guard import resolve_under_base, safe_atomic_write
 
 logger = logging.getLogger(__name__)
@@ -24,8 +24,8 @@ class FileCopySink(ResultSink):
         self._source_artifact: Artifact | None = None
         self._written_path: Path | None = None
         self._output_type: str | None = None
-        self._security_level: str | None = None
-        self._determinism_level: str | None = None
+        self._security_level: SecurityLevel | None = None
+        self._determinism_level: DeterminismLevel | None = None
         # Configure allowed base path for containment checks
         try:
             default_base = self.destination.parent.resolve()
@@ -100,8 +100,10 @@ class FileCopySink(ResultSink):
                 metadata={"source": str(src_path), "dest": str(target)},
             )
         if metadata and metadata.get("security_level"):
-            self._security_level = normalize_security_level(metadata.get("security_level"))
-            self._determinism_level = normalize_determinism_level(metadata.get("determinism_level"))
+            level = metadata.get("security_level")
+            det = metadata.get("determinism_level")
+            self._security_level = level if isinstance(level, SecurityLevel) else SecurityLevel.from_string(level)
+            self._determinism_level = det if isinstance(det, DeterminismLevel) else DeterminismLevel.from_string(det)
 
     def collect_artifacts(self) -> dict[str, Artifact]:  # pragma: no cover - optional
         if not self._written_path:

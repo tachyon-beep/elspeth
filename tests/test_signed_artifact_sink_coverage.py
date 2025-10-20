@@ -39,23 +39,18 @@ def sample_results():
             {"input": "test1", "output": "result1"},
             {"input": "test2", "output": "result2"},
         ],
-        "aggregates": {
-            "score_stats": {"criteria": {"accuracy": {"mean": 0.85}}}
-        },
+        "aggregates": {"score_stats": {"criteria": {"accuracy": {"mean": 0.85}}}},
         "cost_summary": {
             "total_cost": 1.23,
             "total_tokens": 1000,
-        }
+        },
     }
 
 
 def test_invalid_on_error_raises():
     """Test that invalid on_error raises ValueError - line 39."""
     with pytest.raises(ValueError, match="on_error must be 'abort' or 'skip'"):
-        SignedArtifactSink(
-            base_path="/tmp/test",
-            on_error="invalid"
-        )
+        SignedArtifactSink(base_path="/tmp/test", on_error="invalid")
 
 
 def test_plugin_logger_event_logging(temp_output_dir, sample_results, monkeypatch):
@@ -97,7 +92,7 @@ def test_on_error_skip_recovery(temp_output_dir, caplog):
         base_path=str(temp_output_dir),
         bundle_name="test_bundle",
         on_error="skip",
-        key_env="NONEXISTENT_KEY_VAR"  # Will fail to find key
+        key_env="NONEXISTENT_KEY_VAR",  # Will fail to find key
     )
 
     # Mock plugin_logger
@@ -159,6 +154,7 @@ def test_cost_summary_in_manifest(temp_output_dir, sample_results, monkeypatch):
 def test_key_resolution_from_legacy_env(temp_output_dir, monkeypatch, caplog):
     """Test key resolution from legacy DMP_SIGNING_KEY - line 166."""
     import logging
+
     # Set legacy env var
     monkeypatch.setenv("DMP_SIGNING_KEY", "legacy-key")
 
@@ -227,8 +223,10 @@ def test_rsa_public_key_fingerprint(temp_output_dir, monkeypatch):
     )
 
     # Mock the signature generation and fingerprint
-    with patch("elspeth.plugins.nodes.sinks.signed.generate_signature") as mock_sig, \
-         patch("elspeth.plugins.nodes.sinks.signed.public_key_fingerprint") as mock_fp:
+    with (
+        patch("elspeth.plugins.nodes.sinks.signed.generate_signature") as mock_sig,
+        patch("elspeth.plugins.nodes.sinks.signed.public_key_fingerprint") as mock_fp,
+    ):
         mock_sig.return_value = "mock_signature"
         mock_fp.return_value = "sha256:abcd1234"
 
@@ -260,8 +258,10 @@ def test_ecdsa_public_key_from_private_key_bytes(temp_output_dir):
         bundle_name="ecdsa_test",
     )
 
-    with patch("elspeth.plugins.nodes.sinks.signed.generate_signature") as mock_sig, \
-         patch("elspeth.plugins.nodes.sinks.signed.public_key_fingerprint") as mock_fp:
+    with (
+        patch("elspeth.plugins.nodes.sinks.signed.generate_signature") as mock_sig,
+        patch("elspeth.plugins.nodes.sinks.signed.public_key_fingerprint") as mock_fp,
+    ):
         mock_sig.return_value = "mock_signature"
         mock_fp.return_value = "sha256:ecdsa_fp"
 
@@ -285,8 +285,10 @@ def test_public_key_fingerprint_exception_handled(temp_output_dir, monkeypatch):
         bundle_name="exception_test",
     )
 
-    with patch("elspeth.plugins.nodes.sinks.signed.generate_signature") as mock_sig, \
-         patch("elspeth.plugins.nodes.sinks.signed.public_key_fingerprint") as mock_fp:
+    with (
+        patch("elspeth.plugins.nodes.sinks.signed.generate_signature") as mock_sig,
+        patch("elspeth.plugins.nodes.sinks.signed.public_key_fingerprint") as mock_fp,
+    ):
         mock_sig.return_value = "mock_signature"
         mock_fp.side_effect = Exception("Fingerprint error")
 

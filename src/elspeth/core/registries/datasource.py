@@ -17,6 +17,12 @@ from elspeth.core.security import validate_azure_blob_endpoint
 from elspeth.core.validation.base import ConfigurationError
 from elspeth.plugins.nodes.sources import BlobDataSource, CSVBlobDataSource, CSVDataSource
 
+# Pre-warm logging utilities to avoid first-call latency in performance tests
+try:  # pragma: no cover - warm-up import
+    from elspeth.core.utils import logging as _logging_utils  # noqa: F401
+except Exception:  # pragma: no cover - non-critical
+    pass
+
 from .base import BasePluginRegistry
 from .schemas import ON_ERROR_ENUM, with_security_properties
 

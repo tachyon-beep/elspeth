@@ -143,12 +143,12 @@ def test_validate_suite_invalid_rate_limiter():
 
         exp1 = suite_path / "exp1"
         exp1.mkdir()
-        (exp1 / "config.json").write_text('''{
+        (exp1 / "config.json").write_text("""{
             "name": "exp1",
             "is_baseline": true,
             "prompt_system": "test",
             "rate_limiter": {"name": "unknown_limiter", "options": {}}
-        }''')
+        }""")
 
         result = validate_suite(suite_path)
 
@@ -163,12 +163,12 @@ def test_validate_suite_invalid_cost_tracker():
 
         exp1 = suite_path / "exp1"
         exp1.mkdir()
-        (exp1 / "config.json").write_text('''{
+        (exp1 / "config.json").write_text("""{
             "name": "exp1",
             "is_baseline": true,
             "prompt_system": "test",
             "cost_tracker": {"name": "unknown_tracker", "options": {}}
-        }''')
+        }""")
 
         result = validate_suite(suite_path)
 
@@ -183,12 +183,12 @@ def test_validate_suite_concurrency_not_mapping():
 
         exp1 = suite_path / "exp1"
         exp1.mkdir()
-        (exp1 / "config.json").write_text('''{
+        (exp1 / "config.json").write_text("""{
             "name": "exp1",
             "is_baseline": true,
             "prompt_system": "test",
             "concurrency": "not_a_mapping"
-        }''')
+        }""")
 
         result = validate_suite(suite_path)
 
@@ -209,21 +209,21 @@ def test_validate_suite_max_tokens_warnings():
         # Experiment with max_tokens <= 0
         exp1 = suite_path / "exp1"
         exp1.mkdir()
-        (exp1 / "config.json").write_text('''{
+        (exp1 / "config.json").write_text("""{
             "name": "exp1",
             "is_baseline": true,
             "max_tokens": 0,
             "prompt_system": "test"
-        }''')
+        }""")
 
         # Experiment with max_tokens > 4096
         exp2 = suite_path / "exp2"
         exp2.mkdir()
-        (exp2 / "config.json").write_text('''{
+        (exp2 / "config.json").write_text("""{
             "name": "exp2",
             "max_tokens": 8000,
             "prompt_system": "test"
-        }''')
+        }""")
 
         result = validate_suite(suite_path)
 
@@ -245,13 +245,13 @@ def test_validate_suite_no_config_json():
         # Create valid experiment
         exp2 = suite_path / "exp2"
         exp2.mkdir()
-        (exp2 / "config.json").write_text('''{
+        (exp2 / "config.json").write_text("""{
             "name": "exp2",
             "is_baseline": true,
             "prompt_system": "test",
             "temperature": 0.0,
             "max_tokens": 100
-        }''')
+        }""")
 
         result = validate_suite(suite_path)
 
