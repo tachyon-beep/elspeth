@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 # Avoid top-level import of logging utilities to prevent circular imports
 from elspeth.core.base.types import DeterminismLevel, SecurityLevel
+from elspeth.core.security import ensure_determinism_level, ensure_security_level
 
 
 class PluginContext(BaseModel):
@@ -55,18 +56,14 @@ class PluginContext(BaseModel):
     @field_validator("security_level", mode="before")
     @classmethod
     def parse_security_level(cls, v: SecurityLevel | str | None) -> SecurityLevel:
-        """Accept strings or enum; convert via SecurityLevel.from_string."""
-        if isinstance(v, SecurityLevel):
-            return v
-        return SecurityLevel.from_string(v)
+        """Accept strings or enum; normalize via security.ensure_security_level."""
+        return ensure_security_level(v)
 
     @field_validator("determinism_level", mode="before")
     @classmethod
     def parse_determinism_level(cls, v: DeterminismLevel | str | None) -> DeterminismLevel:
-        """Accept strings or enum; convert via DeterminismLevel.from_string."""
-        if isinstance(v, DeterminismLevel):
-            return v
-        return DeterminismLevel.from_string(v)
+        """Accept strings or enum; normalize via security.ensure_determinism_level."""
+        return ensure_determinism_level(v)
 
     def derive(
         self,

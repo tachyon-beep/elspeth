@@ -72,7 +72,9 @@ class SecurityLevel(str, Enum):
         if value is None or not str(value).strip():
             return cls.UNOFFICIAL
 
-        normalized = str(value).strip().upper().replace("-", "_").replace(" ", "_")
+        # Replace punctuation sequences with single underscore
+        # Order matters: replace ": " (colon-space) first to avoid double underscores
+        normalized = str(value).strip().upper().replace(": ", "_").replace("-", "_").replace(" ", "_").replace(":", "_")
 
         # Handle legacy/alias mappings
         aliases = {

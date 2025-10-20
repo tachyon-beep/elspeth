@@ -125,7 +125,7 @@ def schema_from_config(
 
     # Pydantic's create_model() has complex overloads that mypy cannot fully resolve
     # when using **fields with dynamic field definitions. This is safe at runtime.
-    return create_model(  # type: ignore[arg-type,call-overload,no-any-return]
+    return create_model(  # type: ignore[call-overload,no-any-return]
         schema_name,
         __base__=DataFrameSchema,
         __config__=DataFrameSchema.model_config,  # Explicit v2 config inheritance

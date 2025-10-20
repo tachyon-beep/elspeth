@@ -10,6 +10,14 @@ import pandas as pd
 logger = logging.getLogger(__name__)
 
 
+# Sinks that support automatic folder_path injection when publishing artifacts.
+# TODO: Replace with capability-based system when sink registry supports plugin capabilities.
+# See: https://github.com/tachyon-beep/elspeth/pull/7#discussion_r2442469169
+_SINKS_WITH_AUTO_FOLDER_PATH = frozenset([
+    "azure_devops_artifact_repo",
+])
+
+
 def ensure_artifacts_dir(base: Path | None) -> Path:
     ts = pd.Timestamp.utcnow().strftime("%Y%m%dT%H%M%SZ")
     root = base if base else Path("artifacts")
@@ -61,7 +69,7 @@ def create_signed_bundle(
         from elspeth.plugins.nodes.sinks.reproducibility_bundle import ReproducibilityBundleSink
     except ImportError as exc:  # pragma: no cover - optional import
         logger.warning("Reproducibility bundle unavailable: %s", exc)
-        return
+        return None
     bundle_dir = art_dir / f"{name}_bundle"
     bundle_dir.mkdir(parents=True, exist_ok=True)
     sink = ReproducibilityBundleSink(
@@ -104,7 +112,8 @@ def maybe_publish_artifacts_bundle(
         except ValueError as exc:
             logger.warning("artifact sink config invalid; skipping publish: %s", exc)
             return
-    if plugin_name == "azure_devops_artifact_repo" and not opts.get("folder_path"):
+    # Auto-inject folder_path for sinks that support it
+    if plugin_name in _SINKS_WITH_AUTO_FOLDER_PATH and not opts.get("folder_path"):
         opts["folder_path"] = str(bundle_dir)
     try:
         from elspeth.core.validation.base import ConfigurationError as configuration_error  # local import to avoid cycles

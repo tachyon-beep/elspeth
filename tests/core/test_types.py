@@ -19,6 +19,10 @@ from elspeth.core.base.types import (
         ("official", SecurityLevel.OFFICIAL),
         ("sensitive", SecurityLevel.OFFICIAL_SENSITIVE),
         ("official_sensitive", SecurityLevel.OFFICIAL_SENSITIVE),
+        ("OFFICIAL: SENSITIVE", SecurityLevel.OFFICIAL_SENSITIVE),  # Canonical PSPF string
+        ("official: sensitive", SecurityLevel.OFFICIAL_SENSITIVE),  # Case-insensitive
+        ("OFFICIAL-SENSITIVE", SecurityLevel.OFFICIAL_SENSITIVE),  # Hyphenated variant
+        ("official-sensitive", SecurityLevel.OFFICIAL_SENSITIVE),  # Hyphenated, case-insensitive
         ("confidential", SecurityLevel.PROTECTED),
         ("protected", SecurityLevel.PROTECTED),
         ("secret", SecurityLevel.SECRET),

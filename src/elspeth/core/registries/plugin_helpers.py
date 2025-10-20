@@ -22,6 +22,7 @@ from elspeth.core.base.types import SecurityLevel
 from elspeth.core.security import (
     coalesce_determinism_level,
     coalesce_security_level,
+    ensure_security_level,
 )
 from elspeth.core.validation.base import ConfigurationError
 
@@ -151,7 +152,7 @@ def create_plugin_with_inheritance(
 
     level = coalesce_security_level(child_sec_level)
     if parent_sec_level is not None:
-        parent_level = parent_sec_level if isinstance(parent_sec_level, SecurityLevel) else SecurityLevel.from_string(parent_sec_level)
+        parent_level = parent_sec_level if isinstance(parent_sec_level, SecurityLevel) else ensure_security_level(parent_sec_level)
         if level < parent_level:
             child_text = level.value if isinstance(level, SecurityLevel) else str(level)
             parent_text = parent_level.value if isinstance(parent_level, SecurityLevel) else str(parent_level)
