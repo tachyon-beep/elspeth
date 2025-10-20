@@ -213,7 +213,7 @@ def test_score_significance_fdr_with_statsmodels():
         ]
     }
 
-    with patch("elspeth.plugins.experiments.baseline.score_significance.fdrcorrection") as mock_fdr:
+    with patch("statsmodels.stats.multitest.fdrcorrection") as mock_fdr:
         mock_fdr.return_value = ([True, True], [0.03, 0.04])
         result = plugin.compare(baseline, variant)
 
