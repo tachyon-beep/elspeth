@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from elspeth.core.base.types import DeterminismLevel, SecurityLevel
+from elspeth.core.security import ensure_determinism_level, ensure_security_level
 from elspeth.core.security import (
     coalesce_determinism_level,
     coalesce_security_level,
@@ -12,13 +13,13 @@ from elspeth.core.security import (
 )
 
 
-def test_security_level_from_string_aliases_and_canonical_values():
+def test_security_level_aliases_and_canonical_values():
     # Aliases map to PSPF canonical enums/strings
-    assert SecurityLevel.from_string("internal") == SecurityLevel.OFFICIAL
-    assert SecurityLevel.from_string("public") == SecurityLevel.UNOFFICIAL
+    assert ensure_security_level("internal") == SecurityLevel.OFFICIAL
+    assert ensure_security_level("public") == SecurityLevel.UNOFFICIAL
     # Already canonical strings remain unchanged (case-insensitive input)
-    assert SecurityLevel.from_string("official") == SecurityLevel.OFFICIAL
-    assert SecurityLevel.from_string("PROTECTED") == SecurityLevel.PROTECTED
+    assert ensure_security_level("official") == SecurityLevel.OFFICIAL
+    assert ensure_security_level("PROTECTED") == SecurityLevel.PROTECTED
 
 
 def test_is_security_level_allowed_hierarchy():
@@ -49,7 +50,7 @@ def test_coalesce_security_level_agrees_or_raises():
 
 
 def test_determinism_resolve_and_coalesce():
-    assert DeterminismLevel.from_string("HIGH") == DeterminismLevel.HIGH
+    assert ensure_determinism_level("HIGH") == DeterminismLevel.HIGH
     assert resolve_determinism_level("guaranteed", "high") == DeterminismLevel.HIGH  # least deterministic wins
     assert coalesce_determinism_level("guaranteed", "GUARANTEED") == DeterminismLevel.GUARANTEED
     with pytest.raises(ValueError):

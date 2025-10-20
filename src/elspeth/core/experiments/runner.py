@@ -15,6 +15,7 @@ import pandas as pd
 from elspeth.core.base.protocols import LLMClientProtocol, LLMMiddleware, LLMRequest, ResultSink
 from elspeth.core.base.schema import DataFrameSchema, SchemaViolation
 from elspeth.core.base.types import SecurityLevel
+from elspeth.core.security import ensure_security_level
 from elspeth.core.controls import CostTracker, RateLimiter
 from elspeth.core.experiments.plugin_registry import create_early_stop_plugin
 from elspeth.core.experiments.validation import validate_plugin_schemas
@@ -537,7 +538,7 @@ class ExperimentRunner:
             sink_id = f"{base_id}:{index}"
             security_level = getattr(sink, "_elspeth_security_level", None)
             if security_level is not None and not isinstance(security_level, SecurityLevel):
-                security_level = SecurityLevel.from_string(security_level)
+                security_level = ensure_security_level(security_level)
             bindings.append(
                 SinkBinding(
                     id=sink_id,

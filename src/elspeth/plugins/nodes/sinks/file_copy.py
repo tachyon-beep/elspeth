@@ -9,6 +9,7 @@ from typing import Mapping
 
 from elspeth.core.base.protocols import Artifact, ResultSink
 from elspeth.core.base.types import DeterminismLevel, SecurityLevel
+from elspeth.core.security import ensure_determinism_level, ensure_security_level
 from elspeth.core.utils.path_guard import resolve_under_base, safe_atomic_write
 
 logger = logging.getLogger(__name__)
@@ -102,8 +103,8 @@ class FileCopySink(ResultSink):
         if metadata and metadata.get("security_level"):
             level = metadata.get("security_level")
             det = metadata.get("determinism_level")
-            self._security_level = level if isinstance(level, SecurityLevel) else SecurityLevel.from_string(level)
-            self._determinism_level = det if isinstance(det, DeterminismLevel) else DeterminismLevel.from_string(det)
+            self._security_level = level if isinstance(level, SecurityLevel) else ensure_security_level(level)
+            self._determinism_level = det if isinstance(det, DeterminismLevel) else ensure_determinism_level(det)
 
     def collect_artifacts(self) -> dict[str, Artifact]:  # pragma: no cover - optional
         if not self._written_path:

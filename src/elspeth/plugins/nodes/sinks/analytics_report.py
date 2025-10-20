@@ -9,6 +9,7 @@ from typing import Any, Mapping, Sequence
 
 from elspeth.core.base.protocols import Artifact, ArtifactDescriptor, ResultSink
 from elspeth.core.base.types import DeterminismLevel, SecurityLevel
+from elspeth.core.security import ensure_determinism_level, ensure_security_level
 
 logger = logging.getLogger(__name__)
 
@@ -72,8 +73,8 @@ class AnalyticsReportSink(ResultSink):
             if metadata:
                 level = metadata.get("security_level")
                 det = metadata.get("determinism_level")
-                self._security_level = level if isinstance(level, SecurityLevel) else SecurityLevel.from_string(level)
-                self._determinism_level = det if isinstance(det, DeterminismLevel) else DeterminismLevel.from_string(det)
+                self._security_level = level if isinstance(level, SecurityLevel) else ensure_security_level(level)
+                self._determinism_level = det if isinstance(det, DeterminismLevel) else ensure_determinism_level(det)
             if plugin_logger:
                 total_bytes = 0
                 for p in written:

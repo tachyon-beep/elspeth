@@ -40,6 +40,7 @@ import yaml
 
 from elspeth.core.base.plugin_context import PluginContext
 from elspeth.core.base.types import DeterminismLevel, SecurityLevel
+from elspeth.core.security import ensure_determinism_level, ensure_security_level
 from elspeth.core.experiments.runner import ExperimentRunner
 from elspeth.core.pipeline.artifact_pipeline import ArtifactPipeline, SinkBinding
 from elspeth.core.registries.datasource import datasource_registry
@@ -58,21 +59,21 @@ def _context_from_defaults(job: Mapping[str, Any]) -> PluginContext:
         candidates: list[SecurityLevel] = []
         ds = job.get("datasource") or {}
         if ds.get("security_level") is not None:
-            candidates.append(SecurityLevel.from_string(ds.get("security_level")))
+            candidates.append(ensure_security_level(ds.get("security_level")))
         llm = job.get("llm") or {}
         if llm.get("security_level") is not None:
-            candidates.append(SecurityLevel.from_string(llm.get("security_level")))
+            candidates.append(ensure_security_level(llm.get("security_level")))
         for entry in job.get("sinks", []) or []:
             if entry.get("security_level") is not None:
-                candidates.append(SecurityLevel.from_string(entry.get("security_level")))
+                candidates.append(ensure_security_level(entry.get("security_level")))
         if candidates:
             # Choose the most restrictive level (enum comparison)
             sec = max(candidates)
         else:
-            sec = SecurityLevel.from_string(None)
+            sec = ensure_security_level(None)
     else:
-        sec = SecurityLevel.from_string(job_sec)
-    det = DeterminismLevel.from_string(job.get("determinism_level"))
+        sec = ensure_security_level(job_sec)
+    det = ensure_determinism_level(job.get("determinism_level"))
     return PluginContext(
         plugin_name="job",
         plugin_kind="orchestrator",
@@ -131,7 +132,7 @@ def _build_sink_bindings(sinks: Sequence[Any], *, default_context: PluginContext
             # Fall back to plugin context if present; otherwise use job-level
             security_level = getattr(getattr(sink, "plugin_context", None), "security_level", default_context.security_level)
         if security_level is not None and not isinstance(security_level, SecurityLevel):
-            security_level = SecurityLevel.from_string(security_level)
+            security_level = ensure_security_level(security_level)
         bindings.append(
             SinkBinding(
                 id=sink_id,

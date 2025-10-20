@@ -10,7 +10,7 @@ from typing import Any, Iterable, Mapping, cast
 from elspeth.core.base.protocols import Artifact, ArtifactDescriptor, ResultSink
 from elspeth.core.base.types import SecurityLevel
 from elspeth.core.pipeline.artifacts import validate_artifact_type
-from elspeth.core.security import is_security_level_allowed
+from elspeth.core.security import ensure_security_level, is_security_level_allowed
 
 VALID_REQUEST_MODES = {"single", "all"}
 logger = logging.getLogger(__name__)
@@ -90,7 +90,7 @@ class ArtifactStore:
         artifact.persist = descriptor.persist or artifact.persist
         artifact.schema_id = artifact.schema_id or descriptor.schema_id
         level = artifact.security_level or descriptor.security_level or binding.security_level
-        artifact.security_level = level if isinstance(level, SecurityLevel) else SecurityLevel.from_string(level)
+        artifact.security_level = level if isinstance(level, SecurityLevel) else ensure_security_level(level)
         self._by_id[artifact_id] = artifact
 
         alias_key = descriptor.alias or descriptor.name
@@ -163,7 +163,7 @@ class ArtifactPipeline:  # pylint: disable=too-many-instance-attributes
         binding.security_level = (
             binding.security_level
             if isinstance(binding.security_level, SecurityLevel)
-            else SecurityLevel.from_string(binding.security_level)
+            else ensure_security_level(binding.security_level)
         )
         artifact_section = binding.artifact_config or {}
         produces_config = artifact_section.get("produces", []) or []
@@ -177,7 +177,7 @@ class ArtifactPipeline:  # pylint: disable=too-many-instance-attributes
                 security_level=(
                     entry.get("security_level")
                     if isinstance(entry.get("security_level"), SecurityLevel)
-                    else SecurityLevel.from_string(entry.get("security_level"))
+                    else ensure_security_level(entry.get("security_level"))
                 ),
             )
             validate_artifact_type(descriptor.type)
@@ -192,7 +192,7 @@ class ArtifactPipeline:  # pylint: disable=too-many-instance-attributes
                     descriptor.security_level = (
                         descriptor.security_level
                         if isinstance(descriptor.security_level, SecurityLevel)
-                        else SecurityLevel.from_string(descriptor.security_level)
+                        else ensure_security_level(descriptor.security_level)
                     )
                     binding.produces.append(descriptor)
 

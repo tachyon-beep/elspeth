@@ -13,6 +13,7 @@ from openpyxl import Workbook  # type: ignore[import-untyped]
 
 from elspeth.core.base.protocols import Artifact, ArtifactDescriptor, ResultSink
 from elspeth.core.base.types import DeterminismLevel, SecurityLevel
+from elspeth.core.security import ensure_determinism_level, ensure_security_level
 from elspeth.core.utils.path_guard import resolve_under_base, safe_atomic_write
 from elspeth.plugins.nodes.sinks._sanitize import sanitize_cell
 
@@ -154,8 +155,8 @@ class ExcelResultSink(ResultSink):
             if metadata:
                 level = metadata.get("security_level")
                 det = metadata.get("determinism_level")
-                self._security_level = level if isinstance(level, SecurityLevel) else SecurityLevel.from_string(level)
-                self._determinism_level = det if isinstance(det, DeterminismLevel) else DeterminismLevel.from_string(det)
+                self._security_level = level if isinstance(level, SecurityLevel) else ensure_security_level(level)
+                self._determinism_level = det if isinstance(det, DeterminismLevel) else ensure_determinism_level(det)
             if plugin_logger:
                 try:
                     size = Path(self._last_workbook_path).stat().st_size if self._last_workbook_path else 0

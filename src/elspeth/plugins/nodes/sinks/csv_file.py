@@ -10,6 +10,7 @@ import pandas as pd
 
 from elspeth.core.base.protocols import Artifact, ArtifactDescriptor, ResultSink
 from elspeth.core.base.types import SecurityLevel
+from elspeth.core.security import ensure_security_level
 from elspeth.core.utils.path_guard import (
     resolve_under_base,
     safe_atomic_write,
@@ -162,7 +163,7 @@ class CsvResultSink(ResultSink):
 
             if metadata:
                 level = metadata.get("security_level")
-                self._security_level = level if isinstance(level, SecurityLevel) else SecurityLevel.from_string(level)
+                self._security_level = level if isinstance(level, SecurityLevel) else ensure_security_level(level)
             # Emit success event
             if plugin_logger:
                 try:
