@@ -107,7 +107,7 @@ def test_blob_datasource_without_config_or_url(test_context):
     # Should not raise validation errors, but may fail during datasource construction
     # This tests the path where neither config_path nor account_url are provided
     try:
-        datasource = _create_blob_datasource(options, test_context)
+        _datasource = _create_blob_datasource(options, test_context)
     except Exception:
         # Expected to fail during BlobDataSource construction due to missing required params
         pass

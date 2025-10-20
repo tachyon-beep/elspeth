@@ -330,7 +330,7 @@ def test_score_significance_on_error_skip():
             {"metrics": {"scores": {"accuracy": 0.92}}},
         ]
     }
-    result = plugin.compare(baseline, variant)
+    _result = plugin.compare(baseline, variant)
     # Should complete without error
 
 
@@ -371,7 +371,7 @@ def test_score_significance_auto_family_size():
             {"metrics": {"scores": {"accuracy": 0.92, "precision": 0.90}}},
         ]
     }
-    result = plugin.compare(baseline, variant)
+    _result = plugin.compare(baseline, variant)
 
     # Should automatically determine family_size based on number of valid p_values
     # (which should be 2 in this case)

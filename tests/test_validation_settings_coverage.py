@@ -97,7 +97,7 @@ def test_empty_sinks_with_no_fallback(temp_settings_file):
     }
     settings_file = temp_settings_file(settings)
 
-    report = validate_settings(settings_file)
+    _report = validate_settings(settings_file)
     # Should be valid (empty list is still a list)
     # Error only if sinks are completely missing
 
@@ -433,7 +433,7 @@ def test_prompt_pack_with_none_prompts(temp_settings_file):
     }
     settings_file = temp_settings_file(settings)
 
-    report = validate_settings(settings_file)
+    _report = validate_settings(settings_file)
     # None prompts is OK (pack might only provide plugins)
     # Errors only if prompts is wrong type
 
