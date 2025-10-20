@@ -68,6 +68,7 @@ def test_validate_schemas_fails_on_incompatible_plugin_schema(monkeypatch):
     register_row_plugin("require_b", factory_missing)
 
     df = pd.DataFrame({"x": [1]})
+
     # Attach datasource schema (x only)
     class DS(DataFrameSchema):  # noqa: N801
         x: int
@@ -127,4 +128,3 @@ def test_validate_schemas_succeeds_with_compatible_plugin_schema(monkeypatch, ca
     cli.run(args)
     out = capsys.readouterr().out
     assert "Schema validation successful" in out
-

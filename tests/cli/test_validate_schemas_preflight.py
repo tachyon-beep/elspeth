@@ -96,4 +96,3 @@ def test_validate_schemas_enforces_sink_declarations(monkeypatch):
     args = parser.parse_args(["validate-schemas", "--settings", "cfg.yaml", "--profile", "default"])
     with pytest.raises(SystemExit):
         cli.run(args)
-

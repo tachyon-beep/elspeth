@@ -70,4 +70,3 @@ def test_assemble_suite_defaults_merges_optional_and_mappings(tmp_path: Path):
     assert defaults["llm_middleware_defs"]
     assert defaults["rate_limiter"]
     assert defaults["cost_tracker"]
-

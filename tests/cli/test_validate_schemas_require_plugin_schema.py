@@ -177,7 +177,9 @@ def test_agg_plugin_requires_input_schema(monkeypatch):
         cli.run(args)
 
     # Providing schema succeeds
-    settings_ok = _mk_settings(df, agg_plugins=[{"name": "agg_has_schema", "security_level": "OFFICIAL", "determinism_level": "guaranteed"}])
+    settings_ok = _mk_settings(
+        df, agg_plugins=[{"name": "agg_has_schema", "security_level": "OFFICIAL", "determinism_level": "guaranteed"}]
+    )
     monkeypatch.setattr(cli, "load_settings", lambda *a, **k: settings_ok)
     args_ok = parser.parse_args(["validate-schemas", "--settings", "cfg.yaml", "--profile", "default"])
     cli.run(args_ok)
@@ -220,7 +222,9 @@ def test_validation_plugin_requires_input_schema(monkeypatch):
     df = pd.DataFrame({"x": [1]})
     df.attrs["schema"] = DS
 
-    settings_missing = _mk_settings(df, val_plugins=[{"name": "val_needs_schema", "security_level": "OFFICIAL", "determinism_level": "guaranteed"}])
+    settings_missing = _mk_settings(
+        df, val_plugins=[{"name": "val_needs_schema", "security_level": "OFFICIAL", "determinism_level": "guaranteed"}]
+    )
     monkeypatch.setattr(cli, "load_settings", lambda *a, **k: settings_missing)
     monkeypatch.setattr(cli, "validate_settings", lambda *a, **k: ValidationReport())
     parser = cli.build_parser()
@@ -228,7 +232,9 @@ def test_validation_plugin_requires_input_schema(monkeypatch):
     with pytest.raises(SystemExit):
         cli.run(args)
 
-    settings_ok = _mk_settings(df, val_plugins=[{"name": "val_has_schema", "security_level": "OFFICIAL", "determinism_level": "guaranteed"}])
+    settings_ok = _mk_settings(
+        df, val_plugins=[{"name": "val_has_schema", "security_level": "OFFICIAL", "determinism_level": "guaranteed"}]
+    )
     monkeypatch.setattr(cli, "load_settings", lambda *a, **k: settings_ok)
     args_ok = parser.parse_args(["validate-schemas", "--settings", "cfg.yaml", "--profile", "default"])
     cli.run(args_ok)
