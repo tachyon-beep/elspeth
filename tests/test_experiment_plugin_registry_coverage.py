@@ -31,7 +31,7 @@ def test_context():
     """Create test plugin context."""
     return PluginContext(
         security_level="internal",
-        determinism_level="deterministic",
+        determinism_level="guaranteed",
         provenance=["test"],
         plugin_kind="experiment",
         plugin_name="test",
@@ -261,7 +261,8 @@ def test_create_plugins_with_valid_definitions(test_context):
     # Row plugin
     row_def = {
         "name": "noop",
-        "security_level": "internal"
+        "security_level": "internal",
+        "determinism_level": "guaranteed"
     }
     row_plugin = create_row_plugin(row_def, parent_context=test_context)
     assert row_plugin is not None
@@ -269,23 +270,26 @@ def test_create_plugins_with_valid_definitions(test_context):
     # Aggregation plugin
     agg_def = {
         "name": "score_stats",
-        "security_level": "internal"
+        "security_level": "internal",
+        "determinism_level": "guaranteed"
     }
     agg_plugin = create_aggregation_plugin(agg_def, parent_context=test_context)
     assert agg_plugin is not None
 
     # Baseline plugin
     baseline_def = {
-        "name": "row_count",
-        "security_level": "internal"
+        "name": "score_delta",
+        "security_level": "internal",
+        "determinism_level": "guaranteed"
     }
     baseline_plugin = create_baseline_plugin(baseline_def, parent_context=test_context)
     assert baseline_plugin is not None
 
     # Validation plugin
     validation_def = {
-        "name": "regex",
+        "name": "regex_match",
         "security_level": "internal",
+        "determinism_level": "guaranteed",
         "options": {"pattern": ".*"}
     }
     validation_plugin = create_validation_plugin(validation_def, parent_context=test_context)
@@ -295,6 +299,7 @@ def test_create_plugins_with_valid_definitions(test_context):
     early_stop_def = {
         "name": "threshold",
         "security_level": "internal",
+        "determinism_level": "guaranteed",
         "options": {"metric": "score", "threshold": 10}
     }
     early_stop_plugin = create_early_stop_plugin(early_stop_def, parent_context=test_context)

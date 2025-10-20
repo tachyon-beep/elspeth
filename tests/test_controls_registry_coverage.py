@@ -33,10 +33,11 @@ def test_register_rate_limiter_single_param_factory():
     # Should work with old-style factory
     register_rate_limiter("test_old_rl", old_factory, schema={"type": "object"})
 
-    # Should be able to create with it (need security_level)
+    # Should be able to create with it (need security_level and determinism_level)
     result = create_rate_limiter({
         "name": "test_old_rl",
         "security_level": "internal",
+        "determinism_level": "guaranteed",
         "options": {}
     })
     assert result is not None
@@ -55,6 +56,7 @@ def test_register_rate_limiter_two_param_factory():
     result = create_rate_limiter({
         "name": "test_new_rl",
         "security_level": "internal",
+        "determinism_level": "guaranteed",
         "options": {}
     })
     assert result is not None
@@ -72,6 +74,7 @@ def test_register_cost_tracker_single_param_factory():
     result = create_cost_tracker({
         "name": "test_old_ct",
         "security_level": "internal",
+        "determinism_level": "guaranteed",
         "options": {}
     })
     assert result is not None
@@ -90,6 +93,7 @@ def test_register_cost_tracker_two_param_factory():
     result = create_cost_tracker({
         "name": "test_new_ct",
         "security_level": "internal",
+        "determinism_level": "guaranteed",
         "options": {}
     })
     assert result is not None
