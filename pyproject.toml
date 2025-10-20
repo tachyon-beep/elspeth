@@ -53,6 +53,7 @@ dev = [
   "cyclonedx-bom==7.2.0",
   "bandit==1.8.6",
   "semgrep==1.92.0",
+  "vulture==2.13",
 ]
 # Azure ML integration (truly optional - external infrastructure)
 azure = [
@@ -128,6 +129,11 @@ disable_warnings = ["module-not-measured"]
 [tool.coverage.report]
 skip_empty = true
 show_missing = false
+
+[tool.vulture]
+min_confidence = 80
+exclude = ["tests/", ".venv/", "old/", ".tox/"]
+ignore_names = ["test_*", "Test*"]
 
 [[tool.mypy.overrides]]
 module = [

@@ -59,6 +59,12 @@ jobs:
       - name: Lint (ruff + mypy)
         run: python -m ruff check src tests && python -m mypy src
 
+      - name: Dead code detection (vulture)
+        run: |
+          # Detect unused code with high confidence threshold
+          python -m vulture src --min-confidence 80
+        continue-on-error: false
+
       - name: Security static analysis (bandit)
         run: |
           # Pin bandit to a specific version to avoid tool drift

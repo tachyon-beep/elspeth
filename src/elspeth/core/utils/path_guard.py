@@ -6,10 +6,13 @@ atomic write helpers to avoid partial files on failure.
 
 from __future__ import annotations
 
+import logging
 import os
 import tempfile
 from pathlib import Path
 from typing import Callable
+
+logger = logging.getLogger(__name__)
 
 
 def resolve_under_base(target: Path, base: Path) -> Path:
@@ -88,10 +91,12 @@ def safe_atomic_write(path: Path, write_to: Callable[[Path], None]) -> None:
         # already uses a safe default on POSIX, but we enforce explicitly.
         try:
             os.fchmod(tmp_fd, 0o600)
-        except Exception:  # nosec B110 - best-effort permission hardening; non-fatal
+        except Exception as e:  # nosec B110 - best-effort permission hardening; non-fatal
+            logger.debug("Failed to set permissions via fchmod: %s; trying chmod", e)
             try:
                 os.chmod(tmp_path, 0o600)
-            except Exception:  # nosec B110 - best-effort permission hardening; non-fatal
+            except Exception as e2:  # nosec B110 - best-effort permission hardening; non-fatal
+                logger.debug("Failed to set permissions via chmod: %s; continuing without strict perms", e2)
                 pass
         os.close(tmp_fd)
         tmp_fd = None
@@ -105,14 +110,16 @@ def safe_atomic_write(path: Path, write_to: Callable[[Path], None]) -> None:
         if tmp_fd is not None:
             try:
                 os.close(tmp_fd)
-            except Exception:  # nosec B110 - cleanup best-effort
+            except Exception as e:  # nosec B110 - cleanup best-effort
+                logger.debug("Failed to close temp file descriptor: %s", e)
                 pass
         if tmp_path_str:
             try:
                 tmp_p = Path(tmp_path_str)
                 if tmp_p.exists():
                     tmp_p.unlink(missing_ok=True)
-            except Exception:  # nosec B110 - cleanup best-effort
+            except Exception as e:  # nosec B110 - cleanup best-effort
+                logger.debug("Failed to cleanup temp file %s: %s", tmp_path_str, e)
                 pass
 
 
