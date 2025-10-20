@@ -1,11 +1,7 @@
 import pytest
 
-from elspeth.core.base.types import (
-    DataType,
-    DeterminismLevel,
-    PluginType,
-    SecurityLevel,
-)
+from elspeth.core.base.types import DataType, DeterminismLevel, PluginType, SecurityLevel
+from elspeth.core.security import ensure_determinism_level, ensure_security_level
 
 
 @pytest.mark.parametrize(
@@ -28,8 +24,8 @@ from elspeth.core.base.types import (
         ("secret", SecurityLevel.SECRET),
     ],
 )
-def test_security_level_from_string_aliases_and_defaults(text, expected):
-    assert SecurityLevel.from_string(text) == expected
+def test_security_level_aliases_and_defaults(text, expected):
+    assert ensure_security_level(text) == expected
 
 
 def test_security_level_comparisons_ordering():
@@ -42,7 +38,7 @@ def test_security_level_comparisons_ordering():
 
 def test_security_level_unknown_raises():
     with pytest.raises(ValueError):
-        SecurityLevel.from_string("topsecret")
+        ensure_security_level("topsecret")
 
 
 @pytest.mark.parametrize(
@@ -55,8 +51,8 @@ def test_security_level_unknown_raises():
         ("guaranteed", DeterminismLevel.GUARANTEED),
     ],
 )
-def test_determinism_level_from_string_defaults_and_values(text, expected):
-    assert DeterminismLevel.from_string(text) == expected
+def test_determinism_level_defaults_and_values(text, expected):
+    assert ensure_determinism_level(text) == expected
 
 
 def test_determinism_level_comparisons_ordering():
@@ -68,7 +64,7 @@ def test_determinism_level_comparisons_ordering():
 
 def test_determinism_level_unknown_raises():
     with pytest.raises(ValueError):
-        DeterminismLevel.from_string("super")
+        ensure_determinism_level("super")
 
 
 @pytest.mark.parametrize(
