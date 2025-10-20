@@ -161,9 +161,7 @@ class ArtifactPipeline:  # pylint: disable=too-many-instance-attributes
         if binding.security_level is None or not str(binding.security_level).strip():
             raise ValueError(f"Sink '{binding.id}' must declare a security_level")
         binding.security_level = (
-            binding.security_level
-            if isinstance(binding.security_level, SecurityLevel)
-            else ensure_security_level(binding.security_level)
+            binding.security_level if isinstance(binding.security_level, SecurityLevel) else ensure_security_level(binding.security_level)
         )
         artifact_section = binding.artifact_config or {}
         produces_config = artifact_section.get("produces", []) or []

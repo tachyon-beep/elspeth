@@ -39,13 +39,13 @@ from typing import Any, Mapping, Sequence
 import yaml
 
 from elspeth.core.base.plugin_context import PluginContext
-from elspeth.core.base.types import DeterminismLevel, SecurityLevel
-from elspeth.core.security import ensure_determinism_level, ensure_security_level
+from elspeth.core.base.types import SecurityLevel
 from elspeth.core.experiments.runner import ExperimentRunner
 from elspeth.core.pipeline.artifact_pipeline import ArtifactPipeline, SinkBinding
 from elspeth.core.registries.datasource import datasource_registry
 from elspeth.core.registries.llm import create_llm_from_definition
 from elspeth.core.registries.sink import sink_registry
+from elspeth.core.security import ensure_determinism_level, ensure_security_level
 
 logger = logging.getLogger(__name__)
 

@@ -25,8 +25,8 @@ class BlobDataSource(DataSource):
         profile: str = "default",
         pandas_kwargs: dict[str, Any] | None = None,
         on_error: str = "abort",
-        security_level: str | SecurityLevel | None = None,
-        determinism_level: str | DeterminismLevel | None = None,
+        security_level: SecurityLevel | None = None,
+        determinism_level: DeterminismLevel | None = None,
         retain_local: bool,  # REQUIRED - no default
         retain_local_path: str | None = None,
     ):

@@ -38,7 +38,7 @@ from __future__ import annotations
 import logging
 import os
 import re
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 from urllib.parse import urlparse
 
 from elspeth.core.security.secure_mode import SecureMode, get_secure_mode
@@ -82,6 +82,9 @@ APPROVED_PATTERNS: dict[ServiceType, list[str]] = {
         r"https://[^/]+\.search\.windows\.net(/.*)?",
     ],
 }
+
+if TYPE_CHECKING:  # Satisfy static analyzers for forward-referenced type names
+    from elspeth.core.base.types import SecurityLevel
 
 # Security level restrictions by service type
 # Maps service type -> list of allowed security levels (canonical uppercase forms)
@@ -182,7 +185,7 @@ def _is_localhost(endpoint: str) -> bool:
 def validate_endpoint(
     endpoint: str,
     service_type: ServiceType,
-    security_level: str | None = None,
+    security_level: "SecurityLevel | None" = None,
     mode: SecureMode | None = None,
 ) -> None:
     """Validate that an endpoint is approved for use.
@@ -246,12 +249,11 @@ def validate_endpoint(
         # Normalize security level to canonical form (handles aliases like "internal" -> "OFFICIAL")
         # Import here to avoid circular dependency
         from elspeth.core.base.types import SecurityLevel
-        from elspeth.core.security import ensure_security_level
 
         if isinstance(security_level, SecurityLevel):
             security_level_normalized = security_level.value
-        else:
-            security_level_normalized = ensure_security_level(security_level).value
+        else:  # Enforce enum-only API for 1.0
+            raise TypeError("security_level must be a SecurityLevel or None")
 
         # Check if this specific pattern has security level restrictions
         for pattern, allowed_levels in restrictions.items():
@@ -287,7 +289,7 @@ def get_approved_patterns(service_type: ServiceType) -> list[str]:
     return base_patterns + env_patterns
 
 
-def validate_azure_openai_endpoint(endpoint: str, security_level: str | None = None, mode: SecureMode | None = None) -> None:
+def validate_azure_openai_endpoint(endpoint: str, security_level: "SecurityLevel | None" = None, mode: SecureMode | None = None) -> None:
     """Validate an Azure OpenAI endpoint.
 
     Convenience wrapper for validate_endpoint with service_type="azure_openai".
@@ -308,7 +310,7 @@ def validate_azure_openai_endpoint(endpoint: str, security_level: str | None = N
     )
 
 
-def validate_http_api_endpoint(endpoint: str, security_level: str | None = None, mode: SecureMode | None = None) -> None:
+def validate_http_api_endpoint(endpoint: str, security_level: "SecurityLevel | None" = None, mode: SecureMode | None = None) -> None:
     """Validate an HTTP API endpoint.
 
     Convenience wrapper for validate_endpoint with service_type="http_api".
@@ -329,7 +331,7 @@ def validate_http_api_endpoint(endpoint: str, security_level: str | None = None,
     )
 
 
-def validate_azure_blob_endpoint(endpoint: str, security_level: str | None = None, mode: SecureMode | None = None) -> None:
+def validate_azure_blob_endpoint(endpoint: str, security_level: "SecurityLevel | None" = None, mode: SecureMode | None = None) -> None:
     """Validate an Azure Blob Storage endpoint.
 
     Convenience wrapper for validate_endpoint with service_type="azure_blob".
@@ -350,7 +352,7 @@ def validate_azure_blob_endpoint(endpoint: str, security_level: str | None = Non
     )
 
 
-def validate_azure_search_endpoint(endpoint: str, security_level: str | None = None, mode: SecureMode | None = None) -> None:
+def validate_azure_search_endpoint(endpoint: str, security_level: "SecurityLevel | None" = None, mode: SecureMode | None = None) -> None:
     """Validate an Azure Cognitive Search endpoint.
 
     Convenience wrapper for validate_endpoint with service_type="azure_search".

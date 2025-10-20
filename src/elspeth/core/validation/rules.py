@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import Any, Callable, Mapping
 
-from elspeth.core.base.types import SecurityLevel
 from elspeth.core.security import ensure_security_level
 from elspeth.core.validation.base import ConfigurationError, ValidationReport
 

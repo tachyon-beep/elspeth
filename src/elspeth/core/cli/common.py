@@ -1,11 +1,33 @@
+"""Shared CLI helpers for artifact directories and publishing.
+
+This module contains small utilities used by multiple CLI commands to:
+- create timestamped artifact directories
+- persist simple artifact files (results and settings snapshot)
+- load YAML configs for artifact sinks
+- optionally build a signed reproducibility bundle
+- optionally publish bundles via a configured artifact sink
+"""
+
 from __future__ import annotations
 
+import importlib
 import json
 import logging
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
+import yaml
+
+import elspeth.core.registries.sink as sink_reg
+from elspeth.core.validation.base import ConfigurationError
+
+# Optional sink; not required for all CLI flows
+try:
+    _repro_mod = importlib.import_module("elspeth.plugins.nodes.sinks.reproducibility_bundle")
+    ReproBundleSinkCls = getattr(_repro_mod, "ReproducibilityBundleSink", None)
+except Exception:  # pragma: no cover - optional dependency pattern
+    ReproBundleSinkCls = None
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +41,10 @@ _SINKS_WITH_AUTO_FOLDER_PATH = frozenset([
 
 
 def ensure_artifacts_dir(base: Path | None) -> Path:
+    """Create and return a timestamped artifacts directory under ``base``.
+
+    When ``base`` is None, use a default ``artifacts/`` root in the CWD.
+    """
     ts = pd.Timestamp.utcnow().strftime("%Y%m%dT%H%M%SZ")
     root = base if base else Path("artifacts")
     path = root / ts
@@ -27,8 +53,15 @@ def ensure_artifacts_dir(base: Path | None) -> Path:
 
 
 def write_simple_artifacts(art_dir: Path, name: str, payload: dict[str, Any], settings: Any) -> None:
+    """Write a results JSON and a settings YAML snapshot into ``art_dir``.
+
+    - ``{name}_results.json`` contains the provided ``payload``.
+    - ``{name}_settings.yaml`` mirrors the original config file when available.
+    """
     # Results JSON
-    (art_dir / f"{name}_results.json").write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
+    (art_dir / f"{name}_results.json").write_text(
+        json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8"
+    )
     # Settings YAML snapshot
     try:
         cfg_path = Path(getattr(settings, "config_path", ""))
@@ -40,11 +73,10 @@ def write_simple_artifacts(art_dir: Path, name: str, payload: dict[str, Any], se
 
 
 def load_yaml_json(path: Path) -> dict[str, Any]:
-    try:
-        import yaml
-    except ImportError as exc:  # pragma: no cover - PyYAML should be present in CLI env
-        raise ValueError("PyYAML is required to load artifact sink configs") from exc
+    """Load a YAML file as a dict for artifact sink configuration.
 
+    Raises ``ValueError`` for invalid files or parse errors.
+    """
     try:
         data = yaml.safe_load(path.read_text(encoding="utf-8"))
         if isinstance(data, dict):
@@ -65,14 +97,16 @@ def create_signed_bundle(
     *,
     signing_key_env: str,
 ) -> Path | None:
-    try:
-        from elspeth.plugins.nodes.sinks.reproducibility_bundle import ReproducibilityBundleSink
-    except ImportError as exc:  # pragma: no cover - optional import
-        logger.warning("Reproducibility bundle unavailable: %s", exc)
+    """Create a signed reproducibility bundle if the sink is available.
+
+    Returns the output directory path on success, otherwise ``None``.
+    """
+    if ReproBundleSinkCls is None:  # pragma: no cover - optional
+        logger.warning("Reproducibility bundle sink unavailable; skipping bundle creation")
         return None
     bundle_dir = art_dir / f"{name}_bundle"
     bundle_dir.mkdir(parents=True, exist_ok=True)
-    sink = ReproducibilityBundleSink(
+    sink = ReproBundleSinkCls(
         base_path=str(bundle_dir),
         bundle_name=f"{name}",
         timestamped=False,
@@ -99,8 +133,12 @@ def maybe_publish_artifacts_bundle(
     plugin_name: str | None,
     config_path: Path | str | None,
 ) -> None:
-    import elspeth.core.registries.sink as sink_reg
+    """Publish the bundle via a configured sink if provided.
 
+    The sink is created from ``plugin_name`` and optional configuration at
+    ``config_path``. Sinks that support folder publishing may receive the
+    ``folder_path`` automatically.
+    """
     if not plugin_name:
         return
 
@@ -116,12 +154,8 @@ def maybe_publish_artifacts_bundle(
     if plugin_name in _SINKS_WITH_AUTO_FOLDER_PATH and not opts.get("folder_path"):
         opts["folder_path"] = str(bundle_dir)
     try:
-        from elspeth.core.validation.base import ConfigurationError as configuration_error  # local import to avoid cycles
-    except ImportError:  # pragma: no cover - defensive
-        configuration_error = RuntimeError  # type: ignore
-    try:
         sink = sink_reg.sink_registry.create(plugin_name, opts, parent_context=None)
-    except (ValueError, configuration_error, RuntimeError) as exc:
+    except (ValueError, ConfigurationError, RuntimeError) as exc:
         logger.warning("Failed to create artifact sink '%s': %s", plugin_name, exc)
         return
     try:

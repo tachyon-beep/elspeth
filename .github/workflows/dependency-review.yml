@@ -16,6 +16,10 @@ permissions:
   contents: read
   pull-requests: write
 
+concurrency:
+  group: dep-review-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   dependency-review:
     runs-on: ubuntu-latest
@@ -25,14 +29,15 @@ jobs:
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
 
       - name: Dependency Review
-        uses: actions/dependency-review-action@4081bf99e2866ebe428fc0173b4f98c58547b7b9 # v4.5.0
+        # Pinned to latest stable release
+        uses: actions/dependency-review-action@40c09b7dc99638e5ddb0bfd91c1673effc064d8a # v4.8.1
         with:
           # Fail PR if HIGH or CRITICAL vulnerabilities are introduced
           fail-on-severity: high
 
           # Deny problematic licenses
           # GPL/AGPL can be problematic for proprietary software
-          deny-licenses: GPL-3.0, GPL-2.0, AGPL-3.0, LGPL-3.0
+          deny-licenses: GPL-3.0, GPL-2.0, AGPL-3.0
 
           # Comment results on PR for visibility
           comment-summary-in-pr: always
@@ -41,7 +46,8 @@ jobs:
           fail-on-scopes: runtime, development
 
           # Additional configuration
-          allow-ghsas: []  # Don't allow any GitHub Security Advisories
+          # Empty string means no advisories are allowlisted
+          allow-ghsas: ""
 
           # Base ref for comparison (usually main branch)
           base-ref: ${{ github.event.pull_request.base.sha }}

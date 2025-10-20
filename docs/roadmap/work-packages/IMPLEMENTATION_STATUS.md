@@ -52,7 +52,7 @@ The core streaming architecture described in WP001 is **not implemented**. The c
    - **Verification**:
      - ✅ Five PSPF levels defined with strict hierarchy
      - ✅ Comparison operators implemented (`__lt__`, `__le__`, `__gt__`, `__ge__`)
-     - ✅ `from_string()` method with legacy mapping (public → UNOFFICIAL, internal → OFFICIAL)
+     - ✅ Centralized normalization helpers (`ensure_security_level`) with legacy alias support (public → UNOFFICIAL, internal → OFFICIAL)
      - ✅ Documentation matches WP001 specification
 
 3. **Determinism Level Enum and Resolution** ✅ COMPLETE

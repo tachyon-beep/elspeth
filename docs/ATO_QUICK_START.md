@@ -95,7 +95,9 @@ Where <commit-hash> is the commit referenced above.
 EOF
 
 # Verify the archive
+
 ls -la ../elspeth-archive/legacy-code-2025-10-15/
+
 ```
 
 #### 2.3: Remove from Repository (10 minutes)
@@ -233,6 +235,7 @@ This decision was made as part of the ATO remediation effort. The legacy code
 had already been deprecated and was not used by any active system components.
 
 If future development requires reference to old architecture decisions, consult:
+
 1. This ADR and related documentation
 2. Git history for the main repository
 3. The external archive (read-only)
@@ -240,6 +243,7 @@ If future development requires reference to old architecture decisions, consult:
 ---
 
 **Approved By:**
+
 - [ ] Development Team Lead
 - [ ] Security Team
 - [ ] ATO Sponsor
@@ -249,6 +253,7 @@ If future development requires reference to old architecture decisions, consult:
 EOF
 
 echo "✅ ADR created"
+
 ```
 
 #### 2.5: Commit the Changes (15 minutes)
@@ -377,18 +382,21 @@ echo "3. _______________"
 ## 🆘 Getting Help
 
 ### If Tests Fail
+
 1. Check the error message carefully
 2. Run individual failing test: `python -m pytest tests/path/to/test.py::test_name -v`
 3. Check if related to your recent changes
 4. Rollback if needed: `git reset --hard HEAD~1`
 
 ### If Verification Script Fails
+
 1. Read the error output
 2. Search for the specific issue: `grep -r "problem pattern" src/`
 3. Fix the issue
 4. Re-run verification
 
 ### If Blocked
+
 1. Document the blocker in `docs/ATO_PROGRESS.md`
 2. Move to next task if possible
 3. Escalate to team lead if blocker persists >1 day
@@ -396,6 +404,7 @@ echo "3. _______________"
 ## 📊 Tracking Progress
 
 Update `docs/ATO_PROGRESS.md` daily with:
+
 - ✅ Completed tasks
 - ⏳ In-progress tasks
 - 🚧 Blockers
@@ -404,12 +413,14 @@ Update `docs/ATO_PROGRESS.md` daily with:
 ## 🎯 Success Metrics
 
 Daily:
+
 - [ ] All tests passing
 - [ ] No linting errors
 - [ ] Daily verification passing
 - [ ] Progress documented
 
 Weekly:
+
 - [ ] At least 2 Must-Fix items completed
 - [ ] No new blockers introduced
 - [ ] Documentation updated
@@ -417,6 +428,7 @@ Weekly:
 ## 🚦 Red Flags
 
 Stop and escalate if you encounter:
+
 - 🚨 Security vulnerability discovered
 - 🚨 Tests failing that can't be fixed in <2 hours
 - 🚨 Architecture change needed (not in work program)

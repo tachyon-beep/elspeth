@@ -14,8 +14,7 @@ import pandas as pd
 
 from elspeth.core.base.protocols import Artifact, ArtifactDescriptor, ResultSink
 from elspeth.core.base.types import DeterminismLevel, SecurityLevel
-from elspeth.core.security import ensure_determinism_level, ensure_security_level
-from elspeth.core.security import resolve_security_level
+from elspeth.core.security import ensure_determinism_level, ensure_security_level, resolve_security_level
 from elspeth.core.utils.path_guard import resolve_under_base, safe_atomic_write
 from elspeth.plugins.nodes.sinks._sanitize import sanitize_cell
 

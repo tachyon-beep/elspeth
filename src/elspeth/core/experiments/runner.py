@@ -14,15 +14,14 @@ import pandas as pd
 
 from elspeth.core.base.protocols import LLMClientProtocol, LLMMiddleware, LLMRequest, ResultSink
 from elspeth.core.base.schema import DataFrameSchema, SchemaViolation
-from elspeth.core.base.types import SecurityLevel
-from elspeth.core.security import ensure_security_level
+from elspeth.core.base.types import DeterminismLevel, SecurityLevel
 from elspeth.core.controls import CostTracker, RateLimiter
 from elspeth.core.experiments.plugin_registry import create_early_stop_plugin
 from elspeth.core.experiments.validation import validate_plugin_schemas
 from elspeth.core.pipeline.artifact_pipeline import ArtifactPipeline, SinkBinding
 from elspeth.core.pipeline.processing import prepare_prompt_context
 from elspeth.core.prompts import PromptEngine, PromptRenderingError, PromptTemplate, PromptValidationError
-from elspeth.core.security import resolve_determinism_level, resolve_security_level
+from elspeth.core.security import ensure_security_level, resolve_determinism_level, resolve_security_level
 from elspeth.plugins.orchestrators.experiment.protocols import (
     AggregationExperimentPlugin,
     EarlyStopPlugin,
@@ -57,10 +56,10 @@ class ExperimentRunner:
     _compiled_criteria_prompts: dict[str, PromptTemplate] | None = None
     llm_middlewares: list[LLMMiddleware] | None = None
     concurrency_config: dict[str, Any] | None = None
-    security_level: str | None = None
-    _active_security_level: str | None = None
-    determinism_level: str | None = None
-    _active_determinism_level: str | None = None
+    security_level: SecurityLevel | None = None
+    _active_security_level: SecurityLevel | None = None
+    determinism_level: DeterminismLevel | None = None
+    _active_determinism_level: DeterminismLevel | None = None
     early_stop_plugins: list[EarlyStopPlugin] | None = None
     early_stop_config: dict[str, Any] | None = None
     _active_early_stop_plugins: list[EarlyStopPlugin] | None = None

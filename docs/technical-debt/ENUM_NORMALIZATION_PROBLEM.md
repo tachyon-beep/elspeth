@@ -16,6 +16,12 @@ The system now uses `SecurityLevel` and `DeterminismLevel` enums end‑to‑end.
 
 ## The Architecture We Have (Post‑Fix)
 
+Note (2025-10-21): The `from_string()` helpers on `SecurityLevel` and
+`DeterminismLevel` have been removed. Parsing/normalization is centralized in
+`elspeth.core.security.ensure_security_level()` and
+`ensure_determinism_level()`. The examples below referring to
+`*.from_string()` are historical; use the `ensure_*` functions instead.
+
 ### Type Definitions
 
 Located in `src/elspeth/core/base/types.py`:
@@ -29,14 +35,6 @@ class SecurityLevel(str, Enum):
     PROTECTED = "PROTECTED"
     SECRET = "SECRET"
 
-    @classmethod
-    def from_string(cls, value: str | None) -> "SecurityLevel":
-        """Parse string with aliases: 'public'→UNOFFICIAL, 'internal'→OFFICIAL"""
-        # Handles case-insensitive input
-        # Maps legacy aliases (public, internal, confidential, sensitive)
-        # Validates against known levels
-        ...
-
     # Comparison operators for hierarchy enforcement (__lt__, __le__, __gt__, __ge__)
 
 class DeterminismLevel(str, Enum):
@@ -46,17 +44,12 @@ class DeterminismLevel(str, Enum):
     HIGH = "high"
     GUARANTEED = "guaranteed"
 
-    @classmethod
-    def from_string(cls, value: str | None) -> "DeterminismLevel":
-        """Parse string (case-insensitive)"""
-        ...
-
     # Comparison operators for hierarchy enforcement
 ```
 
 ### Normalization Layer
 
-The legacy `normalize_security_level()` and `normalize_determinism_level()` functions have been removed. Use `SecurityLevel.from_string()` / `DeterminismLevel.from_string()` and operate on enums directly.
+The legacy `normalize_security_level()` and `normalize_determinism_level()` functions have been removed. Use `ensure_security_level()` / `ensure_determinism_level()` and operate on enums directly.
 
 ### Helper Functions (Enum‑Based)
 
@@ -159,7 +152,7 @@ All tests updated and passing; coverage ≥ 80% per file.
 ### Migration Guide (Plugin Authors)
 
 - Accept enums in factories; read `ctx.security_level` / `ctx.determinism_level` directly.
-- Convert free‑form input via `.from_string()` when needed.
+- Convert free‑form input via `ensure_security_level()` / `ensure_determinism_level()` when needed.
 - Compare using enum ordering; serialize via `.value`.
 - Remove usage of `normalize_*` and `SECURITY_LEVELS`/`DETERMINISM_LEVELS`.
 
@@ -200,17 +193,15 @@ class PluginContext(BaseModel):
     @classmethod
     def parse_security_level(cls, v: str | SecurityLevel) -> SecurityLevel:
         """Auto-convert strings to SecurityLevel enum."""
-        if isinstance(v, SecurityLevel):
-            return v
-        return SecurityLevel.from_string(v)
+        from elspeth.core.security import ensure_security_level
+        return ensure_security_level(v)
 
     @field_validator("determinism_level", mode="before")
     @classmethod
     def parse_determinism_level(cls, v: str | DeterminismLevel) -> DeterminismLevel:
         """Auto-convert strings to DeterminismLevel enum."""
-        if isinstance(v, DeterminismLevel):
-            return v
-        return DeterminismLevel.from_string(v)
+        from elspeth.core.security import ensure_determinism_level
+        return ensure_determinism_level(v)
 ```
 
 **Benefits**:
@@ -338,21 +329,19 @@ This will catch existing bugs but also may reveal latent type errors.
 
 ### Serialization
 
-**Enums are `str` subclasses**, so they serialize naturally:
+**Serialization**: Enums are `str` subclasses; prefer `.value` for explicit text.
 ```python
-str(SecurityLevel.OFFICIAL)  # "OFFICIAL"
-f"Level: {SecurityLevel.OFFICIAL}"  # "Level: OFFICIAL"
-json.dumps(SecurityLevel.OFFICIAL)  # "OFFICIAL"
+SecurityLevel.OFFICIAL.value  # "OFFICIAL"
+json.dumps(SecurityLevel.OFFICIAL)  # "OFFICIAL" (works because it's a str subclass)
 ```
-
-**YAML**: Pydantic handles enum→string for YAML export automatically.
+Pydantic/YAML: Pydantic v2 will serialize enum `.value` by default.
 
 ### Performance
 
 **Negligible impact**:
 - Enums are singletons (no allocation overhead)
 - String comparison vs enum comparison: both O(1)
-- `.from_string()` has same logic as `normalize_*()`
+- `ensure_*` centralizes normalization logic (replacing legacy `normalize_*()`)
 
 ---
 
@@ -387,7 +376,8 @@ def normalize_security_level(level: str | SecurityLevel | None) -> SecurityLevel
     """Convert to SecurityLevel enum (not string)."""
     if isinstance(level, SecurityLevel):
         return level
-    return SecurityLevel.from_string(level)
+    from elspeth.core.security import ensure_security_level
+    return ensure_security_level(level)
 ```
 
 This keeps the function but makes it return the enum type. Gentler migration path.

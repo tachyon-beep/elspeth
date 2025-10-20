@@ -11,6 +11,7 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 from elspeth.core.base.protocols import LLMClientProtocol
+from elspeth.core.base.types import SecurityLevel
 
 logger = logging.getLogger(__name__)
 
@@ -31,7 +32,7 @@ class HttpOpenAIClient(LLMClientProtocol):
         retry_total: int = 3,
         backoff_factor: float = 0.5,
         status_forcelist: tuple[int, ...] = (429, 500, 502, 503, 504),
-        security_level: str | None = None,
+        security_level: SecurityLevel | None = None,
     ) -> None:
         self.api_base = api_base.rstrip("/")
         # Defense-in-depth: validate endpoint even when instantiated directly

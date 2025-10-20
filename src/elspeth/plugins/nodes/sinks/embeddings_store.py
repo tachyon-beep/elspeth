@@ -285,13 +285,23 @@ class EmbeddingsStoreSink(ResultSink):
 
             document_id = self._extract_value(record, self._id_field) or f"{metadata.get('run_id', 'run')}-{index}"
             record_metadata = self._extract_metadata(record, metadata)
+            # Persist classification as canonical text for storage
+            if isinstance(security_level, str):
+                sec_text = security_level
+            else:
+                try:
+                    from elspeth.core.base.types import SecurityLevel as _SL
+                    sec_text = security_level.value if isinstance(security_level, _SL) else str(security_level)
+                except Exception:
+                    sec_text = str(security_level)
+
             embeddings.append(
                 VectorRecord(
                     document_id=str(document_id),
                     vector=vector,
                     text=str(text_value),
                     metadata=record_metadata,
-                    security_level=str(security_level),
+                    security_level=sec_text,
                 )
             )
 

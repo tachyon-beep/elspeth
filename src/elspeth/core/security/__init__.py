@@ -64,9 +64,7 @@ def _ensure_security_level(level: SecurityLevel | str | None) -> SecurityLevel:
     normalized = _normalize_security_text(text)
 
     # Canonical normalized keys for enum values
-    canonical_map = {
-        _normalize_security_text(e.value): e for e in SecurityLevel
-    }
+    canonical_map = {_normalize_security_text(e.value): e for e in SecurityLevel}
 
     # Legacy/alias mappings (normalized)
     alias_map = {

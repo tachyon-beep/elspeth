@@ -32,8 +32,8 @@ class BaseCSVDataSource(DataSource):
         dtype: dict[str, Any] | None = None,
         encoding: str = "utf-8",
         on_error: str = "abort",
-        security_level: str | SecurityLevel | None = None,
-        determinism_level: str | DeterminismLevel | None = None,
+        security_level: SecurityLevel | None = None,
+        determinism_level: DeterminismLevel | None = None,
         schema: dict[str, str | dict[str, Any]] | None = None,
         infer_schema: bool = True,
         retain_local: bool,  # REQUIRED - no default

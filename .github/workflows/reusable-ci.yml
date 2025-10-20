@@ -1,0 +1,65 @@
+name: Reusable CI (Lint, Types, Tests)
+
+on:
+  workflow_call:
+    inputs:
+      python-version:
+        required: false
+        type: string
+        default: '3.12'
+
+permissions:
+  contents: read
+
+jobs:
+  lint_test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Setup Python
+        id: setup-python
+        uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        with:
+          python-version: ${{ inputs.python-version }}
+          cache: 'pip'
+          cache-dependency-path: |
+            requirements-dev.lock
+
+      - name: Install dependencies (locked)
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pip-tools
+          python -m piptools sync requirements-dev.lock
+          python -m pip install -e . --no-deps
+
+      - name: Restore mypy cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: .mypy_cache
+          key: mypy-${{ runner.os }}-${{ steps.setup-python.outputs.python-version }}-${{ hashFiles('pyproject.toml', 'src/**/*.py') }}
+          restore-keys: |
+            mypy-${{ runner.os }}-${{ steps.setup-python.outputs.python-version }}-
+
+      - name: Lint (ruff + mypy)
+        run: |
+          python -m ruff check src tests
+          python -m mypy src
+
+      - name: Unit tests with coverage
+        run: |
+          python -m pytest -m "not slow" --maxfail=1 --disable-warnings --cov-fail-under=80 --cov-report=xml:coverage.xml
+
+      - name: Enforce per-file coverage (src/elspeth)
+        run: |
+          python scripts/check_coverage_thresholds.py --xml coverage.xml --all 0.80 --include-prefix src/elspeth/
+
+      - name: Upload coverage xml
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: coverage-xml
+          path: coverage.xml
+          retention-days: 7
+

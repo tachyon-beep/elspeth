@@ -8,7 +8,7 @@ runtime Pydantic models backed by `DataFrameSchema`.
 from __future__ import annotations
 
 import warnings
-from typing import Any, Type
+from typing import Any
 
 import pandas as pd
 from pydantic import Field, create_model
@@ -16,7 +16,7 @@ from pydantic import Field, create_model
 from .base import DataFrameSchema
 
 
-def _parse_type_string(type_str: str) -> Type:
+def _parse_type_string(type_str: str) -> type[Any]:
     """
     Parse type string from YAML config to Python type.
 
@@ -51,7 +51,7 @@ def _parse_type_string(type_str: str) -> Type:
 def schema_from_config(
     schema_dict: dict[str, str | dict[str, Any]],
     schema_name: str = "ConfigSchema",
-) -> Type[DataFrameSchema]:
+) -> type[DataFrameSchema]:
     """
     Build Pydantic schema from configuration dictionary.
 
@@ -63,7 +63,9 @@ def schema_from_config(
       key is not supported and will raise a ValueError to avoid pre-release
       tech debt.
     """
-    fields: dict[str, tuple[Any, Any]] = {}
+    # Use Any for values to satisfy static checkers when splatting into create_model(**fields)
+    # (Pylance may otherwise attempt to match these against reserved kwargs like __doc__/__module__).
+    fields: dict[str, Any] = {}
 
     for col_name, col_spec in schema_dict.items():
         # Handle simple string type
@@ -88,8 +90,6 @@ def schema_from_config(
         is_optional = not col_spec.get("required", True)
         if is_optional:
             field_kwargs["default"] = None
-            # Pydantic v2: Make type explicitly Optional
-            python_type = python_type | None  # type: ignore[assignment]
 
         # Numeric constraints
         if "min" in col_spec:
@@ -118,14 +118,18 @@ def schema_from_config(
         if pattern_value is not None:
             field_kwargs["pattern"] = pattern_value
 
+        # Choose the correct annotation, keeping the local python_type unchanged to
+        # avoid type-reassignment noise for type checkers.
+        annotation: Any = (python_type | None) if is_optional else python_type
+
         if "default" not in field_kwargs:
-            fields[col_name] = (python_type, Field(..., **field_kwargs))
+            fields[col_name] = (annotation, Field(..., **field_kwargs))
         else:
-            fields[col_name] = (python_type, Field(**field_kwargs))
+            fields[col_name] = (annotation, Field(**field_kwargs))
 
     # Pydantic's create_model() has complex overloads that mypy cannot fully resolve
     # when using **fields with dynamic field definitions. This is safe at runtime.
-    return create_model(  # type: ignore[call-overload,no-any-return]
+    return create_model(
         schema_name,
         __base__=DataFrameSchema,
         __config__=DataFrameSchema.model_config,  # Explicit v2 config inheritance

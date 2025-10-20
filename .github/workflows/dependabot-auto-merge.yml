@@ -46,7 +46,7 @@ jobs:
     steps:
       - name: Fetch Dependabot PR metadata
         id: metadata
-        uses: dependabot/fetch-metadata@v2
+        uses: dependabot/fetch-metadata@08eff52bf64351f401fb50d4972fa95b9f2c2d1b # v2.4.0
         with:
           github-token: "${{ secrets.GITHUB_TOKEN }}"
 
@@ -69,7 +69,7 @@ jobs:
           fi
 
           # Check CI status
-          gh pr checks "${PR_URL}" --watch --interval 30 || {
+          gh pr checks "${PR_URL}" --watch --interval 60 || {
             echo "❌ CI checks failed - will not auto-merge"
             exit 1
           }
@@ -130,7 +130,7 @@ jobs:
           PR_URL: ${{ github.event.pull_request.html_url }}
         run: |
           # Wait up to 5 minutes for PR to merge
-          for i in {1..30}; do
+          for i in {1..60}; do
             STATE=$(gh pr view "${PR_URL}" --json state --jq '.state')
             if [ "${STATE}" = "MERGED" ]; then
               echo "✅ PR merged successfully"

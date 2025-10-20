@@ -6,7 +6,7 @@ on:
       - "v*"
 
 permissions:
-  contents: read
+  contents: write
   packages: write
   security-events: write
   id-token: write # required for cosign keyless (OIDC) signing
@@ -14,6 +14,9 @@ permissions:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    concurrency:
+      group: publish-${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: true
     env:
       COSIGN_KEY: ${{ secrets.COSIGN_KEY }}
       COSIGN_PASSWORD: ${{ secrets.COSIGN_PASSWORD }}
@@ -44,12 +47,34 @@ jobs:
           VERSION=${GITHUB_REF_NAME}
           docker push ghcr.io/${{ github.repository }}:${VERSION}
 
+      - name: Resolve pushed image digest
+        id: image_digest
+        run: |
+          VERSION=${GITHUB_REF_NAME}
+          REF=$(docker inspect --format='{{index .RepoDigests 0}}' ghcr.io/${{ github.repository }}:${VERSION})
+          DIGEST=${REF#*@}
+          echo "digest=${DIGEST}" >> $GITHUB_OUTPUT
+
+      - name: Attest image provenance (SLSA)
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a # v3.0.0
+        with:
+          subject-name: ghcr.io/${{ github.repository }}
+          subject-digest: ${{ steps.image_digest.outputs.digest }}
+          push-to-registry: true
+
       - name: Generate image SBOM (CycloneDX JSON)
         uses: anchore/sbom-action@aa0e114b2e19480f157109b9922bda359bd98b90 # v0.20.8
         with:
           image: ghcr.io/${{ github.repository }}:${{ github.ref_name }}
           format: cyclonedx-json
           output-file: sbom-image.json
+
+      - name: Upload SBOM to GitHub Release
+        uses: softprops/action-gh-release@6da8fa9354ddfdc4aeace5fc48d7f679b5214090 # v2.4.1
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: sbom-image.json
+          fail_on_unmatched_files: true
 
       - name: "Vulnerability scan (Grype) — block on HIGH"
         id: grype
@@ -100,6 +125,24 @@ jobs:
             echo "Signing keylessly via GitHub OIDC"
             cosign sign --yes "${IMAGE}"
           fi
+
+      - name: Verify image signature
+        if: always()
+        env:
+          COSIGN_EXPERIMENTAL: "1"
+        run: |
+          set -euo pipefail
+          IMAGE="ghcr.io/${{ github.repository }}:${GITHUB_REF_NAME}"
+          echo "Verifying signature for ${IMAGE}"
+          cosign verify --certificate-oidc-issuer https://token.actions.githubusercontent.com "${IMAGE}" | tee cosign-verify.txt || true
+
+      - name: Upload cosign verification log
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: cosign-verify
+          path: cosign-verify.txt
+          retention-days: 7
 
       - name: "Attest SBOM (required: prefer KMS/key if provided, else keyless OIDC)"
         env:
