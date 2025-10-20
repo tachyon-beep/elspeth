@@ -168,14 +168,6 @@ class SignedArtifactSink(ResultSink):
             if env_value:
                 self.key = env_value
                 return env_value
-            # Legacy fallback for pre-rebrand deployments
-            # TODO(v2.0): Remove DMP_SIGNING_KEY backward compatibility
-            if self.key_env == "ELSPETH_SIGNING_KEY":
-                legacy_env = os.getenv("DMP_SIGNING_KEY")
-                if legacy_env:
-                    logger.warning("Using legacy DMP_SIGNING_KEY environment variable; please migrate to ELSPETH_SIGNING_KEY")
-                    self.key = legacy_env
-                    return legacy_env
         # Additional fallback for asymmetric/KMS-style env keys often used in CI
         alt = os.getenv("COSIGN_KEY")
         if alt:

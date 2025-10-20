@@ -80,7 +80,6 @@ def test_missing_config_uses_env(monkeypatch):
 
 def test_missing_required_raises():
     os.environ.pop("ELSPETH_AZURE_OPENAI_DEPLOYMENT", None)
-    os.environ.pop("DMP_AZURE_OPENAI_DEPLOYMENT", None)
     with pytest.raises(ValueError):
         AzureOpenAIClient(
             deployment="gpt",
@@ -89,19 +88,3 @@ def test_missing_required_raises():
                 "azure_endpoint": "https://endpoint.openai.azure.com",
             },
         )
-
-
-def test_legacy_env_support(monkeypatch):
-    monkeypatch.delenv("ELSPETH_AZURE_OPENAI_DEPLOYMENT", raising=False)
-    monkeypatch.setenv("DMP_AZURE_OPENAI_DEPLOYMENT", "legacy-model")
-
-    llm = AzureOpenAIClient(
-        config={
-            "api_key": "key",
-            "api_version": "2024-05-01",
-            "azure_endpoint": "https://endpoint.openai.azure.com",
-        },
-        client=make_dummy_client(),
-    )
-
-    assert llm.deployment == "legacy-model"

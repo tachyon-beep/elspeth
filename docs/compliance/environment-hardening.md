@@ -4,7 +4,6 @@
 
 - **Environment variables only** – LLM clients, repository sinks, and signing bundles read credentials from `*_env` keys (e.g., `ELSPETH_SIGNING_KEY`, `AZURE_CS_KEY`), never static YAML (`src/elspeth/plugins/llms/middleware.py:214`, `src/elspeth/plugins/outputs/signed.py:107`, `src/elspeth/plugins/outputs/repository.py:149`). Use managed secret stores or OS keychains to populate these variables at launch.
 - **Managed identity support** – When SAS tokens are absent, blob datasources fall back to `DefaultAzureCredential`, enabling least-privilege access via Azure AD (`src/elspeth/datasources/blob_store.py:125`). Grant the workstation or compute identity read-only blob roles scoped to the dataset container.
-- **Legacy compatibility** – The signing sink warns when the deprecated `DMP_SIGNING_KEY` is used (`src/elspeth/plugins/outputs/signed.py:119`, `tests/test_outputs_signed.py:59`); disable legacy env vars in hardened deployments to avoid confusion.
 
 ## Network Controls
 

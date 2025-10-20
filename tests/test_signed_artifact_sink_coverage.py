@@ -151,28 +151,6 @@ def test_cost_summary_in_manifest(temp_output_dir, sample_results, monkeypatch):
     assert manifest["cost_summary"]["total_cost"] == 1.23
 
 
-def test_key_resolution_from_legacy_env(temp_output_dir, monkeypatch, caplog):
-    """Test key resolution from legacy DMP_SIGNING_KEY - line 166."""
-    import logging
-
-    # Set legacy env var
-    monkeypatch.setenv("DMP_SIGNING_KEY", "legacy-key")
-
-    sink = SignedArtifactSink(
-        base_path=str(temp_output_dir),
-        key_env="ELSPETH_SIGNING_KEY",  # Preferred env not set
-        timestamped=False,
-        bundle_name="legacy_test",
-    )
-
-    results = {"results": [{"test": "data"}]}
-
-    # Should use legacy key (with warning)
-    with caplog.at_level(logging.WARNING):
-        sink.write(results, metadata={})
-
-    # Check that warning was logged
-    assert any("Using legacy DMP_SIGNING_KEY" in record.message for record in caplog.records)
 
 
 def test_key_resolution_from_cosign(temp_output_dir, monkeypatch):

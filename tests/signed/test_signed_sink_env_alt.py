@@ -27,16 +27,3 @@ def test_signed_sink_uses_cosign_key_fallback(tmp_path: Path, monkeypatch) -> No
     assert (bundle_dir / "signature.json").exists()
 
 
-def test_signed_sink_uses_legacy_dmp_env(tmp_path: Path, monkeypatch) -> None:
-    # Simulate legacy env variable present, primary unset
-    monkeypatch.delenv("ELSPETH_SIGNING_KEY", raising=False)
-    monkeypatch.setenv("DMP_SIGNING_KEY", "legacy-secret")
-
-    sink = SignedArtifactSink(
-        base_path=tmp_path / "signed",
-        bundle_name="legacy",
-        timestamped=False,
-    )
-
-    sink.write({"results": []}, metadata={})
-    assert (tmp_path / "signed" / "legacy" / "signature.json").exists()

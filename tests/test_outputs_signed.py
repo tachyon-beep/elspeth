@@ -54,16 +54,6 @@ def test_signed_artifact_sink_env_key_and_timestamp(tmp_path, monkeypatch):
     assert sink.key == "env-secret"
 
 
-def test_signed_artifact_sink_legacy_env(monkeypatch, tmp_path, caplog):
-    monkeypatch.delenv("ELSPETH_SIGNING_KEY", raising=False)
-    monkeypatch.setenv("DMP_SIGNING_KEY", "legacy")
-
-    sink = SignedArtifactSink(base_path=tmp_path / "signed", bundle_name="exp", timestamped=False)
-
-    with caplog.at_level("WARNING"):
-        sink.write(fake_results(), metadata={"experiment": "exp"})
-
-    assert any("legacy" in record.message for record in caplog.records)
 
 
 def test_signed_artifact_sink_skip_on_error(monkeypatch, tmp_path, caplog):

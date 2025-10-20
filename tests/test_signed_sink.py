@@ -22,11 +22,6 @@ def test_signed_sink_writes_bundle(tmp_path: Path) -> None:
     assert manifest.get("signature", {}).get("value")
 
 
-def test_signed_sink_legacy_env_fallback(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setenv("DMP_SIGNING_KEY", "legacy")
-    sink = SignedArtifactSink(base_path=tmp_path, bundle_name="legacy", timestamped=False)
-    sink.write(_results(), metadata={"experiment": "e"})
-    assert (tmp_path / "legacy" / "signature.json").exists()
 
 
 def test_signed_sink_on_error_skip_when_missing_key(tmp_path: Path) -> None:
