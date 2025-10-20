@@ -67,7 +67,7 @@ jobs:
     name: CI Core (Lint, Types, Tests)
     needs: [secrets-scan, changes]
     if: github.event_name != 'pull_request' || github.event.pull_request.draft != true
-    uses: tachyon-beep/elspeth/.github/workflows/reusable-ci.yml@main
+    uses: tachyon-beep/elspeth/.github/workflows/reusable-ci.yml@remediation
     with:
       python-version: '3.12'
     permissions:

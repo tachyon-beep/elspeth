@@ -11,7 +11,7 @@ on:
 jobs:
   ci-core:
     name: CI Core (Lint, Types, Tests)
-    uses: tachyon-beep/elspeth/.github/workflows/reusable-ci.yml@main
+    uses: tachyon-beep/elspeth/.github/workflows/reusable-ci.yml@remediation
     with:
       python-version: '3.12'
     permissions:
