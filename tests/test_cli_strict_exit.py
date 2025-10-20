@@ -11,7 +11,9 @@ from elspeth import cli
 
 
 def test_cli_strict_mode_exits_on_sink_failure(monkeypatch, tmp_path: Path):
-    # STRICT mode
+    # Security note: this test simulates production STRICT mode to assert the
+    # CLI fails closed when a sink raises. We scope the mode change to this test
+    # via environment, never by relaxing production code.
     monkeypatch.setenv("ELSPETH_SECURE_MODE", "strict")
 
     # Minimal input

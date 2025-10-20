@@ -85,10 +85,10 @@ class AzureOpenAIEmbedder(Embedder):
             )
 
         # Enforce endpoint allowlist for Azure OpenAI (defense-in-depth)
-        from elspeth.core.security import SecureMode, validate_azure_openai_endpoint
+        from elspeth.core.security import get_secure_mode, validate_azure_openai_endpoint
 
-        # Allow relaxed validation for embeddings in development/test contexts.
-        validate_azure_openai_endpoint(endpoint, mode=SecureMode.DEVELOPMENT)
+        # Enforce endpoint according to current secure mode
+        validate_azure_openai_endpoint(endpoint, mode=get_secure_mode())
 
         self._client = AzureOpenAI(
             api_key=key,

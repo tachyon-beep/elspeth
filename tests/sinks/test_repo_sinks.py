@@ -34,7 +34,9 @@ class DummySession:
 
 
 def test_repo_sink_strict_mode_on_error_skip_guard(monkeypatch):
-    # Force STRICT mode to exercise guard in __post_init__
+    # Security note: Force STRICT mode here to exercise the guard path in
+    # __post_init__ without relaxing production logic. The class under test
+    # still enforces policy; we just observe handling in strict contexts.
     import elspeth.plugins.nodes.sinks.repository as repo_mod
 
     monkeypatch.setattr(repo_mod, "get_secure_mode", lambda: SecureMode.STRICT)

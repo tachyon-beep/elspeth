@@ -92,6 +92,12 @@ def test_azure_openai_embedder_requires_endpoint(monkeypatch):
 def test_azure_openai_embedder_uses_env(openai_stub, monkeypatch):
     embedding_module = _import_embedding()
 
+    # Security note:
+    # This test uses a non-approved endpoint (https://example) to avoid any
+    # dependency on real Azure endpoints. We scope the relaxation strictly to
+    # tests by switching secure mode to DEVELOPMENT here. Production code uses
+    # get_secure_mode() and remains STRICT/STANDARD as configured.
+    monkeypatch.setenv("ELSPETH_SECURE_MODE", "development")
     monkeypatch.setenv("AZURE_OPENAI_ENDPOINT", "https://example")
     monkeypatch.setenv("AZURE_OPENAI_API_KEY", "secret")
     monkeypatch.setenv("AZURE_OPENAI_API_VERSION", "2024-05-13")
