@@ -63,14 +63,13 @@ jobs:
           path: results.sarif
           retention-days: 7
 
-
   ci-core:
     name: CI Core (Lint, Types, Tests)
     needs: [secrets-scan, changes]
     if: github.event_name != 'pull_request' || github.event.pull_request.draft != true
     uses: tachyon-beep/elspeth/.github/workflows/reusable-ci.yml@remediation
     with:
-      python-version: '3.12'
+      python-version: "3.12"
     permissions:
       contents: read
 
@@ -87,7 +86,7 @@ jobs:
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         with:
           python-version: "3.12"
-          cache: 'pip'
+          cache: "pip"
           cache-dependency-path: |
             requirements-dev.lock
 
@@ -119,6 +118,7 @@ jobs:
           retention-days: 7
 
       - name: Semgrep scan (curated, Docker CLI)
+        # Use curated p/ci ruleset rather than --config auto to keep signal/noise balanced
         run: |
           docker run --rm \
             -v "$PWD:/src" \
@@ -189,7 +189,7 @@ jobs:
       - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         with:
           python-version: "3.12"
-          cache: 'pip'
+          cache: "pip"
           cache-dependency-path: |
             requirements-dev.lock
 

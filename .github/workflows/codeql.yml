@@ -37,3 +37,27 @@ jobs:
         with:
           category: '/language:python'
 
+      - name: Summarize CodeQL alerts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -e
+          REPO="${{ github.repository }}"
+          REF="${{ github.ref }}"
+          echo "## CodeQL Findings" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Ref: ${REF}" >> "$GITHUB_STEP_SUMMARY"
+          tmp=$(mktemp)
+          if ! gh api -H "Accept: application/vnd.github+json" \
+            repos/${REPO}/code-scanning/alerts -F tool_name=CodeQL -F ref=${REF} -F per_page=100 > "$tmp"; then
+            echo "Unable to fetch alerts (insufficient permissions or none present)." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          total=$(jq 'length' "$tmp")
+          open=$(jq '[.[] | select(.state=="open")] | length' "$tmp")
+          echo "- Alerts: ${total} (open: ${open})" >> "$GITHUB_STEP_SUMMARY"
+          for sev in error warning note; do
+            cnt=$(jq --arg s "$sev" '[.[] | select(.state=="open" and .rule.severity==$s)] | length' "$tmp")
+            echo "  - ${sev}: ${cnt}" >> "$GITHUB_STEP_SUMMARY"
+          done
+          echo "\nTop open alerts:" >> "$GITHUB_STEP_SUMMARY"
+          jq -r '.[] | select(.state=="open") | "* [\(.rule.severity|ascii_upcase)] \(.rule.id) - \(.rule.description) — \(.most_recent_instance.location.path // "")"' "$tmp" | head -n 15 >> "$GITHUB_STEP_SUMMARY"

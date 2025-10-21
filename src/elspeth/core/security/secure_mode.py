@@ -44,7 +44,10 @@ def get_path_contained_sink_types(env: dict[str, str] | None = None) -> frozense
         custom = _parse_csv_list(override)
         return frozenset(PATH_CONTAINED_SINK_TYPES_DEFAULT.union(custom))
     except (ValueError, AttributeError, TypeError):
-        logger.warning("Failed to parse ELSPETH_PATH_CONTAINED_SINKS; using defaults")
+        logger.warning(
+            "Failed to parse ELSPETH_PATH_CONTAINED_SINKS='%s'; using defaults. Custom sink containment settings will not be applied.",
+            override,
+        )
         return PATH_CONTAINED_SINK_TYPES_DEFAULT
 
 
@@ -73,7 +76,9 @@ class SecureMode(Enum):
             return cls(mode_str)
         except ValueError:
             logger.warning(
-                f"Invalid ELSPETH_SECURE_MODE='{mode_str}', defaulting to STANDARD. Valid values: {', '.join([m.value for m in cls])}"
+                "Invalid ELSPETH_SECURE_MODE='%s', defaulting to STANDARD. Valid values: %s",
+                mode_str,
+                ", ".join(m.value for m in cls),
             )
             return cls.STANDARD
 
@@ -120,7 +125,7 @@ def _validate_security_level_required(config: dict[str, Any], plugin_type: str, 
         raise ValueError(f"{plugin_type} missing required 'security_level' ({mode.value.upper()} mode)")
 
     if "security_level" not in config and mode == SecureMode.DEVELOPMENT:
-        logger.warning(f"{plugin_type} missing 'security_level' - allowed in DEVELOPMENT mode")
+        logger.warning("%s missing 'security_level' - allowed in DEVELOPMENT mode", plugin_type)
 
 
 def validate_datasource_config(config: dict[str, Any], mode: SecureMode | None = None) -> None:
@@ -156,9 +161,8 @@ def validate_datasource_config(config: dict[str, Any], mode: SecureMode | None =
         if retain_local is None:
             logger.warning("Datasource missing 'retain_local' - should be explicit True in STRICT mode")
 
-    elif mode == SecureMode.STANDARD:
-        if retain_local is False:
-            logger.warning("Datasource has retain_local=False - consider enabling for audit compliance")
+    elif mode == SecureMode.STANDARD and retain_local is False:
+        logger.warning("Datasource has retain_local=False - consider enabling for audit compliance")
 
 
 def validate_llm_config(config: dict[str, Any], mode: SecureMode | None = None) -> None:
@@ -184,7 +188,7 @@ def validate_llm_config(config: dict[str, Any], mode: SecureMode | None = None) 
         raise ValueError(f"LLM type '{llm_type}' is not allowed in STRICT mode (production requires real LLM clients)")
 
     if mode == SecureMode.STANDARD and llm_type in ["mock", "static_test"]:
-        logger.warning(f"Using mock LLM type '{llm_type}' - consider real LLM for production")
+        logger.warning("Using mock LLM type '%s' - consider real LLM for production", llm_type)
 
 
 def validate_sink_config(config: dict[str, Any], mode: SecureMode | None = None) -> None:
@@ -219,7 +223,7 @@ def validate_sink_config(config: dict[str, Any], mode: SecureMode | None = None)
             )
 
         if mode == SecureMode.STANDARD and sanitize_formulas is False:
-            logger.warning(f"Sink type '{sink_type}' has sanitize_formulas=False - consider enabling for security")
+            logger.warning("Sink type '%s' has sanitize_formulas=False - consider enabling for security", sink_type)
 
         # Enforce explicit base-path containment for local filesystem sinks in STRICT
         allowed_base = config.get("allowed_base_path")

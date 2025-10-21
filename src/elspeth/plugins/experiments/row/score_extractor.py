@@ -80,7 +80,7 @@ class ScoreExtractorPlugin:
         self._threshold_mode = threshold_mode
         self._flag_field = flag_field
 
-    def process_row(self, row: dict[str, Any], responses: Mapping[str, Mapping[str, Any]]) -> dict[str, Any]:
+    def process_row(self, _row: dict[str, Any], responses: Mapping[str, Mapping[str, Any]]) -> dict[str, Any]:
         scores: dict[str, float] = {}
         flags: dict[str, bool] = {}
 

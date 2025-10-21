@@ -6,6 +6,7 @@ used, so environments without Key Vault support are unaffected.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Optional
 from urllib.parse import urlparse
@@ -18,14 +19,20 @@ class KeyVaultSecretRef:
     version: Optional[str]
 
 
+_ALLOWED_VAULT_HOST_RE = re.compile(r"^[a-z0-9-]+\.vault\.azure\.(net|us|cn)$", re.IGNORECASE)
+
+
 def _parse_secret_uri(secret_uri: str) -> KeyVaultSecretRef:
     """Parse a Key Vault secret URI into components.
 
     Expected form: https://{vault}.vault.azure.net/secrets/{name}/{version?}
     """
     parsed = urlparse(secret_uri)
-    if not parsed.scheme.startswith("http") or not parsed.netloc:
+    # Require HTTPS and a host that matches known Azure Key Vault domains
+    if parsed.scheme != "https" or not parsed.netloc:
         raise ValueError(f"Invalid Key Vault secret URI: {secret_uri}")
+    if not _ALLOWED_VAULT_HOST_RE.fullmatch(parsed.netloc):
+        raise ValueError(f"Disallowed Key Vault host: {parsed.netloc}")
     parts = [p for p in parsed.path.split("/") if p]
     if len(parts) < 2 or parts[0] != "secrets":
         raise ValueError(f"Invalid Key Vault secret URI path: {parsed.path}")

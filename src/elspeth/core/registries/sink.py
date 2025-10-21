@@ -50,6 +50,9 @@ from .schemas import (
     with_security_properties,
 )
 
+# Capability flags exposed by sink plugins. Keep constants centralized to avoid drift.
+CAP_SUPPORTS_FOLDER_PATH_INJECTION = "supports_folder_path_injection"
+
 logger = logging.getLogger(__name__)
 
 # Create the sink registry with type safety
@@ -553,6 +556,7 @@ sink_registry.register(
     "azure_devops_artifact_repo",
     _create_azure_devops_artifacts_repo_sink,
     schema=_AZURE_DEVOPS_ARTIFACTS_REPO_SINK_SCHEMA,
+    capabilities={CAP_SUPPORTS_FOLDER_PATH_INJECTION},
 )
 sink_registry.register("signed_artifact", _create_signed_artifact_sink, schema=_SIGNED_ARTIFACT_SINK_SCHEMA)
 sink_registry.register("analytics_report", _create_analytics_report_sink, schema=_ANALYTICS_REPORT_SINK_SCHEMA)
@@ -568,4 +572,5 @@ sink_registry.register("reproducibility_bundle", _create_reproducibility_bundle_
 
 __all__ = [
     "sink_registry",
+    "CAP_SUPPORTS_FOLDER_PATH_INJECTION",
 ]

@@ -63,6 +63,7 @@ class PreparedFile:
 @dataclass
 class _RepoSinkBase(ResultSink):
     """Common repository sink behavior (auth, retries, dry-run, error handling)."""
+
     path_template: str = "experiments/{experiment}/{timestamp}"
     commit_message_template: str = "Add experiment results for {experiment}"
     include_manifest: bool = True
@@ -107,7 +108,7 @@ class _RepoSinkBase(ResultSink):
         if self.dry_run:
             logger.warning(
                 "Repository sink running in dry-run mode; no remote writes will occur. "
-                "Set dry_run=False in configuration (or via CLI flag) to enable remote publishing."
+                "Set dry_run=False in configuration to enable remote publishing, or pass --live-outputs when using the CLI."
             )
             # In STRICT mode, highlight that dry-run prevents remote writes
             if get_secure_mode() == SecureMode.STRICT:

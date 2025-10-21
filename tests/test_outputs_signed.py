@@ -54,8 +54,6 @@ def test_signed_artifact_sink_env_key_and_timestamp(tmp_path, monkeypatch):
     assert sink.key == "env-secret"
 
 
-
-
 def test_signed_artifact_sink_skip_on_error(monkeypatch, tmp_path, caplog):
     monkeypatch.delenv("ELSPETH_SIGNING_KEY", raising=False)
     sink = SignedArtifactSink(base_path=tmp_path / "signed", bundle_name="exp", timestamped=False, on_error="skip")

@@ -22,8 +22,6 @@ def test_signed_sink_writes_bundle(tmp_path: Path) -> None:
     assert manifest.get("signature", {}).get("value")
 
 
-
-
 def test_signed_sink_on_error_skip_when_missing_key(tmp_path: Path) -> None:
     sink = SignedArtifactSink(base_path=tmp_path, bundle_name="nokey", timestamped=False, on_error="skip", key_env="MISSING_ENV_VAR")
     sink.write(_results(), metadata={"experiment": "e"})

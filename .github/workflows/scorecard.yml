@@ -36,3 +36,22 @@ jobs:
         with:
           sarif_file: results.sarif
           category: scorecard
+
+      - name: Summarize Scorecard findings
+        run: |
+          set -e
+          echo "## OpenSSF Scorecard Findings" >> "$GITHUB_STEP_SUMMARY"
+          if [ ! -s results.sarif ]; then
+            echo "No SARIF generated." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          total=$(jq '[.runs[].results[]?] | length' results.sarif)
+          errors=$(jq '[.runs[].results[]? | select(.level=="error")] | length' results.sarif)
+          warnings=$(jq '[.runs[].results[]? | select(.level=="warning")] | length' results.sarif)
+          notes=$(jq '[.runs[].results[]? | select(.level=="note")] | length' results.sarif)
+          echo "- Total results: ${total}" >> "$GITHUB_STEP_SUMMARY"
+          echo "  - ERROR: ${errors}" >> "$GITHUB_STEP_SUMMARY"
+          echo "  - WARNING: ${warnings}" >> "$GITHUB_STEP_SUMMARY"
+          echo "  - NOTE: ${notes}" >> "$GITHUB_STEP_SUMMARY"
+          echo "\nTop findings:" >> "$GITHUB_STEP_SUMMARY"
+          jq -r '.runs[].results[]? | "* [\(.level|ascii_upcase)] \(.ruleId) - \(.message.text|gsub("\n"; " "))"' results.sarif | head -n 15 >> "$GITHUB_STEP_SUMMARY"

@@ -109,8 +109,12 @@ def test_retain_local_copy_failure_yields_empty_when_skip(monkeypatch: pytest.Mo
     csv_path = tmp_path / "data.csv"
     pd.DataFrame({"a": [1]}).to_csv(csv_path, index=False)
     ds = CSVDataSource(path=csv_path, retain_local=True, on_error="skip")
+
     # After a successful read, copying to audit location should fail
-    monkeypatch.setattr("shutil.copy2", lambda *a, **k: (_ for _ in ()).throw(OSError("disk full")))
+    def _copy_oom(*_args, **_kwargs):  # noqa: D401
+        raise OSError("disk full")
+
+    monkeypatch.setattr("shutil.copy2", _copy_oom)
     df = ds.load()
     assert df.empty
 

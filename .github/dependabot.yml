@@ -17,12 +17,15 @@ updates:
       # Check for security updates DAILY at midnight UTC
       interval: "daily"
       time: "00:00"
-      timezone: "UTC"
+      timezone: "Australia/Sydney"
 
-    # ONLY security updates in this pipeline
-    groups:
-      critical-security-patches:
-        update-types: ["security"]
+    # ONLY security updates in this pipeline: ignore all non-security version bumps
+    ignore:
+      - dependency-name: "*"
+        update-types:
+          - "version-update:semver-major"
+          - "version-update:semver-minor"
+          - "version-update:semver-patch"
 
     # Higher limit for security (don't block critical patches)
     open-pull-requests-limit: 20
@@ -53,7 +56,7 @@ updates:
       interval: "weekly"
       day: "monday"
       time: "09:00"
-      timezone: "UTC"
+      timezone: "Australia/Sydney"
 
     # Group related dependencies to reduce PR noise
     groups:
@@ -170,7 +173,7 @@ updates:
       interval: "weekly"
       day: "tuesday"
       time: "09:00"
-      timezone: "UTC"
+      timezone: "Australia/Sydney"
 
     # Group all GitHub Actions updates together
     groups:
@@ -214,7 +217,7 @@ updates:
       interval: "weekly"
       day: "wednesday"
       time: "09:00"
-      timezone: "UTC"
+      timezone: "Australia/Sydney"
 
     # Limit concurrent PRs
     open-pull-requests-limit: 3

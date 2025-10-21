@@ -151,8 +151,6 @@ def test_cost_summary_in_manifest(temp_output_dir, sample_results, monkeypatch):
     assert manifest["cost_summary"]["total_cost"] == 1.23
 
 
-
-
 def test_key_resolution_from_cosign(temp_output_dir, monkeypatch):
     """Test key resolution from COSIGN_KEY fallback."""
     # Set COSIGN_KEY

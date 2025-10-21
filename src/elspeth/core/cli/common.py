@@ -20,6 +20,7 @@ import pandas as pd
 import yaml
 
 import elspeth.core.registries.sink as sink_reg
+from elspeth.core.registries.sink import CAP_SUPPORTS_FOLDER_PATH_INJECTION
 from elspeth.core.validation.base import ConfigurationError
 
 # Optional sink; not required for all CLI flows
@@ -30,14 +31,6 @@ except Exception:  # pragma: no cover - optional dependency pattern
     ReproBundleSinkCls = None
 
 logger = logging.getLogger(__name__)
-
-
-# Sinks that support automatic folder_path injection when publishing artifacts.
-# TODO: Replace with capability-based system when sink registry supports plugin capabilities.
-# See: https://github.com/tachyon-beep/elspeth/pull/7#discussion_r2442469169
-_SINKS_WITH_AUTO_FOLDER_PATH = frozenset([
-    "azure_devops_artifact_repo",
-])
 
 
 def ensure_artifacts_dir(base: Path | None) -> Path:
@@ -59,9 +52,7 @@ def write_simple_artifacts(art_dir: Path, name: str, payload: dict[str, Any], se
     - ``{name}_settings.yaml`` mirrors the original config file when available.
     """
     # Results JSON
-    (art_dir / f"{name}_results.json").write_text(
-        json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8"
-    )
+    (art_dir / f"{name}_results.json").write_text(json.dumps(payload, indent=2, sort_keys=True), encoding="utf-8")
     # Settings YAML snapshot
     try:
         cfg_path = Path(getattr(settings, "config_path", ""))
@@ -150,8 +141,13 @@ def maybe_publish_artifacts_bundle(
         except ValueError as exc:
             logger.warning("artifact sink config invalid; skipping publish: %s", exc)
             return
-    # Auto-inject folder_path for sinks that support it
-    if plugin_name in _SINKS_WITH_AUTO_FOLDER_PATH and not opts.get("folder_path"):
+    try:
+        capabilities = sink_reg.sink_registry.get_plugin_capabilities(plugin_name)
+    except KeyError:
+        logger.warning("Unknown artifact sink plugin '%s'; attempting publish without capability hints", plugin_name)
+        capabilities = frozenset()
+    # Auto-inject folder_path for sinks that advertise capability support
+    if CAP_SUPPORTS_FOLDER_PATH_INJECTION in capabilities and not opts.get("folder_path"):
         opts["folder_path"] = str(bundle_dir)
     try:
         sink = sink_reg.sink_registry.create(plugin_name, opts, parent_context=None)

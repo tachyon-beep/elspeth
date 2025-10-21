@@ -40,8 +40,8 @@ class PgVectorQueryClient(VectorQueryClient):
     def __init__(self, *, dsn: str, table: str = "elspeth_rag", connect_timeout: float | int | None = None) -> None:
         # Defer importing psycopg until query() is executed. This makes unit tests
         # that only validate DSN handling independent from system libpq availability.
-        self._psycopg: Any = None
-        self._sql: Any = None
+        self._psycopg: Any | None = None
+        self._sql: Any | None = None
         self._dsn = dsn
         self._table = table
         self._connect_timeout = int(connect_timeout) if connect_timeout is not None else None
@@ -67,8 +67,8 @@ class PgVectorQueryClient(VectorQueryClient):
 
                 self._sql = sql
             except Exception:
-                # Keep self._sql = None; downstream will refuse raw SQL fallback
-                self._sql = None
+                # self._sql remains None; downstream will refuse raw SQL fallback
+                pass
 
         vector_literal = self._vector_literal(query_vector)
         dsn = self._dsn
@@ -85,10 +85,11 @@ class PgVectorQueryClient(VectorQueryClient):
                     # libpq key-value DSN: append as space-delimited parameter
                     sep = " " if dsn and not dsn.endswith(" ") else ""
                     dsn = f"{dsn}{sep}connect_timeout={self._connect_timeout}"
-            except Exception:
+            except (ValueError, AttributeError, TypeError):
                 # Fallback to safe whitespace-delimited append
                 sep = " " if dsn and not dsn.endswith(" ") else ""
                 dsn = f"{dsn}{sep}connect_timeout={self._connect_timeout}"
+        assert self._psycopg is not None
         conn = self._psycopg.connect(dsn, autocommit=True)
         try:
             # Use sql.Identifier to safely quote table name and prevent SQL injection
@@ -111,7 +112,9 @@ class PgVectorQueryClient(VectorQueryClient):
                     # directly assigned to `self._psycopg` (non-module), return no results
                     # to allow DSN handling assertions without executing SQL.
                     if isinstance(self._psycopg, types.ModuleType):
-                        raise RuntimeError("psycopg.sql unavailable; refusing to execute raw SQL fallback")
+                        raise RuntimeError(
+                            "psycopg.sql unavailable; install psycopg[binary] or psycopg[c] to enable safe SQL identifier quoting"
+                        )
                     return
                 cur.execute(  # nosemgrep: python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query
                     query_sql,

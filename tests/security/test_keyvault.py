@@ -18,7 +18,9 @@ def test_parse_secret_uri_valid_and_invalid():
 
     # Valid without version
     ref = kv._parse_secret_uri("https://x.vault.azure.net/secrets/name")
-    assert ref.vault_url.endswith("vault.azure.net")
+    from urllib.parse import urlparse
+
+    assert urlparse(ref.vault_url).netloc == "x.vault.azure.net"
     assert ref.name == "name"
     assert ref.version is None
 

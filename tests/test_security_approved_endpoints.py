@@ -334,6 +334,7 @@ class TestEndpointValidation:
         """Test OpenAI public API blocks confidential data."""
         with pytest.raises(ValueError, match="not approved for security level"):
             from elspeth.core.base.types import SecurityLevel
+
             validate_http_api_endpoint(
                 "https://api.openai.com",
                 security_level=SecurityLevel.PROTECTED,
@@ -343,6 +344,7 @@ class TestEndpointValidation:
         """Test OpenAI public API blocks SECRET data."""
         with pytest.raises(ValueError, match="not approved for security level"):
             from elspeth.core.base.types import SecurityLevel
+
             validate_http_api_endpoint(
                 "https://api.openai.com",
                 security_level=SecurityLevel.SECRET,
@@ -351,6 +353,7 @@ class TestEndpointValidation:
     def test_security_levels_enums_only(self):
         """Endpoint validation accepts enums (1.0 API)."""
         from elspeth.core.base.types import SecurityLevel
+
         assert (
             validate_http_api_endpoint(
                 "https://api.openai.com",
@@ -369,6 +372,7 @@ class TestEndpointValidationRegistry:
         from elspeth.core.registries.llm import _create_azure_openai
 
         from elspeth.core.base.types import SecurityLevel
+
         context = PluginContext(
             security_level=SecurityLevel.OFFICIAL,
             plugin_kind="llm",
@@ -395,6 +399,7 @@ class TestEndpointValidationRegistry:
         from elspeth.core.registries.llm import _create_http_openai
 
         from elspeth.core.base.types import SecurityLevel
+
         context = PluginContext(
             security_level=SecurityLevel.PROTECTED,
             plugin_kind="llm",

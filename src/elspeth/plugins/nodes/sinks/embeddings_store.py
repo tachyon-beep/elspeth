@@ -84,7 +84,12 @@ class PgVectorClient(VectorStoreClient):
             import psycopg as _psycopg  # local import to avoid hard dependency at module import time
             from psycopg import sql as _sql
         except Exception as exc:  # pragma: no cover - exercised in integration
-            raise ImportError("pgvector provider requires psycopg/libpq. Install 'psycopg' and ensure libpq is available.") from exc
+            raise ImportError(
+                (
+                    "pgvector provider requires psycopg and safe SQL identifier quoting; "
+                    "install 'psycopg[binary]' or 'psycopg[c]' and ensure libpq is available."
+                )
+            ) from exc
         self._psycopg = _psycopg
         self._sql = _sql
         self._dsn = dsn
@@ -291,6 +296,7 @@ class EmbeddingsStoreSink(ResultSink):
             else:
                 try:
                     from elspeth.core.base.types import SecurityLevel as _SL
+
                     sec_text = security_level.value if isinstance(security_level, _SL) else str(security_level)
                 except Exception:
                     sec_text = str(security_level)

@@ -45,7 +45,10 @@ def test_retention_age_and_count_pruning(monkeypatch, tmp_path: Path):
     monkeypatch.setenv("ELSPETH_LOG_MAX_FILES", "1")
 
     # Force inspect.getsource to fail to exercise fallback code path
-    monkeypatch.setattr("inspect.getsource", lambda *_args, **_kw: (_ for _ in ()).throw(OSError("nope")))
+    def _raise_oserror(*_args, **_kw):  # noqa: D401
+        raise OSError("nope")
+
+    monkeypatch.setattr("inspect.getsource", _raise_oserror)
 
     # Create logger - triggers retention and initialization
     ctx = _make_context(tmp_path)

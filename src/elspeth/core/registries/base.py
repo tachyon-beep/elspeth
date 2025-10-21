@@ -37,6 +37,7 @@ class BasePluginFactory(Generic[T]):
         create: Factory callable that creates plugin instances
         schema: Optional JSON schema for validation
         plugin_type: Human-readable plugin type (e.g., "datasource", "llm")
+        capabilities: Declared capability flags exposed to registry consumers
 
     Example:
         >>> def create_my_plugin(opts: Dict, ctx: PluginContext) -> MyPlugin:
@@ -57,6 +58,7 @@ class BasePluginFactory(Generic[T]):
     schema: Mapping[str, Any] | None = None
     plugin_type: str = "plugin"
     requires_input_schema: bool = False
+    capabilities: frozenset[str] = field(default_factory=frozenset)
     _compiled_validator: Any | None = field(default=None, init=False, repr=False)
 
     def validate(self, options: dict[str, Any], *, context: str) -> None:
@@ -81,6 +83,7 @@ class BasePluginFactory(Generic[T]):
 
                 validator_cls = importlib.import_module("jsonschema").Draft202012Validator
                 self._compiled_validator = validator_cls(self.schema)
+            assert self._compiled_validator is not None
             # Validate options
             errors = list(self._compiled_validator.iter_errors(options or {}))
             if errors:
@@ -183,20 +186,23 @@ class BasePluginRegistry(Generic[T]):
         *,
         schema: Mapping[str, Any] | None = None,
         requires_input_schema: bool = False,
+        capabilities: Iterable[str] | None = None,
     ) -> None:
         """
         Register a plugin factory.
 
         Args:
             name: Plugin name (used for lookup)
-            factory: Factory callable that creates plugin instances
-            schema: Optional JSON schema for validation
+        factory: Factory callable that creates plugin instances
+        schema: Optional JSON schema for validation
+        capabilities: Optional iterable of capability flags exposed to callers
         """
         plugin_factory = BasePluginFactory(
             create=factory,
             schema=schema,
             plugin_type=self.plugin_type,
             requires_input_schema=requires_input_schema,
+            capabilities=frozenset(capabilities or ()),
         )
         # Pre-compile JSON schema validator once at registration to avoid first-call latency
         if schema is not None:
@@ -206,10 +212,11 @@ class BasePluginRegistry(Generic[T]):
                 validator_cls = importlib.import_module("jsonschema").Draft202012Validator
                 plugin_factory._compiled_validator = validator_cls(schema)
                 # Warm up validator by running a trivial check to pre-initialize internals
-                try:
-                    _ = list(plugin_factory._compiled_validator.iter_errors({}))  # noqa: F841
-                except Exception:
-                    pass
+                if plugin_factory._compiled_validator is not None:
+                    try:
+                        _ = list(plugin_factory._compiled_validator.iter_errors({}))  # noqa: F841
+                    except Exception:
+                        pass
             except Exception:
                 plugin_factory._compiled_validator = None  # Fallback; validate() will handle
         self._plugins[name] = plugin_factory
@@ -235,6 +242,14 @@ class BasePluginRegistry(Generic[T]):
         payload.pop("determinism_level", None)
 
         factory.validate(payload, context=f"{self.plugin_type}:{name}")
+
+    def get_plugin_capabilities(self, name: str) -> frozenset[str]:
+        """Return declared capability flags for the specified plugin."""
+
+        factory = self._plugins.get(name)
+        if factory is None:
+            raise KeyError(f"Unknown {self.plugin_type} plugin '{name}'")
+        return factory.capabilities
 
     def create(
         self,
