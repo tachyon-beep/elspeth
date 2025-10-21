@@ -164,7 +164,9 @@ jobs:
 
       - name: Generate SBOM (requirements.lock)
         run: |
-          python -m cyclonedx_py requirements requirements.lock --output-format JSON --output-file sbom.json --output-reproducible
+          python -m pip install --upgrade pip
+          python -m pip install "cyclonedx-bom>=3.11.0"
+          cyclonedx-py requirements -i requirements.lock -o sbom.json -F json
 
       - name: Upload SBOM artefact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
