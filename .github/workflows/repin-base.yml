@@ -7,6 +7,8 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
+  workflows: write
 
 concurrency:
   group: repin-${{ github.workflow }}-${{ github.ref }}
@@ -32,6 +34,7 @@ jobs:
       - name: Create Pull Request
         uses: peter-evans/create-pull-request@271a8d0340265f705b14b6d32b9829c1cb33d45e # v7.0.8
         with:
+          token: ${{ github.token }}
           commit-message: "chore: repin base image digest to ${{ steps.digest.outputs.digest }}"
           title: "Repin base image digest"
           body: "Updates .github/base-image.txt to latest linux/amd64 digest for python:3.12.12-slim."

@@ -117,13 +117,13 @@ jobs:
           path: bandit.json
           retention-days: 7
 
-      - name: Semgrep scan (curated)
-        uses: semgrep/semgrep-action@713efdd345f3035192eaa63f56867b88e63e4e5d # v0.58.0
-        with:
-          config: p/ci
-          generate-sarif: true
-          sarif: semgrep.sarif
-          args: --severity ERROR --metrics=off
+      - name: Semgrep scan (curated, Docker CLI)
+        run: |
+          docker run --rm \
+            -v "$PWD:/work" \
+            -w /work \
+            semgrep/semgrep:1.140.0@sha256:220daf180b5bfb02fb077bc324ec7673d8eb4f3f6dcd7cce1eda1995f564f980 \
+            semgrep scan --config p/ci --severity ERROR --metrics=off --sarif --sarif-output semgrep.sarif --error
 
       - name: Upload semgrep report
         if: always()
