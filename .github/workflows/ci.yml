@@ -141,13 +141,11 @@ jobs:
           sarif_file: semgrep.sarif
           category: semgrep-oss
 
-      - name: Run pip-audit (official action)
-        uses: pypa/gh-action-pip-audit@1220774d901786e6f652ae159f7b6bc8fea6d266 # v1.1.0
-        with:
-          inputs: requirements.lock
-          require-hashes: true
-          no-deps: true
-          # Leave output to default (console); this action does not support SARIF
+      - name: Run pip-audit (CLI)
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pip-audit==2.7.3
+          pip-audit -r requirements.lock --require-hashes --no-deps
 
       - name: Upload pip-audit SARIF to code scanning (if generated)
         if: always() && hashFiles('pip-audit.sarif') != ''
