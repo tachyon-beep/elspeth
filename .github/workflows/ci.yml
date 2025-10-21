@@ -50,12 +50,13 @@ jobs:
           fetch-depth: 0
       - name: Run gitleaks
         uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
-        with:
-          args: --report-format sarif --report-path results.sarif
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Upload gitleaks report
-        if: always()
+          # Optional: uncomment to pin CLI version or change behavior
+          # GITLEAKS_VERSION: latest
+          # GITLEAKS_ENABLE_UPLOAD_ARTIFACT: 'true'
+      - name: Upload gitleaks report (if generated)
+        if: always() && hashFiles('results.sarif') != ''
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: gitleaks-report
