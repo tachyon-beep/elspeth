@@ -51,7 +51,10 @@ def create_middleware(
     # When allow_none=False, create_plugin_with_inheritance never returns None
     # (it raises ValueError instead), but add a runtime guard for safety in optimized runs
     if result is None:  # pragma: no cover - defensive, should be unreachable
-        raise RuntimeError("Unexpected None from middleware factory with allow_none=False")
+        name = definition.get("name") or definition.get("plugin") or "<unknown>"
+        raise RuntimeError(
+            f"Unexpected None from middleware factory for '{name}' with allow_none=False"
+        )
     return result
 
 

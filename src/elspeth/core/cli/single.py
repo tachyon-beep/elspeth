@@ -47,7 +47,7 @@ def run_single(args: Any, settings: Any) -> None:
             pass
         raise
 
-    for failure in payload.get("failures", []):
+    for failure in payload["failures"]:
         retry = failure.get("retry") or {}
         attempts = retry.get("attempts")
         logger.error(
@@ -72,7 +72,7 @@ def run_single(args: Any, settings: Any) -> None:
 
     maybe_write_artifacts_single(args, settings, payload, df)
     try:
-        if get_secure_mode() == SecureMode.STRICT and payload.get("failures"):
+        if get_secure_mode() == SecureMode.STRICT and payload["failures"]:
             logger.error("STRICT mode: sink failures detected; aborting with non-zero exit")
             raise SystemExit(1)
     except Exception:

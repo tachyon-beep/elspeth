@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Mapping
@@ -165,14 +166,27 @@ def _instantiate_plugin(
     payload["security_level"] = sec_level
     payload["determinism_level"] = det_level
     # Be flexible with factory signature to support tests that monkeypatch
-    # registry.create without provenance/parent_context kwargs.
+    # registry.create without provenance/parent_context kwargs. Use signature
+    # introspection to decide which optional kwargs to pass, avoiding nested
+    # try/except that could hide genuine signature issues.
     try:
-        return factory(plugin_name, payload, provenance=provenance)
-    except TypeError:
-        try:
-            return factory(plugin_name, payload)
-        except TypeError:
-            return factory(plugin_name, payload, parent_context=None)
+        sig = inspect.signature(factory)
+    except (ValueError, TypeError):  # builtins/c-callables may not have a signature
+        sig = None
+
+    kwargs: dict[str, Any] = {}
+    if sig is not None:
+        param_kinds = {name: p.kind for name, p in sig.parameters.items()}
+        allows_kwargs = any(kind is inspect.Parameter.VAR_KEYWORD for kind in param_kinds.values())
+        if "provenance" in param_kinds or allows_kwargs:
+            kwargs["provenance"] = provenance
+        if "parent_context" in param_kinds or allows_kwargs:
+            kwargs["parent_context"] = None
+    else:
+        # Best-effort default: pass only required positional args
+        kwargs = {}
+
+    return factory(plugin_name, payload, **kwargs)
 
 
 def _collect_prompt_configuration(profile_data: Mapping[str, Any]) -> PromptConfiguration:

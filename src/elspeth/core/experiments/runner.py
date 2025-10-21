@@ -175,9 +175,7 @@ class ExperimentRunner:
         records_with_index.sort(key=lambda item: item[0])
         results = [record for _, record in records_with_index]
 
-        payload: dict[str, Any] = {"results": results}
-        if failures:
-            payload["failures"] = failures
+        payload: dict[str, Any] = {"results": results, "failures": failures}
         aggregates: dict[str, Any] = {}
         for plugin in self.aggregator_plugins or []:
             derived = plugin.finalize(results)

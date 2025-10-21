@@ -231,7 +231,7 @@ def run_suite(
     maybe_write_artifacts_suite(args, settings, suite, results)
     try:
         if get_secure_mode() == SecureMode.STRICT:
-            any_failures = any((entry.get("payload", {}) or {}).get("failures") for entry in results.values())
+            any_failures = any(entry["payload"]["failures"] for entry in results.values())
             if any_failures:
                 logger.error("STRICT mode: sink failures detected in suite; aborting with non-zero exit")
                 raise SystemExit(1)

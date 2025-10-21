@@ -186,11 +186,12 @@ def run_job_config(job: Mapping[str, Any]) -> dict[str, Any]:
             security_level=ctx.security_level,
             determinism_level=ctx.determinism_level,
         )
-        # Middlewares are optional; create via registry if declared
+        # Middlewares are optional by default; create via registry if declared
         try:
             from elspeth.core.registries.middleware import create_middleware
 
             mw_defs = list(job.get("llm_middlewares", []) or [])
+            mw_required = bool(job.get("llm_middlewares_required", False))
             if mw_defs:
                 mws = []
                 for entry in mw_defs:
@@ -202,8 +203,15 @@ def run_job_config(job: Mapping[str, Any]) -> dict[str, Any]:
                     mws.append(create_middleware(defn, parent_context=ctx))
                 runner.llm_middlewares = mws
         except (ImportError, ValueError) as exc:
-            # If middleware registry not available or invalid config, continue without middlewares
+            # If middleware registry is not available or invalid config, decide whether to fail or degrade.
+            if mw_defs and mw_required:
+                # Middlewares declared and required: fail the job explicitly.
+                raise RuntimeError(
+                    f"LLM middleware initialization failed; cannot continue without middlewares: {exc}"
+                ) from exc
+            # Graceful degradation: proceed without middlewares, and make it explicit.
             logger.warning("LLM middleware init failed; continuing without middlewares: %s", exc)
+            runner.llm_middlewares = []
 
         payload_out = runner.run(df)
         return payload_out
@@ -223,8 +231,9 @@ def run_job_config(job: Mapping[str, Any]) -> dict[str, Any]:
     bindings = _build_sink_bindings(sinks, default_context=ctx)
     pipeline = ArtifactPipeline(bindings)
     pipeline.execute(payload, metadata, on_error="continue", failures=failures)
+    # Always include failures for schema consistency
+    payload["failures"] = failures
     if failures:
-        payload["failures"] = failures
         logger.warning(
             "%d sink(s) failed during job write: %s",
             len(failures),

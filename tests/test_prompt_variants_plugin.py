@@ -75,7 +75,7 @@ def test_prompt_variants_aggregator_generates_variations():
     prompts = [item["prompt"] for item in variants]
     assert all(prompt.endswith("{{ colour }}") for prompt in prompts)
     assert aggregate_payload["placeholder_tokens"] == ["{{ colour }}"]
-    assert "failures" not in aggregate_payload
+    assert aggregate_payload["failures"] == []
     assert len(variant_llm.calls) == 3
 
 

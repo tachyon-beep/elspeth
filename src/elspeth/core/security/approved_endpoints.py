@@ -169,7 +169,7 @@ def _is_localhost(endpoint: str) -> bool:
     try:
         parsed = urlparse(endpoint)
         hostname = parsed.hostname
-    except Exception as exc:  # pragma: no cover - ultra-defensive
+    except (ValueError, AttributeError) as exc:  # pragma: no cover - ultra-defensive
         logger.warning("Failed to parse endpoint '%s' in _is_localhost: %s", endpoint, exc)
         return False
 
