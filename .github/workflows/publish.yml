@@ -6,14 +6,16 @@ on:
       - "v*"
 
 permissions:
-  contents: write
-  packages: write
-  security-events: write
-  id-token: write # required for cosign keyless (OIDC) signing
+  read-all: true
 
 jobs:
   publish:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+      security-events: write
+      id-token: write
     concurrency:
       group: publish-${{ github.workflow }}-${{ github.ref }}
       cancel-in-progress: true
@@ -24,11 +26,13 @@ jobs:
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
 
-      - name: Resolve base image digest (linux/amd64)
+      - name: Read pinned base image digest
         run: |
-          docker pull --platform=linux/amd64 python:3.12.12-slim
-          DIGEST=$(docker inspect --format='{{range .RepoDigests}}{{println .}}{{end}}' python:3.12.12-slim | grep '^python@sha256:' | head -n1 | cut -d'@' -f2)
-          echo "DOCKER_PYTHON_IMAGE=python:3.12.12-slim@${DIGEST}" >> $GITHUB_ENV
+          if [ ! -f .github/base-image.txt ]; then
+            echo "Pinned base image not found. Please run the 'Repin Base Image Digest' workflow or add .github/base-image.txt." >&2
+            exit 1
+          fi
+          echo "DOCKER_PYTHON_IMAGE=$(cat .github/base-image.txt)" >> $GITHUB_ENV
 
       - name: Build runtime image (version tag only)
         run: |

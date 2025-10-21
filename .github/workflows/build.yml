@@ -8,10 +8,13 @@ on:
   pull_request:
     types: [opened, synchronize, reopened]
 
+permissions:
+  read-all: true
+
 jobs:
   ci-core:
     name: CI Core (Lint, Types, Tests)
-    uses: tachyon-beep/elspeth/.github/workflows/reusable-ci.yml@remediation
+    uses: tachyon-beep/elspeth/.github/workflows/reusable-ci.yml@1aed7191970eb9d35716a282b8b08a091fc1a816
     with:
       python-version: '3.12'
     permissions:

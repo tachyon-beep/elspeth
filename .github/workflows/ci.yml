@@ -67,7 +67,7 @@ jobs:
     name: CI Core (Lint, Types, Tests)
     needs: [secrets-scan, changes]
     if: github.event_name != 'pull_request' || github.event.pull_request.draft != true
-    uses: tachyon-beep/elspeth/.github/workflows/reusable-ci.yml@remediation
+    uses: tachyon-beep/elspeth/.github/workflows/reusable-ci.yml@1aed7191970eb9d35716a282b8b08a091fc1a816
     with:
       python-version: "3.12"
     permissions:
@@ -226,13 +226,11 @@ jobs:
             echo "Using pinned base image from .github/base-image.txt" && cat .github/base-image.txt
             echo "DOCKER_PYTHON_IMAGE=$(cat .github/base-image.txt)" >> $GITHUB_ENV
           fi
-
-      - name: Resolve base image digest (linux/amd64)
+      - name: Ensure pinned base image is configured
         run: |
           if [ -z "${DOCKER_PYTHON_IMAGE}" ]; then
-            docker pull --platform=linux/amd64 python:3.12.12-slim
-            DIGEST=$(docker inspect --format='{{range .RepoDigests}}{{println .}}{{end}}' python:3.12.12-slim | grep '^python@sha256:' | head -n1 | cut -d'@' -f2)
-            echo "DOCKER_PYTHON_IMAGE=python:3.12.12-slim@${DIGEST}" >> $GITHUB_ENV
+            echo "Pinned base image not found. Please run the 'Repin Base Image Digest' workflow or add .github/base-image.txt." >&2
+            exit 1
           fi
 
       - name: Build dev/test image
