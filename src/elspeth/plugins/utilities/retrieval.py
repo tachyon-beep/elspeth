@@ -133,15 +133,18 @@ class RetrievalContextUtility:
         if self._namespace_override:
             return self._namespace_override
         context: PluginContext | None = getattr(self, "plugin_context", None)
+        # Security level casing policy:
+        # - If provided explicitly in metadata, preserve the caller's casing to reflect
+        #   the external label (e.g., "OFFICIAL").
+        # - When derived from plugin context, normalize to lowercase for namespacing stability
+        #   (avoids collisions across aliases and canonical enum values).
         if "security_level" in metadata:
             level_meta = metadata.get("security_level")
-            # Use provided metadata verbatim (preserve case/format)
             if isinstance(level_meta, SecurityLevel):
                 level = level_meta.value
             else:
                 level = str(level_meta)
         else:
-            # Derive from context; represent in lowercase for namespacing stability
             level_ctx = getattr(context, "security_level", "unofficial")
             if isinstance(level_ctx, SecurityLevel):
                 level = level_ctx.value.lower()

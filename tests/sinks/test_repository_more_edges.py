@@ -29,10 +29,10 @@ def test_github_request_error_non_transient(monkeypatch):
 
 def test_strict_mode_strict_branches_exercised(monkeypatch, tmp_path):
     monkeypatch.setenv("ELSPETH_SECURE_MODE", "strict")
-    # Repository sink (implementation logs, validation layer enforces in config)
-    s1 = GitHubRepoSink(owner="o", repo="r", on_error="skip")
-    assert s1.on_error == "skip"
-    # Blob sink
+    # Repository sink - STRICT mode enforces fail-closed policy
+    with pytest.raises(ValueError, match="cannot use on_error='skip' in STRICT mode"):
+        GitHubRepoSink(owner="o", repo="r", on_error="skip")
+    # Blob sink - STRICT mode enforces fail-closed policy
     cfg = tmp_path / "b.yaml"
     cfg.write_text(
         """
@@ -43,8 +43,8 @@ default:
         """,
         encoding="utf-8",
     )
-    s2 = BlobResultSink(config_path=cfg, on_error="skip")
-    assert s2.on_error == "skip"
-    # Signed sink
-    s3 = SignedArtifactSink(base_path=tmp_path, on_error="skip")
-    assert s3.on_error == "skip"
+    with pytest.raises(ValueError, match="cannot use on_error='skip' in STRICT mode"):
+        BlobResultSink(config_path=cfg, on_error="skip")
+    # Signed sink - STRICT mode enforces fail-closed policy
+    with pytest.raises(ValueError, match="cannot use on_error='skip' in STRICT mode"):
+        SignedArtifactSink(base_path=tmp_path, on_error="skip")

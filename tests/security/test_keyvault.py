@@ -16,7 +16,7 @@ def test_parse_secret_uri_valid_and_invalid():
     assert ref.name == "signing"
     assert ref.version == "1234"
 
-    # Valid without version
+    # Valid without version (public cloud)
     ref = kv._parse_secret_uri("https://x.vault.azure.net/secrets/name")
     from urllib.parse import urlparse
 
@@ -24,11 +24,24 @@ def test_parse_secret_uri_valid_and_invalid():
     assert ref.name == "name"
     assert ref.version is None
 
+    # Valid sovereign clouds (China/Gov)
+    ref_cn = kv._parse_secret_uri("https://mykv.vault.azure.cn/secrets/secretCN/abc")
+    assert urlparse(ref_cn.vault_url).netloc == "mykv.vault.azure.cn"
+    assert ref_cn.name == "secretCN" and ref_cn.version == "abc"
+
+    ref_us = kv._parse_secret_uri("https://mygov.VAULT.AZURE.US/secrets/nameUS")
+    # Case-insensitive host match is allowed
+    assert urlparse(ref_us.vault_url).netloc.lower() == "mygov.vault.azure.us"
+    assert ref_us.name == "nameUS" and ref_us.version is None
+
     # Invalid schemes/paths
     with pytest.raises(ValueError):
         kv._parse_secret_uri("ftp://x/secrets/name")
     with pytest.raises(ValueError):
         kv._parse_secret_uri("https://x/")
+    # Non-HTTPS schemes are rejected
+    with pytest.raises(ValueError):
+        kv._parse_secret_uri("http://mykv.vault.azure.net/secrets/x")
 
 
 def test_fetch_secret_from_keyvault_import_guard(monkeypatch):

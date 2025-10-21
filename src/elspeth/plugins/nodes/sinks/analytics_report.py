@@ -80,7 +80,7 @@ class AnalyticsReportSink(ResultSink):
                 for p in written:
                     try:
                         total_bytes += p.stat().st_size
-                    except Exception:  # nosec B110 - tolerate stat() errors to avoid blocking artifact write
+                    except (OSError, PermissionError):  # tolerate stat() errors to avoid blocking artifact write
                         pass
                 plugin_logger.log_event(
                     "sink_write",
@@ -88,7 +88,7 @@ class AnalyticsReportSink(ResultSink):
                     metrics={"bytes": total_bytes, "files": len(written)},
                     metadata={"path": str(self.base_path)},
                 )
-        except Exception as exc:  # pragma: no cover - error handling path
+        except Exception as exc:  # pragma: no cover - error handling path (render/write)
             if self.on_error == "skip":
                 logger.warning("Analytics report sink failed; skipping write: %s", exc)
                 plugin_logger = getattr(self, "plugin_logger", None)

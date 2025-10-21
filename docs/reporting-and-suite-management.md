@@ -189,3 +189,10 @@ What it does:
 Tips:
 - Define a datasource `schema:` block (for CSV) or enable `infer_schema: true` to attach a schema automatically.
 - Plugins can optionally declare `input_schema()` when they require specific columns; otherwise compatibility checks are skipped for that plugin.
+### Payload and failure semantics
+
+- Orchestrator payloads always include a `failures` list at the top level.
+  - If no failures occurred, the list is empty.
+- Aggregator payloads included in `payload["aggregates"]` always include a `failures` list.
+  - Aggregators that have nothing to report return `{}` and are omitted from `payload["aggregates"]`.
+- The CLI STRICT mode fails if any top‑level `failures` are present (single run) or any experiment payload contains `failures` (suite run).

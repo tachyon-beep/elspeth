@@ -23,6 +23,13 @@ from typing import Any, cast
 
 from elspeth.core.base.plugin_context import PluginContext
 
+# Optional POSIX file locking for cross-process log serialization
+try:  # pragma: no cover - platform dependent
+    import fcntl as _fcntl
+
+    _HAS_FCNTL = True
+except Exception:  # pragma: no cover - Windows or restricted env
+    _HAS_FCNTL = False
 
 class PluginLogger:
     """Structured logger for plugin lifecycle events and metrics.
@@ -81,6 +88,8 @@ class PluginLogger:
 
         # Log file path
         self.log_file = self.log_dir / f"run_{self.run_id}.jsonl"
+        # Cross-process lock file path (POSIX advisory lock)
+        self._lock_file = Path(str(self.log_file) + ".lock")
 
         # Standard Python logger already set above; recompute name if needed
         # (kept for clarity, but reference is identical)
@@ -110,6 +119,13 @@ class PluginLogger:
         candidates = [(p, p.stat().st_mtime) for p in self.log_dir.glob("run_*.jsonl")]
         candidates.sort(key=lambda x: x[1], reverse=True)
         now = datetime.now(timezone.utc)
+        # Safety margin to avoid deleting files that may still be written by another process
+        # (in seconds, default 30). Can be overridden via ELSPETH_LOG_RETENTION_SAFETY_SECONDS.
+        try:
+            safety_sec = int(os.getenv("ELSPETH_LOG_RETENTION_SAFETY_SECONDS", "30"))
+        except ValueError:
+            safety_sec = 30
+        safety_cutoff = now - timedelta(seconds=max(safety_sec, 0))
         # Age-based pruning
         deleted_age = 0
         errors_age = 0
@@ -118,10 +134,13 @@ class PluginLogger:
             for p, mtime in candidates:
                 try:
                     mtime_dt = datetime.fromtimestamp(mtime, tz=timezone.utc)
+                    # Skip files newer than the safety margin window
+                    if mtime_dt >= safety_cutoff:
+                        continue
                     if mtime_dt < cutoff:
                         p.unlink(missing_ok=True)
                         deleted_age += 1
-                except Exception as exc:
+                except (OSError, PermissionError) as exc:
                     # Ignore deletion errors but record for diagnostics
                     errors_age += 1
                     self.logger.debug("Retention age-prune failed for %s: %s", p, exc, exc_info=False)
@@ -139,7 +158,7 @@ class PluginLogger:
                 try:
                     p.unlink(missing_ok=True)
                     deleted_count += 1
-                except Exception as exc:
+                except (OSError, PermissionError) as exc:
                     errors_count += 1
                     self.logger.debug("Retention count-prune failed for %s: %s", p, exc, exc_info=False)
             if deleted_count or errors_count:
@@ -436,8 +455,20 @@ class PluginLogger:
         """
         try:
             with self._file_lock:
-                with open(self.log_file, "a", encoding="utf-8") as f:
-                    f.write(json.dumps(entry) + "\n")
+                if _HAS_FCNTL:
+                    # Use POSIX advisory lock to serialize writes across processes
+                    # Create/open the lock file once per write (short critical section)
+                    with open(self._lock_file, "a") as lf:  # nosec - lock file path is internal
+                        _fcntl.flock(lf, _fcntl.LOCK_EX)
+                        try:
+                            with open(self.log_file, "a", encoding="utf-8") as f:
+                                f.write(json.dumps(entry) + "\n")
+                        finally:
+                            _fcntl.flock(lf, _fcntl.LOCK_UN)
+                else:
+                    # Fallback: rely on per-process threading lock only
+                    with open(self.log_file, "a", encoding="utf-8") as f:
+                        f.write(json.dumps(entry) + "\n")
         except (OSError, IOError) as exc:
             # Fallback to standard logger if file write fails
             self.logger.error("Failed to write log entry: %s", exc)

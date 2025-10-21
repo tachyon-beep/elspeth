@@ -23,6 +23,9 @@ job:
   llm_middlewares:
     - name: prompt_shield
       options: {}
+  # If middlewares are declared and are critical for this job, require them.
+  # When true and initialization fails, the job will fail-fast instead of degrading.
+  llm_middlewares_required: false
   sinks:
     - plugin: csv
       security_level: OFFICIAL
@@ -43,7 +46,11 @@ This produces results and optional signed bundle under `artifacts/<timestamp>/`.
 
 ## Notes
 
-- Middlewares are supported via the existing registry (`llm_middlewares`).
+- Middlewares are supported via the existing registry (`llm_middlewares`). Use `llm_middlewares_required: true`
+  to fail-fast if one or more middlewares cannot be initialized; otherwise the job degrades gracefully and
+  continues with `runner.llm_middlewares = []`.
+- Failure semantics: the job payload always includes `failures` (list), even when empty; aggregators included
+  under `payload["aggregates"]` also include `failures` (the runner normalizes this for consistency).
 - Sinks use the standard sink registry and may include local CSV/Excel/ZIP, repository, blob, etc.
 - Signing options for bundles:
   - HMAC: `export ELSPETH_SIGNING_KEY="super-secret"`

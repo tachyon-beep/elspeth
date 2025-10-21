@@ -31,7 +31,7 @@ class FileCopySink(ResultSink):
         try:
             default_base = self.destination.parent.resolve()
             self._allowed_base = Path(allowed_base_path).resolve() if allowed_base_path is not None else default_base
-        except Exception:  # pragma: no cover - defensive
+        except (OSError, ValueError, TypeError):  # pragma: no cover - defensive
             self._allowed_base = self.destination.parent.resolve()
 
     def prepare_artifacts(self, artifacts: Mapping[str, list[Artifact]]) -> None:  # pragma: no cover - optional
@@ -92,7 +92,7 @@ class FileCopySink(ResultSink):
         if plugin_logger:
             try:
                 size = target.stat().st_size
-            except Exception:
+            except (OSError, PermissionError):
                 size = 0
             plugin_logger.log_event(
                 "sink_write",

@@ -57,9 +57,9 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_URL: ${{ github.event.pull_request.html_url }}
+          UPDATE_TYPE: ${{ steps.metadata.outputs.update-type }}
         run: |
           # Get update type from metadata
-          UPDATE_TYPE="${{ steps.metadata.outputs.update-type }}"
           echo "Update type: ${UPDATE_TYPE}"
 
           # Only auto-merge security patches and minor updates (not major)
@@ -83,6 +83,11 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_URL: ${{ github.event.pull_request.html_url }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          UPDATE_TYPE: ${{ steps.metadata.outputs.update-type }}
+          DEP_NAMES: ${{ steps.metadata.outputs.dependency-names }}
+          PREV_VERSION: ${{ steps.metadata.outputs.previous-version }}
+          NEW_VERSION: ${{ steps.metadata.outputs.new-version }}
         run: |
           gh pr comment "${PR_URL}" --body "🤖 **Automated Security Patch Approval**
 
@@ -91,7 +96,7 @@ jobs:
           ✅ All tests passing
           ✅ Coverage ≥80%
           ✅ Security scans clean
-          ✅ Update type: ${{ steps.metadata.outputs.update-type }}
+          ✅ Update type: ${UPDATE_TYPE}
 
           **Next Steps:**
           1. Auto-merge this PR
@@ -100,10 +105,10 @@ jobs:
           4. Publish signed image to GHCR
 
           **Audit Trail:**
-          - PR: ${{ github.event.pull_request.number }}
-          - Dependency: ${{ steps.metadata.outputs.dependency-names }}
-          - Previous version: ${{ steps.metadata.outputs.previous-version }}
-          - New version: ${{ steps.metadata.outputs.new-version }}
+          - PR: ${PR_NUMBER}
+          - Dependency: ${DEP_NAMES}
+          - Previous version: ${PREV_VERSION}
+          - New version: ${NEW_VERSION}
           - CVE: Check PR description for CVE details
 
           ---
@@ -188,6 +193,10 @@ jobs:
       - name: Create and push new version tag
         env:
           NEW_TAG: ${{ steps.get_version.outputs.new_tag }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          RUN_ID: ${{ github.run_id }}
+          COMMIT_SHA: ${{ github.sha }}
+          REPO: ${{ github.repository }}
         run: |
           # Configure git
           git config user.name "github-actions[bot]"
@@ -198,9 +207,9 @@ jobs:
 
           This release contains automated security dependency updates.
 
-          - Triggered by: Dependabot security PR #${{ github.event.pull_request.number }}
-          - Build: ${{ github.run_id }}
-          - Commit: ${{ github.sha }}
+          - Triggered by: Dependabot security PR #${PR_NUMBER}
+          - Build: ${RUN_ID}
+          - Commit: ${COMMIT_SHA}
 
           All security gates passed:
           ✅ Tests, coverage, linting
@@ -208,7 +217,7 @@ jobs:
           ✅ Lockfile verification
 
           Container image will be published to:
-          ghcr.io/${{ github.repository }}:${NEW_TAG}"
+          ghcr.io/${REPO}:${NEW_TAG}"
 
           # Push tag (triggers publish.yml workflow)
           git push origin "${NEW_TAG}"
@@ -220,6 +229,8 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           NEW_TAG: ${{ steps.get_version.outputs.new_tag }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           gh release create "${NEW_TAG}" \
             --title "Security Patch ${NEW_TAG}" \
@@ -228,18 +239,18 @@ jobs:
           This is an automated security patch release triggered by Dependabot.
 
           ### Changes
-          - Security dependency updates from PR #${{ github.event.pull_request.number }}
+          - Security dependency updates from PR #${PR_NUMBER}
           - All CI security gates passed
 
           ### Container Image
           \`\`\`bash
-          docker pull ghcr.io/${{ github.repository }}:${NEW_TAG}
+          docker pull ghcr.io/${REPO}:${NEW_TAG}
 
           # Verify signature
           cosign verify \\
             --certificate-oidc-issuer https://token.actions.githubusercontent.com \\
-            --certificate-identity-regexp \"https://github.com/${{ github.repository }}/.*\" \\
-            ghcr.io/${{ github.repository }}:${NEW_TAG}
+            --certificate-identity-regexp \"https://github.com/${REPO}/.*\" \\
+            ghcr.io/${REPO}:${NEW_TAG}
           \`\`\`
 
           ### Security Verification
@@ -251,19 +262,25 @@ jobs:
             --latest
 
       - name: Post summary
+        env:
+          NEW_TAG: ${{ steps.get_version.outputs.new_tag }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          RUN_ID: ${{ github.run_id }}
+          COMMIT_SHA: ${{ github.sha }}
         run: |
           cat >> $GITHUB_STEP_SUMMARY << EOF
           ## 🔒 Security Patch Auto-Merge Complete
 
           ### ✅ Actions Completed
           1. Security PR #${{ github.event.pull_request.number }} auto-merged
-          2. Version tag created: \`${{ steps.get_version.outputs.new_tag }}\`
+          2. Version tag created: \`${NEW_TAG}\`
           3. Container image build triggered
           4. GitHub release created
 
           ### 📦 Container Image
           \`\`\`
-          ghcr.io/${{ github.repository }}:${{ steps.get_version.outputs.new_tag }}
+          ghcr.io/${REPO}:${NEW_TAG}
           \`\`\`
 
           ### 🔍 Next Steps
@@ -272,8 +289,8 @@ jobs:
           - Deploy to staging/production environments
 
           ### 📊 Audit Information
-          - **PR**: #${{ github.event.pull_request.number }}
-          - **Build**: ${{ github.run_id }}
-          - **Commit**: ${{ github.sha }}
-          - **Tag**: ${{ steps.get_version.outputs.new_tag }}
+          - **PR**: #${PR_NUMBER}
+          - **Build**: ${RUN_ID}
+          - **Commit**: ${COMMIT_SHA}
+          - **Tag**: ${NEW_TAG}
           EOF

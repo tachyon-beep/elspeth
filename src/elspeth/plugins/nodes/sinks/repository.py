@@ -29,6 +29,11 @@ from elspeth.core.security.secure_mode import SecureMode, get_secure_mode
 
 logger = logging.getLogger(__name__)
 DEFAULT_REQUEST_TIMEOUT = 15
+DRY_RUN_WARNING_MESSAGE = (
+    "Repository sink running in dry-run mode; no remote writes will occur. "
+    "Set dry_run=False in configuration to enable remote publishing. "
+    "When invoking the CLI, include --live-outputs to opt into live sink writes."
+)
 
 
 class _RepoRequestError(RuntimeError):
@@ -76,13 +81,12 @@ class _RepoSinkBase(ResultSink):
     _allow_missing_token: bool = field(default=False, init=False, repr=False)
 
     def __post_init__(self) -> None:
+        # Validate on_error early for clearer error messages
+        if self.on_error not in {"abort", "skip"}:
+            raise ValueError("on_error must be 'abort' or 'skip'")
+
         # Enforce STRICT mode policy: skip-on-error not permitted for repository sinks
-        try:
-            self._enforce_strict_mode_policy()
-        except ValueError as exc:
-            # During tests/config validation we may instantiate with skip to exercise paths.
-            # Record the issue but allow instantiation so validation layers can surface it.
-            logger.debug("Strict mode guard triggered; continuing with on_error='skip': %s", exc, exc_info=False)
+        self._enforce_strict_mode_policy()
         if self.session is None:
             self.session = requests.Session()
             # Mount retry adapter to improve resilience on transient failures
@@ -103,17 +107,16 @@ class _RepoSinkBase(ResultSink):
                     RETRY_CLS,
                     exc_info=False,
                 )
-        if self.on_error not in {"abort", "skip"}:
-            raise ValueError("on_error must be 'abort' or 'skip'")
         if self.dry_run:
-            logger.warning(
-                "Repository sink running in dry-run mode; no remote writes will occur. "
-                "Set dry_run=False in configuration to enable remote publishing. "
-                "When invoking the CLI, include --live-outputs to opt into live sink writes."
-            )
+            logger.warning(DRY_RUN_WARNING_MESSAGE)
             # In STRICT mode, highlight that dry-run prevents remote writes
             if get_secure_mode() == SecureMode.STRICT:
                 logger.warning("STRICT mode: repository sink is in dry-run; remote publishing disabled")
+
+    def _require_session(self) -> requests.Session:
+        if self.session is None:  # pragma: no cover - defensive
+            raise RuntimeError("session must be initialized")
+        return self.session
 
     def _enforce_strict_mode_policy(self) -> None:
         if get_secure_mode() == SecureMode.STRICT and self.on_error == "skip":
@@ -317,13 +320,15 @@ class GitHubRepoSink(_RepoSinkBase):
         base_url: str = "https://api.github.com",
         **kwargs: Any,
     ) -> None:
-        super().__init__(**kwargs)
         self.owner = owner
         self.repo = repo
         self.branch = branch
         self.token_env = token_env
         self.base_url = base_url.rstrip("/")
         self._headers_cache: dict[str, str] | None = None
+        super().__init__(**kwargs)
+
+    # Note: Token validation occurs lazily in _headers(); creation does not fail-fast to preserve test behavior.
 
     # Upload implementation -------------------------------------------------
     def _upload(
@@ -376,10 +381,9 @@ class GitHubRepoSink(_RepoSinkBase):
 
     def _request(self, method: str, url: str, expected_status: set[int] | None = None, **kwargs: Any) -> Any:
         expected_status = expected_status or {200, 201}
-        if self.session is None:  # pragma: no cover - defensive
-            raise RuntimeError("session must be initialized")
+        session = self._require_session()
         timeout = kwargs.pop("timeout", self.request_timeout)
-        response = self.session.request(method, url, headers=self._headers(), timeout=timeout, **kwargs)
+        response = session.request(method, url, headers=self._headers(), timeout=timeout, **kwargs)
         if response.status_code not in expected_status:
             status = response.status_code
             transient = status in {429, 500, 502, 503, 504}
@@ -402,7 +406,6 @@ class AzureDevOpsRepoSink(_RepoSinkBase):
         base_url: str = "https://dev.azure.com",
         **kwargs: Any,
     ) -> None:
-        super().__init__(**kwargs)
         self.organization = organization
         self.project = project
         self.repository = repository
@@ -411,6 +414,9 @@ class AzureDevOpsRepoSink(_RepoSinkBase):
         self.api_version = api_version
         self.base_url = base_url.rstrip("/")
         self._headers_cache: dict[str, str] | None = None
+        super().__init__(**kwargs)
+
+    # Note: Token validation occurs lazily in _headers(); creation does not fail-fast to preserve test behavior.
 
     # Upload implementation -------------------------------------------------
     def _upload(
@@ -466,9 +472,7 @@ class AzureDevOpsRepoSink(_RepoSinkBase):
             auth = base64.b64encode(f":{token}".encode("utf-8")).decode("ascii")
             headers["Authorization"] = f"Basic {auth}"
         elif self._should_require_auth_token():
-            raise RuntimeError(
-                f"Azure DevOps PAT missing; set 'AZURE_DEVOPS_PAT' (or override via '{self.token_env}') or enable dry-run mode"
-            )
+            raise RuntimeError("Azure DevOps PAT missing; set environment variable AZURE_DEVOPS_PAT or enable dry-run mode")
         self._headers_cache = headers
         return headers
 
@@ -497,10 +501,9 @@ class AzureDevOpsRepoSink(_RepoSinkBase):
 
     def _request(self, method: str, url: str, expected_status: set[int] | None = None, **kwargs: Any) -> Any:
         expected_status = expected_status or {200, 201}
-        if self.session is None:  # pragma: no cover - defensive
-            raise RuntimeError("session must be initialized")
+        session = self._require_session()
         timeout = kwargs.pop("timeout", self.request_timeout)
-        response = self.session.request(method, url, headers=self._headers(), timeout=timeout, **kwargs)
+        response = session.request(method, url, headers=self._headers(), timeout=timeout, **kwargs)
         if response.status_code not in expected_status:
             status = response.status_code
             transient = status in {429, 500, 502, 503, 504}

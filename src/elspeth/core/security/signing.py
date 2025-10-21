@@ -21,7 +21,7 @@ try:  # asymmetric crypto is optional at runtime, but available in dev/test
     from cryptography.hazmat.primitives.asymmetric import ec, padding
 
     _ASYM_AVAILABLE = True
-except Exception:  # pragma: no cover - optional dependency guard
+except ImportError:  # pragma: no cover - optional dependency guard
     _ASYM_AVAILABLE = False
 
 Algorithm = Literal[

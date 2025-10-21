@@ -34,15 +34,14 @@ class DummySession:
 
 
 def test_repo_sink_strict_mode_on_error_skip_guard(monkeypatch):
-    # Security note: Force STRICT mode here to exercise the guard path in
-    # __post_init__ without relaxing production logic. The class under test
-    # still enforces policy; we just observe handling in strict contexts.
+    # Security note: STRICT mode enforces fail-closed policy and rejects
+    # on_error='skip' for repository sinks to prevent silent error suppression.
     import elspeth.plugins.nodes.sinks.repository as repo_mod
 
     monkeypatch.setattr(repo_mod, "get_secure_mode", lambda: SecureMode.STRICT)
-    # In STRICT mode, __post_init__ raises inside a try/except and swallows the error.
-    # Instantiation should not raise, but code path is exercised for coverage.
-    GitHubRepoSink(owner="o", repo="r", on_error="skip")
+    # In STRICT mode, __post_init__ raises ValueError for on_error='skip'
+    with pytest.raises(ValueError, match="cannot use on_error='skip' in STRICT mode"):
+        GitHubRepoSink(owner="o", repo="r", on_error="skip")
 
 
 def test_github_dry_run_payload_and_headers(monkeypatch, tmp_path):

@@ -17,11 +17,11 @@ jobs:
       - name: Summarize CodeQL alerts via API
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.event.workflow_run.repository.full_name }}
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
         run: |
           # set -x  # Uncomment for debugging
           set -euo pipefail
-          REPO="${{ github.event.workflow_run.repository.full_name }}"
-          HEAD_BRANCH="${{ github.event.workflow_run.head_branch }}"
           REF_FILTER="refs/heads/${HEAD_BRANCH}"
           echo "## CodeQL Findings" >> "$GITHUB_STEP_SUMMARY"
           echo "- Ref: ${REF_FILTER}" >> "$GITHUB_STEP_SUMMARY"

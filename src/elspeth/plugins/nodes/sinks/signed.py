@@ -37,11 +37,13 @@ class SignedArtifactSink(ResultSink):
         self.base_path: Path = Path(self.base_path)
         if self.on_error not in {"abort", "skip"}:
             raise ValueError("on_error must be 'abort' or 'skip'")
+        # STRICT mode: enforce fail-closed policy (disallow skip-on-error)
         try:
             if get_secure_mode() == SecureMode.STRICT and self.on_error == "skip":
                 raise ValueError("SignedArtifactSink cannot use on_error='skip' in STRICT mode")
-        except Exception as exc:
-            logger.debug("Secure mode check unavailable; proceeding (reason: %s)", exc, exc_info=False)
+        except AttributeError:
+            # get_secure_mode or SecureMode may be unavailable in certain import contexts; ignore in that case
+            pass
 
     def write(self, results: dict[str, Any], *, metadata: dict[str, Any] | None = None) -> None:
         metadata = metadata or {}
@@ -103,7 +105,7 @@ class SignedArtifactSink(ResultSink):
                 for p in (results_path, signature_path, manifest_path):
                     try:
                         total_bytes += p.stat().st_size
-                    except Exception:  # nosec B110 - tolerate stat() errors; do not block artifact write
+                    except (OSError, PermissionError):  # tolerate stat() errors; do not block artifact write
                         pass
                 plugin_logger.log_event(
                     "sink_write",

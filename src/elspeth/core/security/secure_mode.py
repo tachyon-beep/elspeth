@@ -43,7 +43,7 @@ def get_path_contained_sink_types(env: dict[str, str] | None = None) -> frozense
     try:
         custom = _parse_csv_list(override)
         return frozenset(PATH_CONTAINED_SINK_TYPES_DEFAULT.union(custom))
-    except (ValueError, AttributeError, TypeError):
+    except ValueError:
         logger.warning(
             "Failed to parse ELSPETH_PATH_CONTAINED_SINKS='%s'; using defaults. "
             "Custom sink containment settings will NOT be applied. "
@@ -163,8 +163,9 @@ def validate_datasource_config(config: dict[str, Any], mode: SecureMode | None =
         if retain_local is None:
             logger.warning("Datasource missing 'retain_local' - should be explicit True in STRICT mode")
 
-    elif mode == SecureMode.STANDARD and retain_local is False:
-        logger.warning("Datasource has retain_local=False - consider enabling for audit compliance")
+    elif mode == SecureMode.STANDARD:
+        if retain_local is False:
+            logger.warning("Datasource has retain_local=False - consider enabling for audit compliance")
 
 
 def validate_llm_config(config: dict[str, Any], mode: SecureMode | None = None) -> None:

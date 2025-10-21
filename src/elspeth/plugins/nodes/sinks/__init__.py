@@ -1,13 +1,29 @@
 """Sink nodes - output vertices in the data flow graph.
 
-This package exposes many optional sinks that depend on third-party services
-and libraries (e.g., Azure SDKs, psycopg/pgvector). To keep imports lightweight
-and avoid import‑time failures in environments where those optional deps are not
-installed (such as CI when only a subset is needed), we lazily import sink
-implementations on first attribute access.
+Lazy loading
+------------
 
-Clients may continue to do ``from elspeth.plugins.nodes.sinks import FooSink``;
-the symbol will be loaded on demand.
+This package exposes optional sinks that depend on third‑party libraries and
+cloud SDKs (e.g., Azure SDKs, psycopg/pgvector). To keep imports lightweight and
+avoid import‑time failures in environments where those optional dependencies are
+not installed, this module defers importing the underlying implementation until
+the first attribute access via ``__getattr__``.
+
+Import and error behavior
+-------------------------
+
+- ``from elspeth.plugins.nodes.sinks import FooSink`` works as usual; when
+  ``FooSink`` is first accessed, we import its module and return the attribute.
+- If the requested name is not declared in the registry mapping, an
+  ``AttributeError`` is raised (consistent with normal module semantics).
+- If the target module cannot be imported (missing optional dependency), an
+  ``ImportError`` is raised that includes the underlying exception to aid
+  debugging (for example, missing ``azure-storage-blob``).
+- If the module imports successfully but the expected attribute is missing, an
+  ``ImportError`` is raised with a clear message indicating the missing symbol.
+
+This pattern reduces the import cost in environments that only use a subset of
+the sinks and keeps optional dependencies truly optional at import time.
 """
 
 from __future__ import annotations

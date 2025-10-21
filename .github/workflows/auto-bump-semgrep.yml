@@ -28,11 +28,14 @@ jobs:
           python scripts/update_semgrep_pin.py
 
       - name: Select PR token
+        env:
+          PR_AUTOBUMP_TOKEN: ${{ secrets.PR_AUTOBUMP_TOKEN }}
+          GH_TOKEN_FALLBACK: ${{ github.token }}
         run: |
-          if [ -n "${{ secrets.PR_AUTOBUMP_TOKEN }}" ]; then
-            echo "PR_TOKEN=${{ secrets.PR_AUTOBUMP_TOKEN }}" >> $GITHUB_ENV
+          if [ -n "$PR_AUTOBUMP_TOKEN" ]; then
+            echo "PR_TOKEN=$PR_AUTOBUMP_TOKEN" >> "$GITHUB_ENV"
           else
-            echo "PR_TOKEN=${{ github.token }}" >> $GITHUB_ENV
+            echo "PR_TOKEN=$GH_TOKEN_FALLBACK" >> "$GITHUB_ENV"
           fi
 
       - name: Create pull request

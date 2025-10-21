@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 try:  # pragma: no cover - optional dataclasses when azure libs absent
     from azure.storage.blob import ContentSettings
-except Exception:  # pragma: no cover
+except ImportError:  # pragma: no cover
     # Optional dependency fallback: ContentSettings class set to None when azure-storage-blob unavailable
     ContentSettings = None  # type: ignore[assignment,misc]
 
@@ -67,11 +67,12 @@ class BlobResultSink(ResultSink):
             raise ValueError("on_error must be 'abort' or 'skip'")
         self.on_error = on_error
         self._artifact_inputs: list[Artifact] = []
-        # STRICT mode: disallow skip-on-error for blob sinks (fail-closed policy)
+        # STRICT mode: enforce fail-closed policy (disallow skip-on-error)
         try:
             if get_secure_mode() == SecureMode.STRICT and self.on_error == "skip":
                 raise ValueError("BlobResultSink cannot use on_error='skip' in STRICT mode")
-        except Exception:
+        except AttributeError:
+            # get_secure_mode or SecureMode may be unavailable in certain import contexts; ignore in that case
             pass
 
     def write(self, results: dict[str, Any], *, metadata: dict[str, Any] | None = None) -> None:
@@ -212,6 +213,8 @@ class BlobResultSink(ResultSink):
         if "cost_summary" in results:
             manifest["cost_summary"] = results["cost_summary"]
         return manifest
+
+    # _get_service_client defined above near its first usage for readability
 
     def _create_blob_client(self, blob_name: str) -> Any:
         service = self._get_service_client()
@@ -416,7 +419,7 @@ class AzureBlobArtifactsSink(BlobResultSink):
 
             guessed, _ = mimetypes.guess_type(path.name)
             return guessed
-        except Exception:
+        except TypeError:
             return None
 
     # Uses credential resolution and artifact helpers from BlobResultSink

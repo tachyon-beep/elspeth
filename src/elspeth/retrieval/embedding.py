@@ -33,7 +33,9 @@ class OpenAIEmbedder(Embedder):
         key = api_key or os.getenv("OPENAI_API_KEY")
         if not key:
             raise ConfigurationError("OpenAI embeddings require an API key via 'api_key' or OPENAI_API_KEY")
-        # Enforce endpoint allowlist for OpenAI public API (defense-in-depth)
+        # Enforce endpoint allowlist for OpenAI public API (defense-in-depth).
+        # The OpenAI public endpoint is always allowed regardless of security level;
+        # pass security_level=None explicitly to make this intention clear.
         from elspeth.core.security import validate_http_api_endpoint
 
         validate_http_api_endpoint("https://api.openai.com", security_level=None)

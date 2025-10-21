@@ -242,6 +242,22 @@ register_row_plugin(
     schema={"type": "object", "properties": {}, "additionalProperties": True},
     requires_input_schema=True,
 )
+
+## 12) Payload Schema Contract (Failures)
+
+To simplify downstream consumers and CLI behavior, Elspeth standardizes failure reporting:
+
+- Top‑level runner payloads always include a `failures` key.
+  - Shape: `{"results": [...], "failures": [...], "metadata": {...}}`
+  - When there are no failures, `failures` is an empty list.
+
+- Aggregator payloads included under `payload["aggregates"][<name>]` always include `failures`.
+  - The runner normalizes each non‑empty aggregator result to include `failures: []` if the plugin did not set it.
+  - Plugins may return `{}` to indicate “no output” (e.g., skipped or empty input). Empty objects are omitted from `payload["aggregates"]` and therefore have no `failures` key.
+
+- Plugins that want to report their own internal aggregation errors can attach structured entries to `failures` (recommended keys: `error`, `stage`, `context`).
+
+This contract keeps consumers simple: treat `failures` as always present at the top level and for any aggregator object that appears in `payload["aggregates"]`.
 ```
 
 3) Register a sink that writes JSON and declares produced/consumed artifacts:

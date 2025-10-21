@@ -180,6 +180,9 @@ class ExperimentRunner:
         for plugin in self.aggregator_plugins or []:
             derived = plugin.finalize(results)
             if derived:
+                # Standardize aggregator payloads: always include failures (possibly empty)
+                if isinstance(derived, dict) and "failures" not in derived:
+                    derived["failures"] = []
                 aggregates[plugin.name] = derived
         if aggregates:
             payload["aggregates"] = aggregates

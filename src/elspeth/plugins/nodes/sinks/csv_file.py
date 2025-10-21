@@ -67,7 +67,7 @@ class CsvResultSink(ResultSink):
         try:
             default_base = self.path.parent.resolve()
             self._allowed_base = Path(allowed_base_path).resolve() if allowed_base_path is not None else default_base
-        except Exception:  # pragma: no cover - defensive
+        except (OSError, ValueError, TypeError):  # pragma: no cover - defensive
             self._allowed_base = Path.cwd().resolve()
 
     # ------------------------------------------------------------------ helpers
@@ -168,7 +168,7 @@ class CsvResultSink(ResultSink):
             if plugin_logger:
                 try:
                     size = Path(self._last_written_path).stat().st_size if self._last_written_path else 0
-                except Exception:
+                except (OSError, PermissionError):
                     size = 0
                 plugin_logger.log_event(
                     "sink_write",

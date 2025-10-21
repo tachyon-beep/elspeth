@@ -58,7 +58,7 @@ def fetch_secret_from_keyvault(secret_uri: str) -> str:
     try:
         from azure.identity import DefaultAzureCredential
         from azure.keyvault.secrets import SecretClient
-    except Exception as exc:  # pragma: no cover - optional dependency guard
+    except ImportError as exc:  # pragma: no cover - optional dependency guard
         raise ImportError("Azure Key Vault support requires azure-identity and azure-keyvault-secrets") from exc
 
     ref = _parse_secret_uri(secret_uri)
