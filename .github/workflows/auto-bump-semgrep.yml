@@ -8,8 +8,6 @@ on:
 permissions:
   contents: write
   pull-requests: write
-  # Not strictly required to commit workflow files, but useful if using a GitHub App token
-  workflows: write
 
 jobs:
   bump-semgrep-pin:
