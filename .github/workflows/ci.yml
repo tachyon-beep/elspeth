@@ -144,8 +144,10 @@ jobs:
       - name: Run pip-audit (official action)
         uses: pypa/gh-action-pip-audit@1220774d901786e6f652ae159f7b6bc8fea6d266 # v1.1.0
         with:
-          virtual-environment: system
-          inputs: -r requirements.lock --require-hashes --format sarif --output pip-audit.sarif
+          inputs: requirements.lock
+          require-hashes: true
+          no-deps: true
+          internal-be-careful-extra-flags: --format sarif --output pip-audit.sarif
 
       - name: Upload pip-audit SARIF to code scanning
         if: always()
