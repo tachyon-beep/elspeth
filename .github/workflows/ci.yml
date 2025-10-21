@@ -147,17 +147,17 @@ jobs:
           inputs: requirements.lock
           require-hashes: true
           no-deps: true
-          internal-be-careful-extra-flags: --format sarif --output pip-audit.sarif
+          # Leave output to default (console); this action does not support SARIF
 
-      - name: Upload pip-audit SARIF to code scanning
-        if: always()
+      - name: Upload pip-audit SARIF to code scanning (if generated)
+        if: always() && hashFiles('pip-audit.sarif') != ''
         uses: github/codeql-action/upload-sarif@16140ae1a102900babc80a33c44059580f687047 # v4.30.9
         with:
           sarif_file: pip-audit.sarif
           category: pip-audit
 
-      - name: Upload pip-audit artifact
-        if: always()
+      - name: Upload pip-audit artifact (if generated)
+        if: always() && hashFiles('pip-audit.sarif') != ''
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: pip-audit-sarif
