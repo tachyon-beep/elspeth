@@ -9,7 +9,7 @@ on:
     types: [opened, synchronize, reopened]
 
 permissions:
-  read-all: true
+  contents: read
 
 jobs:
   ci-core:

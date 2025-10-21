@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  read-all: true
+  contents: read
 
 concurrency:
   group: repin-${{ github.workflow }}-${{ github.ref }}

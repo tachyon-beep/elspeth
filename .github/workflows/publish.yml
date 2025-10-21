@@ -6,7 +6,7 @@ on:
       - "v*"
 
 permissions:
-  read-all: true
+  contents: read
 
 jobs:
   publish:

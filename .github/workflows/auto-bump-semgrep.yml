@@ -6,7 +6,7 @@ on:
     - cron: '0 5 * * 1'
 
 permissions:
-  read-all: true
+  contents: read
 
 jobs:
   bump-semgrep-pin:
