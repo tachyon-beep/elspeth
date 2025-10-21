@@ -120,8 +120,8 @@ jobs:
       - name: Semgrep scan (curated, Docker CLI)
         run: |
           docker run --rm \
-            -v "$PWD:/work" \
-            -w /work \
+            -v "$PWD:/src" \
+            -w /src \
             semgrep/semgrep:1.140.0@sha256:220daf180b5bfb02fb077bc324ec7673d8eb4f3f6dcd7cce1eda1995f564f980 \
             semgrep scan --config p/ci --severity ERROR --metrics=off --sarif --sarif-output semgrep.sarif --error
 
