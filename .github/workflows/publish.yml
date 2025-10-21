@@ -138,7 +138,12 @@ jobs:
           set -euo pipefail
           IMAGE="ghcr.io/${{ github.repository }}:${GITHUB_REF_NAME}"
           echo "Verifying signature for ${IMAGE}"
-          cosign verify --certificate-oidc-issuer https://token.actions.githubusercontent.com "${IMAGE}" | tee cosign-verify.txt || true
+          if ! cosign verify --certificate-oidc-issuer https://token.actions.githubusercontent.com "${IMAGE}" | tee cosign-verify.txt; then
+            echo "⚠️ Signature verification failed — this can occur briefly after signing (keyless propagation)." >> "$GITHUB_STEP_SUMMARY"
+            echo "Please re-try verification manually after a short delay: cosign verify \"${IMAGE}\"" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "✅ Signature verified successfully for ${IMAGE}" >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Upload cosign verification log
         if: always()

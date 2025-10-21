@@ -151,6 +151,11 @@ jobs:
       contents: write
 
     steps:
+      - name: Wait for merge to propagate
+        run: |
+          # Give GitHub a few seconds to finalize the merge and update refs
+          sleep 10
+
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           fetch-depth: 0
