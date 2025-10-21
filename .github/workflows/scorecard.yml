@@ -46,12 +46,19 @@ jobs:
             exit 0
           fi
           total=$(jq '[.runs[].results[]?] | length' results.sarif)
-          errors=$(jq '[.runs[].results[]? | select(.level=="error")] | length' results.sarif)
-          warnings=$(jq '[.runs[].results[]? | select(.level=="warning")] | length' results.sarif)
-          notes=$(jq '[.runs[].results[]? | select(.level=="note")] | length' results.sarif)
+          # Scorecard SARIF may omit ".level"; coalesce with properties.severity or default to "note"
+          errors=$(jq '[.runs[].results[]? | select(((.level // (.properties.severity // "note"))|ascii_downcase)=="error")] | length' results.sarif)
+          warnings=$(jq '[.runs[].results[]? | select(((.level // (.properties.severity // "note"))|ascii_downcase)=="warning")] | length' results.sarif)
+          notes=$(jq '[.runs[].results[]? | select(((.level // (.properties.severity // "note"))|ascii_downcase)=="note")] | length' results.sarif)
           echo "- Total results: ${total}" >> "$GITHUB_STEP_SUMMARY"
           echo "  - ERROR: ${errors}" >> "$GITHUB_STEP_SUMMARY"
           echo "  - WARNING: ${warnings}" >> "$GITHUB_STEP_SUMMARY"
           echo "  - NOTE: ${notes}" >> "$GITHUB_STEP_SUMMARY"
-          echo "\nTop findings:" >> "$GITHUB_STEP_SUMMARY"
-          jq -r '.runs[].results[]? | "* [\(.level|ascii_upcase)] \(.ruleId) - \(.message.text|gsub("\n"; " "))"' results.sarif | head -n 15 >> "$GITHUB_STEP_SUMMARY"
+          # Print top N findings with coalesced severity and message
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Top findings:" >> "$GITHUB_STEP_SUMMARY"
+          jq -r '.runs[].results[]? | "* [\(((.level // (.properties.severity // "note"))|ascii_upcase))] \(.ruleId // "unknown") - \(((.message.text // "")|gsub("\n"; " ")) )"' results.sarif | head -n 15 >> "$GITHUB_STEP_SUMMARY"
+          # Additionally, show most frequent rules
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Most frequent rules:" >> "$GITHUB_STEP_SUMMARY"
+          jq -r '[.runs[].results[]? | .ruleId] | group_by(.) | map({rule: .[0], count: length}) | sort_by(-.count) | .[] | "* \(.rule): \(.count)"' results.sarif | head -n 10 >> "$GITHUB_STEP_SUMMARY"

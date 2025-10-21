@@ -3,7 +3,7 @@
 **Status:** ✅ Active with Auto-Merge for Security Patches
 **Configuration:** `.github/dependabot.yml`
 **Schedule:**
-- **Security updates:** Daily at 00:00 UTC (auto-merge enabled)
+- **Security updates:** Created immediately when a GitHub Security Advisory is published (bypass weekly schedule)
 - **Regular updates:** Weekly (Monday: Python, Tuesday: GitHub Actions, Wednesday: Docker)
 
 ---
@@ -64,11 +64,13 @@ See: [`docs/operations/security-patch-automation.md`](./security-patch-automatio
 
 ### Security Vulnerability Flow
 
-**Any Time:**
+**Any Time (no separate config block needed):**
 1. GitHub Security Advisory published
-2. Dependabot detects vulnerability **immediately**
-3. Creates **high-priority PR** (bypasses weekly schedule)
-4. PR labeled with "security" for easy identification
+2. Dependabot detects the vulnerability **immediately**, independent of the scheduled checks
+3. Creates a **high-priority PR** that bypasses the weekly cadence
+4. PR is labeled with "security" for easy identification
+
+Note: You do not need a separate "security-only" update entry for the same `package-ecosystem` + `directory`. Dependabot will always open security PRs as soon as an advisory is available. Keeping a single weekly entry for `pip` avoids overlapping configuration errors.
 
 **Your Action:**
 - Review within 24 hours

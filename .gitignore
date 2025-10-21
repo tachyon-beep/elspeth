@@ -155,3 +155,6 @@ audit_data/
 
 # Prevent old/ directory from being recreated (removed during ATO remediation)
 old/
+
+# GH Job Logs
+runlogs/

@@ -5,48 +5,6 @@ version: 2
 
 updates:
   # ============================================================
-  # SECURITY UPDATES (HIGHEST PRIORITY - AUTOMATED)
-  # ============================================================
-  # Security vulnerabilities are checked daily and auto-merged after CI passes.
-  # This ensures rapid response to CVEs while maintaining safety through
-  # comprehensive CI gates (tests, coverage, security scans).
-  # ============================================================
-  - package-ecosystem: "pip"
-    directory: "/"
-    schedule:
-      # Check for security updates DAILY at midnight UTC
-      interval: "daily"
-      time: "00:00"
-      timezone: "Australia/Sydney"
-
-    # ONLY security updates in this pipeline: ignore all non-security version bumps
-    ignore:
-      - dependency-name: "*"
-        update-types:
-          - "version-update:semver-major"
-          - "version-update:semver-minor"
-          - "version-update:semver-patch"
-
-    # Higher limit for security (don't block critical patches)
-    open-pull-requests-limit: 20
-
-    # Clear labeling for automated workflows
-    labels:
-      - "dependencies"
-      - "security"
-      - "auto-merge-enabled"
-      - "priority-critical"
-
-    commit-message:
-      prefix: "security(deps)"
-      include: "scope"
-
-    versioning-strategy: "lockfile-only"
-    rebase-strategy: "auto"
-    allow:
-      - dependency-type: "direct"
-
-  # ============================================================
   # Python Dependencies - Regular Updates (Manual Review)
   # ============================================================
   - package-ecosystem: "pip"
@@ -145,8 +103,7 @@ updates:
       prefix: "deps(python)"
       include: "scope"
 
-    # CRITICAL: Use lockfile-only strategy for pip-tools compatibility
-    # This ensures Dependabot respects your pip-compile workflow
+    # Use lockfile-only to respect pip-compile workflow
     versioning-strategy: "lockfile-only"
 
     # Automatically rebase PRs when base branch changes
