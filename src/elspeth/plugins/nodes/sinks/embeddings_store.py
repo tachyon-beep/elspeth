@@ -83,12 +83,11 @@ class PgVectorClient(VectorStoreClient):
         try:
             import psycopg as _psycopg  # local import to avoid hard dependency at module import time
             from psycopg import sql as _sql
-        except Exception as exc:  # pragma: no cover - exercised in integration
+        except (ImportError, OSError) as exc:  # pragma: no cover - exercised in integration
             raise ImportError(
-                (
-                    "pgvector provider requires psycopg and safe SQL identifier quoting; "
-                    "install 'psycopg[binary]' or 'psycopg[c]' and ensure libpq is available."
-                )
+                "pgvector provider requires psycopg and libpq. "
+                "Install with: pip install 'psycopg[binary]' (or 'psycopg[c]' for C extension). "
+                "Ensure libpq is available on your system."
             ) from exc
         self._psycopg = _psycopg
         self._sql = _sql
@@ -99,9 +98,9 @@ class PgVectorClient(VectorStoreClient):
     def _ensure_table(self, conn: Any) -> None:
         with conn.cursor() as cur:
             cur.execute("CREATE EXTENSION IF NOT EXISTS vector")
-            # Use sql.Identifier to safely quote table name and prevent SQL injection
-            # Safe: table name via sql.Identifier; values are parameterized placeholders
-            cur.execute(  # nosemgrep: python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query
+            # Use sql.Identifier to safely quote table name and prevent SQL injection.
+            # Safe: table name via sql.Identifier; no user-controlled values in DDL.
+            cur.execute(
                 self._sql.SQL("""
                 CREATE TABLE IF NOT EXISTS {} (
                     namespace TEXT NOT NULL,
@@ -131,8 +130,8 @@ class PgVectorClient(VectorStoreClient):
                 for record in items:
                     vector_literal = self._vector_literal(record.vector)
                     metadata = json.dumps(record.metadata or {})
-                    # Safe: table name via sql.Identifier; values provided as parameters
-                    cur.execute(  # nosemgrep: parameterized psycopg with sql.Identifier and placeholders
+                    # Safe: table name via sql.Identifier; all values provided as parameterized placeholders
+                    cur.execute(
                         query,
                         (
                             namespace,
@@ -195,8 +194,11 @@ class AzureSearchVectorClient(VectorStoreClient):
         try:
             from azure.core.credentials import AzureKeyCredential as _AzureKeyCredential
             from azure.search.documents import SearchClient as _SearchClient
-        except Exception as exc:  # pragma: no cover - exercised in integration
-            raise ImportError("azure_search provider requires 'azure-search-documents' and 'azure-core' packages") from exc
+        except (ImportError, OSError) as exc:  # pragma: no cover - exercised in integration
+            raise ImportError(
+                "azure_search provider requires 'azure-search-documents' and 'azure-core' packages. "
+                "Install with: pip install 'azure-search-documents' 'azure-core'"
+            ) from exc
         self._search_client_class = _SearchClient
         self._azure_key_credential_class = _AzureKeyCredential
         self._client = self._search_client_class(endpoint=endpoint, index_name=index, credential=self._azure_key_credential_class(api_key))
@@ -298,7 +300,7 @@ class EmbeddingsStoreSink(ResultSink):
                     from elspeth.core.base.types import SecurityLevel as _SL
 
                     sec_text = security_level.value if isinstance(security_level, _SL) else str(security_level)
-                except Exception:
+                except ImportError:
                     sec_text = str(security_level)
 
             embeddings.append(

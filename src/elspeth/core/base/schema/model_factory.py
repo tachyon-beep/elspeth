@@ -7,7 +7,6 @@ runtime Pydantic models backed by `DataFrameSchema`.
 
 from __future__ import annotations
 
-import warnings
 from typing import Any
 
 import pandas as pd
@@ -59,9 +58,9 @@ def schema_from_config(
     constraints such as `required`, `min`, and `max`.
 
     Notes:
-    - For string constraints, use `pattern` (Pydantic v2). The legacy `regex`
-      key is not supported and will raise a ValueError to avoid pre-release
-      tech debt.
+    - For string constraints, use `pattern` (Pydantic v2 >= 2.12.2). The legacy
+      `regex` key is not supported and will raise a ValueError to avoid carrying
+      pre‑release technical debt.
     """
     # Use Any for values to satisfy static checkers when splatting into create_model(**fields)
     # (Pylance may otherwise attempt to match these against reserved kwargs like __doc__/__module__).
@@ -102,19 +101,15 @@ def schema_from_config(
             field_kwargs["min_length"] = col_spec["min_length"]
         if "max_length" in col_spec:
             field_kwargs["max_length"] = col_spec["max_length"]
-        # Pydantic v2 renamed string regex -> pattern; retain temporary compatibility
-        # for existing configs while signaling deprecation of the old name.
+        # Pydantic v2 uses 'pattern' for string pattern constraints (v1 used 'regex').
+        # We do not support 'regex' to avoid carrying dual behavior pre‑1.0.
         pattern_value = None
         if "pattern" in col_spec:
             pattern_value = col_spec["pattern"]
         elif "regex" in col_spec:
-            warnings.warn(
-                f"Column '{col_name}' uses deprecated 'regex'; use 'pattern' for Pydantic v2",
-                DeprecationWarning,
-                stacklevel=2,
+            raise ValueError(
+                f"Column '{col_name}' uses unsupported 'regex'; use 'pattern' for Pydantic v2"
             )
-            # Backward-compat alias; remove after v0.6.0 (June 2025) once configs migrate fully.
-            pattern_value = col_spec["regex"]
         if pattern_value is not None:
             field_kwargs["pattern"] = pattern_value
 

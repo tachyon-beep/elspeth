@@ -109,7 +109,8 @@ def _get_environment_patterns() -> list[str]:
     Returns:
         List of regex patterns from ELSPETH_APPROVED_ENDPOINTS env var.
     """
-    # Restrict overrides: only allow in DEVELOPMENT to prevent policy drift
+    # Restrict overrides: only allow in DEVELOPMENT to prevent policy drift.
+    # Both STRICT and STANDARD modes block environment overrides for security.
     mode = get_secure_mode()
     if mode in (SecureMode.STRICT, SecureMode.STANDARD):
         return []
@@ -160,6 +161,10 @@ def _is_localhost(endpoint: str) -> bool:
 
     Returns:
         True if endpoint is localhost or loopback address
+
+    Notes:
+        urlparse doesn't raise exceptions in modern Python (3.7+), but we keep
+        ultra-defensive exception handling for edge cases and malformed inputs.
     """
     try:
         parsed = urlparse(endpoint)

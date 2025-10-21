@@ -118,7 +118,8 @@ jobs:
           retention-days: 7
 
       - name: Semgrep scan (curated, Docker CLI)
-        # Use curated p/ci ruleset rather than --config auto to keep signal/noise balanced
+        # Semgrep p/ci is the community-curated CI ruleset (not --config auto)
+        # for balanced signal/noise in security scans
         run: |
           docker run --rm \
             -v "$PWD:/src" \

@@ -85,8 +85,10 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I"]
-# Relax overly strict defaults for this codebase; ignore line length (E501) to accommodate long URLs,
-# LLM prompt templates, and other cases where longer lines are necessary; enforce functional errors and import hygiene.
+# Relax overly strict defaults: ignore line length (E501) to accommodate long URLs,
+# LLM prompt templates, security patterns, and configuration strings where line breaks
+# would reduce readability. Enforce functional errors (F) and import hygiene (I).
+ignore = ["E501"]
 
 
 [tool.ruff.lint.per-file-ignores]

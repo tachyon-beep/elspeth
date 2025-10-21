@@ -47,6 +47,30 @@ class PgVectorQueryClient(VectorQueryClient):
         self._connect_timeout = int(connect_timeout) if connect_timeout is not None else None
         self._logger = logging.getLogger(__name__)
 
+    def _dsn_with_connect_timeout(self, dsn: str) -> str:
+        """Return a DSN with `connect_timeout` appended for URI and key-value styles.
+
+        - URI style (postgresql://...): appends/overrides query param.
+        - Key-value DSN style: appends a space-delimited parameter.
+        Falls back to key-value append on minor parse issues to avoid failing queries.
+        """
+        if self._connect_timeout is None:
+            return dsn
+        try:
+            if "://" in dsn:
+                parsed = urlparse(dsn)
+                q = dict(parse_qsl(parsed.query, keep_blank_values=True))
+                q["connect_timeout"] = str(self._connect_timeout)
+                new_query = urlencode(q, doseq=True)
+                return urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, new_query, parsed.fragment))
+            # libpq key-value DSN: append as space-delimited parameter
+            sep = " " if dsn and not dsn.endswith(" ") else ""
+            return f"{dsn}{sep}connect_timeout={self._connect_timeout}"
+        except (ValueError, AttributeError, TypeError):
+            # Fallback to safe whitespace-delimited append
+            sep = " " if dsn and not dsn.endswith(" ") else ""
+            return f"{dsn}{sep}connect_timeout={self._connect_timeout}"
+
     def query(
         self,
         namespace: str,
@@ -73,22 +97,7 @@ class PgVectorQueryClient(VectorQueryClient):
         vector_literal = self._vector_literal(query_vector)
         dsn = self._dsn
         if self._connect_timeout is not None:
-            # Append connect_timeout to DSN for both URI and key-value DSN styles
-            try:
-                if "://" in dsn:
-                    parsed = urlparse(dsn)
-                    q = dict(parse_qsl(parsed.query, keep_blank_values=True))
-                    q["connect_timeout"] = str(self._connect_timeout)
-                    new_query = urlencode(q, doseq=True)
-                    dsn = urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, new_query, parsed.fragment))
-                else:
-                    # libpq key-value DSN: append as space-delimited parameter
-                    sep = " " if dsn and not dsn.endswith(" ") else ""
-                    dsn = f"{dsn}{sep}connect_timeout={self._connect_timeout}"
-            except (ValueError, AttributeError, TypeError):
-                # Fallback to safe whitespace-delimited append
-                sep = " " if dsn and not dsn.endswith(" ") else ""
-                dsn = f"{dsn}{sep}connect_timeout={self._connect_timeout}"
+            dsn = self._dsn_with_connect_timeout(dsn)
         assert self._psycopg is not None
         conn = self._psycopg.connect(dsn, autocommit=True)
         try:
@@ -128,7 +137,7 @@ class PgVectorQueryClient(VectorQueryClient):
                     if metadata:
                         try:
                             metadata_payload = json.loads(metadata)
-                        except (json.JSONDecodeError, TypeError) as exc:  # pragma: no cover - best effort
+                        except (json.JSONDecodeError, TypeError, ValueError) as exc:  # pragma: no cover - best effort
                             self._logger.debug("Failed to parse metadata JSON for document_id=%s: %s", document_id, exc)
                             metadata_payload = {}
                     yield QueryResult(

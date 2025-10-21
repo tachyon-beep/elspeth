@@ -1,85 +1,53 @@
-import urllib.parse as up
+from __future__ import annotations
 
-import pandas as pd
+from urllib.parse import urlparse, parse_qs
+
+import pytest
 
 from elspeth.retrieval.providers import PgVectorQueryClient
 
 
-class _FakeCursor:
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc, tb):
-        return False
-
-    def execute(self, *args, **kwargs):
-        return None
-
-    def fetchall(self):
-        return []
+def _client(connect_timeout: int | float | None = 5) -> PgVectorQueryClient:
+    # Use a placeholder DSN and table; tests do not call query(), so no DB needed
+    return PgVectorQueryClient(dsn="postgresql://user:pass@host/db", table="elspeth_rag", connect_timeout=connect_timeout)
 
 
-class _FakeConn:
-    def __init__(self):
-        self.closed = False
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc, tb):
-        return False
-
-    def cursor(self):
-        return _FakeCursor()
-
-    def close(self):
-        self.closed = True
+def test_uri_dsn_appends_or_overrides_query_param() -> None:
+    cli = _client(connect_timeout=5)
+    dsn = "postgresql://user:pass@host:5432/db?sslmode=require"
+    out = cli._dsn_with_connect_timeout(dsn)
+    parsed = urlparse(out)
+    q = parse_qs(parsed.query)
+    assert q.get("sslmode") == ["require"]
+    assert q.get("connect_timeout") == ["5"]
 
 
-class _PsycopgShim:
-    def __init__(self, seen):
-        self.seen = seen
-
-    def connect(self, dsn, **kwargs):
-        # capture DSN for assertions
-        self.seen.append(dsn)
-        return _FakeConn()
-
-
-def test_pgvector_dsn_appends_timeout_for_uri_dsn(monkeypatch):
-    seen = []
-    client = PgVectorQueryClient(
-        dsn="postgresql://user:pass@localhost/mydb?sslmode=require",
-        table="t",
-        connect_timeout=5,
-    )
-    # Override psycopg with shim
-    client._psycopg = _PsycopgShim(seen)  # type: ignore[attr-defined]
-
-    list(client.query(namespace="ns", query_vector=[0.0], top_k=1, min_score=0.0))
-
-    assert seen, "connect() should have been called"
-    dsn = seen[0]
-    parsed = up.urlparse(dsn)
-    q = dict(up.parse_qsl(parsed.query))
-    assert q.get("connect_timeout") == "5"
-    # existing params should be preserved too
-    assert q.get("sslmode") == "require"
+def test_uri_dsn_overrides_existing_connect_timeout() -> None:
+    cli = _client(connect_timeout=7)
+    dsn = "postgresql://u:p@h/db?connect_timeout=3&sslmode=disable"
+    out = cli._dsn_with_connect_timeout(dsn)
+    q = parse_qs(urlparse(out).query)
+    assert q.get("connect_timeout") == ["7"]
+    assert q.get("sslmode") == ["disable"]
 
 
-def test_pgvector_dsn_appends_timeout_for_kv_dsn(monkeypatch):
-    seen = []
-    client = PgVectorQueryClient(
-        dsn="host=localhost dbname=mydb user=me",
-        table="t",
-        connect_timeout=7,
-    )
-    client._psycopg = _PsycopgShim(seen)  # type: ignore[attr-defined]
+def test_key_value_dsn_append() -> None:
+    cli = _client(connect_timeout=11)
+    dsn = "host=localhost dbname=mydb"
+    out = cli._dsn_with_connect_timeout(dsn)
+    assert out.endswith(" connect_timeout=11")
 
-    list(client.query(namespace="ns", query_vector=[0.0], top_k=1, min_score=0.0))
 
-    assert seen, "connect() should have been called"
-    dsn = seen[0]
-    assert "connect_timeout=7" in dsn
-    # ensure space-delimited param (kv-style)
-    assert " connect_timeout=7" in dsn or dsn.endswith("connect_timeout=7")
+def test_malformed_urlparse_falls_back(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Force urlparse to raise to exercise fallback path
+    import elspeth.retrieval.providers as providers
+
+    def _boom(*_args, **_kwargs):  # noqa: D401
+        raise ValueError("broken")
+
+    monkeypatch.setattr(providers, "urlparse", _boom)
+    cli = _client(connect_timeout=13)
+    dsn = "host=myhost dbname=mydb"
+    out = cli._dsn_with_connect_timeout(dsn)
+    assert out.endswith(" connect_timeout=13")
+

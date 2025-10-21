@@ -57,7 +57,11 @@ class AzureOpenAIClient(LLMClientProtocol):
         value = os.getenv("ELSPETH_AZURE_OPENAI_DEPLOYMENT")
         if value:
             return value
-        raise ValueError("AzureOpenAIClient missing deployment configuration")
+        raise ValueError(
+            "AzureOpenAIClient missing deployment configuration; "
+            "set 'deployment' in config, or set environment variable "
+            f"'{self.config.get('deployment_env', 'ELSPETH_AZURE_OPENAI_DEPLOYMENT')}'"
+        )
 
     def _resolve_required(self, key: str) -> str:
         value = self._resolve_optional(key)

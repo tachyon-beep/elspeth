@@ -21,7 +21,6 @@ import sys
 import urllib.request
 from typing import Iterable
 
-
 FILES = [
     ".github/workflows/ci.yml",
     ".github/workflows/publish.yml",
@@ -89,4 +88,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

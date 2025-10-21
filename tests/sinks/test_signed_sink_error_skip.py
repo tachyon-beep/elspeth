@@ -17,9 +17,11 @@ def test_signed_sink_on_error_skip_swallows_exceptions(tmp_path: Path, monkeypat
     )
 
     # Force failure after results are written by making manifest hashing blow up
+    def _raise_runtimeerror(*_args, **_kwargs):  # noqa: D401
+        raise RuntimeError("boom")
     monkeypatch.setattr(
         "elspeth.plugins.nodes.sinks.signed.SignedArtifactSink._hash_results",
-        lambda *a, **k: (_ for _ in ()).throw(RuntimeError("boom")),
+        _raise_runtimeerror,
     )
 
     # Should not raise

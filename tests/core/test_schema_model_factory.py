@@ -57,23 +57,8 @@ def test_schema_from_config_required_optional_and_constraints():
         Schema(name="Bob", age=20, nickname="nick_1", ts=pd.Timestamp("2024-03-01"))
 
 
-def test_schema_from_config_rejects_regex_key():
-    """'regex' key is deprecated in favor of 'pattern' for Pydantic v2.
-
-    For backward compatibility, we now issue a DeprecationWarning and accept 'regex',
-    translating it to 'pattern' internally. This test verifies the warning is issued.
-    """
-    cfg = {
-        "nickname": {"type": "string", "regex": r"^[A-Za-z]+$"},
-    }
-    # Changed behavior: now issues DeprecationWarning instead of raising ValueError
-    with pytest.warns(DeprecationWarning, match=r"deprecated 'regex'; use 'pattern'"):
-        Schema = schema_from_config(cfg)  # noqa: N806
-
-    # Verify it still works (backward compatibility)
-    obj = Schema(nickname="Alice")
-    assert obj.nickname == "Alice"
-
-    # Verify pattern validation still works
-    with pytest.raises(ValidationError):
-        Schema(nickname="Alice123")  # Should fail pattern validation
+def test_schema_from_config_rejects_legacy_regex_key():
+    """Legacy 'regex' is not supported; require 'pattern' for Pydantic v2."""
+    cfg = {"nickname": {"type": "string", "regex": r"^[A-Za-z]+$"}}
+    with pytest.raises(ValueError, match=r"unsupported 'regex'; use 'pattern'"):
+        schema_from_config(cfg)

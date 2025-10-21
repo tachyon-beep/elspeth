@@ -55,7 +55,7 @@ def _create_embedder(config: Mapping[str, object]) -> Embedder:
         if isinstance(timeout_raw, (int, float, str)):
             try:
                 timeout = float(timeout_raw)
-            except Exception:
+            except (ValueError, TypeError):
                 timeout = None
         else:
             timeout = None
@@ -75,7 +75,7 @@ def _create_embedder(config: Mapping[str, object]) -> Embedder:
         if isinstance(timeout_raw, (int, float, str)):
             try:
                 timeout_val = float(timeout_raw)
-            except Exception:
+            except (ValueError, TypeError):
                 timeout_val = None
         else:
             timeout_val = None

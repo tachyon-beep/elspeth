@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import builtins
-import inspect as _inspect
 import os
 import time
 from pathlib import Path

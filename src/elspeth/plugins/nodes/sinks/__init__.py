@@ -1,6 +1,6 @@
 """Sink nodes - output vertices in the data flow graph.
 
-This package exposes many optional sinks that depend on third‑party services
+This package exposes many optional sinks that depend on third-party services
 and libraries (e.g., Azure SDKs, psycopg/pgvector). To keep imports lightweight
 and avoid import‑time failures in environments where those optional deps are not
 installed (such as CI when only a subset is needed), we lazily import sink

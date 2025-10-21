@@ -20,7 +20,7 @@ import re
 import sys
 import urllib.error
 import urllib.request
-from typing import Optional, Tuple
+from typing import Tuple
 
 GITHUB_RELEASES_URL = "https://api.github.com/repos/semgrep/semgrep/releases/latest"
 DOCKER_TAG_URL_TMPL = "https://hub.docker.com/v2/repositories/semgrep/semgrep/tags/{tag}"
@@ -108,4 +108,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

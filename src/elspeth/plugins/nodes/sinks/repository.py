@@ -108,7 +108,8 @@ class _RepoSinkBase(ResultSink):
         if self.dry_run:
             logger.warning(
                 "Repository sink running in dry-run mode; no remote writes will occur. "
-                "Set dry_run=False in configuration to enable remote publishing, or pass --live-outputs when using the CLI."
+                "Set dry_run=False in configuration to enable remote publishing. "
+                "When invoking the CLI, include --live-outputs to opt into live sink writes."
             )
             # In STRICT mode, highlight that dry-run prevents remote writes
             if get_secure_mode() == SecureMode.STRICT:

@@ -88,7 +88,9 @@ def test_load_error_logs_and_returns_empty_on_skip(monkeypatch: pytest.MonkeyPat
     rec = _Recorder()
     setattr(ds, "plugin_logger", rec)
 
-    monkeypatch.setattr("pandas.read_csv", lambda *a, **k: (_ for _ in ()).throw(pd.errors.ParserError("bad")))
+    def _raise_parser_error_bad(*_args, **_kwargs):  # noqa: D401
+        raise pd.errors.ParserError("bad")
+    monkeypatch.setattr("pandas.read_csv", _raise_parser_error_bad)
     df = ds.load()
     assert df.empty
     # output_schema() should have returned None when inference fails
@@ -101,7 +103,9 @@ def test_output_schema_inference_failure_returns_none(monkeypatch: pytest.Monkey
     csv_path.write_text("a,b\n1,2\n", encoding="utf-8")
     ds = CSVDataSource(path=csv_path, infer_schema=True, retain_local=False)
     # Force read failure during inference code path
-    monkeypatch.setattr("pandas.read_csv", lambda *a, **k: (_ for _ in ()).throw(pd.errors.ParserError("boom")))
+    def _raise_parser_error_boom(*_args, **_kwargs):  # noqa: D401
+        raise pd.errors.ParserError("boom")
+    monkeypatch.setattr("pandas.read_csv", _raise_parser_error_boom)
     assert ds.output_schema() is None
 
 

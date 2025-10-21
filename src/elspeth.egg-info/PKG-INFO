@@ -5,33 +5,39 @@ Summary: ELSPETH secure LLM orchestration platform
 Author: ELSPETH Team
 Requires-Python: >=3.12
 License-File: LICENSE
-Requires-Dist: azure-identity>=1.25.0
-Requires-Dist: azure-storage-blob>=12.27.0
-Requires-Dist: azure-search-documents>=11.4.0
-Requires-Dist: psycopg>=3.1.0
-Requires-Dist: pandas>=2.3.0
-Requires-Dist: pydantic<3.0,>=2.0
-Requires-Dist: pyyaml>=6.0
-Requires-Dist: openai>=2.0.0
-Requires-Dist: requests>=2.32.0
-Requires-Dist: jinja2>=3.1.0
-Requires-Dist: jsonschema>=4.25.0
-Requires-Dist: scipy>=1.16.0
-Requires-Dist: openpyxl>=3.1
-Requires-Dist: matplotlib>=3.10.0
-Requires-Dist: seaborn>=0.13.0
-Requires-Dist: pingouin>=0.5
-Requires-Dist: statsmodels>=0.14
+Requires-Dist: azure-identity==1.25.1
+Requires-Dist: azure-storage-blob==12.27.0
+Requires-Dist: azure-search-documents==11.6.0
+Requires-Dist: psycopg==3.2.10
+Requires-Dist: pandas==2.3.3
+Requires-Dist: pydantic==2.12.2
+Requires-Dist: pyyaml==6.0.3
+Requires-Dist: openai==2.4.0
+Requires-Dist: requests==2.32.5
+Requires-Dist: jinja2==3.1.6
+Requires-Dist: jsonschema==4.25.1
+Requires-Dist: scipy==1.16.2
+Requires-Dist: openpyxl==3.1.5
+Requires-Dist: matplotlib==3.10.7
+Requires-Dist: seaborn==0.13.2
+Requires-Dist: pingouin==0.5.5
+Requires-Dist: statsmodels==0.14.5
 Provides-Extra: dev
-Requires-Dist: pytest>=8.4.0; extra == "dev"
-Requires-Dist: pytest-mock>=3.10.0; extra == "dev"
-Requires-Dist: pytest-cov>=5.0.0; extra == "dev"
-Requires-Dist: pytest-asyncio>=0.24.0; extra == "dev"
-Requires-Dist: pandas-stubs>=2.2.0.240807; extra == "dev"
-Requires-Dist: ruff>=0.14.0; extra == "dev"
-Requires-Dist: mypy>=1.18.0; extra == "dev"
-Requires-Dist: types-requests>=2.32.0; extra == "dev"
-Requires-Dist: types-PyYAML>=6.0.0; extra == "dev"
+Requires-Dist: pytest==8.4.2; extra == "dev"
+Requires-Dist: pytest-mock==3.15.1; extra == "dev"
+Requires-Dist: pytest-cov==7.0.0; extra == "dev"
+Requires-Dist: pytest-asyncio==1.2.0; extra == "dev"
+Requires-Dist: pandas-stubs==2.3.2.250926; extra == "dev"
+Requires-Dist: ruff==0.14.1; extra == "dev"
+Requires-Dist: mypy==1.18.2; extra == "dev"
+Requires-Dist: types-requests==2.32.4.20250913; extra == "dev"
+Requires-Dist: types-PyYAML==6.0.12.20250915; extra == "dev"
+Requires-Dist: pip-tools==7.5.1; extra == "dev"
+Requires-Dist: pip-audit==2.9.0; extra == "dev"
+Requires-Dist: cyclonedx-bom==7.2.0; extra == "dev"
+Requires-Dist: bandit==1.8.6; extra == "dev"
+Requires-Dist: semgrep==1.92.0; extra == "dev"
+Requires-Dist: vulture==2.13; extra == "dev"
 Provides-Extra: azure
-Requires-Dist: azureml-core>=1.56.0; extra == "azure"
+Requires-Dist: azureml-core==1.60.0.post1; extra == "azure"
 Dynamic: license-file

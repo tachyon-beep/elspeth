@@ -7,6 +7,7 @@ from typing import Sequence
 
 from openai import AzureOpenAI, OpenAI
 
+from elspeth.core.security import get_secure_mode, validate_azure_openai_endpoint
 from elspeth.core.validation.base import ConfigurationError
 
 
@@ -45,11 +46,11 @@ class OpenAIEmbedder(Embedder):
             if t_env:
                 try:
                     resolved_timeout = float(t_env)
-                except Exception:
+                except (ValueError, TypeError):
                     resolved_timeout = None
         try:
             self._timeout = float(resolved_timeout) if resolved_timeout is not None else 30.0
-        except Exception:
+        except (ValueError, TypeError):
             self._timeout = 30.0
 
     def embed(self, text: str) -> Sequence[float]:
@@ -85,9 +86,7 @@ class AzureOpenAIEmbedder(Embedder):
             )
 
         # Enforce endpoint allowlist for Azure OpenAI (defense-in-depth)
-        from elspeth.core.security import get_secure_mode, validate_azure_openai_endpoint
-
-        # Enforce endpoint according to current secure mode
+        # according to current secure mode
         validate_azure_openai_endpoint(endpoint, mode=get_secure_mode())
 
         self._client = AzureOpenAI(
@@ -102,11 +101,11 @@ class AzureOpenAIEmbedder(Embedder):
             if t_env:
                 try:
                     resolved_timeout = float(t_env)
-                except Exception:
+                except (ValueError, TypeError):
                     resolved_timeout = None
         try:
             self._timeout = float(resolved_timeout) if resolved_timeout is not None else 30.0
-        except Exception:
+        except (ValueError, TypeError):
             self._timeout = 30.0
 
     def embed(self, text: str) -> Sequence[float]:

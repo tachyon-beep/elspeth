@@ -31,7 +31,7 @@ class HttpOpenAIClient(LLMClientProtocol):
         timeout: float = 30.0,
         retry_total: int = 3,
         backoff_factor: float = 0.5,
-        status_forcelist: tuple[int, ...] = (429, 500, 502, 503, 504),
+        status_forcelist: tuple[int, ...] | None = None,
         security_level: SecurityLevel | None = None,
     ) -> None:
         self.api_base = api_base.rstrip("/")
@@ -53,6 +53,8 @@ class HttpOpenAIClient(LLMClientProtocol):
         # Configure a session with bounded retries for transient errors
         self.session = requests.Session()
         try:  # pragma: no cover - adapter internals vary by env
+            if status_forcelist is None:
+                status_forcelist = (429, 500, 502, 503, 504)
             retry = Retry(
                 total=retry_total,
                 backoff_factor=backoff_factor,

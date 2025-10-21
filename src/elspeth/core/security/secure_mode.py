@@ -45,7 +45,9 @@ def get_path_contained_sink_types(env: dict[str, str] | None = None) -> frozense
         return frozenset(PATH_CONTAINED_SINK_TYPES_DEFAULT.union(custom))
     except (ValueError, AttributeError, TypeError):
         logger.warning(
-            "Failed to parse ELSPETH_PATH_CONTAINED_SINKS='%s'; using defaults. Custom sink containment settings will not be applied.",
+            "Failed to parse ELSPETH_PATH_CONTAINED_SINKS='%s'; using defaults. "
+            "Custom sink containment settings will NOT be applied. "
+            "Check environment variable syntax (expected: comma-separated list).",
             override,
         )
         return PATH_CONTAINED_SINK_TYPES_DEFAULT
