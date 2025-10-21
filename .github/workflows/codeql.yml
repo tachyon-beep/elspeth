@@ -45,14 +45,31 @@ jobs:
         run: |
           set -e
           REPO="${{ github.repository }}"
-          REF="${{ github.ref }}"
+          EVENT_NAME="${{ github.event_name }}"
+          # Use a branch ref for PRs; API expects refs/heads/<branch>
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            REF_FILTER="refs/heads/${{ github.head_ref }}"
+          else
+            REF_FILTER="${{ github.ref }}"
+          fi
           echo "## CodeQL Findings" >> "$GITHUB_STEP_SUMMARY"
-          echo "- Ref: ${REF}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Ref: ${REF_FILTER}" >> "$GITHUB_STEP_SUMMARY"
           tmp=$(mktemp)
-          if ! gh api -H "Accept: application/vnd.github+json" \
-            repos/${REPO}/code-scanning/alerts -F tool_name=CodeQL -F ref=${REF} -F per_page=100 > "$tmp"; then
-            echo "Unable to fetch alerts (insufficient permissions or none present)." >> "$GITHUB_STEP_SUMMARY"
-            exit 0
+          # Retry a few times to account for eventual consistency after analysis
+          for i in 1 2 3 4 5; do
+            if gh api -H "Accept: application/vnd.github+json" \
+              repos/${REPO}/code-scanning/alerts -F tool_name=CodeQL -F ref=${REF_FILTER} -F per_page=100 > "$tmp"; then
+              break
+            fi
+            sleep 5
+          done || true
+          if [ ! -s "$tmp" ]; then
+            # Fallback without ref filter (e.g., PR merge refs)
+            if ! gh api -H "Accept: application/vnd.github+json" \
+              repos/${REPO}/code-scanning/alerts -F tool_name=CodeQL -F per_page=100 > "$tmp"; then
+              echo "Unable to fetch alerts (insufficient permissions or none present)." >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
           fi
           total=$(jq 'length' "$tmp")
           open=$(jq '[.[] | select(.state=="open")] | length' "$tmp")
