@@ -34,7 +34,7 @@ COPY scripts/ scripts/
 COPY docs/ docs/
 COPY README.md README.md
 COPY LICENSE LICENSE
-RUN python -m pip install -e . --no-deps --no-index
+RUN python -m pip install -e . --no-deps --no-index --no-build-isolation
 
 FROM base AS dev
 COPY --from=builder-dev /opt/venv /opt/venv
@@ -65,7 +65,7 @@ COPY src/ src/
 COPY README.md README.md
 COPY LICENSE LICENSE
 # Install the package non-editably so code is baked into site-packages
-RUN python -m pip install . --no-deps --no-index
+RUN python -m pip install . --no-deps --no-index --no-build-isolation
 
 FROM base AS runtime
 COPY --from=builder-runtime /opt/venv /opt/venv

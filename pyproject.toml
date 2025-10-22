@@ -55,6 +55,7 @@ dev = [
   "bandit==1.8.6",
   "semgrep==1.92.0",
   "vulture==2.13",
+  "pip-licenses==5.5.0",
 ]
 # Azure ML integration (truly optional - external infrastructure)
 azure = [
