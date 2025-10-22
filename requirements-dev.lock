@@ -2349,6 +2349,10 @@ semgrep==1.92.0 \
     --hash=sha256:9aa2d64b4a4a9a85b038cf356ed8536a2cafaa0c8ca1c760815a65bae2033a88 \
     --hash=sha256:a7a0b5d121e9a86953e57cd9ddd00e257190fbdaee9e6612ddda7ba597f71e70
     # via elspeth (pyproject.toml)
+pip-licenses==5.5.0 \
+    --hash=sha256:ae1869436d13ee487088d29e71fc5821950062ad25ec28b6a1a443e0add6d8e8 \
+    --hash=sha256:2473e7afd02a0c21460758f70fd2bb3b3c080c5150713dd33baa9493dc1563a5
+    # via license-check workflow
 setuptools==80.9.0 \
     --hash=sha256:062d34222ad13e0cc312a4c02d73f059e86a4acbfbdea8f8f76b28c99f306922 \
     --hash=sha256:f36b47402ecde768dbfafc46e8e4207b4360c654f1f3bb84475f0a28628fb19c

@@ -33,6 +33,7 @@ During the ATO (Authority to Operate) architectural assessment, this legacy code
 ## Decision
 
 We will **remove all legacy code structures** including:
+
 1. Duplicate plugin files in old locations (22 files)
 2. Backward compatibility shims (4 files)
 3. Update all imports to use new canonical paths
@@ -52,21 +53,25 @@ This removal occurs at the v0.1.0 milestone, establishing a clean baseline for f
 ## Alternatives Considered
 
 ### 1. Keep Legacy Code with Deprecation Warnings
+
 - **Rejected:** Still increases audit burden and confusion risk
 - Warnings alone don't eliminate accidental use risk
 - Increases testing matrix unnecessarily
 
 ### 2. Keep Backward Compatibility Shims Indefinitely
+
 - **Rejected:** Creates permanent technical debt
 - Would still be flagged in security scans
 - Increases maintenance burden for every future change
 
 ### 3. Move to archive/ Directory
+
 - **Rejected:** Still present in repository, still part of deployable package
 - Would still be scanned by security tools
 - Doesn't achieve "least functionality" principle
 
 ### 4. Keep in Separate Branch
+
 - **Rejected:** Branches can still be merged accidentally
 - Doesn't remove from main deployment
 - Creates confusion about branch purpose
@@ -92,6 +97,7 @@ This removal occurs at the v0.1.0 milestone, establishing a clean baseline for f
 ## Consequences
 
 ### Positive
+
 - **Cleaner codebase:** Single source of truth for all plugins
 - **Faster security audits:** Less code to review, no duplicate paths
 - **Less confusion:** Clear canonical import paths
@@ -101,10 +107,12 @@ This removal occurs at the v0.1.0 milestone, establishing a clean baseline for f
 - **Reduced testing burden:** No need to test deprecated code paths
 
 ### Negative
+
 - **Import updates required:** Any unreleased branches need import updates (acceptable at v0.1.0)
 - **No backward compatibility:** External code using old imports will break (none exists)
 
 ### Mitigation
+
 - Git history preserves all removed code for reference
 - This ADR documents decision rationale and alternatives
 - Verification script ensures no legacy code reintroduced
@@ -137,6 +145,7 @@ python -m pytest tests/ && echo "✅ Tests pass"
 ```
 
 **Verification Results (2025-10-15):**
+
 ```
 ✓ Old datasources removed
 ✓ Old llms removed
@@ -153,17 +162,20 @@ python -m pytest tests/ && echo "✅ Tests pass"
 For reference, the new canonical import paths are:
 
 ### Plugins
+
 - **Datasources:** `from elspeth.plugins.nodes.sources.<plugin> import ...`
 - **LLM Transforms:** `from elspeth.plugins.nodes.transforms.llm.<plugin> import ...`
 - **Sinks:** `from elspeth.plugins.nodes.sinks.<plugin> import ...`
 - **Experiment Plugins:** `from elspeth.plugins.orchestrators.experiment.<type> import ...`
 
 ### Protocols
+
 - **Core Protocols:** `from elspeth.core.base.protocols import DataSource, ResultSink, LLMClientProtocol, ...`
 - **Experiment Protocols:** `from elspeth.plugins.orchestrators.experiment.protocols import ValidationPlugin, RowExperimentPlugin, ...`
 
 ### Registries
-- **Plugin Registry:** `from elspeth.core.registries import *` (dedicated registries)
+
+- **Plugin Registry:** `from elspeth.core.registries import datasource_registry, llm_registry, sink_registry` (dedicated registries)
 
 ## References
 
@@ -178,10 +190,12 @@ For reference, the new canonical import paths are:
 This decision was made as part of the v0.1.0 baseline and ATO remediation effort. The legacy code had already been fully migrated to new locations and was not used by any active system components.
 
 The removal establishes a clean architectural baseline:
+
 - **Before:** Mixed old/new plugin paths, backward compatibility shims
 - **After:** Single canonical path for each plugin type, clear architecture
 
 If future development requires reference to old architecture decisions, consult:
+
 1. This ADR and related documentation
 2. Git history for the main repository (commit 47da6d9 and earlier)
 3. Architecture documentation in `docs/architecture/`
@@ -199,6 +213,7 @@ If future development requires reference to old architecture decisions, consult:
 ---
 
 **Approved By:**
+
 - ✅ Development Team Lead (John Morrissey)
 - ✅ Security Team (ATO Assessment reviewed)
 - 📋 ATO Sponsor (pending final review)

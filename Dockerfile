@@ -4,7 +4,7 @@
 #   --build-arg PYTHON_IMAGE=python:3.12.12-slim@sha256:<digest>
 ARG PYTHON_IMAGE=python:3.12.12-slim
 
-FROM ${PYTHON_IMAGE} AS base
+FROM python:3.12.12-slim@sha256:b03eed4944bc758029e0506ec41acb6a4be6d1b2b875d6e04ac4759db343a370 AS base
 ARG PYTHON_IMAGE
 # Enforce digest-pinned base image for reproducibility (CI passes a pinned digest)
 COPY scripts/validate-digest.sh /usr/local/bin/validate-digest.sh
@@ -24,8 +24,8 @@ WORKDIR /workspace
 
 COPY requirements-dev.lock requirements-dev.lock
 COPY pyproject.toml pyproject.toml
-RUN python -m pip install --upgrade pip pip-tools \
-    && python -m piptools sync requirements-dev.lock
+# Install dev/test dependencies strictly from the hash-locked file
+RUN python -m pip install --require-hashes -r requirements-dev.lock
 
 # Copy source and install package in editable mode
 COPY src/ src/
@@ -34,7 +34,7 @@ COPY scripts/ scripts/
 COPY docs/ docs/
 COPY README.md README.md
 COPY LICENSE LICENSE
-RUN python -m pip install -e . --no-deps
+RUN python -m pip install -e . --no-deps --no-index
 
 FROM base AS dev
 COPY --from=builder-dev /opt/venv /opt/venv
@@ -58,15 +58,14 @@ WORKDIR /workspace
 
 COPY requirements.lock requirements.lock
 COPY pyproject.toml pyproject.toml
-RUN python -m pip install --upgrade pip pip-tools
-# Install only runtime dependencies
-RUN python -m piptools sync requirements.lock
+# Install only runtime dependencies from the hash-locked file
+RUN python -m pip install --require-hashes -r requirements.lock
 
 COPY src/ src/
 COPY README.md README.md
 COPY LICENSE LICENSE
 # Install the package non-editably so code is baked into site-packages
-RUN python -m pip install . --no-deps
+RUN python -m pip install . --no-deps --no-index
 
 FROM base AS runtime
 COPY --from=builder-runtime /opt/venv /opt/venv
