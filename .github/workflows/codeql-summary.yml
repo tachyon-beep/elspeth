@@ -5,14 +5,14 @@ on:
     workflows: ["CodeQL Static Analysis"]
     types: [completed]
 
-permissions:
-  contents: read
-  security-events: read
+permissions: {}
 
 jobs:
   summarize:
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
+    permissions:
+      security-events: read
     steps:
       - name: Summarize CodeQL alerts via API
         env:

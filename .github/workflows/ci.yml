@@ -1,7 +1,6 @@
 name: Lint, Tests & Sample Suite
 
-permissions:
-  contents: read
+permissions: {}
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -18,6 +17,8 @@ jobs:
   changes:
     name: Detect Changed Paths
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     outputs:
       code: ${{ steps.filter.outputs.code }}
       docs: ${{ steps.filter.outputs.docs }}
@@ -44,6 +45,8 @@ jobs:
     name: Secret Scan (gitleaks)
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: read
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
@@ -79,6 +82,7 @@ jobs:
     needs: [secrets-scan, changes]
     if: needs.changes.outputs.code == 'true'
     permissions:
+      contents: read
       security-events: write
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -175,6 +179,8 @@ jobs:
     needs: [ci-core, security-scans, changes]
     timeout-minutes: 20
     if: needs.changes.outputs.code == 'true'
+    permissions:
+      contents: read
 
     steps:
       - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
@@ -205,6 +211,7 @@ jobs:
     needs: [ci-core, security-scans, changes]
     timeout-minutes: 30
     permissions:
+      contents: read
       security-events: write
     if: needs.changes.outputs.code == 'true'
     steps:

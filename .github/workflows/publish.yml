@@ -5,8 +5,7 @@ on:
     tags:
       - "v*"
 
-permissions:
-  contents: read
+permissions: {}
 
 jobs:
   publish:
@@ -15,6 +14,7 @@ jobs:
       contents: write
       packages: write
       security-events: write
+      attestations: write
       id-token: write
     concurrency:
       group: publish-${{ github.workflow }}-${{ github.ref }}

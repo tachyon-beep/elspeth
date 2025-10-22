@@ -27,8 +27,7 @@ on:
     workflows: ["Lint, Tests & Sample Suite"]
     types: [completed]
 
-permissions:
-  contents: read
+permissions: {}
 
 jobs:
   auto-merge-security:
