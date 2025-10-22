@@ -83,3 +83,44 @@ def test_krippendorff_alpha_variants():
     arr_ord = np.array([[1, 2, 3], [2, 2, 2], [1, 3, np.nan]], dtype=float)
     a_ord = krippendorff_alpha(arr_ord, level="ordinal")
     assert a_ord is not None and -1.0 <= a_ord <= 1.0
+
+
+def test_krippendorff_alpha_edge_cases():
+    import numpy as np
+
+    # Single item: insufficient data (strict)
+    arr_single = np.array([[1.0, 1.0, 1.0]], dtype=float)
+    assert krippendorff_alpha(arr_single, level="interval") is None
+
+    # All NaN: insufficient data
+    arr_nan = np.array([[np.nan, np.nan], [np.nan, np.nan]], dtype=float)
+    assert krippendorff_alpha(arr_nan, level="interval") is None
+    assert krippendorff_alpha(arr_nan, level="nominal") is None
+
+    # Degenerate variance (all same value) → perfect agreement
+    arr_const = np.array([[2.0, 2.0], [2.0, 2.0]], dtype=float)
+    a_int = krippendorff_alpha(arr_const, level="interval")
+    a_nom = krippendorff_alpha(arr_const, level="nominal")
+    assert a_int is not None and a_int > 0.99
+    assert a_nom is not None and a_nom > 0.99
+
+    # Low agreement (random ratings): should be within bounds and not ~1
+    rng = np.random.default_rng(0)
+    arr_rand = rng.random((30, 4))
+    a_low = krippendorff_alpha(arr_rand, level="interval")
+    assert a_low is not None and -1.0 <= a_low <= 1.0 and a_low < 0.9
+
+
+def test_krippendorff_alpha_nominal_reference_values():
+    import numpy as np
+
+    # Exactly half agree, half disagree → alpha = 0 (nominal)
+    # Items: (A,A), (A,B), (B,A), (B,B)
+    arr0 = np.array([[1, 1], [1, 2], [2, 1], [2, 2]], dtype=float)
+    a0 = krippendorff_alpha(arr0, level="nominal")
+    assert a0 is not None and abs(a0 - 0.0) < 1e-12
+
+    # Always disagree → alpha = -1 (nominal)
+    arrm1 = np.array([[1, 2], [1, 2], [2, 1], [2, 1]], dtype=float)
+    am1 = krippendorff_alpha(arrm1, level="nominal")
+    assert am1 is not None and abs(am1 + 1.0) < 1e-12

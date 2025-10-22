@@ -398,6 +398,9 @@ def _krippendorff_alpha_interval(data: "np.ndarray") -> float | None:
     if data.ndim != 2:
         return None
     x = np.asarray(data, dtype=float)
+    # Require at least two items for a meaningful estimate
+    if x.shape[0] < 2:
+        return None
     v = x[~np.isnan(x)]
     m = v.size
     if m < 2:
@@ -455,6 +458,8 @@ def _krippendorff_alpha_nominal(data: "np.ndarray") -> float | None:
     if data.ndim != 2:
         return None
     x = np.asarray(data)
+    if x.shape[0] < 2:
+        return None
 
     # Flatten non-NaN values to compute expected disagreement from category proportions
     v = x[~np.isnan(x)]
@@ -517,7 +522,12 @@ def krippendorff_alpha(data: "np.ndarray", level: str = "interval") -> float | N
     if level == "nominal":
         return _krippendorff_alpha_nominal(data)
     if level == "ordinal":
-        # Rank-encode categories per column then compute interval alpha
+        # Approximate ordinal alpha:
+        # Rank-encode category values on the pooled set, then use interval alpha.
+        # Note: This rank-transform approach is an approximation. For true ordinal
+        # Krippendorff's α using cumulative distributions, see Krippendorff (2013).
+        # This simplification is acceptable for many practical use cases where
+        # ordinal categories are approximately evenly spaced.
         x = np.asarray(data, dtype=float)
         # Build ranks on pooled unique values (ignoring NaN)
         vals = x[~np.isnan(x)]
