@@ -61,10 +61,6 @@ azure = [
   "azureml-core==1.60.0.post1",
 ]
 
-# Optional extras (kept for compatibility; no GPL dependencies)
-analytics-visual = [
-  # Visual analytics libraries are part of core deps (matplotlib, seaborn).
-]
 
 [tool.setuptools.packages.find]
 where = ["src"]

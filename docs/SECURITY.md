@@ -149,7 +149,7 @@ Keep dependencies up to date:
 pip-audit
 
 # Update dependencies
-pip install --upgrade -e .[dev,analytics-visual]
+pip install --upgrade -e .[dev]
 ```
 
 ## Compliance

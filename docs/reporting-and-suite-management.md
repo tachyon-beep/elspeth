@@ -5,18 +5,16 @@ experiment scaffolds, and producing consolidated analytics artefacts.
 
 ## Prerequisites
 
-Install the optional dependencies used by the reporting pipeline:
+Install the development dependencies used by the reporting pipeline:
 
 ```bash
-pip install -e .[dev,analytics-visual]  # pandas/openpyxl + matplotlib/seaborn for reports
+pip install -e .[dev]  # pandas/openpyxl + matplotlib/seaborn for reports
 ```
 
 > The remainder of the CLI only requires the base installation, but report generation skips
 > Excel/visual outputs when pandas or matplotlib are unavailable.[^reporting-deps-2025-10-12]
 <!-- UPDATE 2025-10-12: The visual analytics sink also relies on matplotlib (and optionally seaborn) when producing PNG/HTML charts; install these packages before enabling the sink. -->
-Optional analytics extras (`pip install -e .[stats-core,stats-agreement,stats-planning,stats-distribution]`)
-unlock additional statistical plugins; install the sets your accreditation run depends on so comparative
-reports include consistent metrics.[^reporting-analytics-extras-2025-10-12]
+Statistical and visual reporting capabilities are available by default; no extras are required.
 
 ## 1. Create or update suites
 

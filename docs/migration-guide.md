@@ -5,7 +5,7 @@ This guide helps teams upgrade from the legacy `old/` implementation to the mode
 ## Prerequisites
 
 - Python 3.12+
-- `pip install -e .[dev,analytics-visual]` to pull dependencies.
+- `pip install -e .[dev]` to pull dependencies.
 - Review `README.md` for project overview and setup notes.
 
 ## High-Level Mapping
@@ -93,7 +93,7 @@ Refer to `notes/config-migration.md` for key renames. Typical steps:
 - `analytics_report` sink writes JSON/Markdown summaries of results, aggregators, and baseline comparisons.
 - Sample configuration: `config/sample_suite/` demonstrates early stop, analytics, and reporting sinks.[^migration-sample-suite-2025-10-12]
 <!-- UPDATE 2025-10-12: Suite reporting commands (`--reports-dir`) now generate comparative analysis, validation summaries, and recommendations mirroring legacy Excel dashboards (`src/elspeth/tools/reporting.py:33`). -->
-- **Visual analytics parity** – Configure `visual_report` sink (requires the `analytics-visual` extra) to regenerate PNG/HTML dashboards that previously relied on bespoke plotting scripts:
+- **Visual analytics parity** – Configure `visual_report` sink (matplotlib/seaborn included by default) to regenerate PNG/HTML dashboards that previously relied on bespoke plotting scripts:
 
   ```yaml
   sinks:
@@ -104,7 +104,7 @@ Refer to `notes/config-migration.md` for key renames. Typical steps:
         chart_title: "Mean Scores by Criterion"
   ```
 
-  Install extras with `pip install -e .[dev,analytics-visual]` to pull `matplotlib`/`seaborn` (`src/elspeth/plugins/nodes/sinks/visual_report.py:17`).[^migration-visual-2025-10-12]
+  `matplotlib`/`seaborn` are part of core dependencies (`src/elspeth/plugins/nodes/sinks/visual_report.py:17`).[^migration-visual-2025-10-12]
 <!-- UPDATE 2025-10-12: Visual sink module relocation -->
 Update 2025-10-12: Visual analytics sink lives in `src/elspeth/plugins/nodes/sinks/visual_report.py`.
 <!-- END UPDATE -->
@@ -171,7 +171,7 @@ Update 2025-10-12: Report generation dispatch now resides at `src/elspeth/cli.py
 
   (`src/elspeth/plugins/experiments/early_stop.py:17`, `src/elspeth/core/experiments/plugin_registry.py:298`).
 - Translate analytics/reporting scripts to CLI calls that include `--reports-dir` so consolidated JSON, Markdown, and Excel assets replace bespoke notebook workflows (`src/elspeth/cli.py:240`, `src/elspeth/tools/reporting.py:94`).[^migration-suite-reporting-2025-10-12]
-- Enable analytics and visual extras via `pip install .[stats-core,stats-agreement,analytics-visual]` when migrating legacy statistical notebooks; document the chosen extras in accreditation runbooks to ensure dependency parity (`pyproject.toml:39`, `pyproject.toml:56`).[^migration-analytics-extras-2025-10-12]
+<!-- Extras removed: analytics-visual is no longer required; visual/statistical features are available by default. -->
 
 ## Update History
 

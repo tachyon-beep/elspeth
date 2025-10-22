@@ -10,7 +10,7 @@ This example drives a locally hosted OpenAI-compatible model (running on `http:/
    ```bash
    python3 -m venv .venv
    source .venv/bin/activate
-   pip install -e .[dev,analytics-visual]  # pulls matplotlib/seaborn for visuals[^colour-visual-deps-2025-10-12]
+   pip install -e .[dev]  # matplotlib/seaborn are included in core deps for visuals
    ```
 
 ## Dataset
@@ -102,7 +102,7 @@ If the endpoint requires a bearer token, expose it via environment variable and 
 <!-- UPDATE 2025-10-12: Adaptive limiter citation refresh -->
 Update 2025-10-12: Adaptive rate limiter implementation resides in `src/elspeth/core/controls/rate_limit.py:104-150`.
 <!-- END UPDATE -->
-<!-- UPDATE 2025-10-12: Enable the `analytics_visual` sink (install via `pip install -e .[dev,analytics-visual]`) to generate PNG/HTML charts alongside CSV outputs when comparing colour responses. -->
+<!-- UPDATE 2025-10-12: Enable the `analytics_visual` sink (no extra install required) to generate PNG/HTML charts alongside CSV outputs when comparing colour responses. -->
 - Add an `analytics_report` or `analytics_visual` sink alongside the CSV sink to capture retry summaries, failure samples, and charts for accreditation evidence:
 
   ```yaml
