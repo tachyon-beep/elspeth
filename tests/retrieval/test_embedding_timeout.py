@@ -62,4 +62,3 @@ def test_azure_openai_embedder_timeout_parsing(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.delenv("ELSPETH_EMBEDDING_TIMEOUT", raising=False)
     a3 = AzureOpenAIEmbedder(endpoint=None, deployment="d", timeout=15)
     assert abs(a3._timeout - 15.0) < 1e-9
-

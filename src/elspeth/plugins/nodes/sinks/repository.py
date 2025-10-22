@@ -308,7 +308,7 @@ class _RepoSinkBase(ResultSink):
 
 
 class GitHubRepoSink(_RepoSinkBase):
-    """Push experiment artifacts to a GitHub repository via the REST API."""
+    """Publish JSON and binary artifacts to a GitHub repository via REST API."""
 
     def __init__(
         self,
@@ -392,7 +392,7 @@ class GitHubRepoSink(_RepoSinkBase):
 
 
 class AzureDevOpsRepoSink(_RepoSinkBase):
-    """Push experiment artifacts to an Azure DevOps Git repository."""
+    """Publish artifacts to Azure DevOps Git repositories via REST API."""
 
     def __init__(
         self,
@@ -517,6 +517,11 @@ class AzureDevOpsRepoSink(_RepoSinkBase):
 
 
 class AzureDevOpsArtifactsRepoSink(AzureDevOpsRepoSink):
+    """Publish a folder of artifacts to Azure DevOps Artifacts feed.
+
+    Extends AzureDevOpsRepoSink with folder upload semantics.
+    """
+
     """Publish local folders or archives to an Azure DevOps Git repository.
 
     This sink uploads all files under a local `folder_path` into the target

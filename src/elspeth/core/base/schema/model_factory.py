@@ -107,9 +107,7 @@ def schema_from_config(
         if "pattern" in col_spec:
             pattern_value = col_spec["pattern"]
         elif "regex" in col_spec:
-            raise ValueError(
-                f"Column '{col_name}' uses unsupported 'regex'; use 'pattern' for Pydantic v2"
-            )
+            raise ValueError(f"Column '{col_name}' uses unsupported 'regex'; use 'pattern' for Pydantic v2")
         if pattern_value is not None:
             field_kwargs["pattern"] = pattern_value
 

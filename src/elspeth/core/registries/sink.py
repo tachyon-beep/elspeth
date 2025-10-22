@@ -81,9 +81,9 @@ def _create_azure_blob_sink(options: dict[str, Any], context: PluginContext) -> 
                 endpoint=blob_config.account_url,
                 security_level=security_level,
             )
-            logger.debug(f"Azure Blob endpoint validated: {blob_config.account_url}")
+            logger.debug("Azure Blob endpoint validated: %s", blob_config.account_url)
         except ValueError as exc:
-            logger.error(f"Azure Blob endpoint validation failed: {exc}")
+            logger.error("Azure Blob endpoint validation failed: %s", exc)
             raise ConfigurationError(f"Azure Blob sink endpoint validation failed: {exc}") from exc
     elif "account_url" in options:
         # Fallback: validate account_url if present in options to prevent bypass
@@ -93,9 +93,9 @@ def _create_azure_blob_sink(options: dict[str, Any], context: PluginContext) -> 
                 endpoint=options["account_url"],
                 security_level=security_level,
             )
-            logger.debug(f"Azure Blob endpoint validated: {options['account_url']}")
+            logger.debug("Azure Blob endpoint validated: %s", options["account_url"])
         except ValueError as exc:
-            logger.error(f"Azure Blob endpoint validation failed: {exc}")
+            logger.error("Azure Blob endpoint validation failed: %s", exc)
             raise ConfigurationError(f"Azure Blob sink endpoint validation failed: {exc}") from exc
 
     return BlobResultSink(**options)
@@ -123,7 +123,7 @@ def _create_csv_sink(options: dict[str, Any], context: PluginContext) -> CsvResu
     except Exception:
         # As a last resort, attempt an explicit import
         try:
-            from elspeth.plugins.nodes.sinks import csv_file as _csv_mod
+            from elspeth.plugins.nodes.sinks import csv_file as _csv_mod  # pylint: disable=import-outside-toplevel
 
             klass = getattr(_csv_mod, "CsvResultSink", CsvResultSink)
             return klass(**options)

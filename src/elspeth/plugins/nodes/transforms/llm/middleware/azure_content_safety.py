@@ -11,6 +11,7 @@ from typing import Any, Sequence
 import requests
 
 from elspeth.core.base.protocols import LLMMiddleware, LLMRequest
+from elspeth.core.base.types import DeterminismLevel
 from elspeth.core.registries.middleware import register_middleware
 
 logger = logging.getLogger(__name__)
@@ -52,6 +53,7 @@ class AzureContentSafetyMiddleware(LLMMiddleware):
         mask: str = "[CONTENT BLOCKED]",
         channel: str | None = None,
         on_error: str = "abort",
+        retry_attempts: int = 3,
     ) -> None:
         if not endpoint:
             raise ValueError("Azure Content Safety requires an endpoint")
@@ -73,6 +75,11 @@ class AzureContentSafetyMiddleware(LLMMiddleware):
         if handler not in {"abort", "skip"}:
             handler = "abort"
         self.on_error = handler
+        # Configure bounded retry attempts for Content Safety calls
+        try:
+            self.retry_attempts = max(1, int(retry_attempts))
+        except (ValueError, TypeError):
+            self.retry_attempts = 3
 
     def before_request(self, request: LLMRequest) -> LLMRequest:
         try:
@@ -110,12 +117,17 @@ class AzureContentSafetyMiddleware(LLMMiddleware):
                 response.raise_for_status()
                 break
             except requests.RequestException:  # pragma: no cover - network failure/backoff path
-                if attempts >= 3:
+                if attempts >= self.retry_attempts:
                     raise
                 # Non-cryptographic jitter: safe for backoff; avoids thundering herd.
                 # Disable jitter for high/guaranteed determinism to preserve reproducibility.
-                det = getattr(self, "_elspeth_determinism_level", getattr(self, "determinism_level", "none"))
-                jitter = 0.0 if str(det).lower() in ("high", "guaranteed") else (random.random() * 0.2)  # nosec B311
+                det = getattr(self, "_elspeth_determinism_level", getattr(self, "determinism_level", None))
+                deterministic = False
+                if isinstance(det, DeterminismLevel):
+                    deterministic = det in (DeterminismLevel.HIGH, DeterminismLevel.GUARANTEED)
+                elif isinstance(det, str):
+                    deterministic = det.lower() in ("high", "guaranteed")
+                jitter = 0.0 if deterministic else (random.random() * 0.2)  # nosec B311
                 time.sleep(delay + jitter)
                 delay *= 2
         data = response.json()

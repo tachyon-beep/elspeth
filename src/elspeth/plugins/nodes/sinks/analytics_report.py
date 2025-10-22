@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 
 class AnalyticsReportSink(ResultSink):
-    """Write experiment analytics to JSON/Markdown artifacts."""
+    """Generate a JSON analytics report (and optional Markdown) summarizing results and failures."""
 
     def __init__(
         self,

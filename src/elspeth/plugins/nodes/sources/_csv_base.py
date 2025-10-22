@@ -59,12 +59,17 @@ class BaseCSVDataSource(DataSource):
         self.allowed_base_path = Path(allowed_base_path).resolve() if allowed_base_path else None
         if self.allowed_base_path is not None:
             try:
-                if not raw_path.is_relative_to(self.allowed_base_path):
-                    raise ValueError(
-                        f"CSV datasource path '{raw_path}' escapes allowed base '{self.allowed_base_path}'",
-                    )
-            except Exception as exc:
+                within = raw_path.is_relative_to(self.allowed_base_path)
+            except ValueError as exc:
+                # Normalize Path-related incompatibilities as ValueError with context
                 raise ValueError(f"Invalid CSV datasource path resolution: {exc}") from exc
+            except Exception as exc:  # pragma: no cover - unexpected Path error
+                logger.exception("Unexpected exception during CSV datasource path containment check")
+                raise
+            if not within:
+                raise ValueError(
+                    f"CSV datasource path '{raw_path}' escapes allowed base '{self.allowed_base_path}'",
+                )
         self.path = raw_path
         self.dtype = dtype
         self.encoding = encoding

@@ -50,4 +50,3 @@ def test_malformed_urlparse_falls_back(monkeypatch: pytest.MonkeyPatch) -> None:
     dsn = "host=myhost dbname=mydb"
     out = cli._dsn_with_connect_timeout(dsn)
     assert out.endswith(" connect_timeout=13")
-

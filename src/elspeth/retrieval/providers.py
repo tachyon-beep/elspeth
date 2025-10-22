@@ -7,7 +7,7 @@ import logging
 import os
 import types
 from dataclasses import dataclass
-from typing import Any, Iterable, Mapping, Sequence
+from typing import Any, Iterable, Mapping, Protocol, Sequence, cast
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 from elspeth.core.security import validate_azure_search_endpoint
@@ -16,6 +16,8 @@ from elspeth.core.validation.base import ConfigurationError
 
 @dataclass
 class QueryResult:
+    """Similarity search result returned by a retrieval provider."""
+
     document_id: str
     text: str
     score: float
@@ -33,10 +35,40 @@ class VectorQueryClient:
         top_k: int,
         min_score: float,
     ) -> Iterable[QueryResult]:  # pragma: no cover - interface
+        """Execute a similarity search and yield ranked results.
+
+        Args:
+            namespace: Logical namespace/partition for multi-tenant stores.
+            query_vector: Query embedding to search against.
+            top_k: Maximum number of results to return.
+            min_score: Minimum similarity score threshold.
+        """
         raise NotImplementedError
 
 
+class _PGCursor(Protocol):
+    """Minimal psycopg cursor protocol used by this module."""
+
+    def execute(self, query: Any, args: Any) -> Any: ...
+    def fetchall(self) -> list[tuple[Any, Any, Any, Any]]: ...
+    def __enter__(self) -> "_PGCursor": ...
+    def __exit__(self, *args: Any) -> Any: ...
+
+
+class _PGConnection(Protocol):
+    """Minimal psycopg connection protocol used by this module."""
+
+    def cursor(self) -> _PGCursor: ...
+    def close(self) -> None: ...
+
+
 class PgVectorQueryClient(VectorQueryClient):
+    """Similarity search against a PostgreSQL database using pgvector.
+
+    Defers importing psycopg until first query to keep optional dependency
+    costs out of environments that don't use pgvector.
+    """
+
     def __init__(self, *, dsn: str, table: str = "elspeth_rag", connect_timeout: float | int | None = None) -> None:
         # Defer importing psycopg until query() is executed. This makes unit tests
         # that only validate DSN handling independent from system libpq availability.
@@ -48,11 +80,11 @@ class PgVectorQueryClient(VectorQueryClient):
         self._logger = logging.getLogger(__name__)
 
     def _dsn_with_connect_timeout(self, dsn: str) -> str:
-        """Return a DSN with `connect_timeout` appended for URI and key-value styles.
+        """Append `connect_timeout` to a PostgreSQL DSN (URI or key-value).
 
-        - URI style (postgresql://...): appends/overrides query param.
-        - Key-value DSN style: appends a space-delimited parameter.
-        Falls back to key-value append on minor parse issues to avoid failing queries.
+        - URI (postgresql://…): set/override `connect_timeout` query parameter.
+        - Key-value DSN: append as a space-delimited parameter.
+        On parse issues, fall back to a safe whitespace-delimited append.
         """
         if self._connect_timeout is None:
             return dsn
@@ -79,18 +111,19 @@ class PgVectorQueryClient(VectorQueryClient):
         top_k: int,
         min_score: float,
     ) -> Iterable[QueryResult]:
+        """Execute similarity search using pgvector and yield results."""
         # Import psycopg here to allow initialization without libpq in minimal test envs.
         if self._psycopg is None and self._sql is None:  # pragma: no cover - trivial path
             try:
-                import psycopg
-            except Exception as exc:  # pragma: no cover - environment missing psycopg
+                import psycopg  # pylint: disable=import-outside-toplevel
+            except ImportError as exc:  # pragma: no cover - environment missing psycopg
                 raise RuntimeError("psycopg unavailable; cannot perform pgvector queries") from exc
             self._psycopg = psycopg
             try:
-                from psycopg import sql
+                from psycopg import sql  # pylint: disable=import-outside-toplevel
 
                 self._sql = sql
-            except Exception:
+            except ImportError:
                 # self._sql remains None; downstream will refuse raw SQL fallback
                 pass
 
@@ -98,8 +131,10 @@ class PgVectorQueryClient(VectorQueryClient):
         dsn = self._dsn
         if self._connect_timeout is not None:
             dsn = self._dsn_with_connect_timeout(dsn)
-        assert self._psycopg is not None
-        conn = self._psycopg.connect(dsn, autocommit=True)
+        if self._psycopg is None:
+            raise RuntimeError("psycopg module not loaded. Ensure psycopg is installed or call a query method that triggers lazy import.")
+        psycopg_mod = cast(Any, self._psycopg)
+        conn: _PGConnection = psycopg_mod.connect(dsn, autocommit=True)
         try:
             # Use sql.Identifier to safely quote table name and prevent SQL injection
             with conn.cursor() as cur:
@@ -137,7 +172,7 @@ class PgVectorQueryClient(VectorQueryClient):
                     if metadata:
                         try:
                             metadata_payload = json.loads(metadata)
-                        except (json.JSONDecodeError, TypeError, ValueError) as exc:  # pragma: no cover - best effort
+                        except (ValueError, TypeError) as exc:  # pragma: no cover - best effort
                             self._logger.debug("Failed to parse metadata JSON for document_id=%s: %s", document_id, exc)
                             metadata_payload = {}
                     yield QueryResult(
@@ -150,11 +185,14 @@ class PgVectorQueryClient(VectorQueryClient):
             conn.close()
 
     def _vector_literal(self, vector: Sequence[float]) -> str:
+        """Format a Python sequence of floats as a pgvector literal string."""
         values = ",".join(f"{float(value):.12g}" for value in vector)
         return f"[{values}]"
 
 
 class AzureSearchQueryClient(VectorQueryClient):
+    """Vector search backed by Azure Cognitive/Search service."""
+
     def __init__(
         self,
         *,
@@ -166,12 +204,13 @@ class AzureSearchQueryClient(VectorQueryClient):
         content_field: str = "contents",
         request_timeout: float | int | None = None,
     ) -> None:
-        from azure.core.credentials import AzureKeyCredential
-        from azure.search.documents import SearchClient
+        from azure.core.credentials import AzureKeyCredential  # pylint: disable=import-outside-toplevel
+        from azure.search.documents import SearchClient  # pylint: disable=import-outside-toplevel
 
-        self._SearchClient = SearchClient
-        self._AzureKeyCredential = AzureKeyCredential
-        self._client = self._SearchClient(endpoint=endpoint, index_name=index, credential=self._AzureKeyCredential(api_key))
+        # Store classes for potential reuse/mocking in tests
+        self._search_client_cls = SearchClient
+        self._azure_key_credential_cls = AzureKeyCredential
+        self._client = self._search_client_cls(endpoint=endpoint, index_name=index, credential=self._azure_key_credential_cls(api_key))
         self._vector_field = vector_field
         self._namespace_field = namespace_field
         self._content_field = content_field
@@ -185,6 +224,7 @@ class AzureSearchQueryClient(VectorQueryClient):
         top_k: int,
         min_score: float,
     ) -> Iterable[QueryResult]:
+        """Execute Azure Cognitive Search vector query and yield results."""
         filter_clause = f"{self._namespace_field} eq '{namespace}'"
         search_kwargs: dict[str, Any] = {}
         if self._timeout is not None:
@@ -212,6 +252,7 @@ class AzureSearchQueryClient(VectorQueryClient):
 
 
 def create_query_client(provider: str, options: Mapping[str, Any]) -> VectorQueryClient:
+    """Factory for retrieval clients based on provider name and options."""
     provider = (provider or "").lower()
     if provider == "pgvector":
         dsn = options.get("dsn")

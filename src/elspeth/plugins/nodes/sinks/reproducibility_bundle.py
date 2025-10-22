@@ -22,7 +22,7 @@ import tempfile
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterator, Literal, Mapping, cast
+from typing import Any, Iterator, Literal, Mapping
 
 from elspeth.core.base.protocols import Artifact, ArtifactDescriptor, ResultSink
 from elspeth.core.security import generate_signature
@@ -30,12 +30,12 @@ from elspeth.plugins.nodes.sinks.csv_file import CsvResultSink
 
 logger = logging.getLogger(__name__)
 
-_TEMP_DIR_NOT_INITIALIZED = "temporary directory not initialized"
+_ERROR_MSG_TEMP_DIR_NOT_INITIALIZED = "temporary directory not initialized"
 
 
 @dataclass
 class ReproducibilityBundleSink(ResultSink):
-    """Create tamper-evident archive with complete experiment reproducibility data."""
+    """Create a tamper-evident reproducibility bundle with results, metadata, and code."""
 
     base_path: str | Path
     bundle_name: str | None = None
@@ -126,17 +126,15 @@ class ReproducibilityBundleSink(ResultSink):
 
             # Generate manifest with file hashes
             manifest = self._build_manifest(results, metadata, timestamp)
-            if self._temp_dir is None:  # pragma: no cover - defensive
-                raise RuntimeError(_TEMP_DIR_NOT_INITIALIZED)
-            manifest_path = self._temp_dir / self.manifest_name
+            temp_dir = self._ensure_temp_dir()
+            manifest_path = temp_dir / self.manifest_name
             manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
             self._file_hashes[self.manifest_name] = self._hash_file(manifest_path)
 
             # Sign the manifest
             signature_data = self._sign_manifest(manifest, timestamp)
-            if self._temp_dir is None:  # pragma: no cover - defensive
-                raise RuntimeError(_TEMP_DIR_NOT_INITIALIZED)
-            signature_path = self._temp_dir / self.signature_name
+            temp_dir = self._ensure_temp_dir()
+            signature_path = temp_dir / self.signature_name
             signature_path.write_text(json.dumps(signature_data, indent=2, sort_keys=True), encoding="utf-8")
 
             # Create final tarball
@@ -173,9 +171,8 @@ class ReproducibilityBundleSink(ResultSink):
 
     def _write_results_json(self, results: dict[str, Any]) -> None:
         """Write results as JSON with sorted keys."""
-        if self._temp_dir is None:  # pragma: no cover - defensive
-            raise RuntimeError(_TEMP_DIR_NOT_INITIALIZED)
-        path = self._temp_dir / self.results_json_name
+        temp_dir = self._ensure_temp_dir()
+        path = temp_dir / self.results_json_name
         # Use custom encoder to handle non-serializable objects
         content = json.dumps(results, indent=2, sort_keys=True, default=self._json_serializer)
         path.write_text(content, encoding="utf-8")
@@ -184,9 +181,8 @@ class ReproducibilityBundleSink(ResultSink):
 
     def _write_results_csv(self, results: dict[str, Any], metadata: dict[str, Any]) -> None:
         """Write results as sanitized CSV."""
-        if self._temp_dir is None:  # pragma: no cover - defensive
-            raise RuntimeError(_TEMP_DIR_NOT_INITIALIZED)
-        path = self._temp_dir / self.results_csv_name
+        temp_dir = self._ensure_temp_dir()
+        path = temp_dir / self.results_csv_name
         csv_sink = CsvResultSink(
             path=str(path),
             overwrite=True,
@@ -221,7 +217,7 @@ class ReproducibilityBundleSink(ResultSink):
     # ---- helpers for source data writing ---------------------------------
     def _ensure_temp_dir(self) -> Path:
         if self._temp_dir is None:  # pragma: no cover - defensive
-            raise RuntimeError(_TEMP_DIR_NOT_INITIALIZED)
+            raise RuntimeError(_ERROR_MSG_TEMP_DIR_NOT_INITIALIZED)
         return self._temp_dir
 
     @staticmethod
@@ -230,16 +226,16 @@ class ReproducibilityBundleSink(ResultSink):
             import pandas as pd  # local import to avoid hard dependency at import-time
 
             return isinstance(obj, pd.DataFrame)
-        except Exception:
+        except (ImportError, AttributeError):
             return False
 
     def _get_retained_path(self, source_data: Any) -> str | None:
         if not self._is_dataframe(source_data):
             return None
         try:
-            value = cast(str | None, source_data.attrs.get("retained_local_path"))
+            value = source_data.attrs.get("retained_local_path")
             return value if isinstance(value, str) or value is None else None
-        except Exception:
+        except AttributeError:
             return None
 
     def _copy_retained_file(self, retained_path: str) -> None:
@@ -273,9 +269,8 @@ class ReproducibilityBundleSink(ResultSink):
         config = metadata.get("config") or metadata.get("experiment_config")
 
         if config:
-            if self._temp_dir is None:  # pragma: no cover - defensive
-                raise RuntimeError(_TEMP_DIR_NOT_INITIALIZED)
-            path = self._temp_dir / self.config_name
+            temp_dir = self._ensure_temp_dir()
+            path = temp_dir / self.config_name
             if isinstance(config, dict):
                 # Convert dict to YAML
                 import yaml
@@ -317,9 +312,8 @@ class ReproducibilityBundleSink(ResultSink):
             )
 
         if prompts:
-            if self._temp_dir is None:  # pragma: no cover - defensive
-                raise RuntimeError(_TEMP_DIR_NOT_INITIALIZED)
-            path = self._temp_dir / self.prompts_name
+            temp_dir = self._ensure_temp_dir()
+            path = temp_dir / self.prompts_name
             path.write_text(json.dumps(prompts, indent=2, sort_keys=True), encoding="utf-8")
             self._file_hashes[self.prompts_name] = self._hash_file(path)
             logger.debug("Wrote %d prompts", len([p for p in prompts if "row_index" in p]))
@@ -328,9 +322,8 @@ class ReproducibilityBundleSink(ResultSink):
 
     def _write_plugins(self, metadata: dict[str, Any]) -> None:
         """Copy source code of all plugins used in this experiment."""
-        if self._temp_dir is None:  # pragma: no cover - defensive
-            raise RuntimeError(_TEMP_DIR_NOT_INITIALIZED)
-        plugins_dir = self._temp_dir / "plugins"
+        temp_dir = self._ensure_temp_dir()
+        plugins_dir = temp_dir / "plugins"
         plugins_dir.mkdir(exist_ok=True)
 
         plugin_info_raw = metadata.get("plugins")
@@ -423,9 +416,8 @@ class ReproducibilityBundleSink(ResultSink):
             return
 
         # Create tarball of framework code
-        if self._temp_dir is None:  # pragma: no cover - defensive
-            raise RuntimeError(_TEMP_DIR_NOT_INITIALIZED)
-        framework_tar = self._temp_dir / "framework_source.tar.gz"
+        temp_dir = self._ensure_temp_dir()
+        framework_tar = temp_dir / "framework_source.tar.gz"
         with tarfile.open(framework_tar, "w:gz") as tar:
             tar.add(framework_dir, arcname="elspeth", filter=self._filter_framework_files)
 
@@ -447,9 +439,8 @@ class ReproducibilityBundleSink(ResultSink):
         if not self._consumed_artifacts:
             return
 
-        if self._temp_dir is None:  # pragma: no cover - defensive
-            raise RuntimeError(_TEMP_DIR_NOT_INITIALIZED)
-        artifacts_dir = self._temp_dir / "artifacts"
+        temp_dir = self._ensure_temp_dir()
+        artifacts_dir = temp_dir / "artifacts"
         artifacts_dir.mkdir(exist_ok=True)
 
         for artifact_type, artifacts in self._consumed_artifacts.items():
@@ -462,8 +453,6 @@ class ReproducibilityBundleSink(ResultSink):
                     rel_path = f"artifacts/{dest_path.name}"
                     self._file_hashes[rel_path] = self._hash_file(dest_path)
                 elif artifact.payload:
-                    if self._temp_dir is None:  # pragma: no cover - defensive
-                        raise RuntimeError(_TEMP_DIR_NOT_INITIALIZED)
                     dest_path = artifacts_dir / f"{filename}.json"
                     dest_path.write_text(json.dumps(artifact.payload, indent=2, sort_keys=True), encoding="utf-8")
                     rel_path = f"artifacts/{dest_path.name}"
@@ -537,8 +526,7 @@ class ReproducibilityBundleSink(ResultSink):
 
     def _create_archive(self, metadata: dict[str, Any], timestamp: datetime) -> Path:
         """Create final compressed tarball."""
-        if self._temp_dir is None:  # pragma: no cover - defensive
-            raise RuntimeError(_TEMP_DIR_NOT_INITIALIZED)
+        temp_dir = self._ensure_temp_dir()
         name = self.bundle_name or str(metadata.get("experiment") or metadata.get("name") or "experiment")
         if self.timestamped:
             name = f"{name}_{timestamp.strftime('%Y%m%dT%H%M%SZ')}"
@@ -555,7 +543,7 @@ class ReproducibilityBundleSink(ResultSink):
         archive_path.parent.mkdir(parents=True, exist_ok=True)
 
         with tarfile.open(archive_path, mode) as tar:  # type: ignore[call-overload]
-            tar.add(self._temp_dir, arcname=name)
+            tar.add(temp_dir, arcname=name)
 
         return archive_path
 

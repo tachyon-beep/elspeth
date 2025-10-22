@@ -9,6 +9,8 @@ from elspeth.core.base.protocols import LLMClientProtocol
 
 
 class AzureOpenAIClient(LLMClientProtocol):
+    """Thin wrapper around OpenAI's Azure client implementing LLMClientProtocol."""
+
     def __init__(
         self,
         *,
@@ -22,7 +24,7 @@ class AzureOpenAIClient(LLMClientProtocol):
         # Bounded request timeouts for operational resilience
         try:
             self.request_timeout = float(config.get("timeout", 30.0))
-        except Exception:
+        except (ValueError, TypeError):
             self.request_timeout = 30.0
         self.deployment = self._resolve_deployment(deployment)
         self._client = client or self._create_client()
@@ -105,7 +107,7 @@ class AzureOpenAIClient(LLMClientProtocol):
         content = None
         try:
             content = response.choices[0].message.content
-        except Exception:  # pragma: no cover - defensive fallback
+        except (AttributeError, IndexError, KeyError, TypeError):  # pragma: no cover - defensive fallback
             content = None
 
         return {

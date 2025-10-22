@@ -227,6 +227,8 @@ class AzureSearchVectorClient(VectorStoreClient):
 
 
 class EmbeddingsStoreSink(ResultSink):
+    """Persist embeddings into a vector store backend (pgvector/Azure Search)."""
+
     """Persist experiment outputs into a vector store for RAG workflows."""
 
     def __init__(

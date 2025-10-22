@@ -20,6 +20,8 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class SignedArtifactSink(ResultSink):
+    """Write a signed artifact bundle (e.g., SBOM + signature) to disk."""
+
     base_path: str | Path
     bundle_name: str | None = None
     timestamped: bool = True
@@ -38,12 +40,10 @@ class SignedArtifactSink(ResultSink):
         if self.on_error not in {"abort", "skip"}:
             raise ValueError("on_error must be 'abort' or 'skip'")
         # STRICT mode: enforce fail-closed policy (disallow skip-on-error)
-        try:
-            if get_secure_mode() == SecureMode.STRICT and self.on_error == "skip":
-                raise ValueError("SignedArtifactSink cannot use on_error='skip' in STRICT mode")
-        except AttributeError:
-            # get_secure_mode or SecureMode may be unavailable in certain import contexts; ignore in that case
-            pass
+        # Only evaluate secure mode directly; get_secure_mode() does not raise.
+        secure_mode = get_secure_mode()
+        if secure_mode == SecureMode.STRICT and self.on_error == "skip":
+            raise ValueError("SignedArtifactSink cannot use on_error='skip' in STRICT mode")
 
     def write(self, results: dict[str, Any], *, metadata: dict[str, Any] | None = None) -> None:
         metadata = metadata or {}
@@ -71,20 +71,17 @@ class SignedArtifactSink(ResultSink):
                 pub_pem: str | bytes | None = os.getenv(self.public_key_env) if self.public_key_env else None
                 # If public key not provided, attempt to derive from private PEM (best-effort)
                 if not pub_pem:
-                    try:
-                        if isinstance(key, (bytes, bytearray)):
-                            if b"BEGIN PUBLIC KEY" in key:
-                                pub_pem = key  # bytes OK
-                        else:
-                            if "BEGIN PUBLIC KEY" in key:
-                                pub_pem = key  # str OK
-                    except TypeError:
-                        # If key type is unexpected, skip fingerprint derivation gracefully
-                        pub_pem = None
+                    if isinstance(key, (bytes, bytearray)):
+                        if b"BEGIN PUBLIC KEY" in key:
+                            pub_pem = key  # bytes OK
+                    elif isinstance(key, str):
+                        if "BEGIN PUBLIC KEY" in key:
+                            pub_pem = key  # str OK
                 if pub_pem:
                     try:
                         key_fp = public_key_fingerprint(pub_pem)
-                    except Exception:  # nosec - optional
+                    except Exception as exc:  # nosec - optional
+                        logger.debug("Failed to compute public key fingerprint: %s", exc, exc_info=False)
                         key_fp = None
             signature_payload = {
                 "algorithm": self.algorithm,

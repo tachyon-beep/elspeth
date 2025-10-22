@@ -24,6 +24,8 @@ except ImportError:  # pragma: no cover
 
 
 class BlobResultSink(ResultSink):
+    """Upload artifacts to Azure Blob Storage with optional path constraints."""
+
     """Persist experiment payloads to Azure Blob Storage.
 
     The sink reuses the existing blob configuration files used by datasources so
@@ -368,6 +370,8 @@ class BlobResultSink(ResultSink):
 
 
 class AzureBlobArtifactsSink(BlobResultSink):
+    """Upload a folder of artifacts (tree) to Azure Blob Storage."""
+
     """Publish local folders or archives to Azure Blob Storage under a prefix.
 
     Options:

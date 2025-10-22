@@ -7,6 +7,7 @@ multiple registry implementations.
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any, Callable, ContextManager, Generic, Iterable, Iterator, Mapping, TypeVar
 
@@ -79,11 +80,12 @@ class BasePluginFactory(Generic[T]):
         try:
             if self._compiled_validator is None:
                 # Lazy import to avoid cost when unused, without type stubs dependency
-                import importlib
+                import importlib  # pylint: disable=import-outside-toplevel
 
                 validator_cls = importlib.import_module("jsonschema").Draft202012Validator
                 self._compiled_validator = validator_cls(self.schema)
-            assert self._compiled_validator is not None
+            if self._compiled_validator is None:
+                raise RuntimeError(f"Failed to compile JSON schema validator for {context}. Ensure jsonschema package is installed.")
             # Validate options
             errors = list(self._compiled_validator.iter_errors(options or {}))
             if errors:
@@ -207,7 +209,7 @@ class BasePluginRegistry(Generic[T]):
         # Pre-compile JSON schema validator once at registration to avoid first-call latency
         if schema is not None:
             try:
-                import importlib
+                import importlib  # pylint: disable=import-outside-toplevel
 
                 validator_cls = importlib.import_module("jsonschema").Draft202012Validator
                 plugin_factory._compiled_validator = validator_cls(schema)
@@ -419,7 +421,6 @@ class BasePluginRegistry(Generic[T]):
             removed when the context exits. This allows testing with
             completely new plugin names.
         """
-        from contextlib import contextmanager
 
         @contextmanager
         def _override() -> Iterator[None]:

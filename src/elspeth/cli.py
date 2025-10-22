@@ -74,6 +74,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Set logging verbosity",
     )
     parser.add_argument(
+        "--health-port",
+        type=int,
+        default=None,
+        help="Enable HTTP health check server on specified port (e.g., 8080 for K8s probes)",
+    )
+    parser.add_argument(
         "--disable-metrics",
         action="store_true",
         help="Disable metrics/statistical plugins from the loaded settings",
@@ -185,6 +191,14 @@ def build_parser() -> argparse.ArgumentParser:
     cmd_single.add_argument("--signed-bundle", action="store_true")
     cmd_single.add_argument("--artifacts-dir", type=Path)
     cmd_single.add_argument("--signing-key-env", default="ELSPETH_SIGNING_KEY")
+
+    # health-server
+    cmd_health = subparsers.add_parser(
+        "health-server",
+        help="Run a simple HTTP health server exposing /health and /ready",
+    )
+    cmd_health.add_argument("--host", default="0.0.0.0")
+    cmd_health.add_argument("--port", type=int, default=8080)
     return parser
 
 
@@ -251,9 +265,18 @@ def run(args: argparse.Namespace) -> None:
 
     log_level = getattr(args, "log_level", "INFO")
     configure_logging(log_level)
+    # Start health check server in the background if requested
+    if getattr(args, "health_port", None):
+        try:
+            from elspeth.core.healthcheck import serve_in_thread  # pylint: disable=import-outside-toplevel
+
+            serve_in_thread(port=int(args.health_port))
+            logger.info("Health check server enabled at http://0.0.0.0:%d/health and /ready", args.health_port)
+        except Exception as exc:  # pragma: no cover - health server optional
+            logger.warning("Failed to start health server: %s", exc)
     # Subcommands take precedence if specified
     if getattr(args, "command", None) == "run-job":
-        from elspeth.core.cli.job import execute_job_file
+        from elspeth.core.cli.job import execute_job_file  # pylint: disable=import-outside-toplevel
 
         payload, df = execute_job_file(args.job_config)
         if args.head and args.head > 0 and not df.empty:
@@ -262,7 +285,7 @@ def run(args: argparse.Namespace) -> None:
         return
 
     if getattr(args, "command", None) == "validate-schemas":
-        from elspeth.core.cli.validate import validate_schemas_command
+        from elspeth.core.cli.validate import validate_schemas_command  # pylint: disable=import-outside-toplevel
 
         settings = _load_settings_from_args(args)
         suite_root = _resolve_suite_root(args, settings)
@@ -293,7 +316,7 @@ def run(args: argparse.Namespace) -> None:
         return
     # Legacy path: If an ad-hoc job config is specified, run it and exit
     if getattr(args, "job_config", None):
-        from elspeth.core.cli.job import execute_job_file
+        from elspeth.core.cli.job import execute_job_file  # pylint: disable=import-outside-toplevel
 
         payload, df = execute_job_file(args.job_config)
         if args.head and args.head > 0 and not df.empty:
@@ -306,7 +329,7 @@ def run(args: argparse.Namespace) -> None:
 
     # Legacy path: Handle schema validation mode
     if getattr(args, "validate_schemas", False):
-        from elspeth.core.cli.validate import validate_schemas_command
+        from elspeth.core.cli.validate import validate_schemas_command  # pylint: disable=import-outside-toplevel
 
         validate_schemas_command(args, settings, suite_root)
         return
@@ -360,6 +383,8 @@ def _run_single(args: argparse.Namespace, settings) -> None:
             # If secure mode utilities unavailable, re-raise original error
             pass
         raise
+    # Enforce payload contract at CLI boundary (failures always present)
+    payload.setdefault("failures", [])
 
     for failure in payload.get("failures", []):
         retry = failure.get("retry") or {}
@@ -395,13 +420,13 @@ def _run_single(args: argparse.Namespace, settings) -> None:
 
 def _clone_suite_sinks(base_sinks: list, experiment_name: str) -> list:
     # Delegate to extracted helper for maintainability
-    from elspeth.core.cli.suite import clone_suite_sinks as _impl
+    from elspeth.core.cli.suite import clone_suite_sinks as _impl  # pylint: disable=import-outside-toplevel
 
     return _impl(base_sinks, experiment_name)
 
 
 def _assemble_suite_defaults(settings) -> dict:
-    from elspeth.core.cli.suite import assemble_suite_defaults as _impl
+    from elspeth.core.cli.suite import assemble_suite_defaults as _impl  # pylint: disable=import-outside-toplevel
 
     return _impl(settings)
 
@@ -435,7 +460,7 @@ def _resolve_suite_root(args: argparse.Namespace, settings) -> Path | None:
 
 
 def _handle_suite_management(args: argparse.Namespace, suite_root: Path | None) -> ExperimentSuite | None:
-    from elspeth.core.cli.suite import handle_suite_management as _impl
+    from elspeth.core.cli.suite import handle_suite_management as _impl  # pylint: disable=import-outside-toplevel
 
     return _impl(args, suite_root)
 
@@ -443,31 +468,31 @@ def _handle_suite_management(args: argparse.Namespace, suite_root: Path | None) 
 def _run_suite(
     args: argparse.Namespace, settings, suite_root: Path, *, preflight: dict | None = None, suite: ExperimentSuite | None = None
 ) -> None:
-    from elspeth.core.cli.suite import run_suite as _impl
+    from elspeth.core.cli.suite import run_suite as _impl  # pylint: disable=import-outside-toplevel
 
     return _impl(args, settings, suite_root, preflight=preflight, suite=suite)
 
 
 def _ensure_artifacts_dir(base: Path | None) -> Path:
-    from elspeth.core.cli.common import ensure_artifacts_dir as _impl
+    from elspeth.core.cli.common import ensure_artifacts_dir as _impl  # pylint: disable=import-outside-toplevel
 
     return _impl(base)
 
 
 def _write_simple_artifacts(art_dir: Path, name: str, payload: dict[str, Any], settings) -> None:
-    from elspeth.core.cli.common import write_simple_artifacts as _impl
+    from elspeth.core.cli.common import write_simple_artifacts as _impl  # pylint: disable=import-outside-toplevel
 
     _impl(art_dir, name, payload, settings)
 
 
 def _maybe_write_artifacts_single(args: argparse.Namespace, settings, payload: dict[str, Any], df: pd.DataFrame) -> None:
-    from elspeth.core.cli.single import maybe_write_artifacts_single as _impl
+    from elspeth.core.cli.single import maybe_write_artifacts_single as _impl  # pylint: disable=import-outside-toplevel
 
     _impl(args, settings, payload, df)
 
 
 def _maybe_write_artifacts_suite(args: argparse.Namespace, settings, suite: ExperimentSuite, results: dict[str, Any]) -> None:
-    from elspeth.core.cli.suite import maybe_write_artifacts_suite as _impl
+    from elspeth.core.cli.suite import maybe_write_artifacts_suite as _impl  # pylint: disable=import-outside-toplevel
 
     _impl(args, settings, suite, results)
 
@@ -481,13 +506,13 @@ def _create_signed_bundle(
     *,
     signing_key_env: str,
 ) -> Path | None:
-    from elspeth.core.cli.common import create_signed_bundle as _impl
+    from elspeth.core.cli.common import create_signed_bundle as _impl  # pylint: disable=import-outside-toplevel
 
     return _impl(art_dir, name, payload, settings, df, signing_key_env=signing_key_env)
 
 
 def _load_yaml_json(path: Path) -> dict[str, Any]:
-    from elspeth.core.cli.common import load_yaml_json as _impl
+    from elspeth.core.cli.common import load_yaml_json as _impl  # pylint: disable=import-outside-toplevel
 
     return _impl(path)
 
@@ -498,7 +523,7 @@ def _maybe_publish_artifacts_bundle(
     plugin_name: str | None,
     config_path: Path | None,
 ) -> None:
-    from elspeth.core.cli.common import maybe_publish_artifacts_bundle as _impl
+    from elspeth.core.cli.common import maybe_publish_artifacts_bundle as _impl  # pylint: disable=import-outside-toplevel
 
     _impl(bundle_dir, plugin_name=plugin_name, config_path=config_path)
 
@@ -512,6 +537,13 @@ def main(argv: Iterable[str] | None = None) -> None:
 
     parser = build_parser()
     args = parser.parse_args(list(argv) if argv is not None else None)
+    # Fast-path subcommand for health server
+    if getattr(args, "command", None) == "health-server":
+        from elspeth.core.healthcheck import serve as _serve_health  # pylint: disable=import-outside-toplevel
+
+        configure_logging(getattr(args, "log_level", "INFO"))
+        _serve_health(host=getattr(args, "host", "0.0.0.0"), port=getattr(args, "port", 8080))
+        return
     run(args)
 
 

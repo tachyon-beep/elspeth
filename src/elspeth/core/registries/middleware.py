@@ -38,7 +38,7 @@ def create_middleware(
 
     Now uses create_plugin_with_inheritance() helper to eliminate duplication.
     """
-    from .plugin_helpers import create_plugin_with_inheritance
+    from .plugin_helpers import create_plugin_with_inheritance  # pylint: disable=import-outside-toplevel
 
     result = create_plugin_with_inheritance(
         _middleware_registry,
@@ -52,9 +52,7 @@ def create_middleware(
     # (it raises ValueError instead), but add a runtime guard for safety in optimized runs
     if result is None:  # pragma: no cover - defensive, should be unreachable
         name = definition.get("name") or definition.get("plugin") or "<unknown>"
-        raise RuntimeError(
-            f"Unexpected None from middleware factory for '{name}' with allow_none=False"
-        )
+        raise RuntimeError(f"Unexpected None from middleware factory for '{name}' with allow_none=False")
     return result
 
 

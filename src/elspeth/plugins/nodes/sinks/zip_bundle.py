@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 
 class ZipResultSink(ResultSink):
-    """Bundle results, manifest, and optional CSV into a compressed archive."""
+    """Bundle results, manifest, and optional CSV into a compressed ZIP archive at the configured path."""
 
     def __init__(
         self,

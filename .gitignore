@@ -101,7 +101,7 @@ __pypackages__/
 # Cython debug symbols
 cython_debug/
 
-# VS Code
+# VS Code (project may still check in select settings explicitly)
 .vscode/
 
 # PyCharm
@@ -129,6 +129,7 @@ venv.bak/
 /data/
 /outputs/
 /artifacts/
+/scorecard-artifacts/
 /orchestration_packs/*/
 # Legacy reference material (tracked separately)
 /external/
@@ -140,21 +141,19 @@ venv.bak/
 
 # Azure CLI/cache
 .azure/
-.coverage
 
 # MCP config files
 .mcp.json
 
 logs/
-coverage.xml
-
-#Ignore vscode AI rules
-.github/instructions/codacy.instructions.md
-.codacy/
 audit_data/
-
-# Prevent old/ directory from being recreated (removed during ATO remediation)
-old/
-
-# GH Job Logs
 runlogs/
+gh_failed_logs/
+coverage_html/
+# Common local artifacts created during CI/analysis
+sbom.json
+sbom.*.json
+audit.json
+
+# Agent instruction files (developer-local)
+AGENTS.md

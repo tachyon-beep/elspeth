@@ -76,9 +76,7 @@ class TestRegistryLookupPerformance:
     def test_llm_client_lookup_fast(self):
         """LLM client lookup should be < 100ms."""
         # Warm-up to avoid first-call import/initialization overhead
-        _ = llm_registry.create(
-            name="static_test", options={"security_level": "internal", "content": "warmup"}, require_determinism=False
-        )
+        _ = llm_registry.create(name="static_test", options={"security_level": "internal", "content": "warmup"}, require_determinism=False)
         start = time.perf_counter()
         llm = llm_registry.create(name="static_test", options={"security_level": "internal", "content": "test"}, require_determinism=False)
         elapsed_ms = (time.perf_counter() - start) * 1000

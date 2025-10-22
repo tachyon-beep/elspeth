@@ -23,6 +23,9 @@ job:
   llm_middlewares:           # optional
     - name: prompt_shield
       options: {}
+  # If True and middleware init fails, the job aborts; otherwise it degrades
+  # gracefully and proceeds without middlewares (runner.llm_middlewares=[]).
+  llm_middlewares_required: false
   sinks:
     - plugin: csv
       security_level: OFFICIAL
@@ -206,9 +209,7 @@ def run_job_config(job: Mapping[str, Any]) -> dict[str, Any]:
             # If middleware registry is not available or invalid config, decide whether to fail or degrade.
             if mw_defs and mw_required:
                 # Middlewares declared and required: fail the job explicitly.
-                raise RuntimeError(
-                    f"LLM middleware initialization failed; cannot continue without middlewares: {exc}"
-                ) from exc
+                raise RuntimeError(f"LLM middleware initialization failed; cannot continue without middlewares: {exc}") from exc
             # Graceful degradation: proceed without middlewares, and make it explicit.
             logger.warning("LLM middleware init failed; continuing without middlewares: %s", exc)
             runner.llm_middlewares = []

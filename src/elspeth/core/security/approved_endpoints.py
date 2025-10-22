@@ -149,7 +149,7 @@ def _matches_pattern(endpoint: str, pattern: str) -> bool:
     try:
         return bool(re.fullmatch(pattern, endpoint))
     except re.error as exc:
-        logger.warning(f"Invalid endpoint pattern '{pattern}': {exc}")
+        logger.warning("Invalid endpoint pattern '%s': %s", pattern, exc)
         return False
 
 
@@ -218,7 +218,7 @@ def validate_endpoint(
 
     # Always allow localhost for testing
     if _is_localhost(endpoint_normalized):
-        logger.debug(f"Endpoint '{endpoint}' is localhost - allowed for testing")
+        logger.debug("Endpoint '%s' is localhost - allowed for testing", endpoint)
         return
 
     # Get approved patterns for this service type
@@ -241,7 +241,7 @@ def validate_endpoint(
         error_msg = f"Endpoint '{endpoint}' is not approved for service type '{service_type}'. Approved patterns: {approved_patterns}"
 
         if mode == SecureMode.DEVELOPMENT:
-            logger.warning(f"{error_msg} (DEVELOPMENT mode - allowing anyway)")
+            logger.warning("%s (DEVELOPMENT mode - allowing anyway)", error_msg)
             return
         else:
             logger.error(error_msg)
@@ -271,13 +271,18 @@ def validate_endpoint(
                     )
 
                     if mode == SecureMode.DEVELOPMENT:
-                        logger.warning(f"{error_msg} (DEVELOPMENT mode - allowing anyway)")
+                        logger.warning("%s (DEVELOPMENT mode - allowing anyway)", error_msg)
                         return
                     else:
                         logger.error(error_msg)
                         raise ValueError(error_msg)
 
-    logger.debug(f"Endpoint '{endpoint}' validated successfully for service '{service_type}' (matched pattern: {matched_pattern})")
+    logger.debug(
+        "Endpoint '%s' validated successfully for service '%s' (matched pattern: %s)",
+        endpoint,
+        service_type,
+        matched_pattern,
+    )
 
 
 def get_approved_patterns(service_type: ServiceType) -> list[str]:

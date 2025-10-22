@@ -161,7 +161,10 @@ __all__ = [
 
 def handle_suite_management(args: Any, suite_root: Path | None) -> ExperimentSuite | None:
     """Process template/export/report requests before running experiments."""
-    from elspeth.core.experiments.tools import create_experiment_template, export_suite_configuration
+    from elspeth.core.experiments.tools import (  # pylint: disable=import-outside-toplevel  # noqa: I001
+        create_experiment_template,
+        export_suite_configuration,
+    )
 
     logger = logging.getLogger(__name__)
     export_path = getattr(args, "export_suite_config", None)
@@ -224,9 +227,9 @@ def run_suite(
             logger.warning("Report generation skipped: reports require suite execution.")
         else:
             try:  # import late to allow test monkeypatching cli.SuiteReportGenerator
-                from elspeth.cli import SuiteReportGenerator as _SRG
+                from elspeth.cli import SuiteReportGenerator as _SRG  # pylint: disable=import-outside-toplevel
             except Exception:  # pragma: no cover - fallback
-                from elspeth.tools.reporting import SuiteReportGenerator as _SRG
+                from elspeth.tools.reporting import SuiteReportGenerator as _SRG  # pylint: disable=import-outside-toplevel
             _SRG(suite, results).generate_all_reports(reports_dir)
     maybe_write_artifacts_suite(args, settings, suite, results)
     try:

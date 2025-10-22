@@ -19,6 +19,7 @@ from elspeth.core.controls.rate_limit import (
     RateLimiter,
 )
 from elspeth.core.registries.base import BasePluginRegistry
+from elspeth.core.validation.base import ConfigurationError
 
 # Initialize the rate limiter registry
 rate_limiter_registry = BasePluginRegistry[RateLimiter]("rate_limiter")
@@ -32,8 +33,6 @@ def _create_noop_rate_limiter(options: dict[str, Any], context: PluginContext) -
 
 def _create_fixed_window_rate_limiter(options: dict[str, Any], context: PluginContext) -> FixedWindowRateLimiter:
     """Create a fixed window rate limiter with specified request rate."""
-    from elspeth.core.validation.base import ConfigurationError
-
     if "requests" not in options:
         raise ConfigurationError("requests is required for fixed_window rate limiter")
     if "per_seconds" not in options:
@@ -47,8 +46,6 @@ def _create_fixed_window_rate_limiter(options: dict[str, Any], context: PluginCo
 
 def _create_adaptive_rate_limiter(options: dict[str, Any], context: PluginContext) -> AdaptiveRateLimiter:
     """Create an adaptive rate limiter with request and token limits."""
-    from elspeth.core.validation.base import ConfigurationError
-
     if "requests_per_minute" not in options:
         raise ConfigurationError("requests_per_minute is required for adaptive rate limiter")
     if "interval_seconds" not in options:

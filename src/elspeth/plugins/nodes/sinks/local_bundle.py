@@ -18,6 +18,8 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class LocalBundleSink(ResultSink):
+    """Create a local folder bundle with payload, metadata, and artifacts."""
+
     base_path: str | Path
     bundle_name: str | None = None
     timestamped: bool = True

@@ -17,11 +17,11 @@ def run_single(args: Any, settings: Any) -> None:
 
     Mirrors legacy CLI behavior while delegating artifact handling to this module.
     """
-    import logging
-    from pathlib import Path
+    import logging  # pylint: disable=import-outside-toplevel
+    from pathlib import Path  # pylint: disable=import-outside-toplevel
 
-    from elspeth.core.orchestrator import ExperimentOrchestrator
-    from elspeth.core.security.secure_mode import SecureMode, get_secure_mode
+    from elspeth.core.orchestrator import ExperimentOrchestrator  # pylint: disable=import-outside-toplevel
+    from elspeth.core.security.secure_mode import SecureMode, get_secure_mode  # pylint: disable=import-outside-toplevel
 
     logger = logging.getLogger(__name__)
 

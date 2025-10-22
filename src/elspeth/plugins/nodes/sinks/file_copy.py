@@ -16,6 +16,12 @@ logger = logging.getLogger(__name__)
 
 
 class FileCopySink(ResultSink):
+    """Copy a single input artifact to a destination path.
+
+    Honors overwrite and on_error semantics and enforces base-path containment
+    via `allowed_base_path` when provided.
+    """
+
     def __init__(self, *, destination: str, overwrite: bool = True, on_error: str = "abort", allowed_base_path: str | None = None) -> None:
         self.destination = Path(destination)
         self.overwrite = overwrite

@@ -54,9 +54,9 @@ def _create_blob_datasource(options: dict[str, Any], context: PluginContext) -> 
                 endpoint=blob_config.account_url,
                 security_level=security_level,
             )
-            logger.debug(f"Azure Blob endpoint validated: {blob_config.account_url}")
+            logger.debug("Azure Blob endpoint validated: %s", blob_config.account_url)
         except ValueError as exc:
-            logger.error(f"Azure Blob endpoint validation failed: {exc}")
+            logger.error("Azure Blob endpoint validation failed: %s", exc)
             raise ConfigurationError(f"Azure Blob datasource endpoint validation failed: {exc}") from exc
     elif "account_url" in options:
         # Fallback: validate account_url if present in options to prevent bypass
@@ -66,9 +66,9 @@ def _create_blob_datasource(options: dict[str, Any], context: PluginContext) -> 
                 endpoint=options["account_url"],
                 security_level=security_level,
             )
-            logger.debug(f"Azure Blob endpoint validated: {options['account_url']}")
+            logger.debug("Azure Blob endpoint validated: %s", options["account_url"])
         except ValueError as exc:
-            logger.error(f"Azure Blob endpoint validation failed: {exc}")
+            logger.error("Azure Blob endpoint validation failed: %s", exc)
             raise ConfigurationError(f"Azure Blob datasource endpoint validation failed: {exc}") from exc
 
     return BlobDataSource(**options)

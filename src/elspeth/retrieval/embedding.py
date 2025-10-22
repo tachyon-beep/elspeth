@@ -7,7 +7,11 @@ from typing import Sequence
 
 from openai import AzureOpenAI, OpenAI
 
-from elspeth.core.security import get_secure_mode, validate_azure_openai_endpoint
+from elspeth.core.security import (
+    get_secure_mode,
+    validate_azure_openai_endpoint,
+    validate_http_api_endpoint,
+)
 from elspeth.core.validation.base import ConfigurationError
 
 
@@ -36,8 +40,6 @@ class OpenAIEmbedder(Embedder):
         # Enforce endpoint allowlist for OpenAI public API (defense-in-depth).
         # The OpenAI public endpoint is always allowed regardless of security level;
         # pass security_level=None explicitly to make this intention clear.
-        from elspeth.core.security import validate_http_api_endpoint
-
         validate_http_api_endpoint("https://api.openai.com", security_level=None)
         self._client = OpenAI(api_key=key)
         self._model = model

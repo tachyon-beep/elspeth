@@ -17,6 +17,7 @@ import inspect
 import json
 import logging
 import os
+import threading
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, cast
@@ -24,12 +25,15 @@ from typing import Any, cast
 from elspeth.core.base.plugin_context import PluginContext
 
 # Optional POSIX file locking for cross-process log serialization
+# Ensure symbol is always bound for type checkers
+_fcntl: Any | None = None
 try:  # pragma: no cover - platform dependent
     import fcntl as _fcntl
 
     _HAS_FCNTL = True
-except Exception:  # pragma: no cover - Windows or restricted env
+except ImportError:  # pragma: no cover - Windows or restricted env
     _HAS_FCNTL = False
+
 
 class PluginLogger:
     """Structured logger for plugin lifecycle events and metrics.
@@ -79,7 +83,7 @@ class PluginLogger:
         # ELSPETH_LOG_MAX_AGE_DAYS: delete files older than given days (int > 0)
         try:
             self._apply_retention()
-        except Exception as exc:
+        except (OSError, PermissionError, ValueError) as exc:
             # Retention is best-effort and should never block execution
             self.logger.debug("Log retention maintenance skipped: %s", exc, exc_info=False)
 
@@ -96,8 +100,6 @@ class PluginLogger:
         self.logger = logging.getLogger(f"elspeth.{context.plugin_kind}.{context.plugin_name}")
 
         # Serialise file appends across threads (must exist before first write)
-        import threading
-
         self._file_lock = threading.Lock()
         # Log initialization
         self._log_initialization()
@@ -140,7 +142,7 @@ class PluginLogger:
                     if mtime_dt < cutoff:
                         p.unlink(missing_ok=True)
                         deleted_age += 1
-                except (OSError, PermissionError) as exc:
+                except OSError as exc:
                     # Ignore deletion errors but record for diagnostics
                     errors_age += 1
                     self.logger.debug("Retention age-prune failed for %s: %s", p, exc, exc_info=False)
@@ -456,9 +458,11 @@ class PluginLogger:
         try:
             with self._file_lock:
                 if _HAS_FCNTL:
+                    if _fcntl is None:
+                        raise RuntimeError("fcntl module not available despite _HAS_FCNTL=True. This should not happen on POSIX systems.")
                     # Use POSIX advisory lock to serialize writes across processes
                     # Create/open the lock file once per write (short critical section)
-                    with open(self._lock_file, "a") as lf:  # nosec - lock file path is internal
+                    with open(self._lock_file, "a", encoding="utf-8") as lf:  # nosec - lock file path is internal
                         _fcntl.flock(lf, _fcntl.LOCK_EX)
                         try:
                             with open(self.log_file, "a", encoding="utf-8") as f:

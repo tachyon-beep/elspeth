@@ -36,7 +36,7 @@ def create_utility_plugin(
 
     Now uses create_plugin_with_inheritance() helper to eliminate duplication.
     """
-    from .plugin_helpers import create_plugin_with_inheritance
+    from .plugin_helpers import create_plugin_with_inheritance  # pylint: disable=import-outside-toplevel
 
     return create_plugin_with_inheritance(
         _utility_registry,
