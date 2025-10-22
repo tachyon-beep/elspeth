@@ -2632,6 +2632,10 @@ semgrep==1.85.0 \
     --hash=sha256:91fab3a0aa7f987a6605e01617179a363338350cca51174905d6ad0080a8d08e \
     --hash=sha256:a63055b392da70c46947780f43fecf54064fb60d8de11a16902e0cc149350a3e
     # via elspeth (pyproject.toml)
+setuptools==80.9.0 \
+    --hash=sha256:062d34222ad13e0cc312a4c02d73f059e86a4acbfbdea8f8f76b28c99f306922 \
+    --hash=sha256:f36b47402ecde768dbfafc46e8e4207b4360c654f1f3bb84475f0a28628fb19c
+    # via opentelemetry-instrumentation
 six==1.17.0 \
     --hash=sha256:4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274 \
     --hash=sha256:ff70335d468e7eb6ec65b95b99d3a2836546063f63acc5171de367e834932a81
