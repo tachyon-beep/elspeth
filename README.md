@@ -1,8 +1,13 @@
 # Elspeth
+**E**xtensible **L**ayered **S**ecure **P**ipeline **E**ngine for **T**ransformation and **H**andling
 
 > Secure, pluggable orchestration for responsible LLM experimentation.
 
-Elspeth bundles a hardened experiment runner, policy-aware plugin registry, and reporting pipeline so teams can run comparative LLM studies without compromising compliance or auditability. Datasources, LLM clients, metrics, and sinks remain swappable while trace metadata, sanitisation, and signing keep artefacts defensible.
+Elspeth is a general-purpose orchestration platform implementing **sense-decide-act** workflows: sources provide inputs, transforms apply logic (analytical, decisional, or procedural), and sinks handle outputs—whether storing results, triggering automation, or actuating real-world effects.
+
+**Transformation** covers any source-to-output logic: data ETL, LLM inference, statistical analysis, rule evaluation, or custom processing. **Handling** encompasses the full range of sink behaviors: persisting to databases, writing reports, sending notifications, invoking APIs, or commanding external systems (IoT devices, infrastructure, satellites).
+
+While Elspeth excels at LLM experimentation (hardened runner, policy-aware plugin registry, comparative studies with compliance controls), the plugin architecture supports any workflow topology. Security controls—artifact signing, sanitisation, security-level enforcement, audit logging—are baked into every pipeline stage, making it suitable for compliance-sensitive automation and operational decision systems.
 
 ## Highlights
 
