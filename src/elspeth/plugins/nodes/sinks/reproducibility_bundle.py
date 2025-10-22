@@ -144,7 +144,7 @@ class ReproducibilityBundleSink(ResultSink):
             if plugin_logger:
                 try:
                     size = archive_path.stat().st_size
-                except Exception:
+                except OSError:
                     size = 0
                 plugin_logger.log_event(
                     "sink_write",
@@ -223,7 +223,7 @@ class ReproducibilityBundleSink(ResultSink):
     @staticmethod
     def _is_dataframe(obj: Any) -> bool:
         try:
-            import pandas as pd  # local import to avoid hard dependency at import-time
+            import pandas as pd  # pylint: disable=import-outside-toplevel
 
             return isinstance(obj, pd.DataFrame)
         except (ImportError, AttributeError):
@@ -253,7 +253,7 @@ class ReproducibilityBundleSink(ResultSink):
         self._file_hashes[self.source_data_name] = self._hash_file(path)
         try:
             rows = len(df)
-        except Exception:
+        except TypeError:
             rows = 0
         logger.debug("Wrote source data snapshot: %d rows", rows)
 
@@ -273,7 +273,7 @@ class ReproducibilityBundleSink(ResultSink):
             path = temp_dir / self.config_name
             if isinstance(config, dict):
                 # Convert dict to YAML
-                import yaml
+                import yaml  # pylint: disable=import-outside-toplevel
 
                 content = yaml.dump(config, default_flow_style=False, sort_keys=True)
             else:
@@ -619,17 +619,16 @@ class ReproducibilityBundleSink(ResultSink):
         if not self._last_archive_path:
             return {}
 
-        artifact = Artifact(
-            id="reproducibility_bundle",
-            type=f"file/tar.{self.compression}",
-            path=self._last_archive_path,
-            metadata={
-                "bundle_type": "reproducibility",
-                "signed": True,
-                "compression": self.compression,
-            },
-            persist=True,
-        )
+        # Initialize with required args only; set optional fields explicitly to
+        # keep static analyzers happy about dataclass construction.
+        artifact = Artifact("reproducibility_bundle", f"file/tar.{self.compression}")
+        artifact.path = self._last_archive_path
+        artifact.metadata = {
+            "bundle_type": "reproducibility",
+            "signed": True,
+            "compression": self.compression,
+        }
+        artifact.persist = True
 
         self._last_archive_path = None
         return {"reproducibility_bundle": artifact}

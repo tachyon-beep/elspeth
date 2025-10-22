@@ -30,6 +30,9 @@ from elspeth.tools.reporting import SuiteReportGenerator  # noqa: F401 - Back-co
 
 logger = logging.getLogger(__name__)
 
+# Default settings path used across subcommands
+DEFAULT_SETTINGS_PATH = "config/settings.yaml"
+
 
 def build_parser() -> argparse.ArgumentParser:
     """Define CLI arguments for ELSPETH orchestration workflows."""
@@ -38,7 +41,7 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command")
     parser.add_argument(
         "--settings",
-        default="config/settings.yaml",
+        default=DEFAULT_SETTINGS_PATH,
         help="Path to orchestrator settings YAML",
     )
     parser.add_argument(
@@ -150,7 +153,7 @@ def build_parser() -> argparse.ArgumentParser:
         "validate-schemas",
         help="Validate datasource schema compatibility without running experiments",
     )
-    cmd_validate.add_argument("--settings", default="config/settings.yaml")
+    cmd_validate.add_argument("--settings", default=DEFAULT_SETTINGS_PATH)
     cmd_validate.add_argument("--profile", default="default")
 
     # run-job
@@ -169,7 +172,7 @@ def build_parser() -> argparse.ArgumentParser:
         "run-suite",
         help="Run all experiments declared in a suite configuration",
     )
-    cmd_suite.add_argument("--settings", default="config/settings.yaml")
+    cmd_suite.add_argument("--settings", default=DEFAULT_SETTINGS_PATH)
     cmd_suite.add_argument("--profile", default="default")
     cmd_suite.add_argument("--suite-root", type=Path, required=True)
     cmd_suite.add_argument("--reports-dir", type=Path)
@@ -183,7 +186,7 @@ def build_parser() -> argparse.ArgumentParser:
         "run-single",
         help="Run a single experiment from settings without a suite",
     )
-    cmd_single.add_argument("--settings", default="config/settings.yaml")
+    cmd_single.add_argument("--settings", default=DEFAULT_SETTINGS_PATH)
     cmd_single.add_argument("--profile", default="default")
     cmd_single.add_argument("--output-csv", type=Path)
     cmd_single.add_argument("--head", type=int, default=5)

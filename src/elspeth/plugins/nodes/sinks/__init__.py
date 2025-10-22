@@ -29,7 +29,7 @@ the sinks and keeps optional dependencies truly optional at import time.
 from __future__ import annotations
 
 import importlib
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 # Common module paths used across multiple sink mappings
 _REPOSITORY_MODULE = "elspeth.plugins.nodes.sinks.repository"
@@ -52,6 +52,51 @@ __all__ = [
     "EmbeddingsStoreSink",
     "ReproducibilityBundleSink",
 ]
+
+# Stubs for static analyzers and __all__ validation. Implementations are
+# provided dynamically via __getattr__ and lazily imported on first access.
+BlobResultSink: Any
+AzureBlobArtifactsSink: Any
+CsvResultSink: Any
+LocalBundleSink: Any
+ExcelResultSink: Any
+ZipResultSink: Any
+FileCopySink: Any
+GitHubRepoSink: Any
+AzureDevOpsRepoSink: Any
+AzureDevOpsArtifactsRepoSink: Any
+SignedArtifactSink: Any
+AnalyticsReportSink: Any
+VisualAnalyticsSink: Any
+EnhancedVisualAnalyticsSink: Any
+EmbeddingsStoreSink: Any
+ReproducibilityBundleSink: Any
+
+# isort: off
+if TYPE_CHECKING:  # pragma: no cover - import only for type checking
+    from elspeth.plugins.nodes.sinks.analytics_report import AnalyticsReportSink as AnalyticsReportSink  # noqa: F401
+    from elspeth.plugins.nodes.sinks.blob import AzureBlobArtifactsSink as AzureBlobArtifactsSink  # noqa: F401
+    from elspeth.plugins.nodes.sinks.blob import BlobResultSink as BlobResultSink  # noqa: F401
+    from elspeth.plugins.nodes.sinks.csv_file import CsvResultSink as CsvResultSink  # noqa: F401
+    from elspeth.plugins.nodes.sinks.embeddings_store import EmbeddingsStoreSink as EmbeddingsStoreSink  # noqa: F401
+    from elspeth.plugins.nodes.sinks.enhanced_visual_report import (
+        EnhancedVisualAnalyticsSink as EnhancedVisualAnalyticsSink,  # noqa: F401
+    )
+    from elspeth.plugins.nodes.sinks.excel import ExcelResultSink as ExcelResultSink  # noqa: F401
+    from elspeth.plugins.nodes.sinks.file_copy import FileCopySink as FileCopySink  # noqa: F401
+    from elspeth.plugins.nodes.sinks.local_bundle import LocalBundleSink as LocalBundleSink  # noqa: F401
+    from elspeth.plugins.nodes.sinks.repository import (
+        AzureDevOpsArtifactsRepoSink as AzureDevOpsArtifactsRepoSink,  # noqa: F401
+        AzureDevOpsRepoSink as AzureDevOpsRepoSink,  # noqa: F401
+        GitHubRepoSink as GitHubRepoSink,  # noqa: F401
+    )
+    from elspeth.plugins.nodes.sinks.reproducibility_bundle import (
+        ReproducibilityBundleSink as ReproducibilityBundleSink,  # noqa: F401
+    )
+    from elspeth.plugins.nodes.sinks.signed import SignedArtifactSink as SignedArtifactSink  # noqa: F401
+    from elspeth.plugins.nodes.sinks.visual_report import VisualAnalyticsSink as VisualAnalyticsSink  # noqa: F401
+    from elspeth.plugins.nodes.sinks.zip_bundle import ZipResultSink as ZipResultSink  # noqa: F401
+# isort: on
 
 _LAZY_IMPORTS: dict[str, tuple[str, str]] = {
     "AnalyticsReportSink": (

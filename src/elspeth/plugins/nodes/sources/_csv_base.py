@@ -63,7 +63,7 @@ class BaseCSVDataSource(DataSource):
             except ValueError as exc:
                 # Normalize Path-related incompatibilities as ValueError with context
                 raise ValueError(f"Invalid CSV datasource path resolution: {exc}") from exc
-            except Exception as exc:  # pragma: no cover - unexpected Path error
+            except Exception:  # pragma: no cover - unexpected Path error
                 logger.exception("Unexpected exception during CSV datasource path containment check")
                 raise
             if not within:

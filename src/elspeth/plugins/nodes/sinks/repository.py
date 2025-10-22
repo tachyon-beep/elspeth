@@ -14,6 +14,9 @@ from typing import Any, Mapping
 
 import requests
 
+from elspeth.core.base.protocols import Artifact, ArtifactDescriptor, ResultSink
+from elspeth.core.security.secure_mode import SecureMode, get_secure_mode
+
 try:
     HTTP_ADAPTER_CLS = getattr(importlib.import_module("requests.adapters"), "HTTPAdapter")
 except (ImportError, AttributeError):  # pragma: no cover - optional dependency
@@ -24,9 +27,6 @@ try:
 except (ImportError, AttributeError):  # pragma: no cover - optional dependency
     RETRY_CLS = None
 
-from elspeth.core.base.protocols import Artifact, ArtifactDescriptor, ResultSink
-from elspeth.core.security.secure_mode import SecureMode, get_secure_mode
-
 logger = logging.getLogger(__name__)
 DEFAULT_REQUEST_TIMEOUT = 15
 DRY_RUN_WARNING_MESSAGE = (
@@ -34,6 +34,8 @@ DRY_RUN_WARNING_MESSAGE = (
     "Set dry_run=False in configuration to enable remote publishing. "
     "When invoking the CLI, include --live-outputs to opt into live sink writes."
 )
+
+# Note: warning throttle flags are stored on the base class to avoid globals
 
 
 class _RepoRequestError(RuntimeError):
@@ -60,6 +62,7 @@ def _json_bytes(payload: dict[str, Any]) -> bytes:
 
 @dataclass
 class PreparedFile:
+    """Simple container for a prepared file upload payload."""
     path: str
     content: bytes
     content_type: str = "application/json"
@@ -79,6 +82,9 @@ class _RepoSinkBase(ResultSink):
     _last_payloads: list[dict[str, Any]] = field(default_factory=list, init=False)
     on_error: str = "abort"
     _allow_missing_token: bool = field(default=False, init=False, repr=False)
+    # Throttle spammy warnings to once per process
+    _dry_run_warned_once: bool = False
+    _strict_dry_run_warned_once: bool = False
 
     def __post_init__(self) -> None:
         # Validate on_error early for clearer error messages
@@ -108,10 +114,14 @@ class _RepoSinkBase(ResultSink):
                     exc_info=False,
                 )
         if self.dry_run:
-            logger.warning(DRY_RUN_WARNING_MESSAGE)
+            cls = self.__class__
+            if not cls._dry_run_warned_once:
+                logger.warning(DRY_RUN_WARNING_MESSAGE)
+                cls._dry_run_warned_once = True
             # In STRICT mode, highlight that dry-run prevents remote writes
-            if get_secure_mode() == SecureMode.STRICT:
+            if get_secure_mode() == SecureMode.STRICT and not cls._strict_dry_run_warned_once:
                 logger.warning("STRICT mode: repository sink is in dry-run; remote publishing disabled")
+                cls._strict_dry_run_warned_once = True
 
     def _require_session(self) -> requests.Session:
         if self.session is None:  # pragma: no cover - defensive
@@ -318,6 +328,7 @@ class GitHubRepoSink(_RepoSinkBase):
         branch: str = "main",
         token_env: str = "GITHUB_TOKEN",
         base_url: str = "https://api.github.com",
+        fail_fast_missing_token: bool = False,
         **kwargs: Any,
     ) -> None:
         self.owner = owner
@@ -326,7 +337,11 @@ class GitHubRepoSink(_RepoSinkBase):
         self.token_env = token_env
         self.base_url = base_url.rstrip("/")
         self._headers_cache: dict[str, str] | None = None
+        self._fail_fast_missing_token = bool(fail_fast_missing_token)
         super().__init__(**kwargs)
+        # Optional: Fail-fast on missing token for better UX when not in dry-run
+        if self._fail_fast_missing_token and not self.dry_run and not self._read_token(self.token_env):
+            raise RuntimeError(f"GitHub token missing; set '{self.token_env}' or enable dry-run mode")
 
     # Note: Token validation occurs lazily in _headers(); creation does not fail-fast to preserve test behavior.
 
@@ -404,6 +419,7 @@ class AzureDevOpsRepoSink(_RepoSinkBase):
         token_env: str = "AZURE_DEVOPS_PAT",
         api_version: str = "7.1-preview",
         base_url: str = "https://dev.azure.com",
+        fail_fast_missing_token: bool = False,
         **kwargs: Any,
     ) -> None:
         self.organization = organization
@@ -414,7 +430,10 @@ class AzureDevOpsRepoSink(_RepoSinkBase):
         self.api_version = api_version
         self.base_url = base_url.rstrip("/")
         self._headers_cache: dict[str, str] | None = None
+        self._fail_fast_missing_token = bool(fail_fast_missing_token)
         super().__init__(**kwargs)
+        if self._fail_fast_missing_token and not self.dry_run and not self._read_token(self.token_env):
+            raise RuntimeError(f"Azure DevOps PAT missing; set '{self.token_env}' or enable dry-run mode")
 
     # Note: Token validation occurs lazily in _headers(); creation does not fail-fast to preserve test behavior.
 
@@ -517,13 +536,7 @@ class AzureDevOpsRepoSink(_RepoSinkBase):
 
 
 class AzureDevOpsArtifactsRepoSink(AzureDevOpsRepoSink):
-    """Publish a folder of artifacts to Azure DevOps Artifacts feed.
-
-    Extends AzureDevOpsRepoSink with folder upload semantics.
-    """
-
     """Publish local folders or archives to an Azure DevOps Git repository.
-
     This sink uploads all files under a local `folder_path` into the target
     repository under `dest_prefix_template` (defaults to artifacts/{timestamp}).
     Files are committed in a single push. Binary files are uploaded using

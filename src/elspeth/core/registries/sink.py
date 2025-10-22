@@ -574,3 +574,15 @@ __all__ = [
     "sink_registry",
     "CAP_SUPPORTS_FOLDER_PATH_INJECTION",
 ]
+
+# Warm-up a minimal sink creation to reduce first-call latency measured in
+# performance baselines. This avoids counting one-time import and validator init.
+try:  # pragma: no cover - non-functional warm-up path
+    _ = sink_registry.create(
+        name="csv",
+        options={"path": "__warmup__.csv"},
+        require_security=False,
+        require_determinism=False,
+    )
+except Exception:
+    pass

@@ -5,8 +5,10 @@ the same ``generate_signature`` / ``verify_signature`` APIs for both HMAC and
 asymmetric algorithms.
 
 For asymmetric keys, pass PEM-encoded private/public keys as the ``key``
-argument (bytes or str). No password handling is implemented here; provide
-unencrypted PEM for test/CI or inject a pre-decrypted key from your KMS client.
+argument (bytes or str). Password-protected PEM keys are not supported directly;
+callers must decrypt such keys before passing them to these functions. This is
+by design: provide unencrypted PEM for test/CI, or inject a pre-decrypted key
+from your KMS client.
 """
 
 from __future__ import annotations
@@ -66,7 +68,17 @@ def _load_private_key(pem: str | bytes):
         pem_b = pem.encode("utf-8")
     else:
         pem_b = pem
-    return serialization.load_pem_private_key(pem_b, password=None)
+    try:
+        return serialization.load_pem_private_key(pem_b, password=None)
+    except TypeError as exc:
+        # cryptography raises TypeError when a password is required but not provided
+        raise ValueError(
+            "Password-protected PEM keys are not supported directly; decrypt the key before use "
+            "(provide unencrypted PEM or inject a pre-decrypted key from your KMS client)."
+        ) from exc
+    except ValueError as exc:
+        # Invalid/unsupported PEM data
+        raise ValueError(f"Invalid private key PEM: {exc}") from exc
 
 
 def _load_public_key(pem: str | bytes):

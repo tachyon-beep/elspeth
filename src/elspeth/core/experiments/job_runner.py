@@ -215,6 +215,9 @@ def run_job_config(job: Mapping[str, Any]) -> dict[str, Any]:
             runner.llm_middlewares = []
 
         payload_out = runner.run(df)
+        # Schema contract: ensure top-level 'failures' key is present for
+        # downstream consumers that expect a stable payload shape.
+        payload_out.setdefault("failures", [])
         return payload_out
 
     # Identity: no LLM present -> write rows as-is via ArtifactPipeline

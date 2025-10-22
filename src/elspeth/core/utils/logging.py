@@ -83,7 +83,7 @@ class PluginLogger:
         # ELSPETH_LOG_MAX_AGE_DAYS: delete files older than given days (int > 0)
         try:
             self._apply_retention()
-        except (OSError, PermissionError, ValueError) as exc:
+        except (OSError, ValueError) as exc:
             # Retention is best-effort and should never block execution
             self.logger.debug("Log retention maintenance skipped: %s", exc, exc_info=False)
 
@@ -108,6 +108,9 @@ class PluginLogger:
     def _apply_retention(self) -> None:
         max_files_raw = os.getenv("ELSPETH_LOG_MAX_FILES")
         max_age_days_raw = os.getenv("ELSPETH_LOG_MAX_AGE_DAYS")
+        # Fast path: if no retention settings are provided, skip filesystem work entirely
+        if not max_files_raw and not max_age_days_raw:
+            return
         try:
             max_files = int(max_files_raw) if max_files_raw else None
         except ValueError:
@@ -142,13 +145,12 @@ class PluginLogger:
                     if mtime_dt < cutoff:
                         p.unlink(missing_ok=True)
                         deleted_age += 1
-                except OSError as exc:
-                    # Ignore deletion errors but record for diagnostics
+                except (OSError, ValueError, OverflowError) as exc:
+                    # Ignore deletion or timestamp conversion errors but record for diagnostics
                     errors_age += 1
                     self.logger.debug("Retention age-prune failed for %s: %s", p, exc, exc_info=False)
-            # Refresh candidate list after age-based deletions
-            candidates = [(p, p.stat().st_mtime) for p in self.log_dir.glob("run_*.jsonl")]
-            candidates.sort(key=lambda x: x[1], reverse=True)
+            # Refresh candidate list after age-based deletions without re-statting
+            candidates = [(p, mtime) for (p, mtime) in candidates if p.exists()]
             if deleted_age or errors_age:
                 level = logging.WARNING if errors_age else logging.DEBUG
                 self.logger.log(level, "Retention age-pruned files: %d (errors: %d)", deleted_age, errors_age)
@@ -160,7 +162,7 @@ class PluginLogger:
                 try:
                     p.unlink(missing_ok=True)
                     deleted_count += 1
-                except (OSError, PermissionError) as exc:
+                except OSError as exc:
                     errors_count += 1
                     self.logger.debug("Retention count-prune failed for %s: %s", p, exc, exc_info=False)
             if deleted_count or errors_count:

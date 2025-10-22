@@ -9,6 +9,10 @@ bootstrap-no-test:
 test:
 	@.venv/bin/python -m pytest
 
+.PHONY: perf
+perf:
+	@.venv/bin/python -m pytest -q tests/test_performance_baseline.py
+
 sample-suite:
 	@.venv/bin/python -m elspeth.cli --settings config/sample_suite/settings.yaml --suite-root config/sample_suite --head 0 --live-outputs
 

@@ -74,3 +74,34 @@ def test_plugin_logger_error_and_specialized_events(tmp_path: Path) -> None:
     # Ensure log file created and contains JSON lines
     run_file = next((p for p in (tmp_path / "logs").glob("run_*.jsonl")), None)
     assert run_file and run_file.read_text(encoding="utf-8").strip()
+
+
+def test_plugin_logger_retention_handles_valueerror(tmp_path: Path, monkeypatch) -> None:
+    """Retention should tolerate timestamp conversion errors (ValueError)."""
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    # Create one historical file so the retention loop runs
+    p = log_dir / "run_20230101.jsonl"
+    p.write_text("{}\n", encoding="utf-8")
+    # Force a small age window so we attempt fromtimestamp conversion
+    monkeypatch.setenv("ELSPETH_LOG_MAX_AGE_DAYS", "1")
+
+    # Monkeypatch datetime.fromtimestamp used in retention to raise ValueError
+    import elspeth.core.utils.logging as logmod
+
+    class _FakeDT:
+        @classmethod
+        def now(cls, tz=None):  # noqa: D401
+            from datetime import datetime as _dt
+
+            return _dt.now(tz)
+
+        @classmethod
+        def fromtimestamp(cls, *_a, **_k):  # noqa: D401
+            raise ValueError("bad ts")
+
+    monkeypatch.setattr(logmod, "datetime", _FakeDT)
+
+    ctx = _context(tmp_path)
+    # Should not raise despite ValueError during retention
+    PluginLogger(plugin_instance=Dummy(), context=ctx, log_dir=log_dir)

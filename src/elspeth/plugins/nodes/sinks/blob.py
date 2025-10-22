@@ -216,7 +216,24 @@ class BlobResultSink(ResultSink):
             manifest["cost_summary"] = results["cost_summary"]
         return manifest
 
-    # _get_service_client defined above near its first usage for readability
+    def _get_service_client(self) -> Any:
+        if self._blob_service_client is not None:
+            # Lazy initialization pattern; mypy sees unreachable due to None-typed field
+            return self._blob_service_client  # type: ignore[unreachable]
+
+        try:
+            from azure.storage.blob import BlobServiceClient
+        except ImportError as exc:  # pragma: no cover - optional dependency missing
+            raise RuntimeError("azure-storage-blob is required for BlobResultSink") from exc
+
+        credential = self._resolve_credential(self.config)
+        client = BlobServiceClient(
+            account_url=self.config.account_url,
+            credential=credential,
+        )
+        # Lazy initialization: assigning BlobServiceClient to None-typed field
+        self._blob_service_client = client  # type: ignore[assignment]
+        return self._blob_service_client
 
     def _create_blob_client(self, blob_name: str) -> Any:
         service = self._get_service_client()
@@ -348,25 +365,6 @@ class BlobResultSink(ResultSink):
             if artifact.determinism_level:
                 metadata["determinism_level"] = artifact.determinism_level
         return metadata
-
-    def _get_service_client(self) -> Any:
-        if self._blob_service_client is not None:
-            # Lazy initialization pattern; mypy sees unreachable due to None-typed field
-            return self._blob_service_client  # type: ignore[unreachable]
-
-        try:
-            from azure.storage.blob import BlobServiceClient
-        except ImportError as exc:  # pragma: no cover - optional dependency missing
-            raise RuntimeError("azure-storage-blob is required for BlobResultSink") from exc
-
-        credential = self._resolve_credential(self.config)
-        client = BlobServiceClient(
-            account_url=self.config.account_url,
-            credential=credential,
-        )
-        # Lazy initialization: assigning BlobServiceClient to None-typed field
-        self._blob_service_client = client  # type: ignore[assignment]
-        return self._blob_service_client
 
 
 class AzureBlobArtifactsSink(BlobResultSink):

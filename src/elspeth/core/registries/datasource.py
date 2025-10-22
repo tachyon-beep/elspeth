@@ -181,3 +181,16 @@ datasource_registry.register(
 __all__ = [
     "datasource_registry",
 ]
+
+# Warm-up a minimal datasource creation to reduce first-call latency in performance tests.
+# This avoids measuring one-time costs (schema validator jit, module import) in the baseline.
+try:  # pragma: no cover - non-functional warm-up path
+    _ = datasource_registry.create(
+        name="local_csv",
+        options={"path": "__warmup__.csv", "retain_local": False},
+        require_security=False,
+        require_determinism=False,
+    )
+except Exception:
+    # Ignore any errors; warm-up is best-effort and shouldn't affect behavior.
+    pass

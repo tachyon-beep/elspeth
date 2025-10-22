@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import logging
 import os
-import types
 from dataclasses import dataclass
 from typing import Any, Iterable, Mapping, Protocol, Sequence, cast
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
@@ -46,7 +45,7 @@ class VectorQueryClient:
         raise NotImplementedError
 
 
-class _PGCursor(Protocol):
+class _PGCursor(Protocol):  # pylint: disable=missing-function-docstring
     """Minimal psycopg cursor protocol used by this module."""
 
     def execute(self, query: Any, args: Any) -> Any: ...
@@ -55,7 +54,7 @@ class _PGCursor(Protocol):
     def __exit__(self, *args: Any) -> Any: ...
 
 
-class _PGConnection(Protocol):
+class _PGConnection(Protocol):  # pylint: disable=missing-function-docstring
     """Minimal psycopg connection protocol used by this module."""
 
     def cursor(self) -> _PGCursor: ...
@@ -134,10 +133,10 @@ class PgVectorQueryClient(VectorQueryClient):
         if self._psycopg is None:
             raise RuntimeError("psycopg module not loaded. Ensure psycopg is installed or call a query method that triggers lazy import.")
         psycopg_mod = cast(Any, self._psycopg)
-        conn: _PGConnection = psycopg_mod.connect(dsn, autocommit=True)
+        conn = cast(_PGConnection, psycopg_mod.connect(dsn, autocommit=True))
         try:
             # Use sql.Identifier to safely quote table name and prevent SQL injection
-            with conn.cursor() as cur:
+            with conn.cursor() as cur:  # pylint: disable=no-member
                 if self._sql is not None:
                     query_sql = self._sql.SQL("""
                         SELECT document_id,
@@ -151,16 +150,12 @@ class PgVectorQueryClient(VectorQueryClient):
                         """).format(self._sql.Identifier(self._table))
                     args = (vector_literal, namespace, vector_literal, top_k)
                 else:
-                    # When psycopg.sql is unavailable: if psycopg is a real module import
-                    # (import path stub), raise to prevent unsafe fallback. If a test shim
-                    # directly assigned to `self._psycopg` (non-module), return no results
-                    # to allow DSN handling assertions without executing SQL.
-                    if isinstance(self._psycopg, types.ModuleType):
-                        raise RuntimeError(
-                            "psycopg.sql unavailable; install psycopg[binary] or psycopg[c] to enable safe SQL identifier quoting"
-                        )
-                    return
-                cur.execute(  # nosemgrep: python.sqlalchemy.security.sqlalchemy-execute-raw-query.sqlalchemy-execute-raw-query
+                    # Always fail closed if psycopg.sql is unavailable to avoid unsafe identifier handling
+                    raise RuntimeError(
+                        "psycopg.sql module unavailable; refusing to execute raw SQL fallback for security. "
+                        "Install psycopg[binary] or psycopg[c] to enable safe SQL identifier quoting."
+                    )
+                cur.execute(  # nosemgrep: python.sql-injection
                     query_sql,
                     args,
                 )
@@ -182,7 +177,7 @@ class PgVectorQueryClient(VectorQueryClient):
                         metadata=metadata_payload,
                     )
         finally:
-            conn.close()
+            conn.close()  # pylint: disable=no-member
 
     def _vector_literal(self, vector: Sequence[float]) -> str:
         """Format a Python sequence of floats as a pgvector literal string."""

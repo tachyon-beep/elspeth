@@ -29,6 +29,16 @@ class RetrievalService:
 
 
 def create_retrieval_service(config: Mapping[str, object]) -> RetrievalService:
+    """Construct a RetrievalService from a config mapping.
+
+    Expects keys:
+    - "provider": retrieval provider name (e.g., "pgvector", "azure_search")
+    - "provider_options": provider-specific options mapping
+    - "embed_model": embedding provider configuration mapping
+
+    Returns:
+        RetrievalService: composed of a vector query client and an embedder.
+    """
     provider = str(config.get("provider") or "").lower()
     provider_options_raw = config.get("provider_options") or {}
     if not isinstance(provider_options_raw, Mapping):

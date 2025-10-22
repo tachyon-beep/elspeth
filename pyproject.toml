@@ -11,8 +11,10 @@ authors = [
 ]
 requires-python = ">=3.12"
 dependencies = [
-  # Core dependencies: versions pinned for reference only (latest stable/LTS as of current lockfiles).
-  # For reproducible installs, always sync from the lockfile (requirements*.lock); do not rely on these pins.
+  # Core dependencies: versions are pinned to document the current locked versions
+  # (latest stable/LTS as of current lockfiles). For reproducible installs, always
+  # sync from the lockfiles (requirements*.lock); these pins are documentation and
+  # fallback only.
   "azure-identity==1.25.1",
   "azure-storage-blob==12.27.0",
   "azure-search-documents==11.6.0",  # Azure Cognitive Search for RAG

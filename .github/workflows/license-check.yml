@@ -28,18 +28,21 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          python -m pip install pip-tools pip-licenses
+          python -m pip install pip-tools
+          # Sync to the locked environment first; this step may uninstall extras
           python -m piptools sync requirements-dev.lock
+          # Install pip-licenses after sync so the CLI is available in this job
+          python -m pip install pip-licenses
 
       - name: Generate license report
         run: |
-          pip-licenses --format=markdown --order=license > licenses.md
-          pip-licenses --format=json --with-urls --with-description > licenses.json
+          python -m piplicenses --format=markdown --order=license > licenses.md
+          python -m piplicenses --format=json --with-urls --with-description > licenses.json
 
       - name: Check for forbidden licenses
         run: |
           # Fail if GPL, LGPL, or AGPL licenses found
-          if pip-licenses --format=json | grep -iE '"License".*"(L?GPL|AGPL)"'; then
+          if python -m piplicenses --format=json | grep -iE '"License".*"(L?GPL|AGPL)"'; then
             echo "ERROR: Copyleft license detected!"
             echo "Forbidden licenses: GPL, LGPL, AGPL"
             echo "Please review licenses.json for details"
@@ -60,7 +63,7 @@ jobs:
       - name: Check for unknown licenses
         run: |
           # Warn if UNKNOWN licenses found (don't fail, but notify)
-          if pip-licenses --format=json | grep -i '"License".*"UNKNOWN"'; then
+          if python -m piplicenses --format=json | grep -i '"License".*"UNKNOWN"'; then
             echo "⚠️  WARNING: Packages with unknown licenses detected"
             echo "Please review licenses.json and update package metadata"
           fi
