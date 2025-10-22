@@ -31,4 +31,22 @@ jobs:
 
       - name: Run performance tests only
         run: |
-          python -m pytest -q tests/test_performance_baseline.py
+          # Expected runtime: ~2-3s on GitHub-hosted runners
+          # Threshold in tests: 5s to allow for CI variability
+          start=$(date +%s)
+          python -m pytest -q tests/test_performance_baseline.py | tee perf-output.txt
+          end=$(date +%s)
+          runtime_s=$((end - start))
+          echo "Performance test runtime: ${runtime_s} s"
+          {
+            echo "## Performance Baseline"
+            echo "- Runtime: ${runtime_s} s"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload performance artifacts
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: perf-output
+          path: perf-output.txt
+          retention-days: 7

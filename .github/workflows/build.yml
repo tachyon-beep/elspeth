@@ -13,7 +13,7 @@ permissions: {}
 jobs:
   ci-core:
     name: CI Core (Lint, Types, Tests)
-    uses: tachyon-beep/elspeth/.github/workflows/reusable-ci.yml@1aed7191970eb9d35716a282b8b08a091fc1a816
+    uses: ./.github/workflows/reusable-ci.yml
     with:
       python-version: '3.12'
     permissions:

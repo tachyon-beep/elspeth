@@ -183,3 +183,13 @@ jobs:
             echo "Attesting keylessly via GitHub OIDC"
             cosign attest --yes --predicate sbom-image.json --type cyclonedx "${IMAGE}"
           fi
+
+      - name: Smoke test published image
+        env:
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          VERSION=${GITHUB_REF_NAME}
+          docker pull ghcr.io/${REPO}:${VERSION}
+          docker run --rm ghcr.io/${REPO}:${VERSION} python -m elspeth.cli --help > /dev/null
+          echo "✅ Published image runs CLI successfully"

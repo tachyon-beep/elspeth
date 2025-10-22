@@ -64,6 +64,8 @@ jobs:
           open=$(jq '[.[] | select(.state=="open")] | length' "$tmp")
           if [ "$used_fallback" -eq 1 ]; then
             echo "- Alerts: ${total} (open: ${open}) — fallback (repo-wide) query used" >> "$GITHUB_STEP_SUMMARY"
+            echo "⚠️ Note: Showing repo-wide alerts (ref-specific query unavailable)" >> "$GITHUB_STEP_SUMMARY"
+            echo "This may include alerts from other branches." >> "$GITHUB_STEP_SUMMARY"
           else
             echo "- Alerts: ${total} (open: ${open})" >> "$GITHUB_STEP_SUMMARY"
           fi

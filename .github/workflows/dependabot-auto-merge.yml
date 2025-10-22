@@ -133,7 +133,7 @@ jobs:
           PR_URL: ${{ github.event.pull_request.html_url }}
         run: |
           # Wait up to 5 minutes for PR to merge
-          for i in {1..60}; do
+          for i in {1..30}; do
             STATE=$(gh pr view "${PR_URL}" --json state --jq '.state')
             if [ "${STATE}" = "MERGED" ]; then
               echo "✅ PR merged successfully"

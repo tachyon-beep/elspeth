@@ -70,7 +70,7 @@ jobs:
     name: CI Core (Lint, Types, Tests)
     needs: [secrets-scan, changes]
     if: github.event_name != 'pull_request' || github.event.pull_request.draft != true
-    uses: tachyon-beep/elspeth/.github/workflows/reusable-ci.yml@1aed7191970eb9d35716a282b8b08a091fc1a816
+    uses: ./.github/workflows/reusable-ci.yml
     with:
       python-version: "3.12"
     permissions:
@@ -267,6 +267,7 @@ jobs:
             sbom-runtime.json
             sbom-image.json
           retention-days: 7
+
       - name: Vulnerability scan (Grype) - block on HIGH
         id: grype
         uses: anchore/scan-action@a5605eb0943e46279cb4fbd9d44297355d3520ab # v7.0.2
@@ -294,3 +295,90 @@ jobs:
           name: grype-sarif
           path: ${{ steps.grype.outputs.sarif }}
           retention-days: 7
+
+  preview-image:
+    name: PR Preview Image (GHCR)
+    runs-on: ubuntu-latest
+    needs: [ci-core, changes]
+    permissions:
+      contents: read
+      packages: write
+      pull-requests: write
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.draft != true &&
+      github.event.pull_request.head.repo.fork == false &&
+      needs.changes.outputs.code == 'true'
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Use pinned digest if provided
+        id: pinfile
+        run: |
+          if [ -f .github/base-image.txt ]; then
+            echo "Using pinned base image from .github/base-image.txt" && cat .github/base-image.txt
+            echo "DOCKER_PYTHON_IMAGE=$(cat .github/base-image.txt)" >> $GITHUB_ENV
+          fi
+      - name: Ensure pinned base image is configured
+        run: |
+          if [ -z "${DOCKER_PYTHON_IMAGE}" ]; then
+            echo "Pinned base image not found. Please run the 'Repin Base Image Digest' workflow or add .github/base-image.txt." >&2
+            exit 1
+          fi
+
+      - name: Login to GHCR
+        uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build preview image (runtime)
+        env:
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          docker build --build-arg PYTHON_IMAGE=$DOCKER_PYTHON_IMAGE --target runtime -t ghcr.io/${REPO}:pr-${PR_NUMBER} .
+
+      - name: Push preview image
+        env:
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          docker push ghcr.io/${REPO}:pr-${PR_NUMBER}
+
+      - name: Summarize preview image
+        env:
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" << EOF
+          ## PR Preview Image
+          - Tag: 
+            ghcr.io/${REPO}:pr-${PR_NUMBER}
+
+          Pull and run locally:
+          ```bash
+          docker pull ghcr.io/${REPO}:pr-${PR_NUMBER}
+          docker run --rm ghcr.io/${REPO}:pr-${PR_NUMBER} python -m elspeth.cli --help
+          ```
+          EOF
+      - name: Comment on PR with preview image
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          body=$(cat << 'EOT'
+          ### PR Preview Image
+
+          - Tag: `ghcr.io/${REPO}:pr-${PR_NUMBER}`
+
+          Pull and run locally:
+          ```bash
+          docker pull ghcr.io/${REPO}:pr-${PR_NUMBER}
+          docker run --rm ghcr.io/${REPO}:pr-${PR_NUMBER} python -m elspeth.cli --help
+          ```
+          EOT
+          )
+          gh pr comment "$PR_NUMBER" --repo "$REPO" --body "$body"
