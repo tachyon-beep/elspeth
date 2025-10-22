@@ -337,19 +337,20 @@ def test_score_agreement_aggregator(monkeypatch):
     for metrics in values:
         records.append({"metrics": metrics})
 
-    # monkeypatch pingouin response
-    import elspeth.plugins.experiments.aggregators.score_agreement as score_agreement_mod
+    # Validate Krippendorff's alpha via in-tree implementation
+    from elspeth.plugins.experiments._stats_helpers import krippendorff_alpha_interval
+    import numpy as np
 
-    class DummyPingouin:
-        @staticmethod
-        def krippendorff_alpha(df, reliability_data=True):
-            return 0.5
-
-    monkeypatch.setattr(score_agreement_mod, "pingouin", DummyPingouin())
     result = plugin.finalize(records)
     assert "cronbach_alpha" in result
     assert result["criteria"] == ["critA", "critB"]
-    assert result["krippendorff_alpha"] == pytest.approx(0.5)
+    # Build array to compute expected alpha (rows=items, cols=criteria)
+    arr = np.array([[0.6, 0.65], [0.7, 0.75], [0.8, 0.78]], dtype=float)
+    expected_alpha = krippendorff_alpha_interval(arr)
+    if expected_alpha is not None:
+        assert result["krippendorff_alpha"] == pytest.approx(expected_alpha)
+    else:
+        assert result["krippendorff_alpha"] is None
 
 
 def test_score_agreement_on_error_skip(monkeypatch):

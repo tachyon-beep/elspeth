@@ -11,6 +11,7 @@ from elspeth.plugins.experiments._stats_helpers import (
     _compute_distribution_shift,
     _compute_significance,
     _create_score_extractor_factory,
+    krippendorff_alpha,
 )
 
 
@@ -63,3 +64,22 @@ def test_bh_correction_and_factory():
         }
     )
     assert cfg["key"] == "scores"
+
+
+def test_krippendorff_alpha_variants():
+    import numpy as np
+
+    # Perfect agreement (interval) -> alpha ~ 1.0
+    arr = np.array([[1.0, 1.0, 1.0], [2.0, 2.0, 2.0]], dtype=float)
+    a_int = krippendorff_alpha(arr, level="interval")
+    assert a_int is not None and a_int > 0.99
+
+    # Nominal: two categories, some disagreement
+    arr_nom = np.array([[1, 1, 2], [2, 2, 2], [1, 2, 1]], dtype=float)
+    a_nom = krippendorff_alpha(arr_nom, level="nominal")
+    assert a_nom is not None and -1.0 <= a_nom <= 1.0
+
+    # Ordinal (rank-based fallback) should be within bounds
+    arr_ord = np.array([[1, 2, 3], [2, 2, 2], [1, 3, np.nan]], dtype=float)
+    a_ord = krippendorff_alpha(arr_ord, level="ordinal")
+    assert a_ord is not None and -1.0 <= a_ord <= 1.0

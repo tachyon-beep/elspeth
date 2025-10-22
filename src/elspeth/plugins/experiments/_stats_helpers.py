@@ -375,3 +375,163 @@ def _benjamini_hochberg(p_values: Sequence[float]) -> list[float]:
         adjusted[idx] = min(value, 1.0)
         prev = adjusted[idx]
     return adjusted
+
+
+def _krippendorff_alpha_interval(data: "np.ndarray") -> float | None:
+    """Compute Krippendorff's alpha for interval data with missing values.
+
+    Args:
+        data: 2D array of shape (n_items, n_raters) with NaN for missing ratings.
+
+    Returns:
+        Alpha in [-inf, 1], or None if insufficient data.
+
+    Notes:
+        This implementation follows the pairwise-disagreement formulation for
+        interval metrics. It computes observed disagreement (Do) as the
+        average of squared differences among available rater pairs per item,
+        and expected disagreement (De) as the average of squared differences
+        among all value pairs in the pooled sample. Missing values (NaN) are
+        ignored. For degenerate cases (no variance), returns 1.0 if all
+        observed values are identical, else None.
+    """
+    if data.ndim != 2:
+        return None
+    x = np.asarray(data, dtype=float)
+    v = x[~np.isnan(x)]
+    m = v.size
+    if m < 2:
+        return None
+
+    # Helper: mean of pairwise squared differences for a 1D vector
+    def _pairwise_sqdiff_mean(vec: "np.ndarray") -> float:
+        n = vec.size
+        if n < 2:
+            return np.nan
+        # O(n^2) is acceptable for small analytics matrices
+        s = 0.0
+        cnt = 0
+        for i in range(n):
+            vi = vec[i]
+            for j in range(i + 1, n):
+                d = vi - vec[j]
+                s += d * d
+                cnt += 1
+        return s / cnt
+
+    De = _pairwise_sqdiff_mean(v)
+    if not np.isfinite(De) or De <= 0:
+        # No variance across pooled values: perfect agreement if all equal
+        return 1.0 if np.allclose(v, v.mean()) else None
+
+    s_do = 0.0
+    c_do = 0
+    for row in x:
+        r = row[~np.isnan(row)]
+        n = r.size
+        if n >= 2:
+            s = 0.0
+            cnt = 0
+            for i in range(n):
+                ri = r[i]
+                for j in range(i + 1, n):
+                    d = ri - r[j]
+                    s += d * d
+                    cnt += 1
+            s_do += s
+            c_do += cnt
+
+    if c_do == 0:
+        return None
+    Do = s_do / c_do
+    return float(1.0 - (Do / De))
+
+
+def _krippendorff_alpha_nominal(data: "np.ndarray") -> float | None:
+    """Krippendorff's alpha for nominal (categorical) data.
+
+    Uses 0/1 disagreement (1 if unequal labels). Missing values (NaN) ignored.
+    """
+    if data.ndim != 2:
+        return None
+    x = np.asarray(data)
+
+    # Flatten non-NaN values to compute expected disagreement from category proportions
+    v = x[~np.isnan(x)]
+    if v.size < 2:
+        return None
+
+    # Map categories to integers (preserve floats by casting to object for hashing if needed)
+    # For nominal, equality matters only.
+    # Convert to Python objects to allow hashing of strings/ints uniformly
+    v_obj = v.astype(object)
+    # Frequencies
+    unique, counts = np.unique(v_obj, return_counts=True)
+    n = v_obj.size
+    p = counts.astype(float) / float(n)
+    De = float(1.0 - np.sum(p * p))
+    if not np.isfinite(De) or De <= 0:
+        return 1.0 if counts.size == 1 else None
+
+    # Observed disagreement: average 0/1 inequality over rater pairs per item, weighted by pair counts
+    s_do = 0.0
+    c_do = 0
+    for row in x:
+        r = row[~np.isnan(row)]
+        m = r.size
+        if m >= 2:
+            # Count unequal pairs
+            unequal = 0
+            total = m * (m - 1) // 2
+            r_obj = r.astype(object)
+            for i in range(m):
+                ri = r_obj[i]
+                for j in range(i + 1, m):
+                    unequal += 0 if ri == r_obj[j] else 1
+            s_do += unequal
+            c_do += total
+    if c_do == 0:
+        return None
+    Do = s_do / c_do
+    return float(1.0 - (Do / De))
+
+
+def krippendorff_alpha(data: "np.ndarray", level: str = "interval") -> float | None:
+    """Compute Krippendorff's alpha for given measurement level.
+
+    Args:
+        data: 2D array (n_items, n_raters) with NaN for missing
+        level: one of {"interval", "nominal", "ordinal"}
+
+    Returns:
+        Alpha or None if insufficient data.
+
+    Notes:
+        - "ordinal" falls back to rank-encoding then uses interval alpha.
+          For many practical cases this is acceptable, though not identical
+          to the cumulative-disagreement definition.
+    """
+    level = level.lower()
+    if level == "interval":
+        return _krippendorff_alpha_interval(data)
+    if level == "nominal":
+        return _krippendorff_alpha_nominal(data)
+    if level == "ordinal":
+        # Rank-encode categories per column then compute interval alpha
+        x = np.asarray(data, dtype=float)
+        # Build ranks on pooled unique values (ignoring NaN)
+        vals = x[~np.isnan(x)]
+        if vals.size < 2:
+            return None
+        uniq = np.unique(vals)
+        # Map each unique observed value to an ordinal rank
+        mapping: dict[float, float] = {float(v): float(i) for i, v in enumerate(uniq)}
+        def _map_val(val: float) -> float:
+            return float("nan") if np.isnan(val) else mapping.get(float(val), float("nan"))
+        xr = np.vectorize(_map_val, otypes=[float])(x)
+        return _krippendorff_alpha_interval(np.asarray(xr, dtype=float))
+    raise ValueError("level must be one of: interval, nominal, ordinal")
+
+
+# Public aliases used by plugins/tests
+krippendorff_alpha_interval = _krippendorff_alpha_interval

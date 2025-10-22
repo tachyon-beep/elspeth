@@ -90,7 +90,7 @@ To reduce PR noise, related packages are updated together:
 | `data-stack` | pandas, scipy, matplotlib, seaborn | **patch only** |
 | `security-tools` | bandit, semgrep, pip-audit, vulture | minor, patch |
 | `dev-tools` | ruff, mypy, types-*, pip-tools | minor, patch |
-| `stats-libs` | pingouin, statsmodels | minor, patch |
+| `stats-libs` | NumPy/SciPy, statsmodels | minor, patch |
 | `github-actions` | All actions | minor, patch |
 
 **Rationale:**

@@ -32,7 +32,6 @@ dependencies = [
   "openpyxl==3.1.5",         # Excel sink plugin
   "matplotlib==3.10.7",      # Visual analytics sinks
   "seaborn==0.13.2",         # Enhanced visual analytics
-  "pingouin==0.5.5",         # Agreement metrics (referee_alignment)
   "statsmodels==0.14.5",     # Power analysis and planning
 ]
 
@@ -60,6 +59,11 @@ dev = [
 # Azure ML integration (truly optional - external infrastructure)
 azure = [
   "azureml-core==1.60.0.post1",
+]
+
+# Optional extras (kept for compatibility; no GPL dependencies)
+analytics-visual = [
+  # Visual analytics libraries are part of core deps (matplotlib, seaborn).
 ]
 
 [tool.setuptools.packages.find]

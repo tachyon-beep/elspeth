@@ -13,8 +13,9 @@ scipy==1.16.2
 openpyxl==3.1.5
 matplotlib==3.10.7
 seaborn==0.13.2
-pingouin==0.5.5
 statsmodels==0.14.5
+
+[analytics-visual]
 
 [azure]
 azureml-core==1.60.0.post1
