@@ -61,10 +61,12 @@ for f in "${FILES[@]}"; do
 
     # Flag pip installs unless they match allowed patterns
     if grep -qE "(pip|python -m pip)[[:space:]]+install" <<<"$norm"; then
+      # Allow locked installs, regardless of option order
       allow_locked_req=$(grep -qE "install[[:space:]]+-r[[:space:]]+[^ ]*requirements.*\.lock([[:space:]]+|.*)--require-hashes" <<<"$norm" && echo 1 || echo 0)
+      allow_locked_req_rev=$(grep -qE "install[[:space:]]+--require-hashes([[:space:]]+.*)?-r[[:space:]]+[^ ]*requirements.*\.lock" <<<"$norm" && echo 1 || echo 0)
       allow_editable_offline=$(grep -qE "install[[:space:]]+-e[[:space:]]+\.[[:space:]]+--no-deps([[:space:]]+.*)?--no-index" <<<"$norm" && echo 1 || echo 0)
       allow_pkg_offline=$(grep -qE "install[[:space:]]+\.[[:space:]]+--no-deps([[:space:]]+.*)?--no-index" <<<"$norm" && echo 1 || echo 0)
-      if [[ $allow_locked_req -eq 0 && $allow_editable_offline -eq 0 && $allow_pkg_offline -eq 0 ]]; then
+      if [[ $allow_locked_req -eq 0 && $allow_locked_req_rev -eq 0 && $allow_editable_offline -eq 0 && $allow_pkg_offline -eq 0 ]]; then
         violations+=("${f}: Unpinned/unsafe pip usage: ${raw}")
       fi
     fi
@@ -85,4 +87,3 @@ if [[ ${#violations[@]} -gt 0 ]]; then
 fi
 
 echo "✅ Dockerfile base images and pip usage are pinned and safe"
-
