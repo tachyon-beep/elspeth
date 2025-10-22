@@ -35,9 +35,11 @@ jobs:
           echo "DOCKER_PYTHON_IMAGE=$(cat .github/base-image.txt)" >> $GITHUB_ENV
 
       - name: Build runtime image (version tag only)
+        env:
+          REPO: ${{ github.repository }}
         run: |
           VERSION=${GITHUB_REF_NAME}
-          docker build --build-arg PYTHON_IMAGE=${{ env.DOCKER_PYTHON_IMAGE }} --target runtime -t ghcr.io/${{ github.repository }}:${VERSION} .
+          docker build --build-arg PYTHON_IMAGE=${{ env.DOCKER_PYTHON_IMAGE }} --target runtime -t ghcr.io/${REPO}:${VERSION} .
 
       - name: Login to GHCR
         uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
@@ -47,15 +49,19 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Push runtime image (version tag only)
+        env:
+          REPO: ${{ github.repository }}
         run: |
           VERSION=${GITHUB_REF_NAME}
-          docker push ghcr.io/${{ github.repository }}:${VERSION}
+          docker push ghcr.io/${REPO}:${VERSION}
 
       - name: Resolve pushed image digest
         id: image_digest
+        env:
+          REPO: ${{ github.repository }}
         run: |
           VERSION=${GITHUB_REF_NAME}
-          REF=$(docker inspect --format='{{index .RepoDigests 0}}' ghcr.io/${{ github.repository }}:${VERSION})
+          REF=$(docker inspect --format='{{index .RepoDigests 0}}' ghcr.io/${REPO}:${VERSION})
           DIGEST=${REF#*@}
           echo "digest=${DIGEST}" >> $GITHUB_OUTPUT
 
@@ -114,9 +120,10 @@ jobs:
       - name: "Sign image (required: prefer KMS/key if provided, else keyless OIDC)"
         env:
           COSIGN_EXPERIMENTAL: "1" # enable keyless OIDC flow
+          REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          IMAGE="ghcr.io/${{ github.repository }}:${GITHUB_REF_NAME}"
+          IMAGE="ghcr.io/${REPO}:${GITHUB_REF_NAME}"
           if [ -n "${COSIGN_KMS_URI:-}" ]; then
             echo "Signing with KMS: ${COSIGN_KMS_URI}"
             cosign sign --yes --key "${COSIGN_KMS_URI}" "${IMAGE}"
@@ -135,9 +142,10 @@ jobs:
         if: always()
         env:
           COSIGN_EXPERIMENTAL: "1"
+          REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          IMAGE="ghcr.io/${{ github.repository }}:${GITHUB_REF_NAME}"
+          IMAGE="ghcr.io/${REPO}:${GITHUB_REF_NAME}"
           echo "Verifying signature for ${IMAGE}"
           if ! cosign verify --certificate-oidc-issuer https://token.actions.githubusercontent.com "${IMAGE}" | tee cosign-verify.txt; then
             echo "⚠️ Signature verification failed — this can occur briefly after signing (keyless propagation)." >> "$GITHUB_STEP_SUMMARY"
@@ -157,9 +165,10 @@ jobs:
       - name: "Attest SBOM (required: prefer KMS/key if provided, else keyless OIDC)"
         env:
           COSIGN_EXPERIMENTAL: "1"
+          REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          IMAGE="ghcr.io/${{ github.repository }}:${GITHUB_REF_NAME}"
+          IMAGE="ghcr.io/${REPO}:${GITHUB_REF_NAME}"
           test -s sbom-image.json
           if [ -n "${COSIGN_KMS_URI:-}" ]; then
             echo "Attesting with KMS: ${COSIGN_KMS_URI}"
