@@ -21,14 +21,11 @@ name: Dependabot Auto-Merge Security Patches
 
 on:
   pull_request:
-    types:
-      - opened
-      - synchronize
-      - reopened
+    types: [opened, synchronize, reopened]
+  # Re-run gating on CI completion for the main CI workflow
   workflow_run:
-    workflows: ["CI"]
-    types:
-      - completed
+    workflows: ["Lint, Tests & Sample Suite"]
+    types: [completed]
 
 permissions:
   contents: read

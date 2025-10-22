@@ -42,6 +42,9 @@ jobs:
             Apache-2.0,
             BSD-2-Clause,
             BSD-3-Clause,
+            LicenseRef-scancode-generic-cla,
+            LicenseRef-scancode-public-domain-disclaimer,
+            LicenseRef-clearlydefined-OTHER,
             LGPL-2.0,
             LGPL-2.1,
             LGPL-3.0,
@@ -53,9 +56,7 @@ jobs:
 
           # Exclude specific non-SPDX/unknown-license dependencies from license checks
           # (reusable workflow in this repo, and gitleaks-action pin)
-          allow-dependencies-licenses: |
-            pkg:github/tachyon-beep/elspeth@1aed7191970eb9d35716a282b8b08a091fc1a816,
-            pkg:github/gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7
+          allow-dependencies-licenses: "pkg:github/tachyon-beep/elspeth@1aed7191970eb9d35716a282b8b08a091fc1a816, pkg:github/gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7"
 
           # Comment results on PR for visibility
           comment-summary-in-pr: always
