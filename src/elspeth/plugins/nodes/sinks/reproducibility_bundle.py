@@ -77,6 +77,7 @@ class ReproducibilityBundleSink(ResultSink):
     _last_archive_path: str | None = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
+        """Normalize configuration and validate on_error early."""
         self.base_path = Path(self.base_path)
         if self.on_error not in {"abort", "skip"}:
             raise ValueError("on_error must be 'abort' or 'skip'")

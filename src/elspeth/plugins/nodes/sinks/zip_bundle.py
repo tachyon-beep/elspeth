@@ -93,13 +93,14 @@ class ZipResultSink(ResultSink):
                 )
 
             def _safe_name(name: str) -> str:
-                """Return a sanitized ZIP entry name.
+                r"""Return a sanitized ZIP entry name.
 
                 - Drops any directory components
                 - Rejects NUL bytes (\x00)
                 - Replaces characters outside [A-Za-z0-9._-] with '_'
                 - Avoids empty/bad names by falling back to 'artifact'
                 """
+
                 if "\x00" in name:
                     raise ValueError("ZIP entry name contains NUL byte")
                 base = Path(name).name

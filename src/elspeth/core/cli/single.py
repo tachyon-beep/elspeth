@@ -1,3 +1,5 @@
+"""Single-run execution helpers used by the CLI entrypoint."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -44,7 +46,7 @@ def run_single(args: Any, settings: Any) -> None:
                 logger.error("STRICT mode: sink error during run; aborting with non-zero exit: %s", exc)
                 raise SystemExit(1)
         except Exception:
-            pass
+            logger.debug("Secure mode utilities unavailable; continuing to re-raise original exception", exc_info=True)
         raise
 
     for failure in payload["failures"]:
@@ -76,10 +78,11 @@ def run_single(args: Any, settings: Any) -> None:
             logger.error("STRICT mode: sink failures detected; aborting with non-zero exit")
             raise SystemExit(1)
     except Exception:
-        pass
+        logger.debug("Secure mode utilities unavailable after run; continuing without exit enforcement", exc_info=True)
 
 
 def maybe_write_artifacts_single(args: Any, settings: Any, payload: dict[str, Any], df: pd.DataFrame) -> None:
+    """Optionally persist CLI artifacts and publish a signed bundle."""
     art_base = getattr(args, "artifacts_dir", None)
     if art_base is None and not getattr(args, "signed_bundle", False):
         return

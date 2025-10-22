@@ -1,9 +1,12 @@
+"""Helpers for orchestration suite management used by the CLI."""
+
 from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any
 
 import pandas as pd
 
@@ -15,6 +18,7 @@ from .common import create_signed_bundle, ensure_artifacts_dir, maybe_publish_ar
 
 
 def clone_suite_sinks(base_sinks: list, experiment_name: str) -> list:
+    """Clone sink definitions for a specific experiment namespace."""
     cloned = []
     for sink in base_sinks:
         security_level = getattr(sink, "_elspeth_security_level", None)
@@ -45,6 +49,7 @@ def clone_suite_sinks(base_sinks: list, experiment_name: str) -> list:
 
 
 def assemble_suite_defaults(settings) -> dict:
+    """Build suite-level defaults dict from settings and orchestrator config."""
     config = settings.orchestrator_config
     defaults: dict[str, Any] = {
         "prompt_system": config.llm_prompt.get("system", ""),
@@ -111,6 +116,7 @@ def assemble_suite_defaults(settings) -> dict:
 
 
 def maybe_write_artifacts_suite(args: Any, settings: Any, suite: Any, results: dict[str, Any]) -> None:
+    """Optionally persist per-experiment payloads and the suite config as artifacts."""
     art_base = getattr(args, "artifacts_dir", None)
     if art_base is None and not getattr(args, "signed_bundle", False):
         return
@@ -239,4 +245,4 @@ def run_suite(
                 logger.error("STRICT mode: sink failures detected in suite; aborting with non-zero exit")
                 raise SystemExit(1)
     except Exception:
-        pass
+        logger.debug("Secure mode utilities unavailable after suite; continuing without exit enforcement", exc_info=True)

@@ -63,6 +63,7 @@ def _json_bytes(payload: dict[str, Any]) -> bytes:
 @dataclass
 class PreparedFile:
     """Simple container for a prepared file upload payload."""
+
     path: str
     content: bytes
     content_type: str = "application/json"
@@ -115,13 +116,13 @@ class _RepoSinkBase(ResultSink):
                 )
         if self.dry_run:
             cls = self.__class__
-            if not cls._dry_run_warned_once:
+            if not cls._dry_run_warned_once:  # pylint: disable=protected-access
                 logger.warning(DRY_RUN_WARNING_MESSAGE)
-                cls._dry_run_warned_once = True
+                cls._dry_run_warned_once = True  # pylint: disable=protected-access
             # In STRICT mode, highlight that dry-run prevents remote writes
-            if get_secure_mode() == SecureMode.STRICT and not cls._strict_dry_run_warned_once:
+            if get_secure_mode() == SecureMode.STRICT and not cls._strict_dry_run_warned_once:  # pylint: disable=protected-access
                 logger.warning("STRICT mode: repository sink is in dry-run; remote publishing disabled")
-                cls._strict_dry_run_warned_once = True
+                cls._strict_dry_run_warned_once = True  # pylint: disable=protected-access
 
     def _require_session(self) -> requests.Session:
         if self.session is None:  # pragma: no cover - defensive
@@ -326,7 +327,7 @@ class GitHubRepoSink(_RepoSinkBase):
         owner: str,
         repo: str,
         branch: str = "main",
-        token_env: str = "GITHUB_TOKEN",
+        token_env: str = "GITHUB_TOKEN",  # noqa: S107 - environment variable name, not a secret
         base_url: str = "https://api.github.com",
         fail_fast_missing_token: bool = False,
         **kwargs: Any,
@@ -416,7 +417,7 @@ class AzureDevOpsRepoSink(_RepoSinkBase):
         project: str,
         repository: str,
         branch: str = "main",
-        token_env: str = "AZURE_DEVOPS_PAT",
+        token_env: str = "AZURE_DEVOPS_PAT",  # noqa: S107 - environment variable name, not a secret
         api_version: str = "7.1-preview",
         base_url: str = "https://dev.azure.com",
         fail_fast_missing_token: bool = False,
@@ -537,6 +538,7 @@ class AzureDevOpsRepoSink(_RepoSinkBase):
 
 class AzureDevOpsArtifactsRepoSink(AzureDevOpsRepoSink):
     """Publish local folders or archives to an Azure DevOps Git repository.
+
     This sink uploads all files under a local `folder_path` into the target
     repository under `dest_prefix_template` (defaults to artifacts/{timestamp}).
     Files are committed in a single push. Binary files are uploaded using

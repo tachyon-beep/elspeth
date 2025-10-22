@@ -93,8 +93,7 @@ jobs:
       - name: Install dependencies (locked)
         run: |
           python -m pip install --upgrade pip
-          python -m pip install pip-tools
-          python -m piptools sync requirements-dev.lock
+          python -m pip install -r requirements-dev.lock --require-hashes
           python -m pip install -e . --no-deps
 
       - name: Verify environment matches lockfile (dev)
@@ -107,7 +106,6 @@ jobs:
 
       - name: Security static analysis (bandit)
         run: |
-          python -m pip install bandit==1.8.6
           bandit -q -r src --severity-level high --confidence-level high -f json -o bandit.json
       - name: Upload bandit report (JSON)
         if: always()
@@ -144,8 +142,6 @@ jobs:
 
       - name: Run pip-audit (CLI)
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install pip-audit==2.7.3
           pip-audit -r requirements.lock --require-hashes --no-deps
 
       - name: Upload pip-audit SARIF to code scanning (if generated)
@@ -165,10 +161,7 @@ jobs:
 
       - name: Generate SBOM (requirements.lock)
         run: |
-          python -m venv .sbom-venv
-          .sbom-venv/bin/python -m pip install --upgrade pip
-          .sbom-venv/bin/python -m pip install "cyclonedx-bom==7.2.0"
-          .sbom-venv/bin/cyclonedx-py requirements requirements.lock --of JSON --output-file sbom.json --output-reproducible
+          python -m cyclonedx_py requirements requirements.lock --of JSON --output-file sbom.json --output-reproducible
 
       - name: Upload SBOM artefact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -197,8 +190,7 @@ jobs:
       - name: Install dependencies (locked)
         run: |
           python -m pip install --upgrade pip
-          python -m pip install pip-tools
-          python -m piptools sync requirements-dev.lock
+          python -m pip install -r requirements-dev.lock --require-hashes
           python -m pip install -e . --no-deps
 
       - name: Run sample suite smoke test

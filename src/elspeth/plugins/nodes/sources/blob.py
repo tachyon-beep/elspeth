@@ -18,6 +18,8 @@ logger = logging.getLogger(__name__)
 
 
 class BlobDataSource(DataSource):
+    """Read CSV data from Azure Blob Storage using configured profiles."""
+
     def __init__(
         self,
         *,

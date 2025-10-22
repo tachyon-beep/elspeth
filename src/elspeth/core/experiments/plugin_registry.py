@@ -9,6 +9,7 @@ preserving the existing API and special handling for experiment plugin patterns.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Mapping
 from importlib import import_module
 from typing import Any, Callable, Sequence
@@ -32,11 +33,10 @@ from elspeth.plugins.orchestrators.experiment.protocols import (
     ValidationPlugin,
 )
 
-# Pre-warm logging utilities to avoid first-call latency in performance tests
 try:  # pragma: no cover - warm-up import
     from elspeth.core.utils import logging as _logging_utils  # noqa: F401
 except Exception:  # pragma: no cover - non-critical
-    pass
+    logging.getLogger(__name__).debug("Logging utils warm-up failed; proceeding without warm-up", exc_info=True)
 
 # Register functions now delegate to the new registries
 

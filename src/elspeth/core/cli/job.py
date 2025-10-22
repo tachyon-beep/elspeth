@@ -1,15 +1,17 @@
+"""Ad-hoc job execution helpers used by the CLI entrypoint."""
+
 from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any, Tuple
+from typing import Any
 
 import pandas as pd
 
 logger = logging.getLogger(__name__)
 
 
-def execute_job_file(job_config: Path) -> Tuple[dict[str, Any], pd.DataFrame]:
+def execute_job_file(job_config: Path) -> tuple[dict[str, Any], pd.DataFrame]:
     """Run an ad-hoc job config and return (payload, DataFrame rows).
 
     This function isolates the job execution path to improve CLI maintainability.
@@ -27,8 +29,8 @@ def execute_job_file(job_config: Path) -> Tuple[dict[str, Any], pd.DataFrame]:
         df = pd.DataFrame(rows)
         return payload, df
     except (ImportError, OSError, ValueError, RuntimeError) as exc:
-        logger.error("Job execution failed: %s", exc, exc_info=True)
-        raise SystemExit(1)
+        logger.exception("Job execution failed")
+        raise SystemExit(1) from exc
 
 
 def _record_to_row(record: dict[str, Any]) -> dict[str, Any]:

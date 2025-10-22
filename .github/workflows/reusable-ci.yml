@@ -6,7 +6,7 @@ on:
       python-version:
         required: false
         type: string
-        default: '3.12'
+        default: "3.12"
 
 permissions:
   contents: read
@@ -23,7 +23,7 @@ jobs:
         uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         with:
           python-version: ${{ inputs.python-version }}
-          cache: 'pip'
+          cache: "pip"
           cache-dependency-path: |
             requirements-dev.lock
 
@@ -47,6 +47,8 @@ jobs:
           python -m ruff check src tests
           python -m mypy src
 
+      # Ruff gates both docstrings (D) and security (S) via pyproject config
+
       - name: Unit tests with coverage
         run: |
           python -m pytest -m "not slow" --maxfail=1 --disable-warnings --cov-fail-under=80 --cov-report=xml:coverage.xml
@@ -62,4 +64,3 @@ jobs:
           name: coverage-xml
           path: coverage.xml
           retention-days: 7
-

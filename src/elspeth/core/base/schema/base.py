@@ -92,5 +92,6 @@ class SchemaViolation:
         }
 
     def __repr__(self) -> str:
+        """Return a concise representation including row and failing fields."""
         error_fields = [e["field"] for e in self.errors]
         return f"SchemaViolation(row={self.row_index}, schema={self.schema_name}, fields={error_fields})"

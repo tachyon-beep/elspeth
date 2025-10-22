@@ -61,6 +61,10 @@ def create_middlewares(
     *,
     parent_context: PluginContext | None = None,
 ) -> list[LLMMiddleware]:
+    """Create a list of middleware instances from definitions.
+
+    Applies the standard middleware creation path with inheritance and context.
+    """
     if not definitions:
         return []
     return [create_middleware(defn, parent_context=parent_context) for defn in definitions]

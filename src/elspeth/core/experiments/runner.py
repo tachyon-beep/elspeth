@@ -34,6 +34,8 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class ExperimentRunner:
+    """Run an experiment over a DataFrame and dispatch to sinks."""
+
     llm_client: LLMClientProtocol
     sinks: list[ResultSink]
     prompt_system: str
@@ -71,6 +73,7 @@ class ExperimentRunner:
     _malformed_rows: list[SchemaViolation] | None = None
 
     def run(self, df: pd.DataFrame) -> dict[str, Any]:
+        """Execute the run, returning a structured payload for sinks and reports."""
         self._init_early_stop()
         processed_ids: set[str] | None = None
         checkpoint_field = None

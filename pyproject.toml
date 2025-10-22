@@ -86,16 +86,37 @@ line-length = 140
 target-version = "py312"
 
 [tool.ruff.lint]
-select = ["E", "F", "I"]
+select = [
+  "E",  # pycodestyle errors
+  "F",  # Pyflakes
+  "I",  # Import sorting
+  "D",  # pydocstyle (docstrings)
+  "S",  # flake8-bandit (security)
+]
 # Relax overly strict defaults: ignore line length (E501) to accommodate long URLs,
 # LLM prompt templates, security patterns, and configuration strings where line breaks
-# would reduce readability. Enforce functional errors (F) and import hygiene (I).
-ignore = ["E501"]
+# would reduce readability.
+ignore = [
+  "E501",
+  "D202",  # allow blank line after docstring
+  "D203",  # no-blank-line-before-class (conflicts with D211)
+  "D212",  # summary may appear on second line
+  "D213",  # allow summary on first line
+  "D107",  # don't require __init__ docstrings
+  "D401",  # imperative mood not enforced for summaries
+  "D413",  # don't enforce blank line after last section
+  "D417",  # don't require argument descriptions in docstrings
+  "D102",  # method docstrings not required
+]
 
 
 [tool.ruff.lint.per-file-ignores]
-# Allow tests to carry helper imports and flexible styles
-"tests/**" = ["F401", "I001", "E501", "F811"]
+# Allow tests to carry helper imports and flexible styles; allow asserts (S101) and skip docstring/security rules
+"tests/**" = ["F401", "I001", "E501", "F811", "S101", "D", "S"]
+# Package __init__ files are allowed to omit docstrings
+"**/__init__.py" = ["D104"]
+
+
 
 [tool.ruff.lint.isort]
 known-first-party = ["elspeth"]

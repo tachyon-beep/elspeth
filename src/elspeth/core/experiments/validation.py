@@ -1,3 +1,5 @@
+"""Schema compatibility validation helpers for experiment plugin definitions."""
+
 from __future__ import annotations
 
 from typing import Type

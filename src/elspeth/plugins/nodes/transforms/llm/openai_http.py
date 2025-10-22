@@ -67,13 +67,12 @@ class HttpOpenAIClient(LLMClientProtocol):
             # Mount HTTP only when explicitly using localhost endpoints; never for external traffic.
             if self.api_base.startswith("http://"):
                 # Endpoint validation already restricts HTTP to localhost/loopback only.
-                # Enforce with a runtime assertion for defense-in-depth.
+                # Enforce with an explicit runtime check for defense-in-depth.
                 from urllib.parse import urlparse
 
                 host = (urlparse(self.api_base).hostname or "").lower()
-                assert (
-                    host == "localhost" or host.startswith("127.") or host == "::1"
-                ), f"HTTP endpoints must be localhost/loopback only, got: {self.api_base}"
+                if not (host == "localhost" or host.startswith("127.") or host == "::1"):
+                    raise RuntimeError(f"HTTP endpoints must be localhost/loopback only, got: {self.api_base}")
                 self.session.mount("http://", adapter)  # NOSONAR - localhost-only by policy
         except (ValueError, TypeError, AttributeError) as exc:
             # If retry adapter isn't available, proceed without retries

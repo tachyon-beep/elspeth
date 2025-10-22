@@ -1,3 +1,5 @@
+"""Schema validation command helpers used by the CLI."""
+
 from __future__ import annotations
 
 import logging
@@ -33,7 +35,7 @@ def validate_schemas_command(args: Any, settings: Any, suite_root: Path | None) 
             logger.warning("  Consider adding a schema declaration to your datasource configuration")
             if getattr(args, "command", None) == "validate-schemas":
                 print("\n❌ Datasource has no declared schema (see logs for guidance)")
-                raise SystemExit(1)
+                raise SystemExit(1) from None
             print("\n⚠️  No schema validation performed")
             print("   Tip: Add a 'schema' section to your datasource configuration for type safety")
             return
@@ -124,7 +126,7 @@ def validate_schemas_command(args: Any, settings: Any, suite_root: Path | None) 
     except ConfigurationError as exc:
         logger.error("\u2717 Configuration error during schema validation: %s", exc)
         print(f"\n❌ Configuration error: {exc}")
-        raise SystemExit(1)
+        raise SystemExit(1) from exc
     except Exception as exc:  # pragma: no cover - defensive
         logger.error("\u2717 Schema validation failed: %s", exc, exc_info=True)
         print(f"\n❌ Schema validation failed: {exc}")

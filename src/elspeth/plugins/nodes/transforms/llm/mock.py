@@ -9,6 +9,8 @@ from elspeth.core.base.protocols import LLMClientProtocol
 
 
 class MockLLMClient(LLMClientProtocol):
+    """Deterministic mock client for tests and offline runs."""
+
     def __init__(self, *, seed: int | None = None):
         self.seed = seed or 0
 

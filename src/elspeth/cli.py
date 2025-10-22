@@ -10,8 +10,9 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+from collections.abc import Iterable, Mapping
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any
 
 import pandas as pd
 
@@ -200,8 +201,10 @@ def build_parser() -> argparse.ArgumentParser:
         "health-server",
         help="Run a simple HTTP health server exposing /health and /ready",
     )
-    cmd_health.add_argument("--host", default="0.0.0.0")
+    cmd_health.add_argument("--host", default="127.0.0.1")
     cmd_health.add_argument("--port", type=int, default=8080)
+    cmd_health.add_argument("--tls-cert", help="Path to TLS certificate (PEM)")
+    cmd_health.add_argument("--tls-key", help="Path to TLS private key (PEM)")
     return parser
 
 
@@ -383,8 +386,8 @@ def _run_single(args: argparse.Namespace, settings) -> None:
                 logger.error("STRICT mode: sink error during run; aborting with non-zero exit: %s", exc)
                 raise SystemExit(1)
         except Exception:
-            # If secure mode utilities unavailable, re-raise original error
-            pass
+            # If secure mode utilities unavailable, re-raise original error but record context
+            logger.debug("Secure mode utilities unavailable; continuing to re-raise original exception", exc_info=True)
         raise
     # Enforce payload contract at CLI boundary (failures always present)
     payload.setdefault("failures", [])
@@ -417,8 +420,8 @@ def _run_single(args: argparse.Namespace, settings) -> None:
             logger.error("STRICT mode: sink failures detected; aborting with non-zero exit")
             raise SystemExit(1)
     except Exception:
-        # If secure mode utilities unavailable, do nothing
-        pass
+        # If secure mode utilities unavailable, record context and continue
+        logger.debug("Secure mode utilities unavailable after run; continuing without exit enforcement", exc_info=True)
 
 
 def _clone_suite_sinks(base_sinks: list, experiment_name: str) -> list:
@@ -545,7 +548,12 @@ def main(argv: Iterable[str] | None = None) -> None:
         from elspeth.core.healthcheck import serve as _serve_health  # pylint: disable=import-outside-toplevel
 
         configure_logging(getattr(args, "log_level", "INFO"))
-        _serve_health(host=getattr(args, "host", "0.0.0.0"), port=getattr(args, "port", 8080))
+        _serve_health(
+            host=getattr(args, "host", "127.0.0.1"),
+            port=getattr(args, "port", 8080),
+            tls_certfile=getattr(args, "tls_cert", None),
+            tls_keyfile=getattr(args, "tls_key", None),
+        )
         return
     run(args)
 

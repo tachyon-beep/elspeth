@@ -8,7 +8,7 @@ runtime Pydantic models that represent a dataframe's structure.
 from __future__ import annotations
 
 import logging
-from typing import Any, Type, cast
+from typing import Any, cast
 
 import pandas as pd
 from pydantic import Field, create_model
@@ -18,7 +18,7 @@ from .base import DataFrameSchema
 logger = logging.getLogger(__name__)
 
 
-def _pandas_dtype_to_python(dtype: Any) -> Type:
+def _pandas_dtype_to_python(dtype: Any) -> type:
     """
     Convert pandas dtype to Python type for Pydantic schema.
 
@@ -50,7 +50,7 @@ def infer_schema_from_dataframe(
     schema_name: str = "InferredSchema",
     *,
     required_columns: list[str | None] | None = None,
-) -> Type[DataFrameSchema]:
+) -> type[DataFrameSchema]:
     """
     Infer Pydantic schema from DataFrame column dtypes.
 

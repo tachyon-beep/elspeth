@@ -21,7 +21,7 @@ from elspeth.plugins.nodes.sources import BlobDataSource, CSVBlobDataSource, CSV
 try:  # pragma: no cover - warm-up import
     from elspeth.core.utils import logging as _logging_utils  # noqa: F401
 except Exception:  # pragma: no cover - non-critical
-    pass
+    logging.getLogger(__name__).debug("Logging utils warm-up failed; proceeding without warm-up", exc_info=True)
 
 from .base import BasePluginRegistry
 from .schemas import ON_ERROR_ENUM, with_security_properties
@@ -193,4 +193,4 @@ try:  # pragma: no cover - non-functional warm-up path
     )
 except Exception:
     # Ignore any errors; warm-up is best-effort and shouldn't affect behavior.
-    pass
+    logging.getLogger(__name__).debug("Datasource warm-up failed; continuing without warm-up", exc_info=True)

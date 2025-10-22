@@ -25,6 +25,8 @@ def _extract_content(response: dict[str, Any]) -> str:
 
 
 class RegexValidationPlugin(ValidationPlugin):
+    """Validate that response content fully matches a provided regex pattern."""
+
     name = "regex_match"
 
     def __init__(self, *, pattern: str, flags: str | None = None):
@@ -59,6 +61,8 @@ class RegexValidationPlugin(ValidationPlugin):
 
 
 class JsonValidationPlugin(ValidationPlugin):
+    """Validate that response content is valid JSON (optionally object)."""
+
     name = "json"
 
     def __init__(self, *, ensure_object: bool = False):
@@ -81,6 +85,8 @@ class JsonValidationPlugin(ValidationPlugin):
 
 
 class LLMGuardValidationPlugin(ValidationPlugin):
+    """Use an LLM to evaluate responses against rules, expecting verdict tokens."""
+
     name = "llm_guard"
 
     def __init__(
@@ -89,8 +95,8 @@ class LLMGuardValidationPlugin(ValidationPlugin):
         validator_llm: LLMClientProtocol,
         user_prompt_template: str,
         system_prompt: str | None = None,
-        valid_token: str = "VALID",
-        invalid_token: str = "INVALID",
+        valid_token: str = "VALID",  # noqa: S107 - marker tokens, not secrets
+        invalid_token: str = "INVALID",  # noqa: S107 - marker tokens, not secrets
         strip_whitespace: bool = True,
     ):
         self.validator_llm = validator_llm

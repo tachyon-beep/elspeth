@@ -121,7 +121,7 @@ class EnhancedVisualAnalyticsSink(BaseVisualSink):
                     try:
                         total_bytes += path.stat().st_size
                     except Exception:  # nosec B110 - tolerate stat() errors; do not block artifact write
-                        pass
+                        logger.debug("Failed to stat file during size aggregation: %s", path, exc_info=True)
                 plugin_logger.log_event(
                     "sink_write",
                     message=f"Enhanced visual written under {self.base_path}",

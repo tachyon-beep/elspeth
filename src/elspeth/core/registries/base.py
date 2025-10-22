@@ -133,7 +133,10 @@ class BasePluginFactory(Generic[T]):
         try:
             setattr(plugin, "_elspeth_requires_input_schema", bool(self.requires_input_schema))
         except Exception:  # pragma: no cover - best effort
-            pass
+            # Best-effort; proceed even if plugin does not allow attribute assignment
+            import logging  # pylint: disable=import-outside-toplevel
+
+            logging.getLogger(__name__).debug("Failed to set _elspeth_requires_input_schema on %s", type(plugin).__name__, exc_info=True)
         apply_plugin_context(plugin, plugin_context)
         return plugin
 
@@ -218,7 +221,9 @@ class BasePluginRegistry(Generic[T]):
                     try:
                         _ = list(plugin_factory._compiled_validator.iter_errors({}))  # noqa: F841
                     except Exception:
-                        pass
+                        import logging  # pylint: disable=import-outside-toplevel
+
+                        logging.getLogger(__name__).debug("Warm-up validation error ignored for %s", name, exc_info=True)
             except Exception:
                 plugin_factory._compiled_validator = None  # Fallback; validate() will handle
         self._plugins[name] = plugin_factory

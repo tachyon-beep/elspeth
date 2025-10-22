@@ -48,6 +48,8 @@ class NoopRateLimiter(RateLimiter):
     """Limiter implementation that performs no throttling."""
 
     def acquire(self, metadata: dict[str, object | None] | None = None) -> ContextManager[None]:  # pragma: no cover - trivial
+        """Return a no-op context manager to match limiter interface."""
+
         @contextmanager
         def _cm() -> Iterator[None]:
             yield
@@ -55,6 +57,7 @@ class NoopRateLimiter(RateLimiter):
         return _cm()
 
     def utilization(self) -> float:  # pragma: no cover - trivial
+        """Return 0.0 to indicate no throttling utilization."""
         return 0.0
 
 
@@ -72,6 +75,8 @@ class FixedWindowRateLimiter(RateLimiter):
         self._usage_ratio = 0.0
 
     def acquire(self, metadata: dict[str, object | None] | None = None) -> ContextManager[None]:
+        """Acquire permission to proceed, blocking until the window allows it."""
+
         @contextmanager
         def _cm() -> Iterator[None]:
             while True:
@@ -92,6 +97,7 @@ class FixedWindowRateLimiter(RateLimiter):
         return _cm()
 
     def utilization(self) -> float:
+        """Return recent usage ratio (0..1) within the current window."""
         with self._lock:
             now = time.time()
             if now - self._window_start >= self.per_seconds:
@@ -124,6 +130,7 @@ class AdaptiveRateLimiter(RateLimiter):
         self._last_utilization = 0.0
 
     def acquire(self, metadata: dict[str, object | None] | None = None) -> ContextManager[None]:
+        """Acquire permission based on requests/tokens ceilings, blocking as needed."""
         estimated_tokens = 0.0
         if metadata:
             value = metadata.get("estimated_tokens")
@@ -154,6 +161,7 @@ class AdaptiveRateLimiter(RateLimiter):
         return _cm()
 
     def update_usage(self, response: dict[str, Any], metadata: dict[str, object | None] | None = None) -> None:
+        """Record token usage from an LLM response to refine utilization tracking."""
         if self.tokens_per_minute is None:
             return
         metrics = response.get("metrics") if isinstance(response, dict) else None
@@ -173,6 +181,7 @@ class AdaptiveRateLimiter(RateLimiter):
             self._token_records.append((now, tokens))
 
     def utilization(self) -> float:
+        """Return recent usage ratio (0..1) across requests and tokens budgets."""
         with self._lock:
             self._trim(time.time())
             request_usage = len(self._request_times) / self.requests_per_minute

@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -29,7 +30,7 @@ class PluginContext(BaseModel):
         default=DeterminismLevel.NONE, description="Determinism level (none, low, high, guaranteed)"
     )
     provenance: tuple[str, ...] = Field(default_factory=tuple, description="Chain of plugin sources")
-    parent: "PluginContext | None" = Field(default=None, description="Parent context for nested plugins")
+    parent: PluginContext | None = Field(default=None, description="Parent context for nested plugins")
     metadata: Mapping[str, Any] = Field(default_factory=dict, description="Additional context metadata")
     suite_root: Path | None = Field(default=None, description="Suite root directory (orchestration pack folder)")
     config_path: Path | None = Field(default=None, description="Configuration file path for this run")
@@ -76,7 +77,7 @@ class PluginContext(BaseModel):
         metadata: Mapping[str, Any] | None = None,
         suite_root: Path | None = None,
         config_path: Path | None = None,
-    ) -> "PluginContext":
+    ) -> PluginContext:
         """Create a child context inheriting from this context.
 
         If security_level, determinism_level, suite_root, or config_path are not provided,
@@ -115,12 +116,12 @@ def apply_plugin_context(instance: Any, context: PluginContext) -> None:
     Also attaches a PluginLogger for structured logging.
     """
 
-    setattr(instance, "plugin_context", context)
-    setattr(instance, "_elspeth_context", context)
-    setattr(instance, "security_level", context.security_level)
-    setattr(instance, "_elspeth_security_level", context.security_level)
-    setattr(instance, "determinism_level", context.determinism_level)
-    setattr(instance, "_elspeth_determinism_level", context.determinism_level)
+    instance.plugin_context = context
+    instance._elspeth_context = context  # noqa: SLF001 - internal marker for plugin context  # pylint: disable=protected-access
+    instance.security_level = context.security_level
+    instance._elspeth_security_level = context.security_level  # noqa: SLF001 - internal marker for plugin context  # pylint: disable=protected-access
+    instance.determinism_level = context.determinism_level
+    instance._elspeth_determinism_level = context.determinism_level  # noqa: SLF001 - internal marker for plugin context  # pylint: disable=protected-access
 
     # Attach plugin logger for structured logging
     from elspeth.core.utils.logging import attach_plugin_logger  # pylint: disable=import-outside-toplevel

@@ -23,4 +23,3 @@ def test_generate_signature_rejects_encrypted_pem():
     with pytest.raises(ValueError) as err:
         generate_signature(b"data", encrypted_pem, algorithm="rsa-pss-sha256")
     assert "Password-protected PEM keys" in str(err.value)
-

@@ -35,6 +35,7 @@ class LocalBundleSink(ResultSink):
     allowed_base_path: str | None = None
 
     def __post_init__(self) -> None:
+        """Normalize configuration and validate on_error early."""
         self.base_path: Path = Path(self.base_path)
         if self.on_error not in {"abort", "skip"}:
             raise ValueError("on_error must be 'abort' or 'skip'")
@@ -91,11 +92,11 @@ class LocalBundleSink(ResultSink):
                     sanitize_formulas=self.sanitize_formulas,
                     sanitize_guard=self.sanitize_guard,
                 )
-                # Propagate allowed base to nested sink
+                # Propagate allowed base to nested sink (best-effort)
                 try:
-                    csv_sink._allowed_base = self._allowed_base
+                    csv_sink._allowed_base = self._allowed_base  # noqa: SLF001 - internal attribute for path guard
                 except Exception:  # nosec B110 - optional optimization only
-                    pass
+                    logger.debug("Failed to set CSV sink allowed base; continuing", exc_info=True)
                 csv_sink.write(results, metadata=metadata)
 
             if plugin_logger:
@@ -110,7 +111,7 @@ class LocalBundleSink(ResultSink):
                         try:
                             total_bytes += p.stat().st_size
                         except Exception:  # nosec B110 - tolerate stat() errors; do not block artifact write
-                            pass
+                            logger.debug("Failed to stat file during size aggregation: %s", p, exc_info=True)
                 plugin_logger.log_event(
                     "sink_write",
                     message=f"Bundle written under {target_dir}",

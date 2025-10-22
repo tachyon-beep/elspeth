@@ -127,7 +127,7 @@ class AzureContentSafetyMiddleware(LLMMiddleware):
                     deterministic = det in (DeterminismLevel.HIGH, DeterminismLevel.GUARANTEED)
                 elif isinstance(det, str):
                     deterministic = det.lower() in ("high", "guaranteed")
-                jitter = 0.0 if deterministic else (random.random() * 0.2)  # nosec B311
+                jitter = 0.0 if deterministic else (random.random() * 0.2)  # noqa: S311 - non-crypto jitter is acceptable
                 time.sleep(delay + jitter)
                 delay *= 2
         data = response.json()

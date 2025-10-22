@@ -585,4 +585,4 @@ try:  # pragma: no cover - non-functional warm-up path
         require_determinism=False,
     )
 except Exception:
-    pass
+    logger.debug("Sink warm-up failed; continuing without warm-up", exc_info=True)

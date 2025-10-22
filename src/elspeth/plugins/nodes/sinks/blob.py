@@ -24,12 +24,12 @@ except ImportError:  # pragma: no cover
 
 
 class BlobResultSink(ResultSink):
-    """Upload artifacts to Azure Blob Storage with optional path constraints."""
+    """Upload artifacts to Azure Blob Storage with optional path constraints.
 
-    """Persist experiment payloads to Azure Blob Storage.
+    Persist experiment payloads to Azure Blob Storage.
 
     The sink reuses the existing blob configuration files used by datasources so
-    operators can target workspace datastores or ad-hoc storage accounts.  The
+    operators can target workspace datastores or ad-hoc storage accounts. The
     uploaded assets include a JSON payload of the experiment results and an
     optional manifest describing auxiliary metadata.
     """
@@ -222,7 +222,7 @@ class BlobResultSink(ResultSink):
             return self._blob_service_client  # type: ignore[unreachable]
 
         try:
-            from azure.storage.blob import BlobServiceClient
+            from azure.storage.blob import BlobServiceClient  # pylint: disable=import-outside-toplevel
         except ImportError as exc:  # pragma: no cover - optional dependency missing
             raise RuntimeError("azure-storage-blob is required for BlobResultSink") from exc
 
@@ -290,7 +290,7 @@ class BlobResultSink(ResultSink):
         if config.sas_token:
             return config.sas_token
         try:
-            from azure.identity import DefaultAzureCredential
+            from azure.identity import DefaultAzureCredential  # pylint: disable=import-outside-toplevel
         except ImportError:  # pragma: no cover - optional dependency missing
             return None
         return DefaultAzureCredential()
@@ -368,9 +368,9 @@ class BlobResultSink(ResultSink):
 
 
 class AzureBlobArtifactsSink(BlobResultSink):
-    """Upload a folder of artifacts (tree) to Azure Blob Storage."""
+    """Upload a folder of artifacts (tree) to Azure Blob Storage.
 
-    """Publish local folders or archives to Azure Blob Storage under a prefix.
+    Publish local folders or archives to Azure Blob Storage under a prefix.
 
     Options:
       - folder_path: local directory to upload
@@ -417,7 +417,7 @@ class AzureBlobArtifactsSink(BlobResultSink):
         if ct:
             return ct
         try:
-            import mimetypes
+            import mimetypes  # pylint: disable=import-outside-toplevel
 
             guessed, _ = mimetypes.guess_type(path.name)
             return guessed

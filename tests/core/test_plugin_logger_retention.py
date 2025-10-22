@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from elspeth.core.base.plugin_context import PluginContext
+from elspeth.core.base.types import SecurityLevel, DeterminismLevel
 from elspeth.core.utils.logging import PluginLogger
 
 
@@ -16,8 +17,8 @@ def _context(tmp: Path) -> PluginContext:
     return PluginContext(
         plugin_name="dummy",
         plugin_kind="sink",
-        security_level="OFFICIAL",
-        determinism_level="guaranteed",
+        security_level=SecurityLevel.OFFICIAL,
+        determinism_level=DeterminismLevel.GUARANTEED,
         suite_root=tmp,
     )
 
@@ -38,7 +39,7 @@ def test_plugin_logger_retention_count_prunes(tmp_path: Path, monkeypatch) -> No
     ctx = _context(tmp_path)
     PluginLogger(plugin_instance=Dummy(), context=ctx, log_dir=log_dir)
 
-    remaining = sorted([p.name for p in log_dir.glob("run_*.jsonl")])
+    remaining = sorted(p.name for p in log_dir.glob("run_*.jsonl"))
     # 2 newest + current run file
     assert len(remaining) == 3
 

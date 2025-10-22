@@ -82,8 +82,8 @@ def safe_atomic_write(path: Path, write_to: Callable[[Path], None]) -> None:
     ensure_destination_is_not_symlink(path)
 
     # Create a temp file in the same directory to ensure atomic os.replace
-    tmp_fd = None
-    tmp_path_str = None
+    tmp_fd: int | None = None
+    tmp_path_str: str | None = None
     try:
         tmp_fd, tmp_path_str = tempfile.mkstemp(prefix=".tmp_", dir=str(path.parent))
         tmp_path = Path(tmp_path_str)
@@ -91,13 +91,13 @@ def safe_atomic_write(path: Path, write_to: Callable[[Path], None]) -> None:
         # already uses a safe default on POSIX, but we enforce explicitly.
         try:
             os.fchmod(tmp_fd, 0o600)
-        except Exception as e:  # nosec B110 - best-effort permission hardening; non-fatal
+        except OSError as e:
             logger.debug("Failed to set permissions via fchmod: %s; trying chmod", e)
             try:
                 os.chmod(tmp_path, 0o600)
-            except Exception as e2:  # nosec B110 - best-effort permission hardening; non-fatal
+            except OSError as e2:
                 logger.debug("Failed to set permissions via chmod: %s; continuing without strict perms", e2)
-                pass
+
         os.close(tmp_fd)
         tmp_fd = None
 
@@ -110,17 +110,16 @@ def safe_atomic_write(path: Path, write_to: Callable[[Path], None]) -> None:
         if tmp_fd is not None:
             try:
                 os.close(tmp_fd)
-            except Exception as e:  # nosec B110 - cleanup best-effort
+            except OSError as e:
                 logger.debug("Failed to close temp file descriptor: %s", e)
-                pass
+
         if tmp_path_str:
             try:
                 tmp_p = Path(tmp_path_str)
                 if tmp_p.exists():
                     tmp_p.unlink(missing_ok=True)
-            except Exception as e:  # nosec B110 - cleanup best-effort
+            except OSError as e:
                 logger.debug("Failed to cleanup temp file %s: %s", tmp_path_str, e)
-                pass
 
 
 __all__ = [

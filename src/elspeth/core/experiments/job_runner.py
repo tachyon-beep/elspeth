@@ -150,6 +150,7 @@ def _build_sink_bindings(sinks: Sequence[Any], *, default_context: PluginContext
 
 
 def run_job_config(job: Mapping[str, Any]) -> dict[str, Any]:
+    """Execute an in-memory job definition and return the result payload."""
     ctx = _context_from_defaults(job)
 
     # Datasource
@@ -247,6 +248,7 @@ def run_job_config(job: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def run_job_file(path: str | Path) -> dict[str, Any]:
+    """Load a job config from file, run it, and return the result payload."""
     try:
         text = Path(path).read_text(encoding="utf-8")
     except OSError as exc:

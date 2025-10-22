@@ -1,3 +1,5 @@
+"""CLI helpers for settings transformations used by elspeth.cli."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -47,7 +49,8 @@ def configure_sink_dry_run(settings: Any, *, enable_live: bool) -> None:
 
     for sink in settings.sinks:
         if hasattr(sink, "dry_run"):
-            setattr(sink, "dry_run", dry_run)
+            # Direct assignment is clearer and lint-friendly
+            sink.dry_run = dry_run
 
     def _update_defs(defs):
         if not defs:

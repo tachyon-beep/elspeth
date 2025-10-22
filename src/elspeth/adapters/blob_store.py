@@ -19,9 +19,7 @@ from urllib.parse import urlparse
 import yaml
 
 # Shared error message for account/container/blob triple requirement
-ERR_ACCT_CONTAINER_BLOB = (
-    "Provide either 'storage_uri' or all of 'account_name', 'container_name', 'blob_path'"
-)
+ERR_ACCT_CONTAINER_BLOB = "Provide either 'storage_uri' or all of 'account_name', 'container_name', 'blob_path'"
 
 logger = logging.getLogger(__name__)
 
@@ -172,6 +170,7 @@ class BlobDataLoader:
         *,
         timeout: int | None = 60,
     ):
+        """Initialize the loader with configuration and optional credential."""
         self.config = config
         self.credential = credential
         self.timeout = timeout
