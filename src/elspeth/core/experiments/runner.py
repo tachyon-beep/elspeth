@@ -223,6 +223,42 @@ class ExperimentRunner:
         self._active_determinism_level = resolve_determinism_level(self.determinism_level, df_determinism_level)
         return self._active_determinism_level
 
+    def _compile_system_prompt(self, engine: PromptEngine) -> PromptTemplate:
+        """Compile system prompt template."""
+        return engine.compile(
+            self.prompt_system or "",
+            name=f"{self.experiment_name or 'experiment'}:system",
+            defaults=self.prompt_defaults or {},
+        )
+
+    def _compile_user_prompt(self, engine: PromptEngine) -> PromptTemplate:
+        """Compile user prompt template."""
+        return engine.compile(
+            self.prompt_template or "",
+            name=f"{self.experiment_name or 'experiment'}:user",
+            defaults=self.prompt_defaults or {},
+        )
+
+    def _compile_criteria_prompts(self, engine: PromptEngine) -> dict[str, PromptTemplate]:
+        """Compile criteria prompt templates."""
+        criteria_templates: dict[str, PromptTemplate] = {}
+
+        if not self.criteria:
+            return criteria_templates
+
+        for crit in self.criteria:
+            template_text = crit.get("template", self.prompt_template or "")
+            crit_name = crit.get("name") or template_text
+            defaults = dict(self.prompt_defaults or {})
+            defaults.update(crit.get("defaults", {}))
+            criteria_templates[crit_name] = engine.compile(
+                template_text,
+                name=f"{self.experiment_name or 'experiment'}:criteria:{crit_name}",
+                defaults=defaults,
+            )
+
+        return criteria_templates
+
     def run(self, df: pd.DataFrame) -> dict[str, Any]:
         """Execute the run, returning a structured payload for sinks and reports."""
         self._init_early_stop()
@@ -235,29 +271,13 @@ class ExperimentRunner:
             processed_ids = self._load_checkpoint(checkpoint_path)
 
         row_plugins = self.row_plugins or []
+
+        # Compile prompt templates using helper methods
         engine = self.prompt_engine or PromptEngine()
-        system_template = engine.compile(
-            self.prompt_system or "",
-            name=f"{self.experiment_name or 'experiment'}:system",
-            defaults=self.prompt_defaults or {},
-        )
-        user_template = engine.compile(
-            self.prompt_template or "",
-            name=f"{self.experiment_name or 'experiment'}:user",
-            defaults=self.prompt_defaults or {},
-        )
-        criteria_templates: dict[str, PromptTemplate] = {}
-        if self.criteria:
-            for crit in self.criteria:
-                template_text = crit.get("template", self.prompt_template or "")
-                crit_name = crit.get("name") or template_text
-                defaults = dict(self.prompt_defaults or {})
-                defaults.update(crit.get("defaults", {}))
-                criteria_templates[crit_name] = engine.compile(
-                    template_text,
-                    name=f"{self.experiment_name or 'experiment'}:criteria:{crit_name}",
-                    defaults=defaults,
-                )
+        system_template = self._compile_system_prompt(engine)
+        user_template = self._compile_user_prompt(engine)
+        criteria_templates = self._compile_criteria_prompts(engine)
+
         self._compiled_system_prompt = system_template
         self._compiled_user_prompt = user_template
         self._compiled_criteria_prompts = criteria_templates
