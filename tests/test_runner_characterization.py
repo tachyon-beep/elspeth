@@ -12,7 +12,7 @@ import pandas as pd
 import pytest
 
 from elspeth.core.base.protocols import Artifact, LLMRequest, ResultSink
-from elspeth.core.experiments.runner import ExperimentRunner
+from elspeth.core.experiments.runner import CheckpointManager, ExperimentRunner
 
 
 class SimpleLLM:
@@ -256,3 +256,37 @@ def test_run_single_failure_doesnt_block_others() -> None:
     # Verify metadata includes retry summary
     assert "retry_summary" in result["metadata"]
     assert result["metadata"]["retry_summary"]["exhausted"] == 3
+
+
+def test_checkpoint_manager_tracks_ids(tmp_path: Path) -> None:
+    """Unit test: CheckpointManager tracks processed IDs correctly."""
+    checkpoint_file = tmp_path / "test_checkpoint.txt"
+    mgr = CheckpointManager(path=checkpoint_file, field="id")
+
+    # Initially empty
+    assert not mgr.is_processed("row1")
+
+    # Mark as processed
+    mgr.mark_processed("row1")
+    assert mgr.is_processed("row1")
+
+    # Verify persistence (plain text format)
+    assert checkpoint_file.exists()
+    with checkpoint_file.open("r") as f:
+        content = f.read()
+        assert "row1\n" == content
+
+    # Mark another ID
+    mgr.mark_processed("row2")
+    assert mgr.is_processed("row2")
+
+    # Verify both IDs persisted
+    with checkpoint_file.open("r") as f:
+        lines = [line.strip() for line in f if line.strip()]
+        assert lines == ["row1", "row2"]
+
+    # Load from file (new instance)
+    mgr2 = CheckpointManager(path=checkpoint_file, field="id")
+    assert mgr2.is_processed("row1")
+    assert mgr2.is_processed("row2")
+    assert not mgr2.is_processed("row3")

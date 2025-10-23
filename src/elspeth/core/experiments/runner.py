@@ -6,7 +6,7 @@ import logging
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Type
 
@@ -30,6 +30,53 @@ from elspeth.plugins.orchestrators.experiment.protocols import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class CheckpointManager:
+    """Manages checkpoint loading, tracking, and persistence.
+
+    Provides atomic checkpoint operations with exactly-once semantics for
+    row processing tracking. Uses plain text format (one ID per line).
+    """
+
+    path: Path
+    field: str
+    _processed_ids: set[str] = field(default_factory=set)
+
+    def __post_init__(self) -> None:
+        """Load existing checkpoint file on initialization."""
+        if self.path.exists():
+            self._load_checkpoint()
+
+    def _load_checkpoint(self) -> None:
+        """Load processed row IDs from checkpoint file (plain text format)."""
+        try:
+            with self.path.open("r") as f:
+                for line in f:
+                    row_id = line.strip()
+                    if row_id:
+                        self._processed_ids.add(row_id)
+        except OSError as e:
+            logger.warning(f"Failed to load checkpoint from {self.path}: {e}")
+
+    def is_processed(self, row_id: str) -> bool:
+        """Check if a row has already been processed."""
+        return row_id in self._processed_ids
+
+    def mark_processed(self, row_id: str) -> None:
+        """Mark a row as processed and persist to checkpoint file."""
+        if row_id not in self._processed_ids:
+            self._processed_ids.add(row_id)
+            self._append_checkpoint(row_id)
+
+    def _append_checkpoint(self, row_id: str) -> None:
+        """Append a single checkpoint entry to file (plain text format)."""
+        try:
+            with self.path.open("a") as f:
+                f.write(f"{row_id}\n")
+        except OSError as e:
+            logger.error(f"Failed to write checkpoint to {self.path}: {e}")
 
 
 @dataclass
