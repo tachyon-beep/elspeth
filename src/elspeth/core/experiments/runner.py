@@ -325,6 +325,28 @@ class ExperimentRunner:
         pipeline = ArtifactPipeline(self._build_sink_bindings())
         pipeline.execute(payload, metadata)
 
+    def _prepare_rows_to_process(
+        self,
+        df: pd.DataFrame,
+        checkpoint_field: str | None,
+        processed_ids: set[str] | None,
+    ) -> list[tuple[int, pd.Series, dict[str, Any], str | None]]:
+        """Prepare list of rows to process, filtering checkpointed and early-stopped rows.
+
+        Returns list of (index, row, context, row_id) tuples ready for processing.
+        """
+        rows_to_process: list[tuple[int, pd.Series, dict[str, Any], str | None]] = []
+        for idx, (_, row) in enumerate(df.iterrows()):
+            context = prepare_prompt_context(row, include_fields=self.prompt_fields)
+            row_id = context.get(checkpoint_field) if checkpoint_field else None
+            if processed_ids is not None and row_id in processed_ids:
+                continue
+            if self._early_stop_event and self._early_stop_event.is_set():
+                break
+            rows_to_process.append((idx, row, context, row_id))
+
+        return rows_to_process
+
     def run(self, df: pd.DataFrame) -> dict[str, Any]:
         """Execute the run, returning a structured payload for sinks and reports."""
         self._init_early_stop()
@@ -356,15 +378,8 @@ class ExperimentRunner:
         # Initialize malformed data tracking
         self._malformed_rows = []
 
-        rows_to_process: list[tuple[int, pd.Series, dict[str, Any], str | None]] = []
-        for idx, (_, row) in enumerate(df.iterrows()):
-            context = prepare_prompt_context(row, include_fields=self.prompt_fields)
-            row_id = context.get(checkpoint_field) if checkpoint_field else None
-            if processed_ids is not None and row_id in processed_ids:
-                continue
-            if self._early_stop_event and self._early_stop_event.is_set():
-                break
-            rows_to_process.append((idx, row, context, row_id))
+        # Prepare rows to process (filtering checkpointed and early-stopped rows)
+        rows_to_process = self._prepare_rows_to_process(df, checkpoint_field, processed_ids)
 
         records_with_index: list[tuple[int, dict[str, Any]]] = []
         failures: list[dict[str, Any]] = []
