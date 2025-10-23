@@ -9,6 +9,7 @@ preserving the existing API and special handling for experiment plugin patterns.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Mapping
 from importlib import import_module
 from typing import Any, Callable, Sequence
@@ -21,6 +22,7 @@ from elspeth.core.experiments.experiment_registries import (
     row_plugin_registry,
     validation_plugin_registry,
 )
+from elspeth.core.registries.plugin_helpers import create_plugin_with_inheritance
 from elspeth.core.security import coalesce_security_level  # Still needed for validation functions
 from elspeth.core.validation.base import ConfigurationError
 from elspeth.plugins.orchestrators.experiment.protocols import (
@@ -31,6 +33,11 @@ from elspeth.plugins.orchestrators.experiment.protocols import (
     ValidationPlugin,
 )
 
+try:  # pragma: no cover - warm-up import
+    from elspeth.core.utils import logging as _logging_utils  # noqa: F401
+except Exception:  # pragma: no cover - non-critical
+    logging.getLogger(__name__).debug("Logging utils warm-up failed; proceeding without warm-up", exc_info=True)
+
 # Register functions now delegate to the new registries
 
 
@@ -39,12 +46,13 @@ def register_row_plugin(
     factory: Callable[[dict[str, Any], PluginContext], RowExperimentPlugin],
     *,
     schema: dict[str, Any] | None = None,
+    requires_input_schema: bool = False,
 ) -> None:
     """Register a row-level experiment plugin.
 
     NOTE: This function now delegates to the migrated row_plugin_registry.
     """
-    row_plugin_registry.register(name, factory, schema=schema)
+    row_plugin_registry.register(name, factory, schema=schema, requires_input_schema=requires_input_schema)
 
 
 def register_aggregation_plugin(
@@ -52,12 +60,13 @@ def register_aggregation_plugin(
     factory: Callable[[dict[str, Any], PluginContext], AggregationExperimentPlugin],
     *,
     schema: dict[str, Any] | None = None,
+    requires_input_schema: bool = False,
 ) -> None:
     """Register an aggregation experiment plugin.
 
     NOTE: This function now delegates to the migrated aggregation_plugin_registry.
     """
-    aggregation_plugin_registry.register(name, factory, schema=schema)
+    aggregation_plugin_registry.register(name, factory, schema=schema, requires_input_schema=requires_input_schema)
 
 
 def register_baseline_plugin(
@@ -78,12 +87,13 @@ def register_validation_plugin(
     factory: Callable[[dict[str, Any], PluginContext], ValidationPlugin],
     *,
     schema: dict[str, Any] | None = None,
+    requires_input_schema: bool = False,
 ) -> None:
     """Register a suite validation plugin.
 
     NOTE: This function now delegates to the migrated validation_plugin_registry.
     """
-    validation_plugin_registry.register(name, factory, schema=schema)
+    validation_plugin_registry.register(name, factory, schema=schema, requires_input_schema=requires_input_schema)
 
 
 def register_early_stop_plugin(
@@ -112,8 +122,6 @@ def create_row_plugin(
     NOTE: This function now uses create_plugin_with_inheritance() helper
     to eliminate duplication.
     """
-    from elspeth.core.registries.plugin_helpers import create_plugin_with_inheritance
-
     try:
         result = create_plugin_with_inheritance(
             row_plugin_registry,
@@ -124,8 +132,9 @@ def create_row_plugin(
             allow_none=False,
         )
         # When allow_none=False, create_plugin_with_inheritance never returns None
-        # (it raises ValueError instead), but mypy doesn't track this
-        assert result is not None, "Unreachable: allow_none=False prevents None return"
+        # (it raises ValueError instead). Add a defensive runtime check.
+        if result is None:  # pragma: no cover - defensive, should be unreachable
+            raise RuntimeError("Unexpected None from row plugin factory with allow_none=False")
         return result
     except ValueError as exc:
         # Re-raise with backward-compatible error message for tests
@@ -145,8 +154,6 @@ def create_aggregation_plugin(
     NOTE: This function now uses create_plugin_with_inheritance() helper
     to eliminate duplication.
     """
-    from elspeth.core.registries.plugin_helpers import create_plugin_with_inheritance
-
     result = create_plugin_with_inheritance(
         aggregation_plugin_registry,
         definition,
@@ -156,7 +163,8 @@ def create_aggregation_plugin(
         allow_none=False,
     )
     # When allow_none=False, create_plugin_with_inheritance never returns None
-    assert result is not None, "Unreachable: allow_none=False prevents None return"
+    if result is None:  # pragma: no cover - defensive, should be unreachable
+        raise RuntimeError("Unexpected None from baseline plugin factory with allow_none=False")
     return result
 
 
@@ -170,8 +178,6 @@ def create_baseline_plugin(
     NOTE: This function now uses create_plugin_with_inheritance() helper
     to eliminate duplication.
     """
-    from elspeth.core.registries.plugin_helpers import create_plugin_with_inheritance
-
     result = create_plugin_with_inheritance(
         baseline_plugin_registry,
         definition,
@@ -181,7 +187,8 @@ def create_baseline_plugin(
         allow_none=False,
     )
     # When allow_none=False, create_plugin_with_inheritance never returns None
-    assert result is not None, "Unreachable: allow_none=False prevents None return"
+    if result is None:  # pragma: no cover - defensive, should be unreachable
+        raise RuntimeError("Unexpected None from validation plugin factory with allow_none=False")
     return result
 
 
@@ -195,8 +202,6 @@ def create_validation_plugin(
     NOTE: This function now uses create_plugin_with_inheritance() helper
     to eliminate duplication.
     """
-    from elspeth.core.registries.plugin_helpers import create_plugin_with_inheritance
-
     result = create_plugin_with_inheritance(
         validation_plugin_registry,
         definition,
@@ -206,7 +211,8 @@ def create_validation_plugin(
         allow_none=False,
     )
     # When allow_none=False, create_plugin_with_inheritance never returns None
-    assert result is not None, "Unreachable: allow_none=False prevents None return"
+    if result is None:  # pragma: no cover - defensive, should be unreachable
+        raise RuntimeError("Unexpected None from early-stop plugin factory with allow_none=False")
     return result
 
 
@@ -220,8 +226,6 @@ def create_early_stop_plugin(
     NOTE: This function now uses create_plugin_with_inheritance() helper
     to eliminate duplication.
     """
-    from elspeth.core.registries.plugin_helpers import create_plugin_with_inheritance
-
     result = create_plugin_with_inheritance(
         early_stop_plugin_registry,
         definition,
@@ -231,7 +235,8 @@ def create_early_stop_plugin(
         allow_none=False,
     )
     # When allow_none=False, create_plugin_with_inheritance never returns None
-    assert result is not None, "Unreachable: allow_none=False prevents None return"
+    if result is None:  # pragma: no cover - defensive, should be unreachable
+        raise RuntimeError("Unexpected None from early-stop plugin factory with allow_none=False")
     return result
 
 

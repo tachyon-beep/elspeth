@@ -5,7 +5,7 @@ update as processes evolve.
 
 ## Pre-Release Validation
 
-1. **Environment** – create/activate `.venv`, run `pip install -e .[dev,analytics-visual]`.
+1. **Environment** – create/activate `.venv`, run `pip install -e .[dev]`.
 1. **Formatting & linting** – `pre-commit run --all-files` (or `make lint`).
 1. **Unit tests** – `python -m pytest` (ensure coverage for new code).
 1. **Sample suite** – run `python -m elspeth.cli --settings config/sample_suite/settings.yaml --suite-root config/sample_suite --head 0 --live-outputs` and inspect outputs under `outputs/sample_suite/`.
@@ -27,9 +27,35 @@ Update 2025-10-12: Suite report logging spans `src/elspeth/tools/reporting.py:26
 Update 2025-10-12: Dry-run toggles are handled at `src/elspeth/cli.py:360-392`.
 <!-- END UPDATE -->
 
+## Container Security (Signing, SBOM, Vulnerabilities)
+
+1. **Digest-pinned base** – ensure publish pipeline used a digest-pinned base (CI step resolves/exports digest; Dockerfile enforces digest via build-arg guard).
+2. **Cosign signature (required)** – verify image signature:
+   - Keyless (GitHub OIDC):
+     ```bash
+     cosign verify \
+       --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+       --certificate-identity-regexp "https://github.com/OWNER/REPO/.*" \
+       ghcr.io/OWNER/REPO:TAG
+     ```
+   - Internal KMS/key (if configured):
+     ```bash
+     cosign verify --key awskms://arn:aws:kms:... ghcr.io/OWNER/REPO:TAG
+     ```
+3. **SBOM attestation (required)** – verify CycloneDX attestation exists and is valid:
+   ```bash
+   cosign verify-attestation --type cyclonedx ghcr.io/OWNER/REPO:TAG | jq
+   ```
+   Confirm the predicate matches the SBOM produced by CI (syft/grype job outputs).
+4. **Vulnerability scan (blocking)** – confirm Grype scan artefact shows no HIGH/CRITICAL (CI gates HIGH). Optionally re-run locally:
+   ```bash
+   grype ghcr.io/OWNER/REPO:TAG --fail-on high -o table
+   ```
+5. **Dependency audit (blocking for CRITICAL)** – confirm `pip-audit` on `requirements.lock` reported no CRITICAL/HIGH without mitigations.
+
 ## Documentation
 
-1. Update `README.md`, `AGENTS.md`, and relevant docs (migration guide, logging standards) when behaviour changes.
+1. Update `README.md` and relevant docs (migration guide, logging standards) when behaviour changes.
 1. Increment plan status in `master_work_plan.md` (mark completed tasks, add notes for deferrals).
 1. Run `docs/reporting-and-suite-management.md` commands to ensure CLI help text remains accurate; update screenshots or artefact lists if analytics pipeline changed.
 
@@ -45,6 +71,11 @@ Update 2025-10-12: Dry-run toggles are handled at `src/elspeth/cli.py:360-392`.
 1. Archive generated outputs/logs if needed; reset `outputs/` locally.
 1. Review telemetry dashboards/alerts to confirm healthy runtime behaviour.
 1. Submit analytics/signed artefact samples to accreditation archive and rotate secrets used during validation.
+
+## References
+
+- Architecture → Verification (Signing & SBOM): `docs/architecture/README.md`
+- Security Policy → Container Signing & SBOM Attestation: `SECURITY.md`
 
 ## Update History
 

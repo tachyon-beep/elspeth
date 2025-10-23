@@ -521,6 +521,28 @@ def test_runner_records_failures(tmp_path):
     assert payload["metadata"]["retry_summary"]["exhausted"] == 1
 
 
+def test_execute_llm_zero_attempts_raises():
+    class DummyLLM:
+        def generate(self, *, system_prompt, user_prompt, metadata=None):  # noqa: D401
+            raise AssertionError("generate should not be called when max_attempts=0")
+
+    class DummySink:
+        def write(self, results, *, metadata=None):  # noqa: D401
+            pass
+
+    runner = ExperimentRunner(
+        llm_client=DummyLLM(),
+        sinks=[_secure_sink(DummySink())],
+        prompt_system="sys",
+        prompt_template="Hi",
+        prompt_fields=[],
+        retry_config={"max_attempts": 0, "initial_delay": 0},
+    )
+
+    with pytest.raises(RuntimeError):
+        runner._execute_llm("hello", {"experiment": "x"})
+
+
 def test_checkpoint_skips_processed(tmp_path):
     checkpoint = tmp_path / "cp.txt"
 

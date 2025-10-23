@@ -12,7 +12,8 @@ This directory contains the technical architecture documentation for Elspeth's c
 
 - **[plugin-catalogue.md](plugin-catalogue.md)** – Complete catalogue of all datasources, LLMs, middleware, sinks, and experiment plugins
 - **[plugin-security-model.md](plugin-security-model.md)** – Security context propagation and plugin isolation
-- **[configuration-merge.md](configuration-merge.md)** – Three-layer configuration merge semantics (defaults → packs → experiments)
+- **[../development/plugin-authoring.md](../development/plugin-authoring.md)** – How to build, register, secure, and test plugins
+- **[configuration-security.md](configuration-security.md)** – Validation pipeline, secret handling, and merge semantics (defaults → packs → experiments)
 
 ## LLM Integration
 
@@ -25,6 +26,20 @@ This directory contains the technical architecture documentation for Elspeth's c
 - **[security-controls.md](security-controls.md)** – Security control inventory and implementation
 - **[threat-surfaces.md](threat-surfaces.md)** – Identified attack surfaces and mitigations
 - **[audit-logging.md](audit-logging.md)** – Audit logging architecture and patterns
+
+### Verification (Signing & SBOM)
+
+All published container images are signed with Sigstore Cosign and include a CycloneDX SBOM attestation. Verification options:
+
+- Keyless (GitHub OIDC):
+  - `cosign verify --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+    --certificate-identity-regexp "https://github.com/OWNER/REPO/.*" ghcr.io/OWNER/REPO:TAG`
+- Internal KMS/key (if configured):
+  - `cosign verify --key awskms://arn:aws:kms:... ghcr.io/OWNER/REPO:TAG`
+- SBOM attestation (CycloneDX):
+  - `cosign verify-attestation --type cyclonedx ghcr.io/OWNER/REPO:TAG | jq`
+
+The CI workflow treats both signing and attestation as mandatory gates. During migration, you may dual‑sign (keyless + internal) and later restrict admission to internal signatures only.
 
 ## Related Documentation
 

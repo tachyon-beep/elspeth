@@ -15,4 +15,3 @@ def test_visual_report_png_success(tmp_path: Path) -> None:
     }
     sink.write(results, metadata={"experiment": "e"})
     assert (tmp_path / "analytics_visual.png").exists()
-

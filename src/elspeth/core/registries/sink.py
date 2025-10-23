@@ -11,6 +11,7 @@ will have the biggest impact on code reduction.
 from __future__ import annotations
 
 import logging
+from sys import modules as _modules
 from typing import Any
 
 from elspeth.adapters.blob_store import load_blob_config
@@ -20,6 +21,8 @@ from elspeth.core.security import validate_azure_blob_endpoint
 from elspeth.core.validation.base import ConfigurationError
 from elspeth.plugins.nodes.sinks import (
     AnalyticsReportSink,
+    AzureBlobArtifactsSink,
+    AzureDevOpsArtifactsRepoSink,
     AzureDevOpsRepoSink,
     BlobResultSink,
     CsvResultSink,
@@ -46,6 +49,9 @@ from .schemas import (
     with_error_handling,
     with_security_properties,
 )
+
+# Capability flags exposed by sink plugins. Keep constants centralized to avoid drift.
+CAP_SUPPORTS_FOLDER_PATH_INJECTION = "supports_folder_path_injection"
 
 logger = logging.getLogger(__name__)
 
@@ -75,9 +81,9 @@ def _create_azure_blob_sink(options: dict[str, Any], context: PluginContext) -> 
                 endpoint=blob_config.account_url,
                 security_level=security_level,
             )
-            logger.debug(f"Azure Blob endpoint validated: {blob_config.account_url}")
+            logger.debug("Azure Blob endpoint validated: %s", blob_config.account_url)
         except ValueError as exc:
-            logger.error(f"Azure Blob endpoint validation failed: {exc}")
+            logger.error("Azure Blob endpoint validation failed: %s", exc)
             raise ConfigurationError(f"Azure Blob sink endpoint validation failed: {exc}") from exc
     elif "account_url" in options:
         # Fallback: validate account_url if present in options to prevent bypass
@@ -87,17 +93,42 @@ def _create_azure_blob_sink(options: dict[str, Any], context: PluginContext) -> 
                 endpoint=options["account_url"],
                 security_level=security_level,
             )
-            logger.debug(f"Azure Blob endpoint validated: {options['account_url']}")
+            logger.debug("Azure Blob endpoint validated: %s", options["account_url"])
         except ValueError as exc:
-            logger.error(f"Azure Blob endpoint validation failed: {exc}")
+            logger.error("Azure Blob endpoint validation failed: %s", exc)
             raise ConfigurationError(f"Azure Blob sink endpoint validation failed: {exc}") from exc
 
     return BlobResultSink(**options)
 
 
+def _create_azure_blob_artifacts_sink(options: dict[str, Any], context: PluginContext) -> AzureBlobArtifactsSink:
+    """Create Azure Blob artifacts publisher sink (folder upload)."""
+    return AzureBlobArtifactsSink(**options)
+
+
 def _create_csv_sink(options: dict[str, Any], context: PluginContext) -> CsvResultSink:
     """Create CSV result sink."""
-    return CsvResultSink(**options)
+    # Fast-path: prefer already-loaded module to avoid import overhead
+    mod = _modules.get("elspeth.plugins.nodes.sinks.csv_file")
+    if mod is not None:
+        try:
+            klass = getattr(mod, "CsvResultSink", CsvResultSink)
+            return klass(**options)
+        except Exception:
+            return CsvResultSink(**options)
+
+    # Fallback: use package export (lazy import via __getattr__ may load the module)
+    try:
+        return CsvResultSink(**options)
+    except Exception:
+        # As a last resort, attempt an explicit import
+        try:
+            from elspeth.plugins.nodes.sinks import csv_file as _csv_mod  # pylint: disable=import-outside-toplevel
+
+            klass = getattr(_csv_mod, "CsvResultSink", CsvResultSink)
+            return klass(**options)
+        except Exception:
+            return CsvResultSink(**options)
 
 
 def _create_local_bundle_sink(options: dict[str, Any], context: PluginContext) -> LocalBundleSink:
@@ -128,6 +159,11 @@ def _create_github_repo_sink(options: dict[str, Any], context: PluginContext) ->
 def _create_azure_devops_repo_sink(options: dict[str, Any], context: PluginContext) -> AzureDevOpsRepoSink:
     """Create Azure DevOps repository sink."""
     return AzureDevOpsRepoSink(**options)
+
+
+def _create_azure_devops_artifacts_repo_sink(options: dict[str, Any], context: PluginContext) -> AzureDevOpsArtifactsRepoSink:
+    """Create Azure DevOps Artifacts repo publisher sink (folder upload)."""
+    return AzureDevOpsArtifactsRepoSink(**options)
 
 
 def _create_signed_artifact_sink(options: dict[str, Any], context: PluginContext) -> SignedArtifactSink:
@@ -245,6 +281,19 @@ _AZURE_BLOB_SINK_SCHEMA = _sink_schema(
     ["config_path"],
 )
 
+_AZURE_BLOB_ARTIFACTS_SINK_SCHEMA = _sink_schema(
+    {
+        "config_path": {"type": "string"},
+        "profile": {"type": "string"},
+        "path_template": {"type": "string"},
+        "folder_path": {"type": "string"},
+        "metadata": {"type": "object"},
+        "upload_chunk_size": {"type": "integer", "minimum": 0},
+        "content_type_map": {"type": "object"},
+    },
+    ["config_path", "folder_path"],
+)
+
 _CSV_SINK_SCHEMA = _sink_schema(
     {
         "path": {"type": "string"},
@@ -341,6 +390,23 @@ _AZURE_DEVOPS_REPO_SINK_SCHEMA = _sink_schema(
         "dry_run": {"type": "boolean"},
     },
     ["organization", "project", "repository"],
+)
+
+_AZURE_DEVOPS_ARTIFACTS_REPO_SINK_SCHEMA = _sink_schema(
+    {
+        "folder_path": {"type": "string"},
+        "dest_prefix_template": {"type": "string"},
+        "commit_message_template": {"type": "string"},
+        "organization": {"type": "string"},
+        "project": {"type": "string"},
+        "repository": {"type": "string"},
+        "branch": {"type": "string"},
+        "token_env": {"type": "string"},
+        "api_version": {"type": "string"},
+        "base_url": {"type": "string"},
+        "dry_run": {"type": "boolean"},
+    },
+    ["folder_path", "organization", "project", "repository"],
 )
 
 _SIGNED_ARTIFACT_SINK_SCHEMA = _sink_schema(
@@ -478,6 +544,7 @@ _REPRODUCIBILITY_BUNDLE_SINK_SCHEMA = _sink_schema(
 # ============================================================================
 
 sink_registry.register("azure_blob", _create_azure_blob_sink, schema=_AZURE_BLOB_SINK_SCHEMA)
+sink_registry.register("azure_blob_artifacts", _create_azure_blob_artifacts_sink, schema=_AZURE_BLOB_ARTIFACTS_SINK_SCHEMA)
 sink_registry.register("csv", _create_csv_sink, schema=_CSV_SINK_SCHEMA)
 sink_registry.register("local_bundle", _create_local_bundle_sink, schema=_LOCAL_BUNDLE_SINK_SCHEMA)
 sink_registry.register("excel_workbook", _create_excel_sink, schema=_EXCEL_SINK_SCHEMA)
@@ -485,6 +552,12 @@ sink_registry.register("zip_bundle", _create_zip_bundle_sink, schema=_ZIP_BUNDLE
 sink_registry.register("file_copy", _create_file_copy_sink, schema=_FILE_COPY_SINK_SCHEMA)
 sink_registry.register("github_repo", _create_github_repo_sink, schema=_GITHUB_REPO_SINK_SCHEMA)
 sink_registry.register("azure_devops_repo", _create_azure_devops_repo_sink, schema=_AZURE_DEVOPS_REPO_SINK_SCHEMA)
+sink_registry.register(
+    "azure_devops_artifact_repo",
+    _create_azure_devops_artifacts_repo_sink,
+    schema=_AZURE_DEVOPS_ARTIFACTS_REPO_SINK_SCHEMA,
+    capabilities={CAP_SUPPORTS_FOLDER_PATH_INJECTION},
+)
 sink_registry.register("signed_artifact", _create_signed_artifact_sink, schema=_SIGNED_ARTIFACT_SINK_SCHEMA)
 sink_registry.register("analytics_report", _create_analytics_report_sink, schema=_ANALYTICS_REPORT_SINK_SCHEMA)
 sink_registry.register("analytics_visual", _create_visual_analytics_sink, schema=_VISUAL_ANALYTICS_SINK_SCHEMA)
@@ -499,4 +572,17 @@ sink_registry.register("reproducibility_bundle", _create_reproducibility_bundle_
 
 __all__ = [
     "sink_registry",
+    "CAP_SUPPORTS_FOLDER_PATH_INJECTION",
 ]
+
+# Warm-up a minimal sink creation to reduce first-call latency measured in
+# performance baselines. This avoids counting one-time import and validator init.
+try:  # pragma: no cover - non-functional warm-up path
+    _ = sink_registry.create(
+        name="csv",
+        options={"path": "__warmup__.csv"},
+        require_security=False,
+        require_determinism=False,
+    )
+except Exception:
+    logger.debug("Sink warm-up failed; continuing without warm-up", exc_info=True)

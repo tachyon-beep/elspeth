@@ -80,12 +80,23 @@ class ScoreExtractorPlugin:
         self._threshold_mode = threshold_mode
         self._flag_field = flag_field
 
-    def process_row(self, row: dict[str, Any], responses: Mapping[str, Mapping[str, Any]]) -> dict[str, Any]:
+    def process_row(self, _row: dict[str, Any], responses: Mapping[str, Mapping[str, Any]]) -> dict[str, Any]:
+        """Extract per-criteria scores and optional threshold flags from responses.
+
+        Args:
+            _row: The original input row (unused by this plugin but part of the interface)
+            responses: Mapping of criterion name -> response payload
+
+        Returns:
+            A derived dictionary containing optional keys: "scores" and the configured
+            flag field (defaults to "score_flags"). Empty when neither are present.
+        """
         scores: dict[str, float] = {}
         flags: dict[str, bool] = {}
 
         for crit_name, response in responses.items():
-            if self._criteria and crit_name not in self._criteria:
+            criteria = self._criteria
+            if criteria is not None and crit_name not in criteria:
                 continue
             value = self._extract_value(response)
             if value is None:
@@ -136,7 +147,10 @@ class ScoreExtractorPlugin:
         return None
 
     def _compare_threshold(self, value: float) -> bool:
-        assert self._threshold is not None, "threshold must not be None"
+        if self._threshold is None:  # pragma: no cover - defensive
+            raise RuntimeError(
+                "ScoreExtractorPlugin._compare_threshold: score threshold must be configured before comparison (self._threshold is None)"
+            )
         mode = self._threshold_mode
         threshold = float(self._threshold)
         if mode == "gt":
@@ -154,7 +168,7 @@ class ScoreExtractorPlugin:
         return None
 
 
-def _create_score_extractor(options: dict[str, Any], context: PluginContext) -> ScoreExtractorPlugin:
+def _create_score_extractor(options: dict[str, Any], _context: PluginContext) -> ScoreExtractorPlugin:
     """Create a score extractor plugin with all required fields."""
     validated = _create_score_extractor_factory(options)
     return ScoreExtractorPlugin(**validated)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import shutil
 import time
 from datetime import datetime, timezone
@@ -13,7 +14,8 @@ import pandas as pd
 
 from elspeth.core.base.protocols import DataSource
 from elspeth.core.base.schema import DataFrameSchema, infer_schema_from_dataframe, schema_from_config
-from elspeth.core.security import normalize_determinism_level, normalize_security_level
+from elspeth.core.base.types import DeterminismLevel, SecurityLevel
+from elspeth.core.security import ensure_determinism_level, ensure_security_level
 
 logger = logging.getLogger(__name__)
 
@@ -25,24 +27,57 @@ class BaseCSVDataSource(DataSource):
         self,
         *,
         path: str | Path,
+        base_path: str | Path | None = None,
+        allowed_base_path: str | Path | None = None,
         dtype: dict[str, Any] | None = None,
         encoding: str = "utf-8",
         on_error: str = "abort",
-        security_level: str | None = None,
-        determinism_level: str | None = None,
+        security_level: SecurityLevel | None = None,
+        determinism_level: DeterminismLevel | None = None,
         schema: dict[str, str | dict[str, Any]] | None = None,
         infer_schema: bool = True,
         retain_local: bool,  # REQUIRED - no default
         retain_local_path: str | None = None,
     ):
-        self.path = Path(path) if isinstance(path, str) else path
+        # Resolve input path relative to base_path or ELSPETH_INPUTS_DIR when provided
+        raw_path = Path(path) if isinstance(path, str) else path
+        base_candidate: Path | None = None
+        if base_path is not None:
+            base_candidate = Path(base_path)
+        elif inp := os.environ.get("ELSPETH_INPUTS_DIR"):
+            base_candidate = Path(inp)
+        elif allowed_base_path is not None:
+            base_candidate = Path(allowed_base_path)
+
+        if raw_path.is_absolute():
+            raw_path = raw_path.resolve()
+        else:
+            if base_candidate is None:
+                base_candidate = Path.cwd()
+            raw_path = (base_candidate / raw_path).resolve()
+
+        self.allowed_base_path = Path(allowed_base_path).resolve() if allowed_base_path else None
+        if self.allowed_base_path is not None:
+            try:
+                within = raw_path.is_relative_to(self.allowed_base_path)
+            except ValueError as exc:
+                # Normalize Path-related incompatibilities as ValueError with context
+                raise ValueError(f"Invalid CSV datasource path resolution: {exc}") from exc
+            except Exception:  # pragma: no cover - unexpected Path error
+                logger.exception("Unexpected exception during CSV datasource path containment check")
+                raise
+            if not within:
+                raise ValueError(
+                    f"CSV datasource path '{raw_path}' escapes allowed base '{self.allowed_base_path}'",
+                )
+        self.path = raw_path
         self.dtype = dtype
         self.encoding = encoding
         if on_error not in {"abort", "skip"}:
             raise ValueError("on_error must be 'abort' or 'skip'")
         self.on_error = on_error
-        self.security_level = normalize_security_level(security_level)
-        self.determinism_level = normalize_determinism_level(determinism_level)
+        self.security_level = ensure_security_level(security_level)
+        self.determinism_level = ensure_determinism_level(determinism_level)
         self.schema_config = schema
         self.infer_schema = infer_schema
         self.retain_local = retain_local

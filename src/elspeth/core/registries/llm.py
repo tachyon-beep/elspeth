@@ -113,9 +113,9 @@ def _create_azure_openai(options: dict[str, Any], context: PluginContext) -> Azu
                 endpoint=azure_endpoint,
                 security_level=security_level,
             )
-            logger.debug(f"Azure OpenAI endpoint validated: {azure_endpoint}")
+            logger.debug("Azure OpenAI endpoint validated: %s", azure_endpoint)
         except ValueError as exc:
-            logger.error(f"Azure OpenAI endpoint validation failed: {exc}")
+            logger.error("Azure OpenAI endpoint validation failed: %s", exc)
             raise ConfigurationError(f"Azure OpenAI endpoint validation failed: {exc}") from exc
 
     return AzureOpenAIClient(**options)
@@ -135,9 +135,9 @@ def _create_http_openai(options: dict[str, Any], context: PluginContext) -> Http
                 endpoint=api_base,
                 security_level=security_level,
             )
-            logger.debug(f"HTTP API endpoint validated: {api_base}")
+            logger.debug("HTTP API endpoint validated: %s", api_base)
         except ValueError as exc:
-            logger.error(f"HTTP API endpoint validation failed: {exc}")
+            logger.error("HTTP API endpoint validation failed: %s", exc)
             raise ConfigurationError(f"HTTP API endpoint validation failed: {exc}") from exc
 
     return HttpOpenAIClient(**options)
@@ -199,6 +199,9 @@ _AZURE_OPENAI_SCHEMA = with_security_properties(
             "deployment": {"type": "string"},
             "client": {},
         },
+        # Require explicit config block to match factory/client contract.
+        # Users must provide configuration explicitly; environment-only setup
+        # is not permitted at the registry layer.
         "required": ["config"],
         "additionalProperties": True,
     },

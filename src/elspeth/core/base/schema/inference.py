@@ -8,7 +8,7 @@ runtime Pydantic models that represent a dataframe's structure.
 from __future__ import annotations
 
 import logging
-from typing import Any, Type
+from typing import Any, cast
 
 import pandas as pd
 from pydantic import Field, create_model
@@ -18,7 +18,7 @@ from .base import DataFrameSchema
 logger = logging.getLogger(__name__)
 
 
-def _pandas_dtype_to_python(dtype: Any) -> Type:
+def _pandas_dtype_to_python(dtype: Any) -> type:
     """
     Convert pandas dtype to Python type for Pydantic schema.
 
@@ -50,7 +50,7 @@ def infer_schema_from_dataframe(
     schema_name: str = "InferredSchema",
     *,
     required_columns: list[str | None] | None = None,
-) -> Type[DataFrameSchema]:
+) -> type[DataFrameSchema]:
     """
     Infer Pydantic schema from DataFrame column dtypes.
 
@@ -77,9 +77,10 @@ def infer_schema_from_dataframe(
             # Pydantic v2 requires explicit Optional for optional fields
             fields[col] = (python_type | None, Field(default=None))  # Optional field
 
-    # Pydantic's create_model() has complex overloads that mypy cannot fully resolve
-    # when using **fields with dynamic field definitions. This is safe at runtime.
-    return create_model(  # type: ignore[call-overload,no-any-return]
+    # Pydantic's create_model() has complex overloads; static checkers may misinterpret
+    # the dynamic **fields. Cast create_model to Any to suppress spurious type errors.
+    cm = cast(Any, create_model)
+    return cm(  # type: ignore[no-any-return]
         schema_name,
         __base__=DataFrameSchema,
         __config__=DataFrameSchema.model_config,  # Explicit v2 config inheritance

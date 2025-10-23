@@ -11,22 +11,25 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from elspeth.adapters.blob_store import BlobConfig, load_blob_config
-from elspeth.core.base.protocols import Artifact, ResultSink
+from elspeth.core.base.protocols import Artifact, ArtifactDescriptor, ResultSink
+from elspeth.core.security.secure_mode import SecureMode, get_secure_mode
 
 logger = logging.getLogger(__name__)
 
 try:  # pragma: no cover - optional dataclasses when azure libs absent
     from azure.storage.blob import ContentSettings
-except Exception:  # pragma: no cover
+except ImportError:  # pragma: no cover
     # Optional dependency fallback: ContentSettings class set to None when azure-storage-blob unavailable
     ContentSettings = None  # type: ignore[assignment,misc]
 
 
 class BlobResultSink(ResultSink):
-    """Persist experiment payloads to Azure Blob Storage.
+    """Upload artifacts to Azure Blob Storage with optional path constraints.
+
+    Persist experiment payloads to Azure Blob Storage.
 
     The sink reuses the existing blob configuration files used by datasources so
-    operators can target workspace datastores or ad-hoc storage accounts.  The
+    operators can target workspace datastores or ad-hoc storage accounts. The
     uploaded assets include a JSON payload of the experiment results and an
     optional manifest describing auxiliary metadata.
     """
@@ -66,6 +69,13 @@ class BlobResultSink(ResultSink):
             raise ValueError("on_error must be 'abort' or 'skip'")
         self.on_error = on_error
         self._artifact_inputs: list[Artifact] = []
+        # STRICT mode: enforce fail-closed policy (disallow skip-on-error)
+        try:
+            if get_secure_mode() == SecureMode.STRICT and self.on_error == "skip":
+                raise ValueError("BlobResultSink cannot use on_error='skip' in STRICT mode")
+        except AttributeError:
+            # get_secure_mode or SecureMode may be unavailable in certain import contexts; ignore in that case
+            pass
 
     def write(self, results: dict[str, Any], *, metadata: dict[str, Any] | None = None) -> None:
         metadata = metadata or {}
@@ -121,6 +131,7 @@ class BlobResultSink(ResultSink):
                     metadata={"container": self.config.container_name, "blob": blob_name},
                 )
         except Exception as exc:
+            # Honor on_error='skip' in non-STRICT modes to maximize delivery; STRICT mode disallowed via __init__ guard
             if self.on_error == "skip":
                 logger.warning("Blob sink failed; skipping upload: %s", exc)
                 plugin_logger = getattr(self, "plugin_logger", None)
@@ -205,7 +216,26 @@ class BlobResultSink(ResultSink):
             manifest["cost_summary"] = results["cost_summary"]
         return manifest
 
-    def _create_blob_client(self, blob_name: str):
+    def _get_service_client(self) -> Any:
+        if self._blob_service_client is not None:
+            # Lazy initialization pattern; mypy sees unreachable due to None-typed field
+            return self._blob_service_client  # type: ignore[unreachable]
+
+        try:
+            from azure.storage.blob import BlobServiceClient  # pylint: disable=import-outside-toplevel
+        except ImportError as exc:  # pragma: no cover - optional dependency missing
+            raise RuntimeError("azure-storage-blob is required for BlobResultSink") from exc
+
+        credential = self._resolve_credential(self.config)
+        client = BlobServiceClient(
+            account_url=self.config.account_url,
+            credential=credential,
+        )
+        # Lazy initialization: assigning BlobServiceClient to None-typed field
+        self._blob_service_client = client  # type: ignore[assignment]
+        return self._blob_service_client
+
+    def _create_blob_client(self, blob_name: str) -> Any:
         service = self._get_service_client()
         container_client = service.get_container_client(self.config.container_name)
         return container_client.get_blob_client(blob_name)
@@ -250,26 +280,7 @@ class BlobResultSink(ResultSink):
                     combined[key] = value
         return combined or None
 
-    def _get_service_client(self):
-        if self._blob_service_client is not None:
-            # Lazy initialization pattern; mypy sees unreachable due to None-typed field
-            return self._blob_service_client  # type: ignore[unreachable]
-
-        try:
-            from azure.storage.blob import BlobServiceClient
-        except ImportError as exc:  # pragma: no cover - optional dependency missing
-            raise RuntimeError("azure-storage-blob is required for BlobResultSink") from exc
-
-        credential = self._resolve_credential(self.config)
-        client = BlobServiceClient(
-            account_url=self.config.account_url,
-            credential=credential,
-        )
-        # Lazy initialization: assigning BlobServiceClient to None-typed field
-        self._blob_service_client = client  # type: ignore[assignment]
-        return self._blob_service_client
-
-    def _resolve_credential(self, config: BlobConfig):
+    def _resolve_credential(self, config: BlobConfig) -> Any:
         if self.credential is not None:
             return self.credential
         if self.credential_env:
@@ -279,19 +290,21 @@ class BlobResultSink(ResultSink):
         if config.sas_token:
             return config.sas_token
         try:
-            from azure.identity import DefaultAzureCredential
+            from azure.identity import DefaultAzureCredential  # pylint: disable=import-outside-toplevel
         except ImportError:  # pragma: no cover - optional dependency missing
             return None
         return DefaultAzureCredential()
 
     # Artifact contract ---------------------------------------------------
-    def produces(self):  # pragma: no cover - to be overridden when chaining enabled
+    def produces(self) -> list[ArtifactDescriptor]:  # pragma: no cover - to be overridden when chaining enabled
         return []
 
-    def consumes(self):  # pragma: no cover - to be overridden when chaining enabled
+    def consumes(self) -> list[str]:  # pragma: no cover - to be overridden when chaining enabled
         return []
 
-    def finalize(self, artifacts, *, metadata=None):  # pragma: no cover - optional cleanup
+    def finalize(
+        self, artifacts: Mapping[str, Artifact], *, metadata: dict[str, Any] | None = None
+    ) -> None:  # pragma: no cover - optional cleanup
         return None
 
     @staticmethod
@@ -305,7 +318,7 @@ class BlobResultSink(ResultSink):
             normalized[key] = "" if value is None else str(value)
         return normalized
 
-    def prepare_artifacts(self, artifacts: Mapping[str, list[Artifact]]):  # pragma: no cover - optional
+    def prepare_artifacts(self, artifacts: Mapping[str, list[Artifact]]) -> None:  # pragma: no cover - optional
         collected: list[Artifact] = []
         for values in artifacts.values():
             if values:
@@ -352,3 +365,80 @@ class BlobResultSink(ResultSink):
             if artifact.determinism_level:
                 metadata["determinism_level"] = artifact.determinism_level
         return metadata
+
+
+class AzureBlobArtifactsSink(BlobResultSink):
+    """Upload a folder of artifacts (tree) to Azure Blob Storage.
+
+    Publish local folders or archives to Azure Blob Storage under a prefix.
+
+    Options:
+      - folder_path: local directory to upload
+      - path_template: optional blob path prefix template (defaults to blob_path in config)
+      - content_type_map: optional mapping of file extensions to content types
+    """
+
+    def __init__(
+        self,
+        *,
+        folder_path: str | Path,
+        content_type_map: Mapping[str, str] | None = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(**kwargs)
+        self.folder_path = Path(folder_path)
+        self.content_type_map = dict(content_type_map or {})
+
+    def write(self, results: dict[str, Any], *, metadata: dict[str, Any] | None = None) -> None:
+        metadata = metadata or {}
+        timestamp = datetime.now(timezone.utc)
+        context = self._build_context(metadata, timestamp)
+
+        if not self.folder_path.exists() or not self.folder_path.is_dir():
+            logger.info("No artifacts found to publish at %s", self.folder_path)
+            return
+
+        prefix = self.path_template.format(**context) if self.path_template else (self.config.blob_path or "")
+        if prefix and not prefix.endswith("/"):
+            prefix = f"{prefix}/"
+
+        for path in self.folder_path.rglob("*"):
+            if path.is_dir():
+                continue
+            rel = path.relative_to(self.folder_path).as_posix()
+            blob_name = f"{prefix}{rel}" if prefix else rel
+            data = path.read_bytes()
+            content_type = self._infer_content_type(path)
+            upload_metadata = self._build_upload_metadata(metadata, None)
+            self._upload_bytes(blob_name, data, content_type=content_type or self.content_type, upload_metadata=upload_metadata)
+
+    def _infer_content_type(self, path: Path) -> str | None:
+        ct = self.content_type_map.get(path.suffix.lower()) if self.content_type_map else None
+        if ct:
+            return ct
+        try:
+            import mimetypes  # pylint: disable=import-outside-toplevel
+
+            guessed, _ = mimetypes.guess_type(path.name)
+            return guessed
+        except TypeError:
+            return None
+
+    # Uses credential resolution and artifact helpers from BlobResultSink
+
+
+def _blob_is_transient_error(exc: Exception) -> bool:
+    """Best-effort classification of transient Azure Blob errors.
+
+    Avoids importing azure.core exceptions at import time; inspects known attributes.
+    """
+    status = getattr(exc, "status_code", None)
+    if status is None:
+        # Some SDK exceptions nest response
+        status = getattr(getattr(exc, "response", None), "status_code", None)
+    if isinstance(status, int) and status in {429, 500, 502, 503, 504}:
+        return True
+    name = exc.__class__.__name__.lower()
+    if any(k in name for k in ("timeout", "throttle", "temporar", "serviceunavailable")):
+        return True
+    return False

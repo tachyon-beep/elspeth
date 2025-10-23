@@ -1,0 +1,44 @@
+name: CodeQL Static Analysis
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    - cron: '0 2 * * 1'  # Mondays at 02:00 UTC
+
+permissions: {}
+
+concurrency:
+  group: codeql-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: Analyze (CodeQL)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          persist-credentials: false
+          submodules: false
+          fetch-depth: 0
+          ref: ${{ github.sha }}
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@16140ae1a102900babc80a33c44059580f687047 # v4.30.9
+        with:
+          languages: python
+
+      - name: Autobuild (Python)
+        uses: github/codeql-action/autobuild@16140ae1a102900babc80a33c44059580f687047 # v4.30.9
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@16140ae1a102900babc80a33c44059580f687047 # v4.30.9
+        with:
+          category: '/language:python'

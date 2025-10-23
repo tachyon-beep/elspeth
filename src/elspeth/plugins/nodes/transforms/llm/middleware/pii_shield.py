@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import logging
 import os
@@ -21,6 +22,10 @@ from elspeth.core.security.pii_validators import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Common regex literals (avoid duplication across patterns)
+# 9 digits in 3-3-3 groups with optional hyphen/space separators
+PATTERN_9_DIGITS_3_3_3 = r"\b\d{3}[-\s]?\d{3}[-\s]?\d{3}\b"
 
 _PII_SHIELD_SCHEMA = {
     "type": "object",
@@ -123,7 +128,7 @@ class PIIShieldMiddleware(LLMMiddleware):
         # Australian Government Identifiers (with checksum validation)
         {
             "name": "tfn_au",
-            "regex": r"\b\d{3}[-\s]?\d{3}[-\s]?\d{3}\b",
+            "regex": PATTERN_9_DIGITS_3_3_3,
             "severity": "HIGH",
             "validator": "tfn",
             "requires_context": True,
@@ -137,7 +142,7 @@ class PIIShieldMiddleware(LLMMiddleware):
         },
         {
             "name": "acn_au",
-            "regex": r"\b\d{3}[-\s]?\d{3}[-\s]?\d{3}\b",
+            "regex": PATTERN_9_DIGITS_3_3_3,
             "severity": "HIGH",
             "validator": "acn",
             "requires_context": True,
@@ -151,7 +156,7 @@ class PIIShieldMiddleware(LLMMiddleware):
         },
         {
             "name": "arbn_au",
-            "regex": r"\b\d{3}[-\s]?\d{3}[-\s]?\d{3}\b",  # Same as ACN format
+            "regex": PATTERN_9_DIGITS_3_3_3,  # Same as ACN format
             "severity": "HIGH",
             "validator": "acn",
             "requires_context": True,
@@ -430,8 +435,6 @@ class PIIShieldMiddleware(LLMMiddleware):
         hash_digest = hashlib.sha256(hash_input).digest()
 
         # Take first 6 bytes, encode as base64, strip padding
-        import base64
-
         token = base64.b64encode(hash_digest[:6]).decode("ascii").rstrip("=")
 
         # Format as type#token

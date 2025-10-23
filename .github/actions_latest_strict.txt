@@ -1,0 +1,12 @@
+REPO                                TAG                  COMMIT
+actions/checkout                    v5.0.0               08c6903cd8c0fde910a37f88322edcfb5dd907a8
+actions/setup-python                v6.0.0               e797f83bcb11b83ae66e0230d6156d7c80228e7c
+actions/upload-artifact             v4.6.2               ea165f8d65b6e75b540449e92b4886f43607fa02
+anchore/sbom-action                 v0.20.8              aa0e114b2e19480f157109b9922bda359bd98b90
+anchore/scan-action                 v7.0.2               a5605eb0943e46279cb4fbd9d44297355d3520ab
+docker/login-action                 v3.6.0               5e57cd118135c172c3672efd75eb46360885c0ef
+github/codeql-action                v4.30.9              16140ae1a102900babc80a33c44059580f687047
+gitleaks/gitleaks-action            v2.3.9               ff98106e4c7b2bc287b24eaf42907196329070c7
+peter-evans/create-pull-request     v7.0.8               271a8d0340265f705b14b6d32b9829c1cb33d45e
+sigstore/cosign-installer           v4.0.0               faadad0cce49287aee09b3a48701e75088a2c6ad
+SonarSource/sonarqube-scan-action   v6.0.0               fd88b7d7ccbaefd23d8f36f73b59db7a3d246602

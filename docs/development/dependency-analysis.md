@@ -31,7 +31,7 @@ Update 2025-10-12: Azure middleware resides in `src/elspeth/plugins/nodes/transf
 <!-- UPDATE 2025-10-12: Excel sink module relocation -->
 Update 2025-10-12: Excel sink lives in `src/elspeth/plugins/nodes/sinks/excel.py`.
 <!-- END UPDATE -->
-- **statsmodels / pingouin** – Advanced analytics extras (`pyproject.toml:42`, `pyproject.toml:48`); ensure reproducibility by pinning minor versions when accreditation relies on deterministic outputs.[^dep-stats-2025-10-12]
+- **NumPy/SciPy + statsmodels** – Statistical computations and planning; Krippendorff's α is implemented in-tree to avoid GPL dependencies; pin minor versions when accreditation relies on deterministic outputs.[^dep-stats-2025-10-12]
 <!-- Update 2025-10-12: Matplotlib/seaborn are optional but required for PNG/HTML visual analytics sinks; install via `pip install matplotlib seaborn` or an internal extra when chart artifacts are needed (`src/elspeth/plugins/outputs/visual_report.py:66`). -->
 <!-- Update 2025-10-12: Additional extras include `[stats-bayesian]`, `[stats-planning]`, `[stats-distribution]`, and `[sinks-excel]`, enabling Bayesian comparisons, power analysis, distribution drift detection, and Excel exports respectively (`pyproject.toml:46`, `pyproject.toml:50`, `pyproject.toml:54`). -->
 
@@ -54,7 +54,7 @@ Update 2025-10-12: Excel sink lives in `src/elspeth/plugins/nodes/sinks/excel.py
 ## Added 2025-10-12 – Transitive Dependency Considerations
 
 - **Azure SDK stack** – `azureml-core` pulls in `azure-storage-blob`, `msrest`, and `adlfs`; verify that CI images patch these transitives in lockstep and document minimum versions in accreditation plans (`pyproject.toml:35`, `src/elspeth/plugins/llms/middleware_azure.py:180`).[^dep-azure-stack-2025-10-12]
-- **Analytics extras** – Installing `[stats-agreement]` adds `pingouin`, `scikit-learn`, and `statsmodels`; when unused, omit the extra to reduce attack surface. If required, capture hashes of wheels used during accreditation runs (`pyproject.toml:44`, `src/elspeth/plugins/experiments/metrics.py:37`).[^dep-analytics-extras-2025-10-12]
+- **Analytics extras** – Agreement metrics use in-tree implementations (no GPL); `statsmodels` remains optional. When unused, omit analytics stacks to reduce surface. If required, capture hashes of wheels used during accreditation runs.[^dep-analytics-extras-2025-10-12]
 - **Visualization packages** – Optional guidance recommends `matplotlib`/`seaborn` for report charts; when deployed, ensure font backends and native libraries are vetted or constrained to headless environments (`docs/reporting-and-suite-management.md:12`).[^dep-visual-packages-2025-10-12]
 
 ## Update History

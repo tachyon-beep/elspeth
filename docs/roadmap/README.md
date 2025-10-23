@@ -10,7 +10,7 @@ This directory tracks planned features, work packages, and completed initiatives
 
 See [`work-packages/`](work-packages/) for detailed planning documents:
 
-- **[work-packages/IMPLEMENTATION_STATUS.md](work-packages/IMPLEMENTATION_STATUS.md)** - Current status of work packages
+- Historical status of work packages is available via Git history.
 - **[work-packages/WP001-streaming-datasource-architecture.md](work-packages/WP001-streaming-datasource-architecture.md)** - Streaming data source design
 - **[work-packages/WP002-dataframe-schema-validation.md](work-packages/WP002-dataframe-schema-validation.md)** - Schema validation system
 - **[work-packages/WP002_IMPLEMENTATION_PLAN.md](work-packages/WP002_IMPLEMENTATION_PLAN.md)** - Implementation plan for WP002

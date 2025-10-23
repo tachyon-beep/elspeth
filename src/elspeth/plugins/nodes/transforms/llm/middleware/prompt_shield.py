@@ -23,6 +23,8 @@ _PROMPT_SHIELD_SCHEMA = {
 
 
 class PromptShieldMiddleware(LLMMiddleware):
+    """Basic middleware that masks or blocks unsafe prompts before sending to the LLM."""
+
     name = "prompt_shield"
 
     def __init__(

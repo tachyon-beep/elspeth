@@ -11,12 +11,15 @@ import pandas as pd
 
 from elspeth.adapters import load_blob_csv
 from elspeth.core.base.protocols import DataSource
-from elspeth.core.security import normalize_determinism_level, normalize_security_level
+from elspeth.core.base.types import DeterminismLevel, SecurityLevel
+from elspeth.core.security import ensure_determinism_level, ensure_security_level
 
 logger = logging.getLogger(__name__)
 
 
 class BlobDataSource(DataSource):
+    """Read CSV data from Azure Blob Storage using configured profiles."""
+
     def __init__(
         self,
         *,
@@ -24,8 +27,8 @@ class BlobDataSource(DataSource):
         profile: str = "default",
         pandas_kwargs: dict[str, Any] | None = None,
         on_error: str = "abort",
-        security_level: str | None = None,
-        determinism_level: str | None = None,
+        security_level: SecurityLevel | None = None,
+        determinism_level: DeterminismLevel | None = None,
         retain_local: bool,  # REQUIRED - no default
         retain_local_path: str | None = None,
     ):
@@ -35,8 +38,8 @@ class BlobDataSource(DataSource):
         if on_error not in {"abort", "skip"}:
             raise ValueError("on_error must be 'abort' or 'skip'")
         self.on_error = on_error
-        self.security_level = normalize_security_level(security_level)
-        self.determinism_level = normalize_determinism_level(determinism_level)
+        self.security_level = ensure_security_level(security_level)
+        self.determinism_level = ensure_determinism_level(determinism_level)
         self.retain_local = retain_local
         self.retain_local_path = retain_local_path
 

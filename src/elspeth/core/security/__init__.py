@@ -22,60 +22,141 @@ from .secure_mode import (
     validate_middleware_config,
     validate_sink_config,
 )
-from .signing import generate_signature, verify_signature
+from .signing import generate_signature, public_key_fingerprint, verify_signature
 
-# Export enum types for backward compatibility
-SECURITY_LEVELS: list[str] = [str(level.value) for level in SecurityLevel]
-DETERMINISM_LEVELS: list[str] = [str(level.value) for level in DeterminismLevel]
+# No legacy string lists; enums are the source of truth
 
 
-def normalize_security_level(level: str | SecurityLevel | None) -> str:
-    """Coerce user-supplied levels to canonical PSPF format (uppercase).
+def _normalize_security_text(value: str) -> str:
+    """Normalize free-form security text for comparison.
 
-    Args:
-        level: String, SecurityLevel enum, or None
+    Removes punctuation and whitespace, lowercases, and collapses variants so
+    inputs like "OFFICIAL: SENSITIVE", "official_sensitive", and
+    "official-sensitive" normalize identically.
+    """
+    # Keep only alphanumeric characters for a robust match across punctuation
+    return "".join(ch for ch in value if ch.isalnum()).lower()
 
-    Returns:
-        Canonical PSPF string (e.g., "OFFICIAL")
 
-    Raises:
-        ValueError: If the level is invalid
+def _ensure_security_level(level: SecurityLevel | str | None) -> SecurityLevel:
+    """Convert input into a SecurityLevel enum (None/blank -> UNOFFICIAL).
+
+    This function is the single normalization point for security levels.
+    It accepts SecurityLevel values directly and supports common string inputs,
+    including canonical PSPF labels (e.g., "OFFICIAL: SENSITIVE") and legacy
+    aliases (e.g., "public" -> UNOFFICIAL, "internal" -> OFFICIAL).
     """
     if isinstance(level, SecurityLevel):
-        return str(level.value)
-    return str(SecurityLevel.from_string(level).value)
+        return level
+    if level is None:
+        return SecurityLevel.UNOFFICIAL
+
+    text = str(level).strip()
+    if not text:
+        return SecurityLevel.UNOFFICIAL
+
+    # First try exact, case-insensitive match to enum values
+    for enum_value in SecurityLevel:
+        if text.casefold() == enum_value.value.casefold():
+            return enum_value
+
+    # Fallback to normalized comparison and legacy aliases
+    normalized = _normalize_security_text(text)
+
+    # Canonical normalized keys for enum values
+    canonical_map = {_normalize_security_text(e.value): e for e in SecurityLevel}
+
+    # Legacy/alias mappings (normalized)
+    alias_map = {
+        "public": SecurityLevel.UNOFFICIAL,
+        "unofficial": SecurityLevel.UNOFFICIAL,
+        "internal": SecurityLevel.OFFICIAL,
+        "official": SecurityLevel.OFFICIAL,
+        "sensitive": SecurityLevel.OFFICIAL_SENSITIVE,
+        "officialsensitive": SecurityLevel.OFFICIAL_SENSITIVE,
+        "confidential": SecurityLevel.PROTECTED,
+        "protected": SecurityLevel.PROTECTED,
+        "secret": SecurityLevel.SECRET,
+    }
+
+    if normalized in canonical_map:
+        return canonical_map[normalized]
+    if normalized in alias_map:
+        return alias_map[normalized]
+
+    valid_levels = ", ".join(level.value for level in SecurityLevel)
+    raise ValueError(f"Unknown security level '{level}'. Must be one of: {valid_levels}")
 
 
-def is_security_level_allowed(data_level: str | None, clearance_level: str | None) -> bool:
+def _ensure_determinism_level(level: DeterminismLevel | str | None) -> DeterminismLevel:
+    """Convert input into a DeterminismLevel enum (None/blank -> NONE)."""
+    if isinstance(level, DeterminismLevel):
+        return level
+    if level is None:
+        return DeterminismLevel.NONE
+    text = str(level).strip()
+    if not text:
+        return DeterminismLevel.NONE
+    try:
+        # DeterminismLevel values are lower-case; accept case-insensitively
+        return DeterminismLevel(text.lower())
+    except ValueError as exc:
+        valid_levels = ", ".join(lv.value for lv in DeterminismLevel)
+        raise ValueError(f"Unknown determinism level '{level}'. Must be one of: {valid_levels}") from exc
+
+
+# Public helpers for normalization from free-form input
+def ensure_security_level(level: SecurityLevel | str | None) -> SecurityLevel:  # noqa: D401
+    """Return SecurityLevel from free-form input (single normalization point)."""
+    return _ensure_security_level(level)
+
+
+def ensure_determinism_level(level: DeterminismLevel | str | None) -> DeterminismLevel:  # noqa: D401
+    """Return DeterminismLevel from free-form input (single normalization point)."""
+    return _ensure_determinism_level(level)
+
+
+def is_security_level_allowed(data_level: SecurityLevel | str | None, clearance_level: SecurityLevel | str | None) -> bool:
     """Return True when the clearance equals or exceeds the data classification."""
 
-    normalized_data = normalize_security_level(data_level)
-    normalized_clearance = normalize_security_level(clearance_level)
-    data_idx = SECURITY_LEVELS.index(normalized_data)
-    clearance_idx = SECURITY_LEVELS.index(normalized_clearance)
-    return clearance_idx >= data_idx
+    data = _ensure_security_level(data_level)
+    clearance = _ensure_security_level(clearance_level)
+    return bool(clearance >= data)
 
 
-def resolve_security_level(*levels: str | None) -> str:
-    """Resolve multiple levels to the highest classification."""
+def resolve_security_level(*levels: SecurityLevel | str | None) -> SecurityLevel:
+    """Resolve multiple levels to the highest classification (most restrictive)."""
 
-    normalized = [normalize_security_level(level) for level in levels if level is not None]
-    if not normalized:
-        return SECURITY_LEVELS[0]
-    return max(normalized, key=SECURITY_LEVELS.index)
-
-
-def coalesce_security_level(*levels: str | None) -> str:
-    """Return a single normalized level ensuring all inputs agree."""
-
-    normalized: list[str] = []
+    filtered: list[SecurityLevel] = []
     for level in levels:
         if level is None:
+            continue
+        if isinstance(level, SecurityLevel):
+            filtered.append(level)
             continue
         text = str(level).strip()
         if not text:
             continue
-        normalized.append(normalize_security_level(text))
+        filtered.append(_ensure_security_level(text))
+    if not filtered:
+        return SecurityLevel.UNOFFICIAL
+    return max(filtered)
+
+
+def coalesce_security_level(*levels: SecurityLevel | str | None) -> SecurityLevel:
+    """Return a single level ensuring all inputs agree (after normalization)."""
+
+    normalized: list[SecurityLevel] = []
+    for level in levels:
+        if level is None:
+            continue
+        if isinstance(level, SecurityLevel):
+            normalized.append(level)
+            continue
+        text = str(level).strip()
+        if not text:
+            continue
+        normalized.append(_ensure_security_level(text))
 
     if not normalized:
         raise ValueError("security_level is required")
@@ -91,50 +172,39 @@ def coalesce_security_level(*levels: str | None) -> str:
 # ============================================================================
 
 
-def normalize_determinism_level(level: str | DeterminismLevel | None) -> str:
-    """Coerce user-supplied determinism levels to canonical lowercase format.
+def resolve_determinism_level(*levels: DeterminismLevel | str | None) -> DeterminismLevel:
+    """Resolve to the LEAST deterministic (none < low < high < guaranteed)."""
 
-    Args:
-        level: String, DeterminismLevel enum, or None
-
-    Returns:
-        Canonical lowercase string (e.g., "high")
-
-    Raises:
-        ValueError: If the level is invalid
-    """
-    if isinstance(level, DeterminismLevel):
-        return str(level.value)
-    return str(DeterminismLevel.from_string(level).value)
-
-
-def resolve_determinism_level(*levels: str | None) -> str:
-    """Resolve multiple levels to the LEAST deterministic (opposite of security).
-
-    Rule: LEAST deterministic wins (none < low < high < guaranteed)
-    Examples:
-        resolve_determinism_level("guaranteed", "high") → "high"
-        resolve_determinism_level("high", "none") → "none"
-    """
-
-    normalized = [normalize_determinism_level(level) for level in levels if level is not None]
-    if not normalized:
-        # Default to "none"
-        return DETERMINISM_LEVELS[0]
-    return min(normalized, key=DETERMINISM_LEVELS.index)
-
-
-def coalesce_determinism_level(*levels: str | None) -> str:
-    """Return a single normalized determinism level ensuring all inputs agree."""
-
-    normalized: list[str] = []
+    filtered: list[DeterminismLevel] = []
     for level in levels:
         if level is None:
+            continue
+        if isinstance(level, DeterminismLevel):
+            filtered.append(level)
             continue
         text = str(level).strip()
         if not text:
             continue
-        normalized.append(normalize_determinism_level(text))
+        filtered.append(_ensure_determinism_level(text))
+    if not filtered:
+        return DeterminismLevel.NONE
+    return min(filtered)
+
+
+def coalesce_determinism_level(*levels: DeterminismLevel | str | None) -> DeterminismLevel:
+    """Return a single determinism level ensuring all inputs agree."""
+
+    normalized: list[DeterminismLevel] = []
+    for level in levels:
+        if level is None:
+            continue
+        if isinstance(level, DeterminismLevel):
+            normalized.append(level)
+            continue
+        text = str(level).strip()
+        if not text:
+            continue
+        normalized.append(_ensure_determinism_level(text))
 
     if not normalized:
         raise ValueError("determinism_level is required")
@@ -148,15 +218,14 @@ def coalesce_determinism_level(*levels: str | None) -> str:
 __all__ = [
     "generate_signature",
     "verify_signature",
+    "public_key_fingerprint",
     "SecurityLevel",
     "DeterminismLevel",
-    "SECURITY_LEVELS",
-    "DETERMINISM_LEVELS",
-    "normalize_security_level",
+    "ensure_security_level",
+    "ensure_determinism_level",
     "is_security_level_allowed",
     "resolve_security_level",
     "coalesce_security_level",
-    "normalize_determinism_level",
     "resolve_determinism_level",
     "coalesce_determinism_level",
     # Secure mode validation

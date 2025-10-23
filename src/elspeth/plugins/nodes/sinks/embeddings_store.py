@@ -9,11 +9,6 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
-import psycopg
-from azure.core.credentials import AzureKeyCredential
-from azure.search.documents import SearchClient
-from psycopg import Connection, sql
-
 from elspeth.core.base.plugin_context import PluginContext
 from elspeth.core.base.protocols import Artifact, ArtifactDescriptor, ResultSink
 from elspeth.core.validation.base import ConfigurationError
@@ -85,16 +80,26 @@ class PgVectorClient(VectorStoreClient):
         table: str,
         upsert_conflict: str = "replace",
     ) -> None:
-        self._psycopg = psycopg
-        self._sql = sql
+        try:
+            import psycopg as _psycopg  # local import to avoid hard dependency at module import time
+            from psycopg import sql as _sql
+        except (ImportError, OSError) as exc:  # pragma: no cover - exercised in integration
+            raise ImportError(
+                "pgvector provider requires psycopg and libpq. "
+                "Install with: pip install 'psycopg[binary]' (or 'psycopg[c]' for C extension). "
+                "Ensure libpq is available on your system."
+            ) from exc
+        self._psycopg = _psycopg
+        self._sql = _sql
         self._dsn = dsn
         self._table = table
         self._conflict_policy = upsert_conflict
 
-    def _ensure_table(self, conn: psycopg.Connection) -> None:
+    def _ensure_table(self, conn: Any) -> None:
         with conn.cursor() as cur:
             cur.execute("CREATE EXTENSION IF NOT EXISTS vector")
-            # Use sql.Identifier to safely quote table name and prevent SQL injection
+            # Use sql.Identifier to safely quote table name and prevent SQL injection.
+            # Safe: table name via sql.Identifier; no user-controlled values in DDL.
             cur.execute(
                 self._sql.SQL("""
                 CREATE TABLE IF NOT EXISTS {} (
@@ -117,7 +122,7 @@ class PgVectorClient(VectorStoreClient):
             return UpsertResponse(count=0, took=0.0, namespace=namespace)
 
         with self._psycopg.connect(self._dsn, autocommit=True) as conn:
-            pg_conn: Connection[Any] = conn
+            pg_conn = conn
             self._ensure_table(pg_conn)
             # Use sql.SQL and sql.Identifier to safely construct queries and prevent SQL injection
             query = self._build_insert_query()
@@ -125,6 +130,7 @@ class PgVectorClient(VectorStoreClient):
                 for record in items:
                     vector_literal = self._vector_literal(record.vector)
                     metadata = json.dumps(record.metadata or {})
+                    # Safe: table name via sql.Identifier; all values provided as parameterized placeholders
                     cur.execute(
                         query,
                         (
@@ -144,7 +150,7 @@ class PgVectorClient(VectorStoreClient):
         values = ",".join(f"{float(value):.12g}" for value in vector)
         return f"[{values}]"
 
-    def _build_insert_query(self):
+    def _build_insert_query(self) -> Any:
         """Build the INSERT query with safe identifier quoting for table name.
 
         Returns SQL composed object with parameterized table name to prevent SQL injection.
@@ -184,8 +190,17 @@ class AzureSearchVectorClient(VectorStoreClient):
         document_id_field: str = "document_id",
         namespace_field: str = "namespace",
     ) -> None:
-        self._search_client_class = SearchClient
-        self._azure_key_credential_class = AzureKeyCredential
+        # Local imports to avoid hard dependency at module import time
+        try:
+            from azure.core.credentials import AzureKeyCredential as _AzureKeyCredential
+            from azure.search.documents import SearchClient as _SearchClient
+        except (ImportError, OSError) as exc:  # pragma: no cover - exercised in integration
+            raise ImportError(
+                "azure_search provider requires 'azure-search-documents' and 'azure-core' packages. "
+                "Install with: pip install 'azure-search-documents' 'azure-core'"
+            ) from exc
+        self._search_client_class = _SearchClient
+        self._azure_key_credential_class = _AzureKeyCredential
         self._client = self._search_client_class(endpoint=endpoint, index_name=index, credential=self._azure_key_credential_class(api_key))
         self._vector_field = vector_field
         self._id_field = document_id_field
@@ -212,6 +227,8 @@ class AzureSearchVectorClient(VectorStoreClient):
 
 
 class EmbeddingsStoreSink(ResultSink):
+    """Persist embeddings into a vector store backend (pgvector/Azure Search)."""
+
     """Persist experiment outputs into a vector store for RAG workflows."""
 
     def __init__(
@@ -277,13 +294,24 @@ class EmbeddingsStoreSink(ResultSink):
 
             document_id = self._extract_value(record, self._id_field) or f"{metadata.get('run_id', 'run')}-{index}"
             record_metadata = self._extract_metadata(record, metadata)
+            # Persist classification as canonical text for storage
+            if isinstance(security_level, str):
+                sec_text = security_level
+            else:
+                try:
+                    from elspeth.core.base.types import SecurityLevel as _SL
+
+                    sec_text = security_level.value if isinstance(security_level, _SL) else str(security_level)
+                except ImportError:
+                    sec_text = str(security_level)
+
             embeddings.append(
                 VectorRecord(
                     document_id=str(document_id),
                     vector=vector,
                     text=str(text_value),
                     metadata=record_metadata,
-                    security_level=str(security_level),
+                    security_level=sec_text,
                 )
             )
 

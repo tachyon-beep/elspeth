@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any, Callable, Iterable, Mapping
 
 from elspeth.core.base.plugin_context import PluginContext
+from elspeth.core.base.types import DeterminismLevel, SecurityLevel
 
 from .base import BasePluginRegistry
 
@@ -35,7 +36,7 @@ def create_utility_plugin(
 
     Now uses create_plugin_with_inheritance() helper to eliminate duplication.
     """
-    from .plugin_helpers import create_plugin_with_inheritance
+    from .plugin_helpers import create_plugin_with_inheritance  # pylint: disable=import-outside-toplevel
 
     return create_plugin_with_inheritance(
         _utility_registry,
@@ -51,8 +52,8 @@ def create_named_utility(
     name: str,
     options: Mapping[str, Any] | None,
     *,
-    security_level: str | None = None,
-    determinism_level: str | None = None,
+    security_level: SecurityLevel | None = None,
+    determinism_level: DeterminismLevel | None = None,
     parent_context: PluginContext | None = None,
     provenance: Iterable[str] | None = None,
 ) -> Any:

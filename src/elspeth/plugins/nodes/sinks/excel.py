@@ -12,7 +12,8 @@ from typing import Any, Iterable, Mapping
 from openpyxl import Workbook  # type: ignore[import-untyped]
 
 from elspeth.core.base.protocols import Artifact, ArtifactDescriptor, ResultSink
-from elspeth.core.security import normalize_determinism_level, normalize_security_level
+from elspeth.core.base.types import DeterminismLevel, SecurityLevel
+from elspeth.core.security import ensure_determinism_level, ensure_security_level
 from elspeth.core.utils.path_guard import resolve_under_base, safe_atomic_write
 from elspeth.plugins.nodes.sinks._sanitize import sanitize_cell
 
@@ -36,7 +37,7 @@ class ExcelSinkConfig:
     sanitize_guard: str = "'"
 
 
-def _load_workbook_dependencies():
+def _load_workbook_dependencies() -> Any:
     """Return the Workbook class for creating Excel files.
 
     Returns:
@@ -106,8 +107,8 @@ class ExcelResultSink(ResultSink):
         # Ensure dependency availability early for fast failure when configured incorrectly.
         self._workbook_factory = _load_workbook_dependencies()
         self._last_workbook_path: str | None = None
-        self._security_level: str | None = None
-        self._determinism_level: str | None = None
+        self._security_level: SecurityLevel | None = None
+        self._determinism_level: DeterminismLevel | None = None
         self._sanitization = {
             "enabled": self.sanitize_formulas,
             "guard": self.sanitize_guard,
@@ -152,8 +153,10 @@ class ExcelResultSink(ResultSink):
             safe_atomic_write(target, _writer)
             self._last_workbook_path = str(target)
             if metadata:
-                self._security_level = normalize_security_level(metadata.get("security_level"))
-                self._determinism_level = normalize_determinism_level(metadata.get("determinism_level"))
+                level = metadata.get("security_level")
+                det = metadata.get("determinism_level")
+                self._security_level = level if isinstance(level, SecurityLevel) else ensure_security_level(level)
+                self._determinism_level = det if isinstance(det, DeterminismLevel) else ensure_determinism_level(det)
             if plugin_logger:
                 try:
                     size = Path(self._last_workbook_path).stat().st_size if self._last_workbook_path else 0
@@ -193,7 +196,7 @@ class ExcelResultSink(ResultSink):
             name = f"{name}_{timestamp.strftime('%Y%m%dT%H%M%SZ')}"
         return self.base_path / f"{name}.xlsx"
 
-    def _populate_results_sheet(self, workbook, entries: Iterable[Mapping[str, Any]]) -> None:
+    def _populate_results_sheet(self, workbook: Any, entries: Iterable[Mapping[str, Any]]) -> None:
         sheet = workbook.active
         sheet.title = self.results_sheet
 
@@ -209,7 +212,7 @@ class ExcelResultSink(ResultSink):
 
     def _populate_manifest_sheet(
         self,
-        workbook,
+        workbook: Any,
         results: Mapping[str, Any],
         metadata: Mapping[str, Any],
         timestamp: datetime,
@@ -224,7 +227,7 @@ class ExcelResultSink(ResultSink):
                 rendered = value
             sheet.append([self._sanitize_value(key), self._sanitize_value(rendered)])
 
-    def _populate_aggregates_sheet(self, workbook, aggregates: Mapping[str, Any]) -> None:
+    def _populate_aggregates_sheet(self, workbook: Any, aggregates: Mapping[str, Any]) -> None:
         sheet = workbook.create_sheet(self.aggregates_sheet)
         sheet.append(
             [
@@ -273,15 +276,17 @@ class ExcelResultSink(ResultSink):
             manifest["failures"] = results["failures"]
         return manifest
 
-    def produces(self):  # pragma: no cover - placeholder for artifact chaining
+    def produces(self) -> list[ArtifactDescriptor]:  # pragma: no cover - placeholder for artifact chaining
         return [
             ArtifactDescriptor(name="excel", type="file/xlsx", persist=True, alias="excel"),
         ]
 
-    def consumes(self):  # pragma: no cover - placeholder for artifact chaining
+    def consumes(self) -> list[str]:  # pragma: no cover - placeholder for artifact chaining
         return []
 
-    def finalize(self, artifacts, *, metadata=None):  # pragma: no cover - optional cleanup
+    def finalize(
+        self, artifacts: Mapping[str, Artifact], *, metadata: dict[str, Any] | None = None
+    ) -> None:  # pragma: no cover - optional cleanup
         return None
 
     def collect_artifacts(self) -> dict[str, Artifact]:  # pragma: no cover

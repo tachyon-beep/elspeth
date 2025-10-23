@@ -30,11 +30,7 @@ class _FakeEmbedder:
 
 
 def _results(n: int = 2) -> dict[str, Any]:
-    return {
-        "results": [
-            {"row": {"APPID": f"A{i}"}, "response": {"content": f"text-{i}"}} for i in range(n)
-        ]
-    }
+    return {"results": [{"row": {"APPID": f"A{i}"}, "response": {"content": f"text-{i}"}} for i in range(n)]}
 
 
 def test_embeddings_store_happy_path(tmp_path: Path) -> None:
@@ -61,4 +57,3 @@ def test_embeddings_store_happy_path(tmp_path: Path) -> None:
     assert "embeddings_manifest" in artifacts
     assert fake_client.calls and fake_client.calls[-1][0] == "ns"
     assert fake_client.calls[-1][1], "Expected at least one upsert record"
-

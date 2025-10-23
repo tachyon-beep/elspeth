@@ -6,7 +6,7 @@ import json
 import logging
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Mapping
+from typing import TYPE_CHECKING, Any, Mapping
 
 from elspeth.core.experiments.config import ExperimentConfig, ExperimentSuite
 from elspeth.core.experiments.tools import export_suite_configuration, summarize_suite
@@ -320,7 +320,11 @@ class SuiteReportGenerator:
         return config.to_export_dict()
 
 
-def _comparisons_dataframe(comparative: dict[str, Any]):
+if TYPE_CHECKING:  # pragma: no cover - import only for type checking
+    import pandas as pd
+
+
+def _comparisons_dataframe(comparative: dict[str, Any]) -> "pd.DataFrame":
     """Build DataFrame of baseline comparison deltas across experiments.
 
     Args:

@@ -8,13 +8,14 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from elspeth.core.base.protocols import Artifact, ArtifactDescriptor, ResultSink
-from elspeth.core.security import normalize_determinism_level, normalize_security_level
+from elspeth.core.base.types import DeterminismLevel, SecurityLevel
+from elspeth.core.security import ensure_determinism_level, ensure_security_level
 
 logger = logging.getLogger(__name__)
 
 
 class AnalyticsReportSink(ResultSink):
-    """Write experiment analytics to JSON/Markdown artifacts."""
+    """Generate a JSON analytics report (and optional Markdown) summarizing results and failures."""
 
     def __init__(
         self,
@@ -44,8 +45,8 @@ class AnalyticsReportSink(ResultSink):
         self.include_aggregates = include_aggregates
         self.include_comparisons = include_comparisons
         self._last_written_files: list[Path] = []
-        self._security_level: str | None = None
-        self._determinism_level: str | None = None
+        self._security_level: SecurityLevel | None = None
+        self._determinism_level: DeterminismLevel | None = None
 
     def write(self, results: dict[str, Any], *, metadata: dict[str, Any] | None = None) -> None:
         try:
@@ -70,14 +71,16 @@ class AnalyticsReportSink(ResultSink):
                 written.append(path)
             self._last_written_files = written
             if metadata:
-                self._security_level = normalize_security_level(metadata.get("security_level"))
-                self._determinism_level = normalize_determinism_level(metadata.get("determinism_level"))
+                level = metadata.get("security_level")
+                det = metadata.get("determinism_level")
+                self._security_level = level if isinstance(level, SecurityLevel) else ensure_security_level(level)
+                self._determinism_level = det if isinstance(det, DeterminismLevel) else ensure_determinism_level(det)
             if plugin_logger:
                 total_bytes = 0
                 for p in written:
                     try:
                         total_bytes += p.stat().st_size
-                    except Exception:
+                    except (OSError, PermissionError):  # tolerate stat() errors to avoid blocking artifact write
                         pass
                 plugin_logger.log_event(
                     "sink_write",
@@ -85,7 +88,7 @@ class AnalyticsReportSink(ResultSink):
                     metrics={"bytes": total_bytes, "files": len(written)},
                     metadata={"path": str(self.base_path)},
                 )
-        except Exception as exc:  # pragma: no cover - error handling path
+        except Exception as exc:  # pragma: no cover - error handling path (render/write)
             if self.on_error == "skip":
                 logger.warning("Analytics report sink failed; skipping write: %s", exc)
                 plugin_logger = getattr(self, "plugin_logger", None)

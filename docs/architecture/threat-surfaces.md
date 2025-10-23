@@ -88,7 +88,7 @@ Update 2025-10-12: Middleware protections now live in `src/elspeth/plugins/nodes
 [^threat-external-2025-10-12]: Update 2025-10-12: External service interactions visualised in docs/architecture/component-diagram.md.
 [^threat-poisoned-2025-10-12]: Update 2025-10-12: Sanitisation and validation pipelines shown in docs/architecture/data-flow-diagrams.md (Update 2025-10-12: Ingress Classification Flow).
 [^threat-prompt-2025-10-12]: Update 2025-10-12: Prompt shielding controls catalogued in docs/architecture/security-controls.md (Update 2025-10-12: Middleware Safeguards).
-[^threat-config-2025-10-12]: Update 2025-10-12: Configuration signing recommendation links to docs/architecture/CONTROL_INVENTORY.md.
+[^threat-config-2025-10-12]: Update 2025-10-12: Configuration signing recommendation links to docs/compliance/CONTROL_INVENTORY.md.
 [^threat-spreadsheet-2025-10-12]: Update 2025-10-12: Spreadsheet sanitisation captured in docs/architecture/security-controls.md (Update 2025-10-12: Output Sanitisation).
 [^threat-artifact-2025-10-12]: Update 2025-10-12: Artifact clearance process described in docs/architecture/security-controls.md (Update 2025-10-12: Artifact Clearance).
 [^threat-repo-2025-10-12]: Update 2025-10-12: Repository guidance elaborated in docs/reporting-and-suite-management.md.

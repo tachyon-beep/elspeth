@@ -21,6 +21,13 @@ _AUDIT_SCHEMA = {
 
 
 class AuditMiddleware(LLMMiddleware):
+    """Structured audit logger for LLM requests and responses.
+
+    - Emits request metadata (and optionally prompts) before dispatch.
+    - Emits response metrics (and optionally content) after completion.
+    - Channel name is configurable via options or defaults to 'elspeth.audit'.
+    """
+
     name = "audit_logger"
 
     def __init__(self, *, include_prompts: bool = False, channel: str | None = None):

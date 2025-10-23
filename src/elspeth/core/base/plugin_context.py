@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Mapping
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+# Avoid top-level import of logging utilities to prevent circular imports
+from elspeth.core.base.types import DeterminismLevel, SecurityLevel
+from elspeth.core.security import ensure_determinism_level, ensure_security_level
 
 
 class PluginContext(BaseModel):
@@ -20,10 +25,12 @@ class PluginContext(BaseModel):
 
     plugin_name: str = Field(..., min_length=1, description="Name of the plugin instance")
     plugin_kind: str = Field(..., min_length=1, description="Type of plugin (datasource, llm, sink, etc)")
-    security_level: str = Field(..., min_length=1, description="Security classification level")
-    determinism_level: str = Field(default="none", description="Determinism level (none, low, high, guaranteed)")
+    security_level: SecurityLevel = Field(..., description="Security classification level")
+    determinism_level: DeterminismLevel = Field(
+        default=DeterminismLevel.NONE, description="Determinism level (none, low, high, guaranteed)"
+    )
     provenance: tuple[str, ...] = Field(default_factory=tuple, description="Chain of plugin sources")
-    parent: "PluginContext | None" = Field(default=None, description="Parent context for nested plugins")
+    parent: PluginContext | None = Field(default=None, description="Parent context for nested plugins")
     metadata: Mapping[str, Any] = Field(default_factory=dict, description="Additional context metadata")
     suite_root: Path | None = Field(default=None, description="Suite root directory (orchestration pack folder)")
     config_path: Path | None = Field(default=None, description="Configuration file path for this run")
@@ -39,40 +46,38 @@ class PluginContext(BaseModel):
         validate_assignment=True,
     )
 
-    @field_validator("plugin_name", "plugin_kind", "security_level")
+    @field_validator("plugin_name", "plugin_kind")
     @classmethod
-    def validate_non_empty(cls, v: str, info) -> str:
+    def validate_non_empty(cls, v: str, info: Any) -> str:
         """Validate that critical fields are non-empty."""
         if not v or not v.strip():
             raise ValueError(f"{info.field_name} cannot be empty")
         return v.strip()
 
-    @field_validator("determinism_level")
+    @field_validator("security_level", mode="before")
     @classmethod
-    def validate_determinism_level(cls, v: str) -> str:
-        """Validate determinism level is one of the expected values.
+    def parse_security_level(cls, v: SecurityLevel | str | None) -> SecurityLevel:
+        """Accept strings or enum; normalize via security.ensure_security_level."""
+        return ensure_security_level(v)
 
-        Valid levels: none, low, high, guaranteed
-        (These correspond to the DeterminismLevel enum)
-        """
-        valid_levels = {"none", "low", "high", "guaranteed"}
-        v_lower = v.lower().strip()
-        if v_lower not in valid_levels:
-            raise ValueError(f"determinism_level must be one of {valid_levels}, got '{v}'")
-        return v_lower
+    @field_validator("determinism_level", mode="before")
+    @classmethod
+    def parse_determinism_level(cls, v: DeterminismLevel | str | None) -> DeterminismLevel:
+        """Accept strings or enum; normalize via security.ensure_determinism_level."""
+        return ensure_determinism_level(v)
 
     def derive(
         self,
         *,
         plugin_name: str,
         plugin_kind: str,
-        security_level: str | None = None,
-        determinism_level: str | None = None,
+        security_level: SecurityLevel | None = None,
+        determinism_level: DeterminismLevel | None = None,
         provenance: Iterable[str] | None = None,
         metadata: Mapping[str, Any] | None = None,
         suite_root: Path | None = None,
         config_path: Path | None = None,
-    ) -> "PluginContext":
+    ) -> PluginContext:
         """Create a child context inheriting from this context.
 
         If security_level, determinism_level, suite_root, or config_path are not provided,
@@ -111,15 +116,15 @@ def apply_plugin_context(instance: Any, context: PluginContext) -> None:
     Also attaches a PluginLogger for structured logging.
     """
 
-    setattr(instance, "plugin_context", context)
-    setattr(instance, "_elspeth_context", context)
-    setattr(instance, "security_level", context.security_level)
-    setattr(instance, "_elspeth_security_level", context.security_level)
-    setattr(instance, "determinism_level", context.determinism_level)
-    setattr(instance, "_elspeth_determinism_level", context.determinism_level)
+    instance.plugin_context = context
+    instance._elspeth_context = context  # noqa: SLF001 - internal marker for plugin context  # pylint: disable=protected-access
+    instance.security_level = context.security_level
+    instance._elspeth_security_level = context.security_level  # noqa: SLF001 - internal marker for plugin context  # pylint: disable=protected-access
+    instance.determinism_level = context.determinism_level
+    instance._elspeth_determinism_level = context.determinism_level  # noqa: SLF001 - internal marker for plugin context  # pylint: disable=protected-access
 
     # Attach plugin logger for structured logging
-    from elspeth.core.utils.logging import attach_plugin_logger
+    from elspeth.core.utils.logging import attach_plugin_logger  # pylint: disable=import-outside-toplevel
 
     attach_plugin_logger(instance, context)
 

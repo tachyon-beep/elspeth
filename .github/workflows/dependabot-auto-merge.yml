@@ -1,0 +1,292 @@
+name: Dependabot Auto-Merge Security Patches
+
+# This workflow automatically approves and merges Dependabot security patches
+# after all CI checks pass. It then triggers a new patch version release
+# which builds and publishes a new container image.
+#
+# Security Gates (ALL must pass before merge):
+# - All CI tests pass (979+ tests)
+# - Coverage ≥80%
+# - Ruff + mypy clean
+# - Bandit + semgrep clean
+# - pip-audit passes
+# - Grype container scan passes
+#
+# Safety Mechanisms:
+# - Only security updates (labeled "security")
+# - Only patch/minor updates (not major)
+# - Only after ALL CI checks pass
+# - Requires Dependabot as author
+# - Creates audit trail via PR comments
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  # Re-run gating on CI completion for the main CI workflow
+  workflow_run:
+    workflows: ["Lint, Tests & Sample Suite"]
+    types: [completed]
+
+permissions: {}
+
+jobs:
+  auto-merge-security:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      id-token: write
+    # Only run on Dependabot PRs with security label
+    if: |
+      github.actor == 'dependabot[bot]' &&
+      contains(github.event.pull_request.labels.*.name, 'security')
+
+    steps:
+      - name: Fetch Dependabot PR metadata
+        id: metadata
+        uses: dependabot/fetch-metadata@08eff52bf64351f401fb50d4972fa95b9f2c2d1b # v2.4.0
+        with:
+          github-token: "${{ secrets.GITHUB_TOKEN }}"
+
+      - name: Check update type and CI status
+        id: check
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          UPDATE_TYPE: ${{ steps.metadata.outputs.update-type }}
+        run: |
+          # Get update type from metadata
+          echo "Update type: ${UPDATE_TYPE}"
+
+          # Only auto-merge security patches and minor updates (not major)
+          if [[ "${UPDATE_TYPE}" =~ ^version-update:semver-(patch|minor)$ ]]; then
+            echo "safe_update=true" >> $GITHUB_OUTPUT
+          else
+            echo "safe_update=false" >> $GITHUB_OUTPUT
+            echo "⚠️ Major version update detected - requires manual review"
+          fi
+
+          # Check CI status
+          gh pr checks "${PR_URL}" --watch --interval 60 || {
+            echo "❌ CI checks failed - will not auto-merge"
+            exit 1
+          }
+
+          echo "✅ All CI checks passed"
+
+      - name: Add approval comment
+        if: steps.check.outputs.safe_update == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          UPDATE_TYPE: ${{ steps.metadata.outputs.update-type }}
+          DEP_NAMES: ${{ steps.metadata.outputs.dependency-names }}
+          PREV_VERSION: ${{ steps.metadata.outputs.previous-version }}
+          NEW_VERSION: ${{ steps.metadata.outputs.new-version }}
+        run: |
+          gh pr comment "${PR_URL}" --body "🤖 **Automated Security Patch Approval**
+
+          This security patch has passed all CI gates and is approved for auto-merge:
+
+          ✅ All tests passing
+          ✅ Coverage ≥80%
+          ✅ Security scans clean
+          ✅ Update type: ${UPDATE_TYPE}
+
+          **Next Steps:**
+          1. Auto-merge this PR
+          2. Create new patch version tag
+          3. Trigger container image build
+          4. Publish signed image to GHCR
+
+          **Audit Trail:**
+          - PR: ${PR_NUMBER}
+          - Dependency: ${DEP_NAMES}
+          - Previous version: ${PREV_VERSION}
+          - New version: ${NEW_VERSION}
+          - CVE: Check PR description for CVE details
+
+          ---
+          *This is an automated action. If you need to prevent auto-merge, add the \`hold\` label.*"
+
+      - name: Approve PR
+        if: steps.check.outputs.safe_update == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          gh pr review "${PR_URL}" --approve --body "✅ Automated approval: All CI checks passed, security patch is safe to merge."
+
+      - name: Enable auto-merge
+        if: steps.check.outputs.safe_update == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          gh pr merge "${PR_URL}" --auto --squash --delete-branch
+
+      - name: Wait for merge to complete
+        if: steps.check.outputs.safe_update == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: |
+          # Wait up to 5 minutes for PR to merge
+          for i in {1..30}; do
+            STATE=$(gh pr view "${PR_URL}" --json state --jq '.state')
+            if [ "${STATE}" = "MERGED" ]; then
+              echo "✅ PR merged successfully"
+              exit 0
+            fi
+            echo "Waiting for merge... (${i}/30)"
+            sleep 10
+          done
+          echo "⚠️ Merge taking longer than expected, but auto-merge is enabled"
+
+  trigger-image-build:
+    runs-on: ubuntu-latest
+    needs: auto-merge-security
+    if: success()
+    permissions:
+      contents: write
+
+    steps:
+      - name: Wait for merge to propagate
+        run: |
+          # Give GitHub a few seconds to finalize the merge and update refs
+          sleep 10
+
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          fetch-depth: 0
+          ref: main  # Checkout main after merge
+
+      - name: Get latest version tag
+        id: get_version
+        run: |
+          # Get latest version tag (format: v0.1.0)
+          LATEST_TAG=$(git tag -l "v*" | sort -V | tail -n1)
+
+          if [ -z "${LATEST_TAG}" ]; then
+            # No tags yet, start with v0.1.0
+            NEW_TAG="v0.1.0"
+          else
+            # Parse version components
+            VERSION=${LATEST_TAG#v}  # Remove 'v' prefix
+            IFS='.' read -r MAJOR MINOR PATCH <<< "${VERSION}"
+
+            # Increment patch version for security updates
+            PATCH=$((PATCH + 1))
+            NEW_TAG="v${MAJOR}.${MINOR}.${PATCH}"
+          fi
+
+          echo "latest_tag=${LATEST_TAG}" >> $GITHUB_OUTPUT
+          echo "new_tag=${NEW_TAG}" >> $GITHUB_OUTPUT
+          echo "📦 Latest tag: ${LATEST_TAG}"
+          echo "🆕 New tag: ${NEW_TAG}"
+
+      - name: Create and push new version tag
+        env:
+          NEW_TAG: ${{ steps.get_version.outputs.new_tag }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          RUN_ID: ${{ github.run_id }}
+          COMMIT_SHA: ${{ github.sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          # Configure git
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Create annotated tag for security patch
+          git tag -a "${NEW_TAG}" -m "Security patch release ${NEW_TAG}
+
+          This release contains automated security dependency updates.
+
+          - Triggered by: Dependabot security PR #${PR_NUMBER}
+          - Build: ${RUN_ID}
+          - Commit: ${COMMIT_SHA}
+
+          All security gates passed:
+          ✅ Tests, coverage, linting
+          ✅ Security scans (bandit, semgrep, pip-audit, grype)
+          ✅ Lockfile verification
+
+          Container image will be published to:
+          ghcr.io/${REPO}:${NEW_TAG}"
+
+          # Push tag (triggers publish.yml workflow)
+          git push origin "${NEW_TAG}"
+
+          echo "✅ Created and pushed tag: ${NEW_TAG}"
+          echo "🚀 Container image build triggered via publish.yml"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NEW_TAG: ${{ steps.get_version.outputs.new_tag }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          gh release create "${NEW_TAG}" \
+            --title "Security Patch ${NEW_TAG}" \
+            --notes "## 🔒 Security Patch Release
+
+          This is an automated security patch release triggered by Dependabot.
+
+          ### Changes
+          - Security dependency updates from PR #${PR_NUMBER}
+          - All CI security gates passed
+
+          ### Container Image
+          \`\`\`bash
+          docker pull ghcr.io/${REPO}:${NEW_TAG}
+
+          # Verify signature
+          cosign verify \\
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \\
+            --certificate-identity-regexp \"https://github.com/${REPO}/.*\" \\
+            ghcr.io/${REPO}:${NEW_TAG}
+          \`\`\`
+
+          ### Security Verification
+          - Image signed with Cosign (keyless OIDC)
+          - SBOM attestation included (CycloneDX)
+          - Grype scan passed (no HIGH/CRITICAL vulnerabilities)
+
+          **Audit Trail:** See PR #${{ github.event.pull_request.number }} for CVE details." \
+            --latest
+
+      - name: Post summary
+        env:
+          NEW_TAG: ${{ steps.get_version.outputs.new_tag }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          RUN_ID: ${{ github.run_id }}
+          COMMIT_SHA: ${{ github.sha }}
+        run: |
+          cat >> $GITHUB_STEP_SUMMARY << EOF
+          ## 🔒 Security Patch Auto-Merge Complete
+
+          ### ✅ Actions Completed
+          1. Security PR #${{ github.event.pull_request.number }} auto-merged
+          2. Version tag created: \`${NEW_TAG}\`
+          3. Container image build triggered
+          4. GitHub release created
+
+          ### 📦 Container Image
+          \`\`\`
+          ghcr.io/${REPO}:${NEW_TAG}
+          \`\`\`
+
+          ### 🔍 Next Steps
+          - Monitor publish.yml workflow for image build status
+          - Verify image signature and SBOM attestation
+          - Deploy to staging/production environments
+
+          ### 📊 Audit Information
+          - **PR**: #${PR_NUMBER}
+          - **Build**: ${RUN_ID}
+          - **Commit**: ${COMMIT_SHA}
+          - **Tag**: ${NEW_TAG}
+          EOF

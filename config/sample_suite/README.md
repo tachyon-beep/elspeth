@@ -36,7 +36,7 @@ outputs that flow through the metrics and CSV sinks.
 
    ```bash
    source .venv/bin/activate
-   pip install -e .[dev,analytics-visual]
+   pip install -e .[dev]
    ```
 
 2. Execute the suite via the CLI

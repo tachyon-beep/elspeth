@@ -10,29 +10,39 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+from collections.abc import Iterable, Mapping
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any
 
 import pandas as pd
 
 from elspeth.config import load_settings
-from elspeth.core.experiments import ExperimentSuite, ExperimentSuiteRunner
-from elspeth.core.experiments.tools import create_experiment_template, export_suite_configuration
+from elspeth.core.cli.config_utils import (
+    configure_sink_dry_run as _configure_sink_dry_run,
+)
+from elspeth.core.cli.config_utils import (
+    strip_metrics_plugins as _strip_metrics_plugins,
+)
+from elspeth.core.experiments import ExperimentSuite
 from elspeth.core.orchestrator import ExperimentOrchestrator
+from elspeth.core.security import SecureMode, get_secure_mode
 from elspeth.core.validation import validate_settings, validate_suite
-from elspeth.plugins.nodes.sinks.csv_file import CsvResultSink
-from elspeth.tools.reporting import SuiteReportGenerator
+from elspeth.tools.reporting import SuiteReportGenerator  # noqa: F401 - Back-compat for tests expecting cli.SuiteReportGenerator
 
 logger = logging.getLogger(__name__)
+
+# Default settings path used across subcommands
+DEFAULT_SETTINGS_PATH = "config/settings.yaml"
 
 
 def build_parser() -> argparse.ArgumentParser:
     """Define CLI arguments for ELSPETH orchestration workflows."""
 
     parser = argparse.ArgumentParser(description="ELSPETH orchestration CLI")
+    subparsers = parser.add_subparsers(dest="command")
     parser.add_argument(
         "--settings",
-        default="config/settings.yaml",
+        default=DEFAULT_SETTINGS_PATH,
         help="Path to orchestrator settings YAML",
     )
     parser.add_argument(
@@ -68,6 +78,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Set logging verbosity",
     )
     parser.add_argument(
+        "--health-port",
+        type=int,
+        default=None,
+        help="Enable HTTP health check server on specified port (e.g., 8080 for K8s probes)",
+    )
+    parser.add_argument(
         "--disable-metrics",
         action="store_true",
         help="Disable metrics/statistical plugins from the loaded settings",
@@ -98,10 +114,97 @@ def build_parser() -> argparse.ArgumentParser:
         help="Directory to write analytics reports when running a suite",
     )
     parser.add_argument(
+        "--artifacts-dir",
+        type=Path,
+        help="Directory to write persistent artifacts (results, configs, signed bundles)",
+    )
+    parser.add_argument(
+        "--signed-bundle",
+        action="store_true",
+        help="Create a signed reproducibility bundle under --artifacts-dir",
+    )
+    parser.add_argument(
+        "--signing-key-env",
+        default="ELSPETH_SIGNING_KEY",
+        help="Environment variable name for the HMAC signing key (for --signed-bundle)",
+    )
+    parser.add_argument(
+        "--artifact-sink-plugin",
+        help="Optional artifact publisher sink plugin (e.g., azure_devops_artifact_repo)",
+    )
+    parser.add_argument(
+        "--artifact-sink-config",
+        type=Path,
+        help="Path to YAML/JSON with options for the artifact sink plugin",
+    )
+    parser.add_argument(
         "--validate-schemas",
         action="store_true",
         help="Validate datasource schema compatibility with plugins without running experiments",
     )
+    parser.add_argument(
+        "--job-config",
+        type=Path,
+        help="Run an ad-hoc job from a YAML config (datasource -> optional LLM transform -> sinks)",
+    )
+
+    # -------------------------- Subcommands (optional) --------------------------
+    # validate-schemas
+    cmd_validate = subparsers.add_parser(
+        "validate-schemas",
+        help="Validate datasource schema compatibility without running experiments",
+    )
+    cmd_validate.add_argument("--settings", default=DEFAULT_SETTINGS_PATH)
+    cmd_validate.add_argument("--profile", default="default")
+
+    # run-job
+    cmd_job = subparsers.add_parser(
+        "run-job",
+        help="Execute an ad-hoc job config and optionally write artifacts",
+    )
+    cmd_job.add_argument("--job-config", type=Path, required=True)
+    cmd_job.add_argument("--head", type=int, default=5)
+    cmd_job.add_argument("--artifacts-dir", type=Path)
+    cmd_job.add_argument("--signed-bundle", action="store_true")
+    cmd_job.add_argument("--signing-key-env", default="ELSPETH_SIGNING_KEY")
+
+    # run-suite
+    cmd_suite = subparsers.add_parser(
+        "run-suite",
+        help="Run all experiments declared in a suite configuration",
+    )
+    cmd_suite.add_argument("--settings", default=DEFAULT_SETTINGS_PATH)
+    cmd_suite.add_argument("--profile", default="default")
+    cmd_suite.add_argument("--suite-root", type=Path, required=True)
+    cmd_suite.add_argument("--reports-dir", type=Path)
+    cmd_suite.add_argument("--head", type=int, default=0)
+    cmd_suite.add_argument("--live-outputs", action="store_true")
+    cmd_suite.add_argument("--signed-bundle", action="store_true")
+    cmd_suite.add_argument("--signing-key-env", default="ELSPETH_SIGNING_KEY")
+
+    # run-single
+    cmd_single = subparsers.add_parser(
+        "run-single",
+        help="Run a single experiment from settings without a suite",
+    )
+    cmd_single.add_argument("--settings", default=DEFAULT_SETTINGS_PATH)
+    cmd_single.add_argument("--profile", default="default")
+    cmd_single.add_argument("--output-csv", type=Path)
+    cmd_single.add_argument("--head", type=int, default=5)
+    cmd_single.add_argument("--live-outputs", action="store_true")
+    cmd_single.add_argument("--signed-bundle", action="store_true")
+    cmd_single.add_argument("--artifacts-dir", type=Path)
+    cmd_single.add_argument("--signing-key-env", default="ELSPETH_SIGNING_KEY")
+
+    # health-server
+    cmd_health = subparsers.add_parser(
+        "health-server",
+        help="Run a simple HTTP health server exposing /health and /ready",
+    )
+    cmd_health.add_argument("--host", default="127.0.0.1")
+    cmd_health.add_argument("--port", type=int, default=8080)
+    cmd_health.add_argument("--tls-cert", help="Path to TLS certificate (PEM)")
+    cmd_health.add_argument("--tls-key", help="Path to TLS private key (PEM)")
     return parser
 
 
@@ -168,12 +271,73 @@ def run(args: argparse.Namespace) -> None:
 
     log_level = getattr(args, "log_level", "INFO")
     configure_logging(log_level)
+    # Start health check server in the background if requested
+    if getattr(args, "health_port", None):
+        try:
+            from elspeth.core.healthcheck import serve_in_thread  # pylint: disable=import-outside-toplevel
+
+            serve_in_thread(port=int(args.health_port))
+            logger.info("Health check server enabled at http://0.0.0.0:%d/health and /ready", args.health_port)
+        except Exception as exc:  # pragma: no cover - health server optional
+            logger.warning("Failed to start health server: %s", exc)
+    # Subcommands take precedence if specified
+    if getattr(args, "command", None) == "run-job":
+        from elspeth.core.cli.job import execute_job_file  # pylint: disable=import-outside-toplevel
+
+        payload, df = execute_job_file(args.job_config)
+        if args.head and args.head > 0 and not df.empty:
+            print(format_preview(df, args.head))
+        _maybe_write_artifacts_single(args, _AdHoc(settings_path=args.job_config), payload, df)
+        return
+
+    if getattr(args, "command", None) == "validate-schemas":
+        from elspeth.core.cli.validate import validate_schemas_command  # pylint: disable=import-outside-toplevel
+
+        settings = _load_settings_from_args(args)
+        suite_root = _resolve_suite_root(args, settings)
+        validate_schemas_command(args, settings, suite_root)
+        return
+
+    if getattr(args, "command", None) == "run-suite":
+        settings = _load_settings_from_args(args)
+        suite_root = _resolve_suite_root(args, settings)
+        if not suite_root:
+            raise SystemExit("--suite-root is required for run-suite")
+        suite_validation = validate_suite(suite_root)
+        for warning in suite_validation.report.warnings:
+            logger.warning(warning.format())
+        suite_validation.report.raise_if_errors()
+        _run_suite(
+            args,
+            settings,
+            suite_root,
+            preflight=suite_validation.preflight,
+            suite=_handle_suite_management(args, suite_root),
+        )
+        return
+
+    if getattr(args, "command", None) == "run-single":
+        settings = _load_settings_from_args(args)
+        _run_single(args, settings)
+        return
+    # Legacy path: If an ad-hoc job config is specified, run it and exit
+    if getattr(args, "job_config", None):
+        from elspeth.core.cli.job import execute_job_file  # pylint: disable=import-outside-toplevel
+
+        payload, df = execute_job_file(args.job_config)
+        if args.head and args.head > 0 and not df.empty:
+            print(format_preview(df, args.head))
+        _maybe_write_artifacts_single(args, _AdHoc(settings_path=args.job_config), payload, df)
+        return
+
     settings = _load_settings_from_args(args)
     suite_root = _resolve_suite_root(args, settings)
 
-    # Handle schema validation mode
+    # Legacy path: Handle schema validation mode
     if getattr(args, "validate_schemas", False):
-        _validate_schemas(args, settings, suite_root)
+        from elspeth.core.cli.validate import validate_schemas_command  # pylint: disable=import-outside-toplevel
+
+        validate_schemas_command(args, settings, suite_root)
         return
 
     suite_instance = _handle_suite_management(args, suite_root)
@@ -195,39 +359,8 @@ def run(args: argparse.Namespace) -> None:
         _run_single(args, settings)
 
 
-def _validate_schemas(args: argparse.Namespace, settings, suite_root: Path | None) -> None:
-    """Validate datasource schema compatibility without running experiments."""
-    logger.info("Validating datasource schema compatibility...")
-
-    try:
-        # Load DataFrame from datasource
-        df = settings.datasource.load()
-        logger.info("✓ Datasource loaded successfully: %d rows, %d columns", len(df), len(df.columns))
-
-        # Check if schema is attached
-        datasource_schema = df.attrs.get("schema") if hasattr(df, "attrs") else None
-
-        if datasource_schema:
-            logger.info("✓ Schema found: %s", datasource_schema.__name__)
-            logger.info("  Columns: %s", list(datasource_schema.__annotations__.keys()))
-
-            # For now, just report success - actual plugin validation would happen
-            # during experiment runner initialization
-            logger.info("✓ Schema validation passed")
-            print("\n✅ Schema validation successful!")
-            print(f"   Datasource: {settings.datasource.__class__.__name__}")
-            print(f"   Schema: {datasource_schema.__name__}")
-            print(f"   Columns: {', '.join(datasource_schema.__annotations__.keys())}")
-        else:
-            logger.warning("⚠ No schema defined - validation skipped")
-            logger.warning("  Consider adding a schema declaration to your datasource configuration")
-            print("\n⚠️  No schema validation performed")
-            print("   Tip: Add a 'schema' section to your datasource configuration for type safety")
-
-    except Exception as exc:
-        logger.error("✗ Schema validation failed: %s", exc, exc_info=True)
-        print(f"\n❌ Schema validation failed: {exc}")
-        raise SystemExit(1)
+## moved to elspeth.core.cli.validate.validate_schemas_command
+## kept import indirection in run() to reduce cli.py size
 
 
 def _run_single(args: argparse.Namespace, settings) -> None:
@@ -244,7 +377,20 @@ def _run_single(args: argparse.Namespace, settings) -> None:
         suite_root=settings.suite_root,
         config_path=settings.config_path,
     )
-    payload = orchestrator.run()
+    try:
+        payload = orchestrator.run()
+    except Exception as exc:  # sink or pipeline failure
+        # STRICT mode: fail-closed on any sink error during run
+        try:
+            if get_secure_mode() == SecureMode.STRICT:
+                logger.error("STRICT mode: sink error during run; aborting with non-zero exit: %s", exc)
+                raise SystemExit(1)
+        except Exception:
+            # If secure mode utilities unavailable, re-raise original error but record context
+            logger.debug("Secure mode utilities unavailable; continuing to re-raise original exception", exc_info=True)
+        raise
+    # Enforce payload contract at CLI boundary (failures always present)
+    payload.setdefault("failures", [])
 
     for failure in payload.get("failures", []):
         retry = failure.get("retry") or {}
@@ -267,112 +413,28 @@ def _run_single(args: argparse.Namespace, settings) -> None:
     if args.head and args.head > 0 and not df.empty:
         print(format_preview(df, args.head))
 
+    _maybe_write_artifacts_single(args, settings, payload, df)
+    # STRICT mode: fail closed if any sink failures were recorded
+    try:
+        if get_secure_mode() == SecureMode.STRICT and payload.get("failures"):
+            logger.error("STRICT mode: sink failures detected; aborting with non-zero exit")
+            raise SystemExit(1)
+    except Exception:
+        # If secure mode utilities unavailable, record context and continue
+        logger.debug("Secure mode utilities unavailable after run; continuing without exit enforcement", exc_info=True)
+
 
 def _clone_suite_sinks(base_sinks: list, experiment_name: str) -> list:
-    """Create experiment-scoped sink instances for suite execution."""
+    # Delegate to extracted helper for maintainability
+    from elspeth.core.cli.suite import clone_suite_sinks as _impl  # pylint: disable=import-outside-toplevel
 
-    cloned = []
-    for sink in base_sinks:
-        security_level = getattr(sink, "_elspeth_security_level", None)
-        determinism_level = getattr(sink, "_elspeth_determinism_level", getattr(sink, "determinism_level", None))
-        if isinstance(sink, CsvResultSink):
-            base_path = Path(sink.path)
-            new_path = base_path.with_name(f"{experiment_name}_{base_path.name}")
-            cloned.append(
-                CsvResultSink(
-                    path=str(new_path),
-                    overwrite=sink.overwrite,
-                    on_error=sink.on_error,
-                    sanitize_formulas=sink.sanitize_formulas,
-                    sanitize_guard=sink.sanitize_guard,
-                )
-            )
-            if security_level:
-                setattr(cloned[-1], "_elspeth_security_level", security_level)
-            if determinism_level:
-                setattr(cloned[-1], "_elspeth_determinism_level", determinism_level)
-                setattr(cloned[-1], "determinism_level", determinism_level)
-        else:
-            cloned.append(sink)
-            if determinism_level:
-                setattr(cloned[-1], "_elspeth_determinism_level", determinism_level)
-                setattr(cloned[-1], "determinism_level", determinism_level)
-    return cloned
+    return _impl(base_sinks, experiment_name)
 
 
 def _assemble_suite_defaults(settings) -> dict:
-    """Merge orchestrator, suite, and runtime defaults for suite execution."""
+    from elspeth.core.cli.suite import assemble_suite_defaults as _impl  # pylint: disable=import-outside-toplevel
 
-    config = settings.orchestrator_config
-    defaults: dict[str, Any] = {
-        "prompt_system": config.llm_prompt.get("system", ""),
-        "prompt_template": config.llm_prompt.get("user", ""),
-        "prompt_fields": config.prompt_fields,
-        "criteria": config.criteria,
-        "prompt_packs": settings.prompt_packs,
-    }
-
-    optional_overrides = {
-        "prompt_pack": config.prompt_pack,
-        "row_plugin_defs": config.row_plugin_defs,
-        "aggregator_plugin_defs": config.aggregator_plugin_defs,
-        "baseline_plugin_defs": config.baseline_plugin_defs,
-        "validation_plugin_defs": config.validation_plugin_defs,
-        "sink_defs": config.sink_defs,
-        "llm_middleware_defs": config.llm_middleware_defs,
-        "prompt_defaults": config.prompt_defaults,
-        "concurrency_config": config.concurrency_config,
-        "early_stop_plugin_defs": config.early_stop_plugin_defs,
-        "early_stop_config": config.early_stop_config,
-    }
-    for key, value in optional_overrides.items():
-        if value:
-            defaults[key] = value
-
-    suite_defaults = settings.suite_defaults or {}
-    passthrough_keys = {
-        k: v
-        for k, v in suite_defaults.items()
-        if k
-        not in {
-            "row_plugins",
-            "aggregator_plugins",
-            "sinks",
-            "baseline_plugins",
-            "llm_middlewares",
-            "early_stop_plugins",
-            "early_stop_plugin_defs",
-        }
-    }
-    defaults.update(passthrough_keys)
-
-    plugin_mappings = {
-        "row_plugin_defs": ["row_plugins"],
-        "aggregator_plugin_defs": ["aggregator_plugins"],
-        "baseline_plugin_defs": ["baseline_plugins"],
-        "validation_plugin_defs": ["validation_plugins"],
-        "llm_middleware_defs": ["llm_middlewares"],
-        "prompt_defaults": ["prompt_defaults"],
-        "concurrency_config": ["concurrency"],
-        "early_stop_plugin_defs": ["early_stop_plugin_defs", "early_stop_plugins"],
-        "early_stop_config": ["early_stop"],
-        "sink_defs": ["sinks"],
-        "prompt_pack": ["prompt_pack"],
-        "rate_limiter_def": ["rate_limiter"],
-        "cost_tracker_def": ["cost_tracker"],
-    }
-    for target, sources in plugin_mappings.items():
-        for candidate in sources:
-            if candidate in suite_defaults:
-                defaults[target] = suite_defaults[candidate]
-                break
-
-    if settings.rate_limiter:
-        defaults["rate_limiter"] = settings.rate_limiter
-    if settings.cost_tracker:
-        defaults["cost_tracker"] = settings.cost_tracker
-
-    return defaults
+    return _impl(settings)
 
 
 def _load_settings_from_args(args: argparse.Namespace):
@@ -389,6 +451,13 @@ def _load_settings_from_args(args: argparse.Namespace):
     return settings
 
 
+class _AdHoc:
+    """Lightweight shim to carry config_path for artifact writing."""
+
+    def __init__(self, *, settings_path: Path) -> None:
+        self.config_path = settings_path
+
+
 def _resolve_suite_root(args: argparse.Namespace, settings) -> Path | None:
     """Determine the suite root directory from CLI overrides or settings."""
 
@@ -397,148 +466,76 @@ def _resolve_suite_root(args: argparse.Namespace, settings) -> Path | None:
 
 
 def _handle_suite_management(args: argparse.Namespace, suite_root: Path | None) -> ExperimentSuite | None:
-    """Process template/export/report requests before running experiments."""
+    from elspeth.core.cli.suite import handle_suite_management as _impl  # pylint: disable=import-outside-toplevel
 
-    export_path = getattr(args, "export_suite_config", None)
-    template_name = getattr(args, "create_experiment_template", None)
-    reports_dir = getattr(args, "reports_dir", None)
-    template_base = getattr(args, "template_base", None)
-    management_requested = any([export_path, template_name, reports_dir])
-    if not management_requested:
-        return None
-    if suite_root is None:
-        message = "Suite root is required for template creation, export, or report generation."
-        raise SystemExit(message)
-
-    suite_instance = ExperimentSuite.load(suite_root)
-
-    if template_name:
-        destination = create_experiment_template(
-            suite_instance,
-            template_name,
-            base_experiment=template_base,
-        )
-        logger.info("Created experiment template at %s", destination)
-        suite_instance = ExperimentSuite.load(suite_root)
-
-    if export_path:
-        export_suite_configuration(suite_instance, export_path)
-        logger.info("Exported suite configuration to %s", export_path)
-
-    return suite_instance
+    return _impl(args, suite_root)
 
 
 def _run_suite(
-    args: argparse.Namespace,
-    settings,
-    suite_root: Path,
-    *,
-    preflight: dict | None = None,
-    suite: ExperimentSuite | None = None,
+    args: argparse.Namespace, settings, suite_root: Path, *, preflight: dict | None = None, suite: ExperimentSuite | None = None
 ) -> None:
-    """Execute all experiments declared in a suite configuration."""
+    from elspeth.core.cli.suite import run_suite as _impl  # pylint: disable=import-outside-toplevel
 
-    logger.info("Running suite at %s", suite_root)
-    suite = suite or ExperimentSuite.load(suite_root)
-    df = settings.datasource.load()
-    suite_runner = ExperimentSuiteRunner(
-        suite=suite,
-        llm_client=settings.llm,
-        sinks=settings.sinks,
-        suite_root=settings.suite_root,
-        config_path=settings.config_path,
-    )
-
-    defaults = _assemble_suite_defaults(settings)
-
-    results = suite_runner.run(
-        df,
-        defaults=defaults,
-        sink_factory=lambda exp: _clone_suite_sinks(settings.sinks, exp.name),
-        preflight_info=preflight,
-    )
-
-    for name, entry in results.items():
-        logger.info("Experiment %s completed with %s rows", name, len(entry["payload"]["results"]))
-
-    reports_dir = getattr(args, "reports_dir", None)
-    if reports_dir:
-        if args.single_run:
-            logger.warning("Report generation skipped: reports require suite execution.")
-        else:
-            SuiteReportGenerator(suite, results).generate_all_reports(reports_dir)
+    return _impl(args, settings, suite_root, preflight=preflight, suite=suite)
 
 
-def _strip_metrics_plugins(settings) -> None:
-    """Remove metrics plugins from settings and prompt packs when disabled."""
+def _ensure_artifacts_dir(base: Path | None) -> Path:
+    from elspeth.core.cli.common import ensure_artifacts_dir as _impl  # pylint: disable=import-outside-toplevel
 
-    row_names = {"score_extractor"}
-    agg_names = {"score_stats", "score_recommendation"}
-    baseline_names = {"score_delta"}
-
-    def _filter(defs, names):
-        if not defs:
-            return defs
-        return [entry for entry in defs if entry.get("name") not in names]
-
-    cfg = settings.orchestrator_config
-    cfg.row_plugin_defs = _filter(cfg.row_plugin_defs, row_names)
-    cfg.aggregator_plugin_defs = _filter(cfg.aggregator_plugin_defs, agg_names)
-    cfg.baseline_plugin_defs = _filter(cfg.baseline_plugin_defs, baseline_names)
-
-    defaults = settings.suite_defaults or {}
-    if "row_plugins" in defaults:
-        defaults["row_plugins"] = _filter(defaults.get("row_plugins"), row_names)
-    if "aggregator_plugins" in defaults:
-        defaults["aggregator_plugins"] = _filter(defaults.get("aggregator_plugins"), agg_names)
-    if "baseline_plugins" in defaults:
-        defaults["baseline_plugins"] = _filter(defaults.get("baseline_plugins"), baseline_names)
-
-    for pack in settings.prompt_packs.values():
-        if isinstance(pack, dict):
-            if "row_plugins" in pack:
-                pack["row_plugins"] = _filter(pack.get("row_plugins"), row_names)
-            if "aggregator_plugins" in pack:
-                pack["aggregator_plugins"] = _filter(pack.get("aggregator_plugins"), agg_names)
-            if "baseline_plugins" in pack:
-                pack["baseline_plugins"] = _filter(pack.get("baseline_plugins"), baseline_names)
+    return _impl(base)
 
 
-def _configure_sink_dry_run(settings, enable_live: bool) -> None:
-    """Toggle dry-run behaviour for sinks supporting remote writes."""
+def _write_simple_artifacts(art_dir: Path, name: str, payload: dict[str, Any], settings) -> None:
+    from elspeth.core.cli.common import write_simple_artifacts as _impl  # pylint: disable=import-outside-toplevel
 
-    dry_run = not enable_live
+    _impl(art_dir, name, payload, settings)
 
-    for sink in settings.sinks:
-        if hasattr(sink, "dry_run"):
-            setattr(sink, "dry_run", dry_run)
 
-    def _update_defs(defs):
-        if not defs:
-            return defs
-        updated = []
-        for entry in defs:
-            options = dict(entry.get("options", {}))
-            if entry.get("plugin") in {"github_repo", "azure_devops_repo"} or "dry_run" in options:
-                options["dry_run"] = dry_run
-            payload = {"plugin": entry.get("plugin"), "options": options}
-            if entry.get("security_level") is not None:
-                payload["security_level"] = entry.get("security_level")
-            if entry.get("determinism_level") is not None:
-                payload["determinism_level"] = entry.get("determinism_level")
-            updated.append(payload)
-        return updated
+def _maybe_write_artifacts_single(args: argparse.Namespace, settings, payload: dict[str, Any], df: pd.DataFrame) -> None:
+    from elspeth.core.cli.single import maybe_write_artifacts_single as _impl  # pylint: disable=import-outside-toplevel
 
-    config = settings.orchestrator_config
-    config.sink_defs = _update_defs(config.sink_defs)
+    _impl(args, settings, payload, df)
 
-    suite_defaults = settings.suite_defaults or {}
-    if "sinks" in suite_defaults:
-        suite_defaults["sinks"] = _update_defs(suite_defaults.get("sinks"))
 
-    for pack in settings.prompt_packs.values():
-        if isinstance(pack, dict) and pack.get("sinks"):
-            pack["sinks"] = _update_defs(pack.get("sinks"))
+def _maybe_write_artifacts_suite(args: argparse.Namespace, settings, suite: ExperimentSuite, results: dict[str, Any]) -> None:
+    from elspeth.core.cli.suite import maybe_write_artifacts_suite as _impl  # pylint: disable=import-outside-toplevel
+
+    _impl(args, settings, suite, results)
+
+
+def _create_signed_bundle(
+    art_dir: Path,
+    name: str,
+    payload: dict[str, Any],
+    settings,
+    df: pd.DataFrame,
+    *,
+    signing_key_env: str,
+) -> Path | None:
+    from elspeth.core.cli.common import create_signed_bundle as _impl  # pylint: disable=import-outside-toplevel
+
+    return _impl(art_dir, name, payload, settings, df, signing_key_env=signing_key_env)
+
+
+def _load_yaml_json(path: Path) -> dict[str, Any]:
+    from elspeth.core.cli.common import load_yaml_json as _impl  # pylint: disable=import-outside-toplevel
+
+    return _impl(path)
+
+
+def _maybe_publish_artifacts_bundle(
+    bundle_dir: Path,
+    *,
+    plugin_name: str | None,
+    config_path: Path | None,
+) -> None:
+    from elspeth.core.cli.common import maybe_publish_artifacts_bundle as _impl  # pylint: disable=import-outside-toplevel
+
+    _impl(bundle_dir, plugin_name=plugin_name, config_path=config_path)
+
+
+## Note: _strip_metrics_plugins and _configure_sink_dry_run are delegated via
+## direct imports at module top (see _load_settings_from_args usage)
 
 
 def main(argv: Iterable[str] | None = None) -> None:
@@ -546,6 +543,18 @@ def main(argv: Iterable[str] | None = None) -> None:
 
     parser = build_parser()
     args = parser.parse_args(list(argv) if argv is not None else None)
+    # Fast-path subcommand for health server
+    if getattr(args, "command", None) == "health-server":
+        from elspeth.core.healthcheck import serve as _serve_health  # pylint: disable=import-outside-toplevel
+
+        configure_logging(getattr(args, "log_level", "INFO"))
+        _serve_health(
+            host=getattr(args, "host", "127.0.0.1"),
+            port=getattr(args, "port", 8080),
+            tls_certfile=getattr(args, "tls_cert", None),
+            tls_keyfile=getattr(args, "tls_key", None),
+        )
+        return
     run(args)
 
 

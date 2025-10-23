@@ -18,6 +18,9 @@ from urllib.parse import urlparse
 
 import yaml
 
+# Shared error message for account/container/blob triple requirement
+ERR_ACCT_CONTAINER_BLOB = "Provide either 'storage_uri' or all of 'account_name', 'container_name', 'blob_path'"
+
 logger = logging.getLogger(__name__)
 
 
@@ -61,12 +64,15 @@ class BlobConfig:
             container_name = data.get("container_name")
             blob_path = data.get("blob_path")
 
-            if not isinstance(account_name, str) or not account_name:
-                raise BlobConfigurationError("Provide either 'storage_uri' or all of 'account_name', 'container_name', 'blob_path'")
-            if not isinstance(container_name, str) or not container_name:
-                raise BlobConfigurationError("Provide either 'storage_uri' or all of 'account_name', 'container_name', 'blob_path'")
-            if not isinstance(blob_path, str) or not blob_path:
-                raise BlobConfigurationError("Provide either 'storage_uri' or all of 'account_name', 'container_name', 'blob_path'")
+            if not (
+                isinstance(account_name, str)
+                and account_name
+                and isinstance(container_name, str)
+                and container_name
+                and isinstance(blob_path, str)
+                and blob_path
+            ):
+                raise BlobConfigurationError(ERR_ACCT_CONTAINER_BLOB)
 
             account_url_value = data.get("account_url")
             account_url = account_url_value if isinstance(account_url_value, str) else f"https://{account_name}.blob.core.windows.net"
@@ -164,13 +170,14 @@ class BlobDataLoader:
         *,
         timeout: int | None = 60,
     ):
+        """Initialize the loader with configuration and optional credential."""
         self.config = config
         self.credential = credential
         self.timeout = timeout
         self._blob_client = None
 
     @property
-    def blob_client(self):
+    def blob_client(self) -> Any:
         """Instantiate the BlobClient lazily to avoid import costs."""
 
         if self._blob_client is None:
@@ -230,7 +237,7 @@ class BlobDataLoader:
         # Azure SDK readall() returns Any despite runtime bytes value
         return downloader.readall()  # type: ignore[no-any-return]
 
-    def load_csv(self, **pandas_kwargs):
+    def load_csv(self, **pandas_kwargs: Any) -> Any:
         """Load the blob as a Pandas DataFrame."""
 
         import pandas as pd  # pylint: disable=import-outside-toplevel
@@ -247,7 +254,7 @@ def load_blob_csv(
     credential: Any | None = None,
     timeout: int | None = 60,
     pandas_kwargs: dict[str, Any] | None = None,
-):
+) -> Any:
     """Convenience helper that downloads a CSV using the configured blob."""
 
     config = load_blob_config(config_path, profile=profile)

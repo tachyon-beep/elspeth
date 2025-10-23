@@ -1805,7 +1805,7 @@ class CSVFileSink:
 - [ ] Configuration schema updates (datasource streaming options)
 - [ ] Update plugin catalogue documentation
 - [ ] Add streaming examples to `config/sample_suite/`
-- [ ] Update `CLAUDE.md` with streaming guidelines
+- [ ] Update developer documentation with streaming guidelines
 
 **Tests**:
 - End-to-end suite test with streaming datasource
@@ -1815,7 +1815,7 @@ class CSVFileSink:
 - `src/elspeth/core/experiments/suite_runner.py`
 - `docs/architecture/plugin-catalogue.md`
 - `docs/architecture/streaming-datasources.md` (new)
-- `CLAUDE.md`
+- Developer documentation (README, CONTRIBUTING)
 - `config/sample_suite/streaming_example.yaml` (new)
 
 **Success Criteria**: Full experiment suite runs with streaming datasource
@@ -2080,7 +2080,7 @@ except SinkCapacityError as exc:
 - Current Datasource Protocol: `src/elspeth/core/interfaces.py:12-17`
 - Current Runner Implementation: `src/elspeth/core/experiments/runner.py:61-217`
 - Artifact Pipeline: `src/elspeth/core/pipeline/artifact_pipeline.py`
-- Configuration Merge: `docs/architecture/configuration-merge.md`
+- Configuration Merge: `docs/architecture/configuration-security.md#update-2025-10-23-prompt-packs-defaults-and-merge-order`
 
 ## Changelog
 

@@ -7,7 +7,7 @@ runtime Pydantic models backed by `DataFrameSchema`.
 
 from __future__ import annotations
 
-from typing import Any, Type
+from typing import Any
 
 import pandas as pd
 from pydantic import Field, create_model
@@ -15,7 +15,7 @@ from pydantic import Field, create_model
 from .base import DataFrameSchema
 
 
-def _parse_type_string(type_str: str) -> Type:
+def _parse_type_string(type_str: str) -> type[Any]:
     """
     Parse type string from YAML config to Python type.
 
@@ -50,14 +50,21 @@ def _parse_type_string(type_str: str) -> Type:
 def schema_from_config(
     schema_dict: dict[str, str | dict[str, Any]],
     schema_name: str = "ConfigSchema",
-) -> Type[DataFrameSchema]:
+) -> type[DataFrameSchema]:
     """
     Build Pydantic schema from configuration dictionary.
 
     Supports both shorthand type strings and extended dicts that include
     constraints such as `required`, `min`, and `max`.
+
+    Notes:
+    - For string constraints, use `pattern` (Pydantic v2 >= 2.12.2). The legacy
+      `regex` key is not supported and will raise a ValueError to avoid carrying
+      pre‑release technical debt.
     """
-    fields: dict[str, tuple[Any, Any]] = {}
+    # Use Any for values to satisfy static checkers when splatting into create_model(**fields)
+    # (Pylance may otherwise attempt to match these against reserved kwargs like __doc__/__module__).
+    fields: dict[str, Any] = {}
 
     for col_name, col_spec in schema_dict.items():
         # Handle simple string type
@@ -82,8 +89,6 @@ def schema_from_config(
         is_optional = not col_spec.get("required", True)
         if is_optional:
             field_kwargs["default"] = None
-            # Pydantic v2: Make type explicitly Optional
-            python_type = python_type | None  # type: ignore[assignment]
 
         # Numeric constraints
         if "min" in col_spec:
@@ -96,17 +101,28 @@ def schema_from_config(
             field_kwargs["min_length"] = col_spec["min_length"]
         if "max_length" in col_spec:
             field_kwargs["max_length"] = col_spec["max_length"]
+        # Pydantic v2 uses 'pattern' for string pattern constraints (v1 used 'regex').
+        # We do not support 'regex' to avoid carrying dual behavior pre‑1.0.
+        pattern_value = None
         if "pattern" in col_spec:
-            field_kwargs["regex"] = col_spec["pattern"]
+            pattern_value = col_spec["pattern"]
+        elif "regex" in col_spec:
+            raise ValueError(f"Column '{col_name}' uses unsupported 'regex'; use 'pattern' for Pydantic v2")
+        if pattern_value is not None:
+            field_kwargs["pattern"] = pattern_value
+
+        # Choose the correct annotation, keeping the local python_type unchanged to
+        # avoid type-reassignment noise for type checkers.
+        annotation: Any = (python_type | None) if is_optional else python_type
 
         if "default" not in field_kwargs:
-            fields[col_name] = (python_type, Field(..., **field_kwargs))
+            fields[col_name] = (annotation, Field(..., **field_kwargs))
         else:
-            fields[col_name] = (python_type, Field(**field_kwargs))
+            fields[col_name] = (annotation, Field(**field_kwargs))
 
     # Pydantic's create_model() has complex overloads that mypy cannot fully resolve
     # when using **fields with dynamic field definitions. This is safe at runtime.
-    return create_model(  # type: ignore[call-overload,no-any-return]
+    return create_model(
         schema_name,
         __base__=DataFrameSchema,
         __config__=DataFrameSchema.model_config,  # Explicit v2 config inheritance

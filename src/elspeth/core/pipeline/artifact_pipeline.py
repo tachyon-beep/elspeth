@@ -8,8 +8,9 @@ from dataclasses import dataclass, field
 from typing import Any, Iterable, Mapping, cast
 
 from elspeth.core.base.protocols import Artifact, ArtifactDescriptor, ResultSink
+from elspeth.core.base.types import SecurityLevel
 from elspeth.core.pipeline.artifacts import validate_artifact_type
-from elspeth.core.security import is_security_level_allowed, normalize_security_level
+from elspeth.core.security import ensure_security_level, is_security_level_allowed
 
 VALID_REQUEST_MODES = {"single", "all"}
 logger = logging.getLogger(__name__)
@@ -66,7 +67,7 @@ class SinkBinding:
     original_index: int
     produces: list[ArtifactDescriptor] = field(default_factory=list)
     consumes: list[ArtifactRequest] = field(default_factory=list)
-    security_level: str | None = None
+    security_level: SecurityLevel | None = None
 
 
 # pylint: disable=too-few-public-methods
@@ -89,7 +90,7 @@ class ArtifactStore:
         artifact.persist = descriptor.persist or artifact.persist
         artifact.schema_id = artifact.schema_id or descriptor.schema_id
         level = artifact.security_level or descriptor.security_level or binding.security_level
-        artifact.security_level = normalize_security_level(level)
+        artifact.security_level = level if isinstance(level, SecurityLevel) else ensure_security_level(level)
         self._by_id[artifact_id] = artifact
 
         alias_key = descriptor.alias or descriptor.name
@@ -159,7 +160,9 @@ class ArtifactPipeline:  # pylint: disable=too-many-instance-attributes
 
         if binding.security_level is None or not str(binding.security_level).strip():
             raise ValueError(f"Sink '{binding.id}' must declare a security_level")
-        binding.security_level = normalize_security_level(binding.security_level)
+        binding.security_level = (
+            binding.security_level if isinstance(binding.security_level, SecurityLevel) else ensure_security_level(binding.security_level)
+        )
         artifact_section = binding.artifact_config or {}
         produces_config = artifact_section.get("produces", []) or []
         for entry in produces_config:
@@ -169,7 +172,11 @@ class ArtifactPipeline:  # pylint: disable=too-many-instance-attributes
                 schema_id=entry.get("schema_id"),
                 persist=entry.get("persist", False),
                 alias=entry.get("alias"),
-                security_level=normalize_security_level(entry.get("security_level")),
+                security_level=(
+                    entry.get("security_level")
+                    if isinstance(entry.get("security_level"), SecurityLevel)
+                    else ensure_security_level(entry.get("security_level"))
+                ),
             )
             validate_artifact_type(descriptor.type)
             binding.produces.append(descriptor)
@@ -180,7 +187,11 @@ class ArtifactPipeline:  # pylint: disable=too-many-instance-attributes
             if produced_iterable:
                 for descriptor in cast(Iterable[ArtifactDescriptor], produced_iterable):
                     validate_artifact_type(descriptor.type)
-                    descriptor.security_level = normalize_security_level(descriptor.security_level)
+                    descriptor.security_level = (
+                        descriptor.security_level
+                        if isinstance(descriptor.security_level, SecurityLevel)
+                        else ensure_security_level(descriptor.security_level)
+                    )
                     binding.produces.append(descriptor)
 
         consumes_config = list(artifact_section.get("consumes", []) or [])
@@ -321,47 +332,77 @@ class ArtifactPipeline:  # pylint: disable=too-many-instance-attributes
         return ordered
 
     # pylint: disable=too-many-locals
-    def execute(self, payload: dict[str, Any], metadata: dict[str, Any] | None = None) -> ArtifactStore:
-        """Run all sinks in dependency order, producing the final artifact store."""
+    def execute(
+        self,
+        payload: dict[str, Any],
+        metadata: dict[str, Any] | None = None,
+        *,
+        on_error: str = "raise",
+        failures: list[dict[str, Any]] | None = None,
+    ) -> ArtifactStore:
+        """Run all sinks in dependency order, producing the final artifact store.
+
+        Args:
+            payload: Experiment/job payload passed to sinks
+            metadata: Metadata to pass alongside payload
+            on_error: Error handling strategy: "raise" (default) or "continue"
+            failures: Optional list to append failure dicts when continuing on errors
+
+        Returns:
+            ArtifactStore with all registered artifacts
+        """
+
+        if on_error not in {"raise", "continue"}:  # pragma: no cover - defensive guard
+            raise ValueError("on_error must be 'raise' or 'continue'")
 
         store = ArtifactStore()
         metadata_dict: dict[str, Any | None] = dict(metadata) if metadata is not None else {}
         for binding in self._ordered_bindings:
-            consumed = store.resolve_requests(binding.consumes)
+            try:
+                consumed = store.resolve_requests(binding.consumes)
 
-            clearance = binding.security_level
-            if clearance:
-                for artifacts in consumed.values():
-                    for artifact in artifacts:
-                        if not is_security_level_allowed(artifact.security_level, clearance):
-                            raise PermissionError(
-                                f"Sink '{binding.id}' with clearance '{clearance}' cannot consume "
-                                f"artifact '{artifact.id}' at level '{normalize_security_level(artifact.security_level)}'"
-                            )
+                clearance = binding.security_level
+                if clearance:
+                    for artifacts in consumed.values():
+                        for artifact in artifacts:
+                            if not is_security_level_allowed(artifact.security_level, clearance):
+                                raise PermissionError(
+                                    f"Sink '{binding.id}' with clearance '{clearance}' cannot consume "
+                                    f"artifact '{artifact.id}' at level '{artifact.security_level}'"
+                                )
 
-            prepare = getattr(binding.sink, "prepare_artifacts", None)
-            if callable(prepare):
-                prepare(consumed)
+                prepare = getattr(binding.sink, "prepare_artifacts", None)
+                if callable(prepare):
+                    prepare(consumed)
 
-            binding.sink.write(payload, metadata=metadata_dict)
+                binding.sink.write(payload, metadata=metadata_dict)
 
-            produced: dict[str, Artifact] = {}
-            collector = getattr(binding.sink, "collect_artifacts", None)
-            if callable(collector):
-                collected = collector()
-                if collected:
-                    produced = cast(dict[str, Artifact], collected)
+                produced: dict[str, Artifact] = {}
+                collector = getattr(binding.sink, "collect_artifacts", None)
+                if callable(collector):
+                    collected = collector()
+                    if collected:
+                        produced = cast(dict[str, Artifact], collected)
 
-            for descriptor in binding.produces:
-                key = descriptor.name
-                candidate = produced.get(key)
-                if not candidate and descriptor.alias:
-                    candidate = produced.get(descriptor.alias)
-                if candidate:
-                    store.register(binding, descriptor, candidate)
+                for descriptor in binding.produces:
+                    key = descriptor.name
+                    candidate = produced.get(key)
+                    if not candidate and descriptor.alias:
+                        candidate = produced.get(descriptor.alias)
+                    if candidate:
+                        store.register(binding, descriptor, candidate)
 
-            finalize = getattr(binding.sink, "finalize", None)
-            if callable(finalize):
-                finalize(dict(store.items()), metadata=metadata_dict)
+                finalize = getattr(binding.sink, "finalize", None)
+                if callable(finalize):
+                    finalize(dict(store.items()), metadata=metadata_dict)
+            except Exception as exc:  # pylint: disable=broad-except
+                if on_error == "continue":
+                    sink_name = getattr(getattr(binding.sink, "__class__", type(binding.sink)), "__name__", binding.plugin or binding.id)
+                    failure = {"sink": sink_name, "error": str(exc)}
+                    if failures is not None:
+                        failures.append(failure)
+                    # Continue to next binding to maximize delivery
+                    continue
+                raise
 
         return store

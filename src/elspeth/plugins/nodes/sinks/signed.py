@@ -8,31 +8,43 @@ import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, Mapping
 
-from elspeth.core.base.protocols import ResultSink
-from elspeth.core.security import generate_signature
+from elspeth.core.base.protocols import Artifact, ArtifactDescriptor, ResultSink
+from elspeth.core.security import generate_signature, public_key_fingerprint
+from elspeth.core.security.keyvault import fetch_secret_from_keyvault
+from elspeth.core.security.secure_mode import SecureMode, get_secure_mode
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass
 class SignedArtifactSink(ResultSink):
+    """Write a signed artifact bundle (e.g., SBOM + signature) to disk."""
+
     base_path: str | Path
     bundle_name: str | None = None
     timestamped: bool = True
     results_name: str = "results.json"
     signature_name: str = "signature.json"
     manifest_name: str = "manifest.json"
-    algorithm: Literal["hmac-sha256", "hmac-sha512"] = "hmac-sha256"
-    key: str | None = None
+    algorithm: Literal["hmac-sha256", "hmac-sha512", "rsa-pss-sha256", "ecdsa-p256-sha256"] = "hmac-sha256"
+    key: str | bytes | None = None
     key_env: str | None = "ELSPETH_SIGNING_KEY"
+    public_key_env: str | None = None
+    key_vault_secret_uri: str | None = None
     on_error: str = "abort"
 
     def __post_init__(self) -> None:
+        """Normalize configuration and validate on_error early."""
         self.base_path: Path = Path(self.base_path)
         if self.on_error not in {"abort", "skip"}:
             raise ValueError("on_error must be 'abort' or 'skip'")
+        # STRICT mode: enforce fail-closed policy (disallow skip-on-error)
+        # Only evaluate secure mode directly; get_secure_mode() does not raise.
+        secure_mode = get_secure_mode()
+        if secure_mode == SecureMode.STRICT and self.on_error == "skip":
+            raise ValueError("SignedArtifactSink cannot use on_error='skip' in STRICT mode")
 
     def write(self, results: dict[str, Any], *, metadata: dict[str, Any] | None = None) -> None:
         metadata = metadata or {}
@@ -54,12 +66,32 @@ class SignedArtifactSink(ResultSink):
 
             key = self._resolve_key()
             signature_value = generate_signature(results_bytes, key, algorithm=self.algorithm)
+            key_fp = None
+            # For asymmetric signing, compute a public key fingerprint if possible
+            if self.algorithm.startswith("rsa-") or self.algorithm.startswith("ecdsa-"):
+                pub_pem: str | bytes | None = os.getenv(self.public_key_env) if self.public_key_env else None
+                # If public key not provided, attempt to derive from private PEM (best-effort)
+                if not pub_pem:
+                    if isinstance(key, (bytes, bytearray)):
+                        if b"BEGIN PUBLIC KEY" in key:
+                            pub_pem = key  # bytes OK
+                    elif isinstance(key, str):
+                        if "BEGIN PUBLIC KEY" in key:
+                            pub_pem = key  # str OK
+                if pub_pem:
+                    try:
+                        key_fp = public_key_fingerprint(pub_pem)
+                    except Exception as exc:  # nosec - optional
+                        logger.debug("Failed to compute public key fingerprint: %s", exc, exc_info=False)
+                        key_fp = None
             signature_payload = {
                 "algorithm": self.algorithm,
                 "signature": signature_value,
                 "generated_at": timestamp.isoformat(),
                 "target": self.results_name,
             }
+            if key_fp:
+                signature_payload["key_fingerprint"] = key_fp
             signature_path = bundle_dir / self.signature_name
             signature_path.write_text(json.dumps(signature_payload, indent=2, sort_keys=True), encoding="utf-8")
 
@@ -71,7 +103,7 @@ class SignedArtifactSink(ResultSink):
                 for p in (results_path, signature_path, manifest_path):
                     try:
                         total_bytes += p.stat().st_size
-                    except Exception:
+                    except (OSError, PermissionError):  # tolerate stat() errors; do not block artifact write
                         pass
                 plugin_logger.log_event(
                     "sink_write",
@@ -128,7 +160,7 @@ class SignedArtifactSink(ResultSink):
         payload = json.dumps(results, sort_keys=True).encode("utf-8")
         return hashlib.sha256(payload).hexdigest()
 
-    def _resolve_key(self) -> str:
+    def _resolve_key(self) -> str | bytes:
         if self.key:
             return self.key
         if self.key_env:
@@ -136,21 +168,26 @@ class SignedArtifactSink(ResultSink):
             if env_value:
                 self.key = env_value
                 return env_value
-            # Legacy fallback for pre-rebrand deployments
-            # TODO(v2.0): Remove DMP_SIGNING_KEY backward compatibility
-            if self.key_env == "ELSPETH_SIGNING_KEY":
-                legacy_env = os.getenv("DMP_SIGNING_KEY")
-                if legacy_env:
-                    logger.warning("Using legacy DMP_SIGNING_KEY environment variable; please migrate to ELSPETH_SIGNING_KEY")
-                    self.key = legacy_env
-                    return legacy_env
+        # Additional fallback for asymmetric/KMS-style env keys often used in CI
+        alt = os.getenv("COSIGN_KEY")
+        if alt:
+            self.key = alt
+            return alt
+        # Key Vault secret URI support (direct or via env variables)
+        kv_uri = self.key_vault_secret_uri or os.getenv("ELSPETH_SIGNING_KEY_VAULT_SECRET_URI") or os.getenv("AZURE_KEYVAULT_SECRET_URI")
+        if kv_uri:
+            pem = fetch_secret_from_keyvault(kv_uri)
+            self.key = pem
+            return pem
         raise ValueError("Signing key not provided; set 'key' or environment variable")
 
-    def produces(self):  # pragma: no cover - placeholder for artifact chaining
+    def produces(self) -> list[ArtifactDescriptor]:  # pragma: no cover - placeholder for artifact chaining
         return []
 
-    def consumes(self):  # pragma: no cover - placeholder for artifact chaining
+    def consumes(self) -> list[str]:  # pragma: no cover - placeholder for artifact chaining
         return []
 
-    def finalize(self, artifacts, *, metadata=None):  # pragma: no cover - optional cleanup
+    def finalize(
+        self, artifacts: Mapping[str, Artifact], *, metadata: dict[str, Any] | None = None
+    ) -> None:  # pragma: no cover - optional cleanup
         return None

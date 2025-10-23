@@ -29,6 +29,16 @@ class RetrievalService:
 
 
 def create_retrieval_service(config: Mapping[str, object]) -> RetrievalService:
+    """Construct a RetrievalService from a config mapping.
+
+    Expects keys:
+    - "provider": retrieval provider name (e.g., "pgvector", "azure_search")
+    - "provider_options": provider-specific options mapping
+    - "embed_model": embedding provider configuration mapping
+
+    Returns:
+        RetrievalService: composed of a vector query client and an embedder.
+    """
     provider = str(config.get("provider") or "").lower()
     provider_options_raw = config.get("provider_options") or {}
     if not isinstance(provider_options_raw, Mapping):
@@ -50,6 +60,18 @@ def _create_embedder(config: Mapping[str, object]) -> Embedder:
         model = str(config.get("model") or "text-embedding-3-large")
         api_key_raw = config.get("api_key")
         api_key = str(api_key_raw) if api_key_raw is not None else None
+        timeout_raw = config.get("timeout")
+        timeout: float | int | None
+        if isinstance(timeout_raw, (int, float, str)):
+            try:
+                timeout = float(timeout_raw)
+            except (ValueError, TypeError):
+                timeout = None
+        else:
+            timeout = None
+        # Pass only non-None arguments to satisfy type checker without breaking tests
+        if timeout is not None:
+            return OpenAIEmbedder(model=model, api_key=api_key, timeout=timeout)
         return OpenAIEmbedder(model=model, api_key=api_key)
     if provider == "azure_openai":
         endpoint_raw = config.get("endpoint")
@@ -59,8 +81,25 @@ def _create_embedder(config: Mapping[str, object]) -> Embedder:
         api_key = str(api_key_raw) if api_key_raw is not None else None
         api_version_raw = config.get("api_version")
         api_version = str(api_version_raw) if api_version_raw is not None else None
+        timeout_raw = config.get("timeout")
+        if isinstance(timeout_raw, (int, float, str)):
+            try:
+                timeout_val = float(timeout_raw)
+            except (ValueError, TypeError):
+                timeout_val = None
+        else:
+            timeout_val = None
         if endpoint:
             validate_azure_openai_endpoint(endpoint)
+        # Pass only non-None arguments to satisfy type checker without breaking tests
+        if timeout_val is not None:
+            return AzureOpenAIEmbedder(
+                endpoint=endpoint,
+                deployment=deployment,
+                api_key=api_key,
+                api_version=api_version,
+                timeout=timeout_val,
+            )
         return AzureOpenAIEmbedder(
             endpoint=endpoint,
             deployment=deployment,

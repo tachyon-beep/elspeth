@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from typing import Any
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 from elspeth.core.base.protocols import LLMClientProtocol
+from elspeth.core.base.types import SecurityLevel
+
+logger = logging.getLogger(__name__)
 
 
 class HttpOpenAIClient(LLMClientProtocol):
@@ -23,8 +29,20 @@ class HttpOpenAIClient(LLMClientProtocol):
         temperature: float | None = None,
         max_tokens: int | None = None,
         timeout: float = 30.0,
+        retry_total: int = 3,
+        backoff_factor: float = 0.5,
+        status_forcelist: tuple[int, ...] | None = None,
+        security_level: SecurityLevel | None = None,
     ) -> None:
         self.api_base = api_base.rstrip("/")
+        # Defense-in-depth: validate endpoint even when instantiated directly
+        try:
+            from elspeth.core.security import validate_http_api_endpoint
+
+            validate_http_api_endpoint(endpoint=self.api_base, security_level=security_level)
+        except ValueError as exc:  # pragma: no cover - validation path exercised via registry tests
+            # Surface endpoint validation issues as ValueError
+            raise ValueError(f"HTTP API endpoint validation failed for '{self.api_base}': {exc}") from exc
         if not api_key and api_key_env:
             api_key = os.getenv(api_key_env)
         self.api_key = api_key
@@ -32,6 +50,33 @@ class HttpOpenAIClient(LLMClientProtocol):
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.timeout = timeout
+        # Configure a session with bounded retries for transient errors
+        self.session = requests.Session()
+        try:  # pragma: no cover - adapter internals vary by env
+            if status_forcelist is None:
+                status_forcelist = (429, 500, 502, 503, 504)
+            retry = Retry(
+                total=retry_total,
+                backoff_factor=backoff_factor,
+                status_forcelist=list(status_forcelist),
+                allowed_methods=["GET", "POST"],
+                raise_on_status=False,
+            )
+            adapter = HTTPAdapter(max_retries=retry)
+            self.session.mount("https://", adapter)
+            # Mount HTTP only when explicitly using localhost endpoints; never for external traffic.
+            if self.api_base.startswith("http://"):  # NOSONAR
+                # Endpoint validation already restricts HTTP to localhost/loopback only.
+                # Enforce with an explicit runtime check for defense-in-depth.
+                from urllib.parse import urlparse
+
+                host = (urlparse(self.api_base).hostname or "").lower()
+                if not (host == "localhost" or host.startswith("127.") or host == "::1"):
+                    raise RuntimeError(f"HTTP endpoints must be localhost/loopback only, got: {self.api_base}")
+                self.session.mount("http://", adapter)  # NOSONAR - localhost-only by policy
+        except (ValueError, TypeError, AttributeError) as exc:
+            # If retry adapter isn't available, proceed without retries
+            logger.debug("HTTP retry adapter not mounted; proceeding without retries: %s", exc, exc_info=False)
 
     def generate(
         self,
@@ -58,7 +103,7 @@ class HttpOpenAIClient(LLMClientProtocol):
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
 
-        response = requests.post(
+        response = self.session.post(
             f"{self.api_base}/v1/chat/completions",
             json=payload,
             headers=headers,

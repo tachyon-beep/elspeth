@@ -74,7 +74,7 @@ def create_llm_from_definition(
 ) -> Any:
     """Backward-compatible shim delegating to ``llm_registry`` helper."""
 
-    from .llm import create_llm_from_definition as _create
+    from .llm import create_llm_from_definition as _create  # pylint: disable=import-outside-toplevel
 
     return _create(
         definition,

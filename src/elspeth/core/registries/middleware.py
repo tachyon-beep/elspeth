@@ -38,7 +38,7 @@ def create_middleware(
 
     Now uses create_plugin_with_inheritance() helper to eliminate duplication.
     """
-    from .plugin_helpers import create_plugin_with_inheritance
+    from .plugin_helpers import create_plugin_with_inheritance  # pylint: disable=import-outside-toplevel
 
     result = create_plugin_with_inheritance(
         _middleware_registry,
@@ -49,8 +49,10 @@ def create_middleware(
         allow_none=False,
     )
     # When allow_none=False, create_plugin_with_inheritance never returns None
-    # (it raises ValueError instead), but mypy doesn't track this
-    assert result is not None, "Unreachable: allow_none=False prevents None return"
+    # (it raises ValueError instead), but add a runtime guard for safety in optimized runs
+    if result is None:  # pragma: no cover - defensive, should be unreachable
+        name = definition.get("name") or definition.get("plugin") or "<unknown>"
+        raise RuntimeError(f"Unexpected None from middleware factory for '{name}' with allow_none=False")
     return result
 
 
@@ -59,6 +61,10 @@ def create_middlewares(
     *,
     parent_context: PluginContext | None = None,
 ) -> list[LLMMiddleware]:
+    """Create a list of middleware instances from definitions.
+
+    Applies the standard middleware creation path with inheritance and context.
+    """
     if not definitions:
         return []
     return [create_middleware(defn, parent_context=parent_context) for defn in definitions]

@@ -13,10 +13,9 @@ fi
 # shellcheck disable=SC1090
 source "$VENV_PATH/bin/activate"
 
-python -m pip install --upgrade pip
-python -m pip install --require-hashes -r "$ROOT_DIR/requirements-dev.lock"
-python -m piptools sync "$ROOT_DIR/requirements-dev.lock"
-python -m pip install -e "$ROOT_DIR" --no-deps
+# Locked, offline-style installs (no unpinned upgrades)
+python -m pip install -r "$ROOT_DIR/requirements-dev.lock" --require-hashes
+python -m pip install -e "$ROOT_DIR" --no-deps --no-index
 
 if [ "$RUN_TESTS" != "0" ]; then
   python -m pytest

@@ -1,0 +1,31 @@
+job:
+  name: sample_job
+  security_level: OFFICIAL
+  determinism_level: high
+
+  datasource:
+    plugin: csv_local
+    security_level: OFFICIAL
+    options:
+      path: config/sample_suite/data/sample_input.csv
+      retain_local: true
+
+  llm:
+    plugin: mock
+    security_level: OFFICIAL
+    options:
+      seed: 42
+
+  prompt:
+    system: |
+      You are an evaluation assistant that returns concise JSON feedback.
+    user: |
+      Evaluate application {{ APPID }} titled "{{ title }}". Summary: {{ summary }}.
+      Return JSON {"score": <0-1>, "comment": "<insight>"}.
+    fields: [APPID, title, summary]
+
+  sinks:
+    - plugin: csv
+      security_level: OFFICIAL
+      options:
+        path: outputs/job_results.csv

@@ -9,6 +9,8 @@ from elspeth.core.base.protocols import LLMClientProtocol
 
 
 class AzureOpenAIClient(LLMClientProtocol):
+    """Thin wrapper around OpenAI's Azure client implementing LLMClientProtocol."""
+
     def __init__(
         self,
         *,
@@ -19,10 +21,15 @@ class AzureOpenAIClient(LLMClientProtocol):
         self.config = config
         self.temperature = config.get("temperature")
         self.max_tokens = config.get("max_tokens")
+        # Bounded request timeouts for operational resilience
+        try:
+            self.request_timeout = float(config.get("timeout", 30.0))
+        except (ValueError, TypeError):
+            self.request_timeout = 30.0
         self.deployment = self._resolve_deployment(deployment)
         self._client = client or self._create_client()
 
-    def _create_client(self):
+    def _create_client(self) -> Any:
         api_key = self._resolve_required("api_key")
         api_version = self._resolve_required("api_version")
         azure_endpoint = self._resolve_required("azure_endpoint")
@@ -52,11 +59,11 @@ class AzureOpenAIClient(LLMClientProtocol):
         value = os.getenv("ELSPETH_AZURE_OPENAI_DEPLOYMENT")
         if value:
             return value
-        # TODO(v2.0): Remove DMP_AZURE_OPENAI_DEPLOYMENT backward compatibility
-        legacy = os.getenv("DMP_AZURE_OPENAI_DEPLOYMENT")
-        if legacy:
-            return legacy
-        raise ValueError("AzureOpenAIClient missing deployment configuration")
+        raise ValueError(
+            "AzureOpenAIClient missing deployment configuration; "
+            "set 'deployment' in config, or set environment variable "
+            f"'{self.config.get('deployment_env', 'ELSPETH_AZURE_OPENAI_DEPLOYMENT')}'"
+        )
 
     def _resolve_required(self, key: str) -> str:
         value = self._resolve_optional(key)
@@ -74,7 +81,7 @@ class AzureOpenAIClient(LLMClientProtocol):
         return None
 
     @property
-    def client(self):
+    def client(self) -> Any:
         return self._client
 
     def generate(
@@ -95,11 +102,12 @@ class AzureOpenAIClient(LLMClientProtocol):
         if self.max_tokens is not None:
             kwargs["max_tokens"] = self.max_tokens
 
-        response = self.client.chat.completions.create(**kwargs)
+        # Apply request timeout; openai SDK accepts per-request timeout
+        response = self.client.chat.completions.create(timeout=self.request_timeout, **kwargs)
         content = None
         try:
             content = response.choices[0].message.content
-        except Exception:  # pragma: no cover - defensive fallback
+        except (AttributeError, IndexError, KeyError, TypeError):  # pragma: no cover - defensive fallback
             content = None
 
         return {

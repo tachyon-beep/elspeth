@@ -224,13 +224,13 @@ Update 2025-10-12: Protocol helpers invoked during rehydration are defined in `s
 [^df-config-loader-2025-10-12]: Update 2025-10-12: Configuration security elaborated in docs/architecture/configuration-security.md (Update 2025-10-12: Loader Safeguards).
 [^df-blob-2025-10-12]: Update 2025-10-12: Secret handling mirrored in docs/architecture/threat-surfaces.md (Update 2025-10-12: Storage Interfaces).
 [^df-azure-2025-10-12]: Update 2025-10-12: Azure credential flow documented in docs/architecture/security-controls.md (Update 2025-10-12: Managed Identity).
-[^df-csv-2025-10-12]: Update 2025-10-12: Sanitisation controls catalogued in docs/architecture/CONTROL_INVENTORY.md.
+[^df-csv-2025-10-12]: Update 2025-10-12: Sanitisation controls catalogued in docs/compliance/CONTROL_INVENTORY.md.
 [^df-signed-2025-10-12]: Update 2025-10-12: Signing mechanism described in docs/architecture/security-controls.md (Update 2025-10-12: Artifact Signing).
 [^df-repo-2025-10-12]: Update 2025-10-12: Repository safeguards outlined in docs/architecture/plugin-security-model.md (Update 2025-10-12: Output Sinks).
 [^df-runner-metadata-2025-10-12]: Update 2025-10-12: Metadata propagation aligns with docs/architecture/audit-logging.md (Update 2025-10-12: Retry Summaries) and docs/architecture/architecture-overview.md Added 2025-10-12 – Concurrency, Checkpoints, and Retry Telemetry.
 [^df-analytics-2025-10-12]: Update 2025-10-12: Analytics sink outputs detailed in docs/reporting-and-suite-management.md (Update 2025-10-12: Analytics Outputs).
 [^df-visual-2025-10-12]: Update 2025-10-12: Visual artifact retention described in docs/architecture/audit-logging.md (Update 2025-10-12: Visual Evidence Logging).
 [^df-excel-2025-10-12]: Update 2025-10-12: Excel workbook sanitisation references docs/architecture/security-controls.md (Update 2025-10-12: Spreadsheet Controls).
-[^df-zip-2025-10-12]: Update 2025-10-12: ZIP bundle lifecycle cross-referenced in docs/architecture/CONTROL_INVENTORY.md (Update 2025-10-12: Bundle Controls).
+[^df-zip-2025-10-12]: Update 2025-10-12: ZIP bundle lifecycle cross-referenced in docs/compliance/CONTROL_INVENTORY.md (Update 2025-10-12: Bundle Controls).
 [^df-blob-sink-2025-10-12]: Update 2025-10-12: Blob sink enforcement detailed in docs/architecture/threat-surfaces.md (Update 2025-10-12: Storage Surfaces).
 [^df-suite-reporting-2025-10-12]: Update 2025-10-12: Suite reporting CLI usage illustrated in docs/reporting-and-suite-management.md (Update 2025-10-12: Suite Reporting Exports).

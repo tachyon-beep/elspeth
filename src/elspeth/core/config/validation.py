@@ -53,7 +53,7 @@ def validate_full_configuration(
     if mode is None:
         mode = get_secure_mode()
 
-    logger.info(f"Validating configuration in {mode.value.upper()} mode")
+    logger.info("Validating configuration in %s mode", mode.value.upper())
 
     # Validate datasource
     datasource_config = profile_data.get("datasource")
@@ -134,7 +134,7 @@ def validate_plugin_definition(
             validate_sink_config(merged_config, mode=mode)
         else:
             # Unknown plugin type - no specific validation
-            logger.debug(f"No specific validation for plugin type: {plugin_type}")
+            logger.debug("No specific validation for plugin type: %s", plugin_type)
     except ValueError as exc:
         raise ConfigurationError(f"Plugin '{plugin_type}' validation failed: {exc}") from exc
 
@@ -155,7 +155,7 @@ def validate_suite_configuration(
     if mode is None:
         mode = get_secure_mode()
 
-    logger.info(f"Validating suite configuration in {mode.value.upper()} mode")
+    logger.info("Validating suite configuration in %s mode", mode.value.upper())
 
     # Validate suite defaults if present
     suite_defaults = suite_config.get("suite_defaults")
@@ -215,7 +215,7 @@ def validate_prompt_pack(
     if mode is None:
         mode = get_secure_mode()
 
-    logger.debug(f"Validating prompt pack in {mode.value.upper()} mode")
+    logger.debug("Validating prompt pack in %s mode", mode.value.upper())
 
     # Validate sinks if present in pack
     sinks_config = pack_config.get("sinks", [])

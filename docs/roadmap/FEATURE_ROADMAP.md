@@ -77,7 +77,8 @@ To provide real-time observability, we will deliver a telemetry middleware and o
    - Record plugin provenance (version, maintainer, signature) in the registry metadata.
 
 5. **Documentation & Communication**  
-   - Integrate this roadmap into the future Sphinx site under a “Plugins” section.  
+- Integrate this roadmap into the future Sphinx site under a “Plugins” section.  
+- Build a consolidated `docs/examples/MASTER_EXAMPLE.md` walkthrough covering schema validation, security middleware, analytics, and signed artifacts before 1.0.
    - Update release notes with plugin milestones and telemetry rollout status.  
    - Share Grafana dashboards and telemetry runbooks with operations teams once available.
 

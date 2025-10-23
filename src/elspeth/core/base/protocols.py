@@ -13,14 +13,16 @@ Experiment-specific protocols live in `plugins/orchestrators/experiment/protocol
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field, replace
-from typing import TYPE_CHECKING, Any, Mapping, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 import pandas as pd
 
 if TYPE_CHECKING:
     from elspeth.core.base.schema import DataFrameSchema
+    from elspeth.core.base.types import DeterminismLevel, SecurityLevel
 
 
 # ============================================================================
@@ -30,8 +32,7 @@ if TYPE_CHECKING:
 
 @runtime_checkable
 class OrchestratorPlugin(Protocol):
-    """
-    Defines the topology of data flow through processing nodes.
+    """Define the topology of data flow through processing nodes.
 
     Orchestrators are 'engines' that define HOW data flows through the system,
     while nodes (sources, sinks, transforms) define WHAT happens at each vertex.
@@ -40,9 +41,8 @@ class OrchestratorPlugin(Protocol):
     a source through LLM transforms and experiment plugins to multiple sinks.
     """
 
-    def run(self, context: "ExperimentContext") -> dict[str, Any]:
-        """
-        Execute the orchestrated data flow.
+    def run(self, context: ExperimentContext) -> dict[str, Any]:
+        """Execute the orchestrated data flow.
 
         Args:
             context: Contains data, configuration, and runtime info
@@ -66,9 +66,8 @@ class DataSource(Protocol):
         """Return the experiment dataset."""
         raise NotImplementedError
 
-    def output_schema(self) -> type["DataFrameSchema"] | None:  # pragma: no cover - optional
-        """
-        Return the schema of the DataFrame this datasource produces.
+    def output_schema(self) -> type[DataFrameSchema] | None:  # pragma: no cover - optional
+        """Return the schema of the DataFrame this datasource produces.
 
         If implemented, enables config-time validation of schema compatibility
         between datasources and plugins.
@@ -87,7 +86,7 @@ class ResultSink(Protocol):  # pylint: disable=too-few-public-methods
         """Persist experiment results."""
         raise NotImplementedError
 
-    def produces(self) -> list["ArtifactDescriptor"]:  # pragma: no cover - optional
+    def produces(self) -> list[ArtifactDescriptor]:  # pragma: no cover - optional
         """Describe artifacts the sink emits, enabling chaining."""
         return []
 
@@ -95,17 +94,15 @@ class ResultSink(Protocol):  # pylint: disable=too-few-public-methods
         """Return artifact names the sink depends on."""
         return []
 
-    def finalize(
-        self, artifacts: Mapping[str, "Artifact"], *, metadata: dict[str, Any] | None = None
-    ) -> None:  # pragma: no cover - optional
+    def finalize(self, artifacts: Mapping[str, Artifact], *, metadata: dict[str, Any] | None = None) -> None:  # pragma: no cover - optional
         """Perform cleanup or post-processing once artifacts are available."""
         return None
 
-    def prepare_artifacts(self, artifacts: Mapping[str, list["Artifact"]]) -> None:  # pragma: no cover - optional
+    def prepare_artifacts(self, artifacts: Mapping[str, list[Artifact]]) -> None:  # pragma: no cover - optional
         """Allow the sink to modify artifacts before finalization."""
         return None
 
-    def collect_artifacts(self) -> dict[str, "Artifact"]:  # pragma: no cover - optional
+    def collect_artifacts(self) -> dict[str, Artifact]:  # pragma: no cover - optional
         """Expose artifacts generated during `write` for downstream consumers."""
         return {}
 
@@ -166,7 +163,7 @@ class LLMRequest:
         system_prompt: str | None = None,
         user_prompt: str | None = None,
         metadata: dict[str, Any] | None = None,
-    ) -> "LLMRequest":
+    ) -> LLMRequest:
         """Create a modified copy of the request."""
         return replace(
             self,
@@ -243,8 +240,8 @@ class ArtifactDescriptor:  # pylint: disable=too-many-instance-attributes
     schema_id: str | None = None
     persist: bool = False
     alias: str | None = None
-    security_level: str | None = None
-    determinism_level: str | None = None
+    security_level: SecurityLevel | None = None
+    determinism_level: DeterminismLevel | None = None
 
 
 @dataclass
@@ -259,8 +256,8 @@ class Artifact:  # pylint: disable=too-many-instance-attributes
     schema_id: str | None = None
     produced_by: str | None = None
     persist: bool = False
-    security_level: str | None = None
-    determinism_level: str | None = None
+    security_level: SecurityLevel | None = None
+    determinism_level: DeterminismLevel | None = None
 
 
 __all__ = [

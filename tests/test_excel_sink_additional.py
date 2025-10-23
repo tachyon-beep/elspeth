@@ -38,4 +38,3 @@ def test_excel_on_error_skip_when_save_fails(tmp_path: Path, monkeypatch: pytest
     monkeypatch.setattr(sink, "_workbook_factory", _WB)
     sink.write({"results": []}, metadata={"experiment": "e"})
     assert not (tmp_path / "bad.xlsx").exists()
-

@@ -8,13 +8,20 @@ from pathlib import Path
 from typing import Mapping
 
 from elspeth.core.base.protocols import Artifact, ResultSink
-from elspeth.core.security import normalize_determinism_level, normalize_security_level
+from elspeth.core.base.types import DeterminismLevel, SecurityLevel
+from elspeth.core.security import ensure_determinism_level, ensure_security_level
 from elspeth.core.utils.path_guard import resolve_under_base, safe_atomic_write
 
 logger = logging.getLogger(__name__)
 
 
 class FileCopySink(ResultSink):
+    """Copy a single input artifact to a destination path.
+
+    Honors overwrite and on_error semantics and enforces base-path containment
+    via `allowed_base_path` when provided.
+    """
+
     def __init__(self, *, destination: str, overwrite: bool = True, on_error: str = "abort", allowed_base_path: str | None = None) -> None:
         self.destination = Path(destination)
         self.overwrite = overwrite
@@ -24,16 +31,16 @@ class FileCopySink(ResultSink):
         self._source_artifact: Artifact | None = None
         self._written_path: Path | None = None
         self._output_type: str | None = None
-        self._security_level: str | None = None
-        self._determinism_level: str | None = None
+        self._security_level: SecurityLevel | None = None
+        self._determinism_level: DeterminismLevel | None = None
         # Configure allowed base path for containment checks
         try:
             default_base = self.destination.parent.resolve()
             self._allowed_base = Path(allowed_base_path).resolve() if allowed_base_path is not None else default_base
-        except Exception:  # pragma: no cover - defensive
+        except (OSError, ValueError, TypeError):  # pragma: no cover - defensive
             self._allowed_base = self.destination.parent.resolve()
 
-    def prepare_artifacts(self, artifacts: Mapping[str, list[Artifact]]):  # pragma: no cover - optional
+    def prepare_artifacts(self, artifacts: Mapping[str, list[Artifact]]) -> None:  # pragma: no cover - optional
         self._source_artifact = None
         self._output_type = None
         for values in artifacts.values():
@@ -91,7 +98,7 @@ class FileCopySink(ResultSink):
         if plugin_logger:
             try:
                 size = target.stat().st_size
-            except Exception:
+            except (OSError, PermissionError):
                 size = 0
             plugin_logger.log_event(
                 "sink_write",
@@ -100,8 +107,10 @@ class FileCopySink(ResultSink):
                 metadata={"source": str(src_path), "dest": str(target)},
             )
         if metadata and metadata.get("security_level"):
-            self._security_level = normalize_security_level(metadata.get("security_level"))
-            self._determinism_level = normalize_determinism_level(metadata.get("determinism_level"))
+            level = metadata.get("security_level")
+            det = metadata.get("determinism_level")
+            self._security_level = level if isinstance(level, SecurityLevel) else ensure_security_level(level)
+            self._determinism_level = det if isinstance(det, DeterminismLevel) else ensure_determinism_level(det)
 
     def collect_artifacts(self) -> dict[str, Artifact]:  # pragma: no cover - optional
         if not self._written_path:

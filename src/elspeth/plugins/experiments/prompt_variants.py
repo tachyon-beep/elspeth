@@ -138,8 +138,10 @@ class PromptVariantsAggregator(AggregationExperimentPlugin):
             "placeholder_tokens": placeholder_tokens,
             "variants": generated,
         }
-        if failures:
-            payload["failures"] = failures
+        # Intentionally include an explicit failures key even when empty.
+        # Downstream consumers and reports rely on a stable schema
+        # (failures: list) to simplify validation and rendering.
+        payload["failures"] = failures
         return payload
 
 

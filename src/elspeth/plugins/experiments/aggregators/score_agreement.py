@@ -7,9 +7,9 @@ import math
 from typing import TYPE_CHECKING, Any, Mapping, Sequence
 
 import numpy as np
-import pingouin
 
 from elspeth.core.experiments.plugin_registry import register_aggregation_plugin
+from elspeth.plugins.experiments._stats_helpers import krippendorff_alpha_interval
 
 if TYPE_CHECKING:
     from elspeth.core.base.schema import DataFrameSchema
@@ -113,13 +113,10 @@ class ScoreAgreementAggregator:
         avg_correlation = float(np.mean(correlations)) if correlations else None
 
         krippendorff_alpha = None
-        if pingouin is not None and arr.shape[1] >= 2:
+        if arr.shape[1] >= 2:
             try:
-                import pandas as pd
-
-                df = pd.DataFrame({columns[i]: arr[:, i] for i in range(n_items)})
-                krippendorff_alpha = float(pingouin.krippendorff_alpha(df, reliability_data=True))
-            except Exception:  # pragma: no cover - pingouin failure
+                krippendorff_alpha = krippendorff_alpha_interval(arr)
+            except Exception:  # pragma: no cover - defensive
                 krippendorff_alpha = None
 
         return {

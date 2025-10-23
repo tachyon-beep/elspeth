@@ -38,7 +38,7 @@ from __future__ import annotations
 import logging
 import os
 import re
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 from urllib.parse import urlparse
 
 from elspeth.core.security.secure_mode import SecureMode, get_secure_mode
@@ -83,6 +83,9 @@ APPROVED_PATTERNS: dict[ServiceType, list[str]] = {
     ],
 }
 
+if TYPE_CHECKING:  # Satisfy static analyzers for forward-referenced type names
+    from elspeth.core.base.types import SecurityLevel
+
 # Security level restrictions by service type
 # Maps service type -> list of allowed security levels (canonical uppercase forms)
 # If not specified, all security levels are allowed
@@ -101,14 +104,22 @@ SECURITY_LEVEL_RESTRICTIONS: dict[ServiceType, dict[str, list[str]]] = {
 def _get_environment_patterns() -> list[str]:
     """Get additional approved patterns from environment variable.
 
+    Only enabled in DEVELOPMENT mode to avoid policy drift in stricter modes.
+
     Returns:
         List of regex patterns from ELSPETH_APPROVED_ENDPOINTS env var.
     """
+    # Restrict overrides: only allow in DEVELOPMENT to prevent policy drift.
+    # Both STRICT and STANDARD modes block environment overrides for security.
+    mode = get_secure_mode()
+    if mode in (SecureMode.STRICT, SecureMode.STANDARD):
+        return []
+
     env_patterns = os.environ.get("ELSPETH_APPROVED_ENDPOINTS", "").strip()
     if not env_patterns:
         return []
 
-    patterns = []
+    patterns: list[str] = []
     for pattern_str in env_patterns.split(","):
         pattern_str = pattern_str.strip()
         if pattern_str:
@@ -117,7 +128,10 @@ def _get_environment_patterns() -> list[str]:
             patterns.append(pattern_str)
 
     if patterns:
-        logger.info(f"Loaded {len(patterns)} additional approved endpoint patterns from ELSPETH_APPROVED_ENDPOINTS environment variable")
+        logger.info(
+            "Loaded %d additional approved endpoint patterns from ELSPETH_APPROVED_ENDPOINTS (DEVELOPMENT mode)",
+            len(patterns),
+        )
 
     return patterns
 
@@ -135,7 +149,7 @@ def _matches_pattern(endpoint: str, pattern: str) -> bool:
     try:
         return bool(re.fullmatch(pattern, endpoint))
     except re.error as exc:
-        logger.warning(f"Invalid endpoint pattern '{pattern}': {exc}")
+        logger.warning("Invalid endpoint pattern '%s': %s", pattern, exc)
         return False
 
 
@@ -147,30 +161,36 @@ def _is_localhost(endpoint: str) -> bool:
 
     Returns:
         True if endpoint is localhost or loopback address
+
+    Notes:
+        urlparse doesn't raise exceptions in modern Python (3.7+), but we keep
+        ultra-defensive exception handling for edge cases and malformed inputs.
     """
     try:
         parsed = urlparse(endpoint)
         hostname = parsed.hostname
-        if not hostname:
-            return False
-
-        # Check common localhost patterns
-        localhost_patterns = [
-            "localhost",
-            "127.0.0.1",
-            "::1",
-            "[::1]",
-        ]
-
-        return hostname.lower() in localhost_patterns
-    except Exception:
+    except (ValueError, AttributeError) as exc:  # pragma: no cover - ultra-defensive
+        logger.warning("Failed to parse endpoint '%s' in _is_localhost: %s", endpoint, exc)
         return False
+
+    if not hostname:
+        return False
+
+    # Check common localhost patterns
+    localhost_patterns = [
+        "localhost",
+        "127.0.0.1",
+        "::1",
+        "[::1]",
+    ]
+
+    return hostname.lower() in localhost_patterns
 
 
 def validate_endpoint(
     endpoint: str,
     service_type: ServiceType,
-    security_level: str | None = None,
+    security_level: "SecurityLevel | None" = None,
     mode: SecureMode | None = None,
 ) -> None:
     """Validate that an endpoint is approved for use.
@@ -198,7 +218,7 @@ def validate_endpoint(
 
     # Always allow localhost for testing
     if _is_localhost(endpoint_normalized):
-        logger.debug(f"Endpoint '{endpoint}' is localhost - allowed for testing")
+        logger.debug("Endpoint '%s' is localhost - allowed for testing", endpoint)
         return
 
     # Get approved patterns for this service type
@@ -221,7 +241,7 @@ def validate_endpoint(
         error_msg = f"Endpoint '{endpoint}' is not approved for service type '{service_type}'. Approved patterns: {approved_patterns}"
 
         if mode == SecureMode.DEVELOPMENT:
-            logger.warning(f"{error_msg} (DEVELOPMENT mode - allowing anyway)")
+            logger.warning("%s (DEVELOPMENT mode - allowing anyway)", error_msg)
             return
         else:
             logger.error(error_msg)
@@ -233,9 +253,12 @@ def validate_endpoint(
 
         # Normalize security level to canonical form (handles aliases like "internal" -> "OFFICIAL")
         # Import here to avoid circular dependency
-        from elspeth.core.security import normalize_security_level
+        from elspeth.core.base.types import SecurityLevel
 
-        security_level_normalized = normalize_security_level(security_level)
+        if isinstance(security_level, SecurityLevel):
+            security_level_normalized = security_level.value
+        else:  # Enforce enum-only API for 1.0
+            raise TypeError("security_level must be a SecurityLevel or None")
 
         # Check if this specific pattern has security level restrictions
         for pattern, allowed_levels in restrictions.items():
@@ -248,13 +271,18 @@ def validate_endpoint(
                     )
 
                     if mode == SecureMode.DEVELOPMENT:
-                        logger.warning(f"{error_msg} (DEVELOPMENT mode - allowing anyway)")
+                        logger.warning("%s (DEVELOPMENT mode - allowing anyway)", error_msg)
                         return
                     else:
                         logger.error(error_msg)
                         raise ValueError(error_msg)
 
-    logger.debug(f"Endpoint '{endpoint}' validated successfully for service '{service_type}' (matched pattern: {matched_pattern})")
+    logger.debug(
+        "Endpoint '%s' validated successfully for service '%s' (matched pattern: %s)",
+        endpoint,
+        service_type,
+        matched_pattern,
+    )
 
 
 def get_approved_patterns(service_type: ServiceType) -> list[str]:
@@ -271,7 +299,7 @@ def get_approved_patterns(service_type: ServiceType) -> list[str]:
     return base_patterns + env_patterns
 
 
-def validate_azure_openai_endpoint(endpoint: str, security_level: str | None = None, mode: SecureMode | None = None) -> None:
+def validate_azure_openai_endpoint(endpoint: str, security_level: "SecurityLevel | None" = None, mode: SecureMode | None = None) -> None:
     """Validate an Azure OpenAI endpoint.
 
     Convenience wrapper for validate_endpoint with service_type="azure_openai".
@@ -292,7 +320,7 @@ def validate_azure_openai_endpoint(endpoint: str, security_level: str | None = N
     )
 
 
-def validate_http_api_endpoint(endpoint: str, security_level: str | None = None, mode: SecureMode | None = None) -> None:
+def validate_http_api_endpoint(endpoint: str, security_level: "SecurityLevel | None" = None, mode: SecureMode | None = None) -> None:
     """Validate an HTTP API endpoint.
 
     Convenience wrapper for validate_endpoint with service_type="http_api".
@@ -313,7 +341,7 @@ def validate_http_api_endpoint(endpoint: str, security_level: str | None = None,
     )
 
 
-def validate_azure_blob_endpoint(endpoint: str, security_level: str | None = None, mode: SecureMode | None = None) -> None:
+def validate_azure_blob_endpoint(endpoint: str, security_level: "SecurityLevel | None" = None, mode: SecureMode | None = None) -> None:
     """Validate an Azure Blob Storage endpoint.
 
     Convenience wrapper for validate_endpoint with service_type="azure_blob".
@@ -334,7 +362,7 @@ def validate_azure_blob_endpoint(endpoint: str, security_level: str | None = Non
     )
 
 
-def validate_azure_search_endpoint(endpoint: str, security_level: str | None = None, mode: SecureMode | None = None) -> None:
+def validate_azure_search_endpoint(endpoint: str, security_level: "SecurityLevel | None" = None, mode: SecureMode | None = None) -> None:
     """Validate an Azure Cognitive Search endpoint.
 
     Convenience wrapper for validate_endpoint with service_type="azure_search".

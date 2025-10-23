@@ -8,7 +8,7 @@ ensure datasource schemas satisfy plugin requirements.
 from __future__ import annotations
 
 import typing
-from typing import Any, Type
+from typing import Any
 
 import pandas as pd
 from pydantic import ValidationError as PydanticValidationError
@@ -18,7 +18,7 @@ from .base import DataFrameSchema, SchemaCompatibilityError, SchemaViolation
 
 def validate_row(
     row: dict[str, Any],
-    schema: Type[DataFrameSchema],
+    schema: type[DataFrameSchema],
     *,
     row_index: int = 0,
 ) -> tuple[bool, SchemaViolation | None]:
@@ -56,7 +56,7 @@ def validate_row(
 
 def validate_dataframe(
     df: pd.DataFrame,
-    schema: Type[DataFrameSchema],
+    schema: type[DataFrameSchema],
     *,
     early_stop: bool = True,
 ) -> tuple[bool, list[SchemaViolation]]:
@@ -82,8 +82,8 @@ def validate_dataframe(
 
 
 def validate_schema_compatibility(
-    datasource_schema: Type[DataFrameSchema],
-    plugin_schema: Type[DataFrameSchema],
+    datasource_schema: type[DataFrameSchema],
+    plugin_schema: type[DataFrameSchema],
     *,
     plugin_name: str = "plugin",
 ) -> None:
@@ -156,7 +156,7 @@ def _unwrap_optional(type_hint: Any) -> Any:
     return type_hint
 
 
-def _types_compatible(datasource_type: Type, plugin_type: Type) -> bool:
+def _types_compatible(datasource_type: type, plugin_type: type) -> bool:
     """
     Check if datasource type is compatible with plugin type.
 
@@ -177,7 +177,7 @@ def _types_compatible(datasource_type: Type, plugin_type: Type) -> bool:
     return False
 
 
-def _type_name(type_hint: Type) -> str:
+def _type_name(type_hint: type) -> str:
     """Get human-readable name for a type."""
     if hasattr(type_hint, "__name__"):
         return type_hint.__name__

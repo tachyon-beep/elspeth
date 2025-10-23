@@ -1,8 +1,18 @@
 # Elspeth
 
+**E**xtensible **L**ayered **S**ecure **P**ipeline **E**ngine for **T**ransformation and **H**andling
+
 > Secure, pluggable orchestration for responsible LLM experimentation.
 
-Elspeth bundles a hardened experiment runner, policy-aware plugin registry, and reporting pipeline so teams can run comparative LLM studies without compromising compliance or auditability. Datasources, LLM clients, metrics, and sinks remain swappable while trace metadata, sanitisation, and signing keep artefacts defensible.
+Elspeth is a general-purpose orchestration platform implementing **sense-decide-act** workflows: sources provide inputs, transforms apply logic (analytical, decisional, or procedural), and sinks handle outputs—whether storing results, triggering automation, or actuating real-world effects.
+
+**Transformation** covers any source-to-output logic: data ETL, LLM inference, statistical analysis, rule evaluation, or custom processing. **Handling** encompasses the full range of sink behaviors: persisting to databases, writing reports, sending notifications, invoking APIs, or commanding external systems (IoT devices, infrastructure, satellites).
+
+While Elspeth excels at LLM experimentation (hardened runner, policy-aware plugin registry, comparative studies with compliance controls), the plugin architecture supports any workflow topology. Security controls—run‑bundle signing (CLI), spreadsheet sanitisation, security‑level enforcement, audit logging—and, in CI, container image signing with SBOM attestation—are baked into every pipeline stage, making it suitable for compliance‑sensitive automation and operational decision systems.
+
+Plugins follow the Phase 2 layout and live under `src/elspeth/plugins/nodes/{sources,transforms,sinks}/` with experiment helpers in `src/elspeth/plugins/experiments/`.
+
+Core concepts: a Suite contains Experiments composed of Sources → Transforms → Sinks; plugins declare `consumes()`/`produces()` to compose safely and enable validation.
 
 ## Highlights
 
@@ -31,13 +41,15 @@ make bootstrap           # creates .venv/, installs extras, runs pytest
 make bootstrap-no-test
 ```
 
-Activate the environment when working manually:
+Activate the environment with locked installs (mandatory for all environments):
 
 ```bash
 source .venv/bin/activate
-pip install --require-hashes -r requirements-dev.lock
-pip install -e . --no-deps
+python -m pip install -r requirements-dev.lock --require-hashes
+python -m pip install -e . --no-deps --no-index
 ```
+
+Note: Do not install directly from `pyproject.toml` constraints (e.g., via unpinned `>=` ranges). Always install from the lockfiles with `--require-hashes` to ensure reproducible builds and AIS compliance.
 
 For Azure ML workflows, use the dedicated lockfiles:
 
@@ -47,8 +59,8 @@ pip install --require-hashes -r requirements-azure.lock
 pip install -e . --no-deps
 
 # Developer tooling + Azure extras
-python -m piptools sync requirements-dev-azure.lock
-pip install -e . --no-deps
+python -m pip install -r requirements-dev-azure.lock --require-hashes
+python -m pip install -e . --no-deps --no-index
 ```
 
 ### Run the sample suite
@@ -73,21 +85,46 @@ python -m elspeth.cli \
 
 Pass `--live-outputs` to allow repository or blob sinks to write to their targets and `--head 0` to skip preview tables.
 
+#### Validate Schemas (pre‑flight)
+
+Fail fast on datasource ↔ plugin schema mismatches without running experiments:
+
+```bash
+python -m elspeth.cli validate-schemas \
+  --settings config/sample_suite/settings.yaml \
+  --profile default
+```
+
+Troubleshooting:
+
+- “No schema validation performed”: attach a schema to your datasource via config (e.g., CSV `schema:` block) or enable inference.
+- “Schema compatibility check failed”: a plugin declared `input_schema()` requiring columns/types your datasource doesn’t provide; fix the datasource schema or adjust the plugin.
+- “Missing prompt_fields in datasource schema”: add the missing columns to your datasource schema or adjust `prompt_fields`.
+- “Sink must implement produces()/consumes()”: ensure each sink class implements these methods and returns lists for chaining metadata.
+
 ## Documentation Hub
 
 | Topic | Description |
 | ------ | ----------- |
 | [Usage & Operations](docs/reporting-and-suite-management.md) | Running suites, managing reports, and operational workflows. |
 | [End-to-End Scenarios](docs/end_to_end_scenarios.md) | Guided walkthroughs for typical experimentation pipelines. |
-| [Configuration & Prompt Packs](docs/architecture/configuration-merge.md) | Deep dive into how profiles, packs, and defaults merge. |
+| [Configuration & Prompt Packs](docs/architecture/configuration-security.md#update-2025-10-23-prompt-packs-defaults-and-merge-order) | Deep dive into how profiles, packs, and defaults merge. |
 | [Configuration Security](docs/architecture/configuration-security.md) | Validation pipeline, secret handling, concurrency/retry/early-stop settings. |
 | [Plugin Catalogue](docs/architecture/plugin-catalogue.md) | Datasources, LLM clients, middleware, metrics, and sinks. |
+| [Plugin Authoring Guide](docs/development/plugin-authoring.md) | Build, register, secure, and test plugins (WP002-aware). |
 | [Security & Compliance](docs/architecture/security-controls.md) | Controls inventory, threat surfaces, and accreditation notes. |
 | [Architecture Overview](docs/architecture/README.md) | Component diagrams, data flows, and lifecycle documentation. |
 | [Logging & Observability](docs/development/logging-standards.md) | Standards for audit logs and telemetry integration. |
 | [Upgrade & Migration Guides](docs/migration-guide.md) | Version-to-version migration checklist and upgrade strategy. |
 
 Prefer a consolidated index? Check `docs/README.md` for a map of every reference.
+
+Signed evidence bundles
+
+- Create a signed reproducibility bundle by passing `--signed-bundle` and `--artifacts-dir`.
+- Algorithms: `hmac-sha256` (default), `hmac-sha512`, `rsa-pss-sha256`, `ecdsa-p256-sha256`.
+- Keys can be supplied via `ELSPETH_SIGNING_KEY` (HMAC or PEM), `COSIGN_KEY` (PEM), or fetched from Azure Key Vault via `ELSPETH_SIGNING_KEY_VAULT_SECRET_URI`.
+- For asymmetric modes, you can embed a public key fingerprint in the signature by setting `public_key_env` on the sink (see docs/operations/artifacts.md).
 
 ## Architecture Snapshot
 
@@ -102,9 +139,43 @@ For diagrams and deep detail, see `docs/architecture/architecture-overview.md`, 
 
 - Run `python -m pytest -m "not slow"` (or `make test`) for fast feedback.
 - Use `python -m pytest --maxfail=1 --disable-warnings` during triage.
-- Lint/format with `make lint` (runs `ruff` formatting/checks plus `pytype`).
+- Lint/format with `make lint` (ruff format + ruff check + mypy).
 - Validate dependencies with `make audit` (pip-audit against `requirements.lock`).
 - Generate an SBOM with `make sbom` (outputs `sbom.json` from the locked requirements).
+- Persistent artifacts and audit bundles are written under `artifacts/` when enabled via the CLI (see `--artifacts-dir` and `--signed-bundle`). This directory is git‑ignored by default.
+- JSONL audit logs are written under `logs/` per run. You can enable simple retention with:
+  - `ELSPETH_LOG_MAX_FILES` (keep newest N files)
+  - `ELSPETH_LOG_MAX_AGE_DAYS` (delete files older than N days)
+  Both are optional and best‑effort; logging never blocks execution.
+
+## Container Signing & Attestation
+
+Elspeth images published by the workflow are signed with Sigstore Cosign and include a CycloneDX SBOM attestation.
+
+- Default: keyless GitHub OIDC signing (no private key required). The workflow has `permissions: id-token: write` and uses `cosign sign` and `cosign attest`.
+- Optional internal keys: provide either a cloud KMS URI or a key pair to add an additional signature/attestation without rebuilding the image.
+  - `COSIGN_KMS_URI`: e.g., `awskms://...`, `gcpkms://...`, or `azurekeyvault://...`
+  - or `COSIGN_KEY` + `COSIGN_PASSWORD`: PEM key material from a secret
+
+Verification examples (replace `OWNER/REPO:TAG`):
+
+```bash
+# Keyless (GitHub OIDC) signature
+cosign verify \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --certificate-identity-regexp "https://github.com/OWNER/REPO/.*" \
+  ghcr.io/OWNER/REPO:TAG
+
+# Internal KMS/key signature
+cosign verify --key awskms://arn:aws:kms:... ghcr.io/OWNER/REPO:TAG
+
+# SBOM attestation (CycloneDX)
+cosign verify-attestation --type cyclonedx ghcr.io/OWNER/REPO:TAG | jq
+```
+
+Migration guidance:
+
+- You can dual‑sign during transition (keyless + internal). OCI registries store multiple signatures per digest. Tighten admission policy to “internal only” when ready.
 - Regenerate analytics artefacts after reporting or sink changes:
 
   ```bash
@@ -119,17 +190,17 @@ Coverage data is emitted to `coverage.xml` for SonarQube/SonarCloud.
 
 ## Contributing
 
-We welcome issues, improvements, and new plugins. Start with [`CONTRIBUTING.md`](CONTRIBUTING.md) for branching, coding-style, and testing guidelines. The [`docs/release-checklist.md`](docs/release-checklist.md) tracks release expectations, and `docs/architecture/upgrade-strategy.md` covers compatibility policies.
+We welcome issues, improvements, and new plugins. Start with [`CONTRIBUTING.md`](CONTRIBUTING.md) for branching, coding-style, and testing guidelines. The [`docs/release-checklist.md`](docs/release-checklist.md) tracks release expectations, and `docs/development/upgrade-strategy.md` covers compatibility policies.
 
 ## Community & Support
 
 - File bugs and feature requests via GitHub Issues.
-- Reference `docs/architecture/incident-response.md` for high-severity escalation processes.
-- Compliance teams can consult `docs/architecture/CONTROL_INVENTORY.md` and `docs/TRACEABILITY_MATRIX.md` for audit evidence.
+- Reference `docs/compliance/incident-response.md` for high-severity escalation processes.
+- Compliance teams can consult `docs/compliance/CONTROL_INVENTORY.md` and `docs/compliance/TRACEABILITY_MATRIX.md` for audit evidence.
 
 ## License
 
-License information will be published in `LICENSE`. Until then, reach out to the maintainers before redistributing or deploying Elspeth in production environments.
+MIT License — see `LICENSE`.
 
 ---
 

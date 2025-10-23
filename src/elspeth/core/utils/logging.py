@@ -16,11 +16,23 @@ import importlib.metadata
 import inspect
 import json
 import logging
-from datetime import datetime, timezone
+import os
+import threading
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, cast
 
 from elspeth.core.base.plugin_context import PluginContext
+
+# Optional POSIX file locking for cross-process log serialization
+# Ensure symbol is always bound for type checkers
+_fcntl: Any | None = None
+try:  # pragma: no cover - platform dependent
+    import fcntl as _fcntl
+
+    _HAS_FCNTL = True
+except ImportError:  # pragma: no cover - Windows or restricted env
+    _HAS_FCNTL = False
 
 
 class PluginLogger:
@@ -63,17 +75,99 @@ class PluginLogger:
         # Create log directory
         self.log_dir.mkdir(parents=True, exist_ok=True)
 
+        # Standard Python logger for traditional logging (set early for retention logs)
+        self.logger = logging.getLogger(f"elspeth.{context.plugin_kind}.{context.plugin_name}")
+
+        # Apply simple retention policy if configured via environment
+        # ELSPETH_LOG_MAX_FILES: keep at most N newest files (int > 0)
+        # ELSPETH_LOG_MAX_AGE_DAYS: delete files older than given days (int > 0)
+        try:
+            self._apply_retention()
+        except (OSError, ValueError) as exc:
+            # Retention is best-effort and should never block execution
+            self.logger.debug("Log retention maintenance skipped: %s", exc, exc_info=False)
+
         # Generate run timestamp (shared across all plugins in this run)
         self.run_id = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
 
         # Log file path
         self.log_file = self.log_dir / f"run_{self.run_id}.jsonl"
+        # Cross-process lock file path (POSIX advisory lock)
+        self._lock_file = Path(str(self.log_file) + ".lock")
 
-        # Standard Python logger for traditional logging
+        # Standard Python logger already set above; recompute name if needed
+        # (kept for clarity, but reference is identical)
         self.logger = logging.getLogger(f"elspeth.{context.plugin_kind}.{context.plugin_name}")
 
+        # Serialise file appends across threads (must exist before first write)
+        self._file_lock = threading.Lock()
         # Log initialization
         self._log_initialization()
+
+    # ------------------------------------------------------------------ retention
+    def _apply_retention(self) -> None:
+        max_files_raw = os.getenv("ELSPETH_LOG_MAX_FILES")
+        max_age_days_raw = os.getenv("ELSPETH_LOG_MAX_AGE_DAYS")
+        # Fast path: if no retention settings are provided, skip filesystem work entirely
+        if not max_files_raw and not max_age_days_raw:
+            return
+        try:
+            max_files = int(max_files_raw) if max_files_raw else None
+        except ValueError:
+            max_files = None
+        try:
+            max_age_days = int(max_age_days_raw) if max_age_days_raw else None
+        except ValueError:
+            max_age_days = None
+
+        # Cache (path, mtime) to avoid repeated stat() calls
+        candidates = [(p, p.stat().st_mtime) for p in self.log_dir.glob("run_*.jsonl")]
+        candidates.sort(key=lambda x: x[1], reverse=True)
+        now = datetime.now(timezone.utc)
+        # Safety margin to avoid deleting files that may still be written by another process
+        # (in seconds, default 30). Can be overridden via ELSPETH_LOG_RETENTION_SAFETY_SECONDS.
+        try:
+            safety_sec = int(os.getenv("ELSPETH_LOG_RETENTION_SAFETY_SECONDS", "30"))
+        except ValueError:
+            safety_sec = 30
+        safety_cutoff = now - timedelta(seconds=max(safety_sec, 0))
+        # Age-based pruning
+        deleted_age = 0
+        errors_age = 0
+        if max_age_days and max_age_days > 0:
+            cutoff = now - timedelta(days=max_age_days)
+            for p, mtime in candidates:
+                try:
+                    mtime_dt = datetime.fromtimestamp(mtime, tz=timezone.utc)
+                    # Skip files newer than the safety margin window
+                    if mtime_dt >= safety_cutoff:
+                        continue
+                    if mtime_dt < cutoff:
+                        p.unlink(missing_ok=True)
+                        deleted_age += 1
+                except (OSError, ValueError, OverflowError) as exc:
+                    # Ignore deletion or timestamp conversion errors but record for diagnostics
+                    errors_age += 1
+                    self.logger.debug("Retention age-prune failed for %s: %s", p, exc, exc_info=False)
+            # Refresh candidate list after age-based deletions without re-statting
+            candidates = [(p, mtime) for (p, mtime) in candidates if p.exists()]
+            if deleted_age or errors_age:
+                level = logging.WARNING if errors_age else logging.DEBUG
+                self.logger.log(level, "Retention age-pruned files: %d (errors: %d)", deleted_age, errors_age)
+        # Count-based pruning
+        deleted_count = 0
+        errors_count = 0
+        if max_files and max_files > 0 and len(candidates) > max_files:
+            for p, _ in candidates[max_files:]:
+                try:
+                    p.unlink(missing_ok=True)
+                    deleted_count += 1
+                except OSError as exc:
+                    errors_count += 1
+                    self.logger.debug("Retention count-prune failed for %s: %s", p, exc, exc_info=False)
+            if deleted_count or errors_count:
+                level = logging.WARNING if errors_count else logging.DEBUG
+                self.logger.log(level, "Retention count-pruned files: %d (errors: %d)", deleted_count, errors_count)
 
     def _compute_config_hash(self) -> str:
         """Compute SHA256 hash of plugin configuration."""
@@ -364,8 +458,23 @@ class PluginLogger:
             entry: Log entry dictionary
         """
         try:
-            with open(self.log_file, "a", encoding="utf-8") as f:
-                f.write(json.dumps(entry) + "\n")
+            with self._file_lock:
+                if _HAS_FCNTL:
+                    if _fcntl is None:
+                        raise RuntimeError("fcntl module not available despite _HAS_FCNTL=True. This should not happen on POSIX systems.")
+                    # Use POSIX advisory lock to serialize writes across processes
+                    # Create/open the lock file once per write (short critical section)
+                    with open(self._lock_file, "a", encoding="utf-8") as lf:  # nosec - lock file path is internal
+                        _fcntl.flock(lf, _fcntl.LOCK_EX)
+                        try:
+                            with open(self.log_file, "a", encoding="utf-8") as f:
+                                f.write(json.dumps(entry) + "\n")
+                        finally:
+                            _fcntl.flock(lf, _fcntl.LOCK_UN)
+                else:
+                    # Fallback: rely on per-process threading lock only
+                    with open(self.log_file, "a", encoding="utf-8") as f:
+                        f.write(json.dumps(entry) + "\n")
         except (OSError, IOError) as exc:
             # Fallback to standard logger if file write fails
             self.logger.error("Failed to write log entry: %s", exc)

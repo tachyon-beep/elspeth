@@ -30,10 +30,12 @@ from elspeth.plugins.nodes.sinks.csv_file import CsvResultSink
 
 logger = logging.getLogger(__name__)
 
+_ERROR_MSG_TEMP_DIR_NOT_INITIALIZED = "temporary directory not initialized"
+
 
 @dataclass
 class ReproducibilityBundleSink(ResultSink):
-    """Create tamper-evident archive with complete experiment reproducibility data."""
+    """Create a tamper-evident reproducibility bundle with results, metadata, and code."""
 
     base_path: str | Path
     bundle_name: str | None = None
@@ -75,6 +77,7 @@ class ReproducibilityBundleSink(ResultSink):
     _last_archive_path: str | None = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
+        """Normalize configuration and validate on_error early."""
         self.base_path = Path(self.base_path)
         if self.on_error not in {"abort", "skip"}:
             raise ValueError("on_error must be 'abort' or 'skip'")
@@ -124,15 +127,15 @@ class ReproducibilityBundleSink(ResultSink):
 
             # Generate manifest with file hashes
             manifest = self._build_manifest(results, metadata, timestamp)
-            assert self._temp_dir is not None
-            manifest_path = self._temp_dir / self.manifest_name
+            temp_dir = self._ensure_temp_dir()
+            manifest_path = temp_dir / self.manifest_name
             manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True), encoding="utf-8")
             self._file_hashes[self.manifest_name] = self._hash_file(manifest_path)
 
             # Sign the manifest
             signature_data = self._sign_manifest(manifest, timestamp)
-            assert self._temp_dir is not None
-            signature_path = self._temp_dir / self.signature_name
+            temp_dir = self._ensure_temp_dir()
+            signature_path = temp_dir / self.signature_name
             signature_path.write_text(json.dumps(signature_data, indent=2, sort_keys=True), encoding="utf-8")
 
             # Create final tarball
@@ -142,7 +145,7 @@ class ReproducibilityBundleSink(ResultSink):
             if plugin_logger:
                 try:
                     size = archive_path.stat().st_size
-                except Exception:
+                except OSError:
                     size = 0
                 plugin_logger.log_event(
                     "sink_write",
@@ -169,8 +172,8 @@ class ReproducibilityBundleSink(ResultSink):
 
     def _write_results_json(self, results: dict[str, Any]) -> None:
         """Write results as JSON with sorted keys."""
-        assert self._temp_dir is not None
-        path = self._temp_dir / self.results_json_name
+        temp_dir = self._ensure_temp_dir()
+        path = temp_dir / self.results_json_name
         # Use custom encoder to handle non-serializable objects
         content = json.dumps(results, indent=2, sort_keys=True, default=self._json_serializer)
         path.write_text(content, encoding="utf-8")
@@ -179,8 +182,8 @@ class ReproducibilityBundleSink(ResultSink):
 
     def _write_results_csv(self, results: dict[str, Any], metadata: dict[str, Any]) -> None:
         """Write results as sanitized CSV."""
-        assert self._temp_dir is not None
-        path = self._temp_dir / self.results_csv_name
+        temp_dir = self._ensure_temp_dir()
+        path = temp_dir / self.results_csv_name
         csv_sink = CsvResultSink(
             path=str(path),
             overwrite=True,
@@ -194,59 +197,84 @@ class ReproducibilityBundleSink(ResultSink):
 
     def _write_source_data(self, metadata: dict[str, Any]) -> None:
         """Write source data snapshot from datasource."""
-        # Priority 1: Check if datasource retained a local copy (preferred)
         source_data = metadata.get("source_data")
         datasource_config = metadata.get("datasource_config")
 
-        # Check DataFrame attrs for retained_local_path
-        retained_path = None
-        if source_data is not None:
-            import pandas as pd
-
-            if isinstance(source_data, pd.DataFrame):
-                retained_path = source_data.attrs.get("retained_local_path")
-
+        retained_path = self._get_retained_path(source_data)
         if retained_path and Path(retained_path).exists():
-            # Copy the retained local file
-            assert self._temp_dir is not None
-            dest_path = self._temp_dir / self.source_data_name
-            shutil.copy2(retained_path, dest_path)
-            self._file_hashes[self.source_data_name] = self._hash_file(dest_path)
-            logger.debug("Copied retained source data from %s (%d bytes)", retained_path, dest_path.stat().st_size)
-
-        elif source_data is not None:
+            self._copy_retained_file(retained_path)
+        elif self._is_dataframe(source_data):
             # DataFrame available but no retained copy - save it now
-            import pandas as pd
-
-            if isinstance(source_data, pd.DataFrame):
-                assert self._temp_dir is not None
-                path = self._temp_dir / self.source_data_name
-                source_data.to_csv(path, index=False)
-                self._file_hashes[self.source_data_name] = self._hash_file(path)
-                logger.debug("Wrote source data snapshot: %d rows", len(source_data))
-                logger.warning("Source data was not retained locally by datasource; saved from DataFrame (may lose original formatting)")
+            self._write_source_dataframe(source_data)
+            logger.warning("Source data was not retained locally by datasource; saved from DataFrame (may lose original formatting)")
 
         if datasource_config:
             # Always save datasource config for reference
-            assert self._temp_dir is not None
-            config_path = self._temp_dir / "datasource_config.json"
-            config_path.write_text(json.dumps(datasource_config, indent=2, sort_keys=True), encoding="utf-8")
-            self._file_hashes["datasource_config.json"] = self._hash_file(config_path)
-            logger.debug("Wrote datasource config")
+            self._write_datasource_config(datasource_config)
 
         if not retained_path and source_data is None:
             logger.warning("Source data not available; skipping snapshot")
+
+    # ---- helpers for source data writing ---------------------------------
+    def _ensure_temp_dir(self) -> Path:
+        if self._temp_dir is None:  # pragma: no cover - defensive
+            raise RuntimeError(_ERROR_MSG_TEMP_DIR_NOT_INITIALIZED)
+        return self._temp_dir
+
+    @staticmethod
+    def _is_dataframe(obj: Any) -> bool:
+        try:
+            import pandas as pd  # pylint: disable=import-outside-toplevel
+
+            return isinstance(obj, pd.DataFrame)
+        except (ImportError, AttributeError):
+            return False
+
+    def _get_retained_path(self, source_data: Any) -> str | None:
+        if not self._is_dataframe(source_data):
+            return None
+        try:
+            value = source_data.attrs.get("retained_local_path")
+            return value if isinstance(value, str) or value is None else None
+        except AttributeError:
+            return None
+
+    def _copy_retained_file(self, retained_path: str) -> None:
+        temp_dir = self._ensure_temp_dir()
+        dest_path = temp_dir / self.source_data_name
+        shutil.copy2(retained_path, dest_path)
+        self._file_hashes[self.source_data_name] = self._hash_file(dest_path)
+        logger.debug("Copied retained source data from %s (%d bytes)", retained_path, dest_path.stat().st_size)
+
+    def _write_source_dataframe(self, df: Any) -> None:
+        temp_dir = self._ensure_temp_dir()
+        path = temp_dir / self.source_data_name
+        # pandas import handled in _is_dataframe
+        df.to_csv(path, index=False)
+        self._file_hashes[self.source_data_name] = self._hash_file(path)
+        try:
+            rows = len(df)
+        except TypeError:
+            rows = 0
+        logger.debug("Wrote source data snapshot: %d rows", rows)
+
+    def _write_datasource_config(self, datasource_config: Any) -> None:
+        temp_dir = self._ensure_temp_dir()
+        config_path = temp_dir / "datasource_config.json"
+        config_path.write_text(json.dumps(datasource_config, indent=2, sort_keys=True), encoding="utf-8")
+        self._file_hashes["datasource_config.json"] = self._hash_file(config_path)
+        logger.debug("Wrote datasource config")
 
     def _write_config(self, metadata: dict[str, Any]) -> None:
         """Write complete experiment configuration."""
         config = metadata.get("config") or metadata.get("experiment_config")
 
         if config:
-            assert self._temp_dir is not None
-            path = self._temp_dir / self.config_name
+            temp_dir = self._ensure_temp_dir()
+            path = temp_dir / self.config_name
             if isinstance(config, dict):
                 # Convert dict to YAML
-                import yaml
+                import yaml  # pylint: disable=import-outside-toplevel
 
                 content = yaml.dump(config, default_flow_style=False, sort_keys=True)
             else:
@@ -285,8 +313,8 @@ class ReproducibilityBundleSink(ResultSink):
             )
 
         if prompts:
-            assert self._temp_dir is not None
-            path = self._temp_dir / self.prompts_name
+            temp_dir = self._ensure_temp_dir()
+            path = temp_dir / self.prompts_name
             path.write_text(json.dumps(prompts, indent=2, sort_keys=True), encoding="utf-8")
             self._file_hashes[self.prompts_name] = self._hash_file(path)
             logger.debug("Wrote %d prompts", len([p for p in prompts if "row_index" in p]))
@@ -295,8 +323,8 @@ class ReproducibilityBundleSink(ResultSink):
 
     def _write_plugins(self, metadata: dict[str, Any]) -> None:
         """Copy source code of all plugins used in this experiment."""
-        assert self._temp_dir is not None
-        plugins_dir = self._temp_dir / "plugins"
+        temp_dir = self._ensure_temp_dir()
+        plugins_dir = temp_dir / "plugins"
         plugins_dir.mkdir(exist_ok=True)
 
         plugin_info_raw = metadata.get("plugins")
@@ -389,8 +417,8 @@ class ReproducibilityBundleSink(ResultSink):
             return
 
         # Create tarball of framework code
-        assert self._temp_dir is not None
-        framework_tar = self._temp_dir / "framework_source.tar.gz"
+        temp_dir = self._ensure_temp_dir()
+        framework_tar = temp_dir / "framework_source.tar.gz"
         with tarfile.open(framework_tar, "w:gz") as tar:
             tar.add(framework_dir, arcname="elspeth", filter=self._filter_framework_files)
 
@@ -412,8 +440,8 @@ class ReproducibilityBundleSink(ResultSink):
         if not self._consumed_artifacts:
             return
 
-        assert self._temp_dir is not None
-        artifacts_dir = self._temp_dir / "artifacts"
+        temp_dir = self._ensure_temp_dir()
+        artifacts_dir = temp_dir / "artifacts"
         artifacts_dir.mkdir(exist_ok=True)
 
         for artifact_type, artifacts in self._consumed_artifacts.items():
@@ -426,7 +454,6 @@ class ReproducibilityBundleSink(ResultSink):
                     rel_path = f"artifacts/{dest_path.name}"
                     self._file_hashes[rel_path] = self._hash_file(dest_path)
                 elif artifact.payload:
-                    assert self._temp_dir is not None
                     dest_path = artifacts_dir / f"{filename}.json"
                     dest_path.write_text(json.dumps(artifact.payload, indent=2, sort_keys=True), encoding="utf-8")
                     rel_path = f"artifacts/{dest_path.name}"
@@ -500,7 +527,7 @@ class ReproducibilityBundleSink(ResultSink):
 
     def _create_archive(self, metadata: dict[str, Any], timestamp: datetime) -> Path:
         """Create final compressed tarball."""
-        assert self._temp_dir is not None
+        temp_dir = self._ensure_temp_dir()
         name = self.bundle_name or str(metadata.get("experiment") or metadata.get("name") or "experiment")
         if self.timestamped:
             name = f"{name}_{timestamp.strftime('%Y%m%dT%H%M%SZ')}"
@@ -517,7 +544,7 @@ class ReproducibilityBundleSink(ResultSink):
         archive_path.parent.mkdir(parents=True, exist_ok=True)
 
         with tarfile.open(archive_path, mode) as tar:  # type: ignore[call-overload]
-            tar.add(self._temp_dir, arcname=name)
+            tar.add(temp_dir, arcname=name)
 
         return archive_path
 
@@ -593,17 +620,16 @@ class ReproducibilityBundleSink(ResultSink):
         if not self._last_archive_path:
             return {}
 
-        artifact = Artifact(
-            id="reproducibility_bundle",
-            type=f"file/tar.{self.compression}",
-            path=self._last_archive_path,
-            metadata={
-                "bundle_type": "reproducibility",
-                "signed": True,
-                "compression": self.compression,
-            },
-            persist=True,
-        )
+        # Initialize with required args only; set optional fields explicitly to
+        # keep static analyzers happy about dataclass construction.
+        artifact = Artifact("reproducibility_bundle", f"file/tar.{self.compression}")
+        artifact.path = self._last_archive_path
+        artifact.metadata = {
+            "bundle_type": "reproducibility",
+            "signed": True,
+            "compression": self.compression,
+        }
+        artifact.persist = True
 
         self._last_archive_path = None
         return {"reproducibility_bundle": artifact}

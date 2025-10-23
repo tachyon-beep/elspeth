@@ -25,12 +25,12 @@ __all__ = [
 
 def __getattr__(name: str):
     if name == "validate_settings":
-        from .settings import validate_settings as _validate_settings
+        from .settings import validate_settings as _validate_settings  # pylint: disable=import-outside-toplevel
 
         return _validate_settings
     if name in {"validate_suite", "SuiteValidationReport"}:
-        from .suite import SuiteValidationReport as _SuiteValidationReport
-        from .suite import validate_suite as _validate_suite
+        from .suite import SuiteValidationReport as _SuiteValidationReport  # pylint: disable=import-outside-toplevel
+        from .suite import validate_suite as _validate_suite  # pylint: disable=import-outside-toplevel
 
         return {"validate_suite": _validate_suite, "SuiteValidationReport": _SuiteValidationReport}[name]
     raise AttributeError(f"module 'elspeth.core.validation' has no attribute {name!r}")

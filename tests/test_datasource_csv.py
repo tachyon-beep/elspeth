@@ -81,7 +81,11 @@ def test_csv_blob_datasource_failure_returns_empty(monkeypatch, tmp_path, caplog
     csv_path.write_text("content", encoding="utf-8")
 
     datasource = CSVBlobDataSource(path=csv_path, on_error="skip", retain_local=False)
-    monkeypatch.setattr("pandas.read_csv", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("boom")))
+
+    def _raise_runtimeerror(*_args, **_kwargs):  # noqa: D401
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr("pandas.read_csv", _raise_runtimeerror)
 
     with caplog.at_level("WARNING"):
         df = datasource.load()

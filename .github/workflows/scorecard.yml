@@ -1,0 +1,65 @@
+name: OSSF Scorecard
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    - cron: '0 5 * * 1'  # Mondays at 05:00 UTC
+
+permissions: {}
+
+concurrency:
+  group: scorecard-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scorecard:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Run OSSF Scorecard
+        uses: ossf/scorecard-action@99c09fe975337306107572b4fdf4db224cf8e2f2 # v2.4.3
+        with:
+          results_format: sarif
+          results_file: results.sarif
+          publish_results: true
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Scorecard SARIF to code scanning
+        uses: github/codeql-action/upload-sarif@16140ae1a102900babc80a33c44059580f687047 # v4.30.9
+        with:
+          sarif_file: results.sarif
+          category: scorecard
+
+      - name: Summarize Scorecard findings
+        run: |
+          set -e
+          echo "## OpenSSF Scorecard Findings" >> "$GITHUB_STEP_SUMMARY"
+          if [ ! -s results.sarif ]; then
+            echo "No SARIF generated." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          total=$(jq '[.runs[].results[]?] | length' results.sarif)
+          # Scorecard SARIF may omit ".level"; coalesce with properties.severity or default to "note"
+          errors=$(jq '[.runs[].results[]? | select(((.level // (.properties.severity // "note"))|ascii_downcase)=="error")] | length' results.sarif)
+          warnings=$(jq '[.runs[].results[]? | select(((.level // (.properties.severity // "note"))|ascii_downcase)=="warning")] | length' results.sarif)
+          notes=$(jq '[.runs[].results[]? | select(((.level // (.properties.severity // "note"))|ascii_downcase)=="note")] | length' results.sarif)
+          echo "- Total results: ${total}" >> "$GITHUB_STEP_SUMMARY"
+          echo "  - ERROR: ${errors}" >> "$GITHUB_STEP_SUMMARY"
+          echo "  - WARNING: ${warnings}" >> "$GITHUB_STEP_SUMMARY"
+          echo "  - NOTE: ${notes}" >> "$GITHUB_STEP_SUMMARY"
+          # Print top N findings with coalesced severity and message
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Top findings:" >> "$GITHUB_STEP_SUMMARY"
+          jq -r '.runs[].results[]? | "* [\(((.level // (.properties.severity // "note"))|ascii_upcase))] \(.ruleId // "unknown") - \(((.message.text // "")|gsub("\n"; " ")) )"' results.sarif | head -n 15 >> "$GITHUB_STEP_SUMMARY"
+          # Additionally, show most frequent rules
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "Most frequent rules:" >> "$GITHUB_STEP_SUMMARY"
+          jq -r '[.runs[].results[]? | .ruleId] | group_by(.) | map({rule: .[0], count: length}) | sort_by(-.count) | .[] | "* \(.rule): \(.count)"' results.sarif | head -n 10 >> "$GITHUB_STEP_SUMMARY"

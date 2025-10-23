@@ -7,18 +7,18 @@ multiple registry implementations.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any, Callable, Generic, Iterable, Mapping, TypeVar
+from contextlib import contextmanager
+from dataclasses import dataclass, field
+from typing import Any, Callable, ContextManager, Generic, Iterable, Iterator, Mapping, TypeVar
 
 from elspeth.core.base.plugin_context import PluginContext, apply_plugin_context
 from elspeth.core.validation.base import ConfigurationError, validate_schema
 
-# Import context utilities (will be implemented next)
-# from .context_utils import (
-#     create_plugin_context,
-#     extract_security_levels,
-#     prepare_plugin_payload,
-# )
+from .context_utils import (
+    create_plugin_context,
+    extract_security_levels,
+    prepare_plugin_payload,
+)
 
 T = TypeVar("T")  # Plugin type
 
@@ -38,6 +38,7 @@ class BasePluginFactory(Generic[T]):
         create: Factory callable that creates plugin instances
         schema: Optional JSON schema for validation
         plugin_type: Human-readable plugin type (e.g., "datasource", "llm")
+        capabilities: Declared capability flags exposed to registry consumers
 
     Example:
         >>> def create_my_plugin(opts: Dict, ctx: PluginContext) -> MyPlugin:
@@ -57,6 +58,9 @@ class BasePluginFactory(Generic[T]):
     create: Callable[[dict[str, Any], PluginContext], T]
     schema: Mapping[str, Any] | None = None
     plugin_type: str = "plugin"
+    requires_input_schema: bool = False
+    capabilities: frozenset[str] = field(default_factory=frozenset)
+    _compiled_validator: Any | None = field(default=None, init=False, repr=False)
 
     def validate(self, options: dict[str, Any], *, context: str) -> None:
         """
@@ -72,10 +76,30 @@ class BasePluginFactory(Generic[T]):
         if self.schema is None:
             return
 
-        errors = list(validate_schema(options or {}, self.schema, context=context))
-        if errors:
-            message = "\n".join(msg.format() for msg in errors)
-            raise ConfigurationError(message)
+        # Fast path: cache compiled JSON Schema validator per factory to avoid repeated parse/compile cost
+        try:
+            if self._compiled_validator is None:
+                # Lazy import to avoid cost when unused, without type stubs dependency
+                import importlib  # pylint: disable=import-outside-toplevel
+
+                validator_cls = importlib.import_module("jsonschema").Draft202012Validator
+                self._compiled_validator = validator_cls(self.schema)
+            if self._compiled_validator is None:
+                raise RuntimeError(f"Failed to compile JSON schema validator for {context}. Ensure jsonschema package is installed.")
+            # Validate options
+            errors = list(self._compiled_validator.iter_errors(options or {}))
+            if errors:
+                # Build a concise error message similar to validate_schema
+                formatted = []
+                for err in errors:
+                    path = ".".join(str(p) for p in err.path) if err.path else context
+                    formatted.append(f"{context}: {err.message} (at {path})")
+                raise ConfigurationError("\n".join(formatted))
+        except Exception:  # Fallback to original path for compatibility/error formatting
+            errors = list(validate_schema(options or {}, self.schema, context=context))
+            if errors:
+                message = "\n".join(msg.format() for msg in errors)
+                raise ConfigurationError(message)
 
     def instantiate(
         self,
@@ -105,6 +129,14 @@ class BasePluginFactory(Generic[T]):
         """
         self.validate(options, context=schema_context)
         plugin = self.create(options, plugin_context)
+        # Attach factory metadata for downstream enforcement (e.g., input_schema requirement)
+        try:
+            setattr(plugin, "_elspeth_requires_input_schema", bool(self.requires_input_schema))
+        except Exception:  # pragma: no cover - best effort
+            # Best-effort; proceed even if plugin does not allow attribute assignment
+            import logging  # pylint: disable=import-outside-toplevel
+
+            logging.getLogger(__name__).debug("Failed to set _elspeth_requires_input_schema on %s", type(plugin).__name__, exc_info=True)
         apply_plugin_context(plugin, plugin_context)
         return plugin
 
@@ -158,20 +190,43 @@ class BasePluginRegistry(Generic[T]):
         factory: Callable[[dict[str, Any], PluginContext], T],
         *,
         schema: Mapping[str, Any] | None = None,
+        requires_input_schema: bool = False,
+        capabilities: Iterable[str] | None = None,
     ) -> None:
         """
         Register a plugin factory.
 
         Args:
             name: Plugin name (used for lookup)
-            factory: Factory callable that creates plugin instances
-            schema: Optional JSON schema for validation
+        factory: Factory callable that creates plugin instances
+        schema: Optional JSON schema for validation
+        capabilities: Optional iterable of capability flags exposed to callers
         """
-        self._plugins[name] = BasePluginFactory(
+        plugin_factory = BasePluginFactory(
             create=factory,
             schema=schema,
             plugin_type=self.plugin_type,
+            requires_input_schema=requires_input_schema,
+            capabilities=frozenset(capabilities or ()),
         )
+        # Pre-compile JSON schema validator once at registration to avoid first-call latency
+        if schema is not None:
+            try:
+                import importlib  # pylint: disable=import-outside-toplevel
+
+                validator_cls = importlib.import_module("jsonschema").Draft202012Validator
+                plugin_factory._compiled_validator = validator_cls(schema)
+                # Warm up validator by running a trivial check to pre-initialize internals
+                if plugin_factory._compiled_validator is not None:
+                    try:
+                        _ = list(plugin_factory._compiled_validator.iter_errors({}))  # noqa: F841
+                    except Exception:
+                        import logging  # pylint: disable=import-outside-toplevel
+
+                        logging.getLogger(__name__).debug("Warm-up validation error ignored for %s", name, exc_info=True)
+            except Exception:
+                plugin_factory._compiled_validator = None  # Fallback; validate() will handle
+        self._plugins[name] = plugin_factory
 
     def validate(self, name: str, options: dict[str, Any] | None) -> None:
         """
@@ -194,6 +249,14 @@ class BasePluginRegistry(Generic[T]):
         payload.pop("determinism_level", None)
 
         factory.validate(payload, context=f"{self.plugin_type}:{name}")
+
+    def get_plugin_capabilities(self, name: str) -> frozenset[str]:
+        """Return declared capability flags for the specified plugin."""
+
+        factory = self._plugins.get(name)
+        if factory is None:
+            raise KeyError(f"Unknown {self.plugin_type} plugin '{name}'")
+        return factory.capabilities
 
     def create(
         self,
@@ -230,13 +293,6 @@ class BasePluginRegistry(Generic[T]):
             ValueError: If plugin not found
             ConfigurationError: If validation or creation fails
         """
-        # Import here to avoid circular dependencies
-        from .context_utils import (
-            create_plugin_context,
-            extract_security_levels,
-            prepare_plugin_payload,
-        )
-
         factory = self._get_factory(name)
 
         # Extract and normalize security levels
@@ -340,7 +396,7 @@ class BasePluginRegistry(Generic[T]):
         factory: Callable[[dict[str, Any], PluginContext], T],
         *,
         schema: Mapping[str, Any] | None = None,
-    ):
+    ) -> ContextManager[None]:
         """
         Context manager to temporarily override a plugin factory (for testing).
 
@@ -370,10 +426,9 @@ class BasePluginRegistry(Generic[T]):
             removed when the context exits. This allows testing with
             completely new plugin names.
         """
-        from contextlib import contextmanager
 
         @contextmanager
-        def _override():
+        def _override() -> Iterator[None]:
             original = self._plugins.get(name)
             self.register(name, factory, schema=schema)
             try:

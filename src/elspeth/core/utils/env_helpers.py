@@ -62,7 +62,7 @@ def get_env_var(
     value = os.getenv(env_var)
     if not value:
         if warn_if_missing:
-            logger.warning(f"Environment variable {env_var} not set")
+            logger.warning("Environment variable %s not set", env_var)
         return default
     return value.strip() if strip else value
 

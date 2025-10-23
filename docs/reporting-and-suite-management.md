@@ -5,18 +5,16 @@ experiment scaffolds, and producing consolidated analytics artefacts.
 
 ## Prerequisites
 
-Install the optional dependencies used by the reporting pipeline:
+Install the development dependencies used by the reporting pipeline:
 
 ```bash
-pip install -e .[dev,analytics-visual]  # pandas/openpyxl + matplotlib/seaborn for reports
+pip install -e .[dev]  # pandas/openpyxl + matplotlib/seaborn for reports
 ```
 
 > The remainder of the CLI only requires the base installation, but report generation skips
 > Excel/visual outputs when pandas or matplotlib are unavailable.[^reporting-deps-2025-10-12]
 <!-- UPDATE 2025-10-12: The visual analytics sink also relies on matplotlib (and optionally seaborn) when producing PNG/HTML charts; install these packages before enabling the sink. -->
-Optional analytics extras (`pip install -e .[stats-core,stats-agreement,stats-planning,stats-distribution]`)
-unlock additional statistical plugins; install the sets your accreditation run depends on so comparative
-reports include consistent metrics.[^reporting-analytics-extras-2025-10-12]
+Statistical and visual reporting capabilities are available by default; no extras are required.
 
 ## 1. Create or update suites
 
@@ -170,3 +168,29 @@ Update 2025-10-12: Dry-run toggles are enforced at `src/elspeth/cli.py:360-392`.
 [^reporting-logging-2025-10-12]: Update 2025-10-12: Logging expectations align with docs/logging-standards.md (Suite report exports).
 [^reporting-checksums-2025-10-12]: Update 2025-10-12: Signing guidance mirrors docs/architecture/security-controls.md (Artifact Signing).
 [^reporting-archive-2025-10-12]: Update 2025-10-12: Evidence archival practices referenced in docs/release-checklist.md (Post-Release artefact handling).
+
+## Schema Validation (WP002)
+
+Use `validate-schemas` to fail fast on datasource ↔ plugin mismatches before execution:
+
+```bash
+python -m elspeth.cli validate-schemas \
+  --settings config/sample_suite/settings.yaml \
+  --profile default
+```
+
+What it does:
+- Loads the datasource and inspects the attached Pydantic `DataFrameSchema`
+- Instantiates experiment plugins and validates compatibility (`required columns` and `compatible types`)
+- Exits non‑zero on mismatch with a concise error
+
+Tips:
+- Define a datasource `schema:` block (for CSV) or enable `infer_schema: true` to attach a schema automatically.
+- Plugins can optionally declare `input_schema()` when they require specific columns; otherwise compatibility checks are skipped for that plugin.
+### Payload and failure semantics
+
+- Orchestrator payloads always include a `failures` list at the top level.
+  - If no failures occurred, the list is empty.
+- Aggregator payloads included in `payload["aggregates"]` always include a `failures` list.
+  - Aggregators that have nothing to report return `{}` and are omitted from `payload["aggregates"]`.
+- The CLI STRICT mode fails if any top‑level `failures` are present (single run) or any experiment payload contains `failures` (suite run).

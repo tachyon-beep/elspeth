@@ -6,6 +6,7 @@ import logging
 from typing import Any, Callable, Mapping
 
 from elspeth.core.base.plugin_context import PluginContext
+from elspeth.core.base.types import SecurityLevel
 from elspeth.core.registries.utility import register_utility_plugin
 from elspeth.core.validation.base import ConfigurationError
 from elspeth.retrieval import RetrievalService, create_retrieval_service
@@ -132,7 +133,23 @@ class RetrievalContextUtility:
         if self._namespace_override:
             return self._namespace_override
         context: PluginContext | None = getattr(self, "plugin_context", None)
-        level = metadata.get("security_level", getattr(context, "security_level", "unofficial"))
+        # Security level casing policy:
+        # - If provided explicitly in metadata, preserve the caller's casing to reflect
+        #   the external label (e.g., "OFFICIAL").
+        # - When derived from plugin context, normalize to lowercase for namespacing stability
+        #   (avoids collisions across aliases and canonical enum values).
+        if "security_level" in metadata:
+            level_meta = metadata.get("security_level")
+            if isinstance(level_meta, SecurityLevel):
+                level = level_meta.value
+            else:
+                level = str(level_meta)
+        else:
+            level_ctx = getattr(context, "security_level", "unofficial")
+            if isinstance(level_ctx, SecurityLevel):
+                level = level_ctx.value.lower()
+            else:
+                level = str(level_ctx).lower()
         experiment_context = getattr(context, "parent", None)
         suite_context = getattr(experiment_context, "parent", None)
         experiment = metadata.get("experiment") or getattr(experiment_context, "plugin_name", None) or row.get("experiment", "experiment")

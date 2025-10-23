@@ -234,6 +234,9 @@ def test_create_query_client_validates_azure_endpoint(monkeypatch, providers_mod
         captured["kwargs"] = kwargs
         return "CLIENT"
 
+    # Security note: we stub the validator to exercise factory wiring without
+    # changing production behavior. The real code enforces allowlists; this
+    # test only captures inputs to the validator.
     monkeypatch.setattr(providers, "validate_azure_search_endpoint", fake_validate)
     monkeypatch.setattr(providers, "AzureSearchQueryClient", fake_client)
 

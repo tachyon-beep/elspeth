@@ -13,7 +13,8 @@ from zipfile import ZIP_DEFLATED, ZipFile
 import pandas as pd
 
 from elspeth.core.base.protocols import Artifact, ArtifactDescriptor, ResultSink
-from elspeth.core.security import normalize_determinism_level, normalize_security_level, resolve_security_level
+from elspeth.core.base.types import DeterminismLevel, SecurityLevel
+from elspeth.core.security import ensure_determinism_level, ensure_security_level, resolve_security_level
 from elspeth.core.utils.path_guard import resolve_under_base, safe_atomic_write
 from elspeth.plugins.nodes.sinks._sanitize import sanitize_cell
 
@@ -21,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 
 class ZipResultSink(ResultSink):
-    """Bundle results, manifest, and optional CSV into a compressed archive."""
+    """Bundle results, manifest, and optional CSV into a compressed ZIP archive at the configured path."""
 
     def __init__(
         self,
@@ -67,8 +68,8 @@ class ZipResultSink(ResultSink):
         self._last_archive_path: str | None = None
         self._last_artifacts: dict[str, Any] = {}
         self._additional_inputs: dict[str, list[Artifact]] = {}
-        self._security_level: str | None = None
-        self._determinism_level: str | None = None
+        self._security_level: SecurityLevel | None = None
+        self._determinism_level: DeterminismLevel | None = None
         # Allowed base directory for writes; default to ./outputs
         try:
             default_base = Path(base_path).resolve()
@@ -92,13 +93,14 @@ class ZipResultSink(ResultSink):
                 )
 
             def _safe_name(name: str) -> str:
-                """Return a sanitized ZIP entry name.
+                r"""Return a sanitized ZIP entry name.
 
                 - Drops any directory components
                 - Rejects NUL bytes (\x00)
                 - Replaces characters outside [A-Za-z0-9._-] with '_'
                 - Avoids empty/bad names by falling back to 'artifact'
                 """
+
                 if "\x00" in name:
                     raise ValueError("ZIP entry name contains NUL byte")
                 base = Path(name).name
@@ -152,8 +154,10 @@ class ZipResultSink(ResultSink):
                 "sanitization": self._sanitization,
             }
             if metadata:
-                self._security_level = normalize_security_level(metadata.get("security_level"))
-                self._determinism_level = normalize_determinism_level(metadata.get("determinism_level"))
+                level = metadata.get("security_level")
+                det = metadata.get("determinism_level")
+                self._security_level = level if isinstance(level, SecurityLevel) else ensure_security_level(level)
+                self._determinism_level = det if isinstance(det, DeterminismLevel) else ensure_determinism_level(det)
         except Exception as exc:
             if self.on_error == "skip":
                 logger.warning("ZIP sink failed; skipping archive creation: %s", exc)
@@ -229,15 +233,17 @@ class ZipResultSink(ResultSink):
         df.to_csv(buffer, index=False)
         return buffer.getvalue()
 
-    def produces(self):  # pragma: no cover - placeholder for artifact chaining
+    def produces(self) -> list[ArtifactDescriptor]:  # pragma: no cover - placeholder for artifact chaining
         return [
             ArtifactDescriptor(name="zip", type="file/zip", persist=True, alias="zip"),
         ]
 
-    def consumes(self):  # pragma: no cover - placeholder for artifact chaining
+    def consumes(self) -> list[str]:  # pragma: no cover - placeholder for artifact chaining
         return []
 
-    def finalize(self, artifacts, *, metadata=None):  # pragma: no cover - optional cleanup
+    def finalize(
+        self, artifacts: Mapping[str, Artifact], *, metadata: dict[str, Any] | None = None
+    ) -> None:  # pragma: no cover - optional cleanup
         return None
 
     def collect_artifacts(self) -> dict[str, Artifact]:  # pragma: no cover
@@ -261,7 +267,7 @@ class ZipResultSink(ResultSink):
         self._determinism_level = None
         return {"zip": artifact}
 
-    def prepare_artifacts(self, artifacts: Mapping[str, list[Artifact]]):  # pragma: no cover
+    def prepare_artifacts(self, artifacts: Mapping[str, list[Artifact]]) -> None:  # pragma: no cover
         self._additional_inputs = {key: list(values) for key, values in artifacts.items() if values}
         if not self._security_level and self._additional_inputs:
             levels = [artifact.security_level for values in self._additional_inputs.values() for artifact in values]

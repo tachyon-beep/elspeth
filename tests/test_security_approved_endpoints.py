@@ -3,6 +3,8 @@
 import pytest
 
 from elspeth.core.security import SecureMode
+from elspeth.core.base.types import SecurityLevel
+from elspeth.core.base.types import SecurityLevel
 from elspeth.core.security.approved_endpoints import (
     get_approved_patterns,
     validate_azure_blob_endpoint,
@@ -23,7 +25,7 @@ class TestEndpointValidation:
         assert (
             validate_azure_openai_endpoint(
                 "https://my-resource.openai.azure.com",
-                security_level="OFFICIAL",
+                security_level=SecurityLevel.OFFICIAL,
             )
             is None
         )
@@ -33,7 +35,7 @@ class TestEndpointValidation:
         with pytest.raises(ValueError, match="not approved"):
             validate_azure_openai_endpoint(
                 "https://my-resource.openai.azure.us",
-                security_level="OFFICIAL",
+                security_level=SecurityLevel.OFFICIAL,
             )
 
     def test_azure_openai_china_cloud(self):
@@ -41,7 +43,7 @@ class TestEndpointValidation:
         with pytest.raises(ValueError, match="not approved"):
             validate_azure_openai_endpoint(
                 "https://my-resource.openai.azure.cn",
-                security_level="internal",
+                security_level=SecurityLevel.OFFICIAL,
             )
 
     def test_azure_openai_unapproved_endpoint(self):
@@ -49,7 +51,7 @@ class TestEndpointValidation:
         with pytest.raises(ValueError, match="not approved"):
             validate_azure_openai_endpoint(
                 "https://malicious-site.com",
-                security_level="OFFICIAL",
+                security_level=SecurityLevel.OFFICIAL,
             )
 
     def test_http_api_openai_public(self):
@@ -57,7 +59,7 @@ class TestEndpointValidation:
         assert (
             validate_http_api_endpoint(
                 "https://api.openai.com",
-                security_level="public",
+                security_level=SecurityLevel.UNOFFICIAL,
             )
             is None
         )
@@ -67,28 +69,28 @@ class TestEndpointValidation:
         with pytest.raises(ValueError, match="not approved for security level"):
             validate_http_api_endpoint(
                 "https://api.openai.com",
-                security_level="confidential",
+                security_level=SecurityLevel.PROTECTED,
             )
 
     def test_http_api_localhost(self):
         """Test localhost endpoints are always allowed."""
         # HTTP localhost
-        assert validate_http_api_endpoint("http://localhost:8080", security_level="confidential") is None
-        assert validate_http_api_endpoint("http://127.0.0.1:8080", security_level="SECRET") is None
+        assert validate_http_api_endpoint("http://localhost:8080", security_level=SecurityLevel.PROTECTED) is None
+        assert validate_http_api_endpoint("http://127.0.0.1:8080", security_level=SecurityLevel.SECRET) is None
 
         # HTTPS localhost
-        assert validate_http_api_endpoint("https://localhost:8080", security_level="confidential") is None
-        assert validate_http_api_endpoint("https://127.0.0.1:8080", security_level="SECRET") is None
+        assert validate_http_api_endpoint("https://localhost:8080", security_level=SecurityLevel.PROTECTED) is None
+        assert validate_http_api_endpoint("https://127.0.0.1:8080", security_level=SecurityLevel.SECRET) is None
 
         # IPv6 localhost
-        assert validate_http_api_endpoint("http://[::1]:8080", security_level="confidential") is None
+        assert validate_http_api_endpoint("http://[::1]:8080", security_level=SecurityLevel.PROTECTED) is None
 
     def test_http_api_unapproved_endpoint(self):
         """Test unapproved HTTP API endpoint raises error."""
         with pytest.raises(ValueError, match="not approved"):
             validate_http_api_endpoint(
                 "https://evil.com/api",
-                security_level="internal",
+                security_level=SecurityLevel.OFFICIAL,
             )
 
     def test_azure_blob_approved_endpoints(self):
@@ -97,7 +99,7 @@ class TestEndpointValidation:
         assert (
             validate_azure_blob_endpoint(
                 "https://myaccount.blob.core.windows.net",
-                security_level="OFFICIAL",
+                security_level=SecurityLevel.OFFICIAL,
             )
             is None
         )
@@ -106,14 +108,14 @@ class TestEndpointValidation:
         with pytest.raises(ValueError, match="not approved"):
             validate_azure_blob_endpoint(
                 "https://myaccount.blob.core.usgovcloudapi.net",
-                security_level="OFFICIAL",
+                security_level=SecurityLevel.OFFICIAL,
             )
 
         # Azure China cloud
         with pytest.raises(ValueError, match="not approved"):
             validate_azure_blob_endpoint(
                 "https://myaccount.blob.core.chinacloudapi.cn",
-                security_level="internal",
+                security_level=SecurityLevel.OFFICIAL,
             )
 
     def test_azure_blob_unapproved_endpoint(self):
@@ -121,33 +123,33 @@ class TestEndpointValidation:
         with pytest.raises(ValueError, match="not approved"):
             validate_azure_blob_endpoint(
                 "https://not-azure.com",
-                security_level="OFFICIAL",
+                security_level=SecurityLevel.OFFICIAL,
             )
 
     def test_azure_search_approved_endpoints(self):
         assert (
             validate_azure_search_endpoint(
                 "https://mysearch.search.windows.net",
-                security_level="OFFICIAL",
+                security_level=SecurityLevel.OFFICIAL,
             )
             is None
         )
         with pytest.raises(ValueError, match="not approved"):
             validate_azure_search_endpoint(
                 "https://federal.search.azure.us",
-                security_level="OFFICIAL",
+                security_level=SecurityLevel.OFFICIAL,
             )
         with pytest.raises(ValueError, match="not approved"):
             validate_azure_search_endpoint(
                 "https://china.search.azure.cn",
-                security_level="OFFICIAL",
+                security_level=SecurityLevel.OFFICIAL,
             )
 
     def test_azure_search_unapproved_endpoint(self):
         with pytest.raises(ValueError, match="not approved"):
             validate_azure_search_endpoint(
                 "https://search.notazure.example.com",
-                security_level="OFFICIAL",
+                security_level=SecurityLevel.OFFICIAL,
             )
 
     def test_development_mode_bypass(self):
@@ -157,7 +159,7 @@ class TestEndpointValidation:
             validate_endpoint(
                 endpoint="https://totally-unapproved.com",
                 service_type="azure_openai",
-                security_level="OFFICIAL",
+                security_level=SecurityLevel.OFFICIAL,
                 mode=SecureMode.DEVELOPMENT,
             )
             is None
@@ -169,7 +171,7 @@ class TestEndpointValidation:
             validate_endpoint(
                 endpoint="https://unapproved.com",
                 service_type="azure_openai",
-                security_level="OFFICIAL",
+                security_level=SecurityLevel.OFFICIAL,
                 mode=SecureMode.STANDARD,
             )
 
@@ -179,7 +181,7 @@ class TestEndpointValidation:
             validate_endpoint(
                 endpoint="https://unapproved.com",
                 service_type="azure_openai",
-                security_level="OFFICIAL",
+                security_level=SecurityLevel.OFFICIAL,
                 mode=SecureMode.STRICT,
             )
 
@@ -189,14 +191,14 @@ class TestEndpointValidation:
         assert (
             validate_azure_openai_endpoint(
                 "https://my-resource.openai.azure.com/",
-                security_level="OFFICIAL",
+                security_level=SecurityLevel.OFFICIAL,
             )
             is None
         )
         assert (
             validate_azure_openai_endpoint(
                 "https://my-resource.openai.azure.com",
-                security_level="OFFICIAL",
+                security_level=SecurityLevel.OFFICIAL,
             )
             is None
         )
@@ -207,7 +209,7 @@ class TestEndpointValidation:
         assert (
             validate_azure_openai_endpoint(
                 "https://my-resource.openai.azure.com/openai/deployments/gpt-4",
-                security_level="OFFICIAL",
+                security_level=SecurityLevel.OFFICIAL,
             )
             is None
         )
@@ -244,6 +246,8 @@ class TestEndpointValidation:
 
     def test_environment_override_patterns(self, monkeypatch):
         """Test ELSPETH_APPROVED_ENDPOINTS environment variable."""
+        # Enable overrides only in DEVELOPMENT mode
+        monkeypatch.setenv("ELSPETH_SECURE_MODE", "development")
         # Add a custom approved pattern
         monkeypatch.setenv(
             "ELSPETH_APPROVED_ENDPOINTS",
@@ -254,13 +258,15 @@ class TestEndpointValidation:
         assert (
             validate_http_api_endpoint(
                 "https://custom-llm.internal.company.com",
-                security_level="OFFICIAL",
+                security_level=SecurityLevel.OFFICIAL,
             )
             is None
         )
 
     def test_environment_override_multiple_patterns(self, monkeypatch):
         """Test multiple patterns in ELSPETH_APPROVED_ENDPOINTS."""
+        # Enable overrides only in DEVELOPMENT mode
+        monkeypatch.setenv("ELSPETH_SECURE_MODE", "development")
         monkeypatch.setenv(
             "ELSPETH_APPROVED_ENDPOINTS",
             r"https://llm1\.internal\.com(/.*)?, https://llm2\.internal\.com(/.*)?",
@@ -270,14 +276,14 @@ class TestEndpointValidation:
         assert (
             validate_http_api_endpoint(
                 "https://llm1.internal.com",
-                security_level="OFFICIAL",
+                security_level=SecurityLevel.OFFICIAL,
             )
             is None
         )
         assert (
             validate_http_api_endpoint(
                 "https://llm2.internal.com",
-                security_level="OFFICIAL",
+                security_level=SecurityLevel.OFFICIAL,
             )
             is None
         )
@@ -287,7 +293,7 @@ class TestEndpointValidation:
         assert (
             validate_http_api_endpoint(
                 "http://[::1]:8000",
-                security_level="SECRET",
+                security_level=SecurityLevel.SECRET,
             )
             is None
         )
@@ -297,7 +303,7 @@ class TestEndpointValidation:
         with pytest.raises(ValueError) as exc_info:
             validate_azure_openai_endpoint(
                 "https://bad-endpoint.com",
-                security_level="OFFICIAL",
+                security_level=SecurityLevel.OFFICIAL,
             )
 
         error_msg = str(exc_info.value)
@@ -310,7 +316,7 @@ class TestEndpointValidation:
         assert (
             validate_http_api_endpoint(
                 "https://api.openai.com",
-                security_level="public",
+                security_level=SecurityLevel.UNOFFICIAL,
             )
             is None
         )
@@ -319,7 +325,7 @@ class TestEndpointValidation:
         assert (
             validate_http_api_endpoint(
                 "https://api.openai.com",
-                security_level="internal",
+                security_level=SecurityLevel.OFFICIAL,
             )
             is None
         )
@@ -327,34 +333,31 @@ class TestEndpointValidation:
     def test_openai_public_confidential_blocked(self):
         """Test OpenAI public API blocks confidential data."""
         with pytest.raises(ValueError, match="not approved for security level"):
+            from elspeth.core.base.types import SecurityLevel
+
             validate_http_api_endpoint(
                 "https://api.openai.com",
-                security_level="confidential",
+                security_level=SecurityLevel.PROTECTED,
             )
 
     def test_openai_public_restricted_blocked(self):
         """Test OpenAI public API blocks SECRET data."""
         with pytest.raises(ValueError, match="not approved for security level"):
+            from elspeth.core.base.types import SecurityLevel
+
             validate_http_api_endpoint(
                 "https://api.openai.com",
-                security_level="SECRET",
+                security_level=SecurityLevel.SECRET,
             )
 
-    def test_case_insensitive_security_levels(self):
-        """Test security level comparison is case-insensitive (normalized)."""
-        # Security levels are normalized, so lowercase works
-        assert (
-            validate_http_api_endpoint(
-                "https://api.openai.com",
-                security_level="internal",  # lowercase - normalized to OFFICIAL
-            )
-            is None
-        )
+    def test_security_levels_enums_only(self):
+        """Endpoint validation accepts enums (1.0 API)."""
+        from elspeth.core.base.types import SecurityLevel
 
         assert (
             validate_http_api_endpoint(
                 "https://api.openai.com",
-                security_level="public",  # lowercase - normalized to UNOFFICIAL
+                security_level=SecurityLevel.OFFICIAL,
             )
             is None
         )
@@ -368,8 +371,10 @@ class TestEndpointValidationRegistry:
         from elspeth.core.base.plugin_context import PluginContext
         from elspeth.core.registries.llm import _create_azure_openai
 
+        from elspeth.core.base.types import SecurityLevel
+
         context = PluginContext(
-            security_level="OFFICIAL",
+            security_level=SecurityLevel.OFFICIAL,
             plugin_kind="llm",
             plugin_name="azure_openai",
         )
@@ -393,8 +398,10 @@ class TestEndpointValidationRegistry:
         from elspeth.core.base.plugin_context import PluginContext
         from elspeth.core.registries.llm import _create_http_openai
 
+        from elspeth.core.base.types import SecurityLevel
+
         context = PluginContext(
-            security_level="confidential",
+            security_level=SecurityLevel.PROTECTED,
             plugin_kind="llm",
             plugin_name="http_openai",
         )
@@ -415,7 +422,7 @@ class TestEndpointValidationRegistry:
         from elspeth.core.registries.llm import _create_http_openai
 
         context = PluginContext(
-            security_level="SECRET",
+            security_level=SecurityLevel.SECRET,
             plugin_kind="llm",
             plugin_name="http_openai",
         )

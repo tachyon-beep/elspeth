@@ -8,6 +8,25 @@ Thanks for investing time in improving Elspeth! This guide outlines the expectat
 - **Check the docs.** Confirm whether a similar capability already exists in `docs/architecture/plugin-catalogue.md` or other references before starting fresh.
 - **Security-first mindset.** Features touching datasources, LLM middleware, or sinks must maintain or improve the existing security posture (sanitisation, signing, audit logging).
 
+## Licensing Policy (Permissive Only)
+
+Elspeth is licensed under MIT. By contributing, you agree that your contribution is provided under the MIT license.
+
+- Allowed third-party licenses (runtime, dev, CI):
+  - MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC, PSF, Unlicense
+- Not allowed (no exceptions):
+  - GPL/AGPL/SSPL and any strong copyleft
+  - Weak copyleft and file-based copyleft (e.g., LGPL, MPL)
+  - Non-SPDX, EULAs, or “Unknown” licenses
+- Source hygiene:
+  - Do not copy code from copyleft or unknown-licensed sources.
+  - If importing small snippets from permissive sources, include proper attribution where required.
+- Dependency hygiene (gated in CI):
+  - New dependencies must pass the license gate in the Dependency Review workflow.
+  - If a change introduces a non-permissive dependency, the PR will fail and must be revised to use a permissive alternative.
+
+If you believe a compelling case exists for a non-permissive dependency, discuss it with maintainers before starting work. The default stance is “permissive only.”
+
 ## Development Workflow
 
 1. **Bootstrap the environment**
@@ -15,7 +34,7 @@ Thanks for investing time in improving Elspeth! This guide outlines the expectat
    ```bash
    make bootstrap            # or scripts/bootstrap.sh
    source .venv/bin/activate
-   pip install -e .[dev,analytics-visual]
+   pip install -e .[dev]
    ```
 
 2. **Create a feature branch**
@@ -73,7 +92,7 @@ When filing a bug or feature request, include:
 
 ## Code of Conduct
 
-Elspeth follows the [Contributor Covenant](https://www.contributor-covenant.org/) (v2.1). Please act with respect and empathy. Report unacceptable behaviour through the maintainers or the incident response channels outlined in `docs/architecture/incident-response.md`.
+Elspeth follows the [Contributor Covenant](https://www.contributor-covenant.org/) (v2.1). Please act with respect and empathy. Report unacceptable behaviour through the maintainers or the incident response channels outlined in `docs/compliance/incident-response.md`.
 
 ## Thank You
 

@@ -9,11 +9,10 @@ from __future__ import annotations
 from typing import Any, Iterable
 
 from elspeth.core.base.plugin_context import PluginContext
+from elspeth.core.base.types import DeterminismLevel, SecurityLevel
 from elspeth.core.security import (
     coalesce_determinism_level,
     coalesce_security_level,
-    normalize_determinism_level,
-    normalize_security_level,
 )
 from elspeth.core.validation.base import ConfigurationError
 
@@ -27,7 +26,7 @@ def extract_security_levels(
     parent_context: PluginContext | None = None,
     require_security: bool = True,
     require_determinism: bool = True,
-) -> tuple[str | None, str, list[str]]:
+) -> tuple[SecurityLevel | None, DeterminismLevel, list[str]]:
     """
     Extract and normalize security/determinism levels from definition and options.
 
@@ -89,10 +88,10 @@ def extract_security_levels(
         sources.append(f"{plugin_type}:{plugin_name}.options.determinism_level")
 
     # Coalesce security level
-    # Note: coalesce_security_level() always returns str (never None) or raises ValueError
+    # Note: coalesce_security_level() always returns SecurityLevel (never None) or raises ValueError
     # if all arguments are None. When require_security=True, the ValueError provides
     # the validation. When require_security=False, we catch and allow None result.
-    security_level: str | None
+    security_level: SecurityLevel | None
     try:
         if parent_sec_level is not None:
             security_level = coalesce_security_level(parent_sec_level, entry_sec_level, option_sec_level)
@@ -105,12 +104,10 @@ def extract_security_levels(
         # If security not required, allow None (will be handled by context creation)
         security_level = None
 
-    # Normalize if we got a value (coalesce_security_level already normalizes, but be explicit)
-    if security_level is not None:
-        security_level = normalize_security_level(security_level)
+    # Already normalized to SecurityLevel by coalesce_security_level
 
     # Coalesce determinism level
-    determinism_level: str | None
+    determinism_level: DeterminismLevel | None
     if entry_det_level is not None or option_det_level is not None:
         try:
             determinism_level = coalesce_determinism_level(entry_det_level, option_det_level)
@@ -118,16 +115,15 @@ def extract_security_levels(
             raise ConfigurationError(f"{plugin_type}:{plugin_name}: {exc}") from exc
     else:
         # Inherit from parent or default to None
-        determinism_level = str(parent_det_level) if parent_det_level is not None else None
+        determinism_level = parent_det_level if parent_det_level is not None else None
 
     if determinism_level is None:
         if require_determinism:
             raise ConfigurationError(f"{plugin_type}:{plugin_name}: determinism_level is required")
         # Default to "none" if not required
-        determinism_level = "none"
+        determinism_level = DeterminismLevel.NONE
 
-    # Normalize after ensuring it's not None
-    determinism_level = normalize_determinism_level(determinism_level)
+    # Already normalized to DeterminismLevel by coalesce_determinism_level / default
 
     return security_level, determinism_level, sources
 
@@ -135,8 +131,8 @@ def extract_security_levels(
 def create_plugin_context(
     plugin_name: str,
     plugin_kind: str,
-    security_level: str | None,
-    determinism_level: str,
+    security_level: SecurityLevel | None,
+    determinism_level: DeterminismLevel,
     provenance: Iterable[str],
     *,
     parent_context: PluginContext | None = None,

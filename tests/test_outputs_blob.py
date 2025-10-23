@@ -246,7 +246,11 @@ def test_blob_result_sink_skip_on_upload_error(tmp_path, monkeypatch, caplog):
 def test_blob_result_sink_abort_on_upload_error(tmp_path, monkeypatch):
     config_path = create_blob_config(tmp_path)
     sink = BlobResultSink(config_path=config_path, profile="default", on_error="abort")
-    monkeypatch.setattr(BlobResultSink, "_upload_bytes", lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("boom")))
+
+    def _raise_runtimeerror(*_args, **_kwargs):  # noqa: D401
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(BlobResultSink, "_upload_bytes", _raise_runtimeerror)
     with pytest.raises(RuntimeError):
         sink.write({"results": []}, metadata={})
 

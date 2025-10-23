@@ -3,7 +3,7 @@
 **Last Updated:** 2025-10-17
 **Status:** Current structure as of PR #4
 
-> **Note:** A future reorganization is proposed in [docs/roadmap/CORE_DIRECTORY_RESTRUCTURE_PROPOSAL.md](../roadmap/CORE_DIRECTORY_RESTRUCTURE_PROPOSAL.md). This document describes the **current** structure.
+> Note: A prior restructure proposal existed; we have removed archived materials. Refer to Git history if you need to review it. This document describes the **current** structure.
 
 ## Quick Reference
 
@@ -212,6 +212,6 @@ src/elspeth/
 ## See Also
 
 - [Plugin Catalogue](plugin-catalogue.md) - Complete list of all plugins
-- [Configuration Architecture](configuration-merge.md) - How configuration works
-- [Core Restructure Proposal](../roadmap/CORE_DIRECTORY_RESTRUCTURE_PROPOSAL.md) - Proposed future reorganization
+- [Configuration Architecture](configuration-security.md#update-2025-10-23-prompt-packs-defaults-and-merge-order) - How configuration works
+<!-- Historical restructure proposal removed; see Git history if needed. -->
 - [Data Flow Architecture](data-flow-orchestration.md) - How data flows through the system

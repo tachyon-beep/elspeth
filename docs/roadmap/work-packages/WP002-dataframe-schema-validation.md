@@ -661,7 +661,7 @@ elspeth validate-schemas --settings config/sample_suite/settings.yaml
 
 1. **docs/architecture/schema-validation.md**: New document explaining schema system
 2. **docs/architecture/plugin-catalogue.md**: Update all plugin entries with schema information
-3. **CLAUDE.md**: Add section on schema validation best practices
+3. **Developer docs**: Add section on schema validation best practices
 4. **README.md**: Add schema validation to feature list
 
 **FR12: Migration Guide**

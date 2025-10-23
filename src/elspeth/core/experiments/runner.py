@@ -8,18 +8,20 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any, Callable, Iterable, Mapping, Type
 
 import pandas as pd
 
 from elspeth.core.base.protocols import LLMClientProtocol, LLMMiddleware, LLMRequest, ResultSink
-from elspeth.core.base.schema import SchemaViolation, validate_schema_compatibility
+from elspeth.core.base.schema import DataFrameSchema, SchemaViolation
+from elspeth.core.base.types import DeterminismLevel, SecurityLevel
 from elspeth.core.controls import CostTracker, RateLimiter
 from elspeth.core.experiments.plugin_registry import create_early_stop_plugin
+from elspeth.core.experiments.validation import validate_plugin_schemas
 from elspeth.core.pipeline.artifact_pipeline import ArtifactPipeline, SinkBinding
 from elspeth.core.pipeline.processing import prepare_prompt_context
 from elspeth.core.prompts import PromptEngine, PromptRenderingError, PromptTemplate, PromptValidationError
-from elspeth.core.security import normalize_security_level, resolve_determinism_level, resolve_security_level
+from elspeth.core.security import ensure_security_level, resolve_determinism_level, resolve_security_level
 from elspeth.plugins.orchestrators.experiment.protocols import (
     AggregationExperimentPlugin,
     EarlyStopPlugin,
@@ -32,6 +34,8 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class ExperimentRunner:
+    """Run an experiment over a DataFrame and dispatch to sinks."""
+
     llm_client: LLMClientProtocol
     sinks: list[ResultSink]
     prompt_system: str
@@ -54,10 +58,10 @@ class ExperimentRunner:
     _compiled_criteria_prompts: dict[str, PromptTemplate] | None = None
     llm_middlewares: list[LLMMiddleware] | None = None
     concurrency_config: dict[str, Any] | None = None
-    security_level: str | None = None
-    _active_security_level: str | None = None
-    determinism_level: str | None = None
-    _active_determinism_level: str | None = None
+    security_level: SecurityLevel | None = None
+    _active_security_level: SecurityLevel | None = None
+    determinism_level: DeterminismLevel | None = None
+    _active_determinism_level: DeterminismLevel | None = None
     early_stop_plugins: list[EarlyStopPlugin] | None = None
     early_stop_config: dict[str, Any] | None = None
     _active_early_stop_plugins: list[EarlyStopPlugin] | None = None
@@ -69,6 +73,7 @@ class ExperimentRunner:
     _malformed_rows: list[SchemaViolation] | None = None
 
     def run(self, df: pd.DataFrame) -> dict[str, Any]:
+        """Execute the run, returning a structured payload for sinks and reports."""
         self._init_early_stop()
         processed_ids: set[str] | None = None
         checkpoint_field = None
@@ -173,13 +178,14 @@ class ExperimentRunner:
         records_with_index.sort(key=lambda item: item[0])
         results = [record for _, record in records_with_index]
 
-        payload: dict[str, Any] = {"results": results}
-        if failures:
-            payload["failures"] = failures
+        payload: dict[str, Any] = {"results": results, "failures": failures}
         aggregates: dict[str, Any] = {}
         for plugin in self.aggregator_plugins or []:
             derived = plugin.finalize(results)
             if derived:
+                # Standardize aggregator payloads: always include failures (possibly empty)
+                if isinstance(derived, dict) and "failures" not in derived:
+                    derived["failures"] = []
                 aggregates[plugin.name] = derived
         if aggregates:
             payload["aggregates"] = aggregates
@@ -484,8 +490,8 @@ class ExperimentRunner:
         user_template: PromptTemplate,
         criteria_templates: dict[str, PromptTemplate],
         row_plugins: list[RowExperimentPlugin],
-        handle_success,
-        handle_failure,
+        handle_success: Callable[[int, dict[str, Any], str | None], None],
+        handle_failure: Callable[[dict[str, Any]], None],
         config: dict[str, Any],
     ) -> None:
         max_workers = max(int(config.get("max_workers", 4)), 1)
@@ -534,8 +540,8 @@ class ExperimentRunner:
             base_id = getattr(sink, "_elspeth_sink_name", plugin)
             sink_id = f"{base_id}:{index}"
             security_level = getattr(sink, "_elspeth_security_level", None)
-            if security_level is not None:
-                security_level = normalize_security_level(security_level)
+            if security_level is not None and not isinstance(security_level, SecurityLevel):
+                security_level = ensure_security_level(security_level)
             bindings.append(
                 SinkBinding(
                     id=sink_id,
@@ -647,7 +653,8 @@ class ExperimentRunner:
                 if backoff and backoff > 0:
                     delay = delay * backoff if delay else backoff
 
-        assert last_error is not None
+        if last_error is None:
+            raise RuntimeError("Retry loop terminated without capturing an error")
         if last_request is not None:
             setattr(last_error, "_elspeth_retry_history", attempt_history)
             setattr(last_error, "_elspeth_retry_attempts", attempt)
@@ -709,85 +716,26 @@ class ExperimentRunner:
         return processed
 
     def _append_checkpoint(self, path: Path, row_id: str) -> None:
-        with path.open("a", encoding="utf-8") as handle:
-            handle.write(f"{row_id}\n")
+        # Serialise appends to avoid interleaved lines under parallel execution
+        if not hasattr(self, "_checkpoint_lock"):
+            import threading
 
-    def _validate_plugin_schemas(self, datasource_schema):
-        """
-        Validate that all plugins are compatible with datasource schema.
+            self._checkpoint_lock = threading.Lock()
+        with self._checkpoint_lock:
+            with path.open("a", encoding="utf-8") as handle:
+                handle.write(f"{row_id}\n")
+
+    def _validate_plugin_schemas(self, datasource_schema: Type[DataFrameSchema]) -> None:
+        """Validate plugin compatibility with public helper.
 
         This is config-time validation - runs once before row processing.
         """
-        # Validate row plugins
-        for row_plugin in self.row_plugins or []:
-            if hasattr(row_plugin, "input_schema") and callable(row_plugin.input_schema):
-                plugin_schema = row_plugin.input_schema()
-                if plugin_schema:
-                    try:
-                        validate_schema_compatibility(
-                            datasource_schema,
-                            plugin_schema,
-                            plugin_name=f"row_plugin:{row_plugin.name}",
-                        )
-                        logger.debug(
-                            "Row plugin '%s' schema compatible with datasource",
-                            row_plugin.name,
-                        )
-                    except Exception as exc:
-                        logger.error(
-                            "Schema compatibility check failed for row plugin '%s': %s",
-                            row_plugin.name,
-                            exc,
-                        )
-                        raise
-
-        # Validate aggregation plugins
-        if self.aggregator_plugins:
-            for aggregation_plugin in self.aggregator_plugins:
-                if hasattr(aggregation_plugin, "input_schema") and callable(aggregation_plugin.input_schema):
-                    plugin_schema = aggregation_plugin.input_schema()
-                    if plugin_schema:
-                        try:
-                            validate_schema_compatibility(
-                                datasource_schema,
-                                plugin_schema,
-                                plugin_name=f"aggregation_plugin:{aggregation_plugin.name}",
-                            )
-                            logger.debug(
-                                "Aggregation plugin '%s' schema compatible with datasource",
-                                aggregation_plugin.name,
-                            )
-                        except Exception as exc:
-                            logger.error(
-                                "Schema compatibility check failed for aggregation plugin '%s': %s",
-                                aggregation_plugin.name,
-                                exc,
-                            )
-                            raise
-
-        # Validate validation plugins
-        if self.validation_plugins:
-            for validation_plugin in self.validation_plugins:
-                if hasattr(validation_plugin, "input_schema") and callable(validation_plugin.input_schema):
-                    plugin_schema = validation_plugin.input_schema()
-                    if plugin_schema:
-                        try:
-                            validate_schema_compatibility(
-                                datasource_schema,
-                                plugin_schema,
-                                plugin_name=f"validation_plugin:{validation_plugin.name}",
-                            )
-                            logger.debug(
-                                "Validation plugin '%s' schema compatible with datasource",
-                                validation_plugin.name,
-                            )
-                        except Exception as exc:
-                            logger.error(
-                                "Schema compatibility check failed for validation plugin '%s': %s",
-                                validation_plugin.name,
-                                exc,
-                            )
-                            raise
+        validate_plugin_schemas(
+            datasource_schema,
+            row_plugins=self.row_plugins or [],
+            aggregator_plugins=self.aggregator_plugins or [],
+            validation_plugins=self.validation_plugins or [],
+        )
 
     def _write_malformed_data(self) -> None:
         """Write malformed rows to dedicated sink."""

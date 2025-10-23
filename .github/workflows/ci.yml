@@ -1,102 +1,201 @@
 name: Lint, Tests & Sample Suite
 
+permissions: {}
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
+  workflow_dispatch:
   pull_request:
   push:
     branches:
       - main
 
 jobs:
+  changes:
+    name: Detect Changed Paths
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+      docs: ${{ steps.filter.outputs.docs }}
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          fetch-depth: 0
+      - id: filter
+        uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36 # v3.0.2
+        with:
+          filters: |
+            code:
+              - 'src/**'
+              - 'tests/**'
+              - 'pyproject.toml'
+              - 'requirements*.lock'
+              - 'Dockerfile'
+              - '.github/workflows/**'
+            docs:
+              - 'docs/**'
+              - 'README.md'
+              - 'notes/**'
   secrets-scan:
     name: Secret Scan (gitleaks)
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
         with:
           fetch-depth: 0
       - name: Run gitleaks
-        uses: gitleaks/gitleaks-action@v2
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Upload gitleaks report
-        if: always()
-        uses: actions/upload-artifact@v4
+          # Optional: uncomment to pin CLI version or change behavior
+          # GITLEAKS_VERSION: latest
+          # GITLEAKS_ENABLE_UPLOAD_ARTIFACT: 'true'
+      - name: Upload gitleaks report (if generated)
+        if: always() && hashFiles('results.sarif') != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: gitleaks-report
           path: results.sarif
+          retention-days: 7
 
-  lint-and-test:
-    name: Lint, Tests, Supply-Chain Gates
+  ci-core:
+    name: CI Core (Lint, Types, Tests)
+    needs: [secrets-scan, changes]
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft != true
+    uses: ./.github/workflows/reusable-ci.yml
+    with:
+      python-version: "3.12"
+    permissions:
+      contents: read
+
+  security-scans:
+    name: Security Scans (Semgrep, Bandit, SBOM, pip-audit)
     runs-on: ubuntu-latest
-    timeout-minutes: 30
-    needs: secrets-scan
-
+    needs: [secrets-scan, changes]
+    if: needs.changes.outputs.code == 'true'
+    permissions:
+      contents: read
+      security-events: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         with:
           python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: |
+            requirements-dev.lock
 
       - name: Install dependencies (locked)
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install pip-tools
-          python -m piptools sync requirements-dev.lock
-          python -m pip install -e . --no-deps
+          python -m pip install -r requirements-dev.lock --require-hashes
+          python -m pip install -e . --no-deps --no-index --no-build-isolation
 
-      - name: Lint (ruff + mypy)
-        run: python -m ruff check src tests && python -m mypy src
+      - name: Verify environment matches lockfile (dev)
+        run: |
+          python scripts/verify_locked_install.py -r requirements-dev.lock
 
-      - name: Unit tests with coverage
-        run: python -m pytest -m "not slow" --maxfail=1 --disable-warnings
+      - name: Validate configuration templates (YAML syntax)
+        run: |
+          python scripts/validate_templates.py
 
-      - name: Generate SBOM
-        run: python -m cyclonedx_py requirements requirements.lock --pyproject pyproject.toml --output-file sbom.json --output-format JSON --output-reproducible
+      - name: Security static analysis (bandit)
+        run: |
+          bandit -q -r src --severity-level high --confidence-level high -f json -o bandit.json
+      - name: Upload bandit report (JSON)
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: bandit-json
+          path: bandit.json
+          retention-days: 7
+
+      - name: Semgrep scan (curated, Docker CLI)
+        # Semgrep p/ci is the community-curated CI ruleset (not --config auto)
+        # for balanced signal/noise in security scans
+        run: |
+          docker run --rm \
+            -v "$PWD:/src" \
+            -w /src \
+            semgrep/semgrep:1.140.0@sha256:220daf180b5bfb02fb077bc324ec7673d8eb4f3f6dcd7cce1eda1995f564f980 \
+            semgrep scan --config p/ci --severity ERROR --metrics=off --sarif --sarif-output semgrep.sarif --error
+
+      - name: Upload semgrep report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: semgrep-sarif
+          path: semgrep.sarif
+          retention-days: 7
+
+      - name: Upload semgrep SARIF to code scanning
+        if: always()
+        uses: github/codeql-action/upload-sarif@16140ae1a102900babc80a33c44059580f687047 # v4.30.9
+        with:
+          sarif_file: semgrep.sarif
+          category: semgrep-oss
+
+      - name: Run pip-audit (CLI)
+        run: |
+          pip-audit -r requirements.lock --require-hashes --no-deps
+
+      - name: Upload pip-audit SARIF to code scanning (if generated)
+        if: always() && hashFiles('pip-audit.sarif') != ''
+        uses: github/codeql-action/upload-sarif@16140ae1a102900babc80a33c44059580f687047 # v4.30.9
+        with:
+          sarif_file: pip-audit.sarif
+          category: pip-audit
+
+      - name: Upload pip-audit artifact (if generated)
+        if: always() && hashFiles('pip-audit.sarif') != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: pip-audit-sarif
+          path: pip-audit.sarif
+          retention-days: 7
+
+      - name: Generate SBOM (requirements.lock)
+        run: |
+          python -m cyclonedx_py requirements requirements.lock --of JSON --output-file sbom.json --output-reproducible
 
       - name: Upload SBOM artefact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: sbom-json
           path: sbom.json
-
-      - name: Upload coverage report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: coverage-xml
-          path: coverage.xml
-
-      - name: Run pip-audit
-        run: pip-audit -r requirements.lock --require-hashes --format json --output pip-audit.json
-
-      - name: Upload audit report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: pip-audit-report
-          path: pip-audit.json
+          retention-days: 7
 
   sample-suite:
     name: Sample Suite Smoke Test
     runs-on: ubuntu-latest
-    needs: lint-and-test
+    needs: [ci-core, security-scans, changes]
     timeout-minutes: 20
+    if: needs.changes.outputs.code == 'true'
+    permissions:
+      contents: read
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         with:
           python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: |
+            requirements-dev.lock
 
       - name: Install dependencies (locked)
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install pip-tools
-          python -m piptools sync requirements-dev.lock
-          python -m pip install -e . --no-deps
+          python -m pip install -r requirements-dev.lock --require-hashes
+          python -m pip install -e . --no-deps --no-index --no-build-isolation
 
       - name: Run sample suite smoke test
         run: |
@@ -105,3 +204,181 @@ jobs:
             --suite-root config/sample_suite \
             --head 0 \
             --live-outputs
+
+  container:
+    name: Container Build, Test, and SBOMs
+    runs-on: ubuntu-latest
+    needs: [ci-core, security-scans, changes]
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write
+    if: needs.changes.outputs.code == 'true'
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Use pinned digest if provided
+        id: pinfile
+        run: |
+          if [ -f .github/base-image.txt ]; then
+            echo "Using pinned base image from .github/base-image.txt" && cat .github/base-image.txt
+            echo "DOCKER_PYTHON_IMAGE=$(cat .github/base-image.txt)" >> $GITHUB_ENV
+          fi
+      - name: Ensure pinned base image is configured
+        run: |
+          if [ -z "${DOCKER_PYTHON_IMAGE}" ]; then
+            echo "Pinned base image not found. Please run the 'Repin Base Image Digest' workflow or add .github/base-image.txt." >&2
+            exit 1
+          fi
+
+      - name: Build dev/test image
+        run: |
+          docker build --build-arg PYTHON_IMAGE=$DOCKER_PYTHON_IMAGE --target dev -t elspeth:devtest .
+
+      - name: Container smoke test
+        run: |
+          docker run --rm elspeth:devtest python -m elspeth.cli --help > /dev/null
+
+      - name: Build runtime image
+        run: |
+          docker build --build-arg PYTHON_IMAGE=$DOCKER_PYTHON_IMAGE --target runtime -t elspeth:runtime .
+
+      - name: Generate runtime SBOM (app graph) inside container
+        run: |
+          docker run --rm \
+            -v "$PWD/pyproject.toml:/tmp/pyproject.toml:ro" \
+            elspeth:devtest sh -c '
+              /opt/venv/bin/cyclonedx-py environment --pyproject /tmp/pyproject.toml --of JSON --output-reproducible -o /tmp/sbom-runtime.json && \
+              cat /tmp/sbom-runtime.json' > sbom-runtime.json
+
+      # Replace curl|sh installers with pinned GitHub Actions for Syft and Grype
+      - name: Generate image SBOM (CycloneDX JSON)
+        uses: anchore/sbom-action@aa0e114b2e19480f157109b9922bda359bd98b90 # v0.20.8
+        with:
+          image: elspeth:runtime
+          format: cyclonedx-json
+          output-file: sbom-image.json
+
+      - name: Upload SBOM artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: container-sboms
+          path: |
+            sbom-runtime.json
+            sbom-image.json
+          retention-days: 7
+
+      - name: Vulnerability scan (Grype) - block on HIGH
+        id: grype
+        uses: anchore/scan-action@a5605eb0943e46279cb4fbd9d44297355d3520ab # v7.0.2
+        with:
+          image: elspeth:runtime
+          severity-cutoff: high
+          fail-build: true
+          output-format: sarif
+          grype-version: v0.101.1
+        env:
+          GRYPE_DB_CACHE_DIR: ${{ runner.temp }}/grype-db
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Grype SARIF to code scanning
+        if: always() && steps.grype.outputs.sarif != ''
+        uses: github/codeql-action/upload-sarif@16140ae1a102900babc80a33c44059580f687047 # v4.30.9
+        with:
+          sarif_file: ${{ steps.grype.outputs.sarif }}
+          category: grype
+
+      - name: Upload Grype SARIF artifact
+        if: always() && steps.grype.outputs.sarif != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: grype-sarif
+          path: ${{ steps.grype.outputs.sarif }}
+          retention-days: 7
+
+  preview-image:
+    name: PR Preview Image (GHCR)
+    runs-on: ubuntu-latest
+    needs: [container]
+    permissions:
+      contents: read
+      packages: write
+      pull-requests: write
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.draft != true &&
+      github.event.pull_request.head.repo.fork == false &&
+      needs.changes.outputs.code == 'true'
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Use pinned digest if provided
+        id: pinfile
+        run: |
+          if [ -f .github/base-image.txt ]; then
+            echo "Using pinned base image from .github/base-image.txt" && cat .github/base-image.txt
+            echo "DOCKER_PYTHON_IMAGE=$(cat .github/base-image.txt)" >> $GITHUB_ENV
+          fi
+      - name: Ensure pinned base image is configured
+        run: |
+          if [ -z "${DOCKER_PYTHON_IMAGE}" ]; then
+            echo "Pinned base image not found. Please run the 'Repin Base Image Digest' workflow or add .github/base-image.txt." >&2
+            exit 1
+          fi
+
+      - name: Login to GHCR
+        uses: docker/login-action@5e57cd118135c172c3672efd75eb46360885c0ef # v3.6.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build preview image (runtime)
+        env:
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          docker build --build-arg PYTHON_IMAGE=$DOCKER_PYTHON_IMAGE --target runtime -t ghcr.io/${REPO}:pr-${PR_NUMBER} .
+
+      - name: Push preview image
+        env:
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          docker push ghcr.io/${REPO}:pr-${PR_NUMBER}
+
+      - name: Summarize preview image
+        env:
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          cat >> "$GITHUB_STEP_SUMMARY" << EOF
+          ## PR Preview Image
+          - Tag: 
+            ghcr.io/${REPO}:pr-${PR_NUMBER}
+
+          Pull and run locally:
+          ```bash
+          docker pull ghcr.io/${REPO}:pr-${PR_NUMBER}
+          docker run --rm ghcr.io/${REPO}:pr-${PR_NUMBER} python -m elspeth.cli --help
+          ```
+          EOF
+      - name: Comment on PR with preview image
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          body=$(cat << 'EOT'
+          ### PR Preview Image
+
+          - Tag: `ghcr.io/${REPO}:pr-${PR_NUMBER}`
+
+          Pull and run locally:
+          ```bash
+          docker pull ghcr.io/${REPO}:pr-${PR_NUMBER}
+          docker run --rm ghcr.io/${REPO}:pr-${PR_NUMBER} python -m elspeth.cli --help
+          ```
+          EOT
+          )
+          gh pr comment "$PR_NUMBER" --repo "$REPO" --body "$body"

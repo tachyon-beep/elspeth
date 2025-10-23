@@ -1,8 +1,8 @@
 # Middleware Lifecycle Management
 
 **Status:** Implementation Reference
-**Last Updated:** January 2025
-**Related:** [plugin-catalogue.md](plugin-catalogue.md), [plugin-security-model.md](plugin-security-model.md)
+**Last Updated:** October 2025
+**Related:** [plugin-catalogue.md](plugin-catalogue.md), [plugin-security-model.md](plugin-security-model.md), [examples/MASTER_EXAMPLE.md](../examples/MASTER_EXAMPLE.md)
 
 ---
 
@@ -22,34 +22,41 @@ This document explains:
 
 ### 1. Definition & Registration
 
-Middleware is defined in configuration at three levels:
+Middleware is declared at the same three layers as other suite components:
 
 ```yaml
 # Suite defaults (lowest priority)
 defaults:
-  llm_middleware_defs:
-    - name: audit_logger
-      options:
-        log_level: "INFO"
+  llm:
+    middleware:
+      - plugin: audit_logger
+        security_level: OFFICIAL
+        determinism_level: guaranteed
+        options:
+          destination: logs/audit.jsonl
 
 # Prompt pack (middle priority)
 prompt_packs:
   classification:
-    llm_middlewares:
-      - name: prompt_shield
-        options:
-          block_pii: true
+    llm:
+      middleware:
+        - plugin: prompt_shield
+          options:
+            block_pii: true
 
 # Experiment config (highest priority)
 experiments:
   - name: experiment_1
-    llm_middleware_defs:
-      - name: cost_tracker
-        options:
-          budget: 100.0
+    llm:
+      middleware:
+        - plugin: cost_tracker
+          options:
+            budget: 100.0
 ```
 
-These definitions are **merged** (concatenated) to form the final middleware chain for each experiment.
+During suite preparation the merger concatenates middleware lists in priority order
+(defaults → prompt pack → experiment). Set `llm.middleware.inherit: false` at the experiment
+layer to drop inherited middleware; otherwise each layer appends to the chain.
 
 ### 2. Instantiation & Caching
 
@@ -60,13 +67,14 @@ These definitions are **merged** (concatenated) to form the final middleware cha
 Middleware instances are cached using a **fingerprint** composed of:
 
 ```python
-# From suite_runner.py:241
+# src/elspeth/core/experiments/suite_runner.py:245
+name = defn.get("name") or defn.get("plugin")
 identifier = f"{name}:{json.dumps(defn.get('options', {}), sort_keys=True)}:{parent_context.security_level}"
 ```
 
 **Fingerprint Components:**
-- `name`: Middleware plugin name (e.g., "audit_logger")
-- `options`: Middleware options (JSON-serialized with sorted keys for stability)
+- `plugin/name`: Middleware plugin identifier (e.g., `prompt_shield`)
+- `options`: JSON-serialized options dict (sorted for stability)
 - `security_level`: Parent experiment context security level
 
 **Cache Behavior:**
@@ -86,19 +94,22 @@ instances.append(self._shared_middlewares[identifier])
 ```yaml
 experiments:
   - name: exp_1
-    llm_middleware_defs:
-      - name: audit_logger  # Instance A
-        options: {level: "INFO"}
+    llm:
+      middleware:
+        - plugin: audit_logger  # Instance A
+          options: {level: "INFO"}
 
   - name: exp_2
-    llm_middleware_defs:
-      - name: audit_logger  # SAME instance A (reused!)
-        options: {level: "INFO"}
+    llm:
+      middleware:
+        - plugin: audit_logger  # SAME instance A (reused!)
+          options: {level: "INFO"}
 
   - name: exp_3
-    llm_middleware_defs:
-      - name: audit_logger  # NEW instance B (different options)
-        options: {level: "DEBUG"}
+    llm:
+      middleware:
+        - plugin: audit_logger  # NEW instance B (different options)
+          options: {level: "DEBUG"}
 ```
 
 **Result:**
@@ -335,14 +346,16 @@ class SafeRequestFilter:
 ```yaml
 experiments:
   - name: exp_1
-    llm_middleware_defs:
-      - name: audit_logger
-        options: {destination: "/logs/audit.json"}
+    llm:
+      middleware:
+        - plugin: audit_logger
+          options: {destination: "/logs/audit.json"}
 
   - name: exp_2
-    llm_middleware_defs:
-      - name: audit_logger
-        options: {destination: "/logs/audit.json"}  # SAME options
+    llm:
+      middleware:
+        - plugin: audit_logger
+          options: {destination: "/logs/audit.json"}  # SAME options
 ```
 
 **Behavior:**
@@ -357,14 +370,16 @@ experiments:
 ```yaml
 experiments:
   - name: exp_1_gpt4
-    llm_middleware_defs:
-      - name: cost_tracker
-        options: {model: "gpt-4"}  # Different options
+    llm:
+      middleware:
+        - plugin: cost_tracker
+          options: {model: "gpt-4"}  # Different options
 
   - name: exp_2_gpt3
-    llm_middleware_defs:
-      - name: cost_tracker
-        options: {model: "gpt-3.5"}  # Different options
+    llm:
+      middleware:
+        - plugin: cost_tracker
+          options: {model: "gpt-3.5"}  # Different options
 ```
 
 **Behavior:**
@@ -380,15 +395,17 @@ experiments:
 experiments:
   - name: exp_1_secret
     security_level: "SECRET"
-    llm_middleware_defs:
-      - name: audit_logger
-        options: {level: "INFO"}
+    llm:
+      middleware:
+        - plugin: audit_logger
+          options: {level: "INFO"}
 
   - name: exp_2_official
     security_level: "OFFICIAL"
-    llm_middleware_defs:
-      - name: audit_logger
-        options: {level: "INFO"}  # SAME options
+    llm:
+      middleware:
+        - plugin: audit_logger
+          options: {level: "INFO"}  # SAME options
 ```
 
 **Behavior:**
@@ -484,23 +501,26 @@ experiments:
 ```yaml
 # Before (creates 2 instances):
 defaults:
-  llm_middleware_defs:
-    - name: db_logger
-      options: {host: "localhost"}
+  llm:
+    middleware:
+      - plugin: db_logger
+        options: {host: "localhost"}
 
 experiments:
   - name: exp_1
     # Uses defaults (host: localhost)
   - name: exp_2
-    llm_middleware_defs:
-      - name: db_logger
-        options: {host: "localhost", port: 5432}  # Different options!
+    llm:
+      middleware:
+        - plugin: db_logger
+          options: {host: "localhost", port: 5432}  # Different options!
 
 # After (creates 1 instance):
 defaults:
-  llm_middleware_defs:
-    - name: db_logger
-      options: {host: "localhost", port: 5432}  # Consistent
+  llm:
+    middleware:
+      - plugin: db_logger
+        options: {host: "localhost", port: 5432}  # Consistent
 
 experiments:
   - name: exp_1
@@ -584,19 +604,20 @@ experiments:
 ### Middleware Definition Schema
 
 ```yaml
-llm_middleware_defs:
-  - name: <middleware_name>          # Required: Plugin name
-    security_level: <level>          # Optional: Inherited from context if omitted
-    determinism_level: <level>       # Optional: Inherited from context if omitted
-    options:                         # Optional: Plugin-specific options
-      <key>: <value>
+llm:
+  middleware:
+    - plugin: <middleware_name>        # Required: plugin identifier
+      security_level: <level>          # Optional: inherits from experiment if omitted
+      determinism_level: <level>       # Optional: inherits from experiment if omitted
+      options:                         # Optional: plugin-specific options
+        <key>: <value>
 ```
 
 ### Fingerprint Components
 
 | Component | Source | Impact on Sharing |
 |-----------|--------|-------------------|
-| `name` | Middleware plugin name | Different names → different instances |
+| `plugin/name` | Middleware plugin identifier | Different names → different instances |
 | `options` | JSON-serialized options dict | Different options → different instances |
 | `security_level` | Parent experiment context | Different levels → different instances |
 
@@ -608,12 +629,13 @@ llm_middleware_defs:
 
 - [Plugin Catalogue](plugin-catalogue.md) - Available middleware plugins
 - [Plugin Security Model](plugin-security-model.md) - Security context propagation
-- [Configuration Merge](configuration-merge.md) - How configuration layers merge
+- [Configuration Security](configuration-security.md) - How configuration layers merge
 - [Experiment Runner](experiment-runner.md) - How middleware integrates with experiment execution
 
 ---
 
 ## Changelog
 
+- **2025-10-23:** Updated configuration schema (`plugin` key), refreshed examples, and added references to master example/profile tooling.
 - **2025-01-14:** Initial documentation based on architectural review
-- **Implementation:** `src/elspeth/core/experiments/suite_runner.py:232-245`
+- **Implementation:** `src/elspeth/core/experiments/suite_runner.py:200-260`

@@ -13,8 +13,9 @@ import matplotlib
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-from elspeth.core.base.protocols import Artifact, ResultSink
-from elspeth.core.security import normalize_determinism_level, normalize_security_level
+from elspeth.core.base.protocols import Artifact, ArtifactDescriptor, ResultSink
+from elspeth.core.base.types import DeterminismLevel, SecurityLevel
+from elspeth.core.security import ensure_determinism_level, ensure_security_level
 
 logger = logging.getLogger(__name__)
 
@@ -72,8 +73,8 @@ class BaseVisualSink(ResultSink):
 
         # State tracking
         self._plot_modules: tuple[Any, Any, Any] | None = None
-        self._security_level: str | None = None
-        self._determinism_level: str | None = None
+        self._security_level: SecurityLevel | None = None
+        self._determinism_level: DeterminismLevel | None = None
         self._last_written_files: list[tuple[Any, Path, dict[str, Any]]] = []
 
     # Validation methods ------------------------------------------------------
@@ -281,8 +282,10 @@ class BaseVisualSink(ResultSink):
             metadata: Result metadata containing security_level and determinism_level
         """
         if metadata:
-            self._security_level = normalize_security_level(metadata.get("security_level"))
-            self._determinism_level = normalize_determinism_level(metadata.get("determinism_level"))
+            level = metadata.get("security_level")
+            det = metadata.get("determinism_level")
+            self._security_level = level if isinstance(level, SecurityLevel) else ensure_security_level(level)
+            self._determinism_level = det if isinstance(det, DeterminismLevel) else ensure_determinism_level(det)
         else:
             self._security_level = None
             self._determinism_level = None
@@ -293,15 +296,15 @@ class BaseVisualSink(ResultSink):
         """Generate and save visualizations. Must be implemented by subclasses."""
         raise NotImplementedError("Subclasses must implement write()")
 
-    def produces(self):
+    def produces(self) -> list[ArtifactDescriptor]:
         """Declare produced artifacts. Must be implemented by subclasses."""
         raise NotImplementedError("Subclasses must implement produces()")
 
-    def consumes(self):
+    def consumes(self) -> list[str]:
         """Declare consumed artifacts. Must be implemented by subclasses."""
         raise NotImplementedError("Subclasses must implement consumes()")
 
-    def collect_artifacts(self):
+    def collect_artifacts(self) -> dict[str, Artifact]:
         """Return artifacts created by write(). Must be implemented by subclasses."""
         raise NotImplementedError("Subclasses must implement collect_artifacts()")
 

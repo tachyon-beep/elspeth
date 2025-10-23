@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, Mapping
 
-from elspeth.core.security import normalize_security_level
+from elspeth.core.security import ensure_security_level
 from elspeth.core.validation.base import ConfigurationError, ValidationReport
 
 
@@ -28,7 +28,7 @@ def _validate_security_level_fields(
             report.add_error("security_level must be non-empty", context=context)
         else:
             try:
-                normalized_entry = normalize_security_level(entry_text)
+                normalized_entry = ensure_security_level(entry_text).value
             except ValueError as exc:
                 report.add_error(str(exc), context=context)
 
@@ -37,7 +37,7 @@ def _validate_security_level_fields(
             report.add_error("options.security_level must be non-empty", context=context)
         else:
             try:
-                normalized_options = normalize_security_level(options_text)
+                normalized_options = ensure_security_level(options_text).value
             except ValueError as exc:
                 report.add_error(str(exc), context=context)
 
