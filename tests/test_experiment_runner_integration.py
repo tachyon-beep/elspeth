@@ -139,7 +139,11 @@ def test_experiment_runner_handles_retries_and_artifact_pipeline(tmp_path: Path)
             "backlog_threshold": 1,
             "utilization_pause": 0.5,
         },
-        checkpoint_config={"path": str(tmp_path / "checkpoint.jsonl"), "field": "APPID"},
+        checkpoint_config={
+            "path": str(tmp_path / "checkpoint.jsonl"),
+            "field": "APPID",
+            "allowed_base_path": str(tmp_path),  # Required for fail-closed validation
+        },
         security_level="SECRET",
         determinism_level="guaranteed",
         experiment_name="integration",

@@ -101,6 +101,7 @@ def test_run_checkpoint_idempotency(tmp_path: Path) -> None:
         checkpoint_config={
             "path": str(checkpoint_file),
             "field": "id",
+            "allowed_base_path": str(tmp_path),  # Required for fail-closed validation
         },
     )
 
@@ -363,3 +364,40 @@ def test_calculate_retry_summary_with_retries() -> None:
     assert summary["total_requests"] == 3
     assert summary["total_retries"] == 3  # 2 + 0 + 1
     assert summary["exhausted"] == 1
+
+
+def test_checkpoint_config_fails_closed_on_missing_allowed_base(tmp_path: Path) -> None:
+    """SECURITY: Missing allowed_base_path defaults to CWD (fail-closed), not None (fail-open).
+
+    This test verifies the critical security property: user configurations cannot
+    bypass path validation by omitting allowed_base_path. Without this protection,
+    malicious configs could perform path traversal attacks:
+
+        checkpoint_config:
+          path: "../../../etc/passwd"  # Path traversal
+          # Omit allowed_base_path to bypass validation → FAIL OPEN (insecure!)
+
+    The fail-closed implementation defaults to Path.cwd() when allowed_base_path
+    is missing, ensuring ALL user-provided checkpoint paths are validated.
+    """
+    # Create a checkpoint path that attempts traversal
+    traversal_path = "../../../outside_cwd/malicious.txt"
+
+    runner = ExperimentRunner(
+        llm_client=SimpleLLM(),
+        sinks=[],
+        prompt_system="Test",
+        prompt_template="Process {{ id }}",
+        checkpoint_config={
+            "path": traversal_path,
+            "field": "id",
+            # Deliberately omit allowed_base_path to test fail-closed behavior
+        },
+    )
+
+    df = pd.DataFrame([{"id": "test"}])
+
+    # SECURITY ASSERTION: Path traversal should be blocked
+    # If this doesn't raise ValueError, we have a FAIL-OPEN vulnerability!
+    with pytest.raises(ValueError, match="Checkpoint path validation failed"):
+        runner.run(df)

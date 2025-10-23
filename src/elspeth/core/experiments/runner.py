@@ -58,10 +58,12 @@ class CheckpointManager:
         - Symlink attack prevention via path_guard utilities
         - Thread-safe file operations with lock
         - allowed_base_path constrains file operations to safe directory
+        - FAIL-CLOSED: User configurations should ALWAYS provide allowed_base_path
 
     Examples:
-        Secure usage (user-controlled configuration):
-        >>> # Configuration from untrusted sources (user input, external APIs)
+        Secure usage (user-controlled configuration - REQUIRED):
+        >>> # Configuration from untrusted sources (user input, external APIs, YAML files)
+        >>> # MUST provide allowed_base_path to prevent path traversal attacks
         >>> checkpoint_mgr = CheckpointManager(
         ...     path=Path("checkpoints/experiment_001.txt"),
         ...     id_field="row_id",
@@ -70,14 +72,16 @@ class CheckpointManager:
         >>> # Path traversal attempts will raise ValueError:
         >>> # path=Path("../../../etc/passwd") -> ValueError
 
-        Trusted usage (internal configuration):
-        >>> # Configuration from trusted internal sources only
+        Trusted usage (internal hardcoded paths - ONLY for tests/internal code):
+        >>> # ONLY use allowed_base_path=None for hardcoded, trusted paths
+        >>> # Example: pytest fixtures, internal testing, hardcoded paths in code
         >>> checkpoint_mgr = CheckpointManager(
         ...     path=Path("internal_checkpoints/run.txt"),
         ...     id_field="id",
-        ...     allowed_base_path=None,  # No validation - trusted path only!
+        ...     allowed_base_path=None,  # No validation - ONLY for trusted sources!
         ... )
-        >>> # WARNING: None disables path validation - use only for trusted sources!
+        >>> # WARNING: allowed_base_path=None disables ALL path validation.
+        >>> # NEVER use None for user-provided paths or configurations!
 
     Raises:
         ValueError: If path escapes allowed_base_path or contains symlinks
@@ -117,8 +121,10 @@ class CheckpointManager:
                 raise ValueError(f"Checkpoint path validation failed: {e}") from e
         else:
             # Trusted path: Use directly without validation
-            logger.debug(
-                "CheckpointManager initialized with unvalidated path (allowed_base_path=None): %s",
+            # WARNING: This disables ALL path validation - only for trusted sources!
+            logger.warning(
+                "CheckpointManager initialized WITHOUT path validation (allowed_base_path=None). "
+                "Path: %s. This should ONLY occur for hardcoded trusted paths, never user config!",
                 self.path
             )
             self._safe_path = self.path
@@ -464,28 +470,53 @@ class ExperimentRunner:
         return rows_to_process
 
     def _init_checkpoint(self) -> CheckpointManager | None:
-        """Initialize checkpoint configuration and load existing processed IDs.
+        """Initialize checkpoint configuration with fail-closed path validation.
 
-        Returns CheckpointManager instance or None if checkpointing disabled.
+        Security Model (FAIL-CLOSED):
+            User-provided checkpoint paths are UNTRUSTED and MUST be validated.
+            If allowed_base_path is not specified in configuration, we provide
+            a safe default (current working directory) rather than disabling
+            validation entirely. This prevents path traversal attacks.
+
+        Returns:
+            CheckpointManager instance with validated path, or None if checkpointing disabled
 
         Raises:
             ValueError: If checkpoint path escapes allowed base or contains symlinks
+
+        Security Rationale:
+            NEVER allow user configurations to bypass path validation by omitting
+            allowed_base_path. This prevents attacks like:
+                checkpoint_config:
+                  path: "../../../etc/passwd"  # Path traversal
+                  # Omitted allowed_base_path to bypass validation
         """
         if not self.checkpoint_config:
             return None
 
-        checkpoint_path = Path(self.checkpoint_config.get("path", "checkpoint.jsonl"))
+        checkpoint_path = Path(self.checkpoint_config.get("path", "checkpoint.txt"))
         checkpoint_field = self.checkpoint_config.get("field", "APPID")
 
-        # Optional: Allow configuration to specify allowed base path
-        # Defaults to parent directory of checkpoint path if not provided
+        # SECURITY: Fail-closed path validation
+        # User configs MUST NOT bypass validation by omitting allowed_base_path
         allowed_base = self.checkpoint_config.get("allowed_base_path")
-        allowed_base_path = Path(allowed_base) if allowed_base else None
+        if allowed_base:
+            allowed_base_path = Path(allowed_base)
+        else:
+            # FAIL-CLOSED: Default to CWD for strict validation
+            # This ensures user-provided paths cannot escape to system directories
+            allowed_base_path = Path.cwd()
+            logger.info(
+                "Checkpoint allowed_base_path not specified in config. "
+                "FAIL-CLOSED: Defaulting to current working directory for security: %s. "
+                "Checkpoint path will be validated against this directory.",
+                allowed_base_path
+            )
 
         return CheckpointManager(
             path=checkpoint_path,
             id_field=checkpoint_field,
-            allowed_base_path=allowed_base_path,
+            allowed_base_path=allowed_base_path,  # Always set (never None)
         )
 
     def _init_prompts(self) -> tuple[PromptEngine, PromptTemplate, PromptTemplate, dict[str, PromptTemplate]]:
