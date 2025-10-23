@@ -481,6 +481,98 @@ class ExperimentRunner:
 
         self._malformed_rows = []
 
+    def _create_result_handlers(
+        self,
+        records_with_index: list[tuple[int, dict[str, Any]]],
+        failures: list[dict[str, Any]],
+        checkpoint_manager: CheckpointManager | None,
+    ) -> ResultHandlers:
+        """Create success/failure handlers with checkpoint integration.
+
+        Creates callback handlers that manage result accumulation, checkpoint persistence,
+        and early stop triggering for row processing operations.
+
+        Args:
+            records_with_index: List to accumulate successful (index, record) tuples
+            failures: List to accumulate failure dictionaries
+            checkpoint_manager: Optional manager for checkpoint persistence
+
+        Returns:
+            ResultHandlers with on_success and on_failure callbacks
+        """
+
+        def handle_success(idx: int, record: dict[str, Any], row_id: str | None) -> None:
+            records_with_index.append((idx, record))
+            if checkpoint_manager is not None and row_id is not None:
+                checkpoint_manager.mark_processed(row_id)
+            self._maybe_trigger_early_stop(record, row_index=idx)
+
+        def handle_failure(failure: dict[str, Any]) -> None:
+            failures.append(failure)
+
+        return ResultHandlers(on_success=handle_success, on_failure=handle_failure)
+
+    def _process_rows_sequentially(
+        self,
+        rows_to_process: list[tuple[int, pd.Series, dict[str, Any], str | None]],
+        engine: PromptEngine,
+        system_template: PromptTemplate,
+        user_template: PromptTemplate,
+        criteria_templates: dict[str, PromptTemplate],
+        row_plugins: list[RowExperimentPlugin],
+        handlers: ResultHandlers,
+    ) -> None:
+        """Process rows sequentially with early stop support.
+
+        Processes each row one at a time in order, checking for early stop between rows.
+        Uses provided handlers to manage successful and failed processing results.
+
+        Args:
+            rows_to_process: List of (index, row, context, row_id) tuples
+            engine: Prompt engine for template rendering
+            system_template: Compiled system prompt template
+            user_template: Compiled user prompt template
+            criteria_templates: Dict of compiled criteria templates by name
+            row_plugins: List of row-level experiment plugins
+            handlers: ResultHandlers with success/failure callbacks
+        """
+        for idx, row, context, row_id in rows_to_process:
+            if self._early_stop_event and self._early_stop_event.is_set():
+                break
+
+            record, failure = self._process_single_row(
+                engine,
+                system_template,
+                user_template,
+                criteria_templates,
+                row_plugins,
+                context,
+                row,
+                row_id,
+            )
+
+            if record:
+                handlers.on_success(idx, record, row_id)
+            if failure:
+                handlers.on_failure(failure)
+
+    def _sort_and_extract_records(
+        self, records_with_index: list[tuple[int, dict[str, Any]]]
+    ) -> list[dict[str, Any]]:
+        """Sort records by original row index and extract record dictionaries.
+
+        Maintains DataFrame row order by sorting records according to their original
+        index, then extracts just the record dictionaries.
+
+        Args:
+            records_with_index: List of (index, record) tuples from processing
+
+        Returns:
+            Sorted list of record dictionaries
+        """
+        records_with_index.sort(key=lambda item: item[0])
+        return [record for _, record in records_with_index]
+
     def _execute_row_processing(
         self,
         rows_to_process: list[tuple[int, pd.Series, dict[str, Any], str | None]],
@@ -529,15 +621,10 @@ class ExperimentRunner:
         records_with_index: list[tuple[int, dict[str, Any]]] = []
         failures: list[dict[str, Any]] = []
 
-        def handle_success(idx: int, record: dict[str, Any], row_id: str | None) -> None:
-            records_with_index.append((idx, record))
-            if checkpoint_manager is not None and row_id is not None:
-                checkpoint_manager.mark_processed(row_id)
-            self._maybe_trigger_early_stop(record, row_index=idx)
+        # Create handlers with checkpoint integration
+        handlers = self._create_result_handlers(records_with_index, failures, checkpoint_manager)
 
-        def handle_failure(failure: dict[str, Any]) -> None:
-            failures.append(failure)
-
+        # Execute parallel or sequential based on configuration
         concurrency_cfg = self.concurrency_config or {}
         if rows_to_process and self._should_run_parallel(concurrency_cfg, len(rows_to_process)):
             self._run_parallel(
@@ -547,33 +634,23 @@ class ExperimentRunner:
                 user_template,
                 criteria_templates,
                 row_plugins,
-                handle_success,
-                handle_failure,
+                handlers.on_success,
+                handlers.on_failure,
                 concurrency_cfg,
             )
         else:
-            for idx, row, context, row_id in rows_to_process:
-                if self._early_stop_event and self._early_stop_event.is_set():
-                    break
-                record, failure = self._process_single_row(
-                    engine,
-                    system_template,
-                    user_template,
-                    criteria_templates,
-                    row_plugins,
-                    context,
-                    row,
-                    row_id,
-                )
-                if record:
-                    handle_success(idx, record, row_id)
-                if failure:
-                    handle_failure(failure)
+            self._process_rows_sequentially(
+                rows_to_process,
+                engine,
+                system_template,
+                user_template,
+                criteria_templates,
+                row_plugins,
+                handlers,
+            )
 
-        # Sort records by original index to maintain row order
-        records_with_index.sort(key=lambda item: item[0])
-        results = [record for _, record in records_with_index]
-
+        # Sort and extract results maintaining row order
+        results = self._sort_and_extract_records(records_with_index)
         return ProcessingResult(records=results, failures=failures)
 
     def run(self, df: pd.DataFrame) -> dict[str, Any]:
