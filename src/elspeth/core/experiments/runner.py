@@ -347,6 +347,46 @@ class ExperimentRunner:
 
         return rows_to_process
 
+    def _init_checkpoint(self) -> tuple[Path | None, str | None, set[str] | None]:
+        """Initialize checkpoint configuration and load existing processed IDs.
+
+        Returns tuple of (checkpoint_path, checkpoint_field, processed_ids).
+        """
+        if not self.checkpoint_config:
+            return None, None, None
+
+        checkpoint_path = Path(self.checkpoint_config.get("path", "checkpoint.jsonl"))
+        checkpoint_field = self.checkpoint_config.get("field", "APPID")
+        processed_ids = self._load_checkpoint(checkpoint_path)
+
+        return checkpoint_path, checkpoint_field, processed_ids
+
+    def _init_prompts(self) -> tuple[PromptEngine, PromptTemplate, PromptTemplate, dict[str, PromptTemplate]]:
+        """Initialize and compile all prompt templates.
+
+        Returns tuple of (engine, system_template, user_template, criteria_templates).
+        Also caches compiled templates in instance variables.
+        """
+        engine = self.prompt_engine or PromptEngine()
+        system_template = self._compile_system_prompt(engine)
+        user_template = self._compile_user_prompt(engine)
+        criteria_templates = self._compile_criteria_prompts(engine)
+
+        # Cache compiled templates
+        self._compiled_system_prompt = system_template
+        self._compiled_user_prompt = user_template
+        self._compiled_criteria_prompts = criteria_templates
+
+        return engine, system_template, user_template, criteria_templates
+
+    def _init_validation(self, df: pd.DataFrame) -> None:
+        """Initialize schema validation and malformed data tracking."""
+        datasource_schema = df.attrs.get("schema") if hasattr(df, "attrs") else None
+        if datasource_schema:
+            self._validate_plugin_schemas(datasource_schema)
+
+        self._malformed_rows = []
+
     def _execute_row_processing(
         self,
         rows_to_process: list[tuple[int, pd.Series, dict[str, Any], str | None]],
@@ -417,33 +457,15 @@ class ExperimentRunner:
     def run(self, df: pd.DataFrame) -> dict[str, Any]:
         """Execute the run, returning a structured payload for sinks and reports."""
         self._init_early_stop()
-        processed_ids: set[str] | None = None
-        checkpoint_field = None
-        checkpoint_path = None
-        if self.checkpoint_config:
-            checkpoint_path = Path(self.checkpoint_config.get("path", "checkpoint.jsonl"))
-            checkpoint_field = self.checkpoint_config.get("field", "APPID")
-            processed_ids = self._load_checkpoint(checkpoint_path)
+        checkpoint_path, checkpoint_field, processed_ids = self._init_checkpoint()
 
         row_plugins = self.row_plugins or []
 
-        # Compile prompt templates using helper methods
-        engine = self.prompt_engine or PromptEngine()
-        system_template = self._compile_system_prompt(engine)
-        user_template = self._compile_user_prompt(engine)
-        criteria_templates = self._compile_criteria_prompts(engine)
+        # Initialize and compile prompt templates
+        engine, system_template, user_template, criteria_templates = self._init_prompts()
 
-        self._compiled_system_prompt = system_template
-        self._compiled_user_prompt = user_template
-        self._compiled_criteria_prompts = criteria_templates
-
-        # Config-time schema validation: Check plugin compatibility
-        datasource_schema = df.attrs.get("schema") if hasattr(df, "attrs") else None
-        if datasource_schema:
-            self._validate_plugin_schemas(datasource_schema)
-
-        # Initialize malformed data tracking
-        self._malformed_rows = []
+        # Initialize schema validation and malformed data tracking
+        self._init_validation(df)
 
         # Prepare rows to process (filtering checkpointed and early-stopped rows)
         rows_to_process = self._prepare_rows_to_process(df, checkpoint_field, processed_ids)
