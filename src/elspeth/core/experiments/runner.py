@@ -38,11 +38,13 @@ class CheckpointManager:
 
     Provides atomic checkpoint operations with exactly-once semantics for
     row processing tracking. Uses plain text format (one ID per line).
+    Thread-safe for parallel execution.
     """
 
     path: Path
     id_field: str
     _processed_ids: set[str] = field(default_factory=set)
+    _lock: threading.Lock = field(default_factory=threading.Lock)
 
     def __post_init__(self) -> None:
         """Load existing checkpoint file on initialization."""
@@ -71,12 +73,16 @@ class CheckpointManager:
             self._append_checkpoint(row_id)
 
     def _append_checkpoint(self, row_id: str) -> None:
-        """Append a single checkpoint entry to file (plain text format)."""
-        try:
-            with self.path.open("a") as f:
-                f.write(f"{row_id}\n")
-        except OSError as e:
-            logger.error(f"Failed to write checkpoint to {self.path}: {e}")
+        """Append a single checkpoint entry to file (plain text format).
+
+        Thread-safe: Uses lock to serialize appends during parallel execution.
+        """
+        with self._lock:
+            try:
+                with self.path.open("a", encoding="utf-8") as f:
+                    f.write(f"{row_id}\n")
+            except OSError as e:
+                logger.error(f"Failed to write checkpoint to {self.path}: {e}")
 
 
 @dataclass
@@ -328,8 +334,7 @@ class ExperimentRunner:
     def _prepare_rows_to_process(
         self,
         df: pd.DataFrame,
-        checkpoint_field: str | None,
-        processed_ids: set[str] | None,
+        checkpoint_manager: CheckpointManager | None,
     ) -> list[tuple[int, pd.Series, dict[str, Any], str | None]]:
         """Prepare list of rows to process, filtering checkpointed and early-stopped rows.
 
@@ -338,8 +343,8 @@ class ExperimentRunner:
         rows_to_process: list[tuple[int, pd.Series, dict[str, Any], str | None]] = []
         for idx, (_, row) in enumerate(df.iterrows()):
             context = prepare_prompt_context(row, include_fields=self.prompt_fields)
-            row_id = context.get(checkpoint_field) if checkpoint_field else None
-            if processed_ids is not None and row_id in processed_ids:
+            row_id = context.get(checkpoint_manager.id_field) if checkpoint_manager else None
+            if checkpoint_manager is not None and row_id is not None and checkpoint_manager.is_processed(row_id):
                 continue
             if self._early_stop_event and self._early_stop_event.is_set():
                 break
@@ -347,19 +352,21 @@ class ExperimentRunner:
 
         return rows_to_process
 
-    def _init_checkpoint(self) -> tuple[Path | None, str | None, set[str] | None]:
+    def _init_checkpoint(self) -> CheckpointManager | None:
         """Initialize checkpoint configuration and load existing processed IDs.
 
-        Returns tuple of (checkpoint_path, checkpoint_field, processed_ids).
+        Returns CheckpointManager instance or None if checkpointing disabled.
         """
         if not self.checkpoint_config:
-            return None, None, None
+            return None
 
         checkpoint_path = Path(self.checkpoint_config.get("path", "checkpoint.jsonl"))
         checkpoint_field = self.checkpoint_config.get("field", "APPID")
-        processed_ids = self._load_checkpoint(checkpoint_path)
 
-        return checkpoint_path, checkpoint_field, processed_ids
+        # Ensure parent directory exists
+        checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+
+        return CheckpointManager(path=checkpoint_path, id_field=checkpoint_field)
 
     def _init_prompts(self) -> tuple[PromptEngine, PromptTemplate, PromptTemplate, dict[str, PromptTemplate]]:
         """Initialize and compile all prompt templates.
@@ -395,8 +402,7 @@ class ExperimentRunner:
         user_template: PromptTemplate,
         criteria_templates: dict[str, PromptTemplate],
         row_plugins: list[RowExperimentPlugin],
-        checkpoint_path: Path | None,
-        processed_ids: set[str] | None,
+        checkpoint_manager: CheckpointManager | None,
     ) -> ProcessingResult:
         """Execute row processing using parallel or sequential execution based on configuration.
 
@@ -407,10 +413,8 @@ class ExperimentRunner:
 
         def handle_success(idx: int, record: dict[str, Any], row_id: str | None) -> None:
             records_with_index.append((idx, record))
-            if checkpoint_path and row_id is not None:
-                if processed_ids is not None:
-                    processed_ids.add(row_id)
-                self._append_checkpoint(checkpoint_path, row_id)
+            if checkpoint_manager is not None and row_id is not None:
+                checkpoint_manager.mark_processed(row_id)
             self._maybe_trigger_early_stop(record, row_index=idx)
 
         def handle_failure(failure: dict[str, Any]) -> None:
@@ -457,7 +461,7 @@ class ExperimentRunner:
     def run(self, df: pd.DataFrame) -> dict[str, Any]:
         """Execute the run, returning a structured payload for sinks and reports."""
         self._init_early_stop()
-        checkpoint_path, checkpoint_field, processed_ids = self._init_checkpoint()
+        checkpoint_manager = self._init_checkpoint()
 
         row_plugins = self.row_plugins or []
 
@@ -468,7 +472,7 @@ class ExperimentRunner:
         self._init_validation(df)
 
         # Prepare rows to process (filtering checkpointed and early-stopped rows)
-        rows_to_process = self._prepare_rows_to_process(df, checkpoint_field, processed_ids)
+        rows_to_process = self._prepare_rows_to_process(df, checkpoint_manager)
 
         # Execute row processing (parallel or sequential based on configuration)
         processing_result = self._execute_row_processing(
@@ -478,8 +482,7 @@ class ExperimentRunner:
             user_template,
             criteria_templates,
             row_plugins,
-            checkpoint_path,
-            processed_ids,
+            checkpoint_manager,
         )
         results = processing_result.records
         failures = processing_result.failures
@@ -964,28 +967,6 @@ class ExperimentRunner:
         context = row_context
         for plugin in plugins:
             plugin.validate(response, context=context, metadata=metadata)
-
-    def _load_checkpoint(self, path: Path) -> set[str]:
-        processed: set[str] = set()
-        if path.exists():
-            for line in path.read_text(encoding="utf-8").splitlines():
-                line = line.strip()
-                if not line:
-                    continue
-                processed.add(line)
-        else:
-            path.parent.mkdir(parents=True, exist_ok=True)
-        return processed
-
-    def _append_checkpoint(self, path: Path, row_id: str) -> None:
-        # Serialise appends to avoid interleaved lines under parallel execution
-        if not hasattr(self, "_checkpoint_lock"):
-            import threading
-
-            self._checkpoint_lock = threading.Lock()
-        with self._checkpoint_lock:
-            with path.open("a", encoding="utf-8") as handle:
-                handle.write(f"{row_id}\n")
 
     def _validate_plugin_schemas(self, datasource_schema: Type[DataFrameSchema]) -> None:
         """Validate plugin compatibility with public helper.
