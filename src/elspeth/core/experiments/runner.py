@@ -338,7 +338,24 @@ class ExperimentRunner:
     ) -> list[tuple[int, pd.Series, dict[str, Any], str | None]]:
         """Prepare list of rows to process, filtering checkpointed and early-stopped rows.
 
-        Returns list of (index, row, context, row_id) tuples ready for processing.
+        Args:
+            df: Input DataFrame with rows to process
+            checkpoint_manager: Optional CheckpointManager for resumption tracking
+
+        Returns:
+            List of (index, row, context, row_id) tuples ready for processing
+
+        Example:
+            >>> df = pd.DataFrame({"id": ["A", "B", "C"], "text": ["x", "y", "z"]})
+            >>> checkpoint_mgr = CheckpointManager(path=Path("checkpoint.txt"), id_field="id")
+            >>> checkpoint_mgr.mark_processed("A")  # "A" already processed
+            >>> rows = runner._prepare_rows_to_process(df, checkpoint_mgr)
+            >>> len(rows)  # Only B and C remain
+            2
+            >>> rows[0][0]  # First row index
+            1
+            >>> rows[0][3]  # First row ID
+            'B'
         """
         rows_to_process: list[tuple[int, pd.Series, dict[str, Any], str | None]] = []
         for idx, (_, row) in enumerate(df.iterrows()):
@@ -406,7 +423,38 @@ class ExperimentRunner:
     ) -> ProcessingResult:
         """Execute row processing using parallel or sequential execution based on configuration.
 
-        Returns ProcessingResult with sorted records and failures.
+        This method orchestrates the core experiment execution loop. It processes each row
+        through the LLM, applies row plugins, and manages checkpointing. Execution mode
+        (parallel vs sequential) is determined by concurrency_config.
+
+        Args:
+            rows_to_process: List of (index, row, context, row_id) tuples prepared by _prepare_rows_to_process()
+            engine: Compiled prompt engine for rendering templates
+            system_template: Compiled system prompt template
+            user_template: Compiled user prompt template
+            criteria_templates: Dict of compiled criteria prompt templates by name
+            row_plugins: List of row-level experiment plugins to apply
+            checkpoint_manager: Optional CheckpointManager for tracking completion
+
+        Returns:
+            ProcessingResult containing records list and failures list
+
+        Example:
+            >>> # Prepare inputs
+            >>> rows = [(0, row_series, {"text": "hello"}, "row_1")]
+            >>> engine = PromptEngine()
+            >>> sys_tmpl = engine.compile("You are helpful")
+            >>> user_tmpl = engine.compile("Process: {{text}}")
+            >>> checkpoint_mgr = CheckpointManager(Path("checkpoint.txt"), id_field="id")
+            >>>
+            >>> # Execute processing
+            >>> result = runner._execute_row_processing(
+            ...     rows, engine, sys_tmpl, user_tmpl, {}, [], checkpoint_mgr
+            ... )
+            >>> result.records  # List of successful processing records
+            [{"row": {"text": "hello"}, "response": {...}, ...}]
+            >>> result.failures  # List of failed row processing attempts
+            []
         """
         records_with_index: list[tuple[int, dict[str, Any]]] = []
         failures: list[dict[str, Any]] = []
