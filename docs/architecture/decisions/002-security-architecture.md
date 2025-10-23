@@ -1,8 +1,8 @@
-# ADR 005 – Multi-Level Security Enforcement
+# ADR 002 – Multi-Level Security Enforcement
 
 ## Status
 
-Accepted (2025‑10‑23).
+Accepted (23/10/25).
 
 ## Context
 
@@ -16,18 +16,18 @@ mechanism that prevents sensitive information from flowing into less trusted com
 Adopt a Multi-Level Security (MLS) model inspired by Bell-LaPadula (“no read up, no write
 down”):
 
-1. All plugins declare a `security_level` (e.g., `public`, `internal`, `confidential`,
-   `secret`).
-2. **Clearance-based enforcement:** components may only consume data whose classification is
+ 1. All plugins declare a `security_level` (e.g., `UNOFFICIAL`, `OFFICIAL`,
+     `OFFICIAL: SENSITIVE`, `PROTECTED`, `SECRET` per Australian PSPF classification).
+ 2. **Clearance-based enforcement:** components may only consume data whose classification is
    less than or equal to their declared `security_level`. This is the traditional clearance
    check — a `SECRET` sink may receive `SECRET`, `CONFIDENTIAL`, or `PUBLIC` data, whereas an
    `UNOFFICIAL` sink may only receive `UNOFFICIAL` data.
-3. **Pipeline-wide minimum evaluation:** before execution, the orchestrator evaluates the minimum
+ 3. **Pipeline-wide minimum evaluation:** before execution, the orchestrator evaluates the minimum
    security level across the
    configured pipeline (datasource, all transforms, sinks).
-4. The experiment inherits that minimum level. Components whose declared level is higher
+ 4. The experiment inherits that minimum level. Components whose declared level is higher
    than the computed minimum refuse to run at the downgraded level.
-5. The run aborts early if any component cannot operate at the downgraded level—preventing
+ 5. The run aborts early if any component cannot operate at the downgraded level—preventing
    classified data from reaching low-trust sinks.
 
 ## Consequences
@@ -87,4 +87,4 @@ until the misconfigured sink is removed or elevated.
 - ADR‑001 Design Philosophy (security-first priority hierarchy)
 - `docs/architecture/security-controls.md`
 - `docs/architecture/threat-surfaces.md`
-- ADR‑003 Remove Legacy Code (for context on registry enforcement)
+- ADR‑003 Remove Legacy Code (archived) – registry enforcement context

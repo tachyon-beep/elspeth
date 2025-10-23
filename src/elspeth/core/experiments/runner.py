@@ -151,6 +151,10 @@ class CheckpointManager:
             )
             self._safe_path = self.path
 
+        # Prepare checkpoint directory once during initialization (fail-fast)
+        # This prevents lock contention during concurrent checkpoint writes
+        check_and_prepare_dir(self._safe_path)
+
         # Load existing checkpoint if file exists
         if self._safe_path.exists():
             self._load_checkpoint()
@@ -183,16 +187,13 @@ class CheckpointManager:
         """Append a single checkpoint entry to file (plain text format).
 
         Thread-safe: Uses lock to serialize appends during parallel execution.
-        Uses cached validated path from __post_init__. Creates parent directories safely.
+        Uses cached validated path from __post_init__. Directory already prepared during init.
 
         Raises:
-            OSError: If directory creation or file write fails
+            OSError: If file write fails
         """
         with self._lock:
             try:
-                # Create parent directories with symlink checks (if needed)
-                check_and_prepare_dir(self._safe_path)
-
                 # Append checkpoint entry to validated path
                 with self._safe_path.open("a", encoding="utf-8") as f:
                     f.write(f"{row_id}\n")
