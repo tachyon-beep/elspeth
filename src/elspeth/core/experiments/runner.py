@@ -41,7 +41,7 @@ class CheckpointManager:
     """
 
     path: Path
-    field: str
+    id_field: str
     _processed_ids: set[str] = field(default_factory=set)
 
     def __post_init__(self) -> None:
@@ -77,6 +77,67 @@ class CheckpointManager:
                 f.write(f"{row_id}\n")
         except OSError as e:
             logger.error(f"Failed to write checkpoint to {self.path}: {e}")
+
+
+@dataclass
+class ExperimentContext:
+    """Compiled experiment configuration ready for execution."""
+
+    engine: PromptEngine
+    system_template: PromptTemplate
+    user_template: PromptTemplate
+    criteria_templates: dict[str, PromptTemplate]
+    checkpoint_manager: CheckpointManager | None
+    row_plugins: list[RowExperimentPlugin]
+
+
+@dataclass
+class RowBatch:
+    """Collection of rows prepared for processing."""
+
+    rows: list[tuple[int, pd.Series, dict[str, Any], str | None]]
+
+    @property
+    def count(self) -> int:
+        """Number of rows in batch."""
+        return len(self.rows)
+
+
+@dataclass
+class ProcessingResult:
+    """Results from row processing execution."""
+
+    records: list[dict[str, Any]]
+    failures: list[dict[str, Any]]
+
+
+@dataclass
+class ResultHandlers:
+    """Callback handlers for row processing results."""
+
+    on_success: Callable[[int, dict[str, Any], str | None], None]
+    on_failure: Callable[[dict[str, Any]], None]
+
+
+@dataclass
+class ExecutionMetadata:
+    """Metadata about experiment execution."""
+
+    rows: int
+    row_count: int
+    retry_summary: dict[str, int] | None = None
+    cost_summary: dict[str, Any] | None = None
+    failures: list[dict[str, Any]] | None = None
+    aggregates: dict[str, Any] | None = None
+    security_level: SecurityLevel | None = None
+    determinism_level: DeterminismLevel | None = None
+    early_stop: dict[str, Any] | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary, omitting None values."""
+        from dataclasses import asdict
+
+        return {k: v for k, v in asdict(self).items() if v is not None}
 
 
 @dataclass

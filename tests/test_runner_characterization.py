@@ -12,7 +12,16 @@ import pandas as pd
 import pytest
 
 from elspeth.core.base.protocols import Artifact, LLMRequest, ResultSink
-from elspeth.core.experiments.runner import CheckpointManager, ExperimentRunner
+from elspeth.core.experiments.runner import (
+    CheckpointManager,
+    ExperimentContext,
+    ExperimentRunner,
+    ExecutionMetadata,
+    ProcessingResult,
+    ResultHandlers,
+    RowBatch,
+)
+from elspeth.core.prompts import PromptEngine
 
 
 class SimpleLLM:
@@ -261,7 +270,7 @@ def test_run_single_failure_doesnt_block_others() -> None:
 def test_checkpoint_manager_tracks_ids(tmp_path: Path) -> None:
     """Unit test: CheckpointManager tracks processed IDs correctly."""
     checkpoint_file = tmp_path / "test_checkpoint.txt"
-    mgr = CheckpointManager(path=checkpoint_file, field="id")
+    mgr = CheckpointManager(path=checkpoint_file, id_field="id")
 
     # Initially empty
     assert not mgr.is_processed("row1")
@@ -286,7 +295,42 @@ def test_checkpoint_manager_tracks_ids(tmp_path: Path) -> None:
         assert lines == ["row1", "row2"]
 
     # Load from file (new instance)
-    mgr2 = CheckpointManager(path=checkpoint_file, field="id")
+    mgr2 = CheckpointManager(path=checkpoint_file, id_field="id")
     assert mgr2.is_processed("row1")
     assert mgr2.is_processed("row2")
     assert not mgr2.is_processed("row3")
+
+
+def test_dataclasses_instantiate() -> None:
+    """Smoke test: New dataclasses can be instantiated."""
+    # ExperimentContext
+    ctx = ExperimentContext(
+        engine=PromptEngine(),
+        system_template=PromptEngine().compile("test", name="test"),
+        user_template=PromptEngine().compile("test", name="test"),
+        criteria_templates={},
+        checkpoint_manager=None,
+        row_plugins=[],
+    )
+    assert ctx.engine is not None
+
+    # RowBatch
+    batch = RowBatch(rows=[])
+    assert batch.count == 0
+
+    # ProcessingResult
+    result = ProcessingResult(records=[], failures=[])
+    assert result.records == []
+
+    # ResultHandlers
+    handlers = ResultHandlers(
+        on_success=lambda i, r, rid: None,
+        on_failure=lambda f: None,
+    )
+    assert callable(handlers.on_success)
+
+    # ExecutionMetadata
+    meta = ExecutionMetadata(rows=0, row_count=0)
+    meta_dict = meta.to_dict()
+    assert "rows" in meta_dict
+    assert "retry_summary" not in meta_dict  # None values omitted
