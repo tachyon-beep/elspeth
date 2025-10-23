@@ -26,46 +26,29 @@ These decisions have been completed or superseded but remain documented for hist
 
 ## ADR Format
 
-We follow the lightweight [Michael Nygard ADR format](https://cognitect.com/blog/2011/11/15/documenting-architecture-decisions) with the following structure:
+We follow the lightweight [Michael Nygard ADR format](https://cognitect.com/blog/2011/11/15/documenting-architecture-decisions) with structured sections for clarity. See **[000-template.md](000-template.md)** for the complete template with detailed guidance.
 
-```markdown
-# ADR XXX – [Short Title]
+**Core structure:**
 
-## Status
-
-[Proposed | Accepted | Deprecated | Superseded] (YYYY-MM-DD)
-
-## Context
-
-[Problem statement and background. What is the issue we're addressing?
-What factors are relevant to understanding why this decision was needed?]
-
-## Decision
-
-[What we decided to do. Be specific and prescriptive. Use numbered lists
-for clarity when describing multiple aspects of the decision.]
-
-## Consequences
-
-[Positive and negative impacts. What becomes easier or harder? What are
-the trade-offs? Be honest about limitations and mitigations.]
-
-## Related Documents
-
-[Links to related ADRs, architecture docs, and implementation files]
-```
+- **Status**: Current state (Proposed, Accepted, Deprecated, Superseded) with date
+- **Context**: Problem statement and background
+- **Decision**: What we decided, with specific numbered points and code examples
+- **Consequences**: Benefits, Limitations/Trade-offs, and Implementation Impact
+- **Related Documents**: Links to related ADRs, architecture docs, and implementation files
 
 ## Creating a New ADR
 
 1. **Determine the next number**: Check the highest numbered ADR in this directory
-2. **Copy the template** above into a new file: `XXX-short-title.md`
-3. **Write the ADR**:
-   - **Context**: Why is this decision needed? What's the problem?
-   - **Decision**: What are we going to do? Be specific.
-   - **Consequences**: What are the implications? Trade-offs?
+2. **Copy the template**: `cp 000-template.md XXX-short-title.md`
+3. **Fill in the sections**:
+   - **Context**: Why is this decision needed? What's the problem? What alternatives were considered?
+   - **Decision**: What are we going to do? Be specific with numbered points and code examples.
+   - **Consequences**: Break down into Benefits, Limitations/Trade-offs (with mitigations), and Implementation Impact
+   - **Related Documents**: Link to related ADRs and implementation files
 4. **Start with Status: Proposed** for review
 5. **Create a PR** and discuss with the team
 6. **Update to Status: Accepted** once approved and merged
+7. **Add metadata**: Include Last Updated date and Author(s) at the bottom
 
 ## ADR Lifecycle
 

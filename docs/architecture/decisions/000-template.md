@@ -9,6 +9,7 @@
 What is the issue we're addressing? What problem needs to be solved?
 
 Provide background information that helps readers understand:
+
 - Why this decision is needed now
 - What constraints or forces are at play
 - What alternatives were considered

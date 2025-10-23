@@ -27,8 +27,8 @@ def test_run_with_empty_dataframe() -> None:
     # Should complete successfully
     assert result["results"] == []
     assert result["failures"] == []
-    assert result["metadata"]["rows"] == 0
-    assert result["metadata"]["row_count"] == 0
+    assert result["metadata"]["processed_rows"] == 0
+    assert result["metadata"]["total_rows"] == 0
 
 
 def test_run_with_concurrent_execution() -> None:

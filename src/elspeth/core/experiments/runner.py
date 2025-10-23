@@ -244,10 +244,18 @@ class ResultHandlers:
 
 @dataclass
 class ExecutionMetadata:
-    """Metadata about experiment execution."""
+    """Metadata about experiment execution.
 
-    rows: int
-    row_count: int
+    Row Counts:
+        processed_rows: Number of rows successfully processed in this run (len(results))
+        total_rows: Total rows in input DataFrame (len(df))
+
+    With checkpointing, processed_rows < total_rows indicates previously completed rows were skipped.
+    With early stop, processed_rows < total_rows indicates remaining rows were not attempted.
+    """
+
+    processed_rows: int
+    total_rows: int
     retry_summary: dict[str, int] | None = None
     cost_summary: dict[str, Any] | None = None
     failures: list[dict[str, Any]] | None = None
@@ -410,8 +418,8 @@ class ExperimentRunner:
         Returns ExecutionMetadata dataclass with all metadata fields populated.
         """
         metadata = ExecutionMetadata(
-            rows=len(results),
-            row_count=len(results),
+            processed_rows=len(results),
+            total_rows=len(df),
         )
 
         # Calculate retry summary

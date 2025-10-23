@@ -60,8 +60,8 @@ def test_run_result_structure(simple_runner: ExperimentRunner) -> None:
 
     # Metadata structure
     metadata = result["metadata"]
-    assert "rows" in metadata
-    assert "row_count" in metadata
+    assert "processed_rows" in metadata
+    assert "total_rows" in metadata
     assert "security_level" in metadata
     assert "determinism_level" in metadata
 
@@ -324,9 +324,9 @@ def test_dataclasses_instantiate() -> None:
     assert callable(handlers.on_success)
 
     # ExecutionMetadata
-    meta = ExecutionMetadata(rows=0, row_count=0)
+    meta = ExecutionMetadata(processed_rows=0, total_rows=0)
     meta_dict = meta.to_dict()
-    assert "rows" in meta_dict
+    assert "processed_rows" in meta_dict
     assert "retry_summary" not in meta_dict  # None values omitted
 
 
