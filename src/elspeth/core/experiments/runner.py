@@ -347,40 +347,21 @@ class ExperimentRunner:
 
         return rows_to_process
 
-    def run(self, df: pd.DataFrame) -> dict[str, Any]:
-        """Execute the run, returning a structured payload for sinks and reports."""
-        self._init_early_stop()
-        processed_ids: set[str] | None = None
-        checkpoint_field = None
-        checkpoint_path = None
-        if self.checkpoint_config:
-            checkpoint_path = Path(self.checkpoint_config.get("path", "checkpoint.jsonl"))
-            checkpoint_field = self.checkpoint_config.get("field", "APPID")
-            processed_ids = self._load_checkpoint(checkpoint_path)
+    def _execute_row_processing(
+        self,
+        rows_to_process: list[tuple[int, pd.Series, dict[str, Any], str | None]],
+        engine: PromptEngine,
+        system_template: PromptTemplate,
+        user_template: PromptTemplate,
+        criteria_templates: dict[str, PromptTemplate],
+        row_plugins: list[RowExperimentPlugin],
+        checkpoint_path: Path | None,
+        processed_ids: set[str] | None,
+    ) -> ProcessingResult:
+        """Execute row processing using parallel or sequential execution based on configuration.
 
-        row_plugins = self.row_plugins or []
-
-        # Compile prompt templates using helper methods
-        engine = self.prompt_engine or PromptEngine()
-        system_template = self._compile_system_prompt(engine)
-        user_template = self._compile_user_prompt(engine)
-        criteria_templates = self._compile_criteria_prompts(engine)
-
-        self._compiled_system_prompt = system_template
-        self._compiled_user_prompt = user_template
-        self._compiled_criteria_prompts = criteria_templates
-
-        # Config-time schema validation: Check plugin compatibility
-        datasource_schema = df.attrs.get("schema") if hasattr(df, "attrs") else None
-        if datasource_schema:
-            self._validate_plugin_schemas(datasource_schema)
-
-        # Initialize malformed data tracking
-        self._malformed_rows = []
-
-        # Prepare rows to process (filtering checkpointed and early-stopped rows)
-        rows_to_process = self._prepare_rows_to_process(df, checkpoint_field, processed_ids)
-
+        Returns ProcessingResult with sorted records and failures.
+        """
         records_with_index: list[tuple[int, dict[str, Any]]] = []
         failures: list[dict[str, Any]] = []
 
@@ -427,8 +408,59 @@ class ExperimentRunner:
                 if failure:
                     handle_failure(failure)
 
+        # Sort records by original index to maintain row order
         records_with_index.sort(key=lambda item: item[0])
         results = [record for _, record in records_with_index]
+
+        return ProcessingResult(records=results, failures=failures)
+
+    def run(self, df: pd.DataFrame) -> dict[str, Any]:
+        """Execute the run, returning a structured payload for sinks and reports."""
+        self._init_early_stop()
+        processed_ids: set[str] | None = None
+        checkpoint_field = None
+        checkpoint_path = None
+        if self.checkpoint_config:
+            checkpoint_path = Path(self.checkpoint_config.get("path", "checkpoint.jsonl"))
+            checkpoint_field = self.checkpoint_config.get("field", "APPID")
+            processed_ids = self._load_checkpoint(checkpoint_path)
+
+        row_plugins = self.row_plugins or []
+
+        # Compile prompt templates using helper methods
+        engine = self.prompt_engine or PromptEngine()
+        system_template = self._compile_system_prompt(engine)
+        user_template = self._compile_user_prompt(engine)
+        criteria_templates = self._compile_criteria_prompts(engine)
+
+        self._compiled_system_prompt = system_template
+        self._compiled_user_prompt = user_template
+        self._compiled_criteria_prompts = criteria_templates
+
+        # Config-time schema validation: Check plugin compatibility
+        datasource_schema = df.attrs.get("schema") if hasattr(df, "attrs") else None
+        if datasource_schema:
+            self._validate_plugin_schemas(datasource_schema)
+
+        # Initialize malformed data tracking
+        self._malformed_rows = []
+
+        # Prepare rows to process (filtering checkpointed and early-stopped rows)
+        rows_to_process = self._prepare_rows_to_process(df, checkpoint_field, processed_ids)
+
+        # Execute row processing (parallel or sequential based on configuration)
+        processing_result = self._execute_row_processing(
+            rows_to_process,
+            engine,
+            system_template,
+            user_template,
+            criteria_templates,
+            row_plugins,
+            checkpoint_path,
+            processed_ids,
+        )
+        results = processing_result.records
+        failures = processing_result.failures
 
         payload: dict[str, Any] = {"results": results, "failures": failures}
         aggregates = self._run_aggregation(results)
