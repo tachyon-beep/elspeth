@@ -8,19 +8,7 @@ import pandas as pd
 import pytest
 
 from elspeth.core.experiments.runner import ExperimentRunner
-
-
-class SimpleLLM:
-    """Deterministic LLM for safety tests."""
-
-    def generate(
-        self,
-        *,
-        system_prompt: str,
-        user_prompt: str,
-        metadata: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
-        return {"content": "test", "raw": {"usage": {"prompt_tokens": 10, "completion_tokens": 5}}}
+from tests.conftest import SimpleLLM
 
 
 def test_run_with_empty_dataframe() -> None:

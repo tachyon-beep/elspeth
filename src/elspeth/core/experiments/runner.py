@@ -117,6 +117,10 @@ class CheckpointManager:
                 raise ValueError(f"Checkpoint path validation failed: {e}") from e
         else:
             # Trusted path: Use directly without validation
+            logger.debug(
+                "CheckpointManager initialized with unvalidated path (allowed_base_path=None): %s",
+                self.path
+            )
             self._safe_path = self.path
 
         # Load existing checkpoint if file exists

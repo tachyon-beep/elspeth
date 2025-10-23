@@ -21,6 +21,17 @@ This plan combines risk mitigation and refactoring activities into a single exec
 
 ---
 
+## ⚠️ Important Discovery Note
+
+**Checkpoint Format Discovery:**
+During Phase 0 characterization testing, we discovered that the checkpoint file format is **plain text** (one row ID per line with newline terminator: `"row1\nrow2\nrow3\n"`), **not JSONL** as this plan originally assumed. This was documented in characterization tests and confirmed in the codebase.
+
+See `REFACTORING_COMPLETE_summary.md:51` for details on this discovery.
+
+This does not affect the refactoring approach but clarifies the actual implementation being refactored.
+
+---
+
 ## Pre-Flight Checklist
 
 **Before starting Phase 0:**

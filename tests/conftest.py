@@ -1,7 +1,7 @@
 import csv
 import sys
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 
 import pytest
 
@@ -60,3 +60,32 @@ def assert_sanitized_artifact() -> Callable[[str | Path], None]:
             raise AssertionError(f"Unsupported artifact type for sanitization check: {artifact_path}")
 
     return _assert
+
+
+class SimpleLLM:
+    """Deterministic LLM for testing.
+
+    Returns predictable responses for characterization and safety tests.
+    Uses row_id from metadata to create unique per-row responses.
+    """
+
+    def generate(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Generate deterministic response based on row_id from metadata."""
+        metadata = metadata or {}
+        row_id = metadata.get("row_id", "unknown")
+        return {
+            "content": f"response_{row_id}",
+            "raw": {"usage": {"prompt_tokens": 10, "completion_tokens": 5}},
+        }
+
+
+@pytest.fixture
+def simple_llm() -> SimpleLLM:
+    """Fixture providing a deterministic LLM for testing."""
+    return SimpleLLM()

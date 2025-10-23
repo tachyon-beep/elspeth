@@ -22,24 +22,7 @@ from elspeth.core.experiments.runner import (
     RowBatch,
 )
 from elspeth.core.prompts import PromptEngine
-
-
-class SimpleLLM:
-    """Deterministic LLM for characterization tests."""
-
-    def generate(
-        self,
-        *,
-        system_prompt: str,
-        user_prompt: str,
-        metadata: dict[str, Any] | None = None,
-    ) -> dict[str, Any]:
-        metadata = metadata or {}
-        row_id = metadata.get("row_id", "unknown")
-        return {
-            "content": f"response_{row_id}",
-            "raw": {"usage": {"prompt_tokens": 10, "completion_tokens": 5}},
-        }
+from tests.conftest import SimpleLLM
 
 
 class CollectingSink(ResultSink):
