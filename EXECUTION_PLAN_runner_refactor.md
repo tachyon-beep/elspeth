@@ -2720,6 +2720,27 @@ git checkout main
 - [Key insight 2]
 - [Key insight 3]
 
+## Future Opportunities
+
+### Test Coverage Enhancement
+
+**Context:** While coverage increased from 71% to 75% on runner.py during this refactoring, the characterization tests focus on integration-level behavioral verification rather than granular unit test coverage.
+
+**Recommendation:** Consider adding focused unit tests for edge cases identified during the refactoring:
+- **Checkpoint corruption scenarios** - What happens if checkpoint file is corrupted mid-write?
+- **Concurrent access edge cases** - Race conditions during parallel checkpoint writes
+- **Early stop edge cases** - Multiple early stop conditions firing simultaneously
+- **Retry exhaustion patterns** - Complex failure scenarios with nested retries
+- **Malformed data routing** - Edge cases in schema violation routing logic
+
+**Priority:** Low (deferred to future work)
+
+The current characterization test approach is appropriate for refactoring verification. These granular unit tests would provide additional safety for future modifications but are not required for this PR.
+
+See functional reviewer feedback (post-approval) for additional context.
+
+---
+
 ## Next Steps
 - [ ] Merge PR
 - [ ] Update SonarQube

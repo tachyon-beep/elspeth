@@ -91,7 +91,7 @@ def test_run_preserves_dataframe_order(simple_runner: ExperimentRunner) -> None:
 
 def test_run_checkpoint_idempotency(tmp_path: Path) -> None:
     """INVARIANT: Re-running with checkpoint skips already processed rows."""
-    checkpoint_file = tmp_path / "test_checkpoint.jsonl"
+    checkpoint_file = tmp_path / "test_checkpoint.txt"
 
     runner = ExperimentRunner(
         llm_client=SimpleLLM(),

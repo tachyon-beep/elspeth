@@ -311,6 +311,10 @@ class ExperimentRunner:
     malformed_data_sink: ResultSink | None = None
     _malformed_rows: list[SchemaViolation] | None = None
 
+    # ============================================================================
+    # Result Processing & Metadata Helpers
+    # ============================================================================
+
     def _calculate_retry_summary(self, results: ProcessingResult) -> dict[str, int] | None:
         """Calculate retry statistics from processing results.
 
@@ -353,6 +357,10 @@ class ExperimentRunner:
         df_determinism_level = getattr(df, "attrs", {}).get("determinism_level") if hasattr(df, "attrs") else None
         self._active_determinism_level = resolve_determinism_level(self.determinism_level, df_determinism_level)
         return self._active_determinism_level
+
+    # ============================================================================
+    # Prompt Compilation Helpers
+    # ============================================================================
 
     def _compile_system_prompt(self, engine: PromptEngine) -> PromptTemplate:
         """Compile system prompt template."""
@@ -456,6 +464,10 @@ class ExperimentRunner:
         pipeline = ArtifactPipeline(self._build_sink_bindings())
         pipeline.execute(payload, metadata)
 
+    # ============================================================================
+    # Row Processing Orchestration
+    # ============================================================================
+
     def _prepare_rows_to_process(
         self,
         df: pd.DataFrame,
@@ -499,6 +511,10 @@ class ExperimentRunner:
             rows_to_process.append((idx, row, context, row_id))
 
         return rows_to_process
+
+    # ============================================================================
+    # Initialization Helpers
+    # ============================================================================
 
     def _init_checkpoint(self) -> CheckpointManager | None:
         """Initialize checkpoint configuration with fail-closed path validation.
