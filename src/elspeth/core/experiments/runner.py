@@ -320,6 +320,11 @@ class ExperimentRunner:
 
         return metadata
 
+    def _dispatch_to_sinks(self, payload: dict[str, Any], metadata: dict[str, Any]) -> None:
+        """Dispatch payload to configured sinks via artifact pipeline."""
+        pipeline = ArtifactPipeline(self._build_sink_bindings())
+        pipeline.execute(payload, metadata)
+
     def run(self, df: pd.DataFrame) -> dict[str, Any]:
         """Execute the run, returning a structured payload for sinks and reports."""
         self._init_early_stop()
@@ -427,8 +432,8 @@ class ExperimentRunner:
 
         payload["metadata"] = metadata
 
-        pipeline = ArtifactPipeline(self._build_sink_bindings())
-        pipeline.execute(payload, metadata)
+        # Dispatch to sinks via artifact pipeline
+        self._dispatch_to_sinks(payload, metadata)
         self._active_security_level = None
         return payload
 
