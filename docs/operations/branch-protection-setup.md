@@ -382,7 +382,7 @@ git push origin production
 - Security patch automation: `docs/operations/security-patch-automation.md`
 - Dependabot configuration: `docs/operations/dependabot.md`
 - CI workflows: `.github/workflows/`
-- Incident response: `docs/architecture/incident-response.md`
+- Incident response: `docs/compliance/incident-response.md`
 
 ---
 

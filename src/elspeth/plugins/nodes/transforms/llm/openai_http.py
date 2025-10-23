@@ -65,7 +65,7 @@ class HttpOpenAIClient(LLMClientProtocol):
             adapter = HTTPAdapter(max_retries=retry)
             self.session.mount("https://", adapter)
             # Mount HTTP only when explicitly using localhost endpoints; never for external traffic.
-            if self.api_base.startswith("http://"):
+            if self.api_base.startswith("http://"):  # NOSONAR
                 # Endpoint validation already restricts HTTP to localhost/loopback only.
                 # Enforce with an explicit runtime check for defense-in-depth.
                 from urllib.parse import urlparse

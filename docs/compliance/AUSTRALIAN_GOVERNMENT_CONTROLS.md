@@ -326,8 +326,8 @@ python -m pytest -k "classified" -v
 - **Plugin Catalogue**: `docs/architecture/plugin-catalogue.md`
 - **Security Controls**: `docs/architecture/security-controls.md`
 - **Threat Model**: `docs/architecture/threat-surfaces.md`
-- **Control Inventory**: `docs/architecture/CONTROL_INVENTORY.md`
-- **Configuration Guide**: `docs/architecture/configuration-merge.md`
+- **Control Inventory**: `docs/compliance/CONTROL_INVENTORY.md`
+- **Configuration Guide**: `docs/architecture/configuration-security.md`
 
 ## Contact & Support
 
@@ -335,4 +335,4 @@ For Australian government-specific deployment guidance:
 
 - Review `docs/reporting-and-suite-management.md` for operational procedures
 - See `docs/end_to_end_scenarios.md` for common workflow patterns
-- Check `CLAUDE.md` for development guidelines
+- Refer to `CONTRIBUTING.md` for day-to-day development guidelines

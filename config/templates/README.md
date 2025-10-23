@@ -262,7 +262,7 @@ sinks:
 ## Related Documentation
 
 - [ATO Work Program](../../docs/ATO_REMEDIATION_WORK_PROGRAM.md) - Security requirements
-- [Configuration Merge](../../docs/architecture/configuration-merge.md) - Config hierarchy
+- [Configuration Merge](../../docs/architecture/configuration-security.md#update-2025-10-23-prompt-packs-defaults-and-merge-order) - Config hierarchy
 - [Plugin Catalogue](../../docs/architecture/plugin-catalogue.md) - Available plugins
 - [Security Controls](../../docs/architecture/security-controls.md) - Security features
 

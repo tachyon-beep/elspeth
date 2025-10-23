@@ -55,7 +55,7 @@ Update 2025-10-12: Dry-run toggles are handled at `src/elspeth/cli.py:360-392`.
 
 ## Documentation
 
-1. Update `README.md`, `AGENTS.md`, and relevant docs (migration guide, logging standards) when behaviour changes.
+1. Update `README.md` and relevant docs (migration guide, logging standards) when behaviour changes.
 1. Increment plan status in `master_work_plan.md` (mark completed tasks, add notes for deferrals).
 1. Run `docs/reporting-and-suite-management.md` commands to ensure CLI help text remains accurate; update screenshots or artefact lists if analytics pipeline changed.
 

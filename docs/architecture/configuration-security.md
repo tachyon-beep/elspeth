@@ -27,14 +27,21 @@ secret material during orchestration.
   uploads; store PATs in secret managers and inject via CI rather than committing them
   (`src/elspeth/plugins/nodes/sinks/repository.py:140-219`).
 
-## Update 2025-10-12: Prompt Packs & Suite Defaults
+## Update 2025-10-23: Prompt Packs, Defaults, and Merge Order
 
 - Prompt packs can define prompts, middleware, sinks, and plugin lists that merge with suite
-  defaults and per-experiment overrides (`src/elspeth/config.py:102-188`).
-- `ConfigMerger` guarantees deterministic resolution order (defaults ← prompt pack ← experiment)
-  before normalising plugin lists (`src/elspeth/core/experiments/suite_runner.py:37-116`).
-- Suite defaults should capture shared middleware (audit, prompt shield, content safety) so
-  experiments inherit mandatory safeguards.
+  defaults and per-experiment overrides (`src/elspeth/config.py:110-210`).
+- `ConfigMerger` guarantees a deterministic resolution order **defaults → prompt pack → experiment**
+  before normalising plugin lists and instantiating registry objects (`src/elspeth/core/experiments/suite_runner.py:32-173`).
+- `load_settings` hydrates the profile in two stages: profile YAML + CLI overrides → prompt pack
+  overlay → suite defaults → validated `OrchestratorConfig` (`src/elspeth/config.py:52-210`).
+- Middleware, sinks, datasource definitions, and plugin lists honour `inherit: false` so
+  experiments can opt out of inherited entries when required for hard-isolation scenarios.
+- During suite build the runner fingerprints middleware by plugin name, options, and security
+  level (see `middleware-lifecycle.md`) so shared definitions remain singleton per suite.
+- Suite defaults should capture mandatory middleware (audit logger, content safety, prompt
+  shield, cost tracker) ensuring every experiment inherits the security controls unless
+  explicitly removed.
 
 ## Update 2025-10-12: Concurrency, Retry, and Early Stop Configuration
 
@@ -80,4 +87,3 @@ secret material during orchestration.
 
 - 2025-10-12 – Introduced configuration security overview covering validation pipeline, secret
   handling, concurrency/retry/early-stop settings, and suite export governance for accreditation.
-

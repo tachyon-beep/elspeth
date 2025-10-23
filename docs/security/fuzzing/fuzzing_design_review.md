@@ -1,9 +1,13 @@
 # Fuzzing Plan – Peer Review & Risk Reduction
 
-Reviewer: Internal self‑review and checklist for fuzzing strategy in `docs/fuzzing.md`.
+Reviewer: Internal self‑review of the canonical strategy in `docs/security/fuzzing/fuzzing.md`.
+
+Related docs:
+- Strategy & targets (canonical): [fuzzing.md](./fuzzing.md)
+- Concise implementation roadmap: [fuzzing_plan.md](./fuzzing_plan.md)
 
 ## Summary
-The plan proposes Atheris for coverage‑guided fuzzing on high‑value parsers and guardrails, with Hypothesis to lock in invariants. CI adds a nightly fuzz job (time‑boxed) and keeps property tests in normal runs. This is an appropriate balance for a Python codebase handling paths, URIs, and config schemas.
+We will use Atheris for coverage‑guided fuzzing on high‑value parsers and guardrails, paired with Hypothesis to lock in invariants. CI adds a time‑boxed nightly job, while property tests run in normal suites. This balances fidelity and cost for a Python codebase with path, URI, and config surfaces.
 
 ## Strengths
 - Targets the riskiest surfaces (path normalization, sanitization, validators)
@@ -44,16 +48,13 @@ The plan proposes Atheris for coverage‑guided fuzzing on high‑value parsers 
    - Risk: Only a few targets fuzzed; bugs persist elsewhere.
    - Mitigation: Expand targets iteratively based on crash data and code churn; consider instrumenting coverage in fuzz runs to measure marginal value.
 
-## Action Items
+## Action Items (non‑duplicating)
 - [ ] Add `fuzz/` harnesses for `path_guard`, `zip_sanitize`
 - [ ] Add Hypothesis property suites under `tests/fuzz_props/`
 - [ ] Add `fuzz.yml` nightly workflow (3.11 runtime, 10–15m per harness)
 - [ ] Pin `atheris` in `requirements-dev.lock` and confirm lock installs in CI
 - [ ] Add corpus seeds and contribution guide for adding minimized crashes
-- [ ] Document local run instructions and resource caps in `docs/fuzzing.md`
+- [ ] Ensure resource caps and local run instructions are present in [fuzzing.md](./fuzzing.md)
 
 ## Acceptance Criteria (Phase 1)
-- Nightly fuzz workflow runs reliably for 7 days
-- At least one meaningful crash found/fixed or properties expanded to cover edge invariants
-- Zero regressions in property tests for two subsequent releases
-
+Use the authoritative “Success Criteria (Phase 1)” in the canonical strategy: [fuzzing.md](./fuzzing.md).

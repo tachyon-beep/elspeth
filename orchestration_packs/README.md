@@ -61,4 +61,4 @@ With the new data flow architecture (see `docs/architecture/refactoring/data-flo
 - **Nodes**: Reusable processing components (sources, sinks, transforms)
 - **Protocols**: Clear contracts for plugin behavior
 
-See `CLAUDE.md` and the architecture documentation for more details on creating orchestration packs with the new architecture.
+See `CONTRIBUTING.md` and the architecture documentation for more details on creating orchestration packs with the new architecture.

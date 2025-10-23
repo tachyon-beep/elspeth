@@ -1159,7 +1159,7 @@ elspeth run --settings config/sample_suite/settings.yaml --head 5
 
 #### Task 5.2: Update Main Documentation (30 min)
 **Files**:
-- `CLAUDE.md` - Add schema validation section
+- Developer documentation - Add schema validation section
 - `docs/architecture/plugin-catalogue.md` - Update plugin entries with schemas
 - `README.md` - Add schema validation to feature list
 

@@ -92,7 +92,7 @@ When filing a bug or feature request, include:
 
 ## Code of Conduct
 
-Elspeth follows the [Contributor Covenant](https://www.contributor-covenant.org/) (v2.1). Please act with respect and empathy. Report unacceptable behaviour through the maintainers or the incident response channels outlined in `docs/architecture/incident-response.md`.
+Elspeth follows the [Contributor Covenant](https://www.contributor-covenant.org/) (v2.1). Please act with respect and empathy. Report unacceptable behaviour through the maintainers or the incident response channels outlined in `docs/compliance/incident-response.md`.
 
 ## Thank You
 

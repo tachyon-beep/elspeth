@@ -238,7 +238,7 @@ Update 2025-10-12: `--reports-dir` handling currently occurs at `src/elspeth/cli
 - Rate and cost control registries normalise security levels and schema validation before attaching to the runner (`src/elspeth/core/controls/registry.py:36`, `src/elspeth/core/controls/rate_limit.py:104`). See docs/architecture/plugin-security-model.md Update 2025-10-12: Control Registry.
 
 ### Update 2025-10-12: Artifact Tokens
-- Sinks advertise artifacts via `ArtifactDescriptor` and runtime metadata (`src/elspeth/core/interfaces.py:83`, `src/elspeth/core/pipeline/artifact_pipeline.py:153`), enabling analytics and signing sinks to consume upstream assets. Controls are catalogued in docs/architecture/CONTROL_INVENTORY.md.
+- Sinks advertise artifacts via `ArtifactDescriptor` and runtime metadata (`src/elspeth/core/interfaces.py:83`, `src/elspeth/core/pipeline/artifact_pipeline.py:153`), enabling analytics and signing sinks to consume upstream assets. Controls are catalogued in docs/compliance/CONTROL_INVENTORY.md.
 <!-- UPDATE 2025-10-12: Artifact descriptor relocation -->
 Update 2025-10-12: Artifact descriptor definitions reside in `src/elspeth/core/base/protocols.py:237-309`; request parsing and binding resolution continue in `src/elspeth/core/pipeline/artifact_pipeline.py:120-219`.
 <!-- END UPDATE -->

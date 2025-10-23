@@ -327,7 +327,7 @@ class GitHubRepoSink(_RepoSinkBase):
         owner: str,
         repo: str,
         branch: str = "main",
-        token_env: str = "GITHUB_TOKEN",  # noqa: S107 - environment variable name, not a secret
+        token_env: str = "GITHUB_TOKEN",  # noqa: S107
         base_url: str = "https://api.github.com",
         fail_fast_missing_token: bool = False,
         **kwargs: Any,
@@ -417,8 +417,8 @@ class AzureDevOpsRepoSink(_RepoSinkBase):
         project: str,
         repository: str,
         branch: str = "main",
-        token_env: str = "AZURE_DEVOPS_PAT",  # noqa: S107 - environment variable name, not a secret
-        api_version: str = "7.1-preview",
+        token_env: str = "AZURE_DEVOPS_PAT",  # noqa: S107
+        api_version: str = "7.1-preview",  # NB: token_env is an environment variable name, not a secret
         base_url: str = "https://dev.azure.com",
         fail_fast_missing_token: bool = False,
         **kwargs: Any,

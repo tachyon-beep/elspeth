@@ -8,7 +8,7 @@ This directory contains all operational guides, architecture references, complia
 |--------------|----------|
 | **Get started quickly** | [End-to-End Scenarios](end_to_end_scenarios.md) |
 | **Run experiments and generate reports** | [Reporting & Suite Management](reporting-and-suite-management.md) |
-| **Run ad‑hoc jobs (datasource → LLM → sinks)** | [Ad‑hoc Job Configs](../docs/operations/job-configs.md) |
+| **Run ad‑hoc jobs (datasource → LLM → sinks)** | [Ad‑hoc Job Configs](operations/job-configs.md) |
 | **Expose liveness/readiness probes** | [Health Check Server](operations/healthcheck.md) |
 | **Understand the architecture** | [Architecture Overview](architecture/architecture-overview.md) |
 | **Add a new plugin** | [Plugin Catalogue](architecture/plugin-catalogue.md) |
@@ -73,10 +73,11 @@ Day-to-day operational guides for running Elspeth:
 
 **See [`examples/`](examples/)** for hands-on examples:
 
+- Master example (schema validation → middleware → analytics → signed bundles)
 - Quick start scenarios
 - Azure integration guides
 - Schema validation demos
-- PII detection workflows
+- Security middleware deep dives (`classified_material`, `pii_shield`)
 
 **Index:** [examples/README.md](examples/README.md)
 

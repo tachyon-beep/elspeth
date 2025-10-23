@@ -13,7 +13,7 @@ This directory contains the technical architecture documentation for Elspeth's c
 - **[plugin-catalogue.md](plugin-catalogue.md)** – Complete catalogue of all datasources, LLMs, middleware, sinks, and experiment plugins
 - **[plugin-security-model.md](plugin-security-model.md)** – Security context propagation and plugin isolation
 - **[../development/plugin-authoring.md](../development/plugin-authoring.md)** – How to build, register, secure, and test plugins
-- **[configuration-merge.md](configuration-merge.md)** – Three-layer configuration merge semantics (defaults → packs → experiments)
+- **[configuration-security.md](configuration-security.md)** – Validation pipeline, secret handling, and merge semantics (defaults → packs → experiments)
 
 ## LLM Integration
 

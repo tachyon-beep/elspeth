@@ -15,6 +15,7 @@ The repository includes a tracked placeholder at `config/blob_store.yaml` for re
 **To configure blob storage securely**:
 
 1. Use the template:
+
    ```bash
    cp config/blob_store.yaml.template config/blob_store.yaml
    ```
@@ -22,6 +23,7 @@ The repository includes a tracked placeholder at `config/blob_store.yaml` for re
 2. Add your credentials to a local `config/blob_store.yaml` (ignored by git). Do not modify the placeholder in version control.
 
 3. **Recommended**: Use Azure DefaultAzureCredential (no SAS token needed):
+
    ```yaml
    default:
      account_name: "your-storage-account"
@@ -31,6 +33,7 @@ The repository includes a tracked placeholder at `config/blob_store.yaml` for re
    ```
 
 4. **Alternative**: Use short-lived SAS tokens (≤ 24 hours):
+
    ```yaml
    default:
      account_name: "your-storage-account"
@@ -38,15 +41,6 @@ The repository includes a tracked placeholder at `config/blob_store.yaml` for re
      blob_path: "your-data.csv"
      sas_token: "your-short-lived-token"
    ```
-
-### Historical Note
-
-Prior to commit `9077b01` (October 14, 2025), `config/blob_store.yaml` was tracked in git and contained an expired SAS token (expired October 3, 2025). This token is no longer valid and cannot access the storage account.
-
-If you have concerns about the historical exposure, consider:
-- Rotating any credentials that may have been exposed
-- Reviewing Azure storage account access logs
-- Using Azure Managed Identities for production workloads
 
 ## Environment Variables
 
@@ -65,6 +59,7 @@ Elspeth includes several built-in security features:
 ### 1. Security Level Enforcement
 
 All datasources, LLM clients, and sinks must declare explicit `security_level`:
+
 - `public`
 - `internal`
 - `confidential`
@@ -75,6 +70,7 @@ No silent defaults are allowed (enforced since Phase 3 of data flow migration).
 ### 2. Artifact Pipeline Security
 
 The artifact pipeline enforces "read-up" restrictions:
+
 - Sinks cannot consume artifacts from higher security classifications
 - Each artifact carries security metadata
 - Cross-tier access is blocked
@@ -82,18 +78,21 @@ The artifact pipeline enforces "read-up" restrictions:
 ### 3. Formula Sanitization
 
 CSV and Excel sinks guard against formula injection:
+
 - Configurable via `sanitize_formulas` and `sanitize_guard`
 - Prevents execution of malicious formulas in spreadsheet applications
 
 ### 4. Prompt Sanitization
 
 Strict Jinja2 rendering without eval:
+
 - No code execution in templates
 - Safe variable substitution only
 
 ### 5. Middleware Security
 
 Built-in middleware for security:
+
 - **PII Shield**: Detects and blocks personally identifiable information
 - **Classified Material Shield**: Detects and blocks classified markings
 - **Azure Content Safety**: Integration with Azure Content Safety API
@@ -104,6 +103,7 @@ Built-in middleware for security:
 ### 1. Credential Management
 
 ✅ **DO**:
+
 - Use Azure Managed Identities in production
 - Use short-lived tokens (≤ 24 hours)
 - Store credentials in environment variables
@@ -111,6 +111,7 @@ Built-in middleware for security:
 - Rotate credentials regularly
 
 ❌ **DON'T**:
+
 - Commit credentials to git
 - Use long-lived SAS tokens
 - Share credentials in documentation
@@ -119,12 +120,14 @@ Built-in middleware for security:
 ### 2. Configuration Management
 
 ✅ **DO**:
+
 - Use `.template` files for configuration examples
 - Add config files with secrets to `.gitignore`
 - Document required environment variables
 - Use explicit security levels for all plugins
 
 ❌ **DON'T**:
+
 - Track config files with real credentials
 - Use implicit/default security levels
 - Share configuration files containing secrets
@@ -132,11 +135,13 @@ Built-in middleware for security:
 ### 3. Testing
 
 ✅ **DO**:
+
 - Use mock clients for tests
 - Use environment variables for integration tests
 - Test with expired/invalid credentials to verify error handling
 
 ❌ **DON'T**:
+
 - Commit test data with real credentials
 - Use production credentials in tests
 
@@ -158,7 +163,7 @@ Elspeth is designed for responsible LLM experimentation with built-in security c
 
 - `docs/architecture/security-controls.md` - Control inventory
 - `docs/architecture/threat-surfaces.md` - Threat model
-- `docs/TRACEABILITY_MATRIX.md` - Requirements traceability
+- `docs/compliance/TRACEABILITY_MATRIX.md` - Requirements traceability
 
 ### Signed Artifacts (Local) — HMAC and Asymmetric
 
@@ -250,6 +255,7 @@ Major security improvements:
 ## Questions?
 
 For security-related questions, contact the maintainers directly.
+
 ### 6. Path Containment & Atomic Writes
 
 - Local sinks (CSV, Excel, local bundle, ZIP bundle) enforce write-path allowlists
