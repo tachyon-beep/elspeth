@@ -22,6 +22,7 @@ from elspeth.core.pipeline.artifact_pipeline import ArtifactPipeline, SinkBindin
 from elspeth.core.pipeline.processing import prepare_prompt_context
 from elspeth.core.prompts import PromptEngine, PromptRenderingError, PromptTemplate, PromptValidationError
 from elspeth.core.security import ensure_security_level, resolve_determinism_level, resolve_security_level
+from elspeth.core.utils.path_guard import check_and_prepare_dir, ensure_destination_is_not_symlink, resolve_under_base
 from elspeth.plugins.orchestrators.experiment.protocols import (
     AggregationExperimentPlugin,
     EarlyStopPlugin,
@@ -34,31 +35,75 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class CheckpointManager:
-    """Manages checkpoint loading, tracking, and persistence.
+    """Manages checkpoint loading, tracking, and persistence with path traversal protection.
 
     Provides atomic checkpoint operations with exactly-once semantics for
     row processing tracking. Uses plain text format (one ID per line).
-    Thread-safe for parallel execution.
+    Thread-safe for parallel execution. Protects against path traversal attacks
+    by constraining checkpoint files to an allowed base directory.
+
+    Security:
+        - Path traversal protection via resolve_under_base()
+        - Symlink attack prevention via path_guard utilities
+        - Thread-safe file operations with lock
     """
 
     path: Path
     id_field: str
+    allowed_base_path: Path | None = None
     _processed_ids: set[str] = field(default_factory=set)
     _lock: threading.Lock = field(default_factory=threading.Lock)
+    _resolved_base: Path = field(init=False)
 
     def __post_init__(self) -> None:
-        """Load existing checkpoint file on initialization."""
-        if self.path.exists():
+        """Initialize resolved base path and load existing checkpoint file.
+
+        Raises:
+            ValueError: If path escapes allowed base or contains symlinks
+        """
+        # Default base to parent directory of checkpoint path if not specified
+        if self.allowed_base_path is None:
+            try:
+                self._resolved_base = self.path.parent.resolve()
+            except (OSError, ValueError):
+                # Fall back to current working directory
+                self._resolved_base = Path.cwd().resolve()
+        else:
+            try:
+                self._resolved_base = self.allowed_base_path.resolve()
+            except (OSError, ValueError) as e:
+                raise ValueError(f"Invalid allowed_base_path: {e}") from e
+
+        # Validate path doesn't escape base on initialization
+        try:
+            _ = resolve_under_base(self.path, self._resolved_base)
+        except ValueError as e:
+            raise ValueError(f"Checkpoint path validation failed: {e}") from e
+
+        # Load existing checkpoint if file exists
+        resolved_path = resolve_under_base(self.path, self._resolved_base)
+        if resolved_path.exists():
             self._load_checkpoint()
 
     def _load_checkpoint(self) -> None:
-        """Load processed row IDs from checkpoint file (plain text format)."""
+        """Load processed row IDs from checkpoint file (plain text format).
+
+        Raises:
+            ValueError: If path escapes allowed base or contains symlinks
+        """
         try:
-            with self.path.open("r") as f:
+            # Resolve path under base to prevent traversal
+            safe_path = resolve_under_base(self.path, self._resolved_base)
+            ensure_destination_is_not_symlink(safe_path)
+
+            with safe_path.open("r", encoding="utf-8") as f:
                 for line in f:
                     row_id = line.strip()
                     if row_id:
                         self._processed_ids.add(row_id)
+        except ValueError as e:
+            logger.error(f"Security violation loading checkpoint: {e}")
+            raise
         except OSError as e:
             logger.warning(f"Failed to load checkpoint from {self.path}: {e}")
 
@@ -76,11 +121,27 @@ class CheckpointManager:
         """Append a single checkpoint entry to file (plain text format).
 
         Thread-safe: Uses lock to serialize appends during parallel execution.
+
+        Raises:
+            ValueError: If path escapes allowed base or contains symlinks
         """
         with self._lock:
             try:
-                with self.path.open("a", encoding="utf-8") as f:
+                # Resolve path under base to prevent traversal
+                safe_path = resolve_under_base(self.path, self._resolved_base)
+
+                # Create parent directories with symlink checks
+                check_and_prepare_dir(safe_path)
+
+                # Verify destination is not a symlink
+                ensure_destination_is_not_symlink(safe_path)
+
+                # Append checkpoint entry
+                with safe_path.open("a", encoding="utf-8") as f:
                     f.write(f"{row_id}\n")
+            except ValueError as e:
+                logger.error(f"Security violation writing checkpoint: {e}")
+                raise
             except OSError as e:
                 logger.error(f"Failed to write checkpoint to {self.path}: {e}")
 
@@ -373,6 +434,9 @@ class ExperimentRunner:
         """Initialize checkpoint configuration and load existing processed IDs.
 
         Returns CheckpointManager instance or None if checkpointing disabled.
+
+        Raises:
+            ValueError: If checkpoint path escapes allowed base or contains symlinks
         """
         if not self.checkpoint_config:
             return None
@@ -380,10 +444,16 @@ class ExperimentRunner:
         checkpoint_path = Path(self.checkpoint_config.get("path", "checkpoint.jsonl"))
         checkpoint_field = self.checkpoint_config.get("field", "APPID")
 
-        # Ensure parent directory exists
-        checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+        # Optional: Allow configuration to specify allowed base path
+        # Defaults to parent directory of checkpoint path if not provided
+        allowed_base = self.checkpoint_config.get("allowed_base_path")
+        allowed_base_path = Path(allowed_base) if allowed_base else None
 
-        return CheckpointManager(path=checkpoint_path, id_field=checkpoint_field)
+        return CheckpointManager(
+            path=checkpoint_path,
+            id_field=checkpoint_field,
+            allowed_base_path=allowed_base_path,
+        )
 
     def _init_prompts(self) -> tuple[PromptEngine, PromptTemplate, PromptTemplate, dict[str, PromptTemplate]]:
         """Initialize and compile all prompt templates.
