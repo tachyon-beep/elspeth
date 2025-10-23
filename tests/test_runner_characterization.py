@@ -254,7 +254,11 @@ def test_run_single_failure_doesnt_block_others() -> None:
 def test_checkpoint_manager_tracks_ids(tmp_path: Path) -> None:
     """Unit test: CheckpointManager tracks processed IDs correctly."""
     checkpoint_file = tmp_path / "test_checkpoint.txt"
-    mgr = CheckpointManager(path=checkpoint_file, id_field="id")
+    mgr = CheckpointManager(
+        path=checkpoint_file,
+        id_field="id",
+        _bypass_validation_for_trusted_internal_paths=True,  # Test fixture: hardcoded tmp_path
+    )
 
     # Initially empty
     assert not mgr.is_processed("row1")
@@ -281,7 +285,11 @@ def test_checkpoint_manager_tracks_ids(tmp_path: Path) -> None:
         assert lines == ["row1", "row2"]
 
     # Load from file (new instance)
-    mgr2 = CheckpointManager(path=checkpoint_file, id_field="id")
+    mgr2 = CheckpointManager(
+        path=checkpoint_file,
+        id_field="id",
+        _bypass_validation_for_trusted_internal_paths=True,  # Test fixture: hardcoded tmp_path
+    )
     assert mgr2.is_processed("row1")
     assert mgr2.is_processed("row2")
     assert not mgr2.is_processed("row3")

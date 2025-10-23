@@ -51,14 +51,20 @@ class CheckpointManager:
         id_field: Name of DataFrame column containing unique row identifiers
         allowed_base_path: Directory path to constrain checkpoint file location.
             If set, enables path validation to prevent traversal attacks.
-            If None, path is used directly without validation (trusted sources only).
+            If None, requires _bypass_validation_for_trusted_internal_paths=True
+        _bypass_validation_for_trusted_internal_paths: DANGEROUS bypass for internal code.
+            Set to True ONLY for hardcoded, trusted paths (tests, internal code).
+            NEVER use for user-provided configurations.
+            If False (default), allowed_base_path is required (defense in depth).
 
-    Security:
+    Security (Defense in Depth):
+        - Layer 1: _init_checkpoint() provides safe defaults for user configs
+        - Layer 2: CheckpointManager enforces validation requirements
         - Path traversal protection via resolve_under_base()
         - Symlink attack prevention via path_guard utilities
         - Thread-safe file operations with lock
-        - allowed_base_path constrains file operations to safe directory
-        - FAIL-CLOSED: User configurations should ALWAYS provide allowed_base_path
+        - FAIL-CLOSED: allowed_base_path required unless explicit bypass
+        - Explicit bypass parameter prevents accidental security bypasses
 
     Examples:
         Secure usage (user-controlled configuration - REQUIRED):
@@ -73,24 +79,27 @@ class CheckpointManager:
         >>> # path=Path("../../../etc/passwd") -> ValueError
 
         Trusted usage (internal hardcoded paths - ONLY for tests/internal code):
-        >>> # ONLY use allowed_base_path=None for hardcoded, trusted paths
-        >>> # Example: pytest fixtures, internal testing, hardcoded paths in code
+        >>> # ONLY for hardcoded, trusted paths (pytest fixtures, internal code)
+        >>> # Requires EXPLICIT bypass parameter to prevent accidents
         >>> checkpoint_mgr = CheckpointManager(
         ...     path=Path("internal_checkpoints/run.txt"),
         ...     id_field="id",
-        ...     allowed_base_path=None,  # No validation - ONLY for trusted sources!
+        ...     allowed_base_path=None,
+        ...     _bypass_validation_for_trusted_internal_paths=True,  # EXPLICIT bypass
         ... )
-        >>> # WARNING: allowed_base_path=None disables ALL path validation.
-        >>> # NEVER use None for user-provided paths or configurations!
+        >>> # WARNING: Bypass disables ALL path validation. Use ONLY for hardcoded paths.
+        >>> # NEVER use bypass for user-provided paths or configurations!
 
     Raises:
         ValueError: If path escapes allowed_base_path or contains symlinks
         ValueError: If allowed_base_path cannot be resolved
+        ValueError: If allowed_base_path is None without explicit bypass (DEFENSE IN DEPTH)
     """
 
     path: Path
     id_field: str
     allowed_base_path: Path | None = None
+    _bypass_validation_for_trusted_internal_paths: bool = False
     _processed_ids: set[str] = field(default_factory=set)
     _lock: threading.Lock = field(default_factory=threading.Lock)
     _safe_path: Path = field(init=False)  # Cached validated path
@@ -98,14 +107,27 @@ class CheckpointManager:
     def __post_init__(self) -> None:
         """Validate checkpoint path and load existing checkpoint file.
 
-        Security model:
+        Security Model (DEFENSE IN DEPTH):
+            - Layer 1: _init_checkpoint() provides safe defaults for user configs
+            - Layer 2: THIS METHOD enforces validation requirements for ALL callers
             - If allowed_base_path is set: Validates path against base, caches validated path
-            - If allowed_base_path is None: Uses path directly (trusted sources only)
+            - If allowed_base_path is None: Requires explicit bypass parameter
 
         Raises:
+            ValueError: If allowed_base_path is None without explicit bypass
             ValueError: If allowed_base_path is set and path escapes base or contains symlinks
             ValueError: If allowed_base_path cannot be resolved
         """
+        # DEFENSE IN DEPTH: Enforce validation unless explicitly bypassed
+        if self.allowed_base_path is None and not self._bypass_validation_for_trusted_internal_paths:
+            raise ValueError(
+                "CheckpointManager requires allowed_base_path for security (DEFENSE IN DEPTH). "
+                "Path validation protects against traversal attacks. "
+                "If this is a hardcoded, trusted internal path (tests/fixtures), "
+                "set _bypass_validation_for_trusted_internal_paths=True. "
+                "NEVER bypass validation for user-provided configurations."
+            )
+
         if self.allowed_base_path is not None:
             # Untrusted path: Validate against allowed base directory
             try:
