@@ -211,6 +211,18 @@ class ExperimentRunner:
 
         return retry_summary if retry_present else None
 
+    def _resolve_security_level(self, df: pd.DataFrame) -> SecurityLevel:
+        """Resolve final security level from DataFrame and configuration."""
+        df_security_level = getattr(df, "attrs", {}).get("security_level") if hasattr(df, "attrs") else None
+        self._active_security_level = resolve_security_level(self.security_level, df_security_level)
+        return self._active_security_level
+
+    def _resolve_determinism_level(self, df: pd.DataFrame) -> DeterminismLevel:
+        """Resolve final determinism level from DataFrame and configuration."""
+        df_determinism_level = getattr(df, "attrs", {}).get("determinism_level") if hasattr(df, "attrs") else None
+        self._active_determinism_level = resolve_determinism_level(self.determinism_level, df_determinism_level)
+        return self._active_determinism_level
+
     def run(self, df: pd.DataFrame) -> dict[str, Any]:
         """Execute the run, returning a structured payload for sinks and reports."""
         self._init_early_stop()
@@ -349,13 +361,9 @@ class ExperimentRunner:
         if failures:
             metadata["failures"] = failures
 
-        df_security_level = getattr(df, "attrs", {}).get("security_level") if hasattr(df, "attrs") else None
-        self._active_security_level = resolve_security_level(self.security_level, df_security_level)
-        metadata["security_level"] = self._active_security_level
-
-        df_determinism_level = getattr(df, "attrs", {}).get("determinism_level") if hasattr(df, "attrs") else None
-        self._active_determinism_level = resolve_determinism_level(self.determinism_level, df_determinism_level)
-        metadata["determinism_level"] = self._active_determinism_level
+        # Resolve security and determinism levels using helper methods
+        metadata["security_level"] = self._resolve_security_level(df)
+        metadata["determinism_level"] = self._resolve_determinism_level(df)
 
         if self._early_stop_reason:
             metadata["early_stop"] = dict(self._early_stop_reason)
