@@ -563,7 +563,11 @@ def test_checkpoint_skips_processed(tmp_path):
         prompt_system="sys",
         prompt_template="Hello {APPID}",
         prompt_fields=["APPID"],
-        checkpoint_config={"path": str(checkpoint), "field": "APPID"},
+        checkpoint_config={
+            "path": str(checkpoint),
+            "field": "APPID",
+            "allowed_base_path": str(tmp_path),  # Required for fail-closed validation
+        },
     )
 
     df1 = pd.DataFrame({"APPID": ["1", "2"]})

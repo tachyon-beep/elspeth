@@ -338,30 +338,33 @@ jobs:
           REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          docker build --build-arg PYTHON_IMAGE=$DOCKER_PYTHON_IMAGE --target runtime -t ghcr.io/${REPO}:pr-${PR_NUMBER} .
+          REPO_LOWER=$(echo "${REPO}" | tr '[:upper:]' '[:lower:]')
+          docker build --build-arg PYTHON_IMAGE=$DOCKER_PYTHON_IMAGE --target runtime -t ghcr.io/${REPO_LOWER}:pr-${PR_NUMBER} .
 
       - name: Push preview image
         env:
           REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          docker push ghcr.io/${REPO}:pr-${PR_NUMBER}
+          REPO_LOWER=$(echo "${REPO}" | tr '[:upper:]' '[:lower:]')
+          docker push ghcr.io/${REPO_LOWER}:pr-${PR_NUMBER}
 
       - name: Summarize preview image
         env:
           REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
+          REPO_LOWER=$(echo "${REPO}" | tr '[:upper:]' '[:lower:]')
           cat >> "$GITHUB_STEP_SUMMARY" << EOF
-          ## PR Preview Image
-          - Tag: 
-            ghcr.io/${REPO}:pr-${PR_NUMBER}
+          ## 🐳 PR Preview Image
 
-          Pull and run locally:
-          ```bash
-          docker pull ghcr.io/${REPO}:pr-${PR_NUMBER}
-          docker run --rm ghcr.io/${REPO}:pr-${PR_NUMBER} python -m elspeth.cli --help
-          ```
+          **Tag:** \`ghcr.io/${REPO_LOWER}:pr-${PR_NUMBER}\`
+
+          **Pull and run locally:**
+          \`\`\`bash
+          docker pull ghcr.io/${REPO_LOWER}:pr-${PR_NUMBER}
+          docker run --rm ghcr.io/${REPO_LOWER}:pr-${PR_NUMBER} python -m elspeth.cli --help
+          \`\`\`
           EOF
       - name: Comment on PR with preview image
         env:
@@ -369,16 +372,24 @@ jobs:
           REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          body=$(cat << 'EOT'
-          ### PR Preview Image
+          REPO_LOWER=$(echo "${REPO}" | tr '[:upper:]' '[:lower:]')
 
-          - Tag: `ghcr.io/${REPO}:pr-${PR_NUMBER}`
+          body=$(cat << EOT
+          ### 🐳 PR Preview Image Available
 
-          Pull and run locally:
-          ```bash
-          docker pull ghcr.io/${REPO}:pr-${PR_NUMBER}
-          docker run --rm ghcr.io/${REPO}:pr-${PR_NUMBER} python -m elspeth.cli --help
-          ```
+          **Tag:** \`ghcr.io/${REPO_LOWER}:pr-${PR_NUMBER}\`
+
+          **Pull and run locally:**
+          \`\`\`bash
+          docker pull ghcr.io/${REPO_LOWER}:pr-${PR_NUMBER}
+          docker run --rm ghcr.io/${REPO_LOWER}:pr-${PR_NUMBER} python -m elspeth.cli --help
+          \`\`\`
+
+          **Run an experiment:**
+          \`\`\`bash
+          docker run --rm -v \$(pwd)/config:/config ghcr.io/${REPO_LOWER}:pr-${PR_NUMBER} \\
+            python -m elspeth.cli --settings /config/settings.yaml
+          \`\`\`
           EOT
           )
           gh pr comment "$PR_NUMBER" --repo "$REPO" --body "$body"

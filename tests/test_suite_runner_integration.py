@@ -149,8 +149,9 @@ def test_suite_runner_executes_with_defaults_and_packs(tmp_path):
     assert set(results.keys()) == {"baseline", "variant"}
 
     baseline_payload = results["baseline"]["payload"]
-    # Check that metadata includes row count
-    assert baseline_payload["metadata"]["row_count"] == 2
+    # Check that metadata includes row counts
+    assert baseline_payload["metadata"]["processed_rows"] == 2
+    assert baseline_payload["metadata"]["total_rows"] == 2
     baseline_variants = baseline_payload["aggregates"]["prompt_variants"]["variants"]
     assert len(baseline_variants) == 2
     assert "Baseline pack prompt" in baseline_payload["results"][0]["response"]["content"]

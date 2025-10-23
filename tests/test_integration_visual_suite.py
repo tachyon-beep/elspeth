@@ -87,7 +87,8 @@ def test_integration_visual_and_analytics_sinks(tmp_path: Path) -> None:
     payload = runner.run(df)
 
     # Validate metrics and aggregates populated by score plugins
-    assert payload["metadata"]["rows"] == 3
+    assert payload["metadata"]["processed_rows"] == 3
+    assert payload["metadata"]["total_rows"] == 3
     assert payload["aggregates"]["score_stats"]["overall"]["mean"] == 0.85
 
     # Validate analytics report artifact

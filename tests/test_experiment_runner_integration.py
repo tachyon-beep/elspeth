@@ -139,7 +139,11 @@ def test_experiment_runner_handles_retries_and_artifact_pipeline(tmp_path: Path)
             "backlog_threshold": 1,
             "utilization_pause": 0.5,
         },
-        checkpoint_config={"path": str(tmp_path / "checkpoint.jsonl"), "field": "APPID"},
+        checkpoint_config={
+            "path": str(tmp_path / "checkpoint.jsonl"),
+            "field": "APPID",
+            "allowed_base_path": str(tmp_path),  # Required for fail-closed validation
+        },
         security_level="SECRET",
         determinism_level="guaranteed",
         experiment_name="integration",
@@ -150,7 +154,8 @@ def test_experiment_runner_handles_retries_and_artifact_pipeline(tmp_path: Path)
     # Successful rows only include A1 and A2 (A3 exhausts retries).
     row_ids = {entry["row"]["APPID"] for entry in payload["results"]}
     assert row_ids == {"A1", "A2"}
-    assert payload["metadata"]["rows"] == 2
+    assert payload["metadata"]["processed_rows"] == 2
+    assert payload["metadata"]["total_rows"] == 3
     assert payload["metadata"]["security_level"] == "SECRET"
     assert payload["metadata"]["determinism_level"] == "guaranteed"
 
@@ -183,7 +188,8 @@ def test_experiment_runner_handles_retries_and_artifact_pipeline(tmp_path: Path)
     assert len(sink.calls) == 1
     recorded_results, recorded_metadata = sink.calls[0]
     assert recorded_results is payload
-    assert recorded_metadata["rows"] == 2
+    assert recorded_metadata["processed_rows"] == 2
+    assert recorded_metadata["total_rows"] == 3
     assert sink.prepared  # prepare_artifacts invoked even with no dependencies
     assert sink.prepared[0] == {}
     assert sink.collected and "bundle" in sink.collected[0]

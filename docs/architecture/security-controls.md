@@ -19,6 +19,31 @@ Update 2025-10-12: Signed artifact enforcement resides in `src/elspeth/plugins/n
 <!-- END UPDATE -->
 - **Plugin-scoped endpoint allowlists** – Each outbound plugin (Azure/OpenAI clients, retrieval connectors, sinks) embeds its own certified endpoint allowlist and validation logic so updates to approved infrastructure are versioned with the component, not centralised in shared configuration. The current configuration limits outbound traffic to the Australian public Azure cloud (`src/elspeth/plugins/nodes/transforms/llm/azure_openai.py`, `src/elspeth/retrieval/providers.py`, `src/elspeth/core/security/approved_endpoints.py`). (Update 2025-10-17)
 
+## Pipeline Security Model
+
+- **Clearance enforcement (traditional MLS)** – Components may only consume data whose
+  classification is less than or equal to their declared `security_level`. An
+  `UNOFFICIAL` sink can only receive `UNOFFICIAL` data, whereas a `SECRET` sink can handle
+  anything up to `SECRET`.
+- **Pipeline-wide minimum evaluation (proactive prevention)** – Before execution the suite
+  runner evaluates the minimum security level across all configured components (datasource,
+  LLM, middleware, sinks). If any component advertises a lower level, the experiment inherits
+  that minimum; higher-classified sources refuse to operate below their clearance, causing the
+  run to abort before data is retrieved.
+
+```yaml
+# This configuration fails safely before touching SecretDB:
+datasource: SecretDB  # security_level: SECRET
+sinks:
+  - EncryptedVault    # security_level: SECRET
+  - DebugLogger       # security_level: UNOFFICIAL  ← lowers pipeline
+
+# Pipeline level => UNOFFICIAL; SecretDB refuses to operate.
+```
+
+This defence-in-depth pairing stops both inadvertent misconfigurations and malicious downgrade
+attempts.
+
 ### Update 2025-10-12: Managed Identity
 - Azure datasources/outputs default to `DefaultAzureCredential`, falling back to SAS tokens when managed identity is unavailable (`src/elspeth/datasources/blob_store.py:125`, `src/elspeth/plugins/outputs/blob.py:210`).
 
