@@ -279,7 +279,8 @@ def test_checkpoint_manager_tracks_ids(tmp_path: Path) -> None:
     mgr.mark_processed("row1")
     assert mgr.is_processed("row1")
 
-    # Verify persistence (plain text format)
+    # Verify persistence: Checkpoint format is plain text, one ID per line with newline terminator
+    # Expected content: "row1\n" (single line with trailing newline)
     assert checkpoint_file.exists()
     with checkpoint_file.open("r") as f:
         content = f.read()
@@ -289,7 +290,8 @@ def test_checkpoint_manager_tracks_ids(tmp_path: Path) -> None:
     mgr.mark_processed("row2")
     assert mgr.is_processed("row2")
 
-    # Verify both IDs persisted
+    # Verify both IDs persisted: Plain text format, one ID per line
+    # Expected content: "row1\nrow2\n" (two lines, each with trailing newline)
     with checkpoint_file.open("r") as f:
         lines = [line.strip() for line in f if line.strip()]
         assert lines == ["row1", "row2"]
