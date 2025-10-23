@@ -259,6 +259,22 @@ class ExperimentRunner:
 
         return criteria_templates
 
+    def _run_aggregation(self, results: list[dict[str, Any]]) -> dict[str, Any] | None:
+        """Execute aggregator plugins and collect results.
+
+        Returns aggregates dictionary if any aggregator produced output, None otherwise.
+        """
+        aggregates: dict[str, Any] = {}
+        for plugin in self.aggregator_plugins or []:
+            derived = plugin.finalize(results)
+            if derived:
+                # Standardize aggregator payloads: always include failures (possibly empty)
+                if isinstance(derived, dict) and "failures" not in derived:
+                    derived["failures"] = []
+                aggregates[plugin.name] = derived
+
+        return aggregates if aggregates else None
+
     def run(self, df: pd.DataFrame) -> dict[str, Any]:
         """Execute the run, returning a structured payload for sinks and reports."""
         self._init_early_stop()
@@ -350,14 +366,7 @@ class ExperimentRunner:
         results = [record for _, record in records_with_index]
 
         payload: dict[str, Any] = {"results": results, "failures": failures}
-        aggregates: dict[str, Any] = {}
-        for plugin in self.aggregator_plugins or []:
-            derived = plugin.finalize(results)
-            if derived:
-                # Standardize aggregator payloads: always include failures (possibly empty)
-                if isinstance(derived, dict) and "failures" not in derived:
-                    derived["failures"] = []
-                aggregates[plugin.name] = derived
+        aggregates = self._run_aggregation(results)
         if aggregates:
             payload["aggregates"] = aggregates
 
