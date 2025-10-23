@@ -1,7 +1,21 @@
 # SonarQube Issues Triage Report
 **Generated:** 2025-10-23
+**Last Updated:** 2025-10-24
 **Project:** tachyon-beep_elspeth
 **Total Issues Found:** 295 (118 OPEN, 177 CLOSED)
+
+## 🎯 Progress Tracker
+
+| Phase | Status | Completed | Remaining |
+|-------|--------|-----------|-----------|
+| **Phase 1: Quick Wins** | 🔴 Not Started | 0/22 | 22 items |
+| **Phase 2: Critical Complexity** | 🟡 In Progress | ✅ 2/12 (16.7%) | 10 functions |
+| **Phase 3: Modernization** | 🔴 Not Started | 0/? | TBD |
+| **Phase 4: Moderate Complexity** | 🔴 Not Started | 0/37 | 37 functions |
+
+### Recent Completions
+- ✅ **2025-10-24** - `runner.py::run_experiment` refactored (73 → 11 complexity) - PR #10
+- ✅ **2025-10-24** - `runner.py::_run_row_processing` extracted into helpers - PR #10
 
 ---
 
@@ -10,22 +24,26 @@
 ### 1. Extreme Cognitive Complexity (Complexity > 40)
 **Impact:** Very difficult to maintain, test, and debug. High risk of bugs.
 
-| File | Function | Line | Complexity | Severity |
-|------|----------|------|------------|----------|
-| `src/elspeth/core/experiments/suite_runner.py` | `run_suite` | 281 | **69** | CRITICAL |
-| `src/elspeth/core/experiments/runner.py` | `run_experiment` | 75 | **73** | CRITICAL |
-| `src/elspeth/core/experiments/runner.py` | `_run_row_processing` | 557 | **45** | CRITICAL |
-| `src/elspeth/plugins/nodes/sinks/visual_report.py` | `_generate_visualizations` | 216 | **63** | CRITICAL |
-| `src/elspeth/plugins/nodes/sinks/zip_bundle.py` | `execute` | 80 | **54** | CRITICAL |
-| `src/elspeth/plugins/nodes/transforms/llm/middleware/pii_shield.py` | `_apply_masking` | 474 | **56** | CRITICAL |
-| `src/elspeth/plugins/nodes/transforms/llm/middleware/classified_material.py` | `_detect_patterns` | 379 | **41** | CRITICAL |
-| `src/elspeth/plugins/experiments/baseline/score_significance.py` | `aggregate` | 73 | **51** | CRITICAL |
-| `src/elspeth/plugins/experiments/aggregators/score_agreement.py` | `aggregate` | 53 | **43** | CRITICAL |
-| `src/elspeth/plugins/experiments/_stats_helpers.py` | `_run_bayesian_analysis` | 123 | **42** | CRITICAL |
-| `src/elspeth/core/pipeline/artifact_pipeline.py` | `_resolve_dependencies` | 335 | **45** | CRITICAL |
-| `src/elspeth/core/config/validation.py` | `validate_experiment_config` | 142 | **59** | CRITICAL |
+| File | Function | Line | Complexity | Severity | Status |
+|------|----------|------|------------|----------|--------|
+| `src/elspeth/core/experiments/suite_runner.py` | `run_suite` | 281 | **69** | CRITICAL | 🔴 TODO |
+| `src/elspeth/core/experiments/runner.py` | `run_experiment` | 75 | ~~**73**~~ → **11** | ~~CRITICAL~~ ✅ | ✅ **DONE** (PR #10) |
+| `src/elspeth/core/experiments/runner.py` | `_run_row_processing` | 557 | ~~**45**~~ → *extracted* | ~~CRITICAL~~ ✅ | ✅ **DONE** (PR #10) |
+| `src/elspeth/plugins/nodes/sinks/visual_report.py` | `_generate_visualizations` | 216 | **63** | CRITICAL | 🔴 TODO |
+| `src/elspeth/plugins/nodes/sinks/zip_bundle.py` | `execute` | 80 | **54** | CRITICAL | 🔴 TODO |
+| `src/elspeth/plugins/nodes/transforms/llm/middleware/pii_shield.py` | `_apply_masking` | 474 | **56** | CRITICAL | 🔴 TODO |
+| `src/elspeth/plugins/nodes/transforms/llm/middleware/classified_material.py` | `_detect_patterns` | 379 | **41** | CRITICAL | 🔴 TODO |
+| `src/elspeth/plugins/experiments/baseline/score_significance.py` | `aggregate` | 73 | **51** | CRITICAL | 🔴 TODO |
+| `src/elspeth/plugins/experiments/aggregators/score_agreement.py` | `aggregate` | 53 | **43** | CRITICAL | 🔴 TODO |
+| `src/elspeth/plugins/experiments/_stats_helpers.py` | `_run_bayesian_analysis` | 123 | **42** | CRITICAL | 🔴 TODO |
+| `src/elspeth/core/pipeline/artifact_pipeline.py` | `_resolve_dependencies` | 335 | **45** | CRITICAL | 🔴 TODO |
+| `src/elspeth/core/config/validation.py` | `validate_experiment_config` | 142 | **59** | CRITICAL | 🔴 TODO |
 
-**Recommendation:** These 12 functions need immediate refactoring. Extract helper functions, use early returns, and break into smaller units.
+**Recommendation:** These ~~12~~ **10** functions need immediate refactoring. Extract helper functions, use early returns, and break into smaller units.
+
+**✅ Completed (2/12):**
+- `runner.py::run_experiment` - Reduced from 73 to 11 complexity (85% reduction) - See PR #10
+- `runner.py::_run_row_processing` - Extracted into focused helpers - See PR #10
 
 ---
 
@@ -282,11 +300,13 @@ JSON_CODE_BLOCK = "```json"
 
 ## 📊 Summary Statistics
 
-| Category | Count | Total Effort Est. |
-|----------|-------|-------------------|
-| **Critical Must-Do** | 25 functions | 40-80 hours |
-| **Nice-to-Have** | 50+ items | 20-40 hours |
-| **Quick Wins** | 19 items | 30 minutes |
+| Category | Count | Completed | Remaining | Total Effort Est. |
+|----------|-------|-----------|-----------|-------------------|
+| **Critical Must-Do** | 12 functions | ✅ 2 | 🔴 10 | ~~40-80 hours~~ → 30-65 hours |
+| **Nice-to-Have** | 50+ items | - | 50+ | 20-40 hours |
+| **Quick Wins** | 19 items | - | 19 | 30 minutes |
+
+**Progress:** 2/12 critical complexity functions refactored (16.7% complete)
 
 ### By Severity (OPEN issues only)
 - CRITICAL: 88 issues
@@ -320,26 +340,28 @@ JSON_CODE_BLOCK = "```json"
 ### Phase 2: Critical Complexity Reduction (2-3 sprints)
 Priority order by risk/impact:
 
-1. **Suite Runner** (`suite_runner.py:281`, complexity 69)
+1. **Suite Runner** (`suite_runner.py:281`, complexity 69) 🔴 TODO
    - Most critical orchestration code
    - High risk of bugs
 
-2. **Experiment Runner** (`runner.py:75`, complexity 73)
-   - Core execution engine
-   - Hardest to test
+2. ~~**Experiment Runner**~~ ✅ **DONE** (PR #10)
+   - ~~`runner.py:75`, complexity 73~~ → **Reduced to 11**
+   - ~~Core execution engine~~ → **Refactored using Template Method pattern**
+   - ~~Hardest to test~~ → **13 characterization tests added, 75% coverage**
+   - **Achievement:** 85% complexity reduction, 15 helper methods extracted
 
-3. **Config Validation** (`validation.py:142`, complexity 59)
+3. **Config Validation** (`validation.py:142`, complexity 59) 🔴 TODO
    - Security-critical
    - Complex validation logic
 
-4. **Artifact Pipeline** (`artifact_pipeline.py:335`, complexity 45)
+4. **Artifact Pipeline** (`artifact_pipeline.py:335`, complexity 45) 🔴 TODO
    - DAG resolution is complex
    - Affects all sinks
 
-5. **Visual Reports** (`visual_report.py:216`, complexity 63)
+5. **Visual Reports** (`visual_report.py:216`, complexity 63) 🔴 TODO
    - Less critical, but still complex
 
-6. **PII Shield** (`pii_shield.py:474`, complexity 56)
+6. **PII Shield** (`pii_shield.py:474`, complexity 56) 🔴 TODO
    - Security-critical
    - Pattern matching complexity
 
