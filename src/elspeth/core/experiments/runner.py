@@ -180,6 +180,37 @@ class ExperimentRunner:
     malformed_data_sink: ResultSink | None = None
     _malformed_rows: list[SchemaViolation] | None = None
 
+    def _calculate_retry_summary(self, results: ProcessingResult) -> dict[str, int] | None:
+        """Calculate retry statistics from processing results.
+
+        Returns retry summary dict if any retries occurred, None otherwise.
+        """
+        retry_summary: dict[str, int] = {
+            "total_requests": len(results.records) + len(results.failures),
+            "total_retries": 0,
+            "exhausted": len(results.failures),
+        }
+
+        retry_present = False
+
+        # Count retries in successful results
+        for record in results.records:
+            info = record.get("retry")
+            if info:
+                retry_present = True
+                attempts = int(info.get("attempts", 1))
+                retry_summary["total_retries"] += max(attempts - 1, 0)
+
+        # Count retries in failures
+        for failure in results.failures:
+            info = failure.get("retry")
+            if info:
+                retry_present = True
+                attempts = int(info.get("attempts", 0))
+                retry_summary["total_retries"] += max(attempts - 1, 0)
+
+        return retry_summary if retry_present else None
+
     def run(self, df: pd.DataFrame) -> dict[str, Any]:
         """Execute the run, returning a structured payload for sinks and reports."""
         self._init_early_stop()
@@ -302,25 +333,10 @@ class ExperimentRunner:
             "rows": len(results),
             "row_count": len(results),
         }
-        retry_summary: dict[str, int] = {
-            "total_requests": len(results) + len(failures),
-            "total_retries": 0,
-            "exhausted": len(failures),
-        }
-        retry_present = False
-        for record in results:
-            info = record.get("retry")
-            if info:
-                retry_present = True
-                attempts = int(info.get("attempts", 1))
-                retry_summary["total_retries"] += max(attempts - 1, 0)
-        for failure in failures:
-            info = failure.get("retry")
-            if info:
-                retry_present = True
-                attempts = int(info.get("attempts", 0))
-                retry_summary["total_retries"] += max(attempts - 1, 0)
-        if retry_present:
+
+        # Calculate retry summary using helper method
+        retry_summary = self._calculate_retry_summary(ProcessingResult(records=results, failures=failures))
+        if retry_summary:
             metadata["retry_summary"] = retry_summary
 
         if aggregates:

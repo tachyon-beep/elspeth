@@ -334,3 +334,47 @@ def test_dataclasses_instantiate() -> None:
     meta_dict = meta.to_dict()
     assert "rows" in meta_dict
     assert "retry_summary" not in meta_dict  # None values omitted
+
+
+def test_calculate_retry_summary_no_retries() -> None:
+    """Unit: _calculate_retry_summary returns None when no retries."""
+    runner = ExperimentRunner(
+        llm_client=SimpleLLM(),
+        sinks=[],
+        prompt_system="Test",
+        prompt_template="Test",
+    )
+
+    result = ProcessingResult(
+        records=[{"data": "test"}],
+        failures=[],
+    )
+
+    summary = runner._calculate_retry_summary(result)
+    assert summary is None
+
+
+def test_calculate_retry_summary_with_retries() -> None:
+    """Unit: _calculate_retry_summary counts retries correctly."""
+    runner = ExperimentRunner(
+        llm_client=SimpleLLM(),
+        sinks=[],
+        prompt_system="Test",
+        prompt_template="Test",
+    )
+
+    result = ProcessingResult(
+        records=[
+            {"retry": {"attempts": 3}},  # 2 retries
+            {"retry": {"attempts": 1}},  # 0 retries
+        ],
+        failures=[
+            {"retry": {"attempts": 2}},  # 1 retry
+        ],
+    )
+
+    summary = runner._calculate_retry_summary(result)
+    assert summary is not None
+    assert summary["total_requests"] == 3
+    assert summary["total_retries"] == 3  # 2 + 0 + 1
+    assert summary["exhausted"] == 1
