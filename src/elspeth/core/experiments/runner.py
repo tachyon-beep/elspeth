@@ -275,6 +275,51 @@ class ExperimentRunner:
 
         return aggregates if aggregates else None
 
+    def _assemble_metadata(
+        self,
+        results: list[dict[str, Any]],
+        failures: list[dict[str, Any]],
+        aggregates: dict[str, Any] | None,
+        df: pd.DataFrame,
+    ) -> ExecutionMetadata:
+        """Assemble execution metadata from results and configuration.
+
+        Returns ExecutionMetadata dataclass with all metadata fields populated.
+        """
+        metadata = ExecutionMetadata(
+            rows=len(results),
+            row_count=len(results),
+        )
+
+        # Calculate retry summary
+        retry_summary = self._calculate_retry_summary(ProcessingResult(records=results, failures=failures))
+        if retry_summary:
+            metadata.retry_summary = retry_summary
+
+        # Add aggregates if present
+        if aggregates:
+            metadata.aggregates = aggregates
+
+        # Add cost summary if available
+        if self.cost_tracker:
+            summary = self.cost_tracker.summary()
+            if summary:
+                metadata.cost_summary = summary
+
+        # Add failures if present
+        if failures:
+            metadata.failures = failures
+
+        # Resolve security and determinism levels
+        metadata.security_level = self._resolve_security_level(df)
+        metadata.determinism_level = self._resolve_determinism_level(df)
+
+        # Add early stop reason if present
+        if self._early_stop_reason:
+            metadata.early_stop = dict(self._early_stop_reason)
+
+        return metadata
+
     def run(self, df: pd.DataFrame) -> dict[str, Any]:
         """Execute the run, returning a structured payload for sinks and reports."""
         self._init_early_stop()
@@ -370,33 +415,15 @@ class ExperimentRunner:
         if aggregates:
             payload["aggregates"] = aggregates
 
-        metadata: dict[str, Any] = {
-            "rows": len(results),
-            "row_count": len(results),
-        }
+        # Assemble metadata using helper method
+        metadata_obj = self._assemble_metadata(results, failures, aggregates, df)
+        metadata = metadata_obj.to_dict()
 
-        # Calculate retry summary using helper method
-        retry_summary = self._calculate_retry_summary(ProcessingResult(records=results, failures=failures))
-        if retry_summary:
-            metadata["retry_summary"] = retry_summary
-
-        if aggregates:
-            metadata["aggregates"] = aggregates
-        if self.cost_tracker:
-            summary = self.cost_tracker.summary()
-            if summary:
-                payload["cost_summary"] = summary
-                metadata["cost_summary"] = summary
-        if failures:
-            metadata["failures"] = failures
-
-        # Resolve security and determinism levels using helper methods
-        metadata["security_level"] = self._resolve_security_level(df)
-        metadata["determinism_level"] = self._resolve_determinism_level(df)
-
-        if self._early_stop_reason:
-            metadata["early_stop"] = dict(self._early_stop_reason)
-            payload["early_stop"] = dict(self._early_stop_reason)
+        # Add metadata-derived fields to payload
+        if metadata_obj.cost_summary:
+            payload["cost_summary"] = metadata_obj.cost_summary
+        if metadata_obj.early_stop:
+            payload["early_stop"] = metadata_obj.early_stop
 
         payload["metadata"] = metadata
 
