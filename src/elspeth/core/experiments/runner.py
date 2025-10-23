@@ -42,10 +42,42 @@ class CheckpointManager:
     Thread-safe for parallel execution. Protects against path traversal attacks
     by constraining checkpoint files to an allowed base directory.
 
+    Args:
+        path: Path to checkpoint file (plain text, one ID per line)
+        id_field: Name of DataFrame column containing unique row identifiers
+        allowed_base_path: Directory path to constrain checkpoint file location.
+            If None, defaults to parent directory of checkpoint path.
+            Use None only for trusted configuration sources.
+
     Security:
         - Path traversal protection via resolve_under_base()
         - Symlink attack prevention via path_guard utilities
         - Thread-safe file operations with lock
+        - allowed_base_path constrains file operations to safe directory
+
+    Examples:
+        Secure usage (user-controlled configuration):
+        >>> # Configuration from untrusted sources (user input, external APIs)
+        >>> checkpoint_mgr = CheckpointManager(
+        ...     path=Path("checkpoints/experiment_001.txt"),
+        ...     id_field="row_id",
+        ...     allowed_base_path=Path("/safe/checkpoints/directory"),
+        ... )
+        >>> # Path traversal attempts will raise ValueError:
+        >>> # path=Path("../../../etc/passwd") -> ValueError
+
+        Trusted usage (internal configuration):
+        >>> # Configuration from trusted internal sources only
+        >>> checkpoint_mgr = CheckpointManager(
+        ...     path=Path("internal_checkpoints/run.txt"),
+        ...     id_field="id",
+        ...     allowed_base_path=None,  # Defaults to parent directory
+        ... )
+        >>> # WARNING: Only use None for trusted, non-user-controlled paths!
+
+    Raises:
+        ValueError: If path escapes allowed_base_path or contains symlinks
+        ValueError: If allowed_base_path cannot be resolved
     """
 
     path: Path
