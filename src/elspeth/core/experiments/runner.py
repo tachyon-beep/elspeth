@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class CheckpointManager:
-    """Manages checkpoint loading, tracking, and persistence with path traversal protection.
+    r"""Manages checkpoint loading, tracking, and persistence with path traversal protection.
 
     Provides atomic checkpoint operations with exactly-once semantics for
     row processing tracking. Thread-safe for parallel execution. Protects
