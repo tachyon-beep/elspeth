@@ -67,7 +67,7 @@ def test_baseline_comparison_skipped_when_no_baseline() -> None:
     comparisons_run = []
 
     for experiment in experiments:
-        payload = {"results": [f"{experiment['name']}_result"]}
+        {"results": [f"{experiment['name']}_result"]}
 
         # Comparison guard logic (from suite_runner.py:396)
         if baseline_payload is not None:
@@ -106,7 +106,6 @@ def test_baseline_never_compares_to_itself() -> None:
     comparisons_run = []
 
     for experiment in experiments:
-        payload = {"results": [f"{experiment.name}_result"]}
 
         # Comparison guard (from suite_runner.py:396)
         if baseline_payload and experiment != suite_baseline:
@@ -247,7 +246,7 @@ def test_baseline_comparison_runs_after_each_experiment_completes() -> None:
     for experiment in experiments:
         # Experiment execution
         execution_log.append(f"{experiment['name']}_start")
-        payload = {"results": [f"{experiment['name']}_result"]}
+        {"results": [f"{experiment['name']}_result"]}
         execution_log.append(f"{experiment['name']}_complete")
 
         # Comparison runs IMMEDIATELY (not batched)
@@ -329,7 +328,6 @@ def test_baseline_comparison_skipped_when_no_plugins() -> None:
 
     Empty comparisons dict is not added to payload (lines 408-410 check `if comparisons`).
     """
-    baseline_payload = {"results": ["baseline"]}
 
     # No comparison plugin definitions from any source
     comp_defs = []

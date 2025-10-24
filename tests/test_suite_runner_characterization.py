@@ -179,7 +179,7 @@ def test_baseline_tracking_through_complete_execution(tmp_path: Path) -> None:
         ],
     )
 
-    tracer = MiddlewareHookTracer(name="tracking_tracer")
+    MiddlewareHookTracer(name="tracking_tracer")
 
     # Create a simple baseline comparison plugin definition
     # (This will fail if plugin doesn't exist, but that's documented)

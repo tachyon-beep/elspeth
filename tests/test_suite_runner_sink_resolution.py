@@ -82,9 +82,9 @@ class TestSinkResolutionPriority:
         pack, defaults, or factory configuration.
         """
         # Create identifiable sinks for each layer
-        experiment_sink = CollectingSink()
-        pack_sink = CollectingSink()
-        defaults_sink = CollectingSink()
+        CollectingSink()
+        CollectingSink()
+        CollectingSink()
         factory_sink = CollectingSink()
         runner_sink = CollectingSink()
 
@@ -138,7 +138,8 @@ class TestSinkResolutionPriority:
             ],
         }
 
-        sink_factory = lambda exp: [factory_sink]
+        def sink_factory(exp):
+            return [factory_sink]
 
         runner = ExperimentSuiteRunner(suite, SimpleLLM(), [runner_sink])
         results = runner.run(pd.DataFrame([{"text": "test"}]), defaults, sink_factory)
@@ -350,10 +351,6 @@ class TestSinkResolutionPriority:
         This test verifies that higher priority layers always win,
         even when lower priority layers are configured.
         """
-        experiment_called = []
-        pack_called = []
-        defaults_called = []
-        factory_called = []
 
         # Test 1: Experiment wins over all
         suite = ExperimentSuite(
