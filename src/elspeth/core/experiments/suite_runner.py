@@ -518,6 +518,178 @@ class ExperimentSuiteRunner:
             if hasattr(mw, "on_suite_complete"):
                 mw.on_suite_complete()
 
+    def _notify_middleware_suite_loaded(
+        self,
+        middlewares: list[Any],
+        ctx: SuiteExecutionContext,
+    ) -> None:
+        """Notify middlewares of suite start with deduplication.
+
+        This method ensures each unique middleware instance receives on_suite_loaded
+        exactly once, even if it appears in multiple experiments. Uses id(middleware)
+        for deduplication tracking in ctx.notified_middlewares.
+
+        Args:
+            middlewares: List of middleware instances for current experiment
+            ctx: Suite execution context with notified_middlewares tracking
+
+        Complexity Reduction:
+            Before: Nested loop + conditionals in run() (complexity ~8)
+            After: Dedicated notification method (complexity ~3)
+        """
+        for mw in middlewares:
+            key = id(mw)
+            if hasattr(mw, "on_suite_loaded") and key not in ctx.notified_middlewares:
+                mw.on_suite_loaded(ctx.suite_metadata, ctx.preflight_info)
+                ctx.notified_middlewares[key] = mw
+
+    def _notify_middleware_experiment_start(
+        self,
+        middlewares: list[Any],
+        experiment: ExperimentConfig,
+    ) -> None:
+        """Notify middlewares that an experiment is starting.
+
+        Args:
+            middlewares: List of middleware instances for this experiment
+            experiment: The experiment that is starting
+
+        Complexity Reduction:
+            Before: Part of inline loop in run() (complexity ~5)
+            After: Dedicated notification method (complexity ~2)
+        """
+        event_metadata = {
+            "temperature": experiment.temperature,
+            "max_tokens": experiment.max_tokens,
+            "is_baseline": experiment.is_baseline,
+        }
+
+        for mw in middlewares:
+            if hasattr(mw, "on_experiment_start"):
+                mw.on_experiment_start(experiment.name, event_metadata)
+
+    def _notify_middleware_experiment_complete(
+        self,
+        middlewares: list[Any],
+        experiment: ExperimentConfig,
+        payload: dict[str, Any],
+    ) -> None:
+        """Notify middlewares that an experiment has completed.
+
+        Args:
+            middlewares: List of middleware instances for this experiment
+            experiment: The experiment that completed
+            payload: Results from the experiment execution
+
+        Complexity Reduction:
+            Before: Part of inline loop in run() (complexity ~5)
+            After: Dedicated notification method (complexity ~2)
+        """
+        event_metadata = {
+            "temperature": experiment.temperature,
+            "max_tokens": experiment.max_tokens,
+            "is_baseline": experiment.is_baseline,
+        }
+
+        for mw in middlewares:
+            if hasattr(mw, "on_experiment_complete"):
+                mw.on_experiment_complete(experiment.name, payload, event_metadata)
+
+    def _merge_baseline_plugin_defs(
+        self,
+        experiment: ExperimentConfig,
+        pack: dict[str, Any] | None,
+        defaults: dict[str, Any],
+    ) -> list[Any]:
+        """Merge baseline plugin definitions from 3 configuration sources.
+
+        This implements the 3-level merge hierarchy for baseline comparison plugins:
+        1. defaults["baseline_plugin_defs"] (lowest priority)
+        2. pack["baseline_plugins"] (middle priority)
+        3. experiment.baseline_plugin_defs (highest priority)
+
+        Args:
+            experiment: Experiment configuration
+            pack: Optional prompt pack configuration
+            defaults: Default configuration values
+
+        Returns:
+            Merged list of baseline plugin definitions
+
+        Complexity Reduction:
+            Before: Inline 3-level merge in run() (complexity ~6)
+            After: Dedicated merge method (complexity ~3)
+        """
+        comp_defs = list(defaults.get("baseline_plugin_defs", []))
+
+        if pack and pack.get("baseline_plugins"):
+            comp_defs = list(pack.get("baseline_plugins", [])) + comp_defs
+
+        if experiment.baseline_plugin_defs:
+            comp_defs += experiment.baseline_plugin_defs
+
+        return comp_defs
+
+    def _run_baseline_comparison(
+        self,
+        experiment: ExperimentConfig,
+        ctx: SuiteExecutionContext,
+        current_payload: dict[str, Any],
+        pack: dict[str, Any] | None,
+        defaults: dict[str, Any],
+        middlewares: list[Any],
+        experiment_context: PluginContext,
+    ) -> None:
+        """Execute baseline comparison and store results.
+
+        This method compares the current experiment against the baseline using
+        configured comparison plugins. Results are stored in both the payload
+        and ctx.results, and middlewares are notified.
+
+        Early exits:
+        - If no baseline has been captured yet (ctx.baseline_payload is None)
+        - If this IS the baseline experiment (no self-comparison)
+        - If no comparison plugins are configured
+
+        Args:
+            experiment: Current experiment configuration
+            ctx: Suite execution context with baseline_payload
+            current_payload: Results from current experiment
+            pack: Optional prompt pack configuration
+            defaults: Default configuration values
+            middlewares: Middleware instances to notify
+            experiment_context: PluginContext for comparison plugins
+
+        Complexity Reduction:
+            Before: Inline comparison logic in run() (complexity ~18)
+            After: Dedicated comparison method (complexity ~6)
+        """
+        # Early exit: only compare non-baseline experiments
+        if not ctx.baseline_payload or experiment == self.suite.baseline:
+            return
+
+        # Merge plugin definitions from all sources
+        comp_defs = self._merge_baseline_plugin_defs(experiment, pack, defaults)
+        if not comp_defs:
+            return
+
+        # Execute comparison plugins
+        comparisons = {}
+        for defn in comp_defs:
+            plugin = create_baseline_plugin(defn, parent_context=experiment_context)
+            diff = plugin.compare(ctx.baseline_payload, current_payload)
+            if diff:
+                comparisons[plugin.name] = diff
+
+        # Store results and notify middlewares
+        if comparisons:
+            current_payload["baseline_comparison"] = comparisons
+            ctx.results[experiment.name]["baseline_comparison"] = comparisons
+
+            for mw in middlewares:
+                if hasattr(mw, "on_baseline_comparison"):
+                    mw.on_baseline_comparison(experiment.name, comparisons)
+
     def run(
         self,
         df: pd.DataFrame,
@@ -552,22 +724,10 @@ class ExperimentSuiteRunner:
             )
             experiment_context = self._get_experiment_context(runner, experiment, defaults)
             middlewares = cast(list[Any], runner.llm_middlewares or [])
-            suite_notified = []
-            for mw in middlewares:
-                key = id(mw)
-                if hasattr(mw, "on_suite_loaded") and key not in ctx.notified_middlewares:
-                    mw.on_suite_loaded(ctx.suite_metadata, ctx.preflight_info)
-                    ctx.notified_middlewares[key] = mw
-                    suite_notified.append(mw)
-                if hasattr(mw, "on_experiment_start"):
-                    mw.on_experiment_start(
-                        experiment.name,
-                        {
-                            "temperature": experiment.temperature,
-                            "max_tokens": experiment.max_tokens,
-                            "is_baseline": experiment.is_baseline,
-                        },
-                    )
+
+            self._notify_middleware_suite_loaded(middlewares, ctx)
+            self._notify_middleware_experiment_start(middlewares, experiment)
+
             payload = runner.run(df)
 
             if ctx.baseline_payload is None and (experiment.is_baseline or experiment == self.suite.baseline):
@@ -577,36 +737,11 @@ class ExperimentSuiteRunner:
                 "payload": payload,
                 "config": experiment,
             }
-            for mw in middlewares:
-                if hasattr(mw, "on_experiment_complete"):
-                    mw.on_experiment_complete(
-                        experiment.name,
-                        payload,
-                        {
-                            "temperature": experiment.temperature,
-                            "max_tokens": experiment.max_tokens,
-                            "is_baseline": experiment.is_baseline,
-                        },
-                    )
+            self._notify_middleware_experiment_complete(middlewares, experiment, payload)
 
-            if ctx.baseline_payload and experiment != self.suite.baseline:
-                comp_defs = list(defaults.get("baseline_plugin_defs", []))
-                if pack and pack.get("baseline_plugins"):
-                    comp_defs = list(pack.get("baseline_plugins", [])) + comp_defs
-                if experiment.baseline_plugin_defs:
-                    comp_defs += experiment.baseline_plugin_defs
-                comparisons = {}
-                for defn in comp_defs:
-                    plugin = create_baseline_plugin(defn, parent_context=experiment_context)
-                    diff = plugin.compare(ctx.baseline_payload, payload)
-                    if diff:
-                        comparisons[plugin.name] = diff
-                if comparisons:
-                    payload["baseline_comparison"] = comparisons
-                    ctx.results[experiment.name]["baseline_comparison"] = comparisons
-                    for mw in middlewares:
-                        if hasattr(mw, "on_baseline_comparison"):
-                            mw.on_baseline_comparison(experiment.name, comparisons)
+            self._run_baseline_comparison(
+                experiment, ctx, payload, pack, defaults, middlewares, experiment_context
+            )
 
         self._finalize_suite(ctx)
         return ctx.results
