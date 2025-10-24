@@ -194,6 +194,24 @@ updates:
     # Rebase strategy
     rebase-strategy: "auto"
 
+    # Python version policy: Only accept mature stable releases
+    # Strategy: Wait 6-12 months after initial release for ecosystem maturity
+    ignore:
+      # Python 3.14.x - Too new (released Oct 2025)
+      # Reason: Limited wheel coverage, ecosystem still catching up
+      # Revisit: Q2 2026 (6 months post-release)
+      - dependency-name: "python"
+        versions: ["3.14.x"]
+
+      # Python 3.15+ - Future releases
+      # Reason: Always wait for ecosystem maturity before adopting
+      - dependency-name: "python"
+        versions: [">=3.15"]
+
+      # Uncomment to stay on Python 3.12 LTS and skip 3.13
+      # - dependency-name: "python"
+      #   versions: ["3.13.x"]
+
 # ============================================================
 # Notes for Maintainers
 # ============================================================
@@ -204,6 +222,25 @@ updates:
 # 3. Respect pip-tools lockfile workflow (lockfile-only strategy)
 # 4. Maintain SHA-pinned GitHub Actions security
 # 5. Provide clear labeling for automation and filtering
+#
+# Python Version Policy:
+# ----------------------
+# We follow a conservative Python adoption strategy:
+#
+# ✅ ACCEPT: Patch updates to current stable (e.g., 3.12.x → 3.12.y)
+# ⏰ WAIT: New minor versions (e.g., 3.14.0) for 6-12 months post-release
+# ❌ IGNORE: Alpha/beta/RC releases (unstable)
+#
+# Rationale:
+# - New Python versions lack pre-built wheels for many packages
+# - Building from source often fails in minimal Docker images
+# - Ecosystem needs time to update (lxml, numpy, pandas, etc.)
+# - Production stability > bleeding edge features
+#
+# Review Schedule:
+# - Q2 2026: Consider Python 3.14 adoption (6 months post-release)
+# - Current: Python 3.12.x (LTS-stable, excellent ecosystem support)
+# - Optional: Python 3.13.x (released Oct 2024, mature)
 #
 # Tuning Guidelines:
 # - If receiving too many PRs: Increase grouping, reduce open-pull-requests-limit
