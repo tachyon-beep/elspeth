@@ -29,6 +29,101 @@ from elspeth.core.validation.base import ConfigurationError
 
 
 @dataclass
+class SuiteExecutionContext:
+    """Encapsulates suite-level execution state during run().
+
+    This dataclass manages all suite-level state variables that were previously
+    scattered as local variables in the run() method. By grouping them together,
+    we reduce complexity and make state management explicit.
+
+    Attributes:
+        defaults: Default configuration values for the suite
+        prompt_packs: Dictionary of named prompt pack configurations
+        experiments: List of experiments to execute (baseline-first ordering)
+        baseline_payload: Results from baseline experiment (None until baseline runs)
+        results: Accumulated results dictionary {exp_name: {payload, config, ...}}
+        preflight_info: Metadata about the run environment
+        notified_middlewares: Tracks middleware instances that received on_suite_loaded
+            (uses id(middleware) as key to prevent duplicate notifications)
+    """
+
+    defaults: dict[str, Any]
+    prompt_packs: dict[str, Any]
+    experiments: list[ExperimentConfig]
+    baseline_payload: dict[str, Any] | None = None
+    results: dict[str, Any] = field(default_factory=dict)
+    preflight_info: dict[str, Any] = field(default_factory=dict)
+    notified_middlewares: dict[int, Any] = field(default_factory=dict)
+
+    @classmethod
+    def create(
+        cls,
+        suite: ExperimentSuite,
+        defaults: dict[str, Any],
+        preflight_info: dict[str, Any] | None = None,
+    ) -> SuiteExecutionContext:
+        """Factory method to create context from suite and defaults.
+
+        Args:
+            suite: The experiment suite to execute
+            defaults: Default configuration values
+            preflight_info: Optional metadata about run environment
+
+        Returns:
+            Initialized SuiteExecutionContext with baseline-first experiment ordering
+
+        Example:
+            >>> ctx = SuiteExecutionContext.create(suite, defaults)
+            >>> ctx.experiments[0].is_baseline  # True - baseline always first
+        """
+        # Build experiment list with baseline first (if present)
+        experiments = []
+        if suite.baseline:
+            experiments.append(suite.baseline)
+        experiments.extend(exp for exp in suite.experiments if exp != suite.baseline)
+
+        # Build preflight_info with suite metadata
+        if preflight_info is None:
+            preflight_info = {
+                "experiment_count": len(experiments),
+                "baseline": suite.baseline.name if suite.baseline else None,
+            }
+
+        return cls(
+            defaults=defaults,
+            prompt_packs=defaults.get("prompt_packs", {}),
+            experiments=experiments,
+            preflight_info=preflight_info,
+        )
+
+
+@dataclass
+class ExperimentExecutionConfig:
+    """Configuration for a single experiment execution.
+
+    This dataclass groups all the configuration needed to execute a single
+    experiment. Previously, these were separate variables passed between methods.
+    By encapsulating them together, we reduce parameter passing complexity and
+    make the relationship between these components explicit.
+
+    Attributes:
+        experiment: The experiment configuration to execute
+        pack: Optional prompt pack configuration (None if no pack)
+        sinks: List of result sinks for this experiment
+        runner: The experiment runner instance
+        context: Plugin context for security/provenance tracking
+        middlewares: List of middleware instances for lifecycle hooks
+    """
+
+    experiment: ExperimentConfig
+    pack: dict[str, Any] | None
+    sinks: list[ResultSink]
+    runner: ExperimentRunner
+    context: PluginContext
+    middlewares: list[Any]
+
+
+@dataclass
 class ExperimentSuiteRunner:
     """Runner for executing experiment suites with shared LLM client and sinks.
 
