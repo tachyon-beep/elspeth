@@ -81,6 +81,288 @@
 
 ---
 
+## DataFrame Classification Metadata (Critical Runtime Defense)
+
+### DataFrame Must Carry Classification
+
+**CRITICAL REQUIREMENT**: DataFrames must remember their classification so that every component receiving data can validate they're not handling data above their clearance.
+
+**Why this matters**: This is the **data-level runtime check**. Even if:
+- Start-time validation is bypassed
+- Orchestrator is compromised
+- Component checks are bypassed
+
+...the DataFrame itself carries its classification, and components validate incoming data.
+
+### Implementation: ClassifiedDataFrame Wrapper
+
+```python
+class ClassifiedDataFrame:
+    """DataFrame wrapper that carries immutable classification metadata.
+
+    This enables runtime validation: every component receiving data can verify
+    the data's classification matches their capability BEFORE processing.
+    """
+
+    def __init__(self, data: pd.DataFrame, classification: SecurityLevel):
+        self._data = data
+        self._classification = classification
+        self._immutable_lock = True
+
+    @property
+    def data(self) -> pd.DataFrame:
+        """Access the underlying DataFrame."""
+        return self._data
+
+    @property
+    def classification(self) -> SecurityLevel:
+        """Get the immutable classification of this data."""
+        return self._classification
+
+    def __setattr__(self, name, value):
+        """Prevent modification of classification after creation."""
+        if hasattr(self, '_immutable_lock') and name in ('_classification',):
+            raise SecurityError("Cannot modify DataFrame classification after creation")
+        super().__setattr__(name, value)
+```
+
+### Runtime Validation: Sink Example
+
+```python
+class UnofficialSink:
+    """Sink for UNOFFICIAL test data only (e.g., MTG card test data)."""
+
+    security_level = SecurityLevel.UNOFFICIAL
+
+    def write(self, df: ClassifiedDataFrame):
+        """Write data with classification validation.
+
+        CRITICAL: Validate incoming data classification BEFORE processing.
+        This is defense-in-depth - should NEVER trigger if start-time
+        validation worked, but catches data spillage if orchestrator bypassed.
+        """
+        incoming_classification = df.classification
+
+        # HARD ABORT if data classification exceeds sink capability
+        if incoming_classification > self.security_level:
+            raise SecurityError(
+                f"CRITICAL DATA SPILLAGE ATTEMPT: "
+                f"{self.security_level.value} sink received {incoming_classification.value} data. "
+                f"HARD ABORT - refusing to process. "
+                f"This should NEVER happen if start-time validation worked. "
+                f"Possible security bypass attempt or orchestrator compromise."
+            )
+
+        # Safe to write - data classification matches sink capability
+        self._write_to_storage(df.data)
+
+
+class OfficialSink:
+    """Sink for OFFICIAL data (Archive Act implications)."""
+
+    security_level = SecurityLevel.OFFICIAL
+
+    def write(self, df: ClassifiedDataFrame):
+        """Write with classification validation."""
+        incoming = df.classification
+
+        if incoming > self.security_level:
+            raise SecurityError(
+                f"OFFICIAL sink received {incoming.value} data - HARD ABORT. "
+                f"Archive Act compliance violation risk."
+            )
+
+        # OFFICIAL sink can safely handle OFFICIAL or UNOFFICIAL data
+        # (downgrade is safe: writing UNOFFICIAL to OFFICIAL sink is OK)
+        self._write_with_archive_act_compliance(df.data)
+```
+
+### Datasource Sets Classification
+
+```python
+class AzureDataSource:
+    """Datasource that inspects blob classification and tags DataFrame."""
+
+    def get_security_level_for_job(self, config: dict) -> SecurityLevel:
+        """Inspect blob to determine classification (called at job start)."""
+        container = config['container']
+        blob_metadata = azure.get_blob_metadata(container)
+        return SecurityLevel.from_string(blob_metadata['classification'])
+
+    def read_data(self, config: dict) -> ClassifiedDataFrame:
+        """Read data and tag with classification metadata."""
+        # Read the raw data
+        raw_data = pd.read_csv(azure_blob_url)
+
+        # Get actual classification from blob metadata
+        classification = self.get_security_level_for_job(config)
+
+        # Wrap in ClassifiedDataFrame with immutable classification
+        return ClassifiedDataFrame(raw_data, classification)
+```
+
+### LLM Transform Preserves Classification
+
+```python
+class LLMTransform:
+    """LLM transforms preserve input data classification."""
+
+    def transform(self, input_df: ClassifiedDataFrame) -> ClassifiedDataFrame:
+        """Transform data, preserving classification."""
+        # Validate we can handle this classification
+        if input_df.classification > self.security_level:
+            raise SecurityError(
+                f"LLM transform requires {self.security_level}, "
+                f"received {input_df.classification} data"
+            )
+
+        # Process data
+        transformed = self._llm_process(input_df.data)
+
+        # Output classification = input classification
+        # (LLM doesn't change the sensitivity of the data)
+        return ClassifiedDataFrame(transformed, input_df.classification)
+```
+
+### Defense in Depth: Three Validation Layers
+
+**Layer 1: Start-Time (PRIMARY - MUST BLOCK)**
+- Orchestrator collects security levels from all plugins
+- Computes operating level (minimum)
+- Validates ALL components can operate at that level
+- Job **fails to start** if misconfigured
+
+**Layer 2: Component Runtime Validation (FAILSAFE)**
+- Each component validates orchestrator operating level
+- Should NEVER trigger if Layer 1 works
+- Catches orchestrator compromise
+
+**Layer 3: Data Classification Validation (DEEP DEFENSE)**
+- DataFrame carries immutable classification
+- Every component validates incoming data classification
+- Should NEVER trigger if Layer 1 and 2 work
+- Catches data mislabeling or classification tampering
+
+**All three layers must be bypassed** for a security violation to occur.
+
+### Inherited Behavior: BasePlugin Enforcement
+
+**Key insight**: Data classification validation should be inherited behavior, not manually implemented in every plugin.
+
+```python
+class BasePlugin(ABC):
+    """Base class for all plugins with automatic classification enforcement.
+
+    All plugins inherit this validation logic - they DON'T refuse to hand out
+    data AND refuse to accept data they can't handle.
+
+    This is the same mechanic on both sides:
+    - Sources: Don't hand out data above recipient's clearance
+    - Sinks: Don't accept data above own clearance
+    - Transforms: Don't process data above own clearance
+    """
+
+    security_level: SecurityLevel
+
+    def _validate_can_handle_data(self, df: ClassifiedDataFrame) -> None:
+        """Inherited validation: refuse data above clearance.
+
+        CRITICAL: This is called AUTOMATICALLY before any data processing.
+        All plugins inherit this protection.
+        """
+        if df.classification > self.security_level:
+            raise SecurityError(
+                f"SECURITY VIOLATION: {self.__class__.__name__} "
+                f"({self.security_level.value} clearance) "
+                f"received {df.classification.value} data. "
+                f"HARD ABORT - refusing to process. "
+                f"Possible data spillage or orchestrator bypass attempt."
+            )
+
+    @abstractmethod
+    def _process_data(self, df: ClassifiedDataFrame) -> Any:
+        """Subclasses implement actual data processing logic."""
+        pass
+
+    def process(self, df: ClassifiedDataFrame) -> Any:
+        """Public method with automatic classification validation.
+
+        All data processing goes through this method, ensuring validation
+        happens BEFORE plugin-specific logic executes.
+        """
+        # Inherited validation (automatic - can't be skipped)
+        self._validate_can_handle_data(df)
+
+        # Plugin-specific processing (only if validation passed)
+        return self._process_data(df)
+```
+
+**Example: Sink Implementation**
+
+```python
+class UnofficialSink(BasePlugin):
+    """Sink for UNOFFICIAL test data.
+
+    Inherits classification validation - doesn't need manual checks.
+    """
+
+    security_level = SecurityLevel.UNOFFICIAL
+
+    def _process_data(self, df: ClassifiedDataFrame) -> None:
+        """Write data to storage.
+
+        By the time this runs, BasePlugin._validate_can_handle_data()
+        has already verified df.classification <= UNOFFICIAL.
+
+        No manual validation needed - inherited behavior protects us.
+        """
+        self._write_to_storage(df.data)
+```
+
+**Example: Source Implementation**
+
+```python
+class AzureDataSource(BasePlugin):
+    """Datasource that reads from Azure blob storage.
+
+    Inherits classification validation when passing data to next component.
+    """
+
+    def read_data(self, config: dict) -> ClassifiedDataFrame:
+        """Read and classify data."""
+        raw_data = pd.read_csv(azure_blob_url)
+        classification = self._inspect_blob_classification(config)
+        return ClassifiedDataFrame(raw_data, classification)
+
+    def pass_to_next_component(
+        self, df: ClassifiedDataFrame, recipient: BasePlugin
+    ) -> None:
+        """Pass data to next component with validation.
+
+        Inherited validation ensures recipient can handle this data.
+        """
+        # recipient.process(df) will automatically call
+        # recipient._validate_can_handle_data(df) before processing
+        recipient.process(df)
+```
+
+**Benefits of Inherited Behavior**:
+
+1. **Automatic enforcement**: Can't forget to add validation
+2. **Consistent behavior**: All plugins protected the same way
+3. **Tamper-resistant**: Validation in base class, not overrideable
+4. **Same mechanic both sides**: Sources refuse to hand out, sinks refuse to accept
+5. **Defense in depth**: Even if orchestrator bypassed, every plugin validates
+
+**Symmetric Protection**:
+- **Source → Transform**: Transform validates incoming data
+- **Transform → Sink**: Sink validates incoming data
+- **Every handoff**: Recipient validates before processing
+
+**Result**: Data classification is validated at EVERY component boundary, creating defense in depth even if orchestrator is compromised.
+
+---
+
 ## Key Principles
 
 ### 1. Orchestrator Operates at Minimum (Clearance Envelope)
