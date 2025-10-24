@@ -119,6 +119,10 @@ class ExperimentExecutionConfig:
     By encapsulating them together, we reduce parameter passing complexity and
     make the relationship between these components explicit.
 
+    Using this config object prevents parameter-order bugs (swapping two dict
+    parameters, for example) and makes method signatures clearer by grouping
+    related configuration into one cohesive object.
+
     Attributes:
         experiment: The experiment configuration to execute
         pack: Optional prompt pack configuration (None if no pack)
@@ -632,13 +636,10 @@ class ExperimentSuiteRunner:
 
     def _run_baseline_comparison(
         self,
-        experiment: ExperimentConfig,
+        exp_config: ExperimentExecutionConfig,
         ctx: SuiteExecutionContext,
         current_payload: dict[str, Any],
-        pack: dict[str, Any] | None,
         defaults: dict[str, Any],
-        middlewares: list[Any],
-        experiment_context: PluginContext,
     ) -> None:
         """Execute baseline comparison and store results.
 
@@ -652,31 +653,31 @@ class ExperimentSuiteRunner:
         - If no comparison plugins are configured
 
         Args:
-            experiment: Current experiment configuration
+            exp_config: Experiment execution configuration containing experiment,
+                pack, middlewares, and context needed for comparison
             ctx: Suite execution context with baseline_payload
             current_payload: Results from current experiment
-            pack: Optional prompt pack configuration
             defaults: Default configuration values
-            middlewares: Middleware instances to notify
-            experiment_context: PluginContext for comparison plugins
 
         Complexity Reduction:
-            Before: Inline comparison logic in run() (complexity ~18)
-            After: Dedicated comparison method (complexity ~6)
+            Before: 7 parameters (experiment, ctx, payload, pack, defaults, middlewares, context)
+            After: 4 parameters via config object (prevents parameter-order bugs)
         """
         # Early exit: only compare non-baseline experiments
-        if not ctx.baseline_payload or experiment == self.suite.baseline:
+        if not ctx.baseline_payload or exp_config.experiment == self.suite.baseline:
             return
 
         # Merge plugin definitions from all sources
-        comp_defs = self._merge_baseline_plugin_defs(experiment, pack, defaults)
+        comp_defs = self._merge_baseline_plugin_defs(
+            exp_config.experiment, exp_config.pack, defaults
+        )
         if not comp_defs:
             return
 
         # Execute comparison plugins
         comparisons = {}
         for defn in comp_defs:
-            plugin = create_baseline_plugin(defn, parent_context=experiment_context)
+            plugin = create_baseline_plugin(defn, parent_context=exp_config.context)
             diff = plugin.compare(ctx.baseline_payload, current_payload)
             if diff:
                 comparisons[plugin.name] = diff
@@ -684,11 +685,11 @@ class ExperimentSuiteRunner:
         # Store results and notify middlewares
         if comparisons:
             current_payload["baseline_comparison"] = comparisons
-            ctx.results[experiment.name]["baseline_comparison"] = comparisons
+            ctx.results[exp_config.experiment.name]["baseline_comparison"] = comparisons
 
-            for mw in middlewares:
+            for mw in exp_config.middlewares:
                 if hasattr(mw, "on_baseline_comparison"):
-                    mw.on_baseline_comparison(experiment.name, comparisons)
+                    mw.on_baseline_comparison(exp_config.experiment.name, comparisons)
 
     def run(
         self,
@@ -799,6 +800,16 @@ class ExperimentSuiteRunner:
             experiment_context = self._get_experiment_context(runner, experiment, defaults)
             middlewares = cast(list[Any], runner.llm_middlewares or [])
 
+            # Create experiment execution config to group related state
+            exp_config = ExperimentExecutionConfig(
+                experiment=experiment,
+                pack=pack,
+                sinks=sinks,
+                runner=runner,
+                context=experiment_context,
+                middlewares=middlewares,
+            )
+
             self._notify_middleware_suite_loaded(middlewares, ctx)
             self._notify_middleware_experiment_start(middlewares, experiment)
 
@@ -813,9 +824,7 @@ class ExperimentSuiteRunner:
             }
             self._notify_middleware_experiment_complete(middlewares, experiment, payload)
 
-            self._run_baseline_comparison(
-                experiment, ctx, payload, pack, defaults, middlewares, experiment_context
-            )
+            self._run_baseline_comparison(exp_config, ctx, payload, defaults)
 
         self._finalize_suite(ctx)
         return ctx.results
