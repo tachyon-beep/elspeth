@@ -201,14 +201,30 @@ class AzureDataSource:
         return ClassifiedDataFrame(raw_data, classification)
 ```
 
-### LLM Transform Preserves Classification
+### Classification Uplifting: The "High Water Mark" Principle
+
+**CRITICAL SECURITY PRINCIPLE**: When data passes through a higher-classification component, the output inherits the higher classification level. Classification can only go UP, never down.
+
+**Why**: A SECRET-level LLM (fine-tuned on SECRET data) processing OFFICIAL data produces SECRET output because:
+1. The model may leak information from its SECRET training data
+2. The model's behavior itself may reveal classified patterns
+3. Conservative security requires treating output as highest classification in the processing chain
+
+This is **automatic and non-negotiable** - plugins don't decide, the framework enforces.
+
+### LLM Transform with Classification Uplifting
 
 ```python
 class LLMTransform:
-    """LLM transforms preserve input data classification."""
+    """LLM transforms with automatic classification uplifting."""
+
+    security_level = SecurityLevel.SECRET  # LLM trained on SECRET data
 
     def transform(self, input_df: ClassifiedDataFrame) -> ClassifiedDataFrame:
-        """Transform data, preserving classification."""
+        """Transform data with automatic classification uplifting.
+
+        Output classification = max(input classification, LLM classification)
+        """
         # Validate we can handle this classification
         if input_df.classification > self.security_level:
             raise SecurityError(
@@ -219,9 +235,45 @@ class LLMTransform:
         # Process data
         transformed = self._llm_process(input_df.data)
 
-        # Output classification = input classification
-        # (LLM doesn't change the sensitivity of the data)
-        return ClassifiedDataFrame(transformed, input_df.classification)
+        # CRITICAL: Output classification uplifted to component level
+        # OFFICIAL input → SECRET LLM → SECRET output (automatically)
+        output_classification = max(input_df.classification, self.security_level)
+
+        return ClassifiedDataFrame(transformed, output_classification)
+```
+
+**Example Scenarios**:
+
+```python
+# Scenario 1: OFFICIAL data through SECRET LLM
+input_df = ClassifiedDataFrame(data, SecurityLevel.OFFICIAL)
+secret_llm = LLMTransform(security_level=SecurityLevel.SECRET)
+output_df = secret_llm.transform(input_df)
+# output_df.classification == SecurityLevel.SECRET (uplifted)
+
+# Scenario 2: OFFICIAL data through OFFICIAL LLM
+input_df = ClassifiedDataFrame(data, SecurityLevel.OFFICIAL)
+official_llm = LLMTransform(security_level=SecurityLevel.OFFICIAL)
+output_df = official_llm.transform(input_df)
+# output_df.classification == SecurityLevel.OFFICIAL (no uplift)
+
+# Scenario 3: SECRET data through SECRET LLM
+input_df = ClassifiedDataFrame(data, SecurityLevel.SECRET)
+secret_llm = LLMTransform(security_level=SecurityLevel.SECRET)
+output_df = secret_llm.transform(input_df)
+# output_df.classification == SecurityLevel.SECRET (already at max)
+```
+
+**Critical Implication**: Even if a pipeline starts with OFFICIAL data, if it passes through a SECRET-level LLM, the output MUST go to a SECRET-level sink. The orchestrator's start-time validation will catch this:
+
+```python
+# This configuration FAILS at start time:
+# - Datasource: OFFICIAL blob
+# - LLM: SECRET (fine-tuned on SECRET data)
+# - Sink: OFFICIAL
+#
+# Orchestrator computes: min(OFFICIAL, SECRET, OFFICIAL) = OFFICIAL
+# Validation: SECRET LLM cannot operate at OFFICIAL envelope → FAIL TO START
 ```
 
 ### Defense in Depth: Three Validation Layers
