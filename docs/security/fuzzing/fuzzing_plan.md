@@ -1,340 +1,241 @@
-# Fuzzing Implementation Roadmap (Concise)
+# Phase 1 Fuzzing Roadmap (Quick Reference)
 
-This document provides a concise, execution‑focused roadmap for fuzzing. It defers strategy/targets/invariants to the canonical guide ([fuzzing.md](./fuzzing.md)) and risk treatment to the design review ([fuzzing_design_review.md](./fuzzing_design_review.md)).
+This document provides a concise, execution-focused roadmap for **Phase 1** fuzzing (Hypothesis property-based testing). For strategy, targets, oracles, and detailed procedures, see the canonical guide: [fuzzing.md](./fuzzing.md)
 
-## Scope & Links
-- Strategy & targets (canonical): [fuzzing.md](./fuzzing.md)
-- Risks, mitigations, acceptance: [fuzzing_design_review.md](./fuzzing_design_review.md)
-- CI: nightly fuzz on Python 3.11 (Atheris), PR property tests on 3.12
+**Phase 1 (Active - Implement This)**:
 
-## Phases & Milestones
+- **Canonical strategy**: [fuzzing.md](./fuzzing.md) - Complete Phase 1 strategy with oracles
+- **Quick roadmap**: This document - Week-by-week implementation checklist
+- **IRAP risk acceptance**: [fuzzing_irap_risk_acceptance.md](./fuzzing_irap_risk_acceptance.md) - For assessors
 
-### Phase 0 — Discovery & Risk Assessment (1–2 weeks)
-- Validate threat surfaces; prioritize high‑risk modules
-- Generate coverage heatmap for security‑critical code
-- Define input domains + invariants per target
-- Record ADR on tooling choices (Hypothesis + Atheris, corpus policy, coverage goal)
+**Phase 2 (Archived - Blocked 6+ months)**: [Why Archived?](../archive/phase2_blocked_atheris/README.md)
 
-Deliverables:
-- Updated threat model + prioritized targets
-- Invariants spec per module; initial seeds/corpus policy
-- ADR summarizing key decisions
-
-### Phase 1 — Implementation & Integration (2–3 weeks)
-- Add Hypothesis properties for top targets (path_guard, name/URI sanitize, endpoint validators)
-- Implement Atheris harnesses for the highest‑risk targets
-- Nightly fuzz workflow (10–15 min per harness; crash artifact policy)
-- Turn crashes into regression properties; document triage
-
-Deliverables:
-- Property suites merged into tests/fuzz_props/
-- Atheris harnesses under fuzz/
-- CI workflow .github/workflows/fuzz.yml (nightly + on‑demand)
-- Crash triage notes and follow‑up issues (if any)
-
-### Phase 2 — Expansion & Hardening (ongoing)
-- Add additional targets based on crash data and code churn
-- Track coverage/branch deltas on fuzzed modules
-- Periodically prune corpus; keep only minimized interesting seeds
-
-## Success Criteria (references)
-- Use the authoritative “Success Criteria (Phase 1)” in [fuzzing.md](./fuzzing.md).
-
-## Ownership & RACI (lightweight)
-- Strategy/targets: Security Eng (A), Tech Lead (C)
-- Properties/harnesses: Contributors/Owners of modules (R), Security Eng (C)
-- CI integration & retention policy: DevOps (R), Security Eng (C)
-
-## Notes
-- Nightly fuzz runs on Python 3.11 for Atheris; runtime stays 3.12.
-- Resource caps: time‑box jobs, upload minimized crashes only, 7‑day retention.
-
-### Weeks 1-2: Foundation (40-60 hours)
-
-#### Task 1: Atheris Harness Development (15-20 hours)
-
-**Modules to Fuzz** (Priority Order):
-
-1. `path_guard.py` - Path traversal protection
-2. `approved_endpoints.py` - URL validation
-3. `sanitizers.py` - Input sanitization
-4. `prompt_renderer.py` - Template injection
-5. `config_parser.py` - YAML/JSON parsing
-
-**Example Harness Structure**:
-
-```python
-# fuzz/fuzz_path_guard.py
-import atheris
-import tempfile
-from pathlib import Path
-from elspeth.core.utils.path_guard import resolve_under_base
-
-def TestOneInput(data):
-    fdp = atheris.FuzzedDataProvider(data)
-    
-    # Generate fuzzed inputs
-    candidate = fdp.ConsumeUnicodeNoSurrogates(
-        fdp.ConsumeIntInRange(0, 1000)
-    )
-    base = fdp.ConsumeUnicodeNoSurrogates(
-        fdp.ConsumeIntInRange(0, 1000)
-    )
-    
-    # Test with oracle assertions
-    with tempfile.TemporaryDirectory() as tmpdir:
-        # ... implementation ...
-        
-if __name__ == "__main__":
-    atheris.Setup(sys.argv, TestOneInput)
-    atheris.Fuzz()
-```
-
-#### Task 2: Hypothesis Test Suite (10-15 hours)
-
-**Property Tests to Write**:
-
-- Path resolution properties
-- URL validation properties
-- Sanitization effectiveness
-- Template safety properties
-- Configuration parsing robustness
-
-#### Task 3: Seed Corpus Creation (5-10 hours)
-
-**Corpus Sources**:
-
-- Existing test fixtures
-- Known attack patterns (OWASP Top 10)
-- Production config samples (anonymized)
-- CVE exploit patterns
-
-**Target**: 50+ seeds per fuzzing target
-
-### Weeks 3-4: Integration (15-25 hours)
-
-#### Task 4: CI/CD Pipeline Integration (5-10 hours)
-
-**Implementation Requirements**:
-
-- Fast property tests (<5 min) on every PR
-- Deep Atheris fuzzing (15 min) nightly
-- Crash artifact collection
-- Automated issue creation for findings
-
-#### Task 5: Crash Triage Process (10-15 hours)
-
-**Triage Workflow**:
-
-1. **Reproduce**: `python fuzz/fuzz_path_guard.py crash-abc123.txt`
-2. **Minimize**: `atheris --minimize_crash=crash-abc123.txt`
-3. **Debug**: Identify root cause and impact
-4. **Test**: Write regression test
-5. **Fix**: Implement security patch
-6. **Document**: Add to corpus and update docs
-
-### Weeks 5-6: Stabilization (20-30 hours)
-
-#### Task 6: Coverage Optimization (5-10 hours)
-
-**Activities**:
-
-- Run coverage analysis
-- Identify uncovered branches
-- Design targeted seeds
-- Optimize harness performance
-
-#### Task 7: Performance Tuning (5-10 hours)
-
-**Optimization Targets**:
-
-- Achieve >10,000 executions/second
-- Reduce test flakiness
-- Optimize resource usage
-- Implement smart mocking
-
-#### Task 8: Documentation & Training (5-10 hours)
-
-**Documentation Deliverables**:
-
-- Fuzzing user guide
-- Crash triage playbook
-- Coverage reports
-- Compliance narrative
+- Coverage-guided fuzzing with Atheris awaiting Python 3.12 support (Q2 2025+)
+- Fully designed and ready to implement when unblocked
+- See archive README for rationale and when to revisit
 
 ---
 
-## Implementation Options
+## Executive Summary
 
-### Option A: Incremental Approach (Recommended)
+**Approach**: Hypothesis property-based testing on Python 3.12
+**Timeline**: 3-4 weeks, 30-45 hours
+**Key Innovation**: Explicit oracle specifications + bug injection validation
 
-**Total Investment**: 15-20 hours initially, expand based on results
+---
 
-**Phase 1a**: Hypothesis Only (Week 1-2)
+## Phased Timeline
 
-- Implement property-based tests
-- Integrate with existing CI
-- Evaluate bug discovery rate
+### Phase 0: Foundation (Week 1, 8-15 hours)
 
-**Decision Point**: Assess value and findings
+**Goal**: Prove fuzzing effectiveness before full commitment
 
-**Phase 1b**: Add Atheris (If justified)
+| Task | Hours | Deliverable | Success Criteria |
+|------|-------|-------------|------------------|
+| Define oracle specifications | 2 | Complete oracle table for 5 modules | [See fuzzing.md Section 1.3](./fuzzing.md) |
+| Configure Hypothesis profiles | 1 | `pyproject.toml` with ci/explore profiles | [See fuzzing.md Section 1.4](./fuzzing.md) |
+| Implement bug injection tests | 3 | 2-3 smoke tests in `tests/fuzz_smoke/` | [See fuzzing.md Section 2.2](./fuzzing.md) |
+| Write initial property tests | 3-5 | 3-5 properties for `path_guard.py` | [See fuzzing.md Phase 1, Task 1](./fuzzing.md) |
+| CI integration prototype | 2-4 | Fast PR workflow (<5 min) | [See fuzzing.md Section 2.3](./fuzzing.md) |
 
-- Implement for highest-risk modules only
-- Deploy in dedicated fuzzing infrastructure
+**Decision Point**: If bug injection tests catch 100% of injected bugs AND 1+ real bug found → Proceed to Phase 1
 
-### Option B: Full Implementation
+---
 
-**Total Investment**: 60-100 hours
+### Phase 1: Expansion (Weeks 2-3, 15-25 hours)
 
-**When Appropriate**:
+**Goal**: Production-ready fuzzing across security-critical modules
 
-- ✅ Security compliance mandates
-- ✅ Dedicated sprint allocation
-- ✅ Senior developer with fuzzing expertise
-- ✅ High-risk code justifying investment
+| Task | Hours | Deliverable | Details |
+|------|-------|-------------|---------|
+| Expand property test suite | 8-12 | 15-20 properties across 5 modules | [Target modules](./fuzzing.md) |
+| Add regression seed tests | 3-5 | 10-15 explicit seeds per module | [See fuzzing.md Task 2](./fuzzing.md) |
+| Nightly deep exploration | 2-3 | Nightly CI workflow (15 min) | [See fuzzing.md Section 2.3](./fuzzing.md) |
+| Crash triage procedures | 2-5 | Severity taxonomy + GitHub templates | [See fuzzing.md Section 3.1](./fuzzing.md) |
+
+**Decision Point**: If false positive rate <10% AND CI runtime <5 min → Proceed to Phase 2
+
+---
+
+### Phase 2: Stabilization (Week 4, 5-10 hours)
+
+**Goal**: Optimize, document, and prepare for long-term maintenance
+
+| Task | Hours | Deliverable |
+|------|-------|-------------|
+| Coverage optimization | 2-4 | Target 85% branch coverage on security modules |
+| Performance tuning | 1-3 | Optimize slow properties, improve mocking |
+| IRAP compliance docs | 2-3 | Evidence package for accreditation |
+| Team training materials | 1-2 | Runbook for crash triage and property writing |
+
+---
+
+## Critical Success Factors
+
+### Must-Haves (Non-Negotiable)
+
+1. ✅ **Oracle specifications** - Explicit invariants for each target (fuzzing.md Section 1.3)
+2. ✅ **Bug injection validation** - Prove tests catch vulnerabilities (fuzzing.md Section 2.2)
+3. ✅ **CI guardrails** - Timeout budgets + crash artifacts (fuzzing.md Section 2.3)
+4. ✅ **Severity taxonomy** - Clear S0-S4 triage SLAs (fuzzing.md Section 3.1)
+
+### Key Metrics (See [fuzzing.md Success Criteria](./fuzzing.md) for full list)
+
+- **Bug discovery**: ≥1 bug in Phase 0, ≥2 total in Phase 1
+- **Coverage**: 85% branch coverage on security modules (not 95%)
+- **Performance**: <5 min PR tests, <15 min nightly
+- **Quality**: <10% false positive rate, <5% test flakiness
+
+---
+
+## Risks & Mitigations
+
+Full risk analysis in [fuzzing_design_review.md](./fuzzing_design_review.md) and [external review](./fuzzing_design_review_external.md)
+
+| Risk | Mitigation | Reference |
+|------|-----------|-----------|
+| Weak oracles (false negatives) | Bug injection smoke tests validate effectiveness | fuzzing.md Section 2.2 |
+| Strict oracles (false positives) | Start with permissive oracles, tighten based on data | fuzzing_design_review.md |
+| CI timeout runaway | Hard 5/15 min limits, HYPOTHESIS_PROFILE configs | fuzzing.md Section 2.3 |
+| Resource exhaustion | Per-test deadline (500ms), tempdir cleanup | fuzzing.md Section 1.4 |
+
+---
+
+## Quick Start Checklist
+
+Use this for week-by-week execution:
+
+### Week 1 (Phase 0)
+
+- [ ] Copy oracle table from fuzzing.md Section 1.3 → write first 3 oracles
+- [ ] Add Hypothesis profiles to `pyproject.toml` (ci + explore)
+- [ ] Write 2 bug injection tests (path traversal + URL validation)
+- [ ] Implement 3 property tests for `path_guard.py`
+- [ ] Add `.github/workflows/fuzz.yml` (fast PR tests)
+- [ ] **Decision**: Bug injection passing? Real bugs found? → Continue
+
+### Week 2 (Phase 1 - Part 1)
+
+- [ ] Expand to 8-10 total property tests (add URL validation + sanitizers)
+- [ ] Add `tests/fuzz_props/seeds.py` with 5+ regression seeds
+- [ ] Implement `.github/workflows/fuzz-nightly.yml` (deep exploration)
+- [ ] Document crash triage procedure (see fuzzing.md Section 3.1)
+
+### Week 3 (Phase 1 - Part 2)
+
+- [ ] Complete 15-20 property tests across 5 modules
+- [ ] Add severity taxonomy + GitHub issue template
+- [ ] Run coverage analysis (pytest --cov)
+- [ ] **Decision**: FP rate <10%? CI <5min? → Continue
+
+### Week 4 (Phase 2)
+
+- [ ] Optimize slow properties (profiling, mocking)
+- [ ] Document untested branches + rationale
+- [ ] Create IRAP evidence package
+- [ ] Write team training materials (crash triage playbook)
 
 ---
 
 ## Resource Requirements
 
-### Team Skills Needed
+**Team**: 1 senior Python developer with security testing experience
+**Time**: 30-45 hours over 3-4 weeks (10-12 hours/week)
+**Skills**: Python testing, Hypothesis basics (1-day learning curve), security awareness
 
-| Skill | Level | Hours |
-|-------|-------|-------|
-| Python Development | Senior | 40-60 |
-| Security Testing | Intermediate+ | 20-30 |
-| CI/CD Configuration | Intermediate | 5-10 |
-| Documentation | Any | 5-10 |
+**Infrastructure** (minimal):
 
-### Infrastructure
-
-- **CI Resources**: Additional 15-30 min/day compute time
-- **Storage**: 100MB-1GB for corpus management
-- **Monitoring**: Crash tracking and alerting system
+- CI compute: +5-15 min per run (PR + nightly)
+- Storage: ~50MB for `.hypothesis/examples/` corpus
+- No dedicated fuzzing servers required
 
 ---
 
-## Success Criteria
+## Links to Detailed Information
 
-### Phase 0 Success Metrics
-
-- ✅ 3 property tests passing
-- ✅ 1+ bug discovered and fixed
-- ✅ CI integration functional
-- ✅ Documentation complete
-
-### Phase 1 Success Metrics
-
-- ✅ >95% branch coverage on security modules
-- ✅ 5+ security issues identified and resolved
-- ✅ <5 min PR test runtime maintained
-- ✅ Continuous fuzzing operational
-
----
-
-## Risk Analysis
-
-### Technical Risks
-
-| Risk | Likelihood | Impact | Mitigation |
-|------|------------|--------|------------|
-| No bugs found | Low | Medium | Inject known bugs to validate |
-| Too many false positives | Medium | High | Refine oracle functions |
-| Performance degradation | Medium | Medium | Implement smart mocking |
-| CI timeout issues | Low | Low | Configure appropriate limits |
-
-### Resource Risks
-
-| Risk | Likelihood | Impact | Mitigation |
-|------|------------|--------|------------|
-| Skill gap | Medium | High | Start with Hypothesis, training |
-| Time overrun | Medium | Medium | Incremental approach |
-| Maintenance burden | Low | Medium | Automate triage process |
+| Topic | Where to Find It |
+|-------|------------------|
+| Oracle specifications (CRITICAL) | [fuzzing.md Section 1.3](./fuzzing.md) |
+| Bug injection smoke tests | [fuzzing.md Section 2.2](./fuzzing.md) |
+| Hypothesis profiles config | [fuzzing.md Section 1.4](./fuzzing.md) |
+| CI workflow templates | [fuzzing.md Section 2.3](./fuzzing.md) |
+| Severity taxonomy (S0-S4) | [fuzzing.md Section 3.1](./fuzzing.md) |
+| Crash triage procedures | [fuzzing.md Phase 1 Task 3](./fuzzing.md) |
+| Success criteria (full list) | [fuzzing.md Success Criteria](./fuzzing.md) |
+| Risk analysis | [fuzzing_design_review.md](./fuzzing_design_review.md) |
+| External review recommendations | [fuzzing_design_review_external.md](./fuzzing_design_review_external.md) |
+| Property test examples | [fuzzing.md Phase 1 Task 1](./fuzzing.md) |
+| Seed corpus management | [fuzzing.md Phase 1 Task 2](./fuzzing.md) |
 
 ---
 
-## Recommendations
+## Notes
 
-### Immediate Actions (Week 1)
-
-1. **Run coverage analysis** on security modules
-2. **Select top 3 targets** based on risk assessment
-3. **Write first Hypothesis test** as proof of concept
-4. **Allocate resources** for Phase 0 (1 developer, 2-3 weeks)
-
-### Go/No-Go Decision Criteria
-
-**Proceed to full implementation if**:
-
-- Hypothesis finds 2+ real bugs in Phase 0
-- Security audit requirements mandate fuzzing
-- Team has bandwidth for 60-100 hour investment
-
-**Defer/scale back if**:
-
-- No bugs found in initial testing
-- Resource constraints exist
-- Lower-risk codebase assessment
+- **Python version**: All fuzzing uses Python 3.12 (no version juggling)
+- **Tool choice**: Hypothesis only (Atheris deferred - see fuzzing.md Appendix A)
+- **CI strategy**: Fast on PR (5 min), deep nightly (15 min)
+- **Corpus**: Use Hypothesis native `.hypothesis/examples/`, don't create separate corpus directory
+- **Timeout handling**: Use Hypothesis `deadline` setting, not custom timeout utilities
+- **Metrics**: Focus on bug discovery and false positive rate, not rigid coverage percentages
+- **External review integration**: See fuzzing.md "Recommendations" section for adopted/adapted/deferred items
 
 ---
 
-## Appendix A: Tool Selection Rationale
+## Success Stories (Update After Implementation)
 
-### Hypothesis vs. Atheris
+<!-- Document bugs found, security improvements, and lessons learned here -->
 
-| Aspect | Hypothesis | Atheris |
-|--------|------------|---------|
-| Setup Complexity | Low | High |
-| Bug Finding | Good | Excellent |
-| Debugging | Excellent | Moderate |
-| CI Integration | Easy | Complex |
-| Maintenance | Low | High |
-| Coverage-Guided | No | Yes |
+**Phase 0 Results** (TBD):
 
-**Recommendation**: Start with Hypothesis, add Atheris for critical modules
+- Bugs found:
+- Coverage improvement:
+- Time invested:
 
----
+**Phase 1 Results** (TBD):
 
-## Appendix B: Example Fuzzing Targets
-
-### Priority 1: Path Traversal (`path_guard.py`)
-
-- **Risk**: High (filesystem access)
-- **Complexity**: Medium
-- **Test Strategy**: Property + coverage-guided
-- **Expected Bugs**: 2-5
-
-### Priority 2: URL Validation (`approved_endpoints.py`)
-
-- **Risk**: High (SSRF potential)
-- **Complexity**: High (URL parsing edge cases)
-- **Test Strategy**: Property-based
-- **Expected Bugs**: 3-7
-
-### Priority 3: Input Sanitization
-
-- **Risk**: Medium (XSS/injection)
-- **Complexity**: Medium
-- **Test Strategy**: Property-based
-- **Expected Bugs**: 1-3
+- Total bugs found:
+- False positive rate:
+- CI impact:
+- IRAP value:
 
 ---
 
-## Appendix C: Compliance & Audit Trail
+## Path to Phase 2: Coverage-Guided Fuzzing
 
-### Documentation for Accreditation
+### When to Consider Phase 2
 
-1. Fuzzing strategy and rationale
-2. Coverage metrics and trends
-3. Bug discovery and remediation log
-4. Continuous testing evidence
-5. Security posture improvements
+**Evaluate after Phase 1 completion if**:
 
-### Audit Evidence
+- ✅ Phase 1 found ≥2 security bugs (proves fuzzing ROI)
+- ✅ System handles classified data or PII (higher security bar)
+- ✅ IRAP/compliance requires defense-in-depth
+- ✅ Team has capacity for additional 40-80 hours
 
-- Timestamped fuzzing runs
-- Coverage reports
-- Issue tracking integration
-- Fix verification tests
-- Corpus evolution metrics
+### Phase 2 Value Proposition
+
+**Coverage-guided fuzzing (Atheris) complements property testing**:
+
+- **Hypothesis (Phase 1)**: Tests *known* invariants you specify
+- **Atheris (Phase 2)**: Discovers *unknown* edge cases through instrumentation
+
+**Historical precedent**: Most critical parser CVEs found via coverage-guided fuzzing (URL parsers, path traversal, template engines)
+
+### Current Status
+
+🔶 **BLOCKED** - Awaiting Atheris Python 3.12 support
+
+**Track progress**:
+
+- **Readiness checklist**: [fuzzing_coverage_guided_readiness.md](./fuzzing_coverage_guided_readiness.md)
+- **Monthly monitoring**: Check Atheris releases for Python 3.12 support
+- **Estimated availability**: Q2 2025 or later
+
+### Pre-Approved Strategy
+
+Phase 2 implementation is **pre-designed and ready to execute** once unblocked:
+
+- **Complete strategy**: [fuzzing_coverage_guided.md](./fuzzing_coverage_guided.md)
+- **Execution roadmap**: [fuzzing_coverage_guided_plan.md](./fuzzing_coverage_guided_plan.md)
+- **Resource requirements**: 40-80 hours, ~$50-110/month CI costs
+
+**No additional design work needed** - just resource allocation when Python 3.12 support arrives.

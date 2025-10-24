@@ -1,13 +1,25 @@
 # Elspeth Fuzzing Strategy (Canonical)
 
-Fuzzing docs index: [Strategy](./fuzzing.md) • [Roadmap](./fuzzing_plan.md) • [Risk review](./fuzzing_design_review.md)
+**Phase 1 (Active)**: [Strategy](./fuzzing.md) • [Roadmap](./fuzzing_plan.md) • [Risk Review](../archive/fuzzing_design_review.md) • [IRAP Risk Acceptance](./fuzzing_irap_risk_acceptance.md)
 
-This is the canonical strategy for fuzzing in Elspeth. It defines targets, invariants, tools, and CI integration.
+**Phase 2 (Archived - Blocked)**: [Why Archived?](../archive/phase2_blocked_atheris/README.md) • Awaiting Atheris Python 3.12 support (Q2 2025+)
+
+---
+
+## Phase 1: Property-Based Fuzzing (This Document)
+
+This is the canonical strategy for **Phase 1** fuzzing in Elspeth using Hypothesis property-based testing on Python 3.12.
+
+**Phase 2 note**: For mission-critical systems with classified/PII data, coverage-guided fuzzing (Atheris) provides additional security depth by discovering unknown edge cases. See [Phase 2 documentation](../archive/phase2_blocked_atheris/fuzzing_coverage_guided.md) for the complementary coverage-guided strategy (blocked on Atheris Python 3.12 support).
+
+**Current focus**: Phase 1 (Hypothesis property-based testing)
 
 Notes and pointers:
-- Nightly fuzzing runs under Python 3.11 (Atheris compatibility). Runtime and the rest of CI remain on Python 3.12.
+
+- All Phase 1 fuzzing uses Python 3.12 with Hypothesis property-based testing
 - Concise implementation roadmap: [fuzzing_plan.md](./fuzzing_plan.md)
-- Risk review and mitigations: [fuzzing_design_review.md](./fuzzing_design_review.md)
+- Internal risk review: [fuzzing_design_review.md](../archive/fuzzing_design_review.md)
+- External review recommendations: [fuzzing_design_review_external.md](../archive/fuzzing_design_review_external.md)
 
 ## Security Testing Enhancement Through Property-Based and Coverage-Guided Fuzzing
 
@@ -15,12 +27,12 @@ Notes and pointers:
 
 ## Executive Summary
 
-This document outlines a comprehensive plan to implement fuzzing for the Elspeth project's security-critical components. The plan is divided into two major phases:
+This document outlines a comprehensive plan to implement property-based fuzzing for Elspeth's security-critical components using Hypothesis on Python 3.12. The plan is divided into two major phases:
 
-- **Phase 0**: Discovery & Risk Assessment (3 weeks, 45-65 hours)
-- **Phase 1**: Implementation & Integration (6 weeks, 60-100 hours)
+- **Phase 0**: Discovery & Risk Assessment (1-2 weeks, 8-15 hours)
+- **Phase 1**: Implementation & Integration (2-3 weeks, 15-30 hours)
 
-The recommended approach is incremental, starting with Hypothesis property-based testing (15-20 hours) to demonstrate value before committing to full Atheris coverage-guided fuzzing.
+The approach focuses on Hypothesis property-based testing with explicit oracle specifications, bug injection validation, and CI integration with appropriate guardrails. This balanced strategy provides strong security testing without the operational complexity of coverage-guided fuzzing infrastructure.
 
 ---
 
@@ -39,9 +51,16 @@ The recommended approach is incremental, starting with Hypothesis property-based
 ### Goals
 
 1. Identify and fix security vulnerabilities before production
-2. Achieve >95% branch coverage on security-critical modules
+2. Achieve ≥85% branch coverage on security-critical modules (realistic target for property-based testing)
 3. Establish continuous fuzzing in CI/CD pipeline
 4. Support security compliance and accreditation requirements
+
+**Coverage Philosophy**: Target 85% branch coverage, not 95%. Rationale:
+
+- Last 15% often unreachable code (error handlers, edge cases, dead code)
+- Property-based testing naturally achieves ~85% with well-designed oracles
+- Diminishing returns: 85%→95% requires 3x effort for minimal security improvement
+- Better ROI: Cover more security modules at 85% than fewer modules at 95%
 
 ---
 
@@ -87,25 +106,26 @@ pytest --cov-report=html --cov=elspeth
 
 **Objective**: Define valid inputs and invariants for each fuzzing target
 
-**Specifications to Document**:
+**Oracle Specifications**:
 
-- **Path Guard**:
-  - Valid formats: relative, absolute, UNC, symlinks
-  - Invariants: paths must remain within `base_dir`
-  - Oracle functions: symlink escape detection
-  
-- **Approved Endpoints**:
-  - URL schemes and patterns
-  - Edge cases: IPv6, IDN, encoded characters
-  
-- **Template Rendering**:
-  - Allowed syntax elements
-  - Rejection criteria for dangerous constructs
-  
-- **Sanitizers**:
-  - Dangerous CSV/Excel constructs (formulas, macros, hyperlinks)
+The following table defines the security invariants (properties that MUST always hold) and allowed exceptions for each fuzzing target. Every property test must enforce these invariants:
 
-**Deliverable**: Input domain specification document with invariants and oracles
+| Target | Module | Invariants (MUST hold) | Allowed Exceptions |
+|--------|--------|------------------------|-------------------|
+| **Path Guard** | `path_guard.py` | • Result always under `base_dir`<br>• No symlink escape<br>• Normalized (no `..` in result)<br>• Absolute paths rejected | `ValueError`, `SecurityError` |
+| **URL Validation** | `approved_endpoints.py` | • Scheme in {`https`, `http`}<br>• Host in approved list<br>• No credentials in URL<br>• IDN punycode valid<br>• Port in allowed range | `ValueError`, `URLError` |
+| **CSV Sanitizer** | `sanitizers.py` | • Output never starts with `=+-@`<br>• No formula injection<br>• Unicode preserved (NFC)<br>• Hyperlinks removed or quoted | `None` (silent sanitization) |
+| **Template Renderer** | `prompt_renderer.py` | • No `eval()` or `exec()` constructs<br>• All variables resolved or error<br>• Output encoding matches input<br>• Template depth < 10 (recursion limit) | `TemplateError`, `SecurityError` |
+| **Config Parser** | `config_parser.py` | • Parse → serialize → parse = identity<br>• Required fields present or error<br>• Type coercion consistent<br>• No code execution in YAML | `ConfigError`, `ValidationError` |
+
+**Implementation Requirements**:
+
+1. Each property test must document which invariant(s) it enforces in its docstring
+2. Oracle assertions must use descriptive failure messages referencing the invariant
+3. Allowed exceptions must be explicitly tested (e.g., "rejects absolute paths with ValueError")
+4. Edge cases must map to specific invariants (e.g., symlink escape → "Result always under base_dir")
+
+**Deliverable**: Input domain specification document with invariants and oracles (table above serves as canonical reference)
 
 #### 1.4 Fuzzing Strategy Design (4 hours)
 
@@ -115,11 +135,40 @@ pytest --cov-report=html --cov=elspeth
 
 | Decision | Options | Recommendation |
 |----------|---------|----------------|
-| Testing Framework | Hypothesis-only vs. Dual (Hypothesis + Atheris) | Start Hypothesis, add Atheris for high-risk |
-| Corpus Management | Generate vs. Extract vs. Curate | Hybrid: extract from tests + curate attacks |
-| Oracle Strategy | Differential vs. Crash vs. Assertion | Assertion-based with invariant checking |
-| Coverage Metrics | Line vs. Branch vs. Path | Branch coverage primary, path secondary |
-| CI Integration | Every PR vs. Nightly vs. On-demand | Fast tests on PR, deep fuzzing nightly |
+| Testing Framework | Hypothesis property-based testing | Hypothesis-only (Python 3.12) |
+| Corpus Management | Hypothesis native vs. Manual | Use Hypothesis `.hypothesis/examples/` native corpus |
+| Oracle Strategy | Differential vs. Crash vs. Assertion | Assertion-based with explicit invariant checking (see oracle table) |
+| Coverage Metrics | Line vs. Branch vs. Path | Branch coverage on security modules, target 85% realistic |
+| CI Integration | Every PR vs. Nightly vs. On-demand | Fast tests (5min) on PR, deep exploration (15min) nightly |
+| Hypothesis Profiles | Single vs. Multiple | Multiple: `ci` (200 examples, derandomized), `explore` (5000 examples) |
+
+**Hypothesis Configuration** (`pyproject.toml`):
+
+```toml
+# Pytest marker for fuzzing tests
+[tool.pytest.ini_options]
+markers = [
+    "fuzz: Property-based fuzzing tests (pytest -m fuzz)",
+]
+
+# Hypothesis settings
+[tool.hypothesis]
+# Default profile (local development)
+max_examples = 100
+deadline = 500  # milliseconds per example
+
+[tool.hypothesis.profiles.ci]
+max_examples = 200
+deadline = 500
+derandomize = true
+# Note: print_blob is a CLI flag (--hypothesis-show-statistics), not a config setting
+
+[tool.hypothesis.profiles.explore]
+max_examples = 5000
+deadline = 5000
+derandomize = false
+verbosity = "verbose"
+```
 
 **Deliverable**: Architecture Decision Record (ADR) with rationale
 
@@ -163,58 +212,238 @@ def test_resolve_under_base_never_escapes(candidate, base):
 
 **Deliverable**: Working Hypothesis property test for `path_guard.py`
 
-#### 2.2 Bug Injection Testing (2 hours)
+#### 2.2 Bug Injection Smoke Tests (3 hours) ⭐ **CRITICAL**
 
-**Objective**: Verify fuzzing can detect known vulnerabilities
+**Objective**: Verify property tests actually catch bugs (not just exercise code)
 
-**Activities**:
+**Implementation**:
 
-- Inject known path traversal bug
-- Verify property test detects the vulnerability
-- Document detection capabilities
+Create `tests/fuzz_smoke/` directory with intentionally vulnerable implementations:
 
-**Deliverable**: Validation report confirming fuzzing effectiveness
+```python
+# tests/fuzz_smoke/test_bug_injection_path_guard.py
+"""
+Smoke test: Verify property tests catch intentionally injected bugs.
+MUST FAIL when BUG_INJECTION_ENABLED=1
+"""
+import os
+import pytest
+from hypothesis import given, strategies as st, settings
+from pathlib import Path
 
-#### 2.3 Atheris Prototype (6 hours)
+BUG_INJECTION = os.getenv("BUG_INJECTION_ENABLED") == "1"
 
-**Objective**: Evaluate coverage-guided fuzzing feasibility
+def vulnerable_resolve_under_base(base: Path, candidate: str) -> Path:
+    """Intentionally vulnerable version for testing."""
+    if BUG_INJECTION:
+        # VULNERABILITY: Skip normalization, allow traversal
+        return base / candidate
+    else:
+        # Correct implementation
+        from elspeth.core.utils.path_guard import resolve_under_base
+        return resolve_under_base(base, candidate)
 
-**Implementation**: Basic Atheris harness for highest-risk module
+@given(candidate=st.text(min_size=1, max_size=100))
+@settings(max_examples=100, deadline=500)
+def test_path_traversal_injection_caught(tmp_path, candidate):
+    """Property: Path never escapes base (should catch injected bug)."""
+    try:
+        result = vulnerable_resolve_under_base(tmp_path, candidate)
+        # Oracle: Result must be under base_dir
+        assert result.is_relative_to(tmp_path), \
+            f"BUG DETECTED: Path escaped base: {result}"
+    except (ValueError, SecurityError):
+        # Allowed exceptions for invalid inputs
+        pass
+```
 
-**Deliverable**: Atheris harness prototype with performance metrics
+**CI Integration** (`.github/workflows/fuzz-smoke.yml`):
 
-#### 2.4 CI Integration Prototype (4 hours)
+```yaml
+- name: Verify bug injection fails (must fail with bugs)
+  run: |
+    BUG_INJECTION_ENABLED=1 pytest tests/fuzz_smoke/ -v
+    if [ $? -eq 0 ]; then
+      echo "ERROR: Smoke tests passed with bugs injected!"
+      exit 1
+    fi
+  continue-on-error: false
 
-**Objective**: Test fuzzing in CI/CD pipeline
+- name: Verify normal tests pass (must pass without bugs)
+  run: pytest tests/fuzz_props/ -v
+```
+
+**Test Coverage**:
+
+1. Path traversal bypass (path_guard)
+2. URL validation bypass (approved_endpoints)
+3. Sanitization bypass (CSV formula injection)
+
+**Deliverable**:
+
+- Smoke test suite that proves property tests detect security vulnerabilities
+- CI job that validates test effectiveness
+- Documentation for IRAP compliance (test effectiveness evidence)
+
+#### 2.3 CI Integration Prototype with Guardrails (4 hours)
+
+**Objective**: Test fuzzing in CI/CD pipeline with resource protection
 
 **Implementation**:
 
 ```yaml
-# .github/workflows/fuzz.yml
-name: Fuzzing Tests
-on: [push, pull_request]
+# .github/workflows/fuzz.yml (Fast PR tests)
+name: Property Tests (Fast)
+on: [pull_request, push]
+
 jobs:
-  hypothesis-tests:
-    timeout-minutes: 5
-    # Configuration...
+  hypothesis-fast:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5  # Hard limit
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          pip install -e ".[test]"
+          pip install hypothesis pytest pytest-cov
+
+      - name: Run fast property tests
+        env:
+          HYPOTHESIS_PROFILE: ci
+        run: |
+          pytest tests/fuzz_props/ -v -m fuzz \
+            --tb=short --maxfail=3
+
+      - name: Upload crash artifacts (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crashes-pr-${{ github.run_id }}
+          path: .hypothesis/examples/
+          retention-days: 7
+
+# .github/workflows/fuzz-nightly.yml (Deep exploration)
+name: Property Tests (Deep)
+on:
+  schedule:
+    - cron: '0 2 * * *'  # 2 AM daily
+  workflow_dispatch:  # Manual trigger
+
+jobs:
+  hypothesis-explore:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15  # Longer budget for exploration
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run deep property exploration
+        env:
+          HYPOTHESIS_PROFILE: explore
+        run: |
+          pytest tests/fuzz_props/ -v -m fuzz \
+            --hypothesis-seed=random \
+            --tb=short
+
+      - name: Upload crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crashes-nightly-${{ github.run_id }}
+          path: .hypothesis/examples/
+          retention-days: 7
+
+      - name: Create issue for crashes
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: '[FUZZ] Nightly fuzzing found issues',
+              body: 'Fuzzing run failed. Check artifacts.',
+              labels: ['security', 'fuzzing', 'needs-triage']
+            })
 ```
 
-**Deliverable**: Working CI workflow for property tests
+**Deliverable**: Working CI workflow with resource guardrails and crash artifact collection
 
 ### Week 3: Risk Reduction & Planning (10-15 hours)
 
-#### 3.1 Risk Mitigation Planning (6 hours)
+#### 3.1 Risk Mitigation Planning & Severity Taxonomy (6 hours)
 
-**Objective**: Prepare for fuzzing challenges
+**Objective**: Prepare for fuzzing challenges with clear triage procedures
 
-**Plans to Develop**:
+**Crash Severity Classification**:
 
-- Crash triage procedure
-- Severity ranking criteria (DoS vs. ACE vs. info leak)
-- Reproducibility testing process
-- False positive handling
+| Severity | Criteria | Examples | Triage SLA | Fix SLA |
+|----------|----------|----------|-----------|---------|
+| **S0 (Critical)** | Remote code execution, credential leak, arbitrary file access | Path traversal to `/etc/shadow`, `eval()` injection, password disclosure | 4 hours | 24 hours |
+| **S1 (High)** | Authentication bypass, privilege escalation, SSRF | Symlink escape, URL validation bypass allowing internal network access | 24 hours | 3 days |
+| **S2 (Medium)** | DoS, resource exhaustion, data corruption, formula injection | ZIP bomb, unbounded memory allocation, CSV formula injection | 3 days | 1 week |
+| **S3 (Low)** | Logic error without security impact, improper error handling | Incorrect sanitization that's cosmetic, unclear error messages | 5 days | 2 weeks |
+| **S4 (Info)** | Duplicate, false positive, test infrastructure issue | Test flakiness, known limitation, environment-specific failure | Best effort | Best effort |
 
-**Deliverable**: Risk mitigation checklist with contingency plans
+**Triage Procedure**:
+
+1. **Reproduce**: `HYPOTHESIS_SEED=<seed> pytest tests/fuzz_props/test_X.py -k <test_name>`
+2. **Classify**: Assign severity S0-S4 based on table above
+3. **Minimize**: Use Hypothesis's shrinking (automatic) or manual reduction
+4. **Analyze**: Identify root cause and map to oracle violation
+5. **Document**: Create GitHub issue with `[FUZZ]` prefix and severity label
+6. **Regression**: Convert crash into explicit regression test in `tests/fuzz_props/seeds.py`
+
+**GitHub Issue Template** (`.github/ISSUE_TEMPLATE/fuzz-crash.md`):
+
+```markdown
+---
+name: Fuzzing Crash Report
+about: Report a crash found by property-based fuzzing
+labels: security, fuzzing, needs-triage
+---
+
+## Crash Details
+
+**Severity**: [S0/S1/S2/S3/S4] (see severity table)
+**Test**: `tests/fuzz_props/test_X.py::test_Y`
+**Hypothesis Seed**: `<seed value>`
+
+## Reproduction
+
+\```bash
+HYPOTHESIS_SEED=<seed> pytest tests/fuzz_props/test_X.py::test_Y -v
+\```
+
+## Oracle Violation
+
+Which invariant was violated? (reference oracle table in fuzzing.md)
+- [ ] Path escapes base_dir
+- [ ] Symlink escape
+- [ ] URL validation bypass
+- [ ] Formula injection
+- [ ] Other: ___
+
+## Impact Assessment
+
+[Describe security impact and exploitability]
+
+## Minimized Example
+
+\```python
+# Minimal reproducer
+\```
+```
+
+**Deliverable**: Risk mitigation checklist with severity taxonomy and triage procedures
 
 #### 3.2 Integration Planning (4 hours)
 
@@ -236,7 +465,7 @@ jobs:
 **Metrics**:
 
 - Bug discovery rate
-- Coverage improvement (target: >95% branch coverage)
+- Coverage improvement (target: ≥85% branch coverage on security modules)
 - Performance impact (<5 min for PR tests)
 - Compliance documentation completeness
 
@@ -250,7 +479,7 @@ jobs:
 
 ### Weeks 1-2: Foundation (40-60 hours)
 
-#### Task 1: Atheris Harness Development (15-20 hours)
+#### Task 1: Hypothesis Property Test Suite (10-15 hours)
 
 **Modules to Fuzz** (Priority Order):
 
@@ -260,77 +489,140 @@ jobs:
 4. `prompt_renderer.py` - Template injection
 5. `config_parser.py` - YAML/JSON parsing
 
-**Example Harness Structure**:
+**Example Property Test with Oracle** (`tests/fuzz_props/test_path_guard_properties.py`):
 
 ```python
-# fuzz/fuzz_path_guard.py
-import atheris
-import tempfile
+from hypothesis import given, strategies as st, settings
 from pathlib import Path
 from elspeth.core.utils.path_guard import resolve_under_base
 
-def TestOneInput(data):
-    fdp = atheris.FuzzedDataProvider(data)
-    
-    # Generate fuzzed inputs
-    candidate = fdp.ConsumeUnicodeNoSurrogates(
-        fdp.ConsumeIntInRange(0, 1000)
+@given(
+    candidate=st.text(
+        alphabet=st.characters(blacklist_categories=['Cs']),  # Valid Unicode
+        min_size=1,
+        max_size=200
     )
-    base = fdp.ConsumeUnicodeNoSurrogates(
-        fdp.ConsumeIntInRange(0, 1000)
-    )
-    
-    # Test with oracle assertions
-    with tempfile.TemporaryDirectory() as tmpdir:
-        # ... implementation ...
-        
-if __name__ == "__main__":
-    atheris.Setup(sys.argv, TestOneInput)
-    atheris.Fuzz()
+)
+@settings(max_examples=100, deadline=500)
+def test_resolve_under_base_never_escapes(tmp_path, candidate):
+    """
+    Oracle: Result must always be under base_dir.
+    Maps to invariant: "Result always under base_dir" from oracle table.
+    """
+    try:
+        result = resolve_under_base(tmp_path, candidate)
+
+        # Oracle assertion with explicit invariant reference
+        assert result.is_relative_to(tmp_path), \
+            f"ORACLE VIOLATION: Path escaped base_dir\n" \
+            f"  Base: {tmp_path}\n" \
+            f"  Candidate: {repr(candidate)}\n" \
+            f"  Result: {result}\n" \
+            f"  Invariant: Result always under base_dir (see oracle table)"
+
+    except (ValueError, SecurityError):
+        # Allowed exceptions for invalid inputs (e.g., absolute paths)
+        pass
 ```
 
-#### Task 2: Hypothesis Test Suite (10-15 hours)
+**Property Tests per Module**:
 
-**Property Tests to Write**:
+- **path_guard.py**: 5 properties (no escape, normalization, symlink handling, absolute rejection, empty input)
+- **approved_endpoints.py**: 5 properties (scheme validation, host allowlist, no credentials, IDN handling, port restrictions)
+- **sanitizers.py**: 3 properties (no formula injection, Unicode preservation, hyperlink removal)
+- **prompt_renderer.py**: 4 properties (no code execution, variable resolution, encoding consistency, depth limit)
+- **config_parser.py**: 3 properties (round-trip identity, type consistency, required fields)
 
-- Path resolution properties
-- URL validation properties
-- Sanitization effectiveness
-- Template safety properties
-- Configuration parsing robustness
+**Total**: 20 property tests across 5 modules
 
-#### Task 3: Seed Corpus Creation (5-10 hours)
+#### Task 2: Seed Corpus and Regression Tests (5-10 hours)
 
-**Corpus Sources**:
+**Corpus Management** (Hypothesis-Native Approach):
 
-- Existing test fixtures
-- Known attack patterns (OWASP Top 10)
-- Production config samples (anonymized)
-- CVE exploit patterns
+Hypothesis automatically manages its corpus in `.hypothesis/examples/`. Do NOT create a separate `corpus/` directory.
 
-**Target**: 50+ seeds per fuzzing target
+**Explicit Regression Tests** (`tests/fuzz_props/seeds.py`):
+
+```python
+"""
+Documented seeds for regression testing.
+Each seed captures a specific bug, attack pattern, or edge case.
+"""
+import pytest
+from elspeth.core.utils.path_guard import resolve_under_base
+
+# Known traversal attempts (from OWASP, CVEs, production incidents)
+KNOWN_TRAVERSAL_ATTEMPTS = [
+    ("../../../etc/passwd", "CVE-style Unix path traversal"),
+    ("..\\..\\..\\windows\\system32\\config\\sam", "Windows path traversal"),
+    ("/absolute/path/escape", "Absolute path bypass attempt"),
+    ("symlink/../../../etc", "Symlink + traversal combo"),
+    ("file://../../etc/passwd", "URL-style file path"),
+    ("\x00/../etc/passwd", "Null byte injection"),
+]
+
+@pytest.mark.parametrize("candidate,reason", KNOWN_TRAVERSAL_ATTEMPTS)
+def test_known_traversal_patterns_rejected(tmp_path, candidate, reason):
+    """Regression tests for documented attack patterns."""
+    with pytest.raises((ValueError, SecurityError)):
+        resolve_under_base(tmp_path, candidate), \
+            f"Failed to reject: {reason}"
+```
+
+**Sources for Regression Seeds**:
+
+- Existing test fixtures from test suite
+- Known attack patterns (OWASP Top 10, MITRE ATT&CK)
+- CVE exploit patterns (e.g., CVE-2019-XXXX path traversal)
+- Bugs found by fuzzing (added after triage)
+
+**Target**: 10-15 explicit regression tests per high-risk module
 
 ### Weeks 3-4: Integration (15-25 hours)
 
-#### Task 4: CI/CD Pipeline Integration (5-10 hours)
+#### Task 4: CI/CD Pipeline Integration (Already completed in Section 2.3)
 
-**Implementation Requirements**:
+**Implementation Requirements** (See Section 2.3 for full workflow):
 
-- Fast property tests (<5 min) on every PR
-- Deep Atheris fuzzing (15 min) nightly
-- Crash artifact collection
-- Automated issue creation for findings
+- Fast property tests (<5 min) on every PR using `HYPOTHESIS_PROFILE=ci`
+- Deep property exploration (15 min) nightly using `HYPOTHESIS_PROFILE=explore`
+- Crash artifact upload to GitHub Actions (7-day retention)
+- Automated issue creation for nightly failures with `[FUZZ]` label
 
-#### Task 5: Crash Triage Process (10-15 hours)
+#### Task 3: Crash Triage Process (5-10 hours)
 
-**Triage Workflow**:
+**Triage Workflow** (References severity taxonomy in Section 3.1):
 
-1. **Reproduce**: `python fuzz/fuzz_path_guard.py crash-abc123.txt`
-2. **Minimize**: `atheris --minimize_crash=crash-abc123.txt`
-3. **Debug**: Identify root cause and impact
-4. **Test**: Write regression test
-5. **Fix**: Implement security patch
-6. **Document**: Add to corpus and update docs
+1. **Reproduce**: `HYPOTHESIS_SEED=<seed> pytest tests/fuzz_props/test_X.py::test_Y -v`
+2. **Classify**: Assign severity S0-S4 (see severity table in Section 3.1)
+3. **Minimize**: Hypothesis automatic shrinking provides minimized example
+4. **Analyze**: Map to oracle violation (which invariant failed?)
+5. **Document**: Create GitHub issue using `[FUZZ]` template
+6. **Regression**: Add to `tests/fuzz_props/seeds.py`
+7. **Fix**: Implement security patch with tests
+8. **Verify**: Re-run property test to confirm fix
+
+**Reproducibility**:
+
+```bash
+# With seed from crash report
+HYPOTHESIS_SEED=123456789 pytest tests/fuzz_props/test_path_guard_properties.py -k escape -v
+
+# With saved example from .hypothesis/examples/
+pytest tests/fuzz_props/ --hypothesis-seed=<seed-from-artifact>
+
+# Manual replay with specific input
+pytest tests/fuzz_props/ -k test_name --hypothesis-verbosity=verbose
+```
+
+**Documentation Requirements** (Per crash):
+
+- GitHub issue with `[FUZZ]` prefix and severity label (S0-S4)
+- Hypothesis seed for reproduction
+- Oracle violation description (which invariant?)
+- Impact assessment (exploitability, data at risk)
+- Minimized example code
+- Fix verification (regression test passing)
 
 ### Weeks 5-6: Stabilization (20-30 hours)
 
@@ -363,35 +655,44 @@ if __name__ == "__main__":
 
 ---
 
-## Implementation Options
+## Implementation Approach
 
-### Option A: Incremental Approach (Recommended)
+### Recommended: Phased Rollout
 
-**Total Investment**: 15-20 hours initially, expand based on results
+**Total Investment**: 30-45 hours over 3-4 weeks
 
-**Phase 1a**: Hypothesis Only (Week 1-2)
+**Phase 0** (Week 1, ~8-15 hours):
 
-- Implement property-based tests
-- Integrate with existing CI
-- Evaluate bug discovery rate
+- Define oracle specifications (complete table)
+- Implement 3-5 property tests for highest-risk module (path_guard.py)
+- Add 2-3 bug injection smoke tests
+- Configure Hypothesis profiles in pyproject.toml
 
-**Decision Point**: Assess value and findings
+**Phase 1** (Weeks 2-3, ~15-25 hours):
 
-**Phase 1b**: Add Atheris (If justified)
+- Expand to 15-20 property tests across 5 security modules
+- Integrate with CI (PR + nightly workflows)
+- Add crash triage procedures and severity taxonomy
+- Document 10-15 regression seeds per module
 
-- Implement for highest-risk modules only
-- Deploy in dedicated fuzzing infrastructure
+**Phase 2** (Week 4, ~5-10 hours):
 
-### Option B: Full Implementation
+- Coverage optimization (identify untested branches)
+- Performance tuning (achieve <5 min PR runtime)
+- Documentation and IRAP compliance evidence
+- Training materials for team
 
-**Total Investment**: 60-100 hours
+**Decision Points**:
 
-**When Appropriate**:
+✅ **After Phase 0**: Did we find 1+ real bugs? → Proceed to Phase 1
+✅ **After Phase 1**: Are we maintaining <5% false positive rate? → Proceed to Phase 2
+⚠️ **If false positives >10%**: Refine oracles before expanding
 
-- ✅ Security compliance mandates
-- ✅ Dedicated sprint allocation
-- ✅ Senior developer with fuzzing expertise
-- ✅ High-risk code justifying investment
+**When to Scale Back**:
+
+- No bugs found after 200+ examples per property (may indicate low-value target)
+- False positive rate >15% (oracle specifications too strict or code too dynamic)
+- CI runtime exceeds 7 minutes consistently (need better mocking or reduced examples)
 
 ---
 
@@ -416,19 +717,46 @@ if __name__ == "__main__":
 
 ## Success Criteria
 
-### Phase 0 Success Metrics
+### Phase 0 Success Metrics (Discovery)
 
-- ✅ 3 property tests passing
-- ✅ 1+ bug discovered and fixed
-- ✅ CI integration functional
-- ✅ Documentation complete
+- ✅ **Oracle specifications**: Complete oracle table with invariants for 5 targets
+- ✅ **Bug injection tests**: 3+ smoke tests that catch intentionally injected bugs
+- ✅ **Property tests**: 3+ property tests passing with explicit oracle assertions
+- ✅ **Bug discovery**: 1+ real security issue found and fixed
+- ✅ **CI integration**: Fast property tests running in <5 minutes on PRs
 
-### Phase 1 Success Metrics
+### Phase 1 Success Metrics (Production)
 
-- ✅ >95% branch coverage on security modules
-- ✅ 5+ security issues identified and resolved
-- ✅ <5 min PR test runtime maintained
-- ✅ Continuous fuzzing operational
+**Discovery Metrics**:
+
+- ✅ **Unique bugs found**: ≥ 2 real security issues discovered
+- ✅ **Bug injection detection rate**: 100% of injected bugs caught by property tests
+- ✅ **Property test coverage**: ≥ 15 property tests across 5 security modules
+
+**Coverage Metrics** (Realistic, Not Aspirational):
+
+- ✅ **Branch coverage on security modules**: ≥ 85% (not 95% - external review recommendation)
+- ✅ **Coverage delta per property**: Each new property adds ≥ 3% coverage to target module
+- ✅ **Untested critical branches**: <20 in security-critical code paths
+
+**Performance Metrics** (CI Health):
+
+- ✅ **PR test runtime**: ≤ 5 minutes (fast feedback, no blocking)
+- ✅ **Nightly exploration runtime**: ≤ 15 minutes (deep search within budget)
+- ✅ **Test failure rate**: <5% (mostly true bugs, not flakes or environmental issues)
+
+**Maintenance Metrics** (Sustainability):
+
+- ✅ **Crash triage time**: <24h for S0/S1, <3 days for S2 (per SLA table)
+- ✅ **False positive rate**: <10% of reported crashes
+- ✅ **Corpus size**: .hypothesis/examples/ < 50MB per target (pruned regularly)
+
+**Compliance Evidence** (IRAP/Accreditation):
+
+- ✅ **Oracle documentation**: Explicit security invariants documented for each target
+- ✅ **Test effectiveness proof**: Bug injection tests demonstrate vulnerability detection
+- ✅ **Continuous testing evidence**: Timestamped CI runs with crash artifacts
+- ✅ **Remediation tracking**: GitHub issues linking crashes to fixes
 
 ---
 
@@ -455,43 +783,92 @@ if __name__ == "__main__":
 
 ## Recommendations
 
-### Immediate Actions (Week 1)
+### Immediate Actions (Week 1, Priority Order)
 
-1. **Run coverage analysis** on security modules
-2. **Select top 3 targets** based on risk assessment
-3. **Write first Hypothesis test** as proof of concept
-4. **Allocate resources** for Phase 0 (1 developer, 2-3 weeks)
+1. **Define oracle specifications** (CRITICAL) - Complete the oracle table for all 5 target modules
+2. **Add Hypothesis profiles** - Configure `pyproject.toml` with ci and explore profiles
+3. **Implement 2 bug injection tests** - Prove property tests can catch vulnerabilities
+4. **Write 3 property tests** - Start with path_guard.py (highest risk)
+5. **Run coverage analysis** - Identify untested branches in security modules
+
+### Integration with External Review
+
+This strategy incorporates recommendations from the external review (see `fuzzing_design_review_external.md`):
+
+✅ **Adopted**:
+
+- Explicit oracle table (Section 1.3) - CRITICAL addition
+- Bug injection smoke tests (Section 2.2) - Proves test effectiveness
+- Severity taxonomy with SLAs (Section 3.1) - Clear triage procedures
+- Hypothesis profiles (Section 1.4) - ci and explore configurations
+- CI guardrails (Section 2.3) - Timeout budgets and artifact collection
+- Hypothesis-appropriate metrics (Success Criteria) - 85% coverage, not 95%
+
+⚠️ **Adapted**:
+
+- Differential testing - Only for URL validation (where applicable)
+- Timeout handling - Use Hypothesis `deadline` setting, not custom utilities
+- Corpus management - Use Hypothesis native `.hypothesis/examples/`
+
+❌ **Deferred**:
+
+- Mutation testing - Separate quality initiative, not fuzzing
+- Edge-based metrics - Not applicable to Hypothesis
+- Atheris/coverage-guided fuzzing - Operational complexity not justified for current risk profile
 
 ### Go/No-Go Decision Criteria
 
-**Proceed to full implementation if**:
+**Proceed to Phase 1 if** (after Phase 0):
 
-- Hypothesis finds 2+ real bugs in Phase 0
-- Security audit requirements mandate fuzzing
-- Team has bandwidth for 60-100 hour investment
+- Bug injection tests catch 100% of injected vulnerabilities
+- Property tests find 1+ real security issues in path_guard or URL validation
+- CI integration functional with <5 min PR runtime
+- Team can commit 15-25 hours for expansion
 
-**Defer/scale back if**:
+**Scale back or defer if**:
 
-- No bugs found in initial testing
-- Resource constraints exist
-- Lower-risk codebase assessment
+- False positive rate >15% after oracle refinement
+- No bugs found in 500+ examples across 3 properties
+- CI runtime consistently >7 minutes despite optimization
+- Team bandwidth <10 hours over next 2 weeks
 
 ---
 
 ## Appendix A: Tool Selection Rationale
 
-### Hypothesis vs. Atheris
+### Why Hypothesis Property-Based Testing?
 
-| Aspect | Hypothesis | Atheris |
-|--------|------------|---------|
-| Setup Complexity | Low | High |
-| Bug Finding | Good | Excellent |
-| Debugging | Excellent | Moderate |
-| CI Integration | Easy | Complex |
-| Maintenance | Low | High |
-| Coverage-Guided | No | Yes |
+**Decision**: Use Hypothesis exclusively for property-based fuzzing on Python 3.12
 
-**Recommendation**: Start with Hypothesis, add Atheris for critical modules
+**Rationale**:
+
+| Factor | Hypothesis Strengths |
+|--------|---------------------|
+| **Setup Complexity** | Low - pip install, works with pytest, no special infrastructure |
+| **Python Compatibility** | Native Python 3.12 support, no version juggling |
+| **Bug Finding** | Good for logic errors and security invariants when oracles are well-defined |
+| **Debugging** | Excellent - automatic shrinking, deterministic reproduction with seeds |
+| **CI Integration** | Easy - runs in standard pytest, fast feedback (<5 min) |
+| **Maintenance** | Low - stdlib-like stability, minimal API churn |
+| **Learning Curve** | Moderate - team already familiar with pytest |
+| **Cost** | Zero - open source, no dedicated infrastructure |
+
+**Why Not Atheris (Coverage-Guided Fuzzing)?**
+
+While Atheris offers superior edge-case discovery through coverage guidance, it introduces operational complexity:
+
+- **Python 3.11 requirement**: Forces version juggling (runtime on 3.12, fuzz on 3.11)
+- **Infrastructure needs**: Dedicated fuzzing servers or extended CI time (hours, not minutes)
+- **Higher false positive rate**: Finds crashes without semantic meaning more often
+- **Maintenance burden**: More complex setup, crash reproduction harder
+- **Overkill for current risk**: Property testing with explicit oracles sufficient for identified threat surfaces
+
+**Decision Rule**: Adopt Hypothesis first. Only consider coverage-guided fuzzing (Atheris/libFuzzer) if:
+
+1. Hypothesis finds 5+ high-severity bugs (proving ROI)
+2. Code complexity increases significantly (parser expansion, new untrusted input)
+3. External compliance mandate (e.g., FIPS, Common Criteria)
+4. Team can commit 100+ hours to infrastructure and maintenance
 
 ---
 
@@ -540,8 +917,48 @@ if __name__ == "__main__":
 
 ---
 
-## Conclusion
+## Conclusion and Path Forward
 
-Fuzzing represents a significant but valuable investment in Elspeth's security posture. The incremental approach allows for risk mitigation while demonstrating value early. Starting with Hypothesis property-based testing (15-20 hours) provides immediate security benefits with manageable complexity, while preserving the option to expand to full coverage-guided fuzzing if warranted by initial results.
+### Phase 1: Foundation (This Document)
 
-The key to success is treating fuzzing not as a one-time activity but as an ongoing security practice integrated into the development lifecycle.
+Hypothesis property-based testing (30-45 hours over 3-4 weeks) provides immediate, high-value security testing with explicit oracles and low operational overhead. This phase establishes fuzzing practices, builds team expertise, and demonstrates ROI through bug discovery.
+
+**Key to success**: Treat fuzzing as an ongoing security practice integrated into development, not a one-time activity.
+
+### Phase 2: Advanced Coverage (When Ready)
+
+For mission-critical systems handling classified data and PII, **Phase 2 (coverage-guided fuzzing with Atheris)** provides defense-in-depth by discovering unknown edge cases that property testing misses.
+
+**Phase 2 is justified when**:
+
+- ✅ Phase 1 finds ≥2 security bugs (proves fuzzing ROI)
+- ✅ Atheris supports Python 3.12 (technical blocker removed)
+- ✅ Threat profile warrants additional investment (classified data, nation-state actors)
+
+**Status**: 🔶 **BLOCKED** on Atheris Python 3.12 support (est. Q2 2025+)
+
+**Documentation**:
+
+- **Strategy**: [fuzzing_coverage_guided.md](../archive/phase2_blocked_atheris/fuzzing_coverage_guided.md) - Complete Atheris approach
+- **Roadmap**: [fuzzing_coverage_guided_plan.md](./fuzzing_coverage_guided_plan.md) - Implementation timeline
+- **Tracking**: [fuzzing_coverage_guided_readiness.md](./fuzzing_coverage_guided_readiness.md) - Prerequisites and monitoring
+
+### Defense-in-Depth Fuzzing Strategy
+
+**Both approaches complement each other**:
+
+- **Hypothesis (Phase 1)**: Fast oracle validation of *known* security invariants
+- **Atheris (Phase 2)**: Deep exploration to discover *unknown* edge cases
+
+**Recommended for**:
+
+- High-assurance systems (classified, PII, mission-critical)
+- IRAP/Common Criteria compliance requirements
+- Systems with complex parsers (URLs, paths, templates)
+- Post-incident hardening after security vulnerabilities
+
+**Not recommended if**:
+
+- Phase 1 finds <2 bugs (Hypothesis may be sufficient)
+- Limited team capacity (<40 hours available)
+- Lower-risk codebase without classified data handling
