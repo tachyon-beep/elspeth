@@ -198,6 +198,23 @@ def test_middleware_hook_sequence_multi_experiment(
 def test_shared_middleware_deduplication() -> None:
     """INVARIANT: Shared middleware instance gets on_suite_loaded ONLY ONCE.
 
+    ╔═══════════════════════════════════════════════════════════════════════════╗
+    ║ CERTIFICATION IMPACT: HIGH                                                ║
+    ║                                                                           ║
+    ║ This test validates framework-level audit event deduplication. Failure   ║
+    ║ indicates a CERTIFICATION BLOCKER - the system may emit duplicate audit   ║
+    ║ events to compliance logging middleware, violating audit trail integrity. ║
+    ║                                                                           ║
+    ║ Regulatory Impact:                                                        ║
+    ║ • Duplicate audit records corrupt compliance event streams               ║
+    ║ • May trigger false positives in anomaly detection systems               ║
+    ║ • Could invalidate certification for systems requiring accurate counts   ║
+    ║                                                                           ║
+    ║ This is NOT a config issue - this is core framework security enforcement.║
+    ║ If this test fails, DO NOT proceed to certification without investigating║
+    ║ the root cause in suite_runner.py middleware notification logic.         ║
+    ╚═══════════════════════════════════════════════════════════════════════════╝
+
     This is the CRITICAL deduplication behavior in suite_runner.py lines 359-365.
     The notified_middlewares dict tracks which middleware instances have received
     on_suite_loaded to prevent duplicate notifications when the same middleware

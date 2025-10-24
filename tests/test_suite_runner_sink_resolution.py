@@ -61,6 +61,23 @@ class TestSinkResolutionPriority:
     ) -> None:
         """INVARIANT: Experiment sink_defs have highest priority.
 
+        ╔═══════════════════════════════════════════════════════════════════════════╗
+        ║ CERTIFICATION IMPACT: HIGH                                                ║
+        ║                                                                           ║
+        ║ This test validates security tier enforcement for result sinks. Failure  ║
+        ║ indicates a CERTIFICATION BLOCKER - the system may write classified data  ║
+        ║ to incorrect security tiers, violating data classification controls.     ║
+        ║                                                                           ║
+        ║ Regulatory Impact:                                                        ║
+        ║ • Classified results could leak to lower security tiers                  ║
+        ║ • Violates principle of explicit experiment-level security controls      ║
+        ║ • Could result in data spillage events requiring incident reporting      ║
+        ║                                                                           ║
+        ║ This is NOT a config issue - this is core framework security enforcement.║
+        ║ If this test fails, DO NOT proceed to certification. The 5-level sink    ║
+        ║ resolution priority hierarchy is a security control, not a convenience.  ║
+        ╚═══════════════════════════════════════════════════════════════════════════╝
+
         When experiment defines sink_defs, they are used regardless of
         pack, defaults, or factory configuration.
         """
