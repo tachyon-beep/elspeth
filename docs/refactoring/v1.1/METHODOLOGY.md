@@ -3065,7 +3065,7 @@ By following this methodology, you can confidently reduce complexity in critical
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
 
-**Version:** 1.0
+**Version:** 1.1
 **Last Updated:** 2025-10-25
-**Success Rate:** 2/2 (100%)
+**Success Rate:** 2/2 (100%) - 86.7% avg complexity reduction
 **Team:** Elspeth Engineering
