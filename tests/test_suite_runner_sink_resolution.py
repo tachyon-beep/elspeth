@@ -80,11 +80,10 @@ class TestSinkResolutionPriority:
                     name="exp1", temperature=0.7, max_tokens=100,
                     sink_defs=[
                         {
-                            "plugin": "csv_file",
+                            "plugin": "collecting",
                             "options": {
-                                "path": "/tmp/experiment.csv",
                                 "security_level": "internal",
-                                "determinism_level": "deterministic",
+                                "determinism_level": "guaranteed",
                             },
                         }
                     ],
@@ -99,11 +98,11 @@ class TestSinkResolutionPriority:
                 "test_pack": {
                     "sinks": [
                         {
-                            "plugin": "csv_file",
+                            "plugin": "collecting",
                             "options": {
                                 "path": "/tmp/pack.csv",
                                 "security_level": "internal",
-                                "determinism_level": "deterministic",
+                                "determinism_level": "guaranteed",
                             },
                         }
                     ]
@@ -112,11 +111,11 @@ class TestSinkResolutionPriority:
             "prompt_pack": "test_pack",
             "sink_defs": [
                 {
-                    "plugin": "csv_file",
+                    "plugin": "collecting",
                     "options": {
                         "path": "/tmp/defaults.csv",
                         "security_level": "internal",
-                        "determinism_level": "deterministic",
+                        "determinism_level": "guaranteed",
                     },
                 }
             ],
@@ -169,11 +168,11 @@ class TestSinkResolutionPriority:
                     },
                     "sinks": [
                         {
-                            "plugin": "csv_file",
+                            "plugin": "collecting",
                             "options": {
                                 "path": "/tmp/pack.csv",
                                 "security_level": "internal",
-                                "determinism_level": "deterministic",
+                                "determinism_level": "guaranteed",
                             },
                         }
                     ],
@@ -182,11 +181,11 @@ class TestSinkResolutionPriority:
             # Also configure defaults (should be ignored when pack has sinks)
             "sink_defs": [
                 {
-                    "plugin": "csv_file",
+                    "plugin": "collecting",
                     "options": {
                         "path": "/tmp/defaults.csv",
                         "security_level": "internal",
-                        "determinism_level": "deterministic",
+                        "determinism_level": "guaranteed",
                     },
                 }
             ],
@@ -225,11 +224,11 @@ class TestSinkResolutionPriority:
             **base_defaults,
             "sink_defs": [
                 {
-                    "plugin": "csv_file",
+                    "plugin": "collecting",
                     "options": {
                         "path": "/tmp/defaults.csv",
                         "security_level": "internal",
-                        "determinism_level": "deterministic",
+                        "determinism_level": "guaranteed",
                     },
                 }
             ],
@@ -349,11 +348,11 @@ class TestSinkResolutionPriority:
                     prompt_pack="test_pack",
                     sink_defs=[
                         {
-                            "plugin": "csv_file",
+                            "plugin": "collecting",
                             "options": {
                                 "path": "/tmp/exp.csv",
                                 "security_level": "internal",
-                                "determinism_level": "deterministic",
+                                "determinism_level": "guaranteed",
                             },
                         }
                     ],
@@ -368,11 +367,11 @@ class TestSinkResolutionPriority:
                     "prompts": {"system": "Pack", "user": "{{ text }}"},
                     "sinks": [
                         {
-                            "plugin": "csv_file",
+                            "plugin": "collecting",
                             "options": {
                                 "path": "/tmp/pack.csv",
                                 "security_level": "internal",
-                                "determinism_level": "deterministic",
+                                "determinism_level": "guaranteed",
                             },
                         }
                     ],
@@ -380,11 +379,11 @@ class TestSinkResolutionPriority:
             },
             "sink_defs": [
                 {
-                    "plugin": "csv_file",
+                    "plugin": "collecting",
                     "options": {
                         "path": "/tmp/defaults.csv",
                         "security_level": "internal",
-                        "determinism_level": "deterministic",
+                        "determinism_level": "guaranteed",
                     },
                 }
             ],
@@ -402,6 +401,7 @@ class TestSinkResolutionPriority:
 
         # Test 2: Pack wins over defaults and factory (when no experiment sinks)
         suite2 = ExperimentSuite(
+            root=Path("/tmp"),
             baseline=None,
             experiments=[
                 ExperimentConfig(
@@ -412,7 +412,8 @@ class TestSinkResolutionPriority:
             ],
         )
 
-        results2 = runner.run(
+        runner2 = ExperimentSuiteRunner(suite2, SimpleLLM(), [CollectingSink()])
+        results2 = runner2.run(
             pd.DataFrame([{"text": "test"}]),
             defaults,
             sink_factory=lambda exp: [CollectingSink()],
@@ -448,11 +449,11 @@ class TestSinkResolutionEdgeCases:
             "security_level": "internal",
             "sink_defs": [
                 {
-                    "plugin": "csv_file",
+                    "plugin": "collecting",
                     "options": {
                         "path": "/tmp/defaults.csv",
                         "security_level": "internal",
-                        "determinism_level": "deterministic",
+                        "determinism_level": "guaranteed",
                     },
                 }
             ],

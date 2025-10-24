@@ -113,6 +113,37 @@ class CollectingSink(ResultSink):
         self.calls.append((results, metadata))
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _register_test_sinks():
+    """Register CollectingSink as a test plugin for sink resolution tests.
+
+    This enables sink definition-based tests (paths 1-3 in test_suite_runner_sink_resolution.py)
+    to test the complete integration path: definition → registry → instantiated object.
+
+    Without this, only pre-instantiated sink tests (paths 4-5) would work, leaving a 60%
+    coverage gap in the 5-level sink resolution priority chain.
+    """
+    from elspeth.core.base.plugin_context import PluginContext
+    from elspeth.core.registries.sink import sink_registry
+
+    def _create_collecting_sink(options: dict[str, Any], context: PluginContext) -> CollectingSink:
+        """Factory function for CollectingSink plugin."""
+        return CollectingSink()
+
+    # Minimal schema - accepts any options for test flexibility
+    schema = {
+        "type": "object",
+        "properties": {},
+        "additionalProperties": True,
+    }
+
+    sink_registry.register("collecting", _create_collecting_sink, schema=schema)
+
+    yield  # Test run happens here
+
+    # No cleanup needed - registry state doesn't persist across test runs
+
+
 class MiddlewareHookTracer:
     """Captures all middleware lifecycle hook calls for verification.
 
