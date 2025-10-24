@@ -181,10 +181,14 @@ def get_data(self, context):
 
 ## Key Design Decisions
 
-### 1. Clearance Envelope Model
-- Orchestrator operates at MINIMUM security level
+### 1. Clearance Envelope Model with Dynamic Assessment
+- Orchestrator asks plugins for security level FOR THIS SPECIFIC JOB
+- Plugins inspect configuration and report ACTUAL level (not maximum capability)
+- Orchestrator operates at MINIMUM of all reported levels
 - High-security components refuse to participate in low-clearance envelopes
 - NOT "datasource blocks low sink" - it's "ALL components validate against operating level"
+
+**Example**: Azure datasource plugin is CAPABLE of SECRET, but when accessing an OFFICIAL blob container, it reports "OFFICIAL" for this job. This allows the job to run with OFFICIAL components (not just SECRET components). Without dynamic assessment, plugin would always report SECRET and fail even with OFFICIAL-only pipelines.
 
 ### 2. Defense in Depth
 - **Start-time** (PRIMARY): Fail-fast before data retrieval - MUST catch all misconfigs
