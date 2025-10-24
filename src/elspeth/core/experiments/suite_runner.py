@@ -815,6 +815,9 @@ class ExperimentSuiteRunner:
 
             payload = runner.run(df)
 
+            # Baseline detection: Check both is_baseline flag (experiment-level marker)
+            # and suite.baseline identity (suite-level reference). This handles cases where
+            # experiments may be marked as baseline via either mechanism.
             if ctx.baseline_payload is None and (experiment.is_baseline or experiment == self.suite.baseline):
                 ctx.baseline_payload = payload
 

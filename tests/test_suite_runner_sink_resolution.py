@@ -82,9 +82,6 @@ class TestSinkResolutionPriority:
         pack, defaults, or factory configuration.
         """
         # Create identifiable sinks for each layer
-        CollectingSink()
-        CollectingSink()
-        CollectingSink()
         factory_sink = CollectingSink()
         runner_sink = CollectingSink()
 

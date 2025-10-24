@@ -67,8 +67,6 @@ def test_baseline_comparison_skipped_when_no_baseline() -> None:
     comparisons_run = []
 
     for experiment in experiments:
-        {"results": [f"{experiment['name']}_result"]}
-
         # Comparison guard logic (from suite_runner.py:396)
         if baseline_payload is not None:
             comparisons_run.append(experiment["name"])
@@ -246,7 +244,6 @@ def test_baseline_comparison_runs_after_each_experiment_completes() -> None:
     for experiment in experiments:
         # Experiment execution
         execution_log.append(f"{experiment['name']}_start")
-        {"results": [f"{experiment['name']}_result"]}
         execution_log.append(f"{experiment['name']}_complete")
 
         # Comparison runs IMMEDIATELY (not batched)
