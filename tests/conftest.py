@@ -5,6 +5,7 @@ from typing import Any, Callable
 
 import pytest
 
+from elspeth.core.base.protocols import ResultSink
 from elspeth.plugins.nodes.sinks._sanitize import DANGEROUS_PREFIXES
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -89,6 +90,27 @@ class SimpleLLM:
 def simple_llm() -> SimpleLLM:
     """Fixture providing a deterministic LLM for testing."""
     return SimpleLLM()
+
+
+class CollectingSink(ResultSink):
+    """Sink that records all write() calls for test assertions.
+
+    Used across characterization, integration, and behavioral tests to verify
+    sink data flow without actual I/O operations.
+
+    Attributes:
+        calls: List of (results_dict, metadata_dict) tuples for each write() call
+        _elspeth_security_level: Required security level attribute
+    """
+
+    def __init__(self) -> None:
+        """Initialize collecting sink with empty call log."""
+        self.calls: list[tuple[dict[str, Any], dict[str, Any] | None]] = []
+        self._elspeth_security_level = "official"
+
+    def write(self, results: dict[str, Any], *, metadata: dict[str, Any] | None = None) -> None:
+        """Record write call with results and metadata."""
+        self.calls.append((results, metadata))
 
 
 class MiddlewareHookTracer:
