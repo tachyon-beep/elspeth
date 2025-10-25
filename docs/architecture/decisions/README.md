@@ -18,6 +18,7 @@ These decisions are currently in effect and guide ongoing development:
 | [003](003-plugin-type-registry.md) | Central Plugin Type Registry | 2025-10-25 | 📋 Proposed | Central registry for plugin security validation with type-safe plugin composition |
 | [004](004-mandatory-baseplugin-inheritance.md) | Mandatory BasePlugin Inheritance | 2025-10-25 | 📋 Proposed | Requires all plugins to inherit from BasePlugin for security enforcement |
 | [005](005-security-critical-exception-policy.md) | Security-Critical Exception Policy | 2025-10-25 | 📋 Proposed | Policy-enforced fail-loud exceptions for security invariant violations |
+| [006](006-universal-dual-output-protocol.md) | Universal Dual-Output Plugin Protocol | 2025-10-26 | 📋 Proposed | Establishes dual-output pattern (DataFrame + Artifacts) with inheritance control for universal plugin composability |
 
 ## Historical ADRs
 
@@ -81,5 +82,5 @@ When an ADR is superseded or becomes historical, move it to the `historical/` su
 
 ---
 
-**Last Updated**: 2025-10-25
+**Last Updated**: 2025-10-26
 **Maintained By**: Architecture Team

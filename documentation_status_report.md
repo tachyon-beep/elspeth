@@ -222,6 +222,21 @@ Batch 15 (141-147):
 | `docs/architecture/archive/adr-002-implementation/CHECKLIST.md` | 205 | Spot read | Medium | `docs/architecture/archive/...` | Needs update | Items remain unchecked despite implementation being complete; either mark completed gates or label the file explicitly as a template to avoid confusion during audits. |
 | `docs/architecture/archive/adr-002-implementation/METHODOLOGY.md` | 631 | Spot read | High | `docs/architecture/archive/...` | Needs update | Method references `THREAT_MODEL_ADR002.md`, but the repo ships `THREAT_MODEL.md`; update file names and cross-links so operators land on the right artefacts. |
 
+## Batch 2 Deep Dive Findings
+
+| File | Lines | Review Depth | Usefulness | Placement | Currency | Notes |
+|---|---|---|---|---|---|---|
+| `docs/architecture/archive/adr-002-implementation/PROGRESS.md` | 690 | Spot read | Medium | `docs/architecture/archive/...` | Needs update | Top summary says phases complete, but later sections still show “Current Status: No tests yet” and reference `tests/test_adr002_integration.py`; mark as archival snapshot or align the checkpoints. |
+| `docs/architecture/archive/adr-002-implementation/README.md` | 147 | Full read | High | `docs/architecture/archive/...` | Current | Clearly signposts canonical documentation locations; double-check cited test counts/coverage before reusing in compliance reports. |
+| `docs/architecture/archive/adr-002-implementation/THREAT_MODEL.md` | 589 | Spot read | High | `docs/architecture/archive/...` | Needs update | Consider flagging this as archival-only and ensure evidence references match current test names/locations to avoid divergence from `docs/security/adr-002-threat-model.md`. |
+| `docs/architecture/audit-logging.md` | 109 | Full read | High | `docs/architecture` | Needs update | Content is accurate, but inline citations still reference `src/elspeth/plugins/outputs/...`; swap to the `nodes/sinks` paths (the update callouts already mention them). |
+| `docs/architecture/component-diagram.md` | 257 | Spot read | High | `docs/architecture` | Needs update | Diagrams are current, but “See Also” links to `data-flow-orchestration.md`, which no longer exists—point to `data-flow-diagrams.md` instead. |
+| `docs/architecture/configuration-security.md` | 89 | Full read | High | `docs/architecture` | Current | Provides actionable guidance on validation, secrets, and governance in the reorganised codebase. |
+| `docs/architecture/CORE_STRUCTURE_CURRENT.md` | 217 | Spot read | High | `docs/architecture` | Needs update | Navigation guidance is solid, but the “See Also” section references `data-flow-orchestration.md`; update the link to the active diagrams file. |
+| `docs/architecture/data-flow-diagrams.md` | 236 | Spot read | High | `docs/architecture` | Needs update | Primary bullets still cite pre-migration module paths before the update notes; rewrite the lead references to use the `nodes/{sources,transforms,sinks}` structure to avoid confusion. |
+| `docs/architecture/decisions/000-template.md` | 74 | Full read | High | `docs/architecture/decisions` | Current | ADR template is clear and actionable; no changes needed. |
+| `docs/architecture/decisions/001-design-philosophy.md` | 118 | Full read | High | `docs/architecture/decisions` | Current | Security-first hierarchy and fail-closed policy remain accurate for the present architecture. |
+
 
 ## Detailed Inventory
 

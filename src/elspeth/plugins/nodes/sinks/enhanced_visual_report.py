@@ -13,6 +13,7 @@ import numpy as np
 import pandas as pd
 
 from elspeth.core.base.protocols import Artifact, ArtifactDescriptor
+from elspeth.core.base.types import SecurityLevel
 
 from ._visual_base import BaseVisualSink
 
@@ -43,6 +44,7 @@ class EnhancedVisualAnalyticsSink(BaseVisualSink):
         seaborn_style: str | None = "darkgrid",
         color_palette: str | None = "Set2",
         on_error: str = "abort",
+        security_level: SecurityLevel,  # REQUIRED - no default (ADR-004 requirement)
     ) -> None:
         # Initialize base class with common parameters
         super().__init__(
@@ -54,6 +56,7 @@ class EnhancedVisualAnalyticsSink(BaseVisualSink):
             default_figure_size=(10.0, 6.0),  # Custom default for this sink
             seaborn_style=seaborn_style,
             on_error=on_error,
+            security_level=security_level,  # Pass security level to BaseVisualSink (ADR-004)
         )
 
         # Sink-specific parameters: chart type validation
@@ -172,8 +175,8 @@ class EnhancedVisualAnalyticsSink(BaseVisualSink):
                 path=str(path),
                 metadata=metadata,
                 persist=True,
-                security_level=self._security_level,
-                determinism_level=self._determinism_level,
+                security_level=self._artifact_security_level,
+                determinism_level=self._artifact_determinism_level,
             )
             artifacts[name] = artifact
         self._last_written_files = []

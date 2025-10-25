@@ -14,7 +14,9 @@ from typing import Any, Mapping
 
 import requests
 
+from elspeth.core.base.plugin import BasePlugin
 from elspeth.core.base.protocols import Artifact, ArtifactDescriptor, ResultSink
+from elspeth.core.base.types import SecurityLevel
 from elspeth.core.security.secure_mode import SecureMode, get_secure_mode
 
 try:
@@ -70,8 +72,11 @@ class PreparedFile:
 
 
 @dataclass
-class _RepoSinkBase(ResultSink):
-    """Common repository sink behavior (auth, retries, dry-run, error handling)."""
+class _RepoSinkBase(BasePlugin, ResultSink):
+    """Common repository sink behavior (auth, retries, dry-run, error handling).
+
+    Inherits from BasePlugin to provide security enforcement (ADR-004).
+    """
 
     path_template: str = "experiments/{experiment}/{timestamp}"
     commit_message_template: str = "Add experiment results for {experiment}"
@@ -82,12 +87,16 @@ class _RepoSinkBase(ResultSink):
     request_timeout: int = DEFAULT_REQUEST_TIMEOUT
     _last_payloads: list[dict[str, Any]] = field(default_factory=list, init=False)
     on_error: str = "abort"
+    security_level: SecurityLevel = SecurityLevel.OFFICIAL  # REQUIRED (ADR-004) - default to OFFICIAL
     _allow_missing_token: bool = field(default=False, init=False, repr=False)
     # Throttle spammy warnings to once per process
     _dry_run_warned_once: bool = False
     _strict_dry_run_warned_once: bool = False
 
     def __post_init__(self) -> None:
+        # Initialize BasePlugin with security level (ADR-004)
+        super().__init__(security_level=self.security_level)
+
         # Validate on_error early for clearer error messages
         if self.on_error not in {"abort", "skip"}:
             raise ValueError("on_error must be 'abort' or 'skip'")
