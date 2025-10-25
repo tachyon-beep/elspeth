@@ -27,6 +27,40 @@ We will add **frozen plugin capability** via a **mandatory configuration paramet
 - **Requires explicit security choice** (no default - security decisions must be intentional)
 - ⚠️ **Breaking change**: All plugins MUST explicitly declare `allow_downgrade=True` or `allow_downgrade=False`
 
+### Bell-LaPadula Directionality: Data vs Plugin Classifications
+
+**CRITICAL DISTINCTION**: Data classifications and plugin operations move in OPPOSITE directions under Bell-LaPadula:
+
+**Data Classifications (Can Only INCREASE)**:
+- Data tagged UNOFFICIAL can be **uplifted** to OFFICIAL or SECRET (via `with_uplifted_classification()`)
+- Data tagged SECRET **CANNOT** be downgraded to OFFICIAL or UNOFFICIAL
+- Violates Bell-LaPadula "no write down" rule
+- Example: SECRET-tagged DataFrame cannot be written to UNOFFICIAL sink
+- Classification increases are EXPLICIT and AUDITED (never implicit)
+
+**Plugin Operations (Can Only DECREASE - if allow_downgrade=True)**:
+- Plugin with SECRET clearance **CAN** operate at OFFICIAL or UNOFFICIAL levels (trusted downgrade)
+- Plugin with UNOFFICIAL clearance **CANNOT** operate at SECRET level (insufficient clearance)
+- Violates Bell-LaPadula "no read up" rule
+- Example: UNOFFICIAL datasource cannot participate in SECRET pipeline
+- Operation decreases require `allow_downgrade=True` (frozen plugins reject ALL downgrade attempts)
+
+**Asymmetry Summary**:
+```
+Data:    UNOFFICIAL → OFFICIAL → SECRET  (can only increase via uplift)
+Plugin:  SECRET → OFFICIAL → UNOFFICIAL  (can only decrease via trusted downgrade)
+```
+
+**Forbidden Operations**:
+- ❌ UNOFFICIAL plugin running at SECRET level (insufficient clearance)
+- ❌ SECRET data downgrading to UNOFFICIAL (no write down)
+- ❌ Frozen plugin (allow_downgrade=False) operating below its clearance
+
+**Allowed Operations**:
+- ✅ SECRET plugin operating at UNOFFICIAL level (if allow_downgrade=True) - trusted to filter
+- ✅ UNOFFICIAL data uplifted to SECRET (explicit via with_uplifted_classification())
+- ✅ Frozen plugin operating at EXACT declared level only
+
 ### Implementation: Configuration-Driven Approach
 
 Add `allow_downgrade: bool` parameter to `BasePlugin.__init__()`:
@@ -109,16 +143,16 @@ class BasePlugin(ABC):
             3. Otherwise: ALLOW (exact match or trusted downgrade)
 
         Example:
-            >>> # Trusted downgrade (default)
-            >>> plugin = MyPlugin(security_level=SecurityLevel.SECRET, allow_downgrade=True)
-            >>> plugin.validate_can_operate_at_level(SecurityLevel.OFFICIAL)  # ✅ OK
-            >>> plugin.validate_can_operate_at_level(SecurityLevel.TOP_SECRET)  # ❌ Raises
+            >>> # Trusted downgrade (allow_downgrade=True)
+            >>> plugin = MyPlugin(security_level=SecurityLevel.PROTECTED, allow_downgrade=True)
+            >>> plugin.validate_can_operate_at_level(SecurityLevel.OFFICIAL)  # ✅ OK (trusted downgrade)
+            >>> plugin.validate_can_operate_at_level(SecurityLevel.SECRET)  # ❌ Raises (insufficient clearance)
 
-            >>> # Frozen plugin
-            >>> frozen = MyPlugin(security_level=SecurityLevel.SECRET, allow_downgrade=False)
-            >>> frozen.validate_can_operate_at_level(SecurityLevel.SECRET)  # ✅ OK (exact)
-            >>> frozen.validate_can_operate_at_level(SecurityLevel.OFFICIAL)  # ❌ Raises (frozen)
-            >>> frozen.validate_can_operate_at_level(SecurityLevel.TOP_SECRET)  # ❌ Raises (insufficient)
+            >>> # Frozen plugin (allow_downgrade=False)
+            >>> frozen = MyPlugin(security_level=SecurityLevel.PROTECTED, allow_downgrade=False)
+            >>> frozen.validate_can_operate_at_level(SecurityLevel.PROTECTED)  # ✅ OK (exact match only)
+            >>> frozen.validate_can_operate_at_level(SecurityLevel.OFFICIAL)  # ❌ Raises (frozen, no downgrade)
+            >>> frozen.validate_can_operate_at_level(SecurityLevel.SECRET)  # ❌ Raises (insufficient clearance)
         """
         # Check 1: Insufficient clearance (Bell-LaPadula "no read up")
         if operating_level > self._security_level:
