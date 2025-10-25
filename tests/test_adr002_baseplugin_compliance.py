@@ -1,52 +1,80 @@
 """
-ADR-002 BasePlugin Protocol Compliance Tests
+ADR-002 BasePlugin ABC Inheritance Tests
 
-**PURPOSE**: Safety net for ADR-002 BasePlugin completion migration (P0 blocker)
+**PURPOSE**: Safety net for ADR-002 BasePlugin ABC migration (P0 blocker)
 
 This test suite uses the RED → GREEN → REFACTOR methodology from
-docs/refactoring/METHODOLOGY.md to implement the BasePlugin protocol across
-all 26 plugin classes.
+docs/refactoring/METHODOLOGY.md to migrate all 26 plugin classes to inherit
+from BasePlugin ABC with concrete "security bones" implementation (ADR-004).
 
 **PROBLEM STATEMENT**:
-Current ADR-002 validation code uses hasattr() defensive checks that
-short-circuit when plugins don't implement BasePlugin protocol methods
-(get_security_level() and validate_can_operate_at_level()). This allows
-SECRET datasources to flow to UNOFFICIAL sinks UNCHECKED.
+Current plugins don't inherit from BasePlugin ABC. ADR-002 validation code
+uses isinstance() checks that return False (no inheritance), causing validation
+to short-circuit. This allows SECRET datasources to flow to UNOFFICIAL sinks
+UNCHECKED.
+
+**NEW DESIGN (ADR-004 "Security Bones")**:
+- BasePlugin is now an ABC (not Protocol) with CONCRETE security methods
+- Plugins INHERIT security enforcement, they don't implement it
+- Security methods are FINAL and cannot be overridden (runtime enforced)
+- Validation logic is centralized in BasePlugin (single source of truth)
 
 **TEST CATEGORIES**:
 
+0. **Step 0 Verification** (GREEN - verify ABC infrastructure)
+   - BasePlugin ABC exists with concrete methods
+   - Runtime enforcement prevents method override (__init_subclass__)
+   - Property and methods work correctly
+   - Expected: XFAIL now (no ABC yet), PASS after Step 0
+
 1. **Characterization Tests** (RED - document current broken state)
-   - Prove plugins lack BasePlugin methods
+   - Prove plugins lack BasePlugin inheritance
    - Expected: PASS (documents problem)
 
 2. **Security Bug Tests** (RED - prove validation skips)
-   - Prove hasattr checks return False
+   - Prove isinstance checks return False
    - Prove SECRET→UNOFFICIAL currently allowed
    - Expected: PASS (proves vulnerability)
 
 3. **Security Property Tests** (GREEN - define success criteria)
-   - All plugins implement BasePlugin
+   - All plugins inherit from BasePlugin ABC
    - Validation raises SecurityValidationError on mismatch
    - Validation succeeds when safe
-   - Expected: XFAIL now, PASS after Phase 1
+   - Expected: XFAIL now, PASS after Step 1-4
 
 4. **Registry Enforcement Tests** (GREEN - define registration validation)
-   - Registry rejects plugins without BasePlugin methods
-   - Registry accepts plugins with BasePlugin methods
-   - Expected: XFAIL now, PASS after Phase 1.5 (optional)
+   - Registry rejects plugins without BasePlugin inheritance
+   - Registry accepts plugins with BasePlugin inheritance
+   - Expected: XFAIL now, PASS after Step 1-4 (optional)
 
 5. **Integration Tests** (GREEN - end-to-end validation)
    - Suite runner validates before data load
    - Multi-sink validation checks all sinks
-   - Expected: XFAIL now, PASS after Phase 2
+   - Expected: XFAIL now, PASS after Phase 1.5 complete
 
-**MIGRATION PHASES**:
-- Phase 0 (THIS FILE): Build safety net (2-3 hours)
-- Phase 1: Add BasePlugin methods to 26 plugins (2-3 hours)
-- Phase 2: Remove hasattr checks from suite_runner.py (30 min)
-- Phase 3: End-to-end verification (1-2 hours)
+**MIGRATION STEPS** (ADR-004 + ADR-003/004 Migration Plan):
+- **Step 0 (35 min)**: Create BasePlugin ABC, remove old Protocol, update imports
+  * Create src/elspeth/core/base/plugin.py with ABC
+  * Remove Protocol from src/elspeth/core/base/protocols.py
+  * Update all imports (protocols → plugin module)
+  * Verify isinstance checks use ABC (nominal typing)
 
-**EXIT CRITERIA (Phase 0)**:
+- **Step 1-4 (3-5 hours)**: Add BasePlugin inheritance to 26 plugins
+  * Add BasePlugin to inheritance chains
+  * Update __init__ to call super().__init__(security_level=...)
+  * Remove any existing get_security_level() implementations (now inherited)
+
+- **Phase 2 (30 min)**: Remove hasattr checks from suite_runner.py
+  * Replace hasattr defensive checks with direct method calls
+  * Add AttributeError handling for better error messages
+
+- **Phase 3 (1-2 hours)**: End-to-end verification
+  * All tests GREEN
+  * SECRET→UNOFFICIAL blocked
+  * isinstance(plugin, BasePlugin) returns True for all plugins
+
+**EXIT CRITERIA (Phase 0 - THIS FILE)**:
+- ✅ All Category 0 tests XFAIL (ABC doesn't exist yet)
 - ✅ All Category 1-2 tests PASS (characterization + bugs)
 - ✅ All Category 3-5 tests XFAIL (will pass after implementation)
 - ✅ MyPy clean
@@ -68,9 +96,218 @@ from elspeth.plugins.nodes.sinks.csv_file import CsvResultSink
 
 
 # =============================================================================
+# CATEGORY 0: STEP 0 VERIFICATION (BasePlugin ABC Infrastructure)
+# =============================================================================
+# Expected: All XFAIL now (ABC doesn't exist), PASS after Step 0 complete
+# =============================================================================
+
+
+class TestCategory0Step0Verification:
+    """Category 0: Step 0 verification - BasePlugin ABC infrastructure tests.
+
+    These tests verify that Step 0 (Protocol removal + ABC creation) is complete:
+    - BasePlugin ABC exists at src/elspeth/core/base/plugin.py
+    - Old Protocol removed from src/elspeth/core/base/protocols.py
+    - ABC has concrete security methods (not abstract)
+    - Runtime enforcement prevents method override (__init_subclass__)
+
+    **EXPECTED STATE**:
+    - Phase 0 (now): XFAIL - ABC doesn't exist yet, Protocol still in place
+    - After Step 0: PASS - ABC exists, Protocol removed, imports updated
+    """
+
+    @pytest.mark.xfail(
+        strict=True,
+        reason="Step 0 not complete - BasePlugin ABC doesn't exist yet at core.base.plugin"
+    )
+    def test_baseplugin_abc_module_exists(self) -> None:
+        """BasePlugin ABC MUST exist at src/elspeth/core/base/plugin.py (Step 0.1).
+
+        **STEP 0 REQUIREMENT**: Create new module with BasePlugin ABC
+        **EXPECTED**: XFAIL now, PASS after Step 0.1 complete
+        """
+        # Try to import BasePlugin ABC from the new module
+        try:
+            from elspeth.core.base.plugin import BasePlugin
+        except ImportError as e:
+            pytest.fail(
+                f"BasePlugin ABC module doesn't exist yet: {e}. "
+                f"Complete Step 0.1: Create src/elspeth/core/base/plugin.py"
+            )
+
+        # Verify it's an ABC, not Protocol
+        from abc import ABC
+        assert issubclass(BasePlugin, ABC), (
+            "BasePlugin should be an ABC (inherit from abc.ABC), not Protocol"
+        )
+
+    @pytest.mark.xfail(
+        strict=True,
+        reason="Step 0 not complete - BasePlugin ABC doesn't have concrete methods yet"
+    )
+    def test_baseplugin_has_concrete_security_methods(self) -> None:
+        """BasePlugin ABC MUST provide CONCRETE security methods (not abstract).
+
+        **SECURITY BONES DESIGN**: BasePlugin provides the implementation,
+        subclasses inherit it (they don't reimplement).
+
+        **EXPECTED**: XFAIL now, PASS after Step 0.1 complete
+        """
+        from elspeth.core.base.plugin import BasePlugin
+        from elspeth.core.base.types import SecurityLevel
+
+        # Create a minimal subclass (doesn't implement any methods)
+        class MinimalPlugin(BasePlugin):
+            def __init__(self, *, security_level: SecurityLevel):
+                super().__init__(security_level=security_level)
+
+        # Instantiate - should work because methods are inherited
+        plugin = MinimalPlugin(security_level=SecurityLevel.SECRET)
+
+        # Verify methods exist and work (inherited from BasePlugin)
+        assert hasattr(plugin, "get_security_level"), "Missing get_security_level method"
+        assert hasattr(plugin, "validate_can_operate_at_level"), "Missing validate_can_operate_at_level method"
+        assert plugin.get_security_level() == SecurityLevel.SECRET
+
+    @pytest.mark.xfail(
+        strict=True,
+        reason="Step 0 not complete - Runtime enforcement (__init_subclass__) not implemented"
+    )
+    def test_baseplugin_prevents_method_override_runtime(self) -> None:
+        """BasePlugin MUST prevent override of security methods at class definition (runtime enforcement).
+
+        **SECURITY INVARIANT**: get_security_level() and validate_can_operate_at_level()
+        are FINAL. Subclasses attempting to override them should raise TypeError.
+
+        This uses __init_subclass__ for runtime enforcement (complements @final for static checks).
+
+        **EXPECTED**: XFAIL now, PASS after Step 0.1 complete
+        """
+        from elspeth.core.base.plugin import BasePlugin
+        from elspeth.core.base.types import SecurityLevel
+
+        # Attempt to override get_security_level - should raise TypeError at class definition
+        with pytest.raises(TypeError) as exc_info:
+            class BrokenPlugin(BasePlugin):
+                def __init__(self, *, security_level: SecurityLevel):
+                    super().__init__(security_level=security_level)
+
+                def get_security_level(self) -> SecurityLevel:  # ← Override attempt
+                    return SecurityLevel.UNOFFICIAL  # ← Should be rejected!
+
+        # Error message should be clear
+        error_msg = str(exc_info.value)
+        assert "may not override" in error_msg or "security invariant" in error_msg
+        assert "get_security_level" in error_msg
+
+    @pytest.mark.xfail(
+        strict=True,
+        reason="Step 0 not complete - Read-only security_level property not implemented"
+    )
+    def test_baseplugin_security_level_property(self) -> None:
+        """BasePlugin MUST provide read-only security_level property.
+
+        **DESIGN**: Property enables convenient access (self.security_level) while
+        preventing reassignment (no setter). Backed by private _security_level attribute.
+
+        **EXPECTED**: XFAIL now, PASS after Step 0.1 complete
+        """
+        from elspeth.core.base.plugin import BasePlugin
+        from elspeth.core.base.types import SecurityLevel
+
+        class TestPlugin(BasePlugin):
+            def __init__(self, *, security_level: SecurityLevel):
+                super().__init__(security_level=security_level)
+
+        plugin = TestPlugin(security_level=SecurityLevel.SECRET)
+
+        # Property access should work
+        assert plugin.security_level == SecurityLevel.SECRET
+
+        # Property should be read-only (no setter)
+        with pytest.raises(AttributeError):
+            plugin.security_level = SecurityLevel.UNOFFICIAL  # ← Should fail!
+
+    @pytest.mark.xfail(
+        strict=True,
+        reason="Step 0 not complete - Old Protocol still exists in protocols.py"
+    )
+    def test_old_protocol_removed_from_protocols_module(self) -> None:
+        """Old BasePlugin Protocol MUST be removed from protocols.py (Step 0.2).
+
+        **CRITICAL**: If old Protocol remains, code importing from protocols module
+        will continue using structural typing (duck typing), defeating the ABC design.
+
+        **EXPECTED**: XFAIL now, PASS after Step 0.2 complete
+        """
+        import inspect
+
+        # Import protocols module
+        from elspeth.core.base import protocols
+
+        # Check if BasePlugin exists in protocols module
+        if hasattr(protocols, "BasePlugin"):
+            baseplugin_in_protocols = getattr(protocols, "BasePlugin")
+
+            # If it exists, it should be a re-export of the ABC, not the old Protocol
+            from typing import Protocol
+            from abc import ABC
+
+            is_protocol = (
+                hasattr(baseplugin_in_protocols, "__annotations__") and
+                inspect.isclass(baseplugin_in_protocols) and
+                issubclass(type(baseplugin_in_protocols), type(Protocol))
+            )
+
+            is_abc = inspect.isclass(baseplugin_in_protocols) and issubclass(baseplugin_in_protocols, ABC)
+
+            if is_protocol and not is_abc:
+                pytest.fail(
+                    "Old BasePlugin Protocol still exists in protocols.py! "
+                    "Complete Step 0.2: Remove Protocol or replace with ABC re-export"
+                )
+
+    @pytest.mark.xfail(
+        strict=True,
+        reason="Step 0 not complete - Validation code still imports from protocols module"
+    )
+    def test_validation_code_imports_abc_not_protocol(self) -> None:
+        """Validation code MUST import BasePlugin ABC from plugin module (Step 0.3).
+
+        **CRITICAL**: suite_runner._validate_component_clearances must use ABC
+        for isinstance checks to enforce nominal typing (explicit inheritance).
+
+        **EXPECTED**: XFAIL now, PASS after Step 0.3 complete
+        """
+        # Read suite_runner.py source to check imports
+        import inspect
+        from elspeth.core.experiments import suite_runner
+
+        source = inspect.getsource(suite_runner)
+
+        # Check for old Protocol import (should NOT exist after Step 0.3)
+        old_import = "from elspeth.core.base.protocols import BasePlugin"
+        new_import = "from elspeth.core.base.plugin import BasePlugin"
+
+        if old_import in source:
+            pytest.fail(
+                f"suite_runner.py still imports from protocols module! "
+                f"Complete Step 0.3: Update import to use plugin module. "
+                f"Found: {old_import!r}, Expected: {new_import!r}"
+            )
+
+        # Verify new import exists
+        if new_import not in source:
+            pytest.fail(
+                f"suite_runner.py doesn't import BasePlugin ABC from plugin module yet. "
+                f"Complete Step 0.3: Add {new_import!r}"
+            )
+
+
+# =============================================================================
 # CATEGORY 1: CHARACTERIZATION TESTS (Document Current Broken State)
 # =============================================================================
-# Expected: All PASS (proves plugins lack BasePlugin methods)
+# Expected: All PASS (proves plugins lack BasePlugin inheritance)
 # =============================================================================
 
 
@@ -487,40 +724,57 @@ class TestCategory5Integration:
 
     These tests verify the complete validation flow in ExperimentSuiteRunner,
     using REAL production plugins (CSVDataSource, CsvResultSink) to demonstrate
-    the CURRENT BROKEN BEHAVIOR where isinstance(plugin, BasePlugin) returns False.
+    the CURRENT BROKEN BEHAVIOR where isinstance(plugin, BasePlugin) returns False
+    because plugins don't inherit from BasePlugin ABC.
 
     **CRITICAL**: These tests use REAL plugins, NOT mocks. This ensures we're testing
     actual production behavior, not idealized mock behavior that gives false confidence.
 
-    Expected: XFAIL (Phase 0) → PASS after Phase 1-2 (BasePlugin implemented + hasattr removed)
+    **NEW DESIGN (ADR-004 "Security Bones")**:
+    - BasePlugin is an ABC (nominal typing) with concrete security methods
+    - Plugins INHERIT from BasePlugin (explicit inheritance required)
+    - isinstance checks enforce that plugins explicitly opt-in to security framework
+    - Security methods are FINAL and inherited (not reimplemented by each plugin)
+
+    **MIGRATION PHASES**:
+    - Step 0 (35 min): Create BasePlugin ABC, remove Protocol, update imports
+    - Step 1-4 (3-5 hours): Add BasePlugin inheritance to 26 plugins
+    - After complete: isinstance(plugin, BasePlugin) returns True, validation runs
+
+    Expected: XFAIL (Phase 0) → PASS after Step 1-4 complete (BasePlugin ABC inheritance added)
     """
 
     @pytest.mark.xfail(
         strict=True,
-        reason="Phase 0 - Real plugins lack BasePlugin methods, so isinstance checks fail and validation is SKIPPED (security bug!)"
+        reason="Phase 0 - Real plugins don't inherit from BasePlugin ABC, so isinstance checks fail and validation is SKIPPED (security bug!)"
     )
     def test_secret_datasource_unofficial_sink_blocked(self, tmp_path: Path) -> None:
         """Suite runner MUST block SECRET datasource → UNOFFICIAL sink flow.
 
         **TEST TYPE**: Integration (end-to-end security validation)
-        **PHASE 0 STATE**: XFAIL - validation skipped because real plugins lack BasePlugin
-        **AFTER PHASE 1**: Should turn GREEN when real plugins implement BasePlugin
+        **PHASE 0 STATE**: XFAIL - validation skipped because real plugins don't inherit from BasePlugin ABC
+        **AFTER STEP 1-4**: Should turn GREEN when real plugins inherit from BasePlugin ABC
 
         **SECURITY BUG DOCUMENTED**: This test uses REAL production plugins (CSVDataSource, CsvResultSink)
-        that currently DO NOT implement BasePlugin protocol. The validation code checks:
+        that currently DO NOT inherit from BasePlugin ABC. The validation code checks:
 
-            if isinstance(datasource, BasePlugin):  # line 598 in suite_runner.py
+            if isinstance(datasource, BasePlugin):  # Uses ABC (nominal typing)
                 plugins.append(datasource)
 
-        Because real plugins lack get_security_level() and validate_can_operate_at_level(),
-        isinstance returns FALSE, plugin is NOT added to validation list, and security
-        validation is SKIPPED entirely. This allows classified data to flow to low-clearance sinks!
+        Because real plugins don't inherit from BasePlugin ABC, isinstance returns FALSE (nominal typing
+        requires explicit inheritance). Plugin is NOT added to validation list, and security validation
+        is SKIPPED entirely. This allows classified data to flow to low-clearance sinks!
 
-        **EXPECTED AFTER PHASE 1**: When we add BasePlugin methods to CSVDataSource and CsvResultSink,
-        isinstance will return True, validation will run, and this test will turn GREEN.
+        **AFTER STEP 0**: BasePlugin ABC exists, but plugins still don't inherit from it
+        **AFTER STEP 1-4**: Plugins inherit from BasePlugin ABC, isinstance returns True, validation runs
+
+        **NEW DESIGN (ADR-004 "Security Bones")**:
+        - Plugins inherit from BasePlugin ABC (not Protocol)
+        - Security methods inherited from BasePlugin (not implemented by each plugin)
+        - isinstance checks enforce nominal typing (explicit inheritance required)
 
         **SCENARIO**: SECRET datasource + UNOFFICIAL sink (security mismatch)
-        **EXPECTED BEHAVIOR (after fix)**: SecurityValidationError raised before data retrieval
+        **EXPECTED BEHAVIOR (after Step 1-4)**: SecurityValidationError raised before data retrieval
         **CURRENT BEHAVIOR (bug)**: Validation skipped, experiment runs successfully (WRONG!)
         """
         from elspeth.core.experiments.config import ExperimentConfig, ExperimentSuite
@@ -575,22 +829,31 @@ class TestCategory5Integration:
 
     @pytest.mark.xfail(
         strict=True,
-        reason="Phase 0 - Real plugins lack BasePlugin methods, so isinstance checks fail and validation is SKIPPED"
+        reason="Phase 0 - Real plugins don't inherit from BasePlugin ABC, so isinstance checks fail and validation is SKIPPED"
     )
     def test_matching_security_levels_allowed(self, tmp_path: Path) -> None:
         """Suite runner MUST allow matching security levels (SECRET → SECRET).
 
         **TEST TYPE**: Integration (end-to-end security validation)
-        **PHASE 0 STATE**: XFAIL - validation skipped because real plugins lack BasePlugin
-        **AFTER PHASE 1**: Should turn GREEN when real plugins implement BasePlugin
+        **PHASE 0 STATE**: XFAIL - validation skipped because real plugins don't inherit from BasePlugin ABC
+        **AFTER STEP 1-4**: Should turn GREEN when real plugins inherit from BasePlugin ABC
 
-        **SECURITY BUG DOCUMENTED**: This test uses REAL production plugins that lack BasePlugin.
-        Even though this scenario SHOULD succeed (matching security levels), the validation
-        code never runs because isinstance(plugin, BasePlugin) returns False. We can't verify
-        the "success" path works correctly until plugins implement BasePlugin.
+        **SECURITY BUG DOCUMENTED**: This test uses REAL production plugins that don't inherit from
+        BasePlugin ABC. Even though this scenario SHOULD succeed (matching security levels), the validation
+        code never runs because isinstance(plugin, BasePlugin) returns False (nominal typing requires
+        explicit inheritance). We can't verify the "success" path works correctly until plugins inherit
+        from BasePlugin ABC.
+
+        **AFTER STEP 0**: BasePlugin ABC exists, but plugins still don't inherit from it
+        **AFTER STEP 1-4**: Plugins inherit from BasePlugin ABC, isinstance returns True, validation runs
+
+        **NEW DESIGN (ADR-004 "Security Bones")**:
+        - Plugins inherit from BasePlugin ABC (explicit inheritance)
+        - Security methods inherited from BasePlugin (centralized implementation)
+        - Validation runs when isinstance(plugin, BasePlugin) returns True
 
         **SCENARIO**: SECRET datasource + SECRET sink (matching levels)
-        **EXPECTED BEHAVIOR (after fix)**: Validation runs, both accept SECRET envelope, test passes
+        **EXPECTED BEHAVIOR (after Step 1-4)**: Validation runs, both accept SECRET envelope, test passes
         **CURRENT BEHAVIOR (bug)**: Validation skipped, test passes for WRONG reason (no validation ran)
         """
         from elspeth.core.experiments.config import ExperimentConfig, ExperimentSuite
