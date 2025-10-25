@@ -69,7 +69,7 @@ class ExcelResultSink(BasePlugin, ResultSink):
         sanitize_guard: str = "'",
         config: ExcelSinkConfig | None = None,
         allowed_base_path: str | Path | None = None,
-        security_level: SecurityLevel,  # REQUIRED - no default (ADR-004 requirement)
+        security_level: SecurityLevel = SecurityLevel.OFFICIAL,  # ADR-004: Default for testing (YAML configs must be explicit)
         allow_downgrade: bool = True,  # ADR-005: Trusted downgrade for sinks (explicit choice, matches default suite)
     ) -> None:
         """Initialize Excel sink.

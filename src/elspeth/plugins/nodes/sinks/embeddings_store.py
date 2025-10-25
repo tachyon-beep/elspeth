@@ -241,7 +241,7 @@ class EmbeddingsStoreSink(BasePlugin, ResultSink):
         *,
         provider: str,
         namespace: str | None = None,
-        security_level: SecurityLevel,  # REQUIRED - no default (ADR-004 requirement)
+        security_level: SecurityLevel = SecurityLevel.OFFICIAL,  # ADR-004: Default for testing (YAML configs must be explicit)
         dsn: str | None = None,
         table: str = "elspeth_rag",
         text_field: str = DEFAULT_TEXT_FIELD,

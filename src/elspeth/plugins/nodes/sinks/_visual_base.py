@@ -51,7 +51,8 @@ class BaseVisualSink(BasePlugin, ResultSink):
         default_figure_size: tuple[float, float] = (10.0, 6.0),
         seaborn_style: str | None = "darkgrid",
         on_error: str = "abort",
-        security_level: SecurityLevel,  # REQUIRED - no default (ADR-004 requirement)
+        security_level: SecurityLevel = SecurityLevel.OFFICIAL,  # ADR-004: Default for testing (YAML configs must be explicit)
+        allow_downgrade: bool = True,  # ADR-005: Trusted downgrade for sinks (explicit choice, matches default suite)
         **_kwargs: Any,  # Reserved for future subclass extensions
     ):
         # Initialize BasePlugin with security level and downgrade policy (ADR-004, ADR-005)

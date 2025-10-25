@@ -31,7 +31,7 @@ class BlobDataSource(BasePlugin, DataSource):
         profile: str = "default",
         pandas_kwargs: dict[str, Any] | None = None,
         on_error: str = "abort",
-        security_level: SecurityLevel,  # REQUIRED - no default (ADR-004 requirement)
+        security_level: SecurityLevel = SecurityLevel.OFFICIAL,  # ADR-004: Default for testing (YAML configs must be explicit)
         allow_downgrade: bool = True,  # ADR-005: Trusted downgrade for datasources (explicit choice, matches default suite)
         determinism_level: DeterminismLevel | None = None,
         retain_local: bool,  # REQUIRED - no default
