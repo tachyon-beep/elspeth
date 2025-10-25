@@ -609,6 +609,30 @@ class ExperimentSuiteRunner:
             if isinstance(middleware, BasePlugin):
                 plugins.append(middleware)
 
+        # Row plugins (from runner) - process individual rows
+        row_plugins = getattr(runner, "row_plugins", None) or []
+        for plugin in row_plugins:
+            if isinstance(plugin, BasePlugin):
+                plugins.append(plugin)
+
+        # Aggregator plugins (from runner) - process aggregated results
+        aggregator_plugins = getattr(runner, "aggregator_plugins", None) or []
+        for plugin in aggregator_plugins:
+            if isinstance(plugin, BasePlugin):
+                plugins.append(plugin)
+
+        # Validation plugins (from runner) - validate LLM responses
+        validation_plugins = getattr(runner, "validation_plugins", None) or []
+        for plugin in validation_plugins:
+            if isinstance(plugin, BasePlugin):
+                plugins.append(plugin)
+
+        # Early stop plugins (from runner) - observe and signal halt
+        early_stop_plugins = getattr(runner, "early_stop_plugins", None) or []
+        for plugin in early_stop_plugins:
+            if isinstance(plugin, BasePlugin):
+                plugins.append(plugin)
+
         # Sinks (passed as parameter)
         for sink in sinks:
             if isinstance(sink, BasePlugin):

@@ -235,12 +235,10 @@ class TestADR002SuiteIntegration:
         llm_client = MockLLMClient()
         runner = ExperimentSuiteRunner(suite=suite, llm_client=llm_client, sinks=[], datasource=datasource)
 
-        # Should succeed - SECRET sink rejects OFFICIAL operating level
+        # SECRET sink requires SECRET, but operating level = OFFICIAL
+        # Therefore SECRET sink should reject the operating level
         with pytest.raises(SecurityValidationError) as exc_info:
             runner.run(df, sink_factory=lambda exp: [sink])
-
-        # Actually, wait - SECRET sink requires SECRET, but operating level = OFFICIAL
-        # So SECRET sink should REJECT. Let me fix the test expectation.
 
         error_msg = str(exc_info.value)
         assert "SECRET" in error_msg, "SECRET sink should reject OFFICIAL envelope"

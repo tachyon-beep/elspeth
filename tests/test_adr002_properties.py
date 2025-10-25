@@ -18,35 +18,19 @@ from hypothesis import given, strategies as st, settings
 from pathlib import Path
 from typing import List
 
-# NOTE: These imports will fail until Phase 1-2 implementation
-try:
-    from elspeth.core.security import SecurityLevel, ClassifiedDataFrame
-    from elspeth.core.experiments.suite_runner import (
-        compute_minimum_clearance_envelope,
-        ExperimentSuiteRunner,
-        SuiteExecutionContext,
-    )
-    from elspeth.core.experiments.config import ExperimentSuite
-    from elspeth.core.base.protocols import BasePlugin
-except ImportError:
-    SecurityLevel = None
-    ClassifiedDataFrame = None
-    compute_minimum_clearance_envelope = None
-    ExperimentSuiteRunner = None
-    SuiteExecutionContext = None
-    ExperimentSuite = None
-    BasePlugin = None
+from elspeth.core.security import SecurityLevel, ClassifiedDataFrame
+from elspeth.core.experiments.suite_runner import (
+    compute_minimum_clearance_envelope,
+    ExperimentSuiteRunner,
+    SuiteExecutionContext,
+)
+from elspeth.core.experiments.config import ExperimentSuite
+from elspeth.core.base.protocols import BasePlugin
 
 
 # ============================================================================
 # PROPERTY 1: Minimum Envelope Correctness
 # ============================================================================
-
-
-@pytest.mark.skipif(
-    compute_minimum_clearance_envelope is None,
-    reason="Phase 1 not implemented yet"
-)
 class TestPropertyMinimumEnvelope:
     """PROPERTY: Minimum clearance envelope computation is correct under
                ALL possible plugin configurations.
@@ -119,10 +103,6 @@ class TestPropertyMinimumEnvelope:
 # ============================================================================
 
 
-@pytest.mark.skipif(
-    ExperimentSuiteRunner is None,
-    reason="Phase 2 not implemented yet"
-)
 class TestPropertyNoClassificationBreach:
     """PROPERTY: No configuration allows data to reach component with
                insufficient clearance.
@@ -205,10 +185,6 @@ class TestPropertyNoClassificationBreach:
 # ============================================================================
 
 
-@pytest.mark.skipif(
-    ClassifiedDataFrame is None,
-    reason="Phase 1 not implemented yet"
-)
 class TestPropertyClassificationUplifting:
     """PROPERTY: Classification uplifting is monotonic (never decreases).
 
@@ -304,10 +280,6 @@ class TestPropertyClassificationUplifting:
 # ============================================================================
 
 
-@pytest.mark.skipif(
-    ClassifiedDataFrame is None,
-    reason="Phase 1 not implemented yet"
-)
 class TestPropertyImmutability:
     """PROPERTY: ClassifiedDataFrame immutability prevents accidental downgrades.
 
@@ -380,10 +352,6 @@ class TestPropertyImmutability:
 # ============================================================================
 
 
-@pytest.mark.skipif(
-    compute_minimum_clearance_envelope is None,
-    reason="Phase 1 not implemented yet"
-)
 class TestPropertyAdversarialEdgeCases:
     """PROPERTY: Security properties hold even for adversarial/unusual configurations.
 
