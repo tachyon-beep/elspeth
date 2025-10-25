@@ -189,7 +189,7 @@ class BasePlugin(ABC):
             SecurityLevel: Plugin's security clearance.
 
         Example:
-            >>> plugin = MyPlugin(security_level=SecurityLevel.SECRET)
+            >>> plugin = MyPlugin(security_level=SecurityLevel.SECRET, allow_downgrade=True)
             >>> plugin.security_level  # ✅ Convenient access
             SecurityLevel.SECRET
             >>> plugin.security_level = SecurityLevel.UNOFFICIAL  # ❌ AttributeError (read-only)
@@ -209,17 +209,18 @@ class BasePlugin(ABC):
                 - False: Frozen plugin - must operate at exact declared level only
 
         Design Notes:
-            - Defaults to True (trusted downgrade per ADR-002)
+            - MANDATORY parameter (no default - explicit security choice required per ADR-005)
+            - Set to True for trusted downgrade (standard behavior per ADR-002)
             - Set to False for frozen plugins (strict enforcement per ADR-005)
             - Read-only to prevent runtime modification (prevents TOCTOU attacks)
 
         Example:
-            >>> # Trusted downgrade (default)
-            >>> plugin = MyPlugin(security_level=SecurityLevel.SECRET)
+            >>> # Trusted downgrade (explicit - most common)
+            >>> plugin = MyPlugin(security_level=SecurityLevel.SECRET, allow_downgrade=True)
             >>> plugin.allow_downgrade
             True
 
-            >>> # Frozen plugin
+            >>> # Frozen plugin (explicit - strict enforcement)
             >>> frozen = MyPlugin(security_level=SecurityLevel.SECRET, allow_downgrade=False)
             >>> frozen.allow_downgrade
             False
@@ -272,20 +273,20 @@ class BasePlugin(ABC):
         Design Notes:
             - Check 1 implements Bell-LaPadula "no read up" rule
             - Check 2 implements ADR-005 frozen plugin capability
-            - Default allow_downgrade=True maintains ADR-002 semantics (backwards compatible)
+            - allow_downgrade parameter is MANDATORY (no default, explicit security choice)
             - Fail-fast: Validation happens BEFORE any data processing
 
-        Example (Trusted Downgrade):
-            >>> plugin = MyPlugin(security_level=SecurityLevel.SECRET)
+        Example (Trusted Downgrade - allow_downgrade=True):
+            >>> plugin = MyPlugin(security_level=SecurityLevel.PROTECTED, allow_downgrade=True)
             >>> plugin.validate_can_operate_at_level(SecurityLevel.OFFICIAL)  # ✅ OK (trusted downgrade)
-            >>> plugin.validate_can_operate_at_level(SecurityLevel.SECRET)  # ✅ OK (exact match)
-            >>> plugin.validate_can_operate_at_level(SecurityLevel.TOP_SECRET)  # ❌ Raises (insufficient)
+            >>> plugin.validate_can_operate_at_level(SecurityLevel.PROTECTED)  # ✅ OK (exact match)
+            >>> plugin.validate_can_operate_at_level(SecurityLevel.SECRET)  # ❌ Raises (insufficient clearance)
 
-        Example (Frozen Plugin):
-            >>> frozen = MyPlugin(security_level=SecurityLevel.SECRET, allow_downgrade=False)
-            >>> frozen.validate_can_operate_at_level(SecurityLevel.SECRET)  # ✅ OK (exact match)
-            >>> frozen.validate_can_operate_at_level(SecurityLevel.OFFICIAL)  # ❌ Raises (frozen)
-            >>> frozen.validate_can_operate_at_level(SecurityLevel.TOP_SECRET)  # ❌ Raises (insufficient)
+        Example (Frozen Plugin - allow_downgrade=False):
+            >>> frozen = MyPlugin(security_level=SecurityLevel.PROTECTED, allow_downgrade=False)
+            >>> frozen.validate_can_operate_at_level(SecurityLevel.PROTECTED)  # ✅ OK (exact match only)
+            >>> frozen.validate_can_operate_at_level(SecurityLevel.OFFICIAL)  # ❌ Raises (frozen, no downgrade)
+            >>> frozen.validate_can_operate_at_level(SecurityLevel.SECRET)  # ❌ Raises (insufficient clearance)
         """
         # Check 1: Insufficient clearance (Bell-LaPadula "no read up")
         if operating_level > self._security_level:

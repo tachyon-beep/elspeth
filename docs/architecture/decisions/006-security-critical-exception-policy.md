@@ -1,4 +1,4 @@
-# ADR 005 – Security-Critical Exception Policy (Fail-Loud on Invariant Violations)
+# ADR 006 – Security-Critical Exception Policy (Fail-Loud on Invariant Violations)
 
 ## Status
 
@@ -6,7 +6,7 @@ Proposed (2025-10-25)
 
 ## Context
 
-Elspeth implements Bell-LaPadula Multi-Level Security (MLS) for handling classified data ranging from UNOFFICIAL to TOP_SECRET (ADR-002, ADR-002-A). The security model relies on **security invariants** that must hold at all times:
+Elspeth implements Bell-LaPadula Multi-Level Security (MLS) for handling classified data ranging from UNOFFICIAL to SECRET (ADR-002, ADR-002-A). The security model relies on **security invariants** that must hold at all times:
 
 1. **Classification monotonicity** (ADR-002-A) – Classifications can only increase (high water mark), never decrease
 2. **Container integrity** (ADR-002-A) – Classified data cannot escape `ClassifiedDataFrame` boundaries without explicit authorization

@@ -15,12 +15,23 @@ BasePlugin changes from **Protocol** (structural typing) to **ABC** (nominal typ
 class BasePlugin(ABC):
     """Provides mandatory, non-overridable "security bones" for ALL plugins."""
 
-    def __init__(self, *, security_level: SecurityLevel, **kwargs):
+    def __init__(
+        self,
+        *,
+        security_level: SecurityLevel,
+        allow_downgrade: bool,  # MANDATORY - no default (ADR-005)
+        **kwargs
+    ):
         self._security_level = security_level  # Private storage
+        self._allow_downgrade = allow_downgrade  # Private storage
 
     @property
     def security_level(self) -> SecurityLevel:
         return self._security_level  # Read-only property (no setter)
+
+    @property
+    def allow_downgrade(self) -> bool:
+        return self._allow_downgrade  # Read-only property (no setter)
 
     def get_security_level(self) -> SecurityLevel:
         return self._security_level  # FINAL - do not override
@@ -31,14 +42,20 @@ class BasePlugin(ABC):
             raise SecurityValidationError(
                 f"Cannot operate at {operating_level} - insufficient clearance"
             )
+        # Frozen plugin: Reject downgrade if allow_downgrade=False (ADR-005)
+        if operating_level < self._security_level and not self._allow_downgrade:
+            raise SecurityValidationError(
+                f"Frozen plugin - cannot operate below {self._security_level}"
+            )
 ```
 
 **Key Properties**:
 
-- ✅ **Can't instantiate without security_level**: Keyword-only arg enforced by Python
+- ✅ **Can't instantiate without security_level and allow_downgrade**: Keyword-only args enforced by Python
 - ✅ **Can't override security behavior**: Methods are concrete, subclasses inherit
 - ✅ **Centralized validation logic**: ONE implementation in BasePlugin
 - ✅ **Prevents accidental plugins**: Must explicitly inherit from BasePlugin
+- ✅ **Mandatory security choices**: No defaults for security_level or allow_downgrade (explicit > implicit)
 
 **Migration Impact**: Plugins inherit security enforcement, don't reimplement it.
 
@@ -549,17 +566,17 @@ class BasePlugin(ABC):
             SecurityValidationError: If operating_level > this plugin's clearance
 
         Example (Bell-LaPadula "no read up"):
-            >>> ds = SecretDatasource(path="data.csv", security_level=SecurityLevel.SECRET)
+            >>> ds = ProtectedDatasource(path="data.csv", security_level=SecurityLevel.PROTECTED, allow_downgrade=True)
             >>>
             >>> # ✅ PASS: Operating at same or lower level (plugin can downgrade)
-            >>> ds.validate_can_operate_at_level(SecurityLevel.SECRET)      # Same - OK
-            >>> ds.validate_can_operate_at_level(SecurityLevel.OFFICIAL)    # Lower - OK
-            >>> ds.validate_can_operate_at_level(SecurityLevel.UNOFFICIAL)  # Much lower - OK
+            >>> ds.validate_can_operate_at_level(SecurityLevel.PROTECTED)  # Same - OK
+            >>> ds.validate_can_operate_at_level(SecurityLevel.OFFICIAL)   # Lower - OK
+            >>> ds.validate_can_operate_at_level(SecurityLevel.UNOFFICIAL) # Much lower - OK
             >>>
             >>> # ❌ FAIL: Operating level ABOVE clearance (insufficient clearance)
-            >>> ds.validate_can_operate_at_level(SecurityLevel.TOP_SECRET)
-            SecurityValidationError: SecretDatasource has clearance SECRET,
-                but pipeline requires TOP_SECRET - insufficient clearance
+            >>> ds.validate_can_operate_at_level(SecurityLevel.SECRET)
+            SecurityValidationError: ProtectedDatasource has clearance PROTECTED,
+                but pipeline requires SECRET - insufficient clearance
         """
         if operating_level > self._security_level:
             raise SecurityValidationError(
