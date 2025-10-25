@@ -207,6 +207,21 @@ Batch 15 (141-147):
 
 - Consider establishing an authoritative index per domain (architecture, security, operations) to prevent drift between overlapping plans and checklists.
 
+## Batch 1 Deep Dive Findings
+
+| File | Lines | Review Depth | Usefulness | Placement | Currency | Notes |
+|---|---|---|---|---|---|---|
+| `CLAUDE.md` | 423 | Spot read | High | Root (AI pair-programmer playbook) | Current | Guidance still matches Make targets and security policy; consider adding a short TL;DR/quick links section because the document is 400+ lines. |
+| `CONTRIBUTING.md` | 99 | Full read | High | Root (contributor policy) | Current | Workflow, licensing gates, and test expectations align with current tooling (Python 3.12, `make lint`/`pytest`). |
+| `docs/architecture/architecture-overview.md` | 151 | Full read | High | `docs/architecture` | Current | Architecture map reflects latest module layout; inline “Update 2025-10-12” callouts could be moved into a change log to improve readability. |
+| `docs/architecture/archive/adr-002-implementation/ADR002A_CODE_REVIEW.md` | 777 | Spot read | High | `docs/architecture/archive/...` | Current | Serves as detailed security review evidence; might surface better alongside other security assurance artefacts (e.g., `docs/security/archive`). |
+| `docs/architecture/archive/adr-002-implementation/ADR002A_EVALUATION.md` | 591 | Spot read | Medium | `docs/architecture/archive/...` | Needs update | Summary still states “Phases 3-5 pending” even though PROGRESS.md shows the work complete—clarify that this is a mid-project snapshot or refresh status. |
+| `docs/architecture/archive/adr-002-implementation/ADR002A_PLAN.md` | 580 | Spot read | High | `docs/architecture/archive/...` | Needs update | Checklists remain unchecked and header says “Status: Planning”; add completion annotations or reframe as a reusable template. |
+| `docs/architecture/archive/adr-002-implementation/ADR002_IMPLEMENTATION_README.md` | 158 | Full read | High | `docs/architecture/archive/...` | Needs update | Directory table still marks `CERTIFICATION_EVIDENCE.md` as “To be created” even though the file exists; update status and cleanup checklist to reflect closure actions. |
+| `docs/architecture/archive/adr-002-implementation/CERTIFICATION_EVIDENCE.md` | 647 | Spot read | High | `docs/architecture/archive/...` | Needs update | Evidence table references `tests/test_adr002a_cve.py`, which is not present—revise test citations and metrics to match the actual suite. |
+| `docs/architecture/archive/adr-002-implementation/CHECKLIST.md` | 205 | Spot read | Medium | `docs/architecture/archive/...` | Needs update | Items remain unchecked despite implementation being complete; either mark completed gates or label the file explicitly as a template to avoid confusion during audits. |
+| `docs/architecture/archive/adr-002-implementation/METHODOLOGY.md` | 631 | Spot read | High | `docs/architecture/archive/...` | Needs update | Method references `THREAT_MODEL_ADR002.md`, but the repo ships `THREAT_MODEL.md`; update file names and cross-links so operators land on the right artefacts. |
+
 
 ## Detailed Inventory
 
