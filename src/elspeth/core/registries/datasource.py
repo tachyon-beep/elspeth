@@ -71,7 +71,13 @@ def _create_blob_datasource(options: dict[str, Any], context: PluginContext) -> 
             logger.error("Azure Blob endpoint validation failed: %s", exc)
             raise ConfigurationError(f"Azure Blob datasource endpoint validation failed: {exc}") from exc
 
-    return BlobDataSource(**options)
+    # Inject security/determinism levels from context (ADR-004)
+    # Registry strips these from options, but BasePlugin requires them in constructor
+    return BlobDataSource(
+        **options,
+        security_level=context.security_level,
+        determinism_level=context.determinism_level,
+    )
 
 
 def _create_csv_blob_datasource(options: dict[str, Any], context: PluginContext) -> CSVBlobDataSource:
@@ -80,12 +86,24 @@ def _create_csv_blob_datasource(options: dict[str, Any], context: PluginContext)
     Note: Despite the name, CSVBlobDataSource reads from local files, not actual blob storage.
     It's used for testing/mocking blob scenarios. No endpoint validation needed.
     """
-    return CSVBlobDataSource(**options)
+    # Inject security/determinism levels from context (ADR-004)
+    # Registry strips these from options, but BasePlugin requires them in constructor
+    return CSVBlobDataSource(
+        **options,
+        security_level=context.security_level,
+        determinism_level=context.determinism_level,
+    )
 
 
 def _create_csv_datasource(options: dict[str, Any], context: PluginContext) -> CSVDataSource:
     """Create local CSV datasource."""
-    return CSVDataSource(**options)
+    # Inject security/determinism levels from context (ADR-004)
+    # Registry strips these from options, but BasePlugin requires them in constructor
+    return CSVDataSource(
+        **options,
+        security_level=context.security_level,
+        determinism_level=context.determinism_level,
+    )
 
 
 # ============================================================================

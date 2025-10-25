@@ -10,15 +10,19 @@ from typing import Any
 import pandas as pd
 
 from elspeth.adapters import load_blob_csv
+from elspeth.core.base.plugin import BasePlugin
 from elspeth.core.base.protocols import DataSource
 from elspeth.core.base.types import DeterminismLevel, SecurityLevel
-from elspeth.core.security import ensure_determinism_level, ensure_security_level
+from elspeth.core.security import ensure_determinism_level
 
 logger = logging.getLogger(__name__)
 
 
-class BlobDataSource(DataSource):
-    """Read CSV data from Azure Blob Storage using configured profiles."""
+class BlobDataSource(BasePlugin, DataSource):
+    """Read CSV data from Azure Blob Storage using configured profiles.
+
+    Inherits from BasePlugin to provide security enforcement (ADR-004).
+    """
 
     def __init__(
         self,
@@ -27,18 +31,21 @@ class BlobDataSource(DataSource):
         profile: str = "default",
         pandas_kwargs: dict[str, Any] | None = None,
         on_error: str = "abort",
-        security_level: SecurityLevel | None = None,
+        security_level: SecurityLevel,  # REQUIRED - no default (ADR-004 requirement)
         determinism_level: DeterminismLevel | None = None,
         retain_local: bool,  # REQUIRED - no default
         retain_local_path: str | None = None,
     ):
+        # Initialize BasePlugin with security level (ADR-004)
+        super().__init__(security_level=security_level)
+
         self.config_path = config_path
         self.profile = profile
         self.pandas_kwargs = pandas_kwargs or {}
         if on_error not in {"abort", "skip"}:
             raise ValueError("on_error must be 'abort' or 'skip'")
         self.on_error = on_error
-        self.security_level = ensure_security_level(security_level)
+        # security_level is now set by BasePlugin.__init__() (ADR-004)
         self.determinism_level = ensure_determinism_level(determinism_level)
         self.retain_local = retain_local
         self.retain_local_path = retain_local_path

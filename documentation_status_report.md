@@ -237,6 +237,36 @@ Batch 15 (141-147):
 | `docs/architecture/decisions/000-template.md` | 74 | Full read | High | `docs/architecture/decisions` | Current | ADR template is clear and actionable; no changes needed. |
 | `docs/architecture/decisions/001-design-philosophy.md` | 118 | Full read | High | `docs/architecture/decisions` | Current | Security-first hierarchy and fail-closed policy remain accurate for the present architecture. |
 
+## Batch 3 Deep Dive Findings
+
+| File | Lines | Review Depth | Usefulness | Placement | Currency | Notes |
+|---|---|---|---|---|---|---|
+| `docs/architecture/decisions/002-a-trusted-container-model.md` | 192 | Full read | High | `docs/architecture/decisions` | Current | ADR reflects the implemented constructor protection; double-check references to supporting docs (`classified-dataframe-hardening-delta`) remain aligned. |
+| `docs/architecture/decisions/002-security-architecture.md` | 121 | Full read | High | `docs/architecture/decisions` | Current | Core MLS rationale and enforcement steps are still accurate; consider adding a cross-reference to newer ADRs (004/005) for the evolving security posture. |
+| `docs/architecture/decisions/003-plugin-type-registry.md` | 550 | Spot read | Medium | `docs/architecture/decisions` | Needs update | Rich detail, but it’s still marked “Accepted” while companion ADR 004 is only proposed; clarify dependency status and prune duplicated hardening detail if the new enforcement strategy supersedes it. |
+| `docs/architecture/decisions/004-mandatory-baseplugin-inheritance.md` | 1149 | Spot read | Medium | `docs/architecture/decisions` | Needs update | Massive “Proposed” ADR reads like accepted policy; tighten it to decision essentials or mark superseded sections once implementation lands. |
+| `docs/architecture/decisions/005-security-critical-exception-policy.md` | 987 | Spot read | Medium | `docs/architecture/decisions` | Needs update | Currently “Proposed” with detailed enforcement and feature-flag toggles—note the interim flag strategy and highlight outstanding decisions before treating as authoritative. |
+| `docs/architecture/decisions/historical/003-remove-legacy-code.md` | 20 | Full read | Medium | `docs/architecture/decisions/historical` | Current | Concise historical record; no action needed. |
+| `docs/architecture/decisions/historical/004-complete-registry-migration.md` | 21 | Full read | Medium | `docs/architecture/decisions/historical` | Current | Short archive entry remains valid. |
+| `docs/architecture/decisions/README.md` | 85 | Full read | High | `docs/architecture/decisions` | Needs update | ADR index lists 003 as “Proposed” despite the doc saying “Accepted” and doesn’t mention ADR 006 file in repo—sync statuses and entries. |
+| `docs/architecture/embeddings-rag-plugin-design.md` | 220 | Full read | High | `docs/architecture` | Current | Covers the updated utility pattern and is consistent with code layout; no gaps spotted. |
+| `docs/architecture/llm-tracing-plugin-options.md` | 150 | Full read | High | `docs/architecture` | Current | Option catalogue plus structured trace plan are still relevant; nothing stale identified. |
+
+## Batch 4 Deep Dive Findings
+
+| File | Lines | Review Depth | Usefulness | Placement | Currency | Notes |
+|---|---|---|---|---|---|---|
+| `docs/architecture/middleware-lifecycle.md` | 641 | Spot read | High | `docs/architecture` | Needs update | Lifecycle guidance still accurate, but sample configs refer to a non-existent `cost_tracker` middleware and the cited line numbers (`suite_runner.py:245`) no longer match the current file (~404); refresh examples and references. |
+| `docs/architecture/plugin-catalogue.md` | 187 | Full read | High | `docs/architecture` | Needs update | Catalogue still helpful, yet module paths for LLM clients/middleware point to `src/elspeth/plugins/llms/...`; swap to the `nodes/transforms/llm` locations to avoid confusion post-namespace migration. |
+| `docs/architecture/plugin-security-model.md` | 121 | Full read | High | `docs/architecture` | Needs update | Core narrative is sound, but the “Reporting sinks” section still cites `src/elspeth/plugins/outputs/...`; align top-level references with the new `nodes/sinks` modules (the update callout already hints at it). |
+| `docs/architecture/README.md` | 68 | Full read | High | `docs/architecture` | Current | Directory index is concise and up to date; no action needed. |
+| `docs/architecture/security-controls.md` | 184 | Full read | High | `docs/architecture` | Needs update | Inventory remains accurate but repeats legacy paths (`plugins/llms/...`) in the main bullets—mirror the `nodes/transforms/llm` paths consistently rather than relying on the update footnotes. |
+| `docs/architecture/sink-hardening-plan.md` | 57 | Full read | Medium | `docs/architecture` | Current | Plan aligns with current code structure and reference paths; no changes required. |
+| `docs/architecture/threat-surfaces.md` | 104 | Full read | High | `docs/architecture` | Needs update | Trust-boundary notes still useful, yet they reference `plugins/llms/...` in the primary bullets; update to the new namespace to match the migration. |
+| `docs/archive/roadmap/data-flow-migration/data-flow-migration/SILENT_DEFAULTS_AUDIT.md` | 15 | Full read | Medium | `docs/archive/roadmap/...` | Current | Short audit log reads as intended; nothing to amend. |
+| `docs/compliance/accreditation-run-example.md` | 41 | Full read | High | `docs/compliance` | Needs update | Great walkthrough, but links to `docs/architecture/environment-hardening.md` (should be `docs/compliance/environment-hardening.md`) and still cite `src/elspeth/plugins/llms/middleware.py`; revise paths and cross-references. |
+| `docs/compliance/adr-002-certification-evidence.md` | 647 | Spot read | High | `docs/compliance` | Needs update | Evidence pack is comprehensive, yet it references a non-existent `tests/test_adr002a_cve.py`; adjust the test citations to the current suite and verify other metrics before the next audit export. |
+
 
 ## Detailed Inventory
 
