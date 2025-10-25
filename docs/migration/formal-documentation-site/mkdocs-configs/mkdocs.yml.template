@@ -1,0 +1,225 @@
+# MkDocs Configuration Template for Elspeth Documentation
+# Copy to site-docs/mkdocs.yml and customize
+
+# =============================================================================
+# Site Metadata
+# =============================================================================
+site_name: Elspeth Documentation
+site_description: Extensible Layered Secure Pipeline Engine for Transformation and Handling
+site_url: https://yourusername.github.io/elspeth  # UPDATE: Your deployment URL
+
+repo_url: https://github.com/yourusername/elspeth  # UPDATE: Your repository
+repo_name: yourusername/elspeth  # UPDATE: Your username/org
+edit_uri: edit/main/site-docs/docs/
+
+# =============================================================================
+# Theme Configuration
+# =============================================================================
+theme:
+  name: material
+
+  # Color Scheme (Light + Dark Mode)
+  palette:
+    # Light mode
+    - scheme: default
+      primary: indigo        # UPDATE: Choose color (indigo, blue, teal, etc.)
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+
+    # Dark mode
+    - scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+
+  # Features (Enable/Disable as Needed)
+  features:
+    # Navigation
+    - navigation.tabs          # Top-level tabs
+    - navigation.sections      # Expandable sections in sidebar
+    - navigation.expand        # Auto-expand subsections
+    - navigation.top           # "Back to top" button
+    - navigation.indexes       # Section index pages
+
+    # Search
+    - search.suggest           # Search suggestions as you type
+    - search.highlight         # Highlight search terms in results
+    - search.share             # Share search query via URL
+
+    # Code Blocks
+    - content.code.copy        # Copy button on code blocks
+    - content.code.annotate    # Annotations in code blocks
+
+    # Content
+    - content.tabs.link        # Link content tabs across pages
+
+  # Logo and Favicon (Optional - Add Files to overrides/)
+  # logo: assets/logo.png
+  # favicon: assets/favicon.png
+
+# =============================================================================
+# Plugins
+# =============================================================================
+plugins:
+  # Search Plugin (Built-in)
+  - search:
+      lang: en
+      separator: '[\s\-\.]+'
+
+  # mkdocstrings - Auto-generate API docs from docstrings
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [../src]  # Path to source code (relative to mkdocs.yml)
+          options:
+            docstring_style: google           # Google-style docstrings
+            show_source: true                 # Show source code links
+            show_root_heading: true           # Show module name as heading
+            show_root_toc_entry: true         # Show in TOC
+            heading_level: 2                  # Start headings at h2
+            show_category_heading: true       # Show "Methods", "Attributes", etc.
+            show_if_no_docstring: true        # Show even if no docstring
+            inherited_members: false          # Don't show inherited methods
+            members_order: source             # Order: source, alphabetical
+            separate_signature: true          # Separate signature from docstring
+            merge_init_into_class: true       # Merge __init__ into class doc
+            docstring_section_style: table    # Style: table, list, spacy
+
+# =============================================================================
+# Markdown Extensions
+# =============================================================================
+markdown_extensions:
+  # Built-in Extensions
+  - toc:                                    # Table of contents
+      permalink: true                       # Add permalink anchors
+      toc_depth: 3                          # Heading depth in TOC
+  - tables                                  # GitHub-style tables
+  - attr_list                               # Add CSS classes to elements
+  - md_in_html                              # Markdown inside HTML
+  - def_list                                # Definition lists
+  - footnotes                               # Footnotes
+
+  # Admonitions (Call-out Boxes)
+  - admonition                              # !!! note, !!! warning, etc.
+  - pymdownx.details                        # Collapsible admonitions
+
+  # Code Blocks
+  - pymdownx.highlight:                     # Syntax highlighting
+      anchor_linenums: true                 # Anchor line numbers
+      line_spans: __span                    # Line span for highlighting
+      pygments_lang_class: true             # Add language class
+  - pymdownx.superfences:                   # Nested code blocks
+      custom_fences:
+        - name: mermaid                     # Mermaid diagrams support
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.inlinehilite                   # Inline code highlighting
+  - pymdownx.snippets                       # Include file snippets
+
+  # Tabbed Content
+  - pymdownx.tabbed:
+      alternate_style: true                 # Material-style tabs
+
+  # Formatting
+  - pymdownx.betterem:                      # Better emphasis handling
+      smart_enable: all
+  - pymdownx.caret                          # Superscript (^text^)
+  - pymdownx.mark                           # Highlighting (==text==)
+  - pymdownx.tilde                          # Subscript (~text~) and strikethrough (~~text~~)
+  - pymdownx.keys                           # Keyboard keys (++ctrl+alt+del++)
+  - pymdownx.smartsymbols                   # Smart symbols (copyright, arrows, etc.)
+
+  # Lists and Task Lists
+  - pymdownx.tasklist:
+      custom_checkbox: true                 # Custom checkbox rendering
+
+# =============================================================================
+# Navigation Structure
+# =============================================================================
+nav:
+  - Home: index.md
+
+  - Getting Started:
+    - Installation: getting-started/installation.md
+    - Quickstart: getting-started/quickstart.md
+    - First Experiment: getting-started/first-experiment.md
+
+  - User Guide:
+    - Security Model: user-guide/security-model.md
+    - Configuration: user-guide/configuration.md
+    # - Advanced Configuration: user-guide/advanced-configuration.md  # Phase 2+
+
+  - Plugins:
+    - Overview: plugins/overview.md
+    - Datasources: plugins/datasources.md
+    - Transforms: plugins/transforms.md
+    - Sinks: plugins/sinks.md
+
+  - Architecture:
+    - Overview: architecture/overview.md
+    # - Plugin System: architecture/plugin-system.md  # Future
+    # - Security Enforcement: architecture/security-enforcement.md  # Future
+
+  - Compliance:
+    - Security Controls: compliance/security-controls.md
+    # - Audit Logging: compliance/audit-logging.md  # Phase 1+
+    # - SBOM: compliance/sbom.md  # Phase 1+
+
+  - Operations:
+    # - Deployment: operations/deployment.md  # Phase 2+
+    # - Monitoring: operations/monitoring.md  # Phase 2+
+    # - Troubleshooting: operations/troubleshooting.md  # Phase 2+
+
+  - API Reference:
+    - Core: api-reference/core.md
+    - Security: api-reference/security.md
+    # - Pipeline: api-reference/pipeline.md  # Phase 2
+    # - Registries: api-reference/registries.md  # Phase 2
+    # - Plugins: api-reference/plugins.md  # Phase 2
+
+# =============================================================================
+# Extra Configuration
+# =============================================================================
+extra:
+  # Versioning (Phase 4 - mike integration)
+  version:
+    provider: mike
+    default: latest
+
+  # Social Links (Optional)
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/yourusername/elspeth  # UPDATE: Your repo
+      name: GitHub Repository
+    # - icon: fontawesome/brands/twitter
+    #   link: https://twitter.com/yourhandle
+    #   name: Twitter
+
+  # Analytics (Optional - Phase 4)
+  # analytics:
+  #   provider: google
+  #   property: G-XXXXXXXXXX
+
+# =============================================================================
+# Extra CSS/JS (Optional)
+# =============================================================================
+# extra_css:
+#   - stylesheets/extra.css
+
+# extra_javascript:
+#   - javascripts/extra.js
+
+# =============================================================================
+# Copyright
+# =============================================================================
+copyright: Copyright &copy; 2025 Elspeth Contributors
+
+# =============================================================================
+# Strict Mode (Recommended for CI/CD)
+# =============================================================================
+# Run with: mkdocs build --strict
+# This will fail the build on warnings (broken links, missing pages, etc.)
