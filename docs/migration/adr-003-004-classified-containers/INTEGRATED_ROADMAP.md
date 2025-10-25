@@ -81,12 +81,13 @@ This roadmap integrates **two migrations** into a single cohesive plan:
 │    Exit: All new tests passing, MyPy clean                         │
 ├─────────────────────────────────────────────────────────────────────┤
 │  PHASE 1.5: BasePlugin Inheritance Migration (3-5 hours) 🚨 NEW    │
-│    - Create BasePlugin ABC with concrete security methods          │
-│    - Add BasePlugin to 26 plugin class inheritance chains          │
-│    - Update __init__ to call super().__init__(security_level=...)  │
-│    - CRITICAL: Enables ADR-002 validation (stops isinstance fails) │
+│    - Step 0: Create BasePlugin ABC + Remove old Protocol (FIRST!)  │
+│    - Step 0: Update all imports (protocols → plugin module)        │
+│    - Step 1-4: Add BasePlugin to 26 plugin inheritance chains      │
+│    - Step 1-4: Update __init__ to call super().__init__(...)       │
+│    - CRITICAL: Enables ADR-002 validation (nominal typing)         │
 │    - "Security Bones" design: inherit methods, don't implement     │
-│    Exit: Validation runs, SECRET→UNOFFICIAL blocked, no overrides  │
+│    Exit: Protocol removed, validation runs, isinstance uses ABC    │
 ├─────────────────────────────────────────────────────────────────────┤
 │  PHASE 2: Datasource Migration (2 hours)                           │
 │    - 4 datasources return SecureDataFrame                          │

@@ -267,11 +267,171 @@ This folder contains all planning artifacts for the ADR-003+004 migration:
 - Runtime enforcement via `__init_subclass__` prevents security method override
 - **Much simpler migration** - just inherit and call super().__init__()
 
-**Scope** (26 plugin classes):
-- **4 datasources**: `BaseCSVDataSource`, `CSVLocalDataSource`, `CSVBlobDataSource`, `BlobDataSource`
-- **6 LLM clients**: `AzureOpenAIClient`, `OpenAIHTTPClient`, `MockLLMClient`, `StaticLLMClient`, + middleware wrappers
-- **16 sinks**: All implementations in `plugins/nodes/sinks/`
-- **Affected validation**: `_validate_component_clearances()` currently short-circuits on isinstance checks
+**Scope**:
+- **26 plugin classes**: 4 datasources, 6 LLM clients, 16 sinks
+- **1 Protocol replacement**: Remove old BasePlugin Protocol, create new ABC
+- **All isinstance() checks**: Update validation code to use ABC (nominal typing)
+- **All imports**: Switch from `core.base.protocols` to `core.base.plugin`
+
+**Migration Steps:**
+
+### Step 0: Create BasePlugin ABC and Remove Old Protocol (CRITICAL - Do This FIRST!)
+
+**Objective**: Replace Protocol-based BasePlugin with ABC-based version to enforce nominal typing.
+
+**⚠️ CRITICAL**: If you skip this step, the old Protocol will remain and continue accepting duck-typed helpers, defeating the entire "security bones" design!
+
+**Sub-Step 0.1: Create New BasePlugin ABC** (15 minutes)
+
+Create **NEW FILE**: `src/elspeth/core/base/plugin.py`
+
+```python
+"""BasePlugin ABC with concrete security enforcement (ADR-004).
+
+This module replaces the old Protocol-based BasePlugin from protocols.py.
+All plugins MUST inherit from this ABC to participate in ADR-002 validation.
+"""
+
+from abc import ABC
+from typing import final
+
+from elspeth.core.base.types import SecurityLevel
+from elspeth.core.validation.base import SecurityValidationError
+
+
+class BasePlugin(ABC):
+    """Base class providing mandatory "security bones" for ALL plugins.
+
+    SECURITY INVARIANTS (ADR-004):
+    1. All plugins MUST explicitly inherit from this class (nominal typing)
+    2. Security level is MANDATORY at construction (keyword-only arg)
+    3. Security methods are FINAL and cannot be overridden by subclasses
+    4. Validation logic is centralized in BasePlugin (single source of truth)
+    """
+
+    def __init_subclass__(cls, **kwargs):
+        """Runtime enforcement: prevent subclasses from overriding security methods."""
+        super().__init_subclass__(**kwargs)
+
+        sealed_methods = ("get_security_level", "validate_can_operate_at_level")
+        for method_name in sealed_methods:
+            if method_name in cls.__dict__:
+                raise TypeError(
+                    f"{cls.__name__} may not override {method_name} (ADR-004 security invariant). "
+                    f"Security enforcement is provided by BasePlugin and cannot be customized."
+                )
+
+    def __init__(self, *, security_level: SecurityLevel, **kwargs):
+        """Initialize plugin with MANDATORY security level."""
+        if security_level is None:
+            raise ValueError(f"{type(self).__name__}: security_level cannot be None")
+        self._security_level = security_level
+        super().__init__(**kwargs)
+
+    @property
+    def security_level(self) -> SecurityLevel:
+        """Read-only property for security level (convenience accessor)."""
+        return self._security_level
+
+    @final
+    def get_security_level(self) -> SecurityLevel:
+        """Return the minimum security level (FINAL - do not override)."""
+        return self._security_level
+
+    @final
+    def validate_can_operate_at_level(self, operating_level: SecurityLevel) -> None:
+        """Validate security level (FINAL - do not override)."""
+        if operating_level < self._security_level:
+            raise SecurityValidationError(
+                f"{type(self).__name__} requires {self._security_level.name}, "
+                f"operating envelope is {operating_level.name}"
+            )
+```
+
+**Sub-Step 0.2: Remove Old Protocol from protocols.py** (5 minutes)
+
+**File**: `src/elspeth/core/base/protocols.py`
+
+Find and **DELETE** the old Protocol-based BasePlugin (approximately lines 62-79):
+
+```python
+# ❌ DELETE THIS ENTIRE BLOCK:
+@runtime_checkable
+class BasePlugin(Protocol):
+    """Base protocol defining security requirements for all plugins."""
+
+    def get_security_level(self) -> SecurityLevel:
+        """Return the minimum security level this plugin requires."""
+        raise NotImplementedError
+
+    def validate_can_operate_at_level(self, operating_level: SecurityLevel) -> None:
+        """Validate this plugin can operate at the given security level."""
+        raise NotImplementedError
+```
+
+**ALTERNATIVE (if protocols.py needs to stay for backward compatibility)**: Re-export the ABC
+
+```python
+# In protocols.py, add this at the top:
+from elspeth.core.base.plugin import BasePlugin  # Re-export ABC (ADR-004)
+
+# Then DELETE the old Protocol definition
+```
+
+**Sub-Step 0.3: Update All Imports** (10 minutes)
+
+Find all files that import the old Protocol:
+
+```bash
+# Find all imports of old BasePlugin
+grep -r "from elspeth.core.base.protocols import.*BasePlugin" src/
+grep -r "from elspeth.core.base.protocols import.*BasePlugin" tests/
+```
+
+**Replace** in all files:
+
+```python
+# BEFORE (Protocol import)
+from elspeth.core.base.protocols import BasePlugin
+
+# AFTER (ABC import)
+from elspeth.core.base.plugin import BasePlugin
+```
+
+**Expected files to update** (minimum):
+- `src/elspeth/core/experiments/suite_runner.py` (validation code)
+- `tests/test_adr002_*.py` (all ADR-002 tests)
+- Any other files that use `isinstance(obj, BasePlugin)`
+
+**Sub-Step 0.4: Verify Protocol Removal** (5 minutes)
+
+```bash
+# Verify no code still imports Protocol-based BasePlugin
+grep -r "runtime_checkable.*BasePlugin" src/
+# Should return NOTHING
+
+# Verify all imports use ABC
+grep -r "from elspeth.core.base.plugin import BasePlugin" src/
+# Should return multiple files
+
+# Verify isinstance checks use ABC
+grep -r "isinstance.*BasePlugin" src/
+# Should use the ABC, not Protocol
+```
+
+**Exit Criteria for Step 0**:
+- ✅ New file `src/elspeth/core/base/plugin.py` exists with BasePlugin ABC
+- ✅ Old Protocol removed from `src/elspeth/core/base/protocols.py`
+- ✅ All imports updated to use ABC from `plugin.py`
+- ✅ No `runtime_checkable` Protocol references remain
+- ✅ MyPy clean (no import errors)
+
+**Why This Step Is CRITICAL**:
+Without this, the old Protocol continues to accept duck-typed helpers via structural typing, and ADR-002 validation keeps short-circuiting. The ABC **MUST** replace the Protocol for nominal typing enforcement to work!
+
+---
+
+### Step 1: Add BasePlugin to Plugin Inheritance Chains
 
 **Changes per plugin class:**
 
@@ -379,18 +539,34 @@ def test_cannot_override_security_methods():
 ```
 
 **Files to Update**:
-- **Create BasePlugin ABC**: `src/elspeth/core/base/plugin.py` (new file)
+
+**Step 0 (Protocol Removal - CRITICAL)**:
+- **Create**: `src/elspeth/core/base/plugin.py` (new file with BasePlugin ABC)
+- **Update**: `src/elspeth/core/base/protocols.py` (remove old Protocol OR re-export ABC)
+- **Update imports**: `src/elspeth/core/experiments/suite_runner.py` (validation code)
+- **Update imports**: `tests/test_adr002_*.py` (all ADR-002 tests)
+- **Update imports**: Any file with `isinstance(obj, BasePlugin)` checks
+
+**Step 1-4 (Plugin Migration)**:
 - **Datasources**: `src/elspeth/plugins/nodes/sources/_csv_base.py`, `csv_local.py`, `csv_blob.py`, `blob.py`
 - **LLM Clients**: `src/elspeth/plugins/nodes/transforms/llm/*.py` (all 6 clients)
 - **Sinks**: `src/elspeth/plugins/nodes/sinks/*.py` (all 16 implementations)
 
 **Exit Criteria**:
-- ✅ BasePlugin ABC exists at `src/elspeth/core/base/plugin.py` with concrete security methods
-- ✅ All 26 plugin classes inherit from BasePlugin
+
+**Step 0 (Protocol Removal)**:
+- ✅ New file `src/elspeth/core/base/plugin.py` exists with BasePlugin ABC
+- ✅ Old Protocol removed/replaced in `src/elspeth/core/base/protocols.py`
+- ✅ All imports updated from `protocols` to `plugin` module
+- ✅ No `runtime_checkable` Protocol references remain
+- ✅ MyPy clean (no import errors)
+
+**Step 1-4 (Plugin Migration)**:
+- ✅ All 26 plugin classes inherit from BasePlugin ABC
 - ✅ All plugins call `super().__init__(security_level=...)` in their constructors
 - ✅ Integration test proves validation runs (SECRET→UNOFFICIAL blocked)
 - ✅ MyPy clean (BasePlugin inheritance verified)
-- ✅ **isinstance(plugin, BasePlugin) returns True** for all plugins
+- ✅ **isinstance(plugin, BasePlugin) returns True** for all plugins (uses ABC, not Protocol!)
 - ✅ **No more isinstance short-circuiting** in validation code
 - ✅ Runtime enforcement test passes (cannot override security methods)
 
