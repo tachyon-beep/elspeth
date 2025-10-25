@@ -29,46 +29,24 @@ class MockSecureComponent(BasePlugin):
     """Component requiring SECRET clearance."""
 
     def __init__(self, name: str = "SecureComponent"):
+        super().__init__(security_level=SecurityLevel.SECRET)
         self.name = name
-
-    def get_security_level(self) -> SecurityLevel:
-        return SecurityLevel.SECRET
-
-    def validate_can_operate_at_level(self, operating_level: SecurityLevel) -> None:
-        if operating_level < SecurityLevel.SECRET:
-            raise SecurityValidationError(
-                f"{self.name} requires SECRET, got {operating_level.name}"
-            )
 
 
 class MockOfficialComponent(BasePlugin):
     """Component requiring OFFICIAL clearance."""
 
     def __init__(self, name: str = "OfficialComponent"):
+        super().__init__(security_level=SecurityLevel.OFFICIAL)
         self.name = name
-
-    def get_security_level(self) -> SecurityLevel:
-        return SecurityLevel.OFFICIAL
-
-    def validate_can_operate_at_level(self, operating_level: SecurityLevel) -> None:
-        if operating_level < SecurityLevel.OFFICIAL:
-            raise SecurityValidationError(
-                f"{self.name} requires OFFICIAL, got {operating_level.name}"
-            )
 
 
 class MockUnofficialComponent(BasePlugin):
     """Component handling UNOFFICIAL data."""
 
     def __init__(self, name: str = "UnofficialComponent"):
+        super().__init__(security_level=SecurityLevel.UNOFFICIAL)
         self.name = name
-
-    def get_security_level(self) -> SecurityLevel:
-        return SecurityLevel.UNOFFICIAL
-
-    def validate_can_operate_at_level(self, operating_level: SecurityLevel) -> None:
-        # UNOFFICIAL is lowest, always accepts
-        pass
 
 
 class MockRunner:

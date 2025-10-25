@@ -31,16 +31,8 @@ class MockSecureDatasource(BasePlugin):
     """Datasource requiring SECRET clearance."""
 
     def __init__(self, df: pd.DataFrame):
+        super().__init__(security_level=SecurityLevel.SECRET)
         self.df = df
-
-    def get_security_level(self) -> SecurityLevel:
-        return SecurityLevel.SECRET
-
-    def validate_can_operate_at_level(self, operating_level: SecurityLevel) -> None:
-        if operating_level < SecurityLevel.SECRET:
-            raise SecurityValidationError(
-                f"MockSecureDatasource requires SECRET, got {operating_level.name}"
-            )
 
     def load(self) -> pd.DataFrame:
         return self.df
@@ -50,16 +42,8 @@ class MockOfficialDatasource(BasePlugin):
     """Datasource requiring OFFICIAL clearance."""
 
     def __init__(self, df: pd.DataFrame):
+        super().__init__(security_level=SecurityLevel.OFFICIAL)
         self.df = df
-
-    def get_security_level(self) -> SecurityLevel:
-        return SecurityLevel.OFFICIAL
-
-    def validate_can_operate_at_level(self, operating_level: SecurityLevel) -> None:
-        if operating_level < SecurityLevel.OFFICIAL:
-            raise SecurityValidationError(
-                f"MockOfficialDatasource requires OFFICIAL, got {operating_level.name}"
-            )
 
     def load(self) -> pd.DataFrame:
         return self.df
@@ -69,43 +53,19 @@ class MockUnofficialSink(BasePlugin):
     """Sink that only handles UNOFFICIAL data."""
 
     def __init__(self):
+        super().__init__(security_level=SecurityLevel.UNOFFICIAL)
         self.written = []
-
-    def get_security_level(self) -> SecurityLevel:
-        return SecurityLevel.UNOFFICIAL
-
-    def validate_can_operate_at_level(self, operating_level: SecurityLevel) -> None:
-        if operating_level < SecurityLevel.UNOFFICIAL:
-            # UNOFFICIAL is lowest, so this never happens
-            raise SecurityValidationError(
-                f"MockUnofficialSink requires UNOFFICIAL, got {operating_level.name}"
-            )
 
     def write(self, results: dict, *, metadata: dict | None = None) -> None:
         self.written.append(results)
 
 
 class MockOfficialSink(BasePlugin):
-    """Sink that handles data up to OFFICIAL level (rejects SECRET and above)."""
+    """Sink requiring OFFICIAL clearance."""
 
     def __init__(self):
+        super().__init__(security_level=SecurityLevel.OFFICIAL)
         self.written = []
-
-    def get_security_level(self) -> SecurityLevel:
-        return SecurityLevel.OFFICIAL
-
-    def validate_can_operate_at_level(self, operating_level: SecurityLevel) -> None:
-        # OFFICIAL sink can only handle data at OFFICIAL level or lower
-        # Rejects SECRET, PROTECTED, etc. (too sensitive)
-        if operating_level > SecurityLevel.OFFICIAL:
-            raise SecurityValidationError(
-                f"MockOfficialSink cannot handle {operating_level.name} data "
-                f"(maximum clearance: OFFICIAL)"
-            )
-        if operating_level < SecurityLevel.OFFICIAL:
-            raise SecurityValidationError(
-                f"MockOfficialSink requires at least OFFICIAL, got {operating_level.name}"
-            )
 
     def write(self, results: dict, *, metadata: dict | None = None) -> None:
         self.written.append(results)
@@ -115,16 +75,8 @@ class MockSecretSink(BasePlugin):
     """Sink requiring SECRET clearance."""
 
     def __init__(self):
+        super().__init__(security_level=SecurityLevel.SECRET)
         self.written = []
-
-    def get_security_level(self) -> SecurityLevel:
-        return SecurityLevel.SECRET
-
-    def validate_can_operate_at_level(self, operating_level: SecurityLevel) -> None:
-        if operating_level < SecurityLevel.SECRET:
-            raise SecurityValidationError(
-                f"MockSecretSink requires SECRET, got {operating_level.name}"
-            )
 
     def write(self, results: dict, *, metadata: dict | None = None) -> None:
         self.written.append(results)
@@ -133,14 +85,8 @@ class MockSecretSink(BasePlugin):
 class MockSecretTransformPlugin(BasePlugin):
     """Transform plugin requiring SECRET clearance (for ADR-002-A testing)."""
 
-    def get_security_level(self) -> SecurityLevel:
-        return SecurityLevel.SECRET
-
-    def validate_can_operate_at_level(self, operating_level: SecurityLevel) -> None:
-        if operating_level < SecurityLevel.SECRET:
-            raise SecurityValidationError(
-                f"MockSecretTransformPlugin requires SECRET, got {operating_level.name}"
-            )
+    def __init__(self):
+        super().__init__(security_level=SecurityLevel.SECRET)
 
     def transform(self, data: pd.DataFrame) -> pd.DataFrame:
         """Transform data (adds 'processed' column)."""
@@ -340,14 +286,8 @@ class TestADR002SuiteIntegration:
         class ADR002ACompliantDatasource(BasePlugin):
             """Datasource that correctly creates ClassifiedDataFrame."""
 
-            def get_security_level(self) -> SecurityLevel:
-                return SecurityLevel.SECRET
-
-            def validate_can_operate_at_level(self, operating_level: SecurityLevel) -> None:
-                if operating_level < SecurityLevel.SECRET:
-                    raise SecurityValidationError(
-                        f"ADR002ACompliantDatasource requires SECRET, got {operating_level.name}"
-                    )
+            def __init__(self):
+                super().__init__(security_level=SecurityLevel.SECRET)
 
             def load(self) -> pd.DataFrame:
                 """Load data as ClassifiedDataFrame using correct pattern."""
@@ -361,14 +301,8 @@ class TestADR002SuiteIntegration:
         class ADR002ACompliantPlugin(BasePlugin):
             """Plugin that correctly transforms ClassifiedDataFrame."""
 
-            def get_security_level(self) -> SecurityLevel:
-                return SecurityLevel.SECRET
-
-            def validate_can_operate_at_level(self, operating_level: SecurityLevel) -> None:
-                if operating_level < SecurityLevel.SECRET:
-                    raise SecurityValidationError(
-                        f"ADR002ACompliantPlugin requires SECRET, got {operating_level.name}"
-                    )
+            def __init__(self):
+                super().__init__(security_level=SecurityLevel.SECRET)
 
             def transform(self, data: pd.DataFrame) -> pd.DataFrame:
                 """Transform data using ADR-002-A pattern."""
@@ -441,14 +375,8 @@ class TestADR002SuiteIntegration:
 
         # OFFICIAL datasource
         class OfficialDatasource(BasePlugin):
-            def get_security_level(self) -> SecurityLevel:
-                return SecurityLevel.OFFICIAL
-
-            def validate_can_operate_at_level(self, operating_level: SecurityLevel) -> None:
-                if operating_level < SecurityLevel.OFFICIAL:
-                    raise SecurityValidationError(
-                        f"OfficialDatasource requires OFFICIAL, got {operating_level.name}"
-                    )
+            def __init__(self):
+                super().__init__(security_level=SecurityLevel.OFFICIAL)
 
             def load(self) -> pd.DataFrame:
                 classified = ClassifiedDataFrame.create_from_datasource(df, SecurityLevel.OFFICIAL)
@@ -456,14 +384,8 @@ class TestADR002SuiteIntegration:
 
         # OFFICIAL transform (stays at OFFICIAL)
         class OfficialTransformPlugin(BasePlugin):
-            def get_security_level(self) -> SecurityLevel:
-                return SecurityLevel.OFFICIAL
-
-            def validate_can_operate_at_level(self, operating_level: SecurityLevel) -> None:
-                if operating_level < SecurityLevel.OFFICIAL:
-                    raise SecurityValidationError(
-                        f"OfficialTransformPlugin requires OFFICIAL, got {operating_level.name}"
-                    )
+            def __init__(self):
+                super().__init__(security_level=SecurityLevel.OFFICIAL)
 
             def transform(self, data: pd.DataFrame) -> pd.DataFrame:
                 # Simulate receiving ClassifiedDataFrame
@@ -494,16 +416,8 @@ class TestADR002SuiteIntegration:
         # OFFICIAL sink (can handle OFFICIAL envelope)
         class OfficialSink(BasePlugin):
             def __init__(self):
+                super().__init__(security_level=SecurityLevel.OFFICIAL)
                 self.written = []
-
-            def get_security_level(self) -> SecurityLevel:
-                return SecurityLevel.OFFICIAL
-
-            def validate_can_operate_at_level(self, operating_level: SecurityLevel) -> None:
-                if operating_level < SecurityLevel.OFFICIAL:
-                    raise SecurityValidationError(
-                        f"OfficialSink requires OFFICIAL, got {operating_level.name}"
-                    )
 
             def write(self, results: dict, *, metadata: dict | None = None) -> None:
                 self.written.append({"results": results, "metadata": metadata})
@@ -608,18 +522,8 @@ class TestADR002SuiteIntegration:
             """Real sink pattern that captures output for testing."""
 
             def __init__(self):
+                super().__init__(security_level=SecurityLevel.OFFICIAL)
                 self.written = []
-                self.security_level = SecurityLevel.OFFICIAL
-
-            def get_security_level(self) -> SecurityLevel:
-                return self.security_level
-
-            def validate_can_operate_at_level(self, operating_level: SecurityLevel) -> None:
-                if operating_level < self.security_level:
-                    raise SecurityValidationError(
-                        f"SimpleCaptureSink requires {self.security_level.name}, "
-                        f"got {operating_level.name}"
-                    )
 
             def write(self, results: dict, *, metadata: dict | None = None) -> None:
                 self.written.append({"results": results, "metadata": metadata})

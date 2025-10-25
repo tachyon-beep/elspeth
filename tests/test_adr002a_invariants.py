@@ -40,14 +40,8 @@ from elspeth.core.validation.base import SecurityValidationError
 class MockDatasource(BasePlugin):
     """Mock datasource for testing datasource-only creation."""
 
-    def get_security_level(self) -> SecurityLevel:
-        return SecurityLevel.OFFICIAL
-
-    def validate_can_operate_at_level(self, operating_level: SecurityLevel) -> None:
-        if operating_level < SecurityLevel.OFFICIAL:
-            raise SecurityValidationError(
-                f"MockDatasource requires OFFICIAL, got {operating_level.name}"
-            )
+    def __init__(self):
+        super().__init__(security_level=SecurityLevel.OFFICIAL)
 
     def load(self) -> pd.DataFrame:
         return pd.DataFrame({"data": [1, 2, 3]})
@@ -56,14 +50,8 @@ class MockDatasource(BasePlugin):
 class MockPlugin(BasePlugin):
     """Mock plugin for testing plugin creation blocking."""
 
-    def get_security_level(self) -> SecurityLevel:
-        return SecurityLevel.SECRET
-
-    def validate_can_operate_at_level(self, operating_level: SecurityLevel) -> None:
-        if operating_level < SecurityLevel.SECRET:
-            raise SecurityValidationError(
-                f"MockPlugin requires SECRET, got {operating_level.name}"
-            )
+    def __init__(self):
+        super().__init__(security_level=SecurityLevel.SECRET)
 
 
 # ============================================================================
@@ -263,17 +251,14 @@ class TestADR002ATrustedContainerModel:
         Expected State: FAILS (RED) - No constructor protection yet
         """
         # Simulate attack scenario from ADR-002-A specification
-        class SubtlyMaliciousPlugin(BasePlugin):
-            """Plugin that attempts classification laundering attack."""
+        # NOTE: Malicious plugin does NOT inherit from BasePlugin
+        # (a real attacker wouldn't follow the rules anyway)
+        class SubtlyMaliciousPlugin:
+            """Plugin that attempts classification laundering attack.
 
-            def get_security_level(self) -> SecurityLevel:
-                return SecurityLevel.SECRET  # ✅ Truthful - passes start-time validation
-
-            def validate_can_operate_at_level(
-                self, operating_level: SecurityLevel
-            ) -> None:
-                if operating_level < SecurityLevel.SECRET:
-                    raise SecurityValidationError("Requires SECRET")
+            This is a malicious actor that doesn't follow BasePlugin protocol.
+            The test verifies that ClassifiedDataFrame blocks the attack regardless.
+            """
 
             def process(
                 self, input_data: ClassifiedDataFrame
@@ -327,17 +312,14 @@ class TestADR002ATrustedContainerModel:
         This test verifies the fix for HIGH severity finding from security review.
         """
         # Simulate name spoofing attack from security review
-        class NameSpoofingPlugin(BasePlugin):
-            """Plugin that attempts to bypass constructor protection via name spoofing."""
+        # NOTE: Malicious plugin does NOT inherit from BasePlugin
+        # (a real attacker wouldn't follow the rules anyway)
+        class NameSpoofingPlugin:
+            """Plugin that attempts to bypass constructor protection via name spoofing.
 
-            def get_security_level(self) -> SecurityLevel:
-                return SecurityLevel.SECRET
-
-            def validate_can_operate_at_level(
-                self, operating_level: SecurityLevel
-            ) -> None:
-                if operating_level < SecurityLevel.SECRET:
-                    raise SecurityValidationError("Requires SECRET")
+            This is a malicious actor that doesn't follow BasePlugin protocol.
+            The test verifies that ClassifiedDataFrame blocks the attack regardless.
+            """
 
             def with_uplifted_classification(self, input_data: ClassifiedDataFrame) -> ClassifiedDataFrame:
                 """Spoofed method name - attempt to bypass frame inspection.

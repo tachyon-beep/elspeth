@@ -33,14 +33,8 @@ class MockUnofficialDatasource(BasePlugin):
     """Datasource at UNOFFICIAL level (lowest)."""
 
     def __init__(self, df: pd.DataFrame):
+        super().__init__(security_level=SecurityLevel.UNOFFICIAL)
         self.df = df
-
-    def get_security_level(self) -> SecurityLevel:
-        return SecurityLevel.UNOFFICIAL
-
-    def validate_can_operate_at_level(self, operating_level: SecurityLevel) -> None:
-        # UNOFFICIAL is lowest, always accepts
-        pass
 
     def load(self) -> pd.DataFrame:
         """Load data at UNOFFICIAL level."""
@@ -51,14 +45,8 @@ class MockUnofficialDatasource(BasePlugin):
 class MockOfficialTransform(BasePlugin):
     """Transform plugin at OFFICIAL level."""
 
-    def get_security_level(self) -> SecurityLevel:
-        return SecurityLevel.OFFICIAL
-
-    def validate_can_operate_at_level(self, operating_level: SecurityLevel) -> None:
-        if operating_level < SecurityLevel.OFFICIAL:
-            raise SecurityValidationError(
-                f"MockOfficialTransform requires OFFICIAL, got {operating_level.name}"
-            )
+    def __init__(self):
+        super().__init__(security_level=SecurityLevel.OFFICIAL)
 
     def transform(self, data: pd.DataFrame) -> pd.DataFrame:
         """Transform data and uplift to OFFICIAL."""
@@ -84,14 +72,8 @@ class MockSecretLLM:
 class MockProtectedAggregator(BasePlugin):
     """Aggregator at PROTECTED level."""
 
-    def get_security_level(self) -> SecurityLevel:
-        return SecurityLevel.PROTECTED
-
-    def validate_can_operate_at_level(self, operating_level: SecurityLevel) -> None:
-        if operating_level < SecurityLevel.PROTECTED:
-            raise SecurityValidationError(
-                f"MockProtectedAggregator requires PROTECTED, got {operating_level.name}"
-            )
+    def __init__(self):
+        super().__init__(security_level=SecurityLevel.PROTECTED)
 
     def aggregate(self, data: pd.DataFrame) -> dict:
         """Aggregate data at PROTECTED level."""
@@ -106,16 +88,8 @@ class MockProtectedSink(BasePlugin):
     """Sink at PROTECTED level."""
 
     def __init__(self):
+        super().__init__(security_level=SecurityLevel.PROTECTED)
         self.written = []
-
-    def get_security_level(self) -> SecurityLevel:
-        return SecurityLevel.PROTECTED
-
-    def validate_can_operate_at_level(self, operating_level: SecurityLevel) -> None:
-        if operating_level < SecurityLevel.PROTECTED:
-            raise SecurityValidationError(
-                f"MockProtectedSink requires PROTECTED, got {operating_level.name}"
-            )
 
     def write(self, results: dict, *, metadata: dict | None = None) -> None:
         self.written.append({"results": results, "metadata": metadata})
@@ -125,16 +99,8 @@ class MockSecretSink(BasePlugin):
     """Sink at SECRET level."""
 
     def __init__(self):
+        super().__init__(security_level=SecurityLevel.SECRET)
         self.written = []
-
-    def get_security_level(self) -> SecurityLevel:
-        return SecurityLevel.SECRET
-
-    def validate_can_operate_at_level(self, operating_level: SecurityLevel) -> None:
-        if operating_level < SecurityLevel.SECRET:
-            raise SecurityValidationError(
-                f"MockSecretSink requires SECRET, got {operating_level.name}"
-            )
 
     def write(self, results: dict, *, metadata: dict | None = None) -> None:
         self.written.append({"results": results, "metadata": metadata})
@@ -332,14 +298,8 @@ class TestADR002MiddlewareIntegration:
 
         # SECRET datasource
         class SecretDatasource(BasePlugin):
-            def get_security_level(self) -> SecurityLevel:
-                return SecurityLevel.SECRET
-
-            def validate_can_operate_at_level(self, operating_level: SecurityLevel) -> None:
-                if operating_level < SecurityLevel.SECRET:
-                    raise SecurityValidationError(
-                        f"SecretDatasource requires SECRET, got {operating_level.name}"
-                    )
+            def __init__(self):
+                super().__init__(security_level=SecurityLevel.SECRET)
 
             def load(self) -> pd.DataFrame:
                 classified = ClassifiedDataFrame.create_from_datasource(df, SecurityLevel.SECRET)

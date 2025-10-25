@@ -35,16 +35,8 @@ class MockSecretDatasource(BasePlugin):
     """Datasource with SECRET classified data."""
 
     def __init__(self, df: pd.DataFrame):
+        super().__init__(security_level=SecurityLevel.SECRET)
         self.df = df
-
-    def get_security_level(self) -> SecurityLevel:
-        return SecurityLevel.SECRET
-
-    def validate_can_operate_at_level(self, operating_level: SecurityLevel) -> None:
-        if operating_level < SecurityLevel.SECRET:
-            raise SecurityValidationError(
-                f"MockSecretDatasource requires SECRET, got {operating_level.name}"
-            )
 
     def load(self) -> pd.DataFrame:
         """Load SECRET data."""
@@ -76,17 +68,9 @@ class FaultySink(BasePlugin):
     """Sink that fails during write to test error handling."""
 
     def __init__(self, fail_on_write: bool = True):
+        super().__init__(security_level=SecurityLevel.SECRET)
         self.fail_on_write = fail_on_write
         self.written = []
-
-    def get_security_level(self) -> SecurityLevel:
-        return SecurityLevel.SECRET
-
-    def validate_can_operate_at_level(self, operating_level: SecurityLevel) -> None:
-        if operating_level < SecurityLevel.SECRET:
-            raise SecurityValidationError(
-                f"FaultySink requires SECRET, got {operating_level.name}"
-            )
 
     def write(self, results: dict, *, metadata: dict | None = None) -> None:
         """Write that fails to simulate disk full, permissions, etc."""
@@ -100,16 +84,8 @@ class MockSecretSink(BasePlugin):
     """Standard SECRET sink for testing."""
 
     def __init__(self):
+        super().__init__(security_level=SecurityLevel.SECRET)
         self.written = []
-
-    def get_security_level(self) -> SecurityLevel:
-        return SecurityLevel.SECRET
-
-    def validate_can_operate_at_level(self, operating_level: SecurityLevel) -> None:
-        if operating_level < SecurityLevel.SECRET:
-            raise SecurityValidationError(
-                f"MockSecretSink requires SECRET, got {operating_level.name}"
-            )
 
     def write(self, results: dict, *, metadata: dict | None = None) -> None:
         self.written.append({"results": results, "metadata": metadata})
@@ -302,16 +278,8 @@ class TestADR002ErrorHandling:
         # OFFICIAL datasource
         class OfficialDatasource(BasePlugin):
             def __init__(self, df: pd.DataFrame):
+                super().__init__(security_level=SecurityLevel.OFFICIAL)
                 self.df = df
-
-            def get_security_level(self) -> SecurityLevel:
-                return SecurityLevel.OFFICIAL
-
-            def validate_can_operate_at_level(self, operating_level: SecurityLevel) -> None:
-                if operating_level < SecurityLevel.OFFICIAL:
-                    raise SecurityValidationError(
-                        f"OfficialDatasource requires OFFICIAL, got {operating_level.name}"
-                    )
 
             def load(self) -> pd.DataFrame:
                 classified = ClassifiedDataFrame.create_from_datasource(self.df, SecurityLevel.OFFICIAL)

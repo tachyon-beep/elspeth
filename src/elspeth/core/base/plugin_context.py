@@ -114,13 +114,25 @@ def apply_plugin_context(instance: Any, context: PluginContext) -> None:
 
     Sets both security_level and determinism_level as mandatory first-class attributes.
     Also attaches a PluginLogger for structured logging.
+
+    For BasePlugin instances, security_level is read-only (set in constructor),
+    so we skip setting it if it's already a property.
     """
 
     instance.plugin_context = context
     instance._elspeth_context = context  # noqa: SLF001 - internal marker for plugin context  # pylint: disable=protected-access
-    instance.security_level = context.security_level
+
+    # ADR-004: BasePlugin has read-only security_level property (set in constructor)
+    # Only set security_level if it's not already a property
+    if not hasattr(type(instance), 'security_level') or not isinstance(type(instance).security_level, property):
+        instance.security_level = context.security_level
+
     instance._elspeth_security_level = context.security_level  # noqa: SLF001 - internal marker for plugin context  # pylint: disable=protected-access
-    instance.determinism_level = context.determinism_level
+
+    # Same for determinism_level (future: may also become read-only)
+    if not hasattr(type(instance), 'determinism_level') or not isinstance(type(instance).determinism_level, property):
+        instance.determinism_level = context.determinism_level
+
     instance._elspeth_determinism_level = context.determinism_level  # noqa: SLF001 - internal marker for plugin context  # pylint: disable=protected-access
 
     # Attach plugin logger for structured logging
