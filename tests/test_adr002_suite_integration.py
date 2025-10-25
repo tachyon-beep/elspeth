@@ -142,9 +142,9 @@ class TestADR002SuiteIntegration:
         )
         suite = ExperimentSuite(root=".", baseline=experiment, experiments=[experiment])
 
-        # Monkey-patch datasource into runner (normally done in build_runner)
+        # Create suite runner with datasource
         llm_client = MockLLMClient()
-        runner = ExperimentSuiteRunner(suite=suite, llm_client=llm_client, datasource=datasource)
+        runner = ExperimentSuiteRunner(suite=suite, llm_client=llm_client, sinks=[], datasource=datasource)
 
         # Run with sink
         results = runner.run(df, sink_factory=lambda exp: [sink])
@@ -176,7 +176,7 @@ class TestADR002SuiteIntegration:
         suite = ExperimentSuite(root=".", baseline=experiment, experiments=[experiment])
 
         llm_client = MockLLMClient()
-        runner = ExperimentSuiteRunner(suite=suite, llm_client=llm_client, datasource=datasource)
+        runner = ExperimentSuiteRunner(suite=suite, llm_client=llm_client, sinks=[], datasource=datasource)
 
         # Expect security validation to BLOCK job at start
         with pytest.raises(SecurityValidationError) as exc_info:
@@ -214,7 +214,7 @@ class TestADR002SuiteIntegration:
         suite = ExperimentSuite(root=".", baseline=experiment, experiments=[experiment])
 
         llm_client = MockLLMClient()
-        runner = ExperimentSuiteRunner(suite=suite, llm_client=llm_client, datasource=datasource)
+        runner = ExperimentSuiteRunner(suite=suite, llm_client=llm_client, sinks=[], datasource=datasource)
 
         # Should succeed - SECRET sink rejects OFFICIAL operating level
         with pytest.raises(SecurityValidationError) as exc_info:
@@ -261,7 +261,7 @@ class TestADR002SuiteIntegration:
         suite = ExperimentSuite(root=".", baseline=experiment, experiments=[experiment])
 
         llm_client = MockLLMClient()
-        runner = ExperimentSuiteRunner(suite=suite, llm_client=llm_client, datasource=datasource)
+        runner = ExperimentSuiteRunner(suite=suite, llm_client=llm_client, sinks=[], datasource=datasource)
 
         # Should succeed - no BasePlugin components, validation skipped
         results = runner.run(df, sink_factory=lambda exp: [sink])

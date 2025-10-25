@@ -196,6 +196,7 @@ class ExperimentSuiteRunner:
     suite: ExperimentSuite
     llm_client: LLMClientProtocol
     sinks: list[ResultSink]
+    datasource: Any = None  # Optional datasource for ADR-002 security validation
     suite_root: Any = None
     config_path: Any = None
     _shared_middlewares: dict[str, Any] = field(default_factory=dict, init=False)
@@ -592,8 +593,8 @@ class ExperimentSuiteRunner:
         # Collect all plugins that implement BasePlugin protocol
         plugins: list[BasePlugin] = []
 
-        # Datasource (from runner)
-        datasource = getattr(runner, "datasource", None)
+        # Datasource (from suite runner or experiment runner)
+        datasource = self.datasource or getattr(runner, "datasource", None)
         if datasource and isinstance(datasource, BasePlugin):
             plugins.append(datasource)
 
