@@ -7,6 +7,35 @@
 
 ---
 
+## TL;DR - "Security Bones" Design
+
+BasePlugin changes from **Protocol** (structural typing) to **ABC** (nominal typing) with **concrete security enforcement**:
+
+```python
+class BasePlugin(ABC):
+    """Provides mandatory, non-overridable "security bones" for ALL plugins."""
+
+    def __init__(self, *, security_level: SecurityLevel, **kwargs):
+        self._security_level = security_level  # Private storage
+
+    def get_security_level(self) -> SecurityLevel:
+        return self._security_level  # FINAL - do not override
+
+    def validate_can_operate_at_level(self, operating_level: SecurityLevel) -> None:
+        if operating_level < self._security_level:  # FINAL - do not override
+            raise SecurityValidationError(...)
+```
+
+**Key Properties**:
+- ✅ **Can't instantiate without security_level**: Keyword-only arg enforced by Python
+- ✅ **Can't override security behavior**: Methods are concrete, subclasses inherit
+- ✅ **Centralized validation logic**: ONE implementation in BasePlugin
+- ✅ **Prevents accidental plugins**: Must explicitly inherit from BasePlugin
+
+**Migration Impact**: Plugins inherit security enforcement, don't reimplement it.
+
+---
+
 ## Context and Problem Statement
 
 **Current State**: `BasePlugin` is implemented as a `Protocol` (structural typing), allowing any class with the correct method signatures to be treated as a plugin:
@@ -216,108 +245,297 @@ class BasePlugin(Protocol):
 
 **After**:
 ```python
-from abc import ABC, abstractmethod
+from abc import ABC
+
+from elspeth.core.base.types import SecurityLevel
+from elspeth.core.validation.base import SecurityValidationError
+
 
 class BasePlugin(ABC):
-    """Base class for ALL plugins that process data.
+    """Base class providing MANDATORY security enforcement for ALL plugins.
 
-    SECURITY REQUIREMENT (ADR-004):
-    All plugins MUST explicitly inherit from this class to participate in
-    ADR-002 security validation. Inheritance is REQUIRED, not optional.
+    CRITICAL SECURITY DESIGN (ADR-004 "Security Bones"):
+    This class provides CONCRETE, FINAL security enforcement that CANNOT be
+    overridden by subclasses. Think of it as the "security bones" - the
+    foundational structure that higher-level classes build on but cannot break.
 
-    This prevents accidental compliance via structural typing (duck typing).
-    Only classes that explicitly inherit are treated as plugins.
+    SECURITY INVARIANTS (enforced by BasePlugin):
+    1. ALL plugins MUST provide security_level at construction (keyword-only arg)
+    2. Security behavior CANNOT be customized/overridden by subclasses
+    3. get_security_level() and validate_can_operate_at_level() are FINAL
+    4. ADR-002 validation logic is centralized and consistent across ALL plugins
 
-    Why ABC Instead of Protocol?
-    - Protocol allows ANY class with matching methods to be a plugin
+    Why Concrete Implementation (Not Abstract)?
+    - Abstract methods allow each subclass to implement security differently
+    - This creates inconsistency and potential security bugs
+    - BasePlugin provides ONE correct implementation used by ALL plugins
+    - Subclasses inherit security behavior, they don't reimplement it
+
+    Why ABC (Not Protocol)?
+    - Protocol allows ANY class with matching methods to be a plugin (duck typing)
     - ABC requires explicit inheritance: class MyPlugin(BasePlugin)
-    - This ensures developer intent and prevents security accidents
+    - This ensures developer intent and prevents accidental compliance
 
-    Example:
-        # ✅ CORRECT: Explicit inheritance
-        class SecretDatasource(BasePlugin):
-            def get_security_level(self) -> SecurityLevel:
-                return SecurityLevel.SECRET
+    Constructor Pattern (ALL subclasses MUST follow):
+        class MyPlugin(BasePlugin):
+            def __init__(self, *, param1: str, security_level: SecurityLevel):
+                super().__init__(security_level=security_level)  # ← Pass to BasePlugin
+                self.param1 = param1
 
-            def validate_can_operate_at_level(self, level: SecurityLevel) -> None:
-                if level < SecurityLevel.SECRET:
-                    raise SecurityValidationError(...)
+            # NO get_security_level() - inherited from BasePlugin ✅
+            # NO validate_can_operate_at_level() - inherited from BasePlugin ✅
 
-        # ❌ WRONG: No inheritance (rejected by isinstance())
-        class AccidentalPlugin:
-            def get_security_level(self) -> SecurityLevel:
-                return SecurityLevel.UNOFFICIAL
+    Example - Correct Usage:
+        >>> class SecretDatasource(BasePlugin):
+        ...     def __init__(self, *, path: str, security_level: SecurityLevel):
+        ...         super().__init__(security_level=security_level)
+        ...         self.path = path
+        ...
+        >>> ds = SecretDatasource(path="data.csv", security_level=SecurityLevel.SECRET)
+        >>> ds.get_security_level()  # Inherited method
+        SecurityLevel.SECRET
+        >>> ds.validate_can_operate_at_level(SecurityLevel.UNOFFICIAL)
+        SecurityValidationError: SecretDatasource requires SECRET, operating envelope is UNOFFICIAL
 
-            def validate_can_operate_at_level(self, level: SecurityLevel) -> None:
-                pass
+    Example - Wrong (No Inheritance):
+        >>> class AccidentalPlugin:  # ← Missing (BasePlugin) inheritance
+        ...     def get_security_level(self) -> SecurityLevel:
+        ...         return SecurityLevel.UNOFFICIAL
+        ...
+        >>> isinstance(AccidentalPlugin(), BasePlugin)  # False ✅
+        False
 
-        isinstance(AccidentalPlugin(), BasePlugin)  # False ✅
+    Example - Wrong (Trying to Override Security):
+        >>> class BrokenPlugin(BasePlugin):
+        ...     def __init__(self, *, security_level: SecurityLevel):
+        ...         super().__init__(security_level=security_level)
+        ...
+        ...     def get_security_level(self) -> SecurityLevel:  # ← WRONG!
+        ...         return SecurityLevel.UNOFFICIAL  # Override attempt
+        ...
+        >>> plugin = BrokenPlugin(security_level=SecurityLevel.SECRET)
+        >>> plugin.get_security_level()  # Which one is called?
+        SecurityLevel.UNOFFICIAL  # ⚠️ Override succeeded - BAD!
+
+        # To prevent this, BasePlugin methods should be marked final in Python 3.8+
+        # Or documented as DO NOT OVERRIDE
     """
 
-    @abstractmethod
+    def __init__(self, *, security_level: SecurityLevel, **kwargs):
+        """Initialize plugin with MANDATORY security level.
+
+        SECURITY REQUIREMENT (ADR-004):
+        All plugins MUST provide security_level at construction. This is enforced
+        by keyword-only argument (raises TypeError if missing).
+
+        Args:
+            security_level: REQUIRED - minimum clearance for this plugin
+                           Cannot be None, must be valid SecurityLevel enum
+            **kwargs: Passed to parent classes (for cooperative multiple inheritance)
+
+        Raises:
+            TypeError: If security_level not provided (Python enforces keyword-only)
+            ValueError: If security_level is None or invalid
+
+        Example:
+            >>> class MyPlugin(BasePlugin):
+            ...     def __init__(self, *, name: str, security_level: SecurityLevel):
+            ...         super().__init__(security_level=security_level)
+            ...         self.name = name
+            ...
+            >>> # ✅ CORRECT: security_level provided
+            >>> MyPlugin(name="test", security_level=SecurityLevel.SECRET)
+            ...
+            >>> # ❌ WRONG: security_level missing
+            >>> MyPlugin(name="test")  # TypeError: missing required keyword argument
+        """
+        if security_level is None:
+            raise ValueError(
+                f"{type(self).__name__}: security_level cannot be None. "
+                f"All plugins MUST have a defined security level (ADR-004)."
+            )
+
+        # Private attribute to discourage direct access/override
+        # Subclasses should use get_security_level(), not self._security_level
+        self._security_level = security_level
+        super().__init__(**kwargs)
+
     def get_security_level(self) -> SecurityLevel:
         """Return the minimum security level this plugin requires.
 
-        This method MUST be implemented by all plugins.
+        FINAL METHOD (ADR-004 Security Bones):
+        This method is CONCRETE and should NOT be overridden by subclasses.
+        All plugins inherit this implementation from BasePlugin.
+
+        Subclasses that override this method break the "security bones" design
+        and create inconsistent security behavior. DO NOT OVERRIDE.
 
         Returns:
-            SecurityLevel: The minimum clearance level required to use this plugin.
+            SecurityLevel: The minimum clearance level required to use this plugin
 
         Example:
-            def get_security_level(self) -> SecurityLevel:
-                return SecurityLevel.SECRET  # Requires SECRET clearance
+            >>> ds = SecretDatasource(path="data.csv", security_level=SecurityLevel.SECRET)
+            >>> ds.get_security_level()  # Calls BasePlugin.get_security_level()
+            SecurityLevel.SECRET
         """
-        ...
+        return self._security_level
 
-    @abstractmethod
     def validate_can_operate_at_level(self, operating_level: SecurityLevel) -> None:
         """Validate this plugin can operate at the given security level.
 
-        This method MUST be implemented by all plugins.
+        FINAL METHOD (ADR-004 Security Bones):
+        This method is CONCRETE and should NOT be overridden by subclasses.
+        All plugins inherit this implementation from BasePlugin.
 
-        Called by ADR-002 security validation BEFORE job starts.
-        If this method raises SecurityValidationError, the job is blocked.
+        This method implements ADR-002 start-time validation with consistent logic:
+        - If operating_level >= required level: validation passes (no exception)
+        - If operating_level < required level: raises SecurityValidationError
+
+        Subclasses that override this method break the "security bones" design
+        and create inconsistent ADR-002 enforcement. DO NOT OVERRIDE.
 
         Args:
             operating_level: The minimum clearance envelope for the job
+                           (computed as MIN of all plugin security levels)
 
         Raises:
-            SecurityValidationError: If operating_level < required security level
+            SecurityValidationError: If operating_level < this plugin's required level
 
         Example:
-            def validate_can_operate_at_level(self, operating_level: SecurityLevel) -> None:
-                if operating_level < SecurityLevel.SECRET:
-                    raise SecurityValidationError(
-                        f"SecretDatasource requires SECRET, got {operating_level.name}"
-                    )
+            >>> ds = SecretDatasource(path="data.csv", security_level=SecurityLevel.SECRET)
+            >>>
+            >>> # ✅ PASS: Operating level meets requirement
+            >>> ds.validate_can_operate_at_level(SecurityLevel.SECRET)
+            >>> ds.validate_can_operate_at_level(SecurityLevel.TOP_SECRET)
+            >>>
+            >>> # ❌ FAIL: Operating level below requirement
+            >>> ds.validate_can_operate_at_level(SecurityLevel.UNOFFICIAL)
+            SecurityValidationError: SecretDatasource requires SECRET, operating envelope is UNOFFICIAL
         """
-        ...
+        if operating_level < self._security_level:
+            raise SecurityValidationError(
+                f"{type(self).__name__} requires {self._security_level.name}, "
+                f"operating envelope is {operating_level.name}"
+            )
 ```
 
 ### Phase 2: Update All Existing Plugins (30-45 min)
 
 **Migration Pattern**:
+
 ```python
-# BEFORE:
+# BEFORE (No BasePlugin):
 class MyDatasource:
+    def __init__(self, *, path: str, security_level: SecurityLevel):
+        self.path = path
+        self.security_level = security_level  # ← Stored manually
+
     def get_security_level(self) -> SecurityLevel:
-        return SecurityLevel.SECRET
+        return self.security_level  # ← Manual implementation
 
     def validate_can_operate_at_level(self, level: SecurityLevel) -> None:
-        if level < SecurityLevel.SECRET:
-            raise SecurityValidationError(...)
+        if level < self.security_level:  # ← Manual validation logic
+            raise SecurityValidationError(
+                f"MyDatasource requires {self.security_level.name}, got {level.name}"
+            )
 
-# AFTER:
+# AFTER (With BasePlugin - "Security Bones"):
 from elspeth.core.base.protocols import BasePlugin
 
-class MyDatasource(BasePlugin):  # ← Add inheritance
-    def get_security_level(self) -> SecurityLevel:
-        return SecurityLevel.SECRET
+class MyDatasource(BasePlugin):  # ← 1. Inherit from BasePlugin
+    def __init__(self, *, path: str, security_level: SecurityLevel):
+        super().__init__(security_level=security_level)  # ← 2. Pass to BasePlugin
+        self.path = path
+        # NO self.security_level assignment - BasePlugin stores it ✅
 
-    def validate_can_operate_at_level(self, level: SecurityLevel) -> None:
-        if level < SecurityLevel.SECRET:
-            raise SecurityValidationError(...)
+    # ✅ NO get_security_level() - inherited from BasePlugin
+    # ✅ NO validate_can_operate_at_level() - inherited from BasePlugin
+    # Security enforcement happens automatically via inheritance!
 ```
+
+**Key Changes**:
+1. ✅ Add `(BasePlugin)` inheritance
+2. ✅ Add `super().__init__(security_level=security_level)` call
+3. ❌ **REMOVE** manual `get_security_level()` implementation
+4. ❌ **REMOVE** manual `validate_can_operate_at_level()` implementation
+5. ❌ **REMOVE** `self.security_level = ...` assignment (BasePlugin handles it)
+
+**Why Remove the Methods?**
+- BasePlugin provides concrete implementations
+- All plugins get consistent security behavior
+- Cannot accidentally break security logic
+- Less code duplication
+
+---
+
+#### Special Case: Plugins Without Existing security_level Constructor Parameter
+
+**Problem**: Some plugins (e.g., `StaticLLMClient`, many sinks) don't currently accept `security_level` in their constructor because they haven't been migrated to ADR-002 yet.
+
+**Example - StaticLLMClient** (before ADR-004):
+```python
+class StaticLLMClient(LLMClientProtocol):
+    """Return predefined content for testing."""
+
+    def __init__(self, *, content: str, score: float | None = None):
+        self.content = content
+        self.score = score
+        # ❌ NO security_level parameter!
+        # ❌ NO get_security_level() method!
+```
+
+**Solution**: Add `security_level` parameter and pass to BasePlugin:
+
+```python
+from elspeth.core.base.protocols import BasePlugin
+
+class StaticLLMClient(BasePlugin, LLMClientProtocol):  # ← Multi-inheritance
+    """Return predefined content for testing."""
+
+    def __init__(
+        self,
+        *,
+        content: str,
+        security_level: SecurityLevel,  # ← ADD mandatory parameter
+        score: float | None = None,
+    ):
+        super().__init__(security_level=security_level)  # ← Pass to BasePlugin
+        self.content = content
+        self.score = score
+
+    # ✅ NO get_security_level() - inherited from BasePlugin
+    # ✅ NO validate_can_operate_at_level() - inherited from BasePlugin
+```
+
+**Migration Checklist for Plugins Without security_level**:
+
+1. ✅ Add `BasePlugin` to inheritance chain (before other protocols/classes)
+2. ✅ Add `security_level: SecurityLevel` to `__init__` signature (keyword-only)
+3. ✅ Call `super().__init__(security_level=security_level)` first thing in `__init__`
+4. ✅ Update all call sites to provide `security_level` argument
+5. ✅ Choose appropriate default security level for test code (typically `SecurityLevel.UNOFFICIAL`)
+
+**Example Call Site Updates**:
+
+```python
+# BEFORE:
+client = StaticLLMClient(content="Hello", score=0.9)
+
+# AFTER:
+client = StaticLLMClient(
+    content="Hello",
+    score=0.9,
+    security_level=SecurityLevel.UNOFFICIAL  # ← ADD for test/mock usage
+)
+```
+
+**Choosing Security Levels**:
+- **Production datasources/sinks**: Use actual data classification (SECRET, OFFICIAL, etc.)
+- **Test mocks/stubs**: Use `SecurityLevel.UNOFFICIAL` (lowest restriction)
+- **LLM clients**: Typically `SecurityLevel.UNOFFICIAL` (unless accessing classified endpoints)
+- **Middleware**: Match the data they operate on
+
+---
 
 **Files to Update** (search for classes implementing both methods):
 
