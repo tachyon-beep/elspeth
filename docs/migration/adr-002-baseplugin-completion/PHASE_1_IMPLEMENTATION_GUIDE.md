@@ -1,6 +1,6 @@
 # Phase 1: BasePlugin Implementation Guide
 
-**Objective**: Add BasePlugin protocol methods to all 26 plugin classes
+**Objective**: Ensure all 26 plugin classes inherit from BasePlugin ABC and pass security level to the base constructor
 
 **Estimated Effort**: 2-3 hours
 **Strategy**: Implement ONE class at a time, test after each
@@ -11,38 +11,21 @@
 
 ### Universal Pattern (All Plugins)
 
-Every plugin class gets these TWO methods added:
+BasePlugin now provides the concrete `get_security_level()` and `validate_can_operate_at_level()` implementations. Each plugin only needs to:
 
 ```python
-def get_security_level(self) -> SecurityLevel:
-    """Return the minimum security level this plugin requires.
+from elspeth.core.base.plugin import BasePlugin
 
-    Implements BasePlugin protocol for ADR-002 start-time validation.
+class MyPlugin(BasePlugin):
+    """Example plugin using BasePlugin security bones."""
 
-    Returns:
-        SecurityLevel: Minimum clearance required for this plugin
-    """
-    return self.security_level
-
-
-def validate_can_operate_at_level(self, operating_level: SecurityLevel) -> None:
-    """Validate this plugin can operate at the given security level.
-
-    Implements BasePlugin protocol for ADR-002 start-time validation.
-
-    Args:
-        operating_level: Security level of the operating envelope (minimum across all components)
-
-    Raises:
-        SecurityValidationError: If operating_level < this plugin's required level
-    """
-    if operating_level < self.security_level:
-        from elspeth.core.validation.base import SecurityValidationError
-        raise SecurityValidationError(
-            f"{self.__class__.__name__} requires {self.security_level.name} "
-            f"clearance, but operating envelope is {operating_level.name}"
-        )
+    def __init__(self, *, security_level: SecurityLevel, **kwargs):
+        super().__init__(security_level=security_level, **kwargs)
+        # plugin-specific initialisation
+        ...
 ```
+
+`BasePlugin.__init__` raises if `security_level` is missing or `None`, so every concrete plugin must surface a `security_level` argument (or supply an explicit default before calling `super().__init__`).
 
 ---
 
@@ -50,12 +33,12 @@ def validate_can_operate_at_level(self, operating_level: SecurityLevel) -> None:
 
 **FOR EACH PLUGIN CLASS:**
 
-1. **Add methods** to the class
-2. **Add import** if needed: `from elspeth.core.base.types import SecurityLevel`
-3. **Update docstring** to mention BasePlugin compliance
+1. **Add `BasePlugin` to the inheritance list** (if not already present)
+2. **Expose/propagate a `security_level` keyword argument** and call `super().__init__(security_level=security_level, ...)`
+3. **Update docstring** to mention BasePlugin compliance (optional but recommended)
 4. **Run tests**: `pytest tests/test_adr002_baseplugin_compliance.py -v -k <ClassName>`
 5. **Run mypy**: `mypy src/<path_to_file>.py`
-6. **Commit**: `git add <file> && git commit -m "feat: Add BasePlugin protocol to <ClassName>"`
+6. **Commit**: `git add <file> && git commit -m "feat: Adopt BasePlugin ABC in <ClassName>"`
 7. **Repeat** for next class
 
 ---
@@ -70,53 +53,24 @@ def validate_can_operate_at_level(self, operating_level: SecurityLevel) -> None:
 
 **Location**: After `__init__` method, before `load()` method
 
-**Code**:
-```python
-# After line 86 (after __init__)
+**Code changes**:
 
-# ========== BasePlugin Protocol Implementation (ADR-002) ==========
+1. Update the class signature (if needed) so it inherits from `BasePlugin`:
+   ```python
+   class BaseCSVDataSource(BasePlugin, DataSource):
+       ...
+   ```
 
-def get_security_level(self) -> SecurityLevel:
-    """Return the minimum security level this datasource requires.
+2. Add a `security_level` keyword argument to `__init__` (it already exists) and make sure the first line calls the base constructor:
+   ```python
+   def __init__(..., security_level: SecurityLevel | None = None, ...):
+       super().__init__(security_level=ensure_security_level(security_level))
+       # existing initialisation continues...
+   ```
 
-    Implements BasePlugin protocol for ADR-002 start-time validation.
+   If the class already normalises `security_level`, pass the resolved value to `super().__init__` and keep assigning to local attributes as needed.
 
-    Returns:
-        SecurityLevel: Minimum clearance required for this datasource
-
-    Example:
-        >>> ds = BaseCSVDataSource(path="data.csv", security_level=SecurityLevel.SECRET, retain_local=False)
-        >>> ds.get_security_level()
-        SecurityLevel.SECRET
-    """
-    return self.security_level
-
-def validate_can_operate_at_level(self, operating_level: SecurityLevel) -> None:
-    """Validate this datasource can operate at the given security level.
-
-    Implements BasePlugin protocol for ADR-002 start-time validation.
-    This is the PRIMARY security control preventing SECRET→UNOFFICIAL data flow.
-
-    Args:
-        operating_level: Security level of the operating envelope (minimum across all components)
-
-    Raises:
-        SecurityValidationError: If operating_level < this datasource's required level
-
-    Example:
-        >>> ds = BaseCSVDataSource(path="data.csv", security_level=SecurityLevel.SECRET, retain_local=False)
-        >>> ds.validate_can_operate_at_level(SecurityLevel.OFFICIAL)
-        SecurityValidationError: BaseCSVDataSource requires SECRET clearance, but operating envelope is OFFICIAL
-    """
-    if operating_level < self.security_level:
-        from elspeth.core.validation.base import SecurityValidationError
-        raise SecurityValidationError(
-            f"{self.__class__.__name__} requires {self.security_level.name} "
-            f"clearance, but operating envelope is {operating_level.name}"
-        )
-
-# ========== End BasePlugin Protocol ==========
-```
+3. Remove any legacy assignments to `self.security_level` that would fight the read-only property (use the property returned by BasePlugin instead, or keep the local variable before calling `super().__init__`).
 
 **Test**: `pytest tests/test_adr002_baseplugin_compliance.py -v -k BaseCSVDataSource`
 
@@ -154,7 +108,7 @@ assert hasattr(ds, "validate_can_operate_at_level")  # Inherited!
 
 **File**: `src/elspeth/plugins/nodes/sources/blob.py`
 
-**Notes**: Does NOT inherit from BaseCSVDataSource - needs methods added directly
+**Notes**: Does NOT inherit from BaseCSVDataSource - ensure the class now inherits from `BasePlugin` and calls `super().__init__(security_level=...)` in its constructor. Remove any manual `self.security_level` assignments.
 
 **Location**: After `__init__` method
 
@@ -372,8 +326,8 @@ pytest tests/ -v
 
 ## Exit Criteria
 
-- ✅ All 26 plugin classes have `get_security_level()` method
-- ✅ All 26 plugin classes have `validate_can_operate_at_level()` method
+- ✅ All 26 plugin classes expose `get_security_level()` via BasePlugin inheritance
+- ✅ All 26 plugin classes expose `validate_can_operate_at_level()` via BasePlugin inheritance
 - ✅ All security property tests (Category 3) PASS
 - ✅ All integration tests (Category 4) PASS
 - ✅ MyPy clean across all plugin files
