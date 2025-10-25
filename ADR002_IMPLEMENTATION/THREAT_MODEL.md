@@ -254,16 +254,44 @@ Frame inspection mechanism (`src/elspeth/core/security/classified_data.py:70-119
 
 ---
 
+## Threat Model Boundary
+
+**What This Framework Protects Against**:
+- ✅ **Accidental developer errors** (forgot to inherit BasePlugin, misconfigured security levels)
+- ✅ **Moderate attacker with code access** (can write plugins, but not bypass CI/signing)
+- ✅ **Classification accidents** (developer doesn't realize their code breaches classification)
+- ✅ **Configuration mistakes** (wrong security levels in suite configuration)
+
+**What This Framework Does NOT Protect Against**:
+- ❌ **Insider threat with admin rights** (can bypass CI, modify build pipeline, sign arbitrary code)
+- ❌ **Compromised signing infrastructure** (attacker has code signing keys)
+- ❌ **Malicious plugin author with certification approval** (background check passed, but malicious)
+- ❌ **Root/admin access to production systems** (can replace entire framework with `def steal_all_data()`)
+
+**Key Principle**: Defense in depth is about **preventing accidents** and **raising the bar for attackers**, NOT about protecting against adversaries who control the entire build/deployment pipeline.
+
+**Honest Assessment**: If an attacker can:
+1. Bypass MyPy type checking (`# type: ignore`)
+2. Bypass Ruff linting (`# noqa`)
+3. Bypass pre-commit hooks (`--no-verify`)
+4. Bypass CI checks (admin override)
+5. Obtain code signing keys (cryptographic signing)
+6. Deploy to production (admin access)
+
+...then they might as well replace the entire codebase with a single function that exfiltrates all data. At this point, **the threat model has failed at a more fundamental level** (insider threat, compromised credentials, organizational security breach). The framework cannot defend against this - it's an operational/personnel security problem, not a technical control problem.
+
+---
+
 ## Out of Scope (Certification Verifies)
 
-These threats CANNOT be prevented by framework code (would require solving undecidable problems per Rice's Theorem):
+These threats CANNOT be prevented by framework code (would require solving undecidable problems per Rice's Theorem, or defending against root-level compromise):
 
 ### OS1: Malicious Code in Plugins
-**Why Out of Scope**: Framework cannot detect malicious intent in code
+**Why Out of Scope**: Framework cannot detect malicious intent in code (Halting Problem)
 **Certification Handles**: Code review, background checks, approval process
 
 ### OS2: Backdoors in Signed Plugins
-**Why Out of Scope**: Requires semantic analysis of all code paths (undecidable)
+**Why Out of Scope**: Requires semantic analysis of all code paths (undecidable per Rice's Theorem)
 **Certification Handles**: Security review, penetration testing, cryptographic signatures
 
 ### OS3: Social Engineering
@@ -277,6 +305,18 @@ These threats CANNOT be prevented by framework code (would require solving undec
 ### OS5: Privilege Escalation Outside Framework
 **Why Out of Scope**: OS-level security, not framework responsibility
 **Certification Handles**: System hardening, access control, monitoring
+
+### OS6: Insider Threat with Signing Keys + Admin Rights
+**Why Out of Scope**: If attacker controls build pipeline, signing infrastructure, AND production deployment, they can replace entire codebase
+**Reality Check**: At this threat level, framework security is irrelevant - attacker can just sign `def exfiltrate_all(): ...` and deploy it
+**Certification Handles**:
+- **Personnel Security**: Background checks, clearance verification, least privilege
+- **Separation of Duties**: Different people control signing keys vs. deployment vs. code approval
+- **Audit Trails**: All signing events logged, deployments monitored, code changes tracked
+- **Infrastructure Security**: HSM-protected signing keys, multi-party control, time-limited credentials
+- **Incident Response**: Rapid key revocation, deployment rollback, forensic investigation
+
+**Design Philosophy**: Framework provides **defense in depth** for accidents and moderate threats. It does NOT claim to defend against adversaries with root access and signing keys - that's a **fundamentally different security domain** (personnel/operational security, not technical controls).
 
 ---
 
