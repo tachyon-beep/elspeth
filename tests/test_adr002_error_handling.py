@@ -35,7 +35,7 @@ class MockSecretDatasource(BasePlugin):
     """Datasource with SECRET classified data."""
 
     def __init__(self, df: pd.DataFrame):
-        super().__init__(security_level=SecurityLevel.SECRET)
+        super().__init__(security_level=SecurityLevel.SECRET, allow_downgrade=True)
         self.df = df
 
     def load(self) -> pd.DataFrame:
@@ -68,7 +68,7 @@ class FaultySink(BasePlugin):
     """Sink that fails during write to test error handling."""
 
     def __init__(self, fail_on_write: bool = True):
-        super().__init__(security_level=SecurityLevel.SECRET)
+        super().__init__(security_level=SecurityLevel.SECRET, allow_downgrade=True)
         self.fail_on_write = fail_on_write
         self.written = []
 
@@ -84,7 +84,7 @@ class MockSecretSink(BasePlugin):
     """Standard SECRET sink for testing."""
 
     def __init__(self):
-        super().__init__(security_level=SecurityLevel.SECRET)
+        super().__init__(security_level=SecurityLevel.SECRET, allow_downgrade=True)
         self.written = []
 
     def write(self, results: dict, *, metadata: dict | None = None) -> None:
@@ -278,7 +278,7 @@ class TestADR002ErrorHandling:
         # OFFICIAL datasource
         class OfficialDatasource(BasePlugin):
             def __init__(self, df: pd.DataFrame):
-                super().__init__(security_level=SecurityLevel.OFFICIAL)
+                super().__init__(security_level=SecurityLevel.OFFICIAL, allow_downgrade=True)
                 self.df = df
 
             def load(self) -> pd.DataFrame:

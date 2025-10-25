@@ -33,7 +33,7 @@ class MockUnofficialDatasource(BasePlugin):
     """Datasource at UNOFFICIAL level (lowest)."""
 
     def __init__(self, df: pd.DataFrame):
-        super().__init__(security_level=SecurityLevel.UNOFFICIAL)
+        super().__init__(security_level=SecurityLevel.UNOFFICIAL, allow_downgrade=True)
         self.df = df
 
     def load(self) -> pd.DataFrame:
@@ -46,7 +46,7 @@ class MockOfficialTransform(BasePlugin):
     """Transform plugin at OFFICIAL level."""
 
     def __init__(self):
-        super().__init__(security_level=SecurityLevel.OFFICIAL)
+        super().__init__(security_level=SecurityLevel.OFFICIAL, allow_downgrade=True)
 
     def transform(self, data: pd.DataFrame) -> pd.DataFrame:
         """Transform data and uplift to OFFICIAL."""
@@ -73,7 +73,7 @@ class MockProtectedAggregator(BasePlugin):
     """Aggregator at PROTECTED level."""
 
     def __init__(self):
-        super().__init__(security_level=SecurityLevel.PROTECTED)
+        super().__init__(security_level=SecurityLevel.PROTECTED, allow_downgrade=True)
 
     def aggregate(self, data: pd.DataFrame) -> dict:
         """Aggregate data at PROTECTED level."""
@@ -88,7 +88,7 @@ class MockProtectedSink(BasePlugin):
     """Sink at PROTECTED level."""
 
     def __init__(self):
-        super().__init__(security_level=SecurityLevel.PROTECTED)
+        super().__init__(security_level=SecurityLevel.PROTECTED, allow_downgrade=True)
         self.written = []
 
     def write(self, results: dict, *, metadata: dict | None = None) -> None:
@@ -99,7 +99,7 @@ class MockSecretSink(BasePlugin):
     """Sink at SECRET level."""
 
     def __init__(self):
-        super().__init__(security_level=SecurityLevel.SECRET)
+        super().__init__(security_level=SecurityLevel.SECRET, allow_downgrade=True)
         self.written = []
 
     def write(self, results: dict, *, metadata: dict | None = None) -> None:
@@ -299,7 +299,7 @@ class TestADR002MiddlewareIntegration:
         # SECRET datasource
         class SecretDatasource(BasePlugin):
             def __init__(self):
-                super().__init__(security_level=SecurityLevel.SECRET)
+                super().__init__(security_level=SecurityLevel.SECRET, allow_downgrade=True)
 
             def load(self) -> pd.DataFrame:
                 classified = ClassifiedDataFrame.create_from_datasource(df, SecurityLevel.SECRET)

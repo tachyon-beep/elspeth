@@ -31,7 +31,7 @@ class MockSecureDatasource(BasePlugin):
     """Datasource requiring SECRET clearance."""
 
     def __init__(self, df: pd.DataFrame):
-        super().__init__(security_level=SecurityLevel.SECRET)
+        super().__init__(security_level=SecurityLevel.SECRET, allow_downgrade=True)
         self.df = df
 
     def load(self) -> pd.DataFrame:
@@ -42,7 +42,7 @@ class MockOfficialDatasource(BasePlugin):
     """Datasource requiring OFFICIAL clearance."""
 
     def __init__(self, df: pd.DataFrame):
-        super().__init__(security_level=SecurityLevel.OFFICIAL)
+        super().__init__(security_level=SecurityLevel.OFFICIAL, allow_downgrade=True)
         self.df = df
 
     def load(self) -> pd.DataFrame:
@@ -53,7 +53,7 @@ class MockUnofficialSink(BasePlugin):
     """Sink that only handles UNOFFICIAL data."""
 
     def __init__(self):
-        super().__init__(security_level=SecurityLevel.UNOFFICIAL)
+        super().__init__(security_level=SecurityLevel.UNOFFICIAL, allow_downgrade=True)
         self.written = []
 
     def write(self, results: dict, *, metadata: dict | None = None) -> None:
@@ -64,7 +64,7 @@ class MockOfficialSink(BasePlugin):
     """Sink requiring OFFICIAL clearance."""
 
     def __init__(self):
-        super().__init__(security_level=SecurityLevel.OFFICIAL)
+        super().__init__(security_level=SecurityLevel.OFFICIAL, allow_downgrade=True)
         self.written = []
 
     def write(self, results: dict, *, metadata: dict | None = None) -> None:
@@ -75,7 +75,7 @@ class MockSecretSink(BasePlugin):
     """Sink requiring SECRET clearance."""
 
     def __init__(self):
-        super().__init__(security_level=SecurityLevel.SECRET)
+        super().__init__(security_level=SecurityLevel.SECRET, allow_downgrade=True)
         self.written = []
 
     def write(self, results: dict, *, metadata: dict | None = None) -> None:
@@ -86,7 +86,7 @@ class MockSecretTransformPlugin(BasePlugin):
     """Transform plugin requiring SECRET clearance (for ADR-002-A testing)."""
 
     def __init__(self):
-        super().__init__(security_level=SecurityLevel.SECRET)
+        super().__init__(security_level=SecurityLevel.SECRET, allow_downgrade=True)
 
     def transform(self, data: pd.DataFrame) -> pd.DataFrame:
         """Transform data (adds 'processed' column)."""
@@ -287,7 +287,7 @@ class TestADR002SuiteIntegration:
             """Datasource that correctly creates ClassifiedDataFrame."""
 
             def __init__(self):
-                super().__init__(security_level=SecurityLevel.SECRET)
+                super().__init__(security_level=SecurityLevel.SECRET, allow_downgrade=True)
 
             def load(self) -> pd.DataFrame:
                 """Load data as ClassifiedDataFrame using correct pattern."""
@@ -302,7 +302,7 @@ class TestADR002SuiteIntegration:
             """Plugin that correctly transforms ClassifiedDataFrame."""
 
             def __init__(self):
-                super().__init__(security_level=SecurityLevel.SECRET)
+                super().__init__(security_level=SecurityLevel.SECRET, allow_downgrade=True)
 
             def transform(self, data: pd.DataFrame) -> pd.DataFrame:
                 """Transform data using ADR-002-A pattern."""
@@ -376,7 +376,7 @@ class TestADR002SuiteIntegration:
         # OFFICIAL datasource
         class OfficialDatasource(BasePlugin):
             def __init__(self):
-                super().__init__(security_level=SecurityLevel.OFFICIAL)
+                super().__init__(security_level=SecurityLevel.OFFICIAL, allow_downgrade=True)
 
             def load(self) -> pd.DataFrame:
                 classified = ClassifiedDataFrame.create_from_datasource(df, SecurityLevel.OFFICIAL)
@@ -385,7 +385,7 @@ class TestADR002SuiteIntegration:
         # OFFICIAL transform (stays at OFFICIAL)
         class OfficialTransformPlugin(BasePlugin):
             def __init__(self):
-                super().__init__(security_level=SecurityLevel.OFFICIAL)
+                super().__init__(security_level=SecurityLevel.OFFICIAL, allow_downgrade=True)
 
             def transform(self, data: pd.DataFrame) -> pd.DataFrame:
                 # Simulate receiving ClassifiedDataFrame
@@ -416,7 +416,7 @@ class TestADR002SuiteIntegration:
         # OFFICIAL sink (can handle OFFICIAL envelope)
         class OfficialSink(BasePlugin):
             def __init__(self):
-                super().__init__(security_level=SecurityLevel.OFFICIAL)
+                super().__init__(security_level=SecurityLevel.OFFICIAL, allow_downgrade=True)
                 self.written = []
 
             def write(self, results: dict, *, metadata: dict | None = None) -> None:
@@ -522,7 +522,7 @@ class TestADR002SuiteIntegration:
             """Real sink pattern that captures output for testing."""
 
             def __init__(self):
-                super().__init__(security_level=SecurityLevel.OFFICIAL)
+                super().__init__(security_level=SecurityLevel.OFFICIAL, allow_downgrade=True)
                 self.written = []
 
             def write(self, results: dict, *, metadata: dict | None = None) -> None:

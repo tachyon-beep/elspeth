@@ -41,7 +41,7 @@ class MockDatasource(BasePlugin):
     """Mock datasource for testing datasource-only creation."""
 
     def __init__(self):
-        super().__init__(security_level=SecurityLevel.OFFICIAL)
+        super().__init__(security_level=SecurityLevel.OFFICIAL, allow_downgrade=True)
 
     def load(self) -> pd.DataFrame:
         return pd.DataFrame({"data": [1, 2, 3]})
@@ -51,7 +51,7 @@ class MockPlugin(BasePlugin):
     """Mock plugin for testing plugin creation blocking."""
 
     def __init__(self):
-        super().__init__(security_level=SecurityLevel.SECRET)
+        super().__init__(security_level=SecurityLevel.SECRET, allow_downgrade=True)
 
 
 # ============================================================================

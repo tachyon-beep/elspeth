@@ -29,7 +29,7 @@ class MockSecureComponent(BasePlugin):
     """Component requiring SECRET clearance."""
 
     def __init__(self, name: str = "SecureComponent"):
-        super().__init__(security_level=SecurityLevel.SECRET)
+        super().__init__(security_level=SecurityLevel.SECRET, allow_downgrade=True)
         self.name = name
 
 
@@ -37,7 +37,7 @@ class MockOfficialComponent(BasePlugin):
     """Component requiring OFFICIAL clearance."""
 
     def __init__(self, name: str = "OfficialComponent"):
-        super().__init__(security_level=SecurityLevel.OFFICIAL)
+        super().__init__(security_level=SecurityLevel.OFFICIAL, allow_downgrade=True)
         self.name = name
 
 
@@ -45,7 +45,7 @@ class MockUnofficialComponent(BasePlugin):
     """Component handling UNOFFICIAL data."""
 
     def __init__(self, name: str = "UnofficialComponent"):
-        super().__init__(security_level=SecurityLevel.UNOFFICIAL)
+        super().__init__(security_level=SecurityLevel.UNOFFICIAL, allow_downgrade=True)
         self.name = name
 
 
