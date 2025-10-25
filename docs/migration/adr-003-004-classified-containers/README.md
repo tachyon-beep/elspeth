@@ -392,7 +392,7 @@ grep -r "from elspeth.core.base.protocols import.*BasePlugin" tests/
 
 ```python
 # BEFORE (Protocol import)
-from elspeth.core.base.protocols import BasePlugin
+from elspeth.core.base.plugin import BasePlugin
 
 # AFTER (ABC import)
 from elspeth.core.base.plugin import BasePlugin

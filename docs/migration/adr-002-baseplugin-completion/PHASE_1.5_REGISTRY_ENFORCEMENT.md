@@ -30,7 +30,7 @@
 
 ```python
 from typing import Protocol, runtime_checkable
-from elspeth.core.base.protocols import BasePlugin
+from elspeth.core.base.plugin import BasePlugin
 
 
 class BasePluginRegistry(Generic[T]):

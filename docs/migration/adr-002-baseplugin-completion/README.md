@@ -160,7 +160,7 @@ Following the refactoring methodology from `docs/refactoring/METHODOLOGY.md`, ad
 ```python
 def test_baseplugin_protocol_conformance():
     """CHARACTERIZATION: Prove concrete plugins DON'T implement BasePlugin."""
-    from elspeth.core.base.protocols import BasePlugin
+    from elspeth.core.base.plugin import BasePlugin
 
     # Datasources
     ds = BaseCSVDataSource(path="test.csv", retain_local=False, security_level=SecurityLevel.SECRET)
@@ -206,7 +206,7 @@ def test_secret_datasource_unofficial_sink_blocked():
 @pytest.mark.xfail(reason="ADR-002 validation not yet implemented", strict=True)
 def test_all_datasources_have_baseplugin_methods():
     """PROTOCOL COMPLIANCE: All datasources MUST implement BasePlugin."""
-    from elspeth.core.base.protocols import BasePlugin
+    from elspeth.core.base.plugin import BasePlugin
 
     datasource_classes = [
         BaseCSVDataSource,

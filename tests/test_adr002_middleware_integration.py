@@ -17,7 +17,7 @@ middleware-specific behaviors and deep uplifting scenarios.
 import pandas as pd
 import pytest
 
-from elspeth.core.base.protocols import BasePlugin
+from elspeth.core.base.plugin import BasePlugin  # ADR-004: ABC with nominal typing
 from elspeth.core.base.types import SecurityLevel
 from elspeth.core.experiments.config import ExperimentConfig, ExperimentSuite
 from elspeth.core.experiments.suite_runner import ExperimentSuiteRunner
@@ -232,7 +232,7 @@ class TestADR002MiddlewareIntegration:
         df = pd.DataFrame({"text": ["level1", "level2", "level3"]})
 
         datasource = MockUnofficialDatasource(df)  # UNOFFICIAL (lowest)
-        transform = MockOfficialTransform()  # OFFICIAL
+        # MockOfficialTransform would be OFFICIAL (not used in this test)
         llm_client = MockSecretLLM()  # SECRET processing
         sink = MockProtectedSink()  # PROTECTED
 

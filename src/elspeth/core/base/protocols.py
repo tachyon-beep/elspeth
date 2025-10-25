@@ -59,60 +59,6 @@ class OrchestratorPlugin(Protocol):
 
 
 @runtime_checkable
-class BasePlugin(Protocol):
-    """Base protocol defining security requirements for all plugins.
-
-    This protocol enforces ADR-002 security model by requiring all plugins
-    (datasources, sinks, LLMs, middleware) to declare their security level
-    and validate they can operate at the orchestrator's envelope level.
-
-    Security Properties:
-        - get_security_level() defines the MINIMUM clearance required
-        - validate_can_operate_at_level() enforces start-time validation
-        - Raises SecurityValidationError if envelope < plugin requirement
-
-    Example:
-        >>> class SecretDatasource:
-        >>>     def get_security_level(self) -> SecurityLevel:
-        >>>         return SecurityLevel.SECRET
-        >>>
-        >>>     def validate_can_operate_at_level(self, operating_level: SecurityLevel) -> None:
-        >>>         if operating_level < SecurityLevel.SECRET:
-        >>>             raise SecurityValidationError("Requires SECRET clearance")
-    """
-
-    def get_security_level(self) -> SecurityLevel:
-        """Return the minimum security level this plugin requires.
-
-        This defines the plugin's security requirement - the orchestrator
-        must operate at this level or higher for the plugin to function safely.
-
-        Returns:
-            SecurityLevel: Minimum clearance required (e.g., SecurityLevel.SECRET)
-        """
-        raise NotImplementedError
-
-    def validate_can_operate_at_level(self, operating_level: SecurityLevel) -> None:
-        """Validate this plugin can operate at the given security level.
-
-        This is the PRIMARY security control enforcing ADR-002 start-time
-        validation. Plugins MUST reject operating_level < get_security_level().
-
-        Args:
-            operating_level: The security level the orchestrator will operate at
-                           (typically MIN(all plugin security levels))
-
-        Raises:
-            SecurityValidationError: If operating_level < get_security_level()
-
-        Example:
-            >>> secret_plugin.validate_can_operate_at_level(SecurityLevel.OFFICIAL)
-            >>> # Raises: SecurityValidationError("Requires SECRET, got OFFICIAL")
-        """
-        raise NotImplementedError
-
-
-@runtime_checkable
 class DataSource(Protocol):
     """Source node: where data comes from."""
 
@@ -318,7 +264,7 @@ __all__ = [
     # Orchestrator protocols
     "OrchestratorPlugin",
     # Node protocols
-    "BasePlugin",
+    # NOTE: BasePlugin moved to src/elspeth/core/base/plugin.py (ADR-004: ABC with nominal typing)
     "DataSource",
     "ResultSink",
     "TransformNode",

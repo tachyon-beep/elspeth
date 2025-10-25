@@ -31,7 +31,7 @@ ADR-002-A establishes a **Trusted Container Model** that prevents classification
 Datasources are **trusted sources** that label data with correct classifications. Use `create_from_datasource()`:
 
 ```python
-from elspeth.core.base.protocols import BasePlugin
+from elspeth.core.base.plugin import BasePlugin
 from elspeth.core.base.types import SecurityLevel
 from elspeth.core.security.classified_data import ClassifiedDataFrame
 import pandas as pd
@@ -91,7 +91,7 @@ This prevents classification laundering attacks (ADR-002-A).
 When you modify `.data` in-place (same schema), uplift the classification:
 
 ```python
-from elspeth.core.base.protocols import BasePlugin
+from elspeth.core.base.plugin import BasePlugin
 from elspeth.core.base.types import SecurityLevel
 from elspeth.core.security.classified_data import ClassifiedDataFrame
 

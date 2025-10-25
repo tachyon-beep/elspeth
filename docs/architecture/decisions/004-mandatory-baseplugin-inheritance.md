@@ -566,7 +566,7 @@ class MyDatasource:
             )
 
 # AFTER (With BasePlugin - "Security Bones"):
-from elspeth.core.base.protocols import BasePlugin
+from elspeth.core.base.plugin import BasePlugin
 
 class MyDatasource(BasePlugin):  # ← 1. Inherit from BasePlugin
     def __init__(self, *, path: str, security_level: SecurityLevel):
@@ -613,7 +613,7 @@ class StaticLLMClient(LLMClientProtocol):
 **Solution**: Add `security_level` parameter and pass to BasePlugin:
 
 ```python
-from elspeth.core.base.protocols import BasePlugin
+from elspeth.core.base.plugin import BasePlugin
 
 class StaticLLMClient(BasePlugin, LLMClientProtocol):  # ← Multi-inheritance
     """Return predefined content for testing."""
@@ -701,13 +701,13 @@ rg "def get_security_level" -A 10 | rg "def validate_can_operate_at_level" -B 10
 **Pattern**:
 ```python
 # BEFORE: Protocol allows structural typing
-from elspeth.core.base.protocols import BasePlugin  # Protocol
+from elspeth.core.base.plugin import BasePlugin  # Protocol
 
 def process(plugin: BasePlugin) -> None:
     # Any object with right methods accepted
 
 # AFTER: ABC requires inheritance
-from elspeth.core.base.protocols import BasePlugin  # ABC
+from elspeth.core.base.plugin import BasePlugin  # ABC
 
 def process(plugin: BasePlugin) -> None:
     # Only classes inheriting BasePlugin accepted
@@ -736,7 +736,7 @@ These tests verify that:
 """
 
 import pytest
-from elspeth.core.base.protocols import BasePlugin
+from elspeth.core.base.plugin import BasePlugin
 from elspeth.core.base.types import SecurityLevel
 
 
@@ -1093,7 +1093,7 @@ class SecretDatasource:
             raise SecurityValidationError(...)
 
 # AFTER: One-line fix
-from elspeth.core.base.protocols import BasePlugin
+from elspeth.core.base.plugin import BasePlugin
 
 class SecretDatasource(BasePlugin):  # ← Add this
     def get_security_level(self) -> SecurityLevel:

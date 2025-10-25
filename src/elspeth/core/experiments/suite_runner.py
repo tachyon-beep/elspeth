@@ -8,8 +8,9 @@ from typing import Any, Callable, cast
 
 import pandas as pd
 
+from elspeth.core.base.plugin import BasePlugin  # ADR-004: ABC with nominal typing
 from elspeth.core.base.plugin_context import PluginContext, apply_plugin_context
-from elspeth.core.base.protocols import BasePlugin, LLMClientProtocol, ResultSink
+from elspeth.core.base.protocols import LLMClientProtocol, ResultSink
 from elspeth.core.base.types import SecurityLevel
 from elspeth.core.controls import create_cost_tracker, create_rate_limiter
 from elspeth.core.experiments.config import ExperimentConfig, ExperimentSuite

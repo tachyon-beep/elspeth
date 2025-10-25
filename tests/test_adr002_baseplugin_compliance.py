@@ -110,20 +110,17 @@ class TestCategory0Step0Verification:
     - ABC has concrete security methods (not abstract)
     - Runtime enforcement prevents method override (__init_subclass__)
 
-    **EXPECTED STATE**:
-    - Phase 0 (now): XFAIL - ABC doesn't exist yet, Protocol still in place
-    - After Step 0: PASS - ABC exists, Protocol removed, imports updated
+    **STATUS**: ✅ Step 0 COMPLETE - All 6 tests passing
+    - BasePlugin ABC created with concrete security methods
+    - Old Protocol removed from protocols.py
+    - All imports updated to use ABC module
     """
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="Step 0 not complete - BasePlugin ABC doesn't exist yet at core.base.plugin"
-    )
     def test_baseplugin_abc_module_exists(self) -> None:
         """BasePlugin ABC MUST exist at src/elspeth/core/base/plugin.py (Step 0.1).
 
         **STEP 0 REQUIREMENT**: Create new module with BasePlugin ABC
-        **EXPECTED**: XFAIL now, PASS after Step 0.1 complete
+        **STATUS**: ✅ PASS (Step 0.1 complete)
         """
         # Try to import BasePlugin ABC from the new module
         try:
@@ -140,17 +137,13 @@ class TestCategory0Step0Verification:
             "BasePlugin should be an ABC (inherit from abc.ABC), not Protocol"
         )
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="Step 0 not complete - BasePlugin ABC doesn't have concrete methods yet"
-    )
     def test_baseplugin_has_concrete_security_methods(self) -> None:
         """BasePlugin ABC MUST provide CONCRETE security methods (not abstract).
 
         **SECURITY BONES DESIGN**: BasePlugin provides the implementation,
         subclasses inherit it (they don't reimplement).
 
-        **EXPECTED**: XFAIL now, PASS after Step 0.1 complete
+        **STATUS**: ✅ PASS (Step 0.1 complete)
         """
         from elspeth.core.base.plugin import BasePlugin
         from elspeth.core.base.types import SecurityLevel
@@ -168,10 +161,6 @@ class TestCategory0Step0Verification:
         assert hasattr(plugin, "validate_can_operate_at_level"), "Missing validate_can_operate_at_level method"
         assert plugin.get_security_level() == SecurityLevel.SECRET
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="Step 0 not complete - Runtime enforcement (__init_subclass__) not implemented"
-    )
     def test_baseplugin_prevents_method_override_runtime(self) -> None:
         """BasePlugin MUST prevent override of security methods at class definition (runtime enforcement).
 
@@ -180,7 +169,7 @@ class TestCategory0Step0Verification:
 
         This uses __init_subclass__ for runtime enforcement (complements @final for static checks).
 
-        **EXPECTED**: XFAIL now, PASS after Step 0.1 complete
+        **STATUS**: ✅ PASS (Step 0.1 complete)
         """
         from elspeth.core.base.plugin import BasePlugin
         from elspeth.core.base.types import SecurityLevel
@@ -199,17 +188,13 @@ class TestCategory0Step0Verification:
         assert "may not override" in error_msg or "security invariant" in error_msg
         assert "get_security_level" in error_msg
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="Step 0 not complete - Read-only security_level property not implemented"
-    )
     def test_baseplugin_security_level_property(self) -> None:
         """BasePlugin MUST provide read-only security_level property.
 
         **DESIGN**: Property enables convenient access (self.security_level) while
         preventing reassignment (no setter). Backed by private _security_level attribute.
 
-        **EXPECTED**: XFAIL now, PASS after Step 0.1 complete
+        **STATUS**: ✅ PASS (Step 0.1 complete)
         """
         from elspeth.core.base.plugin import BasePlugin
         from elspeth.core.base.types import SecurityLevel
@@ -227,17 +212,13 @@ class TestCategory0Step0Verification:
         with pytest.raises(AttributeError):
             plugin.security_level = SecurityLevel.UNOFFICIAL  # ← Should fail!
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="Step 0 not complete - Old Protocol still exists in protocols.py"
-    )
     def test_old_protocol_removed_from_protocols_module(self) -> None:
         """Old BasePlugin Protocol MUST be removed from protocols.py (Step 0.2).
 
         **CRITICAL**: If old Protocol remains, code importing from protocols module
         will continue using structural typing (duck typing), defeating the ABC design.
 
-        **EXPECTED**: XFAIL now, PASS after Step 0.2 complete
+        **STATUS**: ✅ PASS (Step 0.2 complete)
         """
         import inspect
 
@@ -266,17 +247,13 @@ class TestCategory0Step0Verification:
                     "Complete Step 0.2: Remove Protocol or replace with ABC re-export"
                 )
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason="Step 0 not complete - Validation code still imports from protocols module"
-    )
     def test_validation_code_imports_abc_not_protocol(self) -> None:
         """Validation code MUST import BasePlugin ABC from plugin module (Step 0.3).
 
         **CRITICAL**: suite_runner._validate_component_clearances must use ABC
         for isinstance checks to enforce nominal typing (explicit inheritance).
 
-        **EXPECTED**: XFAIL now, PASS after Step 0.3 complete
+        **STATUS**: ✅ PASS (Step 0.3 complete)
         """
         # Read suite_runner.py source to check imports
         import inspect

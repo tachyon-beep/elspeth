@@ -25,7 +25,7 @@ from elspeth.core.experiments.suite_runner import (
     SuiteExecutionContext,
 )
 from elspeth.core.experiments.config import ExperimentSuite
-from elspeth.core.base.protocols import BasePlugin
+from elspeth.core.base.plugin import BasePlugin  # ADR-004: ABC with nominal typing
 
 
 # ============================================================================

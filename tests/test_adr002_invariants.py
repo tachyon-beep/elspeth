@@ -35,7 +35,7 @@ except ImportError:
     ExperimentSuiteRunner = None
 
 try:
-    from elspeth.core.base.protocols import BasePlugin
+    from elspeth.core.base.plugin import BasePlugin  # ADR-004: ABC with nominal typing
 except ImportError:
     BasePlugin = None
 

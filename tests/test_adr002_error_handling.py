@@ -19,7 +19,7 @@ Threat Prevention:
 import pandas as pd
 import pytest
 
-from elspeth.core.base.protocols import BasePlugin
+from elspeth.core.base.plugin import BasePlugin  # ADR-004: ABC with nominal typing
 from elspeth.core.base.types import SecurityLevel
 from elspeth.core.experiments.config import ExperimentConfig, ExperimentSuite
 from elspeth.core.experiments.suite_runner import ExperimentSuiteRunner

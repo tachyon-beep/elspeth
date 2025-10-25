@@ -26,7 +26,7 @@ Expected State: ALL TESTS WILL FAIL (RED) until implementation complete.
 import pandas as pd
 import pytest
 
-from elspeth.core.base.protocols import BasePlugin
+from elspeth.core.base.plugin import BasePlugin  # ADR-004: ABC with nominal typing
 from elspeth.core.base.types import SecurityLevel
 from elspeth.core.security.classified_data import ClassifiedDataFrame
 from elspeth.core.validation.base import SecurityValidationError
