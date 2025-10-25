@@ -193,31 +193,22 @@ class TestInvariantPluginValidation:
     DEFENSE: BasePlugin.validate_can_operate_at_level() enforces clearance checks.
     """
 
-    def test_high_security_plugin_rejects_low_envelope(self):
-        """⚠️ TEST BASED ON INVERTED LOGIC - Will FAIL with corrected MockPlugin.
+    def test_high_security_plugin_accepts_low_envelope(self):
+        """✅ CORRECT Bell-LaPadula: HIGH clearance CAN operate at LOW level.
 
-        With CORRECT Bell-LaPadula semantics:
+        Bell-LaPadula "trusted downgrade":
         - SECRET plugin (clearance SECRET) CAN operate at UNOFFICIAL (lower level)
-        - Should NOT raise error (trusted to filter/downgrade)
-        - This test expects WRONG behavior (raising error)
+        - Plugin is trusted to filter/downgrade data appropriately
+        - Should NOT raise error
 
-        TODO: Rewrite this test to validate correct behavior.
-
-        OLD (WRONG) EXPECTATION:
-        Given: Plugin requires SECRET clearance
-        When: Validating against UNOFFICIAL envelope
-        Then: SecurityValidationError raised with clear message
+        Given: Plugin with SECRET clearance
+        When: Validating against UNOFFICIAL envelope (lower level)
+        Then: Validation MUST succeed (no exception)
         """
-        from elspeth.core.validation.base import SecurityValidationError
-
         secret_plugin = SecretPlugin()
 
-        with pytest.raises(SecurityValidationError) as exc_info:
-            secret_plugin.validate_can_operate_at_level(SecurityLevel.UNOFFICIAL)
-
-        error_msg = str(exc_info.value)
-        assert "SECRET" in error_msg, "Error should mention required level"
-        assert "UNOFFICIAL" in error_msg, "Error should mention envelope level"
+        # Should NOT raise - SECRET clearance can operate at UNOFFICIAL level (trusted downgrade)
+        secret_plugin.validate_can_operate_at_level(SecurityLevel.UNOFFICIAL)
 
     def test_plugin_accepts_sufficient_envelope(self):
         """Plugin MUST accept operating level ≥ its requirement.
@@ -231,17 +222,30 @@ class TestInvariantPluginValidation:
         # Should not raise
         official_plugin.validate_can_operate_at_level(SecurityLevel.OFFICIAL)
 
-    def test_plugin_accepts_higher_envelope(self):
-        """Plugin MUST accept operating level > its requirement.
+    def test_plugin_rejects_higher_envelope(self):
+        """✅ CORRECT Bell-LaPadula: LOW clearance CANNOT operate at HIGH level.
 
-        Given: Plugin requires UNOFFICIAL clearance
-        When: Validating against SECRET envelope (higher)
-        Then: No exception (validation passes)
+        Bell-LaPadula "no read up":
+        - UNOFFICIAL plugin (clearance UNOFFICIAL) CANNOT operate at SECRET level
+        - Plugin has insufficient clearance for SECRET data
+        - MUST raise SecurityValidationError
+
+        Given: Plugin with UNOFFICIAL clearance (lowest level)
+        When: Validating against SECRET envelope (higher level)
+        Then: Validation MUST fail with SecurityValidationError
         """
+        from elspeth.core.validation.base import SecurityValidationError
+
         unofficial_plugin = UnofficialPlugin()
 
-        # Should not raise (SECRET > UNOFFICIAL)
-        unofficial_plugin.validate_can_operate_at_level(SecurityLevel.SECRET)
+        # MUST raise - UNOFFICIAL clearance is insufficient for SECRET level
+        with pytest.raises(SecurityValidationError) as exc_info:
+            unofficial_plugin.validate_can_operate_at_level(SecurityLevel.SECRET)
+
+        error_msg = str(exc_info.value)
+        assert "UNOFFICIAL" in error_msg, "Error should mention plugin clearance level"
+        assert "SECRET" in error_msg, "Error should mention required envelope level"
+        assert "insufficient" in error_msg.lower(), "Error should indicate insufficient clearance"
 
 
 # ============================================================================
@@ -432,14 +436,18 @@ class TestInvariantNoConfigurationAllowsBreach:
         )
     )
     def test_validation_blocks_all_insufficient_clearances(self, plugin_levels):
-        """PROPERTY: If any plugin requires > envelope, validation MUST fail.
+        """✅ CORRECT Bell-LaPadula: Plugins with LOW clearance reject HIGH envelope.
 
-        This ensures no configuration allows a plugin to receive data
-        above its clearance.
+        Property-based test ensuring no configuration allows a plugin to receive data
+        above its clearance level (Bell-LaPadula "no read up" enforcement).
+
+        CORRECT Logic:
+        - Plugin clearance < operating_level → REJECT (insufficient clearance)
+        - Plugin clearance >= operating_level → ACCEPT (sufficient/trusted clearance)
 
         Given: Random plugin configuration with mixed levels
         When: Operating level = min(levels), validating all plugins
-        Then: Any plugin with level > operating_level MUST reject
+        Then: Any plugin with clearance < operating_level MUST reject
         """
         from elspeth.core.validation.base import SecurityValidationError
 
@@ -451,12 +459,12 @@ class TestInvariantNoConfigurationAllowsBreach:
 
         # Check each plugin
         for plugin in plugins:
-            if plugin.get_security_level() > operating_level:
-                # Plugin requires higher level than envelope - MUST reject
+            if plugin.get_security_level() < operating_level:
+                # Plugin has INSUFFICIENT clearance - MUST reject
                 with pytest.raises(SecurityValidationError):
                     plugin.validate_can_operate_at_level(operating_level)
             else:
-                # Plugin can handle envelope level - MUST accept
+                # Plugin has SUFFICIENT clearance (same or higher) - MUST accept
                 plugin.validate_can_operate_at_level(operating_level)  # Should not raise
 
 
