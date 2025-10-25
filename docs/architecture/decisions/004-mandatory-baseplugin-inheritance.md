@@ -126,35 +126,75 @@ runner = ExperimentRunner(
 - ❌ Cannot reliably distinguish plugins from helpers
 - ❌ Security risk (shown in attack scenario)
 
-### Option 2: Convert to ABC (Nominal Typing) - CHOSEN
+### Option 2: Convert to ABC with Concrete "Security Bones" - CHOSEN
 
-**Approach**: Replace `Protocol` with `ABC` (Abstract Base Class), requiring explicit inheritance.
+**Approach**: Replace `Protocol` with `ABC` (Abstract Base Class) that provides **concrete, non-overridable** security enforcement. Subclasses inherit security behavior, they don't implement it.
 
 ```python
-from abc import ABC, abstractmethod
+from abc import ABC
+from typing import final
 
 class BasePlugin(ABC):
-    """Base class for ALL plugins that process data.
+    """Base class providing mandatory "security bones" for ALL plugins.
 
-    SECURITY: All plugins MUST explicitly inherit from this class.
-    Inheritance is REQUIRED, not optional.
+    SECURITY INVARIANTS (ADR-004):
+    1. All plugins MUST explicitly inherit from this class (nominal typing)
+    2. Security level is MANDATORY at construction (keyword-only arg)
+    3. Security methods are FINAL and cannot be overridden by subclasses
+    4. Validation logic is centralized in BasePlugin (single source of truth)
 
-    This prevents accidental compliance via structural typing.
+    This prevents both accidental compliance AND intentional security bypasses.
     """
 
-    @abstractmethod
-    def get_security_level(self) -> SecurityLevel:
-        """Return the minimum security level this plugin requires."""
-        ...
+    def __init_subclass__(cls, **kwargs):
+        """Runtime enforcement: prevent subclasses from overriding security methods."""
+        super().__init_subclass__(**kwargs)
 
-    @abstractmethod
+        sealed_methods = ("get_security_level", "validate_can_operate_at_level")
+        for method_name in sealed_methods:
+            if method_name in cls.__dict__:
+                raise TypeError(
+                    f"{cls.__name__} may not override {method_name} (ADR-004 security invariant). "
+                    f"Security enforcement is provided by BasePlugin and cannot be customized."
+                )
+
+    def __init__(self, *, security_level: SecurityLevel, **kwargs):
+        """Initialize plugin with MANDATORY security level.
+
+        Args:
+            security_level: REQUIRED - minimum clearance for this plugin
+
+        Raises:
+            TypeError: If security_level not provided (keyword-only enforcement)
+            ValueError: If security_level is None
+        """
+        if security_level is None:
+            raise ValueError(f"{type(self).__name__}: security_level cannot be None")
+        self._security_level = security_level
+        super().__init__(**kwargs)
+
+    @property
+    def security_level(self) -> SecurityLevel:
+        """Read-only property for security level (convenience accessor)."""
+        return self._security_level
+
+    @final
+    def get_security_level(self) -> SecurityLevel:
+        """Return the minimum security level (FINAL - do not override)."""
+        return self._security_level
+
+    @final
     def validate_can_operate_at_level(self, operating_level: SecurityLevel) -> None:
-        """Validate this plugin can operate at the given security level.
+        """Validate security level (FINAL - do not override).
 
         Raises:
             SecurityValidationError: If operating_level < required level
         """
-        ...
+        if operating_level < self._security_level:
+            raise SecurityValidationError(
+                f"{type(self).__name__} requires {self._security_level.name}, "
+                f"operating envelope is {operating_level.name}"
+            )
 ```
 
 **Pros**:
@@ -164,11 +204,22 @@ class BasePlugin(ABC):
 - ✅ **Type Safety**: MyPy can verify inheritance at compile time
 - ✅ **Auditability**: Can list all plugins via inheritance tree
 - ✅ **Runtime Safety**: `isinstance()` checks are definitive
+- ✅ **"Security Bones"**: Concrete implementation, subclasses inherit (don't reimplement)
+- ✅ **Cannot Break Security**: Runtime enforcement prevents method override
+- ✅ **Single Source of Truth**: Validation logic in ONE place (BasePlugin)
+- ✅ **Mandatory Security Level**: Keyword-only arg enforced by Python
+- ✅ **Dual Enforcement**: @final (static) + __init_subclass__ (runtime)
 
 **Cons**:
 - ⚠️ **Breaking Change**: Existing code must add `(BasePlugin)` inheritance
-- ⚠️ **Migration Required**: All current plugins must be updated
+- ⚠️ **Migration Required**: All current plugins must be updated to call `super().__init__(security_level=...)`
 - ⚠️ **Less Flexible**: Cannot use arbitrary objects (by design - this is good!)
+
+**Why Concrete Over Abstract**:
+- **Security-critical code benefits from centralization**: One implementation to audit, test, and patch
+- **Prevents inconsistent security logic**: If each plugin implements validation differently, some will get it wrong
+- **Simpler migration**: Plugins inherit methods, don't copy 10 lines of validation logic to 26 classes
+- **Fail-fast on violations**: Runtime enforcement catches override attempts at class definition time
 
 ### Option 3: Hybrid - Protocol + Explicit Registration
 
@@ -206,7 +257,7 @@ def is_registered_plugin(obj):
 
 ## Decision Outcome
 
-**Chosen**: **Option 2 - Convert BasePlugin to ABC (Nominal Typing)**
+**Chosen**: **Option 2 - Convert BasePlugin to ABC with Concrete "Security Bones"**
 
 **Rationale**:
 1. **Security First**: Prevents accidental compliance attack scenario
@@ -215,8 +266,19 @@ def is_registered_plugin(obj):
 4. **Industry Standard**: ABCs are Python's standard mechanism for mandatory base classes
 5. **Pre-1.0 Window**: Breaking changes are acceptable now, not after 1.0
 6. **Simplicity**: ABC is simpler and more well-understood than custom registration
+7. **"Security Bones" Design**: Concrete implementation prevents inconsistent security logic
+8. **Centralized Trust**: One validation implementation to audit, test, and patch
+9. **Fail-Fast**: Runtime enforcement prevents override attempts at class definition
+10. **Simpler Migration**: Plugins inherit security methods instead of reimplementing them
 
 **Breaking Change Justification**: We are pre-1.0 release. Now is the time to establish correct security foundations, even if it requires migration.
+
+**Why Concrete Implementation Over Abstract Methods**:
+- **Single Source of Truth**: Validation logic lives in ONE place (BasePlugin), not duplicated across 26 plugin classes
+- **Cannot Break Security**: `__init_subclass__` hook raises TypeError if subclass tries to override security methods
+- **Reduces Bug Surface**: 26 classes inheriting correct logic vs. 26 classes implementing their own (with 26 opportunities for bugs)
+- **Easier to Patch**: Security fixes only need to be made in BasePlugin, automatically inherited by all plugins
+- **Simpler Testing**: Test BasePlugin once instead of testing 26 implementations
 
 ---
 
