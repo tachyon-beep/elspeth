@@ -8,6 +8,7 @@ from typing import Any, Mapping
 
 import pandas as pd
 
+from elspeth.core.base.plugin import BasePlugin
 from elspeth.core.base.protocols import Artifact, ArtifactDescriptor, ResultSink
 from elspeth.core.base.types import SecurityLevel
 from elspeth.core.security import ensure_security_level
@@ -20,12 +21,14 @@ from elspeth.plugins.nodes.sinks._sanitize import sanitize_cell
 logger = logging.getLogger(__name__)
 
 
-class CsvResultSink(ResultSink):
+class CsvResultSink(BasePlugin, ResultSink):
     """Result sink that writes experiment results to CSV files with formula sanitization.
 
     Converts experiment results into tabular CSV format with configurable sanitization
     to prevent formula injection attacks. Extracts row data, LLM responses, and named
     responses into a flat structure suitable for spreadsheet analysis.
+
+    Inherits from BasePlugin to provide security enforcement (ADR-004).
 
     Features:
     - Automatic formula sanitization (prefix dangerous characters with guard)
@@ -43,7 +46,11 @@ class CsvResultSink(ResultSink):
         sanitize_formulas: bool = True,
         sanitize_guard: str = "'",
         allowed_base_path: str | Path | None = None,
+        security_level: SecurityLevel,  # REQUIRED - no default (ADR-004 requirement)
     ) -> None:
+        # Initialize BasePlugin with security level (ADR-004)
+        super().__init__(security_level=security_level)
+
         self.path = Path(path)
         self.overwrite = overwrite
         if on_error not in {"abort", "skip"}:
@@ -58,7 +65,10 @@ class CsvResultSink(ResultSink):
         if not self.sanitize_formulas:
             logger.warning("CSV sink sanitization disabled; outputs may trigger spreadsheet formulas.")
         self._last_written_path: str | None = None
-        self._security_level: SecurityLevel | None = None
+        # Runtime data classification tracking (separate from sink's security clearance)
+        # security_level (from BasePlugin) = sink's clearance level
+        # _artifact_security_level = runtime classification of written data (for artifact metadata)
+        self._artifact_security_level: SecurityLevel | None = None
         self._sanitization = {
             "enabled": self.sanitize_formulas,
             "guard": self.sanitize_guard,
@@ -163,7 +173,7 @@ class CsvResultSink(ResultSink):
 
             if metadata:
                 level = metadata.get("security_level")
-                self._security_level = level if isinstance(level, SecurityLevel) else ensure_security_level(level)
+                self._artifact_security_level = level if isinstance(level, SecurityLevel) else ensure_security_level(level)
             # Emit success event
             if plugin_logger:
                 try:
@@ -213,12 +223,12 @@ class CsvResultSink(ResultSink):
             metadata={
                 "path": self._last_written_path,
                 "content_type": "text/csv",
-                "security_level": self._security_level,
+                "security_level": self._artifact_security_level,
                 "sanitization": self._sanitization,
             },
             persist=True,
-            security_level=self._security_level,
+            security_level=self._artifact_security_level,
         )
         self._last_written_path = None
-        self._security_level = None
+        self._artifact_security_level = None
         return {"csv": artifact}
