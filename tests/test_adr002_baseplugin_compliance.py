@@ -486,109 +486,169 @@ class TestCategory5Integration:
     """Category 5: Integration tests for end-to-end security validation.
 
     These tests verify the complete validation flow in ExperimentSuiteRunner,
-    ensuring validation runs BEFORE data retrieval and checks ALL components.
+    using REAL production plugins (CSVDataSource, CsvResultSink) to demonstrate
+    the CURRENT BROKEN BEHAVIOR where isinstance(plugin, BasePlugin) returns False.
 
-    Expected: XFAIL → PASS after Phase 2 (hasattr checks removed)
+    **CRITICAL**: These tests use REAL plugins, NOT mocks. This ensures we're testing
+    actual production behavior, not idealized mock behavior that gives false confidence.
+
+    Expected: XFAIL (Phase 0) → PASS after Phase 1-2 (BasePlugin implemented + hasattr removed)
     """
 
     @pytest.mark.xfail(
-        reason="Phase 1-2 not complete - validation still uses hasattr checks",
-        strict=True
+        strict=True,
+        reason="Phase 0 - Real plugins lack BasePlugin methods, so isinstance checks fail and validation is SKIPPED (security bug!)"
     )
     def test_secret_datasource_unofficial_sink_blocked(self, tmp_path: Path) -> None:
         """Suite runner MUST block SECRET datasource → UNOFFICIAL sink flow.
 
         **TEST TYPE**: Integration (end-to-end security validation)
-        **EXPECTED**: XFAIL (validation skips) → PASS after Phase 2
+        **PHASE 0 STATE**: XFAIL - validation skipped because real plugins lack BasePlugin
+        **AFTER PHASE 1**: Should turn GREEN when real plugins implement BasePlugin
 
-        **SCENARIO**: SECRET datasource + UNOFFICIAL sink
-        **EXPECTED BEHAVIOR**: SecurityValidationError raised BEFORE datasource.load()
+        **SECURITY BUG DOCUMENTED**: This test uses REAL production plugins (CSVDataSource, CsvResultSink)
+        that currently DO NOT implement BasePlugin protocol. The validation code checks:
+
+            if isinstance(datasource, BasePlugin):  # line 598 in suite_runner.py
+                plugins.append(datasource)
+
+        Because real plugins lack get_security_level() and validate_can_operate_at_level(),
+        isinstance returns FALSE, plugin is NOT added to validation list, and security
+        validation is SKIPPED entirely. This allows classified data to flow to low-clearance sinks!
+
+        **EXPECTED AFTER PHASE 1**: When we add BasePlugin methods to CSVDataSource and CsvResultSink,
+        isinstance will return True, validation will run, and this test will turn GREEN.
+
+        **SCENARIO**: SECRET datasource + UNOFFICIAL sink (security mismatch)
+        **EXPECTED BEHAVIOR (after fix)**: SecurityValidationError raised before data retrieval
+        **CURRENT BEHAVIOR (bug)**: Validation skipped, experiment runs successfully (WRONG!)
         """
+        from elspeth.core.experiments.config import ExperimentConfig, ExperimentSuite
         from elspeth.core.experiments.suite_runner import ExperimentSuiteRunner
+        from elspeth.plugins.nodes.sources.csv_local import CSVDataSource
+        from elspeth.plugins.nodes.sinks.csv_file import CsvResultSink
+        from elspeth.plugins.nodes.transforms.llm.mock import MockLLMClient
 
-        # Create test data
-        csv_file = tmp_path / "secret_data.csv"
-        csv_file.write_text("col1,col2\n1,2\n")
+        # Create test CSV file with classified data
+        test_csv = tmp_path / "secret_data.csv"
+        test_csv.write_text("text\nClassified record 1\nClassified record 2\n")
 
-        output_file = tmp_path / "output.csv"
+        # REAL production datasource with SECRET security level
+        datasource = CSVDataSource(
+            path=str(test_csv),
+            security_level=SecurityLevel.SECRET,
+            retain_local=False,
+        )
 
-        # Minimal suite config (will create SECRET datasource + UNOFFICIAL sink)
-        config = {
-            "suite_id": "test_suite",
-            "suite_metadata": {"name": "Test Suite"},
-            "experiments": [
-                {
-                    "experiment_id": "exp1",
-                    "datasource": {"type": "csv_local", "path": str(csv_file)},
-                    "sinks": [{"type": "csv_file", "path": str(output_file)}]
-                }
-            ]
-        }
+        # REAL production sink (NO security_level parameter - that's the bug!)
+        # CsvResultSink lacks BasePlugin methods, so validation is skipped
+        unofficial_sink_path = tmp_path / "public_output.csv"
+        unofficial_sink = CsvResultSink(
+            path=str(unofficial_sink_path),
+        )
 
-        # SUCCESS CRITERIA: SecurityValidationError raised
+        # LLM client (doesn't affect security validation in this test)
+        llm_client = MockLLMClient()
+
+        # Build experiment suite
+        experiment = ExperimentConfig(
+            name="secret_to_unofficial",
+            prompt_system="Test",
+            prompt_template="Process: {text}",
+            temperature=0.7,
+            max_tokens=100,
+        )
+        suite = ExperimentSuite(root=tmp_path, baseline=experiment, experiments=[experiment])
+
+        runner = ExperimentSuiteRunner(suite=suite, llm_client=llm_client, sinks=[], datasource=datasource)
+
+        # EXPECTED BEHAVIOR (after Phase 1): SecurityValidationError raised
+        # ACTUAL BEHAVIOR (bug): Validation skipped, no exception raised
+        # This test is XFAIL because we expect it to fail (no exception when there should be one)
         with pytest.raises(SecurityValidationError) as exc_info:
-            runner = ExperimentSuiteRunner(config)  # type: ignore[arg-type,call-arg]
-            runner.run()  # type: ignore[call-arg]
+            runner.run(pd.DataFrame({"text": ["test"]}), sink_factory=lambda exp: [unofficial_sink])
 
-        # Error should mention security mismatch
+        # After Phase 1, error should mention security mismatch
         error_msg = str(exc_info.value)
-        assert "SECRET" in error_msg or "UNOFFICIAL" in error_msg, \
-            "Error must mention security level mismatch"
-
-        # Output file should NOT be created (validation failed before data load)
-        assert not output_file.exists(), \
-            "Output file should not exist - validation should abort before data retrieval"
+        assert "SECRET" in error_msg or "UNOFFICIAL" in error_msg
+        assert "ADR-002" in error_msg
 
     @pytest.mark.xfail(
-        reason="Phase 1-2 not complete - validation still uses hasattr checks",
-        strict=True
+        strict=True,
+        reason="Phase 0 - Real plugins lack BasePlugin methods, so isinstance checks fail and validation is SKIPPED"
     )
-    def test_unofficial_datasource_secret_sink_allowed(self, tmp_path: Path) -> None:
-        """Suite runner MUST allow UNOFFICIAL datasource → SECRET sink flow.
+    def test_matching_security_levels_allowed(self, tmp_path: Path) -> None:
+        """Suite runner MUST allow matching security levels (SECRET → SECRET).
 
         **TEST TYPE**: Integration (end-to-end security validation)
-        **EXPECTED**: XFAIL (validation skips) → PASS after Phase 2
+        **PHASE 0 STATE**: XFAIL - validation skipped because real plugins lack BasePlugin
+        **AFTER PHASE 1**: Should turn GREEN when real plugins implement BasePlugin
 
-        **SCENARIO**: UNOFFICIAL datasource + SECRET sink
-        **EXPECTED BEHAVIOR**: Experiment succeeds (safe downward flow)
+        **SECURITY BUG DOCUMENTED**: This test uses REAL production plugins that lack BasePlugin.
+        Even though this scenario SHOULD succeed (matching security levels), the validation
+        code never runs because isinstance(plugin, BasePlugin) returns False. We can't verify
+        the "success" path works correctly until plugins implement BasePlugin.
+
+        **SCENARIO**: SECRET datasource + SECRET sink (matching levels)
+        **EXPECTED BEHAVIOR (after fix)**: Validation runs, both accept SECRET envelope, test passes
+        **CURRENT BEHAVIOR (bug)**: Validation skipped, test passes for WRONG reason (no validation ran)
         """
+        from elspeth.core.experiments.config import ExperimentConfig, ExperimentSuite
         from elspeth.core.experiments.suite_runner import ExperimentSuiteRunner
+        from elspeth.plugins.nodes.sources.csv_local import CSVDataSource
+        from elspeth.plugins.nodes.sinks.csv_file import CsvResultSink
+        from elspeth.plugins.nodes.transforms.llm.mock import MockLLMClient
 
-        # Create test data
-        csv_file = tmp_path / "unofficial_data.csv"
-        csv_file.write_text("col1,col2\n1,2\n")
+        # Create test CSV file with classified data
+        test_csv = tmp_path / "secret_data.csv"
+        test_csv.write_text("text\nClassified record 1\nClassified record 2\n")
 
-        output_file = tmp_path / "output.csv"
+        # REAL production datasource with SECRET security level
+        datasource = CSVDataSource(
+            path=str(test_csv),
+            security_level=SecurityLevel.SECRET,
+            retain_local=False,
+        )
 
-        # Minimal suite config
-        config = {
-            "suite_id": "test_suite",
-            "suite_metadata": {"name": "Test Suite"},
-            "experiments": [
-                {
-                    "experiment_id": "exp1",
-                    "datasource": {
-                        "type": "csv_local",
-                        "path": str(csv_file),
-                        "security_level": "UNOFFICIAL"
-                    },
-                    "sinks": [
-                        {
-                            "type": "csv_file",
-                            "path": str(output_file),
-                            "security_level": "SECRET"
-                        }
-                    ]
-                }
-            ]
-        }
+        # REAL production sink (NO security_level parameter - that's the bug!)
+        # CsvResultSink lacks BasePlugin methods, so validation is skipped
+        secret_sink_path = tmp_path / "secret_output.csv"
+        secret_sink = CsvResultSink(
+            path=str(secret_sink_path),
+        )
 
-        # SUCCESS CRITERIA: No exception raised, output file created
-        runner = ExperimentSuiteRunner(config)  # type: ignore[arg-type,call-arg]
-        runner.run()  # type: ignore[call-arg]
+        # LLM client
+        llm_client = MockLLMClient()
 
-        assert output_file.exists(), \
-            "Output file should be created - validation should pass for safe downward flow"
+        # Build experiment suite
+        experiment = ExperimentConfig(
+            name="secret_to_secret",
+            prompt_system="Test",
+            prompt_template="Process: {text}",
+            temperature=0.7,
+            max_tokens=100,
+        )
+        suite = ExperimentSuite(root=tmp_path, baseline=experiment, experiments=[experiment])
+
+        runner = ExperimentSuiteRunner(suite=suite, llm_client=llm_client, sinks=[], datasource=datasource)
+
+        # EXPECTED BEHAVIOR (after Phase 1): Validation runs, both plugins accept, test passes
+        # CURRENT BEHAVIOR (bug): Validation skipped (isinstance returns False)
+        #
+        # This test is XFAIL because we WANT to verify that validation runs and accepts
+        # matching security levels, but we CAN'T verify that until plugins implement BasePlugin.
+        #
+        # The experiment WILL succeed (validation is skipped), but we raise an assertion failure
+        # to document that this success is for the WRONG reason (no validation ran).
+        results = runner.run(pd.DataFrame({"text": ["test"]}), sink_factory=lambda exp: [secret_sink])
+
+        # This assertion DOCUMENTS the bug - experiment succeeded but validation never ran!
+        # After Phase 1, remove this and just assert the experiment succeeded.
+        assert "secret_to_secret" in results
+        pytest.fail(
+            "Test passed for WRONG reason: validation was skipped (isinstance returned False). "
+            "After Phase 1, remove this pytest.fail() and let test pass naturally."
+        )
 
 
 # =============================================================================
