@@ -7,9 +7,10 @@ Accepted (2025-10-23)
 ## Context
 
 Elspeth orchestrates experiments that chain datasources, LLM transforms, and sinks. Many
-deployments handle data with strict classification requirements (e.g., government TOP
-SECRET/SECRET/UNOFFICIAL, healthcare HIPAA data, PCI-DSS cardholder data). We need a
-mechanism that prevents sensitive information from flowing into less trusted components.
+deployments handle data with strict classification requirements (e.g., Australian Government
+PSPF classifications UNOFFICIAL → OFFICIAL → OFFICIAL:SENSITIVE → PROTECTED → SECRET,
+healthcare HIPAA data, PCI-DSS cardholder data). We need a mechanism that prevents sensitive
+information from flowing into less trusted components.
 
 Traditional access control models rely solely on clearance checks at consumption time
 ("can this component access this data?"), but this approach has a critical vulnerability:
@@ -46,6 +47,44 @@ no write down") with two layers of enforcement:
    for the required operating level, preventing low-clearance components from handling
    classified data. **Note**: In normal automatic computation, the operating level equals the
    LOWEST component clearance, so insufficient-clearance errors only occur with manual overrides.
+
+### Bell-LaPadula Directionality: Data vs Plugin Operations
+
+**CRITICAL DISTINCTION**: Data classifications and plugin operations move in OPPOSITE directions under Bell-LaPadula:
+
+**Data Classifications (Can Only INCREASE)** - ADR-002a:
+- Data tagged UNOFFICIAL can be **uplifted** to OFFICIAL or SECRET (via `with_uplifted_classification()`)
+- Data tagged SECRET **CANNOT** be downgraded to OFFICIAL or UNOFFICIAL
+- Violates Bell-LaPadula "no write down" rule
+- Example: SECRET-tagged DataFrame cannot be written to UNOFFICIAL sink
+- Classification increases are EXPLICIT and AUDITED (never implicit)
+- Enforced by ClassifiedDataFrame container model (ADR-002a)
+
+**Plugin Operations (Can Only DECREASE - if allow_downgrade=True)** - ADR-002/ADR-005:
+- Plugin with SECRET clearance **CAN** operate at OFFICIAL or UNOFFICIAL levels (trusted downgrade)
+- Plugin with UNOFFICIAL clearance **CANNOT** operate at SECRET level (insufficient clearance)
+- Violates Bell-LaPadula "no read up" rule
+- Example: UNOFFICIAL datasource cannot participate in SECRET pipeline
+- Operation decreases require `allow_downgrade=True` (frozen plugins reject ALL downgrade attempts)
+- Enforced by BasePlugin.validate_can_operate_at_level() (ADR-004)
+
+**Asymmetry Summary**:
+```
+Data Classification:  UNOFFICIAL → OFFICIAL → SECRET  (can only increase via uplift)
+Plugin Operation:     SECRET → OFFICIAL → UNOFFICIAL  (can only decrease via trusted downgrade)
+```
+
+**Forbidden Operations**:
+- ❌ UNOFFICIAL plugin running at SECRET level (insufficient clearance - plugin operation violation)
+- ❌ SECRET data downgrading to UNOFFICIAL (no write down - data classification violation)
+- ❌ Frozen plugin (allow_downgrade=False) operating below its clearance (strict enforcement)
+
+**Allowed Operations**:
+- ✅ SECRET plugin operating at UNOFFICIAL level (if allow_downgrade=True) - trusted to filter
+- ✅ UNOFFICIAL data uplifted to SECRET (explicit via with_uplifted_classification())
+- ✅ Frozen plugin operating at EXACT declared level only
+
+**See Also**: ADR-005 (Frozen Plugin Capability) for detailed frozen behavior specification.
 
 ### Example Implementation
 

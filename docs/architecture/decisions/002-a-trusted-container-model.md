@@ -46,7 +46,11 @@ This is more subtle than T2 (malicious plugins lying about capabilities) because
 
 ## Decision
 
-We will adopt a **Trusted Container Model** that separates classification metadata (immutable, trusted) from data content (mutable, transformed):
+We will adopt a **Trusted Container Model** that separates classification metadata (immutable, trusted) from data content (mutable, transformed).
+
+**Bell-LaPadula Note**: This ADR covers **data classification** management (can only INCREASE via uplift). For **plugin operation** rules (can only DECREASE via trusted downgrade), see ADR-002 and ADR-005. Data and plugin operations move in OPPOSITE directions - see ADR-005 "Bell-LaPadula Directionality" for the asymmetry explanation.
+
+### Container Model Implementation
 
 1. **Datasource-only creation** – Only datasources can create `ClassifiedDataFrame` instances via `create_from_datasource()` factory method. Plugins attempting direct construction will raise `SecurityValidationError`.
 
