@@ -10,18 +10,36 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
+from elspeth.core.base.plugin import BasePlugin
 from elspeth.core.base.protocols import LLMClientProtocol
 from elspeth.core.base.types import SecurityLevel
 
 logger = logging.getLogger(__name__)
 
 
-class HttpOpenAIClient(LLMClientProtocol):
-    """Minimal client for standard /v1/chat/completions endpoints."""
+class HttpOpenAIClient(BasePlugin, LLMClientProtocol):
+    """Minimal client for standard /v1/chat/completions endpoints.
+
+    Args:
+        security_level: Security clearance for this LLM adapter (MANDATORY per ADR-004).
+        allow_downgrade: Whether adapter can operate at lower pipeline levels (MANDATORY per ADR-005).
+        api_base: Base URL for OpenAI-compatible API endpoint.
+        api_key: API key for authentication (optional if using api_key_env).
+        api_key_env: Environment variable name containing API key.
+        model: Model identifier to use.
+        temperature: Sampling temperature (0-2).
+        max_tokens: Maximum tokens in response.
+        timeout: Request timeout in seconds.
+        retry_total: Total number of retry attempts.
+        backoff_factor: Backoff factor for retries.
+        status_forcelist: HTTP status codes to retry on.
+    """
 
     def __init__(
         self,
         *,
+        security_level: SecurityLevel,
+        allow_downgrade: bool,
         api_base: str,
         api_key: str | None = None,
         api_key_env: str | None = None,
@@ -32,8 +50,8 @@ class HttpOpenAIClient(LLMClientProtocol):
         retry_total: int = 3,
         backoff_factor: float = 0.5,
         status_forcelist: tuple[int, ...] | None = None,
-        security_level: SecurityLevel | None = None,
     ) -> None:
+        super().__init__(security_level=security_level, allow_downgrade=allow_downgrade)
         self.api_base = api_base.rstrip("/")
         # Defense-in-depth: validate endpoint even when instantiated directly
         try:

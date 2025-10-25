@@ -5,19 +5,32 @@ from __future__ import annotations
 import os
 from typing import Any
 
+from elspeth.core.base.plugin import BasePlugin
 from elspeth.core.base.protocols import LLMClientProtocol
+from elspeth.core.base.types import SecurityLevel
 
 
-class AzureOpenAIClient(LLMClientProtocol):
-    """Thin wrapper around OpenAI's Azure client implementing LLMClientProtocol."""
+class AzureOpenAIClient(BasePlugin, LLMClientProtocol):
+    """Thin wrapper around OpenAI's Azure client implementing LLMClientProtocol.
+
+    Args:
+        security_level: Security clearance for this LLM adapter (MANDATORY per ADR-004).
+        allow_downgrade: Whether adapter can operate at lower pipeline levels (MANDATORY per ADR-005).
+        deployment: Azure deployment name (optional, can be resolved from config or env).
+        config: Azure OpenAI configuration dict (endpoint, API keys, model parameters).
+        client: Pre-configured OpenAI client (optional, for dependency injection).
+    """
 
     def __init__(
         self,
         *,
+        security_level: SecurityLevel,
+        allow_downgrade: bool,
         deployment: str | None = None,
         config: dict[str, Any],
         client: Any | None = None,
     ):
+        super().__init__(security_level=security_level, allow_downgrade=allow_downgrade)
         self.config = config
         self.temperature = config.get("temperature")
         self.max_tokens = config.get("max_tokens")

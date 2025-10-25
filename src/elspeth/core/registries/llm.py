@@ -99,7 +99,18 @@ def create_llm_from_definition(
 
 
 def _create_azure_openai(options: dict[str, Any], context: PluginContext) -> AzureOpenAIClient:
-    """Create Azure OpenAI LLM client with endpoint validation."""
+    """Create Azure OpenAI LLM client with endpoint validation.
+
+    Args:
+        options: Configuration options (should include security_level and allow_downgrade).
+        context: Plugin context (provides fallback security_level if not in options).
+
+    Returns:
+        AzureOpenAIClient instance with security enforcement.
+
+    Note:
+        Defaults to allow_downgrade=True if not specified (standard trusted downgrade per ADR-002).
+    """
     # Extract azure_endpoint from config for validation
     config = options.get("config", {})
     azure_endpoint = config.get("azure_endpoint")
@@ -118,11 +129,33 @@ def _create_azure_openai(options: dict[str, Any], context: PluginContext) -> Azu
             logger.error("Azure OpenAI endpoint validation failed: %s", exc)
             raise ConfigurationError(f"Azure OpenAI endpoint validation failed: {exc}") from exc
 
+    # Create a copy to avoid mutating input
+    options = dict(options)
+
+    # Ensure security_level is set (from options or context)
+    if "security_level" not in options and context:
+        options["security_level"] = context.security_level
+
+    # Ensure allow_downgrade is set (default to True - standard trusted downgrade)
+    if "allow_downgrade" not in options:
+        options["allow_downgrade"] = True
+
     return AzureOpenAIClient(**options)
 
 
 def _create_http_openai(options: dict[str, Any], context: PluginContext) -> HttpOpenAIClient:
-    """Create HTTP OpenAI LLM client with endpoint validation."""
+    """Create HTTP OpenAI LLM client with endpoint validation.
+
+    Args:
+        options: Configuration options (should include security_level and allow_downgrade).
+        context: Plugin context (provides fallback security_level if not in options).
+
+    Returns:
+        HttpOpenAIClient instance with security enforcement.
+
+    Note:
+        Defaults to allow_downgrade=True if not specified (standard trusted downgrade per ADR-002).
+    """
     # Extract api_base for validation
     api_base = options.get("api_base")
 
@@ -139,6 +172,17 @@ def _create_http_openai(options: dict[str, Any], context: PluginContext) -> Http
         except ValueError as exc:
             logger.error("HTTP API endpoint validation failed: %s", exc)
             raise ConfigurationError(f"HTTP API endpoint validation failed: {exc}") from exc
+
+    # Create a copy to avoid mutating input
+    options = dict(options)
+
+    # Ensure security_level is set (from options or context)
+    if "security_level" not in options and context:
+        options["security_level"] = context.security_level
+
+    # Ensure allow_downgrade is set (default to True - standard trusted downgrade)
+    if "allow_downgrade" not in options:
+        options["allow_downgrade"] = True
 
     return HttpOpenAIClient(**options)
 
@@ -172,17 +216,36 @@ def _create_mock_llm(options: dict[str, Any], context: PluginContext) -> MockLLM
 
 
 def _create_static_llm(options: dict[str, Any], context: PluginContext) -> StaticLLMClient:
-    """Create static LLM client."""
+    """Create static LLM client.
+
+    Args:
+        options: Configuration options (should include security_level, allow_downgrade, and content).
+        context: Plugin context (provides fallback security_level if not in options).
+
+    Returns:
+        StaticLLMClient instance with security enforcement.
+
+    Note:
+        Defaults to allow_downgrade=True if not specified (standard trusted downgrade per ADR-002).
+    """
     content = options.get("content")
     if not content:
         raise ConfigurationError(
             "static_test LLM requires explicit 'content' parameter. Provide the test response content explicitly in configuration."
         )
-    return StaticLLMClient(
-        content=content,
-        score=options.get("score"),
-        metrics=options.get("metrics"),
-    )
+
+    # Create a copy to avoid mutating input
+    options = dict(options)
+
+    # Ensure security_level is set (from options or context)
+    if "security_level" not in options and context:
+        options["security_level"] = context.security_level
+
+    # Ensure allow_downgrade is set (default to True - standard trusted downgrade)
+    if "allow_downgrade" not in options:
+        options["allow_downgrade"] = True
+
+    return StaticLLMClient(**options)
 
 
 # ============================================================================

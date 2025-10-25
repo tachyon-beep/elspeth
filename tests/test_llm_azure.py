@@ -2,6 +2,7 @@ import os
 
 import pytest
 
+from elspeth.core.base.types import SecurityLevel
 from elspeth.plugins.nodes.transforms.llm.azure_openai import AzureOpenAIClient
 
 
@@ -41,6 +42,8 @@ def test_generate_uses_client_calls(monkeypatch):
     dummy_client = make_dummy_client()
 
     llm = AzureOpenAIClient(
+        security_level=SecurityLevel.UNOFFICIAL,
+        allow_downgrade=True,
         deployment="gpt",
         config={
             "api_key": "key",
@@ -67,6 +70,8 @@ def test_missing_config_uses_env(monkeypatch):
     monkeypatch.setenv("ELSPETH_AZURE_OPENAI_DEPLOYMENT", "env-model")
 
     llm = AzureOpenAIClient(
+        security_level=SecurityLevel.UNOFFICIAL,
+        allow_downgrade=True,
         config={
             "api_key_env": "OPENAI_TEST_KEY",
             "api_version": "2024-05-01",
@@ -82,6 +87,8 @@ def test_missing_required_raises():
     os.environ.pop("ELSPETH_AZURE_OPENAI_DEPLOYMENT", None)
     with pytest.raises(ValueError):
         AzureOpenAIClient(
+            security_level=SecurityLevel.UNOFFICIAL,
+            allow_downgrade=True,
             deployment="gpt",
             config={
                 "api_key": "key",

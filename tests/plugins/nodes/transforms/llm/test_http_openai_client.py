@@ -4,18 +4,30 @@ from typing import Any
 
 import pytest
 
+from elspeth.core.base.types import SecurityLevel
 from elspeth.plugins.nodes.transforms.llm.openai_http import HttpOpenAIClient
 
 
 def test_http_openai_client_mounts_http_for_localhost() -> None:
-    client = HttpOpenAIClient(api_base="http://localhost:8080", model="gpt-test")
+    client = HttpOpenAIClient(
+        security_level=SecurityLevel.UNOFFICIAL,
+        allow_downgrade=True,
+        api_base="http://localhost:8080",
+        model="gpt-test"
+    )
     # requests.Session stores adapters keyed by scheme prefixes
     assert "http://" in client.session.adapters
     assert "https://" in client.session.adapters
 
 
 def test_http_openai_client_generate(monkeypatch) -> None:
-    client = HttpOpenAIClient(api_base="http://localhost:8080", model="gpt-test", timeout=1.5)
+    client = HttpOpenAIClient(
+        security_level=SecurityLevel.UNOFFICIAL,
+        allow_downgrade=True,
+        api_base="http://localhost:8080",
+        model="gpt-test",
+        timeout=1.5
+    )
 
     captured: dict[str, Any] = {}
 
@@ -45,4 +57,9 @@ def test_http_openai_client_generate(monkeypatch) -> None:
 def test_http_openai_client_rejects_non_localhost_http():
     # http:// must be restricted to localhost/loopback by endpoint validator
     with pytest.raises(ValueError):
-        _ = HttpOpenAIClient(api_base="http://example.com", model="gpt-test")
+        _ = HttpOpenAIClient(
+            security_level=SecurityLevel.UNOFFICIAL,
+            allow_downgrade=True,
+            api_base="http://example.com",
+            model="gpt-test"
+        )
