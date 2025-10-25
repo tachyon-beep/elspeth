@@ -1,0 +1,398 @@
+================================================================================
+ELSPETH DATA FLOW ARCHITECTURE - COMPLETE MAPPING
+================================================================================
+
+                              TIER 0: DATA SOURCES
+===============================================================================
+
+CSV/Blob Datasources [4 plugins]
+├─ _csv_base.py         (BASE CLASS: All CSV sources inherit from this)
+├─ csv_local.py         (Wrapper: LocalCSVDataSource)
+├─ csv_blob.py          (Wrapper: BlobCSVDataSource)
+└─ blob.py              (BlobStoreDataSource for cloud storage)
+
+PROTOCOL CONTRACT:
+  class DataSource(Protocol):
+      def load(self) -> pd.DataFrame:
+          ...
+
+CURRENT BEHAVIOR:
+  df = pd.read_csv(...)
+  df.attrs['security_level'] = self.security_level
+  return df
+
+MIGRATION:
+  df = pd.read_csv(...)
+  return ClassifiedDataFrame.create_from_datasource(df, self.security_level)
+
+================================================================================
+TIER 1: ORCHESTRATION LAYER (Top-level Entry Point)
+================================================================================
+
+┌─ orchestrator.py (ExperimentOrchestrator class, 181 lines) ──────────────┐
+│                                                                           │
+│  run() -> dict[str, Any]:                                                │
+│    │                                                                      │
+│    ├─ Line 159: df = self.datasource.load()                             │
+│    │            MIGRATE: Handle ClassifiedDataFrame                      │
+│    │                                                                      │
+│    ├─ Line 163: if self.config.max_rows: df = df.head(...)             │
+│    │            MIGRATE: ClassifiedDataFrame.head() support              │
+│    │                                                                      │
+│    ├─ Line 165-166: Extract prompts from config                         │
+│    │            NO CHANGE: String-based                                  │
+│    │                                                                      │
+│    └─ Line 179: payload = runner.run(df)                                │
+│                 MIGRATE: runner.run() must accept ClassifiedDataFrame    │
+│                                                                           │
+└───────────────────────────────────────────────────────────────────────────┘
+                                    ↓
+                            (Pass DataFrame)
+                                    ↓
+┌──────────────────────────────────────────────────────────────────────────┐
+│         TIER 2: EXPERIMENT RUNNER (950+ lines)                           │
+│                                                                           │
+│  ExperimentRunner.run(df: pd.DataFrame) -> dict[str, Any]:              │
+│                                                                           │
+│  TIER 2.1: INITIALIZATION                                               │
+│  ├─ Line 769: _init_early_stop()                                        │
+│  ├─ Line 770: checkpoint_manager = _init_checkpoint()                   │
+│  ├─ Line 775: engine, system_template, user_template, criteria_templates  │
+│  │            = _init_prompts()                                          │
+│  ├─ Line 778: _init_validation(df)                                      │
+│  │            ├─ Schema validation against input_schema()               │
+│  │            └─ Malformed data tracking                                │
+│  │                                                                       │
+│  └─ Line 781: rows_to_process = _prepare_rows_to_process(df)            │
+│              EXTRACT: list[tuple(index, row: pd.Series, context: dict, │
+│                                  row_id: str | None)]                   │
+│              MIGRATE: Extract from ClassifiedDataFrame.data             │
+│                       Wrap context in ClassifiedData[dict]              │
+│                                                                       │
+└──────────────────────────────────────────────────────────────────────────┘
+                                    ↓
+                        Row Preparation Complete
+                                    ↓
+┌──────────────────────────────────────────────────────────────────────────┐
+│  TIER 2.2: ROW PROCESSING (Parallel or Sequential)                       │
+│  Line 784-792: _execute_row_processing() -> ProcessingResult             │
+│    FOR EACH ROW IN rows_to_process:                                      │
+│      ├─ Index: int (row position)                                       │
+│      ├─ Row: pd.Series (original row data)                              │
+│      ├─ Context: dict (extracted row fields for prompt rendering)       │
+│      ├─ Row ID: str (checkpoint identifier)                             │
+│      │                                                                   │
+│      └─ Call _process_single_row(...) -> (record, failure)              │
+│         MIGRATE: context is ClassifiedData[dict]                         │
+│                                                                           │
+│         STEPS IN _process_single_row():                                  │
+│         ├─ Render system prompt from template                           │
+│         ├─ Render user prompt from template (includes context)          │
+│         ├─ MIDDLEWARE CHAIN:                                            │
+│         │  ├─ Build LLMRequest(system, user, metadata=context)          │
+│         │  │  MIGRATE: context could be ClassifiedData[dict]            │
+│         │  │                                                             │
+│         │  ├─ For each middleware:                                      │
+│         │  │  └─ before_request(request) -> request                    │
+│         │  │     MIGRATE: Unwrap if ClassifiedData                      │
+│         │  │                                                             │
+│         │  ├─ llm_client.generate(system_prompt, user_prompt, metadata) │
+│         │  │  NO CHANGE: Receives strings and dict                      │
+│         │  │                                                             │
+│         │  └─ For each middleware:                                      │
+│         │     └─ after_response(request, response) -> response          │
+│         │        MIGRATE: Re-wrap if needed, uplift classification      │
+│         │                                                                │
+│         ├─ VALIDATION:                                                  │
+│         │  └─ For each validation_plugin:                               │
+│         │     validator.validate(response, context, metadata)           │
+│         │     NO CHANGE: Validates response structure                   │
+│         │                                                                │
+│         ├─ ROW PLUGINS:                                                 │
+│         │  └─ For each row_plugin:                                      │
+│         │     plugin.process_row(row_dict, response_dict)               │
+│         │     -> dict (derived metrics)                                 │
+│         │     MIGRATE: row_dict could be ClassifiedData[dict]           │
+│         │                                                                │
+│         └─ ACCUMULATE RESULT:                                           │
+│            record = {                                                    │
+│              "row": {...},             # Original row data              │
+│              "responses": {...},       # LLM responses                  │
+│              "metrics": {...},         # Row plugin outputs             │
+│              "retry": {...},           # Optional: retry info           │
+│            }                                                             │
+│            MIGRATE: Might contain ClassifiedData fields                 │
+│                                                                           │
+└──────────────────────────────────────────────────────────────────────────┘
+                                    ↓
+                    Row Processing Complete (results list)
+                                    ↓
+┌──────────────────────────────────────────────────────────────────────────┐
+│  TIER 2.3: AGGREGATION (runner.py:401)                                   │
+│  _run_aggregation(results: list[dict]) -> dict | None                   │
+│                                                                           │
+│  FOR EACH AGGREGATOR PLUGIN:                                            │
+│  ├─ aggregator.finalize(results)                                        │
+│  │  MIGRATE: results might be list[ClassifiedData[dict]]                │
+│  │           Aggregator unwraps for processing                          │
+│  │                                                                       │
+│  └─ Returns: dict (e.g., {"stats": {...}, "scores": {...}})            │
+│     NO CHANGE: Output is plain dict                                     │
+│                                                                          │
+│  AGGREGATORS (6 plugins):                                               │
+│  ├─ score_stats.py (Computes statistics)                                │
+│  ├─ score_variant_ranking.py (Ranks variants)                           │
+│  ├─ score_recommendation.py (Generates recommendations)                 │
+│  ├─ score_power.py (Statistical power)                                  │
+│  ├─ rationale_analysis.py (Analyzes rationales)                         │
+│  └─ latency_summary.py, cost_summary.py (Summaries)                    │
+│                                                                          │
+│  BASELINE PLUGINS (9 plugins - NO CHANGES):                             │
+│  ├─ score_delta.py, score_significance.py, outlier_detection.py        │
+│  ├─ score_bayesian.py, score_flip_analysis.py, etc.                    │
+│  └─ These work with aggregated metrics (already processed)              │
+│                                                                          │
+└──────────────────────────────────────────────────────────────────────────┘
+                                    ↓
+                        Aggregation Complete
+                                    ↓
+┌──────────────────────────────────────────────────────────────────────────┐
+│  TIER 2.4: METADATA ASSEMBLY (runner.py:417)                             │
+│  _assemble_metadata(results, failures, aggregates, df)                  │
+│    -> ExecutionMetadata                                                  │
+│                                                                          │
+│  Builds ExecutionMetadata with:                                         │
+│  ├─ processed_rows: int (len(results))                                  │
+│  ├─ total_rows: int (len(df))                                           │
+│  ├─ retry_summary: dict | None                                          │
+│  ├─ cost_summary: dict | None                                           │
+│  ├─ failures: list[dict] | None                                         │
+│  ├─ aggregates: dict | None                                             │
+│  ├─ security_level: SecurityLevel | None                                │
+│  ├─ determinism_level: DeterminismLevel | None                          │
+│  └─ early_stop: dict | None                                             │
+│                                                                          │
+│  NO CHANGE: Already has security_level field                            │
+│                                                                          │
+└──────────────────────────────────────────────────────────────────────────┘
+                                    ↓
+┌──────────────────────────────────────────────────────────────────────────┐
+│  TIER 2.5: PAYLOAD ASSEMBLY (runner.py:796)                              │
+│  Assembles final payload dict:                                          │
+│                                                                          │
+│  payload = {                                                            │
+│    "results": list[dict],           # Row results with metrics          │
+│    "failures": list[dict],          # Failed rows                       │
+│    "aggregates": dict | None,       # Aggregation results               │
+│    "cost_summary": dict | None,     # Optional: cost tracking           │
+│    "early_stop": dict | None,       # Optional: early stop reason       │
+│    "metadata": {                    # Metadata dict                     │
+│        "processed_rows": int,                                            │
+│        "total_rows": int,                                                │
+│        "security_level": SecurityLevel.name,  # String!                 │
+│        "determinism_level": DeterminismLevel.name,                      │
+│        "retry_summary": dict | None,                                    │
+│        "failures": list[dict] | None,                                   │
+│        "aggregates": dict | None,                                       │
+│        "cost_summary": dict | None,                                     │
+│        "early_stop": dict | None,                                       │
+│    }                                                                     │
+│  }                                                                       │
+│                                                                          │
+│  NO CHANGE: Already contains security_level in metadata                 │
+│                                                                          │
+└──────────────────────────────────────────────────────────────────────────┘
+                                    ↓
+                    Payload ready for sinks
+                                    ↓
+================================================================================
+TIER 3: ARTIFACT PIPELINE & SINK DISPATCH
+================================================================================
+
+runner.py:814: _dispatch_to_sinks(payload, metadata)
+  │
+  └─ artifact_pipeline.execute(payload, metadata)
+     │
+     ├─ ARTIFACT RESOLUTION:
+     │  └─ Resolve sink dependencies and order
+     │     (Uses sink.consumes() and sink.produces())
+     │
+     └─ FOR EACH SINK (in dependency order):
+        │
+        ├─ sink.write(payload, metadata=metadata)
+        │  (Sink writes results to storage)
+        │
+        ├─ sink.collect_artifacts() -> dict[str, Artifact]
+        │  (Sink reports generated artifacts)
+        │
+        ├─ Artifact registration in ArtifactStore
+        │  └─ Each artifact tagged with:
+        │     ├─ security_level (from sink or metadata)
+        │     ├─ determinism_level
+        │     └─ schema_id
+        │
+        └─ sink.finalize(artifacts)
+           (Cleanup/post-processing)
+
+SINK PLUGINS (16 implementations):
+├─ csv_file.py                      (CSV output)
+├─ excel.py                         (Excel workbooks)
+├─ blob.py                          (2 classes: Blob storage)
+├─ analytics_report.py              (Analytics)
+├─ visual_report.py                 (Visual analytics)
+├─ enhanced_visual_report.py        (Enhanced visuals)
+├─ embeddings_store.py              (Vector embeddings)
+├─ local_bundle.py                  (Local bundles)
+├─ repository.py                    (3 classes: Git/Azure DevOps repos)
+├─ reproducibility_bundle.py        (Reproducibility)
+├─ signed.py                        (Signed artifacts)
+├─ zip_bundle.py                    (Zip bundles)
+├─ file_copy.py                     (File copying)
+├─ _sanitize.py                     (Formula injection protection)
+└─ _visual_base.py                  (Visual sink base)
+
+CURRENT BEHAVIOR:
+  All sinks receive:
+  ├─ payload: dict with "results", "failures", "aggregates", metadata
+  ├─ metadata: ExecutionMetadata dict with security_level
+
+MIGRATION:
+  ├─ Minimal changes (already dict-based)
+  ├─ Security level already in metadata
+  ├─ Artifacts already have security metadata
+  └─ May need to handle ClassifiedData fields in result dicts
+
+================================================================================
+DATA STRUCTURE TRANSFORMATIONS
+================================================================================
+
+┌─ DATASOURCE LAYER ─────────────────────────────────────────────────────┐
+│                                                                         │
+│  BEFORE:                              AFTER:                          │
+│  ┌─ pd.DataFrame ─────────────────┐  ┌─ ClassifiedDataFrame ───────┐ │
+│  │ attrs={'security_level': ...}   │  │ data: pd.DataFrame          │ │
+│  │ [data, ...]                     │  │ classification: SecurityLevel│ │
+│  └─────────────────────────────────┘  └─────────────────────────────┘ │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+                                   ↓
+┌─ ROW EXTRACTION LAYER ─────────────────────────────────────────────────┐
+│                                                                         │
+│  BEFORE:                              AFTER:                          │
+│  ┌─ (index, pd.Series, dict) ────┐   ┌─ (index, pd.Series, ───────┐ │
+│  │ row = df.iloc[i]               │   │  ClassifiedData[dict])      │ │
+│  │ context = {field: row[field]}  │   │ row = frame.data.iloc[i]    │ │
+│  │ NO CLASSIFICATION              │   │ context = ClassifiedData[{...│ │
+│  └─────────────────────────────────┘  └─────────────────────────────┘ │
+│                                                                         │
+└─────────────────────────────────────────────────────────────────────────┘
+                                   ↓
+┌─ MIDDLEWARE LAYER ────────────────────────────────────────────────────┐
+│                                                                        │
+│  BEFORE:                            AFTER:                           │
+│  ┌─ LLMRequest ────────────────┐   ┌─ LLMRequest ─────────────────┐ │
+│  │ system_prompt: str           │   │ system_prompt: str            │ │
+│  │ user_prompt: str             │   │ user_prompt: str              │ │
+│  │ metadata: dict[str, Any]     │   │ metadata: ClassifiedData[dict]│ │
+│  │           ╔════════════════╗ │   │           ╔════════════════╗  │ │
+│  │           ║ Unwrapped dict ║ │   │           ║ Classification║  │ │
+│  │           ║ fields mixed   ║ │   │           ║ uplifting in  ║  │ │
+│  │           ║ with metadata  ║ │   │           ║ after_response║  │ │
+│  │           ╚════════════════╝ │   │           ╚════════════════╝  │ │
+│  └──────────────────────────────┘   └──────────────────────────────┘ │
+│                                                                        │
+└────────────────────────────────────────────────────────────────────────┘
+                                   ↓
+┌─ AGGREGATION LAYER ────────────────────────────────────────────────────┐
+│                                                                         │
+│  BEFORE:                            AFTER:                            │
+│  ┌─ list[dict[str, Any]] ────────┐ ┌─ list[ClassifiedData[dict]] ──┐ │
+│  │ [{...metrics...},             │ │ [ClassifiedData({...}),       │ │
+│  │  {...metrics...},             │ │  ClassifiedData({...}),       │ │
+│  │  ...]                         │ │  ...]                         │ │
+│  │ NO CLASSIFICATION per row     │ │ CLASSIFICATION per row        │ │
+│  └───────────────────────────────┘ └───────────────────────────────┘ │
+│                                                                        │
+└────────────────────────────────────────────────────────────────────────┘
+                                   ↓
+┌─ PAYLOAD ASSEMBLY ────────────────────────────────────────────────────┐
+│                                                                        │
+│  BEFORE/AFTER: (No change at this layer)                              │
+│  ┌─ dict[str, Any] ────────────────────────────────────────────────┐ │
+│  │ {                                                                │ │
+│  │   "results": list[dict],        # Row results                  │ │
+│  │   "aggregates": dict,           # Aggregated metrics           │ │
+│  │   "metadata": {                 # Execution metadata           │ │
+│  │       "security_level": OFFICIAL,   # Already here!           │ │
+│  │       "determinism_level": DETERMINISTIC,                     │ │
+│  │       ...                                                       │ │
+│  │   }                                                             │ │
+│  │ }                                                               │ │
+│  └─────────────────────────────────────────────────────────────────┘ │
+│                                                                        │
+└────────────────────────────────────────────────────────────────────────┘
+
+================================================================================
+MIDDLEWARE UNWRAP/WRAP FLOW (Most Complex Part)
+================================================================================
+
+Middleware receives LLMRequest with metadata:
+
+OPTION A: Runner Unwraps (RECOMMENDED)
+  1. Runner builds context dict from row: {"field1": v1, "field2": v2}
+  2. Runner wraps context: ClassifiedData[dict]
+  3. Runner extracts before passing to middleware: LLMRequest.metadata = dict
+  4. Middleware receives unwrapped dict (no change to middleware code)
+  5. Runner re-wraps after_response: request.metadata = ClassifiedData[dict]
+  6. Runner uplifts after middleware chain
+
+OPTION B: Middleware Unwraps
+  1. Runner wraps context: ClassifiedData[dict]
+  2. Middleware.before_request():
+     - if isinstance(request.metadata, ClassifiedData):
+       - metadata_dict = request.metadata.data
+       - request = request.clone(metadata=metadata_dict)
+  3. Middleware.after_response():
+     - if had_classified_metadata:
+       - request.metadata = ClassifiedData(request.metadata)
+       - request.metadata = request.metadata.with_uplifted_classification(plugin_level)
+
+RECOMMENDED: Option A (cleaner, middleware doesn't need ClassifiedData awareness)
+
+================================================================================
+CLASSIFICATION UPLIFTING FLOW
+================================================================================
+
+Initial data classification: OFFICIAL (from datasource)
+┌─ security_level: OFFICIAL
+
+Extract row context (wrapped in ClassifiedData[dict]):
+├─ security_level: OFFICIAL
+
+Middleware processes (e.g., PII Shield, Classified Material):
+├─ Plugin security_level: SECRET
+├─ Response gets uplifted: max(OFFICIAL, SECRET) = SECRET
+
+LLM processes (e.g., Azure OpenAI):
+├─ Plugin security_level: CONFIDENTIAL
+├─ Response gets uplifted: max(SECRET, CONFIDENTIAL) = SECRET
+
+Row plugins process:
+├─ Plugin security_level: OFFICIAL
+├─ Result gets uplifted: max(SECRET, OFFICIAL) = SECRET
+
+Aggregation:
+├─ Plugin security_level: OFFICIAL
+├─ Aggregates get uplifted: max(SECRET, OFFICIAL) = SECRET
+
+Final payload security_level: SECRET (highest seen during processing)
+
+Sinks receive:
+├─ metadata.security_level = SECRET
+├─ All artifacts tagged with security_level: SECRET
+
+THIS IS THE "HIGH WATER MARK" PRINCIPLE:
+Data classification never decreases, only increases as it passes through
+higher-security plugins.
+
+================================================================================

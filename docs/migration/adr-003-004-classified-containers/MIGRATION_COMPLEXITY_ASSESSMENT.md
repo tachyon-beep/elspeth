@@ -485,7 +485,6 @@
 - ⭕ Aggregators use ClassifiedData[dict]
 - ⭕ Baseline plugins explicitly handle classification
 - ⭕ Classification audit logging (track uplifts)
-- ⭕ Feature flag for gradual rollout
 
 ---
 
