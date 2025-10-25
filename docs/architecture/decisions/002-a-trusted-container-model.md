@@ -11,6 +11,7 @@ Augments [ADR-002](002-security-architecture.md)
 ADR-002 established Multi-Level Security (MLS) enforcement with two layers: start-time validation (orchestrator rejects misconfigured pipelines) and runtime validation (`ClassifiedDataFrame` validates access at every data hand-off).
 
 Phase 1 implementation (commit d83d7fd) introduced `ClassifiedDataFrame` with:
+
 - **Immutable classification** – `@dataclass(frozen=True)` prevents modification
 - **Uplifting enforcement** – `with_uplifted_classification()` uses `max()` to prevent downgrades
 - **Runtime failsafe** – `validate_access_by()` checks clearance at every hand-off
@@ -34,6 +35,7 @@ class SubtlyMaliciousPlugin(TransformNode):
 ```
 
 This is more subtle than T2 (malicious plugins lying about capabilities) because:
+
 - Plugin truthfully reports `get_security_level()` → passes start-time validation
 - Plugin lies about **output data lineage** → transformed SECRET data mislabeled as OFFICIAL
 - Requires reviewing every transformation to detect → high certification burden
@@ -56,32 +58,60 @@ We will adopt a **Trusted Container Model** that separates classification metada
 
 ### Implementation
 
-**Constructor protection** via `__post_init__` validation:
+**Constructor protection** via `__post_init__` validation (hardened, fail-closed):
 
 ```python
 @dataclass(frozen=True)
 class ClassifiedDataFrame:
     data: pd.DataFrame
     classification: SecurityLevel
-    _created_by_datasource: bool = False
+    _created_by_datasource: bool = field(default=False, init=False, compare=False, repr=False)
 
-    def __post_init__(self):
-        """Enforce datasource-only creation."""
+    def __post_init__(self) -> None:
+        """Enforce datasource-only creation (ADR-002-A constructor protection).
+
+        Security: Fail-closed when stack inspection unavailable (CVE-ADR-002-A-003).
+        Verifies caller identity to prevent spoofing (CVE-ADR-002-A-001).
+        """
         import inspect
-        caller = inspect.currentframe().f_back
-
-        # Allow internal methods
-        if caller.f_code.co_name in ('with_uplifted_classification', 'with_new_data'):
-            return
 
         # Allow datasource factory
         if object.__getattribute__(self, '_created_by_datasource'):
             return
 
-        # Block all other attempts
+        # Check stack inspection availability
+        frame = inspect.currentframe()
+        if frame is None:
+            # SECURITY: Fail-closed when stack inspection unavailable
+            raise SecurityValidationError(
+                "Cannot verify caller identity - stack inspection is unavailable in this Python runtime. "
+                "ClassifiedDataFrame creation blocked for security. "
+                "Datasources must use ClassifiedDataFrame.create_from_datasource(). "
+                "Plugins must use with_uplifted_classification() or with_new_data()."
+            )
+
+        # Walk up call stack to find trusted methods
+        current_frame = frame
+        for _ in range(5):
+            if current_frame is None or current_frame.f_back is None:
+                break
+            current_frame = current_frame.f_back
+            caller_name = current_frame.f_code.co_name
+
+            # Allow internal methods (with_uplifted_classification, with_new_data)
+            if caller_name in ("with_uplifted_classification", "with_new_data"):
+                # SECURITY: Verify the caller's 'self' is actually a ClassifiedDataFrame instance
+                # Prevents spoofing via external functions with same name
+                caller_self = current_frame.f_locals.get('self')
+                if isinstance(caller_self, ClassifiedDataFrame):
+                    return  # Legitimate internal method call
+
+        # Block all other attempts (plugins, direct construction)
         raise SecurityValidationError(
-            "ClassifiedDataFrame can only be created by datasources. "
-            "Plugins must use with_uplifted_classification() or mutate .data directly."
+            "ClassifiedDataFrame can only be created by datasources using "
+            "create_from_datasource(). Plugins must use with_uplifted_classification() "
+            "to uplift existing frames or with_new_data() to generate new data. "
+            "This prevents classification laundering attacks (ADR-002-A)."
         )
 ```
 
@@ -115,6 +145,7 @@ def with_new_data(self, new_data: pd.DataFrame) -> "ClassifiedDataFrame":
 ### Supported Plugin Patterns
 
 **Pattern 1: In-place mutation (recommended)**
+
 ```python
 def process(self, frame: ClassifiedDataFrame) -> ClassifiedDataFrame:
     frame.data['processed'] = transform(frame.data['input'])
@@ -122,6 +153,7 @@ def process(self, frame: ClassifiedDataFrame) -> ClassifiedDataFrame:
 ```
 
 **Pattern 2: New data generation**
+
 ```python
 def process(self, frame: ClassifiedDataFrame) -> ClassifiedDataFrame:
     new_df = self.llm.generate(...)
@@ -131,6 +163,7 @@ def process(self, frame: ClassifiedDataFrame) -> ClassifiedDataFrame:
 ```
 
 **Anti-pattern: Direct creation (blocked)**
+
 ```python
 def process(self, frame: ClassifiedDataFrame) -> ClassifiedDataFrame:
     return ClassifiedDataFrame(new_data, SecurityLevel.OFFICIAL)  # SecurityValidationError
@@ -178,6 +211,58 @@ def process(self, frame: ClassifiedDataFrame) -> ClassifiedDataFrame:
 - **Threat model** – `ADR002_IMPLEMENTATION/THREAT_MODEL.md` T4 section updated to reflect technical enforcement rather than certification-only defense.
 
 - **Certification checklist** – ADR-002 certification checklist updated to remove "verify all transformations use uplifting" requirement (technically enforced).
+
+## Interaction with Plugin Customization (ADR-002 / ADR-005)
+
+ADR-002 and ADR-005 document the frozen plugin capability (`allow_downgrade=False`) that enables
+strict level enforcement. This customization is **orthogonal to the ClassifiedDataFrame container model**:
+
+**Two Independent Security Layers**:
+
+1. **Clearance validation** (ADR-002) – Can this plugin participate in this pipeline?
+   - Default: Higher clearance can operate at lower levels (trusted downgrade)
+   - Custom frozen: Must operate at exact declared level (no downgrade)
+
+2. **Classification management** (ADR-002A) – How do we track data classification?
+   - Container model: Immutable classification, datasource-only creation, uplifting enforcement
+   - Applies to ALL plugins regardless of clearance validation behavior
+
+**Frozen Plugin Container Usage**:
+
+Frozen plugins still MUST respect the ClassifiedDataFrame container model:
+
+```python
+class FrozenSecretDataSource(BasePlugin, DataSource):
+    def __init__(self):
+        super().__init__(security_level=SecurityLevel.SECRET)
+
+    def validate_can_operate_at_level(self, operating_level: SecurityLevel) -> None:
+        # Custom validation: frozen at SECRET only
+        if operating_level != SecurityLevel.SECRET:
+            raise SecurityValidationError("Must operate at SECRET level exactly")
+
+    def load_data(self, context: PluginContext) -> ClassifiedDataFrame:
+        data = fetch_data()
+
+        # ✅ CORRECT: Use factory method (container model requirement)
+        return ClassifiedDataFrame.create_from_datasource(
+            data=data,
+            classification=SecurityLevel.SECRET
+        )
+
+        # ❌ WRONG: Direct construction blocked by container model
+        # return ClassifiedDataFrame(data, SecurityLevel.SECRET)  # SecurityValidationError
+```
+
+**Key Insight**: Freezing behavior affects WHEN plugins can run (clearance checks at pipeline
+construction), not HOW they manage data classification (container model at runtime). Both
+layers are enforced independently:
+
+- **Pipeline construction** (start-time): Frozen validation rejects mismatched operating levels
+- **Data hand-off** (runtime): Container model prevents classification laundering
+
+Custom frozen plugins require certification to verify BOTH layers: correct clearance validation
+AND correct container model usage.
 
 ## Related Documents
 

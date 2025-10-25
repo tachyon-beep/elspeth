@@ -304,18 +304,20 @@ class BaseCSVDataSource(DataSource):
             operating_level: Security level of the operating envelope (minimum across all components)
 
         Raises:
-            SecurityValidationError: If operating_level < this datasource's required level
+            SecurityValidationError: If operating_level > this datasource's clearance
 
-        Example:
+        Example (Bell-LaPadula "no read up"):
             >>> ds = BaseCSVDataSource(path="secret.csv", security_level=SecurityLevel.SECRET)
-            >>> ds.validate_can_operate_at_level(SecurityLevel.OFFICIAL)
-            SecurityValidationError: BaseCSVDataSource requires SECRET clearance, but operating envelope is OFFICIAL
+            >>> ds.validate_can_operate_at_level(SecurityLevel.OFFICIAL)  # ✅ OK (lower)
+            >>> ds.validate_can_operate_at_level(SecurityLevel.TOP_SECRET)  # ❌ Fails
+            SecurityValidationError: BaseCSVDataSource has clearance SECRET,
+                but pipeline requires TOP_SECRET - insufficient clearance
         """
-        if operating_level < self.security_level:
+        if operating_level > self.security_level:
             from elspeth.core.validation.base import SecurityValidationError
             raise SecurityValidationError(
-                f"{self.__class__.__name__} requires {self.security_level.name} "
-                f"clearance, but operating envelope is {operating_level.name}"
+                f"{self.__class__.__name__} has clearance {self.security_level.name}, "
+                f"but pipeline requires {operating_level.name} - insufficient clearance"
             )
 
     # ========== END BasePlugin Implementation ==========

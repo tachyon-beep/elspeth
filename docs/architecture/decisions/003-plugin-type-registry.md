@@ -532,8 +532,11 @@ class SecretPlugin(BasePlugin):
     def get_security_level(self) -> SecurityLevel:
         return SecurityLevel.SECRET
     def validate_can_operate_at_level(self, level: SecurityLevel) -> None:
-        if level < SecurityLevel.SECRET:
-            raise SecurityValidationError(...)
+        # Reject if operating level EXCEEDS plugin clearance (Bell-LaPadula "no read up")
+        if level > SecurityLevel.SECRET:
+            raise SecurityValidationError(
+                f"Cannot operate at {level.name} - plugin only cleared for SECRET"
+            )
 
 plugin = SecretPlugin()
 isinstance(plugin, BasePlugin)  # True - accepted ✅

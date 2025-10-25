@@ -37,13 +37,14 @@ class LocalBundleSink(BasePlugin, ResultSink):
     sanitize_formulas: bool = True
     sanitize_guard: str = "'"
     security_level: SecurityLevel = SecurityLevel.OFFICIAL  # REQUIRED (ADR-004) - default to OFFICIAL
+    allow_downgrade: bool = True  # ADR-005: Trusted downgrade for sinks (explicit choice, matches default suite)
 
     allowed_base_path: str | None = None
 
     def __post_init__(self) -> None:
         """Normalize configuration and validate on_error early."""
-        # Initialize BasePlugin with security level (ADR-004)
-        super().__init__(security_level=self.security_level)
+        # Initialize BasePlugin with security level and downgrade policy (ADR-004, ADR-005)
+        super().__init__(security_level=self.security_level, allow_downgrade=self.allow_downgrade)
 
         self.base_path: Path = Path(self.base_path)
         if self.on_error not in {"abort", "skip"}:

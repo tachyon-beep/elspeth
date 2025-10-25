@@ -144,9 +144,12 @@ class BasePlugin(ABC):
 
     @final
     def validate_can_operate_at_level(self, operating_level: SecurityLevel) -> None:
-        """FINAL method - do not override."""
-        if operating_level < self._security_level:
-            raise SecurityValidationError(...)
+        """FINAL method - do not override. Bell-LaPadula 'no read up'."""
+        if operating_level > self._security_level:
+            raise SecurityValidationError(
+                f"Insufficient clearance - plugin cleared for {self._security_level}, "
+                f"pipeline requires {operating_level}"
+            )
 ```
 
 **Why This Design**:

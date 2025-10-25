@@ -119,11 +119,13 @@ make verify-locked
 - Security levels declared via `security_level` field (enforced at pipeline construction)
 - Context propagation via `PluginContext` (security_level, run_id, audit_logger)
 
-**Multi-Level Security (ADR-002)**
+**Multi-Level Security (ADR-002 - Bell-LaPadula "no read up")**
 - Pipeline computes minimum security level across all components (datasource, transforms, sinks)
-- Components with higher declared levels refuse to run if pipeline level is downgraded
+- Components with LOWER declared clearance refuse to run if pipeline level is HIGHER (insufficient clearance)
+- Components with HIGHER clearance can operate at LOWER levels (trusted to filter/downgrade data)
 - **Fail-fast**: Misconfigured pipelines abort before data retrieval
-- Example: SECRET datasource + UNOFFICIAL sink → pipeline aborts before querying datasource
+- Example: UNOFFICIAL datasource + SECRET sink → pipeline aborts (datasource has insufficient clearance)
+- Example: SECRET datasource + UNOFFICIAL sink → pipeline SUCCEEDS at UNOFFICIAL level (datasource filters data)
 
 **Configuration Merge Order** (see `docs/architecture/configuration-security.md`)
 1. Suite defaults (`config/suite_defaults.yaml`)

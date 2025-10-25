@@ -20,15 +20,18 @@ class MockPlugin:
     def validate_can_operate_at_level(self, operating_level: SecurityLevel) -> None:
         """Validate plugin can operate at the given envelope level.
 
+        Bell-LaPadula "no read up": Plugin can operate at same or lower level,
+        but cannot operate ABOVE its clearance.
+
         Raises:
-            SecurityValidationError: If operating_level < self._security_level
+            SecurityValidationError: If operating_level > self._security_level
         """
         from elspeth.core.validation.base import SecurityValidationError
 
-        if operating_level < self._security_level:
+        if operating_level > self._security_level:
             raise SecurityValidationError(
-                f"{self.__class__.__name__} requires {self._security_level.name}, "
-                f"but orchestrator operating at {operating_level.name}"
+                f"{self.__class__.__name__} has clearance {self._security_level.name}, "
+                f"but pipeline requires {operating_level.name} - insufficient clearance"
             )
 
 

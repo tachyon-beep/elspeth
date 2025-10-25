@@ -70,6 +70,7 @@ class ExcelResultSink(BasePlugin, ResultSink):
         config: ExcelSinkConfig | None = None,
         allowed_base_path: str | Path | None = None,
         security_level: SecurityLevel,  # REQUIRED - no default (ADR-004 requirement)
+        allow_downgrade: bool = True,  # ADR-005: Trusted downgrade for sinks (explicit choice, matches default suite)
     ) -> None:
         """Initialize Excel sink.
 
@@ -77,8 +78,8 @@ class ExcelResultSink(BasePlugin, ResultSink):
         If config is provided, it takes precedence over individual args.
         This supports both legacy and new usage patterns.
         """
-        # Initialize BasePlugin with security level (ADR-004)
-        super().__init__(security_level=security_level)
+        # Initialize BasePlugin with security level and downgrade policy (ADR-004, ADR-005)
+        super().__init__(security_level=security_level, allow_downgrade=allow_downgrade)
 
         # Use config if provided, otherwise use individual args
         if config is not None:

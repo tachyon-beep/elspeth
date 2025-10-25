@@ -54,8 +54,8 @@ class BaseVisualSink(BasePlugin, ResultSink):
         security_level: SecurityLevel,  # REQUIRED - no default (ADR-004 requirement)
         **_kwargs: Any,  # Reserved for future subclass extensions
     ):
-        # Initialize BasePlugin with security level (ADR-004)
-        super().__init__(security_level=security_level)
+        # Initialize BasePlugin with security level and downgrade policy (ADR-004, ADR-005)
+        super().__init__(security_level=security_level, allow_downgrade=allow_downgrade)
         """Initialize base visual sink.
 
         Args:

@@ -267,6 +267,47 @@ Batch 15 (141-147):
 | `docs/compliance/accreditation-run-example.md` | 41 | Full read | High | `docs/compliance` | Needs update | Great walkthrough, but links to `docs/architecture/environment-hardening.md` (should be `docs/compliance/environment-hardening.md`) and still cite `src/elspeth/plugins/llms/middleware.py`; revise paths and cross-references. |
 | `docs/compliance/adr-002-certification-evidence.md` | 647 | Spot read | High | `docs/compliance` | Needs update | Evidence pack is comprehensive, yet it references a non-existent `tests/test_adr002a_cve.py`; adjust the test citations to the current suite and verify other metrics before the next audit export. |
 
+## Batch 5 Deep Dive Findings
+
+| File | Lines | Review Depth | Usefulness | Placement | Currency | Notes |
+|---|---|---|---|---|---|---|
+| `docs/compliance/AUSTRALIAN_GOVERNMENT_CONTROLS.md` | 338 | Spot read | High | `docs/compliance` | Needs update | Guidance is solid, but the YAML snippets still use the deprecated `type:` key; switch to `plugin:` and confirm references to `pii_shield`/`classified_material` point at the new middleware modules. |
+| `docs/compliance/COMPLIANCE_ROADMAP.md` | 94 | Full read | High | `docs/compliance` | Current | Roadmap remains actionable and consistent with the rest of the compliance plan. |
+| `docs/compliance/configuration-security.md` | 87 | Full read | High | `docs/compliance` | Needs update | Several bullet references (`src/elspeth/plugins/llms/...`, `plugins/outputs/...`) predate the namespace migration; align them with `nodes/transforms/llm` and `nodes/sinks` to avoid confusion. |
+| `docs/compliance/CONTROL_INVENTORY.md` | 19 | Full read | High | `docs/compliance` | Needs update | Control rows for prompt shield/content safety still cite `src/elspeth/plugins/llms/...`; update to the current middleware paths so auditors land in the right files. |
+| `docs/compliance/deployment-diagram.md` | 40 | Full read | High | `docs/compliance` | Needs update | Diagram captions reference `src/elspeth/plugins/llms/azure_openai.py`—refresh links to the new `nodes/transforms/llm` module and double-check the middleware path callouts. |
+| `docs/compliance/environment-hardening.md` | 33 | Full read | High | `docs/compliance` | Needs update | Security pointers still mention `plugins/llms/...` and `plugins/outputs/...`; change to the reorganised modules and confirm cited line numbers. |
+| `docs/compliance/incident-response.md` | 25 | Full read | Medium | `docs/compliance` | Needs update | Flow references `src/elspeth/plugins/llms/middleware.py`; re-point the diagram annotations to `nodes/transforms/llm/middleware*.py`. |
+| `docs/compliance/README.md` | 35 | Full read | High | `docs/compliance` | Current | Directory index is accurate; no edits needed. |
+| `docs/compliance/threat-traceability.md` | 40 | Full read | High | `docs/compliance` | Needs update | Control nodes still reference the old middleware and sink modules; retarget to `nodes/...` paths for parity with the rest of the docs. |
+| `docs/compliance/TRACEABILITY_MATRIX.md` | 14 | Full read | High | `docs/compliance` | Needs update | Entry for Azure Environment middleware points at the legacy `plugins/llms` location; update that and scan other rows for lingering old paths. |
+
+## Batch 6 Deep Dive Findings
+
+| File | Lines | Review Depth | Usefulness | Placement | Currency | Notes |
+|---|---|---|---|---|---|---|
+| `docs/development/core-extension-design.md` | 100 | Full read | High | `docs/development` | Needs update | Design notes are still relevant, but references to `src/elspeth/core/interfaces.py`/`core/plugins/context.py` should be double-checked against current module names; add a pointer to the active registry files once the spike lands. |
+| `docs/development/dependency-analysis.md` | 83 | Full read | High | `docs/development` | Needs update | Several callouts still cite `src/elspeth/plugins/llms/...` or `plugins/outputs/...`; update to the `nodes/transforms/llm` and `nodes/sinks` paths so dependency reviewers hit the right files. |
+| `docs/development/logging-standards.md` | 91 | Full read | High | `docs/development` | Needs update | Guidance is solid, but the explanatory bullets link to legacy middleware/sink modules; revise to the new namespaces (the update footnotes already hint at the change). |
+| `docs/development/plugin-authoring.md` | 411 | Spot read | High | `docs/development` | Needs update | Section on LLM middleware still references `src/elspeth/plugins/llms/middleware/`; bring it into line with `nodes/transforms/llm/middleware*` and confirm other path references. |
+| `docs/development/plugin-hardening-principles.md` | 84 | Full read | High | `docs/development` | Current | Long-term roadmap remains accurate; no immediate edits. |
+| `docs/development/README.md` | 29 | Full read | High | `docs/development` | Current | Directory overview is correct. |
+| `docs/development/suite-lifecycle.md` | 41 | Full read | High | `docs/development` | Needs update | Diagram annotations point to `src/elspeth/plugins/llms/middleware_azure.py`; update to the new middleware path. |
+| `docs/development/testing-overview.md` | 16 | Full read | High | `docs/development` | Needs update | Table references `src/elspeth/plugins/llms/azure_openai.py`; swap to the `nodes/transforms/llm` module. |
+| `docs/development/upgrade-strategy.md` | 27 | Full read | High | `docs/development` | Needs update | Mentions `plugins/llms/azure_openai.py` and `plugins/outputs/blob.py`; reflect the renamed modules. |
+| `docs/end_to_end_scenarios.md` | 38 | Full read | High | `docs` | Current | Scenario catalogue matches the live test suite; no action needed. |
+
+## Batch 7 Deep Dive Findings
+
+| File | Lines | Review Depth | Usefulness | Placement | Currency | Notes |
+|---|---|---|---|---|---|---|
+| `docs/examples/README.md` | 35 | Full read | Medium | `docs/examples` | Needs update | Section list repeats the “Master Example” bullet at the end; clean up the duplicate to avoid confusion. |
+| `docs/examples/colour-animals.md` | 131 | Full read | High | `docs/examples` | Current | Workshop example is consistent with current CLI and sink options. |
+| `docs/examples/MASTER_EXAMPLE.md` | 217 | Spot read | High | `docs/examples` | Needs update | Sample config still uses `output_dir` for `visual_report`/`signed_artifact`; update to the current `base_path` option so copy/paste works. |
+| `docs/examples/SCHEMA_VALIDATION_DEMO.md` | 589 | Spot read | High | `docs/examples` | Needs update | `malformed_data_sink` and similar blocks still use the legacy `type: csv` key—switch to `plugin:` (and adjust any other plugin specs) to match Phase 2 configuration. |
+| `docs/examples/SECURE_AZURE_WORKFLOW_GUIDE.md` | 289 | Spot read | High | `docs/examples` | Needs update | Same config drift as the master example (`output_dir` for sinks); review the remaining sink options for Phase 2 naming before teams follow this runbook. |
+| `docs/examples/SECURITY_MIDDLEWARE_DEMOS.md` | 161 | Full read | High | `docs/examples` | Current | Middleware guidance aligns with current defaults and configuration keys. |
+
 
 ## Detailed Inventory
 

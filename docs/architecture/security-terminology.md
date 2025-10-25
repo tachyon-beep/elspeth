@@ -18,9 +18,13 @@
 **Example**:
 ```python
 class SecretClearedSink(BasePlugin, ResultSink):
-    def __init__(self):
-        super().__init__(security_level=SecurityLevel.SECRET)
+    def __init__(self, *, allow_downgrade: bool):
+        super().__init__(
+            security_level=SecurityLevel.SECRET,
+            allow_downgrade=allow_downgrade  # REQUIRED: No default
+        )
         # This sink is cleared to handle data up to SECRET classification
+        # allow_downgrade choice determines if it can operate at lower levels
 ```
 
 **Synonyms to Avoid**: "clearance" (ambiguous - use `security_level` instead)
@@ -82,7 +86,9 @@ operating_level = SecurityLevel.OFFICIAL  # Minimum of all components
 
 **Important Note**: With automatic computation (default behavior), `operating_level` equals the LOWEST component clearance. This means insufficient clearance errors **cannot occur** under normal operation—every component can always operate at or above the minimum level. Insufficient clearance errors ONLY occur in two scenarios:
 1. **Manual override**: Operators force a higher operating level via configuration
-2. **Frozen plugins** (implemented): Plugins with `allow_downgrade=False` refuse to operate below their declared level, even if the automatic minimum is lower. This is useful for dedicated classification domains (e.g., SECRET-only infrastructure).
+2. **Frozen plugins** (ADR-005): Plugins with **explicitly set** `allow_downgrade=False` refuse to operate below their declared level, even if the automatic minimum is lower. This is useful for dedicated classification domains (e.g., SECRET-only infrastructure).
+
+**Note**: `allow_downgrade` has **no default value** - developers must explicitly choose `True` (trusted downgrade) or `False` (frozen plugin) when creating plugins. This explicit choice enforces security-first thinking (ADR-001).
 
 **Related**: ADR-002 (Pipeline-wide minimum evaluation, lines 47-48, 68-77)
 
@@ -119,21 +125,26 @@ if data.classification > sink.security_level:
 
 ### "Trusted Downgrade" Rule
 
-**Definition**: A component with HIGHER clearance CAN operate at LOWER security levels (trusted to filter/downgrade appropriately)
+**Definition**: A component with HIGHER clearance CAN operate at LOWER security levels (trusted to filter/downgrade appropriately) **when explicitly permitted**
 
-**Formula**: `component.security_level >= operating_level` (OK to operate)
+**Formula**: `component.security_level >= operating_level AND component.allow_downgrade == True` (OK to operate)
+
+**Explicit Choice Required**: Developers must set `allow_downgrade=True` to enable trusted downgrade (no default - ADR-001 security-first principle)
 
 **Example (ALLOWED)**:
 ```python
-# Datasource clearance
-datasource.security_level = SecurityLevel.SECRET
+# Datasource with trusted downgrade (EXPLICIT)
+datasource = MyDatasource(
+    security_level=SecurityLevel.SECRET,
+    allow_downgrade=True  # ← REQUIRED: Explicit choice to enable downgrade
+)
 
 # Pipeline operating level
 operating_level = SecurityLevel.OFFICIAL  # Lower than datasource
 
-# Result: OK (datasource can operate at lower level, trusted to filter SECRET data)
-if datasource.security_level >= operating_level:
-    # Datasource executes, responsible for filtering out SECRET data
+# Validation check
+if datasource.security_level >= operating_level and datasource.allow_downgrade:
+    # ✅ OK: datasource can operate at lower level, trusted to filter SECRET data
     datasource.load_data()
 ```
 
@@ -189,13 +200,24 @@ if data.classification > plugin.security_level:
 **Example**:
 ```python
 class BasePlugin(ABC):
+    def __init__(self, *, security_level: SecurityLevel, allow_downgrade: bool):
+        """Initialize plugin with explicit downgrade policy (NO DEFAULT).
+
+        Args:
+            allow_downgrade: MANDATORY - must explicitly choose:
+                - True: Trusted downgrade (can operate at lower levels)
+                - False: Frozen plugin (exact level match only - ADR-005)
+        """
+        self._security_level = security_level
+        self._allow_downgrade = allow_downgrade
+
     @final
     def validate_can_operate_at_level(self, required_level: SecurityLevel) -> None:
         """Validate clearance (CANNOT be overridden by subclasses)."""
-        # Default: trusted downgrade (allow_downgrade=True)
-        # Frozen plugin: exact match only (allow_downgrade=False)
+        # Frozen plugin (allow_downgrade=False): Exact match only
         if not self._allow_downgrade and required_level != self._security_level:
             raise SecurityValidationError("Frozen plugin requires exact level match")
+        # All plugins: Cannot operate above clearance
         if required_level > self._security_level:
             raise SecurityValidationError(
                 f"Insufficient clearance: required {required_level}, "
@@ -268,9 +290,11 @@ datasource.load_data()
 
 **Important Note**: With automatic `operating_level` computation (the default), validation failures only occur in two scenarios:
 1. **Manual override**: Operators force a higher operating level via configuration
-2. **Frozen plugins** (implemented): Plugins with `allow_downgrade=False` refuse to operate below their declared level
+2. **Frozen plugins** (ADR-005): Plugins with **explicitly set** `allow_downgrade=False` refuse to operate below their declared level
 
 Under normal operation, `operating_level = min(all clearances)`, so all components can always pass validation. This design ensures fail-fast catches **configuration errors** and **frozen plugin violations** rather than blocking normal pipeline composition.
+
+**Developer Requirement**: Every plugin must explicitly set `allow_downgrade` (no default) - choose `True` for trusted downgrade or `False` for frozen enforcement.
 
 **Related**: ADR-002 (Pipeline-wide minimum evaluation)
 
@@ -524,7 +548,9 @@ operating_level = min(OFFICIAL, SECRET, SECRET) = OFFICIAL
 
 **When Errors Occur**: Only in two scenarios:
 1. **Manual override**: Operators force a higher operating level via configuration
-2. **Frozen plugins** (implemented): Plugins with `allow_downgrade=False` refuse to operate below their declared level
+2. **Frozen plugins** (ADR-005): Plugins with **explicitly set** `allow_downgrade=False` refuse to operate below their declared level
+
+**Critical Design Choice**: `allow_downgrade` has **no default** - every plugin developer must explicitly choose `True` (trusted downgrade) or `False` (frozen). This forces security-conscious decisions at plugin creation time.
 
 **Example (Manual Override Required)**:
 ```python
@@ -568,6 +594,40 @@ if network_timeout():
 
 ---
 
+### ❌ Misconception 5: Plugins default to trusted downgrade (allow_downgrade=True)
+
+**Correction**: `allow_downgrade` has **NO DEFAULT VALUE** - developers must explicitly choose
+
+**Rationale**: Security-first design (ADR-001) requires explicit security decisions over implicit defaults
+
+**Breaking Change**: Pre-ADR-005 versions defaulted to `True`, but current implementation **requires explicit choice**
+
+**Example (CORRECT - explicit choice)**:
+```python
+# Trusted downgrade (EXPLICIT)
+source = MyDatasource(
+    security_level=SecurityLevel.SECRET,
+    allow_downgrade=True  # ✅ Explicit choice required
+)
+
+# Frozen plugin (EXPLICIT)
+frozen_sink = MyResultSink(
+    security_level=SecurityLevel.SECRET,
+    allow_downgrade=False  # ✅ Explicit choice required
+)
+```
+
+**Example (INCORRECT - missing parameter)**:
+```python
+# ERROR: Missing allow_downgrade
+plugin = MyPlugin(security_level=SecurityLevel.SECRET)
+# Raises: TypeError - allow_downgrade is required (no default)
+```
+
+**Design Philosophy**: Forcing explicit choice prevents developers from unknowingly creating plugins that can downgrade. Every plugin author must consciously decide whether their component should be trusted to operate at lower classification levels.
+
+---
+
 ## Quick Reference Table
 
 | Term | Definition | Example Value | Where Used |
@@ -575,6 +635,7 @@ if network_timeout():
 | `security_level` | Component clearance (capability) | `SecurityLevel.SECRET` | Plugin property |
 | `classification` | Data label (constraint) | `SecurityLevel.PROTECTED` | ClassifiedDataFrame |
 | `operating_level` | Pipeline envelope (minimum) | `SecurityLevel.OFFICIAL` | Pipeline validation |
+| `allow_downgrade` | Downgrade permission (REQUIRED, no default) | `True` or `False` | Plugin constructor |
 | `correlation_id` | Request trace ID | `550e8400-...` | PluginContext.run_id |
 | `audit_trail` | Security event log | JSONL file | `logs/run_*.jsonl` |
 | `fail-closed` | Deny on validation failure | Raise exception | Security controls |

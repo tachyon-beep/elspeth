@@ -26,11 +26,15 @@ class BasePlugin(ABC):
         return self._security_level  # FINAL - do not override
 
     def validate_can_operate_at_level(self, operating_level: SecurityLevel) -> None:
-        if operating_level < self._security_level:  # FINAL - do not override
-            raise SecurityValidationError(...)
+        # Bell-LaPadula "no read up": Reject if asked to operate ABOVE clearance
+        if operating_level > self._security_level:  # FINAL - do not override
+            raise SecurityValidationError(
+                f"Cannot operate at {operating_level} - insufficient clearance"
+            )
 ```
 
 **Key Properties**:
+
 - ✅ **Can't instantiate without security_level**: Keyword-only arg enforced by Python
 - ✅ **Can't override security behavior**: Methods are concrete, subclasses inherit
 - ✅ **Centralized validation logic**: ONE implementation in BasePlugin
@@ -61,6 +65,7 @@ class BasePlugin(Protocol):
 **The Problem**: Structural typing allows **accidental compliance** - any class that happens to have these two methods will pass `isinstance(obj, BasePlugin)` checks, even if the developer never intended it to be a plugin.
 
 **Attack Scenario**:
+
 ```python
 # Developer creates a helper class (NOT intended as plugin)
 class SecurityLevelHelper:
@@ -91,6 +96,7 @@ runner = ExperimentRunner(
 ```
 
 **Why This Matters**:
+
 1. **Silent Security Downgrade**: Accidental object lowers operating envelope without any warning
 2. **No Developer Intent**: Class author never meant to participate in security validation
 3. **Hard to Debug**: No obvious connection between helper class and security failure
@@ -116,11 +122,13 @@ runner = ExperimentRunner(
 **Approach**: Continue using `Protocol` with structural typing.
 
 **Pros**:
+
 - ✅ No breaking changes
 - ✅ Flexible - any object with right methods works
 - ✅ Backward compatible
 
 **Cons**:
+
 - ❌ Allows accidental compliance
 - ❌ No explicit developer intent
 - ❌ Cannot reliably distinguish plugins from helpers
@@ -187,17 +195,21 @@ class BasePlugin(ABC):
     def validate_can_operate_at_level(self, operating_level: SecurityLevel) -> None:
         """Validate security level (FINAL - do not override).
 
+        Bell-LaPadula "no read up": Plugin can operate at same or lower level,
+        but cannot operate ABOVE its clearance.
+
         Raises:
-            SecurityValidationError: If operating_level < required level
+            SecurityValidationError: If operating_level > plugin clearance
         """
-        if operating_level < self._security_level:
+        if operating_level > self._security_level:
             raise SecurityValidationError(
-                f"{type(self).__name__} requires {self._security_level.name}, "
-                f"operating envelope is {operating_level.name}"
+                f"{type(self).__name__} has clearance {self._security_level.name}, "
+                f"but pipeline requires {operating_level.name} - insufficient clearance"
             )
 ```
 
 **Pros**:
+
 - ✅ **Explicit Opt-In**: Must write `class MyPlugin(BasePlugin)`
 - ✅ **Cannot Accidentally Comply**: Helper classes rejected automatically
 - ✅ **Clear Intent**: Inheritance signals plugin participation
@@ -208,14 +220,16 @@ class BasePlugin(ABC):
 - ✅ **Cannot Break Security**: Runtime enforcement prevents method override
 - ✅ **Single Source of Truth**: Validation logic in ONE place (BasePlugin)
 - ✅ **Mandatory Security Level**: Keyword-only arg enforced by Python
-- ✅ **Dual Enforcement**: @final (static) + __init_subclass__ (runtime)
+- ✅ **Dual Enforcement**: @final (static) + **init_subclass** (runtime)
 
 **Cons**:
+
 - ⚠️ **Breaking Change**: Existing code must add `(BasePlugin)` inheritance
 - ⚠️ **Migration Required**: All current plugins must be updated to call `super().__init__(security_level=...)`
 - ⚠️ **Less Flexible**: Cannot use arbitrary objects (by design - this is good!)
 
 **Why Concrete Over Abstract**:
+
 - **Security-critical code benefits from centralization**: One implementation to audit, test, and patch
 - **Prevents inconsistent security logic**: If each plugin implements validation differently, some will get it wrong
 - **Simpler migration**: Plugins inherit methods, don't copy 10 lines of validation logic to 26 classes
@@ -244,10 +258,12 @@ def is_registered_plugin(obj):
 ```
 
 **Pros**:
+
 - ✅ Explicit opt-in via decorator
 - ✅ No inheritance required
 
 **Cons**:
+
 - ❌ Easy to forget decorator (no compile-time check)
 - ❌ Runtime-only verification
 - ❌ More complex than ABC
@@ -260,6 +276,7 @@ def is_registered_plugin(obj):
 **Chosen**: **Option 2 - Convert BasePlugin to ABC with Concrete "Security Bones"**
 
 **Rationale**:
+
 1. **Security First**: Prevents accidental compliance attack scenario
 2. **Developer Intent**: Inheritance makes plugin status explicit and obvious
 3. **Type Safety**: MyPy can enforce inheritance at compile time
@@ -274,6 +291,7 @@ def is_registered_plugin(obj):
 **Breaking Change Justification**: We are pre-1.0 release. Now is the time to establish correct security foundations, even if it requires migration.
 
 **Why Concrete Implementation Over Abstract Methods**:
+
 - **Single Source of Truth**: Validation logic lives in ONE place (BasePlugin), not duplicated across 26 plugin classes
 - **Cannot Break Security**: `__init_subclass__` hook raises TypeError if subclass tries to override security methods
 - **Reduces Bug Surface**: 26 classes inheriting correct logic vs. 26 classes implementing their own (with 26 opportunities for bugs)
@@ -289,6 +307,7 @@ def is_registered_plugin(obj):
 **File**: `src/elspeth/core/base/protocols.py`
 
 **Before** (Line 62-79):
+
 ```python
 from typing import Protocol, runtime_checkable
 
@@ -310,6 +329,7 @@ class BasePlugin(Protocol):
 ```
 
 **After**:
+
 ```python
 from abc import ABC
 from typing import final  # Python 3.8+ for static type checkers
@@ -513,9 +533,10 @@ class BasePlugin(ABC):
         This method is CONCRETE and should NOT be overridden by subclasses.
         All plugins inherit this implementation from BasePlugin.
 
-        This method implements ADR-002 start-time validation with consistent logic:
-        - If operating_level >= required level: validation passes (no exception)
-        - If operating_level < required level: raises SecurityValidationError
+        This method implements ADR-002 start-time validation with Bell-LaPadula semantics:
+        - Plugin can operate at SAME or LOWER level (trusted to filter/downgrade)
+        - Plugin CANNOT operate ABOVE its clearance (insufficient clearance)
+        - Validation: If operating_level > plugin.security_level: raise error
 
         Subclasses that override this method break the "security bones" design
         and create inconsistent ADR-002 enforcement. DO NOT OVERRIDE.
@@ -525,23 +546,25 @@ class BasePlugin(ABC):
                            (computed as MIN of all plugin security levels)
 
         Raises:
-            SecurityValidationError: If operating_level < this plugin's required level
+            SecurityValidationError: If operating_level > this plugin's clearance
 
-        Example:
+        Example (Bell-LaPadula "no read up"):
             >>> ds = SecretDatasource(path="data.csv", security_level=SecurityLevel.SECRET)
             >>>
-            >>> # ✅ PASS: Operating level meets requirement
-            >>> ds.validate_can_operate_at_level(SecurityLevel.SECRET)
-            >>> ds.validate_can_operate_at_level(SecurityLevel.TOP_SECRET)
+            >>> # ✅ PASS: Operating at same or lower level (plugin can downgrade)
+            >>> ds.validate_can_operate_at_level(SecurityLevel.SECRET)      # Same - OK
+            >>> ds.validate_can_operate_at_level(SecurityLevel.OFFICIAL)    # Lower - OK
+            >>> ds.validate_can_operate_at_level(SecurityLevel.UNOFFICIAL)  # Much lower - OK
             >>>
-            >>> # ❌ FAIL: Operating level below requirement
-            >>> ds.validate_can_operate_at_level(SecurityLevel.UNOFFICIAL)
-            SecurityValidationError: SecretDatasource requires SECRET, operating envelope is UNOFFICIAL
+            >>> # ❌ FAIL: Operating level ABOVE clearance (insufficient clearance)
+            >>> ds.validate_can_operate_at_level(SecurityLevel.TOP_SECRET)
+            SecurityValidationError: SecretDatasource has clearance SECRET,
+                but pipeline requires TOP_SECRET - insufficient clearance
         """
-        if operating_level < self._security_level:
+        if operating_level > self._security_level:
             raise SecurityValidationError(
-                f"{type(self).__name__} requires {self._security_level.name}, "
-                f"operating envelope is {operating_level.name}"
+                f"{type(self).__name__} has clearance {self._security_level.name}, "
+                f"but pipeline requires {operating_level.name} - insufficient clearance"
             )
 ```
 
@@ -580,6 +603,7 @@ class MyDatasource(BasePlugin):  # ← 1. Inherit from BasePlugin
 ```
 
 **Key Changes**:
+
 1. ✅ Add `(BasePlugin)` inheritance
 2. ✅ Add `super().__init__(security_level=security_level)` call
 3. ❌ **REMOVE** manual `get_security_level()` implementation
@@ -587,6 +611,7 @@ class MyDatasource(BasePlugin):  # ← 1. Inherit from BasePlugin
 5. ❌ **REMOVE** `self.security_level = ...` assignment (BasePlugin handles it)
 
 **Why Remove the Methods?**
+
 - BasePlugin provides concrete implementations
 - All plugins get consistent security behavior
 - Cannot accidentally break security logic
@@ -599,6 +624,7 @@ class MyDatasource(BasePlugin):  # ← 1. Inherit from BasePlugin
 **Problem**: Some plugins (e.g., `StaticLLMClient`, many sinks) don't currently accept `security_level` in their constructor because they haven't been migrated to ADR-002 yet.
 
 **Example - StaticLLMClient** (before ADR-004):
+
 ```python
 class StaticLLMClient(LLMClientProtocol):
     """Return predefined content for testing."""
@@ -656,6 +682,7 @@ client = StaticLLMClient(
 ```
 
 **Choosing Security Levels**:
+
 - **Production datasources/sinks**: Use actual data classification (SECRET, OFFICIAL, etc.)
 - **Test mocks/stubs**: Use `SecurityLevel.UNOFFICIAL` (lowest restriction)
 - **LLM clients**: Typically `SecurityLevel.UNOFFICIAL` (unless accessing classified endpoints)
@@ -687,6 +714,7 @@ client = StaticLLMClient(
    - Pattern: `class Mock*Plugin:` → `class Mock*Plugin(BasePlugin):`
 
 **Automated Search**:
+
 ```bash
 # Find all classes implementing both security methods
 rg "def get_security_level" -A 10 | rg "def validate_can_operate_at_level" -B 10
@@ -695,10 +723,12 @@ rg "def get_security_level" -A 10 | rg "def validate_can_operate_at_level" -B 10
 ### Phase 3: Update Type Hints (15 min)
 
 **Files to Update**:
+
 - `src/elspeth/core/experiments/suite_runner.py`
 - `src/elspeth/core/experiments/runner.py`
 
 **Pattern**:
+
 ```python
 # BEFORE: Protocol allows structural typing
 from elspeth.core.base.plugin import BasePlugin  # Protocol
@@ -714,6 +744,7 @@ def process(plugin: BasePlugin) -> None:
 ```
 
 **MyPy Configuration** (already present in `pyproject.toml`):
+
 ```toml
 [tool.mypy]
 strict = true
@@ -849,6 +880,7 @@ class TestMigrationVerification:
 ### Phase 6: CI Enforcement (10 min)
 
 **Pre-Commit Hook** (`.pre-commit-config.yaml`):
+
 ```yaml
 repos:
   - repo: local
@@ -862,6 +894,7 @@ repos:
 ```
 
 **GitHub Actions** (`.github/workflows/ci.yml`):
+
 ```yaml
 - name: ADR-004 Security Verification
   run: |
@@ -876,11 +909,13 @@ repos:
 ### Breaking Changes
 
 **What Breaks**:
+
 - All existing plugin classes without `(BasePlugin)` inheritance will fail `isinstance()` checks
 - Plugins will be skipped in ADR-002 validation (likely causing test failures)
 - Any code relying on structural typing will break
 
 **Who Is Affected**:
+
 - ✅ **Internal Code**: We control all plugins, can migrate easily
 - ✅ **Test Mocks**: Test helpers need `(BasePlugin)` added
 - ❌ **External Plugins**: None (pre-1.0, no external plugin ecosystem yet)
@@ -900,6 +935,7 @@ repos:
 **Total Effort**: ~2-2.5 hours
 
 **Risk Level**: **LOW**
+
 - Pre-1.0 (no external users)
 - Mechanical changes (add inheritance)
 - Type checker catches errors
@@ -915,6 +951,7 @@ If critical issues discovered:
 4. **Time**: <5 minutes
 
 **Rollback Triggers**:
+
 - Critical production bug discovered
 - >50% of plugins fail to migrate cleanly
 - Unforeseen MyPy/type checking issues
@@ -951,6 +988,7 @@ If critical issues discovered:
 ### Test Coverage
 
 **Unit Tests** (`test_adr004_baseplugin_enforcement.py`):
+
 - ✅ Explicit inheritance is recognized
 - ✅ Accidental compliance is rejected
 - ✅ Cannot instantiate BasePlugin directly
@@ -958,27 +996,32 @@ If critical issues discovered:
 - ✅ All existing plugins migrated (verification)
 
 **Integration Tests** (existing `test_adr002_suite_integration.py`):
+
 - ✅ All integration tests still pass with ABC
 - ✅ Security validation works correctly
 - ✅ No regressions in ADR-002 enforcement
 
 **Property-Based Tests** (existing `test_adr002_properties.py`):
+
 - ✅ All property tests still pass
 - ✅ Hypothesis finds no new edge cases
 
 ### Success Criteria
 
 **Functional**:
+
 - [ ] All existing tests pass after migration
 - [ ] No plugins accidentally bypass validation
 - [ ] Type checker (MyPy) catches missing inheritance
 
 **Security**:
+
 - [ ] `isinstance(helper_class, BasePlugin)` returns False (accidental compliance rejected)
 - [ ] Only explicit inheritors participate in security validation
 - [ ] No security regressions in ADR-002 enforcement
 
 **Developer Experience**:
+
 - [ ] Clear error messages when inheritance forgotten
 - [ ] IDE autocomplete shows BasePlugin inheritance requirement
 - [ ] Documentation provides migration examples
@@ -996,6 +1039,7 @@ If critical issues discovered:
 | **Layer 3: ADR-003** | Test enforcement | Registry falling out of sync |
 
 **Combined Effect**:
+
 - Cannot accidentally be a plugin (Layer 1)
 - Cannot forget to validate plugin type (Layer 2 + 3)
 - Multiple independent defenses
@@ -1109,11 +1153,13 @@ class SecretDatasource(BasePlugin):  # ← Add this
 ## Compliance and Certification
 
 **ADR-002 Impact**: This ADR strengthens ADR-002 by:
+
 1. Preventing accidental plugins from lowering operating envelope
 2. Making plugin participation explicit and auditable
 3. Providing compile-time verification of plugin compliance
 
 **Certification Updates**:
+
 - [ ] Update CERTIFICATION_EVIDENCE.md with ADR-004 verification
 - [ ] Add to THREAT_MODEL.md as defense for T1
 - [ ] Security team review and approval
@@ -1124,7 +1170,7 @@ class SecretDatasource(BasePlugin):  # ← Add this
 
 - **ADR-002**: Suite-level security enforcement
 - **ADR-003**: Plugin type registry and test enforcement
-- **Python ABC Documentation**: https://docs.python.org/3/library/abc.html
+- **Python ABC Documentation**: <https://docs.python.org/3/library/abc.html>
 - **PEP 3119**: Introducing Abstract Base Classes
 - **Related Incident**: Copilot P1 finding (missing plugin types) - highlighted need for stronger typing
 
@@ -1134,6 +1180,7 @@ class SecretDatasource(BasePlugin):  # ← Add this
 
 **Review Date**: TBD (6 months after implementation)
 **Success Criteria**:
+
 - [ ] Zero incidents of accidental plugin compliance
 - [ ] All developers understand inheritance requirement
 - [ ] No security regressions

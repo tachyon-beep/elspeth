@@ -1,5 +1,17 @@
 # ADR-002 Threat Model & Risk Assessment
 
+**⚠️ ARCHIVED DOCUMENT - CONTAINS INVERTED BELL-LAPADULA LOGIC**
+
+This document is ARCHIVED and was written when Bell-LaPadula validation logic was INVERTED
+throughout the codebase. T1 threat scenario and defense layers describe WRONG behavior.
+
+**For current threat model, see**: `docs/security/adr-002-threat-model.md`
+
+**Correct Model**: Plugin `security_level` = maximum clearance. Plugins CAN operate at lower
+levels (trusted to filter). Plugins CANNOT operate above their clearance (insufficient clearance).
+
+---
+
 **Date**: 2025-10-25 (Updated)
 **Status**: ADR-002 Phase 2 Complete ✅ | ADR-002-A Phase 3 Complete ✅ | Phase 4 Complete ✅
 **Security Controls**:
@@ -47,14 +59,18 @@ suite = ExperimentSuite(
 **Subtlety**: **LOW** - Obvious misconfiguration, but automation makes it easy to miss
 
 **Defense Layers**:
-- **Primary (Start-time)**: `_validate_security_envelope()` rejects suite before data access
-  - Datasource reports "I require SECRET"
-  - Sink reports "I handle UNOFFICIAL"
-  - Orchestrator computes: `MIN(SECRET, UNOFFICIAL) = UNOFFICIAL`
-  - Validation fails: "Datasource requires SECRET but envelope is UNOFFICIAL"
-  - Job NEVER STARTS
-- **Failsafe (Runtime)**: `ClassifiedDataFrame.validate_access_by()` blocks data hand-off
-  - If start-time validation bypassed/broken
+- **Primary (Start-time)**: `_validate_security_envelope()` computes pipeline minimum and validates components
+  - Datasource reports "I have SECRET clearance"
+  - Sink reports "I have UNOFFICIAL clearance"
+  - Orchestrator computes: `operating_level = MIN(SECRET, UNOFFICIAL) = UNOFFICIAL`
+  - Validation: SECRET-cleared datasource CAN operate at UNOFFICIAL level (trusted to filter)
+  - Validation: UNOFFICIAL-cleared sink CAN operate at UNOFFICIAL level (exact match)
+  - **Note**: Start-time validation does NOT reject higher-clearance components at lower operating levels.
+    It only rejects insufficient-clearance scenarios (component clearance < operating level).
+- **Failsafe (Runtime)**: `ClassifiedDataFrame.validate_access_by()` blocks data hand-off if classification exceeds clearance
+  - Datasource must filter SECRET-tagged data when operating at UNOFFICIAL level (certified behavior)
+  - If filtering fails and SECRET data reaches UNOFFICIAL sink → runtime validation catches it
+  - If start-time validation bypassed/broken → runtime validation provides defense-in-depth
   - Datasource tries to give SECRET data to sink
   - Sink clearance checked: UNOFFICIAL < SECRET
   - Access BLOCKED with SecurityValidationError
@@ -213,7 +229,7 @@ class SubtlyMaliciousPlugin(BasePlugin):
   - Frame inspection in `__post_init__` enforces trusted creation path
   - Prevents classification laundering attack (Scenario 2)
   - **IMPACT**: Reduces certification burden - framework blocks attack automatically
-  - **Known Limitation**: Fail-open for edge cases (see below)
+  - **Security Hardening**: Fail-closed behavior (see below) - blocks when inspection unavailable
 - **Failsafe (Immutability)**: Classification cannot be downgraded
   - `@dataclass(frozen=True)` prevents modification
   - Only `with_uplifted_classification()` and `with_new_data()` allowed (internal methods)
@@ -227,18 +243,21 @@ Frame inspection mechanism (`src/elspeth/core/security/classified_data.py:70-119
 3. Verifies caller's `self` is ClassifiedDataFrame instance (prevents method name spoofing - CVE-ADR-002-A-001)
 4. Blocks all other construction attempts with SecurityValidationError
 
-**Known Limitation - Fail-Open Behavior**:
-- **Lines 86, 93, 99**: If frame inspection cannot determine caller, constructor allows creation
-- **Rationale**:
-  - Python runtime edge cases (C extensions, async contexts may not provide stack frames)
-  - Conservative safety: Better to allow legitimate use than block unexpectedly
-  - Defense-in-depth: `validate_access_by()` provides runtime failsafe
-- **Risk**: Malicious C extension could exploit this to bypass protection
-- **Mitigation**:
-  - This requires OS-level exploit capability (out of scope for framework)
-  - Certification verifies no malicious C extensions
-  - Unlikely attack vector (attacker would need C extension + knowledge of this specific edge case)
-- **Coverage**: 80% on `classified_data.py` (uncovered lines are these defensive edge cases)
+**Security Hardening - Fail-Closed Behavior** (Updated post-CVE-ADR-002-A-003):
+- **Current behavior**: If frame inspection cannot determine caller, constructor BLOCKS creation
+- **Change from original**: Original design failed open (allowed creation), now fails closed (blocks)
+- **Security improvement**:
+  - Aligns with ADR-001 fail-closed principle
+  - Eliminates attack vector via C extensions or async contexts
+  - No exploitation path even if stack inspection unavailable
+- **Trade-off**:
+  - May block legitimate use in exotic Python runtimes (PyPy, embedded interpreters)
+  - Acceptable for high-security deployments where fail-closed is mandatory
+  - Standard CPython 3.12+ supports stack inspection (target platform)
+- **Verification**:
+  - Caller identity verification (CVE-ADR-002-A-001): Checks `caller_self` is ClassifiedDataFrame
+  - Prevents spoofing via external functions with matching names
+  - Test coverage validates both fail-closed path and caller verification
 
 **Mitigation**:
 - Make uplifting automatic and unavoidable

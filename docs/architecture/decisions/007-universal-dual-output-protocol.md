@@ -70,6 +70,7 @@ class DebugBlobDataSource(BlobDataSource):
 Elspeth's plugin architecture has evolved organically with **three different output patterns** across plugin types:
 
 **1. DataSources** - Single output (DataFrame only):
+
 ```python
 class DataSource(Protocol):
     def load(self) -> pd.DataFrame:  # ✅ DataFrame output
@@ -80,6 +81,7 @@ class DataSource(Protocol):
 ```
 
 **2. Transforms** - Single output (dict only):
+
 ```python
 class TransformNode(Protocol):
     def transform(self, data: dict, **kwargs) -> dict:  # ⚠️ Dict, not DataFrame
@@ -89,6 +91,7 @@ class TransformNode(Protocol):
 ```
 
 **3. Sinks** - Artifact output (manual, duplicated):
+
 ```python
 class ResultSink(Protocol):
     def write(self, results: dict, ...) -> None:
@@ -164,6 +167,7 @@ The codebase has sophisticated chaining infrastructure (`src/elspeth/core/pipeli
 ### Why This Matters
 
 **Composability is a force multiplier**:
+
 - Sources + sinks = Basic pipeline
 - Sources + transforms + sinks = LLM experiments
 - **Sources + transforms + sinks + artifact chaining** = Complex workflows, caching, provenance tracking
@@ -192,11 +196,13 @@ Without universal chaining, Elspeth remains a "linear pipeline" system rather th
 **Approach**: Keep current pattern - sinks implement chaining manually, sources/transforms don't participate.
 
 **Pros**:
+
 - ✅ No breaking changes
 - ✅ Existing infrastructure works
 - ✅ Simple mental model (only outputs chain)
 
 **Cons**:
+
 - ❌ 520+ lines of duplicated boilerplate
 - ❌ Sources can't expose metadata (file paths lost)
 - ❌ Transforms can't expose metadata (LLM usage lost)
@@ -219,10 +225,12 @@ class DataSource:
 ```
 
 **Pros**:
+
 - ✅ Zero boilerplate - fully automatic
 - ✅ No developer burden
 
 **Cons**:
+
 - ❌ "Magic" behavior - hard to debug
 - ❌ Can't control what gets exposed
 - ❌ Reflection overhead
@@ -236,12 +244,14 @@ class DataSource:
 **Approach**: Every plugin explicitly produces TWO outputs (DataFrame + Artifacts) with class-level control flags.
 
 **Implementation Strategy**:
+
 1. **DualOutputMixin** base class provides automatic tracking
 2. **Class attributes** control behavior at any inheritance level
 3. **Soft enforcement** - disabled outputs become no-ops (not errors)
 4. **Default: both enabled** - opt-out pattern maximizes composability
 
 **Pros**:
+
 - ✅ **Reduces boilerplate 93%** (640 lines → 48 lines)
 - ✅ **Explicit control** - no magic, clear semantics
 - ✅ **Multi-level inheritance** - disable at base, override in child
@@ -251,11 +261,13 @@ class DataSource:
 - ✅ **Consistent pattern** - same approach for all plugin types
 
 **Cons**:
+
 - ⚠️ Adds complexity to base protocol (two outputs vs one)
 - ⚠️ Lifecycle question (when are in-memory artifacts cleaned up?)
 - ⚠️ Need to define standard artifact types (dataframe, llm/response, etc.)
 
 **Mitigations**:
+
 - Complexity: Clear documentation, examples for each plugin type
 - Lifecycle: ArtifactStore manages lifecycle, respects `persist` flag
 - Types: Create standard taxonomy in `core/base/artifact_types.py`
@@ -820,13 +832,16 @@ class DebugSink(BaseSink):
 #### Phase 1: Foundation (2-3 hours)
 
 **New Files**:
+
 - `src/elspeth/core/base/outputs.py` - DualOutputMixin (150 lines)
 - `src/elspeth/core/base/artifact_types.py` - Standard types (50 lines)
 
 **Modified Files**:
+
 - `src/elspeth/core/base/protocols.py` - Add produces/collect_artifacts to DataSource, TransformNode
 
 **Tests**:
+
 - `tests/test_dual_output_mixin.py` - Unit tests for mixin (200 lines)
 - `tests/test_inheritance_control.py` - Multi-level override scenarios (150 lines)
 
@@ -835,11 +850,13 @@ class DebugSink(BaseSink):
 **Pattern**: Convert 13 sinks to use DualOutputMixin
 
 **Before/After per sink**:
+
 - Before: 40 lines manual artifact tracking
 - After: 3 lines `_register_artifact_output()` call
 - Time: ~15 minutes per sink
 
 **Priority order** (high usage first):
+
 1. ExcelResultSink
 2. CsvResultSink
 3. VisualAnalyticsSink
@@ -854,6 +871,7 @@ class DebugSink(BaseSink):
 **Pattern**: Add artifact output to 4 datasources
 
 **Example**: CSVLocalDataSource
+
 - Add DualOutputMixin to inheritance
 - Call `_register_artifact_output()` in `load()`
 - Register file path, schema, row count
@@ -865,6 +883,7 @@ class DebugSink(BaseSink):
 **Pattern**: Add artifact output to 6 LLM clients
 
 **Example**: AzureOpenAIClient
+
 - Add DualOutputMixin to inheritance
 - Set `_produces_dataframe = False`
 - Call `_register_artifact_output()` in `generate()`
@@ -875,12 +894,14 @@ class DebugSink(BaseSink):
 #### Phase 5: Documentation & Examples (2-3 hours)
 
 **Updated Documentation**:
+
 - `docs/architecture/plugin-catalogue.md` - Add "Produces" column to tables
 - `docs/development/plugin-authoring.md` - Dual-output guide with examples
 - `docs/architecture/artifact-chaining.md` - NEW comprehensive guide
 - `CLAUDE.md` - Update plugin development patterns section
 
 **New Tests**:
+
 - `tests/test_universal_chaining.py` - End-to-end composition scenarios
 - `tests/test_dataframe_archiving.py` - Source → DataFrame archive sink
 - `tests/test_llm_response_caching.py` - Transform → response analysis sink
@@ -892,16 +913,19 @@ class DebugSink(BaseSink):
 ## Related Documents
 
 ### ADRs
+
 - [ADR-003](003-plugin-type-registry.md) - Central plugin type registry (plugin architecture context)
 - [ADR-004](004-mandatory-baseplugin-inheritance.md) - Mandatory BasePlugin inheritance (inheritance pattern precedent)
 - [ADR-002](002-security-architecture.md) - Multi-Level Security (artifact metadata carries SecurityLevel)
 
 ### Implementation
+
 - `src/elspeth/core/pipeline/artifact_pipeline.py:1-409` - Existing artifact chaining infrastructure
 - `src/elspeth/core/base/protocols.py:82-108` - Current ResultSink protocol with produces/consumes/collect_artifacts
 - `src/elspeth/plugins/nodes/sinks/excel.py:290-303` - Example sink with manual artifact tracking
 
 ### Documentation
+
 - `docs/architecture/plugin-catalogue.md` - Plugin inventory (will add "Produces" column)
 - `docs/development/plugin-authoring.md` - Plugin development guide (will add dual-output section)
 

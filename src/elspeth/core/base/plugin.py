@@ -67,14 +67,29 @@ class BasePlugin(ABC):
         >>> ds = MyDatasource(security_level=SecurityLevel.SECRET)
         >>> ds.get_security_level()
         SecurityLevel.SECRET
-        >>> ds.validate_can_operate_at_level(SecurityLevel.SECRET)  # ✅ OK
-        >>> ds.validate_can_operate_at_level(SecurityLevel.UNOFFICIAL)  # ❌ Raises
+        >>> ds.validate_can_operate_at_level(SecurityLevel.SECRET)  # ✅ OK (exact)
+        >>> ds.validate_can_operate_at_level(SecurityLevel.OFFICIAL)  # ✅ OK (trusted downgrade)
+
+    Example (Frozen Plugin - ADR-005):
+        >>> class FrozenDatasource(BasePlugin):
+        ...     def __init__(self):
+        ...         super().__init__(security_level=SecurityLevel.SECRET, allow_downgrade=False)
+        ...
+        >>> frozen = FrozenDatasource()
+        >>> frozen.get_security_level()
+        SecurityLevel.SECRET
+        >>> frozen.allow_downgrade
+        False
+        >>> frozen.validate_can_operate_at_level(SecurityLevel.SECRET)  # ✅ OK (exact)
+        >>> frozen.validate_can_operate_at_level(SecurityLevel.OFFICIAL)  # ❌ Raises (frozen)
 
     Attributes:
         _security_level (SecurityLevel): Plugin's security clearance (private storage).
+        _allow_downgrade (bool): Whether plugin can operate at lower levels (private storage).
 
     Properties:
         security_level (SecurityLevel): Read-only access to security clearance.
+        allow_downgrade (bool): Read-only access to downgrade permission.
 
     Methods:
         get_security_level() -> SecurityLevel: Returns plugin's security clearance.
@@ -113,26 +128,54 @@ class BasePlugin(ABC):
                     f"If you need custom security logic, please consult the architecture team."
                 )
 
-    def __init__(self, *, security_level: SecurityLevel, **kwargs: object) -> None:
-        """Initialize BasePlugin with mandatory security level.
+    def __init__(
+        self,
+        *,
+        security_level: SecurityLevel,
+        allow_downgrade: bool,
+        **kwargs: object
+    ) -> None:
+        """Initialize BasePlugin with mandatory security level and downgrade policy.
 
         Args:
             security_level: Plugin's security clearance (MANDATORY keyword-only argument).
+            allow_downgrade: Whether plugin can operate at lower pipeline levels (MANDATORY - no default).
+                - True: Trusted downgrade - plugin can filter/downgrade to lower levels
+                - False: Frozen plugin - must operate at exact declared level (ADR-005)
+                - ⚠️ NO DEFAULT: Explicit security choice required (security-first principle)
             **kwargs: Additional keyword arguments passed to super().__init__().
 
         Raises:
             ValueError: If security_level is None.
+            TypeError: If allow_downgrade not provided (no default - explicit choice required).
 
         Design Notes:
             - security_level is keyword-only (forces explicit declaration)
-            - Stored in private _security_level (discourages direct access)
-            - Public access via .security_level property (read-only)
+            - allow_downgrade is keyword-only with NO DEFAULT (security-first: explicit > implicit)
+            - ⚠️ BREAKING CHANGE from previous version that defaulted to True
+            - Stored in private fields (discourages direct access)
+            - Public access via properties (read-only)
             - **kwargs allows cooperative multiple inheritance
+
+        Example:
+            >>> # Trusted downgrade (EXPLICIT - required)
+            >>> plugin = MyPlugin(security_level=SecurityLevel.SECRET, allow_downgrade=True)
+            >>> plugin.allow_downgrade
+            True
+
+            >>> # Frozen: Strict level enforcement (ADR-005)
+            >>> frozen = MyPlugin(security_level=SecurityLevel.SECRET, allow_downgrade=False)
+            >>> frozen.allow_downgrade
+            False
+
+            >>> # ERROR: Missing allow_downgrade (no default)
+            >>> bad = MyPlugin(security_level=SecurityLevel.SECRET)  # TypeError!
         """
         if security_level is None:
             raise ValueError(f"{type(self).__name__}: security_level cannot be None (ADR-004 requirement)")
 
         self._security_level = security_level
+        self._allow_downgrade = allow_downgrade
         super().__init__(**kwargs)
 
     @property
@@ -152,6 +195,36 @@ class BasePlugin(ABC):
             >>> plugin.security_level = SecurityLevel.UNOFFICIAL  # ❌ AttributeError (read-only)
         """
         return self._security_level
+
+    @property
+    def allow_downgrade(self) -> bool:
+        """Read-only property for downgrade permission (ADR-005).
+
+        This property indicates whether the plugin can operate at pipeline levels
+        LOWER than its declared security clearance.
+
+        Returns:
+            bool: Whether plugin can operate at lower pipeline levels.
+                - True: Trusted downgrade - can filter/downgrade data to lower levels
+                - False: Frozen plugin - must operate at exact declared level only
+
+        Design Notes:
+            - Defaults to True (trusted downgrade per ADR-002)
+            - Set to False for frozen plugins (strict enforcement per ADR-005)
+            - Read-only to prevent runtime modification (prevents TOCTOU attacks)
+
+        Example:
+            >>> # Trusted downgrade (default)
+            >>> plugin = MyPlugin(security_level=SecurityLevel.SECRET)
+            >>> plugin.allow_downgrade
+            True
+
+            >>> # Frozen plugin
+            >>> frozen = MyPlugin(security_level=SecurityLevel.SECRET, allow_downgrade=False)
+            >>> frozen.allow_downgrade
+            False
+        """
+        return self._allow_downgrade
 
     @final
     def get_security_level(self) -> SecurityLevel:
@@ -180,32 +253,54 @@ class BasePlugin(ABC):
     def validate_can_operate_at_level(self, operating_level: SecurityLevel) -> None:
         """Validate that plugin can operate at the given security level (SEALED).
 
-        Bell-LaPadula Multi-Level Security (MLS) enforcement:
-        - Plugin with HIGHER clearance can operate at LOWER level (declassification allowed)
-        - Plugin with LOWER clearance CANNOT operate at HIGHER level (security violation)
+        Bell-LaPadula Multi-Level Security (MLS) enforcement with optional frozen behavior:
+        - Plugin with HIGHER clearance can operate at LOWER level (trusted downgrade, ADR-002)
+        - Plugin with LOWER clearance CANNOT operate at HIGHER level (insufficient clearance)
+        - Frozen plugin (allow_downgrade=False) CANNOT operate at LOWER level (strict enforcement, ADR-005)
 
         Args:
             operating_level: Security level of the pipeline/suite.
 
         Raises:
-            SecurityValidationError: If operating_level < plugin's declared security_level.
+            SecurityValidationError: If insufficient clearance OR frozen downgrade violation.
+
+        Validation Logic:
+            1. Check insufficient clearance: operating_level > security_level → REJECT (always)
+            2. Check frozen downgrade: operating_level < security_level AND not allow_downgrade → REJECT
+            3. Otherwise: ALLOW (exact match or trusted downgrade)
 
         Design Notes:
-            - This implements the "no write-up" rule from Bell-LaPadula MLS
-            - Plugins refuse to participate in pipelines below their clearance
+            - Check 1 implements Bell-LaPadula "no read up" rule
+            - Check 2 implements ADR-005 frozen plugin capability
+            - Default allow_downgrade=True maintains ADR-002 semantics (backwards compatible)
             - Fail-fast: Validation happens BEFORE any data processing
 
-        Example:
+        Example (Trusted Downgrade):
             >>> plugin = MyPlugin(security_level=SecurityLevel.SECRET)
-            >>> plugin.validate_can_operate_at_level(SecurityLevel.SECRET)  # ✅ OK
-            >>> plugin.validate_can_operate_at_level(SecurityLevel.TOP_SECRET)  # ✅ OK (upgrade)
-            >>> plugin.validate_can_operate_at_level(SecurityLevel.OFFICIAL)  # ❌ Raises
+            >>> plugin.validate_can_operate_at_level(SecurityLevel.OFFICIAL)  # ✅ OK (trusted downgrade)
+            >>> plugin.validate_can_operate_at_level(SecurityLevel.SECRET)  # ✅ OK (exact match)
+            >>> plugin.validate_can_operate_at_level(SecurityLevel.TOP_SECRET)  # ❌ Raises (insufficient)
+
+        Example (Frozen Plugin):
+            >>> frozen = MyPlugin(security_level=SecurityLevel.SECRET, allow_downgrade=False)
+            >>> frozen.validate_can_operate_at_level(SecurityLevel.SECRET)  # ✅ OK (exact match)
+            >>> frozen.validate_can_operate_at_level(SecurityLevel.OFFICIAL)  # ❌ Raises (frozen)
+            >>> frozen.validate_can_operate_at_level(SecurityLevel.TOP_SECRET)  # ❌ Raises (insufficient)
         """
-        if operating_level < self._security_level:
+        # Check 1: Insufficient clearance (Bell-LaPadula "no read up")
+        if operating_level > self._security_level:
             raise SecurityValidationError(
-                f"{type(self).__name__} requires security level {self._security_level.name} "
-                f"but pipeline operates at {operating_level.name}. "
-                f"Cannot downgrade security clearance (Bell-LaPadula MLS violation)."
+                f"{type(self).__name__} has clearance {self._security_level.name}, "
+                f"but pipeline requires {operating_level.name}. "
+                f"Insufficient clearance for higher classification (Bell-LaPadula MLS violation)."
+            )
+
+        # Check 2: Frozen plugin downgrade rejection (ADR-005)
+        if operating_level < self._security_level and not self._allow_downgrade:
+            raise SecurityValidationError(
+                f"{type(self).__name__} is frozen at {self._security_level.name} "
+                f"(allow_downgrade=False). Cannot operate at lower level {operating_level.name}. "
+                f"This plugin requires exact level matching and does not support trusted downgrade."
             )
 
 

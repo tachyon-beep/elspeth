@@ -340,11 +340,11 @@ class BasePlugin(ABC):
 
     @final
     def validate_can_operate_at_level(self, operating_level: SecurityLevel) -> None:
-        """Validate security level (FINAL - do not override)."""
-        if operating_level < self._security_level:
+        """Validate security level (FINAL - do not override). Bell-LaPadula 'no read up'."""
+        if operating_level > self._security_level:
             raise SecurityValidationError(
-                f"{type(self).__name__} requires {self._security_level.name}, "
-                f"operating envelope is {operating_level.name}"
+                f"{type(self).__name__} has clearance {self._security_level.name}, "
+                f"but pipeline requires {operating_level.name} - insufficient clearance"
             )
 ```
 
@@ -498,7 +498,7 @@ def get_security_level(self) -> SecurityLevel:
     """Returns self._security_level (provided by BasePlugin)."""
 
 def validate_can_operate_at_level(self, operating_level: SecurityLevel) -> None:
-    """Raises SecurityValidationError if operating_level < self._security_level."""
+    """Bell-LaPadula 'no read up': Raises SecurityValidationError if operating_level > self._security_level."""
 ```
 
 **Runtime Enforcement** (prevents override attempts):

@@ -255,8 +255,8 @@ class EmbeddingsStoreSink(BasePlugin, ResultSink):
         embedder_factory: Callable[[Mapping[str, Any]], Embedder] | None = None,
         provider_options: Mapping[str, Any] | None = None,
     ) -> None:
-        # Initialize BasePlugin with security level (ADR-004)
-        super().__init__(security_level=security_level)
+        # Initialize BasePlugin with security level and downgrade policy (ADR-004, ADR-005)
+        super().__init__(security_level=security_level, allow_downgrade=allow_downgrade)
 
         self.provider_name = provider
         self._namespace_override = namespace

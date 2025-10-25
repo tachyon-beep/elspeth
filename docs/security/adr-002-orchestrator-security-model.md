@@ -1,7 +1,19 @@
 # ADR-002 Orchestrator Security Model - Clarification
 
+**⚠️ WARNING - DOCUMENT REQUIRES COMPREHENSIVE REVIEW**
+
+This document was written during Phase 1 implementation when Bell-LaPadula validation logic
+was INVERTED. While specific code examples have been corrected, the test scenarios and some
+prose descriptions may still reflect the WRONG semantics. This document should be reviewed
+comprehensively before being used as implementation guidance.
+
+**Correct Model**: Plugin `security_level` = maximum clearance. Plugins can operate at SAME
+or LOWER levels (trusted to filter). Plugins CANNOT operate ABOVE their clearance.
+
+---
+
 **Document Purpose**: Clarifies the correct "minimum clearance envelope" model for ADR-002 implementation
-**Date**: 2025-10-25
+**Date**: 2025-10-25 (Pre-correction), 2025-10-26 (Warning added)
 **Related**: `adr-002-implementation-gap.md`
 
 ---
@@ -65,18 +77,20 @@
 
    ```python
    class SecretDataSource:
-       security_level = SecurityLevel.SECRET
+       security_level = SecurityLevel.SECRET  # Clearance: up to SECRET
 
        def get_data(self, orchestrator_context):
            # Runtime check: Should NEVER come up if start-time validation works
            # BUT: If someone tricks the orchestrator, plugins still protect themselves
-           if orchestrator_context.operating_level < self.security_level:
+           # Reject if asked to operate ABOVE clearance (Bell-LaPadula "no read up")
+           if orchestrator_context.operating_level > self.security_level:
                raise SecurityError(
-                   f"Datasource requires {self.security_level}, "
-                   f"orchestrator operating at {orchestrator_context.operating_level}. "
-                   f"REFUSING to hand over data (defense in depth failsafe)."
+                   f"Datasource cleared for {self.security_level}, "
+                   f"but orchestrator requires {orchestrator_context.operating_level}. "
+                   f"INSUFFICIENT CLEARANCE - refusing to operate (defense in depth failsafe)."
                )
-           return self._actual_classified_data
+           # If operating_level <= self.security_level, we can operate (possibly filtering data)
+           return self._get_filtered_data(orchestrator_context.operating_level)
    ```
 
 ---
@@ -458,13 +472,16 @@ class AzureDataSourcePlugin:
 
 ```python
 # WRONG: Only datasource validates
-if datasource.security_level > pipeline_min:
-    raise SecurityError("Datasource can't operate")
+if pipeline_min > datasource.security_level:
+    raise SecurityError("Datasource has insufficient clearance")
 
-# CORRECT: ALL components validate
+# CORRECT: ALL components validate (Bell-LaPadula "no read up")
+# Each component checks: Can I operate at this level?
 for component in all_components:
-    if component.security_level > orchestrator.operating_level:
-        raise SecurityError(f"{component} can't operate at {orchestrator.operating_level}")
+    if orchestrator.operating_level > component.security_level:
+        raise SecurityError(
+            f"{component} has insufficient clearance for {orchestrator.operating_level} pipeline"
+        )
 ```
 
 ### 3. Defense in Depth: Start-Time + Runtime
@@ -949,15 +966,19 @@ def test_adr002_secret_datasource_unofficial_sink_fails_at_start():
         llm_client=SimpleLLM(security_level="secret"),
     )
 
-    # Expected flow:
+    # ⚠️ WARNING: This test scenario is based on INVERTED logic!
+    # With CORRECT Bell-LaPadula semantics, this test should PASS, not FAIL:
     # 1. Orchestrator collects levels: {datasource: SECRET, llm: SECRET, sink: UNOFFICIAL}
     # 2. Orchestrator computes operating level: min(...) = UNOFFICIAL
-    # 3. Orchestrator validates components:
-    #    - datasource requires SECRET but orchestrator at UNOFFICIAL → FAIL
-    #    - llm requires SECRET but orchestrator at UNOFFICIAL → FAIL
-    #    - sink requires UNOFFICIAL, orchestrator at UNOFFICIAL → OK
-    # 4. Job FAILS TO START (before any data retrieval)
+    # 3. Orchestrator validates components (CORRECT):
+    #    - datasource: SECRET clearance, operate at UNOFFICIAL → ✅ OK (can downgrade/filter)
+    #    - llm: SECRET clearance, operate at UNOFFICIAL → ✅ OK (can downgrade)
+    #    - sink: UNOFFICIAL clearance, operate at UNOFFICIAL → ✅ OK (same level)
+    # 4. Job STARTS SUCCESSFULLY - SECRET datasource trusted to filter data to UNOFFICIAL
+    #
+    # The scenario that SHOULD fail: UNOFFICIAL datasource in SECRET pipeline
 
+    # ⚠️ This test expectation is WRONG - kept for reference only
     with pytest.raises(SecurityError, match="requires SECRET but orchestrator operating at UNOFFICIAL"):
         runner.run(dataframe, defaults)
 ```
@@ -1005,16 +1026,24 @@ class CSVDataSource:
 ### Start-Time (Primary Enforcement)
 
 ```text
+⚠️ WRONG ERROR MESSAGE (based on inverted logic):
 SecurityError: Component 'datasource' requires SECRET but orchestrator operating at UNOFFICIAL.
-Job cannot start - remove low-security component or create separate pipeline.
+
+✅ CORRECT ERROR MESSAGE (Bell-LaPadula "no read up"):
+SecurityError: Component 'datasource' has clearance OFFICIAL but pipeline requires SECRET.
+Job cannot start - component has insufficient clearance for required level.
 ADR-002 fail-fast enforcement.
 ```
 
 ### Runtime (Failsafe - Should Never Happen)
 
 ```text
+⚠️ WRONG ERROR MESSAGE (based on inverted logic):
 SecurityError: RUNTIME FAILSAFE: Datasource requires SECRET but orchestrator operating at UNOFFICIAL.
-Refusing to hand over data.
+
+✅ CORRECT ERROR MESSAGE (Bell-LaPadula "no read up"):
+SecurityError: RUNTIME FAILSAFE: Datasource has clearance OFFICIAL but pipeline requires SECRET.
+Insufficient clearance - refusing to operate.
 This should have been caught at start-time - possible security bypass attempt.
 ADR-002 defense-in-depth enforcement.
 ```

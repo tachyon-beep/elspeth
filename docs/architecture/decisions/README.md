@@ -17,8 +17,15 @@ These decisions are currently in effect and guide ongoing development:
 | [002-A](002-a-trusted-container-model.md) | Trusted Container Model | 2025-10-25 | ✅ Accepted | Introduces ClassifiedDataFrame for immutable classification tracking and high water mark enforcement |
 | [003](003-plugin-type-registry.md) | Central Plugin Type Registry | 2025-10-25 | 📋 Proposed | Central registry for plugin security validation with type-safe plugin composition |
 | [004](004-mandatory-baseplugin-inheritance.md) | Mandatory BasePlugin Inheritance | 2025-10-25 | 📋 Proposed | Requires all plugins to inherit from BasePlugin for security enforcement |
-| [005](005-security-critical-exception-policy.md) | Security-Critical Exception Policy | 2025-10-25 | 📋 Proposed | Policy-enforced fail-loud exceptions for security invariant violations |
-| [006](006-universal-dual-output-protocol.md) | Universal Dual-Output Plugin Protocol | 2025-10-26 | 📋 Proposed | Establishes dual-output pattern (DataFrame + Artifacts) with inheritance control for universal plugin composability |
+| [005](005-frozen-plugin-capability.md) | Frozen Plugin Capability | 2025-10-26 | ✅ Accepted | Implements `allow_downgrade=False` parameter for plugins requiring exact security level match |
+| [006](006-security-critical-exception-policy.md) | Security-Critical Exception Policy | 2025-10-25 | 📋 Proposed | Policy-enforced fail-loud exceptions for security invariant violations |
+| [007](007-universal-dual-output-protocol.md) | Universal Dual-Output Plugin Protocol | 2025-10-26 | 📋 Proposed | Establishes dual-output pattern (DataFrame + Artifacts) with inheritance control for universal plugin composability |
+| [008](008-unified-registry-pattern.md) | Unified Registry Pattern | 2025-10-26 | 📝 Draft | Documents BasePluginRegistry[T] generic pattern for type-safe plugin registration with consistent security enforcement |
+| [009](009-configuration-composition.md) | Configuration Composition & Validation | 2025-10-26 | 📝 Draft | Formalizes three-layer config merge (suite defaults → prompt packs → experiments) with deep merge semantics and fail-fast validation |
+| [010](010-pass-through-lifecycle-and-routing.md) | Pass-Through Artifact Lifecycle & Transform Composition | 2025-10-26 | 📝 Draft (P0) | **CRITICAL**: Three-tier plugin architecture (Transform → Routing → FileWrite) with pass-through lifecycle and logical routing primitives (AND/OR/IF/TRY) |
+| [011](011-error-classification-and-recovery.md) | Error Classification & Recovery Strategy | 2025-10-26 | 📝 Draft | Comprehensive error taxonomy (Security/Transient/Permanent/Fatal) with on_error policy semantics and retry strategy |
+| [012](012-testing-strategy-and-quality-gates.md) | Testing Strategy & Quality Gates | 2025-10-26 | 📝 Draft | Component-specific coverage requirements (security: >90%, core: >80%, plugins: >70%) with quality gates (tests, coverage, MyPy, Ruff, mutation testing) |
+| [013](013-global-observability-policy.md) | Global Observability Policy | 2025-10-26 | 📝 Draft | Global policy for mandatory logging (security, data processing, errors), prohibited content (PII, classified data), retention (90 days security, 30 days operational), and fail-closed audit logging |
 
 ## Historical ADRs
 
@@ -26,8 +33,10 @@ These decisions have been completed or superseded but remain documented for hist
 
 | ADR | Title | Status | Summary |
 |-----|-------|--------|---------|
-| [003](historical/003-remove-legacy-code.md) | Remove Legacy Code | Completed | Removed duplicate orchestration helpers after new pipeline achieved feature parity |
-| [004](historical/004-complete-registry-migration.md) | Complete Registry Migration | Completed | Migrated all plugin registries to unified `BasePluginRegistry` framework |
+| [A001](historical/A001-remove-legacy-code.md) | Remove Legacy Code | Completed | Removed duplicate orchestration helpers after new pipeline achieved feature parity |
+| [A002](historical/A002-complete-registry-migration.md) | Complete Registry Migration | Completed | Migrated all plugin registries to unified `BasePluginRegistry` framework |
+
+**Note**: Historical ADRs use 'A' prefix (A001, A002) to avoid numbering conflicts with active ADRs.
 
 ## ADR Format
 

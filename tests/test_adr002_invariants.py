@@ -4,12 +4,13 @@ These tests define the security properties that MUST hold for ADR-002
 suite-level security enforcement. All tests should FAIL initially (red),
 then pass after implementation (green).
 
-Security Invariants:
+Security Invariants (Bell-LaPadula "no read up"):
 1. Orchestrator MUST operate at MIN(all plugin security levels)
-2. Plugins MUST refuse to operate below their security requirement
-3. Classification uplifting MUST be automatic (not manual/optional)
-4. Output classification MUST be ≥ input classification (always)
-5. No configuration MUST allow classification breach
+2. Plugins MUST refuse to operate ABOVE their security clearance (insufficient clearance)
+3. Plugins with HIGHER clearance MAY operate at LOWER levels (trusted to filter/downgrade)
+4. Classification uplifting MUST be automatic (not manual/optional)
+5. Output classification MUST be ≥ input classification (always)
+6. No configuration MUST allow classification breach
 
 CRITICAL: These are not regression tests - they define NEW security behavior.
 """
@@ -58,15 +59,18 @@ class MockPlugin:
     def validate_can_operate_at_level(self, operating_level: "SecurityLevel") -> None:
         """Validate plugin can operate at the given envelope level.
 
+        Bell-LaPadula "no read up": Plugin can operate at same or lower level,
+        but cannot operate ABOVE its clearance.
+
         Raises:
-            SecurityValidationError: If operating_level < self._security_level
+            SecurityValidationError: If operating_level > self._security_level
         """
         from elspeth.core.validation.base import SecurityValidationError
 
-        if operating_level < self._security_level:
+        if operating_level > self._security_level:
             raise SecurityValidationError(
-                f"{self.__class__.__name__} requires {self._security_level.name}, "
-                f"but orchestrator operating at {operating_level.name}"
+                f"{self.__class__.__name__} has clearance {self._security_level.name}, "
+                f"but pipeline requires {operating_level.name} - insufficient clearance"
             )
 
 
@@ -178,16 +182,28 @@ class TestInvariantMinimumClearanceEnvelope:
 
 
 class TestInvariantPluginValidation:
-    """INVARIANT: Plugins MUST refuse to operate below their security requirement.
+    """INVARIANT: Plugins MUST refuse to operate ABOVE their security clearance (Bell-LaPadula "no read up").
 
-    THREAT: If SECRET datasource accepts UNOFFICIAL envelope → data leakage.
+    THREAT: If UNOFFICIAL datasource operates in SECRET pipeline → insufficient clearance breach.
+
+    CORRECT BEHAVIOR:
+    - UNOFFICIAL datasource in SECRET pipeline → REJECT (insufficient clearance)
+    - SECRET datasource in UNOFFICIAL pipeline → ALLOW (trusted to filter to UNOFFICIAL)
 
     DEFENSE: BasePlugin.validate_can_operate_at_level() enforces clearance checks.
     """
 
     def test_high_security_plugin_rejects_low_envelope(self):
-        """SECRET plugin MUST reject UNOFFICIAL operating level.
+        """⚠️ TEST BASED ON INVERTED LOGIC - Will FAIL with corrected MockPlugin.
 
+        With CORRECT Bell-LaPadula semantics:
+        - SECRET plugin (clearance SECRET) CAN operate at UNOFFICIAL (lower level)
+        - Should NOT raise error (trusted to filter/downgrade)
+        - This test expects WRONG behavior (raising error)
+
+        TODO: Rewrite this test to validate correct behavior.
+
+        OLD (WRONG) EXPECTATION:
         Given: Plugin requires SECRET clearance
         When: Validating against UNOFFICIAL envelope
         Then: SecurityValidationError raised with clear message

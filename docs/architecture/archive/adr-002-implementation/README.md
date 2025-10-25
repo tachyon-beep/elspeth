@@ -1,5 +1,20 @@
 # ADR-002 Implementation Planning Archive
 
+**⚠️ CRITICAL WARNING - ARCHIVED DOCUMENTS CONTAIN INVERTED BELL-LAPADULA LOGIC**
+
+These archived documents were written when Bell-LaPadula validation logic was **INVERTED** throughout
+the codebase (2025-10-25). The following files contain **WRONG** security semantics and should NOT be
+used as implementation guidance:
+- THREAT_MODEL.md (archived - use `docs/security/adr-002-threat-model.md` instead)
+- CERTIFICATION_EVIDENCE.md, METHODOLOGY.md, PROGRESS.md, CHECKLIST.md
+
+**Inverted Logic Issue**: Documents describe "SECRET datasource refuses UNOFFICIAL pipeline" but the
+CORRECT behavior is "UNOFFICIAL datasource refuses SECRET pipeline" (insufficient clearance).
+
+**For Current Documentation**: Use `docs/security/` and `docs/architecture/decisions/` instead.
+
+---
+
 **Status**: Implementation Complete (2025-10-25)
 **Archive Date**: 2025-10-25
 

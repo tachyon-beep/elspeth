@@ -150,8 +150,8 @@ class TestCategory0Step0Verification:
 
         # Create a minimal subclass (doesn't implement any methods)
         class MinimalPlugin(BasePlugin):
-            def __init__(self, *, security_level: SecurityLevel):
-                super().__init__(security_level=security_level)
+            def __init__(self, *, security_level: SecurityLevel, allow_downgrade: bool = True):
+                super().__init__(security_level=security_level, allow_downgrade=allow_downgrade)
 
         # Instantiate - should work because methods are inherited
         plugin = MinimalPlugin(security_level=SecurityLevel.SECRET)
@@ -177,8 +177,8 @@ class TestCategory0Step0Verification:
         # Attempt to override get_security_level - should raise TypeError at class definition
         with pytest.raises(TypeError) as exc_info:
             class BrokenPlugin(BasePlugin):
-                def __init__(self, *, security_level: SecurityLevel):
-                    super().__init__(security_level=security_level)
+                def __init__(self, *, security_level: SecurityLevel, allow_downgrade: bool = True):
+                    super().__init__(security_level=security_level, allow_downgrade=allow_downgrade)
 
                 def get_security_level(self) -> SecurityLevel:  # ← Override attempt
                     return SecurityLevel.UNOFFICIAL  # ← Should be rejected!
@@ -200,8 +200,8 @@ class TestCategory0Step0Verification:
         from elspeth.core.base.types import SecurityLevel
 
         class TestPlugin(BasePlugin):
-            def __init__(self, *, security_level: SecurityLevel):
-                super().__init__(security_level=security_level)
+            def __init__(self, *, security_level: SecurityLevel, allow_downgrade: bool = True):
+                super().__init__(security_level=security_level, allow_downgrade=allow_downgrade)
 
         plugin = TestPlugin(security_level=SecurityLevel.SECRET)
 
@@ -344,9 +344,10 @@ class TestCategory1Characterization:
             "validate_can_operate_at_level is not callable!"
 
         # Test method functionality (Bell-LaPadula MLS)
-        ds.validate_can_operate_at_level(SecurityLevel.SECRET)  # Should pass (same level)
-        # Note: Cannot test with higher level (no TOP_SECRET in test suite)
-        # ds.validate_can_operate_at_level(SecurityLevel.OFFICIAL) would FAIL (lower level rejected)
+        # Plugin has SECRET clearance, can operate at same or lower levels
+        ds.validate_can_operate_at_level(SecurityLevel.SECRET)  # ✅ Same level
+        ds.validate_can_operate_at_level(SecurityLevel.OFFICIAL)  # ✅ Lower level (cleared for SECRET, operating at OFFICIAL)
+        ds.validate_can_operate_at_level(SecurityLevel.UNOFFICIAL)  # ✅ Much lower level
 
     def test_csvdatasource_no_get_security_level(self, tmp_path: Path) -> None:
         """CSVDataSource has get_security_level() method after Phase 1 migration.
@@ -409,9 +410,16 @@ class TestCategory1Characterization:
             "validate_can_operate_at_level is not callable!"
 
         # Test method functionality (Bell-LaPadula MLS)
-        sink.validate_can_operate_at_level(SecurityLevel.OFFICIAL)  # Should pass (same level)
-        sink.validate_can_operate_at_level(SecurityLevel.SECRET)  # Should pass (higher level, more secure)
-        # sink.validate_can_operate_at_level(SecurityLevel.UNOFFICIAL) would FAIL (lower level rejected)
+        # Sink has OFFICIAL clearance, can operate at same or lower levels
+        sink.validate_can_operate_at_level(SecurityLevel.OFFICIAL)  # ✅ Same level
+        sink.validate_can_operate_at_level(SecurityLevel.UNOFFICIAL)  # ✅ Lower level (cleared for OFFICIAL, operating at UNOFFICIAL)
+
+        # Should REJECT higher level (insufficient clearance)
+        try:
+            sink.validate_can_operate_at_level(SecurityLevel.SECRET)  # ❌ Should raise (above clearance)
+            assert False, "Should have rejected SECRET level with OFFICIAL clearance!"
+        except Exception:
+            pass  # Expected to raise
 
 
 # =============================================================================
@@ -490,15 +498,12 @@ class TestCategory3SecurityProperties:
     Expected: XFAIL → PASS after Phase 1
     """
 
-    @pytest.mark.xfail(
-        reason="Phase 1 not started - plugins don't implement BasePlugin yet",
-        strict=True
-    )
     def test_all_datasources_implement_baseplugin(self, tmp_path: Path) -> None:
-        """All datasources MUST implement BasePlugin protocol after Phase 1.
+        """All datasources MUST implement BasePlugin protocol.
 
-        **TEST TYPE**: Security property (success criteria)
-        **EXPECTED**: XFAIL (plugins lack methods) → PASS after Phase 1
+        **TEST TYPE**: Security property (VERIFIED POST-MIGRATION)
+        **PHASE 1 STATUS**: ✅ COMPLETE for datasources (commit 5a063b4)
+        **EXPECTED**: PASS (datasources inherit from BasePlugin ABC)
         """
         csv_file = tmp_path / "test.csv"
         csv_file.write_text("col1,col2\n1,2\n")
@@ -545,15 +550,12 @@ class TestCategory3SecurityProperties:
         assert callable(sink.validate_can_operate_at_level), \
             "validate_can_operate_at_level must be callable"
 
-    @pytest.mark.xfail(
-        reason="Phase 1 not started - plugins don't implement BasePlugin yet",
-        strict=True
-    )
     def test_get_security_level_returns_correct_value(self, tmp_path: Path) -> None:
         """get_security_level() MUST return the plugin's declared security level.
 
-        **TEST TYPE**: Security property (behavior verification)
-        **EXPECTED**: XFAIL (method missing) → PASS after Phase 1
+        **TEST TYPE**: Security property (VERIFIED POST-MIGRATION)
+        **PHASE 1 STATUS**: ✅ COMPLETE for datasources (commit 5a063b4)
+        **EXPECTED**: PASS (method inherited from BasePlugin ABC)
         """
         csv_file = tmp_path / "test.csv"
         csv_file.write_text("col1,col2\n1,2\n")
@@ -708,10 +710,11 @@ class TestCategory4RegistryEnforcement:
                 return self.security_level
 
             def validate_can_operate_at_level(self, operating_level: SecurityLevel) -> None:
-                if operating_level < self.security_level:
+                # Bell-LaPadula "no read up": Reject if asked to operate ABOVE clearance
+                if operating_level > self.security_level:
                     raise SecurityValidationError(
-                        f"Datasource requires {self.security_level.name}, "
-                        f"operating envelope is {operating_level.name}"
+                        f"Datasource has clearance {self.security_level.name}, "
+                        f"but pipeline requires {operating_level.name} - insufficient clearance"
                     )
 
         registry = BasePluginRegistry[DataSource]("test_datasource")

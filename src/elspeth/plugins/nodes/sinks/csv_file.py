@@ -47,9 +47,10 @@ class CsvResultSink(BasePlugin, ResultSink):
         sanitize_guard: str = "'",
         allowed_base_path: str | Path | None = None,
         security_level: SecurityLevel,  # REQUIRED - no default (ADR-004 requirement)
+        allow_downgrade: bool = True,  # ADR-005: Trusted downgrade for sinks (explicit choice, matches default suite)
     ) -> None:
-        # Initialize BasePlugin with security level (ADR-004)
-        super().__init__(security_level=security_level)
+        # Initialize BasePlugin with security level and downgrade policy (ADR-004, ADR-005)
+        super().__init__(security_level=security_level, allow_downgrade=allow_downgrade)
 
         self.path = Path(path)
         self.overwrite = overwrite

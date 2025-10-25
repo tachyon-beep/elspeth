@@ -33,9 +33,10 @@ class FileCopySink(BasePlugin, ResultSink):
         on_error: str = "abort",
         allowed_base_path: str | None = None,
         security_level: SecurityLevel,  # REQUIRED - no default (ADR-004 requirement)
-    ) -> None:
-        # Initialize BasePlugin with security level (ADR-004)
-        super().__init__(security_level=security_level)
+    allow_downgrade: bool = True,  # ADR-005: Trusted downgrade for sinks (explicit choice, matches default suite)
+        ) -> None:
+        # Initialize BasePlugin with security level and downgrade policy (ADR-004, ADR-005)
+        super().__init__(security_level=security_level, allow_downgrade=allow_downgrade)
         self.destination = Path(destination)
         self.overwrite = overwrite
         if on_error not in {"abort", "skip"}:

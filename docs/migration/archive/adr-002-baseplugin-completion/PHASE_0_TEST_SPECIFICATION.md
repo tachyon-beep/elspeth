@@ -424,8 +424,9 @@ class TestRegistryEnforcement:
                 return self.security_level
 
             def validate_can_operate_at_level(self, operating_level: SecurityLevel) -> None:
-                if operating_level < self.security_level:
-                    raise SecurityValidationError("...")
+                # Bell-LaPadula "no read up"
+                if operating_level > self.security_level:
+                    raise SecurityValidationError("Insufficient clearance")
 
         registry = DatasourceRegistry()
 

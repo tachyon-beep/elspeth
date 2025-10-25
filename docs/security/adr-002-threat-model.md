@@ -26,21 +26,23 @@
 
 ## Threat Catalog
 
-### T1: Classification Breach (Direct Data Leakage)
+### T1: Classification Breach (Insufficient Clearance)
 
-**Scenario**: SECRET datasource configured with UNOFFICIAL sink
+**Scenario**: UNOFFICIAL datasource in SECRET pipeline (insufficient clearance)
 
 **Attack Vector**:
 ```python
 # Misconfigured suite
 suite = ExperimentSuite(
-    datasource=SecretDatasource(),  # Requires SECRET clearance
-    sinks=[UnofficialSink()],       # Only handles UNOFFICIAL data
+    datasource=UnofficialDatasource(),  # Only cleared for UNOFFICIAL data
+    sinks=[SecretSink()],               # Requires SECRET clearance
+    llm=SecretLLM(),                    # Requires SECRET clearance
 )
-# Without our control: SECRET data writes to UNOFFICIAL sink → CLASSIFICATION BREACH
+# Without our control: UNOFFICIAL datasource tries to participate in SECRET pipeline
+# → INSUFFICIENT CLEARANCE (Bell-LaPadula "no read up" violation)
 ```
 
-**Impact**: **CRITICAL** - Direct violation of classification policy, potential data spillage
+**Impact**: **CRITICAL** - Insufficient-clearance component could leak or mishandle classified data
 
 **Likelihood**: **HIGH** - Easy to misconfigure, especially in multi-agency environments
 
@@ -48,19 +50,37 @@ suite = ExperimentSuite(
 
 **Defense Layers**:
 - **Primary (Start-time)**: `_validate_security_envelope()` rejects suite before data access
-  - Datasource reports "I require SECRET"
-  - Sink reports "I handle UNOFFICIAL"
-  - Orchestrator computes: `MIN(SECRET, UNOFFICIAL) = UNOFFICIAL`
-  - Validation fails: "Datasource requires SECRET but envelope is UNOFFICIAL"
-  - Job NEVER STARTS
-- **Failsafe (Runtime)**: `ClassifiedDataFrame.validate_access_by()` blocks data hand-off
-  - If start-time validation bypassed/broken
-  - Datasource tries to give SECRET data to sink
-  - Sink clearance checked: UNOFFICIAL < SECRET
-  - Access BLOCKED with SecurityValidationError
-- **Certification**: Auditor verifies both layers exist and work correctly
+  - Datasource reports "I'm cleared for UNOFFICIAL"
+  - Sink reports "I'm cleared for SECRET"
+  - LLM reports "I'm cleared for SECRET"
+  - Orchestrator computes: `MIN(UNOFFICIAL, SECRET, SECRET) = UNOFFICIAL`
+  - Each component validates: Can I operate at UNOFFICIAL?
+    - Datasource: UNOFFICIAL clearance, operating at UNOFFICIAL → ✅ OK
+    - LLM: SECRET clearance, operating at UNOFFICIAL → ✅ OK (can downgrade)
+    - Sink: SECRET clearance, operating at UNOFFICIAL → ✅ OK (can downgrade)
+  - **Job STARTS SUCCESSFULLY** (all components can operate at UNOFFICIAL level)
 
-**Test Evidence**: `test_INTEGRATION_secret_datasource_rejects_unofficial_sink`
+  **Alternative scenario** (what actually fails):
+  - If we try to force SECRET pipeline level (e.g., require SECRET output):
+    - Datasource validation: UNOFFICIAL clearance, asked for SECRET → ❌ FAILS
+    - Validation fails: "Datasource has insufficient clearance for SECRET pipeline"
+    - Job NEVER STARTS
+
+- **Failsafe (Runtime)**: `BasePlugin.validate_can_operate_at_level()` blocks participation
+  - If start-time validation bypassed/broken
+  - Component asked to operate at level ABOVE its clearance
+  - Validation: `if operating_level > self.security_level: raise`
+  - Access BLOCKED with SecurityValidationError
+
+- **Trusted Downgrade**: Components with HIGHER clearance CAN operate at LOWER levels
+  - SECRET datasource at UNOFFICIAL pipeline level → ✅ OK (filters data appropriately)
+  - Certified datasources are trusted to filter based on operating level
+
+- **Certification**: Auditor verifies:
+  1. Validation logic correct (upgrade blocked, downgrade allowed)
+  2. Datasources correctly filter data when operating at lower levels
+
+**Test Evidence**: `test_INTEGRATION_insufficient_clearance_datasource_rejected`
 
 ---
 
