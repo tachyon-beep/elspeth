@@ -1,6 +1,7 @@
 import pandas as pd
 
 from elspeth.cli import _result_to_row
+from elspeth.core.base.types import SecurityLevel
 from elspeth.core.experiments.plugin_registry import create_early_stop_plugin, create_row_plugin
 from elspeth.core.experiments.runner import ExperimentRunner
 from elspeth.plugins.nodes.transforms.llm.mock import MockLLMClient
@@ -16,7 +17,11 @@ class DummySink:
 
 def _build_runner():
     return ExperimentRunner(
-        llm_client=MockLLMClient(seed=123),
+        llm_client=MockLLMClient(
+            security_level=SecurityLevel.UNOFFICIAL,
+            allow_downgrade=True,
+            seed=123
+        ),
         sinks=[DummySink()],
         prompt_system="You are a tester.",
         prompt_template="Summarise {{ APPID }}.",

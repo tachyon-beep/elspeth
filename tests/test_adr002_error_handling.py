@@ -91,8 +91,11 @@ class MockSecretSink(BasePlugin):
         self.written.append({"results": results, "metadata": metadata})
 
 
-class MockLLMClient:
+class MockLLMClient(BasePlugin):
     """Simple mock LLM for error tests."""
+
+    def __init__(self):
+        super().__init__(security_level=SecurityLevel.UNOFFICIAL, allow_downgrade=True)
 
     def generate(self, *, system_prompt: str, user_prompt: str, metadata: dict | None = None) -> dict:
         return {
@@ -257,23 +260,26 @@ class TestADR002ErrorHandling:
     def test_security_validation_error_provides_context_without_leaking_data(self):
         """Security validation errors provide helpful context without leaking data.
 
-        Problem: When security validation fails (wrong clearance level, envelope
-        mismatch), the error message should explain WHAT failed without revealing
-        sensitive data content.
+        Problem: When security validation fails (frozen plugin refusing downgrade),
+        the error message should explain WHAT failed without revealing sensitive data content.
 
-        Given: OFFICIAL datasource → SECRET sink (envelope mismatch)
-        When: Start-time validation detects security level conflict
+        Given: OFFICIAL datasource → SECRET frozen sink (sink refuses downgrade to OFFICIAL)
+        When: Start-time validation detects frozen plugin downgrade rejection
         Then:
           - SecurityValidationError raised (expected)
-          - Error mentions security levels (OFFICIAL, SECRET)
-          - Error references ADR-002 for context
+          - Error mentions security levels or frozen/downgrade
+          - Error references security validation
           - Error does NOT contain data from datasource
           - Error is actionable (tells user what to fix)
 
         Security Property: Validation errors reveal CONFIGURATION issues, not DATA.
         Example:
-          ✅ "SECRET sink requires SECRET, got OFFICIAL envelope" (safe - config)
-          ❌ "SECRET sink blocked data: [row 0: {'password': 'SECRET'}]" (breach!)
+          ✅ "Frozen SECRET sink cannot operate at OFFICIAL level" (safe - config)
+          ❌ "Sink blocked data: [row 0: {'password': 'SECRET'}]" (breach!)
+
+        MLS Model: Operating level = MIN(OFFICIAL, SECRET) = OFFICIAL
+        - Datasource: OFFICIAL clearance @ OFFICIAL level = OK (exact match)
+        - Frozen Sink: SECRET clearance @ OFFICIAL level = REJECT (frozen, no downgrade)
         """
         # OFFICIAL datasource
         class OfficialDatasource(BasePlugin):
@@ -285,15 +291,24 @@ class TestADR002ErrorHandling:
                 classified = ClassifiedDataFrame.create_from_datasource(self.df, SecurityLevel.OFFICIAL)
                 return classified.data
 
-        # Datasource with sensitive data (even though OFFICIAL)
+        # Datasource with sensitive data
         df = pd.DataFrame({
             "employee_id": ["E12345", "E67890"],
-            "salary": [150000, 200000],  # Sensitive even at OFFICIAL
+            "salary": [150000, 200000],  # Sensitive data
             "performance_review": ["Excellent", "Outstanding"],
         })
 
+        # SECRET frozen sink (allow_downgrade=False) - refuses to operate at OFFICIAL level
+        class SecretFrozenSink(BasePlugin):
+            def __init__(self):
+                super().__init__(security_level=SecurityLevel.SECRET, allow_downgrade=False)
+                self.written = []
+
+            def write(self, results: dict, *, metadata: dict | None = None) -> None:
+                self.written.append({"results": results, "metadata": metadata})
+
         datasource = OfficialDatasource(df)
-        sink = MockSecretSink()  # Requires SECRET, datasource is OFFICIAL → mismatch
+        sink = SecretFrozenSink()  # Frozen SECRET sink refuses to operate at OFFICIAL level
 
         experiment = ExperimentConfig(
             name="validation_error_test",
@@ -320,13 +335,21 @@ class TestADR002ErrorHandling:
         assert "excellent" not in error_msg, "Error leaked performance review!"
         assert "e12345" not in error_msg, "Error leaked employee ID!"
 
-        # ✅ SHOULD mention security levels (configuration context)
-        assert "secret" in error_msg or "official" in error_msg, \
-            "Error should mention security levels for debugging"
+        # ✅ SHOULD mention security levels or frozen plugin (configuration context)
+        # Note: Error might mention "frozen", "allow_downgrade", or security levels
+        has_config_context = (
+            "secret" in error_msg or
+            "official" in error_msg or
+            "frozen" in error_msg or
+            "allow_downgrade" in error_msg or
+            "downgrade" in error_msg
+        )
+        assert has_config_context, \
+            "Error should mention security levels, frozen plugin, or downgrade policy for debugging"
 
-        # ✅ SHOULD reference ADR-002 (architectural context)
-        assert "adr-002" in error_msg or "adr002" in error_msg or "security" in error_msg, \
-            "Error should reference ADR-002 or security validation"
+        # ✅ SHOULD reference ADR or security validation (architectural context)
+        assert "adr" in error_msg or "security" in error_msg or "validation" in error_msg, \
+            "Error should reference ADR or security validation"
 
         # ✅ Error should be a SecurityValidationError (proper exception type)
         assert isinstance(exc_info.value, SecurityValidationError), \

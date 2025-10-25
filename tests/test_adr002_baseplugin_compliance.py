@@ -814,7 +814,10 @@ class TestCategory5Integration:
         )
 
         # LLM client (doesn't affect security validation in this test)
-        llm_client = MockLLMClient()
+        llm_client = MockLLMClient(
+            security_level=SecurityLevel.UNOFFICIAL,
+            allow_downgrade=True
+        )
 
         # Build experiment suite
         experiment = ExperimentConfig(
@@ -893,7 +896,10 @@ class TestCategory5Integration:
         )
 
         # LLM client
-        llm_client = MockLLMClient()
+        llm_client = MockLLMClient(
+            security_level=SecurityLevel.UNOFFICIAL,
+            allow_downgrade=True
+        )
 
         # Build experiment suite
         experiment = ExperimentConfig(

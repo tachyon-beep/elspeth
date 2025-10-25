@@ -144,7 +144,30 @@ def _create_http_openai(options: dict[str, Any], context: PluginContext) -> Http
 
 
 def _create_mock_llm(options: dict[str, Any], context: PluginContext) -> MockLLMClient:
-    """Create mock LLM client."""
+    """Create mock LLM client with security parameters.
+
+    Args:
+        options: Configuration options (should include security_level and allow_downgrade).
+        context: Plugin context (provides fallback security_level if not in options).
+
+    Returns:
+        MockLLMClient instance with security enforcement.
+
+    Note:
+        For test/mock usage, defaults to allow_downgrade=True if not specified.
+        This provides standard trusted downgrade behavior (ADR-002).
+    """
+    # Create a copy to avoid mutating input
+    options = dict(options)
+
+    # Ensure security_level is set (from options or context)
+    if "security_level" not in options and context:
+        options["security_level"] = context.security_level
+
+    # Ensure allow_downgrade is set (default to True for mock clients - standard behavior)
+    if "allow_downgrade" not in options:
+        options["allow_downgrade"] = True
+
     return MockLLMClient(**options)
 
 

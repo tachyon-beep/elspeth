@@ -5,13 +5,28 @@ from __future__ import annotations
 import hashlib
 from typing import Any
 
+from elspeth.core.base.plugin import BasePlugin
 from elspeth.core.base.protocols import LLMClientProtocol
+from elspeth.core.base.types import SecurityLevel
 
 
-class MockLLMClient(LLMClientProtocol):
-    """Deterministic mock client for tests and offline runs."""
+class MockLLMClient(BasePlugin, LLMClientProtocol):
+    """Deterministic mock client for tests and offline runs.
 
-    def __init__(self, *, seed: int | None = None):
+    Args:
+        security_level: Security clearance for this LLM adapter (MANDATORY).
+        allow_downgrade: Whether adapter can operate at lower pipeline levels (MANDATORY).
+        seed: Optional seed for deterministic response generation (default: 0).
+    """
+
+    def __init__(
+        self,
+        *,
+        security_level: SecurityLevel,
+        allow_downgrade: bool,
+        seed: int | None = None
+    ):
+        super().__init__(security_level=security_level, allow_downgrade=allow_downgrade)
         self.seed = seed or 0
 
     def generate(

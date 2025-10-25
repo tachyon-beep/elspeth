@@ -4,6 +4,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
+from elspeth.core.base.types import SecurityLevel
 from elspeth.core.experiments.config import ExperimentConfig, ExperimentSuite
 from elspeth.core.experiments.suite_runner import ExperimentSuiteRunner
 from elspeth.core.validation import ConfigurationError
@@ -102,7 +103,11 @@ def test_suite_runner_executes_with_defaults_and_packs(tmp_path):
     suite = ExperimentSuite.load(suite_root)
     runner = ExperimentSuiteRunner(
         suite=suite,
-        llm_client=MockLLMClient(seed=7),
+        llm_client=MockLLMClient(
+            security_level=SecurityLevel.UNOFFICIAL,
+            allow_downgrade=True,
+            seed=7
+        ),
         sinks=[],
     )
 
@@ -204,7 +209,15 @@ def test_suite_runner_executes_with_defaults_and_packs(tmp_path):
 def test_suite_runner_requires_prompts_when_missing(tmp_path):
     config = ExperimentConfig(name="empty", temperature=0.0, max_tokens=64)
     suite = ExperimentSuite(root=tmp_path, experiments=[config], baseline=config)
-    runner = ExperimentSuiteRunner(suite=suite, llm_client=MockLLMClient(seed=1), sinks=[])
+    runner = ExperimentSuiteRunner(
+        suite=suite,
+        llm_client=MockLLMClient(
+            security_level=SecurityLevel.UNOFFICIAL,
+            allow_downgrade=True,
+            seed=1
+        ),
+        sinks=[]
+    )
 
     with pytest.raises(ConfigurationError, match="no system prompt"):
         runner.build_runner(config, defaults={"prompt_packs": {}}, sinks=[])
@@ -220,7 +233,15 @@ def test_suite_runner_builds_controls_and_early_stop(tmp_path):
         determinism_level="high",
     )
     suite = ExperimentSuite(root=tmp_path, experiments=[config], baseline=config)
-    runner = ExperimentSuiteRunner(suite=suite, llm_client=MockLLMClient(seed=2), sinks=[])
+    runner = ExperimentSuiteRunner(
+        suite=suite,
+        llm_client=MockLLMClient(
+            security_level=SecurityLevel.UNOFFICIAL,
+            allow_downgrade=True,
+            seed=2
+        ),
+        sinks=[]
+    )
 
     defaults = {
         "prompt_packs": {},
