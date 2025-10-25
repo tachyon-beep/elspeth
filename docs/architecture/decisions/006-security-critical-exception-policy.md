@@ -103,6 +103,11 @@ Exception
 - Security metadata tampering
 - "Should never execute" code paths executing
 - **MUST NOT be caught** in production code (policy-enforced via CI/linting)
+- **Allowable scope**: Only unit/integration tests (under `tests/`) or generated
+  scaffolding specifically tagged for auditing may catch this exception.
+  All first-party production modules (`src/`) are linted to reject catches, and
+  glue code (e.g., orchestration notebooks, Airflow DAGs) must either live under
+  `tests/` or opt into the same lint rule set to guarantee enforcement.
 
 ### 2. Exception Implementation
 
@@ -135,7 +140,7 @@ class SecurityCriticalError(Exception):
     - Multi-Level Security (MLS) requires fail-safe behavior
     - Compliance requires unmissable audit trail
 
-    See: docs/architecture/decisions/005-security-critical-exception-policy.md
+    See: docs/architecture/decisions/006-security-critical-exception-policy.md
     """
 
     def __init__(
@@ -183,6 +188,10 @@ class SecurityCriticalError(Exception):
         import traceback
         from datetime import datetime, timezone
 
+        tb = traceback.format_exc()
+        if tb.strip() == "NoneType: None":
+            tb = "".join(traceback.format_stack())
+
         event = {
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "severity": "CRITICAL",
@@ -193,7 +202,7 @@ class SecurityCriticalError(Exception):
             "message": message,
             "evidence": evidence,
             "process_id": os.getpid(),
-            "traceback": traceback.format_exc(),
+            "traceback": tb,
         }
 
         # 1. stderr - always visible (for operators/container logs)

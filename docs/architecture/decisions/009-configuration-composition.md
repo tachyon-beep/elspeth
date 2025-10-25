@@ -80,8 +80,18 @@ model: "gpt-3.5-turbo"
 temperature: 0.7
 max_tokens: 1000
 
+# Security policy must be explicit
+plugins:
+  datasource:
+    allow_downgrade: false  # Frozen by default at suite scope
+
 # Layer 2: Prompt pack
 temperature: 0.9  # Overrides suite default
+
+# Prompt pack explicitly opts-in to trusted downgrade where required
+plugins:
+  datasource:
+    allow_downgrade: true
 
 # Layer 3: Experiment override
 max_tokens: 2000  # Overrides suite default
@@ -90,6 +100,9 @@ max_tokens: 2000  # Overrides suite default
 model: "gpt-3.5-turbo"      # From suite defaults
 temperature: 0.9            # From prompt pack (overrides suite)
 max_tokens: 2000            # From experiment (overrides suite)
+plugins:
+  datasource:
+    allow_downgrade: true   # Highest-priority layer wins
 ```
 
 **Rationale**: Higher layers are more specific, should have final say.
@@ -164,6 +177,12 @@ sinks:
 sinks:
   - type: excel_file     # Only layer 2, layer 1 discarded
 ```
+
+**Deduplication Guidance**: Because union is the default, lists should include
+stable identifiers (e.g., `name:` fields) so downstream validation can detect
+duplicates. If a sink may only appear once, authors should either use
+`__replace__` or rely on validation rules that error when duplicate identifiers
+are encountered.
 
 **Rationale**: Concatenation is safer default (additive), replace is opt-in.
 

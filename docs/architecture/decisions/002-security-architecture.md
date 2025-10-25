@@ -46,7 +46,8 @@ no write down") with two layers of enforcement:
 5. **Fail-fast abort** – The run aborts early if any component has insufficient clearance
    for the required operating level, preventing low-clearance components from handling
    classified data. **Note**: In normal automatic computation, the operating level equals the
-   LOWEST component clearance, so insufficient-clearance errors only occur with manual overrides.
+   LOWEST component clearance, so insufficient-clearance errors only occur with manual overrides
+   or when a component has explicitly set `allow_downgrade=False` (frozen plugin).
 
 ### Bell-LaPadula Directionality: Data vs Plugin Operations
 
@@ -168,13 +169,13 @@ class FrozenSecretDataSource(BasePlugin, DataSource):
         ...
 ```
 
-**How It Works**:
+-**How It Works**:
 
-- `allow_downgrade=True` (default): Plugin with SECRET clearance can operate at OFFICIAL or UNOFFICIAL levels (trusted to filter)
+- `allow_downgrade=True` (explicit): Plugin with SECRET clearance can operate at OFFICIAL or UNOFFICIAL levels (trusted to filter)
 - `allow_downgrade=False` (frozen): Plugin with SECRET clearance can ONLY operate at SECRET level (exact match required)
 - Sealed `validate_can_operate_at_level()` method checks both insufficient clearance AND frozen downgrade
 - No override attack surface (configuration parameter, not method override)
-- Backwards compatible (defaults to trusted downgrade)
+- Explicit security choice required (`allow_downgrade` has no default)
 
 **Trade-offs**:
 

@@ -90,6 +90,11 @@ class BasePluginRegistry(Generic[T], ABC):
         plugin_class = self.get(name)
         return plugin_class(**config)
 
+    # NOTE: jsonschema remains the canonical validation engine for registry
+    # schemas. Pydantic is deliberately not used here to avoid a split-brain
+    # validation model—plugin authors rely on a single technology path when
+    # publishing schemas.
+
     @abstractmethod
     def _validate_schema(self, schema: dict) -> None:
         """Subclass-specific schema validation rules."""
@@ -142,7 +147,9 @@ Plugins register via decorator pattern (preferred) or direct registration:
 )
 class CsvLocalDataSource(BasePlugin, DataSource):
     """Local CSV file datasource."""
-    pass
+    def __init__(self, *, path: str, allow_downgrade: bool):
+        super().__init__(security_level=SecurityLevel.UNOFFICIAL, allow_downgrade=allow_downgrade)
+        self._path = path
 ```
 
 **Direct Registration** (programmatic):
@@ -154,6 +161,9 @@ datasource_registry.register(
     schema=CSV_BLOB_SCHEMA,
     security_level=SecurityLevel.OFFICIAL
 )
+# When instantiated via registry.instantiate(...), the configuration dict must
+# include `allow_downgrade: true|false` so the BasePlugin constructor receives an
+# explicit downgrade policy (ADR-005).
 ```
 
 #### 4. Type Safety Guarantees

@@ -90,6 +90,22 @@ High-velocity pipelines (1000+ rows/second, 100+ experiments) cannot accumulate 
 
 We will adopt a **Pass-Through Artifact Lifecycle Model** with **three-tier plugin architecture** and **logical routing primitives** to enable composability, user extensibility, and high-velocity data processing.
 
+### Security Alignment (ADR-002 / ADR-005)
+
+- Every tier uses `BasePlugin` and therefore **must be constructed with an explicit
+  `allow_downgrade` policy**. Trusted downgrade is opt-in (`True`), frozen
+  behavior (`False`) is available for dedicated classification domains.
+- Artifact transforms, routing nodes, and file writers **preserve the artifact's
+  `SecurityLevel`** and invoke MLS clearance checks (`validate_access_by` or the
+  artifact equivalent) at each hop. Routing logic never downgrades security
+  metadata implicitly.
+- Frozen plugins in the chain will refuse to pass artifacts to lower-clearance
+  components. Routing primitives must detect this and short-circuit or emit
+  explicit errors to maintain Bell-LaPadula compliance.
+- Persisted artifacts include classification, determinism, and provenance in
+  their metadata so downstream destinations can re-validate before storage and
+  audits can reconstruct the chain of custody.
+
 ### Architecture Overview
 
 ```
@@ -783,6 +799,9 @@ class LocalFileWriteSink(BaseFileWriteSink):
             with open(artifact.id, "wb") as f:
                 f.write(artifact.data)
 ```
+Each tier-3 writer must also surface persisted artifacts via
+`collect_artifacts()` (custom or inherited) so the pipeline can produce
+auditable output manifests and optional downstream routing decisions.
 
 **Configuration Migration**:
 ```yaml

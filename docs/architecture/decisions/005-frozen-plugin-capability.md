@@ -71,7 +71,7 @@ class BasePlugin(ABC):
 
     Attributes:
         _security_level (SecurityLevel): Plugin's security clearance.
-        _allow_downgrade (bool): Whether plugin can operate at lower levels (default: True).
+        _allow_downgrade (bool): Whether plugin can operate at lower levels (explicit choice).
     """
 
     def __init__(
@@ -249,7 +249,7 @@ class DedicatedSecretDataSource(BasePlugin, DataSource):
 - Update docstrings with frozen plugin examples
 
 **Test Coverage** (`tests/test_baseplugin_frozen.py` - NEW):
-- Test default `allow_downgrade=True` (trusted downgrade scenarios)
+- Test trusted downgrade (`allow_downgrade=True`) scenarios
 - Test frozen `allow_downgrade=False` (exact match only scenarios)
 - Test insufficient clearance rejection (always enforced)
 - Test frozen rejection error messages
@@ -270,10 +270,10 @@ class DedicatedSecretDataSource(BasePlugin, DataSource):
   - Document `allow_downgrade=False` pattern
   - Add certification notes for frozen plugins
 
-**Migration Impact**: **ZERO** ✅
-- Backwards compatible (default behavior unchanged)
-- No existing plugin changes required
-- New capability opt-in via explicit parameter
+**Migration Impact**: **COMPLETED (Pre-1.0)** ✅
+- All existing plugins updated to pass explicit `allow_downgrade` values
+- Trusted downgrade remains opt-in (`allow_downgrade=True`)
+- Frozen behavior available via `allow_downgrade=False`
 
 **Certification Impact**:
 - **Default Plugins**: Certification unchanged (trusted downgrade verified as before)
@@ -311,13 +311,8 @@ class MockPlugin(BasePlugin):
         )
 
 
-class TestDefaultTrustedDowngrade:
-    """Test default allow_downgrade=True behavior (ADR-002 semantics)."""
-
-    def test_default_parameter_is_true(self):
-        """Default allow_downgrade parameter is True (backwards compatible)."""
-        plugin = MockPlugin(security_level=SecurityLevel.SECRET)
-        assert plugin.allow_downgrade is True
+class TestTrustedDowngrade:
+    """Test allow_downgrade=True behavior (ADR-002 trusted downgrade semantics)."""
 
     def test_trusted_downgrade_to_lower_level(self):
         """SECRET plugin can operate at OFFICIAL level (trusted downgrade)."""
@@ -554,7 +549,7 @@ def test_frozen_sink_accepts_higher_level_datasource():
 
 ## Related Documents
 
-- [ADR-002](002-security-architecture.md) – Multi-Level Security Enforcement (trusted downgrade default)
+- [ADR-002](002-security-architecture.md) – Multi-Level Security Enforcement (trusted downgrade model, explicit opt-in)
 - [ADR-004](004-mandatory-baseplugin-inheritance.md) – Mandatory BasePlugin Inheritance (sealed methods)
 - `docs/development/plugin-authoring.md` – Plugin development guide
 - `tests/test_baseplugin_frozen.py` – Frozen plugin test suite (NEW)

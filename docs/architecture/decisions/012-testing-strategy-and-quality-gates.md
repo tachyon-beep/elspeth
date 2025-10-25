@@ -69,6 +69,11 @@ We will establish formal **testing strategy** with **component-specific coverage
 
 **Rationale**: Security cannot be compromised. High coverage + mutation testing ensures security controls work.
 
+**Enforcement**: The `ci-quality-gate` GitHub Actions workflow runs `pytest --cov`
+and `mutmut` for the security-critical packages. The job fails if coverage drops
+below 90% or if more than 10% of mutations survive, and posts a status comment on
+pull requests for reviewer visibility.
+
 ---
 
 #### 2. Core Orchestration (>80% coverage)
@@ -142,6 +147,9 @@ We will establish formal **testing strategy** with **component-specific coverage
 | **Core Orchestration** | **>80%** | ⚠️ Recommended | ✅ Required |
 | **Plugin Implementations** | **>70%** | ❌ Not required | ⚠️ Recommended |
 | **Configuration** | **>85%** | ⚠️ Recommended | ✅ Required |
+
+Coverage is enforced automatically in CI via the `ci-quality-gate` workflow and
+SonarQube. A merge is blocked if any component type falls below its target.
 
 ---
 

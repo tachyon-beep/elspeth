@@ -280,6 +280,23 @@ class DataSource:
 
 We will implement a **Universal Dual-Output Protocol** where ALL plugins produce two output types with multi-level inheritance control.
 
+### Security Alignment (ADR-002 / ADR-005)
+
+- **Explicit downgrade policy**: Every dual-output participant calls
+  `BasePlugin.__init__(..., allow_downgrade=...)`. There is no default—plugins must
+  opt-in to trusted downgrade or remain frozen.
+- **MLS propagation**: Artifact transforms, routing nodes, and file writers
+  propagate `SecurityLevel` and invoke `validate_access_by()` (or equivalent
+  artifact clearance checks) on every hop. Artifacts never bypass the MLS guard
+  rail when routed.
+- **Frozen plugins**: Components with `allow_downgrade=False` will refuse to
+  process artifacts whose effective operating level is lower than their
+  clearance. Routing primitives must short-circuit the flow when a frozen node
+  is asked to downgrade.
+- **Auditability**: Artifact metadata includes classification, determinism, and
+  provenance, so downstream sinks can re-validate before persisting and audits
+  retain a complete chain of custody.
+
 ### Core Components
 
 #### 1. DualOutputMixin Base Class
@@ -643,8 +660,8 @@ class AzureOpenAIClient(DualOutputMixin, LLMClientProtocol):
 ```python
 # BEFORE (excel.py) - 55 lines
 class ExcelResultSink(BasePlugin, ResultSink):
-    def __init__(self, ...):
-        super().__init__(security_level=security_level)
+    def __init__(self, *, security_level: SecurityLevel, allow_downgrade: bool):
+        super().__init__(security_level=security_level, allow_downgrade=allow_downgrade)
         self._last_workbook_path: str | None = None  # Manual tracking
         self._artifact_security_level: SecurityLevel | None = None
 
@@ -682,6 +699,9 @@ class ExcelResultSink(BasePlugin, ResultSink):
 class ExcelResultSink(BasePlugin, DualOutputMixin, ResultSink):
     _produces_dataframe = False  # ❌ Sinks don't output DataFrames
     _produces_artifacts = True   # ✅ Sinks always output artifacts
+
+    def __init__(self, *, security_level: SecurityLevel, allow_downgrade: bool):
+        super().__init__(security_level=security_level, allow_downgrade=allow_downgrade)
 
     def write(self, results, *, metadata=None):
         # ... write logic ...

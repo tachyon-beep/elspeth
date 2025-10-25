@@ -112,6 +112,18 @@ if data.classification > sink.security_level:
 
 **Handling**: Retry with exponential backoff
 
+**Configuration**:
+
+```yaml
+llm:
+  type: azure_openai
+  on_error: retry
+  retry:
+    max_attempts: 4         # explicit budget
+    backoff: exponential    # 1s, 2s, 4s, 8s
+    jitter: 0.2             # ±20% jitter to avoid thundering herd
+```
+
 **Example**:
 ```python
 # Transient error: Network timeout
@@ -159,6 +171,11 @@ except SchemaValidationError as exc:
 - **Transform**: Skip item, pass NULL result downstream
 - **Sink**: Skip item, do not write this item
 
+Transform implementations that return `None` must still emit an explicit
+`SkipResult` structure so downstream sinks can distinguish between "no output"
+and "error". The standardized wrapper will convert `None` into the skip signal
+and log the failure once, avoiding duplicated error handling in sinks.
+
 ---
 
 #### 4. Fatal Errors (Abort-able)
@@ -197,6 +214,17 @@ except OSError as exc:
 ---
 
 ### Error Classification Matrix
+
+| `on_error` Policy | Error Category          | Default Action                 |
+|-------------------|------------------------|--------------------------------|
+| `abort`           | Security / Fatal       | Abort pipeline immediately     |
+| `retry`           | Transient              | Retry using configured budget  |
+| `skip`            | Permanent              | Skip item, log once, continue  |
+| `log`             | Permanent (non-block)  | Log and continue (transform-only)|
+
+Policies are resolved per component. If configuration omits `on_error`, the
+system selects a safe default (`retry` for datasources/LLMs, `abort` for sinks,
+`abort` for security errors). Overrides must be explicit in YAML/JSON config.
 
 | Error Type | Example | Retry? | Skip? | Abort? | Checkpoint? |
 |------------|---------|--------|-------|--------|-------------|
