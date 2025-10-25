@@ -47,7 +47,6 @@ except ImportError:
     compute_minimum_clearance_envelope is None,
     reason="Phase 1 not implemented yet"
 )
-@settings(max_examples=1000)  # Run 1000+ adversarial examples
 class TestPropertyMinimumEnvelope:
     """PROPERTY: Minimum clearance envelope computation is correct under
                ALL possible plugin configurations.
@@ -55,6 +54,7 @@ class TestPropertyMinimumEnvelope:
     THREAT: Edge case configuration causes incorrect envelope calculation.
     """
 
+    @settings(max_examples=1000)  # Run 1000+ adversarial examples
     @given(
         plugin_levels=st.lists(
             st.sampled_from([
@@ -73,7 +73,7 @@ class TestPropertyMinimumEnvelope:
         When: Computing minimum clearance envelope
         Then: Operating level = exact minimum of all plugin levels
         """
-        from tests.test_adr002_invariants import MockPlugin
+        from tests.adr002_test_helpers import MockPlugin
 
         plugins = [MockPlugin(level) for level in plugin_levels]
         operating_level = compute_minimum_clearance_envelope(plugins)
@@ -83,6 +83,7 @@ class TestPropertyMinimumEnvelope:
         assert operating_level == expected_minimum, \
             f"Envelope {operating_level.name} != min {expected_minimum.name}"
 
+    @settings(max_examples=1000)
     @given(
         plugin_levels=st.lists(
             st.sampled_from([
@@ -103,7 +104,7 @@ class TestPropertyMinimumEnvelope:
         When: Computing minimum clearance envelope
         Then: Operating level ≤ every individual plugin level
         """
-        from tests.test_adr002_invariants import MockPlugin
+        from tests.adr002_test_helpers import MockPlugin
 
         plugins = [MockPlugin(level) for level in plugin_levels]
         operating_level = compute_minimum_clearance_envelope(plugins)
@@ -122,7 +123,6 @@ class TestPropertyMinimumEnvelope:
     ExperimentSuiteRunner is None,
     reason="Phase 2 not implemented yet"
 )
-@settings(max_examples=1000)
 class TestPropertyNoClassificationBreach:
     """PROPERTY: No configuration allows data to reach component with
                insufficient clearance.
@@ -133,6 +133,7 @@ class TestPropertyNoClassificationBreach:
           security guarantee of ADR-002.
     """
 
+    @settings(max_examples=1000)
     @given(
         datasource_level=st.sampled_from([
             SecurityLevel.UNOFFICIAL,
@@ -158,6 +159,7 @@ class TestPropertyNoClassificationBreach:
         # This test skeleton documents the required property
         pytest.skip("Phase 2 not implemented yet - test skeleton only")
 
+    @settings(max_examples=1000)
     @given(
         plugin_levels=st.lists(
             st.sampled_from([
@@ -180,7 +182,7 @@ class TestPropertyNoClassificationBreach:
         When: Computing envelope and validating plugins
         Then: Validation results match expected based on envelope
         """
-        from tests.test_adr002_invariants import MockPlugin
+        from tests.adr002_test_helpers import MockPlugin
         from elspeth.core.validation.base import SecurityValidationError
 
         plugins = [MockPlugin(level) for level in plugin_levels]
@@ -207,13 +209,13 @@ class TestPropertyNoClassificationBreach:
     ClassifiedDataFrame is None,
     reason="Phase 1 not implemented yet"
 )
-@settings(max_examples=1000)
 class TestPropertyClassificationUplifting:
     """PROPERTY: Classification uplifting is monotonic (never decreases).
 
     THREAT: Sequence of transforms could downgrade classification.
     """
 
+    @settings(max_examples=1000)
     @given(
         initial_level=st.sampled_from([
             SecurityLevel.UNOFFICIAL,
@@ -239,7 +241,7 @@ class TestPropertyClassificationUplifting:
         """
         import pandas as pd
 
-        current_df = ClassifiedDataFrame(
+        current_df = ClassifiedDataFrame.create_from_datasource(
             data=pd.DataFrame({"col": [1]}),
             classification=initial_level
         )
@@ -255,6 +257,7 @@ class TestPropertyClassificationUplifting:
 
             previous_level = current_level
 
+    @settings(max_examples=1000)
     @given(
         initial_level=st.sampled_from([
             SecurityLevel.UNOFFICIAL,
@@ -280,7 +283,7 @@ class TestPropertyClassificationUplifting:
         """
         import pandas as pd
 
-        current_df = ClassifiedDataFrame(
+        current_df = ClassifiedDataFrame.create_from_datasource(
             data=pd.DataFrame({"col": [1]}),
             classification=initial_level
         )
@@ -305,13 +308,13 @@ class TestPropertyClassificationUplifting:
     ClassifiedDataFrame is None,
     reason="Phase 1 not implemented yet"
 )
-@settings(max_examples=500)
 class TestPropertyImmutability:
     """PROPERTY: ClassifiedDataFrame immutability prevents accidental downgrades.
 
     THREAT: Mutable classification allows accidental security violations.
     """
 
+    @settings(max_examples=500)
     @given(
         initial_level=st.sampled_from([
             SecurityLevel.UNOFFICIAL,
@@ -333,7 +336,7 @@ class TestPropertyImmutability:
         """
         import pandas as pd
 
-        original = ClassifiedDataFrame(
+        original = ClassifiedDataFrame.create_from_datasource(
             data=pd.DataFrame({"col": [1]}),
             classification=initial_level
         )
@@ -346,6 +349,7 @@ class TestPropertyImmutability:
         # New instance returned
         assert uplifted is not original
 
+    @settings(max_examples=500)
     @given(
         level=st.sampled_from([
             SecurityLevel.UNOFFICIAL,
@@ -362,7 +366,7 @@ class TestPropertyImmutability:
         """
         import pandas as pd
 
-        df = ClassifiedDataFrame(
+        df = ClassifiedDataFrame.create_from_datasource(
             data=pd.DataFrame({"col": [1]}),
             classification=level
         )
@@ -380,7 +384,6 @@ class TestPropertyImmutability:
     compute_minimum_clearance_envelope is None,
     reason="Phase 1 not implemented yet"
 )
-@settings(max_examples=500)
 class TestPropertyAdversarialEdgeCases:
     """PROPERTY: Security properties hold even for adversarial/unusual configurations.
 
@@ -398,6 +401,7 @@ class TestPropertyAdversarialEdgeCases:
 
         assert operating_level == SecurityLevel.UNOFFICIAL
 
+    @settings(max_examples=500)
     @given(
         level=st.sampled_from([
             SecurityLevel.UNOFFICIAL,
@@ -413,7 +417,7 @@ class TestPropertyAdversarialEdgeCases:
         When: Computing minimum clearance envelope
         Then: Operating level = common level
         """
-        from tests.test_adr002_invariants import MockPlugin
+        from tests.adr002_test_helpers import MockPlugin
 
         plugins = [MockPlugin(level) for _ in range(count)]
         operating_level = compute_minimum_clearance_envelope(plugins)

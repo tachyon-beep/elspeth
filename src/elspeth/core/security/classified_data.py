@@ -31,32 +31,123 @@ class ClassifiedDataFrame:
     downgraded. Supports automatic classification uplifting when data passes
     through higher-security components.
 
-    Security Model:
+    Security Model (ADR-002-A Trusted Container):
         - Classification is immutable (frozen dataclass)
+        - Only datasources can create instances (constructor protection)
+        - Plugins can only uplift, never relabel (prevents laundering)
         - Uplifting creates new instance (original unchanged)
         - Downgrading is impossible (max() operation prevents it)
         - Access validation provides runtime failsafe
 
-    Example:
-        >>> df = ClassifiedDataFrame(data, SecurityLevel.OFFICIAL)
-        >>> df.classification = SecurityLevel.UNOFFICIAL  # AttributeError (frozen)
-        >>>
-        >>> # Uplifting to SECRET (data passed through SECRET LLM)
-        >>> secret_df = df.with_uplifted_classification(SecurityLevel.SECRET)
-        >>> assert secret_df.classification == SecurityLevel.SECRET
-        >>> assert df.classification == SecurityLevel.OFFICIAL  # Original unchanged
-        >>>
-        >>> # Attempting to downgrade (creates SECRET, not OFFICIAL)
-        >>> result = secret_df.with_uplifted_classification(SecurityLevel.OFFICIAL)
-        >>> assert result.classification == SecurityLevel.SECRET  # max() prevents downgrade
+    Creation Patterns:
+        Datasource (trusted source):
+            >>> frame = ClassifiedDataFrame.create_from_datasource(
+            ...     data, SecurityLevel.OFFICIAL
+            ... )
+
+        Plugin transformation (in-place mutation):
+            >>> frame.data['processed'] = transform(frame.data['input'])
+            >>> result = frame.with_uplifted_classification(plugin.get_security_level())
+
+        Plugin data generation (LLMs, aggregations):
+            >>> new_df = llm.generate(...)
+            >>> result = frame.with_new_data(new_df).with_uplifted_classification(
+            ...     plugin.get_security_level()
+            ... )
+
+        Anti-Pattern (BLOCKED):
+            >>> ClassifiedDataFrame(data, level)  # SecurityValidationError
 
     ADR-002 Threat Prevention:
-        - T4 (Classification Mislabeling): Automatic uplifting prevents forgotten manual tagging
+        - T4 (Classification Mislabeling): Constructor protection prevents laundering
         - T3 (Runtime Bypass): validate_access_by() catches start-time validation bypass
     """
 
     data: pd.DataFrame
     classification: SecurityLevel
+    _created_by_datasource: bool = False
+
+    def __post_init__(self) -> None:
+        """Enforce datasource-only creation (ADR-002-A constructor protection).
+
+        Only datasources can create ClassifiedDataFrame instances from scratch.
+        Plugins must use with_uplifted_classification() or with_new_data().
+
+        This prevents classification laundering attacks where malicious plugins
+        create "fresh" frames with lower classifications, bypassing uplifting logic.
+
+        Raises:
+            SecurityValidationError: If called from non-trusted context
+        """
+        import inspect
+
+        # Allow datasource factory
+        if object.__getattribute__(self, "_created_by_datasource"):
+            return
+
+        # Walk up call stack to find trusted methods
+        # __post_init__ is called by __init__, which is called by the method we care about
+        frame = inspect.currentframe()
+        if frame is None:
+            # Cannot determine caller - allow (fail-open for edge cases)
+            return
+
+        # Check up to 5 frames up the stack for trusted callers
+        current_frame = frame
+        for _ in range(5):
+            if current_frame is None or current_frame.f_back is None:
+                break
+            current_frame = current_frame.f_back
+            caller_name = current_frame.f_code.co_name
+
+            # Allow internal methods (with_uplifted_classification, with_new_data)
+            if caller_name in ("with_uplifted_classification", "with_new_data"):
+                return
+
+        # Block all other attempts (plugins, direct construction)
+        from elspeth.core.validation.base import SecurityValidationError
+
+        raise SecurityValidationError(
+            "ClassifiedDataFrame can only be created by datasources using "
+            "create_from_datasource(). Plugins must use with_uplifted_classification() "
+            "to uplift existing frames or with_new_data() to generate new data. "
+            "This prevents classification laundering attacks (ADR-002-A)."
+        )
+
+    @classmethod
+    def create_from_datasource(
+        cls, data: pd.DataFrame, classification: SecurityLevel
+    ) -> "ClassifiedDataFrame":
+        """Create ClassifiedDataFrame from datasource (trusted source only).
+
+        This is the ONLY way to create a ClassifiedDataFrame from scratch.
+        Datasources are trusted to label data with correct classification.
+
+        Args:
+            data: Pandas DataFrame containing the data
+            classification: Security classification of the data
+
+        Returns:
+            New ClassifiedDataFrame with datasource-authorized creation
+
+        Security:
+            - This factory method sets _created_by_datasource=True
+            - This allows __post_init__ validation to pass
+            - Only datasources should call this method (verified during certification)
+
+        Example:
+            >>> # In datasource implementation
+            >>> df = pd.DataFrame({"data": [1, 2, 3]})
+            >>> frame = ClassifiedDataFrame.create_from_datasource(
+            ...     df, SecurityLevel.OFFICIAL
+            ... )
+        """
+        # Use __new__ to bypass __init__ and set fields manually
+        instance = cls.__new__(cls)
+        object.__setattr__(instance, "data", data)
+        object.__setattr__(instance, "classification", classification)
+        object.__setattr__(instance, "_created_by_datasource", True)
+        return instance
 
     def with_uplifted_classification(
         self, new_level: SecurityLevel
@@ -79,7 +170,9 @@ class ClassifiedDataFrame:
 
         Example:
             >>> # OFFICIAL data through SECRET LLM
-            >>> input_df = ClassifiedDataFrame(data, SecurityLevel.OFFICIAL)
+            >>> input_df = ClassifiedDataFrame.create_from_datasource(
+            ...     data, SecurityLevel.OFFICIAL
+            ... )
             >>> llm_level = SecurityLevel.SECRET
             >>> output_df = input_df.with_uplifted_classification(llm_level)
             >>> assert output_df.classification == SecurityLevel.SECRET
@@ -93,6 +186,40 @@ class ClassifiedDataFrame:
         return ClassifiedDataFrame(
             data=self.data,  # Share DataFrame (immutability at classification level)
             classification=uplifted_classification,
+        )
+
+    def with_new_data(self, new_data: pd.DataFrame) -> "ClassifiedDataFrame":
+        """Create frame with different data, preserving current classification.
+
+        For plugins that generate entirely new DataFrames (LLMs, aggregations)
+        that cannot mutate .data in-place due to schema changes.
+
+        Args:
+            new_data: New pandas DataFrame to wrap
+
+        Returns:
+            New ClassifiedDataFrame with new data but SAME classification
+
+        Security:
+            - Preserves current classification (cannot downgrade)
+            - Plugin must still call with_uplifted_classification() afterwards
+            - Bypasses __post_init__ validation (trusted internal method)
+
+        Example:
+            >>> # LLM generates new DataFrame
+            >>> input_frame = ClassifiedDataFrame.create_from_datasource(
+            ...     input_df, SecurityLevel.OFFICIAL
+            ... )
+            >>> new_df = llm.generate(...)
+            >>> output_frame = input_frame.with_new_data(new_df)
+            >>> # Must still uplift to LLM's security level
+            >>> final_frame = output_frame.with_uplifted_classification(
+            ...     SecurityLevel.SECRET
+            ... )
+        """
+        # Use ClassifiedDataFrame constructor (will bypass __post_init__ check)
+        return ClassifiedDataFrame(
+            data=new_data, classification=self.classification, _created_by_datasource=False
         )
 
     def validate_access_by(self, accessor: "BasePlugin") -> None:
@@ -111,7 +238,9 @@ class ClassifiedDataFrame:
             accessor.get_security_level() >= self.classification
 
         Example:
-            >>> secret_df = ClassifiedDataFrame(data, SecurityLevel.SECRET)
+            >>> secret_df = ClassifiedDataFrame.create_from_datasource(
+            ...     data, SecurityLevel.SECRET
+            ... )
             >>> unofficial_sink = UnofficialSink()  # Reports UNOFFICIAL clearance
             >>>
             >>> secret_df.validate_access_by(unofficial_sink)

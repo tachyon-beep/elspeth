@@ -251,7 +251,7 @@ class TestInvariantClassificationUplifting:
         """
         import pandas as pd
 
-        df = ClassifiedDataFrame(
+        df = ClassifiedDataFrame.create_from_datasource(
             data=pd.DataFrame({"col": [1, 2, 3]}),
             classification=SecurityLevel.OFFICIAL
         )
@@ -271,7 +271,7 @@ class TestInvariantClassificationUplifting:
         """
         import pandas as pd
 
-        df = ClassifiedDataFrame(
+        df = ClassifiedDataFrame.create_from_datasource(
             data=pd.DataFrame({"col": [1, 2, 3]}),
             classification=SecurityLevel.SECRET
         )
@@ -291,7 +291,7 @@ class TestInvariantClassificationUplifting:
         """
         import pandas as pd
 
-        df = ClassifiedDataFrame(
+        df = ClassifiedDataFrame.create_from_datasource(
             data=pd.DataFrame({"col": [1, 2, 3]}),
             classification=SecurityLevel.OFFICIAL
         )
@@ -326,19 +326,18 @@ class TestInvariantOutputClassification:
         """
         import pandas as pd
 
-        input_df = ClassifiedDataFrame(
+        input_df = ClassifiedDataFrame.create_from_datasource(
             data=pd.DataFrame({"text": ["test"]}),
             classification=SecurityLevel.OFFICIAL
         )
 
-        # Simulate transform by SECRET component
+        # Simulate transform by SECRET component using proper pattern
         component_level = SecurityLevel.SECRET
-        output_classification = max(input_df.classification, component_level)
 
-        output_df = ClassifiedDataFrame(
-            data=pd.DataFrame({"transformed": ["result"]}),
-            classification=output_classification
-        )
+        # Proper ADR-002-A pattern: with_new_data() then with_uplifted_classification()
+        output_df = input_df.with_new_data(
+            pd.DataFrame({"transformed": ["result"]})
+        ).with_uplifted_classification(component_level)
 
         assert output_df.classification >= input_df.classification
         assert output_df.classification == SecurityLevel.SECRET
@@ -352,19 +351,18 @@ class TestInvariantOutputClassification:
         """
         import pandas as pd
 
-        input_df = ClassifiedDataFrame(
+        input_df = ClassifiedDataFrame.create_from_datasource(
             data=pd.DataFrame({"text": ["test"]}),
             classification=SecurityLevel.OFFICIAL
         )
 
-        # Simulate transform by OFFICIAL component
+        # Simulate transform by OFFICIAL component using proper pattern
         component_level = SecurityLevel.OFFICIAL
-        output_classification = max(input_df.classification, component_level)
 
-        output_df = ClassifiedDataFrame(
-            data=pd.DataFrame({"transformed": ["result"]}),
-            classification=output_classification
-        )
+        # Proper ADR-002-A pattern: with_new_data() then with_uplifted_classification()
+        output_df = input_df.with_new_data(
+            pd.DataFrame({"transformed": ["result"]})
+        ).with_uplifted_classification(component_level)
 
         assert output_df.classification == input_df.classification
 

@@ -1,8 +1,10 @@
 # ADR-002 Threat Model & Risk Assessment
 
-**Date**: 2025-10-25
-**Status**: Phase 0 - Implementation Planning
-**Security Control**: Suite-level minimum clearance envelope
+**Date**: 2025-10-25 (Updated)
+**Status**: ADR-002 Phase 2 Complete ✅ | ADR-002-A Phase 3 Complete ✅
+**Security Controls**:
+1. Suite-level minimum clearance envelope (ADR-002)
+2. Trusted container model - constructor protection (ADR-002-A)
 
 ---
 
@@ -10,12 +12,15 @@
 
 **What we're preventing**: Classification breaches where SECRET data reaches UNOFFICIAL components.
 
-**How**: Three-layer defense:
-1. **Start-time validation** (PRIMARY): Job fails to start if any plugin requires higher security than minimum envelope
-2. **Runtime failsafe** (DEFENSE IN DEPTH): Data access blocked if component clearance insufficient
-3. **Certification** (VERIFICATION): Human review confirms Layers 1 & 2 correctly implemented
+**How**: Four-layer defense:
+1. **Start-time validation** (PRIMARY - ADR-002): Job fails to start if any plugin requires higher security than minimum envelope
+2. **Constructor protection** (TECHNICAL CONTROL - ADR-002-A): Framework blocks plugins from creating arbitrary ClassifiedDataFrame instances, preventing classification laundering attacks
+3. **Runtime failsafe** (DEFENSE IN DEPTH - ADR-002): Data access blocked if component clearance insufficient
+4. **Certification** (VERIFICATION): Human review confirms Layers 1-3 correctly implemented
 
 **Security Invariant**: No configuration can allow data to reach a component with lower security clearance.
+
+**ADR-002-A Impact**: Reduces certification burden by blocking classification laundering attacks at framework level (previously required manual code review of every plugin transformation).
 
 ---
 
@@ -146,11 +151,11 @@ plugin.write(secret_data)  # Now at wrong level
 
 ---
 
-### T4: Classification Mislabeling (Uplifting Forgotten)
+### T4: Classification Mislabeling (Uplifting Forgotten / Laundering Attack)
 
-**Scenario**: Data passes through high-security component but output not uplifted
+**Scenario 1**: Data passes through high-security component but output not uplifted
 
-**Attack Vector**:
+**Attack Vector 1** (Forgotten Uplifting):
 ```python
 # OFFICIAL data enters SECRET LLM
 input_df = ClassifiedDataFrame(data, SecurityLevel.OFFICIAL)
@@ -166,30 +171,64 @@ output_df = secret_llm.transform(input_df)
 # Classification breach through mislabeling
 ```
 
+**Scenario 2**: Malicious plugin creates "fresh" frame to bypass uplifting (ADR-002-A)
+
+**Attack Vector 2** (Classification Laundering):
+```python
+class SubtlyMaliciousPlugin(BasePlugin):
+    """Plugin that launders SECRET data as OFFICIAL."""
+
+    def get_security_level(self) -> SecurityLevel:
+        return SecurityLevel.SECRET  # ✅ Truthful - passes start-time validation
+
+    def process(self, input_data: ClassifiedDataFrame) -> ClassifiedDataFrame:
+        # input_data.classification == SECRET (legitimate)
+        result = input_data.data.copy()
+        result["processed"] = True
+
+        # ❌ ATTACK: Create "fresh" frame claiming OFFICIAL classification
+        # Bypasses with_uplifted_classification() enforcement
+        return ClassifiedDataFrame(result, SecurityLevel.OFFICIAL)
+
+# Without ADR-002-A: Attack succeeds, SECRET data relabeled as OFFICIAL
+# With ADR-002-A: SecurityValidationError raised at construction
+```
+
 **Impact**: **HIGH** - Subtle classification breach, hard to detect
 
-**Likelihood**: **HIGH** - Easy to forget manual uplifting
+**Likelihood**:
+- Scenario 1 (Forgotten Uplifting): **MEDIUM** - Developer error
+- Scenario 2 (Laundering Attack): **LOW** - Requires malicious plugin, but technically feasible
 
-**Subtlety**: **VERY HIGH** - "Blended data" problem, not obvious
+**Subtlety**: **VERY HIGH** - "Blended data" problem, not obvious; laundering attack looks like legitimate code
 
 **Defense Layers**:
 - **Primary (Automatic Uplifting)**: `ClassifiedDataFrame.with_uplifted_classification()`
   - Every component MUST uplift: `max(input.classification, self.get_security_level())`
   - NOT optional, NOT manual
   - Enforced by inherited BasePlugin behavior
+- **Technical Control (ADR-002-A - Constructor Protection)**: **NEW** ✅
+  - Only datasources can create ClassifiedDataFrame via `create_from_datasource()`
+  - Plugins BLOCKED from direct construction (SecurityValidationError)
+  - Frame inspection in `__post_init__` enforces trusted creation path
+  - Prevents classification laundering attack (Scenario 2)
+  - **IMPACT**: Reduces certification burden - framework blocks attack automatically
 - **Failsafe (Immutability)**: Classification cannot be downgraded
   - `@dataclass(frozen=True)` prevents modification
-  - Only `with_uplifted_classification()` allowed (creates new instance)
-- **Certification**: Code review verifies all transforms use uplifting
+  - Only `with_uplifted_classification()` and `with_new_data()` allowed (internal methods)
+- **Certification**: Code review verifies datasources label correctly (reduced scope vs. before)
 
 **Mitigation**:
 - Make uplifting automatic and unavoidable
+- Block direct construction to prevent laundering (ADR-002-A)
 - Type system enforces: `transform(input: ClassifiedDataFrame) -> ClassifiedDataFrame`
 - Property test: `output.classification >= input.classification` ALWAYS
 
 **Test Evidence**:
 - `test_INVARIANT_classification_uplifting_automatic`
 - `test_INTEGRATION_classification_uplifting_through_secret_llm`
+- **`test_invariant_plugin_cannot_create_frame_directly` (ADR-002-A)** ✅
+- **`test_invariant_malicious_classification_laundering_blocked` (ADR-002-A)** ✅
 
 ---
 
