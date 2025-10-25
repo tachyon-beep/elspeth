@@ -62,3 +62,19 @@ sbom:
 
 audit:
 	@.venv/bin/pip-audit -r requirements.lock --require-hashes
+
+# ============================================================================
+# Documentation Targets
+# ============================================================================
+
+.PHONY: docs-serve
+docs-serve:  ## Serve formal documentation locally
+	cd site-docs && mkdocs serve
+
+.PHONY: docs-build
+docs-build:  ## Build formal documentation
+	cd site-docs && mkdocs build --strict
+
+.PHONY: docs-deploy
+docs-deploy:  ## Deploy documentation to GitHub Pages
+	cd site-docs && mkdocs gh-deploy --force

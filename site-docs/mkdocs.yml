@@ -1,0 +1,69 @@
+# Elspeth Formal Documentation Site Configuration
+
+site_name: Elspeth Documentation
+site_description: Extensible Layered Secure Pipeline Engine for Transformation and Handling
+site_url: https://elspeth.readthedocs.io
+
+repo_url: https://github.com/yourusername/elspeth
+repo_name: elspeth
+edit_uri: edit/main/site-docs/docs/
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+
+plugins:
+  - search
+
+markdown_extensions:
+  - toc:
+      permalink: true
+  - tables
+  - admonition
+  - pymdownx.details
+  - pymdownx.highlight
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+
+nav:
+  - Home: index.md
+  - Getting Started:
+    - Installation: getting-started/installation.md
+    - Quickstart: getting-started/quickstart.md
+    - First Experiment: getting-started/first-experiment.md
+  - User Guide:
+    - Security Model: user-guide/security-model.md
+    - Configuration: user-guide/configuration.md
+  - Plugins:
+    - Overview: plugins/overview.md
+    - Datasources: plugins/datasources.md
+    - Transforms: plugins/transforms.md
+    - Sinks: plugins/sinks.md
+  - Architecture:
+    - Overview: architecture/overview.md
+  - API Reference:
+    - Core: api-reference/core.md
+    - Security: api-reference/security.md
+
+copyright: Copyright &copy; 2025 Elspeth Contributors
