@@ -9,7 +9,8 @@ from typing import Any, Callable, cast
 import pandas as pd
 
 from elspeth.core.base.plugin_context import PluginContext, apply_plugin_context
-from elspeth.core.base.protocols import LLMClientProtocol, ResultSink
+from elspeth.core.base.protocols import BasePlugin, LLMClientProtocol, ResultSink
+from elspeth.core.base.types import SecurityLevel
 from elspeth.core.controls import create_cost_tracker, create_rate_limiter
 from elspeth.core.experiments.config import ExperimentConfig, ExperimentSuite
 from elspeth.core.experiments.config_merger import ConfigMerger
@@ -26,6 +27,45 @@ from elspeth.core.registries.middleware import create_middleware
 from elspeth.core.registries.sink import sink_registry
 from elspeth.core.security import resolve_determinism_level, resolve_security_level
 from elspeth.core.validation.base import ConfigurationError
+
+# ============================================================================
+# ADR-002 Security Primitives
+# ============================================================================
+
+
+def compute_minimum_clearance_envelope(plugins: list[BasePlugin]) -> SecurityLevel:
+    """Compute minimum security level across all plugins (weakest-link principle).
+
+    This implements ADR-002's "minimum clearance envelope" - the orchestrator
+    operates at the LOWEST security level that ALL plugins can handle.
+
+    Why MIN not MAX?
+    - If we operated at MAX, low-security plugins would receive high-security data
+    - MIN ensures NO plugin receives data above its clearance
+    - This enforces the weakest-link security model
+
+    Args:
+        plugins: List of all plugins in the suite (datasources, LLMs, sinks, middleware)
+
+    Returns:
+        SecurityLevel: Minimum security level (UNOFFICIAL if empty)
+
+    Example:
+        >>> plugins = [SecretPlugin(), OfficialPlugin(), SecretPlugin()]
+        >>> level = compute_minimum_clearance_envelope(plugins)
+        >>> assert level == SecurityLevel.OFFICIAL  # Weakest link wins
+
+    ADR-002 Threat Prevention:
+        - T1 (Classification Breach): Prevents SECRET data reaching UNOFFICIAL sink
+        - Ensures orchestrator never operates above weakest plugin's capability
+    """
+    if not plugins:
+        # Safe default: lowest security level (no plugins = no security requirements)
+        return SecurityLevel.UNOFFICIAL
+
+    # Weakest-link principle: operate at minimum level across ALL plugins
+    plugin_levels = [plugin.get_security_level() for plugin in plugins]
+    return min(plugin_levels)
 
 
 @dataclass

@@ -2,6 +2,7 @@
 
 from elspeth.core.base.types import DeterminismLevel, SecurityLevel
 
+from .classified_data import ClassifiedDataFrame
 from .approved_endpoints import (
     ServiceType,
     get_approved_patterns,
@@ -221,6 +222,7 @@ __all__ = [
     "public_key_fingerprint",
     "SecurityLevel",
     "DeterminismLevel",
+    "ClassifiedDataFrame",
     "ensure_security_level",
     "ensure_determinism_level",
     "is_security_level_allowed",

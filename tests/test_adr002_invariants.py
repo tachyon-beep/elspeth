@@ -19,21 +19,24 @@ from hypothesis import given, strategies as st
 from pathlib import Path
 from typing import Any
 
-# NOTE: These imports will fail until Phase 1 implementation
+# Import types that already exist
+from elspeth.core.security import SecurityLevel, ClassifiedDataFrame
+
+# NOTE: These imports will fail until Phase 1-2 implementation
 # This is EXPECTED for test-first development
 try:
-    from elspeth.core.security import SecurityLevel, ClassifiedDataFrame
     from elspeth.core.experiments.suite_runner import (
         compute_minimum_clearance_envelope,
         ExperimentSuiteRunner,
     )
-    from elspeth.core.base.protocols import BasePlugin
 except ImportError:
     # Allow test file to be created before implementation exists
-    SecurityLevel = None
-    ClassifiedDataFrame = None
     compute_minimum_clearance_envelope = None
     ExperimentSuiteRunner = None
+
+try:
+    from elspeth.core.base.protocols import BasePlugin
+except ImportError:
     BasePlugin = None
 
 
@@ -93,10 +96,6 @@ class SecretPlugin(MockPlugin):
 # ============================================================================
 
 
-@pytest.mark.skipif(
-    compute_minimum_clearance_envelope is None,
-    reason="Phase 1 not implemented yet (expected for test-first)"
-)
 class TestInvariantMinimumClearanceEnvelope:
     """INVARIANT: Orchestrator MUST operate at MIN(all plugin security levels).
 
@@ -178,10 +177,6 @@ class TestInvariantMinimumClearanceEnvelope:
 # ============================================================================
 
 
-@pytest.mark.skipif(
-    BasePlugin is None,
-    reason="Phase 1 not implemented yet (expected for test-first)"
-)
 class TestInvariantPluginValidation:
     """INVARIANT: Plugins MUST refuse to operate below their security requirement.
 
@@ -238,10 +233,6 @@ class TestInvariantPluginValidation:
 # ============================================================================
 
 
-@pytest.mark.skipif(
-    ClassifiedDataFrame is None,
-    reason="Phase 1 not implemented yet (expected for test-first)"
-)
 class TestInvariantClassificationUplifting:
     """INVARIANT: Classification uplifting MUST be automatic (not manual/optional).
 
@@ -383,10 +374,6 @@ class TestInvariantOutputClassification:
 # ============================================================================
 
 
-@pytest.mark.skipif(
-    compute_minimum_clearance_envelope is None,
-    reason="Phase 1 not implemented yet (expected for test-first)"
-)
 class TestInvariantNoConfigurationAllowsBreach:
     """INVARIANT: No configuration MUST allow classification breach.
 
@@ -397,11 +384,7 @@ class TestInvariantNoConfigurationAllowsBreach:
 
     @given(
         plugin_levels=st.lists(
-            st.sampled_from([
-                SecurityLevel.UNOFFICIAL,
-                SecurityLevel.OFFICIAL,
-                SecurityLevel.SECRET
-            ]),
+            st.sampled_from([0, 1, 2]),  # Will map to security levels
             min_size=1,
             max_size=10
         )
@@ -416,21 +399,20 @@ class TestInvariantNoConfigurationAllowsBreach:
         When: Computing minimum clearance envelope
         Then: Operating level ≤ weakest plugin level
         """
-        plugins = [MockPlugin(level) for level in plugin_levels]
+        # Map integers to SecurityLevel
+        level_map = [SecurityLevel.UNOFFICIAL, SecurityLevel.OFFICIAL, SecurityLevel.SECRET]
+        security_levels = [level_map[i] for i in plugin_levels]
+        plugins = [MockPlugin(level) for level in security_levels]
 
         operating_level = compute_minimum_clearance_envelope(plugins)
 
-        min_level = min(plugin_levels)
+        min_level = min(security_levels)
         assert operating_level <= min_level, \
             f"Operating level {operating_level.name} exceeds minimum {min_level.name}"
 
     @given(
         plugin_levels=st.lists(
-            st.sampled_from([
-                SecurityLevel.UNOFFICIAL,
-                SecurityLevel.OFFICIAL,
-                SecurityLevel.SECRET
-            ]),
+            st.sampled_from([0, 1, 2]),  # Will map to security levels
             min_size=2,
             max_size=8
         )
@@ -447,7 +429,10 @@ class TestInvariantNoConfigurationAllowsBreach:
         """
         from elspeth.core.validation.base import SecurityValidationError
 
-        plugins = [MockPlugin(level) for level in plugin_levels]
+        # Map integers to SecurityLevel
+        level_map = [SecurityLevel.UNOFFICIAL, SecurityLevel.OFFICIAL, SecurityLevel.SECRET]
+        security_levels = [level_map[i] for i in plugin_levels]
+        plugins = [MockPlugin(level) for level in security_levels]
         operating_level = compute_minimum_clearance_envelope(plugins)
 
         # Check each plugin

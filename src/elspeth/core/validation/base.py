@@ -10,6 +10,22 @@ class ConfigurationError(RuntimeError):
     """Raised when configuration validation fails."""
 
 
+class SecurityValidationError(RuntimeError):
+    """Raised when security validation fails (ADR-002 enforcement).
+
+    This exception is raised by security controls when:
+    - A plugin cannot operate at the orchestrator's security level
+    - Data access violates clearance requirements
+    - Classification constraints would be breached
+
+    Example:
+        >>> if operating_level < required_level:
+        >>>     raise SecurityValidationError(
+        >>>         f"Requires {required_level.name}, got {operating_level.name}"
+        >>>     )
+    """
+
+
 @dataclass
 class ValidationMessage:
     """Represents a single validation outcome with optional context."""
@@ -249,6 +265,7 @@ def _format_error_path(path: Iterable[object]) -> str:
 
 __all__ = [
     "ConfigurationError",
+    "SecurityValidationError",
     "ValidationMessage",
     "ValidationReport",
     "validate_schema",
