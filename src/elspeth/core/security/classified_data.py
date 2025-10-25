@@ -12,7 +12,7 @@ CRITICAL: Classification uplifting is NOT optional - it's enforced by the
           type system and immutability guarantees.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 import pandas as pd
@@ -65,7 +65,7 @@ class ClassifiedDataFrame:
 
     data: pd.DataFrame
     classification: SecurityLevel
-    _created_by_datasource: bool = False
+    _created_by_datasource: bool = field(default=False, compare=False, repr=False)
 
     def __post_init__(self) -> None:
         """Enforce datasource-only creation (ADR-002-A constructor protection).
@@ -101,8 +101,12 @@ class ClassifiedDataFrame:
             caller_name = current_frame.f_code.co_name
 
             # Allow internal methods (with_uplifted_classification, with_new_data)
+            # SECURITY: Verify this is OUR method, not a spoofed function (CVE-ADR-002-A-001)
             if caller_name in ("with_uplifted_classification", "with_new_data"):
-                return
+                # Verify the caller's 'self' is actually a ClassifiedDataFrame instance
+                caller_self = current_frame.f_locals.get('self')
+                if isinstance(caller_self, ClassifiedDataFrame):
+                    return  # Legitimate internal method call
 
         # Block all other attempts (plugins, direct construction)
         from elspeth.core.validation.base import SecurityValidationError

@@ -269,6 +269,68 @@ class TestADR002ATrustedContainerModel:
             "Error should explain only datasources can create frames"
         )
 
+    def test_invariant_method_name_spoofing_blocked(self):
+        """SECURITY INVARIANT: Method name spoofing attack is blocked (CVE-ADR-002-A-001).
+
+        Attack Scenario (from Security Review):
+            1. Malicious plugin defines a method named 'with_uplifted_classification'
+            2. Inside this method, attacker creates ClassifiedDataFrame with arbitrary classification
+            3. Frame inspection finds matching name 'with_uplifted_classification'
+            4. ❌ BLOCKED: Instance verification detects this is NOT our method
+
+        Vulnerability:
+            Before fix: Frame inspection only checked function name
+            After fix: Frame inspection verifies caller's 'self' is ClassifiedDataFrame instance
+
+        Security Property:
+            Plugin spoofing method name → Still blocked by instance verification
+
+        This test verifies the fix for HIGH severity finding from security review.
+        """
+        # Simulate name spoofing attack from security review
+        class NameSpoofingPlugin(BasePlugin):
+            """Plugin that attempts to bypass constructor protection via name spoofing."""
+
+            def get_security_level(self) -> SecurityLevel:
+                return SecurityLevel.SECRET
+
+            def validate_can_operate_at_level(
+                self, operating_level: SecurityLevel
+            ) -> None:
+                if operating_level < SecurityLevel.SECRET:
+                    raise SecurityValidationError("Requires SECRET")
+
+            def with_uplifted_classification(self, input_data: ClassifiedDataFrame) -> ClassifiedDataFrame:
+                """Spoofed method name - attempt to bypass frame inspection.
+
+                Attack: Create "fresh" frame inside a method named 'with_uplifted_classification'
+                to trick frame inspection into thinking this is a legitimate internal call.
+
+                Before Fix: Would succeed (only checked name)
+                After Fix: Blocked (verifies 'self' is ClassifiedDataFrame, not NameSpoofingPlugin)
+                """
+                # ❌ ATTACK: Create frame with lower classification inside spoofed method
+                return ClassifiedDataFrame(input_data.data, SecurityLevel.OFFICIAL)
+
+        # Set up attack scenario
+        secret_data = pd.DataFrame({"classified": ["secret1", "secret2"]})
+        secret_frame = ClassifiedDataFrame.create_from_datasource(
+            secret_data, SecurityLevel.SECRET
+        )
+
+        spoofing_plugin = NameSpoofingPlugin()
+
+        # Attack should be BLOCKED by instance verification
+        with pytest.raises(SecurityValidationError) as exc_info:
+            spoofing_plugin.with_uplifted_classification(secret_frame)
+
+        error_msg = str(exc_info.value)
+        assert "datasource" in error_msg.lower(), (
+            "Error should explain only datasources can create frames"
+        )
+        # Verify spoofing attack was blocked
+        assert exc_info.value is not None, "Spoofing attack should raise SecurityValidationError"
+
 
 # ============================================================================
 # Test Summary
