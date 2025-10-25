@@ -7,9 +7,9 @@
 - **ADR-003** (Phases 1-5): SecureDataFrame adoption across all plugins
 - **ADR-004** (Phases 1-5): SecureData[T] generic wrapper for dicts/metadata
 
-**Total Estimated Effort**: 25-35 hours (3-4 days)
-- Terminology Rename: 10-14 hours (1-2 days, no deprecation shims needed)
-- Container Adoption: 15-21 hours (2 days, clean migration)
+**Total Estimated Effort**: 30-40 hours (4-5 days)
+- Terminology Rename (Phase 0): 12-16 hours (1.5-2 days, no deprecation shims needed)
+- Container Adoption (Phases 1-6): 18-24 hours (2.5-3 days, clean migration)
 
 **Risk Level**: MEDIUM (ADR-003/004), LOW (Rename)
 **Confidence**: HIGH
@@ -23,14 +23,14 @@ This migration implements **universal adoption** of the ADR-002-A Trusted Contai
 
 ### Two-Phase Approach (INTEGRATED)
 
-**Phase 0: Terminology Rename** (10-14 hours, 1-2 days)
+**Phase 0: Terminology Rename** (12-16 hours, 1.5-2 days)
 - Rename `ClassifiedDataFrame` → `SecureDataFrame`
 - Rename `.classification` → `.security_level` (aligns with existing 529 uses of `security_level`)
 - Update all documentation for universal applicability (removes government-specific connotations)
 - **Pre-1.0 Approach**: Clean cut-over, no deprecation shims (fix-on-fail)
 - **Why First**: ADR-003/004 implementation uses correct terminology from day one
 
-**Phases 1-5: Container Adoption** (15-21 hours, 2 days)
+**Phases 1-6: Container Adoption** (18-24 hours, 2.5-3 days)
 - Migrate all datasources, orchestrators, runners to use `SecureDataFrame`
 - Create generic `SecureData[T]` wrapper for dicts, metadata, middleware integration
 - **Pre-1.0 Approach**: Direct migration, breaking changes acceptable
@@ -240,9 +240,11 @@ This folder contains all planning artifacts for the ADR-003+004 migration:
 **Branch**: `feature/adr-003-004-secure-containers`
 
 - Create `SecureData[T]` generic class (mirrors `SecureDataFrame` for any type T)
-- Add utility functions: `unwrap()`, `wrap()`, `uplift_dict()`
-- Write invariant tests (5+ core properties: immutability, uplifting, unwrap/wrap)
-- **Exit Criteria**: All new tests passing, MyPy clean
+- Add utility functions: `unwrap(secure: SecureData[T]) -> T` (public, safe extraction)
+- Add `SecureDataFrame.create_secure_dict(data: dict) -> SecureData[dict]` factory method
+- **NO public `wrap()` helper** - would allow classification laundering (CVE-ADR-002-A-003)
+- Write invariant tests (5+ core properties: immutability, uplifting, factory safety)
+- **Exit Criteria**: All new tests passing, MyPy clean, no wrap() in public API
 
 ---
 
@@ -624,7 +626,7 @@ All work is internal to Elspeth codebase.
 - **ADR-002**: Multi-Level Security Enforcement (`docs/architecture/decisions/002-security-architecture.md`)
 - **ADR-002-A**: Trusted Container Model (`docs/architecture/decisions/002-a-trusted-container-model.md`)
 - **Plugin Development Guide**: ADR-002-A patterns (`docs/guides/plugin-development-adr002a.md`)
-- **Threat Model**: ADR-002 security controls (`ADR002_IMPLEMENTATION/THREAT_MODEL.md`)
+- **Threat Model**: ADR-002 security controls (`docs/security/adr-002-threat-model.md`)
 
 ### Migration Documentation
 - **Terminology Rename**: `RENAMING_ASSESSMENT.md` (this folder)

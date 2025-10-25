@@ -394,7 +394,7 @@ A: ADR-002-A is the architectural decision record that established this trusted 
 
 - **ADR-002**: Suite-level security enforcement
 - **ADR-002-A**: Trusted container model specification
-- **Threat Model**: `ADR002_IMPLEMENTATION/THREAT_MODEL.md` (T4 - Classification Mislabeling)
+- **Threat Model**: `docs/security/adr-002-threat-model.md` (T4 - Classification Mislabeling)
 - **API Reference**: `src/elspeth/core/security/classified_data.py` (implementation)
 
 ---

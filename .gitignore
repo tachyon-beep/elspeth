@@ -131,6 +131,8 @@ venv.bak/
 /artifacts/
 /scorecard-artifacts/
 /orchestration_packs/*/
+/logs/
+!/logs/.gitkeep
 # Legacy reference material (tracked separately)
 /external/
 # Quarantined historical scripts (tracked)
