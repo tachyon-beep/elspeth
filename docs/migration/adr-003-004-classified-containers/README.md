@@ -7,9 +7,9 @@
 - **ADR-003** (Phases 1-5): SecureDataFrame adoption across all plugins
 - **ADR-004** (Phases 1-5): SecureData[T] generic wrapper for dicts/metadata
 
-**Total Estimated Effort**: 36-48 hours (5-6 days)
+**Total Estimated Effort**: 35-47 hours (5-6 days)
 - Terminology Rename (Phase 0): 12-16 hours (1.5-2 days, no deprecation shims needed)
-- Container Adoption (Phases 1-6): 24-32 hours (3-4 days, includes BasePlugin migration)
+- Container Adoption (Phases 1-6): 23-31 hours (3-4 days, includes BasePlugin inheritance migration using ADR-004 "Security Bones" design)
 
 **Risk Level**: MEDIUM (ADR-003/004), LOW (Rename)
 **Confidence**: HIGH
@@ -172,9 +172,10 @@ This folder contains all planning artifacts for the ADR-003+004 migration:
 │ PHASE 1: Infrastructure (2-3 hours)                            │
 │   Output: SecureData[T] generic wrapper                        │
 ├─────────────────────────────────────────────────────────────────┤
-│ PHASE 1.5: BasePlugin Protocol Migration (4-6 hours) 🚨 NEW   │
-│   Output: All 26 plugins implement BasePlugin protocol         │
-│   CRITICAL: Enables ADR-002 validation (stops short-circuits)  │
+│ PHASE 1.5: BasePlugin Inheritance Migration (3-5 hours) 🚨 NEW │
+│   Output: All 26 plugins inherit from BasePlugin ABC           │
+│   CRITICAL: Enables ADR-002 validation (stops isinstance fail) │
+│   Design: ADR-004 "Security Bones" - inherit, don't implement  │
 ├─────────────────────────────────────────────────────────────────┤
 │ PHASE 2: Datasource Migration (2 hours)                        │
 │   Output: 4 datasources return SecureDataFrame                 │
@@ -253,75 +254,155 @@ This folder contains all planning artifacts for the ADR-003+004 migration:
 
 ---
 
-### Phase 1.5: BasePlugin Protocol Migration (4-6 hours) 🔐
+### Phase 1.5: BasePlugin Inheritance Migration (3-5 hours) 🔐
 
-**Objective**: Add BasePlugin compliance to all concrete plugins (CRITICAL - enables ADR-002 validation)
+**Objective**: Convert all plugins to inherit from `BasePlugin` ABC (CRITICAL - enables ADR-002 validation)
 
-**Background**: Current plugins store `security_level` as an attribute but don't implement the `BasePlugin` protocol. This causes ADR-002 validation to short-circuit (hasattr checks fail), allowing SECRET→UNOFFICIAL paths unchecked!
+**Background**: Current plugins store `security_level` as an attribute but don't inherit from `BasePlugin` ABC. This causes ADR-002 validation to short-circuit (isinstance checks fail), allowing SECRET→UNOFFICIAL paths unchecked!
+
+**NEW DESIGN (ADR-004 "Security Bones")**:
+- BasePlugin is now an **Abstract Base Class** with CONCRETE implementation (not Protocol)
+- Plugins **INHERIT** security methods, they don't implement them
+- Security enforcement is **centralized** in BasePlugin - cannot be overridden
+- Runtime enforcement via `__init_subclass__` prevents security method override
+- **Much simpler migration** - just inherit and call super().__init__()
 
 **Scope** (26 plugin classes):
 - **4 datasources**: `BaseCSVDataSource`, `CSVLocalDataSource`, `CSVBlobDataSource`, `BlobDataSource`
 - **6 LLM clients**: `AzureOpenAIClient`, `OpenAIHTTPClient`, `MockLLMClient`, `StaticLLMClient`, + middleware wrappers
 - **16 sinks**: All implementations in `plugins/nodes/sinks/`
-- **Affected validation**: `_validate_experiment_security()` currently short-circuits on hasattr checks
+- **Affected validation**: `_validate_component_clearances()` currently short-circuits on isinstance checks
 
 **Changes per plugin class:**
 
-1. **Add `get_security_level()` method**:
+1. **Add BasePlugin to inheritance chain**:
    ```python
-   def get_security_level(self) -> SecurityLevel:
-       """Return the minimum security level this plugin requires (ADR-002 protocol)."""
-       return self.security_level
+   from elspeth.core.base.plugin import BasePlugin
+
+   class CSVLocalDataSource(BasePlugin, DataSourceProtocol):  # ← Add BasePlugin
+       """CSV datasource with BasePlugin security enforcement."""
    ```
 
-2. **Add `validate_can_operate_at_level()` method**:
+2. **Update `__init__` to call BasePlugin constructor**:
    ```python
-   def validate_can_operate_at_level(self, operating_level: SecurityLevel) -> None:
-       """Validate this plugin can operate at the given envelope level (ADR-002 start-time check).
+   def __init__(
+       self,
+       *,
+       path: str,
+       security_level: SecurityLevel,  # ← Must be keyword-only
+       retain_local: bool = False,
+       **kwargs
+   ):
+       # Pass security_level to BasePlugin (stores in self._security_level)
+       super().__init__(security_level=security_level, **kwargs)
 
-       Raises:
-           SecurityValidationError: If operating_level < required level
-       """
-       if operating_level < self.security_level:
-           from elspeth.core.validation.base import SecurityValidationError
-           raise SecurityValidationError(
-               f"{self.__class__.__name__} requires {self.security_level.name} "
-               f"clearance, but operating envelope is {operating_level.name}"
-           )
+       # Plugin-specific initialization
+       self.path = path
+       self.retain_local = retain_local
    ```
 
-3. **Update class docstrings** to document BasePlugin compliance
+3. **Remove any existing get_security_level() or validate_can_operate_at_level() implementations**:
+   ```python
+   # ❌ DELETE these if present - they're now inherited from BasePlugin:
+   # def get_security_level(self) -> SecurityLevel:
+   #     return self.security_level
+   #
+   # def validate_can_operate_at_level(self, operating_level: SecurityLevel) -> None:
+   #     ...
+   ```
+
+4. **For plugins WITHOUT existing security_level parameter**: Add it to constructor
+   ```python
+   # BEFORE (StaticLLMClient example)
+   def __init__(self, *, content: str, score: float | None = None):
+       self.content = content
+       self.score = score
+
+   # AFTER
+   def __init__(
+       self,
+       *,
+       content: str,
+       security_level: SecurityLevel,  # ← ADD mandatory parameter
+       score: float | None = None,
+   ):
+       super().__init__(security_level=security_level)  # ← Pass to BasePlugin
+       self.content = content
+       self.score = score
+   ```
+
+**What BasePlugin Provides (Inherited, NOT Implemented)**:
+```python
+# These methods are FINAL - subclasses inherit them, cannot override
+def get_security_level(self) -> SecurityLevel:
+    """Returns self._security_level (provided by BasePlugin)."""
+
+def validate_can_operate_at_level(self, operating_level: SecurityLevel) -> None:
+    """Raises SecurityValidationError if operating_level < self._security_level."""
+```
+
+**Runtime Enforcement** (prevents override attempts):
+```python
+# BasePlugin.__init_subclass__ hook (automatic):
+>>> class BrokenPlugin(BasePlugin):
+...     def get_security_level(self):  # ← Override attempt
+...         return SecurityLevel.UNOFFICIAL
+TypeError: BrokenPlugin may not override get_security_level (ADR-004 security invariant)
+```
 
 **Testing** (CRITICAL):
 ```python
-# Test that validation ACTUALLY RUNS (not short-circuits)
+# Test 1: Validation ACTUALLY RUNS (not short-circuits)
 def test_secret_datasource_unofficial_sink_blocked():
     """Verify ADR-002 validation catches mismatch (not short-circuits)."""
-    secret_ds = BaseCSVDataSource(..., security_level=SecurityLevel.SECRET)
-    unofficial_sink = CSVFileSink(..., security_level=SecurityLevel.UNOFFICIAL)
+    secret_ds = CSVLocalDataSource(
+        path="data/secret.csv",
+        security_level=SecurityLevel.SECRET,
+        retain_local=False
+    )
+    unofficial_sink = CsvResultSink(
+        path="outputs/public.csv",
+        security_level=SecurityLevel.UNOFFICIAL
+    )
 
-    # MUST raise during _validate_experiment_security
+    # MUST raise during _validate_component_clearances
     with pytest.raises(SecurityValidationError, match="requires SECRET.*UNOFFICIAL"):
-        runner.run(experiment_with(datasource=secret_ds, sinks=[unofficial_sink]))
+        runner.run(pd.DataFrame({"text": ["test"]}), sink_factory=lambda exp: [unofficial_sink])
+
+# Test 2: Runtime enforcement prevents override
+def test_cannot_override_security_methods():
+    """BasePlugin prevents override of security methods at class definition time."""
+    with pytest.raises(TypeError, match="may not override get_security_level"):
+        class BrokenPlugin(BasePlugin):
+            def get_security_level(self) -> SecurityLevel:
+                return SecurityLevel.UNOFFICIAL  # ← Rejected at class definition!
 ```
 
 **Files to Update**:
-- `src/elspeth/plugins/nodes/sources/_csv_base.py` (BaseCSVDataSource)
-- `src/elspeth/plugins/nodes/sources/csv_local.py` (CSVLocalDataSource)
-- `src/elspeth/plugins/nodes/sources/csv_blob.py` (CSVBlobDataSource)
-- `src/elspeth/plugins/nodes/sources/blob.py` (BlobDataSource)
-- `src/elspeth/plugins/nodes/transforms/llm/*.py` (all LLM clients)
-- `src/elspeth/plugins/nodes/sinks/*.py` (all 16 sink implementations)
+- **Create BasePlugin ABC**: `src/elspeth/core/base/plugin.py` (new file)
+- **Datasources**: `src/elspeth/plugins/nodes/sources/_csv_base.py`, `csv_local.py`, `csv_blob.py`, `blob.py`
+- **LLM Clients**: `src/elspeth/plugins/nodes/transforms/llm/*.py` (all 6 clients)
+- **Sinks**: `src/elspeth/plugins/nodes/sinks/*.py` (all 16 implementations)
 
 **Exit Criteria**:
-- ✅ All 26 plugin classes have `get_security_level()` method
-- ✅ All 26 plugin classes have `validate_can_operate_at_level()` method
+- ✅ BasePlugin ABC exists at `src/elspeth/core/base/plugin.py` with concrete security methods
+- ✅ All 26 plugin classes inherit from BasePlugin
+- ✅ All plugins call `super().__init__(security_level=...)` in their constructors
 - ✅ Integration test proves validation runs (SECRET→UNOFFICIAL blocked)
-- ✅ MyPy clean (BasePlugin protocol conformance verified)
-- ✅ **No more hasattr short-circuiting** in validation code
+- ✅ MyPy clean (BasePlugin inheritance verified)
+- ✅ **isinstance(plugin, BasePlugin) returns True** for all plugins
+- ✅ **No more isinstance short-circuiting** in validation code
+- ✅ Runtime enforcement test passes (cannot override security methods)
 
 **Why This Phase Is CRITICAL**:
-Without this, ADR-002 security validation **never runs** in production (hasattr checks short-circuit), allowing classified data to flow to unauthorized sinks! This is a P0 security blocker for the migration.
+Without this, ADR-002 security validation **never runs** in production (isinstance checks short-circuit), allowing classified data to flow to unauthorized sinks! This is a P0 security blocker for the migration.
+
+**Why "Security Bones" Design Is Better**:
+- ✅ **Simpler migration** - No need to copy validation logic to 26 classes
+- ✅ **Cannot break security** - Runtime enforcement prevents override
+- ✅ **Single source of truth** - Validation logic in ONE place (BasePlugin)
+- ✅ **Type-safe** - isinstance() checks + MyPy protocol verification
+- ✅ **Fail-fast** - TypeError at class definition if override attempted
 
 ---
 
@@ -633,11 +714,11 @@ All work is internal to Elspeth codebase.
 
 ## Timeline & Effort
 
-**Total Estimated Effort**: 36-48 hours (5-6 days) - **Increased from 30-40 hours** (added Phase 1.5: BasePlugin protocol migration)
+**Total Estimated Effort**: 35-47 hours (5-6 days) - **Reduced from 36-48 hours** (Phase 1.5 simplified with ADR-004 "Security Bones" design)
 
 **Breakdown by Migration**:
 - **Phase 0: Terminology Rename**: 12-16 hours (1.5-2 days, no deprecation shims)
-- **Phases 1-6: Container Adoption**: 24-32 hours (3-4 days, includes BasePlugin migration)
+- **Phases 1-6: Container Adoption**: 23-31 hours (3-4 days, includes BasePlugin inheritance migration using ADR-004 design)
 
 **Detailed Phase Breakdown**:
 | Phase | Hours | Complexity | Risk | Notes |
@@ -648,7 +729,7 @@ All work is internal to Elspeth codebase.
 | - Sub-phase 0.3: Docs + Configs | 4-6 | MEDIUM | LOW | Update configs directly |
 | **Checkpoint: Merge Phase 0** | - | - | - | - |
 | **Phase 1: Infrastructure** | **2-3** | **MEDIUM** | **MEDIUM** | SecureData[T] generic |
-| **Phase 1.5: BasePlugin Migration** | **4-6** | **MEDIUM** | **HIGH** | **26 plugins, ADR-002 validation enablement** |
+| **Phase 1.5: BasePlugin Inheritance** | **3-5** | **MEDIUM** | **HIGH** | **26 plugins inherit from ABC, ADR-004 "Security Bones" design** |
 | **Phase 2: Datasources** | **2** | **LOW** | **LOW** | 4 files, simple change |
 | **Phase 3: Core Engine** | **3-4** | **HIGH** | **MEDIUM** | Orchestrator/runner |
 | **Phase 4: Middleware** | **3-4** | **HIGH** | **MEDIUM** | **Direct migration, safe factory** |

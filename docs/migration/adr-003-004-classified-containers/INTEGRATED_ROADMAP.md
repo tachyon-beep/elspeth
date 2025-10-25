@@ -1,8 +1,8 @@
 # Integrated Migration Roadmap: Secure Data Containers
 
-**Total Duration**: 36-48 hours (5-6 days)
-**Phases**: 7 (Phase 0: Rename + Phases 1-6: Adoption + Phase 1.5: BasePlugin Migration)
-**Status**: Planning Complete - Ready for Execution (UPDATED with Phase 1.5)
+**Total Duration**: 35-47 hours (5-6 days)
+**Phases**: 7 (Phase 0: Rename + Phases 1-6: Adoption + Phase 1.5: BasePlugin Inheritance)
+**Status**: Planning Complete - Ready for Execution (UPDATED with ADR-004 "Security Bones")
 
 ---
 
@@ -11,8 +11,8 @@
 This roadmap integrates **two migrations** into a single cohesive plan:
 
 1. **Phase 0: Terminology Rename** (12-16 hours) - "Classified" → "Secure" for universal applicability
-2. **Phases 1-6: Container Adoption** (24-32 hours) - Universal adoption of secure containers across all plugins
-   - **NEW: Phase 1.5** (4-6 hours) - BasePlugin protocol migration (CRITICAL for ADR-002 validation)
+2. **Phases 1-6: Container Adoption** (23-31 hours) - Universal adoption of secure containers across all plugins
+   - **NEW: Phase 1.5** (3-5 hours) - BasePlugin inheritance migration (CRITICAL for ADR-002 validation, uses "Security Bones" design from ADR-004)
 
 **Why This Sequence**: Rename FIRST ensures ADR-003/004 implementation uses correct terminology from day one, avoiding double-work.
 
@@ -80,11 +80,13 @@ This roadmap integrates **two migrations** into a single cohesive plan:
 │    - Write invariant tests (5+ core properties)                    │
 │    Exit: All new tests passing, MyPy clean                         │
 ├─────────────────────────────────────────────────────────────────────┤
-│  PHASE 1.5: BasePlugin Protocol Migration (4-6 hours) 🚨 NEW       │
-│    - Add get_security_level() to 26 plugin classes                 │
-│    - Add validate_can_operate_at_level() to 26 plugin classes      │
-│    - CRITICAL: Enables ADR-002 validation (stops short-circuits)   │
-│    Exit: Validation runs, SECRET→UNOFFICIAL blocked                │
+│  PHASE 1.5: BasePlugin Inheritance Migration (3-5 hours) 🚨 NEW    │
+│    - Create BasePlugin ABC with concrete security methods          │
+│    - Add BasePlugin to 26 plugin class inheritance chains          │
+│    - Update __init__ to call super().__init__(security_level=...)  │
+│    - CRITICAL: Enables ADR-002 validation (stops isinstance fails) │
+│    - "Security Bones" design: inherit methods, don't implement     │
+│    Exit: Validation runs, SECRET→UNOFFICIAL blocked, no overrides  │
 ├─────────────────────────────────────────────────────────────────────┤
 │  PHASE 2: Datasource Migration (2 hours)                           │
 │    - 4 datasources return SecureDataFrame                          │
@@ -146,13 +148,13 @@ This roadmap integrates **two migrations** into a single cohesive plan:
 | 0.3 | Documentation | 4-6 | MEDIUM | LOW | 11-15 |
 | **Checkpoint** | **Merge Phase 0** | **-** | **-** | **-** | **-** |
 | **Phase 1** | **Infrastructure** | **2-3** | **MEDIUM** | **MEDIUM** | **14-19** |
-| **Phase 1.5** | **BasePlugin Migration** | **4-6** | **MEDIUM** | **HIGH** | **18-25** |
-| **Phase 2** | **Datasources** | **2** | **LOW** | **LOW** | **20-27** |
-| **Phase 3** | **Core Engine** | **3-4** | **HIGH** | **MEDIUM** | **23-31** |
-| **Phase 4** | **Middleware** | **3-4** | **HIGH** | **MEDIUM** | **26-35** |
-| **Phase 5** | **Plugins** | **2-3** | **MEDIUM** | **LOW** | **28-38** |
-| **Phase 6** | **Verification** | **1-2** | **LOW** | **LOW** | **29-40** |
-| **Total** | **7 Phases** | **36-48** | **MEDIUM** | **MEDIUM** | **36-48** |
+| **Phase 1.5** | **BasePlugin Inheritance** | **3-5** | **MEDIUM** | **HIGH** | **17-24** |
+| **Phase 2** | **Datasources** | **2** | **LOW** | **LOW** | **19-26** |
+| **Phase 3** | **Core Engine** | **3-4** | **HIGH** | **MEDIUM** | **22-30** |
+| **Phase 4** | **Middleware** | **3-4** | **HIGH** | **MEDIUM** | **25-34** |
+| **Phase 5** | **Plugins** | **2-3** | **MEDIUM** | **LOW** | **27-37** |
+| **Phase 6** | **Verification** | **1-2** | **LOW** | **LOW** | **28-39** |
+| **Total** | **7 Phases** | **35-47** | **MEDIUM** | **MEDIUM** | **35-47** |
 
 **Conservative Timeline**: 5-6 days with rigorous testing at each phase
 

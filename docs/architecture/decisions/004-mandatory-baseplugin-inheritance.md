@@ -246,6 +246,7 @@ class BasePlugin(Protocol):
 **After**:
 ```python
 from abc import ABC
+from typing import final  # Python 3.8+ for static type checkers
 
 from elspeth.core.base.types import SecurityLevel
 from elspeth.core.validation.base import SecurityValidationError
@@ -261,9 +262,14 @@ class BasePlugin(ABC):
 
     SECURITY INVARIANTS (enforced by BasePlugin):
     1. ALL plugins MUST provide security_level at construction (keyword-only arg)
-    2. Security behavior CANNOT be customized/overridden by subclasses
+    2. Security behavior CANNOT be customized/overridden by subclasses (runtime enforced)
     3. get_security_level() and validate_can_operate_at_level() are FINAL
     4. ADR-002 validation logic is centralized and consistent across ALL plugins
+
+    Runtime Enforcement:
+    - @final decorator enforces at static type-check time (MyPy/Pyright)
+    - __init_subclass__ hook enforces at runtime (raises TypeError on override)
+    - Dual enforcement ensures security invariants cannot be violated
 
     Why Concrete Implementation (Not Abstract)?
     - Abstract methods allow each subclass to implement security differently
@@ -305,21 +311,48 @@ class BasePlugin(ABC):
         >>> isinstance(AccidentalPlugin(), BasePlugin)  # False ✅
         False
 
-    Example - Wrong (Trying to Override Security):
-        >>> class BrokenPlugin(BasePlugin):
-        ...     def __init__(self, *, security_level: SecurityLevel):
-        ...         super().__init__(security_level=security_level)
-        ...
-        ...     def get_security_level(self) -> SecurityLevel:  # ← WRONG!
+    Example - Wrong (Trying to Override Security - BLOCKED AT RUNTIME):
+        >>> class BrokenPlugin(BasePlugin):  # ← TypeError raised immediately!
+        ...     def get_security_level(self) -> SecurityLevel:
         ...         return SecurityLevel.UNOFFICIAL  # Override attempt
         ...
-        >>> plugin = BrokenPlugin(security_level=SecurityLevel.SECRET)
-        >>> plugin.get_security_level()  # Which one is called?
-        SecurityLevel.UNOFFICIAL  # ⚠️ Override succeeded - BAD!
+        TypeError: BrokenPlugin may not override get_security_level (ADR-004 invariant)
 
-        # To prevent this, BasePlugin methods should be marked final in Python 3.8+
-        # Or documented as DO NOT OVERRIDE
+        # __init_subclass__ hook prevents this class from even being created!
     """
+
+    def __init_subclass__(cls, **kwargs):
+        """Runtime enforcement: prevent subclasses from overriding security methods.
+
+        SECURITY INVARIANT (ADR-004):
+        The methods get_security_level() and validate_can_operate_at_level() are
+        FINAL and cannot be overridden by subclasses. This hook enforces that
+        invariant at runtime by raising TypeError if a subclass attempts to
+        override these methods.
+
+        This complements the @final decorator which only works for static type checkers.
+
+        Raises:
+            TypeError: If subclass overrides get_security_level or validate_can_operate_at_level
+
+        Example:
+            >>> class BadPlugin(BasePlugin):
+            ...     def get_security_level(self) -> SecurityLevel:  # ← Override attempt
+            ...         return SecurityLevel.UNOFFICIAL
+            ...
+            TypeError: BadPlugin may not override get_security_level (ADR-004 invariant)
+        """
+        super().__init_subclass__(**kwargs)
+
+        # List of sealed methods that cannot be overridden
+        sealed_methods = ("get_security_level", "validate_can_operate_at_level")
+
+        for method_name in sealed_methods:
+            if method_name in cls.__dict__:  # Check if subclass defines this method
+                raise TypeError(
+                    f"{cls.__name__} may not override {method_name} (ADR-004 security invariant). "
+                    f"Security enforcement is provided by BasePlugin and cannot be customized."
+                )
 
     def __init__(self, *, security_level: SecurityLevel, **kwargs):
         """Initialize plugin with MANDATORY security level.
