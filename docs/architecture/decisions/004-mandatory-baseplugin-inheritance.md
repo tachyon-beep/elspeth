@@ -18,6 +18,10 @@ class BasePlugin(ABC):
     def __init__(self, *, security_level: SecurityLevel, **kwargs):
         self._security_level = security_level  # Private storage
 
+    @property
+    def security_level(self) -> SecurityLevel:
+        return self._security_level  # Read-only property (no setter)
+
     def get_security_level(self) -> SecurityLevel:
         return self._security_level  # FINAL - do not override
 
@@ -392,6 +396,33 @@ class BasePlugin(ABC):
         # Subclasses should use get_security_level(), not self._security_level
         self._security_level = security_level
         super().__init__(**kwargs)
+
+    @property
+    def security_level(self) -> SecurityLevel:
+        """Read-only property for security level (convenience accessor).
+
+        DESIGN NOTE (ADR-004):
+        This property provides backward compatibility with existing code that
+        references self.security_level directly (e.g., in factory methods like
+        SecureDataFrame.create_from_datasource(df, self.security_level)).
+
+        The property is READ-ONLY (no setter) to prevent accidental reassignment.
+        Subclasses cannot override security level after construction.
+
+        For protocol compliance and clarity, prefer using get_security_level()
+        in validation code. Use this property for convenience in non-security
+        contexts (logging, factory methods, etc.).
+
+        Returns:
+            SecurityLevel: The minimum clearance level (same as get_security_level())
+
+        Example:
+            >>> ds = SecretDatasource(path="data.csv", security_level=SecurityLevel.SECRET)
+            >>> ds.security_level  # Property access (read-only)
+            SecurityLevel.SECRET
+            >>> ds.security_level = SecurityLevel.UNOFFICIAL  # ❌ AttributeError: can't set
+        """
+        return self._security_level
 
     def get_security_level(self) -> SecurityLevel:
         """Return the minimum security level this plugin requires.
