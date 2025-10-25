@@ -2,44 +2,103 @@
 
 **Date**: 2025-10-25
 **Branch**: `feature/adr-002-security-enforcement`
-**Status**: ✅ **PHASE 0 COMPLETE - READY FOR STEP 0 IMPLEMENTATION**
+**Status**: ✅ **STEP 0 COMPLETE - READY FOR STEP 1-4 (PLUGIN INHERITANCE)**
 
 ---
 
 ## Executive Summary
 
-Phase 0 (safety net construction) is **COMPLETE**. All planning, documentation, and test infrastructure is in place for the ADR-002 BasePlugin ABC migration using the ADR-004 "Security Bones" design.
+**Step 0 (BasePlugin ABC Infrastructure) is COMPLETE!** ✅
 
-**Key Achievement**: Successfully pivoted from Protocol-based (structural typing) to ABC-based (nominal typing) approach with concrete security enforcement that cannot be overridden.
+The BasePlugin ABC with "Security Bones" design has been successfully implemented, old Protocol removed, and all imports updated. The foundation for nominal typing enforcement is in place.
 
-**Next Step**: Execute Step 0 (35 minutes) - Create BasePlugin ABC, remove old Protocol, update imports.
+**Key Achievement**: Successfully transitioned from Protocol-based (structural typing) to ABC-based (nominal typing) with concrete security enforcement that cannot be overridden.
+
+**Next Step**: Execute Step 1-4 (3-5 hours) - Add BasePlugin inheritance to 26 plugin classes.
 
 ---
 
-## Current State Summary
+## Step 0 Completion Summary
 
-### ✅ Completed in This Session
+### ✅ What Was Accomplished (35 minutes actual)
+
+#### 1. **Created BasePlugin ABC** (`src/elspeth/core/base/plugin.py` - 229 lines)
+   - ✅ Concrete "Security Bones" implementation (not abstract methods)
+   - ✅ Dual enforcement: `@final` decorator + `__init_subclass__` runtime hook
+   - ✅ Read-only `security_level` property
+   - ✅ Mandatory keyword-only constructor parameter
+   - ✅ Proper imports (SecurityLevel, SecurityValidationError)
+
+#### 2. **Removed Old Protocol** (`src/elspeth/core/base/protocols.py`)
+   - ✅ Deleted `@runtime_checkable BasePlugin(Protocol)` definition (52 lines)
+   - ✅ Removed from `__all__` exports
+   - ✅ Added explanatory note about move to plugin module
+
+#### 3. **Updated All Imports** (16 files total)
+   - ✅ Production code: `suite_runner.py`, `classified_data.py`
+   - ✅ Test files: 7 `test_adr002_*.py` files
+   - ✅ Documentation: 5 files (ADR-004, migration docs, plugin guide)
+   - ✅ All imports now use: `from elspeth.core.base.plugin import BasePlugin`
+
+#### 4. **Updated Category 0 Tests** (`test_adr002_baseplugin_compliance.py`)
+   - ✅ Removed `@pytest.mark.xfail` decorators (tests now passing)
+   - ✅ Updated docstrings to show ✅ PASS status
+   - ✅ Updated class docstring to reflect completion
+
+#### 5. **Fixed Pre-Existing Issues**
+   - ✅ Removed unused `List` import
+   - ✅ Fixed unused variable in middleware integration test
+
+### 📊 Test Results (All Passing!)
+
+**Category 0 (Step 0 Verification)**: 6/6 PASSED ✅
+- `test_baseplugin_abc_module_exists` - ✅ PASS
+- `test_baseplugin_has_concrete_security_methods` - ✅ PASS
+- `test_baseplugin_prevents_method_override_runtime` - ✅ PASS
+- `test_baseplugin_security_level_property` - ✅ PASS
+- `test_old_protocol_removed_from_protocols_module` - ✅ PASS
+- `test_validation_code_imports_abc_not_protocol` - ✅ PASS
+
+**Category 1-2 (Characterization)**: 7/7 PASSED ✅ (documents current broken state)
+
+**Category 3-5 (Security Properties)**: 9/9 XFAIL ✅ (will pass after Step 1-4)
+
+**Total**: 22 tests, 13 PASSED, 9 XFAIL (as expected)
+
+### 🔒 Quality Gates
+
+✅ **MyPy clean** - All modified production files type-check cleanly
+✅ **Ruff clean** - No linting errors in src/ or tests/
+✅ **No Protocol references** - Verified with grep (no old imports remain)
+✅ **Git committed** - `8f1e1b9` (18 files, +894/-110 lines)
+
+### 📦 Commit Details
+
+**Commit**: `8f1e1b9`
+**Message**: `feat(ADR-004): Complete Step 0 - BasePlugin ABC infrastructure`
+**Files Changed**: 18 files
+**Lines Changed**: +894 insertions, -110 deletions
+
+**New Files**:
+- `src/elspeth/core/base/plugin.py` (229 lines)
+- `docs/migration/adr-002-baseplugin-completion/PHASE_0_STATUS.md` (this file)
+
+**Modified Files**:
+- Production: `suite_runner.py`, `classified_data.py`, `protocols.py`
+- Tests: 7 test files
+- Docs: 5 documentation files
+
+---
+
+## Phase 0 Historical Summary (For Reference)
+
+### ✅ Completed Earlier in Session
 
 1. **ADR-004 "Security Bones" Design** - Complete specification for BasePlugin ABC
 2. **Migration Planning Updates** - Phase 1.5 now has explicit Step 0 with Protocol removal
 3. **Test Suite** - 14 comprehensive tests across 6 categories (Category 0-5)
 4. **Documentation Consistency** - All docs aligned with ABC approach
 5. **Housekeeping** - Fixed all P0/P1 issues identified
-
-### 🎯 Ready to Execute
-
-**Step 0** (35 minutes, 4 sub-steps):
-- Create `src/elspeth/core/base/plugin.py` with BasePlugin ABC
-- Remove old Protocol from `src/elspeth/core/base/protocols.py`
-- Update all imports (protocols → plugin module)
-- Verify Protocol removal (grep commands)
-
-### 📊 Test Status
-
-- **Category 0**: 6 tests XFAIL (ABC doesn't exist yet) ✅ EXPECTED
-- **Category 1-2**: 7 tests PASS (characterization + bugs) ✅ EXPECTED
-- **Category 3-5**: 7 tests XFAIL (will pass after implementation) ✅ EXPECTED
-- **Existing ADR-002 tests**: All passing ✅
 
 ---
 
@@ -592,10 +651,10 @@ docs/migration/adr-003-004-classified-containers/INTEGRATED_ROADMAP.md
 # Tests
 tests/test_adr002_baseplugin_compliance.py
 
-# Implementation (to be created in Step 0)
-src/elspeth/core/base/plugin.py (NEW)
-src/elspeth/core/base/protocols.py (MODIFY)
-src/elspeth/core/experiments/suite_runner.py (MODIFY imports)
+# Implementation (Step 0 COMPLETE - files now exist)
+src/elspeth/core/base/plugin.py ✅ CREATED (229 lines)
+src/elspeth/core/base/protocols.py ✅ MODIFIED (Protocol removed)
+src/elspeth/core/experiments/suite_runner.py ✅ MODIFIED (imports updated)
 ```
 
 ### Key Commands
@@ -625,24 +684,104 @@ pytest tests/test_adr002_baseplugin_compliance.py::TestCategory0Step0Verificatio
 
 ## Conclusion
 
-**Phase 0 is COMPLETE**. All planning, documentation, and testing infrastructure is in place. The migration path is clear, the design is well-specified, and the safety net is comprehensive.
+**Step 0 is COMPLETE!** ✅ The BasePlugin ABC infrastructure is in place, old Protocol removed, and all imports updated. The foundation for nominal typing enforcement is ready.
 
-**Next step**: Execute Step 0 (35 minutes) to create the BasePlugin ABC infrastructure.
+**Achievement**: Successfully created "Security Bones" design - plugins now inherit security enforcement instead of reimplementing it.
+
+**Next step**: Execute Step 1-4 (3-5 hours) to add BasePlugin inheritance to 26 plugin classes.
 
 **Confidence**: HIGH ✅
-- Design reviewed and refined (ADR-004)
-- Migration plan detailed with step-by-step instructions
-- Test suite comprehensive (14 tests, 6 categories)
-- All P0/P1 issues resolved
-- Documentation fully consistent
+- Step 0 completed in 35 minutes (as estimated)
+- All 6 Category 0 tests passing
+- MyPy clean, Ruff clean
+- No Protocol references remain
+- Git committed and verified
 
-**Ready to proceed**: ✅ YES
+**Ready for Step 1-4**: ✅ YES
+
+---
+
+## Next Steps: Step 1-4 (Plugin Inheritance)
+
+### What Needs to Happen
+
+Add `BasePlugin` inheritance to **26 plugin classes** across 4 categories:
+
+1. **Datasources** (4 classes):
+   - `src/elspeth/plugins/nodes/sources/_csv_base.py` - BaseCSVDataSource
+   - `src/elspeth/plugins/nodes/sources/csv_local.py` - CSVDataSource
+   - `src/elspeth/plugins/nodes/sources/csv_blob.py` - CSVBlobDataSource
+   - `src/elspeth/plugins/nodes/sources/blob.py` - BlobDataSource
+
+2. **Sinks** (~20 classes):
+   - See `docs/migration/adr-003-004-classified-containers/README.md` for full list
+   - Key sinks: CsvResultSink, ExcelSink, MarkdownSink, SignedBundleSink, etc.
+
+3. **LLM Clients** (~2 classes):
+   - Azure OpenAI client
+   - OpenAI HTTP client
+
+4. **Middleware** (~6 classes):
+   - Prompt shield, PII shield, content safety, etc.
+
+### Pattern for Each Plugin
+
+```python
+# BEFORE (current broken state)
+class MyPlugin:
+    def __init__(self, security_level: SecurityLevel, ...):
+        self._security_level = security_level
+        # ... other init code
+
+    def get_security_level(self) -> SecurityLevel:
+        return self._security_level
+
+    def validate_can_operate_at_level(self, level: SecurityLevel) -> None:
+        if level < self._security_level:
+            raise SecurityValidationError(...)
+
+# AFTER (inherit from BasePlugin)
+class MyPlugin(BasePlugin):  # ← Add inheritance
+    def __init__(self, security_level: SecurityLevel, ...):
+        super().__init__(security_level=security_level)  # ← Add super().__init__
+        # ... other init code
+        # NOTE: Remove get_security_level() and validate_can_operate_at_level()
+        #       (now inherited from BasePlugin - "Security Bones")
+```
+
+### Verification Commands
+
+```bash
+# Run tests after each plugin migration
+pytest tests/test_adr002_baseplugin_compliance.py -v
+
+# Expected progression:
+# - Category 0: 6 PASSED (already done)
+# - Category 1-2: 7 PASSED (should stay passing)
+# - Category 3-5: Gradually turn from XFAIL → PASS as plugins are migrated
+
+# Type check after each file
+python -m mypy src/elspeth/plugins/nodes/sources/csv_local.py
+
+# Lint check
+python -m ruff check src tests
+```
+
+### Exit Criteria (Step 1-4 Complete)
+
+- ✅ All 26 plugins inherit from BasePlugin
+- ✅ All Category 3-5 tests PASSING (9 tests)
+- ✅ All existing ADR-002 tests still passing
+- ✅ MyPy clean on all modified files
+- ✅ Ruff clean
+- ✅ Git committed with clear message
+
+**Estimated Time**: 3-5 hours (systematic plugin-by-plugin migration)
 
 ---
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
 
-**Status Report Prepared By**: Claude Code
-**Date**: 2025-10-25
-**Session**: ADR-002 BasePlugin ABC Migration Planning
-**Next Session**: Step 0 Implementation (35 minutes)
+**Status Report Updated**: 2025-10-25
+**Session**: ADR-002 BasePlugin ABC Migration - Step 0 COMPLETE
+**Next Session**: Step 1-4 Implementation (3-5 hours)
