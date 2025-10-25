@@ -3,404 +3,204 @@
 **Status**: PROPOSED
 **Date**: 2025-10-25
 **Deciders**: Security Team, Core Platform Team
-**Related**: ADR-002 (Suite-level security enforcement)
+**Related**: ADR-002 (Suite-level security), ADR-004 (Mandatory BasePlugin inheritance)
+
+---
+
+## Executive Summary
+
+**Problem**: P1 security gap discovered where 4 plugin types bypassed ADR-002 validation due to manual enumeration in `suite_runner.py`.
+
+**Solution**: Three-layer defense:
+1. **Layer 1 (ADR-004)**: Nominal typing - plugins must inherit `BasePlugin` ABC
+2. **Layer 2**: Central `PLUGIN_TYPE_REGISTRY` - explicit list of all plugin types
+3. **Layer 3**: Test enforcement - fails if registry incomplete
+
+**Impact**: Prevents future plugin types from bypassing security validation.
+
+**Effort**: ~1.5-2 hours implementation + ~1-1.5 hours optional hardening (H1-H4)
 
 ---
 
 ## Context and Problem Statement
 
-**Incident**: During code review, Copilot discovered a P1 security gap where 4 plugin types (`row_plugins`, `aggregator_plugins`, `validation_plugins`, `early_stop_plugins`) were not included in ADR-002 security validation. This allowed plugins to bypass the minimum clearance envelope check.
+### The Incident
 
-**Root Cause**: Security validation in `suite_runner.py` manually enumerates plugin types:
+During code review, Copilot discovered 4 plugin types (`row_plugins`, `aggregator_plugins`, `validation_plugins`, `early_stop_plugins`) were missing from ADR-002 security validation, allowing plugins to bypass minimum clearance envelope checks.
+
+### Root Cause
+
+Security validation manually enumerates plugin types:
 
 ```python
-# suite_runner.py:593-639 (FRAGILE - manual enumeration)
+# suite_runner.py:593-639 (FRAGILE)
 plugins = []
 plugins.append(datasource)
 plugins.append(llm_client)
 plugins.extend(llm_middlewares)
-plugins.extend(row_plugins)  # ← Easy to forget when adding new plugin type
-plugins.extend(aggregator_plugins)
-# ... etc
+# ❌ Easy to forget when adding new plugin type
 ```
 
-**The Risk**: When a developer adds a new plugin type to `ExperimentRunner`:
-1. ❌ **No compiler/type checker enforcement** to update security validation
-2. ❌ **No test failures** if they forget (unless explicitly tested)
-3. ❌ **Silent security bypass** - new plugins process data without validation
-4. ❌ **Shotgun surgery** - one conceptual change requires edits in 3+ files
+### The Risk
 
-**Why This Matters**: ADR-002's security guarantee is "no configuration can allow data at classification X to reach component with clearance Y < X". Forgetting to validate a plugin type **completely violates this guarantee**.
+When developers add new plugin types to `ExperimentRunner`:
+- ❌ No compiler enforcement to update security validation
+- ❌ No test failures if forgotten
+- ❌ Silent security bypass - plugins process data without validation
+- ❌ Shotgun surgery - requires edits in 3+ files
+
+**Security Impact**: Violates ADR-002's core guarantee: "no configuration allows data at classification X to reach component with clearance Y < X"
 
 ---
 
 ## Decision Drivers
 
 1. **Security-Critical**: Plugin validation is a security control - cannot rely on developer memory
-2. **Fail-Safe Default**: New plugin types should fail loudly if not properly registered
-3. **Developer Experience**: Adding plugin types should have clear, enforced process
-4. **Maintainability**: Reduce coupling between ExperimentRunner and security validation
-5. **Auditability**: Security team should be able to verify all plugin types are validated
+2. **Fail-Loud Default**: New plugin types should fail immediately if not registered
+3. **Developer Experience**: Clear, enforced process for adding plugin types
+4. **Maintainability**: Reduce coupling between ExperimentRunner and security code
+5. **Auditability**: Security team can verify completeness in one location
 
 ---
 
-## Considered Options
+## Decision
 
-### Option 1: Central Registry with Manual Enumeration
+**Chosen Solution**: Hybrid registry + test enforcement + nominal typing (3 independent layers)
 
-**Approach**: Create `PLUGIN_TYPE_REGISTRY` constant listing all plugin attribute names.
+### Layer 1: Nominal Typing (ADR-004)
 
-```python
-# core/base/plugin_types.py
-PLUGIN_TYPE_REGISTRY = [
-    "row_plugins",
-    "aggregator_plugins",
-    "validation_plugins",
-    "early_stop_plugins",
-    "llm_middlewares",
-]
+**Mechanism**: Convert `BasePlugin` from Protocol to ABC - require explicit inheritance
 
-# suite_runner.py
-def collect_all_plugins(runner):
-    plugins = []
-    for attr_name in PLUGIN_TYPE_REGISTRY:
-        attr = getattr(runner, attr_name, None)
-        if isinstance(attr, list):
-            plugins.extend([p for p in attr if isinstance(p, BasePlugin)])
-    return plugins
-```
-
-**Pros**:
-- ✅ Simple, explicit
-- ✅ Single source of truth
-- ✅ Easy to audit
-
-**Cons**:
-- ❌ Still requires manual update when adding plugin types
-- ❌ No compile-time enforcement
-- ❌ Can still forget to update registry
-
-### Option 2: Introspection with Naming Convention
-
-**Approach**: Use reflection to find all attributes matching `*_plugins` or `*_middlewares`.
-
-```python
-def collect_all_plugins(runner):
-    plugins = []
-    for attr_name in dir(runner):
-        if attr_name.endswith('_plugins') or attr_name.endswith('_middlewares'):
-            attr = getattr(runner, attr_name, None)
-            if isinstance(attr, list):
-                plugins.extend([p for p in attr if isinstance(p, BasePlugin)])
-    return plugins
-```
-
-**Pros**:
-- ✅ Self-healing - automatically picks up new plugin types
-- ✅ Zero manual maintenance
-- ✅ Enforces naming convention
-
-**Cons**:
-- ❌ "Magic" - behavior not obvious from code
-- ❌ Could pick up unintended attributes
-- ❌ Performance overhead of introspection
-
-### Option 3: Protocol with Required Method
-
-**Approach**: Define protocol requiring `get_all_plugins()` method.
-
-```python
-class PluginContainer(Protocol):
-    def get_all_plugins(self) -> list[BasePlugin]:
-        """Return ALL plugins for security validation."""
-        ...
-
-class ExperimentRunner(PluginContainer):
-    def get_all_plugins(self) -> list[BasePlugin]:
-        return [
-            *self.row_plugins or [],
-            *self.aggregator_plugins or [],
-            # Must explicitly list all
-        ]
-```
-
-**Pros**:
-- ✅ Explicit, type-checked
-- ✅ Forces developer to think about security
-- ✅ Self-documenting
-
-**Cons**:
-- ❌ Still manual enumeration (just in different place)
-- ❌ Invasive change to ExperimentRunner
-- ❌ Duplication of plugin list logic
-
-### Option 4: Hybrid - Registry + Test Enforcement + Type Hints
-
-**Approach**: Combine registry with automated test verification.
-
-```python
-# core/base/plugin_types.py
-from typing import TypedDict
-
-class PluginTypeRegistry(TypedDict):
-    """Central registry of all plugin types for security validation.
-
-    CRITICAL: When adding a new plugin type to ExperimentRunner:
-    1. Add attribute name to this registry
-    2. Run test_plugin_registry_complete to verify
-    3. Update ADR-003 decision record
-    """
-    row_plugins: str
-    aggregator_plugins: str
-    validation_plugins: str
-    early_stop_plugins: str
-    llm_middlewares: str
-
-PLUGIN_TYPE_REGISTRY: PluginTypeRegistry = {
-    "row_plugins": "RowExperimentPlugin",
-    "aggregator_plugins": "AggregationExperimentPlugin",
-    "validation_plugins": "ValidationPlugin",
-    "early_stop_plugins": "EarlyStopPlugin",
-    "llm_middlewares": "LLMMiddleware",
-}
-
-# suite_runner.py
-def collect_all_plugins(runner) -> list[BasePlugin]:
-    """Collect all plugins from runner for security validation.
-
-    Uses PLUGIN_TYPE_REGISTRY to ensure all plugin types are checked.
-    """
-    plugins = []
-    for attr_name in PLUGIN_TYPE_REGISTRY.keys():
-        attr = getattr(runner, attr_name, None)
-        if isinstance(attr, list):
-            plugins.extend([p for p in attr if isinstance(p, BasePlugin)])
-    return plugins
-
-# tests/test_plugin_registry.py
-def test_plugin_registry_complete():
-    """SECURITY: Verify all *_plugins attributes in ExperimentRunner are registered.
-
-    This test prevents security bypass where new plugin types are added
-    but not included in ADR-002 validation.
-    """
-    runner_attrs = [a for a in dir(ExperimentRunner)
-                    if (a.endswith('_plugins') or a.endswith('_middlewares'))
-                    and not a.startswith('_')]
-
-    registered_attrs = set(PLUGIN_TYPE_REGISTRY.keys())
-
-    missing = set(runner_attrs) - registered_attrs
-    assert not missing, (
-        f"SECURITY: Plugin types {missing} exist in ExperimentRunner but are "
-        f"NOT registered in PLUGIN_TYPE_REGISTRY. This means they will bypass "
-        f"ADR-002 security validation. Add them to core/base/plugin_types.py "
-        f"and update ADR-003."
-    )
-```
-
-**Pros**:
-- ✅ Explicit registry (auditability)
-- ✅ Test enforcement (fail-loud if incomplete)
-- ✅ Clear documentation for developers
-- ✅ Type hints provide some IDE support
-- ✅ Balance between automation and control
-
-**Cons**:
-- ⚠️ Still requires manual update (but test will fail if forgotten)
-- ⚠️ Slightly more complex than pure reflection
-
----
-
-## Decision Outcome
-
-**Chosen**: **Option 4 - Hybrid Registry + Test Enforcement + Nominal Typing Enforcement**
-
-**Rationale**:
-1. **Security**: Test enforcement prevents silent bypasses (fail-loud, not fail-open)
-2. **Auditability**: Explicit registry provides clear paper trail for security review
-3. **Developer Guidance**: TypedDict and test error message guide developers
-4. **Maintainability**: Balance between automation and explicit control
-5. **Compatibility**: Non-invasive, doesn't require ExperimentRunner changes
-6. **Type Safety**: Nominal typing (inheritance from BasePlugin ABC) prevents accidental compliance
-
-### Additional Enforcement: Nominal Typing Requirement
-
-**Critical Addition**: All plugins MUST inherit from `BasePlugin` abstract base class, not just implement the protocol interface.
-
-**Current State (TOO LOOSE)**:
-```python
-# BasePlugin is a Protocol (structural typing)
-class BasePlugin(Protocol):
-    def get_security_level(self) -> SecurityLevel: ...
-    def validate_can_operate_at_level(self, level: SecurityLevel) -> None: ...
-
-# Any class with these methods "implements" BasePlugin
-class AccidentalPlugin:
-    """This class accidentally has the right methods - DANGEROUS!"""
-    def get_security_level(self) -> SecurityLevel:
-        return SecurityLevel.UNOFFICIAL  # Oops, didn't mean to be a plugin!
-    def validate_can_operate_at_level(self, level: SecurityLevel) -> None:
-        pass  # Empty implementation
-```
-
-**Required State (ENFORCED)**:
 ```python
 from abc import ABC, abstractmethod
 
-# BasePlugin is an ABC (nominal typing)
 class BasePlugin(ABC):
-    """Base class for ALL plugins that process data.
-
-    SECURITY: All plugins MUST inherit from this class to participate
-    in ADR-002 security validation. This prevents accidental compliance
-    via structural typing (duck typing).
-
-    Inheritance is REQUIRED, not optional.
-    """
+    @abstractmethod
+    def get_security_level(self) -> SecurityLevel: ...
 
     @abstractmethod
-    def get_security_level(self) -> SecurityLevel:
-        """Return the security clearance level required by this plugin."""
-        ...
-
-    @abstractmethod
-    def validate_can_operate_at_level(self, operating_level: SecurityLevel) -> None:
-        """Validate this plugin can operate at the given security level.
-
-        Raises:
-            SecurityValidationError: If operating_level < required level
-        """
-        ...
-
-# CORRECT: Explicit inheritance
-class MySecretPlugin(BasePlugin):
-    def get_security_level(self) -> SecurityLevel:
-        return SecurityLevel.SECRET
-    def validate_can_operate_at_level(self, operating_level: SecurityLevel) -> None:
-        if operating_level < SecurityLevel.SECRET:
-            raise SecurityValidationError(...)
-
-# WRONG: Cannot accidentally comply - must inherit
-class AccidentalPlugin:
-    def get_security_level(self) -> SecurityLevel:
-        return SecurityLevel.UNOFFICIAL
-    def validate_can_operate_at_level(self, level: SecurityLevel) -> None:
-        pass
-
-# isinstance() check rejects accidental compliance
-plugin = AccidentalPlugin()
-isinstance(plugin, BasePlugin)  # False - not inherited!
-# Security validation will skip this (correct behavior)
+    def validate_can_operate_at_level(self, level: SecurityLevel) -> None: ...
 ```
 
-**Why This Matters**:
-- ✅ **Cannot accidentally be a plugin** - must explicitly inherit
-- ✅ **Runtime verification is reliable** - `isinstance()` check is definitive
-- ✅ **Clear plugin lineage** - can trace all plugins via inheritance tree
-- ✅ **IDE/Type checker support** - inheritance is explicit in code
-- ✅ **Security by default** - opt-in, not opt-out
+**Prevents**: Accidental plugin compliance via duck typing
 
-### Implementation Plan
+**See**: ADR-004 for full details and implementation plan
 
-**Phase 0: Convert BasePlugin from Protocol to ABC** (BREAKING CHANGE - Pre-1.0 OK) (45 min)
-- [ ] Update `src/elspeth/core/base/protocols.py`:
-  - Change `class BasePlugin(Protocol)` → `class BasePlugin(ABC)`
-  - Add `@abstractmethod` decorators to `get_security_level()` and `validate_can_operate_at_level()`
-  - Remove `@runtime_checkable` decorator (not needed for ABC)
-- [ ] Update all existing plugins to explicitly inherit `BasePlugin`:
-  - Datasources: `class MyDatasource(BasePlugin)`
-  - Sinks: `class MySink(BasePlugin)`
-  - LLM clients: `class MyLLMClient(BasePlugin)`
-  - Middleware: `class MyMiddleware(BasePlugin)`
-- [ ] Run full test suite to verify no regressions (expect test failures until all plugins updated)
-- [ ] Update type hints from `BasePlugin` protocol to `BasePlugin` ABC
+### Layer 2: Central Registry
 
-**Phase 1: Core Infrastructure** (30 min)
-- [ ] Create `src/elspeth/core/base/plugin_types.py` with `PLUGIN_TYPE_REGISTRY`
-- [ ] Create `collect_all_plugins(runner)` helper function
-- [ ] Update `suite_runner.py` to use helper instead of manual enumeration
-- [ ] Verify `isinstance(plugin, BasePlugin)` checks work correctly
+**Mechanism**: `PLUGIN_TYPE_REGISTRY` lists all plugin attribute names with cardinality
 
-**Phase 2: Test Enforcement** (20 min)
-- [ ] Create `tests/test_plugin_registry.py` with `test_plugin_registry_complete()`
-- [ ] Add test verifying accidental plugins are rejected:
-  ```python
-  def test_accidental_plugin_rejected():
-      """Verify classes with correct methods but no inheritance are NOT plugins."""
-      class AccidentalPlugin:
-          def get_security_level(self): return SecurityLevel.UNOFFICIAL
-          def validate_can_operate_at_level(self, level): pass
+```python
+# core/base/plugin_types.py
+PLUGIN_TYPE_REGISTRY = {
+    "llm_client": {"type": "singleton", "protocol": "LLMClient"},
+    "llm_middlewares": {"type": "list", "protocol": "LLMMiddleware"},
+    "row_plugins": {"type": "list", "protocol": "RowExperimentPlugin"},
+    "aggregator_plugins": {"type": "list", "protocol": "AggregationExperimentPlugin"},
+    "validation_plugins": {"type": "list", "protocol": "ValidationPlugin"},
+    "early_stop_plugins": {"type": "list", "protocol": "EarlyStopPlugin"},
+}
 
-      plugin = AccidentalPlugin()
-      assert not isinstance(plugin, BasePlugin)  # ✅ Rejected
-  ```
-- [ ] Add to CI as critical security test (cannot skip)
+def collect_all_plugins(runner) -> list[BasePlugin]:
+    """Collect all plugins using registry (handles both singletons and lists)."""
+    plugins = []
+    for attr_name, config in PLUGIN_TYPE_REGISTRY.items():
+        attr = getattr(runner, attr_name, None)
+        if attr is None:
+            continue
 
-**Phase 3: Documentation** (15 min)
-- [ ] Update developer guide with "Adding a New Plugin Type" section
-- [ ] Document nominal typing requirement in CONTRIBUTING.md
-- [ ] Update plugin development guide showing inheritance requirement
-- [ ] Update this ADR with implementation notes
+        if config["type"] == "singleton":
+            # Singleton plugin (e.g., llm_client)
+            if isinstance(attr, BasePlugin):
+                plugins.append(attr)
+        elif config["type"] == "list":
+            # List of plugins (e.g., llm_middlewares, row_plugins)
+            plugins.extend([p for p in attr if isinstance(p, BasePlugin)])
 
-**Total Effort**: ~1.5-2 hours (including BasePlugin migration)
+    return plugins
+```
 
-**Migration Risk**: LOW (pre-1.0, no external plugins yet)
+**Prevents**: Forgetting to collect new plugin types (both singletons and lists)
+
+### Layer 3: Test Enforcement
+
+**Mechanism**: Test verifies registry completeness (including singleton plugins)
+
+```python
+# tests/test_plugin_registry.py
+def test_plugin_registry_complete():
+    """SECURITY: Verify all plugin attributes are registered (lists AND singletons)."""
+    from typing import get_type_hints
+
+    # Get all plugin-related attributes from ExperimentRunner
+    runner_attrs = [
+        a for a in dir(ExperimentRunner)
+        if (a.endswith('_plugins') or a.endswith('_middlewares') or a.endswith('_client'))
+        and not a.startswith('_')
+    ]
+
+    registered = set(PLUGIN_TYPE_REGISTRY.keys())
+    missing = set(runner_attrs) - registered
+
+    assert not missing, (
+        f"SECURITY: {missing} exist in ExperimentRunner but NOT in registry. "
+        f"Will bypass ADR-002 validation. Add to plugin_types.py with correct cardinality "
+        f"(singleton or list)."
+    )
+
+def test_plugin_registry_cardinality_correct():
+    """SECURITY: Verify registry cardinality matches actual attribute types."""
+    runner = ExperimentRunner(...)  # Mock/fixture
+
+    for attr_name, config in PLUGIN_TYPE_REGISTRY.items():
+        attr = getattr(runner, attr_name, None)
+        if attr is None:
+            continue
+
+        if config["type"] == "singleton":
+            assert not isinstance(attr, list), (
+                f"Registry declares {attr_name} as singleton but it's a list!"
+            )
+        elif config["type"] == "list":
+            assert isinstance(attr, list), (
+                f"Registry declares {attr_name} as list but it's a singleton!"
+            )
+```
+
+**Prevents**: Registry falling out of sync with ExperimentRunner (both cardinality and completeness)
 
 ---
 
-## Defense in Depth - Three Layers
+## Defense Matrix
 
-This ADR implements **three independent security layers** that work together:
+| Failure Mode | Layer 1 (ABC) | Layer 2 (Registry) | Layer 3 (Test) | Outcome |
+|--------------|---------------|-------------------|----------------|---------|
+| Accidental class with matching methods | ✅ **CATCHES** | - | - | Rejected (no inheritance) |
+| New plugin type, forgot to register | - | ❌ Misses | ✅ **CATCHES** | Test fails |
+| New plugin type, forgot both | ✅ **CATCHES** | ❌ Misses | ✅ **CATCHES** | Test fails + rejected |
+| Malicious plugin without inheritance | ✅ **CATCHES** | - | - | Rejected |
+| Correct implementation | ✅ Passes | ✅ Passes | ✅ Passes | Works ✅ |
 
-### Layer 1: Nominal Typing (BasePlugin ABC)
-**Prevents**: Accidental plugin compliance via duck typing
-**How**: Classes must explicitly inherit `class MyPlugin(BasePlugin)`
-**Catches**: Developer accidentally creates class with right methods
+**Result**: No single point of failure. Multiple independent defenses.
 
-**Example Prevention**:
-```python
-# This won't be treated as a plugin (good!)
-class AccidentalHelper:
-    def get_security_level(self): return SecurityLevel.UNOFFICIAL
-    def validate_can_operate_at_level(self, level): pass
+---
 
-isinstance(AccidentalHelper(), BasePlugin)  # False ✅
-```
+## Swiss Cheese Model - Additional Hardening
 
-### Layer 2: Plugin Type Registry
-**Prevents**: Forgetting to collect new plugin types in security validation
-**How**: Central `PLUGIN_TYPE_REGISTRY` lists all plugin attribute names
-**Catches**: Developer adds `preprocessing_plugins` to ExperimentRunner but forgets to collect it
+**Optional**: Four additional measures to eliminate remaining "wiggle room":
 
-**Example Prevention**:
-```python
-# Developer adds new plugin type to ExperimentRunner
-class ExperimentRunner:
-    preprocessing_plugins: list[PreprocessingPlugin] | None = None  # NEW
+| Hardening | Closes Hole | Enforcement | Effort | Priority |
+|-----------|-------------|-------------|--------|----------|
+| **H1: MyPy Type Aliases** | Layer 1 (forgot to inherit) | `mypy --strict` in CI | 15 min | HIGH |
+| **H2: Pre-Commit Hook** | Layer 3 (didn't run test) | Hook runs `test_plugin_registry_complete()` | 10 min | HIGH |
+| **H3: Auto-Generated Registry** | Layer 2 (forgot to register) | Generate from `ExperimentRunner` type hints | 30 min | MEDIUM |
+| **H4: Ruff Custom Lint** | Layer 1 (forgot to inherit) | Custom rule detects missing `BasePlugin` | 45 min | LOW |
 
-# suite_runner.py uses registry - automatically includes it
-plugins = collect_all_plugins(runner)  # Uses PLUGIN_TYPE_REGISTRY
-# If developer forgot to add to registry, test catches it (Layer 3)
-```
+**Total Additional Effort**: ~1-1.5 hours
 
-### Layer 3: Test Enforcement
-**Prevents**: Registry falling out of sync with ExperimentRunner
-**How**: Test compares `PLUGIN_TYPE_REGISTRY` with actual `*_plugins` attributes
-**Catches**: Developer adds plugin attribute but forgets to register it
+**With Hardening**: Developer would need to bypass MyPy + Ruff + pre-commit + CI (requires admin) = obvious malicious intent
 
-**Example Prevention**:
-```python
-def test_plugin_registry_complete():
-    """Fail if new plugin types exist but aren't registered."""
-    runner_attrs = [a for a in dir(ExperimentRunner)
-                    if a.endswith('_plugins') or a.endswith('_middlewares')]
-    registered = set(PLUGIN_TYPE_REGISTRY.keys())
-
-    missing = set(runner_attrs) - registered
-    assert not missing, f"SECURITY: {missing} not in registry!"
-# Test FAILS if preprocessing_plugins added but not registered ✅
-```
+**See**: Appendix A for implementation details
 
 ---
 
@@ -409,73 +209,177 @@ def test_plugin_registry_complete():
 ### Positive
 
 - ✅ **Defense in Depth**: Three independent layers catch different failure modes
-- ✅ **Cannot Accidentally Bypass**: Must explicitly inherit BasePlugin AND be registered
-- ✅ **Fail-Loud**: Test failure alerts developers immediately
-- ✅ **Auditability**: Security team can review registry in one file
-- ✅ **Type Safety**: ABC provides compile-time checking (MyPy)
-- ✅ **Runtime Safety**: isinstance() checks are reliable
-- ✅ **Documentation**: Clear process for adding plugin types
+- ✅ **Fail-Loud**: Test failure alerts developers immediately (no silent bypass)
+- ✅ **Auditability**: Security team reviews registry in one file
+- ✅ **Type Safety**: ABC + MyPy provide compile-time checking
+- ✅ **Runtime Safety**: `isinstance()` checks are reliable
+- ✅ **Clear Process**: Developers know exactly what to do
 
 ### Negative
 
-- ⚠️ **Breaking Change**: Existing code must add `(BasePlugin)` inheritance
-- ⚠️ **Manual Process**: Still requires developer to update registry (mitigated by test)
+- ⚠️ **Breaking Change**: Existing code must add `(BasePlugin)` inheritance (see ADR-004)
+- ⚠️ **Manual Step**: Still requires updating registry (mitigated by test enforcement)
 - ⚠️ **Complexity**: Three layers to understand (justified by security criticality)
 
-### Why All Three Layers?
+### Neutral
 
-| Scenario | Layer 1 | Layer 2 | Layer 3 | Outcome |
-|----------|---------|---------|---------|---------|
-| Accidental class with right methods | ✅ CATCHES | - | - | Rejected (no inheritance) |
-| New plugin type, forgot to register | - | ❌ MISSES | ✅ CATCHES | Test fails |
-| New plugin type, forgot both | ✅ CATCHES | ❌ MISSES | ✅ CATCHES | Test fails + no inheritance |
-| Malicious plugin without inheritance | ✅ CATCHES | - | - | Rejected (no inheritance) |
-| Well-meaning dev adds plugin correctly | ✅ PASSES | ✅ PASSES | ✅ PASSES | Works correctly |
+- ➡️ **Pre-1.0 Only**: Breaking changes acceptable now, not post-1.0
+- ➡️ **One-Time Cost**: Migration is one-time, ongoing benefit
 
-**Result**: No single point of failure. Each layer provides independent protection.
+---
 
-## Swiss Cheese Model - Closing the Gaps
+## Implementation Plan
 
-**Concern**: Three-layer defense still has "holes" that could align (Swiss Cheese Model):
+### Core Implementation (~1.5-2 hours)
 
+**Phase 0: BasePlugin Migration (45 min)** - See ADR-004
+- Convert `BasePlugin` Protocol → ABC
+- Update all existing plugins to inherit explicitly
+- Update type hints
+
+**Phase 1: Registry Infrastructure (30 min)**
+- Create `src/elspeth/core/base/plugin_types.py` with `PLUGIN_TYPE_REGISTRY`
+- Create `collect_all_plugins(runner)` helper
+- Update `suite_runner.py` to use helper
+
+**Phase 2: Test Enforcement (20 min)**
+- Create `tests/test_plugin_registry.py` with `test_plugin_registry_complete()`
+- Add test for accidental plugin rejection
+- Add to CI as critical security test
+
+**Phase 3: Documentation (15 min)**
+- Update developer guide with "Adding New Plugin Type" workflow
+- Document nominal typing requirement
+- Update CERTIFICATION_EVIDENCE.md
+
+**Migration Risk**: LOW (pre-1.0, no external plugins)
+
+**See**: Appendix B for detailed checklist
+
+### Implementation Risks
+
+| Risk | Likelihood | Impact | Mitigation |
+|------|-----------|--------|------------|
+| Developer ignores test failure | Low | High | Make test part of CI, cannot merge with failure |
+| Registry falls out of sync | Low | High | Test catches this automatically |
+| Performance of reflection in test | Low | Low | Test only runs once during suite, acceptable |
+| False positive (non-plugin attribute ends with `_plugins`) | Medium | Low | Test can filter by type hints or manual exclusion list |
+
+---
+
+## Developer Workflow
+
+### Adding a New Plugin Type
+
+```python
+# 1. Add to ExperimentRunner
+class ExperimentRunner:
+    preprocessing_plugins: list[PreprocessingPlugin] | None = None  # NEW
+
+# 2. Add to registry (test will catch if forgotten)
+PLUGIN_TYPE_REGISTRY = {
+    "preprocessing_plugins": "PreprocessingPlugin",  # ← Add here
+    # ...existing entries
+}
+
+# 3. Run tests
+$ pytest tests/test_plugin_registry.py
+# ✅ Passes if complete, ❌ fails with clear error if missing
 ```
-Layer 1 (ABC):     Developer forgets to inherit     🕳️
-Layer 2 (Registry): Developer forgets to register    🕳️
-Layer 3 (Test):    Developer doesn't run tests       🕳️
-                   ═════════════════════════════════
-                   All three align → Bypass possible 💥
+
+**If Step 2 Forgotten**:
+```
+SECURITY: Plugin types {'preprocessing_plugins'} exist in ExperimentRunner
+but are NOT registered in PLUGIN_TYPE_REGISTRY. This means they will bypass
+ADR-002 security validation. Add them to core/base/plugin_types.py
 ```
 
-### Additional Hardening (Eliminate Wiggle Room)
+---
 
-**H1: Static Type Checking (Close Layer 1 Hole)**
+## Compliance and Certification
 
-Use MyPy strict mode to **require** BasePlugin inheritance for plugin types:
+**ADR-002 Impact**: Strengthens security guarantee by:
+1. Ensuring ALL plugin types included in minimum clearance envelope
+2. Preventing future bypass vulnerabilities
+3. Making security validation auditable
+
+**Certification Requirements**:
+- [ ] Security review approval (new security control)
+- [ ] Update CERTIFICATION_EVIDENCE.md with registry verification
+- [ ] Add to THREAT_MODEL.md as defense for T1 (Classification Breach)
+
+**Audit Trail**:
+- Registry: `src/elspeth/core/base/plugin_types.py`
+- Test: `tests/test_plugin_registry.py::test_plugin_registry_complete`
+- Incident: Commit 46faef7 (Copilot P1 finding)
+
+---
+
+## References
+
+- **ADR-002**: Suite-level security enforcement
+- **ADR-004**: Mandatory BasePlugin inheritance (nominal typing)
+- **Incident**: Copilot P1 finding (commit 46faef7) - Missing 4 plugin types
+- **THREAT_MODEL.md**: T1 - Classification Breach prevention
+- **CERTIFICATION_EVIDENCE.md**: Security Invariant I4
+- **Python ABC**: https://docs.python.org/3/library/abc.html
+
+---
+
+## Decision Review
+
+**Review Date**: TBD (6 months post-implementation)
+
+**Success Criteria**:
+- [ ] Zero incidents of plugin types bypassing validation
+- [ ] Test catches all new plugin types
+- [ ] Developer feedback positive (clear process)
+- [ ] No security regressions
+
+---
+
+## Appendix A: Alternative Options Considered
+
+### Option 1: Central Registry (Manual Only)
+
+**Pros**: Simple, explicit, easy to audit
+**Cons**: Still manual, no compile-time enforcement
+
+### Option 2: Introspection with Naming Convention
+
+**Pros**: Self-healing, zero maintenance
+**Cons**: "Magic" behavior, could pick up unintended attributes
+
+### Option 3: Protocol with Required Method
+
+**Pros**: Explicit, type-checked
+**Cons**: Invasive to ExperimentRunner, still manual enumeration
+
+**Decision**: Option 4 (Hybrid) chosen for balance of explicitness and enforcement
+
+---
+
+## Appendix B: Hardening Implementation Details
+
+### H1: MyPy Type Aliases
 
 ```python
 # core/base/plugin_types.py
 from typing import TypeAlias
 
-# Type aliases for plugin lists - MyPy will enforce these
-RowPluginList: TypeAlias = list[BasePlugin]  # Not list[Protocol]
+RowPluginList: TypeAlias = list[BasePlugin]
 AggregatorPluginList: TypeAlias = list[BasePlugin]
 
-# ExperimentRunner type hints
+# ExperimentRunner
 class ExperimentRunner:
-    row_plugins: RowPluginList | None = None
-    aggregator_plugins: AggregatorPluginList | None = None
-    # MyPy error if plugin doesn't inherit BasePlugin!
+    row_plugins: RowPluginList | None = None  # MyPy enforces BasePlugin
 ```
 
-**Enforcement**: `mypy --strict` in CI (already present)
-
-**Wiggle Room Eliminated**: Cannot use plugin without BasePlugin inheritance (MyPy fails)
+**Enforcement**: `mypy --strict` (already in CI)
 
 ---
 
-**H2: Pre-Commit Hook (Close Layer 3 Hole)**
-
-Add mandatory pre-commit hook that runs test_plugin_registry_complete():
+### H2: Pre-Commit Hook
 
 ```yaml
 # .pre-commit-config.yaml
@@ -487,130 +391,68 @@ repos:
         entry: pytest tests/test_plugin_registry.py::test_plugin_registry_complete -v
         language: system
         always_run: true
-        pass_filenames: false
 ```
 
-**Enforcement**: Cannot commit if registry incomplete (hook fails)
-
-**Wiggle Room Eliminated**: Developer cannot bypass test (pre-commit runs automatically)
+**Enforcement**: Cannot commit if registry incomplete
 
 ---
 
-**H3: Type-Driven Registry (Close Layer 2 Hole)**
-
-Auto-generate registry from ExperimentRunner type annotations:
+### H3: Auto-Generated Registry
 
 ```python
-# core/base/plugin_types.py (GENERATED - DO NOT EDIT)
+# core/base/plugin_types.py
 from typing import get_type_hints
-from elspeth.core.experiments.runner import ExperimentRunner
 
 def _generate_registry() -> dict[str, str]:
-    """Auto-generate plugin registry from ExperimentRunner type hints."""
+    """Auto-generate registry from ExperimentRunner type hints."""
     hints = get_type_hints(ExperimentRunner)
-    registry = {}
-
-    for attr_name, hint in hints.items():
-        if attr_name.endswith('_plugins') or attr_name.endswith('_middlewares'):
-            # Extract inner type from list[T] | None
-            inner_type = _extract_list_type(hint)
-            registry[attr_name] = inner_type.__name__
-
-    return registry
+    return {
+        attr: _extract_type_name(hint)
+        for attr, hint in hints.items()
+        if attr.endswith('_plugins') or attr.endswith('_middlewares')
+    }
 
 PLUGIN_TYPE_REGISTRY = _generate_registry()  # Auto-generated!
 ```
 
-**Enforcement**: Registry is derived from source of truth (type annotations)
-
-**Wiggle Room Eliminated**: Cannot forget to register (automatic generation)
+**Enforcement**: Source of truth is type annotations (cannot forget)
 
 ---
 
-**H4: Ruff Custom Lint Rule (Close Layer 1 Hole - Belt + Suspenders)**
-
-Add custom lint rule detecting plugins without BasePlugin:
+### H4: Ruff Custom Lint Rule
 
 ```python
 # .ruff_plugins/check_plugin_inheritance.py
 def check_plugin_inheritance(node):
-    """Lint rule: Classes in *_plugins lists must inherit BasePlugin."""
+    """Lint: Classes in *_plugins must inherit BasePlugin."""
     if is_plugin_class(node) and not inherits_from(node, "BasePlugin"):
         raise LintError(
-            f"Plugin {node.name} must inherit from BasePlugin "
-            f"(ADR-003 security requirement)"
+            f"Plugin {node.name} must inherit BasePlugin (ADR-003)"
         )
 ```
 
-**Enforcement**: Ruff fails on commit (already in CI)
-
-**Wiggle Room Eliminated**: Linter catches missing inheritance before commit
+**Enforcement**: Ruff in CI (already present)
 
 ---
 
-### Hardened Defense Matrix
+### Hardening Effort Summary
 
-| Layer | Original Hole | Hardening | Wiggle Room Remaining |
-|-------|--------------|-----------|----------------------|
-| **Layer 1 (ABC)** | Forgot to inherit | H1: MyPy strict + H4: Ruff lint | ❌ **CLOSED** - Cannot compile |
-| **Layer 2 (Registry)** | Forgot to register | H3: Auto-generation | ❌ **CLOSED** - Cannot forget |
-| **Layer 3 (Test)** | Didn't run test | H2: Pre-commit hook | ❌ **CLOSED** - Cannot commit without |
-
-**Result**: Developer would need to:
-1. Bypass MyPy strict mode (`# type: ignore`)
-2. Bypass Ruff linting (`# noqa`)
-3. Bypass pre-commit hook (`--no-verify`)
-4. Bypass CI checks (requires admin rights)
-
-**At this point**: Obvious malicious intent, not accident
+| Phase | Time | Cumulative |
+|-------|------|------------|
+| Core (3 layers) | 1.5-2h | 1.5-2h |
+| H1: MyPy type aliases | 15 min | 2-2.25h |
+| H2: Pre-commit hook | 10 min | 2-2.5h |
+| H3: Auto-generation | 30 min | 2.5-3h |
+| H4: Ruff lint rule | 45 min | 3-3.5h |
 
 ---
 
-### Implementation Effort (Additional Hardening)
+## Appendix C: Code Examples
 
-| Hardening | Effort | Priority |
-|-----------|--------|----------|
-| H1: MyPy strict type aliases | 15 min | HIGH (free enforcement) |
-| H2: Pre-commit hook | 10 min | HIGH (cannot bypass locally) |
-| H3: Auto-generated registry | 30 min | MEDIUM (eliminates manual step) |
-| H4: Ruff custom lint rule | 45 min | LOW (belt + suspenders) |
-
-**Total Additional**: ~1-1.5 hours
-**Combined Total**: ~3-3.5 hours (including original ADR-003)
-
----
-
-### Risks
-
-| Risk | Likelihood | Impact | Mitigation |
-|------|-----------|--------|------------|
-| Developer ignores test failure | Low | High | Make test part of CI, cannot merge with failure |
-| Registry falls out of sync | Low | High | Test catches this automatically |
-| Performance of reflection in test | Low | Low | Test only runs once during suite, acceptable |
-| False positive (non-plugin attribute ends with `_plugins`) | Medium | Low | Test can filter by type hints or manual exclusion list |
-
----
-
-## Compliance and Certification
-
-**ADR-002 Impact**: This ADR directly supports ADR-002 security guarantee by:
-1. Ensuring ALL plugin types are included in minimum clearance envelope
-2. Preventing future bypass vulnerabilities
-3. Making security validation auditable
-
-**Certification Requirements**:
-- [ ] Security review approval (new security control)
-- [ ] Update CERTIFICATION_EVIDENCE.md with plugin registry verification step
-- [ ] Add to threat model as defense for T1 (Classification Breach)
-
----
-
-## Examples
-
-### Before (Fragile - Manual Enumeration)
+### Before: Manual Enumeration (Fragile)
 
 ```python
-# suite_runner.py (BEFORE - P1 vulnerability window)
+# suite_runner.py (BEFORE - P1 vulnerability)
 def _validate_experiment_security(self, runner, sinks):
     plugins = []
 
@@ -622,30 +464,38 @@ def _validate_experiment_security(self, runner, sinks):
     if llm_client and isinstance(llm_client, BasePlugin):
         plugins.append(llm_client)
 
-    # ❌ EASY TO FORGET NEW PLUGIN TYPES
-    # ❌ NO ENFORCEMENT IF FORGOTTEN
-    # ❌ SILENT SECURITY BYPASS
+    # ❌ FRAGILE: Easy to forget new plugin types
+    # ❌ NO ENFORCEMENT
+    # ❌ SILENT BYPASS
 ```
 
-### After (Robust - Registry + Test Enforcement)
+### After: Registry-Based (Robust)
 
 ```python
 # core/base/plugin_types.py
 PLUGIN_TYPE_REGISTRY = {
-    "row_plugins": "RowExperimentPlugin",
-    "aggregator_plugins": "AggregationExperimentPlugin",
-    "validation_plugins": "ValidationPlugin",
-    "early_stop_plugins": "EarlyStopPlugin",
-    "llm_middlewares": "LLMMiddleware",
+    "llm_client": {"type": "singleton", "protocol": "LLMClient"},  # ✓ Singleton handling
+    "llm_middlewares": {"type": "list", "protocol": "LLMMiddleware"},
+    "row_plugins": {"type": "list", "protocol": "RowExperimentPlugin"},
+    "aggregator_plugins": {"type": "list", "protocol": "AggregationExperimentPlugin"},
+    "validation_plugins": {"type": "list", "protocol": "ValidationPlugin"},
+    "early_stop_plugins": {"type": "list", "protocol": "EarlyStopPlugin"},
 }
 
 def collect_all_plugins(runner) -> list[BasePlugin]:
-    """Collect all plugins from runner using registry."""
+    """Collect all plugins using registry (handles both singletons and lists)."""
     plugins = []
-    for attr_name in PLUGIN_TYPE_REGISTRY.keys():
+    for attr_name, config in PLUGIN_TYPE_REGISTRY.items():
         attr = getattr(runner, attr_name, None)
-        if isinstance(attr, list):
+        if attr is None:
+            continue
+
+        if config["type"] == "singleton":
+            if isinstance(attr, BasePlugin):
+                plugins.append(attr)  # ✓ Singleton added
+        elif config["type"] == "list":
             plugins.extend([p for p in attr if isinstance(p, BasePlugin)])
+
     return plugins
 
 # suite_runner.py (AFTER)
@@ -654,137 +504,46 @@ from elspeth.core.base.plugin_types import collect_all_plugins
 def _validate_experiment_security(self, runner, sinks):
     plugins = collect_all_plugins(runner)  # ✅ Registry ensures completeness
 
-    # Datasource and sinks handled separately (not in runner)
+    # Datasource and sinks handled separately
     if self.datasource and isinstance(self.datasource, BasePlugin):
         plugins.append(self.datasource)
     for sink in sinks:
         if isinstance(sink, BasePlugin):
             plugins.append(sink)
 
-    # Rest of validation logic...
+    # Rest of validation...
 ```
 
-### Developer Workflow: Adding New Plugin Type
+### Layer 1 Example: Nominal Typing
 
 ```python
-# 1. Add to ExperimentRunner
-class ExperimentRunner:
-    preprocessing_plugins: list[PreprocessingPlugin] | None = None  # NEW
-
-# 2. Add to registry (ENFORCED BY TEST)
-# core/base/plugin_types.py
-PLUGIN_TYPE_REGISTRY = {
-    "preprocessing_plugins": "PreprocessingPlugin",  # ← Add here
-    # ...existing entries
-}
-
-# 3. Run tests
-$ pytest tests/test_plugin_registry.py
-# ✅ Test passes - registry is complete
-
-# 4. (If forgotten step 2) Test fails with clear error:
-"""
-SECURITY: Plugin types {'preprocessing_plugins'} exist in ExperimentRunner
-but are NOT registered in PLUGIN_TYPE_REGISTRY. This means they will bypass
-ADR-002 security validation. Add them to core/base/plugin_types.py
-and update ADR-003.
-"""
-```
-
----
-
-## Current State Assessment
-
-### BasePlugin Definition (protocols.py:62-120)
-
-**Current** (Structural Typing - TOO LOOSE):
-```python
-@runtime_checkable
-class BasePlugin(Protocol):
-    """Base protocol defining security requirements for all plugins."""
-
+# ❌ REJECTED: No inheritance (accidental compliance)
+class AccidentalHelper:
     def get_security_level(self) -> SecurityLevel:
-        raise NotImplementedError
+        return SecurityLevel.UNOFFICIAL
+    def validate_can_operate_at_level(self, level: SecurityLevel) -> None:
+        pass
 
-    def validate_can_operate_at_level(self, operating_level: SecurityLevel) -> None:
-        raise NotImplementedError
-```
+helper = AccidentalHelper()
+isinstance(helper, BasePlugin)  # False - rejected ✅
 
-**Problem**: Any class with these two methods is considered a `BasePlugin` via duck typing. This allows accidental compliance.
-
-**Target** (Nominal Typing - ENFORCED):
-```python
-from abc import ABC, abstractmethod
-
-class BasePlugin(ABC):
-    """Base class for ALL plugins that process data.
-
-    SECURITY: All plugins MUST explicitly inherit from this class.
-    Inheritance is REQUIRED, not optional.
-    """
-
-    @abstractmethod
+# ✅ ACCEPTED: Explicit inheritance
+class SecretPlugin(BasePlugin):
     def get_security_level(self) -> SecurityLevel:
-        """Return the minimum security level this plugin requires."""
-        ...
+        return SecurityLevel.SECRET
+    def validate_can_operate_at_level(self, level: SecurityLevel) -> None:
+        if level < SecurityLevel.SECRET:
+            raise SecurityValidationError(...)
 
-    @abstractmethod
-    def validate_can_operate_at_level(self, operating_level: SecurityLevel) -> None:
-        """Validate this plugin can operate at the given security level."""
-        ...
+plugin = SecretPlugin()
+isinstance(plugin, BasePlugin)  # True - accepted ✅
 ```
-
-### Plugin Collection (suite_runner.py:593-639)
-
-**Current** (Manual Enumeration - FRAGILE):
-```python
-plugins = []
-plugins.append(datasource)
-plugins.append(llm_client)
-plugins.extend(llm_middlewares)
-plugins.extend(row_plugins)  # Added in commit 46faef7 (after P1 finding)
-plugins.extend(aggregator_plugins)
-plugins.extend(validation_plugins)
-plugins.extend(early_stop_plugins)
-# ⚠️ Easy to forget new plugin types
-```
-
-**Target** (Registry-Based - ROBUST):
-```python
-from elspeth.core.base.plugin_types import collect_all_plugins
-
-plugins = collect_all_plugins(runner)  # Uses PLUGIN_TYPE_REGISTRY
-plugins.append(datasource)  # Datasource not in runner
-plugins.extend(sinks)       # Sinks passed separately
-# ✅ Registry ensures completeness
-# ✅ Test enforces registration
-```
-
----
-
-## References
-
-- **ADR-002**: Suite-level security enforcement
-- **Incident**: Copilot P1 finding (commit 46faef7) - Missing row/aggregator/validation/early-stop plugins
-- **THREAT_MODEL.md**: T1 - Classification Breach prevention
-- **CERTIFICATION_EVIDENCE.md**: Security Invariant I4 (All Plugins Accept Envelope OR Job Fails)
-- **Python ABC Documentation**: https://docs.python.org/3/library/abc.html
-
----
-
-## Decision Review
-
-**Review Date**: TBD (6 months after implementation)
-**Success Criteria**:
-- [ ] Zero incidents of plugin types bypassing validation
-- [ ] Test catches all new plugin types
-- [ ] Developer feedback positive (process is clear)
 
 ---
 
 **Author**: Claude Code
 **Approvers**: [Pending Security Team Review]
-**Implementation**: [Pending]
+**Implementation**: [Pending ADR-004 approval]
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
 
