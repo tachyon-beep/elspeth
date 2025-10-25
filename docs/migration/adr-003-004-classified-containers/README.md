@@ -620,11 +620,55 @@ All work is internal to Elspeth codebase.
 
 ---
 
+## ⚠️ IMPORTANT: Follow-On Work After ADR-003/004
+
+**DO NOT RETURN TO COMPLEX FUNCTION REFACTORING YET**
+
+After completing this migration, the **immediate next priority** is:
+
+### 🔴 ADR-005: Security-Critical Exception Policy (12-16 hours)
+
+**Location**: `docs/architecture/decisions/005-security-critical-exception-policy.md`
+
+**Why This Is Next**:
+1. **Security Hardening Window** - ADR-003/004 delivers secure containers, but lacks fail-loud invariants
+2. **Code is Fresh** - Team context on `SecureDataFrame` is still warm
+3. **Natural Integration Point** - Invariant checks belong in `SecureDataFrame` methods we just migrated
+4. **Prevents Regression** - Without fail-loud policy, future code changes could accidentally bypass security checks
+
+**What ADR-005 Delivers**:
+- `SecurityCriticalError` exception for invariant violations (classification downgrade, metadata tampering)
+- Emergency logging infrastructure (stderr + audit log + SIEM)
+- CI/pre-commit policy enforcement (blocks catching `SecurityCriticalError` in production code)
+- Fail-loud behavior for "impossible" security states
+
+**Effort**: 12-16 hours (phased rollout with feature flags)
+
+**Phases**:
+1. **Foundation** (Week 1) - Create exception class, emergency logging, CI enforcement
+2. **Integration** (Week 2) - Add invariant checks to `SecureDataFrame` with feature flags
+3. **Validation** (Week 3) - Mutation testing, load testing, team training
+4. **Rollout** (Week 4) - Enable in production, monitor for false positives
+
+**After ADR-005 Completion**: THEN return to complex function refactoring backlog
+
+### Why We Paused Refactoring for This
+
+During complex function refactoring work, we identified a **critical security gap**:
+- Current code uses catchable `SecurityValidationError` for BOTH expected validation failures AND impossible invariant violations
+- This creates risk of accidental catch blocks hiding security breaches
+- ADR-005 provides fail-loud exceptions that policy-enforce "never catch this"
+
+**Priority Justification**: Security > Code Quality (per ADR-001 Design Philosophy)
+
+---
+
 ## References
 
 ### Internal Documentation
 - **ADR-002**: Multi-Level Security Enforcement (`docs/architecture/decisions/002-security-architecture.md`)
 - **ADR-002-A**: Trusted Container Model (`docs/architecture/decisions/002-a-trusted-container-model.md`)
+- **ADR-005**: Security-Critical Exception Policy ⚠️ **FOLLOW-ON WORK** (`docs/architecture/decisions/005-security-critical-exception-policy.md`)
 - **Plugin Development Guide**: ADR-002-A patterns (`docs/guides/plugin-development-adr002a.md`)
 - **Threat Model**: ADR-002 security controls (`docs/security/adr-002-threat-model.md`)
 

@@ -36,6 +36,44 @@ When priorities conflict, the higher-ranked concern wins. For example:
 - Drop features that would break reproducibility (Integrity > Functionality)
 - Require additional authentication even if it impacts UX (Security > Usability)
 
+### Fail-Closed Principle (Security-First Enforcement)
+
+**Mandatory Requirement**: All security controls in Elspeth **MUST fail-closed** when the control itself is unavailable, degraded, or cannot be verified.
+
+**Definition**:
+- **Fail-closed** (secure): Deny the operation when security cannot be validated
+- **Fail-open** (insecure): Allow the operation when security cannot be validated
+
+**Policy**:
+When a security control cannot operate (missing dependencies, runtime limitations, verification failure):
+- ✅ **REQUIRED**: Raise an error and deny the operation (fail-closed)
+- ❌ **FORBIDDEN**: Log a warning and allow the operation (fail-open)
+
+**Rationale**:
+Fail-open behavior creates attack surfaces where adversaries can trigger control failures to bypass security. In classified data systems, allowing operations when security is unverifiable violates the Security-First principle (#1 priority).
+
+**Examples**:
+
+| Scenario | Fail-Open (Insecure) | Fail-Closed (Secure) |
+|----------|----------------------|----------------------|
+| Stack inspection unavailable | Allow frame creation | `SecurityValidationError` |
+| Authentication service down | Grant access | Deny access |
+| Encryption key not found | Store plaintext | Refuse to store |
+| Security level unknown | Assume UNOFFICIAL | Require explicit declaration |
+| Signature verification fails | Accept artifact | Reject artifact |
+
+**Implementation Requirements**:
+- All security validation functions MUST raise exceptions on failure (never return `False` or `None`)
+- Convenience fallbacks for security controls are FORBIDDEN (no "skip SSL verification" flags)
+- Feature flags for security controls FORBIDDEN in production (testing/development only)
+- Audit logging for attempted bypasses (capture security control failure attempts)
+
+**Reference Implementations**:
+- `classified_data.py:90-102` – Fail-closed when stack inspection unavailable (CVE-ADR-002-A-003 fix)
+- `path_guard.py` – Fail-closed when `allowed_base_path` missing (test_runner_characterization.py:378)
+
+**Related**: ADR-002 (MLS enforcement), ADR-002-A (Trusted container model)
+
 ## Consequences
 
 ### Benefits
@@ -76,5 +114,5 @@ When priorities conflict, the higher-ranked concern wins. For example:
 
 ---
 
-**Last Updated**: 2025-10-24
+**Last Updated**: 2025-10-25 (Added Fail-Closed Principle section)
 **Author(s)**: Architecture Team

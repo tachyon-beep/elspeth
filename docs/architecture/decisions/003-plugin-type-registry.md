@@ -1,6 +1,6 @@
 # ADR-003: Central Plugin Type Registry for Security Validation
 
-**Status**: PROPOSED
+**Status**: ACCEPTED
 **Date**: 2025-10-25
 **Deciders**: Security Team, Core Platform Team
 **Related**: ADR-002 (Suite-level security), ADR-004 (Mandatory BasePlugin inheritance)

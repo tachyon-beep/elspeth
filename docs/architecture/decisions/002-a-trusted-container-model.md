@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed (2025-10-25)
+Accepted (2025-10-25)
 
 Augments [ADR-002](002-security-architecture.md)
 

@@ -89,8 +89,17 @@ class ClassifiedDataFrame:
         # __post_init__ is called by __init__, which is called by the method we care about
         frame = inspect.currentframe()
         if frame is None:
-            # Cannot determine caller - allow (fail-open for edge cases)
-            return
+            # SECURITY: Fail-closed when stack inspection unavailable (CVE-ADR-002-A-003)
+            # Aligns with ADR-001 fail-closed principle
+            from elspeth.core.validation.base import SecurityValidationError
+
+            raise SecurityValidationError(
+                "Cannot verify caller identity - stack inspection is unavailable in this Python runtime. "
+                "ClassifiedDataFrame creation blocked for security. "
+                "This runtime may not support the required security controls. "
+                "Datasources must use ClassifiedDataFrame.create_from_datasource(). "
+                "Plugins must use with_uplifted_classification() or with_new_data()."
+            )
 
         # Check up to 5 frames up the stack for trusted callers
         current_frame = frame

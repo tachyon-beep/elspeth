@@ -46,8 +46,6 @@ coverage.json
 .mypy_cache/
 .ruff_cache/
 .vscode/
-.claude/
-
 
 # Translations
 *.mo
@@ -131,6 +129,8 @@ venv.bak/
 /artifacts/
 /scorecard-artifacts/
 /orchestration_packs/*/
+!/orchestration_packs/.gitkeep
+!/orchestration_packs/README.md
 /logs/
 !/logs/.gitkeep
 # Legacy reference material (tracked separately)
@@ -147,7 +147,6 @@ venv.bak/
 # MCP config files
 .mcp.json
 
-logs/
 audit_data/
 runlogs/
 gh_failed_logs/
@@ -159,3 +158,5 @@ audit.json
 
 # Agent instruction files (developer-local)
 AGENTS.md
+CLAUDE.md
+.claude/
