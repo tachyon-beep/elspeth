@@ -11,11 +11,15 @@
 
 ## Executive Summary
 
-**Phase 1 of ADR-002 implementation is COMPLETE.** All datasources (3/3) and sinks (14/14) have been successfully migrated to the BasePlugin Abstract Base Class, establishing the foundation for Bell-LaPadula Multi-Level Security (MLS) enforcement throughout the Elspeth platform.
+**Phase 1 of ADR-002 implementation is COMPLETE.** All datasources (4/4) and sinks (14/14) have been successfully migrated to the BasePlugin Abstract Base Class, establishing the foundation for Bell-LaPadula Multi-Level Security (MLS) enforcement throughout the Elspeth platform.
+
+**P0 Critical Fixes Applied (2025-10-26):** Two priority-zero vulnerabilities discovered and fixed before integration testing:
+1. Registry integration mismatch preventing datasource instantiation (TypeError on all CSV sources)
+2. BlobDataSource (Azure Storage, SECRET data) not migrated to BasePlugin in initial Phase 1.1
 
 **Migration Statistics:**
-- **Total Components Migrated**: 17/17 (100%)
-- **Datasources**: 3/3 (100%)
+- **Total Components Migrated**: 18/18 (100%)
+- **Datasources**: 4/4 (100%)
 - **Sinks**: 14/14 (100%)
 - **Integration Tests**: 8/8 passing
 - **Code Quality**: MyPy clean, Ruff clean
@@ -40,16 +44,22 @@ Migrate all datasources and result sinks to inherit from `BasePlugin` ABC, provi
 
 ### Phase 1.1: Datasources (COMPLETE) ✅
 
-**Completion Date**: 2025-10-25
-**Components Migrated**: 3
+**Completion Date**: 2025-10-26
+**Components Migrated**: 4
+**P0 Fixes Applied**: 2025-10-26
 
 | Component | Pattern | Status | Commit |
 |-----------|---------|--------|--------|
 | `BaseCSVDataSource` | Dataclass base | ✅ Complete | 5a063b4 |
 | `CSVLocalDataSource` | Dataclass inheritor | ✅ Complete | 5a063b4 |
 | `CSVBlobDataSource` | Dataclass inheritor | ✅ Complete | 5a063b4 |
+| `BlobDataSource` | Standard class | ✅ Complete | 7f8c036 (P0 fix) |
 
 **Key Achievement**: Single base class migration secured two child datasources automatically, demonstrating Security Bones Pattern effectiveness.
+
+**P0 Fixes** (2025-10-26):
+- **Registry Integration**: Updated factory functions to inject `security_level` from PluginContext into constructor kwargs (fixes instantiation TypeError)
+- **Missing Migration**: BlobDataSource (Azure Storage, handles SECRET data) migrated to BasePlugin inheritance
 
 ### Phase 1.2: Result Sinks (COMPLETE) ✅
 
@@ -273,6 +283,7 @@ Inheritance automatically secured child classes:
 ✅ All datasources and sinks declare mandatory `security_level`
 ✅ Components validate their own security level at construction
 ✅ Child plugins cannot downgrade parent security levels
+✅ Registry integration bridged (context → constructor injection)
 
 **What Phase 1 DID NOT ACHIEVE** (out of scope):
 ❌ Suite-level security computation across all components
@@ -280,6 +291,28 @@ Inheritance automatically secured child classes:
 ❌ Pipeline minimum security level enforcement
 
 **Rationale**: These are **Phase 2** requirements (orchestrator-level enforcement) documented in [adr-002-implementation-gap.md](./adr-002-implementation-gap.md).
+
+### P0 Fixes Applied (2025-10-26)
+
+**Issue 1: Registry Integration Mismatch**
+- **Problem**: `BasePluginRegistry.create()` stripped `security_level` before passing to factories, but migrated datasources require it in constructor → TypeError on instantiation
+- **Root Cause**: Context propagation pattern (registry) vs constructor validation pattern (BasePlugin) interface mismatch
+- **Fix**: Factory functions now inject `security_level` and `determinism_level` from PluginContext back into constructor kwargs
+- **Impact**: All datasource instantiation through registry now works correctly
+- **Files**: `src/elspeth/core/registries/datasource.py` (all 3 factory functions)
+
+**Issue 2: Incomplete Datasource Migration**
+- **Problem**: `BlobDataSource` (Azure Storage, handles classified data) was NOT migrated to BasePlugin in Phase 1.1
+- **Risk**: SECRET-level data sources had optional `security_level=None`, bypassing ADR-004 fail-fast enforcement
+- **Fix**: Migrated BlobDataSource to inherit from BasePlugin with mandatory security_level constructor parameter
+- **Impact**: Datasource count corrected from 3/3 to 4/4; all Azure Storage operations now enforce mandatory security levels
+- **Files**: `src/elspeth/plugins/nodes/sources/blob.py`
+
+**Verification**: Manual registry instantiation tests confirm:
+- ✅ local_csv datasource with OFFICIAL security
+- ✅ csv_blob datasource with PROTECTED security
+- ✅ azure_blob datasource with SECRET security
+- ✅ Correctly rejects datasources without security_level
 
 ### Remaining Work
 
