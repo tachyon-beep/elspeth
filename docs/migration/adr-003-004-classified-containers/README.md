@@ -7,9 +7,9 @@
 - **ADR-003** (Phases 1-5): SecureDataFrame adoption across all plugins
 - **ADR-004** (Phases 1-5): SecureData[T] generic wrapper for dicts/metadata
 
-**Total Estimated Effort**: 30-40 hours (4-5 days)
+**Total Estimated Effort**: 36-48 hours (5-6 days)
 - Terminology Rename (Phase 0): 12-16 hours (1.5-2 days, no deprecation shims needed)
-- Container Adoption (Phases 1-6): 18-24 hours (2.5-3 days, clean migration)
+- Container Adoption (Phases 1-6): 24-32 hours (3-4 days, includes BasePlugin migration)
 
 **Risk Level**: MEDIUM (ADR-003/004), LOW (Rename)
 **Confidence**: HIGH
@@ -30,9 +30,10 @@ This migration implements **universal adoption** of the ADR-002-A Trusted Contai
 - **Pre-1.0 Approach**: Clean cut-over, no deprecation shims (fix-on-fail)
 - **Why First**: ADR-003/004 implementation uses correct terminology from day one
 
-**Phases 1-6: Container Adoption** (18-24 hours, 2.5-3 days)
+**Phases 1-6: Container Adoption** (24-32 hours, 3-4 days)
 - Migrate all datasources, orchestrators, runners to use `SecureDataFrame`
 - Create generic `SecureData[T]` wrapper for dicts, metadata, middleware integration
+- **[NEW] Phase 1.5**: Add BasePlugin protocol compliance to all concrete plugins (CRITICAL for ADR-002 validation)
 - **Pre-1.0 Approach**: Direct migration, breaking changes acceptable
 - **Why After Rename**: Clean implementation without terminology churn
 
@@ -157,7 +158,7 @@ This folder contains all planning artifacts for the ADR-003+004 migration:
 
 ## Integrated Migration Timeline
 
-### Complete Migration: 6 Phases (30-40 hours, 4-5 days)
+### Complete Migration: 7 Phases (36-48 hours, 5-6 days)
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -170,6 +171,10 @@ This folder contains all planning artifacts for the ADR-003+004 migration:
 ├─────────────────────────────────────────────────────────────────┤
 │ PHASE 1: Infrastructure (2-3 hours)                            │
 │   Output: SecureData[T] generic wrapper                        │
+├─────────────────────────────────────────────────────────────────┤
+│ PHASE 1.5: BasePlugin Protocol Migration (4-6 hours) 🚨 NEW   │
+│   Output: All 26 plugins implement BasePlugin protocol         │
+│   CRITICAL: Enables ADR-002 validation (stops short-circuits)  │
 ├─────────────────────────────────────────────────────────────────┤
 │ PHASE 2: Datasource Migration (2 hours)                        │
 │   Output: 4 datasources return SecureDataFrame                 │
@@ -245,6 +250,78 @@ This folder contains all planning artifacts for the ADR-003+004 migration:
 - **NO public `wrap()` helper** - would allow classification laundering (CVE-ADR-002-A-003)
 - Write invariant tests (5+ core properties: immutability, uplifting, factory safety)
 - **Exit Criteria**: All new tests passing, MyPy clean, no wrap() in public API
+
+---
+
+### Phase 1.5: BasePlugin Protocol Migration (4-6 hours) 🔐
+
+**Objective**: Add BasePlugin compliance to all concrete plugins (CRITICAL - enables ADR-002 validation)
+
+**Background**: Current plugins store `security_level` as an attribute but don't implement the `BasePlugin` protocol. This causes ADR-002 validation to short-circuit (hasattr checks fail), allowing SECRET→UNOFFICIAL paths unchecked!
+
+**Scope** (26 plugin classes):
+- **4 datasources**: `BaseCSVDataSource`, `CSVLocalDataSource`, `CSVBlobDataSource`, `BlobDataSource`
+- **6 LLM clients**: `AzureOpenAIClient`, `OpenAIHTTPClient`, `MockLLMClient`, `StaticLLMClient`, + middleware wrappers
+- **16 sinks**: All implementations in `plugins/nodes/sinks/`
+- **Affected validation**: `_validate_experiment_security()` currently short-circuits on hasattr checks
+
+**Changes per plugin class:**
+
+1. **Add `get_security_level()` method**:
+   ```python
+   def get_security_level(self) -> SecurityLevel:
+       """Return the minimum security level this plugin requires (ADR-002 protocol)."""
+       return self.security_level
+   ```
+
+2. **Add `validate_can_operate_at_level()` method**:
+   ```python
+   def validate_can_operate_at_level(self, operating_level: SecurityLevel) -> None:
+       """Validate this plugin can operate at the given envelope level (ADR-002 start-time check).
+
+       Raises:
+           SecurityValidationError: If operating_level < required level
+       """
+       if operating_level < self.security_level:
+           from elspeth.core.validation.base import SecurityValidationError
+           raise SecurityValidationError(
+               f"{self.__class__.__name__} requires {self.security_level.name} "
+               f"clearance, but operating envelope is {operating_level.name}"
+           )
+   ```
+
+3. **Update class docstrings** to document BasePlugin compliance
+
+**Testing** (CRITICAL):
+```python
+# Test that validation ACTUALLY RUNS (not short-circuits)
+def test_secret_datasource_unofficial_sink_blocked():
+    """Verify ADR-002 validation catches mismatch (not short-circuits)."""
+    secret_ds = BaseCSVDataSource(..., security_level=SecurityLevel.SECRET)
+    unofficial_sink = CSVFileSink(..., security_level=SecurityLevel.UNOFFICIAL)
+
+    # MUST raise during _validate_experiment_security
+    with pytest.raises(SecurityValidationError, match="requires SECRET.*UNOFFICIAL"):
+        runner.run(experiment_with(datasource=secret_ds, sinks=[unofficial_sink]))
+```
+
+**Files to Update**:
+- `src/elspeth/plugins/nodes/sources/_csv_base.py` (BaseCSVDataSource)
+- `src/elspeth/plugins/nodes/sources/csv_local.py` (CSVLocalDataSource)
+- `src/elspeth/plugins/nodes/sources/csv_blob.py` (CSVBlobDataSource)
+- `src/elspeth/plugins/nodes/sources/blob.py` (BlobDataSource)
+- `src/elspeth/plugins/nodes/transforms/llm/*.py` (all LLM clients)
+- `src/elspeth/plugins/nodes/sinks/*.py` (all 16 sink implementations)
+
+**Exit Criteria**:
+- ✅ All 26 plugin classes have `get_security_level()` method
+- ✅ All 26 plugin classes have `validate_can_operate_at_level()` method
+- ✅ Integration test proves validation runs (SECRET→UNOFFICIAL blocked)
+- ✅ MyPy clean (BasePlugin protocol conformance verified)
+- ✅ **No more hasattr short-circuiting** in validation code
+
+**Why This Phase Is CRITICAL**:
+Without this, ADR-002 security validation **never runs** in production (hasattr checks short-circuit), allowing classified data to flow to unauthorized sinks! This is a P0 security blocker for the migration.
 
 ---
 
@@ -389,14 +466,18 @@ class SecureData[T]:
 
 **Rationale**: Pre-1.0 allows clean migration without backward compatibility. Migrate middleware directly to `SecureData[dict]` protocol.
 
-**Pattern**:
+**Pattern** (SAFE - uses factory from existing container):
 ```python
-# Direct migration (pre-1.0):
-secure_context = SecureData.wrap(context, security_level)
+# Direct migration (pre-1.0) - SECURITY: NO public wrap()!
+# Create SecureData[dict] from existing SecureDataFrame (maintains security level)
+secure_context = input_frame.create_secure_dict(context)
 secure_response = middleware_chain(secure_context)  # Middleware handles SecureData directly
+uplifted_context = secure_response.with_uplifted_security_level(middleware.get_security_level())
 ```
 
-**Benefits**: Simpler code (no unwrap/wrap shims), cleaner architecture, faster execution.
+**CRITICAL SECURITY NOTE**: There is **NO public `SecureData.wrap()` helper** - it would allow classification laundering (CVE-ADR-002-A-003). Only factory methods on `SecureDataFrame` can create new `SecureData[T]` instances.
+
+**Benefits**: Simpler code (no unwrap/wrap shims), cleaner architecture, faster execution, maintains security invariants.
 
 ---
 
@@ -552,24 +633,25 @@ All work is internal to Elspeth codebase.
 
 ## Timeline & Effort
 
-**Total Estimated Effort**: 25-35 hours (3-4 days) - **Reduced from 30-40 hours** (pre-1.0, no backward compatibility)
+**Total Estimated Effort**: 36-48 hours (5-6 days) - **Increased from 30-40 hours** (added Phase 1.5: BasePlugin protocol migration)
 
 **Breakdown by Migration**:
-- **Phase 0: Terminology Rename**: 10-14 hours (1-2 days, no deprecation shims)
-- **Phases 1-6: Container Adoption**: 15-21 hours (2 days, clean migration)
+- **Phase 0: Terminology Rename**: 12-16 hours (1.5-2 days, no deprecation shims)
+- **Phases 1-6: Container Adoption**: 24-32 hours (3-4 days, includes BasePlugin migration)
 
 **Detailed Phase Breakdown**:
 | Phase | Hours | Complexity | Risk | Notes |
 |-------|-------|------------|------|-------|
-| **Phase 0: Rename** | **10-14** | **LOW** | **LOW** | **No shims, clean cut-over** |
-| - Sub-phase 0.1: Core Code | 3-4 | LOW | LOW | No deprecation shims needed |
+| **Phase 0: Rename** | **12-16** | **LOW** | **LOW** | **No shims, clean cut-over** |
+| - Sub-phase 0.1: Core Code | 4-5 | LOW | LOW | No deprecation shims needed |
 | - Sub-phase 0.2: Tests | 3-4 | LOW | LOW | Clean rename, no compat tests |
-| - Sub-phase 0.3: Docs + Configs | 3-5 | MEDIUM | LOW | Update configs directly |
+| - Sub-phase 0.3: Docs + Configs | 4-6 | MEDIUM | LOW | Update configs directly |
 | **Checkpoint: Merge Phase 0** | - | - | - | - |
 | **Phase 1: Infrastructure** | **2-3** | **MEDIUM** | **MEDIUM** | SecureData[T] generic |
-| **Phase 2: Datasources** | **1-2** | **LOW** | **LOW** | 4 files, simple change |
-| **Phase 3: Core Engine** | **2-3** | **HIGH** | **MEDIUM** | Orchestrator/runner |
-| **Phase 4: Middleware** | **2-3** | **HIGH** | **MEDIUM** | **Direct migration, no unwrap shims** |
+| **Phase 1.5: BasePlugin Migration** | **4-6** | **MEDIUM** | **HIGH** | **26 plugins, ADR-002 validation enablement** |
+| **Phase 2: Datasources** | **2** | **LOW** | **LOW** | 4 files, simple change |
+| **Phase 3: Core Engine** | **3-4** | **HIGH** | **MEDIUM** | Orchestrator/runner |
+| **Phase 4: Middleware** | **3-4** | **HIGH** | **MEDIUM** | **Direct migration, safe factory** |
 | **Phase 5: Plugins** | **2-3** | **MEDIUM** | **LOW** | Row/aggregator/baseline |
 | **Phase 6: Verification** | **1-2** | **LOW** | **LOW** | Tests/docs/ADRs |
 

@@ -1,8 +1,8 @@
 # Integrated Migration Roadmap: Secure Data Containers
 
-**Total Duration**: 30-40 hours (4-5 days)
-**Phases**: 6 (Phase 0: Rename + Phases 1-6: Adoption)
-**Status**: Planning Complete - Ready for Execution
+**Total Duration**: 36-48 hours (5-6 days)
+**Phases**: 7 (Phase 0: Rename + Phases 1-6: Adoption + Phase 1.5: BasePlugin Migration)
+**Status**: Planning Complete - Ready for Execution (UPDATED with Phase 1.5)
 
 ---
 
@@ -11,7 +11,8 @@
 This roadmap integrates **two migrations** into a single cohesive plan:
 
 1. **Phase 0: Terminology Rename** (12-16 hours) - "Classified" → "Secure" for universal applicability
-2. **Phases 1-6: Container Adoption** (18-24 hours) - Universal adoption of secure containers across all plugins
+2. **Phases 1-6: Container Adoption** (24-32 hours) - Universal adoption of secure containers across all plugins
+   - **NEW: Phase 1.5** (4-6 hours) - BasePlugin protocol migration (CRITICAL for ADR-002 validation)
 
 **Why This Sequence**: Rename FIRST ensures ADR-003/004 implementation uses correct terminology from day one, avoiding double-work.
 
@@ -70,14 +71,20 @@ This roadmap integrates **two migrations** into a single cohesive plan:
 └─────────────────────────────────────────────────────────────────────┘
                               ↓
 ┌─────────────────────────────────────────────────────────────────────┐
-│  PHASES 1-6: CONTAINER ADOPTION (18-24 hours, 2-3 days)            │
+│  PHASES 1-6: CONTAINER ADOPTION (24-32 hours, 3-4 days)            │
 │  Branch: feature/adr-003-004-secure-containers                     │
 ├─────────────────────────────────────────────────────────────────────┤
 │  PHASE 1: Infrastructure (2-3 hours)                               │
 │    - Create SecureData[T] generic wrapper                          │
-│    - Add utility functions (unwrap, wrap, uplift_dict)             │
+│    - Add utility functions (unwrap, safe factory)                  │
 │    - Write invariant tests (5+ core properties)                    │
 │    Exit: All new tests passing, MyPy clean                         │
+├─────────────────────────────────────────────────────────────────────┤
+│  PHASE 1.5: BasePlugin Protocol Migration (4-6 hours) 🚨 NEW       │
+│    - Add get_security_level() to 26 plugin classes                 │
+│    - Add validate_can_operate_at_level() to 26 plugin classes      │
+│    - CRITICAL: Enables ADR-002 validation (stops short-circuits)   │
+│    Exit: Validation runs, SECRET→UNOFFICIAL blocked                │
 ├─────────────────────────────────────────────────────────────────────┤
 │  PHASE 2: Datasource Migration (2 hours)                           │
 │    - 4 datasources return SecureDataFrame                          │
@@ -139,14 +146,15 @@ This roadmap integrates **two migrations** into a single cohesive plan:
 | 0.3 | Documentation | 4-6 | MEDIUM | LOW | 11-15 |
 | **Checkpoint** | **Merge Phase 0** | **-** | **-** | **-** | **-** |
 | **Phase 1** | **Infrastructure** | **2-3** | **MEDIUM** | **MEDIUM** | **14-19** |
-| **Phase 2** | **Datasources** | **2** | **LOW** | **LOW** | **16-21** |
-| **Phase 3** | **Core Engine** | **3-4** | **HIGH** | **MEDIUM** | **19-25** |
-| **Phase 4** | **Middleware** | **3-4** | **HIGH** | **MEDIUM** | **22-29** |
-| **Phase 5** | **Plugins** | **2-3** | **MEDIUM** | **LOW** | **24-32** |
-| **Phase 6** | **Verification** | **1-2** | **LOW** | **LOW** | **25-34** |
-| **Total** | **6 Phases** | **30-40** | **MEDIUM** | **MEDIUM** | **30-40** |
+| **Phase 1.5** | **BasePlugin Migration** | **4-6** | **MEDIUM** | **HIGH** | **18-25** |
+| **Phase 2** | **Datasources** | **2** | **LOW** | **LOW** | **20-27** |
+| **Phase 3** | **Core Engine** | **3-4** | **HIGH** | **MEDIUM** | **23-31** |
+| **Phase 4** | **Middleware** | **3-4** | **HIGH** | **MEDIUM** | **26-35** |
+| **Phase 5** | **Plugins** | **2-3** | **MEDIUM** | **LOW** | **28-38** |
+| **Phase 6** | **Verification** | **1-2** | **LOW** | **LOW** | **29-40** |
+| **Total** | **7 Phases** | **36-48** | **MEDIUM** | **MEDIUM** | **36-48** |
 
-**Conservative Timeline**: 4-5 days with rigorous testing at each phase
+**Conservative Timeline**: 5-6 days with rigorous testing at each phase
 
 ---
 
