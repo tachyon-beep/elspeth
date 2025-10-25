@@ -107,6 +107,45 @@ class TestADR002ATrustedContainerModel:
             "Error should guide plugins to use with_uplifted_classification()"
         )
 
+    def test_cve_adr002a_002_bypass_flag_not_exposed(self):
+        """CVE-ADR-002-A-002: _created_by_datasource parameter bypass BLOCKED.
+
+        Vulnerability:
+            Without init=False on _created_by_datasource field, attackers could call:
+                ClassifiedDataFrame(data, level, _created_by_datasource=True)
+            This bypasses __post_init__ security check, allowing classification laundering.
+
+        Attack Scenario:
+            Malicious plugin creates "fresh" frame with UNOFFICIAL classification,
+            bypassing uplifting requirements and laundering SECRET data.
+
+        Fix:
+            Add init=False to _created_by_datasource field definition to remove
+            it from __init__ signature entirely.
+
+        Security Property:
+            ClassifiedDataFrame(..., _created_by_datasource=True) → TypeError
+
+        Discovery: Code review by GPT-4 (2025-10-25)
+        """
+        df = pd.DataFrame({"secret": ["classified1", "classified2"]})
+
+        # Attempt bypass by passing _created_by_datasource=True
+        with pytest.raises(TypeError) as exc_info:
+            ClassifiedDataFrame(
+                data=df,
+                classification=SecurityLevel.UNOFFICIAL,  # DOWNGRADE attempt
+                _created_by_datasource=True  # Bypass flag
+            )
+
+        error_msg = str(exc_info.value)
+        assert "_created_by_datasource" in error_msg, (
+            "Error should mention the invalid parameter name"
+        )
+        assert "unexpected keyword argument" in error_msg, (
+            "Error should indicate parameter not in __init__ signature"
+        )
+
     def test_invariant_datasource_can_create_frame(self):
         """SECURITY INVARIANT: Datasources can create ClassifiedDataFrame instances.
 

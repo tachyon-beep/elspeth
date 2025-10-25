@@ -65,7 +65,7 @@ class ClassifiedDataFrame:
 
     data: pd.DataFrame
     classification: SecurityLevel
-    _created_by_datasource: bool = field(default=False, compare=False, repr=False)
+    _created_by_datasource: bool = field(default=False, init=False, compare=False, repr=False)
 
     def __post_init__(self) -> None:
         """Enforce datasource-only creation (ADR-002-A constructor protection).
@@ -187,10 +187,12 @@ class ClassifiedDataFrame:
         """
         uplifted_classification = max(self.classification, new_level)
 
-        return ClassifiedDataFrame(
-            data=self.data,  # Share DataFrame (immutability at classification level)
-            classification=uplifted_classification,
-        )
+        # Use __new__ to bypass __init__ (same pattern as create_from_datasource)
+        instance = ClassifiedDataFrame.__new__(ClassifiedDataFrame)
+        object.__setattr__(instance, "data", self.data)
+        object.__setattr__(instance, "classification", uplifted_classification)
+        object.__setattr__(instance, "_created_by_datasource", False)
+        return instance
 
     def with_new_data(self, new_data: pd.DataFrame) -> "ClassifiedDataFrame":
         """Create frame with different data, preserving current classification.
@@ -221,10 +223,12 @@ class ClassifiedDataFrame:
             ...     SecurityLevel.SECRET
             ... )
         """
-        # Use ClassifiedDataFrame constructor (will bypass __post_init__ check)
-        return ClassifiedDataFrame(
-            data=new_data, classification=self.classification, _created_by_datasource=False
-        )
+        # Use __new__ to bypass __init__ (same pattern as create_from_datasource)
+        instance = ClassifiedDataFrame.__new__(ClassifiedDataFrame)
+        object.__setattr__(instance, "data", new_data)
+        object.__setattr__(instance, "classification", self.classification)
+        object.__setattr__(instance, "_created_by_datasource", False)
+        return instance
 
     def validate_access_by(self, accessor: "BasePlugin") -> None:
         """Validate accessor has sufficient clearance for this data.
