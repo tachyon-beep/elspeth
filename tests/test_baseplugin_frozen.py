@@ -10,7 +10,6 @@ Test Coverage:
 """
 
 import pytest
-from hypothesis import given, strategies as st
 
 from elspeth.core.base.plugin import BasePlugin
 from elspeth.core.base.types import SecurityLevel
@@ -23,13 +22,17 @@ from elspeth.core.validation.base import SecurityValidationError
 
 
 class MockPlugin(BasePlugin):
-    """Mock plugin for testing frozen capability."""
+    """Mock plugin for testing frozen capability.
+
+    Note: allow_downgrade has NO default (ADR-005 requirement).
+    This ensures tests verify the mandatory parameter contract.
+    """
 
     def __init__(
         self,
         *,
         security_level: SecurityLevel,
-        allow_downgrade: bool = True
+        allow_downgrade: bool
     ):
         super().__init__(
             security_level=security_level,
@@ -42,17 +45,12 @@ class MockPlugin(BasePlugin):
 # ============================================================================
 
 
-class TestDefaultTrustedDowngrade:
-    """Test default allow_downgrade=True behavior (ADR-002 semantics).
+class TestTrustedDowngrade:
+    """Test allow_downgrade=True behavior (ADR-002 trusted downgrade semantics).
 
-    These tests verify backwards compatibility - the default behavior should
-    allow trusted downgrade as specified in ADR-002.
+    These tests verify that plugins with allow_downgrade=True can operate at
+    lower security levels (trusted downgrade per ADR-002).
     """
-
-    def test_default_parameter_is_true(self):
-        """Default allow_downgrade parameter is True (backwards compatible)."""
-        plugin = MockPlugin(security_level=SecurityLevel.SECRET)
-        assert plugin.allow_downgrade is True
 
     def test_trusted_downgrade_to_lower_level(self):
         """SECRET plugin can operate at OFFICIAL level (trusted downgrade)."""
@@ -180,19 +178,25 @@ class TestPropertyBased:
     @pytest.mark.parametrize("plugin_level", [
         SecurityLevel.UNOFFICIAL,
         SecurityLevel.OFFICIAL,
+        SecurityLevel.OFFICIAL_SENSITIVE,
+        SecurityLevel.PROTECTED,
         SecurityLevel.SECRET,
     ])
     @pytest.mark.parametrize("operating_level", [
         SecurityLevel.UNOFFICIAL,
         SecurityLevel.OFFICIAL,
+        SecurityLevel.OFFICIAL_SENSITIVE,
+        SecurityLevel.PROTECTED,
         SecurityLevel.SECRET,
     ])
     def test_trusted_downgrade_matrix(self, plugin_level, operating_level):
         """Trusted downgrade: plugin can operate at same or lower level.
 
-        Matrix of test cases:
+        Matrix of test cases (covers all 5 SecurityLevels):
         - Plugin level ≥ Operating level → ALLOW (same or downgrade)
         - Plugin level < Operating level → REJECT (insufficient clearance)
+
+        Total combinations: 5×5 = 25 test cases
         """
         plugin = MockPlugin(security_level=plugin_level, allow_downgrade=True)
 
@@ -207,19 +211,25 @@ class TestPropertyBased:
     @pytest.mark.parametrize("plugin_level", [
         SecurityLevel.UNOFFICIAL,
         SecurityLevel.OFFICIAL,
+        SecurityLevel.OFFICIAL_SENSITIVE,
+        SecurityLevel.PROTECTED,
         SecurityLevel.SECRET,
     ])
     @pytest.mark.parametrize("operating_level", [
         SecurityLevel.UNOFFICIAL,
         SecurityLevel.OFFICIAL,
+        SecurityLevel.OFFICIAL_SENSITIVE,
+        SecurityLevel.PROTECTED,
         SecurityLevel.SECRET,
     ])
     def test_frozen_matrix(self, plugin_level, operating_level):
         """Frozen: plugin can ONLY operate at exact level.
 
-        Matrix of test cases:
+        Matrix of test cases (covers all 5 SecurityLevels):
         - Plugin level == Operating level → ALLOW (exact match)
         - Plugin level != Operating level → REJECT (frozen or insufficient)
+
+        Total combinations: 5×5 = 25 test cases
         """
         plugin = MockPlugin(security_level=plugin_level, allow_downgrade=False)
 
@@ -239,6 +249,16 @@ class TestPropertyBased:
 
 class TestEdgeCases:
     """Test edge cases and boundary conditions."""
+
+    def test_missing_allow_downgrade_raises_typeerror(self):
+        """Regression test: omitting allow_downgrade parameter must raise TypeError.
+
+        ADR-005 requires allow_downgrade to be explicitly provided (no default).
+        This test ensures no future changes sneak a default value back in.
+        """
+        with pytest.raises(TypeError, match="allow_downgrade"):
+            # Missing required keyword argument 'allow_downgrade'
+            MockPlugin(security_level=SecurityLevel.OFFICIAL)  # type: ignore[call-arg]
 
     def test_unofficial_plugin_cannot_upgrade(self):
         """UNOFFICIAL plugin (lowest) cannot operate at higher levels."""
@@ -341,8 +361,7 @@ class TestErrorMessages:
 """
 Test Coverage Summary:
 
-Default Trusted Downgrade (5 tests):
-- default_parameter_is_true
+Trusted Downgrade (4 tests):
 - trusted_downgrade_to_lower_level
 - trusted_downgrade_to_lowest_level
 - exact_match_allowed
@@ -355,11 +374,12 @@ Frozen Plugin (5 tests):
 - frozen_two_level_downgrade_rejected
 - frozen_insufficient_clearance_rejected
 
-Property-Based (18 parameterized tests):
-- trusted_downgrade_matrix (3×3 = 9 combinations)
-- frozen_matrix (3×3 = 9 combinations)
+Property-Based (50 parameterized tests):
+- trusted_downgrade_matrix (5×5 = 25 combinations, all SecurityLevels)
+- frozen_matrix (5×5 = 25 combinations, all SecurityLevels)
 
-Edge Cases (3 tests):
+Edge Cases (4 tests):
+- missing_allow_downgrade_raises_typeerror (regression test for mandatory parameter)
 - unofficial_plugin_cannot_upgrade
 - secret_plugin_can_downgrade_to_all
 - frozen_secret_plugin_only_at_secret
@@ -368,5 +388,5 @@ Error Messages (2 tests):
 - insufficient_clearance_error_message
 - frozen_downgrade_error_message
 
-TOTAL: 33 test cases
+TOTAL: 65 test cases (expanded from 33 to cover all 5 SecurityLevels)
 """
