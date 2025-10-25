@@ -12,6 +12,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 import pandas as pd
 
+from elspeth.core.base.plugin import BasePlugin
 from elspeth.core.base.protocols import Artifact, ArtifactDescriptor, ResultSink
 from elspeth.core.base.types import DeterminismLevel, SecurityLevel
 from elspeth.core.security import ensure_determinism_level, ensure_security_level, resolve_security_level
@@ -21,8 +22,11 @@ from elspeth.plugins.nodes.sinks._sanitize import sanitize_cell
 logger = logging.getLogger(__name__)
 
 
-class ZipResultSink(ResultSink):
-    """Bundle results, manifest, and optional CSV into a compressed ZIP archive at the configured path."""
+class ZipResultSink(BasePlugin, ResultSink):
+    """Bundle results, manifest, and optional CSV into a compressed ZIP archive at the configured path.
+
+    Inherits from BasePlugin to provide security enforcement (ADR-004).
+    """
 
     def __init__(
         self,
@@ -40,7 +44,11 @@ class ZipResultSink(ResultSink):
         sanitize_formulas: bool = True,
         sanitize_guard: str = "'",
         allowed_base_path: str | Path | None = None,
+        security_level: SecurityLevel,  # REQUIRED - no default (ADR-004 requirement)
     ) -> None:
+        # Initialize BasePlugin with security level (ADR-004)
+        super().__init__(security_level=security_level)
+
         self.base_path = Path(base_path)
         self.bundle_name = bundle_name
         self.timestamped = timestamped
@@ -68,8 +76,11 @@ class ZipResultSink(ResultSink):
         self._last_archive_path: str | None = None
         self._last_artifacts: dict[str, Any] = {}
         self._additional_inputs: dict[str, list[Artifact]] = {}
-        self._security_level: SecurityLevel | None = None
-        self._determinism_level: DeterminismLevel | None = None
+        # Runtime data classification tracking (separate from sink's security clearance)
+        # security_level (from BasePlugin) = sink's clearance level
+        # _artifact_security_level = runtime classification of written data (for artifact metadata)
+        self._artifact_security_level: SecurityLevel | None = None
+        self._artifact_determinism_level: DeterminismLevel | None = None
         # Allowed base directory for writes; default to ./outputs
         try:
             default_base = Path(base_path).resolve()
@@ -156,8 +167,8 @@ class ZipResultSink(ResultSink):
             if metadata:
                 level = metadata.get("security_level")
                 det = metadata.get("determinism_level")
-                self._security_level = level if isinstance(level, SecurityLevel) else ensure_security_level(level)
-                self._determinism_level = det if isinstance(det, DeterminismLevel) else ensure_determinism_level(det)
+                self._artifact_security_level = level if isinstance(level, SecurityLevel) else ensure_security_level(level)
+                self._artifact_determinism_level = det if isinstance(det, DeterminismLevel) else ensure_determinism_level(det)
         except Exception as exc:
             if self.on_error == "skip":
                 logger.warning("ZIP sink failed; skipping archive creation: %s", exc)
@@ -250,28 +261,28 @@ class ZipResultSink(ResultSink):
         if not self._last_archive_path:
             return {}
         metadata = {key: value for key, value in self._last_artifacts.items() if value}
-        metadata["security_level"] = self._security_level
-        metadata["determinism_level"] = self._determinism_level
+        metadata["security_level"] = self._artifact_security_level
+        metadata["determinism_level"] = self._artifact_determinism_level
         artifact = Artifact(
             id="",
             type="file/zip",
             path=self._last_archive_path,
             metadata=metadata,
             persist=True,
-            security_level=self._security_level,
-            determinism_level=self._determinism_level,
+            security_level=self._artifact_security_level,
+            determinism_level=self._artifact_determinism_level,
         )
         self._last_archive_path = None
         self._last_artifacts = {}
-        self._security_level = None
-        self._determinism_level = None
+        self._artifact_security_level = None
+        self._artifact_determinism_level = None
         return {"zip": artifact}
 
     def prepare_artifacts(self, artifacts: Mapping[str, list[Artifact]]) -> None:  # pragma: no cover
         self._additional_inputs = {key: list(values) for key, values in artifacts.items() if values}
-        if not self._security_level and self._additional_inputs:
+        if not self._artifact_security_level and self._additional_inputs:
             levels = [artifact.security_level for values in self._additional_inputs.values() for artifact in values]
-            self._security_level = resolve_security_level(*levels)
+            self._artifact_security_level = resolve_security_level(*levels)
 
     @staticmethod
     def _read_artifact(artifact: Artifact) -> bytes:
