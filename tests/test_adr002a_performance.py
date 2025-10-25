@@ -69,10 +69,10 @@ class TestADR002APerformance:
         )
 
         # Print benchmark results for visibility
-        print(f"\n✅ Constructor Performance Benchmark:")
+        print("\n✅ Constructor Performance Benchmark:")
         print(f"   Total time (10,000 creations): {total_time:.4f}s")
         print(f"   Average per creation: {avg_time_per_creation*1e6:.2f}μs")
-        print(f"   Threshold: 10μs")
+        print("   Threshold: 10μs")
         print(f"   Status: {'PASS' if avg_time_per_creation < 10e-6 else 'FAIL'}")
 
     def test_uplifting_overhead_acceptable(self):
@@ -109,10 +109,10 @@ class TestADR002APerformance:
         )
 
         # Print benchmark results
-        print(f"\n✅ Uplifting Performance Benchmark:")
+        print("\n✅ Uplifting Performance Benchmark:")
         print(f"   Total time (10,000 uplifts): {total_time:.4f}s")
         print(f"   Average per uplift: {avg_time_per_uplift*1e6:.2f}μs")
-        print(f"   Threshold: 5μs")
+        print("   Threshold: 5μs")
         print(f"   Status: {'PASS' if avg_time_per_uplift < 5e-6 else 'FAIL'}")
 
     def test_with_new_data_overhead_acceptable(self):
@@ -148,10 +148,10 @@ class TestADR002APerformance:
         )
 
         # Print benchmark results
-        print(f"\n✅ Data Replacement Performance Benchmark:")
+        print("\n✅ Data Replacement Performance Benchmark:")
         print(f"   Total time (10,000 replacements): {total_time:.4f}s")
         print(f"   Average per replacement: {avg_time_per_replacement*1e6:.2f}μs")
-        print(f"   Threshold: 10μs")
+        print("   Threshold: 10μs")
         print(f"   Status: {'PASS' if avg_time_per_replacement < 10e-6 else 'FAIL'}")
 
     @pytest.mark.slow
@@ -210,11 +210,11 @@ class TestADR002APerformance:
         )
 
         # Print benchmark results
-        print(f"\n✅ Full Suite Overhead Benchmark:")
+        print("\n✅ Full Suite Overhead Benchmark:")
         print(f"   Total time (1,000 simulated suites): {total_time:.4f}s")
         print(f"   Average per suite: {avg_time_per_suite*1e6:.2f}μs")
-        print(f"   Operations per suite: 6")
-        print(f"   Threshold: 100μs")
+        print("   Operations per suite: 6")
+        print("   Threshold: 100μs")
         print(f"   Overhead ratio (vs 5min suite): {(avg_time_per_suite/300):.6f}%")
         print(f"   Status: {'PASS' if avg_time_per_suite < 100e-6 else 'FAIL'}")
 

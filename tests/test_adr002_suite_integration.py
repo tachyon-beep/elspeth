@@ -366,7 +366,6 @@ class TestADR002SuiteIntegration:
                 return uplifted.data  # Return underlying DataFrame
 
         datasource = ADR002ACompliantDatasource()
-        plugin = ADR002ACompliantPlugin()
         sink = MockSecretSink()
 
         experiment = ExperimentConfig(

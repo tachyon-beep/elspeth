@@ -2,7 +2,6 @@
 
 from elspeth.core.base.types import DeterminismLevel, SecurityLevel
 
-from .classified_data import ClassifiedDataFrame
 from .approved_endpoints import (
     ServiceType,
     get_approved_patterns,
@@ -12,6 +11,7 @@ from .approved_endpoints import (
     validate_endpoint,
     validate_http_api_endpoint,
 )
+from .classified_data import ClassifiedDataFrame
 from .secure_mode import (
     SecureMode,
     get_mode_description,
