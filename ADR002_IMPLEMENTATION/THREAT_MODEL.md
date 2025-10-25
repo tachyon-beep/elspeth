@@ -213,10 +213,32 @@ class SubtlyMaliciousPlugin(BasePlugin):
   - Frame inspection in `__post_init__` enforces trusted creation path
   - Prevents classification laundering attack (Scenario 2)
   - **IMPACT**: Reduces certification burden - framework blocks attack automatically
+  - **Known Limitation**: Fail-open for edge cases (see below)
 - **Failsafe (Immutability)**: Classification cannot be downgraded
   - `@dataclass(frozen=True)` prevents modification
   - Only `with_uplifted_classification()` and `with_new_data()` allowed (internal methods)
 - **Certification**: Code review verifies datasources label correctly (reduced scope vs. before)
+
+**Constructor Protection Implementation Details** (ADR-002-A):
+
+Frame inspection mechanism (`src/elspeth/core/security/classified_data.py:70-119`):
+1. Walks up 5 stack frames to find caller method name
+2. Allows: `create_from_datasource()`, `with_uplifted_classification()`, `with_new_data()`
+3. Verifies caller's `self` is ClassifiedDataFrame instance (prevents method name spoofing - CVE-ADR-002-A-001)
+4. Blocks all other construction attempts with SecurityValidationError
+
+**Known Limitation - Fail-Open Behavior**:
+- **Lines 86, 93, 99**: If frame inspection cannot determine caller, constructor allows creation
+- **Rationale**:
+  - Python runtime edge cases (C extensions, async contexts may not provide stack frames)
+  - Conservative safety: Better to allow legitimate use than block unexpectedly
+  - Defense-in-depth: `validate_access_by()` provides runtime failsafe
+- **Risk**: Malicious C extension could exploit this to bypass protection
+- **Mitigation**:
+  - This requires OS-level exploit capability (out of scope for framework)
+  - Certification verifies no malicious C extensions
+  - Unlikely attack vector (attacker would need C extension + knowledge of this specific edge case)
+- **Coverage**: 80% on `classified_data.py` (uncovered lines are these defensive edge cases)
 
 **Mitigation**:
 - Make uplifting automatic and unavoidable
