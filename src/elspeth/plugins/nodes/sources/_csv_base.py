@@ -12,16 +12,20 @@ from typing import Any, Type
 
 import pandas as pd
 
+from elspeth.core.base.plugin import BasePlugin
 from elspeth.core.base.protocols import DataSource
 from elspeth.core.base.schema import DataFrameSchema, infer_schema_from_dataframe, schema_from_config
 from elspeth.core.base.types import DeterminismLevel, SecurityLevel
-from elspeth.core.security import ensure_determinism_level, ensure_security_level
+from elspeth.core.security import ensure_determinism_level
 
 logger = logging.getLogger(__name__)
 
 
-class BaseCSVDataSource(DataSource):
-    """Base class for CSV datasources with common functionality."""
+class BaseCSVDataSource(BasePlugin, DataSource):
+    """Base class for CSV datasources with common functionality.
+
+    Inherits from BasePlugin to provide security enforcement (ADR-004).
+    """
 
     def __init__(
         self,
@@ -32,13 +36,16 @@ class BaseCSVDataSource(DataSource):
         dtype: dict[str, Any] | None = None,
         encoding: str = "utf-8",
         on_error: str = "abort",
-        security_level: SecurityLevel | None = None,
+        security_level: SecurityLevel,  # REQUIRED - no default (ADR-004 requirement)
         determinism_level: DeterminismLevel | None = None,
         schema: dict[str, str | dict[str, Any]] | None = None,
         infer_schema: bool = True,
         retain_local: bool,  # REQUIRED - no default
         retain_local_path: str | None = None,
     ):
+        # Initialize BasePlugin with security level (ADR-004)
+        super().__init__(security_level=security_level)
+
         # Resolve input path relative to base_path or ELSPETH_INPUTS_DIR when provided
         raw_path = Path(path) if isinstance(path, str) else path
         base_candidate: Path | None = None
@@ -76,7 +83,7 @@ class BaseCSVDataSource(DataSource):
         if on_error not in {"abort", "skip"}:
             raise ValueError("on_error must be 'abort' or 'skip'")
         self.on_error = on_error
-        self.security_level = ensure_security_level(security_level)
+        # security_level is now set by BasePlugin.__init__() (ADR-004)
         self.determinism_level = ensure_determinism_level(determinism_level)
         self.schema_config = schema
         self.infer_schema = infer_schema
