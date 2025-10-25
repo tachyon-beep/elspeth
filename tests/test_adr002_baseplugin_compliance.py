@@ -86,7 +86,6 @@ See: docs/migration/adr-002-baseplugin-completion/PHASE_0_TEST_SPECIFICATION.md
 import pytest
 import pandas as pd
 from pathlib import Path
-from typing import List
 
 from elspeth.core.base.types import SecurityLevel
 from elspeth.core.validation.base import SecurityValidationError
