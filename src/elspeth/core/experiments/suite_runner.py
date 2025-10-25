@@ -85,6 +85,9 @@ class SuiteExecutionContext:
         preflight_info: Metadata about the run environment
         notified_middlewares: Tracks middleware instances that received on_suite_loaded
             (uses id(middleware) as key to prevent duplicate notifications)
+        operating_security_level: ADR-002 minimum clearance envelope computed from
+            all plugin security levels. Set during suite startup and used for
+            runtime validation failsafe. None until security validation complete.
     """
 
     defaults: dict[str, Any]
@@ -95,6 +98,7 @@ class SuiteExecutionContext:
     results: dict[str, Any] = field(default_factory=dict)
     preflight_info: dict[str, Any] = field(default_factory=dict)
     notified_middlewares: dict[int, Any] = field(default_factory=dict)
+    operating_security_level: SecurityLevel | None = None
 
     @classmethod
     def create(
@@ -544,6 +548,94 @@ class ExperimentSuiteRunner:
             ),
         )
 
+    def _validate_experiment_security(
+        self,
+        experiment: ExperimentConfig,
+        runner: ExperimentRunner,
+        sinks: list[ResultSink],
+        ctx: SuiteExecutionContext,
+    ) -> None:
+        """Validate experiment security using ADR-002 minimum clearance envelope model.
+
+        This method implements ADR-002 start-time security validation (PRIMARY control):
+        1. Collect all plugins that implement BasePlugin protocol
+        2. Compute minimum clearance envelope (weakest-link principle)
+        3. Validate ALL plugins can operate at that level
+        4. Set operating_security_level in context for runtime failsafe
+
+        Security Model:
+            - Orchestrator operates at MIN(all plugin security levels)
+            - ANY plugin requiring > operating level causes job to FAIL AT START
+            - This prevents classification breaches BEFORE data retrieval
+
+        Args:
+            experiment: Experiment configuration being validated
+            runner: Experiment runner with datasource, LLM, middleware
+            sinks: List of result sinks for this experiment
+            ctx: Suite execution context (operating_security_level will be set)
+
+        Raises:
+            SecurityValidationError: If any plugin cannot operate at the envelope level
+
+        ADR-002 Threats Prevented:
+            - T1 (Classification Breach): Prevents SECRET data reaching UNOFFICIAL sink
+            - T3 (Runtime Bypass): Sets ctx.operating_security_level for failsafe
+
+        Example:
+            >>> # Experiment with SECRET datasource, OFFICIAL sink
+            >>> # compute_minimum_clearance_envelope([SECRET, OFFICIAL]) = OFFICIAL
+            >>> # SECRET datasource.validate_can_operate_at_level(OFFICIAL) raises!
+            >>> # Job FAILS TO START (before data retrieval)
+        """
+        from elspeth.core.validation.base import SecurityValidationError
+
+        # Collect all plugins that implement BasePlugin protocol
+        plugins: list[BasePlugin] = []
+
+        # Datasource (from runner)
+        datasource = getattr(runner, "datasource", None)
+        if datasource and isinstance(datasource, BasePlugin):
+            plugins.append(datasource)
+
+        # LLM client (from runner)
+        llm_client = getattr(runner, "llm_client", None)
+        if llm_client and isinstance(llm_client, BasePlugin):
+            plugins.append(llm_client)
+
+        # Middleware (from runner)
+        middlewares = getattr(runner, "llm_middlewares", None) or []
+        for middleware in middlewares:
+            if isinstance(middleware, BasePlugin):
+                plugins.append(middleware)
+
+        # Sinks (passed as parameter)
+        for sink in sinks:
+            if isinstance(sink, BasePlugin):
+                plugins.append(sink)
+
+        # If no plugins implement BasePlugin, skip validation (no security requirements)
+        if not plugins:
+            return
+
+        # Compute minimum clearance envelope (weakest-link principle)
+        operating_level = compute_minimum_clearance_envelope(plugins)
+
+        # Validate ALL plugins can operate at this level (fail-fast if any rejects)
+        for plugin in plugins:
+            try:
+                plugin.validate_can_operate_at_level(operating_level)
+            except SecurityValidationError as e:
+                # Enrich error message with experiment context
+                raise SecurityValidationError(
+                    f"ADR-002 Start-Time Validation Failed for experiment '{experiment.name}': "
+                    f"{str(e)}. Orchestrator operating at {operating_level.name}, "
+                    f"but {plugin.__class__.__name__} requires higher clearance. "
+                    f"Job cannot start - adjust plugin security levels or split into separate experiments."
+                ) from e
+
+        # Set operating level in context for runtime validation failsafe (Layer 2)
+        ctx.operating_security_level = operating_level
+
     def _finalize_suite(self, ctx: SuiteExecutionContext) -> None:
         """Notify all middlewares that suite execution is complete.
 
@@ -837,6 +929,11 @@ class ExperimentSuiteRunner:
                 {**defaults, "prompt_packs": ctx.prompt_packs, "prompt_pack": pack_name},
                 sinks,
             )
+
+            # ADR-002: Start-time security validation (PRIMARY control)
+            # Collect all plugins, compute minimum clearance envelope, validate all can operate
+            self._validate_experiment_security(experiment, runner, sinks, ctx)
+
             experiment_context = self._get_experiment_context(runner, experiment, defaults)
             middlewares = cast(list[Any], runner.llm_middlewares or [])
 

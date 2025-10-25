@@ -10,15 +10,15 @@
 
 | Phase | Status | Time Spent | Commits | Notes |
 |-------|--------|------------|---------|-------|
-| Phase 0: Security Properties & Threat Model | ⏸️ NOT STARTED | 0h | - | Security invariants, threat model |
-| Phase 1: Core Security Primitives | ⏸️ NOT STARTED | 0h | - | ClassifiedDataFrame, envelope computation |
+| Phase 0: Security Properties & Threat Model | ✅ COMPLETE | 1.5h | d83d7fd (partial) | Security invariants, threat model |
+| Phase 1: Core Security Primitives | ✅ COMPLETE | 1h | d83d7fd | ClassifiedDataFrame, envelope computation |
 | Phase 2: Suite Runner Integration | ⏸️ NOT STARTED | 0h | - | Start-time validation, runtime failsafe |
 | Phase 3: Integration Tests & Evidence | ⏸️ NOT STARTED | 0h | - | End-to-end scenarios, property tests |
 | Phase 4: Documentation & Certification | ⏸️ NOT STARTED | 0h | - | Evidence package, ADR updates |
 
 **Legend**: ⏸️ Not Started | 🔄 In Progress | ✅ Complete | ⚠️ Blocked
 
-**Total Time**: 0h / 6-10h estimated
+**Total Time**: 2.5h / 6-10h estimated (25-42% complete)
 
 ---
 
@@ -234,3 +234,59 @@ None yet.
 - Comprehensive property testing will find edge cases
 
 **Next**: Phase 1 - Implement core security primitives to make tests green
+
+---
+
+### 2025-10-25 - Phase 1 Complete ✅
+
+**Time**: 1 hour
+
+**Commit**: d83d7fd - "Feat: Core ADR-002 security primitives (ClassifiedDataFrame, envelope)"
+
+**Completed**:
+- ✅ ClassifiedDataFrame implemented (136 lines)
+  - Frozen dataclass with immutable classification
+  - Automatic uplifting via max() operation
+  - Runtime validation failsafe
+  - 5/5 tests passing
+
+- ✅ Minimum Clearance Envelope (compute_minimum_clearance_envelope)
+  - Weakest-link principle implementation
+  - Returns MIN(all plugin security levels)
+  - Empty list defaults to UNOFFICIAL
+  - 4/4 tests passing
+
+- ✅ BasePlugin Protocol
+  - get_security_level() abstract method
+  - validate_can_operate_at_level() validation method
+  - Added to protocols.py with full documentation
+  - 3/3 tests passing
+
+- ✅ SecurityValidationError exception
+  - Added to validation/base.py
+  - Used by all validation methods
+  - 2/2 property tests passing
+
+**Test Status**:
+- 14/14 security invariant tests PASSING (GREEN) ✅
+- All Phase 1 tests complete
+- MyPy clean ✅
+- Ruff clean ✅
+
+**Files Modified/Created**:
+```
+A  src/elspeth/core/security/classified_data.py (NEW - 136 lines)
+M  src/elspeth/core/base/protocols.py (+51 lines - BasePlugin protocol)
+M  src/elspeth/core/experiments/suite_runner.py (+37 lines - envelope func)
+M  src/elspeth/core/security/__init__.py (+1 export)
+M  src/elspeth/core/validation/base.py (+13 lines - SecurityValidationError)
+M  tests/test_adr002_invariants.py (-9 lines - removed skipif decorators)
+```
+
+**Key Insights**:
+- Test-first discipline working perfectly (RED → GREEN workflow)
+- Frozen dataclass + max() provides strong immutability guarantees
+- MIN envelope computation is elegant (3 lines of logic)
+- BasePlugin protocol integrates cleanly with existing protocols
+
+**Next**: Phase 2 - Suite Runner Integration (start-time validation)
