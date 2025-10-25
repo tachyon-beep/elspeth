@@ -298,10 +298,11 @@ class TestCategory1Characterization:
     """
 
     def test_basecsvdatasource_no_get_security_level(self, tmp_path: Path) -> None:
-        """BaseCSVDataSource currently lacks get_security_level() method.
+        """BaseCSVDataSource has get_security_level() method after Phase 1 migration.
 
-        **TEST TYPE**: Characterization (documents current state)
-        **EXPECTED**: PASS (method missing) → FAIL after Phase 1 (method added)
+        **TEST TYPE**: Characterization (POST-MIGRATION)
+        **PHASE 1 STATUS**: ✅ MIGRATED to BasePlugin (commit 5a063b4)
+        **EXPECTED**: PASS (method present, inherited from BasePlugin)
         """
         csv_file = tmp_path / "test.csv"
         csv_file.write_text("col1,col2\n1,2\n")
@@ -312,15 +313,20 @@ class TestCategory1Characterization:
             security_level=SecurityLevel.SECRET
         )
 
-        # CHARACTERIZATION: Method doesn't exist (yet)
-        assert not hasattr(ds, "get_security_level"), \
-            "BaseCSVDataSource already has get_security_level() - Phase 1 started!"
+        # POST-MIGRATION: Method exists (inherited from BasePlugin)
+        assert hasattr(ds, "get_security_level"), \
+            "BaseCSVDataSource missing get_security_level() after Phase 1 migration!"
+        assert callable(ds.get_security_level), \
+            "get_security_level is not callable!"
+        assert ds.get_security_level() == SecurityLevel.SECRET, \
+            "get_security_level() returned incorrect value!"
 
     def test_basecsvdatasource_no_validate_method(self, tmp_path: Path) -> None:
-        """BaseCSVDataSource currently lacks validate_can_operate_at_level() method.
+        """BaseCSVDataSource has validate_can_operate_at_level() method after Phase 1 migration.
 
-        **TEST TYPE**: Characterization (documents current state)
-        **EXPECTED**: PASS (method missing) → FAIL after Phase 1 (method added)
+        **TEST TYPE**: Characterization (POST-MIGRATION)
+        **PHASE 1 STATUS**: ✅ MIGRATED to BasePlugin (commit 5a063b4)
+        **EXPECTED**: PASS (method present, inherited from BasePlugin)
         """
         csv_file = tmp_path / "test.csv"
         csv_file.write_text("col1,col2\n1,2\n")
@@ -331,15 +337,23 @@ class TestCategory1Characterization:
             security_level=SecurityLevel.SECRET
         )
 
-        # CHARACTERIZATION: Method doesn't exist (yet)
-        assert not hasattr(ds, "validate_can_operate_at_level"), \
-            "BaseCSVDataSource already has validate_can_operate_at_level() - Phase 1 started!"
+        # POST-MIGRATION: Method exists (inherited from BasePlugin)
+        assert hasattr(ds, "validate_can_operate_at_level"), \
+            "BaseCSVDataSource missing validate_can_operate_at_level() after Phase 1 migration!"
+        assert callable(ds.validate_can_operate_at_level), \
+            "validate_can_operate_at_level is not callable!"
+
+        # Test method functionality (Bell-LaPadula MLS)
+        ds.validate_can_operate_at_level(SecurityLevel.SECRET)  # Should pass (same level)
+        # Note: Cannot test with higher level (no TOP_SECRET in test suite)
+        # ds.validate_can_operate_at_level(SecurityLevel.OFFICIAL) would FAIL (lower level rejected)
 
     def test_csvdatasource_no_get_security_level(self, tmp_path: Path) -> None:
-        """CSVDataSource currently lacks get_security_level() method.
+        """CSVDataSource has get_security_level() method after Phase 1 migration.
 
-        **TEST TYPE**: Characterization (documents current state)
-        **EXPECTED**: PASS (method missing) → FAIL after Phase 1 (method added)
+        **TEST TYPE**: Characterization (POST-MIGRATION)
+        **PHASE 1 STATUS**: ✅ MIGRATED to BasePlugin (inherits from BaseCSVDataSource, commit 5a063b4)
+        **EXPECTED**: PASS (method present, inherited from BasePlugin via BaseCSVDataSource)
         """
         csv_file = tmp_path / "test.csv"
         csv_file.write_text("col1,col2\n1,2\n")
@@ -350,37 +364,54 @@ class TestCategory1Characterization:
             security_level=SecurityLevel.SECRET
         )
 
-        # CHARACTERIZATION: Method doesn't exist (yet)
-        assert not hasattr(ds, "get_security_level"), \
-            "CSVDataSource already has get_security_level() - Phase 1 started!"
+        # POST-MIGRATION: Method exists (inherited from BaseCSVDataSource → BasePlugin)
+        assert hasattr(ds, "get_security_level"), \
+            "CSVDataSource missing get_security_level() after Phase 1 migration!"
+        assert callable(ds.get_security_level), \
+            "get_security_level is not callable!"
+        assert ds.get_security_level() == SecurityLevel.SECRET, \
+            "get_security_level() returned incorrect value!"
 
     def test_csvfilesink_no_get_security_level(self, tmp_path: Path) -> None:
-        """CsvResultSink currently lacks get_security_level() method.
+        """CsvResultSink has get_security_level() method after Phase 1 migration.
 
-        **TEST TYPE**: Characterization (documents current state)
-        **EXPECTED**: PASS (method missing) → FAIL after Phase 1 (method added)
+        **TEST TYPE**: Characterization (POST-MIGRATION)
+        **PHASE 1 STATUS**: ✅ MIGRATED to BasePlugin (Phase 1.2 Batch 1, commit 52e9217)
+        **EXPECTED**: PASS (method present, inherited from BasePlugin)
         """
         output_file = tmp_path / "output.csv"
 
-        sink = CsvResultSink(path=str(output_file))
+        sink = CsvResultSink(path=str(output_file), security_level=SecurityLevel.OFFICIAL)
 
-        # CHARACTERIZATION: Method doesn't exist (yet)
-        assert not hasattr(sink, "get_security_level"), \
-            "CsvResultSink already has get_security_level() - Phase 1 started!"
+        # POST-MIGRATION: Method exists (inherited from BasePlugin)
+        assert hasattr(sink, "get_security_level"), \
+            "CsvResultSink missing get_security_level() after Phase 1 migration!"
+        assert callable(sink.get_security_level), \
+            "get_security_level is not callable!"
+        assert sink.get_security_level() == SecurityLevel.OFFICIAL, \
+            "get_security_level() returned incorrect value!"
 
     def test_csvfilesink_no_validate_method(self, tmp_path: Path) -> None:
-        """CsvResultSink currently lacks validate_can_operate_at_level() method.
+        """CsvResultSink has validate_can_operate_at_level() method after Phase 1 migration.
 
-        **TEST TYPE**: Characterization (documents current state)
-        **EXPECTED**: PASS (method missing) → FAIL after Phase 1 (method added)
+        **TEST TYPE**: Characterization (POST-MIGRATION)
+        **PHASE 1 STATUS**: ✅ MIGRATED to BasePlugin (Phase 1.2 Batch 1, commit 52e9217)
+        **EXPECTED**: PASS (method present, inherited from BasePlugin)
         """
         output_file = tmp_path / "output.csv"
 
-        sink = CsvResultSink(path=str(output_file))
+        sink = CsvResultSink(path=str(output_file), security_level=SecurityLevel.OFFICIAL)
 
-        # CHARACTERIZATION: Method doesn't exist (yet)
-        assert not hasattr(sink, "validate_can_operate_at_level"), \
-            "CsvResultSink already has validate_can_operate_at_level() - Phase 1 started!"
+        # POST-MIGRATION: Method exists (inherited from BasePlugin)
+        assert hasattr(sink, "validate_can_operate_at_level"), \
+            "CsvResultSink missing validate_can_operate_at_level() after Phase 1 migration!"
+        assert callable(sink.validate_can_operate_at_level), \
+            "validate_can_operate_at_level is not callable!"
+
+        # Test method functionality (Bell-LaPadula MLS)
+        sink.validate_can_operate_at_level(SecurityLevel.OFFICIAL)  # Should pass (same level)
+        sink.validate_can_operate_at_level(SecurityLevel.SECRET)  # Should pass (higher level, more secure)
+        # sink.validate_can_operate_at_level(SecurityLevel.UNOFFICIAL) would FAIL (lower level rejected)
 
 
 # =============================================================================
@@ -401,11 +432,12 @@ class TestCategory2SecurityBugs:
     """
 
     def test_hasattr_check_returns_false_for_datasources(self, tmp_path: Path) -> None:
-        """Prove hasattr check returns False for datasources without BasePlugin methods.
+        """Prove hasattr check returns True for datasources WITH BasePlugin methods after Phase 1.
 
-        **TEST TYPE**: Security bug demonstration
-        **EXPECTED**: PASS (proves hasattr returns False)
-        **IMPACT**: suite_runner.py validation skips when this is False
+        **TEST TYPE**: Security bug demonstration (POST-MIGRATION)
+        **PHASE 1 STATUS**: ✅ MIGRATED - CSVDataSource inherits from BaseCSVDataSource → BasePlugin
+        **EXPECTED**: PASS (proves hasattr returns True after migration)
+        **IMPACT**: suite_runner.py validation will now run (bug fixed)
         """
         csv_file = tmp_path / "test.csv"
         csv_file.write_text("col1,col2\n1,2\n")
@@ -416,28 +448,29 @@ class TestCategory2SecurityBugs:
             security_level=SecurityLevel.SECRET
         )
 
-        # SECURITY BUG: This check returns False, causing validation to skip
+        # POST-MIGRATION: This check returns True, validation will run
         has_method = hasattr(ds, "validate_can_operate_at_level")
 
-        assert has_method is False, \
-            "hasattr check now returns True - validation will run!"
+        assert has_method is True, \
+            "hasattr check returns False - Phase 1 migration incomplete!"
 
     def test_hasattr_check_returns_false_for_sinks(self, tmp_path: Path) -> None:
-        """Prove hasattr check returns False for sinks without BasePlugin methods.
+        """Prove hasattr check returns True for sinks WITH BasePlugin methods after Phase 1.
 
-        **TEST TYPE**: Security bug demonstration
-        **EXPECTED**: PASS (proves hasattr returns False)
-        **IMPACT**: suite_runner.py validation skips when this is False
+        **TEST TYPE**: Security bug demonstration (POST-MIGRATION)
+        **PHASE 1 STATUS**: ✅ MIGRATED - CsvResultSink inherits from BasePlugin (commit 52e9217)
+        **EXPECTED**: PASS (proves hasattr returns True after migration)
+        **IMPACT**: suite_runner.py validation will now run (bug fixed)
         """
         output_file = tmp_path / "output.csv"
 
-        sink = CsvResultSink(path=str(output_file))
+        sink = CsvResultSink(path=str(output_file), security_level=SecurityLevel.OFFICIAL)
 
-        # SECURITY BUG: This check returns False, causing validation to skip
+        # POST-MIGRATION: This check returns True, validation will run
         has_method = hasattr(sink, "validate_can_operate_at_level")
 
-        assert has_method is False, \
-            "hasattr check now returns True - validation will run!"
+        assert has_method is True, \
+            "hasattr check returns False - Phase 1 migration incomplete!"
 
 
 # =============================================================================
