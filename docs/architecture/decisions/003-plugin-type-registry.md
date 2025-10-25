@@ -434,6 +434,152 @@ def test_plugin_registry_complete():
 
 **Result**: No single point of failure. Each layer provides independent protection.
 
+## Swiss Cheese Model - Closing the Gaps
+
+**Concern**: Three-layer defense still has "holes" that could align (Swiss Cheese Model):
+
+```
+Layer 1 (ABC):     Developer forgets to inherit     🕳️
+Layer 2 (Registry): Developer forgets to register    🕳️
+Layer 3 (Test):    Developer doesn't run tests       🕳️
+                   ═════════════════════════════════
+                   All three align → Bypass possible 💥
+```
+
+### Additional Hardening (Eliminate Wiggle Room)
+
+**H1: Static Type Checking (Close Layer 1 Hole)**
+
+Use MyPy strict mode to **require** BasePlugin inheritance for plugin types:
+
+```python
+# core/base/plugin_types.py
+from typing import TypeAlias
+
+# Type aliases for plugin lists - MyPy will enforce these
+RowPluginList: TypeAlias = list[BasePlugin]  # Not list[Protocol]
+AggregatorPluginList: TypeAlias = list[BasePlugin]
+
+# ExperimentRunner type hints
+class ExperimentRunner:
+    row_plugins: RowPluginList | None = None
+    aggregator_plugins: AggregatorPluginList | None = None
+    # MyPy error if plugin doesn't inherit BasePlugin!
+```
+
+**Enforcement**: `mypy --strict` in CI (already present)
+
+**Wiggle Room Eliminated**: Cannot use plugin without BasePlugin inheritance (MyPy fails)
+
+---
+
+**H2: Pre-Commit Hook (Close Layer 3 Hole)**
+
+Add mandatory pre-commit hook that runs test_plugin_registry_complete():
+
+```yaml
+# .pre-commit-config.yaml
+repos:
+  - repo: local
+    hooks:
+      - id: plugin-registry-check
+        name: Verify plugin registry complete
+        entry: pytest tests/test_plugin_registry.py::test_plugin_registry_complete -v
+        language: system
+        always_run: true
+        pass_filenames: false
+```
+
+**Enforcement**: Cannot commit if registry incomplete (hook fails)
+
+**Wiggle Room Eliminated**: Developer cannot bypass test (pre-commit runs automatically)
+
+---
+
+**H3: Type-Driven Registry (Close Layer 2 Hole)**
+
+Auto-generate registry from ExperimentRunner type annotations:
+
+```python
+# core/base/plugin_types.py (GENERATED - DO NOT EDIT)
+from typing import get_type_hints
+from elspeth.core.experiments.runner import ExperimentRunner
+
+def _generate_registry() -> dict[str, str]:
+    """Auto-generate plugin registry from ExperimentRunner type hints."""
+    hints = get_type_hints(ExperimentRunner)
+    registry = {}
+
+    for attr_name, hint in hints.items():
+        if attr_name.endswith('_plugins') or attr_name.endswith('_middlewares'):
+            # Extract inner type from list[T] | None
+            inner_type = _extract_list_type(hint)
+            registry[attr_name] = inner_type.__name__
+
+    return registry
+
+PLUGIN_TYPE_REGISTRY = _generate_registry()  # Auto-generated!
+```
+
+**Enforcement**: Registry is derived from source of truth (type annotations)
+
+**Wiggle Room Eliminated**: Cannot forget to register (automatic generation)
+
+---
+
+**H4: Ruff Custom Lint Rule (Close Layer 1 Hole - Belt + Suspenders)**
+
+Add custom lint rule detecting plugins without BasePlugin:
+
+```python
+# .ruff_plugins/check_plugin_inheritance.py
+def check_plugin_inheritance(node):
+    """Lint rule: Classes in *_plugins lists must inherit BasePlugin."""
+    if is_plugin_class(node) and not inherits_from(node, "BasePlugin"):
+        raise LintError(
+            f"Plugin {node.name} must inherit from BasePlugin "
+            f"(ADR-003 security requirement)"
+        )
+```
+
+**Enforcement**: Ruff fails on commit (already in CI)
+
+**Wiggle Room Eliminated**: Linter catches missing inheritance before commit
+
+---
+
+### Hardened Defense Matrix
+
+| Layer | Original Hole | Hardening | Wiggle Room Remaining |
+|-------|--------------|-----------|----------------------|
+| **Layer 1 (ABC)** | Forgot to inherit | H1: MyPy strict + H4: Ruff lint | ❌ **CLOSED** - Cannot compile |
+| **Layer 2 (Registry)** | Forgot to register | H3: Auto-generation | ❌ **CLOSED** - Cannot forget |
+| **Layer 3 (Test)** | Didn't run test | H2: Pre-commit hook | ❌ **CLOSED** - Cannot commit without |
+
+**Result**: Developer would need to:
+1. Bypass MyPy strict mode (`# type: ignore`)
+2. Bypass Ruff linting (`# noqa`)
+3. Bypass pre-commit hook (`--no-verify`)
+4. Bypass CI checks (requires admin rights)
+
+**At this point**: Obvious malicious intent, not accident
+
+---
+
+### Implementation Effort (Additional Hardening)
+
+| Hardening | Effort | Priority |
+|-----------|--------|----------|
+| H1: MyPy strict type aliases | 15 min | HIGH (free enforcement) |
+| H2: Pre-commit hook | 10 min | HIGH (cannot bypass locally) |
+| H3: Auto-generated registry | 30 min | MEDIUM (eliminates manual step) |
+| H4: Ruff custom lint rule | 45 min | LOW (belt + suspenders) |
+
+**Total Additional**: ~1-1.5 hours
+**Combined Total**: ~3-3.5 hours (including original ADR-003)
+
+---
+
 ### Risks
 
 | Risk | Likelihood | Impact | Mitigation |
