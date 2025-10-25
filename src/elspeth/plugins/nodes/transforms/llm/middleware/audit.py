@@ -5,7 +5,10 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from elspeth.core.base.plugin import BasePlugin
+from elspeth.core.base.plugin_context import PluginContext
 from elspeth.core.base.protocols import LLMMiddleware, LLMRequest
+from elspeth.core.base.types import SecurityLevel
 from elspeth.core.registries.middleware import register_middleware
 
 logger = logging.getLogger(__name__)
@@ -20,8 +23,14 @@ _AUDIT_SCHEMA = {
 }
 
 
-class AuditMiddleware(LLMMiddleware):
+class AuditMiddleware(BasePlugin, LLMMiddleware):
     """Structured audit logger for LLM requests and responses.
+
+    Args:
+        security_level: Security clearance for this middleware (MANDATORY per ADR-004).
+        allow_downgrade: Whether middleware can operate at lower pipeline levels (MANDATORY per ADR-005).
+        include_prompts: Whether to include full prompts in audit logs (default: False).
+        channel: Logger channel name (default: 'elspeth.audit').
 
     - Emits request metadata (and optionally prompts) before dispatch.
     - Emits response metrics (and optionally content) after completion.
@@ -30,7 +39,15 @@ class AuditMiddleware(LLMMiddleware):
 
     name = "audit_logger"
 
-    def __init__(self, *, include_prompts: bool = False, channel: str | None = None):
+    def __init__(
+        self,
+        *,
+        security_level: SecurityLevel,
+        allow_downgrade: bool,
+        include_prompts: bool = False,
+        channel: str | None = None
+    ):
+        super().__init__(security_level=security_level, allow_downgrade=allow_downgrade)
         self.include_prompts = include_prompts
         self.channel = channel or "elspeth.audit"
 
@@ -48,12 +65,23 @@ class AuditMiddleware(LLMMiddleware):
         return response
 
 
+def _create_audit_middleware(options: dict[str, Any], context: PluginContext) -> AuditMiddleware:
+    """Factory for audit middleware with smart security defaults."""
+    opts = dict(options)
+    if "security_level" not in opts and context:
+        opts["security_level"] = context.security_level
+    allow_downgrade = opts.get("allow_downgrade", True)
+    return AuditMiddleware(
+        security_level=opts["security_level"],
+        allow_downgrade=allow_downgrade,
+        include_prompts=bool(opts.get("include_prompts", False)),
+        channel=opts.get("channel"),
+    )
+
+
 register_middleware(
     "audit_logger",
-    lambda options, context: AuditMiddleware(
-        include_prompts=bool(options.get("include_prompts", False)),
-        channel=options.get("channel"),
-    ),
+    _create_audit_middleware,
     schema=_AUDIT_SCHEMA,
 )
 

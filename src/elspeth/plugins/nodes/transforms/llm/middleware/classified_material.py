@@ -5,9 +5,12 @@ from __future__ import annotations
 import logging
 import re
 import unicodedata
-from typing import Sequence
+from typing import Any, Sequence
 
+from elspeth.core.base.plugin import BasePlugin
+from elspeth.core.base.plugin_context import PluginContext
 from elspeth.core.base.protocols import LLMMiddleware, LLMRequest
+from elspeth.core.base.types import SecurityLevel
 from elspeth.core.registries.middleware import register_middleware
 
 logger = logging.getLogger(__name__)
@@ -32,7 +35,7 @@ _CLASSIFIED_MATERIAL_SCHEMA = {
 }
 
 
-class ClassifiedMaterialMiddleware(LLMMiddleware):
+class ClassifiedMaterialMiddleware(BasePlugin, LLMMiddleware):
     """Detect and block classified material markings in prompts with advanced fuzzy matching.
 
     Features:
@@ -41,6 +44,10 @@ class ClassifiedMaterialMiddleware(LLMMiddleware):
     - Severity scoring (HIGH/MEDIUM/LOW)
     - False-positive dampers (code fence detection, all-caps requirement)
     - REL TO country-list parsing
+
+    Args:
+        security_level: Security clearance for this middleware (MANDATORY per ADR-004).
+        allow_downgrade: Whether middleware can operate at lower pipeline levels (MANDATORY per ADR-005).
     """
 
     name = "classified_material"
@@ -188,6 +195,8 @@ class ClassifiedMaterialMiddleware(LLMMiddleware):
     def __init__(
         self,
         *,
+        security_level: SecurityLevel,
+        allow_downgrade: bool,
         classification_markings: Sequence[str] | None = None,
         on_violation: str = "abort",
         mask: str = "[CLASSIFIED]",
@@ -204,6 +213,8 @@ class ClassifiedMaterialMiddleware(LLMMiddleware):
         """Initialize enhanced classified material middleware.
 
         Args:
+            security_level: Security clearance for this middleware (MANDATORY per ADR-004).
+            allow_downgrade: Whether middleware can operate at lower pipeline levels (MANDATORY per ADR-005).
             classification_markings: Custom classification markings to detect
             on_violation: Action on detection - 'abort', 'mask', or 'log'
             mask: Replacement text when masking
@@ -217,6 +228,7 @@ class ClassifiedMaterialMiddleware(LLMMiddleware):
             check_code_fences: Apply false-positive dampers for code fences
             require_allcaps_confidence: Require ALL-CAPS or proximity to trigger on single words
         """
+        super().__init__(security_level=security_level, allow_downgrade=allow_downgrade)
         mode = (on_violation or "abort").lower()
         if mode not in {"abort", "mask", "log"}:
             mode = "abort"
@@ -453,22 +465,35 @@ class ClassifiedMaterialMiddleware(LLMMiddleware):
         return request
 
 
+def _create_classified_material_middleware(
+    options: dict[str, Any], context: PluginContext
+) -> ClassifiedMaterialMiddleware:
+    """Factory for classified material middleware with smart security defaults."""
+    opts = dict(options)
+    if "security_level" not in opts and context:
+        opts["security_level"] = context.security_level
+    allow_downgrade = opts.get("allow_downgrade", True)
+    return ClassifiedMaterialMiddleware(
+        security_level=opts["security_level"],
+        allow_downgrade=allow_downgrade,
+        classification_markings=opts.get("classification_markings"),
+        on_violation=opts.get("on_violation", "abort"),
+        mask=opts.get("mask", "[CLASSIFIED]"),
+        channel=opts.get("channel"),
+        case_sensitive=opts.get("case_sensitive", False),
+        include_defaults=opts.get("include_defaults", True),
+        include_optional=opts.get("include_optional", False),
+        fuzzy_matching=opts.get("fuzzy_matching", True),
+        severity_scoring=opts.get("severity_scoring", True),
+        min_severity=opts.get("min_severity", "LOW"),
+        check_code_fences=opts.get("check_code_fences", True),
+        require_allcaps_confidence=opts.get("require_allcaps_confidence", False),
+    )
+
+
 register_middleware(
     "classified_material",
-    lambda options, context: ClassifiedMaterialMiddleware(
-        classification_markings=options.get("classification_markings"),
-        on_violation=options.get("on_violation", "abort"),
-        mask=options.get("mask", "[CLASSIFIED]"),
-        channel=options.get("channel"),
-        case_sensitive=options.get("case_sensitive", False),
-        include_defaults=options.get("include_defaults", True),
-        include_optional=options.get("include_optional", False),
-        fuzzy_matching=options.get("fuzzy_matching", True),
-        severity_scoring=options.get("severity_scoring", True),
-        min_severity=options.get("min_severity", "LOW"),
-        check_code_fences=options.get("check_code_fences", True),
-        require_allcaps_confidence=options.get("require_allcaps_confidence", False),
-    ),
+    _create_classified_material_middleware,
     schema=_CLASSIFIED_MATERIAL_SCHEMA,
 )
 

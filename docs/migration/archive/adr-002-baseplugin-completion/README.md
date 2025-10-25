@@ -309,9 +309,9 @@ class BaseCSVDataSource(DataSource):
         Example (Bell-LaPadula "no read up"):
             >>> ds = BaseCSVDataSource(path="secret.csv", security_level=SecurityLevel.SECRET)
             >>> ds.validate_can_operate_at_level(SecurityLevel.OFFICIAL)  # ✅ OK (lower)
-            >>> ds.validate_can_operate_at_level(SecurityLevel.TOP_SECRET)  # ❌ Fails
+            >>> ds.validate_can_operate_at_level(SecurityLevel.PROTECTED)  # ❌ Fails
             SecurityValidationError: BaseCSVDataSource has clearance SECRET,
-                but pipeline requires TOP_SECRET - insufficient clearance
+                but pipeline requires PROTECTED - insufficient clearance
         """
         if operating_level > self.security_level:
             from elspeth.core.validation.base import SecurityValidationError

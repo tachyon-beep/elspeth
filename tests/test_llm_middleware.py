@@ -6,6 +6,7 @@ import pytest
 import requests
 
 from elspeth.core.base.protocols import LLMMiddleware, LLMRequest
+from elspeth.core.base.types import SecurityLevel
 from elspeth.core.experiments.config import ExperimentConfig, ExperimentSuite
 from elspeth.core.experiments.runner import ExperimentRunner
 from elspeth.core.experiments.suite_runner import ExperimentSuiteRunner
@@ -168,6 +169,8 @@ def test_azure_content_safety_blocks(monkeypatch):
     monkeypatch.setenv("AZURE_CS_KEY", "secret")
 
     middleware = AzureContentSafetyMiddleware(
+        security_level=SecurityLevel.UNOFFICIAL,
+        allow_downgrade=True,
         endpoint="https://example.cognitiveservices.azure.com",
         key_env="AZURE_CS_KEY",
         severity_threshold=4,
@@ -193,6 +196,8 @@ def test_azure_content_safety_masks(monkeypatch):
     monkeypatch.setattr("requests.post", lambda *args, **kwargs: DummyResponse())
 
     middleware = AzureContentSafetyMiddleware(
+        security_level=SecurityLevel.UNOFFICIAL,
+        allow_downgrade=True,
         endpoint="https://example.cognitiveservices.azure.com",
         key="secret",
         severity_threshold=4,
@@ -206,7 +211,12 @@ def test_azure_content_safety_masks(monkeypatch):
 
 
 def test_audit_middleware_logs_prompts(caplog):
-    middleware = AuditMiddleware(include_prompts=True, channel="test.audit")
+    middleware = AuditMiddleware(
+        security_level=SecurityLevel.UNOFFICIAL,
+        allow_downgrade=True,
+        include_prompts=True,
+        channel="test.audit",
+    )
     request = LLMRequest(system_prompt="sys", user_prompt="prompt text", metadata={"run": "123"})
     response = {"metrics": {"tokens": 12}, "content": "reply"}
 
@@ -224,7 +234,14 @@ def test_health_monitor_emits_heartbeat(monkeypatch, caplog):
     times = iter([0.0, 0.25, 0.5])
     monkeypatch.setattr("elspeth.plugins.nodes.transforms.llm.middleware.health_monitor.time.monotonic", lambda: next(times))
 
-    middleware = HealthMonitorMiddleware(heartbeat_interval=0, stats_window=2, channel="test.health", include_latency=True)
+    middleware = HealthMonitorMiddleware(
+        security_level=SecurityLevel.UNOFFICIAL,
+        allow_downgrade=True,
+        heartbeat_interval=0,
+        stats_window=2,
+        channel="test.health",
+        include_latency=True,
+    )
     request = LLMRequest(system_prompt="sys", user_prompt="hello", metadata={})
 
     with caplog.at_level("INFO"):
@@ -244,6 +261,8 @@ def test_azure_content_safety_skip_on_error(monkeypatch, caplog):
     monkeypatch.setattr("requests.post", fake_post)
 
     middleware = AzureContentSafetyMiddleware(
+        security_level=SecurityLevel.UNOFFICIAL,
+        allow_downgrade=True,
         endpoint="https://example.cognitiveservices.azure.com",
         key="secret",
         on_violation="abort",
@@ -396,7 +415,13 @@ def test_middleware_retry_hook_invoked(monkeypatch):
 
 
 def test_health_monitor_middleware_logs(caplog):
-    middleware = HealthMonitorMiddleware(heartbeat_interval=0.0, stats_window=5, channel="test.health")
+    middleware = HealthMonitorMiddleware(
+        security_level=SecurityLevel.UNOFFICIAL,
+        allow_downgrade=True,
+        heartbeat_interval=0.0,
+        stats_window=5,
+        channel="test.health",
+    )
     request = LLMRequest(system_prompt="sys", user_prompt="hello", metadata={})
 
     with caplog.at_level("INFO"):
@@ -407,7 +432,13 @@ def test_health_monitor_middleware_logs(caplog):
 
 
 def test_health_monitor_middleware_tracks_failures(caplog):
-    middleware = HealthMonitorMiddleware(heartbeat_interval=0.0, stats_window=5, channel="test.health")
+    middleware = HealthMonitorMiddleware(
+        security_level=SecurityLevel.UNOFFICIAL,
+        allow_downgrade=True,
+        heartbeat_interval=0.0,
+        stats_window=5,
+        channel="test.health",
+    )
     request = LLMRequest(system_prompt="sys", user_prompt="hello", metadata={})
 
     middleware.before_request(request)

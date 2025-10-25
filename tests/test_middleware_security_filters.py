@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 from elspeth.core.base.protocols import LLMRequest
+from elspeth.core.base.types import SecurityLevel
 from elspeth.plugins.nodes.transforms.llm.middleware import ClassifiedMaterialMiddleware, PIIShieldMiddleware
 
 # =====================================================================
@@ -14,7 +15,10 @@ from elspeth.plugins.nodes.transforms.llm.middleware import ClassifiedMaterialMi
 
 def test_pii_shield_detects_email_address() -> None:
     """Test that PII shield detects and blocks email addresses."""
-    middleware = PIIShieldMiddleware(on_violation="abort")
+    middleware = PIIShieldMiddleware(
+        security_level=SecurityLevel.UNOFFICIAL,
+        allow_downgrade=True,
+        on_violation="abort")
     request = LLMRequest(
         system_prompt="You are a helpful assistant.",
         user_prompt="Contact me at john.doe@example.com for more info.",
@@ -27,7 +31,10 @@ def test_pii_shield_detects_email_address() -> None:
 
 def test_pii_shield_detects_us_ssn() -> None:
     """Test that PII shield detects US Social Security Numbers."""
-    middleware = PIIShieldMiddleware(on_violation="abort")
+    middleware = PIIShieldMiddleware(
+        security_level=SecurityLevel.UNOFFICIAL,
+        allow_downgrade=True,
+        on_violation="abort")
     request = LLMRequest(
         system_prompt="",
         user_prompt="My SSN is 123-45-6789.",
@@ -40,7 +47,10 @@ def test_pii_shield_detects_us_ssn() -> None:
 
 def test_pii_shield_detects_phone_number() -> None:
     """Test that PII shield detects US phone numbers."""
-    middleware = PIIShieldMiddleware(on_violation="abort")
+    middleware = PIIShieldMiddleware(
+        security_level=SecurityLevel.UNOFFICIAL,
+        allow_downgrade=True,
+        on_violation="abort")
     request = LLMRequest(
         system_prompt="",
         user_prompt="Call me at (555) 123-4567.",
@@ -53,7 +63,10 @@ def test_pii_shield_detects_phone_number() -> None:
 
 def test_pii_shield_detects_credit_card() -> None:
     """Test that PII shield detects credit card numbers (with checksum validation)."""
-    middleware = PIIShieldMiddleware(on_violation="abort")
+    middleware = PIIShieldMiddleware(
+        security_level=SecurityLevel.UNOFFICIAL,
+        allow_downgrade=True,
+        on_violation="abort")
     # Using a valid Luhn checksum: 4532015112830366 (test Visa)
     request = LLMRequest(
         system_prompt="",
@@ -67,7 +80,10 @@ def test_pii_shield_detects_credit_card() -> None:
 
 def test_pii_shield_detects_multiple_pii_types() -> None:
     """Test that PII shield detects multiple PII types in one prompt."""
-    middleware = PIIShieldMiddleware(on_violation="abort")
+    middleware = PIIShieldMiddleware(
+        security_level=SecurityLevel.UNOFFICIAL,
+        allow_downgrade=True,
+        on_violation="abort")
     request = LLMRequest(
         system_prompt="",
         user_prompt="Contact john@example.com or call 555-123-4567.",
@@ -80,7 +96,10 @@ def test_pii_shield_detects_multiple_pii_types() -> None:
 
 def test_pii_shield_masks_email_when_configured() -> None:
     """Test that PII shield masks email addresses with pseudonyms when on_violation=mask."""
-    middleware = PIIShieldMiddleware(on_violation="mask", mask="[REDACTED]")
+    middleware = PIIShieldMiddleware(
+        security_level=SecurityLevel.UNOFFICIAL,
+        allow_downgrade=True,
+        on_violation="mask", mask="[REDACTED]")
     request = LLMRequest(
         system_prompt="",
         user_prompt="Contact me at john.doe@example.com for more info.",
@@ -98,7 +117,10 @@ def test_pii_shield_masks_email_when_configured() -> None:
 
 def test_pii_shield_logs_only_when_configured() -> None:
     """Test that PII shield only logs when on_violation=log."""
-    middleware = PIIShieldMiddleware(on_violation="log")
+    middleware = PIIShieldMiddleware(
+        security_level=SecurityLevel.UNOFFICIAL,
+        allow_downgrade=True,
+        on_violation="log")
     request = LLMRequest(
         system_prompt="",
         user_prompt="Contact john@example.com.",
@@ -113,7 +135,10 @@ def test_pii_shield_logs_only_when_configured() -> None:
 
 def test_pii_shield_allows_clean_prompts() -> None:
     """Test that PII shield allows prompts without PII."""
-    middleware = PIIShieldMiddleware(on_violation="abort")
+    middleware = PIIShieldMiddleware(
+        security_level=SecurityLevel.UNOFFICIAL,
+        allow_downgrade=True,
+        on_violation="abort")
     request = LLMRequest(
         system_prompt="",
         user_prompt="What is the weather like today?",
@@ -128,6 +153,9 @@ def test_pii_shield_allows_clean_prompts() -> None:
 def test_pii_shield_custom_patterns() -> None:
     """Test that PII shield supports custom regex patterns."""
     middleware = PIIShieldMiddleware(
+        security_level=SecurityLevel.UNOFFICIAL,
+        allow_downgrade=True,
+        
         patterns=[
             {"name": "employee_id", "regex": r"\bEMP-\d{6}\b"},
         ],
@@ -147,6 +175,9 @@ def test_pii_shield_custom_patterns() -> None:
 def test_pii_shield_custom_patterns_with_defaults() -> None:
     """Test that custom patterns can be combined with defaults."""
     middleware = PIIShieldMiddleware(
+        security_level=SecurityLevel.UNOFFICIAL,
+        allow_downgrade=True,
+        
         patterns=[
             {"name": "custom_id", "regex": r"\bCUST-\d{4}\b"},
         ],
@@ -175,7 +206,10 @@ def test_pii_shield_custom_patterns_with_defaults() -> None:
 
 def test_pii_shield_masks_multiple_occurrences() -> None:
     """Test that PII shield masks multiple occurrences with unique pseudonyms."""
-    middleware = PIIShieldMiddleware(on_violation="mask", mask="[REDACTED]")
+    middleware = PIIShieldMiddleware(
+        security_level=SecurityLevel.UNOFFICIAL,
+        allow_downgrade=True,
+        on_violation="mask", mask="[REDACTED]")
     request = LLMRequest(
         system_prompt="",
         user_prompt="Email alice@example.com or bob@example.org.",
@@ -193,6 +227,9 @@ def test_pii_shield_masks_multiple_occurrences() -> None:
 def test_pii_shield_handles_invalid_regex_gracefully() -> None:
     """Test that invalid regex patterns are skipped with warning."""
     middleware = PIIShieldMiddleware(
+        security_level=SecurityLevel.UNOFFICIAL,
+        allow_downgrade=True,
+        
         patterns=[
             {"name": "invalid", "regex": r"(?P<invalid"},  # Invalid regex
             {"name": "valid", "regex": r"\bVALID\b"},
@@ -213,7 +250,10 @@ def test_pii_shield_handles_invalid_regex_gracefully() -> None:
 
 def test_pii_shield_custom_mask_text() -> None:
     """Test that mask mode uses deterministic pseudonyms (mask parameter no longer used)."""
-    middleware = PIIShieldMiddleware(on_violation="mask", mask="***PII***")
+    middleware = PIIShieldMiddleware(
+        security_level=SecurityLevel.UNOFFICIAL,
+        allow_downgrade=True,
+        on_violation="mask", mask="***PII***")
     request = LLMRequest(
         system_prompt="",
         user_prompt="Email: test@example.com",
@@ -229,7 +269,10 @@ def test_pii_shield_custom_mask_text() -> None:
 
 def test_pii_shield_custom_channel() -> None:
     """Test that custom logging channel is used."""
-    middleware = PIIShieldMiddleware(channel="custom.pii.channel")
+    middleware = PIIShieldMiddleware(
+        security_level=SecurityLevel.UNOFFICIAL,
+        allow_downgrade=True,
+        channel="custom.pii.channel")
 
     assert middleware.channel == "custom.pii.channel"
 
@@ -244,7 +287,10 @@ def test_pii_shield_detects_australian_tfn() -> None:
 
     Note: TFN and ACN both use 9-digit format, so both may be detected.
     """
-    middleware = PIIShieldMiddleware(on_violation="abort")
+    middleware = PIIShieldMiddleware(
+        security_level=SecurityLevel.UNOFFICIAL,
+        allow_downgrade=True,
+        on_violation="abort")
 
     # Test with spaces (will match both tfn_au and acn_au due to identical format)
     request1 = LLMRequest(
@@ -276,7 +322,10 @@ def test_pii_shield_detects_australian_tfn() -> None:
 
 def test_pii_shield_detects_australian_abn() -> None:
     """Test that PII shield detects Australian Business Numbers (with checksum validation)."""
-    middleware = PIIShieldMiddleware(on_violation="abort")
+    middleware = PIIShieldMiddleware(
+        security_level=SecurityLevel.UNOFFICIAL,
+        allow_downgrade=True,
+        on_violation="abort")
 
     # Test with valid ABN and context - Using real ABN: 51 824 753 556 (Atlassian)
     request1 = LLMRequest(
@@ -302,7 +351,10 @@ def test_pii_shield_detects_australian_acn() -> None:
 
     Note: TFN and ACN both use 9-digit format, so both may be detected.
     """
-    middleware = PIIShieldMiddleware(on_violation="abort")
+    middleware = PIIShieldMiddleware(
+        security_level=SecurityLevel.UNOFFICIAL,
+        allow_downgrade=True,
+        on_violation="abort")
 
     # Test with spaces (will match both tfn_au and acn_au due to identical format)
     request1 = LLMRequest(
@@ -325,7 +377,10 @@ def test_pii_shield_detects_australian_acn() -> None:
 
 def test_pii_shield_detects_australian_medicare() -> None:
     """Test that PII shield detects Australian Medicare numbers (with checksum validation)."""
-    middleware = PIIShieldMiddleware(on_violation="abort")
+    middleware = PIIShieldMiddleware(
+        security_level=SecurityLevel.UNOFFICIAL,
+        allow_downgrade=True,
+        on_violation="abort")
 
     # Using valid Medicare number: 2000 00002 1 (checksum validated: weights [1,3,7,9,1,3,7,9], check digit = sum % 10)
     request = LLMRequest(
@@ -339,7 +394,10 @@ def test_pii_shield_detects_australian_medicare() -> None:
 
 def test_pii_shield_detects_australian_phone() -> None:
     """Test that PII shield detects Australian landline phone numbers."""
-    middleware = PIIShieldMiddleware(on_violation="abort")
+    middleware = PIIShieldMiddleware(
+        security_level=SecurityLevel.UNOFFICIAL,
+        allow_downgrade=True,
+        on_violation="abort")
 
     # Test with area code in brackets
     request1 = LLMRequest(
@@ -371,7 +429,10 @@ def test_pii_shield_detects_australian_phone() -> None:
 
 def test_pii_shield_detects_australian_mobile() -> None:
     """Test that PII shield detects Australian mobile phone numbers."""
-    middleware = PIIShieldMiddleware(on_violation="abort")
+    middleware = PIIShieldMiddleware(
+        security_level=SecurityLevel.UNOFFICIAL,
+        allow_downgrade=True,
+        on_violation="abort")
 
     # Test standard format
     request1 = LLMRequest(
@@ -403,7 +464,10 @@ def test_pii_shield_detects_australian_mobile() -> None:
 
 def test_pii_shield_detects_australian_passport() -> None:
     """Test that PII shield detects Australian passport numbers."""
-    middleware = PIIShieldMiddleware(on_violation="abort")
+    middleware = PIIShieldMiddleware(
+        security_level=SecurityLevel.UNOFFICIAL,
+        allow_downgrade=True,
+        on_violation="abort")
 
     request = LLMRequest(
         system_prompt="",
@@ -416,7 +480,10 @@ def test_pii_shield_detects_australian_passport() -> None:
 
 def test_pii_shield_detects_australian_drivers_license() -> None:
     """Test that PII shield detects Australian driver's license numbers."""
-    middleware = PIIShieldMiddleware(on_violation="abort")
+    middleware = PIIShieldMiddleware(
+        security_level=SecurityLevel.UNOFFICIAL,
+        allow_downgrade=True,
+        on_violation="abort")
 
     # NSW license (8 digits)
     request1 = LLMRequest(
@@ -448,7 +515,10 @@ def test_pii_shield_detects_australian_drivers_license() -> None:
 
 def test_pii_shield_masks_australian_pii() -> None:
     """Test that Australian PII is masked correctly (with pseudonyms)."""
-    middleware = PIIShieldMiddleware(on_violation="mask", mask="[REDACTED]")
+    middleware = PIIShieldMiddleware(
+        security_level=SecurityLevel.UNOFFICIAL,
+        allow_downgrade=True,
+        on_violation="mask", mask="[REDACTED]")
 
     # Using valid ABN with context
     request = LLMRequest(
@@ -468,7 +538,10 @@ def test_pii_shield_masks_australian_pii() -> None:
 
 def test_pii_shield_detects_mixed_australian_and_us_pii() -> None:
     """Test that both Australian and US PII can be detected together."""
-    middleware = PIIShieldMiddleware(on_violation="abort")
+    middleware = PIIShieldMiddleware(
+        security_level=SecurityLevel.UNOFFICIAL,
+        allow_downgrade=True,
+        on_violation="abort")
 
     request = LLMRequest(
         system_prompt="",
@@ -484,6 +557,9 @@ def test_pii_shield_detects_mixed_australian_and_us_pii() -> None:
 def test_pii_shield_australian_patterns_can_be_disabled() -> None:
     """Test that default patterns (including Australian) can be disabled."""
     middleware = PIIShieldMiddleware(
+        security_level=SecurityLevel.UNOFFICIAL,
+        allow_downgrade=True,
+        
         patterns=[
             {"name": "custom_id", "regex": r"\bCUST-\d{4}\b"},
         ],
@@ -509,7 +585,10 @@ def test_pii_shield_australian_patterns_can_be_disabled() -> None:
 
 def test_classified_material_detects_secret() -> None:
     """Test that classified material middleware detects SECRET marking."""
-    middleware = ClassifiedMaterialMiddleware(on_violation="abort")
+    middleware = ClassifiedMaterialMiddleware(
+        security_level=SecurityLevel.UNOFFICIAL,
+        allow_downgrade=True,
+        on_violation="abort")
     request = LLMRequest(
         system_prompt="",
         user_prompt="This document is marked SECRET.",
@@ -522,7 +601,10 @@ def test_classified_material_detects_secret() -> None:
 
 def test_classified_material_detects_top_secret() -> None:
     """Test that classified material middleware detects TOP SECRET marking."""
-    middleware = ClassifiedMaterialMiddleware(on_violation="abort")
+    middleware = ClassifiedMaterialMiddleware(
+        security_level=SecurityLevel.UNOFFICIAL,
+        allow_downgrade=True,
+        on_violation="abort")
     request = LLMRequest(
         system_prompt="",
         user_prompt="TOP SECRET: Need to know basis only.",
@@ -535,7 +617,10 @@ def test_classified_material_detects_top_secret() -> None:
 
 def test_classified_material_detects_protected() -> None:
     """Test that classified material middleware detects PROTECTED marking."""
-    middleware = ClassifiedMaterialMiddleware(on_violation="abort")
+    middleware = ClassifiedMaterialMiddleware(
+        security_level=SecurityLevel.UNOFFICIAL,
+        allow_downgrade=True,
+        on_violation="abort")
     request = LLMRequest(
         system_prompt="",
         user_prompt="This is PROTECTED information.",
@@ -548,7 +633,10 @@ def test_classified_material_detects_protected() -> None:
 
 def test_classified_material_detects_cabinet_codeword() -> None:
     """Test that classified material middleware detects CABINET CODEWORD marking."""
-    middleware = ClassifiedMaterialMiddleware(on_violation="abort")
+    middleware = ClassifiedMaterialMiddleware(
+        security_level=SecurityLevel.UNOFFICIAL,
+        allow_downgrade=True,
+        on_violation="abort")
     request = LLMRequest(
         system_prompt="",
         user_prompt="PROTECTED: CABINET CODEWORD - Eyes only.",
@@ -561,7 +649,10 @@ def test_classified_material_detects_cabinet_codeword() -> None:
 
 def test_classified_material_case_insensitive_by_default() -> None:
     """Test that classification detection is case-insensitive by default."""
-    middleware = ClassifiedMaterialMiddleware(on_violation="abort")
+    middleware = ClassifiedMaterialMiddleware(
+        security_level=SecurityLevel.UNOFFICIAL,
+        allow_downgrade=True,
+        on_violation="abort")
     request = LLMRequest(
         system_prompt="",
         user_prompt="This is secret information.",  # lowercase
@@ -574,7 +665,10 @@ def test_classified_material_case_insensitive_by_default() -> None:
 
 def test_classified_material_case_sensitive_when_configured() -> None:
     """Test that case-sensitive mode only matches exact case."""
-    middleware = ClassifiedMaterialMiddleware(on_violation="abort", case_sensitive=True)
+    middleware = ClassifiedMaterialMiddleware(
+        security_level=SecurityLevel.UNOFFICIAL,
+        allow_downgrade=True,
+        on_violation="abort", case_sensitive=True)
 
     # Should match uppercase
     request1 = LLMRequest(
@@ -597,7 +691,10 @@ def test_classified_material_case_sensitive_when_configured() -> None:
 
 def test_classified_material_masks_markings() -> None:
     """Test that classified material middleware masks markings when on_violation=mask."""
-    middleware = ClassifiedMaterialMiddleware(on_violation="mask", mask="[REDACTED]")
+    middleware = ClassifiedMaterialMiddleware(
+        security_level=SecurityLevel.UNOFFICIAL,
+        allow_downgrade=True,
+        on_violation="mask", mask="[REDACTED]")
     request = LLMRequest(
         system_prompt="",
         user_prompt="This document is marked SECRET and CONFIDENTIAL.",
@@ -613,7 +710,10 @@ def test_classified_material_masks_markings() -> None:
 
 def test_classified_material_logs_only_when_configured() -> None:
     """Test that classified material middleware only logs when on_violation=log."""
-    middleware = ClassifiedMaterialMiddleware(on_violation="log")
+    middleware = ClassifiedMaterialMiddleware(
+        security_level=SecurityLevel.UNOFFICIAL,
+        allow_downgrade=True,
+        on_violation="log")
     request = LLMRequest(
         system_prompt="",
         user_prompt="This is SECRET.",
@@ -628,7 +728,10 @@ def test_classified_material_logs_only_when_configured() -> None:
 
 def test_classified_material_allows_clean_prompts() -> None:
     """Test that classified material middleware allows prompts without markings."""
-    middleware = ClassifiedMaterialMiddleware(on_violation="abort")
+    middleware = ClassifiedMaterialMiddleware(
+        security_level=SecurityLevel.UNOFFICIAL,
+        allow_downgrade=True,
+        on_violation="abort")
     request = LLMRequest(
         system_prompt="",
         user_prompt="This is unclassified public information.",
@@ -643,6 +746,9 @@ def test_classified_material_allows_clean_prompts() -> None:
 def test_classified_material_custom_markings() -> None:
     """Test that classified material middleware supports custom markings."""
     middleware = ClassifiedMaterialMiddleware(
+        security_level=SecurityLevel.UNOFFICIAL,
+        allow_downgrade=True,
+        
         classification_markings=["ACME INTERNAL", "PROPRIETARY"],
         include_defaults=False,
         on_violation="abort",
@@ -660,6 +766,9 @@ def test_classified_material_custom_markings() -> None:
 def test_classified_material_custom_markings_with_defaults() -> None:
     """Test that custom markings can be combined with defaults."""
     middleware = ClassifiedMaterialMiddleware(
+        security_level=SecurityLevel.UNOFFICIAL,
+        allow_downgrade=True,
+        
         classification_markings=["CUSTOM MARKING"],
         include_defaults=True,
         on_violation="abort",
@@ -686,7 +795,10 @@ def test_classified_material_custom_markings_with_defaults() -> None:
 
 def test_classified_material_detects_ts_sci() -> None:
     """Test that classified material middleware detects TS//SCI marking."""
-    middleware = ClassifiedMaterialMiddleware(on_violation="abort")
+    middleware = ClassifiedMaterialMiddleware(
+        security_level=SecurityLevel.UNOFFICIAL,
+        allow_downgrade=True,
+        on_violation="abort")
     request = LLMRequest(
         system_prompt="",
         user_prompt="Classification: TS//SCI",
@@ -699,7 +811,10 @@ def test_classified_material_detects_ts_sci() -> None:
 
 def test_classified_material_detects_noforn() -> None:
     """Test that classified material middleware detects NOFORN marking."""
-    middleware = ClassifiedMaterialMiddleware(on_violation="abort")
+    middleware = ClassifiedMaterialMiddleware(
+        security_level=SecurityLevel.UNOFFICIAL,
+        allow_downgrade=True,
+        on_violation="abort")
     request = LLMRequest(
         system_prompt="",
         user_prompt="SECRET//NOFORN - US personnel only.",
@@ -712,7 +827,10 @@ def test_classified_material_detects_noforn() -> None:
 
 def test_classified_material_custom_mask_text() -> None:
     """Test that custom mask text is applied."""
-    middleware = ClassifiedMaterialMiddleware(on_violation="mask", mask="***CLASSIFIED***")
+    middleware = ClassifiedMaterialMiddleware(
+        security_level=SecurityLevel.UNOFFICIAL,
+        allow_downgrade=True,
+        on_violation="mask", mask="***CLASSIFIED***")
     request = LLMRequest(
         system_prompt="",
         user_prompt="This is SECRET data.",
@@ -726,14 +844,20 @@ def test_classified_material_custom_mask_text() -> None:
 
 def test_classified_material_custom_channel() -> None:
     """Test that custom logging channel is used."""
-    middleware = ClassifiedMaterialMiddleware(channel="custom.classification.channel")
+    middleware = ClassifiedMaterialMiddleware(
+        security_level=SecurityLevel.UNOFFICIAL,
+        allow_downgrade=True,
+        channel="custom.classification.channel")
 
     assert middleware.channel == "custom.classification.channel"
 
 
 def test_classified_material_masks_multiple_markings() -> None:
     """Test that multiple classification markings are masked."""
-    middleware = ClassifiedMaterialMiddleware(on_violation="mask", mask="[REDACTED]")
+    middleware = ClassifiedMaterialMiddleware(
+        security_level=SecurityLevel.UNOFFICIAL,
+        allow_downgrade=True,
+        on_violation="mask", mask="[REDACTED]")
     request = LLMRequest(
         system_prompt="",
         user_prompt="This is SECRET and CONFIDENTIAL and TOP SECRET.",
@@ -749,7 +873,10 @@ def test_classified_material_masks_multiple_markings() -> None:
 
 def test_classified_material_detects_official_sensitive() -> None:
     """Test that OFFICIAL-SENSITIVE marking is detected when include_optional=True."""
-    middleware = ClassifiedMaterialMiddleware(on_violation="abort", include_optional=True)
+    middleware = ClassifiedMaterialMiddleware(
+        security_level=SecurityLevel.UNOFFICIAL,
+        allow_downgrade=True,
+        on_violation="abort", include_optional=True)
     request = LLMRequest(
         system_prompt="",
         user_prompt="This is OFFICIAL-SENSITIVE information.",
