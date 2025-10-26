@@ -130,6 +130,21 @@ class BasePluginFactory(Generic[T]):
         """
         self.validate(options, context=schema_context)
         plugin = self.create(options, plugin_context)
+
+        # Layer 3: Verify declared security_level matches actual (ADR-002-B, VULN-004)
+        if self.declared_security_level is not None:
+            try:
+                actual_security_level = getattr(plugin, "security_level", None)
+                if actual_security_level != self.declared_security_level:
+                    raise ConfigurationError(
+                        f"{schema_context}: Plugin declares security_level={self.declared_security_level} "
+                        f"but has actual security_level={actual_security_level}. "
+                        "Plugin implementation must match registry declaration (ADR-002-B)."
+                    )
+            except AttributeError:
+                # Plugin doesn't have security_level attribute - this is OK for some plugin types
+                pass
+
         # Attach factory metadata for downstream enforcement (e.g., input_schema requirement)
         try:
             setattr(plugin, "_elspeth_requires_input_schema", bool(self.requires_input_schema))
