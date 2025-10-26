@@ -220,7 +220,8 @@ def run_job_config(job: Mapping[str, Any]) -> dict[str, Any]:
         return payload_out
 
     # Identity: no LLM present -> write rows as-is via ArtifactPipeline
-    results = [{"row": row.to_dict()} for _, row in df.iterrows()]
+    # df is SecureDataFrame - access underlying DataFrame via .data
+    results = [{"row": row.to_dict()} for _, row in df.data.iterrows()]
     payload: dict[str, Any] = {"results": results}
     metadata: dict[str, Any] = {
         "rows": len(results),

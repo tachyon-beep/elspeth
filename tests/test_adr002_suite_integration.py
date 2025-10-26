@@ -20,6 +20,7 @@ from elspeth.core.base.plugin import BasePlugin  # ADR-004: ABC with nominal typ
 from elspeth.core.base.types import SecurityLevel
 from elspeth.core.experiments.config import ExperimentConfig, ExperimentSuite
 from elspeth.core.experiments.suite_runner import ExperimentSuiteRunner
+from elspeth.core.security import SecureDataFrame
 from elspeth.core.validation.base import SecurityValidationError
 
 # ============================================================================
@@ -34,8 +35,8 @@ class MockSecureDatasource(BasePlugin):
         super().__init__(security_level=SecurityLevel.SECRET, allow_downgrade=True)
         self.df = df
 
-    def load(self) -> pd.DataFrame:
-        return self.df
+    def load(self) -> SecureDataFrame:
+        return SecureDataFrame.create_from_datasource(self.df, SecurityLevel.SECRET)
 
 
 class MockOfficialDatasource(BasePlugin):
@@ -45,8 +46,19 @@ class MockOfficialDatasource(BasePlugin):
         super().__init__(security_level=SecurityLevel.OFFICIAL, allow_downgrade=True)
         self.df = df
 
-    def load(self) -> pd.DataFrame:
-        return self.df
+    def load(self) -> SecureDataFrame:
+        return SecureDataFrame.create_from_datasource(self.df, SecurityLevel.OFFICIAL)
+
+
+class MockUnofficialDatasource(BasePlugin):
+    """Datasource requiring UNOFFICIAL clearance."""
+
+    def __init__(self, df: pd.DataFrame):
+        super().__init__(security_level=SecurityLevel.UNOFFICIAL, allow_downgrade=True)
+        self.df = df
+
+    def load(self) -> SecureDataFrame:
+        return SecureDataFrame.create_from_datasource(self.df, SecurityLevel.UNOFFICIAL)
 
 
 class MockUnofficialSink(BasePlugin):
@@ -130,6 +142,7 @@ class TestADR002SuiteIntegration:
             prompt_template="Test: {text}",
             temperature=0.7,
             max_tokens=100,
+            security_level="SECRET",  # Match datasource and sink security level
         )
         suite = ExperimentSuite(root=".", baseline=experiment, experiments=[experiment])
 
@@ -138,7 +151,7 @@ class TestADR002SuiteIntegration:
         runner = ExperimentSuiteRunner(suite=suite, llm_client=llm_client, sinks=[], datasource=datasource)
 
         # Run with sink
-        results = runner.run(df, sink_factory=lambda exp: [sink])
+        results = runner.run(sink_factory=lambda exp: [sink])
 
         # Assertions
         assert "secret_experiment" in results
@@ -160,7 +173,9 @@ class TestADR002SuiteIntegration:
         This demonstrates ADR-002 Threat T1 prevention via trusted downgrade.
         """
         df = pd.DataFrame({"text": ["test1", "test2"]})
-        datasource = MockSecureDatasource(df)  # SECRET with allow_downgrade=True
+        # Use UNOFFICIAL datasource - demonstrates SECRET-capable datasource
+        # operating at UNOFFICIAL level (trusted downgrade returns UNOFFICIAL data)
+        datasource = MockUnofficialDatasource(df)  # Returns UNOFFICIAL data
         sink = MockUnofficialSink()  # UNOFFICIAL level
 
         experiment = ExperimentConfig(
@@ -169,6 +184,7 @@ class TestADR002SuiteIntegration:
             prompt_template="Test: {text}",
             temperature=0.7,
             max_tokens=100,
+            security_level="UNOFFICIAL",  # Operating level for trusted downgrade
         )
         suite = ExperimentSuite(root=".", baseline=experiment, experiments=[experiment])
 
@@ -176,7 +192,7 @@ class TestADR002SuiteIntegration:
         runner = ExperimentSuiteRunner(suite=suite, llm_client=llm_client, sinks=[], datasource=datasource)
 
         # Run succeeds (trusted downgrade)
-        results = runner.run(df, sink_factory=lambda exp: [sink])
+        results = runner.run(sink_factory=lambda exp: [sink])
 
         # Assertions
         assert "mixed_security_experiment" in results
@@ -204,6 +220,7 @@ class TestADR002SuiteIntegration:
             prompt_template="Test: {text}",
             temperature=0.7,
             max_tokens=100,
+            security_level="OFFICIAL",  # Match datasource level (weakest link)
         )
         suite = ExperimentSuite(root=".", baseline=experiment, experiments=[experiment])
 
@@ -211,7 +228,7 @@ class TestADR002SuiteIntegration:
         runner = ExperimentSuiteRunner(suite=suite, llm_client=llm_client, sinks=[], datasource=datasource)
 
         # SECRET sink CAN downgrade to OFFICIAL operating level
-        results = runner.run(df, sink_factory=lambda exp: [sink])
+        results = runner.run(sink_factory=lambda exp: [sink])
 
         # Assertions
         assert "upgrade_experiment" in results
@@ -228,8 +245,8 @@ class TestADR002SuiteIntegration:
 
         # Mock datasource and sink that DON'T implement BasePlugin
         class LegacyDatasource:
-            def load(self) -> pd.DataFrame:
-                return df
+            def load(self) -> SecureDataFrame:
+                return SecureDataFrame.create_from_datasource(df, SecurityLevel.UNOFFICIAL)
 
         class LegacySink:
             def __init__(self):
@@ -254,7 +271,7 @@ class TestADR002SuiteIntegration:
         runner = ExperimentSuiteRunner(suite=suite, llm_client=llm_client, sinks=[], datasource=datasource)
 
         # Should succeed - no BasePlugin components, validation skipped
-        results = runner.run(df, sink_factory=lambda exp: [sink])
+        results = runner.run(sink_factory=lambda exp: [sink])
 
         assert "legacy_experiment" in results
         assert len(sink.written) > 0, "Legacy sink should still work"
@@ -290,13 +307,10 @@ class TestADR002SuiteIntegration:
             def __init__(self):
                 super().__init__(security_level=SecurityLevel.SECRET, allow_downgrade=True)
 
-            def load(self) -> pd.DataFrame:
+            def load(self) -> SecureDataFrame:
                 """Load data as SecureDataFrame using correct pattern."""
                 # ✅ CORRECT: Use factory method (ADR-002-A compliant)
-                classified_frame = SecureDataFrame.create_from_datasource(
-                    df, SecurityLevel.SECRET
-                )
-                return classified_frame.data  # Return underlying DataFrame
+                return SecureDataFrame.create_from_datasource(df, SecurityLevel.SECRET)
 
         # Create plugin that uses ADR-002-A transformation pattern
         class ADR002ACompliantPlugin(BasePlugin):
@@ -333,6 +347,7 @@ class TestADR002SuiteIntegration:
             prompt_template="Test: {text}",
             temperature=0.7,
             max_tokens=100,
+            security_level="SECRET",  # All components at SECRET level
         )
         suite = ExperimentSuite(root=".", baseline=experiment, experiments=[experiment])
 
@@ -340,7 +355,7 @@ class TestADR002SuiteIntegration:
         runner = ExperimentSuiteRunner(suite=suite, llm_client=llm_client, sinks=[], datasource=datasource)
 
         # ✅ Should succeed: All components at SECRET level
-        results = runner.run(df, sink_factory=lambda exp: [sink])
+        results = runner.run(sink_factory=lambda exp: [sink])
 
         # Verify end-to-end flow completed
         assert "adr002a_e2e_test" in results, "Experiment should execute"
@@ -379,9 +394,8 @@ class TestADR002SuiteIntegration:
             def __init__(self):
                 super().__init__(security_level=SecurityLevel.OFFICIAL, allow_downgrade=True)
 
-            def load(self) -> pd.DataFrame:
-                classified = SecureDataFrame.create_from_datasource(df, SecurityLevel.OFFICIAL)
-                return classified.data
+            def load(self) -> SecureDataFrame:
+                return SecureDataFrame.create_from_datasource(df, SecurityLevel.OFFICIAL)
 
         # OFFICIAL transform (stays at OFFICIAL)
         class OfficialTransformPlugin(BasePlugin):
@@ -432,6 +446,7 @@ class TestADR002SuiteIntegration:
             prompt_template="Process: {text}",
             temperature=0.7,
             max_tokens=100,
+            security_level="OFFICIAL",  # Operating envelope (min of all components)
         )
         suite = ExperimentSuite(root=".", baseline=experiment, experiments=[experiment])
 
@@ -442,7 +457,7 @@ class TestADR002SuiteIntegration:
         # Operating envelope = OFFICIAL (min of all components)
         # All components can operate at OFFICIAL level
         # This should SUCCEED - demonstrates multi-stage uplifting works
-        results = runner.run(df, sink_factory=lambda exp: [sink])
+        results = runner.run(sink_factory=lambda exp: [sink])
 
         # Verify execution succeeded
         assert "multi_stage_uplifting" in results, "Experiment should execute successfully"
@@ -472,7 +487,9 @@ class TestADR002SuiteIntegration:
         - All plugins with allow_downgrade=True can operate at lower levels
         """
         df = pd.DataFrame({"text": ["secret1", "secret2"]})
-        datasource = MockSecureDatasource(df)  # SECRET with allow_downgrade=True
+        # Use OFFICIAL datasource - demonstrates SECRET-capable datasource
+        # downgrading to OFFICIAL operating level (trusted downgrade returns OFFICIAL data)
+        datasource = MockOfficialDatasource(df)  # Returns OFFICIAL data
 
         secret_sink = MockSecretSink()  # SECRET with allow_downgrade=True
         official_sink = MockOfficialSink()  # OFFICIAL level
@@ -483,6 +500,7 @@ class TestADR002SuiteIntegration:
             prompt_template="Test: {text}",
             temperature=0.7,
             max_tokens=100,
+            security_level="OFFICIAL",  # Envelope = min(datasource, sinks) = OFFICIAL
         )
         suite = ExperimentSuite(root=".", baseline=experiment, experiments=[experiment])
 
@@ -490,7 +508,7 @@ class TestADR002SuiteIntegration:
         runner = ExperimentSuiteRunner(suite=suite, llm_client=llm_client, sinks=[], datasource=datasource)
 
         # This should SUCCEED - all plugins can downgrade to OFFICIAL envelope
-        results = runner.run(df, sink_factory=lambda exp: [secret_sink, official_sink])
+        results = runner.run(sink_factory=lambda exp: [secret_sink, official_sink])
 
         # Assertions
         assert "multi_sink_test" in results
@@ -543,13 +561,14 @@ class TestADR002SuiteIntegration:
             prompt_template="Analyze: {text}",
             temperature=0.0,
             max_tokens=50,
+            security_level="OFFICIAL",  # Match datasource and sink level
         )
         suite = ExperimentSuite(root=".", baseline=experiment, experiments=[experiment])
 
         runner = ExperimentSuiteRunner(suite=suite, llm_client=llm_client, sinks=[], datasource=datasource)
 
         # Should succeed - all at OFFICIAL level with real plugins
-        results = runner.run(df, sink_factory=lambda exp: [sink])
+        results = runner.run(sink_factory=lambda exp: [sink])
 
         # Verify execution with real plugins
         assert "real_plugin_test" in results, "Experiment should execute with real plugins"

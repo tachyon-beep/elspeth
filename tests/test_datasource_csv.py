@@ -14,14 +14,19 @@ def test_csv_datasource_loads(tmp_path):
     datasource = CSVDataSource(path=csv_path, retain_local=False)
     loaded = datasource.load()
 
-    assert list(loaded["APPID"].astype(str)) == ["1", "2"]
-    assert loaded["value"].sum() == 30
+    # SecureDataFrame wraps the DataFrame - access via .data
+    assert list(loaded.data["APPID"].astype(str)) == ["1", "2"]
+    assert loaded.data["value"].sum() == 30
+    # Verify security level is set
+    assert loaded.security_level == SecurityLevel.UNOFFICIAL
 
 
 def test_csv_datasource_skip_on_missing(tmp_path):
     datasource = CSVDataSource(path=tmp_path / "missing.csv", on_error="skip", retain_local=False)
     loaded = datasource.load()
-    assert loaded.empty
+    # SecureDataFrame wraps empty DataFrame
+    assert loaded.data.empty
+    assert loaded.security_level == SecurityLevel.UNOFFICIAL
 
 
 def test_csv_blob_datasource_loads(tmp_path):
@@ -32,8 +37,10 @@ def test_csv_blob_datasource_loads(tmp_path):
     datasource = CSVBlobDataSource(path=csv_path, retain_local=False)
     loaded = datasource.load()
 
-    assert list(loaded["APPID"].astype(str)) == ["1", "2"]
-    assert loaded["value"].sum() == 30
+    # SecureDataFrame wraps the DataFrame - access via .data
+    assert list(loaded.data["APPID"].astype(str)) == ["1", "2"]
+    assert loaded.data["value"].sum() == 30
+    assert loaded.security_level == SecurityLevel.UNOFFICIAL
 
 
 def test_csv_datasource_missing_raises(tmp_path):
@@ -55,9 +62,9 @@ def test_csv_datasource_security_level_and_dtype(tmp_path):
     )
 
     df = datasource.load()
-    assert df.attrs["security_level"] == "UNOFFICIAL"  # Hard-coded per ADR-002-B
-    assert df.attrs["determinism_level"] == "guaranteed"
-    assert list(df["value"]) == ["001", "002"]
+    assert df.data.attrs["security_level"] == "UNOFFICIAL"  # Hard-coded per ADR-002-B
+    assert df.data.attrs["determinism_level"] == "guaranteed"
+    assert list(df.data["value"]) == ["001", "002"]
 
 
 def test_csv_blob_datasource_skip_missing_returns_empty(tmp_path, caplog):
@@ -69,9 +76,9 @@ def test_csv_blob_datasource_skip_missing_returns_empty(tmp_path, caplog):
     )
     with caplog.at_level("WARNING"):
         df = datasource.load()
-    assert df.empty
-    assert df.attrs["security_level"] == "UNOFFICIAL"  # Hard-coded per ADR-002-B
-    assert df.attrs["determinism_level"] == "guaranteed"
+    assert df.data.empty
+    assert df.data.attrs["security_level"] == "UNOFFICIAL"  # Hard-coded per ADR-002-B
+    assert df.data.attrs["determinism_level"] == "guaranteed"
     assert any("missing file" in record.message for record in caplog.records)
 
 
@@ -89,7 +96,7 @@ def test_csv_blob_datasource_failure_returns_empty(monkeypatch, tmp_path, caplog
     with caplog.at_level("WARNING"):
         df = datasource.load()
 
-    assert df.empty
+    assert df.data.empty
     assert any("failed; returning empty" in record.message for record in caplog.records)
 
 
@@ -113,8 +120,8 @@ def test_csv_datasource_with_schema_config(tmp_path):
     datasource = CSVDataSource(path=csv_path, schema=schema_config, retain_local=False)
     loaded = datasource.load()
 
-    assert loaded.attrs["schema"] is not None
-    assert loaded.attrs["schema"].__name__ == "sample_ConfigSchema"
+    assert loaded.data.attrs["schema"] is not None
+    assert loaded.data.attrs["schema"].__name__ == "sample_ConfigSchema"
 
 
 def test_csv_datasource_schema_inference(tmp_path):
@@ -126,8 +133,8 @@ def test_csv_datasource_schema_inference(tmp_path):
     datasource = CSVDataSource(path=csv_path, infer_schema=True, retain_local=False)
     loaded = datasource.load()
 
-    assert loaded.attrs["schema"] is not None
-    assert "InferredSchema" in loaded.attrs["schema"].__name__
+    assert loaded.data.attrs["schema"] is not None
+    assert "InferredSchema" in loaded.data.attrs["schema"].__name__
 
 
 def test_csv_datasource_with_retain_local(tmp_path):
@@ -141,7 +148,7 @@ def test_csv_datasource_with_retain_local(tmp_path):
     datasource = CSVDataSource(path=csv_path, retain_local=True, retain_local_path=str(retain_dir / "custom_name.csv"))
     loaded = datasource.load()
 
-    assert loaded.attrs["retained_local_path"] == str(retain_dir / "custom_name.csv")
+    assert loaded.data.attrs["retained_local_path"] == str(retain_dir / "custom_name.csv")
     assert (retain_dir / "custom_name.csv").exists()
 
 
@@ -155,5 +162,5 @@ def test_csv_datasource_with_retain_local_auto_path(tmp_path):
     loaded = datasource.load()
 
     # Should have generated automatic path in audit_data/
-    assert "retained_local_path" in loaded.attrs
-    assert "audit_data" in loaded.attrs["retained_local_path"]
+    assert "retained_local_path" in loaded.data.attrs
+    assert "audit_data" in loaded.data.attrs["retained_local_path"]

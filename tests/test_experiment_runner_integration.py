@@ -10,8 +10,10 @@ import pandas as pd
 import pytest
 
 from elspeth.core.base.protocols import Artifact, ArtifactDescriptor, LLMRequest, ResultSink
+from elspeth.core.base.types import SecurityLevel
 from elspeth.core.controls import FixedPriceCostTracker, FixedWindowRateLimiter
 from elspeth.core.experiments.runner import ExperimentRunner
+from elspeth.core.security import SecureDataFrame
 
 
 class FlakyLLM:
@@ -149,7 +151,9 @@ def test_experiment_runner_handles_retries_and_artifact_pipeline(tmp_path: Path)
         experiment_name="integration",
     )
 
-    payload = runner.run(df)
+    # Wrap DataFrame in SecureDataFrame (datasources do this automatically)
+    secure_df = SecureDataFrame.create_from_datasource(df, SecurityLevel.OFFICIAL)
+    payload = runner.run(secure_df)
 
     # Successful rows only include A1 and A2 (A3 exhausts retries).
     row_ids = {entry["row"]["APPID"] for entry in payload["results"]}

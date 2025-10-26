@@ -26,8 +26,10 @@ def test_blob_datasource_loads_with_kwargs(monkeypatch, tmp_path):
 
     df = datasource.load()
 
-    assert df.attrs["security_level"] == "UNOFFICIAL"
-    assert df.attrs["determinism_level"] == "guaranteed"
+    # SecureDataFrame wraps the DataFrame - access attrs via .data
+    assert df.data.attrs["security_level"] == "UNOFFICIAL"
+    assert df.data.attrs["determinism_level"] == "guaranteed"
+    assert df.security_level == SecurityLevel.UNOFFICIAL
     assert calls == {
         "path": str(tmp_path / "config.yaml"),
         "profile": "alt",
@@ -51,9 +53,11 @@ def test_blob_datasource_skip_on_error(monkeypatch, caplog, tmp_path):
     with caplog.at_level("WARNING"):
         df = datasource.load()
 
-    assert df.empty
-    assert df.attrs["security_level"] == "UNOFFICIAL"
-    assert df.attrs["determinism_level"] == "guaranteed"
+    # SecureDataFrame wraps the DataFrame - access via .data
+    assert df.data.empty
+    assert df.data.attrs["security_level"] == "UNOFFICIAL"
+    assert df.data.attrs["determinism_level"] == "guaranteed"
+    assert df.security_level == SecurityLevel.UNOFFICIAL
     assert any("Blob datasource failed" in record.message for record in caplog.records)
 
 

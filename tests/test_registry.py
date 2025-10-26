@@ -7,6 +7,7 @@ from elspeth.core.experiments import plugin_registry
 from elspeth.core.registries.datasource import datasource_registry
 from elspeth.core.registries.llm import llm_registry
 from elspeth.core.registries.sink import sink_registry
+from elspeth.core.security import SecureDataFrame
 from elspeth.core.validation import ConfigurationError
 
 
@@ -46,8 +47,8 @@ def test_registry_creates_blob_datasource(tmp_path, monkeypatch):
     )
 
     frame = ds.load()
-    assert isinstance(frame, pd.DataFrame)
-    assert list(frame.columns) == ["value"]
+    assert isinstance(frame, SecureDataFrame)
+    assert list(frame.columns) == ["value"]  # SecureDataFrame has .columns proxy
 
 
 def test_registry_unknown_plugin_raises():

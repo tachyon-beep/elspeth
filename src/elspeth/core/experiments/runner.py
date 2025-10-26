@@ -21,7 +21,7 @@ from elspeth.core.experiments.validation import validate_plugin_schemas
 from elspeth.core.pipeline.artifact_pipeline import ArtifactPipeline, SinkBinding
 from elspeth.core.pipeline.processing import prepare_prompt_context
 from elspeth.core.prompts import PromptEngine, PromptRenderingError, PromptTemplate, PromptValidationError
-from elspeth.core.security import ensure_security_level, resolve_determinism_level, resolve_security_level
+from elspeth.core.security import SecureDataFrame, ensure_security_level, resolve_determinism_level, resolve_security_level
 from elspeth.core.utils.path_guard import check_and_prepare_dir, ensure_destination_is_not_symlink, resolve_under_base
 from elspeth.plugins.orchestrators.experiment.protocols import (
     AggregationExperimentPlugin,
@@ -427,7 +427,7 @@ class ExperimentRunner:
         """
         metadata = ExecutionMetadata(
             processed_rows=len(results),
-            total_rows=len(df),
+            total_rows=len(df.data),  # df is SecureDataFrame - access underlying DataFrame
         )
 
         # Calculate retry summary
@@ -495,7 +495,8 @@ class ExperimentRunner:
             'B'
         """
         rows_to_process: list[tuple[int, pd.Series, dict[str, Any], str | None]] = []
-        for idx, (_, row) in enumerate(df.iterrows()):
+        # df is SecureDataFrame - access underlying DataFrame via .data
+        for idx, (_, row) in enumerate(df.data.iterrows()):
             context = prepare_prompt_context(row, include_fields=self.prompt_fields)
 
             # Skip checkpoint-filtered rows (guard clause pattern)
@@ -764,8 +765,28 @@ class ExperimentRunner:
         results = self._sort_and_extract_records(records_with_index)
         return ProcessingResult(records=results, failures=failures)
 
-    def run(self, df: pd.DataFrame) -> dict[str, Any]:
-        """Execute the run, returning a structured payload for sinks and reports."""
+    def run(self, df: pd.DataFrame | SecureDataFrame) -> dict[str, Any]:
+        """Execute the run, returning a structured payload for sinks and reports.
+
+        Args:
+            df: Either a SecureDataFrame (preferred) or raw DataFrame (auto-wrapped for backward compatibility)
+        """
+        # ADR-002-A: Auto-wrap raw DataFrames for backward compatibility
+        # Datasources return SecureDataFrame, but tests/legacy code may pass raw DataFrames
+        if isinstance(df, pd.DataFrame) and not isinstance(df, SecureDataFrame):
+            # Infer security level from attrs if available, otherwise use self.security_level
+            security_level = df.attrs.get("security_level")
+            if security_level is None:
+                security_level = ensure_security_level(self.security_level)
+            else:
+                security_level = ensure_security_level(security_level)
+            df = SecureDataFrame.create_from_datasource(df, security_level)
+
+        # ADR-002-A: Runtime clearance validation (defense-in-depth failsafe)
+        # Verify runner has sufficient clearance to process this data
+        runner_clearance = ensure_security_level(self.security_level)
+        df.validate_compatible_with(runner_clearance)
+
         self._init_early_stop()
         checkpoint_manager = self._init_checkpoint()
 

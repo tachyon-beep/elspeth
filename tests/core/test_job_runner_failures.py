@@ -3,11 +3,14 @@ from __future__ import annotations
 import pandas as pd
 
 from elspeth.core.experiments import job_runner
+from elspeth.core.security import SecureDataFrame
+from elspeth.core.base.types import SecurityLevel
 
 
 class _FakeDatasource:
     def load(self):
-        return pd.DataFrame({"a": [1]})
+        df = pd.DataFrame({"a": [1]})
+        return SecureDataFrame.create_from_datasource(df, SecurityLevel.UNOFFICIAL)
 
 
 class _GoodSink:

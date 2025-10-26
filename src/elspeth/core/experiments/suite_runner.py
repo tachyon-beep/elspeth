@@ -1035,7 +1035,8 @@ class ExperimentSuiteRunner:
                 )
             # Validation will happen per-experiment in loop below, BEFORE we use df
             # Loading here allows validation to inspect self.datasource object
-            df = self.datasource.load()
+            df = self.datasource.load()  # Returns SecureDataFrame (ADR-002-A)
+            # Clearance validation happens when runner.run(df) is called for each experiment
 
         defaults = defaults or {}
         ctx = self._prepare_suite_context(defaults, preflight_info)

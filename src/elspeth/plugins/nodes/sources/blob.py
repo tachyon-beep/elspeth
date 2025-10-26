@@ -13,7 +13,7 @@ from elspeth.adapters import load_blob_csv
 from elspeth.core.base.plugin import BasePlugin
 from elspeth.core.base.protocols import DataSource
 from elspeth.core.base.types import DeterminismLevel, SecurityLevel
-from elspeth.core.security import ensure_determinism_level
+from elspeth.core.security import SecureDataFrame, ensure_determinism_level
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +52,13 @@ class BlobDataSource(BasePlugin, DataSource):
         self.retain_local = retain_local
         self.retain_local_path = retain_local_path
 
-    def load(self) -> pd.DataFrame:
+    def load(self) -> SecureDataFrame:
+        """Load blob data with security enforcement.
+
+        Returns:
+            SecureDataFrame: Wrapped DataFrame with immutable security level metadata.
+                             Created via datasource-trusted factory method per ADR-002-A.
+        """
         import time
 
         # Log connection attempt
@@ -102,8 +108,8 @@ class BlobDataSource(BasePlugin, DataSource):
                         metadata={"local_path": str(local_path)},
                     )
 
-            # load_blob_csv return type not fully annotated; returns DataFrame at runtime
-            return df  # type: ignore[no-any-return]
+            # ADR-002-A: Wrap DataFrame with SecureDataFrame using datasource-trusted factory
+            return SecureDataFrame.create_from_datasource(df, self.security_level)
         except Exception as exc:
             if plugin_logger:
                 plugin_logger.log_error(
@@ -117,7 +123,8 @@ class BlobDataSource(BasePlugin, DataSource):
                 df = pd.DataFrame()
                 df.attrs["security_level"] = self.security_level
                 df.attrs["determinism_level"] = self.determinism_level
-                return df
+                # ADR-002-A: Wrap empty DataFrame with SecureDataFrame
+                return SecureDataFrame.create_from_datasource(df, self.security_level)
             raise
 
     def _save_local_copy(self, df: pd.DataFrame) -> Path:

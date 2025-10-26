@@ -16,7 +16,7 @@ from elspeth.core.base.plugin import BasePlugin
 from elspeth.core.base.protocols import DataSource
 from elspeth.core.base.schema import DataFrameSchema, infer_schema_from_dataframe, schema_from_config
 from elspeth.core.base.types import DeterminismLevel, SecurityLevel
-from elspeth.core.security import ensure_determinism_level
+from elspeth.core.security import SecureDataFrame, ensure_determinism_level
 
 logger = logging.getLogger(__name__)
 
@@ -102,8 +102,13 @@ class BaseCSVDataSource(BasePlugin, DataSource):
         """Override in subclass to specify datasource type for messages."""
         return "CSV"
 
-    def load(self) -> pd.DataFrame:
-        """Load CSV file with optional logging and retention."""
+    def load(self) -> SecureDataFrame:
+        """Load CSV file with optional logging and retention.
+
+        Returns:
+            SecureDataFrame: Wrapped DataFrame with immutable security level metadata.
+                             Created via datasource-trusted factory method per ADR-002-A.
+        """
         plugin_logger = getattr(self, "plugin_logger", None)
 
         # Log file check
@@ -140,7 +145,8 @@ class BaseCSVDataSource(BasePlugin, DataSource):
                 self._log_retention(plugin_logger, df, local_path)
 
             self._df_loaded = True
-            return df
+            # ADR-002-A: Wrap DataFrame with SecureDataFrame using datasource-trusted factory
+            return SecureDataFrame.create_from_datasource(df, self.security_level)
         except (OSError, ValueError, pd.errors.ParserError, RuntimeError) as exc:
             return self._handle_load_error(plugin_logger, exc)
 
@@ -149,7 +155,7 @@ class BaseCSVDataSource(BasePlugin, DataSource):
         # Pandas dtype parameter has strict typing; our dict[str, Any] is compatible at runtime
         return pd.read_csv(self.path, dtype=self.dtype, encoding=self.encoding)  # type: ignore[arg-type]
 
-    def _handle_missing_file(self, plugin_logger) -> pd.DataFrame:
+    def _handle_missing_file(self, plugin_logger) -> SecureDataFrame:
         """Handle missing file based on on_error strategy."""
         if plugin_logger:
             plugin_logger.log_error(
@@ -164,11 +170,12 @@ class BaseCSVDataSource(BasePlugin, DataSource):
             df.attrs["security_level"] = self.security_level
             df.attrs["determinism_level"] = self.determinism_level
             df.attrs["schema"] = self.output_schema()
-            return df
+            # ADR-002-A: Wrap empty DataFrame with SecureDataFrame
+            return SecureDataFrame.create_from_datasource(df, self.security_level)
 
         raise FileNotFoundError(f"{self.datasource_type} datasource file not found: {self.path}")
 
-    def _handle_load_error(self, plugin_logger, exc: OSError | ValueError | pd.errors.ParserError | RuntimeError) -> pd.DataFrame:
+    def _handle_load_error(self, plugin_logger, exc: OSError | ValueError | pd.errors.ParserError | RuntimeError) -> SecureDataFrame:
         """Handle errors during CSV loading.
 
         Args:
@@ -176,7 +183,7 @@ class BaseCSVDataSource(BasePlugin, DataSource):
             exc: The specific exception that occurred during loading
 
         Returns:
-            Empty DataFrame if on_error='skip', otherwise re-raises the exception
+            Empty SecureDataFrame if on_error='skip', otherwise re-raises the exception
 
         Raises:
             OSError: For file access errors
@@ -197,7 +204,8 @@ class BaseCSVDataSource(BasePlugin, DataSource):
             df.attrs["security_level"] = self.security_level
             df.attrs["determinism_level"] = self.determinism_level
             df.attrs["schema"] = self.output_schema()
-            return df
+            # ADR-002-A: Wrap empty DataFrame with SecureDataFrame
+            return SecureDataFrame.create_from_datasource(df, self.security_level)
         raise exc
 
     def _copy_to_audit_location(self) -> Path:

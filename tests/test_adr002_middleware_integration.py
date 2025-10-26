@@ -36,10 +36,9 @@ class MockUnofficialDatasource(BasePlugin):
         super().__init__(security_level=SecurityLevel.UNOFFICIAL, allow_downgrade=True)
         self.df = df
 
-    def load(self) -> pd.DataFrame:
+    def load(self) -> SecureDataFrame:
         """Load data at UNOFFICIAL level."""
-        classified = SecureDataFrame.create_from_datasource(self.df, SecurityLevel.UNOFFICIAL)
-        return classified.data
+        return SecureDataFrame.create_from_datasource(self.df, SecurityLevel.UNOFFICIAL)
 
 
 class MockOfficialTransform(BasePlugin):
@@ -220,7 +219,7 @@ class TestADR002MiddlewareIntegration:
         # Operating envelope = UNOFFICIAL (datasource level)
         # PROTECTED sink with allow_downgrade=True can operate at UNOFFICIAL (trusted downgrade)
         # Should SUCCEED
-        results = runner.run(df, sink_factory=lambda exp: [sink])
+        results = runner.run(sink_factory=lambda exp: [sink])
 
         # Verify execution succeeded
         assert "four_level_test" in results, "Experiment should complete successfully"
@@ -266,7 +265,7 @@ class TestADR002MiddlewareIntegration:
         # Operating envelope = UNOFFICIAL
         # SECRET sink with allow_downgrade=True can operate at UNOFFICIAL (trusted downgrade)
         # Should SUCCEED
-        results = runner.run(df, sink_factory=lambda exp: [sink])
+        results = runner.run(sink_factory=lambda exp: [sink])
 
         # Verify execution succeeded
         assert "three_level_mismatched_test" in results, "Experiment should complete successfully"
@@ -298,9 +297,8 @@ class TestADR002MiddlewareIntegration:
             def __init__(self):
                 super().__init__(security_level=SecurityLevel.SECRET, allow_downgrade=True)
 
-            def load(self) -> pd.DataFrame:
-                classified = SecureDataFrame.create_from_datasource(df, SecurityLevel.SECRET)
-                return classified.data
+            def load(self) -> SecureDataFrame:
+                return SecureDataFrame.create_from_datasource(df, SecurityLevel.SECRET)
 
         # LLM client wrapped with middleware
         class SecretLLMClient:
@@ -371,6 +369,7 @@ class TestADR002MiddlewareIntegration:
             prompt_template="Process: {text}",
             temperature=0.7,
             max_tokens=100,
+            security_level="SECRET",  # Match SECRET datasource and sink
         )
         suite = ExperimentSuite(root=".", baseline=experiment, experiments=[experiment])
 
@@ -382,7 +381,7 @@ class TestADR002MiddlewareIntegration:
         )
 
         # Should succeed - all at SECRET level
-        results = runner.run(df, sink_factory=lambda exp: [sink])
+        results = runner.run(sink_factory=lambda exp: [sink])
 
         # Verify execution succeeded
         assert "middleware_test" in results

@@ -38,10 +38,9 @@ class MockSecretDatasource(BasePlugin):
         super().__init__(security_level=SecurityLevel.SECRET, allow_downgrade=True)
         self.df = df
 
-    def load(self) -> pd.DataFrame:
+    def load(self) -> SecureDataFrame:
         """Load SECRET data."""
-        classified = SecureDataFrame.create_from_datasource(self.df, SecurityLevel.SECRET)
-        return classified.data
+        return SecureDataFrame.create_from_datasource(self.df, SecurityLevel.SECRET)
 
 
 class FaultyLLMClient:
@@ -152,13 +151,15 @@ class TestADR002ErrorHandling:
             prompt_template="Process: {username}",
             temperature=0.7,
             max_tokens=100,
+            security_level="SECRET",  # Match SECRET datasource and sink
         )
         suite = ExperimentSuite(root=".", baseline=experiment, experiments=[experiment])
 
         runner = ExperimentSuiteRunner(suite=suite, llm_client=llm_client, sinks=[], datasource=datasource)
 
         # Run - LLM client will fail on second row, but runner catches and logs it
-        results = runner.run(df, sink_factory=lambda exp: [sink])
+        # Don't pass df - let datasource.load() be called (returns SecureDataFrame)
+        results = runner.run(sink_factory=lambda exp: [sink])
 
         # CRITICAL SECURITY ASSERTIONS:
         # The runner catches LLM exceptions and records them in failures array
@@ -241,7 +242,7 @@ class TestADR002ErrorHandling:
 
         # Run expecting sink write failure
         with pytest.raises(Exception) as exc_info:
-            runner.run(df, sink_factory=lambda exp: [sink])
+            runner.run(sink_factory=lambda exp: [sink])
 
         # CRITICAL SECURITY ASSERTIONS:
         error_msg = str(exc_info.value).lower()
@@ -287,9 +288,8 @@ class TestADR002ErrorHandling:
                 super().__init__(security_level=SecurityLevel.OFFICIAL, allow_downgrade=True)
                 self.df = df
 
-            def load(self) -> pd.DataFrame:
-                classified = SecureDataFrame.create_from_datasource(self.df, SecurityLevel.OFFICIAL)
-                return classified.data
+            def load(self) -> SecureDataFrame:
+                return SecureDataFrame.create_from_datasource(self.df, SecurityLevel.OFFICIAL)
 
         # Datasource with sensitive data
         df = pd.DataFrame({
@@ -324,7 +324,7 @@ class TestADR002ErrorHandling:
 
         # Run expecting security validation failure
         with pytest.raises(SecurityValidationError) as exc_info:
-            runner.run(df, sink_factory=lambda exp: [sink])
+            runner.run(sink_factory=lambda exp: [sink])
 
         # CRITICAL SECURITY ASSERTIONS:
         error_msg = str(exc_info.value).lower()

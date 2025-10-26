@@ -280,3 +280,182 @@ class SecureDataFrame:
                 f"This is a runtime failsafe - start-time validation should have "
                 f"prevented this configuration."
             )
+
+    # Convenience properties for DataFrame-like interface
+    # These reduce integration friction while maintaining security wrapper
+
+    @property
+    def empty(self) -> bool:
+        """Proxy to underlying DataFrame.empty for convenience.
+
+        Returns:
+            True if DataFrame has no rows, False otherwise
+
+        Example:
+            >>> frame = SecureDataFrame.create_from_datasource(
+            ...     pd.DataFrame(), SecurityLevel.OFFICIAL
+            ... )
+            >>> assert frame.empty is True
+        """
+        return self.data.empty
+
+    @property
+    def shape(self) -> tuple[int, int]:
+        """Proxy to underlying DataFrame.shape for convenience.
+
+        Returns:
+            Tuple of (rows, columns)
+
+        Example:
+            >>> df = pd.DataFrame({"a": [1, 2], "b": [3, 4]})
+            >>> frame = SecureDataFrame.create_from_datasource(
+            ...     df, SecurityLevel.OFFICIAL
+            ... )
+            >>> assert frame.shape == (2, 2)
+        """
+        return self.data.shape
+
+    def __len__(self) -> int:
+        """Support len() for convenience - returns number of rows.
+
+        Returns:
+            Number of rows in underlying DataFrame
+
+        Example:
+            >>> df = pd.DataFrame({"a": [1, 2, 3]})
+            >>> frame = SecureDataFrame.create_from_datasource(
+            ...     df, SecurityLevel.OFFICIAL
+            ... )
+            >>> assert len(frame) == 3
+        """
+        return len(self.data)
+
+    def __getitem__(self, key):
+        """Proxy to underlying DataFrame.__getitem__ for column/row access.
+
+        Allows standard DataFrame indexing syntax like frame["column"] or frame[0:5].
+
+        Args:
+            key: Column name, list of columns, slice, or boolean array
+
+        Returns:
+            Result of indexing operation on underlying DataFrame
+
+        Example:
+            >>> df = pd.DataFrame({"a": [1, 2], "b": [3, 4]})
+            >>> frame = SecureDataFrame.create_from_datasource(
+            ...     df, SecurityLevel.OFFICIAL
+            ... )
+            >>> assert list(frame["a"]) == [1, 2]
+            >>> assert len(frame[0:1]) == 1
+        """
+        return self.data[key]
+
+    def head(self, n: int = 5) -> "SecureDataFrame":
+        """Return first n rows, preserving SecureDataFrame wrapper.
+
+        Args:
+            n: Number of rows to return (default 5)
+
+        Returns:
+            New SecureDataFrame with first n rows, same security level
+
+        Example:
+            >>> df = pd.DataFrame({"a": [1, 2, 3, 4, 5]})
+            >>> frame = SecureDataFrame.create_from_datasource(
+            ...     df, SecurityLevel.OFFICIAL
+            ... )
+            >>> head = frame.head(2)
+            >>> assert len(head) == 2
+            >>> assert head.security_level == SecurityLevel.OFFICIAL
+        """
+        return self.with_new_data(self.data.head(n))
+
+    def tail(self, n: int = 5) -> "SecureDataFrame":
+        """Return last n rows, preserving SecureDataFrame wrapper.
+
+        Args:
+            n: Number of rows to return (default 5)
+
+        Returns:
+            New SecureDataFrame with last n rows, same security level
+
+        Example:
+            >>> df = pd.DataFrame({"a": [1, 2, 3, 4, 5]})
+            >>> frame = SecureDataFrame.create_from_datasource(
+            ...     df, SecurityLevel.OFFICIAL
+            ... )
+            >>> tail = frame.tail(2)
+            >>> assert len(tail) == 2
+            >>> assert tail.security_level == SecurityLevel.OFFICIAL
+        """
+        return self.with_new_data(self.data.tail(n))
+
+    @property
+    def columns(self) -> pd.Index:
+        """Proxy to underlying DataFrame.columns for convenience.
+
+        Returns:
+            Column labels of the DataFrame
+
+        Example:
+            >>> df = pd.DataFrame({"a": [1], "b": [2]})
+            >>> frame = SecureDataFrame.create_from_datasource(
+            ...     df, SecurityLevel.OFFICIAL
+            ... )
+            >>> assert list(frame.columns) == ["a", "b"]
+        """
+        return self.data.columns
+
+    @property
+    def index(self) -> pd.Index:
+        """Proxy to underlying DataFrame.index for convenience.
+
+        Returns:
+            Row index of the DataFrame
+
+        Example:
+            >>> df = pd.DataFrame({"a": [1, 2, 3]})
+            >>> frame = SecureDataFrame.create_from_datasource(
+            ...     df, SecurityLevel.OFFICIAL
+            ... )
+            >>> assert len(frame.index) == 3
+        """
+        return self.data.index
+
+    @property
+    def dtypes(self) -> pd.Series:
+        """Proxy to underlying DataFrame.dtypes for convenience.
+
+        Returns:
+            Series with column names as index and data types as values
+
+        Example:
+            >>> df = pd.DataFrame({"a": [1, 2], "b": ["x", "y"]})
+            >>> frame = SecureDataFrame.create_from_datasource(
+            ...     df, SecurityLevel.OFFICIAL
+            ... )
+            >>> assert frame.dtypes["a"] == pd.Int64Dtype() or frame.dtypes["a"].kind == "i"
+        """
+        return self.data.dtypes
+
+    @property
+    def attrs(self) -> dict:
+        """Proxy to underlying DataFrame.attrs for metadata access.
+
+        Returns:
+            Dictionary containing DataFrame metadata
+
+        Note:
+            While attrs["security_level"] exists for legacy compatibility,
+            prefer using the direct .security_level property on SecureDataFrame.
+
+        Example:
+            >>> df = pd.DataFrame({"a": [1]})
+            >>> df.attrs["metadata"] = "custom_value"
+            >>> frame = SecureDataFrame.create_from_datasource(
+            ...     df, SecurityLevel.OFFICIAL
+            ... )
+            >>> assert frame.attrs["metadata"] == "custom_value"
+        """
+        return self.data.attrs
