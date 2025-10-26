@@ -931,6 +931,7 @@ All security-relevant events MUST be logged to structured audit logs (`logs/run_
 4. Security validation failures (SecurityValidationError)
 5. **CRITICAL**: Security invariant violations (SecurityCriticalError - emergency logging)
 6. Plugin instantiation with security parameters
+7. **Reproducibility bundle creation** (ADR-014 - tamper-evident archives for audit)
 
 **Audit Log Format**:
 ```json
@@ -958,6 +959,9 @@ All security-relevant events MUST be logged to structured audit logs (`logs/run_
 | **ISO 27001** | A.9.4.1 Information access restriction | Operating level computation (Policy 1.2) | suite_runner.py:_compute_operating_level() |
 | **Common Criteria** | FDP_IFC.1 Subset information flow control | Immutable classification (Policy 2) | ADR-002a, classified_data.py |
 | **GDPR** | Article 32 Security of processing | Defense-in-depth (All Policies) | Full ADR suite (002-006) |
+| **HIPAA** | §164.312(b) Audit controls | Reproducibility bundles with tamper-evident signatures | ADR-014, reproducibility_bundle.py |
+| **PCI-DSS** | Requirement 10.2 Audit trail for security events | JSONL audit logs + signed reproducibility archives | ADR-014, logs/run_*.jsonl |
+| **PSPF (Australia)** | Recordkeeping and audit | Mandatory reproducibility bundle in production mode | ADR-014, config/templates/production_suite.yaml |
 
 ### Certification Checklist
 
@@ -1007,6 +1011,7 @@ For security certification/accreditation, verify:
 - **[ADR-004: Mandatory BasePlugin Inheritance](adrs.md#adr-004-mandatory-baseplugin-inheritance)** - Security bones design
 - **[ADR-005: Frozen Plugin Capability](adrs.md#adr-005-frozen-plugin-capability)** - Strict level enforcement
 - **[ADR-006: Security-Critical Exception Policy](adrs.md#adr-006-security-critical-exception-policy)** - Fail-loud invariants
+- **[ADR-014: Tamper-Evident Reproducibility Bundle](adrs.md#adr-014-tamper-evident-reproducibility-bundle)** - Audit trail and compliance
 
 ### User Guides
 
@@ -1038,6 +1043,7 @@ For security certification/accreditation, verify:
 **Change History**:
 - 2025-10-26: Initial consolidated policy (v1.0) - Combined ADRs 002, 002a, 003, 004, 005, 006
 - 2025-10-26: Added Policy 3 (ADR-002b) - Immutable Security Policy Metadata (v1.1)
+- 2025-10-26: Added ADR-014 compliance mapping - Reproducibility bundles for audit (v1.2)
 
 ---
 
