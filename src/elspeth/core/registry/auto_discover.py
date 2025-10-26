@@ -56,7 +56,7 @@ logger = logging.getLogger(__name__)
 EXPECTED_PLUGINS = {
     "datasource": ["local_csv", "csv_blob", "azure_blob"],
     "llm": ["mock", "azure_openai"],  # Minimum set
-    "sink": ["csv", "json", "markdown"],  # Core output formats
+    "sink": ["csv", "signed_artifact", "local_bundle"],  # Core output formats
     # Other plugin types have no minimum (optional plugins)
 }
 

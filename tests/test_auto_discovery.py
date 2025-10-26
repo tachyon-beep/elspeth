@@ -161,7 +161,7 @@ class TestDiscoveryValidation:
         mock_registries = {
             "datasource": MagicMock(list_plugins=lambda: ["local_csv", "csv_blob", "azure_blob"]),
             "llm": MagicMock(list_plugins=lambda: ["mock", "azure_openai"]),
-            "sink": MagicMock(list_plugins=lambda: ["csv", "json", "markdown"]),
+            "sink": MagicMock(list_plugins=lambda: ["csv", "signed_artifact", "local_bundle"]),
         }
 
         # Should pass with expected plugins present
