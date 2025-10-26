@@ -45,9 +45,8 @@ from elspeth.core.base.plugin_context import PluginContext
 from elspeth.core.base.types import SecurityLevel
 from elspeth.core.experiments.runner import ExperimentRunner
 from elspeth.core.pipeline.artifact_pipeline import ArtifactPipeline, SinkBinding
-from elspeth.core.registries.datasource import datasource_registry
 from elspeth.core.registries.llm import create_llm_from_definition
-from elspeth.core.registries.sink import sink_registry
+from elspeth.core.registry import central_registry
 from elspeth.core.security import ensure_determinism_level, ensure_security_level
 
 logger = logging.getLogger(__name__)
@@ -87,6 +86,7 @@ def _context_from_defaults(job: Mapping[str, Any]) -> PluginContext:
 
 
 def _create_datasource(defn: Mapping[str, Any], ctx: PluginContext):
+    datasource_registry = central_registry.get_registry("datasource")
     name = defn.get("plugin")
     if not isinstance(name, str) or not name:
         raise ValueError("datasource.plugin must be a non-empty string")
@@ -99,6 +99,7 @@ def _create_datasource(defn: Mapping[str, Any], ctx: PluginContext):
 
 
 def _create_sinks(defs: Sequence[Mapping[str, Any]], ctx: PluginContext):
+    sink_registry = central_registry.get_registry("sink")
     sinks = []
     for entry in defs:
         plugin = entry.get("plugin") or entry.get("name")

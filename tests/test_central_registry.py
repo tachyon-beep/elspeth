@@ -137,18 +137,18 @@ class TestCentralRegistryGetPlugin:
     """Tests for unified get_plugin() interface."""
 
     def test_get_plugin_retrieves_from_correct_registry(self):
-        """get_plugin(plugin_type, plugin_name) should retrieve from correct type registry.
+        """create_plugin(plugin_type, plugin_name, options) should create from correct type registry.
 
-        Unified interface for plugin retrieval across all types.
+        Unified interface for plugin creation across all types.
         """
         from elspeth.core.registry.central import CentralPluginRegistry
 
-        # Create mock registries with get() methods
+        # Create mock registries with create() methods
         mock_datasource = MagicMock()
-        mock_datasource.get.return_value = MagicMock(name="csv_plugin")
+        mock_datasource.create.return_value = MagicMock(name="csv_plugin")
 
         mock_llm = MagicMock()
-        mock_llm.get.return_value = MagicMock(name="openai_plugin")
+        mock_llm.create.return_value = MagicMock(name="openai_plugin")
 
         with patch("elspeth.core.registry.central.auto_discover_internal_plugins"):
             with patch("elspeth.core.registry.central.validate_discovery"):
@@ -158,18 +158,18 @@ class TestCentralRegistryGetPlugin:
                     sink_registry=MagicMock(),
                 )
 
-                # Get datasource plugin
-                plugin = registry.get_plugin("datasource", "local_csv")
+                # Create datasource plugin
+                plugin = registry.create_plugin("datasource", "local_csv", options={})
                 assert plugin is not None
-                mock_datasource.get.assert_called_once_with("local_csv")
+                mock_datasource.create.assert_called_once_with("local_csv", {})
 
-                # Get llm plugin
-                plugin = registry.get_plugin("llm", "azure_openai")
+                # Create llm plugin
+                plugin = registry.create_plugin("llm", "azure_openai", options={})
                 assert plugin is not None
-                mock_llm.get.assert_called_once_with("azure_openai")
+                mock_llm.create.assert_called_once_with("azure_openai", {})
 
     def test_get_plugin_raises_on_unknown_type(self):
-        """get_plugin() should raise KeyError for unknown plugin types.
+        """create_plugin() should raise KeyError for unknown plugin types.
 
         SECURITY: Prevents type confusion attacks where wrong plugin type is retrieved.
         """
@@ -185,7 +185,7 @@ class TestCentralRegistryGetPlugin:
 
                 # Should raise KeyError for unknown type
                 with pytest.raises(KeyError) as exc_info:
-                    registry.get_plugin("invalid_type", "some_plugin")
+                    registry.create_plugin("invalid_type", "some_plugin", options={})
 
                 assert "invalid_type" in str(exc_info.value)
 
@@ -251,11 +251,11 @@ class TestCentralRegistryConvenience:
     """Tests for convenience methods (get_datasource, get_llm, get_sink, etc.)."""
 
     def test_get_datasource_convenience_method(self):
-        """get_datasource(name) should be shorthand for get_plugin('datasource', name)."""
+        """create_datasource(name, options) should be shorthand for create_plugin('datasource', name, options)."""
         from elspeth.core.registry.central import CentralPluginRegistry
 
         mock_datasource = MagicMock()
-        mock_datasource.get.return_value = MagicMock(name="csv_plugin")
+        mock_datasource.create.return_value = MagicMock(name="csv_plugin")
 
         with patch("elspeth.core.registry.central.auto_discover_internal_plugins"):
             with patch("elspeth.core.registry.central.validate_discovery"):
@@ -266,16 +266,16 @@ class TestCentralRegistryConvenience:
                 )
 
                 # Use convenience method
-                plugin = registry.get_datasource("local_csv")
+                plugin = registry.create_datasource("local_csv", options={})
                 assert plugin is not None
-                mock_datasource.get.assert_called_once_with("local_csv")
+                mock_datasource.create.assert_called_once_with("local_csv", {})
 
     def test_get_llm_convenience_method(self):
-        """get_llm(name) should be shorthand for get_plugin('llm', name)."""
+        """create_llm(name, options) should be shorthand for create_plugin('llm', name, options)."""
         from elspeth.core.registry.central import CentralPluginRegistry
 
         mock_llm = MagicMock()
-        mock_llm.get.return_value = MagicMock(name="openai_plugin")
+        mock_llm.create.return_value = MagicMock(name="openai_plugin")
 
         with patch("elspeth.core.registry.central.auto_discover_internal_plugins"):
             with patch("elspeth.core.registry.central.validate_discovery"):
@@ -286,16 +286,16 @@ class TestCentralRegistryConvenience:
                 )
 
                 # Use convenience method
-                plugin = registry.get_llm("azure_openai")
+                plugin = registry.create_llm("azure_openai", options={})
                 assert plugin is not None
-                mock_llm.get.assert_called_once_with("azure_openai")
+                mock_llm.create.assert_called_once_with("azure_openai", {})
 
     def test_get_sink_convenience_method(self):
-        """get_sink(name) should be shorthand for get_plugin('sink', name)."""
+        """create_sink(name, options) should be shorthand for create_plugin('sink', name, options)."""
         from elspeth.core.registry.central import CentralPluginRegistry
 
         mock_sink = MagicMock()
-        mock_sink.get.return_value = MagicMock(name="csv_sink")
+        mock_sink.create.return_value = MagicMock(name="csv_sink")
 
         with patch("elspeth.core.registry.central.auto_discover_internal_plugins"):
             with patch("elspeth.core.registry.central.validate_discovery"):
@@ -306,9 +306,9 @@ class TestCentralRegistryConvenience:
                 )
 
                 # Use convenience method
-                plugin = registry.get_sink("csv")
+                plugin = registry.create_sink("csv", options={})
                 assert plugin is not None
-                mock_sink.get.assert_called_once_with("csv")
+                mock_sink.create.assert_called_once_with("csv", {})
 
 
 class TestCentralRegistryGlobalInstance:

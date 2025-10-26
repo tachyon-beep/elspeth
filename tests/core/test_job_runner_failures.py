@@ -3,6 +3,7 @@ from __future__ import annotations
 import pandas as pd
 
 from elspeth.core.experiments import job_runner
+from elspeth.core.registry import central_registry
 from elspeth.core.security import SecureDataFrame
 from elspeth.core.base.types import SecurityLevel
 
@@ -40,8 +41,19 @@ def test_job_runner_accumulates_sink_failures(monkeypatch):
             return _BadSink()
         raise AssertionError(f"unexpected sink name {name}")
 
-    monkeypatch.setattr(job_runner, "datasource_registry", type("R", (), {"create": staticmethod(fake_ds_create)})())
-    monkeypatch.setattr(job_runner, "sink_registry", type("R", (), {"create": staticmethod(fake_sink_create)})())
+    # Mock the central_registry.get_registry() to return fake registries
+    fake_datasource_registry = type("R", (), {"create": staticmethod(fake_ds_create)})()
+    fake_sink_registry = type("R", (), {"create": staticmethod(fake_sink_create)})()
+
+    original_get_registry = central_registry.get_registry
+    def mock_get_registry(plugin_type):
+        if plugin_type == "datasource":
+            return fake_datasource_registry
+        elif plugin_type == "sink":
+            return fake_sink_registry
+        return original_get_registry(plugin_type)
+
+    monkeypatch.setattr(central_registry, "get_registry", mock_get_registry)
 
     job = {
         "datasource": {"plugin": "csv_local", "options": {"path": "irrelevant.csv", "retain_local": True}},

@@ -25,7 +25,7 @@ from elspeth.core.experiments.plugin_registry import (
 )
 from elspeth.core.experiments.runner import ExperimentRunner
 from elspeth.core.registries.middleware import create_middleware
-from elspeth.core.registries.sink import sink_registry
+from elspeth.core.registry import central_registry
 from elspeth.core.security import resolve_determinism_level, resolve_security_level
 from elspeth.core.validation.base import ConfigurationError
 
@@ -406,6 +406,7 @@ class ExperimentSuiteRunner:
         return instances
 
     def _instantiate_sinks(self, defs: list[dict[str, Any]]) -> list[ResultSink]:
+        sink_registry = central_registry.get_registry("sink")
         sinks: list[ResultSink] = []
         for _, entry in enumerate(defs):
             plugin = entry.get("plugin")

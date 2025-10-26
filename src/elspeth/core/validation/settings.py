@@ -10,9 +10,7 @@ import yaml
 import elspeth.core.registries.middleware as llm_middleware_registry
 from elspeth.core.controls import registry as controls_registry
 from elspeth.core.experiments import plugin_registry as exp_registry
-from elspeth.core.registries.datasource import datasource_registry
-from elspeth.core.registries.llm import llm_registry as llm_reg
-from elspeth.core.registries.sink import sink_registry
+from elspeth.core.registry import central_registry
 from elspeth.core.validation.base import ConfigurationError, ValidationReport, validate_schema
 
 from .rules import (
@@ -92,6 +90,9 @@ def _validate_primary_plugins(
 ) -> None:
     """Validate datasource and llm entries for a settings profile."""
 
+    datasource_registry = central_registry.get_registry("datasource")
+    llm_registry = central_registry.get_registry("llm")
+
     _validate_plugin_reference(
         report,
         profile_data.get("datasource"),
@@ -103,7 +104,7 @@ def _validate_primary_plugins(
         report,
         profile_data.get("llm"),
         kind="llm",
-        validator=llm_reg.validate,
+        validator=llm_registry.validate,
         require_security_level=True,
     )
 
@@ -123,6 +124,7 @@ def _validate_top_level_sinks(
     if not sinks:
         return False
 
+    sink_registry = central_registry.get_registry("sink")
     for entry in sinks:
         _validate_plugin_reference(
             report,
@@ -255,6 +257,7 @@ def _validate_prompt_pack(
 ) -> None:
     """Validate a prompt pack configuration entry."""
 
+    sink_registry = central_registry.get_registry("sink")
     context = f"prompt_pack:{name}"
     if not isinstance(pack, Mapping):
         report.add_error("Prompt pack must be a mapping", context=context)
@@ -321,6 +324,7 @@ def _validate_suite_defaults(
 ) -> None:
     """Validate suite-level default configuration entries."""
 
+    sink_registry = central_registry.get_registry("sink")
     _validate_experiment_plugins(
         report,
         defaults.get("row_plugins"),
