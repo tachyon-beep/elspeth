@@ -256,7 +256,7 @@ class EmbeddingsStoreSink(BasePlugin, ResultSink):
         provider_options: Mapping[str, Any] | None = None,
     ) -> None:
         # Initialize BasePlugin with security level and downgrade policy (ADR-004, ADR-005)
-        super().__init__(security_level=security_level, allow_downgrade=allow_downgrade)
+        super().__init__(security_level=security_level, allow_downgrade=True)  # ADR-005: Plugin hard-codes security policy
 
         self.provider_name = provider
         self._namespace_override = namespace

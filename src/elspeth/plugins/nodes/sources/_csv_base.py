@@ -37,7 +37,7 @@ class BaseCSVDataSource(BasePlugin, DataSource):
         encoding: str = "utf-8",
         on_error: str = "abort",
         security_level: SecurityLevel = SecurityLevel.OFFICIAL,  # ADR-004: Default for testing (YAML configs must be explicit)
-        allow_downgrade: bool = True,  # ADR-005: Trusted downgrade for datasources (explicit choice)
+        allow_downgrade: bool,  # ADR-005: Trusted downgrade for datasources (explicit choice)
         determinism_level: DeterminismLevel | None = None,
         schema: dict[str, str | dict[str, Any]] | None = None,
         infer_schema: bool = True,
@@ -45,7 +45,7 @@ class BaseCSVDataSource(BasePlugin, DataSource):
         retain_local_path: str | None = None,
     ):
         # Initialize BasePlugin with security level and downgrade policy (ADR-004, ADR-005)
-        super().__init__(security_level=security_level, allow_downgrade=allow_downgrade)
+        super().__init__(security_level=security_level, allow_downgrade=True)  # ADR-005: Plugin hard-codes security policy
 
         # Resolve input path relative to base_path or ELSPETH_INPUTS_DIR when provided
         raw_path = Path(path) if isinstance(path, str) else path

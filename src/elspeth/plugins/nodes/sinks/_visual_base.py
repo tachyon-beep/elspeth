@@ -52,11 +52,11 @@ class BaseVisualSink(BasePlugin, ResultSink):
         seaborn_style: str | None = "darkgrid",
         on_error: str = "abort",
         security_level: SecurityLevel = SecurityLevel.OFFICIAL,  # ADR-004: Default for testing (YAML configs must be explicit)
-        allow_downgrade: bool = True,  # ADR-005: Trusted downgrade for sinks (explicit choice, matches default suite)
+        allow_downgrade: bool,  # ADR-005: Trusted downgrade for sinks (explicit choice, matches default suite)
         **_kwargs: Any,  # Reserved for future subclass extensions
     ):
         # Initialize BasePlugin with security level and downgrade policy (ADR-004, ADR-005)
-        super().__init__(security_level=security_level, allow_downgrade=allow_downgrade)
+        super().__init__(security_level=security_level, allow_downgrade=True)  # ADR-005: Plugin hard-codes security policy
         """Initialize base visual sink.
 
         Args:

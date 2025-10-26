@@ -44,11 +44,10 @@ class ZipResultSink(BasePlugin, ResultSink):
         sanitize_formulas: bool = True,
         sanitize_guard: str = "'",
         allowed_base_path: str | Path | None = None,
-        security_level: SecurityLevel = SecurityLevel.OFFICIAL,  # ADR-004: Default for testing (YAML configs must be explicit)
-    allow_downgrade: bool = True,  # ADR-005: Trusted downgrade for sinks (explicit choice, matches default suite)
-        ) -> None:
+        security_level: SecurityLevel = SecurityLevel.OFFICIAL,  # ADR-004: Default for testing (YAML configs must be explicit)       
+    ) -> None:
         # Initialize BasePlugin with security level and downgrade policy (ADR-004, ADR-005)
-        super().__init__(security_level=security_level, allow_downgrade=allow_downgrade)
+        super().__init__(security_level=security_level, allow_downgrade=True)  # ADR-005: Plugin hard-codes security policy
 
         self.base_path = Path(base_path)
         self.bundle_name = bundle_name

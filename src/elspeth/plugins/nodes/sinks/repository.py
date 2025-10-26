@@ -88,7 +88,7 @@ class _RepoSinkBase(BasePlugin, ResultSink):
     _last_payloads: list[dict[str, Any]] = field(default_factory=list, init=False)
     on_error: str = "abort"
     security_level: SecurityLevel = SecurityLevel.OFFICIAL  # REQUIRED (ADR-004) - default to OFFICIAL
-    allow_downgrade: bool = True  # ADR-005: Trusted downgrade for sinks (explicit choice, matches default suite)
+    allow_downgrade: bool = True  # ADR-005: Sinks are trusted to downgrade (hard-coded policy, not user-configurable)
     _allow_missing_token: bool = field(default=False, init=False, repr=False)
     # Throttle spammy warnings to once per process
     _dry_run_warned_once: bool = False

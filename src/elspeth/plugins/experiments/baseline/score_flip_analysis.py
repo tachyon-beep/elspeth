@@ -48,15 +48,13 @@ class ScoreFlipAnalysisAggregator(BasePlugin):
     def __init__(
         self,
         *,
-        security_level: SecurityLevel,
-        allow_downgrade: bool,
-        criteria: list[str] | None = None,
+        security_level: SecurityLevel,        criteria: list[str] | None = None,
         pass_threshold: float = 3.0,
         fail_threshold: float = 2.0,
         major_change: float = 2.0,
         on_error: str = "abort",
     ) -> None:
-        super().__init__(security_level=security_level, allow_downgrade=allow_downgrade)
+        super().__init__(security_level=security_level, allow_downgrade=True)  # ADR-005: Baseline plugins trusted to downgrade
         self._criteria = set(criteria) if criteria else None
         self._pass_threshold = float(pass_threshold)
         self._fail_threshold = float(fail_threshold)
@@ -164,11 +162,8 @@ def _create_score_flip_analysis(options: dict[str, Any], context: PluginContext)
     opts = dict(options)
     if "security_level" not in opts and context:
         opts["security_level"] = context.security_level
-    allow_downgrade = opts.get("allow_downgrade", True)
-
     return ScoreFlipAnalysisAggregator(
         security_level=opts["security_level"],
-        allow_downgrade=allow_downgrade,
         criteria=options.get("criteria"),
         pass_threshold=float(options.get("pass_threshold", 3.0)),
         fail_threshold=float(options.get("fail_threshold", 2.0)),

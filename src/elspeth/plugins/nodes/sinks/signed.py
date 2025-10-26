@@ -40,7 +40,7 @@ class SignedArtifactSink(BasePlugin, ResultSink):
     key_vault_secret_uri: str | None = None
     on_error: str = "abort"
     security_level: SecurityLevel = SecurityLevel.OFFICIAL  # REQUIRED (ADR-004) - default to OFFICIAL
-    allow_downgrade: bool = True  # ADR-005: Trusted downgrade for sinks (explicit choice, matches default suite)
+    allow_downgrade: bool = True  # ADR-005: Sinks are trusted to downgrade (hard-coded policy, not user-configurable)
 
     def __post_init__(self) -> None:
         """Normalize configuration and validate on_error early."""

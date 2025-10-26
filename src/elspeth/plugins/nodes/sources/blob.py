@@ -32,13 +32,12 @@ class BlobDataSource(BasePlugin, DataSource):
         pandas_kwargs: dict[str, Any] | None = None,
         on_error: str = "abort",
         security_level: SecurityLevel = SecurityLevel.OFFICIAL,  # ADR-004: Default for testing (YAML configs must be explicit)
-        allow_downgrade: bool = True,  # ADR-005: Trusted downgrade for datasources (explicit choice, matches default suite)
         determinism_level: DeterminismLevel | None = None,
         retain_local: bool,  # REQUIRED - no default
         retain_local_path: str | None = None,
-    ):
+    ) -> None:
         # Initialize BasePlugin with security level and downgrade policy (ADR-004, ADR-005)
-        super().__init__(security_level=security_level, allow_downgrade=allow_downgrade)
+        super().__init__(security_level=security_level, allow_downgrade=True)  # ADR-005: Plugin hard-codes security policy
 
         self.config_path = config_path
         self.profile = profile

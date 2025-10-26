@@ -73,6 +73,7 @@ def _create_blob_datasource(options: dict[str, Any], context: PluginContext) -> 
 
     # Inject security/determinism levels from context (ADR-004)
     # Registry strips these from options, but BasePlugin requires them in constructor
+    # ADR-005: allow_downgrade is set by concrete plugin class, not configurable by users
     return BlobDataSource(
         **options,
         security_level=context.security_level,
@@ -88,6 +89,7 @@ def _create_csv_blob_datasource(options: dict[str, Any], context: PluginContext)
     """
     # Inject security/determinism levels from context (ADR-004)
     # Registry strips these from options, but BasePlugin requires them in constructor
+    # ADR-005: allow_downgrade is set by concrete plugin class, not configurable by users
     return CSVBlobDataSource(
         **options,
         security_level=context.security_level,
@@ -99,6 +101,7 @@ def _create_csv_datasource(options: dict[str, Any], context: PluginContext) -> C
     """Create local CSV datasource."""
     # Inject security/determinism levels from context (ADR-004)
     # Registry strips these from options, but BasePlugin requires them in constructor
+    # ADR-005: allow_downgrade is set by concrete plugin class, not configurable by users
     return CSVDataSource(
         **options,
         security_level=context.security_level,

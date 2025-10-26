@@ -41,14 +41,12 @@ class ScoreBayesianBaselinePlugin(BasePlugin):
     def __init__(
         self,
         *,
-        security_level: SecurityLevel,
-        allow_downgrade: bool,
-        criteria: Sequence[str] | None = None,
+        security_level: SecurityLevel,        criteria: Sequence[str] | None = None,
         min_samples: int = 2,
         credible_interval: float = 0.95,
         on_error: str = "abort",
     ) -> None:
-        super().__init__(security_level=security_level, allow_downgrade=allow_downgrade)
+        super().__init__(security_level=security_level, allow_downgrade=True)  # ADR-005: Baseline plugins trusted to downgrade
         self._criteria = set(criteria) if criteria else None
         self._min_samples = max(int(min_samples), 2)
         self._ci = min(max(float(credible_interval), 0.5), 0.999)
@@ -89,11 +87,8 @@ def _create_score_bayesian(options: dict[str, Any], context: PluginContext) -> S
     opts = dict(options)
     if "security_level" not in opts and context:
         opts["security_level"] = context.security_level
-    allow_downgrade = opts.get("allow_downgrade", True)
-
     return ScoreBayesianBaselinePlugin(
         security_level=opts["security_level"],
-        allow_downgrade=allow_downgrade,
         criteria=options.get("criteria"),
         min_samples=int(options.get("min_samples", 2)),
         credible_interval=float(options.get("credible_interval", 0.95)),

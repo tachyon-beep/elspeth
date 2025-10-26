@@ -32,11 +32,10 @@ class FileCopySink(BasePlugin, ResultSink):
         overwrite: bool = True,
         on_error: str = "abort",
         allowed_base_path: str | None = None,
-        security_level: SecurityLevel = SecurityLevel.OFFICIAL,  # ADR-004: Default for testing (YAML configs must be explicit)
-    allow_downgrade: bool = True,  # ADR-005: Trusted downgrade for sinks (explicit choice, matches default suite)
-        ) -> None:
+        security_level: SecurityLevel = SecurityLevel.OFFICIAL,  # ADR-004: Default for testing (YAML configs must be explicit)       
+    ) -> None:
         # Initialize BasePlugin with security level and downgrade policy (ADR-004, ADR-005)
-        super().__init__(security_level=security_level, allow_downgrade=allow_downgrade)
+        super().__init__(security_level=security_level, allow_downgrade=True)  # ADR-005: Plugin hard-codes security policy
         self.destination = Path(destination)
         self.overwrite = overwrite
         if on_error not in {"abort", "skip"}:

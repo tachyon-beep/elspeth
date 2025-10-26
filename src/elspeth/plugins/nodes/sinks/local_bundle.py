@@ -37,7 +37,7 @@ class LocalBundleSink(BasePlugin, ResultSink):
     sanitize_formulas: bool = True
     sanitize_guard: str = "'"
     security_level: SecurityLevel = SecurityLevel.OFFICIAL  # REQUIRED (ADR-004) - default to OFFICIAL
-    allow_downgrade: bool = True  # ADR-005: Trusted downgrade for sinks (explicit choice, matches default suite)
+    allow_downgrade: bool = True  # ADR-005: Sinks are trusted to downgrade (hard-coded policy, not user-configurable)
 
     allowed_base_path: str | None = None
 

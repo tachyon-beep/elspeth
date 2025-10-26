@@ -40,13 +40,11 @@ class ScoreDistributionAggregator(BasePlugin):
     def __init__(
         self,
         *,
-        security_level: SecurityLevel,
-        allow_downgrade: bool,
-        criteria: Sequence[str] | None = None,
+        security_level: SecurityLevel,        criteria: Sequence[str] | None = None,
         min_samples: int = 2,
         on_error: str = "abort",
     ) -> None:
-        super().__init__(security_level=security_level, allow_downgrade=allow_downgrade)
+        super().__init__(security_level=security_level, allow_downgrade=True)  # ADR-005: Baseline plugins trusted to downgrade
         self._criteria = set(criteria) if criteria else None
         self._min_samples = max(int(min_samples), 2)
         if on_error not in {"abort", "skip"}:
@@ -89,11 +87,8 @@ def _create_score_distribution(options: dict[str, Any], context: PluginContext) 
     opts = dict(options)
     if "security_level" not in opts and context:
         opts["security_level"] = context.security_level
-    allow_downgrade = opts.get("allow_downgrade", True)
-
     return ScoreDistributionAggregator(
         security_level=opts["security_level"],
-        allow_downgrade=allow_downgrade,
         criteria=opts.get("criteria"),
         min_samples=int(opts.get("min_samples", 2)),
         on_error=opts.get("on_error", "abort"),

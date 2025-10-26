@@ -32,10 +32,9 @@ class AnalyticsReportSink(BasePlugin, ResultSink):
         include_comparisons: bool = True,
         on_error: str = "abort",
         security_level: SecurityLevel = SecurityLevel.OFFICIAL,  # ADR-004: Default for testing (YAML configs must be explicit)
-    allow_downgrade: bool = True,  # ADR-005: Trusted downgrade for sinks (explicit choice, matches default suite)
-        ) -> None:
+    ) -> None:
         # Initialize BasePlugin with security level and downgrade policy (ADR-004, ADR-005)
-        super().__init__(security_level=security_level, allow_downgrade=allow_downgrade)
+        super().__init__(security_level=security_level, allow_downgrade=True)  # ADR-005: Analytics sinks can operate at lower security levels
         self.base_path = Path(base_path)
         self.file_stem = file_stem or "analytics_report"
         selected = []

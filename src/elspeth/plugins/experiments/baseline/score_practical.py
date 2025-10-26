@@ -43,15 +43,13 @@ class ScorePracticalBaselinePlugin(BasePlugin):
     def __init__(
         self,
         *,
-        security_level: SecurityLevel,
-        allow_downgrade: bool,
-        criteria: Sequence[str] | None = None,
+        security_level: SecurityLevel,        criteria: Sequence[str] | None = None,
         threshold: float = 1.0,
         success_threshold: float = 4.0,
         min_samples: int = 1,
         on_error: str = "abort",
     ) -> None:
-        super().__init__(security_level=security_level, allow_downgrade=allow_downgrade)
+        super().__init__(security_level=security_level, allow_downgrade=True)  # ADR-005: Baseline plugins trusted to downgrade
         self._criteria = set(criteria) if criteria else None
         self._threshold = float(threshold)
         self._success_threshold = float(success_threshold)
@@ -109,11 +107,8 @@ def _create_score_practical(options: dict[str, Any], context: PluginContext) -> 
     opts = dict(options)
     if "security_level" not in opts and context:
         opts["security_level"] = context.security_level
-    allow_downgrade = opts.get("allow_downgrade", True)
-
     return ScorePracticalBaselinePlugin(
         security_level=opts["security_level"],
-        allow_downgrade=allow_downgrade,
         criteria=options.get("criteria"),
         threshold=float(options.get("threshold", 1.0)),
         success_threshold=float(options.get("success_threshold", 4.0)),

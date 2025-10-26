@@ -48,14 +48,12 @@ class OutlierDetectionAggregator(BasePlugin):
     def __init__(
         self,
         *,
-        security_level: SecurityLevel,
-        allow_downgrade: bool,
-        top_n: int = 10,
+        security_level: SecurityLevel,        top_n: int = 10,
         criteria: list[str] | None = None,
         min_delta: float = 0.0,
         on_error: str = "abort",
     ) -> None:
-        super().__init__(security_level=security_level, allow_downgrade=allow_downgrade)
+        super().__init__(security_level=security_level, allow_downgrade=True)  # ADR-005: Baseline plugins trusted to downgrade
         self._top_n = max(int(top_n), 1)
         self._criteria = set(criteria) if criteria else None
         self._min_delta = float(min_delta)
@@ -166,11 +164,8 @@ def _create_outlier_detection(options: dict[str, Any], context: PluginContext) -
     opts = dict(options)
     if "security_level" not in opts and context:
         opts["security_level"] = context.security_level
-    allow_downgrade = opts.get("allow_downgrade", True)
-
     return OutlierDetectionAggregator(
         security_level=opts["security_level"],
-        allow_downgrade=allow_downgrade,
         top_n=int(opts.get("top_n", 10)),
         criteria=opts.get("criteria"),
         min_delta=float(opts.get("min_delta", 0.0)),

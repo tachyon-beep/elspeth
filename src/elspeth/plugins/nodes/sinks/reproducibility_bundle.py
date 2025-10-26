@@ -75,7 +75,7 @@ class ReproducibilityBundleSink(BasePlugin, ResultSink):
     sanitize_guard: str = "'"
     compression: str = "gz"  # gz, bz2, xz, or none
     security_level: SecurityLevel = SecurityLevel.OFFICIAL  # REQUIRED (ADR-004) - default to OFFICIAL
-    allow_downgrade: bool = True  # ADR-005: Trusted downgrade for sinks (explicit choice, matches default suite)
+    allow_downgrade: bool = True  # ADR-005: Sinks are trusted to downgrade (hard-coded policy, not user-configurable)
 
     # Internal state
     _temp_dir: Path | None = field(default=None, init=False, repr=False)
