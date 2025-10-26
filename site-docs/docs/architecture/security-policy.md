@@ -134,7 +134,7 @@ operating_level = min(
    - Each sink validates it can accept the output classification
    - Chained sinks (artifact pipeline) validate dependency classification compatibility
 
-### 1.3 Bell-LaPadula Directionality: Data vs Plugin Classifications
+### 1.3 Bell-LaPadula Directionality: Data vs Plugin Operations
 
 **CRITICAL DISTINCTION**: Data classifications and plugin operations move in OPPOSITE directions:
 
@@ -717,7 +717,9 @@ Exception
 | Exception | Purpose | Catchability | Use Cases |
 |-----------|---------|--------------|-----------|
 | **SecurityValidationError** | Expected security boundaries | ✅ May be caught in production | Start-time validation failures, clearance mismatches, permission denied |
-| **SecurityCriticalError** | Impossible invariant violations | ❌ MUST NOT be caught in production (tests only) | Classification downgrades, metadata tampering, container boundary violations |
+| **SecurityCriticalError** | Impossible invariant violations | ❌ MUST NOT be caught in production (tests only)*  | Classification downgrades, metadata tampering, container boundary violations |
+
+\* **Allowable scope**: Only unit/integration tests (under `tests/`) or generated scaffolding specifically tagged for auditing may catch this exception. All first-party production modules (`src/`) are linted to reject catches, and glue code (e.g., orchestration notebooks, Airflow DAGs) must either live under `tests/` or opt into the same lint rule set to guarantee enforcement.
 
 ### 6.2 SecurityValidationError (Expected Boundaries)
 
