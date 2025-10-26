@@ -22,7 +22,7 @@ default:
   # ============================================================================
   datasource:
     plugin: azure_blob  # Or local_csv for local development
-    security_level: "OFFICIAL"  # REQUIRED: Must match data classification
+    security_level: "UNOFFICIAL"  # REQUIRED: Must match data classification
     determinism_level: "high"   # Recommended for reproducibility
     options:
       # Azure Blob Storage
@@ -40,7 +40,7 @@ default:
   # ============================================================================
   llm:
     plugin: azure_openai  # Real LLM required in STRICT mode
-    security_level: "OFFICIAL"  # REQUIRED: Must match or exceed data security
+    security_level: "UNOFFICIAL"  # REQUIRED: Must match or exceed data security
     determinism_level: "high"   # Recommended for reproducibility
     options:
       endpoint: "https://your-resource.openai.azure.com"
@@ -56,7 +56,7 @@ default:
   sinks:
     # CSV export with formula sanitization
     - plugin: csv
-      security_level: "OFFICIAL"  # REQUIRED: Must match data classification
+      security_level: "UNOFFICIAL"  # REQUIRED: Must match data classification
       options:
         path: "outputs/production/results.csv"
         sanitize_formulas: true  # REQUIRED in STRICT mode (default)
@@ -65,7 +65,7 @@ default:
 
     # Excel workbook with sanitization
     - plugin: excel_workbook
-      security_level: "OFFICIAL"
+      security_level: "UNOFFICIAL"
       options:
         path: "outputs/production/results.xlsx"
         sanitize_formulas: true  # REQUIRED in STRICT mode (default)
@@ -74,7 +74,7 @@ default:
 
     # Analytics report (JSON + Markdown)
     - plugin: analytics_report
-      security_level: "OFFICIAL"
+      security_level: "UNOFFICIAL"
       options:
         output_dir: "outputs/production/reports"
         formats: ["json", "markdown"]
@@ -82,7 +82,7 @@ default:
 
     # Reproducibility bundle (complete audit trail)
     - plugin: reproducibility_bundle
-      security_level: "OFFICIAL"
+      security_level: "UNOFFICIAL"
       options:
         output_dir: "outputs/production/audit"
         sanitize_formulas: true  # REQUIRED in STRICT mode

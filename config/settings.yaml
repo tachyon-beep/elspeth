@@ -23,21 +23,21 @@ default:
             Offer whimsical advice to the applicant {APPID} considering context "{context_1}" and "{context_2}".
       row_plugins:
         - name: score_extractor
-          security_level: OFFICIAL
+          security_level: UNOFFICIAL
           determinism_level: guaranteed
           options:
             threshold: 0.7
             threshold_mode: gte
       aggregator_plugins:
         - name: score_stats
-          security_level: OFFICIAL
+          security_level: UNOFFICIAL
           determinism_level: guaranteed
         - name: score_recommendation
-          security_level: OFFICIAL
+          security_level: UNOFFICIAL
           determinism_level: guaranteed
       baseline_plugins:
         - name: score_delta
-          security_level: OFFICIAL
+          security_level: UNOFFICIAL
           determinism_level: guaranteed
     archival:
       prompts:
@@ -54,31 +54,31 @@ default:
             Provide a factual archival summary for application {APPID} with priority {priority_level}.
       row_plugins:
         - name: score_extractor
-          security_level: OFFICIAL
+          security_level: UNOFFICIAL
           determinism_level: guaranteed
           options:
             key: score
             threshold: 0.8
       aggregator_plugins:
         - name: score_stats
-          security_level: OFFICIAL
+          security_level: UNOFFICIAL
           determinism_level: guaranteed
       sinks:
         - plugin: local_bundle
-          security_level: OFFICIAL
+          security_level: UNOFFICIAL
           determinism_level: guaranteed
           options:
             base_path: outputs/bundles
             bundle_name: archival
         - plugin: signed_artifact
-          security_level: OFFICIAL
+          security_level: UNOFFICIAL
           determinism_level: guaranteed
           options:
             base_path: outputs/signed
             bundle_name: archival
             key_env: ELSPETH_SIGNING_KEY
         - plugin: github_repo
-          security_level: OFFICIAL
+          security_level: UNOFFICIAL
           determinism_level: guaranteed
           options:
             owner: example
@@ -86,7 +86,7 @@ default:
             path_template: archives/{experiment}/{timestamp}
             dry_run: true
         - plugin: azure_devops_repo
-          security_level: OFFICIAL
+          security_level: UNOFFICIAL
           determinism_level: guaranteed
           options:
             organization: example-org
@@ -95,19 +95,19 @@ default:
             dry_run: true
   datasource:
     plugin: csv_blob
-    security_level: OFFICIAL
+    security_level: UNOFFICIAL
     determinism_level: guaranteed
     options:
       path: config/data/generic_input.csv
   llm:
     plugin: mock
-    security_level: OFFICIAL
+    security_level: UNOFFICIAL
     determinism_level: high
     options:
       seed: 1337
   sinks:
     - plugin: csv
-      security_level: OFFICIAL
+      security_level: UNOFFICIAL
       determinism_level: guaranteed
       options:
         path: outputs/latest_results.csv
@@ -132,39 +132,39 @@ default:
         Offer whimsical advice to the applicant {APPID} considering context "{context_1}" and "{context_2}".
   row_plugins:
     - name: score_extractor
-      security_level: OFFICIAL
+      security_level: UNOFFICIAL
       determinism_level: guaranteed
       options:
         threshold: 0.7
         threshold_mode: gte
   aggregator_plugins:
     - name: score_stats
-      security_level: OFFICIAL
+      security_level: UNOFFICIAL
       determinism_level: guaranteed
     - name: score_recommendation
-      security_level: OFFICIAL
+      security_level: UNOFFICIAL
       determinism_level: guaranteed
   baseline_plugins:
     - name: score_delta
-      security_level: OFFICIAL
+      security_level: UNOFFICIAL
       determinism_level: guaranteed
   suite_defaults:
     prompt_pack: whimsical
     row_plugins:
       - name: score_extractor
-        security_level: OFFICIAL
+        security_level: UNOFFICIAL
         determinism_level: guaranteed
         options:
           threshold: 0.7
           threshold_mode: gte
     aggregator_plugins:
       - name: score_stats
-        security_level: OFFICIAL
+        security_level: UNOFFICIAL
         determinism_level: guaranteed
       - name: score_recommendation
-        security_level: OFFICIAL
+        security_level: UNOFFICIAL
         determinism_level: guaranteed
     baseline_plugins:
       - name: score_delta
-        security_level: OFFICIAL
+        security_level: UNOFFICIAL
         determinism_level: guaranteed

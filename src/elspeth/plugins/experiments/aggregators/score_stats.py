@@ -41,12 +41,11 @@ class ScoreStatsAggregator(BasePlugin):
         self,
         *,
         security_level: SecurityLevel,
-        allow_downgrade: bool,
         source_field: str = "scores",
         flag_field: str = "score_flags",
         ddof: int = 0,
     ) -> None:
-        super().__init__(security_level=security_level, allow_downgrade=allow_downgrade)
+        super().__init__(security_level=security_level, allow_downgrade=True)  # ADR-005: Aggregators trusted to operate at lower levels
         self._source_field = source_field
         self._flag_field = flag_field
         self._ddof = ddof
@@ -126,11 +125,8 @@ def _create_score_stats(options: dict[str, Any], context: PluginContext) -> Scor
     opts = dict(options)
     if "security_level" not in opts and context:
         opts["security_level"] = context.security_level
-    allow_downgrade = opts.get("allow_downgrade", True)
-
     return ScoreStatsAggregator(
         security_level=opts["security_level"],
-        allow_downgrade=allow_downgrade,
         source_field=opts.get("source_field", "scores"),
         flag_field=opts.get("flag_field", "score_flags"),
         ddof=int(opts.get("ddof", 0)),

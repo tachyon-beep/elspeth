@@ -10,7 +10,7 @@ def test_csv_datasource_loads(tmp_path):
     df = pd.DataFrame({"APPID": ["1", "2"], "value": [10, 20]})
     df.to_csv(csv_path, index=False)
 
-    datasource = CSVDataSource(path=csv_path, retain_local=False)
+    datasource = CSVDataSource(path=csv_path, retain_local=False, security_level=SecurityLevel.OFFICIAL)
     loaded = datasource.load()
 
     assert list(loaded["APPID"].astype(str)) == ["1", "2"]
@@ -18,7 +18,7 @@ def test_csv_datasource_loads(tmp_path):
 
 
 def test_csv_datasource_skip_on_missing(tmp_path):
-    datasource = CSVDataSource(path=tmp_path / "missing.csv", on_error="skip", retain_local=False)
+    datasource = CSVDataSource(path=tmp_path / "missing.csv", on_error="skip", retain_local=False, security_level=SecurityLevel.OFFICIAL)
     loaded = datasource.load()
     assert loaded.empty
 
@@ -28,7 +28,7 @@ def test_csv_blob_datasource_loads(tmp_path):
     df = pd.DataFrame({"APPID": ["1", "2"], "value": [10, 20]})
     df.to_csv(csv_path, index=False)
 
-    datasource = CSVBlobDataSource(path=csv_path, retain_local=False)
+    datasource = CSVBlobDataSource(path=csv_path, retain_local=False, security_level=SecurityLevel.OFFICIAL)
     loaded = datasource.load()
 
     assert list(loaded["APPID"].astype(str)) == ["1", "2"]
@@ -36,7 +36,7 @@ def test_csv_blob_datasource_loads(tmp_path):
 
 
 def test_csv_datasource_missing_raises(tmp_path):
-    datasource = CSVDataSource(path=tmp_path / "missing.csv", retain_local=False)
+    datasource = CSVDataSource(path=tmp_path / "missing.csv", retain_local=False, security_level=SecurityLevel.OFFICIAL)
     with pytest.raises(FileNotFoundError):
         datasource.load()
 
@@ -80,7 +80,7 @@ def test_csv_blob_datasource_failure_returns_empty(monkeypatch, tmp_path, caplog
     csv_path = tmp_path / "sample.csv"
     csv_path.write_text("content", encoding="utf-8")
 
-    datasource = CSVBlobDataSource(path=csv_path, on_error="skip", retain_local=False)
+    datasource = CSVBlobDataSource(path=csv_path, on_error="skip", retain_local=False, security_level=SecurityLevel.OFFICIAL)
 
     def _raise_runtimeerror(*_args, **_kwargs):  # noqa: D401
         raise RuntimeError("boom")
@@ -111,7 +111,7 @@ def test_csv_datasource_with_schema_config(tmp_path):
         "age": {"type": "integer", "required": True},
     }
 
-    datasource = CSVDataSource(path=csv_path, schema=schema_config, retain_local=False)
+    datasource = CSVDataSource(path=csv_path, schema=schema_config, retain_local=False, security_level=SecurityLevel.OFFICIAL)
     loaded = datasource.load()
 
     assert loaded.attrs["schema"] is not None
@@ -124,7 +124,7 @@ def test_csv_datasource_schema_inference(tmp_path):
     df = pd.DataFrame({"name": ["Alice", "Bob"], "age": [30, 25]})
     df.to_csv(csv_path, index=False)
 
-    datasource = CSVDataSource(path=csv_path, infer_schema=True, retain_local=False)
+    datasource = CSVDataSource(path=csv_path, infer_schema=True, retain_local=False, security_level=SecurityLevel.OFFICIAL)
     loaded = datasource.load()
 
     assert loaded.attrs["schema"] is not None
@@ -139,7 +139,7 @@ def test_csv_datasource_with_retain_local(tmp_path):
 
     retain_dir = tmp_path / "retained"
 
-    datasource = CSVDataSource(path=csv_path, retain_local=True, retain_local_path=str(retain_dir / "custom_name.csv"))
+    datasource = CSVDataSource(path=csv_path, retain_local=True, retain_local_path=str(retain_dir / "custom_name.csv", security_level=SecurityLevel.OFFICIAL))
     loaded = datasource.load()
 
     assert loaded.attrs["retained_local_path"] == str(retain_dir / "custom_name.csv")
@@ -152,7 +152,7 @@ def test_csv_datasource_with_retain_local_auto_path(tmp_path):
     df = pd.DataFrame({"name": ["Alice"], "value": [100]})
     df.to_csv(csv_path, index=False)
 
-    datasource = CSVDataSource(path=csv_path, retain_local=True, retain_local_path=None)
+    datasource = CSVDataSource(path=csv_path, retain_local=True, retain_local_path=None, security_level=SecurityLevel.OFFICIAL)
     loaded = datasource.load()
 
     # Should have generated automatic path in audit_data/

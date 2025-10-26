@@ -15,7 +15,7 @@ def test_blob_datasource_success_and_retain_local(monkeypatch, tmp_path):
         config_path="dummy.yaml",
         profile="p",
         retain_local=True,
-        retain_local_path=str(retain_path),
+        retain_local_path=str(retain_path, security_level=SecurityLevel.OFFICIAL),
         on_error="abort",
         security_level="official",
         determinism_level="low",

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from elspeth.core.base.types import DeterminismLevel, SecurityLevel
+from elspeth.core.base.types import DeterminismLevel, SecurityLevel, SecurityLevel
 from elspeth.core.security import ensure_determinism_level, ensure_security_level
 from elspeth.core.security import (
     coalesce_determinism_level,

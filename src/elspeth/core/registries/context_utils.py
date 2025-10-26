@@ -223,6 +223,8 @@ def prepare_plugin_payload(
         {'path': 'data.csv'}
     """
     payload = dict(options)
+    if 'allow_downgrade' in payload:
+        raise ConfigurationError("allow_downgrade is author-owned; remove it from configuration")
     if strip_security:
         payload.pop("security_level", None)
     if strip_determinism:

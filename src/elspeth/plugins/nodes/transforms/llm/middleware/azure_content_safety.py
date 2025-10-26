@@ -42,7 +42,6 @@ class AzureContentSafetyMiddleware(BasePlugin, LLMMiddleware):
 
     Args:
         security_level: Security clearance for this middleware (MANDATORY per ADR-004).
-        allow_downgrade: Whether middleware can operate at lower pipeline levels (MANDATORY per ADR-005).
     """
 
     name = "azure_content_safety"
@@ -51,7 +50,6 @@ class AzureContentSafetyMiddleware(BasePlugin, LLMMiddleware):
         self,
         *,
         security_level: SecurityLevel,
-        allow_downgrade: bool,
         endpoint: str,
         key: str | None = None,
         key_env: str | None = None,
@@ -64,7 +62,7 @@ class AzureContentSafetyMiddleware(BasePlugin, LLMMiddleware):
         on_error: str = "abort",
         retry_attempts: int = 3,
     ) -> None:
-        super().__init__(security_level=security_level, allow_downgrade=allow_downgrade)
+        super().__init__(security_level=security_level, allow_downgrade=True)  # ADR-005: Middleware trusted to downgrade
         if not endpoint:
             raise ValueError("Azure Content Safety requires an endpoint")
         self.endpoint = endpoint.rstrip("/")
@@ -156,10 +154,8 @@ def _create_azure_content_safety_middleware(options: dict[str, Any], context: Pl
     opts = dict(options)
     if "security_level" not in opts and context:
         opts["security_level"] = context.security_level
-    allow_downgrade = opts.get("allow_downgrade", True)
     return AzureContentSafetyMiddleware(
         security_level=opts["security_level"],
-        allow_downgrade=allow_downgrade,
         endpoint=str(opts.get("endpoint", "")),
         key=str(opts.get("key")) if opts.get("key") is not None else None,
         key_env=str(opts.get("key_env")) if opts.get("key_env") is not None else None,

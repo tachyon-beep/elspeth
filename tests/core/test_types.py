@@ -1,6 +1,6 @@
 import pytest
 
-from elspeth.core.base.types import DataType, DeterminismLevel, PluginType, SecurityLevel
+from elspeth.core.base.types import DataType, DeterminismLevel, PluginType, SecurityLevel, SecurityLevel
 from elspeth.core.security import ensure_determinism_level, ensure_security_level
 
 

@@ -84,6 +84,10 @@ All plugins receive a `PluginContext` at creation. The registry stamps:
 
 Never downgrade security levels in code. Use the attached logger to record events; avoid printing secrets.
 
+Security policy metadata (security_level, allow_downgrade) is author-owned.
+Per ADR-002-B, configuration must NOT expose allow_downgrade and plugins should
+set their policy explicitly in code before publishing.
+
 ## 4) WP002: DataFrame Schemas & Validation
 
 - Datasources: must attach a `DataFrameSchema` to the returned DataFrame (either via explicit config schema → `schema_from_config()` or inference when enabled).

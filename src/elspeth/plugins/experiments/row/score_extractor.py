@@ -67,7 +67,6 @@ class ScoreExtractorPlugin(BasePlugin):
         self,
         *,
         security_level: SecurityLevel,
-        allow_downgrade: bool,
         key: str = "score",
         criteria: list[str] | None = None,
         parse_json_content: bool = True,
@@ -76,7 +75,7 @@ class ScoreExtractorPlugin(BasePlugin):
         threshold_mode: str = "gte",
         flag_field: str = "score_flags",
     ) -> None:
-        super().__init__(security_level=security_level, allow_downgrade=allow_downgrade)
+        super().__init__(security_level=security_level, allow_downgrade=True)  # ADR-005: Row computation plugin trusted to downgrade
         self._key = key
         self._criteria = set(criteria) if criteria else None
         self._parse_json = parse_json_content
@@ -178,17 +177,15 @@ def _create_score_extractor(options: dict[str, Any], context: PluginContext) -> 
 
     Security defaults:
     - Falls back to context.security_level if not provided in options
-    - Defaults allow_downgrade=True (trusted computation plugin)
+    - Hard-codes allow_downgrade=True (trusted computation plugin)
     """
     opts = dict(options)
     if "security_level" not in opts and context:
         opts["security_level"] = context.security_level
-    allow_downgrade = opts.get("allow_downgrade", True)
 
     validated = _create_score_extractor_factory(opts)
     return ScoreExtractorPlugin(
         security_level=opts["security_level"],
-        allow_downgrade=allow_downgrade,
         **validated,
     )
 

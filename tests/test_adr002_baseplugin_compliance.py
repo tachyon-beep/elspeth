@@ -308,7 +308,7 @@ class TestCategory1Characterization:
         csv_file.write_text("col1,col2\n1,2\n")
 
         ds = BaseCSVDataSource(
-            path=str(csv_file),
+            path=str(csv_file, security_level=SecurityLevel.OFFICIAL),
             retain_local=False,
             security_level=SecurityLevel.SECRET
         )
@@ -332,7 +332,7 @@ class TestCategory1Characterization:
         csv_file.write_text("col1,col2\n1,2\n")
 
         ds = BaseCSVDataSource(
-            path=str(csv_file),
+            path=str(csv_file, security_level=SecurityLevel.OFFICIAL),
             retain_local=False,
             security_level=SecurityLevel.SECRET
         )
@@ -360,7 +360,7 @@ class TestCategory1Characterization:
         csv_file.write_text("col1,col2\n1,2\n")
 
         ds = CSVDataSource(
-            path=str(csv_file),
+            path=str(csv_file, security_level=SecurityLevel.OFFICIAL),
             retain_local=False,
             security_level=SecurityLevel.SECRET
         )
@@ -451,7 +451,7 @@ class TestCategory2SecurityBugs:
         csv_file.write_text("col1,col2\n1,2\n")
 
         ds = CSVDataSource(
-            path=str(csv_file),
+            path=str(csv_file, security_level=SecurityLevel.OFFICIAL),
             retain_local=False,
             security_level=SecurityLevel.SECRET
         )
@@ -509,7 +509,7 @@ class TestCategory3SecurityProperties:
         csv_file.write_text("col1,col2\n1,2\n")
 
         ds = CSVDataSource(
-            path=str(csv_file),
+            path=str(csv_file, security_level=SecurityLevel.OFFICIAL),
             retain_local=False,
             security_level=SecurityLevel.SECRET
         )
@@ -561,7 +561,7 @@ class TestCategory3SecurityProperties:
         csv_file.write_text("col1,col2\n1,2\n")
 
         ds = CSVDataSource(
-            path=str(csv_file),
+            path=str(csv_file, security_level=SecurityLevel.OFFICIAL),
             retain_local=False,
             security_level=SecurityLevel.SECRET
         )
@@ -587,7 +587,7 @@ class TestCategory3SecurityProperties:
         csv_file.write_text("col1,col2\n1,2\n")
 
         ds = CSVDataSource(
-            path=str(csv_file),
+            path=str(csv_file, security_level=SecurityLevel.OFFICIAL),
             retain_local=False,
             security_level=SecurityLevel.SECRET
         )
@@ -618,7 +618,7 @@ class TestCategory3SecurityProperties:
         csv_file.write_text("col1,col2\n1,2\n")
 
         ds = CSVDataSource(
-            path=str(csv_file),
+            path=str(csv_file, security_level=SecurityLevel.OFFICIAL),
             retain_local=False,
             security_level=SecurityLevel.UNOFFICIAL
         )
@@ -801,7 +801,7 @@ class TestCategory5Integration:
 
         # REAL production datasource with SECRET security level
         datasource = CSVDataSource(
-            path=str(test_csv),
+            path=str(test_csv, security_level=SecurityLevel.OFFICIAL),
             security_level=SecurityLevel.SECRET,
             retain_local=False,
         )
@@ -883,7 +883,7 @@ class TestCategory5Integration:
 
         # REAL production datasource with SECRET security level
         datasource = CSVDataSource(
-            path=str(test_csv),
+            path=str(test_csv, security_level=SecurityLevel.OFFICIAL),
             security_level=SecurityLevel.SECRET,
             retain_local=False,
         )

@@ -42,10 +42,9 @@ class CostSummaryAggregator(BasePlugin):
         self,
         *,
         security_level: SecurityLevel,
-        allow_downgrade: bool,
         on_error: str = "abort",
     ) -> None:
-        super().__init__(security_level=security_level, allow_downgrade=allow_downgrade)
+        super().__init__(security_level=security_level, allow_downgrade=True)  # ADR-005: Aggregator trusted to downgrade
         if on_error not in {"abort", "skip"}:
             raise ValueError("on_error must be 'abort' or 'skip'")
         self._on_error = on_error
@@ -135,11 +134,8 @@ def _create_cost_summary(options: dict[str, Any], context: PluginContext) -> Cos
     opts = dict(options)
     if "security_level" not in opts and context:
         opts["security_level"] = context.security_level
-    allow_downgrade = opts.get("allow_downgrade", True)
-
     return CostSummaryAggregator(
         security_level=opts["security_level"],
-        allow_downgrade=allow_downgrade,
         on_error=opts.get("on_error", "abort"),
     )
 

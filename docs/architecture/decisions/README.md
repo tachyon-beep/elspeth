@@ -26,6 +26,7 @@ These decisions are currently in effect and guide ongoing development:
 | [011](011-error-classification-and-recovery.md) | Error Classification & Recovery Strategy | 2025-10-26 | 📝 Draft | Comprehensive error taxonomy (Security/Transient/Permanent/Fatal) with on_error policy semantics and retry strategy |
 | [012](012-testing-strategy-and-quality-gates.md) | Testing Strategy & Quality Gates | 2025-10-26 | 📝 Draft | Component-specific coverage requirements (security: >90%, core: >80%, plugins: >70%) with quality gates (tests, coverage, MyPy, Ruff, mutation testing) |
 | [013](013-global-observability-policy.md) | Global Observability Policy | 2025-10-26 | 📝 Draft | Global policy for mandatory logging (security, data processing, errors), prohibited content (PII, classified data), retention (90 days security, 30 days operational), and fail-closed audit logging |
+| [014](014-security-policy-metadata.md) | Immutable Security Policy Metadata | 2025-10-26 | 📝 Draft | Declares security policy metadata (security_level, allow_downgrade) immutable and author-owned |
 
 ## Historical ADRs
 

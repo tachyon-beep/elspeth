@@ -33,7 +33,6 @@ class HealthMonitorMiddleware(BasePlugin, LLMMiddleware):
 
     Args:
         security_level: Security clearance for this middleware (MANDATORY per ADR-004).
-        allow_downgrade: Whether middleware can operate at lower pipeline levels (MANDATORY per ADR-005).
         heartbeat_interval: Seconds between heartbeat emissions (default: 60.0).
         stats_window: Number of recent requests to track for statistics (default: 50).
         channel: Logger channel name (default: 'elspeth.health').
@@ -46,13 +45,12 @@ class HealthMonitorMiddleware(BasePlugin, LLMMiddleware):
         self,
         *,
         security_level: SecurityLevel,
-        allow_downgrade: bool,
         heartbeat_interval: float = 60.0,
         stats_window: int = 50,
         channel: str | None = None,
         include_latency: bool = True,
     ) -> None:
-        super().__init__(security_level=security_level, allow_downgrade=allow_downgrade)
+        super().__init__(security_level=security_level, allow_downgrade=True)  # ADR-005: Middleware trusted to downgrade
         if heartbeat_interval < 0:
             raise ValueError("heartbeat_interval must be non-negative")
         self.interval = float(heartbeat_interval)
@@ -113,10 +111,8 @@ def _create_health_monitor_middleware(options: dict[str, Any], context: PluginCo
     opts = dict(options)
     if "security_level" not in opts and context:
         opts["security_level"] = context.security_level
-    allow_downgrade = opts.get("allow_downgrade", True)
     return HealthMonitorMiddleware(
         security_level=opts["security_level"],
-        allow_downgrade=allow_downgrade,
         heartbeat_interval=float(opts.get("heartbeat_interval", 60.0)),
         stats_window=int(opts.get("stats_window", 50)),
         channel=opts.get("channel"),

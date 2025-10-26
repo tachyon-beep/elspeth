@@ -46,7 +46,6 @@ class ScoreSignificanceBaselinePlugin(BasePlugin):
         self,
         *,
         security_level: SecurityLevel,
-        allow_downgrade: bool,
         criteria: Sequence[str] | None = None,
         min_samples: int = 2,
         equal_var: bool = False,
@@ -54,7 +53,7 @@ class ScoreSignificanceBaselinePlugin(BasePlugin):
         family_size: int | None = None,
         on_error: str = "abort",
     ) -> None:
-        super().__init__(security_level=security_level, allow_downgrade=allow_downgrade)
+        super().__init__(security_level=security_level, allow_downgrade=True)  # ADR-005: Baseline statistic plugins trusted to downgrade
         self._criteria = set(criteria) if criteria else None
         self._min_samples = max(int(min_samples), 2)
         self._equal_var = bool(equal_var)
@@ -141,11 +140,8 @@ def _create_score_significance(options: dict[str, Any], context: PluginContext) 
     opts = dict(options)
     if "security_level" not in opts and context:
         opts["security_level"] = context.security_level
-    allow_downgrade = opts.get("allow_downgrade", True)
-
     return ScoreSignificanceBaselinePlugin(
         security_level=opts["security_level"],
-        allow_downgrade=allow_downgrade,
         criteria=opts.get("criteria"),
         min_samples=int(opts.get("min_samples", 2)),
         equal_var=bool(opts.get("equal_var", False)),

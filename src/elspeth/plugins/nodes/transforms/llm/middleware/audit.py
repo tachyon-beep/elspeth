@@ -28,7 +28,6 @@ class AuditMiddleware(BasePlugin, LLMMiddleware):
 
     Args:
         security_level: Security clearance for this middleware (MANDATORY per ADR-004).
-        allow_downgrade: Whether middleware can operate at lower pipeline levels (MANDATORY per ADR-005).
         include_prompts: Whether to include full prompts in audit logs (default: False).
         channel: Logger channel name (default: 'elspeth.audit').
 
@@ -43,11 +42,10 @@ class AuditMiddleware(BasePlugin, LLMMiddleware):
         self,
         *,
         security_level: SecurityLevel,
-        allow_downgrade: bool,
         include_prompts: bool = False,
-        channel: str | None = None
+        channel: str | None = None,
     ):
-        super().__init__(security_level=security_level, allow_downgrade=allow_downgrade)
+        super().__init__(security_level=security_level, allow_downgrade=True)  # ADR-005: Middleware trusted to downgrade
         self.include_prompts = include_prompts
         self.channel = channel or "elspeth.audit"
 
@@ -70,10 +68,8 @@ def _create_audit_middleware(options: dict[str, Any], context: PluginContext) ->
     opts = dict(options)
     if "security_level" not in opts and context:
         opts["security_level"] = context.security_level
-    allow_downgrade = opts.get("allow_downgrade", True)
     return AuditMiddleware(
         security_level=opts["security_level"],
-        allow_downgrade=allow_downgrade,
         include_prompts=bool(opts.get("include_prompts", False)),
         channel=opts.get("channel"),
     )

@@ -21,7 +21,7 @@ def test_csv_allowed_base_positive(tmp_path: Path) -> None:
     data = base / "data" / "file.csv"
     _write_csv(data)
 
-    ds = CSVDataSource(path=str(data), allowed_base_path=str(base), retain_local=False)
+    ds = CSVDataSource(path=str(data, security_level=SecurityLevel.OFFICIAL), allowed_base_path=str(base), retain_local=False)
     df = ds.load()
     assert not df.empty
     assert set(df.columns) == {"id", "name"}
@@ -33,4 +33,4 @@ def test_csv_allowed_base_negative(tmp_path: Path) -> None:
     _write_csv(data)
 
     with pytest.raises(ValueError):
-        _ = CSVDataSource(path=str(data), allowed_base_path=str(base), retain_local=False)
+        _ = CSVDataSource(path=str(data, security_level=SecurityLevel.OFFICIAL), allowed_base_path=str(base), retain_local=False)

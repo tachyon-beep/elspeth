@@ -422,7 +422,7 @@ def test_score_bayes_on_error_skip(monkeypatch):
     import elspeth.plugins.experiments._stats_helpers as stats_helpers
     from elspeth.plugins.experiments.baseline.score_bayesian import ScoreBayesianBaselinePlugin
 
-    plugin = ScoreBayesianBaselinePlugin(on_error="skip")
+    plugin = ScoreBayesianBaselinePlugin(security_level=SecurityLevel.OFFICIAL, on_error="skip")
 
     def boom(*args, **kwargs):
         raise RuntimeError("boom")
@@ -523,7 +523,7 @@ def test_score_distribution_on_error_skip(monkeypatch):
     import elspeth.plugins.experiments._stats_helpers as stats_helpers
     from elspeth.plugins.experiments.baseline.score_distribution import ScoreDistributionAggregator
 
-    plugin = ScoreDistributionAggregator(on_error="skip")
+    plugin = ScoreDistributionAggregator(security_level=SecurityLevel.OFFICIAL, on_error="skip")
 
     def boom(*args, **kwargs):
         raise RuntimeError("boom")
@@ -1335,7 +1335,7 @@ def test_referee_alignment_on_error_skip():
     """Test on_error='skip' behavior."""
     from elspeth.plugins.experiments.baseline.referee_alignment import RefereeAlignmentBaselinePlugin
 
-    plugin = RefereeAlignmentBaselinePlugin(on_error="skip")
+    plugin = RefereeAlignmentBaselinePlugin(security_level=SecurityLevel.OFFICIAL, on_error="skip")
 
     def boom(*args, **kwargs):
         raise RuntimeError("boom")
@@ -1348,7 +1348,7 @@ def test_referee_alignment_on_error_abort():
     """Test on_error='abort' behavior (default)."""
     from elspeth.plugins.experiments.baseline.referee_alignment import RefereeAlignmentBaselinePlugin
 
-    plugin = RefereeAlignmentBaselinePlugin(on_error="abort")
+    plugin = RefereeAlignmentBaselinePlugin(security_level=SecurityLevel.OFFICIAL, on_error="abort")
 
     def boom(*args, **kwargs):
         raise RuntimeError("boom")

@@ -56,7 +56,7 @@ class BaseVisualSink(BasePlugin, ResultSink):
         **_kwargs: Any,  # Reserved for future subclass extensions
     ):
         # Initialize BasePlugin with security level and downgrade policy (ADR-004, ADR-005)
-        super().__init__(security_level=security_level, allow_downgrade=True)  # ADR-005: Plugin hard-codes security policy
+        super().__init__(security_level=security_level, allow_downgrade=allow_downgrade)
         """Initialize base visual sink.
 
         Args:

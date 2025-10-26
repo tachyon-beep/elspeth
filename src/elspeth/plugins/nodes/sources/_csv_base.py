@@ -45,7 +45,7 @@ class BaseCSVDataSource(BasePlugin, DataSource):
         retain_local_path: str | None = None,
     ):
         # Initialize BasePlugin with security level and downgrade policy (ADR-004, ADR-005)
-        super().__init__(security_level=security_level, allow_downgrade=True)  # ADR-005: Plugin hard-codes security policy
+        super().__init__(security_level=security_level, allow_downgrade=allow_downgrade)
 
         # Resolve input path relative to base_path or ELSPETH_INPUTS_DIR when provided
         raw_path = Path(path) if isinstance(path, str) else path

@@ -30,7 +30,6 @@ class PromptShieldMiddleware(BasePlugin, LLMMiddleware):
 
     Args:
         security_level: Security clearance for this middleware (MANDATORY per ADR-004).
-        allow_downgrade: Whether middleware can operate at lower pipeline levels (MANDATORY per ADR-005).
         denied_terms: List of terms to detect and block/mask.
         mask: Replacement text for masked terms (default: '[REDACTED]').
         on_violation: Action to take ('abort', 'mask', or 'log', default: 'abort').
@@ -43,13 +42,12 @@ class PromptShieldMiddleware(BasePlugin, LLMMiddleware):
         self,
         *,
         security_level: SecurityLevel,
-        allow_downgrade: bool,
         denied_terms: Sequence[str] | None = None,
         mask: str = "[REDACTED]",
         on_violation: str = "abort",
         channel: str | None = None,
     ):
-        super().__init__(security_level=security_level, allow_downgrade=allow_downgrade)
+        super().__init__(security_level=security_level, allow_downgrade=True)  # ADR-005: Middleware trusted to downgrade
         self.denied_terms = [term.lower() for term in denied_terms or []]
         self.mask = mask
         mode = (on_violation or "abort").lower()
@@ -77,10 +75,8 @@ def _create_prompt_shield_middleware(options: dict[str, Any], context: PluginCon
     opts = dict(options)
     if "security_level" not in opts and context:
         opts["security_level"] = context.security_level
-    allow_downgrade = opts.get("allow_downgrade", True)
     return PromptShieldMiddleware(
         security_level=opts["security_level"],
-        allow_downgrade=allow_downgrade,
         denied_terms=opts.get("denied_terms", []),
         mask=opts.get("mask", "[REDACTED]"),
         on_violation=opts.get("on_violation", "abort"),

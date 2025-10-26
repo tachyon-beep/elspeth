@@ -47,7 +47,6 @@ class ClassifiedMaterialMiddleware(BasePlugin, LLMMiddleware):
 
     Args:
         security_level: Security clearance for this middleware (MANDATORY per ADR-004).
-        allow_downgrade: Whether middleware can operate at lower pipeline levels (MANDATORY per ADR-005).
     """
 
     name = "classified_material"
@@ -196,7 +195,6 @@ class ClassifiedMaterialMiddleware(BasePlugin, LLMMiddleware):
         self,
         *,
         security_level: SecurityLevel,
-        allow_downgrade: bool,
         classification_markings: Sequence[str] | None = None,
         on_violation: str = "abort",
         mask: str = "[CLASSIFIED]",
@@ -214,7 +212,6 @@ class ClassifiedMaterialMiddleware(BasePlugin, LLMMiddleware):
 
         Args:
             security_level: Security clearance for this middleware (MANDATORY per ADR-004).
-            allow_downgrade: Whether middleware can operate at lower pipeline levels (MANDATORY per ADR-005).
             classification_markings: Custom classification markings to detect
             on_violation: Action on detection - 'abort', 'mask', or 'log'
             mask: Replacement text when masking
@@ -228,7 +225,7 @@ class ClassifiedMaterialMiddleware(BasePlugin, LLMMiddleware):
             check_code_fences: Apply false-positive dampers for code fences
             require_allcaps_confidence: Require ALL-CAPS or proximity to trigger on single words
         """
-        super().__init__(security_level=security_level, allow_downgrade=allow_downgrade)
+        super().__init__(security_level=security_level, allow_downgrade=True)  # ADR-005: Middleware trusted to downgrade
         mode = (on_violation or "abort").lower()
         if mode not in {"abort", "mask", "log"}:
             mode = "abort"
@@ -472,10 +469,8 @@ def _create_classified_material_middleware(
     opts = dict(options)
     if "security_level" not in opts and context:
         opts["security_level"] = context.security_level
-    allow_downgrade = opts.get("allow_downgrade", True)
     return ClassifiedMaterialMiddleware(
         security_level=opts["security_level"],
-        allow_downgrade=allow_downgrade,
         classification_markings=opts.get("classification_markings"),
         on_violation=opts.get("on_violation", "abort"),
         mask=opts.get("mask", "[CLASSIFIED]"),

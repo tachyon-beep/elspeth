@@ -24,9 +24,15 @@ class ScoreVariantRankingAggregator(BasePlugin):
 
     name = "score_variant_ranking"
 
-    def __init__(self, *,
-        security_level: SecurityLevel, allow_downgrade: bool, threshold: float = 0.7, weight_mean: float = 1.0, weight_pass: float = 1.0,
+    def __init__(
+        self,
+        *,
+        security_level: SecurityLevel,
+        threshold: float = 0.7,
+        weight_mean: float = 1.0,
+        weight_pass: float = 1.0,
     ) -> None:
+        super().__init__(security_level=security_level, allow_downgrade=True)  # ADR-005: Aggregator trusted to downgrade
         self._threshold = float(threshold)
         self._weight_mean = float(weight_mean)
         self._weight_pass = float(weight_pass)
@@ -84,11 +90,8 @@ def _create_score_variant_ranking(options: dict[str, Any], context: PluginContex
     opts = dict(options)
     if "security_level" not in opts and context:
         opts["security_level"] = context.security_level
-    allow_downgrade = opts.get("allow_downgrade", True)
-
     return ScoreVariantRankingAggregator(
         security_level=opts["security_level"],
-        allow_downgrade=allow_downgrade,
         threshold=float(opts.get("threshold", 0.7)),
         weight_mean=float(opts.get("weight_mean", 1.0)),
         weight_pass=float(opts.get("weight_pass", 1.0)),

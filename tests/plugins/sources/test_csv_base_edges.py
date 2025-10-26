@@ -36,12 +36,12 @@ def test_allowed_base_path_enforced_for_absolute(tmp_path: Path) -> None:
 
     # Using absolute path outside allowed must raise
     with pytest.raises(ValueError):
-        CSVDataSource(path=csv_path, allowed_base_path=allowed, retain_local=False)
+        CSVDataSource(path=csv_path, allowed_base_path=allowed, retain_local=False, security_level=SecurityLevel.OFFICIAL)
 
     # Inside allowed should pass
     ok_path = allowed / "ok.csv"
     pd.DataFrame({"a": [1]}).to_csv(ok_path, index=False)
-    ds = CSVDataSource(path=ok_path, allowed_base_path=allowed, retain_local=False)
+    ds = CSVDataSource(path=ok_path, allowed_base_path=allowed, retain_local=False, security_level=SecurityLevel.OFFICIAL)
     assert ds.load().shape[0] == 1
 
 
@@ -52,18 +52,18 @@ def test_base_path_and_env_resolution_and_allowed(tmp_path: Path, monkeypatch: p
     pd.DataFrame({"x": [1, 2]}).to_csv(p, index=False)
 
     # Resolve via base_path
-    ds = CSVDataSource(path="file.csv", base_path=base, allowed_base_path=base, retain_local=False)
+    ds = CSVDataSource(path="file.csv", base_path=base, allowed_base_path=base, retain_local=False, security_level=SecurityLevel.OFFICIAL)
     assert ds.load().shape == (2, 1)
 
     # Resolve via ELSPETH_INPUTS_DIR when base_path omitted
     monkeypatch.setenv("ELSPETH_INPUTS_DIR", str(base))
-    ds2 = CSVDataSource(path="file.csv", allowed_base_path=base, retain_local=False)
+    ds2 = CSVDataSource(path="file.csv", allowed_base_path=base, retain_local=False, security_level=SecurityLevel.OFFICIAL)
     assert ds2.load().shape == (2, 1)
 
 
 def test_missing_file_logs_to_plugin_logger_when_skip(tmp_path: Path) -> None:
     rec = _Recorder()
-    ds = CSVDataSource(path=tmp_path / "missing.csv", on_error="skip", retain_local=False)
+    ds = CSVDataSource(path=tmp_path / "missing.csv", on_error="skip", retain_local=False, security_level=SecurityLevel.OFFICIAL)
     # Attach a plugin_logger-like object
     setattr(ds, "plugin_logger", rec)
     df = ds.load()
@@ -73,7 +73,7 @@ def test_missing_file_logs_to_plugin_logger_when_skip(tmp_path: Path) -> None:
 
 def test_missing_file_abort_logs_and_raises(tmp_path: Path) -> None:
     rec = _Recorder()
-    ds = CSVDataSource(path=tmp_path / "missing.csv", on_error="abort", retain_local=False)
+    ds = CSVDataSource(path=tmp_path / "missing.csv", on_error="abort", retain_local=False, security_level=SecurityLevel.OFFICIAL)
     setattr(ds, "plugin_logger", rec)
     with pytest.raises(FileNotFoundError):
         ds.load()
@@ -84,7 +84,7 @@ def test_missing_file_abort_logs_and_raises(tmp_path: Path) -> None:
 def test_load_error_logs_and_returns_empty_on_skip(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     csv_path = tmp_path / "bad.csv"
     csv_path.write_text("not,csv\n\x00\x00", encoding="utf-8")
-    ds = CSVDataSource(path=csv_path, on_error="skip", retain_local=False)
+    ds = CSVDataSource(path=csv_path, on_error="skip", retain_local=False, security_level=SecurityLevel.OFFICIAL)
     rec = _Recorder()
     setattr(ds, "plugin_logger", rec)
 
@@ -102,7 +102,7 @@ def test_load_error_logs_and_returns_empty_on_skip(monkeypatch: pytest.MonkeyPat
 def test_output_schema_inference_failure_returns_none(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     csv_path = tmp_path / "data.csv"
     csv_path.write_text("a,b\n1,2\n", encoding="utf-8")
-    ds = CSVDataSource(path=csv_path, infer_schema=True, retain_local=False)
+    ds = CSVDataSource(path=csv_path, infer_schema=True, retain_local=False, security_level=SecurityLevel.OFFICIAL)
 
     # Force read failure during inference code path
     def _raise_parser_error_boom(*_args, **_kwargs):  # noqa: D401
@@ -115,7 +115,7 @@ def test_output_schema_inference_failure_returns_none(monkeypatch: pytest.Monkey
 def test_retain_local_copy_failure_yields_empty_when_skip(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     csv_path = tmp_path / "data.csv"
     pd.DataFrame({"a": [1]}).to_csv(csv_path, index=False)
-    ds = CSVDataSource(path=csv_path, retain_local=True, on_error="skip")
+    ds = CSVDataSource(path=csv_path, retain_local=True, on_error="skip", security_level=SecurityLevel.OFFICIAL)
 
     # After a successful read, copying to audit location should fail
     def _copy_oom(*_args, **_kwargs):  # noqa: D401
@@ -130,6 +130,6 @@ def test_retain_local_copy_success_sets_attr(tmp_path: Path) -> None:
     csv_path = tmp_path / "data.csv"
     pd.DataFrame({"a": [1]}).to_csv(csv_path, index=False)
     dest_dir = tmp_path / "audit"
-    ds = CSVDataSource(path=csv_path, retain_local=True, retain_local_path=str(dest_dir / "snap.csv"))
+    ds = CSVDataSource(path=csv_path, retain_local=True, retain_local_path=str(dest_dir / "snap.csv", security_level=SecurityLevel.OFFICIAL))
     df = ds.load()
     assert df.attrs.get("retained_local_path") == str(dest_dir / "snap.csv")

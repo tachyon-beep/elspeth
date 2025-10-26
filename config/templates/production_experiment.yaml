@@ -17,7 +17,7 @@ default:
   # ============================================================================
   datasource:
     plugin: local_csv  # Simple CSV for single experiment
-    security_level: "OFFICIAL"  # REQUIRED: Must match data classification
+    security_level: "UNOFFICIAL"  # REQUIRED: Must match data classification
     determinism_level: "high"   # Optional: For reproducibility
     options:
       path: "data/experiment_input.csv"
@@ -28,7 +28,7 @@ default:
   # ============================================================================
   llm:
     plugin: azure_openai
-    security_level: "OFFICIAL"  # REQUIRED: Must match or exceed data security
+    security_level: "UNOFFICIAL"  # REQUIRED: Must match or exceed data security
     determinism_level: "high"   # Optional: For reproducibility
     options:
       endpoint: "https://your-resource.openai.azure.com"
@@ -110,7 +110,7 @@ default:
   sinks:
     # CSV export with sanitization
     - plugin: csv
-      security_level: "OFFICIAL"  # REQUIRED
+      security_level: "UNOFFICIAL"  # REQUIRED
       options:
         path: "outputs/experiment_results.csv"
         sanitize_formulas: true  # Enabled by default (recommended)
@@ -118,7 +118,7 @@ default:
 
     # Analytics report
     - plugin: analytics_report
-      security_level: "OFFICIAL"  # REQUIRED
+      security_level: "UNOFFICIAL"  # REQUIRED
       options:
         output_dir: "outputs/experiment_reports"
         formats: ["json", "markdown"]

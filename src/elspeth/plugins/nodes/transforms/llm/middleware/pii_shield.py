@@ -81,7 +81,6 @@ class PIIShieldMiddleware(BasePlugin, LLMMiddleware):
 
     Args:
         security_level: Security clearance for this middleware (MANDATORY per ADR-004).
-        allow_downgrade: Whether middleware can operate at lower pipeline levels (MANDATORY per ADR-005).
     """
 
     name = "pii_shield"
@@ -275,7 +274,6 @@ class PIIShieldMiddleware(BasePlugin, LLMMiddleware):
         self,
         *,
         security_level: SecurityLevel,
-        allow_downgrade: bool,
         patterns: Sequence[dict[str, Any]] | None = None,
         on_violation: str = "abort",
         mask: str = "[PII REDACTED]",
@@ -294,7 +292,6 @@ class PIIShieldMiddleware(BasePlugin, LLMMiddleware):
 
         Args:
             security_level: Security clearance for this middleware (MANDATORY per ADR-004).
-            allow_downgrade: Whether middleware can operate at lower pipeline levels (MANDATORY per ADR-005).
             patterns: Custom PII patterns (dicts with 'name', 'regex', 'severity', etc.)
             on_violation: Action on detection - 'abort', 'mask', or 'log'
             mask: Replacement text when masking (not used in blind review)
@@ -309,7 +306,7 @@ class PIIShieldMiddleware(BasePlugin, LLMMiddleware):
             redaction_salt: Salt for deterministic pseudonym generation
             bsb_account_window: Max distance (chars) for BSB+Account combo detection
         """
-        super().__init__(security_level=security_level, allow_downgrade=allow_downgrade)
+        super().__init__(security_level=security_level, allow_downgrade=True)  # ADR-005: Middleware trusted to downgrade
         mode = (on_violation or "abort").lower()
         if mode not in {"abort", "mask", "log"}:
             mode = "abort"
@@ -653,10 +650,8 @@ def _create_pii_shield_middleware(options: dict[str, Any], context: PluginContex
     opts = dict(options)
     if "security_level" not in opts and context:
         opts["security_level"] = context.security_level
-    allow_downgrade = opts.get("allow_downgrade", True)
     return PIIShieldMiddleware(
         security_level=opts["security_level"],
-        allow_downgrade=allow_downgrade,
         patterns=opts.get("patterns"),
         on_violation=opts.get("on_violation", "abort"),
         mask=opts.get("mask", "[PII REDACTED]"),

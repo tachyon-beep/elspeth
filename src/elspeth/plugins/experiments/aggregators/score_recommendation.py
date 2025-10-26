@@ -40,18 +40,16 @@ class ScoreRecommendationAggregator(BasePlugin):
         self,
         *,
         security_level: SecurityLevel,
-        allow_downgrade: bool,
         min_samples: int = 5,
         improvement_margin: float = 0.05,
         source_field: str = "scores",
         flag_field: str = "score_flags",
     ) -> None:
-        super().__init__(security_level=security_level, allow_downgrade=allow_downgrade)
+        super().__init__(security_level=security_level, allow_downgrade=True)  # ADR-005: Aggregator trusted to downgrade
         self._min_samples = min_samples
         self._improvement_margin = improvement_margin
         self._stats = ScoreStatsAggregator(
             security_level=security_level,
-            allow_downgrade=allow_downgrade,
             source_field=source_field,
             flag_field=flag_field,
         )
@@ -116,15 +114,13 @@ class ScoreRecommendationAggregator(BasePlugin):
 
 
 def _create_score_recommendation(options: dict[str, Any], context: PluginContext) -> ScoreRecommendationAggregator:
-    "Create score recommendation aggregator with smart security defaults."
+    """Create score recommendation aggregator with smart security defaults."""
     opts = dict(options)
     if "security_level" not in opts and context:
         opts["security_level"] = context.security_level
-    allow_downgrade = opts.get("allow_downgrade", True)
 
     return ScoreRecommendationAggregator(
         security_level=opts["security_level"],
-        allow_downgrade=allow_downgrade,
         min_samples=int(opts.get("min_samples", 5)),
         improvement_margin=float(opts.get("improvement_margin", 0.05)),
         source_field=opts.get("source_field", "scores"),

@@ -37,11 +37,10 @@ class ScoreDeltaBaselinePlugin(BasePlugin):
         self,
         *,
         security_level: SecurityLevel,
-        allow_downgrade: bool,
         metric: str = "mean",
         criteria: list[str] | None = None,
     ) -> None:
-        super().__init__(security_level=security_level, allow_downgrade=allow_downgrade)
+        super().__init__(security_level=security_level, allow_downgrade=True)  # Baseline computation trusted to downgrade (ADR-005)
         self._metric = metric
         self._criteria = set(criteria) if criteria else None
 
@@ -82,11 +81,8 @@ def _create_score_delta(options: dict[str, Any], context: PluginContext) -> Scor
     opts = dict(options)
     if "security_level" not in opts and context:
         opts["security_level"] = context.security_level
-    allow_downgrade = opts.get("allow_downgrade", True)
-
     return ScoreDeltaBaselinePlugin(
         security_level=opts["security_level"],
-        allow_downgrade=allow_downgrade,
         metric=opts.get("metric", "mean"),
         criteria=opts.get("criteria"),
     )
