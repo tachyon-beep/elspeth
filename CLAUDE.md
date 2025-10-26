@@ -111,6 +111,77 @@ make verify-locked
 - **`tests/`** – Comprehensive test coverage (see `docs/development/testing-overview.md`)
   - Configuration, datasources, middleware, LLM adapters, sanitization, signing, artifact pipeline, suite runner
 
+### Central Plugin Registry (ADR-003)
+
+**Security Architecture**: All plugin access flows through `central_registry` for unified enforcement and automatic discovery.
+
+**Basic Usage**:
+```python
+from elspeth.core.registry import central_registry
+
+# Get type-specific registry
+datasource_registry = central_registry.get_registry("datasource")
+llm_registry = central_registry.get_registry("llm")
+sink_registry = central_registry.get_registry("sink")
+
+# Create plugin instances
+datasource = datasource_registry.create("local_csv", options={...})
+llm = llm_registry.create("azure_openai", options={...})
+sink = sink_registry.create("csv", options={...})
+```
+
+**Convenience Methods**:
+```python
+# Shorthand for common plugin types
+datasource = central_registry.create_datasource("local_csv", options={...})
+llm = central_registry.create_llm("azure_openai", options={...})
+sink = central_registry.create_sink("csv", options={...})
+middleware = central_registry.create_middleware("prompt_shield", options={...})
+```
+
+**Discovery**:
+```python
+# List available plugins by type
+datasources = central_registry.list_plugins("datasource")  # ['local_csv', 'csv_blob', ...]
+llms = central_registry.list_plugins("llm")  # ['mock', 'azure_openai', 'openai_http']
+
+# List all plugins across all types
+all_plugins = central_registry.list_all_plugins()
+# {
+#   'datasource': ['local_csv', 'csv_blob', ...],
+#   'llm': ['mock', 'azure_openai', ...],
+#   'sink': ['csv', 'json', 'markdown', ...],
+#   ...
+# }
+```
+
+**Testing Pattern** (monkeypatch central_registry):
+```python
+def test_with_mock_registry(monkeypatch):
+    # Create fake registry
+    fake_registry = type("R", (), {
+        "create": staticmethod(lambda name, opts, **kw: FakePlugin()),
+        "validate": staticmethod(lambda name, opts: None)
+    })()
+
+    # Mock get_registry() to return fake
+    original_get_registry = central_registry.get_registry
+    def mock_get_registry(plugin_type):
+        if plugin_type == "llm":
+            return fake_registry
+        return original_get_registry(plugin_type)
+
+    monkeypatch.setattr(central_registry, "get_registry", mock_get_registry)
+
+    # Test code using central_registry.get_registry("llm") will now get fake
+```
+
+**Security Benefits**:
+- Single enforcement point for all plugin operations
+- Automatic discovery via module scanning (no manual registration)
+- Validation layer ensures expected plugins are registered
+- Fail-fast at import time (catches missing plugins before runtime)
+
 ### Key Architectural Patterns
 
 **Plugin Registration (Phase 2)**
@@ -163,7 +234,10 @@ make verify-locked
    - Transforms: `transform()`, `consumes()`, `produces()`
    - Sinks: `write()`, `consumes()`, `produces()`, `security_level`
 
-3. **Register plugin** in corresponding registry (see `src/elspeth/core/registries/`)
+3. **Register plugin** in corresponding registry:
+   - **Auto-Discovery**: Plugins in standard locations are automatically discovered via `auto_discover_internal_plugins()`
+   - **Manual Registration**: External plugins use `registry.register(name, factory_fn)` in registry files
+   - **See**: `src/elspeth/core/registries/` for type-specific registries
 
 4. **Add schema validation** using `jsonschema` patterns
 
@@ -172,6 +246,7 @@ make verify-locked
    - Security level enforcement
    - Error handling (`on_error` policies)
    - Schema validation
+   - Plugin discovery (if not in standard location)
 
 6. **Update documentation** in `docs/architecture/plugin-catalogue.md`
 
@@ -417,6 +492,7 @@ Azure datasources and sinks require `azure-identity`, `azure-storage-blob`, `azu
 
 - **ADR-001**: Design Philosophy – Security-first priority hierarchy
 - **ADR-002**: Multi-Level Security Enforcement – Bell-LaPadula MLS model with pipeline-wide minimum evaluation
+- **ADR-003**: Central Plugin Registry – Unified registry interface with automatic discovery and validation
 
 ## Contact & Support
 
