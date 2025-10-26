@@ -9,12 +9,14 @@ Discover Elspeth's built-in plugins organized by **what you want to accomplish**
 
 ## Overview
 
-Elspeth plugins are modular components that handle specific tasks in your experiment pipeline:
+Elspeth plugins are modular components that handle specific tasks in your workflow pipeline:
 
 ```
-Datasources → LLM Transforms → Sinks
-     ↓             ↓             ↓
-  Load Data    Process Data   Save Results
+Datasources → Transforms → Sinks
+     ↓             ↓          ↓
+  Load Data    Process    Save Results
+              (LLM, ETL,
+            Analytics, etc)
 ```
 
 All plugins declare a **security level** (clearance) and work within the Bell-LaPadula MLS framework. See [Security Model](../user-guide/security-model.md) for details.

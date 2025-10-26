@@ -2,7 +2,11 @@
 
 **Extensible Layered Secure Pipeline Engine for Transformation and Handling**
 
-Elspeth is a security-first orchestration platform for LLM experimentation and general-purpose sense-decide-act workflows implementing **Bell-LaPadula Multi-Level Security (MLS)** enforcement.
+Elspeth is a general-purpose orchestration platform implementing **sense-decide-act workflows**: sources provide inputs, transforms apply logic (analytical, decisional, or procedural), and sinks handle outputs—whether storing results, triggering automation, or actuating real-world effects.
+
+**Transformation** covers any source-to-output logic: data ETL, LLM inference, statistical analysis, rule evaluation, or custom processing. **Handling** encompasses the full range of sink behaviors: persisting to databases, writing reports, sending notifications, invoking APIs, or commanding external systems.
+
+While Elspeth excels at LLM experimentation with hardened runners, policy-aware registries, and comparative studies, the plugin architecture supports any workflow topology. Security controls—**Bell-LaPadula Multi-Level Security (MLS)** enforcement, artifact signing, audit logging, spreadsheet sanitization—are baked into every pipeline stage.
 
 ---
 
@@ -59,12 +63,12 @@ Elspeth is a security-first orchestration platform for LLM experimentation and g
 
 ### Flexible Architecture
 
-- 🔌 **40+ Built-in Plugins** - Datasources, LLM clients, sinks, middleware
-- 🔄 **Middleware Pipeline** - Security filters, monitoring, content safety
-- 📊 **Experiment Helpers** - Validation, aggregation, baseline comparison, early stop
+- 🔌 **40+ Built-in Plugins** - Datasources, transforms (LLM, ETL, analytics, rules), sinks, middleware
+- 🔄 **Middleware Pipeline** - Security filters, monitoring, content safety, custom logic
+- 📊 **Workflow Helpers** - Validation, aggregation, baseline comparison, early stop
 - 🎯 **Dependency-Ordered Execution** - Artifact pipeline with sink chaining
 - ⚡ **Concurrency Support** - Parallel execution with rate limiting
-- 💾 **Checkpoint Recovery** - Resume long-running experiments
+- 💾 **Checkpoint Recovery** - Resume long-running workflows
 
 ### Production-Ready
 
@@ -90,16 +94,16 @@ Elspeth is a security-first orchestration platform for LLM experimentation and g
 └───────────────────────┬─────────────────────────────────────┘
                         ↓
 ┌─────────────────────────────────────────────────────────────┐
-│  Experiment Orchestrator (Operating Level = MIN of all)     │
+│  Workflow Orchestrator (Operating Level = MIN of all)       │
 └───────────────────────┬─────────────────────────────────────┘
                         ↓
 ┌─────────────────────────────────────────────────────────────┐
-│  Experiment Runner (Concurrency, Retries, Checkpoints)      │
+│  Workflow Runner (Concurrency, Retries, Checkpoints)        │
 └───────────────────────┬─────────────────────────────────────┘
                         ↓
 ┌─────────────────────────────────────────────────────────────┐
-│  LLM Transforms + Middleware (Security Filters, Monitoring) │
-│  Azure OpenAI, OpenAI HTTP, Mock + PII/Content Safety      │
+│  Transforms + Middleware (Security Filters, Monitoring)     │
+│  LLM (Azure OpenAI, HTTP, Mock), ETL, Analytics, Rules     │
 └───────────────────────┬─────────────────────────────────────┘
                         ↓
 ┌─────────────────────────────────────────────────────────────┐
@@ -168,10 +172,35 @@ Auto-generated API documentation for developers:
 
 ## Common Use Cases
 
-### Development & Testing
+### Data ETL & Analytics
 
 ```yaml
-# Simple configuration for testing (no sensitive data)
+# Transform and analyze data without external APIs
+datasource:
+  type: csv_local
+  path: data/raw_data.csv
+  security_level: OFFICIAL
+
+transform:
+  type: custom_analytics  # Rule-based logic, statistical analysis
+  security_level: OFFICIAL
+
+sinks:
+  - type: excel_workbook
+    base_path: reports/
+    security_level: OFFICIAL
+  - type: analytics_report
+    formats: [json, markdown]
+```
+
+**Use for**: Data validation, statistical analysis, business rule evaluation, compliance reporting
+
+---
+
+### LLM Experimentation (Development & Testing)
+
+```yaml
+# Simple LLM configuration for testing (no sensitive data)
 datasource:
   type: csv_local
   path: data/test.csv
@@ -192,7 +221,7 @@ sinks:
 
 ---
 
-### Production with Security
+### LLM Production with Security
 
 ```yaml
 # Secure configuration with middleware and signing
@@ -321,7 +350,7 @@ This documentation site provides **user-facing guides and API reference**. For c
 ---
 
 !!! success "Welcome to Elspeth!"
-    Elspeth brings **security-first orchestration** to LLM experimentation with:
+    Elspeth brings **security-first orchestration** to sense-decide-act workflows with:
 
     - ✅ Bell-LaPadula MLS enforcement (immutable classification)
     - ✅ 40+ built-in plugins (extensible architecture)

@@ -23,18 +23,18 @@ Elspeth is organized into **six core layers**:
 └─────────────────────────────────────────────────────────────┘
                           ↓
 ┌─────────────────────────────────────────────────────────────┐
-│  Experiment Orchestrator                                     │
-│  └─ Bind datasource + LLM + sinks + middleware              │
+│  Workflow Orchestrator                                       │
+│  └─ Bind datasource + transforms + sinks + middleware       │
 └─────────────────────────────────────────────────────────────┘
                           ↓
 ┌─────────────────────────────────────────────────────────────┐
-│  Experiment Runner                                           │
+│  Workflow Runner                                             │
 │  └─ Concurrency, retries, middleware chain, validation      │
 └─────────────────────────────────────────────────────────────┘
                           ↓
 ┌─────────────────────────────────────────────────────────────┐
-│  LLM Transforms (with Middleware)                           │
-│  └─ Azure OpenAI, HTTP, Mock + security filters             │
+│  Transforms (with Middleware)                                │
+│  └─ LLM (Azure OpenAI, Mock), ETL, Analytics, Rules        │
 └─────────────────────────────────────────────────────────────┘
                           ↓
 ┌─────────────────────────────────────────────────────────────┐
@@ -47,22 +47,22 @@ Elspeth is organized into **six core layers**:
 graph TD
     CLI[CLI & Configuration<br/>YAML validation, environment resolution]
     DS[Datasources Ingress<br/>CSV local/blob, Azure Blob]
-    ORCH[Experiment Orchestrator<br/>Bind datasource + LLM + sinks]
-    RUNNER[Experiment Runner<br/>Concurrency, retries, middleware]
-    LLM[LLM Transforms<br/>Azure OpenAI, HTTP, Mock + filters]
+    ORCH[Workflow Orchestrator<br/>Bind datasource + transforms + sinks]
+    RUNNER[Workflow Runner<br/>Concurrency, retries, middleware]
+    TRANSFORM[Transforms<br/>LLM, ETL, Analytics, Rules]
     PIPE[Artifact Pipeline Egress<br/>Dependency-ordered sinks]
 
     CLI --> DS
     DS --> ORCH
     ORCH --> RUNNER
-    RUNNER --> LLM
-    LLM --> PIPE
+    RUNNER --> TRANSFORM
+    TRANSFORM --> PIPE
 
     style CLI fill:#E6F3FF
     style DS fill:#FFE6E6
     style ORCH fill:#E6FFE6
     style RUNNER fill:#FFF3E6
-    style LLM fill:#F3E6FF
+    style TRANSFORM fill:#F3E6FF
     style PIPE fill:#FFFFE6
 ```
 
@@ -79,7 +79,7 @@ All external integrations use **typed protocols** so untrusted components can be
 class DataSource(Protocol):
     def load_data(self) -> ClassifiedDataFrame: ...
 
-class LLMClient(Protocol):
+class Transform(Protocol):
     def transform(self, frame: ClassifiedDataFrame) -> ClassifiedDataFrame: ...
 
 class Sink(Protocol):
@@ -201,7 +201,7 @@ Merges configuration from multiple sources in priority order:
 
 ### Orchestrator
 
-Binds datasource, LLM client, sinks, and optional controls into a cohesive experiment.
+Binds datasource, transforms, sinks, and optional controls into a cohesive workflow.
 
 **Responsibilities**:
 - Instantiate plugins from configuration
@@ -224,9 +224,9 @@ operating_level = orchestrator.compute_operating_level()
 
 ---
 
-### Experiment Runner
+### Workflow Runner
 
-Executes the experiment with concurrency, retries, and validation.
+Executes the workflow with concurrency, retries, and validation.
 
 **Execution Flow**:
 ```
@@ -253,9 +253,9 @@ Executes the experiment with concurrency, retries, and validation.
 
 ---
 
-### LLM Transforms
+### Transforms
 
-Process data through language models with middleware pipeline.
+Process data through transforms (LLMs, ETL, analytics, rules) with middleware pipeline.
 
 **Middleware Stack**:
 ```
