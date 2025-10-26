@@ -63,6 +63,24 @@ def create_llm_from_definition(
             "Security level is plugin-author-owned and inherited from parent context."
         )
 
+    # ADR-002-B: Also reject allow_downgrade and max_operating_level (immutable security policy)
+    entry_allow_downgrade = definition.get("allow_downgrade")
+    opts_allow_downgrade = options.get("allow_downgrade")
+    entry_max_operating = definition.get("max_operating_level")
+    opts_max_operating = options.get("max_operating_level")
+
+    if entry_allow_downgrade is not None or opts_allow_downgrade is not None:
+        raise ConfigurationError(
+            f"llm:{plugin_name}: allow_downgrade cannot be specified in configuration (ADR-002-B). "
+            "Security policy is plugin-author-owned and cannot be overridden."
+        )
+
+    if entry_max_operating is not None or opts_max_operating is not None:
+        raise ConfigurationError(
+            f"llm:{plugin_name}: max_operating_level cannot be specified in configuration (ADR-002-B). "
+            "Security policy is plugin-author-owned and cannot be overridden."
+        )
+
     sources = []
     if entry_det is not None:
         sources.append(f"llm:{plugin_name}.definition.determinism_level")
