@@ -9,7 +9,7 @@
 
 ## Executive Summary
 
-Elspeth implements a **defense-in-depth security architecture** based on Bell-LaPadula Multi-Level Security (MLS) principles. This policy consolidates 6 Architecture Decision Records (ADRs 002, 002a, 003, 004, 005, 006) into a cohesive security framework for protecting classified data ranging from UNOFFICIAL to SECRET.
+Elspeth implements a **defense-in-depth security architecture** based on Bell-LaPadula Multi-Level Security (MLS) principles. This policy consolidates 7 Architecture Decision Records (ADRs 002, 002a, 002b, 003, 004, 005, 006) into a cohesive security framework for protecting classified data ranging from UNOFFICIAL to SECRET.
 
 ### Core Security Guarantees
 
@@ -275,13 +275,168 @@ class MaliciousTransform(BasePlugin):
 
 ---
 
-## Policy 3: Plugin Security Architecture
+## Policy 3: Immutable Security Policy Metadata
+
+**Source**: ADR-002b
+**Status**: Mandatory
+**Enforcement**: Compile-time (code review) + Registry (schema validation) + CI (lint rules)
+
+### 3.1 Author-Owned Security Policy
+
+Security policy metadata is **immutable, author-owned, and signed**. Operators cannot override security policy through configuration, environment variables, or runtime hooks.
+
+#### Rule 1: Immutable Policy Fields
+
+The following fields are defined **solely in plugin code** by the author:
+- `security_level`: Plugin's security clearance
+- `allow_downgrade`: Whether plugin can operate at lower levels
+- Future policy fields: `max_operating_level`, compliance tags, etc.
+
+**Forbidden**: Configuration-driven policy overrides
+
+```yaml
+# ❌ FORBIDDEN: Cannot override security policy via config
+datasource:
+  type: azure_blob
+  security_level: PROTECTED  # ❌ REJECTED by registry
+  allow_downgrade: false     # ❌ REJECTED by registry
+```
+
+**Correct**: Policy defined in code only
+
+```python
+# ✅ CORRECT: Policy hard-coded by plugin author
+class AzureBlobDatasource(BasePlugin):
+    def __init__(self, *, config_path: str, profile: str):
+        # Policy is hard-coded, NOT configurable
+        super().__init__(
+            security_level=SecurityLevel.PROTECTED,
+            allow_downgrade=True  # Author's decision
+        )
+        # ... rest of initialization
+```
+
+#### Rule 2: Registry Enforcement
+
+Plugin registries **reject registration schemas** that expose policy fields as configurable parameters.
+
+**Factory Implementation**:
+```python
+def create_azure_blob_datasource(opts: dict, ctx: PluginContext) -> AzureBlobDatasource:
+    """Factory ignores security policy fields from config."""
+    # Strip security policy fields if present (defensive)
+    safe_opts = {k: v for k, v in opts.items()
+                 if k not in ("security_level", "allow_downgrade")}
+
+    # Plugin sets policy internally
+    return AzureBlobDatasource(**safe_opts)
+```
+
+**Registry Schema**:
+```python
+AZURE_BLOB_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "config_path": {"type": "string"},
+        "profile": {"type": "string"},
+        # ❌ NO security_level or allow_downgrade properties
+    },
+    "required": ["config_path", "profile"]
+}
+```
+
+#### Rule 3: Signature Attestation
+
+Published plugins include policy metadata in the signing manifest. Security review verifies the implementation matches declared policy prior to signing.
+
+**Signing Manifest**:
+```json
+{
+  "plugin": "AzureBlobDatasource",
+  "version": "1.2.0",
+  "security_policy": {
+    "security_level": "PROTECTED",
+    "allow_downgrade": true,
+    "policy_hash": "sha256:abc123..."
+  },
+  "signature": "..."
+}
+```
+
+**Verification Process**:
+1. Security team reviews plugin code
+2. Extracts declared policy (`security_level`, `allow_downgrade`)
+3. Verifies policy matches security requirements
+4. Signs plugin with attested policy metadata
+5. Runtime validates signature matches running code
+
+### 3.2 Frozen vs Trusted Downgrade Selection
+
+Authors choose security policy **explicitly at development time**, not configuration time:
+
+| Author Choice | Policy Declaration | Operator Selection |
+|---------------|-------------------|-------------------|
+| **Trusted Downgrade** | `allow_downgrade=True` in code | Use this plugin for mixed-classification workflows |
+| **Frozen** | `allow_downgrade=False` in code | Use this plugin ONLY for dedicated classification domains |
+
+**Operator Workflow**:
+```yaml
+# Operator selects the RIGHT PLUGIN, not the right configuration
+datasource:
+  type: azure_blob_trusted  # allow_downgrade=True (hard-coded)
+
+# OR
+
+datasource:
+  type: azure_blob_frozen   # allow_downgrade=False (hard-coded)
+```
+
+### 3.3 Attack Scenario Prevention
+
+**Threat**: Configuration-driven security downgrade
+
+An operator (malicious or misconfigured) attempts to override security policy via YAML:
+
+```yaml
+# ATTACK: Try to override frozen plugin to allow downgrade
+datasource:
+  type: dedicated_secret_source  # Author set allow_downgrade=False
+  allow_downgrade: true          # ❌ ATTACKER attempts override
+```
+
+**Defense**:
+1. **Registry**: Rejects schema with policy fields → Plugin won't register
+2. **Factory**: Strips policy fields from opts → Override ignored
+3. **Plugin**: Hard-coded policy in `__init__` → Immutable
+4. **CI Lint**: Detects policy fields in YAML → Build fails
+
+**Result**: Attack prevented at 4 independent layers.
+
+### 3.4 Compliance Requirements
+
+**Implementation Checklist**:
+- [x] All plugins define policy in `__init__`, not from parameters
+- [x] Registry schemas exclude `security_level` and `allow_downgrade`
+- [x] Factory functions strip policy fields from configuration
+- [x] CI lint rules detect policy fields in YAML configs
+- [x] Signing manifests include attested policy metadata
+- [x] Security review process validates policy before signing
+
+**Audit Evidence**:
+- Plugin implementation: Hard-coded policy in `super().__init__()`
+- Registry schemas: No policy fields in JSON schemas
+- CI lint: `.github/workflows/config-lint.yml`
+- Signing manifest: `manifests/plugins/*.json`
+
+---
+
+## Policy 4: Plugin Security Architecture
 
 **Source**: ADR-003, ADR-004
 **Status**: Mandatory
 **Enforcement**: Compile-time (ABC inheritance, MyPy) + Runtime (registry, isinstance()) + Test (CI)
 
-### 3.1 Mandatory BasePlugin Inheritance ("Security Bones")
+### 4.1 Mandatory BasePlugin Inheritance ("Security Bones")
 
 All plugins MUST explicitly inherit from `BasePlugin` ABC to participate in security validation.
 
@@ -415,7 +570,7 @@ def test_plugin_registry_complete():
     )
 ```
 
-### 3.2 Defense Matrix
+### 4.2 Defense Matrix
 
 | Failure Mode | Layer 1 (ABC) | Layer 2 (Registry) | Layer 3 (Test) | Outcome |
 |--------------|---------------|-------------------|----------------|---------|
@@ -427,7 +582,7 @@ def test_plugin_registry_complete():
 
 **Result**: No single point of failure. Multiple independent defenses.
 
-### 3.3 Compliance Requirements
+### 4.3 Compliance Requirements
 
 **Implementation Checklist**:
 - [x] All plugins inherit from BasePlugin ABC
@@ -443,13 +598,13 @@ def test_plugin_registry_complete():
 
 ---
 
-## Policy 4: Frozen Plugin Capability
+## Policy 5: Frozen Plugin Capability
 
 **Source**: ADR-005
 **Status**: Mandatory (Explicit Choice Required)
 **Enforcement**: Compile-time (no default parameter) + Runtime (validation) + Test (CI)
 
-### 4.1 Trusted Downgrade vs Frozen Plugins
+### 5.1 Trusted Downgrade vs Frozen Plugins
 
 Elspeth supports two security postures via the `allow_downgrade` parameter:
 
@@ -460,7 +615,7 @@ Elspeth supports two security postures via the `allow_downgrade` parameter:
 
 ⚠️ **BREAKING CHANGE**: `allow_downgrade` has NO default value. All plugins MUST explicitly declare their security posture.
 
-### 4.2 Trusted Downgrade Pattern (allow_downgrade=True)
+### 5.2 Trusted Downgrade Pattern (allow_downgrade=True)
 
 **Scenario**: Cloud-based datasource handles data at multiple classification levels
 
@@ -494,7 +649,7 @@ class AzureBlobDataSource(BasePlugin, DataSource):
 - ✅ Operates at UNOFFICIAL level: `validate_can_operate_at_level(UNOFFICIAL)` → PASS (trusted downgrade)
 - ❌ Operates at higher level: Not possible (SECRET is highest)
 
-### 4.3 Frozen Plugin Pattern (allow_downgrade=False)
+### 5.3 Frozen Plugin Pattern (allow_downgrade=False)
 
 **Scenario**: Dedicated SECRET-only infrastructure (air-gapped, regulatory compliance)
 
@@ -528,7 +683,7 @@ SecurityValidationError: DedicatedSecretDataSource is frozen at SECRET
 This plugin requires exact level matching and does not support trusted downgrade.
 ```
 
-### 4.4 Compliance Requirements
+### 5.4 Compliance Requirements
 
 **Implementation Checklist**:
 - [x] All plugins explicitly set `allow_downgrade=True` or `allow_downgrade=False`
@@ -543,13 +698,13 @@ This plugin requires exact level matching and does not support trusted downgrade
 
 ---
 
-## Policy 5: Security-Critical Exception Policy
+## Policy 6: Security-Critical Exception Policy
 
 **Source**: ADR-006
 **Status**: Mandatory
 **Enforcement**: Static Analysis (Ruff, MyPy) + Pre-Commit (AST parsing) + CI (grep-based) + Code Review
 
-### 5.1 Dual-Exception Model
+### 6.1 Dual-Exception Model
 
 Elspeth distinguishes between **expected security boundaries** and **impossible security invariant violations**:
 
@@ -564,7 +719,7 @@ Exception
 | **SecurityValidationError** | Expected security boundaries | ✅ May be caught in production | Start-time validation failures, clearance mismatches, permission denied |
 | **SecurityCriticalError** | Impossible invariant violations | ❌ MUST NOT be caught in production (tests only) | Classification downgrades, metadata tampering, container boundary violations |
 
-### 5.2 SecurityValidationError (Expected Boundaries)
+### 6.2 SecurityValidationError (Expected Boundaries)
 
 **Use for expected security validation failures** where graceful error handling is appropriate:
 
@@ -591,7 +746,7 @@ except SecurityValidationError as e:
     # Graceful degradation, notify user, etc.
 ```
 
-### 5.3 SecurityCriticalError (Invariant Violations)
+### 6.3 SecurityCriticalError (Invariant Violations)
 
 **Use for "should never happen" scenarios** indicating bugs or attacks:
 
@@ -642,7 +797,7 @@ def test_classification_downgrade_raises_critical_error():
     assert exc_info.value.cve_id == "CVE-ADR-002-A-004"
 ```
 
-### 5.4 Emergency Logging
+### 6.4 Emergency Logging
 
 `SecurityCriticalError` automatically logs to multiple channels BEFORE propagating:
 
@@ -689,7 +844,7 @@ class SecurityCriticalError(Exception):
 }
 ```
 
-### 5.5 Policy Enforcement Layers
+### 6.5 Policy Enforcement Layers
 
 **Layer 1: Ruff Linting (Fast Feedback)**
 
@@ -735,7 +890,7 @@ Pull request checklist:
 - [ ] Test code properly validates invariant violations
 - [ ] Security-critical paths have defensive checks
 
-### 5.6 Compliance Requirements
+### 6.6 Compliance Requirements
 
 **Implementation Checklist**:
 - [x] `SecurityCriticalError` defined with emergency logging
@@ -847,6 +1002,7 @@ For security certification/accreditation, verify:
 - **[ADR-001: Design Philosophy](adrs.md#adr-001-design-philosophy)** - Security-first principles, fail-closed approach
 - **[ADR-002: Multi-Level Security](adrs.md#adr-002-multi-level-security)** - Bell-LaPadula MLS model (full text)
 - **[ADR-002a: Trusted Container Model](adrs.md#adr-002a-trusted-container-model)** - ClassifiedDataFrame immutability
+- **[ADR-002b: Immutable Security Policy Metadata](adrs.md#adr-002b-immutable-security-policy-metadata)** - Author-owned policy, no config overrides
 - **[ADR-003: Plugin Type Registry](adrs.md#adr-003-plugin-type-registry)** - Central registry for validation coverage
 - **[ADR-004: Mandatory BasePlugin Inheritance](adrs.md#adr-004-mandatory-baseplugin-inheritance)** - Security bones design
 - **[ADR-005: Frozen Plugin Capability](adrs.md#adr-005-frozen-plugin-capability)** - Strict level enforcement
@@ -881,6 +1037,7 @@ For security certification/accreditation, verify:
 
 **Change History**:
 - 2025-10-26: Initial consolidated policy (v1.0) - Combined ADRs 002, 002a, 003, 004, 005, 006
+- 2025-10-26: Added Policy 3 (ADR-002b) - Immutable Security Policy Metadata (v1.1)
 
 ---
 
