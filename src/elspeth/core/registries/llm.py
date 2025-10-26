@@ -337,7 +337,7 @@ llm_registry.register(
     "http_openai",
     _create_http_openai,
     schema=_HTTP_OPENAI_SCHEMA,
-    declared_security_level="UNOFFICIAL",  # ADR-002-B: Public OpenAI, lowest clearance
+    declared_security_level="OFFICIAL",  # ADR-002-B: Public HTTP OpenAI (per plugin implementation)
 )
 
 llm_registry.register(
