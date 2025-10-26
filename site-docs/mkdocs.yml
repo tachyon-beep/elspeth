@@ -79,11 +79,9 @@ nav:
     - Configuration: user-guide/configuration.md
   - Plugins:
     - Overview: plugins/overview.md
-    - Datasources: plugins/datasources.md
-    - Transforms: plugins/transforms.md
-    - Sinks: plugins/sinks.md
   - Architecture:
     - Overview: architecture/overview.md
+    - ADR Catalogue: architecture/adrs.md
   - API Reference:
     - Overview: api-reference/index.md
     - Core:
