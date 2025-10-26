@@ -90,13 +90,12 @@ def _create_datasource(defn: Mapping[str, Any], ctx: PluginContext):
     name = defn.get("plugin")
     if not isinstance(name, str) or not name:
         raise ValueError("datasource.plugin must be a non-empty string")
-    # Merge top-level security/determinism overrides into options before registry
+    # ADR-002-B: Do NOT merge security_level into options (plugin-author-owned)
+    # Only merge determinism_level (user-configurable)
     opts = dict(defn.get("options", {}) or {})
-    if defn.get("security_level") is not None:
-        opts["security_level"] = defn.get("security_level")
     if defn.get("determinism_level") is not None:
         opts["determinism_level"] = defn.get("determinism_level")
-    return datasource_registry.create(name, opts, parent_context=ctx)
+    return datasource_registry.create(name, opts, parent_context=ctx, require_security=False)
 
 
 def _create_sinks(defs: Sequence[Mapping[str, Any]], ctx: PluginContext):
@@ -105,15 +104,14 @@ def _create_sinks(defs: Sequence[Mapping[str, Any]], ctx: PluginContext):
         plugin = entry.get("plugin") or entry.get("name")
         if not isinstance(plugin, str) or not plugin:
             raise ValueError("sink.plugin must be a non-empty string")
-        # Merge top-level security/determinism overrides into options before registry
+        # ADR-002-B: Do NOT merge security_level into options (plugin-author-owned)
+        # Only merge determinism_level (user-configurable)
         raw_options = dict(entry.get("options", {}) or {})
         # Extract artifacts section so it doesn't get passed to constructor
         artifacts_cfg = raw_options.pop("artifacts", None)
-        if entry.get("security_level") is not None:
-            raw_options["security_level"] = entry.get("security_level")
         if entry.get("determinism_level") is not None:
             raw_options["determinism_level"] = entry.get("determinism_level")
-        sink = sink_registry.create(plugin, raw_options, parent_context=ctx)
+        sink = sink_registry.create(plugin, raw_options, parent_context=ctx, require_security=False)
         # Attach artifact metadata used by ArtifactPipeline binding preparation
         setattr(sink, "_elspeth_artifact_config", artifacts_cfg or {})
         setattr(sink, "_elspeth_plugin_name", plugin)

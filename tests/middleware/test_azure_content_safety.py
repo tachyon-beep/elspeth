@@ -30,8 +30,6 @@ def test_content_safety_abort_on_violation(monkeypatch):
         _mock_post(flagged=True, severity=6),
     )
     mw = AzureContentSafetyMiddleware(
-        security_level=SecurityLevel.UNOFFICIAL,
-        allow_downgrade=True,
         endpoint="https://safety",
         key="k",
         severity_threshold=4,
@@ -47,8 +45,6 @@ def test_content_safety_mask_on_violation(monkeypatch):
         _mock_post(flagged=True, severity=5),
     )
     mw = AzureContentSafetyMiddleware(
-        security_level=SecurityLevel.UNOFFICIAL,
-        allow_downgrade=True,
         endpoint="https://safety",
         key="k",
         severity_threshold=4,
@@ -69,8 +65,6 @@ def test_content_safety_skip_on_error(monkeypatch, caplog):
         boom,
     )
     mw = AzureContentSafetyMiddleware(
-        security_level=SecurityLevel.UNOFFICIAL,
-        allow_downgrade=True,
         endpoint="https://safety",
         key="k",
         on_error="skip",

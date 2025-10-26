@@ -15,6 +15,7 @@ def test_visual_base_validation_and_save(tmp_path: Path):
         formats=["png", "html"],
         dpi=100,
         figure_size=(2, 1),
+        allow_downgrade=True,
     )
     # Load plotting backends and create a simple figure
     _, pyplot, _ = sink._load_plot_modules()
@@ -32,26 +33,26 @@ def test_visual_base_validation_and_save(tmp_path: Path):
 
 
 def test_visual_base_update_security_context():
-    sink = BaseVisualSink(base_path=".", file_stem="x")
+    sink = BaseVisualSink(base_path=".", file_stem="x", allow_downgrade=True)
     sink._update_security_context_from_metadata({"security_level": "OFFICIAL", "determinism_level": "guaranteed"})
     # Access internal attributes to confirm set
-    assert sink._security_level == "OFFICIAL"
-    assert sink._determinism_level == "guaranteed"
+    assert sink._artifact_security_level.name == "OFFICIAL"
+    assert sink._artifact_determinism_level.name == "GUARANTEED"
     # Reset to None when metadata absent
     sink._update_security_context_from_metadata(None)
-    assert sink._security_level is None
-    assert sink._determinism_level is None
+    assert sink._artifact_security_level is None
+    assert sink._artifact_determinism_level is None
 
 
 def test_visual_base_invalid_params():
     # Invalid DPI
     with pytest.raises(ValueError):
-        BaseVisualSink(base_path=".", file_stem="x", dpi=0)
+        BaseVisualSink(base_path=".", file_stem="x", dpi=0, allow_downgrade=True)
     # Invalid figure size
     with pytest.raises(ValueError):
-        BaseVisualSink(base_path=".", file_stem="x", figure_size=(0, 1))
+        BaseVisualSink(base_path=".", file_stem="x", figure_size=(0, 1), allow_downgrade=True)
     with pytest.raises(ValueError):
-        BaseVisualSink(base_path=".", file_stem="x", figure_size=(1,))  # type: ignore[arg-type]
+        BaseVisualSink(base_path=".", file_stem="x", figure_size=(1,), allow_downgrade=True)  # type: ignore[arg-type]
     # Invalid on_error
     with pytest.raises(ValueError):
-        BaseVisualSink(base_path=".", file_stem="x", on_error="noop")
+        BaseVisualSink(base_path=".", file_stem="x", on_error="noop", allow_downgrade=True)

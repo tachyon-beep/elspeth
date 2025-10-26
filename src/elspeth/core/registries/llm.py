@@ -69,27 +69,24 @@ def create_llm_from_definition(
     if provenance:
         sources.extend(provenance)
 
-    try:
-        sec_level = coalesce_security_level(parent_context.security_level, entry_sec, opts_sec)
-    except ValueError as exc:
-        raise ConfigurationError(f"llm:{plugin_name}: {exc}") from exc
-
+    # ADR-002-B: Do NOT pass security_level in options (plugin-author-owned)
+    # Security level comes from parent_context inheritance
+    # Only pass determinism_level if specified (user-configurable)
     if entry_det is not None or opts_det is not None:
         try:
             det_level = coalesce_determinism_level(entry_det, opts_det)
+            options["determinism_level"] = det_level
         except ValueError as exc:
             raise ConfigurationError(f"llm:{plugin_name}: {exc}") from exc
-    else:
-        det_level = parent_context.determinism_level
-
-    options["security_level"] = sec_level
-    options["determinism_level"] = det_level
+    elif parent_context.determinism_level is not None:
+        options["determinism_level"] = parent_context.determinism_level
 
     return llm_registry.create(
         plugin_name,
         options,
         provenance=tuple(sources or (f"llm:{plugin_name}.resolved",)),
         parent_context=parent_context,
+        require_security=False,
     )
 
 

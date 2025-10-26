@@ -93,6 +93,7 @@ def with_security_properties(
     result["properties"] = dict(schema.get("properties", {}))
     result["properties"]["security_level"] = SECURITY_LEVEL_SCHEMA
     result["properties"]["determinism_level"] = DETERMINISM_LEVEL_SCHEMA
+    result["properties"]["allow_downgrade"] = {"type": "boolean"}  # ADR-005: Capability metadata freeze
 
     if require_security or require_determinism:
         # Create a copy of required list to avoid mutating the original

@@ -94,11 +94,15 @@ def _resolve_early_stop_sections(profile_data: Mapping[str, Any]) -> tuple[dict[
 
 
 def _prepare_plugin_definition(definition: Mapping[str, Any], context: str) -> tuple[dict[str, Any], str, str, tuple[str, ...]]:
-    """Extract options, normalized security level, determinism level, and provenance."""
+    """Extract options, normalized security level, determinism level, and provenance.
+
+    ADR-002-B: security_level is now optional in configuration (plugin-author-owned).
+    If not provided, will be "UNCLASSIFIED" as default for legacy compatibility.
+    """
 
     options = dict(definition.get("options", {}) or {})
 
-    # Handle security_level
+    # Handle security_level (ADR-002-B: optional, plugin-author-owned)
     entry_sec_level = definition.get("security_level")
     options_sec_level = options.get("security_level")
     sources: list[str] = []
@@ -106,10 +110,16 @@ def _prepare_plugin_definition(definition: Mapping[str, Any], context: str) -> t
         sources.append(f"{context}.definition.security_level")
     if options_sec_level is not None:
         sources.append(f"{context}.options.security_level")
-    try:
-        sec_level = coalesce_security_level(entry_sec_level, options_sec_level)
-    except ValueError as exc:
-        raise ConfigurationError(f"{context}: {exc}") from exc
+
+    # If no security_level provided, use UNOFFICIAL as default (legacy compatibility)
+    if entry_sec_level is None and options_sec_level is None:
+        sec_level = "UNOFFICIAL"
+        sources.append(f"{context}.default")
+    else:
+        try:
+            sec_level = coalesce_security_level(entry_sec_level, options_sec_level)
+        except ValueError as exc:
+            raise ConfigurationError(f"{context}: {exc}") from exc
 
     # Handle determinism_level
     entry_det_level = definition.get("determinism_level")
@@ -123,8 +133,8 @@ def _prepare_plugin_definition(definition: Mapping[str, Any], context: str) -> t
     except ValueError as exc:
         raise ConfigurationError(f"{context}: {exc}") from exc
 
-    # Keep the resolved levels inside the options we hand to plugin factories
-    options["security_level"] = sec_level
+    # ADR-002-B: Do NOT pass security_level to plugin payload (plugin-author-owned)
+    # Only pass determinism_level (user-configurable)
     options["determinism_level"] = det_level
     provenance = tuple(sources or (f"{context}.resolved",))
     return options, sec_level, det_level, provenance
@@ -155,7 +165,11 @@ def _instantiate_plugin(
     context: str,
     factory: Callable[..., Any],
 ) -> Any:
-    """Instantiate a plugin and apply the resolved security and determinism levels."""
+    """Instantiate a plugin and apply the resolved security and determinism levels.
+
+    ADR-002-B: security_level is NOT passed in payload (plugin-author-owned).
+    Only determinism_level is passed (user-configurable).
+    """
 
     if not isinstance(definition, Mapping):
         raise ConfigurationError(f"{context} configuration must be a mapping.")
@@ -164,8 +178,8 @@ def _instantiate_plugin(
         raise ConfigurationError(f"{context} configuration must define a plugin name.")
     options, sec_level, det_level, provenance = _prepare_plugin_definition(definition, context)
     payload = dict(options)
-    payload["security_level"] = sec_level
-    payload["determinism_level"] = det_level
+    # ADR-002-B: Do NOT pass security_level (plugin-author-owned)
+    # determinism_level already added to options in _prepare_plugin_definition
     # Be flexible with factory signature to support tests that monkeypatch
     # registry.create without provenance/parent_context kwargs. Use signature
     # introspection to decide which optional kwargs to pass, avoiding nested
@@ -183,6 +197,11 @@ def _instantiate_plugin(
             kwargs["provenance"] = provenance
         if "parent_context" in param_kinds or allows_kwargs:
             kwargs["parent_context"] = None
+        # ADR-002-B: Security level is plugin-author-owned, not configuration-owned
+        if "require_security" in param_kinds or allows_kwargs:
+            kwargs["require_security"] = False
+        if "require_determinism" in param_kinds or allows_kwargs:
+            kwargs["require_determinism"] = True  # determinism still required
     else:
         # Best-effort default: pass only required positional args
         kwargs = {}

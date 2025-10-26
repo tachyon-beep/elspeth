@@ -53,7 +53,6 @@ class TestSinkResolutionPriority:
         return {
             "prompt_system": "Test system",
             "prompt_template": "{{ text }}",
-            "security_level": "internal",
         }
 
     def test_sink_resolution_path_1_experiment_wins(
@@ -96,7 +95,6 @@ class TestSinkResolutionPriority:
                         {
                             "plugin": "collecting",
                             "options": {
-                                "security_level": "internal",
                                 "determinism_level": "guaranteed",
                             },
                         }
@@ -115,7 +113,6 @@ class TestSinkResolutionPriority:
                             "plugin": "collecting",
                             "options": {
                                 "path": "/tmp/pack.csv",
-                                "security_level": "internal",
                                 "determinism_level": "guaranteed",
                             },
                         }
@@ -128,7 +125,6 @@ class TestSinkResolutionPriority:
                     "plugin": "collecting",
                     "options": {
                         "path": "/tmp/defaults.csv",
-                        "security_level": "internal",
                         "determinism_level": "guaranteed",
                     },
                 }
@@ -186,7 +182,6 @@ class TestSinkResolutionPriority:
                             "plugin": "collecting",
                             "options": {
                                 "path": "/tmp/pack.csv",
-                                "security_level": "internal",
                                 "determinism_level": "guaranteed",
                             },
                         }
@@ -199,7 +194,6 @@ class TestSinkResolutionPriority:
                     "plugin": "collecting",
                     "options": {
                         "path": "/tmp/defaults.csv",
-                        "security_level": "internal",
                         "determinism_level": "guaranteed",
                     },
                 }
@@ -242,7 +236,6 @@ class TestSinkResolutionPriority:
                     "plugin": "collecting",
                     "options": {
                         "path": "/tmp/defaults.csv",
-                        "security_level": "internal",
                         "determinism_level": "guaranteed",
                     },
                 }
@@ -362,7 +355,6 @@ class TestSinkResolutionPriority:
                             "plugin": "collecting",
                             "options": {
                                 "path": "/tmp/exp.csv",
-                                "security_level": "internal",
                                 "determinism_level": "guaranteed",
                             },
                         }
@@ -381,7 +373,6 @@ class TestSinkResolutionPriority:
                             "plugin": "collecting",
                             "options": {
                                 "path": "/tmp/pack.csv",
-                                "security_level": "internal",
                                 "determinism_level": "guaranteed",
                             },
                         }
@@ -393,7 +384,6 @@ class TestSinkResolutionPriority:
                     "plugin": "collecting",
                     "options": {
                         "path": "/tmp/defaults.csv",
-                        "security_level": "internal",
                         "determinism_level": "guaranteed",
                     },
                 }
@@ -457,13 +447,11 @@ class TestSinkResolutionEdgeCases:
         defaults = {
             "prompt_system": "Test",
             "prompt_template": "{{ text }}",
-            "security_level": "internal",
             "sink_defs": [
                 {
                     "plugin": "collecting",
                     "options": {
                         "path": "/tmp/defaults.csv",
-                        "security_level": "internal",
                         "determinism_level": "guaranteed",
                     },
                 }
@@ -502,7 +490,6 @@ class TestSinkResolutionEdgeCases:
         defaults = {
             "prompt_system": "Test",
             "prompt_template": "{{ text }}",
-            "security_level": "internal",
         }
 
         runner = ExperimentSuiteRunner(suite, SimpleLLM(), [])

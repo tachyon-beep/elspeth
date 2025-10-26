@@ -24,15 +24,12 @@ def test_job_runner_with_llm_and_csv_sink(tmp_path: Path) -> None:
     out_path = tmp_path / "out.csv"
     job = {
         "name": "test_job",
-        "security_level": "OFFICIAL",
         "datasource": {
             "plugin": "local_csv",
-            "security_level": "OFFICIAL",
             "options": {"path": str(csv_path), "retain_local": True},
         },
         "llm": {
             "plugin": "mock",
-            "security_level": "OFFICIAL",
             "options": {"seed": 1},
         },
         "prompt": {
@@ -43,7 +40,6 @@ def test_job_runner_with_llm_and_csv_sink(tmp_path: Path) -> None:
         "sinks": [
             {
                 "plugin": "csv",
-                "security_level": "OFFICIAL",
                 "options": {"path": str(out_path), "overwrite": True},
             }
         ],
@@ -64,13 +60,11 @@ def test_job_runner_identity_without_llm(tmp_path: Path) -> None:
         "name": "identity_job",
         "datasource": {
             "plugin": "local_csv",
-            "security_level": "OFFICIAL",
             "options": {"path": str(csv_path), "retain_local": True},
         },
         "sinks": [
             {
                 "plugin": "csv",
-                "security_level": "OFFICIAL",
                 "options": {"path": str(out_path), "overwrite": True},
             }
         ],
@@ -91,13 +85,11 @@ def test_run_job_file(tmp_path: Path) -> None:
 job:
   datasource:
     plugin: local_csv
-    security_level: OFFICIAL
     options:
       path: {csv_path}
       retain_local: true
   sinks:
     - plugin: csv
-      security_level: OFFICIAL
       options:
         path: {out_path}
         overwrite: true

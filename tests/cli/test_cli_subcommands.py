@@ -108,14 +108,12 @@ job:
   name: adhoc
   datasource:
     plugin: local_csv
-    security_level: OFFICIAL
     determinism_level: guaranteed
     options:
       path: INPUT
       retain_local: false
   sinks:
     - plugin: csv
-      security_level: OFFICIAL
       determinism_level: guaranteed
       options:
         path: OUTPUT

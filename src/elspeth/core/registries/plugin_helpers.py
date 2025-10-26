@@ -137,20 +137,23 @@ def create_plugin_with_inheritance(
     if provenance:
         sources.extend(provenance)
 
+    # ADR-002-B: security_level is now optional (plugin-author-owned)
     if definition_sec_level is None and option_sec_level is None:
-        raise ConfigurationError(f"{plugin_kind}:{name}: security_level must be declared on the plugin definition or options")
+        # Default to UNOFFICIAL if not provided (plugin can override)
+        child_sec_level = SecurityLevel.UNOFFICIAL
+    else:
+        # Coalesce security level with downgrade prevention
+        try:
+            child_sec_level = coalesce_security_level(definition_sec_level, option_sec_level)
+        except ValueError as exc:
+            raise ConfigurationError(f"{plugin_kind}:{name}: {exc}") from exc
+
     if definition_det_level is None and option_det_level is None:
         raise ConfigurationError(f"{plugin_kind}:{name}: determinism_level must be declared on the plugin definition or options")
 
-    # Coalesce security level with downgrade prevention
     # Security enforcement: child plugins CANNOT downgrade parent's security classification
     # but CAN upgrade or match it
-    try:
-        child_sec_level = coalesce_security_level(definition_sec_level, option_sec_level)
-    except ValueError as exc:
-        raise ConfigurationError(f"{plugin_kind}:{name}: {exc}") from exc
-
-    level = coalesce_security_level(child_sec_level)
+    level = child_sec_level
     if parent_sec_level is not None:
         parent_level = parent_sec_level if isinstance(parent_sec_level, SecurityLevel) else ensure_security_level(parent_sec_level)
         if level < parent_level:

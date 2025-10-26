@@ -199,95 +199,359 @@ We will establish a **Global Observability Policy** that defines:
 
 ---
 
-## Part 2: Prohibited Logging (MUST NOT LOG)
+## Part 2: Sensitive Data Handling & Scrubbing Policy
 
-### Prohibited Content
+### Policy Overview
 
-To prevent PII leakage and classified data exposure:
+**Critical Principle**: PII and classified content **CAN be logged** because sink clearance is **enforced at pipeline construction** (Part 4). Lower-clearance sinks are **rejected immediately** (fail-fast), making cross-level leakage structurally impossible.
 
-#### 1. PII (Personally Identifiable Information)
+**Security Model**:
+- **MLS Enforcement** (Part 4): Sink clearance validated at construction, mismatched sinks **abort pipeline immediately**
+- **No Lower-Cleared Sinks**: You cannot connect an UNOFFICIAL sink to a SECRET pipeline (construction fails)
+- **Data Minimization** (Part 2): Scrubbing is **operational choice** (full content vs metadata), not security requirement
+- **Secrets** (Always prohibited): Never log credentials, even to cleared sinks
 
-**MUST NOT log**:
-- Full names (unless necessary for audit trail)
-- Email addresses (log user ID instead)
-- Phone numbers, addresses, SSNs
-- IP addresses (unless security event)
-
-**Exception**: User ID for audit trail (authenticated identity)
+**Key Insight**: Security is enforced by **infrastructure** (clearance validation), not **content filtering** (scrubbing). Scrubbing is for efficiency/minimization, not security.
 
 ---
 
-#### 2. Classified Content
+### Category 1: PII (Personally Identifiable Information)
 
-**MUST NOT log**:
-- **Prompt content**: Only log metadata (length, model, template name)
-- **LLM responses**: Only log metadata (length, status, latency)
-- **Datasource content**: Only log schema, row count, security level
-- **Artifact payloads**: Only log artifact ID, type, size
+**Policy**: **MAY log** PII to cleared sinks (sink clearance enforced at construction). Scrubbing is **operational choice** for data minimization.
 
-**Log metadata instead**:
+**Important**: Lower-clearance sinks are **rejected at construction** (ADR-002 fail-fast). There is no runtime scenario where PII logs to an unchecked sink.
+
+**Logging Decision Matrix**:
+
+| Content Type | Full Content Logging | Metadata-Only Logging | Rationale |
+|--------------|---------------------|----------------------|-----------|
+| **Full names** | ✅ Log for audit trail | ⚠️ Log user_id only | Audit requires identity, but user_id reduces breach impact |
+| **Email addresses** | ✅ Log for debugging | ⚠️ Log user_id only | Contact info helps triage, but scrubbing reduces storage |
+| **Phone, SSN, addresses** | ⚠️ Log if operationally critical | ✅ Omit entirely | Highly sensitive, only log if compliance requires |
+| **IP addresses** | ✅ Log for security events | ⚠️ Scrub for general logs | Security triage needs IP, but scrub non-security logs |
+
+**Example 1** (full context logging - operational choice):
+```json
+{
+  "event_type": "authentication_failure",
+  "timestamp": "2025-10-26T14:30:00Z",
+  "user_email": "john.doe@example.com",  // ✅ Full PII (sink already cleared)
+  "ip_address": "192.168.1.100",         // ✅ Security event
+  "failure_reason": "invalid_password"
+}
+// OFFICIAL pipeline → Azure Blob OFFICIAL sink
+// Sink clearance validated at construction ✅
+// Full context aids debugging, compliance audit
+```
+
+**Example 2** (metadata-only logging - data minimization choice):
+```json
+{
+  "event_type": "authentication_failure",
+  "timestamp": "2025-10-26T14:30:00Z",
+  "user_id": "user_550e8400",            // ⚠️ Metadata only (still traceable)
+  "ip_address_prefix": "192.168.xxx",    // ⚠️ Scrubbed for efficiency
+  "failure_reason": "invalid_password"
+}
+// OFFICIAL pipeline → Azure Blob OFFICIAL sink
+// Sink clearance validated at construction ✅
+// Metadata reduces storage, still enables triage
+```
+
+**Note**: Both examples use OFFICIAL-cleared sinks (construction validated). The difference is **operational choice** (full vs metadata), not security validation.
+
+**Scrubbing Recommendation**: Scrub PII even for cleared sinks unless full context operationally necessary (data minimization, efficiency).
+
+---
+
+### Category 2: Classified Content
+
+**Policy**: **MAY log** classified content to cleared sinks (sink clearance enforced at construction). Use metadata-only for efficiency, full content for debugging/audit.
+
+**Important**: Sink clearance is **binary** - either validated at construction (pass) or pipeline aborts (fail). There is no "lower-cleared sink" scenario at runtime.
+
+**Logging Decision Matrix**:
+
+| Content Type | Full Content Logging | Metadata-Only Logging | Rationale |
+|--------------|---------------------|----------------------|-----------|
+| **Prompt content** | ✅ Log full text for debugging | ⚠️ Log length/template for efficiency | Full prompt aids deep debugging, metadata saves 90%+ storage |
+| **LLM responses** | ✅ Log full text for audit | ⚠️ Log status/length for efficiency | Compliance may require response, metadata sufficient for triage |
+| **Datasource content** | ✅ Log rows for provenance | ⚠️ Log schema/counts for efficiency | Reproducibility may need snapshot, metadata reduces cost |
+| **Artifact payloads** | ⚠️ Log for critical audit | ✅ Log metadata only | Bundle sink captures payloads, log metadata avoids duplication |
+
+**Example 1** (full content logging - debugging/audit choice):
 ```json
 {
   "event_type": "llm_call",
-  "correlation_id": "...",
-  "prompt_length": 500,
-  "prompt_template": "summarization",
+  "correlation_id": "550e8400-...",
+  "prompt": "Summarize this SECRET intelligence report: ...",  // ✅ Full text (sink cleared)
+  "response": "Summary: The report indicates...",             // ✅ Full response
   "model": "gpt-4",
-  "response_length": 200,
-  "response_status": "success",
   "latency_ms": 1500
-  // ❌ NO "prompt" or "response" fields
 }
+// SECRET pipeline → Azure Blob Gov Cloud SECRET sink
+// Sink clearance validated at construction ✅
+// Full content enables deep debugging, compliance audit
 ```
 
-**Rationale**: Logging classified content creates additional classified data stores, violates data minimization.
-
----
-
-#### 3. Secrets & Credentials
-
-**MUST NOT log**:
-- API keys, tokens, passwords
-- Encryption keys, signing keys
-- Connection strings with embedded credentials
-- OAuth tokens, refresh tokens
-
-**Log placeholder instead**:
+**Example 2** (metadata-only logging - efficiency choice):
 ```json
 {
-  "azure_openai_endpoint": "https://example.openai.azure.com",
-  "api_key": "***REDACTED***"  // ✅ Redacted
+  "event_type": "llm_call",
+  "correlation_id": "550e8400-...",
+  "prompt_length": 500,                   // ⚠️ Metadata (90%+ storage savings)
+  "prompt_template": "intelligence_summary",
+  "response_length": 200,                 // ⚠️ Metadata only
+  "response_status": "success",
+  "model": "gpt-4",
+  "latency_ms": 1500
 }
+// SECRET pipeline → Azure Blob Gov Cloud SECRET sink
+// Sink clearance validated at construction ✅
+// Metadata sufficient for performance monitoring, cost analysis
 ```
 
-**Rationale**: Credentials in logs create security vulnerabilities.
+**Note**: Both examples use SECRET-cleared sinks (construction validated). The difference is **operational choice** (full text vs metadata), not security validation.
+
+**Scrubbing Recommendation**:
+- **For debugging/audit**: Log full content (sink already cleared, security enforced at construction)
+- **For performance/cost**: Log metadata only (reduces storage 90%+, sufficient for monitoring)
+- **Decision**: Based on compliance requirements vs operational efficiency
 
 ---
 
-### Sensitive Data Scrubbing
+### Category 3: Secrets & Credentials (ALWAYS PROHIBITED)
 
-**All logs MUST be scrubbed** before persistence:
-1. **Regex-based scrubbing**: Remove API keys, emails, SSNs
-2. **Field allowlist**: Only log approved fields
-3. **Length limits**: Truncate long fields (prevent log injection)
+**Policy**: **MUST NOT log** secrets, even to cleared sinks. Credentials are **never safe** in logs.
 
-**Example**:
+**Prohibited Content** (no exceptions):
+- API keys, tokens, passwords
+- Encryption keys, signing keys (HMAC, RSA, ECDSA)
+- Connection strings with embedded credentials
+- OAuth tokens, refresh tokens
+- Database passwords, service account credentials
+
+**Rationale**:
+- Credentials enable impersonation (lateral movement)
+- Log breaches would compromise authentication
+- No legitimate debugging use case for credential values
+- Key rotation invalidates logged credentials (noise)
+
+**Example** (correct handling):
+```json
+{
+  "event_type": "azure_openai_configured",
+  "endpoint": "https://example.openai.azure.com",
+  "api_key": "***REDACTED***",           // ✅ Redacted
+  "key_length": 32,                       // ✅ Metadata OK
+  "key_rotation_date": "2025-10-01"      // ✅ Operational info
+}
+```
+
+**Example** (violation):
+```json
+{
+  "event_type": "azure_openai_configured",
+  "endpoint": "https://example.openai.azure.com",
+  "api_key": "sk-abc123def456..."        // ❌ CRITICAL VIOLATION
+}
+// Even in SECRET sink, this is a security vulnerability
+```
+
+---
+
+### Scrubbing Implementation (Optional, Recommended)
+
+**When to Scrub**:
+- **Lower-cleared sinks**: MUST scrub classified content exceeding sink clearance
+- **Data minimization**: SHOULD scrub PII even for cleared sinks (reduce breach impact)
+- **Storage efficiency**: SHOULD use metadata instead of full payloads (reduce costs)
+- **Secrets**: MUST scrub always (no exceptions)
+
+**Scrubbing Mechanisms**:
+
+#### 1. Regex-Based Scrubbing
 ```python
-def scrub_log_entry(entry: dict) -> dict:
-    """Scrub sensitive data from log entry."""
-    # Redact known sensitive fields
-    if "api_key" in entry:
-        entry["api_key"] = "***REDACTED***"
+import re
 
-    # Regex scrubbing for PII
-    entry["message"] = re.sub(
-        r'\b[\w\.-]+@[\w\.-]+\.\w+\b',  # Email regex
-        "***EMAIL***",
-        entry["message"]
-    )
+def scrub_pii(text: str) -> str:
+    """Scrub PII patterns from text."""
+    # Email addresses
+    text = re.sub(r'\b[\w\.-]+@[\w\.-]+\.\w+\b', '***EMAIL***', text)
+
+    # SSNs (US format)
+    text = re.sub(r'\b\d{3}-\d{2}-\d{4}\b', '***SSN***', text)
+
+    # Credit cards (simple pattern)
+    text = re.sub(r'\b\d{4}[\s-]?\d{4}[\s-]?\d{4}[\s-]?\d{4}\b', '***CC***', text)
+
+    # IP addresses (optional)
+    text = re.sub(r'\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b', '***IP***', text)
+
+    return text
+```
+
+#### 2. Field Allowlist
+```python
+def scrub_log_entry(entry: dict, allowed_fields: set[str]) -> dict:
+    """Scrub log entry to allowlist fields only."""
+    return {k: v for k, v in entry.items() if k in allowed_fields}
+
+# Example usage
+ALLOWED_FIELDS = {
+    "event_type", "timestamp", "correlation_id", "component",
+    "latency_ms", "status", "error_type"
+}
+
+scrubbed = scrub_log_entry(raw_entry, ALLOWED_FIELDS)
+# Result: Only allowlisted fields remain
+```
+
+#### 3. Content-Based Scrubbing
+```python
+def scrub_classified_content(entry: dict, sink_level: SecurityLevel) -> dict:
+    """Scrub content exceeding sink clearance."""
+    if "prompt" in entry and entry.get("prompt_classification", SecurityLevel.OFFICIAL) > sink_level:
+        # Replace with metadata
+        entry["prompt_length"] = len(entry.pop("prompt"))
+        entry["prompt_scrubbed"] = True
+
+    if "response" in entry and entry.get("response_classification", SecurityLevel.OFFICIAL) > sink_level:
+        # Replace with metadata
+        entry["response_length"] = len(entry.pop("response"))
+        entry["response_scrubbed"] = True
 
     return entry
 ```
+
+**Scrubbing at Sink Boundary** (recommended):
+```python
+class AuditLogSink(BasePlugin, ResultSink):
+    """Audit log sink with automatic scrubbing."""
+
+    def write(self, log: ClassifiedAuditLog) -> None:
+        """Write logs with optional scrubbing based on sink clearance."""
+        scrubbed_entries = []
+
+        for entry in log.entries:
+            # Scrub if log level exceeds sink clearance
+            if log.security_level > self.security_level:
+                raise SecurityValidationError(
+                    f"Cannot write {log.security_level} logs to {self.security_level} sink"
+                )
+
+            # Optional: Scrub for data minimization even if cleared
+            if self.config.get("scrub_pii", False):
+                entry = scrub_pii_fields(entry)
+
+            scrubbed_entries.append(entry)
+
+        # Write scrubbed logs
+        self._write_to_storage(scrubbed_entries)
+```
+
+---
+
+### Summary: Scrubbing vs Sink Clearance
+
+**Two Independent Security Mechanisms**:
+
+| Mechanism | Purpose | When Applied | Mandatory? |
+|-----------|---------|--------------|------------|
+| **Sink Clearance** (Part 4) | Prevent cross-level leakage | At sink boundary | ✅ YES (ADR-002) |
+| **Content Scrubbing** (Part 2) | Data minimization, efficiency | Optional, at logging or sink | ⚠️ Recommended |
+
+**Example**:
+```python
+# SECRET pipeline with SECRET sink
+log = ClassifiedAuditLog(security_level=SecurityLevel.SECRET)
+sink = AzureBlobSink(security_level=SecurityLevel.SECRET)
+
+# Sink clearance: PASS (SECRET ≥ SECRET)
+validate_clearance(log, sink)  # ✅ OK
+
+# Content scrubbing: Optional
+if sink.config.get("scrub_for_efficiency"):
+    log.entries = [scrub_pii(e) for e in log.entries]  # ⚠️ Recommended
+```
+
+**Result**: Security enforced by clearance, efficiency improved by scrubbing.
+
+---
+
+### Key Architectural Innovation: Logs Flow to Sinks
+
+**Traditional Observability** (pre-ADR-013):
+```python
+# ❌ Direct file writes - no clearance validation
+with open(f"logs/run_{run_id}.jsonl", "a") as f:
+    f.write(json.dumps(log_entry) + "\n")
+
+# Problems:
+# - Log file has no security level (unclassified by default?)
+# - No validation that /logs/ directory has appropriate clearance
+# - SECRET metadata could leak to world-readable filesystem
+# - Log rotation/retention handled separately from pipeline
+```
+
+**Elspeth Observability** (ADR-013):
+```python
+# ✅ Logs flow through artifact pipeline with clearance validation
+audit_log = ClassifiedAuditLog(
+    security_level=pipeline.effective_level,  # Inherits from pipeline
+    entries=[...],
+)
+
+# Route to sink with validated clearance
+artifact_pipeline.route_artifact(
+    audit_log.to_artifact(),
+    sink=log_sink,  # Azure Blob Gov Cloud (SECRET clearance)
+)
+
+# Sink validation at construction (fail-fast)
+if log_sink.security_level < audit_log.security_level:
+    raise SecurityValidationError("Sink lacks clearance")  # ✅ Aborts before data
+
+# Benefits:
+# - Log sink clearance validated at construction (fail-fast)
+# - Logs are security artifacts (same treatment as results)
+# - MLS enforcement prevents cross-level leakage structurally
+# - Sink handles retention, encryption, access controls
+```
+
+**Key Innovation**: **Logs are routed to sinks, not written to disk**. This enables:
+
+1. **Security by Construction**: Lower-clearance sinks rejected at pipeline construction (impossible to leak)
+2. **Uniform Treatment**: Logs treated as security artifacts (ClassifiedAuditLog ≈ ClassifiedDataFrame)
+3. **Environment Portability**: Same pipeline works with local file (dev) or Azure Blob Gov Cloud (prod)
+4. **Separation of Concerns**:
+   - **Part 2 (Scrubbing)**: Operational efficiency (full content vs metadata)
+   - **Part 4 (Sinks)**: Security enforcement (MLS clearance validation)
+
+**Example Configuration** (environment-specific sinks):
+```yaml
+# Development environment
+audit_logging:
+  sinks:
+    UNOFFICIAL:
+      type: local_file
+      path: logs/run_{run_id}.jsonl
+
+# Production environment
+audit_logging:
+  sinks:
+    OFFICIAL:
+      type: azure_blob
+      container: elspeth-audit-official
+      encryption: aes256
+    SECRET:
+      type: azure_blob
+      container: elspeth-audit-secret-govcloud
+      region: us-gov-virginia
+      encryption: fips140_2
+```
+
+**Result**: Same pipeline code works across environments. Security enforced by sink configuration, not code logic.
 
 ---
 

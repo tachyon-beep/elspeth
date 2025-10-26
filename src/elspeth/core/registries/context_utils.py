@@ -175,11 +175,11 @@ def create_plugin_context(
             provenance=provenance_tuple,
         )
 
-    # Creating new context without parent - security_level must be provided
+    # Creating new context without parent
+    # ADR-002-B: security_level may be None if plugin will hard-code it
+    # Use UNOFFICIAL as default if not provided (plugin can override)
     if security_level is None:
-        raise ConfigurationError(
-            f"Cannot create plugin context for {plugin_kind}:{plugin_name} without security_level (no parent context to inherit from)"
-        )
+        security_level = SecurityLevel.UNOFFICIAL
 
     return PluginContext(
         plugin_name=plugin_name,

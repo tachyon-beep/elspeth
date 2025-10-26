@@ -150,11 +150,11 @@ class TestCategory0Step0Verification:
 
         # Create a minimal subclass (doesn't implement any methods)
         class MinimalPlugin(BasePlugin):
-            def __init__(self, *, security_level: SecurityLevel, allow_downgrade: bool = True):
-                super().__init__(security_level=security_level, allow_downgrade=allow_downgrade)
+            def __init__(self):
+                super().__init__(security_level=SecurityLevel.SECRET, allow_downgrade=True)
 
         # Instantiate - should work because methods are inherited
-        plugin = MinimalPlugin(security_level=SecurityLevel.SECRET)
+        plugin = MinimalPlugin()
 
         # Verify methods exist and work (inherited from BasePlugin)
         assert hasattr(plugin, "get_security_level"), "Missing get_security_level method"
@@ -177,8 +177,8 @@ class TestCategory0Step0Verification:
         # Attempt to override get_security_level - should raise TypeError at class definition
         with pytest.raises(TypeError) as exc_info:
             class BrokenPlugin(BasePlugin):
-                def __init__(self, *, security_level: SecurityLevel, allow_downgrade: bool = True):
-                    super().__init__(security_level=security_level, allow_downgrade=allow_downgrade)
+                def __init__(self):
+                    super().__init__(security_level=SecurityLevel.SECRET, allow_downgrade=True)
 
                 def get_security_level(self) -> SecurityLevel:  # ← Override attempt
                     return SecurityLevel.UNOFFICIAL  # ← Should be rejected!
@@ -200,10 +200,10 @@ class TestCategory0Step0Verification:
         from elspeth.core.base.types import SecurityLevel
 
         class TestPlugin(BasePlugin):
-            def __init__(self, *, security_level: SecurityLevel, allow_downgrade: bool = True):
-                super().__init__(security_level=security_level, allow_downgrade=allow_downgrade)
+            def __init__(self):
+                super().__init__(security_level=SecurityLevel.SECRET, allow_downgrade=True)
 
-        plugin = TestPlugin(security_level=SecurityLevel.SECRET)
+        plugin = TestPlugin()
 
         # Property access should work
         assert plugin.security_level == SecurityLevel.SECRET

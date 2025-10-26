@@ -413,20 +413,19 @@ class ExperimentSuiteRunner:
                 raise ConfigurationError("Each sink definition must include a 'plugin' string")
             raw_options = dict(entry.get("options", {}))
             artifacts_cfg = raw_options.pop("artifacts", None)
-            security_level = entry.get("security_level", raw_options.get("security_level"))
-            if security_level is None:
-                raise ConfigurationError(f"sink '{plugin}' requires a security_level")
+            # ADR-002-B: security_level is plugin-author-owned, not user-configurable
+            # Don't require or inject it - plugins hard-code their own security level
             determinism_level = entry.get("determinism_level", raw_options.get("determinism_level"))
             if determinism_level is None:
                 raise ConfigurationError(f"sink '{plugin}' requires a determinism_level")
             options_with_level = dict(raw_options)
-            options_with_level["security_level"] = security_level
             options_with_level["determinism_level"] = determinism_level
             sink_registry.validate(plugin, options_with_level)
             sink = sink_registry.create(
                 plugin,
                 options_with_level,
                 provenance=(f"sink:{plugin}.definition",),
+                require_security=False,  # ADR-002-B: Plugins self-declare
             )
             setattr(sink, "_elspeth_artifact_config", artifacts_cfg or {})
             setattr(sink, "_elspeth_plugin_name", plugin)
