@@ -35,6 +35,7 @@ sinks:
 ```
 
 **Without ADR-002 (no fail-fast validation)**:
+
 1. Pipeline construction succeeds (no early validation)
 2. Datasource retrieves SECRET-classified data into memory
 3. Data flows through transforms
@@ -43,6 +44,7 @@ sinks:
 6. Memory dumps, error logs, or debugging outputs may leak classified data
 
 **With ADR-002 (fail-fast validation)**:
+
 1. Pipeline construction computes: `operating_level = MIN(SECRET datasource, UNOFFICIAL sink) = UNOFFICIAL`
 2. Datasource validates: "Can I operate at UNOFFICIAL level?" → **NO** (insufficient clearance - SECRET data requires SECRET level)
 3. **Pipeline aborts BEFORE data retrieval** → No classified data loaded into memory
@@ -89,6 +91,7 @@ Elspeth implements Bell-LaPadula MLS with a critical **architectural split** bet
 #### The Architectural Split
 
 **"No Write Down" (Data Classification Layer)** - ADR-002-A:
+
 - **What it controls**: ClassifiedDataFrame objects (data containers)
 - **Enforcement**: Immutable classification via frozen dataclass
 - **Rule**: Data tagged SECRET CANNOT be downgraded to UNOFFICIAL
@@ -97,6 +100,7 @@ Elspeth implements Bell-LaPadula MLS with a critical **architectural split** bet
 - **Result**: TypeError or AttributeError (no downgrade API exists)
 
 **"No Read Up" (Plugin Clearance Layer)** - ADR-002/ADR-004:
+
 - **What it controls**: Plugin operations (datasource retrieval, transform processing, sink writes)
 - **Enforcement**: Clearance validation via `BasePlugin.validate_can_operate_at_level()`
 - **Rule**: Plugin with UNOFFICIAL clearance CANNOT operate at SECRET level (insufficient clearance)
@@ -105,6 +109,7 @@ Elspeth implements Bell-LaPadula MLS with a critical **architectural split** bet
 - **Result**: `SecurityValidationError` raised during pipeline setup
 
 **"Trusted Downgrade" (Plugin Operation Flexibility)** - ADR-002/ADR-005:
+
 - **What it enables**: Plugins with SECRET clearance CAN operate at UNOFFICIAL level (if `allow_downgrade=True`)
 - **Trust model**: Certified plugins are responsible for filtering data appropriately at lower operating levels
 - **Enforcement**: Certification + audit, NOT runtime validation
@@ -116,12 +121,14 @@ Elspeth implements Bell-LaPadula MLS with a critical **architectural split** bet
 **Common Misconception**: "SECRET datasource writing to UNOFFICIAL sink violates 'no write down'"
 
 **Correct Understanding**:
+
 1. Pipeline computes `operating_level = MIN(SECRET datasource, UNOFFICIAL sink) = UNOFFICIAL`
 2. SECRET datasource validates: "Can I operate at UNOFFICIAL level?" → YES (trusted downgrade)
 3. Datasource operates at UNOFFICIAL level → produces `ClassifiedDataFrame(data, SecurityLevel.UNOFFICIAL)`
 4. UNOFFICIAL sink receives UNOFFICIAL data → ✅ No violation
 
 **Key Insight**: The SECRET datasource **does not produce SECRET data** when operating at UNOFFICIAL level. It is responsible for filtering and producing UNOFFICIAL-classified data only. This filtering responsibility is validated through:
+
 - Certification process (pre-deployment audit)
 - Code review of datasource filtering logic
 - Attestation that datasource correctly handles multi-level data sources
@@ -142,11 +149,13 @@ Layer 2 - Plugin Operation:
 ```
 
 **Forbidden Operations**:
+
 - ❌ **Plugin clearance violation**: UNOFFICIAL plugin running at SECRET level (insufficient clearance - "no read up")
 - ❌ **Data classification violation**: SECRET ClassifiedDataFrame downgraded to UNOFFICIAL (impossible - no API exists - "no write down")
 - ❌ **Frozen plugin violation**: Plugin with `allow_downgrade=False` operating below its clearance (ADR-005 strict enforcement)
 
 **Allowed Operations**:
+
 - ✅ **Trusted downgrade**: SECRET plugin operating at UNOFFICIAL level (if `allow_downgrade=True`) - trusted to filter appropriately
 - ✅ **Explicit uplift**: UNOFFICIAL data uplifted to SECRET (via `with_uplifted_classification()` - explicit and audited)
 - ✅ **Exact match**: Frozen plugin operating at EXACT declared level only (strict enforcement)
@@ -182,6 +191,7 @@ sink.write(data)  # ✅ SUCCEEDS: UNOFFICIAL sink receiving UNOFFICIAL data
 ```
 
 **What if datasource misbehaves?**
+
 ```python
 # Buggy/malicious datasource returns wrong classification
 data = ClassifiedDataFrame(secret_df, SecurityLevel.SECRET)  # ❌ BUG: wrong level
@@ -204,6 +214,7 @@ Plugins with LOWER clearance CANNOT operate at HIGHER levels (insufficient clear
 
 **Datasource Filtering Responsibility**: When a SECRET-cleared datasource operates at an OFFICIAL pipeline level,
 it MUST filter its data retrieval to produce only OFFICIAL-classified data. This responsibility is validated through:
+
 - Pre-deployment certification audit
 - Code review of filtering logic
 - Attestation documentation
@@ -225,10 +236,12 @@ pipelines, regardless of filtering capabilities.
 see [ADR-005: Frozen Plugin Capability](005-frozen-plugin-capability.md).**
 
 **Quick Reference**:
+
 - `allow_downgrade=True`: Trusted downgrade (ADR-002 default semantics)
 - `allow_downgrade=False`: Frozen plugin (strict level enforcement - ADR-005)
 
 **When to Use Frozen Plugins**:
+
 - ✅ Dedicated classification domains (physically/logically separated by level)
 - ✅ Regulatory mandates requiring explicit per-level certification
 - ✅ High-assurance systems where filtering trust is insufficient
@@ -253,6 +266,7 @@ frozen `PluginContext`. They cannot modify it or bypass validation.
 - **operating_level** (effective level): What the plugin SHOULD produce (pipeline minimum)
 
 **Example**:
+
 ```python
 # SECRET datasource in UNOFFICIAL pipeline
 datasource.get_security_level()   # Returns SECRET (declared clearance)
@@ -264,6 +278,7 @@ datasource.get_effective_level()  # Returns UNOFFICIAL (pipeline operating level
 Plugins should use `get_effective_level()` for:
 
 ✅ **Filtering Optimization** (datasources):
+
 ```python
 def load_data(self) -> ClassifiedDataFrame:
     effective_level = self.get_effective_level()
@@ -279,6 +294,7 @@ def load_data(self) -> ClassifiedDataFrame:
 ```
 
 ✅ **Conditional Processing** (transforms):
+
 ```python
 def transform(self, df: ClassifiedDataFrame) -> ClassifiedDataFrame:
     effective_level = self.get_effective_level()
@@ -291,6 +307,7 @@ def transform(self, df: ClassifiedDataFrame) -> ClassifiedDataFrame:
 ```
 
 ✅ **Audit Logging** (all plugins):
+
 ```python
 def load_data(self) -> ClassifiedDataFrame:
     effective_level = self.get_effective_level()
@@ -307,6 +324,7 @@ def load_data(self) -> ClassifiedDataFrame:
 ```
 
 ✅ **Performance Optimization** (all plugins):
+
 ```python
 def process(self, data):
     effective_level = self.get_effective_level()
@@ -321,6 +339,7 @@ def process(self, data):
 #### Anti-Patterns (DO NOT)
 
 ❌ **Bypassing Filtering**:
+
 ```python
 # WRONG: Skipping filtering based on effective level
 def load_data(self):
@@ -328,10 +347,12 @@ def load_data(self):
         # "No filtering needed - levels match"
         return self._load_all_data()  # ❌ May include higher-classified data!
 ```
+
 **Why Wrong**: Even when levels match, datasource must filter correctly. The multi-level
 data source may contain data ABOVE the operating level that must be excluded.
 
 ❌ **Assuming Level == Content Classification**:
+
 ```python
 # WRONG: Assuming effective level determines data classification
 def load_data(self):
@@ -340,17 +361,20 @@ def load_data(self):
     # "Data is at effective level, so tag it as such"
     return ClassifiedDataFrame(data, effective_level)  # ❌ Data may be UNOFFICIAL!
 ```
+
 **Why Wrong**: Operating level is pipeline constraint, not data classification. Data
 classification is determined by content, not pipeline level. Use
 `with_uplifted_classification()` if data needs higher classification.
 
 ❌ **Skipping Validation**:
+
 ```python
 # WRONG: Bypassing validation based on effective level
 def validate_data(self, data):
     if self.get_effective_level() == SecurityLevel.UNOFFICIAL:
         return  # "No validation needed at low level" ❌
 ```
+
 **Why Wrong**: Validation requirements are independent of security level. All data must
 be validated according to schema and business rules.
 
@@ -370,6 +394,7 @@ Plugins using `get_effective_level()` must demonstrate correct behavior during c
    documented and tested at all supported levels
 
 **Certification Test Pattern**:
+
 ```python
 def test_datasource_filters_at_lower_level():
     # SECRET-cleared datasource with mixed data
@@ -400,11 +425,13 @@ def test_datasource_filters_at_lower_level():
 #### Implementation Details
 
 **Context Propagation**:
+
 1. Pipeline validation computes `operating_level = MIN(all plugin clearances)`
 2. `ExperimentSuiteRunner._propagate_operating_level()` updates all plugin contexts
 3. Plugins access via `self.get_effective_level()`
 
 **Fail-Fast Behavior**:
+
 - `operating_level` field defaults to `None` (pre-validation state)
 - `get_effective_level()` raises `RuntimeError` if `operating_level` is `None`
 - **High-security principle**: LOUD CATASTROPHIC FAILURE, not graceful degradation
@@ -412,6 +439,7 @@ def test_datasource_filters_at_lower_level():
 - This catches programming errors early (using effective level before validation completes)
 
 **Security Properties**:
+
 - `PluginContext` is frozen (immutable) - plugins cannot modify `operating_level`
 - `get_effective_level()` is `@final` - plugins cannot override it
 - Operating level always ≤ declared security level (guaranteed by validation)

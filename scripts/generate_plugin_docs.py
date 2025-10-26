@@ -439,7 +439,7 @@ def generate_user_catalogue(plugins: list[PluginMetadata]) -> str:
         "| 🔒 Frozen | `allow_downgrade=False` | Plugin requires exact security level matching (dedicated classification domains) |",
         "| ❓ Unknown | Not specified | Security behavior not explicitly declared in source |",
         "",
-        "See [Security Policy](../architecture/security-policy.md#policy-4-frozen-plugin-capability) for details on trusted downgrade vs frozen plugins.",
+        "See [Security Policy](../architecture/security-policy.md#policy-4-plugin-security-architecture) for details on trusted downgrade vs frozen plugins.",
         "",
     ])
 

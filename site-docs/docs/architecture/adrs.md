@@ -12,21 +12,21 @@ Elspeth's design is guided by documented architecture decisions. This catalog pr
 | ID | Title | Status | Category | Impact |
 |----|-------|--------|----------|--------|
 | [001](#adr-001-design-philosophy) | Design Philosophy | ✅ Accepted | Foundation | 🔴 Critical |
-| [002](#adr-002-multi-level-security) | Multi-Level Security Enforcement | ✅ Accepted | Security | 🔴 Critical |
+| [002](#adr-002-multi-level-security-enforcement) | Multi-Level Security Enforcement | ✅ Accepted | Security | 🔴 Critical |
 | [002a](#adr-002a-trusted-container-model) | Trusted Container Model (ClassifiedDataFrame) | ✅ Accepted | Security | 🔴 Critical |
 | [002b](#adr-002b-immutable-security-policy-metadata) | Immutable Security Policy Metadata | 🟡 Proposed | Security | 🔴 Critical |
 | [003](#adr-003-plugin-type-registry) | Plugin Type Registry | ✅ Accepted | Architecture | 🟡 High |
 | [004](#adr-004-mandatory-baseplugin-inheritance) | Mandatory BasePlugin Inheritance | ✅ Accepted | Security | 🔴 Critical |
 | [005](#adr-005-frozen-plugin-protection) | Frozen Plugin Protection | ✅ Accepted | Security | 🟡 High |
-| [006](#adr-006-exception-policy) | Security-Critical Exception Policy | ✅ Accepted | Security | 🟡 High |
-| [007](#adr-007-dual-output-protocol) | Universal Dual-Output Protocol | ✅ Accepted | Architecture | 🟢 Medium |
-| [008](#adr-008-unified-registry) | Unified Registry Pattern | ✅ Accepted | Architecture | 🟡 High |
+| [006](#adr-006-security-critical-exception-policy) | Security-Critical Exception Policy | ✅ Accepted | Security | 🟡 High |
+| [007](#adr-007-universal-dual-output-protocol) | Universal Dual-Output Protocol | ✅ Accepted | Architecture | 🟢 Medium |
+| [008](#adr-008-unified-registry-pattern) | Unified Registry Pattern | ✅ Accepted | Architecture | 🟡 High |
 | [009](#adr-009-configuration-composition) | Configuration Composition | ✅ Accepted | Architecture | 🟡 High |
-| [010](#adr-010-lifecycle-routing) | Pass-Through Lifecycle and Routing | ✅ Accepted | Architecture | 🟢 Medium |
-| [011](#adr-011-error-classification) | Error Classification and Recovery | ✅ Accepted | Reliability | 🟢 Medium |
-| [012](#adr-012-testing-strategy) | Testing Strategy and Quality Gates | ✅ Accepted | Quality | 🟡 High |
-| [013](#adr-013-observability) | Global Observability Policy | ✅ Accepted | Operations | 🟢 Medium |
-| [014](#adr-014-reproducibility-bundle) | Tamper-Evident Reproducibility Bundle | ✅ Accepted | Compliance | 🔴 Critical |
+| [010](#adr-010-pass-through-lifecycle-and-routing) | Pass-Through Lifecycle and Routing | ✅ Accepted | Architecture | 🟢 Medium |
+| [011](#adr-011-error-classification-and-recovery) | Error Classification and Recovery | ✅ Accepted | Reliability | 🟢 Medium |
+| [012](#adr-012-testing-strategy-and-quality-gates) | Testing Strategy and Quality Gates | ✅ Accepted | Quality | 🟡 High |
+| [013](#adr-013-global-observability-policy) | Global Observability Policy | ✅ Accepted | Operations | 🟢 Medium |
+| [014](#adr-014-tamper-evident-reproducibility-bundle) | Tamper-Evident Reproducibility Bundle | ✅ Accepted | Compliance | 🔴 Critical |
 
 ---
 
@@ -111,7 +111,7 @@ frame = ClassifiedDataFrame(data, SecurityLevel.OFFICIAL)  # SecurityValidationE
 
 **Impact**: Prevents data laundering and downgrade attacks. All data flows through ClassifiedDataFrame.
 
-**See Also**: [ClassifiedDataFrame API](../api-reference/core/classified-dataframe.md), [ADR-002](#adr-002-multi-level-security)
+**See Also**: [ClassifiedDataFrame API](../api-reference/core/classified-dataframe.md), [ADR-002](#adr-002-multi-level-security-enforcement)
 
 **Full ADR**: [docs/architecture/decisions/002-a-trusted-container-model.md](https://github.com/johnm-dta/elspeth/blob/main/docs/architecture/decisions/002-a-trusted-container-model.md)
 
@@ -143,7 +143,7 @@ datasource:
 
 **Impact**: Prevents silent security bypass via configuration. Security policy is code-certified, not user-configurable.
 
-**See Also**: [ADR-002](#adr-002-multi-level-security), [ADR-005](#adr-005-frozen-plugin-protection)
+**See Also**: [ADR-002](#adr-002-multi-level-security-enforcement), [ADR-005](#adr-005-frozen-plugin-protection)
 
 **Full ADR**: [docs/architecture/decisions/002-b-security-policy-metadata.md](https://github.com/johnm-dta/elspeth/blob/main/docs/architecture/decisions/002-b-security-policy-metadata.md)
 
@@ -170,7 +170,7 @@ datasource:
 
 **Impact**: Foundation of ADR-002 security validation. All plugins use consistent security logic.
 
-**See Also**: [BasePlugin API](../api-reference/core/base-plugin.md), [ADR-002](#adr-002-multi-level-security)
+**See Also**: [BasePlugin API](../api-reference/core/base-plugin.md), [ADR-002](#adr-002-multi-level-security-enforcement)
 
 **Full ADR**: [docs/architecture/decisions/004-mandatory-baseplugin-inheritance.md](https://github.com/johnm-dta/elspeth/blob/main/docs/architecture/decisions/004-mandatory-baseplugin-inheritance.md)
 
@@ -206,7 +206,7 @@ frozen.validate_can_operate_at_level(SecurityLevel.OFFICIAL)  # Raises SecurityV
 
 **Impact**: Allows dedicated SECRET infrastructure that refuses to handle lower-classified data.
 
-**See Also**: [BasePlugin API](../api-reference/core/base-plugin.md), [ADR-002](#adr-002-multi-level-security)
+**See Also**: [BasePlugin API](../api-reference/core/base-plugin.md), [ADR-002](#adr-002-multi-level-security-enforcement)
 
 **Full ADR**: [docs/architecture/decisions/005-frozen-plugin-capability.md](https://github.com/johnm-dta/elspeth/blob/main/docs/architecture/decisions/005-frozen-plugin-capability.md)
 
@@ -401,7 +401,7 @@ def write(self, frame: ClassifiedDataFrame, metadata: dict) -> dict:
 
 **Impact**: Enables resilient pipelines with configurable error handling.
 
-**See Also**: [ADR-006](#adr-006-exception-policy)
+**See Also**: [ADR-006](#adr-006-security-critical-exception-policy)
 
 **Full ADR**: [docs/architecture/decisions/011-error-classification-and-recovery.md](https://github.com/johnm-dta/elspeth/blob/main/docs/architecture/decisions/011-error-classification-and-recovery.md)
 
@@ -525,45 +525,45 @@ python -m elspeth.cli verify-bundle \
 
 **Security Architect**:
 - [ADR-001](#adr-001-design-philosophy) - Fail-closed principle
-- [ADR-002](#adr-002-multi-level-security) - Bell-LaPadula MLS
+- [ADR-002](#adr-002-multi-level-security-enforcement) - Bell-LaPadula MLS
 - [ADR-002a](#adr-002a-trusted-container-model) - Immutable classification
 - [ADR-002b](#adr-002b-immutable-security-policy-metadata) - Immutable security policy
 - [ADR-004](#adr-004-mandatory-baseplugin-inheritance) - Security bones
 - [ADR-005](#adr-005-frozen-plugin-protection) - Dedicated infrastructure
-- [ADR-006](#adr-006-exception-policy) - Security exceptions
-- [ADR-014](#adr-014-reproducibility-bundle) - Tamper-evident bundles
+- [ADR-006](#adr-006-security-critical-exception-policy) - Security exceptions
+- [ADR-014](#adr-014-tamper-evident-reproducibility-bundle) - Tamper-evident bundles
 
 **Plugin Developer**:
 - [ADR-003](#adr-003-plugin-type-registry) - Registry pattern
 - [ADR-004](#adr-004-mandatory-baseplugin-inheritance) - BasePlugin requirements
-- [ADR-007](#adr-007-dual-output-protocol) - Sink metadata return
-- [ADR-008](#adr-008-unified-registry) - Registry API
+- [ADR-007](#adr-007-universal-dual-output-protocol) - Sink metadata return
+- [ADR-008](#adr-008-unified-registry-pattern) - Registry API
 
 **Operations/SRE**:
 - [ADR-001](#adr-001-design-philosophy) - Priority hierarchy
-- [ADR-011](#adr-011-error-classification) - Error recovery strategies
-- [ADR-013](#adr-013-observability) - Logging and telemetry
+- [ADR-011](#adr-011-error-classification-and-recovery) - Error recovery strategies
+- [ADR-013](#adr-013-global-observability-policy) - Logging and telemetry
 
 **Configuration Manager**:
 - [ADR-009](#adr-009-configuration-composition) - Merge order
-- [ADR-010](#adr-010-lifecycle-routing) - Middleware lifecycle
+- [ADR-010](#adr-010-pass-through-lifecycle-and-routing) - Middleware lifecycle
 
 ### By Topic
 
 **Security**:
-- [ADR-001](#adr-001-design-philosophy), [ADR-002](#adr-002-multi-level-security), [ADR-002a](#adr-002a-trusted-container-model), [ADR-002b](#adr-002b-immutable-security-policy-metadata), [ADR-004](#adr-004-mandatory-baseplugin-inheritance), [ADR-005](#adr-005-frozen-plugin-protection), [ADR-006](#adr-006-exception-policy)
+- [ADR-001](#adr-001-design-philosophy), [ADR-002](#adr-002-multi-level-security-enforcement), [ADR-002a](#adr-002a-trusted-container-model), [ADR-002b](#adr-002b-immutable-security-policy-metadata), [ADR-004](#adr-004-mandatory-baseplugin-inheritance), [ADR-005](#adr-005-frozen-plugin-protection), [ADR-006](#adr-006-security-critical-exception-policy)
 
 **Architecture**:
-- [ADR-003](#adr-003-plugin-type-registry), [ADR-007](#adr-007-dual-output-protocol), [ADR-008](#adr-008-unified-registry), [ADR-009](#adr-009-configuration-composition), [ADR-010](#adr-010-lifecycle-routing)
+- [ADR-003](#adr-003-plugin-type-registry), [ADR-007](#adr-007-universal-dual-output-protocol), [ADR-008](#adr-008-unified-registry-pattern), [ADR-009](#adr-009-configuration-composition), [ADR-010](#adr-010-pass-through-lifecycle-and-routing)
 
 **Reliability**:
-- [ADR-011](#adr-011-error-classification), [ADR-012](#adr-012-testing-strategy)
+- [ADR-011](#adr-011-error-classification-and-recovery), [ADR-012](#adr-012-testing-strategy-and-quality-gates)
 
 **Operations**:
-- [ADR-013](#adr-013-observability)
+- [ADR-013](#adr-013-global-observability-policy)
 
 **Compliance**:
-- [ADR-014](#adr-014-reproducibility-bundle)
+- [ADR-014](#adr-014-tamper-evident-reproducibility-bundle)
 
 ---
 
@@ -597,9 +597,9 @@ Use the template at [docs/architecture/decisions/000-template.md](https://github
     ADRs provide the **"why"** behind Elspeth's design. Read them to understand:
 
     - Why security-first priority hierarchy? → [ADR-001](#adr-001-design-philosophy)
-    - Why Bell-LaPadula MLS? → [ADR-002](#adr-002-multi-level-security)
+    - Why Bell-LaPadula MLS? → [ADR-002](#adr-002-multi-level-security-enforcement)
     - Why immutable classification? → [ADR-002a](#adr-002a-trusted-container-model)
     - Why ABC not Protocol? → [ADR-004](#adr-004-mandatory-baseplugin-inheritance)
-    - Why fail-closed exceptions? → [ADR-006](#adr-006-exception-policy)
+    - Why fail-closed exceptions? → [ADR-006](#adr-006-security-critical-exception-policy)
 
     Start with ADR-001 and ADR-002 for foundational understanding.

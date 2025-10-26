@@ -39,13 +39,13 @@ Enumeration of security clearance levels (UNOFFICIAL → SECRET)
 **[Plugin Registry](registries/base.md)**
 Factory pattern for plugin registration and instantiation
 
-**[Datasources](plugins/datasources.md)**
+**[Datasources](plugins/generated-datasources.md)**
 Data loading plugins (CSV, Azure Blob, etc.)
 
-**[Transforms](plugins/transforms.md)**
+**[Transforms](plugins/generated-transforms.md)**
 LLM clients and middleware
 
-**[Sinks](plugins/sinks.md)**
+**[Sinks](plugins/generated-sinks.md)**
 Output plugins (CSV, Excel, signed artifacts, etc.)
 
 ### Pipeline Execution

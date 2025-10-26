@@ -71,6 +71,8 @@ audit:
 docs-deps:  ## Install documentation dependencies from hash-pinned lockfile
 	@echo "Installing documentation dependencies..."
 	@.venv/bin/python -m pip install -r site-docs/requirements-docs.lock --require-hashes
+	@echo "Installing Elspeth package in editable mode (no deps)..."
+	@.venv/bin/python -m pip install -e . --no-deps
 
 .PHONY: docs-generate
 docs-generate:  ## Regenerate auto-generated plugin documentation

@@ -45,22 +45,32 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r site-docs/requirements-docs.lock --require-hashes
+          python -m pip install -e . --no-deps
 
       - name: Generate plugin documentation
         run: |
           python scripts/generate_plugin_docs.py
 
-      - name: Check for documentation changes
-        id: check-changes
+      - name: Ensure generated docs are not committed (Phase 2)
         run: |
-          if git diff --exit-code site-docs/docs/plugins/generated-catalogue.md site-docs/docs/api-reference/plugins/generated-*.md; then
-            echo "No documentation changes detected"
-            echo "has_changes=false" >> $GITHUB_OUTPUT
+          if git ls-files 'site-docs/docs/**/generated-*.md' | grep -q .; then
+            echo "❌ ERROR: Generated documentation files should NOT be committed!"
+            echo ""
+            echo "The following generated files are tracked in git:"
+            git ls-files 'site-docs/docs/**/generated-*.md'
+            echo ""
+            echo "Phase 2 documentation hygiene policy requires generated files to be gitignored."
+            echo ""
+            echo "To fix:"
+            echo "  1. Ensure .gitignore includes: site-docs/docs/api-reference/plugins/generated-*.md"
+            echo "  2. Run: git rm --cached <file>"
+            echo "  3. Commit the removal"
+            echo ""
+            echo "See: site-docs/DOCUMENTATION_HYGIENE.md"
+            exit 1
           else
-            echo "Documentation changes detected"
-            echo "has_changes=true" >> $GITHUB_OUTPUT
+            echo "✅ No generated documentation files are committed (Phase 2 compliant)"
           fi
-        continue-on-error: true
 
       - name: Build documentation (strict mode)
         run: |
@@ -109,6 +119,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r site-docs/requirements-docs.lock --require-hashes
+          python -m pip install -e . --no-deps
 
       - name: Generate plugin documentation
         run: |

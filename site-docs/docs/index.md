@@ -165,7 +165,7 @@ Auto-generated API documentation for developers:
 - **[API Overview](api-reference/index.md)** - Quick navigation and examples
 - **[Core](api-reference/core/base-plugin.md)** - BasePlugin, ClassifiedDataFrame, SecurityLevel
 - **[Registries](api-reference/registries/base.md)** - Plugin registration and factories
-- **[Plugins](api-reference/plugins/datasources.md)** - Datasource, Transform, Sink APIs
+- **[Plugins](api-reference/plugins/generated-datasources.md)** - Datasource, Transform, Sink APIs
 - **[Pipeline](api-reference/pipeline/artifact-pipeline.md)** - Dependency resolution and chaining
 
 ---

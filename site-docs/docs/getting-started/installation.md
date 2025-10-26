@@ -221,4 +221,4 @@ cd .. && rm -rf elspeth
 ---
 
 !!! tip "Production Deployments"
-    For production use, see [Operations > Deployment](../operations/deployment.md) for containerized deployment options with signed artifacts.
+    For production use, see the repository's `docs/operations/` directory for containerized deployment options with signed artifacts.

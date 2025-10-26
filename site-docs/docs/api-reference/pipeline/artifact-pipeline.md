@@ -351,7 +351,7 @@ class CustomSink(BasePlugin):
 
 ## Related Documentation
 
-- **[Sinks](../plugins/sinks.md)** - Sink plugin API
+- **[Sinks](../plugins/generated-sinks.md)** - Sink plugin API
 - **[ClassifiedDataFrame](../core/classified-dataframe.md)** - Data container
 - **[Security Model](../../user-guide/security-model.md)** - Security enforcement
 

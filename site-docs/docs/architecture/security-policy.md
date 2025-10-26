@@ -1006,12 +1006,12 @@ For security certification/accreditation, verify:
 ### Architecture Decision Records (ADRs)
 
 - **[ADR-001: Design Philosophy](adrs.md#adr-001-design-philosophy)** - Security-first principles, fail-closed approach
-- **[ADR-002: Multi-Level Security](adrs.md#adr-002-multi-level-security)** - Bell-LaPadula MLS model (full text)
+- **[ADR-002: Multi-Level Security](adrs.md#adr-002-multi-level-security-enforcement)** - Bell-LaPadula MLS model (full text)
 - **[ADR-002a: Trusted Container Model](adrs.md#adr-002a-trusted-container-model)** - ClassifiedDataFrame immutability
 - **[ADR-002b: Immutable Security Policy Metadata](adrs.md#adr-002b-immutable-security-policy-metadata)** - Author-owned policy, no config overrides
 - **[ADR-003: Plugin Type Registry](adrs.md#adr-003-plugin-type-registry)** - Central registry for validation coverage
 - **[ADR-004: Mandatory BasePlugin Inheritance](adrs.md#adr-004-mandatory-baseplugin-inheritance)** - Security bones design
-- **[ADR-005: Frozen Plugin Capability](adrs.md#adr-005-frozen-plugin-capability)** - Strict level enforcement
+- **[ADR-005: Frozen Plugin Capability](adrs.md#adr-005-frozen-plugin-protection)** - Strict level enforcement
 - **[ADR-006: Security-Critical Exception Policy](adrs.md#adr-006-security-critical-exception-policy)** - Fail-loud invariants
 - **[ADR-014: Tamper-Evident Reproducibility Bundle](adrs.md#adr-014-tamper-evident-reproducibility-bundle)** - Audit trail and compliance
 
