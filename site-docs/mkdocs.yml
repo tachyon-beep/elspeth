@@ -4,8 +4,8 @@ site_name: Elspeth Documentation
 site_description: Extensible Layered Secure Pipeline Engine for Transformation and Handling
 site_url: https://elspeth.readthedocs.io
 
-repo_url: https://github.com/yourusername/elspeth
-repo_name: elspeth
+repo_url: https://github.com/johnm-dta/elspeth
+repo_name: johnm-dta/elspeth
 edit_uri: edit/main/site-docs/docs/
 
 theme:
@@ -93,9 +93,12 @@ nav:
     - Registries:
       - Plugin Registry: api-reference/registries/base.md
     - Plugins:
-      - Datasources: api-reference/plugins/datasources.md
-      - Transforms: api-reference/plugins/transforms.md
-      - Sinks: api-reference/plugins/sinks.md
+      - Datasources: api-reference/plugins/generated-datasources.md
+      - Transforms: api-reference/plugins/generated-transforms.md
+      - Middleware: api-reference/plugins/generated-middlewares.md
+      - Sinks: api-reference/plugins/generated-sinks.md
+      - Aggregators: api-reference/plugins/generated-aggregators.md
+      - Baselines: api-reference/plugins/generated-baselines.md
     - Pipeline:
       - Artifact Pipeline: api-reference/pipeline/artifact-pipeline.md
 

@@ -329,7 +329,7 @@ experiment:
 - **Version**: 0.1.0-dev (pre-release)
 - **Python**: 3.12+
 - **License**: [Check repository for details]
-- **Repository**: [GitHub](https://github.com/yourusername/elspeth)
+- **Repository**: [GitHub](https://github.com/johnm-dta/elspeth)
 
 ### Documentation Organization
 
@@ -345,8 +345,8 @@ This documentation site provides **user-facing guides and API reference**. For c
 
 ### Getting Help
 
-- **Issues**: [GitHub Issues](https://github.com/yourusername/elspeth/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/yourusername/elspeth/discussions)
+- **Issues**: [GitHub Issues](https://github.com/johnm-dta/elspeth/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/johnm-dta/elspeth/discussions)
 - **Security**: See `docs/compliance/incident-response.md` in repository
 
 ---

@@ -26,7 +26,7 @@ The fastest way to get started:
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/elspeth.git
+git clone https://github.com/johnm-dta/elspeth.git
 cd elspeth
 
 # Run bootstrap (creates venv, installs dependencies, runs tests)
@@ -48,7 +48,7 @@ If you prefer manual control:
 ### 1. Clone Repository
 
 ```bash
-git clone https://github.com/yourusername/elspeth.git
+git clone https://github.com/johnm-dta/elspeth.git
 cd elspeth
 ```
 

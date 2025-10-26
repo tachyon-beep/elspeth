@@ -13,7 +13,7 @@ API documentation for **11 sinks** that write experiment outputs.
 ## AnalyticsReportSink
 
 **Configuration Type**: `analytics_report`  
-**Security**: ❓ Unknown  
+**Security**: ✅ Trusted Downgrade  
 **Source**: `src/elspeth/plugins/nodes/sinks/analytics_report.py`
 
 ::: elspeth.plugins.nodes.sinks.analytics_report.AnalyticsReportSink
@@ -30,6 +30,7 @@ API documentation for **11 sinks** that write experiment outputs.
 sinks:
   - type: analytics_report
   security_level: OFFICIAL
+  allow_downgrade: true
 ```
 
 ---
@@ -37,7 +38,7 @@ sinks:
 ## BlobResultSink
 
 **Configuration Type**: `blob`  
-**Security**: ❓ Unknown  
+**Security**: ✅ Trusted Downgrade  
 **Source**: `src/elspeth/plugins/nodes/sinks/blob.py`
 
 ::: elspeth.plugins.nodes.sinks.blob.BlobResultSink
@@ -54,6 +55,7 @@ sinks:
 sinks:
   - type: blob
   security_level: OFFICIAL
+  allow_downgrade: true
 ```
 
 ---
@@ -61,7 +63,7 @@ sinks:
 ## CsvResultSink
 
 **Configuration Type**: `csv_file`  
-**Security**: ❓ Unknown  
+**Security**: ✅ Trusted Downgrade  
 **Source**: `src/elspeth/plugins/nodes/sinks/csv_file.py`
 
 ::: elspeth.plugins.nodes.sinks.csv_file.CsvResultSink
@@ -78,6 +80,7 @@ sinks:
 sinks:
   - type: csv_file
   security_level: OFFICIAL
+  allow_downgrade: true
 ```
 
 ---
@@ -85,7 +88,7 @@ sinks:
 ## EmbeddingsStoreSink
 
 **Configuration Type**: `embeddings_store`  
-**Security**: ❓ Unknown  
+**Security**: ✅ Trusted Downgrade  
 **Source**: `src/elspeth/plugins/nodes/sinks/embeddings_store.py`
 
 ::: elspeth.plugins.nodes.sinks.embeddings_store.EmbeddingsStoreSink
@@ -102,6 +105,7 @@ sinks:
 sinks:
   - type: embeddings_store
   security_level: OFFICIAL
+  allow_downgrade: true
 ```
 
 ---
@@ -109,7 +113,7 @@ sinks:
 ## ExcelResultSink
 
 **Configuration Type**: `excel`  
-**Security**: ❓ Unknown  
+**Security**: ✅ Trusted Downgrade  
 **Source**: `src/elspeth/plugins/nodes/sinks/excel.py`
 
 ::: elspeth.plugins.nodes.sinks.excel.ExcelResultSink
@@ -126,6 +130,7 @@ sinks:
 sinks:
   - type: excel
   security_level: OFFICIAL
+  allow_downgrade: true
 ```
 
 ---
@@ -133,7 +138,7 @@ sinks:
 ## FileCopySink
 
 **Configuration Type**: `file_copy`  
-**Security**: ❓ Unknown  
+**Security**: ✅ Trusted Downgrade  
 **Source**: `src/elspeth/plugins/nodes/sinks/file_copy.py`
 
 ::: elspeth.plugins.nodes.sinks.file_copy.FileCopySink
@@ -150,6 +155,7 @@ sinks:
 sinks:
   - type: file_copy
   security_level: OFFICIAL
+  allow_downgrade: true
 ```
 
 ---
@@ -253,7 +259,7 @@ sinks:
 ## ZipResultSink
 
 **Configuration Type**: `zip_bundle`  
-**Security**: ❓ Unknown  
+**Security**: ✅ Trusted Downgrade  
 **Source**: `src/elspeth/plugins/nodes/sinks/zip_bundle.py`
 
 ::: elspeth.plugins.nodes.sinks.zip_bundle.ZipResultSink
@@ -270,6 +276,7 @@ sinks:
 sinks:
   - type: zip_bundle
   security_level: OFFICIAL
+  allow_downgrade: true
 ```
 
 ---

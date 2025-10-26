@@ -11,25 +11,24 @@ def test_cli_single_run_executes_real_config(tmp_path):
 
     bundle_root = tmp_path / "bundles"
     settings_path = tmp_path / "settings.yaml"
+    # ADR-002-B: security_level removed from config (plugin-author-owned)
+    # Plugins inherit security_level from parent context or use their hard-coded defaults
     settings_path.write_text(
         f"""
 integration:
   datasource:
     plugin: local_csv
-    security_level: official
     determinism_level: guaranteed
     options:
       path: "{data_path.as_posix()}"
       retain_local: false
   llm:
     plugin: mock
-    security_level: official
     determinism_level: guaranteed
     options:
       seed: 101
   sinks:
     - plugin: local_bundle
-      security_level: official
       determinism_level: guaranteed
       options:
         base_path: "{bundle_root.as_posix()}"
@@ -44,7 +43,6 @@ integration:
     - colour
   aggregator_plugins:
     - name: prompt_variants
-      security_level: official
       determinism_level: guaranteed
       options:
         prompt_template: |
@@ -55,7 +53,6 @@ integration:
         max_attempts: 1
         variant_llm:
           plugin: mock
-          security_level: official
           determinism_level: guaranteed
           options:
             seed: 202

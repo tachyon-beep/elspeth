@@ -61,18 +61,60 @@ Fail-open behavior creates attack surfaces where adversaries can trigger control
 | Encryption key not found | Store plaintext | Refuse to store |
 | Security level unknown | Assume UNOFFICIAL | Require explicit declaration |
 | Signature verification fails | Accept artifact | Reject artifact |
+| Operating level not set | Return declared level | `RuntimeError` (fail loudly) |
+
+### Fail-Loud Principle (NO Graceful Degradation)
+
+**Mandatory Requirement**: When anything is not 100% correct in security-critical paths, we **FAIL LOUD** immediately with obvious errors.
+
+**Policy - FAIL LOUD**:
+- ✅ **REQUIRED**: Raise `RuntimeError`, `SecurityValidationError`, or similar exception
+- ✅ **REQUIRED**: Include detailed diagnostic message explaining WHAT failed and WHY
+- ✅ **REQUIRED**: Fail immediately at point of detection (don't defer or accumulate errors)
+- ❌ **FORBIDDEN**: Graceful degradation (fallbacks, defaults, "best effort")
+- ❌ **FORBIDDEN**: Silent failures (logging warning and continuing)
+- ❌ **FORBIDDEN**: Returning None/False/empty values on security failures
+
+**Rationale**:
+In high-security systems, graceful degradation is an attack vector. If a security control fails,
+we want to **FAIL LOUD** immediately:
+1. **Stops execution immediately** (prevents damage from propagating)
+2. **Makes the failure impossible to ignore** (forces investigation)
+3. **Provides diagnostic context** (enables rapid root cause analysis)
+4. **Prevents partial operations** (all-or-nothing, no half-broken states)
+
+Graceful degradation creates situations where:
+- Operators don't notice security failures until damage is done
+- Attackers can trigger fallback paths to bypass controls
+- Systems limp along in insecure states ("works on my machine")
+- Root causes are hidden by layers of fallback logic
+
+**Examples - FAIL LOUD**:
+
+| Scenario | ❌ Graceful Degradation (FORBIDDEN) | ✅ Fail Loud (REQUIRED) |
+|----------|-------------------------------------|----------------------------------------|
+| Operating level not set | `return self.security_level` | `RuntimeError` with diagnostic message |
+| Plugin context missing | Return default context | `RuntimeError` - context must be attached |
+| Security level validation fails | Log warning, continue | `SecurityValidationError` - abort pipeline |
+| Signature missing from artifact | Accept unsigned artifact | `SignatureValidationError` - reject artifact |
+| Clearance insufficient | Skip plugin, continue | `SecurityValidationError` - abort experiment |
 
 **Implementation Requirements**:
 - All security validation functions MUST raise exceptions on failure (never return `False` or `None`)
+- Exception messages MUST be detailed and actionable (include what/why/where/when)
+- No "try to recover" logic in security-critical paths (fail immediately, recover at boundaries)
 - Convenience fallbacks for security controls are FORBIDDEN (no "skip SSL verification" flags)
 - Feature flags for security controls FORBIDDEN in production (testing/development only)
 - Audit logging for attempted bypasses (capture security control failure attempts)
+- Programming errors (wrong lifecycle usage) MUST raise `RuntimeError` (loud and obvious)
 
 **Reference Implementations**:
 - `classified_data.py:90-102` – Fail-closed when stack inspection unavailable (CVE-ADR-002-A-003 fix)
 - `path_guard.py` – Fail-closed when `allowed_base_path` missing (test_runner_characterization.py:378)
+- `plugin.py:get_effective_level()` – `RuntimeError` if operating_level not set (no fallback to security_level)
+- `suite_runner._validate_experiment_security()` – `SecurityValidationError` on insufficient clearance (aborts pipeline)
 
-**Related**: ADR-002 (MLS enforcement), ADR-002-A (Trusted container model)
+**Related**: ADR-002 (MLS enforcement), ADR-002-A (Trusted container model), ADR-004 (BasePlugin security bones)
 
 ## Consequences
 
@@ -114,5 +156,5 @@ Fail-open behavior creates attack surfaces where adversaries can trigger control
 
 ---
 
-**Last Updated**: 2025-10-25 (Added Fail-Closed Principle section)
+**Last Updated**: 2025-10-26 (Added Fail-Loud Principle - no graceful degradation in security controls)
 **Author(s)**: Architecture Team

@@ -14,6 +14,7 @@ Elspeth's design is guided by documented architecture decisions. This catalog pr
 | [001](#adr-001-design-philosophy) | Design Philosophy | ✅ Accepted | Foundation | 🔴 Critical |
 | [002](#adr-002-multi-level-security) | Multi-Level Security Enforcement | ✅ Accepted | Security | 🔴 Critical |
 | [002a](#adr-002a-trusted-container-model) | Trusted Container Model (ClassifiedDataFrame) | ✅ Accepted | Security | 🔴 Critical |
+| [002b](#adr-002b-immutable-security-policy-metadata) | Immutable Security Policy Metadata | 🟡 Proposed | Security | 🔴 Critical |
 | [003](#adr-003-plugin-type-registry) | Plugin Type Registry | ✅ Accepted | Architecture | 🟡 High |
 | [004](#adr-004-mandatory-baseplugin-inheritance) | Mandatory BasePlugin Inheritance | ✅ Accepted | Security | 🔴 Critical |
 | [005](#adr-005-frozen-plugin-protection) | Frozen Plugin Protection | ✅ Accepted | Security | 🟡 High |
@@ -25,6 +26,7 @@ Elspeth's design is guided by documented architecture decisions. This catalog pr
 | [011](#adr-011-error-classification) | Error Classification and Recovery | ✅ Accepted | Reliability | 🟢 Medium |
 | [012](#adr-012-testing-strategy) | Testing Strategy and Quality Gates | ✅ Accepted | Quality | 🟡 High |
 | [013](#adr-013-observability) | Global Observability Policy | ✅ Accepted | Operations | 🟢 Medium |
+| [014](#adr-014-reproducibility-bundle) | Tamper-Evident Reproducibility Bundle | ✅ Accepted | Compliance | 🔴 Critical |
 
 ---
 
@@ -46,7 +48,7 @@ Elspeth's design is guided by documented architecture decisions. This catalog pr
 
 **Impact**: Guides all subsequent architectural decisions. When priorities conflict, higher-ranked wins.
 
-**Full ADR**: [docs/architecture/decisions/001-design-philosophy.md](https://github.com/yourusername/elspeth/blob/main/docs/architecture/decisions/001-design-philosophy.md)
+**Full ADR**: [docs/architecture/decisions/001-design-philosophy.md](https://github.com/johnm-dta/elspeth/blob/main/docs/architecture/decisions/001-design-philosophy.md)
 
 ---
 
@@ -75,7 +77,7 @@ Elspeth's design is guided by documented architecture decisions. This catalog pr
 
 **See Also**: [Security Model Guide](../user-guide/security-model.md), [ADR-002a](#adr-002a-trusted-container-model)
 
-**Full ADR**: [docs/architecture/decisions/002-security-architecture.md](https://github.com/yourusername/elspeth/blob/main/docs/architecture/decisions/002-security-architecture.md)
+**Full ADR**: [docs/architecture/decisions/002-security-architecture.md](https://github.com/johnm-dta/elspeth/blob/main/docs/architecture/decisions/002-security-architecture.md)
 
 ---
 
@@ -111,7 +113,39 @@ frame = ClassifiedDataFrame(data, SecurityLevel.OFFICIAL)  # SecurityValidationE
 
 **See Also**: [ClassifiedDataFrame API](../api-reference/core/classified-dataframe.md), [ADR-002](#adr-002-multi-level-security)
 
-**Full ADR**: [docs/architecture/decisions/002-a-trusted-container-model.md](https://github.com/yourusername/elspeth/blob/main/docs/architecture/decisions/002-a-trusted-container-model.md)
+**Full ADR**: [docs/architecture/decisions/002-a-trusted-container-model.md](https://github.com/johnm-dta/elspeth/blob/main/docs/architecture/decisions/002-a-trusted-container-model.md)
+
+---
+
+### ADR-002b: Immutable Security Policy Metadata
+
+**Status**: 🟡 Proposed (2025-10-26)
+
+**Summary**: Security policy metadata (`security_level`, `allow_downgrade`) is immutable, author-owned, and cannot be overridden via configuration.
+
+**Problem Prevented**:
+```yaml
+# ❌ REJECTED: Configuration overrides security policy
+datasource:
+  type: azure_blob_secret
+  security_level: UNOFFICIAL  # ← Override from SECRET to UNOFFICIAL
+  allow_downgrade: true       # ← Enable downgrade for frozen plugin
+```
+
+**Policy Field Classification**:
+- **Immutable** (plugin-author-owned): `security_level`, `allow_downgrade`, `max_operating_level`
+- **Mutable** (operator-configurable): `path`, `container`, `timeout`, `batch_size`, etc.
+
+**Registry Enforcement**:
+- Configuration exposing forbidden policy fields → `RegistrationError`
+- Security policy hardcoded in plugin implementation, certified with code
+- Aligns with ADR-005 (frozen plugins) and ADR-014 (reproducibility bundles)
+
+**Impact**: Prevents silent security bypass via configuration. Security policy is code-certified, not user-configurable.
+
+**See Also**: [ADR-002](#adr-002-multi-level-security), [ADR-005](#adr-005-frozen-plugin-protection)
+
+**Full ADR**: [docs/architecture/decisions/002-b-security-policy-metadata.md](https://github.com/johnm-dta/elspeth/blob/main/docs/architecture/decisions/002-b-security-policy-metadata.md)
 
 ---
 
@@ -138,7 +172,7 @@ frame = ClassifiedDataFrame(data, SecurityLevel.OFFICIAL)  # SecurityValidationE
 
 **See Also**: [BasePlugin API](../api-reference/core/base-plugin.md), [ADR-002](#adr-002-multi-level-security)
 
-**Full ADR**: [docs/architecture/decisions/004-mandatory-baseplugin-inheritance.md](https://github.com/yourusername/elspeth/blob/main/docs/architecture/decisions/004-mandatory-baseplugin-inheritance.md)
+**Full ADR**: [docs/architecture/decisions/004-mandatory-baseplugin-inheritance.md](https://github.com/johnm-dta/elspeth/blob/main/docs/architecture/decisions/004-mandatory-baseplugin-inheritance.md)
 
 ---
 
@@ -174,7 +208,7 @@ frozen.validate_can_operate_at_level(SecurityLevel.OFFICIAL)  # Raises SecurityV
 
 **See Also**: [BasePlugin API](../api-reference/core/base-plugin.md), [ADR-002](#adr-002-multi-level-security)
 
-**Full ADR**: [docs/architecture/decisions/005-frozen-plugin-capability.md](https://github.com/yourusername/elspeth/blob/main/docs/architecture/decisions/005-frozen-plugin-capability.md)
+**Full ADR**: [docs/architecture/decisions/005-frozen-plugin-capability.md](https://github.com/johnm-dta/elspeth/blob/main/docs/architecture/decisions/005-frozen-plugin-capability.md)
 
 ---
 
@@ -211,7 +245,7 @@ plugin.validate_can_operate_at_level(level)  # Raises SecurityValidationError �
 
 **See Also**: [ADR-001](#adr-001-design-philosophy) (Fail-Closed Principle)
 
-**Full ADR**: [docs/architecture/decisions/006-security-critical-exception-policy.md](https://github.com/yourusername/elspeth/blob/main/docs/architecture/decisions/006-security-critical-exception-policy.md)
+**Full ADR**: [docs/architecture/decisions/006-security-critical-exception-policy.md](https://github.com/johnm-dta/elspeth/blob/main/docs/architecture/decisions/006-security-critical-exception-policy.md)
 
 ---
 
@@ -238,7 +272,7 @@ plugin.validate_can_operate_at_level(level)  # Raises SecurityValidationError �
 
 **See Also**: [Plugin Registry API](../api-reference/registries/base.md)
 
-**Full ADR**: [docs/architecture/decisions/003-plugin-type-registry.md](https://github.com/yourusername/elspeth/blob/main/docs/architecture/decisions/003-plugin-type-registry.md)
+**Full ADR**: [docs/architecture/decisions/003-plugin-type-registry.md](https://github.com/johnm-dta/elspeth/blob/main/docs/architecture/decisions/003-plugin-type-registry.md)
 
 ---
 
@@ -268,7 +302,7 @@ def write(self, frame: ClassifiedDataFrame, metadata: dict) -> dict:
 
 **See Also**: [Artifact Pipeline API](../api-reference/pipeline/artifact-pipeline.md)
 
-**Full ADR**: [docs/architecture/decisions/007-universal-dual-output-protocol.md](https://github.com/yourusername/elspeth/blob/main/docs/architecture/decisions/007-universal-dual-output-protocol.md)
+**Full ADR**: [docs/architecture/decisions/007-universal-dual-output-protocol.md](https://github.com/johnm-dta/elspeth/blob/main/docs/architecture/decisions/007-universal-dual-output-protocol.md)
 
 ---
 
@@ -290,7 +324,7 @@ def write(self, frame: ClassifiedDataFrame, metadata: dict) -> dict:
 
 **See Also**: [Plugin Registry API](../api-reference/registries/base.md)
 
-**Full ADR**: [docs/architecture/decisions/008-unified-registry-pattern.md](https://github.com/yourusername/elspeth/blob/main/docs/architecture/decisions/008-unified-registry-pattern.md)
+**Full ADR**: [docs/architecture/decisions/008-unified-registry-pattern.md](https://github.com/johnm-dta/elspeth/blob/main/docs/architecture/decisions/008-unified-registry-pattern.md)
 
 ---
 
@@ -323,7 +357,7 @@ def write(self, frame: ClassifiedDataFrame, metadata: dict) -> dict:
 
 **See Also**: [Configuration Guide](../user-guide/configuration.md)
 
-**Full ADR**: [docs/architecture/decisions/009-configuration-composition.md](https://github.com/yourusername/elspeth/blob/main/docs/architecture/decisions/009-configuration-composition.md)
+**Full ADR**: [docs/architecture/decisions/009-configuration-composition.md](https://github.com/johnm-dta/elspeth/blob/main/docs/architecture/decisions/009-configuration-composition.md)
 
 ---
 
@@ -344,7 +378,7 @@ def write(self, frame: ClassifiedDataFrame, metadata: dict) -> dict:
 
 **Impact**: Enables suite-aware middleware (health monitoring, cost aggregation).
 
-**Full ADR**: [docs/architecture/decisions/010-pass-through-lifecycle-and-routing.md](https://github.com/yourusername/elspeth/blob/main/docs/architecture/decisions/010-pass-through-lifecycle-and-routing.md)
+**Full ADR**: [docs/architecture/decisions/010-pass-through-lifecycle-and-routing.md](https://github.com/johnm-dta/elspeth/blob/main/docs/architecture/decisions/010-pass-through-lifecycle-and-routing.md)
 
 ---
 
@@ -369,7 +403,7 @@ def write(self, frame: ClassifiedDataFrame, metadata: dict) -> dict:
 
 **See Also**: [ADR-006](#adr-006-exception-policy)
 
-**Full ADR**: [docs/architecture/decisions/011-error-classification-and-recovery.md](https://github.com/yourusername/elspeth/blob/main/docs/architecture/decisions/011-error-classification-and-recovery.md)
+**Full ADR**: [docs/architecture/decisions/011-error-classification-and-recovery.md](https://github.com/johnm-dta/elspeth/blob/main/docs/architecture/decisions/011-error-classification-and-recovery.md)
 
 ---
 
@@ -398,7 +432,7 @@ def write(self, frame: ClassifiedDataFrame, metadata: dict) -> dict:
 
 **See Also**: Testing documentation in developer docs
 
-**Full ADR**: [docs/architecture/decisions/012-testing-strategy-and-quality-gates.md](https://github.com/yourusername/elspeth/blob/main/docs/architecture/decisions/012-testing-strategy-and-quality-gates.md)
+**Full ADR**: [docs/architecture/decisions/012-testing-strategy-and-quality-gates.md](https://github.com/johnm-dta/elspeth/blob/main/docs/architecture/decisions/012-testing-strategy-and-quality-gates.md)
 
 ---
 
@@ -430,7 +464,58 @@ def write(self, frame: ClassifiedDataFrame, metadata: dict) -> dict:
 
 **See Also**: Audit logging documentation in operations docs
 
-**Full ADR**: [docs/architecture/decisions/013-global-observability-policy.md](https://github.com/yourusername/elspeth/blob/main/docs/architecture/decisions/013-global-observability-policy.md)
+**Full ADR**: [docs/architecture/decisions/013-global-observability-policy.md](https://github.com/johnm-dta/elspeth/blob/main/docs/architecture/decisions/013-global-observability-policy.md)
+
+---
+
+### ADR-014: Tamper-Evident Reproducibility Bundle
+
+**Status**: ✅ Accepted (2025-10-26)
+
+**Summary**: Elspeth emits a single, cryptographically signed, tamper-evident reproducibility bundle for every experiment suite execution.
+
+**Compliance Requirements**:
+- Government PSPF, HIPAA, PCI-DSS, defence export control
+- Auditors must verify: what data/config/prompts/code produced results
+- Detect post-run modifications to artifacts
+
+**Core Requirements**:
+
+1. **Mandatory Reproducibility Sink**:
+   - `ReproducibilityBundleSink` enabled by default in production templates
+   - Explicit opt-out required with formal risk acceptance
+
+2. **Comprehensive Contents**:
+   - Experiment results (JSON + sanitized CSV)
+   - Source data snapshot + datasource config
+   - Full merged configuration + rendered prompts
+   - Plugin source code used during run
+   - Optional framework source code
+   - All artifacts from other sinks (logs, analytics)
+   - Sanitization metadata
+
+3. **Cryptographic Integrity**:
+   - Every file hashed (SHA-256) and recorded in `MANIFEST.json`
+   - Manifest signed using configured algorithm: `hmac-sha256`, `hmac-sha512`, `rsa-pss-sha256`, `ecdsa-p256-sha256`
+   - Signature stored in `SIGNATURE.json`
+   - Final archive: `.tar` or `.tar.gz` with signed manifest
+
+4. **Immutable Policy Metadata** (ADR-002-B alignment):
+   - Sink has hard-coded `security_level=SecurityLevel.UNOFFICIAL` and `allow_downgrade=True`
+   - Operators cannot lower signing requirements via configuration
+
+**Verification**:
+```bash
+python -m elspeth.cli verify-bundle \
+  --bundle-path outputs/bundle_2025-10-26_experiment.tar.gz \
+  --public-key /path/to/signing.pub
+```
+
+**Impact**: Every run is independently auditable with tamper detection. Meets compliance requirements for reproducibility.
+
+**See Also**: [ADR-002-B](#adr-002b-immutable-security-policy-metadata), Artifact signing documentation
+
+**Full ADR**: [docs/architecture/decisions/014-reproducibility-bundle.md](https://github.com/johnm-dta/elspeth/blob/main/docs/architecture/decisions/014-reproducibility-bundle.md)
 
 ---
 
@@ -442,9 +527,11 @@ def write(self, frame: ClassifiedDataFrame, metadata: dict) -> dict:
 - [ADR-001](#adr-001-design-philosophy) - Fail-closed principle
 - [ADR-002](#adr-002-multi-level-security) - Bell-LaPadula MLS
 - [ADR-002a](#adr-002a-trusted-container-model) - Immutable classification
+- [ADR-002b](#adr-002b-immutable-security-policy-metadata) - Immutable security policy
 - [ADR-004](#adr-004-mandatory-baseplugin-inheritance) - Security bones
 - [ADR-005](#adr-005-frozen-plugin-protection) - Dedicated infrastructure
 - [ADR-006](#adr-006-exception-policy) - Security exceptions
+- [ADR-014](#adr-014-reproducibility-bundle) - Tamper-evident bundles
 
 **Plugin Developer**:
 - [ADR-003](#adr-003-plugin-type-registry) - Registry pattern
@@ -464,7 +551,7 @@ def write(self, frame: ClassifiedDataFrame, metadata: dict) -> dict:
 ### By Topic
 
 **Security**:
-- [ADR-001](#adr-001-design-philosophy), [ADR-002](#adr-002-multi-level-security), [ADR-002a](#adr-002a-trusted-container-model), [ADR-004](#adr-004-mandatory-baseplugin-inheritance), [ADR-005](#adr-005-frozen-plugin-protection), [ADR-006](#adr-006-exception-policy)
+- [ADR-001](#adr-001-design-philosophy), [ADR-002](#adr-002-multi-level-security), [ADR-002a](#adr-002a-trusted-container-model), [ADR-002b](#adr-002b-immutable-security-policy-metadata), [ADR-004](#adr-004-mandatory-baseplugin-inheritance), [ADR-005](#adr-005-frozen-plugin-protection), [ADR-006](#adr-006-exception-policy)
 
 **Architecture**:
 - [ADR-003](#adr-003-plugin-type-registry), [ADR-007](#adr-007-dual-output-protocol), [ADR-008](#adr-008-unified-registry), [ADR-009](#adr-009-configuration-composition), [ADR-010](#adr-010-lifecycle-routing)
@@ -474,6 +561,9 @@ def write(self, frame: ClassifiedDataFrame, metadata: dict) -> dict:
 
 **Operations**:
 - [ADR-013](#adr-013-observability)
+
+**Compliance**:
+- [ADR-014](#adr-014-reproducibility-bundle)
 
 ---
 
@@ -491,7 +581,7 @@ Create an ADR when making decisions about:
 
 ### ADR Template
 
-Use the template at [docs/architecture/decisions/000-template.md](https://github.com/yourusername/elspeth/blob/main/docs/architecture/decisions/000-template.md).
+Use the template at [docs/architecture/decisions/000-template.md](https://github.com/johnm-dta/elspeth/blob/main/docs/architecture/decisions/000-template.md).
 
 ---
 

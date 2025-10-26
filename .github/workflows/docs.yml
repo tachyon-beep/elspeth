@@ -1,0 +1,120 @@
+name: Documentation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'site-docs/**'
+      - 'scripts/generate_plugin_docs.py'
+      - 'src/elspeth/plugins/**'
+      - 'docs/architecture/decisions/*.md'
+      - '.github/workflows/docs.yml'
+  pull_request:
+    paths:
+      - 'site-docs/**'
+      - 'scripts/generate_plugin_docs.py'
+      - 'src/elspeth/plugins/**'
+      - 'docs/architecture/decisions/*.md'
+      - '.github/workflows/docs.yml'
+  workflow_dispatch:  # Allow manual triggering
+
+permissions:
+  contents: write  # Needed for GitHub Pages deployment
+  pages: write
+  id-token: write
+
+jobs:
+  build:
+    name: Build Documentation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Needed for git metadata
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: 'site-docs/requirements-docs.lock'
+
+      - name: Install documentation dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r site-docs/requirements-docs.lock --require-hashes
+
+      - name: Generate plugin documentation
+        run: |
+          python scripts/generate_plugin_docs.py
+
+      - name: Check for documentation changes
+        id: check-changes
+        run: |
+          if git diff --exit-code site-docs/docs/plugins/generated-catalogue.md site-docs/docs/api-reference/plugins/generated-*.md; then
+            echo "No documentation changes detected"
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+          else
+            echo "Documentation changes detected"
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+          fi
+        continue-on-error: true
+
+      - name: Build documentation (strict mode)
+        run: |
+          cd site-docs
+          mkdocs build --strict
+
+      - name: Upload documentation artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: documentation-site
+          path: site-docs/site/
+          retention-days: 7
+
+      - name: Check for broken links (optional)
+        if: github.event_name == 'pull_request'
+        run: |
+          # Install linkchecker (optional - comment out if not needed)
+          # python -m pip install linkchecker
+          # cd site-docs/site
+          # linkchecker --check-extern --ignore-url="^https://github.com/johnm-dta/elspeth" index.html
+          echo "Link checking skipped (install linkchecker to enable)"
+        continue-on-error: true
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: 'site-docs/requirements-docs.lock'
+
+      - name: Install documentation dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r site-docs/requirements-docs.lock --require-hashes
+
+      - name: Generate plugin documentation
+        run: |
+          python scripts/generate_plugin_docs.py
+
+      - name: Deploy to GitHub Pages
+        run: |
+          cd site-docs
+          mkdocs gh-deploy --force --no-history

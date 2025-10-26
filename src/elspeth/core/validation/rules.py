@@ -44,8 +44,8 @@ def _validate_security_level_fields(
     if normalized_entry and normalized_options and normalized_entry != normalized_options:
         report.add_error("Conflicting security_level values between definition and options", context=context)
 
-    if not normalized_entry and not normalized_options:
-        report.add_error("Plugin must declare a security_level", context=context)
+    # ADR-002-B: security_level is OPTIONAL (defaults to UNOFFICIAL if not provided)
+    # Removed check that required security_level to be declared
 
     return normalized_entry or normalized_options
 

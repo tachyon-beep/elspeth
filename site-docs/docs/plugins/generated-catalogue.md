@@ -14,7 +14,7 @@
 
 | Plugin | Description | Security | Key Parameters |
 |--------|-------------|----------|----------------|
-| **`blob`** | Read CSV data from Azure Blob Storage using configured profiles. | ❓ Unknown | None |
+| **`blob`** | Read CSV data from Azure Blob Storage using configured profiles. | ✅ Trusted Downgrade | None |
 
 ---
 
@@ -31,23 +31,86 @@
 
 ---
 
+## LLM Middleware
+
+**6 middleware plugins** for request/response processing.
+
+| Plugin | Description | Security |
+|--------|-------------|----------|
+| **`audit`** | Structured audit logger for LLM requests and responses. | ✅ Trusted Downgrade |
+| **`azure_content_safety`** | Use Azure Content Safety service to screen prompts before submission. | ✅ Trusted Downgrade |
+| **`classified_material`** | Detect and block classified material markings in prompts with advanced fuzzy matching. | ✅ Trusted Downgrade |
+| **`health_monitor`** | Emit heartbeat logs summarising middleware activity. | ✅ Trusted Downgrade |
+| **`pii_shield`** | Enhanced PII detection with blind review, checksum validation, and severity scoring. | ✅ Trusted Downgrade |
+| **`prompt_shield`** | Basic middleware that masks or blocks unsafe prompts before sending to the LLM. | ✅ Trusted Downgrade |
+
+---
+
 ## Saving Results (Sinks)
 
 **11 sink plugins** available for writing experiment outputs.
 
 | Plugin | Description | Security | Key Parameters |
 |--------|-------------|----------|----------------|
-| **`analytics_report`** | Generate a JSON analytics report (and optional Markdown) summarizing results and failures. | ❓ Unknown | None |
-| **`blob`** | Upload artifacts to Azure Blob Storage with optional path constraints. | ❓ Unknown | None |
-| **`csv_file`** | Result sink that writes experiment results to CSV files with formula sanitization. | ❓ Unknown | None |
-| **`embeddings_store`** | Persist embeddings into a vector store backend (pgvector/Azure Search). | ❓ Unknown | None |
-| **`excel`** | Persist experiment payloads into a timestamped Excel workbook. | ❓ Unknown | None |
-| **`file_copy`** | Copy a single input artifact to a destination path. | ❓ Unknown | None |
+| **`analytics_report`** | Generate a JSON analytics report (and optional Markdown) summarizing results and failures. | ✅ Trusted Downgrade | None |
+| **`blob`** | Upload artifacts to Azure Blob Storage with optional path constraints. | ✅ Trusted Downgrade | None |
+| **`csv_file`** | Result sink that writes experiment results to CSV files with formula sanitization. | ✅ Trusted Downgrade | None |
+| **`embeddings_store`** | Persist embeddings into a vector store backend (pgvector/Azure Search). | ✅ Trusted Downgrade | None |
+| **`excel`** | Persist experiment payloads into a timestamped Excel workbook. | ✅ Trusted Downgrade | None |
+| **`file_copy`** | Copy a single input artifact to a destination path. | ✅ Trusted Downgrade | None |
 | **`local_bundle`** | Create a local folder bundle with payload, metadata, and artifacts. | ❓ Unknown | None |
 | **`repository`** | Common repository sink behavior (auth, retries, dry-run, error handling). | ❓ Unknown | None |
 | **`reproducibility_bundle`** | Create a tamper-evident reproducibility bundle with results, metadata, and code. | ❓ Unknown | None |
 | **`signed`** | Write a signed artifact bundle (e.g., SBOM + signature) to disk. | ❓ Unknown | None |
-| **`zip_bundle`** | Bundle results, manifest, and optional CSV into a compressed ZIP archive at the configured path. | ❓ Unknown | None |
+| **`zip_bundle`** | Bundle results, manifest, and optional CSV into a compressed ZIP archive at the configured path. | ✅ Trusted Downgrade | None |
+
+---
+
+## Row Plugins
+
+**1 row plugins** available.
+
+| Plugin | Description | Security |
+|--------|-------------|----------|
+| **`score_extractor`** | Extract numeric scores from LLM responses. | ✅ Trusted Downgrade |
+
+---
+
+## Aggregators
+
+**8 aggregators** available.
+
+| Plugin | Description | Security |
+|--------|-------------|----------|
+| **`cost_summary`** | Aggregate cost and token usage metrics across all rows. | ✅ Trusted Downgrade |
+| **`latency_summary`** | Aggregate latency metrics across all rows. | ✅ Trusted Downgrade |
+| **`rationale_analysis`** | Analyze LLM rationales to understand scoring patterns and provide interpretability. | ❓ Unknown |
+| **`score_agreement`** | Assess agreement/reliability across criteria scores. | ✅ Trusted Downgrade |
+| **`score_power`** | Estimate power and required sample size for mean comparisons. | ❓ Unknown |
+| **`score_recommendation`** | Generate a lightweight recommendation based on score statistics. | ✅ Trusted Downgrade |
+| **`score_stats`** | Aggregate score statistics across all rows. | ✅ Trusted Downgrade |
+| **`score_variant_ranking`** | Compute a simple composite ranking score for an experiment. | ✅ Trusted Downgrade |
+
+---
+
+## Baseline Comparison
+
+**12 baseline comparison** available.
+
+| Plugin | Description | Security |
+|--------|-------------|----------|
+| **`category_effects`** | Analyze how categorical variables affect score distributions. | ✅ Trusted Downgrade |
+| **`criteria_effects`** | Perform per-criterion statistical comparisons between baseline and variant. | ✅ Trusted Downgrade |
+| **`outlier_detection`** | Identify rows with largest score disagreements between baseline and variant. | ✅ Trusted Downgrade |
+| **`referee_alignment`** | Compare LLM scores against human referee/expert judgments. | ✅ Trusted Downgrade |
+| **`score_assumptions`** | Report normality and variance diagnostics for baseline vs. variant scores. | ✅ Trusted Downgrade |
+| **`score_bayesian`** | Estimate posterior probability that a variant beats the baseline. | ✅ Trusted Downgrade |
+| **`score_cliffs_delta`** | Compute Cliff's delta effect size between baseline and variant. | ✅ Trusted Downgrade |
+| **`score_delta`** | Compare score statistics between baseline and variant. | ✅ Trusted Downgrade |
+| **`score_distribution`** | Assess distribution shifts between baseline and variant deployments. | ✅ Trusted Downgrade |
+| **`score_flip_analysis`** | Analyze score direction changes (flips) between baseline and variant. | ✅ Trusted Downgrade |
+| **`score_practical`** | Assess practical significance (meaningful change, NNT, success deltas). | ✅ Trusted Downgrade |
+| **`score_significance`** | Compare baseline and variant using effect sizes and t-tests. | ✅ Trusted Downgrade |
 
 ---
 
