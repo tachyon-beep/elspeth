@@ -4,7 +4,7 @@
 
 Accepted (2025-10-25)
 
-Augments [ADR-002](002-security-architecture.md)
+Extends [ADR-002](002-security-architecture.md)
 
 ## Context
 

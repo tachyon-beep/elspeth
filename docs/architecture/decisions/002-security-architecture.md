@@ -18,6 +18,39 @@ by the time a clearance violation is detected, the pipeline may have already ret
 sensitive data into memory. We need a fail-fast mechanism that prevents execution from
 starting with misconfigured security levels.
 
+### Attack Scenario: Misconfigured Pipeline Without Fail-Fast
+
+**Scenario**: Operator misconfigures a pipeline with incompatible security levels:
+
+```python
+# config/experiments/classified_analysis.yaml
+datasource:
+  type: "secret_government_data"
+  clearance: SECRET
+
+sinks:
+  - type: "public_csv_export"
+    path: "outputs/public_report.csv"
+    clearance: UNOFFICIAL
+```
+
+**Without ADR-002 (no fail-fast validation)**:
+1. Pipeline construction succeeds (no early validation)
+2. Datasource retrieves SECRET-classified data into memory
+3. Data flows through transforms
+4. **At sink write time**: Clearance check finally triggers - UNOFFICIAL sink cannot write SECRET data
+5. Pipeline aborts, but **SECRET data has already been loaded into memory**
+6. Memory dumps, error logs, or debugging outputs may leak classified data
+
+**With ADR-002 (fail-fast validation)**:
+1. Pipeline construction computes: `operating_level = MIN(SECRET datasource, UNOFFICIAL sink) = UNOFFICIAL`
+2. Datasource validates: "Can I operate at UNOFFICIAL level?" → **NO** (insufficient clearance - SECRET data requires SECRET level)
+3. **Pipeline aborts BEFORE data retrieval** → No classified data loaded into memory
+4. Safe failure: Configuration error detected, no data exposure
+
+**Key Insight**: Fail-fast prevents the window where SECRET data exists in memory but cannot be safely written,
+eliminating the risk of data leakage through error handling, logging, or debugging pathways.
+
 ## Decision
 
 We will adopt a Multi-Level Security (MLS) model inspired by Bell-LaPadula ("no read up,
@@ -127,87 +160,31 @@ it is responsible for filtering out SECRET-tagged data. This is validated throug
 The system trusts that properly certified datasources understand their data context and enforce
 filtering correctly.
 
-### Plugin Customization: Freezing at Declared Level
+### Plugin Customization: Frozen Plugins (Strict Level Enforcement)
 
 **Default Behavior**: The standard `BasePlugin` implementation allows components with higher
 clearance to operate at lower levels (trusted downgrade model). This is the recommended pattern
 for most deployments: a SECRET-cleared datasource CAN operate at OFFICIAL level by filtering
-data appropriately, and a SECRET-cleared sink CAN receive OFFICIAL data.
+data appropriately.
 
 **Frozen Behavior**: Organizations with strict operational security requirements can create
 plugins that refuse ALL operations below their declared level using the `allow_downgrade=False`
-parameter (ADR-005). Example use case: a SECRET-only datasource that should NEVER participate
-in non-SECRET pipelines, regardless of filtering capabilities.
+parameter. Example: a SECRET-only datasource that should NEVER participate in non-SECRET
+pipelines, regardless of filtering capabilities.
 
-**Implementation** (ADR-005 - Configuration-Driven Approach):
+**For complete specification, implementation details, test patterns, and migration guidance,
+see [ADR-005: Frozen Plugin Capability](005-frozen-plugin-capability.md).**
 
-```python
-class FrozenSecretDataSource(BasePlugin, DataSource):
-    """SECRET-only datasource - refuses to operate at lower classification levels.
+**Quick Reference**:
+- `allow_downgrade=True`: Trusted downgrade (ADR-002 default semantics)
+- `allow_downgrade=False`: Frozen plugin (strict level enforcement - ADR-005)
 
-    This pattern is useful when organizational policy requires strict level separation
-    rather than trusted downgrade. For example:
-    - Dedicated SECRET infrastructure that should never serve lower-classified pipelines
-    - Compliance requirements mandating physical separation of classification domains
-    - High-assurance environments requiring explicit per-level certification
-    """
-
-    def __init__(self):
-        super().__init__(
-            security_level=SecurityLevel.SECRET,
-            allow_downgrade=False  # ← Frozen behavior (ADR-005)
-        )
-
-    def load_data(self, context: PluginContext) -> ClassifiedDataFrame:
-        """Load data - validation already enforced at pipeline construction.
-
-        Pipeline will reject configuration if any component has lower clearance
-        (e.g., OFFICIAL sink) because operating_level would be OFFICIAL, but this
-        frozen plugin requires exact SECRET level match.
-        """
-        # Implementation here - knows it's operating at declared level only
-        ...
-```
-
--**How It Works**:
-
-- `allow_downgrade=True` (explicit): Plugin with SECRET clearance can operate at OFFICIAL or UNOFFICIAL levels (trusted to filter)
-- `allow_downgrade=False` (frozen): Plugin with SECRET clearance can ONLY operate at SECRET level (exact match required)
-- Sealed `validate_can_operate_at_level()` method checks both insufficient clearance AND frozen downgrade
-- No override attack surface (configuration parameter, not method override)
-- Explicit security choice required (`allow_downgrade` has no default)
-
-**Trade-offs**:
-
-- **Reduced flexibility** – Frozen plugins cannot participate in mixed-classification pipelines.
-  A SECRET-only datasource will abort if configured with an OFFICIAL sink, even though the
-  datasource could technically filter SECRET data appropriately.
-
-- **Increased certification burden** – Custom validation logic requires separate certification
-  review to verify security properties. Default trusted-downgrade behavior is pre-certified
-  as part of BasePlugin.
-
-- **Deployment complexity** – Operators must configure separate pipelines for each classification
-  level, increasing infrastructure overhead.
-
-**When to Use**:
-
-- ✅ **Dedicated classification domains** – Infrastructure physically/logically separated by level
-- ✅ **Regulatory mandates** – Compliance frameworks requiring explicit per-level certification
-- ✅ **High-assurance systems** – Environments where filtering trust is insufficient
-- ❌ **General-purpose deployments** – Default trusted-downgrade is simpler and more flexible
-- ❌ **Mixed-classification workflows** – Frozen plugins break multi-level orchestration
-
-**Certification Note**: Frozen plugins (`allow_downgrade=False`) require separate certification
-review. Certification must verify:
-1. Constructor correctly sets `allow_downgrade=False` (visible in code review)
-2. Plugin implementation is safe to operate at single level only
-3. No inadvertent cross-level data leakage
-4. Deployment infrastructure supports exact level matching
-
-Frozen plugins use the same `BasePlugin.validate_can_operate_at_level()` sealed method as default
-plugins, so certification scope is reduced compared to custom override approaches (no override
-logic to audit).
+**When to Use Frozen Plugins**:
+- ✅ Dedicated classification domains (physically/logically separated by level)
+- ✅ Regulatory mandates requiring explicit per-level certification
+- ✅ High-assurance systems where filtering trust is insufficient
+- ❌ General-purpose deployments (default trusted-downgrade is simpler)
+- ❌ Mixed-classification workflows (frozen plugins break multi-level orchestration)
 
 ## Consequences
 

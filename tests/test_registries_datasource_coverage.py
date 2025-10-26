@@ -29,7 +29,6 @@ def test_blob_datasource_load_config_failure():
                     "config_path": "/fake/config.yaml",
                     "profile": "default",
                     "retain_local": True,
-                    "security_level": "internal",
                 },
                 parent_context=context,
             )
@@ -56,7 +55,6 @@ def test_csv_blob_datasource_creation():
             {
                 "path": "/fake/data.csv",
                 "retain_local": True,
-                "security_level": "internal",
             },
             parent_context=context,
         )
@@ -83,7 +81,6 @@ def test_local_csv_datasource_creation():
             {
                 "path": "/fake/data.csv",
                 "retain_local": True,
-                "security_level": "internal",
             },
             parent_context=context,
         )

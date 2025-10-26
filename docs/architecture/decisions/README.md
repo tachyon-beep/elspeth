@@ -15,7 +15,9 @@ These decisions are currently in effect and guide ongoing development:
 | [001](001-design-philosophy.md) | Design Philosophy | 2025-10-23 | ✅ Accepted | Establishes security-first priority hierarchy: Security → Data Integrity → Availability → Usability |
 | [002](002-security-architecture.md) | Multi-Level Security Enforcement | 2025-10-23 | ✅ Accepted | Implements Bell-LaPadula MLS model with pipeline-wide minimum evaluation for fail-fast security |
 | [002-A](002-a-trusted-container-model.md) | Trusted Container Model | 2025-10-25 | ✅ Accepted | Introduces ClassifiedDataFrame for immutable classification tracking and high water mark enforcement |
-| [003](003-plugin-type-registry.md) | Central Plugin Type Registry | 2025-10-25 | 📋 Proposed | Central registry for plugin security validation with type-safe plugin composition |
+| [002-B](002-b-security-policy-metadata.md) | Immutable Security Policy Metadata | 2025-10-26 | 📝 Draft | Declares security policy fields (security_level, allow_downgrade, etc.) author-owned and immutable; registries strip config overrides |
+| [014](014-reproducibility-bundle.md) | Tamper-Evident Reproducibility Bundle | 2025-10-26 | ✅ Accepted | Requires every run to emit a signed reproducibility bundle containing artefacts, config, prompts, plugins and manifest/signature |
+| [003](003-plugin-type-registry.md) | Central Plugin Type Registry | 2025-10-25 | ✅ Accepted | Central registry for plugin security validation with type-safe plugin composition |
 | [004](004-mandatory-baseplugin-inheritance.md) | Mandatory BasePlugin Inheritance | 2025-10-25 | 📋 Proposed | Requires all plugins to inherit from BasePlugin for security enforcement |
 | [005](005-frozen-plugin-capability.md) | Frozen Plugin Capability | 2025-10-26 | ✅ Accepted | Implements `allow_downgrade=False` parameter for plugins requiring exact security level match |
 | [006](006-security-critical-exception-policy.md) | Security-Critical Exception Policy | 2025-10-25 | 📋 Proposed | Policy-enforced fail-loud exceptions for security invariant violations |
@@ -26,7 +28,42 @@ These decisions are currently in effect and guide ongoing development:
 | [011](011-error-classification-and-recovery.md) | Error Classification & Recovery Strategy | 2025-10-26 | 📝 Draft | Comprehensive error taxonomy (Security/Transient/Permanent/Fatal) with on_error policy semantics and retry strategy |
 | [012](012-testing-strategy-and-quality-gates.md) | Testing Strategy & Quality Gates | 2025-10-26 | 📝 Draft | Component-specific coverage requirements (security: >90%, core: >80%, plugins: >70%) with quality gates (tests, coverage, MyPy, Ruff, mutation testing) |
 | [013](013-global-observability-policy.md) | Global Observability Policy | 2025-10-26 | 📝 Draft | Global policy for mandatory logging (security, data processing, errors), prohibited content (PII, classified data), retention (90 days security, 30 days operational), and fail-closed audit logging |
-| [014](014-security-policy-metadata.md) | Immutable Security Policy Metadata | 2025-10-26 | 📝 Draft | Declares security policy metadata (security_level, allow_downgrade) immutable and author-owned |
+
+## Security Policy Architecture: ADR Dependency Graph
+
+The security policy (ADRs 001-006) forms a layered defense architecture. Each ADR builds on or extends previous decisions:
+
+```
+ADR-001 (Design Philosophy)
+    ↓
+ADR-002 (MLS Core) ← foundational security model
+    ↓
+    ├─→ ADR-002-A (Container Model) ← extends 002 with classification tracking
+    │   └─→ ADR-006 (Exception Policy) ← refines 002-A exception handling
+    │
+    ├─→ ADR-002-B (Immutable Metadata) ← extends 002 with policy immutability
+    │   └─→ ADR-005 (Frozen Plugins) ← implements 002-B with allow_downgrade
+    │
+    └─→ ADR-003 (Plugin Registry) ← supports 002 validation
+        └─→ ADR-004 (BasePlugin ABC) ← required by 003 for nominal typing
+            └─→ ADR-005 (Frozen Plugins) ← extends 004 with allow_downgrade parameter
+```
+
+**Reading Order**: For newcomers to the security architecture, we recommend this sequence:
+
+1. [ADR-001](001-design-philosophy.md) – Understand security-first principles
+2. [ADR-002](002-security-architecture.md) – Core MLS model and fail-fast validation
+3. [ADR-002-A](002-a-trusted-container-model.md) – Classification container and high water mark
+4. [ADR-004](004-mandatory-baseplugin-inheritance.md) – Plugin inheritance and "security bones"
+5. [ADR-005](005-frozen-plugin-capability.md) – Frozen plugins and allow_downgrade semantics
+6. [ADR-002-B](002-b-security-policy-metadata.md) – Immutable policy enforcement
+7. [ADR-003](003-plugin-type-registry.md) – Plugin registry completeness
+8. [ADR-006](006-security-critical-exception-policy.md) – Fail-loud exception policy
+
+**Key Relationships**:
+- **ADR-005** is referenced by both ADR-002 and ADR-004 (implements policy from 002-B, extends architecture from 004)
+- **ADR-006** refines exception handling established in ADR-002-A (classification container violations)
+- **ADR-004** is required by ADR-003 (nominal typing prevents registry bypass)
 
 ## Historical ADRs
 

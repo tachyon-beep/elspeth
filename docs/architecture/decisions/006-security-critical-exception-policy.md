@@ -730,6 +730,145 @@ Pre-deployment audit checklist:
 
 **Impact:** Zero breaking change - existing `SecurityValidationError` usage is unaffected.
 
+## Integration with ADR-002-A (Classification Container)
+
+ADR-002-A established the `ClassifiedDataFrame` trusted container model with invariant
+enforcement through stack inspection. ADR-006 strengthens this enforcement by introducing
+fail-loud semantics for invariant violations.
+
+### Current State (ADR-002-A)
+
+Classification laundering attempts currently raise `SecurityValidationError`:
+
+```python
+# src/elspeth/core/security/classified_data.py (ADR-002-A implementation)
+def __post_init__(self) -> None:
+    """Verify container created via authorized factory methods only."""
+    if object.__getattribute__(self, '_created_by_datasource'):
+        return
+
+    # Stack inspection to verify authorized caller...
+    frame = inspect.currentframe()
+    # ...
+
+    # CURRENT: Raises SecurityValidationError
+    raise SecurityValidationError(
+        "ClassifiedDataFrame can only be created by datasources or authorized "
+        "factory methods (with_uplifted_classification, with_new_data). "
+        "Direct construction prevents classification tracking (ADR-002-A)."
+    )
+```
+
+### ADR-006 Change
+
+Classification laundering is an **invariant violation** (should never happen with correct
+code), therefore it should raise `SecurityCriticalError` instead:
+
+```python
+# src/elspeth/core/security/classified_data.py (UPDATED for ADR-006)
+from elspeth.core.security.exceptions import SecurityCriticalError
+
+def __post_init__(self) -> None:
+    """Verify container created via authorized factory methods only."""
+    if object.__getattribute__(self, '_created_by_datasource'):
+        return
+
+    # Stack inspection to verify authorized caller...
+    frame = inspect.currentframe()
+    # ...
+
+    # UPDATED: Raise SecurityCriticalError (invariant violation)
+    raise SecurityCriticalError(
+        "CRITICAL: ClassifiedDataFrame created outside datasource factory - "
+        "possible classification laundering attack (ADR-002-A)",
+        evidence={
+            "stack_trace": traceback.format_stack(),
+            "attempted_creation_location": frame.f_code.co_filename if frame else "unknown",
+        },
+        cve_id="CVE-ADR-002-A-001",
+        classification_level=None,  # No classification established yet
+    )
+```
+
+### Affected Invariants
+
+The following ADR-002-A invariants will raise `SecurityCriticalError` after ADR-006 implementation:
+
+| Invariant | Old Exception | New Exception | CVE ID |
+|-----------|---------------|---------------|--------|
+| Direct container construction (bypassing datasource) | `SecurityValidationError` | `SecurityCriticalError` | CVE-ADR-002-A-001 |
+| Classification downgrade (violates high water mark) | Silent max() | `SecurityCriticalError` | CVE-ADR-002-A-004 |
+| Metadata tampering (`frame.classification = X`) | Silent (frozen dataclass) | `SecurityCriticalError` | CVE-ADR-002-A-005 |
+
+### Migration Timeline
+
+**Phase 1: Feature Flag Deployment** (same timeline as ADR-006 general rollout)
+- Deploy with `ELSPETH_ENABLE_SECURITY_CRITICAL_EXCEPTIONS=false`
+- Existing `SecurityValidationError` behavior preserved
+- Monitor for any occurrence of container violations
+
+**Phase 2: Enable in Staging** (after 7 days clean operation)
+- Enable feature flag in staging environments
+- Validate that no legitimate code paths trigger container violations
+- Verify fail-loud behavior works as expected
+
+**Phase 3: Production Rollout** (after 30 days clean staging)
+- Enable in production with monitoring
+- Alert on ANY `SecurityCriticalError` from ADR-002-A code paths
+- Treat violations as P0 incidents (potential security breach)
+
+**Phase 4: Test Updates** (parallel with Phase 1-3)
+
+Update all tests expecting `SecurityValidationError` from container code:
+
+```python
+# BEFORE (ADR-002-A original tests)
+def test_direct_construction_blocked():
+    with pytest.raises(SecurityValidationError):
+        ClassifiedDataFrame(df, SecurityLevel.SECRET)  # Direct construction
+
+# AFTER (ADR-006 integration)
+from elspeth.core.security.exceptions import SecurityCriticalError
+
+def test_direct_construction_blocked():
+    with pytest.raises(SecurityCriticalError) as exc_info:
+        ClassifiedDataFrame(df, SecurityLevel.SECRET)  # Direct construction
+
+    assert "classification laundering" in str(exc_info.value).lower()
+    assert exc_info.value.cve_id == "CVE-ADR-002-A-001"
+```
+
+### Exception Migration Checklist
+
+**Files to Update** (search for `SecurityValidationError` raises in container contexts):
+
+- [ ] `src/elspeth/core/security/classified_data.py:__post_init__()` - Container creation violation
+- [ ] `src/elspeth/core/security/classified_data.py:with_uplifted_classification()` - Classification downgrade
+- [ ] `src/elspeth/core/security/classified_data.py:__setattr__()` - Metadata tampering
+- [ ] `tests/test_adr002a_*.py` - Update ~15 tests expecting `SecurityValidationError`
+- [ ] `tests/test_classified_dataframe.py` - Update container violation tests
+
+**Verification**:
+```bash
+# Find all SecurityValidationError raises in container code
+grep -r "SecurityValidationError" src/elspeth/core/security/classified_data.py
+
+# Find all tests catching SecurityValidationError from container
+grep -r "pytest.raises(SecurityValidationError)" tests/ | grep -i "classified\|container"
+```
+
+### Why This Matters
+
+**Before ADR-006**: Classification laundering attempts raise catchable `SecurityValidationError`,
+which could be accidentally or maliciously caught by broad exception handlers, allowing
+execution to continue after a security invariant violation.
+
+**After ADR-006**: Classification laundering raises `SecurityCriticalError`, which propagates
+to platform termination. Failed pipelines and audit trails make security violations unmissable.
+
+**Security Improvement**: ADR-002-A's container model becomes fail-loud instead of fail-safe,
+ensuring violations cannot be silently handled or ignored.
+
 ## Consequences
 
 ### Benefits

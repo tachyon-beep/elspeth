@@ -38,18 +38,13 @@ _CONTENT_SAFETY_SCHEMA = {
 
 
 class AzureContentSafetyMiddleware(BasePlugin, LLMMiddleware):
-    """Use Azure Content Safety service to screen prompts before submission.
-
-    Args:
-        security_level: Security clearance for this middleware (MANDATORY per ADR-004).
-    """
+    """Use Azure Content Safety service to screen prompts before submission."""
 
     name = "azure_content_safety"
 
     def __init__(
         self,
         *,
-        security_level: SecurityLevel,
         endpoint: str,
         key: str | None = None,
         key_env: str | None = None,
@@ -62,7 +57,10 @@ class AzureContentSafetyMiddleware(BasePlugin, LLMMiddleware):
         on_error: str = "abort",
         retry_attempts: int = 3,
     ) -> None:
-        super().__init__(security_level=security_level, allow_downgrade=True)  # ADR-005: Middleware trusted to downgrade
+        super().__init__(
+            security_level=SecurityLevel.UNOFFICIAL,  # ADR-002-B: Immutable policy
+            allow_downgrade=True,  # ADR-002-B: Immutable policy
+        )
         if not endpoint:
             raise ValueError("Azure Content Safety requires an endpoint")
         self.endpoint = endpoint.rstrip("/")
@@ -150,12 +148,10 @@ class AzureContentSafetyMiddleware(BasePlugin, LLMMiddleware):
 
 
 def _create_azure_content_safety_middleware(options: dict[str, Any], context: PluginContext) -> AzureContentSafetyMiddleware:
-    """Factory for Azure Content Safety middleware with smart security defaults."""
+    """Factory for Azure Content Safety middleware (ADR-002-B: security policy is immutable)."""
     opts = dict(options)
-    if "security_level" not in opts and context:
-        opts["security_level"] = context.security_level
+    # ADR-002-B: security_level is hard-coded in plugin, not passed as parameter
     return AzureContentSafetyMiddleware(
-        security_level=opts["security_level"],
         endpoint=str(opts.get("endpoint", "")),
         key=str(opts.get("key")) if opts.get("key") is not None else None,
         key_env=str(opts.get("key_env")) if opts.get("key_env") is not None else None,

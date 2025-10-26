@@ -1,4 +1,4 @@
-# ADR 010 – Error Classification & Recovery Strategy
+# ADR-011 – Error Classification & Recovery Strategy
 
 ## Status
 
@@ -14,7 +14,7 @@ Elspeth orchestrates complex pipelines involving datasources, LLM transforms, si
 - **Security failures**: Clearance violations, missing credentials (must abort)
 - **Resource failures**: Disk full, memory exhausted (system-level)
 
-ADR-005 "Security-Critical Exceptions" defines security error handling (`SecurityCriticalError` vs `SecurityValidationError`), but **non-security error handling remains fragmented**. The `on_error` policy exists (`abort|skip|log`) but semantics are not formalized:
+ADR-006 "Security-Critical Exceptions" defines security error handling (`SecurityCriticalError` vs `SecurityValidationError`), but **non-security error handling remains fragmented**. The `on_error` policy exists (`abort|skip|log`) but semantics are not formalized:
 - What does "skip" mean for datasources vs transforms vs sinks?
 - When to retry vs skip vs abort?
 - How many retries before giving up?
@@ -71,7 +71,7 @@ We will establish a **comprehensive error classification taxonomy** and **recove
 
 ### Error Categories
 
-#### 1. Security Errors (Covered by ADR-005)
+#### 1. Security Errors (Covered by ADR-006)
 
 **Characteristics**:
 - Clearance violations, authentication failures, missing credentials
@@ -87,7 +87,7 @@ We will establish a **comprehensive error classification taxonomy** and **recove
 
 **Example**:
 ```python
-# ADR-005: Security error handling
+# ADR-006: Security error handling
 if data.classification > sink.security_level:
     raise SecurityValidationError(
         f"Sink lacks clearance for {data.classification} data"
@@ -175,6 +175,106 @@ Transform implementations that return `None` must still emit an explicit
 `SkipResult` structure so downstream sinks can distinguish between "no output"
 and "error". The standardized wrapper will convert `None` into the skip signal
 and log the failure once, avoiding duplicated error handling in sinks.
+
+#### SkipResult Protocol Specification
+
+**Purpose**: Distinguish between "no output" (intentional) and "error occurred, skipping item" (failure with context).
+
+**Protocol Definition**:
+```python
+from dataclasses import dataclass
+from typing import Protocol
+
+@dataclass
+class SkipResult:
+    """Indicates item was skipped due to error (not empty result).
+
+    Attributes:
+        item_id: Identifier for the skipped item (row ID, experiment ID)
+        reason: Human-readable skip reason (e.g., "schema_mismatch", "rate_limit_exceeded")
+        error: Original exception (if available) for debugging
+        component: Component that initiated skip (datasource/transform/sink)
+        retry_count: Number of retry attempts before skip (0 if not retried)
+    """
+    item_id: str
+    reason: str
+    error: Exception | None = None
+    component: str = "unknown"
+    retry_count: int = 0
+```
+
+**Transform Usage Example**:
+```python
+class CustomLLMTransform(BasePlugin, Transform):
+    """Transform with skip-on-error handling."""
+
+    def transform(self, item: dict) -> dict | SkipResult:
+        """Transform item, skip on schema mismatch."""
+        try:
+            # Validate schema
+            if "prompt" not in item:
+                return SkipResult(
+                    item_id=item.get("id", "unknown"),
+                    reason="missing_required_field",
+                    component="CustomLLMTransform",
+                )
+
+            # Perform transformation
+            result = self._call_llm(item["prompt"])
+            return {"result": result, "id": item["id"]}
+
+        except requests.Timeout as exc:
+            # Transient error after retries exhausted
+            return SkipResult(
+                item_id=item.get("id", "unknown"),
+                reason="timeout_after_retries",
+                error=exc,
+                component="CustomLLMTransform",
+                retry_count=self.config.get("max_retries", 3),
+            )
+```
+
+**Sink Usage Example**:
+```python
+class CustomSink(BasePlugin, ResultSink):
+    """Sink that handles SkipResult properly."""
+
+    def write(self, item: dict | SkipResult) -> None:
+        """Write item, skip SkipResult instances."""
+        if isinstance(item, SkipResult):
+            # Log skip but don't write
+            self.logger.warning(
+                f"Skipping item {item.item_id}: {item.reason}",
+                extra={
+                    "item_id": item.item_id,
+                    "skip_reason": item.reason,
+                    "component": item.component,
+                    "retry_count": item.retry_count,
+                }
+            )
+            return  # Don't write to output
+
+        # Normal write path
+        self._write_to_file(item)
+```
+
+**Semantics**:
+- **`None` return**: Intentional empty result (e.g., filter excluded item)
+- **`SkipResult` return**: Error occurred, item skipped with context
+- **Exception raised**: Propagate error to `on_error` policy handler
+
+**Audit Logging**:
+All `SkipResult` instances are logged to audit trail with full context:
+```json
+{
+  "event": "item_skipped",
+  "item_id": "row_123",
+  "reason": "schema_mismatch",
+  "component": "CustomLLMTransform",
+  "retry_count": 0,
+  "timestamp": "2025-10-26T14:30:00Z"
+}
+```
 
 ---
 

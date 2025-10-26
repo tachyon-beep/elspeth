@@ -18,19 +18,19 @@ from elspeth.plugins.experiments.aggregators.latency_summary import LatencySumma
 def test_cost_summary_invalid_on_error():
     """Test CostSummaryAggregator raises on invalid on_error value (line 40)."""
     with pytest.raises(ValueError, match="on_error must be 'abort' or 'skip'"):
-        CostSummaryAggregator(security_level=SecurityLevel.UNOFFICIAL, allow_downgrade=True, on_error="invalid")
+        CostSummaryAggregator(security_level=SecurityLevel.UNOFFICIAL, on_error="invalid")
 
 
 def test_cost_summary_empty_records():
     """Test CostSummaryAggregator with empty records."""
-    aggregator = CostSummaryAggregator(security_level=SecurityLevel.UNOFFICIAL, allow_downgrade=True)
+    aggregator = CostSummaryAggregator(security_level=SecurityLevel.UNOFFICIAL)
     result = aggregator.finalize([])
     assert result == {}
 
 
 def test_cost_summary_no_metrics():
     """Test CostSummaryAggregator with records but no metrics."""
-    aggregator = CostSummaryAggregator(security_level=SecurityLevel.UNOFFICIAL, allow_downgrade=True)
+    aggregator = CostSummaryAggregator(security_level=SecurityLevel.UNOFFICIAL)
     records = [
         {"prompt": "test1"},
         {"prompt": "test2"},
@@ -42,7 +42,7 @@ def test_cost_summary_no_metrics():
 
 def test_cost_summary_with_all_metrics():
     """Test CostSummaryAggregator with complete cost metrics."""
-    aggregator = CostSummaryAggregator(security_level=SecurityLevel.UNOFFICIAL, allow_downgrade=True)
+    aggregator = CostSummaryAggregator(security_level=SecurityLevel.UNOFFICIAL)
     records = [
         {
             "metrics": {
@@ -83,7 +83,7 @@ def test_cost_summary_with_all_metrics():
 
 def test_cost_summary_invalid_prompt_tokens():
     """Test CostSummaryAggregator handles invalid prompt_tokens (lines 69-70)."""
-    aggregator = CostSummaryAggregator(security_level=SecurityLevel.UNOFFICIAL, allow_downgrade=True)
+    aggregator = CostSummaryAggregator(security_level=SecurityLevel.UNOFFICIAL)
     records = [
         {"metrics": {"prompt_tokens": "invalid"}},
         {"metrics": {"prompt_tokens": None}},
@@ -99,7 +99,7 @@ def test_cost_summary_invalid_prompt_tokens():
 
 def test_cost_summary_invalid_completion_tokens():
     """Test CostSummaryAggregator handles invalid completion_tokens (lines 75-76)."""
-    aggregator = CostSummaryAggregator(security_level=SecurityLevel.UNOFFICIAL, allow_downgrade=True)
+    aggregator = CostSummaryAggregator(security_level=SecurityLevel.UNOFFICIAL)
     records = [
         {"metrics": {"completion_tokens": "invalid"}},
         {"metrics": {"completion_tokens": None}},
@@ -115,7 +115,7 @@ def test_cost_summary_invalid_completion_tokens():
 
 def test_cost_summary_invalid_cost():
     """Test CostSummaryAggregator handles invalid cost (lines 81-82)."""
-    aggregator = CostSummaryAggregator(security_level=SecurityLevel.UNOFFICIAL, allow_downgrade=True)
+    aggregator = CostSummaryAggregator(security_level=SecurityLevel.UNOFFICIAL)
     records = [
         {"metrics": {"cost": "invalid"}},
         {"metrics": {"cost": None}},
@@ -131,7 +131,7 @@ def test_cost_summary_invalid_cost():
 
 def test_cost_summary_partial_metrics():
     """Test CostSummaryAggregator with partial metrics across records."""
-    aggregator = CostSummaryAggregator(security_level=SecurityLevel.UNOFFICIAL, allow_downgrade=True)
+    aggregator = CostSummaryAggregator(security_level=SecurityLevel.UNOFFICIAL)
     records = [
         {"metrics": {"prompt_tokens": 100}},
         {"metrics": {"completion_tokens": 50}},
@@ -149,7 +149,7 @@ def test_cost_summary_partial_metrics():
 
 def test_cost_summary_none_metrics():
     """Test CostSummaryAggregator with None metrics field."""
-    aggregator = CostSummaryAggregator(security_level=SecurityLevel.UNOFFICIAL, allow_downgrade=True)
+    aggregator = CostSummaryAggregator(security_level=SecurityLevel.UNOFFICIAL)
     records = [
         {"metrics": None},
         {"metrics": {}},
@@ -162,7 +162,7 @@ def test_cost_summary_none_metrics():
 
 def test_cost_summary_zero_costs():
     """Test CostSummaryAggregator with zero costs."""
-    aggregator = CostSummaryAggregator(security_level=SecurityLevel.UNOFFICIAL, allow_downgrade=True)
+    aggregator = CostSummaryAggregator(security_level=SecurityLevel.UNOFFICIAL)
     records = [
         {"metrics": {"prompt_tokens": 0, "completion_tokens": 0, "cost": 0.0}},
     ]
@@ -176,19 +176,19 @@ def test_cost_summary_zero_costs():
 def test_latency_summary_invalid_on_error():
     """Test LatencySummaryAggregator raises on invalid on_error value (line 134)."""
     with pytest.raises(ValueError, match="on_error must be 'abort' or 'skip'"):
-        LatencySummaryAggregator(security_level=SecurityLevel.UNOFFICIAL, allow_downgrade=True, on_error="invalid")
+        LatencySummaryAggregator(security_level=SecurityLevel.UNOFFICIAL, on_error="invalid")
 
 
 def test_latency_summary_empty_records():
     """Test LatencySummaryAggregator with empty records (line 147-148)."""
-    aggregator = LatencySummaryAggregator(security_level=SecurityLevel.UNOFFICIAL, allow_downgrade=True)
+    aggregator = LatencySummaryAggregator(security_level=SecurityLevel.UNOFFICIAL)
     result = aggregator.finalize([])
     assert result == {}
 
 
 def test_latency_summary_no_latency_data():
     """Test LatencySummaryAggregator with no latency data (lines 164-168)."""
-    aggregator = LatencySummaryAggregator(security_level=SecurityLevel.UNOFFICIAL, allow_downgrade=True)
+    aggregator = LatencySummaryAggregator(security_level=SecurityLevel.UNOFFICIAL)
     records = [
         {"metrics": {}},
         {"metrics": None},
@@ -201,7 +201,7 @@ def test_latency_summary_no_latency_data():
 
 def test_latency_summary_with_valid_latency():
     """Test LatencySummaryAggregator with valid latency data (lines 170-185)."""
-    aggregator = LatencySummaryAggregator(security_level=SecurityLevel.UNOFFICIAL, allow_downgrade=True)
+    aggregator = LatencySummaryAggregator(security_level=SecurityLevel.UNOFFICIAL)
     records = [
         {"metrics": {"latency_seconds": 1.5}},
         {"metrics": {"latency_seconds": 2.0}},
@@ -225,7 +225,7 @@ def test_latency_summary_with_valid_latency():
 
 def test_latency_summary_invalid_latency():
     """Test LatencySummaryAggregator handles invalid latency values (lines 156-162)."""
-    aggregator = LatencySummaryAggregator(security_level=SecurityLevel.UNOFFICIAL, allow_downgrade=True)
+    aggregator = LatencySummaryAggregator(security_level=SecurityLevel.UNOFFICIAL)
     records = [
         {"metrics": {"latency_seconds": "invalid"}},
         {"metrics": {"latency_seconds": None}},
@@ -243,7 +243,7 @@ def test_latency_summary_invalid_latency():
 
 def test_latency_summary_single_value():
     """Test LatencySummaryAggregator with single value (std computation line 178)."""
-    aggregator = LatencySummaryAggregator(security_level=SecurityLevel.UNOFFICIAL, allow_downgrade=True)
+    aggregator = LatencySummaryAggregator(security_level=SecurityLevel.UNOFFICIAL)
     records = [
         {"metrics": {"latency_seconds": 1.5}},
     ]
@@ -256,7 +256,7 @@ def test_latency_summary_single_value():
 
 def test_latency_summary_multiple_values_std():
     """Test LatencySummaryAggregator std computation with multiple values (line 178)."""
-    aggregator = LatencySummaryAggregator(security_level=SecurityLevel.UNOFFICIAL, allow_downgrade=True)
+    aggregator = LatencySummaryAggregator(security_level=SecurityLevel.UNOFFICIAL)
     records = [
         {"metrics": {"latency_seconds": 1.0}},
         {"metrics": {"latency_seconds": 2.0}},
@@ -270,19 +270,19 @@ def test_latency_summary_multiple_values_std():
 
 def test_cost_summary_input_schema():
     """Test that CostSummaryAggregator returns None for input_schema."""
-    aggregator = CostSummaryAggregator(security_level=SecurityLevel.UNOFFICIAL, allow_downgrade=True)
+    aggregator = CostSummaryAggregator(security_level=SecurityLevel.UNOFFICIAL)
     assert aggregator.input_schema() is None
 
 
 def test_latency_summary_input_schema():
     """Test that LatencySummaryAggregator returns None for input_schema (line 189)."""
-    aggregator = LatencySummaryAggregator(security_level=SecurityLevel.UNOFFICIAL, allow_downgrade=True)
+    aggregator = LatencySummaryAggregator(security_level=SecurityLevel.UNOFFICIAL)
     assert aggregator.input_schema() is None
 
 
 def test_cost_summary_on_error_skip():
     """Test CostSummaryAggregator with on_error='skip'."""
-    aggregator = CostSummaryAggregator(security_level=SecurityLevel.UNOFFICIAL, allow_downgrade=True, on_error="skip")
+    aggregator = CostSummaryAggregator(security_level=SecurityLevel.UNOFFICIAL, on_error="skip")
     # Normal operation should work
     result = aggregator.finalize([{"metrics": {"cost": 0.05}}])
     assert result["requests_with_cost"] == 1
@@ -290,7 +290,7 @@ def test_cost_summary_on_error_skip():
 
 def test_latency_summary_on_error_skip():
     """Test LatencySummaryAggregator with on_error='skip'."""
-    aggregator = LatencySummaryAggregator(security_level=SecurityLevel.UNOFFICIAL, allow_downgrade=True, on_error="skip")
+    aggregator = LatencySummaryAggregator(security_level=SecurityLevel.UNOFFICIAL, on_error="skip")
     # Normal operation should work
     result = aggregator.finalize([{"metrics": {"latency_seconds": 1.5}}])
     assert result["requests_with_latency"] == 1
@@ -298,7 +298,7 @@ def test_latency_summary_on_error_skip():
 
 def test_cost_summary_mixed_valid_invalid():
     """Test CostSummaryAggregator with mix of valid and invalid data."""
-    aggregator = CostSummaryAggregator(security_level=SecurityLevel.UNOFFICIAL, allow_downgrade=True)
+    aggregator = CostSummaryAggregator(security_level=SecurityLevel.UNOFFICIAL)
     records = [
         {"metrics": {"prompt_tokens": 100, "completion_tokens": 50, "cost": 0.05}},
         {"metrics": {"prompt_tokens": "bad", "completion_tokens": None, "cost": "invalid"}},
@@ -317,7 +317,7 @@ def test_cost_summary_mixed_valid_invalid():
 
 def test_latency_summary_percentiles():
     """Test LatencySummaryAggregator calculates correct percentiles."""
-    aggregator = LatencySummaryAggregator(security_level=SecurityLevel.UNOFFICIAL, allow_downgrade=True)
+    aggregator = LatencySummaryAggregator(security_level=SecurityLevel.UNOFFICIAL)
     # Create a predictable distribution
     records = [{"metrics": {"latency_seconds": float(i)}} for i in range(1, 101)]
     result = aggregator.finalize(records)

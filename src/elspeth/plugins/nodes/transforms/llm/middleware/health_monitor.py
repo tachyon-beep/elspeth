@@ -32,7 +32,6 @@ class HealthMonitorMiddleware(BasePlugin, LLMMiddleware):
     """Emit heartbeat logs summarising middleware activity.
 
     Args:
-        security_level: Security clearance for this middleware (MANDATORY per ADR-004).
         heartbeat_interval: Seconds between heartbeat emissions (default: 60.0).
         stats_window: Number of recent requests to track for statistics (default: 50).
         channel: Logger channel name (default: 'elspeth.health').
@@ -44,13 +43,15 @@ class HealthMonitorMiddleware(BasePlugin, LLMMiddleware):
     def __init__(
         self,
         *,
-        security_level: SecurityLevel,
         heartbeat_interval: float = 60.0,
         stats_window: int = 50,
         channel: str | None = None,
         include_latency: bool = True,
     ) -> None:
-        super().__init__(security_level=security_level, allow_downgrade=True)  # ADR-005: Middleware trusted to downgrade
+        super().__init__(
+            security_level=SecurityLevel.UNOFFICIAL,  # ADR-002-B: Immutable policy
+            allow_downgrade=True,  # ADR-002-B: Immutable policy
+        )
         if heartbeat_interval < 0:
             raise ValueError("heartbeat_interval must be non-negative")
         self.interval = float(heartbeat_interval)
@@ -107,12 +108,10 @@ class HealthMonitorMiddleware(BasePlugin, LLMMiddleware):
 
 
 def _create_health_monitor_middleware(options: dict[str, Any], context: PluginContext) -> HealthMonitorMiddleware:
-    """Factory for health monitor middleware with smart security defaults."""
+    """Factory for health monitor middleware (ADR-002-B: security policy is immutable)."""
     opts = dict(options)
-    if "security_level" not in opts and context:
-        opts["security_level"] = context.security_level
+    # ADR-002-B: security_level is hard-coded in plugin, not passed as parameter
     return HealthMonitorMiddleware(
-        security_level=opts["security_level"],
         heartbeat_interval=float(opts.get("heartbeat_interval", 60.0)),
         stats_window=int(opts.get("stats_window", 50)),
         channel=opts.get("channel"),

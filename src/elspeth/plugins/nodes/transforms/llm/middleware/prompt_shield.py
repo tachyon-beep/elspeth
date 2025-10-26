@@ -29,7 +29,6 @@ class PromptShieldMiddleware(BasePlugin, LLMMiddleware):
     """Basic middleware that masks or blocks unsafe prompts before sending to the LLM.
 
     Args:
-        security_level: Security clearance for this middleware (MANDATORY per ADR-004).
         denied_terms: List of terms to detect and block/mask.
         mask: Replacement text for masked terms (default: '[REDACTED]').
         on_violation: Action to take ('abort', 'mask', or 'log', default: 'abort').
@@ -41,13 +40,15 @@ class PromptShieldMiddleware(BasePlugin, LLMMiddleware):
     def __init__(
         self,
         *,
-        security_level: SecurityLevel,
         denied_terms: Sequence[str] | None = None,
         mask: str = "[REDACTED]",
         on_violation: str = "abort",
         channel: str | None = None,
     ):
-        super().__init__(security_level=security_level, allow_downgrade=True)  # ADR-005: Middleware trusted to downgrade
+        super().__init__(
+            security_level=SecurityLevel.UNOFFICIAL,  # ADR-002-B: Immutable policy
+            allow_downgrade=True,  # ADR-002-B: Immutable policy
+        )
         self.denied_terms = [term.lower() for term in denied_terms or []]
         self.mask = mask
         mode = (on_violation or "abort").lower()
@@ -71,12 +72,10 @@ class PromptShieldMiddleware(BasePlugin, LLMMiddleware):
 
 
 def _create_prompt_shield_middleware(options: dict[str, Any], context: PluginContext) -> PromptShieldMiddleware:
-    """Factory for prompt shield middleware with smart security defaults."""
+    """Factory for prompt shield middleware (ADR-002-B: security policy is immutable)."""
     opts = dict(options)
-    if "security_level" not in opts and context:
-        opts["security_level"] = context.security_level
+    # ADR-002-B: security_level is hard-coded in plugin, not passed as parameter
     return PromptShieldMiddleware(
-        security_level=opts["security_level"],
         denied_terms=opts.get("denied_terms", []),
         mask=opts.get("mask", "[REDACTED]"),
         on_violation=opts.get("on_violation", "abort"),

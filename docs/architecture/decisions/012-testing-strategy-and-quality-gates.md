@@ -1,4 +1,4 @@
-# ADR 011 – Testing Strategy & Quality Gates
+# ADR-012 – Testing Strategy & Quality Gates
 
 ## Status
 
@@ -96,6 +96,11 @@ pull requests for reviewer visibility.
 
 **Rationale**: Orchestration bugs cause cascading failures. High coverage ensures reliability.
 
+**Enforcement**: The `ci-quality-gate` workflow checks orchestration component coverage.
+PRs modifying `src/elspeth/core/experiments/`, `src/elspeth/core/pipeline/`, or
+`src/elspeth/core/registries/` trigger coverage analysis. The job fails if coverage
+drops below 80%, blocks merge, and posts detailed coverage delta to PR comments.
+
 ---
 
 #### 3. Plugin Implementations (>70% coverage)
@@ -117,6 +122,11 @@ pull requests for reviewer visibility.
 
 **Rationale**: Plugins are user-extensible, test coverage ensures base quality. Lower target acknowledges variation.
 
+**Enforcement**: The `ci-quality-gate` workflow checks plugin coverage. PRs modifying
+`src/elspeth/plugins/` trigger coverage analysis. The job fails if coverage drops
+below 70%, blocks merge via branch protection rules, and posts a PR comment showing
+which plugin files fell below threshold.
+
 ---
 
 #### 4. Configuration & Validation (>85% coverage)
@@ -136,6 +146,11 @@ pull requests for reviewer visibility.
 - ✅ Edge cases (null handling, `__delete__` markers)
 
 **Rationale**: Configuration errors are #1 user pain point. High coverage prevents silent failures.
+
+**Enforcement**: The `ci-quality-gate` workflow enforces 85% coverage for configuration
+components. PRs modifying `src/elspeth/core/config.py` or `src/elspeth/core/validation/`
+trigger strict coverage analysis. The job fails if coverage drops below 85%, blocks
+merge, and requires coverage improvement before approval.
 
 ---
 
@@ -438,6 +453,220 @@ def test_deep_merge_commutative_for_disjoint_keys(dict1, dict2):
 | **MyPy Clean** | No type errors | `mypy src/elspeth` | `# type: ignore` + comment |
 | **Ruff Clean** | No lint errors | `ruff check` | `# noqa` + comment |
 | **Mutation Testing** | ≤10% survivors | `mutmut run` | Security-critical only |
+
+---
+
+## Part 5: CI/CD Enforcement Architecture
+
+### GitHub Actions Workflow Integration
+
+**Workflow**: `.github/workflows/ci-quality-gate.yml`
+
+**Trigger Events**:
+```yaml
+on:
+  pull_request:
+    paths:
+      - 'src/**/*.py'
+      - 'tests/**/*.py'
+      - 'pyproject.toml'
+  push:
+    branches: [main, develop]
+```
+
+**Jobs**:
+
+#### Job 1: Unit Tests & Coverage
+```yaml
+- name: Run pytest with coverage
+  run: |
+    python -m pytest \
+      --cov=elspeth \
+      --cov-report=term-missing \
+      --cov-report=json \
+      --cov-fail-under=70  # Global minimum
+
+- name: Component-specific coverage check
+  run: |
+    python scripts/check_component_coverage.py \
+      --security-critical=90 \
+      --orchestration=80 \
+      --plugins=70 \
+      --config=85
+```
+
+**Output**: Coverage report posted to PR as comment, showing:
+- Overall coverage percentage
+- Coverage delta (change vs base branch)
+- Files below threshold (with line numbers)
+- Component-specific breakdown
+
+**Failure Behavior**: Job fails → PR blocked via branch protection
+
+---
+
+#### Job 2: Type Checking (MyPy)
+```yaml
+- name: Run MyPy type checking
+  run: |
+    python -m mypy src/elspeth \
+      --config-file pyproject.toml \
+      --show-error-codes \
+      --pretty
+```
+
+**Output**: Type errors posted to PR with file locations
+
+**Failure Behavior**: Job fails → PR blocked
+
+---
+
+#### Job 3: Linting (Ruff)
+```yaml
+- name: Run Ruff linter
+  run: |
+    python -m ruff check src tests \
+      --output-format=github \
+      --exit-non-zero-on-fix
+```
+
+**Output**: Linting errors as GitHub annotations on PR diff
+
+**Failure Behavior**: Job fails on errors (warnings allowed) → PR blocked
+
+---
+
+#### Job 4: Mutation Testing (Security-Critical PRs)
+```yaml
+- name: Detect security-critical changes
+  id: security-check
+  run: |
+    git diff origin/main --name-only | \
+      grep -E '^src/elspeth/core/(security|base/plugin|data/classified_data)' \
+      && echo "security_changed=true" >> $GITHUB_OUTPUT \
+      || echo "security_changed=false" >> $GITHUB_OUTPUT
+
+- name: Run mutation testing
+  if: steps.security-check.outputs.security_changed == 'true'
+  run: |
+    python -m mutmut run \
+      --paths-to-mutate src/elspeth/core/security \
+      --runner pytest \
+      --tests-dir tests
+
+    # Check survivor rate
+    python scripts/check_mutation_survivors.py --max-survivors=10
+```
+
+**Output**: Mutation testing report with survivor analysis
+
+**Failure Behavior**: >10% survivors → Job fails → PR blocked
+
+---
+
+### Branch Protection Rules
+
+**Protected Branches**: `main`, `develop`
+
+**Required Status Checks** (must pass before merge):
+- ✅ `ci-quality-gate / unit-tests-coverage`
+- ✅ `ci-quality-gate / type-checking`
+- ✅ `ci-quality-gate / linting`
+- ✅ `ci-quality-gate / mutation-testing` (if triggered)
+- ✅ `sonarqube / code-analysis`
+
+**Additional Rules**:
+- Require pull request reviews (≥1 approver)
+- Dismiss stale reviews on new commits
+- Require linear history (rebase, no merge commits)
+- Require signed commits for security-critical changes
+
+---
+
+### SonarQube Integration
+
+**Analysis Triggers**: Every PR and main branch commit
+
+**Quality Gate Conditions**:
+- Coverage on new code: ≥80%
+- Duplicated lines: ≤3%
+- Maintainability rating: A
+- Reliability rating: A
+- Security rating: A
+- Security hotspots reviewed: 100%
+
+**Failure Behavior**: Quality gate fail → PR flagged in SonarQube dashboard
+
+**Integration**: SonarQube status posted to PR via webhook
+
+---
+
+### Local Development Hooks
+
+**Pre-commit Hook** (`.git/hooks/pre-commit`):
+```bash
+#!/bin/bash
+# Run fast checks before commit
+
+# Format check
+python -m ruff format --check src tests || exit 1
+
+# Lint check
+python -m ruff check src tests || exit 1
+
+# Type check (fast mode)
+python -m mypy src/elspeth --config-file pyproject.toml || exit 1
+
+echo "✅ Pre-commit checks passed"
+```
+
+**Installation**: `make install-hooks` (documented in contributor guide)
+
+**Bypass**: `git commit --no-verify` (requires justification in commit message)
+
+---
+
+### Enforcement Escalation Path
+
+**Level 1: Automated Blocking** (No merge allowed)
+- All tests must pass (100% pass rate)
+- Coverage targets met (component-specific)
+- MyPy clean (zero type errors)
+- Ruff clean (zero lint errors)
+
+**Level 2: Review Required** (Can merge with approval)
+- Mutation testing ≤10% survivors (security-critical only)
+- SonarQube quality gate (A ratings)
+
+**Level 3: Exception Process** (Requires justification + security review)
+- Coverage below target (technical debt documented)
+- `# type: ignore` usage (with explanation comment)
+- `# noqa` usage (with explanation comment)
+- Mutation testing survivors >10% (unkillable mutants documented)
+
+**Exception Approval**: Requires:
+1. Written justification in PR description
+2. Link to technical debt issue (if applicable)
+3. Security review (if security-critical code)
+4. Two approvers (instead of one)
+
+---
+
+### Monitoring & Reporting
+
+**Weekly Coverage Report**:
+- Coverage trends by component type
+- Files with declining coverage
+- Top 10 uncovered code sections
+- Mutation testing summary (security-critical)
+
+**Distribution**: Posted to #engineering Slack channel, emailed to team
+
+**Dashboard**: Grafana dashboard showing:
+- Coverage over time (per component type)
+- Quality gate pass/fail rate
+- Mutation testing survivor rate
+- Test execution time trends
 
 ---
 

@@ -44,9 +44,6 @@ class ClassifiedMaterialMiddleware(BasePlugin, LLMMiddleware):
     - Severity scoring (HIGH/MEDIUM/LOW)
     - False-positive dampers (code fence detection, all-caps requirement)
     - REL TO country-list parsing
-
-    Args:
-        security_level: Security clearance for this middleware (MANDATORY per ADR-004).
     """
 
     name = "classified_material"
@@ -194,7 +191,6 @@ class ClassifiedMaterialMiddleware(BasePlugin, LLMMiddleware):
     def __init__(
         self,
         *,
-        security_level: SecurityLevel,
         classification_markings: Sequence[str] | None = None,
         on_violation: str = "abort",
         mask: str = "[CLASSIFIED]",
@@ -211,7 +207,6 @@ class ClassifiedMaterialMiddleware(BasePlugin, LLMMiddleware):
         """Initialize enhanced classified material middleware.
 
         Args:
-            security_level: Security clearance for this middleware (MANDATORY per ADR-004).
             classification_markings: Custom classification markings to detect
             on_violation: Action on detection - 'abort', 'mask', or 'log'
             mask: Replacement text when masking
@@ -225,7 +220,10 @@ class ClassifiedMaterialMiddleware(BasePlugin, LLMMiddleware):
             check_code_fences: Apply false-positive dampers for code fences
             require_allcaps_confidence: Require ALL-CAPS or proximity to trigger on single words
         """
-        super().__init__(security_level=security_level, allow_downgrade=True)  # ADR-005: Middleware trusted to downgrade
+        super().__init__(
+            security_level=SecurityLevel.UNOFFICIAL,  # ADR-002-B: Immutable policy
+            allow_downgrade=True,  # ADR-002-B: Immutable policy
+        )
         mode = (on_violation or "abort").lower()
         if mode not in {"abort", "mask", "log"}:
             mode = "abort"
@@ -465,12 +463,10 @@ class ClassifiedMaterialMiddleware(BasePlugin, LLMMiddleware):
 def _create_classified_material_middleware(
     options: dict[str, Any], context: PluginContext
 ) -> ClassifiedMaterialMiddleware:
-    """Factory for classified material middleware with smart security defaults."""
+    """Factory for classified material middleware (ADR-002-B: security policy is immutable)."""
     opts = dict(options)
-    if "security_level" not in opts and context:
-        opts["security_level"] = context.security_level
+    # ADR-002-B: security_level is hard-coded in plugin, not passed as parameter
     return ClassifiedMaterialMiddleware(
-        security_level=opts["security_level"],
         classification_markings=opts.get("classification_markings"),
         on_violation=opts.get("on_violation", "abort"),
         mask=opts.get("mask", "[CLASSIFIED]"),

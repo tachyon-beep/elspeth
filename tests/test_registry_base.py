@@ -157,7 +157,7 @@ def test_registry_validate(simple_schema):
         registry.validate("mock", {"number": 42})  # missing required 'value'
 
 
-def test_registry_create():
+def test_registry_create(plugin_context):
     """Registry creates plugin with context."""
     registry = BasePluginRegistry[MockPlugin]("test_plugin")
     registry.register("mock", create_mock_plugin, schema=None)
@@ -167,10 +167,10 @@ def test_registry_create():
         options={
             "value": "test",
             "number": 100,
-            "security_level": "PROTECTED",
             "determinism_level": "high",
         },
-        require_security=True,
+        parent_context=plugin_context,
+        require_security=False,
         require_determinism=True,
     )
 
@@ -178,7 +178,8 @@ def test_registry_create():
     assert plugin.value == "test"
     assert plugin.number == 100
     assert plugin._elspeth_context is not None
-    assert plugin._elspeth_context.security_level == "PROTECTED"
+    # Security level inherited from parent_context
+    assert plugin._elspeth_context.security_level == "OFFICIAL"
     assert plugin._elspeth_context.determinism_level == "high"
 
 
@@ -235,8 +236,8 @@ def test_registry_create_missing_determinism_level():
             name="mock",
             options={
                 "value": "test",
-                "security_level": "OFFICIAL",
             },  # no determinism_level
+            require_security=False,  # Skip security check to test determinism validation
             require_determinism=True,
         )
 
@@ -255,7 +256,7 @@ def test_registry_list_plugins():
     assert registry.list_plugins() == ["plugin_a", "plugin_b", "plugin_c"]
 
 
-def test_registry_provenance_tracking():
+def test_registry_provenance_tracking(plugin_context):
     """Registry tracks provenance sources correctly."""
     registry = BasePluginRegistry[MockPlugin]("test_plugin")
     registry.register("mock", create_mock_plugin, schema=None)
@@ -264,18 +265,19 @@ def test_registry_provenance_tracking():
         name="mock",
         options={
             "value": "test",
-            "security_level": "OFFICIAL",
             "determinism_level": "high",
         },
+        parent_context=plugin_context,
         provenance=["custom.source"],
     )
 
     assert plugin._elspeth_context is not None
-    assert "test_plugin:mock.options.security_level" in plugin._elspeth_context.provenance
+    # Security level no longer in options (ADR-002-B), but determinism should be tracked
+    assert "test_plugin:mock.options.determinism_level" in plugin._elspeth_context.provenance
     assert "custom.source" in plugin._elspeth_context.provenance
 
 
-def test_registry_strips_framework_keys():
+def test_registry_strips_framework_keys(plugin_context):
     """Registry strips security/determinism levels before passing to factory."""
     registry = BasePluginRegistry[MockPlugin]("test_plugin")
 
@@ -292,9 +294,9 @@ def test_registry_strips_framework_keys():
         name="mock",
         options={
             "value": "test",
-            "security_level": "OFFICIAL",
             "determinism_level": "high",
         },
+        parent_context=plugin_context,
     )
 
     assert plugin.value == "test"
@@ -311,7 +313,6 @@ def test_registry_validation_strips_framework_keys(simple_schema):
             "mock",
             {
                 "value": "test",
-                "security_level": "OFFICIAL",
                 "determinism_level": "high",
             },
         )
@@ -356,7 +357,7 @@ def test_registry_clear():
     assert len(registry.list_plugins()) == 0
 
 
-def test_registry_temporary_override():
+def test_registry_temporary_override(plugin_context):
     """Registry temporary_override temporarily replaces a plugin."""
     registry = BasePluginRegistry[MockPlugin]("test_plugin")
 
@@ -370,23 +371,23 @@ def test_registry_temporary_override():
         return plugin
 
     # Original plugin works
-    plugin = registry.create("mock", {"value": "original", "security_level": "OFFICIAL", "determinism_level": "high"})
+    plugin = registry.create("mock", {"value": "original", "determinism_level": "high"}, parent_context=plugin_context)
     assert plugin.value == "original"
     assert not hasattr(plugin, "mocked")
 
     # Override temporarily
     with registry.temporary_override("mock", mock_factory):
-        plugin = registry.create("mock", {"value": "overridden", "security_level": "OFFICIAL", "determinism_level": "high"})
+        plugin = registry.create("mock", {"value": "overridden", "determinism_level": "high"}, parent_context=plugin_context)
         assert plugin.value == "overridden"
         assert plugin.mocked is True
 
     # Original restored
-    plugin = registry.create("mock", {"value": "restored", "security_level": "OFFICIAL", "determinism_level": "high"})
+    plugin = registry.create("mock", {"value": "restored", "determinism_level": "high"}, parent_context=plugin_context)
     assert plugin.value == "restored"
     assert not hasattr(plugin, "mocked")
 
 
-def test_registry_temporary_override_new_plugin():
+def test_registry_temporary_override_new_plugin(plugin_context):
     """Registry temporary_override works for new plugins."""
     registry = BasePluginRegistry[MockPlugin]("test_plugin")
 
@@ -399,14 +400,14 @@ def test_registry_temporary_override_new_plugin():
     # Override creates it temporarily
     with registry.temporary_override("temp_plugin", temp_factory):
         assert "temp_plugin" in registry.list_plugins()
-        plugin = registry.create("temp_plugin", {"value": "temp", "security_level": "OFFICIAL", "determinism_level": "high"})
+        plugin = registry.create("temp_plugin", {"value": "temp", "determinism_level": "high"}, parent_context=plugin_context)
         assert plugin.value == "temp"
 
     # Plugin removed after context
     assert "temp_plugin" not in registry.list_plugins()
 
 
-def test_registry_temporary_override_exception_handling():
+def test_registry_temporary_override_exception_handling(plugin_context):
     """Registry temporary_override restores original even on exception."""
     registry = BasePluginRegistry[MockPlugin]("test_plugin")
 
@@ -422,11 +423,11 @@ def test_registry_temporary_override_exception_handling():
     with pytest.raises(ValueError):
         with registry.temporary_override("mock", mock_factory):
             # Override is active
-            plugin = registry.create("mock", {"value": "test", "security_level": "OFFICIAL", "determinism_level": "high"})
+            plugin = registry.create("mock", {"value": "test", "determinism_level": "high"}, parent_context=plugin_context)
             assert plugin.mocked is True
             # Raise exception
             raise ValueError("Test exception")
 
     # Original still restored despite exception
-    plugin = registry.create("mock", {"value": "restored", "security_level": "OFFICIAL", "determinism_level": "high"})
+    plugin = registry.create("mock", {"value": "restored", "determinism_level": "high"}, parent_context=plugin_context)
     assert not hasattr(plugin, "mocked")

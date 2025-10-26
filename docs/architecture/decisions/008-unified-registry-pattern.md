@@ -1,4 +1,4 @@
-# ADR 007 – Unified Registry Pattern
+# ADR-008 – Unified Registry Pattern
 
 ## Status
 
@@ -44,7 +44,15 @@ class BasePluginRegistry(Generic[T], ABC):
     - Security level stamping (_elspeth_security_level attribute)
     - Factory pattern for plugin instantiation
     - Type safety via Generic[T]
+    - Security policy field enforcement (ADR-002-B)
     """
+
+    # ADR-002-B: Forbidden configuration fields (immutable security policy)
+    FORBIDDEN_CONFIG_FIELDS = frozenset({
+        "security_level",
+        "allow_downgrade",
+        "max_operating_level",  # Future-proofing
+    })
 
     def __init__(self):
         self._plugins: dict[str, type[T]] = {}
@@ -62,8 +70,9 @@ class BasePluginRegistry(Generic[T], ABC):
         if not isinstance(plugin_class, type):
             raise TypeError(f"Expected class, got {type(plugin_class)}")
 
-        # Schema registration
+        # Schema registration with security policy validation (ADR-002-B)
         if schema:
+            self._validate_schema_security(name, schema)  # ← ADR-002-B enforcement
             self._validate_schema(schema)
             self._schemas[name] = schema
 
@@ -73,6 +82,23 @@ class BasePluginRegistry(Generic[T], ABC):
 
         # Store plugin
         self._plugins[name] = plugin_class
+
+    def _validate_schema_security(self, plugin_name: str, schema: dict) -> None:
+        """Verify schema doesn't expose security policy fields (ADR-002-B).
+
+        Raises:
+            RegistrationError: If forbidden fields found in schema
+        """
+        properties = schema.get("properties", {})
+        exposed_fields = self.FORBIDDEN_CONFIG_FIELDS & set(properties.keys())
+
+        if exposed_fields:
+            raise RegistrationError(
+                f"Plugin '{plugin_name}' schema exposes forbidden security policy fields: "
+                f"{exposed_fields}. These are author-owned and immutable (ADR-002-B). "
+                f"Remove from schema - plugins declare security policy in code via "
+                f"BasePlugin.__init__(security_level=..., allow_downgrade=...)."
+            )
 
     def get(self, name: str) -> type[T]:
         """Retrieve registered plugin class (type-safe)."""

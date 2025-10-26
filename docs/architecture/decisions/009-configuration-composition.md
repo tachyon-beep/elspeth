@@ -1,4 +1,4 @@
-# ADR 008 – Configuration Composition & Validation
+# ADR-009 – Configuration Composition & Validation
 
 ## Status
 
@@ -76,34 +76,30 @@ Final Configuration → Plugin Instantiation
 **Example**:
 ```yaml
 # Layer 1: Suite defaults
-model: "gpt-3.5-turbo"
-temperature: 0.7
-max_tokens: 1000
-
-# Security policy must be explicit
-plugins:
-  datasource:
-    allow_downgrade: false  # Frozen by default at suite scope
+llm:
+  model: "gpt-3.5-turbo"
+  temperature: 0.7
+  max_tokens: 1000
+  # ❌ FORBIDDEN: allow_downgrade NOT in config (ADR-002-B)
+  #    Plugins declare security policy in code, not config
 
 # Layer 2: Prompt pack
-temperature: 0.9  # Overrides suite default
-
-# Prompt pack explicitly opts-in to trusted downgrade where required
-plugins:
-  datasource:
-    allow_downgrade: true
+llm:
+  temperature: 0.9  # Overrides suite default
 
 # Layer 3: Experiment override
-max_tokens: 2000  # Overrides suite default
+llm:
+  max_tokens: 2000  # Overrides suite default
 
 # Final merged config:
-model: "gpt-3.5-turbo"      # From suite defaults
-temperature: 0.9            # From prompt pack (overrides suite)
-max_tokens: 2000            # From experiment (overrides suite)
-plugins:
-  datasource:
-    allow_downgrade: true   # Highest-priority layer wins
+llm:
+  model: "gpt-3.5-turbo"      # From suite defaults
+  temperature: 0.9            # From prompt pack (overrides suite)
+  max_tokens: 2000            # From experiment (overrides suite)
+  # Security policy (allow_downgrade) declared in plugin code, not here
 ```
+
+**Note**: Security policy fields (`security_level`, `allow_downgrade`) are **forbidden in configuration** per ADR-002-B (Immutable Security Policy Metadata). These fields are plugin-author-owned and declared in code.
 
 **Rationale**: Higher layers are more specific, should have final say.
 
@@ -231,6 +227,113 @@ temperature:
 ```
 
 **Rationale**: Null is often accidental (missing value), explicit deletion prevents accidents.
+
+---
+
+## Part 2.5: Security Policy Field Exclusion (ADR-002-B Integration)
+
+### Forbidden Configuration Fields
+
+Per **ADR-002-B** (Immutable Security Policy Metadata), the following fields **MUST NOT** appear in configuration YAML at any layer:
+
+- `security_level: SecurityLevel` – Plugin's clearance (code-declared)
+- `allow_downgrade: bool` – Downgrade permission (code-declared)
+- `max_operating_level: SecurityLevel` – Future: upper bound on operations
+
+**Rationale**: Security policy is a property of the **plugin implementation**, not the **deployment configuration**. Operators choose *which plugin* to use, not *how secure* that plugin behaves.
+
+### Registry Enforcement
+
+Plugin registries (ADR-008) reject schemas exposing forbidden fields:
+
+```python
+# src/elspeth/core/registries/base.py
+class BasePluginRegistry(Generic[T]):
+    FORBIDDEN_CONFIG_FIELDS = frozenset({
+        "security_level",
+        "allow_downgrade",
+        "max_operating_level",
+    })
+
+    def register(self, plugin_name: str, plugin_class: type[T], config_schema: dict | None = None):
+        if config_schema:
+            properties = config_schema.get("properties", {})
+            exposed_fields = self.FORBIDDEN_CONFIG_FIELDS & set(properties.keys())
+
+            if exposed_fields:
+                raise RegistrationError(
+                    f"Plugin '{plugin_name}' schema exposes forbidden security policy fields: "
+                    f"{exposed_fields}. These are author-owned and immutable (ADR-002-B)."
+                )
+```
+
+### Configuration Merge Behavior
+
+If forbidden fields appear in YAML (legacy configs, user error):
+
+**Checkpoint 1 (Layer Load)**: Parse YAML successfully (no syntax error)
+
+**Checkpoint 2 (Post-Merge)**: Detect forbidden fields, abort:
+
+```python
+def validate_no_security_policy_fields(config: dict) -> None:
+    """Ensure configuration doesn't override security policy (ADR-002-B)."""
+    forbidden = {"security_level", "allow_downgrade", "max_operating_level"}
+
+    def check_recursively(obj: dict, path: str = ""):
+        for key, value in obj.items():
+            if key in forbidden:
+                raise ConfigurationError(
+                    f"Security policy field '{key}' found in configuration at path '{path}.{key}'. "
+                    f"These fields are plugin-author-owned and immutable (ADR-002-B). "
+                    f"Remove from YAML - plugins declare security policy in code via "
+                    f"BasePlugin.__init__(security_level=..., allow_downgrade=...)."
+                )
+            if isinstance(value, dict):
+                check_recursively(value, f"{path}.{key}")
+
+    check_recursively(config)
+```
+
+**Error Example**:
+```
+ConfigurationError: Security policy field 'allow_downgrade' found in configuration at path 'plugins.datasource.allow_downgrade'. These fields are plugin-author-owned and immutable (ADR-002-B). Remove from YAML - plugins declare security policy in code via BasePlugin.__init__(security_level=..., allow_downgrade=...).
+```
+
+### Migration Guide (For Existing Configs)
+
+**Before (invalid after ADR-002-B)**:
+```yaml
+datasource:
+  type: "csv_local"
+  path: "data.csv"
+  allow_downgrade: true  # ❌ Forbidden!
+```
+
+**After (ADR-002-B compliant)**:
+```yaml
+datasource:
+  type: "csv_local"
+  path: "data.csv"
+  # ✅ Security policy declared in plugin code (CsvLocalDataSource.__init__)
+```
+
+**Plugin Code** (where security policy belongs):
+```python
+class CsvLocalDataSource(BasePlugin, DataSource):
+    def __init__(self, *, path: str):
+        super().__init__(
+            security_level=SecurityLevel.UNOFFICIAL,  # ← Code-declared
+            allow_downgrade=True,                      # ← Code-declared
+        )
+        self.path = path
+```
+
+### Cross-References
+
+- [ADR-002-B](002-b-security-policy-metadata.md) – Full specification of immutable security policy
+- [ADR-008](008-unified-registry-pattern.md) – Registry validation enforcement
+- [ADR-005](005-frozen-plugin-capability.md) – `allow_downgrade` semantics
 
 ---
 

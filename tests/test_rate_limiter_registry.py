@@ -152,10 +152,19 @@ def test_registry_has_all_rate_limiters():
 
 def test_registry_create_via_registry():
     """Test creating rate limiters via registry interface."""
+    # Create parent context for inheritance
+    parent_context = PluginContext(
+        security_level="public",
+        provenance=["test"],
+        plugin_kind="test",
+        plugin_name="parent",
+    )
+
     # Test noop
     limiter = rate_limiter_registry.create(
         "noop",
-        {"security_level": "public"},
+        {},
+        parent_context=parent_context,
         require_security=False,
         require_determinism=False,
     )
@@ -164,7 +173,8 @@ def test_registry_create_via_registry():
     # Test fixed_window
     limiter = rate_limiter_registry.create(
         "fixed_window",
-        {"security_level": "public", "requests": 10, "per_seconds": 1.0},
+        {"requests": 10, "per_seconds": 1.0},
+        parent_context=parent_context,
         require_security=False,
         require_determinism=False,
     )
@@ -173,7 +183,8 @@ def test_registry_create_via_registry():
     # Test adaptive
     limiter = rate_limiter_registry.create(
         "adaptive",
-        {"security_level": "public", "requests_per_minute": 100, "interval_seconds": 1.0},
+        {"requests_per_minute": 100, "interval_seconds": 1.0},
+        parent_context=parent_context,
         require_security=False,
         require_determinism=False,
     )

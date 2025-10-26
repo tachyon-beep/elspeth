@@ -1,14 +1,14 @@
-# ADR 009 – Pass-Through Artifact Lifecycle & Transform Composition
+# ADR-010 – Pass-Through Artifact Lifecycle & Transform Composition
 
 ## Status
 
 **DRAFT** (2025-10-26)
 
-**Priority**: P0 – CRITICAL (Blocks ADR-006 implementation, 1.0 release)
+**Priority**: P0 – CRITICAL (Blocks ADR-007 implementation, 1.0 release)
 
 ## Context
 
-Elspeth's artifact pipeline chains plugins that consume and produce artifacts (DataFrames, Excel workbooks, CSV files, JSON objects). ADR-006 "Universal Dual-Output Protocol" proposed that all plugins can produce both DataFrame and Artifact outputs, enabling composability. However, the artifact lifecycle model—when artifacts are created, passed between plugins, and cleaned up—remained undefined.
+Elspeth's artifact pipeline chains plugins that consume and produce artifacts (DataFrames, Excel workbooks, CSV files, JSON objects). ADR-007 "Universal Dual-Output Protocol" proposed that all plugins can produce both DataFrame and Artifact outputs, enabling composability. However, the artifact lifecycle model—when artifacts are created, passed between plugins, and cleaned up—remained undefined.
 
 ### Current State Problems
 

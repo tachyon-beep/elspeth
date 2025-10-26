@@ -1,4 +1,4 @@
-# ADR-006: Universal Dual-Output Plugin Protocol for Composability
+# ADR-007: Universal Dual-Output Plugin Protocol for Composability
 
 **Status**: PROPOSED
 **Date**: 2025-10-26
@@ -15,7 +15,7 @@ Every plugin produces TWO output types with multi-level inheritance control:
 class DualOutputMixin:
     """Provides automatic dual-output tracking for all plugins.
 
-    DUAL-OUTPUT PROTOCOL (ADR-006):
+    DUAL-OUTPUT PROTOCOL (ADR-007):
     1. DataFrame output - Data flowing through pipeline (sources/transforms)
     2. Artifact output - Chainable metadata for composition (all plugins)
 
@@ -60,6 +60,8 @@ class DebugBlobDataSource(BlobDataSource):
 ```
 
 **Impact**: Reduces boilerplate from ~640 lines (13 sinks × 40 lines) to ~48 lines (93% reduction).
+
+**NOTE**: All references to ADR-006 in this document refer to ADR-007 (Security-Critical Exception Policy is separately numbered as ADR-006).
 
 ---
 
@@ -297,6 +299,124 @@ We will implement a **Universal Dual-Output Protocol** where ALL plugins produce
   provenance, so downstream sinks can re-validate before persisting and audits
   retain a complete chain of custody.
 
+### Security Metadata Propagation (ADR-002 Integration)
+
+**Artifact Security Level Inheritance**:
+
+Every registered artifact inherits the plugin's `security_level` by default (unless explicitly overridden):
+
+```python
+def _register_artifact_output(
+    self,
+    name: str,
+    type: str,
+    *,
+    security_level: SecurityLevel | None = None,  # Optional override
+    ...
+) -> None:
+    # Default to plugin's clearance if not specified
+    effective_level = security_level or self.security_level
+
+    artifact = Artifact(
+        id=f"{self.__class__.__name__}_{name}",
+        type=type,
+        security_level=effective_level,  # ← Propagated from plugin
+        ...
+    )
+    self._output_artifacts[name] = artifact
+```
+
+**ArtifactPipeline Clearance Enforcement**:
+
+Artifact flow is validated at each hop (existing implementation in `artifact_pipeline.py:192`):
+
+```python
+# Simplified enforcement logic
+class ArtifactPipeline:
+    def execute_sink(self, sink: ResultSink, artifacts: dict[str, Artifact]):
+        for artifact in artifacts.values():
+            # Check 1: Sink must have clearance for artifact
+            if artifact.security_level > sink.security_level:
+                raise SecurityValidationError(
+                    f"Sink {sink.__class__.__name__} (clearance: {sink.security_level}) "
+                    f"cannot process artifact (classification: {artifact.security_level}) "
+                    f"- insufficient clearance (ADR-002)"
+                )
+
+            # Check 2: Frozen plugins reject downgrade
+            if artifact.security_level < sink.security_level and not sink.allow_downgrade:
+                raise SecurityValidationError(
+                    f"Frozen sink {sink.__class__.__name__} cannot operate below its "
+                    f"clearance level (ADR-005)"
+                )
+
+        # Clearance validated → execute sink
+        sink.write(artifacts)
+```
+
+**Routing Primitive Security**:
+
+Routing nodes (AND/OR/IF/TRY, see ADR-010) preserve security level:
+- Artifacts maintain original `security_level` through routing
+- Destination validation performed before routing decision
+- Frozen routing nodes reject mismatched clearances
+
+**Cross-Reference**: See ADR-002 lines 52-88 for Bell-LaPadula asymmetry details (data classification ↑ only, plugin operations ↓ only).
+
+### Immutable Policy Integration (ADR-002-B)
+
+**Security Policy Exclusion from Configuration**:
+
+Per ADR-002-B, security policy fields (`security_level`, `allow_downgrade`) are **forbidden in plugin configuration schemas**. The dual-output protocol enforces this:
+
+```python
+# ❌ FORBIDDEN: Schema exposing security policy
+EXCEL_TRANSFORM_SCHEMA = {
+    "properties": {
+        "sanitize_formulas": {"type": "boolean"},
+        "security_level": {"type": "string"},  # ← FORBIDDEN (ADR-002-B)
+    }
+}
+
+# ✅ CORRECT: Security policy declared in code only
+class ExcelTransform(BasePlugin, DualOutputMixin, ResultSink):
+    def __init__(self, *, sanitize_formulas: bool = True):
+        # Security policy hard-coded (immutable)
+        super().__init__(
+            security_level=SecurityLevel.UNOFFICIAL,  # Code-declared
+            allow_downgrade=True,                      # Code-declared
+        )
+        self.sanitize_formulas = sanitize_formulas
+
+# Schema validation (ADR-008 registry enforcement)
+EXCEL_TRANSFORM_SCHEMA = {
+    "properties": {
+        "sanitize_formulas": {"type": "boolean"},
+        # ✅ No security_level (code-only field)
+    }
+}
+```
+
+**Registry Validation**:
+
+Plugin registries (ADR-008) reject schemas exposing forbidden fields:
+
+```python
+# Automatic enforcement when registering dual-output plugins
+registry.register(
+    name="excel_transform",
+    plugin_class=ExcelTransform,
+    schema=EXCEL_TRANSFORM_SCHEMA  # ← Validated: no security policy fields
+)
+# If schema had "security_level", registration would fail (ADR-002-B)
+```
+
+**Rationale**: Operators choose *which plugin* to use (e.g., `excel_transform` vs `csv_transform`), not *how secure* that plugin behaves. Security policy is plugin implementation detail, not deployment configuration.
+
+**Cross-Reference**:
+- [ADR-002-B](002-b-security-policy-metadata.md) – Full immutable policy specification
+- [ADR-008](008-unified-registry-pattern.md) – Registry enforcement mechanism
+
 ### Core Components
 
 #### 1. DualOutputMixin Base Class
@@ -318,7 +438,7 @@ if TYPE_CHECKING:
 class DualOutputMixin:
     """Provides automatic dual-output tracking for all plugins.
 
-    DUAL-OUTPUT PROTOCOL (ADR-006):
+    DUAL-OUTPUT PROTOCOL (ADR-007):
     Every plugin can produce TWO output types:
 
     1. **DataFrame Output** - Data flowing through pipeline

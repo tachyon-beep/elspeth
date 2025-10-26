@@ -81,13 +81,18 @@ class TestLLMParameterEnforcement:
         # src/elspeth/core/llm_registry.py:84-87 (http_openai)
         # src/elspeth/plugins/nodes/transforms/llm/azure_openai.py:20
         # These are optional parameters - if not provided, None is used (API defaults apply)
+        from elspeth.core.base.plugin_context import PluginContext
         from elspeth.core.registries.llm import llm_registry
+
+        parent_context = PluginContext(
+            plugin_name="test", plugin_kind="test", security_level="OFFICIAL", determinism_level="guaranteed"
+        )
 
         # HTTP OpenAI should succeed without temperature (uses API default)
         llm = llm_registry.create(
             name="http_openai",
-            options={"api_base": "https://api.openai.com/v1", "model": "gpt-4", "security_level": "internal"},
-            require_determinism=False,
+            options={"api_base": "https://api.openai.com/v1", "model": "gpt-4"},
+            parent_context=parent_context,
         )
         assert llm is not None
         assert getattr(llm, "temperature", None) is None  # Not provided, should be None
@@ -95,8 +100,8 @@ class TestLLMParameterEnforcement:
         # Should also work with explicit temperature
         llm_with_temp = llm_registry.create(
             name="http_openai",
-            options={"api_base": "https://api.openai.com/v1", "model": "gpt-4", "temperature": 0.7, "security_level": "internal"},
-            require_determinism=False,
+            options={"api_base": "https://api.openai.com/v1", "model": "gpt-4", "temperature": 0.7},
+            parent_context=parent_context,
         )
         assert llm_with_temp is not None
         assert getattr(llm_with_temp, "temperature", None) == pytest.approx(0.7)
@@ -106,13 +111,18 @@ class TestLLMParameterEnforcement:
         # src/elspeth/core/llm_registry.py:88-91 (http_openai)
         # src/elspeth/plugins/nodes/transforms/llm/azure_openai.py:21
         # These are optional parameters - if not provided, None is used (API defaults apply)
+        from elspeth.core.base.plugin_context import PluginContext
         from elspeth.core.registries.llm import llm_registry
+
+        parent_context = PluginContext(
+            plugin_name="test", plugin_kind="test", security_level="OFFICIAL", determinism_level="guaranteed"
+        )
 
         # HTTP OpenAI should succeed without max_tokens (uses API default)
         llm = llm_registry.create(
             name="http_openai",
-            options={"api_base": "https://api.openai.com/v1", "model": "gpt-4", "security_level": "internal"},
-            require_determinism=False,
+            options={"api_base": "https://api.openai.com/v1", "model": "gpt-4"},
+            parent_context=parent_context,
         )
         assert llm is not None
         assert llm.max_tokens is None  # Not provided, should be None
@@ -120,8 +130,8 @@ class TestLLMParameterEnforcement:
         # Should also work with explicit max_tokens
         llm_with_max = llm_registry.create(
             name="http_openai",
-            options={"api_base": "https://api.openai.com/v1", "model": "gpt-4", "max_tokens": 1000, "security_level": "internal"},
-            require_determinism=False,
+            options={"api_base": "https://api.openai.com/v1", "model": "gpt-4", "max_tokens": 1000},
+            parent_context=parent_context,
         )
         assert llm_with_max is not None
         assert llm_with_max.max_tokens == 1000
@@ -134,17 +144,22 @@ class TestStaticLLMDefaults:
         """Verify static LLM requires explicit content parameter."""
         # src/elspeth/core/llm_registry.py:47
         # Validates that content parameter is required
+        from elspeth.core.base.plugin_context import PluginContext
         from elspeth.core.registries.llm import llm_registry
         from elspeth.core.validation.base import ConfigurationError
+
+        parent_context = PluginContext(
+            plugin_name="test", plugin_kind="test", security_level="OFFICIAL", determinism_level="guaranteed"
+        )
 
         # Should raise ConfigurationError when content is missing
         # Schema validation catches this before the factory function
         with pytest.raises(ConfigurationError, match="is a required property.*content"):
-            llm_registry.create(name="static_test", options={"security_level": "internal"}, require_determinism=False)
+            llm_registry.create(name="static_test", options={}, parent_context=parent_context)
 
         # Should succeed when content is provided
         llm = llm_registry.create(
-            name="static_test", options={"security_level": "internal", "content": "Explicit test content"}, require_determinism=False
+            name="static_test", options={"content": "Explicit test content"}, parent_context=parent_context
         )
         assert llm is not None
         assert llm.content == "Explicit test content"
@@ -155,33 +170,35 @@ class TestRateLimitDefaults:
 
     def test_rate_limiter_requires_explicit_config(self):
         """Verify rate limiter requires explicit configuration for all parameters."""
+        from elspeth.core.base.plugin_context import PluginContext
         from elspeth.core.controls.rate_limiter_registry import rate_limiter_registry
         from elspeth.core.validation.base import ConfigurationError
+
+        parent_context = PluginContext(
+            plugin_name="test", plugin_kind="test", security_level="OFFICIAL", determinism_level="guaranteed"
+        )
 
         # fixed_window should fail without requests
         with pytest.raises(ConfigurationError, match="is a required property.*requests"):
             rate_limiter_registry.create(
                 name="fixed_window",
-                options={"per_seconds": 1.0, "security_level": "internal"},
-                require_security=False,
-                require_determinism=False,
+                options={"per_seconds": 1.0},
+                parent_context=parent_context,
             )
 
         # fixed_window should fail without per_seconds
         with pytest.raises(ConfigurationError, match="is a required property.*per_seconds"):
             rate_limiter_registry.create(
                 name="fixed_window",
-                options={"requests": 10, "security_level": "internal"},
-                require_security=False,
-                require_determinism=False,
+                options={"requests": 10},
+                parent_context=parent_context,
             )
 
         # Should succeed with all required fields
         limiter = rate_limiter_registry.create(
             name="fixed_window",
-            options={"requests": 10, "per_seconds": 1.0, "security_level": "internal"},
-            require_security=False,
-            require_determinism=False,
+            options={"requests": 10, "per_seconds": 1.0},
+            parent_context=parent_context,
         )
         assert limiter is not None
 
@@ -191,33 +208,35 @@ class TestCostTrackerDefaults:
 
     def test_cost_tracker_requires_explicit_prices(self):
         """Verify cost tracker requires explicit token price configuration."""
+        from elspeth.core.base.plugin_context import PluginContext
         from elspeth.core.controls.cost_tracker_registry import cost_tracker_registry
         from elspeth.core.validation.base import ConfigurationError
+
+        parent_context = PluginContext(
+            plugin_name="test", plugin_kind="test", security_level="OFFICIAL", determinism_level="guaranteed"
+        )
 
         # Should fail without prompt_token_price
         with pytest.raises(ConfigurationError, match="is a required property.*prompt_token_price"):
             cost_tracker_registry.create(
                 name="fixed_price",
-                options={"completion_token_price": 0.01, "security_level": "internal"},
-                require_security=False,
-                require_determinism=False,
+                options={"completion_token_price": 0.01},
+                parent_context=parent_context,
             )
 
         # Should fail without completion_token_price
         with pytest.raises(ConfigurationError, match="is a required property.*completion_token_price"):
             cost_tracker_registry.create(
                 name="fixed_price",
-                options={"prompt_token_price": 0.005, "security_level": "internal"},
-                require_security=False,
-                require_determinism=False,
+                options={"prompt_token_price": 0.005},
+                parent_context=parent_context,
             )
 
         # Should succeed with both prices explicit
         tracker = cost_tracker_registry.create(
             name="fixed_price",
-            options={"prompt_token_price": 0.005, "completion_token_price": 0.01, "security_level": "internal"},
-            require_security=False,
-            require_determinism=False,
+            options={"prompt_token_price": 0.005, "completion_token_price": 0.01},
+            parent_context=parent_context,
         )
         assert tracker is not None
 

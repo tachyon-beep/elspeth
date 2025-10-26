@@ -220,31 +220,32 @@ def test_create_context_empty_provenance():
 
 
 def test_prepare_payload_strips_security():
-    """Strip security_level from options."""
+    """Reject security_level in options (ADR-002-B)."""
+    from elspeth.core.validation.base import ConfigurationError
+
     options = {
         "path": "data.csv",
-        "security_level": "PROTECTED",
+        "security_level": "PROTECTED",  # ADR-002-B: Not allowed in config
         "determinism_level": "high",
     }
 
-    payload = prepare_plugin_payload(options)
-
-    assert "path" in payload
-    assert "security_level" not in payload
-    assert "determinism_level" not in payload
+    # ADR-002-B: security_level in options should raise error
+    with pytest.raises(ConfigurationError, match="author-owned.*ADR-002-B"):
+        prepare_plugin_payload(options)
 
 
 def test_prepare_payload_keep_security():
-    """Keep security_level when strip_security=False."""
+    """Reject security_level regardless of strip_security flag (ADR-002-B)."""
+    from elspeth.core.validation.base import ConfigurationError
+
     options = {
         "path": "data.csv",
-        "security_level": "PROTECTED",
+        "security_level": "PROTECTED",  # ADR-002-B: Not allowed in config
     }
 
-    payload = prepare_plugin_payload(options, strip_security=False)
-
-    assert "security_level" in payload
-    assert payload["security_level"] == "PROTECTED"
+    # ADR-002-B: security_level always rejected, even with strip_security=False
+    with pytest.raises(ConfigurationError, match="author-owned.*ADR-002-B"):
+        prepare_plugin_payload(options, strip_security=False)
 
 
 def test_prepare_payload_keep_determinism():
@@ -264,13 +265,14 @@ def test_prepare_payload_creates_copy():
     """Prepare payload creates copy, doesn't modify original."""
     options = {
         "path": "data.csv",
-        "security_level": "PROTECTED",
+        "determinism_level": "high",  # Use determinism instead (not security)
     }
 
     payload = prepare_plugin_payload(options)
 
-    assert "security_level" not in payload
-    assert "security_level" in options  # original unchanged
+    # Determinism stripped by default
+    assert "determinism_level" not in payload
+    assert "determinism_level" in options  # original unchanged
 
 
 def test_prepare_payload_empty_options():

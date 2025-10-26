@@ -27,7 +27,6 @@ class AuditMiddleware(BasePlugin, LLMMiddleware):
     """Structured audit logger for LLM requests and responses.
 
     Args:
-        security_level: Security clearance for this middleware (MANDATORY per ADR-004).
         include_prompts: Whether to include full prompts in audit logs (default: False).
         channel: Logger channel name (default: 'elspeth.audit').
 
@@ -41,11 +40,13 @@ class AuditMiddleware(BasePlugin, LLMMiddleware):
     def __init__(
         self,
         *,
-        security_level: SecurityLevel,
         include_prompts: bool = False,
         channel: str | None = None,
     ):
-        super().__init__(security_level=security_level, allow_downgrade=True)  # ADR-005: Middleware trusted to downgrade
+        super().__init__(
+            security_level=SecurityLevel.UNOFFICIAL,  # ADR-002-B: Immutable policy
+            allow_downgrade=True,  # ADR-002-B: Immutable policy
+        )
         self.include_prompts = include_prompts
         self.channel = channel or "elspeth.audit"
 
@@ -64,12 +65,10 @@ class AuditMiddleware(BasePlugin, LLMMiddleware):
 
 
 def _create_audit_middleware(options: dict[str, Any], context: PluginContext) -> AuditMiddleware:
-    """Factory for audit middleware with smart security defaults."""
+    """Factory for audit middleware (ADR-002-B: security policy is immutable)."""
     opts = dict(options)
-    if "security_level" not in opts and context:
-        opts["security_level"] = context.security_level
+    # ADR-002-B: security_level is hard-coded in plugin, not passed as parameter
     return AuditMiddleware(
-        security_level=opts["security_level"],
         include_prompts=bool(opts.get("include_prompts", False)),
         channel=opts.get("channel"),
     )

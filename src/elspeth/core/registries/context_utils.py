@@ -223,10 +223,17 @@ def prepare_plugin_payload(
         {'path': 'data.csv'}
     """
     payload = dict(options)
-    if 'allow_downgrade' in payload:
-        raise ConfigurationError("allow_downgrade is author-owned; remove it from configuration")
-    if strip_security:
-        payload.pop("security_level", None)
+    # ADR-002-B: Reject security policy in configuration
+    if "security_level" in payload:
+        raise ConfigurationError(
+            "Plugin security policy is author-owned (ADR-002-B). "
+            "Remove security_level from configuration."
+        )
+    if "allow_downgrade" in payload:
+        raise ConfigurationError(
+            "Plugin downgrade policy is author-owned (ADR-002-B). "
+            "Remove allow_downgrade from configuration."
+        )
     if strip_determinism:
         payload.pop("determinism_level", None)
     return payload

@@ -169,8 +169,6 @@ def test_azure_content_safety_blocks(monkeypatch):
     monkeypatch.setenv("AZURE_CS_KEY", "secret")
 
     middleware = AzureContentSafetyMiddleware(
-        security_level=SecurityLevel.UNOFFICIAL,
-        allow_downgrade=True,
         endpoint="https://example.cognitiveservices.azure.com",
         key_env="AZURE_CS_KEY",
         severity_threshold=4,
@@ -196,8 +194,6 @@ def test_azure_content_safety_masks(monkeypatch):
     monkeypatch.setattr("requests.post", lambda *args, **kwargs: DummyResponse())
 
     middleware = AzureContentSafetyMiddleware(
-        security_level=SecurityLevel.UNOFFICIAL,
-        allow_downgrade=True,
         endpoint="https://example.cognitiveservices.azure.com",
         key="secret",
         severity_threshold=4,
@@ -212,8 +208,6 @@ def test_azure_content_safety_masks(monkeypatch):
 
 def test_audit_middleware_logs_prompts(caplog):
     middleware = AuditMiddleware(
-        security_level=SecurityLevel.UNOFFICIAL,
-        allow_downgrade=True,
         include_prompts=True,
         channel="test.audit",
     )
@@ -235,8 +229,6 @@ def test_health_monitor_emits_heartbeat(monkeypatch, caplog):
     monkeypatch.setattr("elspeth.plugins.nodes.transforms.llm.middleware.health_monitor.time.monotonic", lambda: next(times))
 
     middleware = HealthMonitorMiddleware(
-        security_level=SecurityLevel.UNOFFICIAL,
-        allow_downgrade=True,
         heartbeat_interval=0,
         stats_window=2,
         channel="test.health",
@@ -261,8 +253,6 @@ def test_azure_content_safety_skip_on_error(monkeypatch, caplog):
     monkeypatch.setattr("requests.post", fake_post)
 
     middleware = AzureContentSafetyMiddleware(
-        security_level=SecurityLevel.UNOFFICIAL,
-        allow_downgrade=True,
         endpoint="https://example.cognitiveservices.azure.com",
         key="secret",
         on_violation="abort",
@@ -416,8 +406,6 @@ def test_middleware_retry_hook_invoked(monkeypatch):
 
 def test_health_monitor_middleware_logs(caplog):
     middleware = HealthMonitorMiddleware(
-        security_level=SecurityLevel.UNOFFICIAL,
-        allow_downgrade=True,
         heartbeat_interval=0.0,
         stats_window=5,
         channel="test.health",
@@ -433,8 +421,6 @@ def test_health_monitor_middleware_logs(caplog):
 
 def test_health_monitor_middleware_tracks_failures(caplog):
     middleware = HealthMonitorMiddleware(
-        security_level=SecurityLevel.UNOFFICIAL,
-        allow_downgrade=True,
         heartbeat_interval=0.0,
         stats_window=5,
         channel="test.health",

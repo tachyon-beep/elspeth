@@ -9,8 +9,6 @@ from elspeth.plugins.nodes.transforms.llm.middleware.classified_material import 
 
 def test_abort_on_secret_literal():
     mw = ClassifiedMaterialMiddleware(
-        security_level=SecurityLevel.UNOFFICIAL,
-        allow_downgrade=True,
         on_violation="abort",
     )
     req = LLMRequest(system_prompt="S", user_prompt="This contains SECRET marking", metadata={})
@@ -20,8 +18,6 @@ def test_abort_on_secret_literal():
 
 def test_mask_mode_masks_literal_case_insensitive():
     mw = ClassifiedMaterialMiddleware(
-        security_level=SecurityLevel.UNOFFICIAL,
-        allow_downgrade=True,
         on_violation="mask",
         mask="[MASK]",
     )
@@ -32,8 +28,6 @@ def test_mask_mode_masks_literal_case_insensitive():
 
 def test_severity_threshold_allows_medium_when_min_high():
     mw = ClassifiedMaterialMiddleware(
-        security_level=SecurityLevel.UNOFFICIAL,
-        allow_downgrade=True,
         on_violation="abort",
         severity_scoring=True,
         min_severity="HIGH",
@@ -46,8 +40,6 @@ def test_severity_threshold_allows_medium_when_min_high():
 
 def test_allcaps_confidence_blocks_lowercase_without_context():
     mw = ClassifiedMaterialMiddleware(
-        security_level=SecurityLevel.UNOFFICIAL,
-        allow_downgrade=True,
         on_violation="abort",
         require_allcaps_confidence=True,
         case_sensitive=True,
@@ -59,8 +51,6 @@ def test_allcaps_confidence_blocks_lowercase_without_context():
 
 def test_false_positive_suppressed_inside_code_fence():
     mw = ClassifiedMaterialMiddleware(
-        security_level=SecurityLevel.UNOFFICIAL,
-        allow_downgrade=True,
         on_violation="abort",
         check_code_fences=True,
     )
@@ -76,8 +66,6 @@ def test_false_positive_suppressed_inside_code_fence():
 
 def test_log_mode_with_regex_detection_returns_request():
     mw = ClassifiedMaterialMiddleware(
-        security_level=SecurityLevel.UNOFFICIAL,
-        allow_downgrade=True,
         on_violation="log",
     )
     req = LLMRequest(system_prompt="S", user_prompt="Information REL TO Canada only", metadata={})
