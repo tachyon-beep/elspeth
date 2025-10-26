@@ -43,6 +43,29 @@ Elspeth is organized into **six core layers**:
 └─────────────────────────────────────────────────────────────┘
 ```
 
+```mermaid
+graph TD
+    CLI[CLI & Configuration<br/>YAML validation, environment resolution]
+    DS[Datasources Ingress<br/>CSV local/blob, Azure Blob]
+    ORCH[Experiment Orchestrator<br/>Bind datasource + LLM + sinks]
+    RUNNER[Experiment Runner<br/>Concurrency, retries, middleware]
+    LLM[LLM Transforms<br/>Azure OpenAI, HTTP, Mock + filters]
+    PIPE[Artifact Pipeline Egress<br/>Dependency-ordered sinks]
+
+    CLI --> DS
+    DS --> ORCH
+    ORCH --> RUNNER
+    RUNNER --> LLM
+    LLM --> PIPE
+
+    style CLI fill:#E6F3FF
+    style DS fill:#FFE6E6
+    style ORCH fill:#E6FFE6
+    style RUNNER fill:#FFF3E6
+    style LLM fill:#F3E6FF
+    style PIPE fill:#FFFFE6
+```
+
 ---
 
 ## Core Principles
@@ -348,6 +371,39 @@ ArtifactPipeline
    - Sinks: OFFICIAL clearance, operating at OFFICIAL → ✅ OK
         ↓
 5. Pipeline executes with OFFICIAL enforcement throughout
+```
+
+```mermaid
+graph TD
+    START[Start Pipeline]
+    DECLARE[Datasource declares<br/>SecurityLevel.OFFICIAL]
+    TAG[Data tagged<br/>ClassifiedDataFrame<br/>classification=OFFICIAL]
+    COMPUTE[Compute Operating Level<br/>min datasource, llm, sinks<br/>= OFFICIAL]
+    VALIDATE{Validate Each<br/>Component}
+
+    DS_CHECK[Datasource: OFFICIAL ≥ OFFICIAL<br/>✅ OK]
+    LLM_CHECK[LLM: SECRET ≥ OFFICIAL<br/>✅ OK trusted downgrade]
+    SINK_CHECK[Sinks: OFFICIAL ≥ OFFICIAL<br/>✅ OK]
+
+    EXECUTE[🎉 Pipeline Executes<br/>with OFFICIAL enforcement]
+
+    START --> DECLARE
+    DECLARE --> TAG
+    TAG --> COMPUTE
+    COMPUTE --> VALIDATE
+    VALIDATE --> DS_CHECK
+    VALIDATE --> LLM_CHECK
+    VALIDATE --> SINK_CHECK
+    DS_CHECK & LLM_CHECK & SINK_CHECK --> EXECUTE
+
+    style START fill:#E6F3FF
+    style DECLARE fill:#FFE6E6
+    style TAG fill:#FFF3E6
+    style COMPUTE fill:#ADD8E6
+    style DS_CHECK fill:#90EE90
+    style LLM_CHECK fill:#90EE90
+    style SINK_CHECK fill:#90EE90
+    style EXECUTE fill:#98FB98
 ```
 
 ---

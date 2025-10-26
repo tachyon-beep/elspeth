@@ -27,6 +27,20 @@ UNOFFICIAL → OFFICIAL → OFFICIAL_SENSITIVE → PROTECTED → SECRET
 (lowest)                                                  (highest)
 ```
 
+```mermaid
+graph LR
+    A[UNOFFICIAL<br/>Public data] --> B[OFFICIAL<br/>Business data]
+    B --> C[OFFICIAL_SENSITIVE<br/>Sensitive data]
+    C --> D[PROTECTED<br/>Highly sensitive]
+    D --> E[SECRET<br/>Classified]
+
+    style A fill:#90EE90
+    style B fill:#FFD700
+    style C fill:#FFA500
+    style D fill:#FF6347
+    style E fill:#8B0000,color:#fff
+```
+
 ### Level Descriptions
 
 | Level | Description | Example Use Cases |
@@ -96,6 +110,35 @@ operating_level = min(
 
 These move in **opposite directions** - this is intentional!
 
+```mermaid
+graph TB
+    subgraph "Bell-LaPadula No Read Up"
+        direction TB
+        SECRET[SECRET Component<br/>Clearance: SECRET]
+        OFFICIAL[OFFICIAL Component<br/>Clearance: OFFICIAL]
+        UNOFFICIAL[UNOFFICIAL Component<br/>Clearance: UNOFFICIAL]
+
+        SECRET -->|✅ Can access| SECRET_DATA[SECRET Data]
+        SECRET -->|✅ Can access| OFFICIAL_DATA[OFFICIAL Data]
+        SECRET -->|✅ Can access| UNOFFICIAL_DATA[UNOFFICIAL Data]
+
+        OFFICIAL -->|❌ BLOCKED| SECRET_DATA
+        OFFICIAL -->|✅ Can access| OFFICIAL_DATA
+        OFFICIAL -->|✅ Can access| UNOFFICIAL_DATA
+
+        UNOFFICIAL -->|❌ BLOCKED| SECRET_DATA
+        UNOFFICIAL -->|❌ BLOCKED| OFFICIAL_DATA
+        UNOFFICIAL -->|✅ Can access| UNOFFICIAL_DATA
+    end
+
+    style SECRET fill:#8B0000,color:#fff
+    style OFFICIAL fill:#FFD700
+    style UNOFFICIAL fill:#90EE90
+    style SECRET_DATA fill:#ffcccc
+    style OFFICIAL_DATA fill:#ffffcc
+    style UNOFFICIAL_DATA fill:#ccffcc
+```
+
 ---
 
 ## How It Works: Step-by-Step
@@ -127,6 +170,37 @@ operating_level = min(OFFICIAL, SECRET, OFFICIAL)
 - Sink: `OFFICIAL` clearance, operating at `OFFICIAL` → ✅ **PASS** (exact match)
 
 **Result**: Pipeline runs successfully at `OFFICIAL` level.
+
+```mermaid
+graph LR
+    subgraph "Pipeline Components"
+        DS[Datasource<br/>OFFICIAL]
+        LLM[LLM<br/>SECRET]
+        SINK[Sink<br/>OFFICIAL]
+    end
+
+    subgraph "Operating Level Computation"
+        MIN["min(OFFICIAL, SECRET, OFFICIAL)<br/>=<br/>OFFICIAL"]
+    end
+
+    DS --> MIN
+    LLM --> MIN
+    SINK --> MIN
+
+    MIN --> VALIDATION{Validation}
+
+    VALIDATION -->|DS: OFFICIAL ≥ OFFICIAL ✅| PASS1[✅ Pass]
+    VALIDATION -->|LLM: SECRET ≥ OFFICIAL ✅| PASS2[✅ Pass]
+    VALIDATION -->|Sink: OFFICIAL ≥ OFFICIAL ✅| PASS3[✅ Pass]
+
+    PASS1 & PASS2 & PASS3 --> SUCCESS[🎉 Pipeline Runs]
+
+    style DS fill:#FFD700
+    style LLM fill:#8B0000,color:#fff
+    style SINK fill:#FFD700
+    style MIN fill:#ADD8E6
+    style SUCCESS fill:#90EE90
+```
 
 ---
 

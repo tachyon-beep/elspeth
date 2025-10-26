@@ -767,7 +767,7 @@ llm:
 
 ## Plugin Development
 
-Want to create custom plugins? See [Plugin Development Guide](development.md).
+Want to create custom plugins? See [API Reference](../api-reference/index.md).
 
 **Built-in plugin interfaces:**
 - **Datasource**: Implement `load_data()`, declare `security_level`
@@ -782,7 +782,7 @@ Want to create custom plugins? See [Plugin Development Guide](development.md).
 - **[Security Model](../user-guide/security-model.md)** - Understanding Bell-LaPadula MLS
 - **[Configuration Guide](../user-guide/configuration.md)** - Deep dive into YAML configuration
 - **[First Experiment](../getting-started/first-experiment.md)** - Build an experiment step-by-step
-- **[Plugin Development](development.md)** - Create custom plugins
+- **[Plugin Development](../api-reference/index.md)** - Create custom plugins
 
 ---
 
