@@ -59,6 +59,21 @@ INFO: Sink: CSV output
 ...
 ```
 
+**How to verify success**:
+
+✅ **Terminal shows** "✓ Experiment complete" with no ERROR lines
+✅ **Output files exist**:
+```bash
+ls outputs/sample_suite_reports/
+# Expected: basic_transform.csv, basic_transform.xlsx, basic_transform.json
+```
+
+✅ **CSV has 10 data rows**:
+```bash
+wc -l outputs/sample_suite_reports/basic_transform.csv
+# Expected: 11 (10 data + 1 header)
+```
+
 ---
 
 ## Step 3: Explore Outputs

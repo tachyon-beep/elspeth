@@ -23,6 +23,23 @@ All plugins declare a **security level** (clearance) and work within the Bell-La
 
 ---
 
+## Quick Navigation
+
+Jump to plugin type:
+
+- [Loading Data (Datasources)](#loading-data-datasources) - CSV local/blob, Azure Blob
+- [Processing with LLMs](#processing-with-llms) - Azure OpenAI, generic HTTP API, mock
+- [LLM Middleware (Security & Monitoring)](#llm-middleware-security-monitoring) - PII shield, audit logging, content safety, health monitoring
+- [Saving Results (Sinks)](#saving-results-sinks) - CSV, Excel, JSON, Markdown, visual analytics, signed bundles
+- [Experiment Helpers](#experiment-helpers) - Row transforms, aggregators, baselines, early stopping
+- [RAG (Retrieval-Augmented Generation)](#advanced-retrieval-augmented-generation-rag) - Azure AI Search, vector stores
+- [Cost & Rate Limiting](#cost-rate-limiting) - Token tracking, budget enforcement, rate limiting
+- [Common Patterns](#common-patterns) - Reusable configuration examples
+- [Security Considerations](#security-considerations) - MLS enforcement, middleware stacking
+- [Plugin Development](#plugin-development) - Create custom plugins
+
+---
+
 ## Loading Data (Datasources)
 
 Choose how to load input data into your experiments.

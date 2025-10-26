@@ -2,6 +2,10 @@
 
 Understand Elspeth's **Bell-LaPadula Multi-Level Security (MLS)** enforcement.
 
+!!! info "Data Classification vs Content Filtering"
+    **This page covers**: Data classification (Bell-LaPadula MLS)
+    **For content filtering**: PII detection, classified markings, formula sanitization → See **[Security Controls](security-controls.md)**
+
 !!! info "Why This Matters"
     Elspeth enforces **fail-fast security validation** to prevent sensitive data from flowing into untrusted components. Understanding this model is critical for configuring experiments correctly.
 
@@ -57,6 +61,12 @@ graph LR
 ---
 
 ## Key Concepts
+
+!!! note "Critical Distinction: Clearance vs Operating Level"
+    - **Security Level (Clearance)**: What a component **CAN** handle (its security badge)
+    - **Operating Level**: What the pipeline **IS** handling (which security zone it's operating in)
+
+    **Analogy**: You have a SECRET badge (clearance) but you're working in an OFFICIAL room (operating level). Your badge allows you to be there, but you're not accessing SECRET data right now.
 
 ### Security Level (Clearance)
 
@@ -165,9 +175,9 @@ operating_level = min(OFFICIAL, SECRET, OFFICIAL)
 ```
 
 **Validation**:
-- Datasource: `OFFICIAL` clearance, operating at `OFFICIAL` → ✅ **PASS** (exact match)
-- LLM: `SECRET` clearance, operating at `OFFICIAL` → ✅ **PASS** (can downgrade, trusted to filter)
-- Sink: `OFFICIAL` clearance, operating at `OFFICIAL` → ✅ **PASS** (exact match)
+- Datasource: Has **OFFICIAL clearance**, pipeline **operating at OFFICIAL** → ✅ **PASS** (exact match)
+- LLM: Has **SECRET clearance**, pipeline **operating at OFFICIAL** → ✅ **PASS** (trusted downgrade - can operate below clearance level)
+- Sink: Has **OFFICIAL clearance**, pipeline **operating at OFFICIAL** → ✅ **PASS** (exact match)
 
 **Result**: Pipeline runs successfully at `OFFICIAL` level.
 
@@ -436,7 +446,7 @@ Requested level: OFFICIAL
 This plugin has allow_downgrade=False
 ```
 
-See [ADR-005](../../architecture/decisions/005-frozen-plugin-protection.md) for details.
+See ADR-005 (Frozen Plugin Protection) for details.
 
 ---
 
@@ -655,10 +665,11 @@ Allowed Operations:
 
 ## Further Reading
 
-- **[ADR-002: Multi-Level Security Enforcement](../../architecture/decisions/002-security-architecture.md)** - Full specification
-- **[ADR-002a: ClassifiedDataFrame Constructor](../../architecture/decisions/002a-classified-dataframe-constructor.md)** - Data classification model
-- **[ADR-005: Frozen Plugin Protection](../../architecture/decisions/005-frozen-plugin-protection.md)** - Strict level enforcement
-- **[Security Controls](../../compliance/security-controls.md)** - Compliance documentation
+- **ADR-002: Multi-Level Security Enforcement** - Full specification
+- **ADR-002a: ClassifiedDataFrame Constructor** - Data classification model
+- **ADR-005: Frozen Plugin Protection** - Strict level enforcement
+
+(See [ADR Catalogue](../architecture/adrs.md) for links to full ADR documents in the repository)
 
 ---
 

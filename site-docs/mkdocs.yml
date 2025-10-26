@@ -1,12 +1,25 @@
 # Elspeth Formal Documentation Site Configuration
 
 site_name: Elspeth Documentation
-site_description: Extensible Layered Secure Pipeline Engine for Transformation and Handling
+site_description: Extensible Layered Secure Pipeline Engine for Transformation and Handling - Security-first orchestration with Bell-LaPadula MLS enforcement
+site_author: Elspeth Contributors
 site_url: https://elspeth.readthedocs.io
 
 repo_url: https://github.com/johnm-dta/elspeth
 repo_name: johnm-dta/elspeth
 edit_uri: edit/main/site-docs/docs/
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/johnm-dta/elspeth
+      name: GitHub Repository
+    - icon: fontawesome/solid/bug
+      link: https://github.com/johnm-dta/elspeth/issues
+      name: Report an Issue
+  version:
+    provider: mike
+    default: latest
 
 theme:
   name: material
@@ -28,16 +41,25 @@ theme:
     - navigation.sections
     - navigation.expand
     - navigation.top
+    - navigation.path  # Breadcrumbs
+    - navigation.indexes  # Section index pages
+    - navigation.footer  # Footer navigation
+    - toc.follow  # Table of contents follows scroll
+    - toc.integrate  # Integrate TOC in navigation
     - search.suggest
     - search.highlight
+    - search.share  # Share search results
     - content.code.copy
+    - content.code.annotate  # Code annotations
+    - content.tabs.link  # Link tabbed content
+  icon:
+    repo: fontawesome/brands/github
 
 plugins:
   - search
   - mkdocstrings:
       handlers:
         python:
-          paths: [../src]  # Point to elspeth source code
           options:
             docstring_style: google
             docstring_section_style: table
@@ -60,13 +82,34 @@ plugins:
 markdown_extensions:
   - toc:
       permalink: true
+      permalink_title: Anchor link to this section
   - tables
   - admonition
   - pymdownx.details
-  - pymdownx.highlight
-  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
   - pymdownx.tabbed:
       alternate_style: true
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - pymdownx.keys
+  - pymdownx.mark
+  - pymdownx.smartsymbols
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - attr_list
+  - md_in_html
+  - def_list
 
 nav:
   - Home: index.md
@@ -76,6 +119,7 @@ nav:
     - First Experiment: getting-started/first-experiment.md
   - User Guide:
     - Security Model: user-guide/security-model.md
+    - Security Controls: user-guide/security-controls.md
     - Configuration: user-guide/configuration.md
   - Plugins:
     - Overview: plugins/overview.md

@@ -81,6 +81,9 @@ logging:
 
 Create `config/my_first_suite/experiments/text_processing.yaml`:
 
+!!! warning "YAML Indentation"
+    YAML requires **2-space indentation** (not tabs). Incorrect indentation will cause schema validation errors. Most editors can be configured to convert tabs to spaces automatically.
+
 ```yaml
 experiment:
   name: text_processing
@@ -335,6 +338,8 @@ See [Security Model](../user-guide/security-model.md) for full details.
 
 **Solution**: Check required fields in experiment config. All sinks need `type` and `path`.
 
+**Learn more**: [Configuration Validation Guide](../user-guide/configuration.md#validation-schema-checking)
+
 ### File Not Found
 
 **Error**: `FileNotFoundError: data/my_data.csv`
@@ -349,6 +354,8 @@ ls data/my_data.csv
 **Error**: `SecurityValidationError: Insufficient clearance`
 
 **Solution**: Ensure all components have same (or compatible) security levels. Start with `UNOFFICIAL` for everything.
+
+**Learn more**: [Security Model Guide](../user-guide/security-model.md) | [Security Controls](../user-guide/security-controls.md)
 
 ### Empty Output
 
