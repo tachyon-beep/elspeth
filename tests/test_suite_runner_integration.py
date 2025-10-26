@@ -41,6 +41,33 @@ def _write_experiment(
 
 
 def test_suite_runner_executes_with_defaults_and_packs(tmp_path):
+    """End-to-end validation of experiment suite execution with security controls.
+
+    ╔═══════════════════════════════════════════════════════════════════════════╗
+    ║ CERTIFICATION IMPACT: CRITICAL                                            ║
+    ║                                                                           ║
+    ║ This test validates the ENTIRE security pipeline from config to output.  ║
+    ║ Failure indicates a CERTIFICATION BLOCKER - core execution guarantees    ║
+    ║ are broken and the system is not safe for production deployment.         ║
+    ║                                                                           ║
+    ║ Security Controls Validated:                                              ║
+    ║ • Plugin context propagation (provenance tracking)                       ║
+    ║ • Security level enforcement (OFFICIAL tier handling)                    ║
+    ║ • Determinism level tracking (reproducibility guarantees)                ║
+    ║ • Baseline comparison execution (variant validation)                     ║
+    ║ • Sink resolution with security_level preservation                       ║
+    ║ • Metadata integrity (row counts, determinism_level in manifests)       ║
+    ║                                                                           ║
+    ║ Regulatory Impact:                                                        ║
+    ║ • Failure means security invariants are not enforced end-to-end          ║
+    ║ • Could indicate regression in audit trail, provenance, or controls      ║
+    ║ • May invalidate ALL certification assumptions about the framework       ║
+    ║                                                                           ║
+    ║ This is NOT a config issue - this is comprehensive framework validation. ║
+    ║ If this test fails, STOP. Do not proceed to certification without a full ║
+    ║ investigation and root cause analysis. This is your integration canary.  ║
+    ╚═══════════════════════════════════════════════════════════════════════════╝
+    """
     suite_root = tmp_path / "suite"
     bundle_root = tmp_path / "bundles"
 
@@ -149,8 +176,9 @@ def test_suite_runner_executes_with_defaults_and_packs(tmp_path):
     assert set(results.keys()) == {"baseline", "variant"}
 
     baseline_payload = results["baseline"]["payload"]
-    # Check that metadata includes row count
-    assert baseline_payload["metadata"]["row_count"] == 2
+    # Check that metadata includes row counts
+    assert baseline_payload["metadata"]["processed_rows"] == 2
+    assert baseline_payload["metadata"]["total_rows"] == 2
     baseline_variants = baseline_payload["aggregates"]["prompt_variants"]["variants"]
     assert len(baseline_variants) == 2
     assert "Baseline pack prompt" in baseline_payload["results"][0]["response"]["content"]

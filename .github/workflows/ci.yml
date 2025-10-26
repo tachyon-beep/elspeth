@@ -138,7 +138,7 @@ jobs:
 
       - name: Upload semgrep SARIF to code scanning
         if: always()
-        uses: github/codeql-action/upload-sarif@16140ae1a102900babc80a33c44059580f687047 # v4.30.9
+        uses: github/codeql-action/upload-sarif@4e94bd11f71e507f7f87df81788dff88d1dacbfb # v4.31.0
         with:
           sarif_file: semgrep.sarif
           category: semgrep-oss
@@ -149,7 +149,7 @@ jobs:
 
       - name: Upload pip-audit SARIF to code scanning (if generated)
         if: always() && hashFiles('pip-audit.sarif') != ''
-        uses: github/codeql-action/upload-sarif@16140ae1a102900babc80a33c44059580f687047 # v4.30.9
+        uses: github/codeql-action/upload-sarif@4e94bd11f71e507f7f87df81788dff88d1dacbfb # v4.31.0
         with:
           sarif_file: pip-audit.sarif
           category: pip-audit
@@ -253,7 +253,7 @@ jobs:
 
       # Replace curl|sh installers with pinned GitHub Actions for Syft and Grype
       - name: Generate image SBOM (CycloneDX JSON)
-        uses: anchore/sbom-action@aa0e114b2e19480f157109b9922bda359bd98b90 # v0.20.8
+        uses: anchore/sbom-action@8e94d75ddd33f69f691467e42275782e4bfefe84 # v0.20.9
         with:
           image: elspeth:runtime
           format: cyclonedx-json
@@ -270,7 +270,7 @@ jobs:
 
       - name: Vulnerability scan (Grype) - block on HIGH
         id: grype
-        uses: anchore/scan-action@a5605eb0943e46279cb4fbd9d44297355d3520ab # v7.0.2
+        uses: anchore/scan-action@568b89d27fc18c60e56937bff480c91c772cd993 # v7.1.0
         with:
           image: elspeth:runtime
           severity-cutoff: high
@@ -283,7 +283,7 @@ jobs:
 
       - name: Upload Grype SARIF to code scanning
         if: always() && steps.grype.outputs.sarif != ''
-        uses: github/codeql-action/upload-sarif@16140ae1a102900babc80a33c44059580f687047 # v4.30.9
+        uses: github/codeql-action/upload-sarif@4e94bd11f71e507f7f87df81788dff88d1dacbfb # v4.31.0
         with:
           sarif_file: ${{ steps.grype.outputs.sarif }}
           category: grype
@@ -338,30 +338,33 @@ jobs:
           REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          docker build --build-arg PYTHON_IMAGE=$DOCKER_PYTHON_IMAGE --target runtime -t ghcr.io/${REPO}:pr-${PR_NUMBER} .
+          REPO_LOWER=$(echo "${REPO}" | tr '[:upper:]' '[:lower:]')
+          docker build --build-arg PYTHON_IMAGE=$DOCKER_PYTHON_IMAGE --target runtime -t ghcr.io/${REPO_LOWER}:pr-${PR_NUMBER} .
 
       - name: Push preview image
         env:
           REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          docker push ghcr.io/${REPO}:pr-${PR_NUMBER}
+          REPO_LOWER=$(echo "${REPO}" | tr '[:upper:]' '[:lower:]')
+          docker push ghcr.io/${REPO_LOWER}:pr-${PR_NUMBER}
 
       - name: Summarize preview image
         env:
           REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
+          REPO_LOWER=$(echo "${REPO}" | tr '[:upper:]' '[:lower:]')
           cat >> "$GITHUB_STEP_SUMMARY" << EOF
-          ## PR Preview Image
-          - Tag: 
-            ghcr.io/${REPO}:pr-${PR_NUMBER}
+          ## 🐳 PR Preview Image
 
-          Pull and run locally:
-          ```bash
-          docker pull ghcr.io/${REPO}:pr-${PR_NUMBER}
-          docker run --rm ghcr.io/${REPO}:pr-${PR_NUMBER} python -m elspeth.cli --help
-          ```
+          **Tag:** \`ghcr.io/${REPO_LOWER}:pr-${PR_NUMBER}\`
+
+          **Pull and run locally:**
+          \`\`\`bash
+          docker pull ghcr.io/${REPO_LOWER}:pr-${PR_NUMBER}
+          docker run --rm ghcr.io/${REPO_LOWER}:pr-${PR_NUMBER} python -m elspeth.cli --help
+          \`\`\`
           EOF
       - name: Comment on PR with preview image
         env:
@@ -369,16 +372,24 @@ jobs:
           REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          body=$(cat << 'EOT'
-          ### PR Preview Image
+          REPO_LOWER=$(echo "${REPO}" | tr '[:upper:]' '[:lower:]')
 
-          - Tag: `ghcr.io/${REPO}:pr-${PR_NUMBER}`
+          body=$(cat << EOT
+          ### 🐳 PR Preview Image Available
 
-          Pull and run locally:
-          ```bash
-          docker pull ghcr.io/${REPO}:pr-${PR_NUMBER}
-          docker run --rm ghcr.io/${REPO}:pr-${PR_NUMBER} python -m elspeth.cli --help
-          ```
+          **Tag:** \`ghcr.io/${REPO_LOWER}:pr-${PR_NUMBER}\`
+
+          **Pull and run locally:**
+          \`\`\`bash
+          docker pull ghcr.io/${REPO_LOWER}:pr-${PR_NUMBER}
+          docker run --rm ghcr.io/${REPO_LOWER}:pr-${PR_NUMBER} python -m elspeth.cli --help
+          \`\`\`
+
+          **Run an experiment:**
+          \`\`\`bash
+          docker run --rm -v \$(pwd)/config:/config ghcr.io/${REPO_LOWER}:pr-${PR_NUMBER} \\
+            python -m elspeth.cli --settings /config/settings.yaml
+          \`\`\`
           EOT
           )
           gh pr comment "$PR_NUMBER" --repo "$REPO" --body "$body"

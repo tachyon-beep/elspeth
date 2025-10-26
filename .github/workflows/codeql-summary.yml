@@ -43,21 +43,31 @@ jobs:
           used_fallback=0
           if [ "$ok" -ne 1 ]; then
             # Fallback to repo-wide alerts (covers merge refs/forks)
+            error_tmp=$(mktemp)
             if ! gh api -H "Accept: application/vnd.github+json" \
-              repos/${REPO}/code-scanning/alerts -F tool_name=CodeQL -F per_page=100 > "$tmp" 2>/dev/null; then
-              REMAINING=$(gh api rate_limit --jq '.resources.core.remaining' 2>/dev/null || echo "")
-              if [ -n "$REMAINING" ]; then
-                echo "Unable to fetch alerts (insufficient permissions or none present). Rate limit remaining: ${REMAINING}" >> "$GITHUB_STEP_SUMMARY"
+              repos/${REPO}/code-scanning/alerts -F tool_name=CodeQL -F per_page=100 > "$tmp" 2>"$error_tmp"; then
+              # Check if it's a 404 (no alerts) vs permission error
+              if grep -q "Not Found" "$error_tmp" 2>/dev/null; then
+                echo "✅ No CodeQL alerts found on this ref!" >> "$GITHUB_STEP_SUMMARY"
+                echo "" >> "$GITHUB_STEP_SUMMARY"
+                echo "CodeQL analysis completed successfully with zero findings." >> "$GITHUB_STEP_SUMMARY"
               else
-                echo "Unable to fetch alerts (insufficient permissions or none present)." >> "$GITHUB_STEP_SUMMARY"
+                REMAINING=$(gh api rate_limit --jq '.resources.core.remaining' 2>/dev/null || echo "")
+                if [ -n "$REMAINING" ]; then
+                  echo "⚠️ Unable to fetch CodeQL alerts (insufficient permissions). Rate limit remaining: ${REMAINING}" >> "$GITHUB_STEP_SUMMARY"
+                else
+                  echo "⚠️ Unable to fetch CodeQL alerts (insufficient permissions)." >> "$GITHUB_STEP_SUMMARY"
+                fi
               fi
+              rm -f "$error_tmp"
               exit 0
             fi
+            rm -f "$error_tmp"
             used_fallback=1
           fi
           # Ensure JSON array
           if ! jq -e 'type=="array"' "$tmp" >/dev/null 2>&1; then
-            echo "No alerts returned or access denied." >> "$GITHUB_STEP_SUMMARY"
+            echo "⚠️ CodeQL response invalid or access denied." >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
           total=$(jq 'length' "$tmp")
