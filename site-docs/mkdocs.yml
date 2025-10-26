@@ -81,6 +81,7 @@ nav:
     - Overview: plugins/overview.md
   - Architecture:
     - Overview: architecture/overview.md
+    - Execution Flow: architecture/execution-flow.md
     - ADR Catalogue: architecture/adrs.md
   - API Reference:
     - Overview: api-reference/index.md
