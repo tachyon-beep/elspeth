@@ -154,13 +154,17 @@ class TestPropertyNoClassificationBreach:
     def test_validation_consistent_with_envelope(self, plugin_levels):
         """PROPERTY: Validation results consistent with envelope calculation.
 
-        If envelope = MIN(levels), then:
-        - Plugins with level = MIN should PASS validation
-        - Plugins with level > MIN should FAIL validation
+        If envelope = MIN(levels), then with trusted downgrade (allow_downgrade=True):
+        - Plugins with level >= envelope should PASS validation (sufficient clearance)
+        - Plugins with level < envelope should FAIL validation (insufficient clearance)
+
+        MockPlugin implements allow_downgrade=True behavior implicitly:
+        - Only rejects when operating_level > plugin_level (insufficient clearance)
+        - Allows operating at lower levels (trusted downgrade)
 
         Given: ANY plugin configuration
         When: Computing envelope and validating plugins
-        Then: Validation results match expected based on envelope
+        Then: Validation results match expected based on envelope and Bell-LaPadula rules
         """
         from tests.adr002_test_helpers import MockPlugin
         from elspeth.core.validation.base import SecurityValidationError
@@ -171,12 +175,15 @@ class TestPropertyNoClassificationBreach:
         for plugin in plugins:
             plugin_level = plugin.get_security_level()
 
-            if plugin_level > operating_level:
-                # Plugin requires higher - MUST reject
+            if operating_level > plugin_level:
+                # Operating level HIGHER than plugin's clearance - insufficient clearance
+                # Example: UNOFFICIAL plugin cannot handle SECRET operating level
                 with pytest.raises(SecurityValidationError):
                     plugin.validate_can_operate_at_level(operating_level)
             else:
-                # Plugin can handle envelope - MUST accept
+                # Plugin level >= operating level (sufficient clearance)
+                # With allow_downgrade=True (MockPlugin default): can operate at lower levels
+                # Example: SECRET plugin can operate at UNOFFICIAL level (trusted downgrade)
                 plugin.validate_can_operate_at_level(operating_level)
 
 

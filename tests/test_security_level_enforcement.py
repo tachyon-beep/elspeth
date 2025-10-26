@@ -210,13 +210,16 @@ def test_child_plugin_inherits_when_no_explicit_level():
         determinism_level="none",
     )
 
-    # Child does not specify security_level - inherits from parent
+    # Child does not specify security_level or determinism_level (ADR-002-B)
     definition = {
         "name": "test",
-        # No security_level specified
+        # No security_level → OK (defaults to UNOFFICIAL)
+        # No determinism_level → ERROR (required)
     }
 
-    with pytest.raises(ConfigurationError, match="security_level must be declared"):
+    # ADR-002-B: security_level is optional (defaults to UNOFFICIAL),
+    # but determinism_level is REQUIRED
+    with pytest.raises(ConfigurationError, match="determinism_level must be declared"):
         create_plugin_with_inheritance(
             registry,
             definition,

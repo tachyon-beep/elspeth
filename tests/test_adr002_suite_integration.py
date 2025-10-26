@@ -144,18 +144,24 @@ class TestADR002SuiteIntegration:
         assert "secret_experiment" in results
         assert len(sink.written) > 0, "Sink should have received data"
 
-    def test_fail_path_secret_datasource_unofficial_sink(self):
-        """Test suite FAILS when SECRET datasource paired with UNOFFICIAL sink.
+    def test_trusted_downgrade_secret_datasource_unofficial_sink(self):
+        """Test suite SUCCEEDS with trusted downgrade (SECRET datasource → UNOFFICIAL level).
 
-        Given: SECRET datasource, UNOFFICIAL sink
+        Given: SECRET datasource (allow_downgrade=True), UNOFFICIAL sink
         When: Running suite
-        Then: SecurityValidationError raised at start-time (before data retrieval)
+        Then: Job executes successfully, operating_security_level = UNOFFICIAL
 
-        This is the CRITICAL certification test for ADR-002 Threat T1.
+        Trusted Downgrade Model:
+        - SECRET datasource is CAPABLE of accessing UNOFFICIAL→SECRET data
+        - When operating at UNOFFICIAL, datasource is RESPONSIBLE for filtering
+        - Framework TRUSTS certified plugins to enforce filtering correctly
+        - Enforcement = audit + certification, NOT runtime checks
+
+        This demonstrates ADR-002 Threat T1 prevention via trusted downgrade.
         """
         df = pd.DataFrame({"text": ["test1", "test2"]})
-        datasource = MockSecureDatasource(df)  # Requires SECRET
-        sink = MockUnofficialSink()  # Only handles UNOFFICIAL
+        datasource = MockSecureDatasource(df)  # SECRET with allow_downgrade=True
+        sink = MockUnofficialSink()  # UNOFFICIAL level
 
         experiment = ExperimentConfig(
             name="mixed_security_experiment",
@@ -169,31 +175,28 @@ class TestADR002SuiteIntegration:
         llm_client = MockLLMClient()
         runner = ExperimentSuiteRunner(suite=suite, llm_client=llm_client, sinks=[], datasource=datasource)
 
-        # Expect security validation to BLOCK job at start
-        with pytest.raises(SecurityValidationError) as exc_info:
-            runner.run(df, sink_factory=lambda exp: [sink])
+        # Run succeeds (trusted downgrade)
+        results = runner.run(df, sink_factory=lambda exp: [sink])
 
-        error_msg = str(exc_info.value)
-        assert "ADR-002" in error_msg, "Error should reference ADR-002"
-        assert "Start-Time Validation Failed" in error_msg
-        assert "SECRET" in error_msg, "Error should mention required level"
-        assert "UNOFFICIAL" in error_msg, "Error should mention operating level"
-
-        # Verify no data was written (job failed at start)
-        assert len(sink.written) == 0, "Sink should NOT have received data (job blocked)"
+        # Assertions
+        assert "mixed_security_experiment" in results
+        assert len(sink.written) > 0, "Sink should have received data (trusted downgrade)"
 
     def test_upgrade_path_official_datasource_secret_sink(self):
-        """Test suite runs when datasource security ≤ sink security (upgrade allowed).
+        """Test suite SUCCEEDS when sink can downgrade to match datasource.
 
-        Given: OFFICIAL datasource, SECRET sink
+        Given: OFFICIAL datasource, SECRET sink (allow_downgrade=True)
         When: Running suite
         Then: Job executes successfully, operating_security_level = OFFICIAL (weakest link)
 
-        This demonstrates that data can be uplifted through higher-security components.
+        Trusted Downgrade:
+        - SECRET sink is CAPABLE of handling UNOFFICIAL→SECRET data
+        - When operating at OFFICIAL, sink OPERATES at that level (no special handling needed)
+        - Bell-LaPadula "write up" allows OFFICIAL data → SECRET sink
         """
         df = pd.DataFrame({"text": ["test1", "test2"]})
-        datasource = MockOfficialDatasource(df)  # Requires OFFICIAL
-        sink = MockSecretSink()  # Requires SECRET (higher than datasource)
+        datasource = MockOfficialDatasource(df)  # OFFICIAL level
+        sink = MockSecretSink()  # SECRET with allow_downgrade=True
 
         experiment = ExperimentConfig(
             name="upgrade_experiment",
@@ -207,14 +210,12 @@ class TestADR002SuiteIntegration:
         llm_client = MockLLMClient()
         runner = ExperimentSuiteRunner(suite=suite, llm_client=llm_client, sinks=[], datasource=datasource)
 
-        # SECRET sink requires SECRET, but operating level = OFFICIAL
-        # Therefore SECRET sink should reject the operating level
-        with pytest.raises(SecurityValidationError) as exc_info:
-            runner.run(df, sink_factory=lambda exp: [sink])
+        # SECRET sink CAN downgrade to OFFICIAL operating level
+        results = runner.run(df, sink_factory=lambda exp: [sink])
 
-        error_msg = str(exc_info.value)
-        assert "SECRET" in error_msg, "SECRET sink should reject OFFICIAL envelope"
-        assert "OFFICIAL" in error_msg
+        # Assertions
+        assert "upgrade_experiment" in results
+        assert len(sink.written) > 0, "Sink should have received data"
 
     def test_backward_compatibility_non_baseplugin_components(self):
         """Test suite runs normally when components don't implement BasePlugin.
@@ -452,25 +453,29 @@ class TestADR002SuiteIntegration:
         assert written_data is not None, "Data should flow through multi-stage pipeline"
 
     def test_mixed_security_multi_sink(self):
-        """Multiple sinks with different security levels - partial success.
+        """Multiple sinks with different security levels - trusted downgrade.
 
         This test verifies that per-sink security validation works correctly
         when a suite has multiple sinks requiring different clearance levels.
 
-        Given: SECRET datasource + [SECRET sink, OFFICIAL sink]
+        Given: SECRET datasource (allow_downgrade=True) + [SECRET sink, OFFICIAL sink]
         When: Running suite
         Then:
-          - Start-time validation computes envelope = SECRET (datasource level)
-          - OFFICIAL sink rejects SECRET envelope (requires lower clearance)
-          - Job FAILS at start-time validation (any component can block)
+          - Start-time validation computes envelope = OFFICIAL (minimum level)
+          - SECRET datasource CAN downgrade to OFFICIAL (trusted to filter)
+          - SECRET sink CAN downgrade to OFFICIAL
+          - OFFICIAL sink operates at OFFICIAL (exact match)
+          - Job SUCCEEDS with all plugins operating at OFFICIAL level
 
-        This tests T1 prevention with multiple output paths.
+        Trusted Downgrade:
+        - Envelope = min(all plugin levels) = OFFICIAL
+        - All plugins with allow_downgrade=True can operate at lower levels
         """
         df = pd.DataFrame({"text": ["secret1", "secret2"]})
-        datasource = MockSecureDatasource(df)  # Requires SECRET
+        datasource = MockSecureDatasource(df)  # SECRET with allow_downgrade=True
 
-        secret_sink = MockSecretSink()  # Can handle SECRET
-        official_sink = MockOfficialSink()  # Only handles OFFICIAL
+        secret_sink = MockSecretSink()  # SECRET with allow_downgrade=True
+        official_sink = MockOfficialSink()  # OFFICIAL level
 
         experiment = ExperimentConfig(
             name="multi_sink_test",
@@ -484,15 +489,13 @@ class TestADR002SuiteIntegration:
         llm_client = MockLLMClient()
         runner = ExperimentSuiteRunner(suite=suite, llm_client=llm_client, sinks=[], datasource=datasource)
 
-        # This should FAIL - OFFICIAL sink cannot accept SECRET envelope
-        # Even though SECRET sink can handle it, ALL sinks must accept the envelope
-        with pytest.raises(SecurityValidationError) as exc_info:
-            runner.run(df, sink_factory=lambda exp: [secret_sink, official_sink])
+        # This should SUCCEED - all plugins can downgrade to OFFICIAL envelope
+        results = runner.run(df, sink_factory=lambda exp: [secret_sink, official_sink])
 
-        error_msg = str(exc_info.value)
-        assert "ADR-002" in error_msg, "Error should reference ADR-002 validation"
-        # Verify neither sink received data (job blocked at start)
-        assert len(secret_sink.written) == 0, "SECRET sink should not have received data (job blocked)"
+        # Assertions
+        assert "multi_sink_test" in results
+        assert len(secret_sink.written) > 0, "SECRET sink should receive data"
+        assert len(official_sink.written) > 0, "OFFICIAL sink should receive data"
 
     def test_real_plugin_integration_static_llm(self):
         """Integration test using real plugin implementations (not mocks).

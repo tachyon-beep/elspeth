@@ -181,26 +181,30 @@ class TestADR002MiddlewareIntegration:
     """Advanced integration tests for ADR-002 with middleware and multi-level pipelines."""
 
     def test_four_level_uplifting_chain(self):
-        """Four-level uplifting chain: UNOFFICIAL → OFFICIAL → SECRET → PROTECTED.
+        """Four-level uplifting chain SUCCEEDS with trusted downgrade.
 
-        This test verifies that classification correctly accumulates through
-        a deep pipeline with escalating security levels at each stage.
+        This test verifies that plugins with allow_downgrade=True can operate
+        at lower security levels when trusted to filter appropriately.
 
-        Given: UNOFFICIAL datasource → OFFICIAL transform → SECRET LLM → PROTECTED sink
+        Given: UNOFFICIAL datasource → SECRET LLM → PROTECTED sink (all with allow_downgrade=True)
         When: Running multi-level pipeline
         Then:
           - Start-time envelope = UNOFFICIAL (min of all components)
-          - PROTECTED sink rejects UNOFFICIAL envelope (start-time validation fails)
-          - No data processed (fail-fast before data retrieval)
+          - PROTECTED sink with allow_downgrade=True CAN operate at UNOFFICIAL level
+          - Pipeline SUCCEEDS (trusted downgrade model)
+          - Sink is responsible for filtering/handling data appropriately
 
-        This tests T1 prevention with deep classification mismatches.
+        Trusted Downgrade Model:
+        - PROTECTED sink is CAPABLE of handling PROTECTED data
+        - When operating at UNOFFICIAL, sink is RESPONSIBLE for appropriate handling
+        - Framework TRUSTS certified plugins to enforce policies correctly
+        - Enforcement = audit + certification, NOT runtime checks
         """
         df = pd.DataFrame({"text": ["level1", "level2", "level3"]})
 
-        datasource = MockUnofficialDatasource(df)  # UNOFFICIAL (lowest)
-        # MockOfficialTransform would be OFFICIAL (not used in this test)
-        llm_client = MockSecretLLM()  # SECRET processing
-        sink = MockProtectedSink()  # PROTECTED
+        datasource = MockUnofficialDatasource(df)  # UNOFFICIAL with allow_downgrade=True
+        llm_client = MockSecretLLM()  # SECRET processing (not BasePlugin, not validated)
+        sink = MockProtectedSink()  # PROTECTED with allow_downgrade=True
 
         experiment = ExperimentConfig(
             name="four_level_test",
@@ -214,42 +218,39 @@ class TestADR002MiddlewareIntegration:
         runner = ExperimentSuiteRunner(suite=suite, llm_client=llm_client, sinks=[], datasource=datasource)
 
         # Operating envelope = UNOFFICIAL (datasource level)
-        # PROTECTED sink requires PROTECTED
-        # This should FAIL - sink cannot accept UNOFFICIAL envelope
-        with pytest.raises(SecurityValidationError) as exc_info:
-            runner.run(df, sink_factory=lambda exp: [sink])
+        # PROTECTED sink with allow_downgrade=True can operate at UNOFFICIAL (trusted downgrade)
+        # Should SUCCEED
+        results = runner.run(df, sink_factory=lambda exp: [sink])
 
-        error_msg = str(exc_info.value)
-        assert "ADR-002" in error_msg, "Error should reference ADR-002 validation"
-        assert isinstance(exc_info.value, SecurityValidationError), \
-            "Should raise SecurityValidationError, not generic exception"
-        assert any(level in error_msg for level in ["PROTECTED", "UNOFFICIAL"]), \
-            "Error should mention security level mismatch"
-
-        # Verify no data written (job blocked at start)
-        assert len(sink.written) == 0, "PROTECTED sink should not receive data (job blocked)"
+        # Verify execution succeeded
+        assert "four_level_test" in results, "Experiment should complete successfully"
+        assert len(sink.written) > 0, "Sink should receive data (trusted downgrade)"
 
     def test_three_level_uplifting_with_mismatched_sink(self):
-        """Three-level uplifting with mismatched sink requirements (should fail).
+        """Three-level uplifting SUCCEEDS with trusted downgrade.
 
-        This test demonstrates envelope validation failure when the sink's
-        security requirements exceed the operating envelope.
+        This test demonstrates that SECRET sink with allow_downgrade=True can
+        operate at UNOFFICIAL level with trusted downgrade.
 
-        Given: UNOFFICIAL datasource → OFFICIAL transform → SECRET LLM → SECRET sink
+        Given: UNOFFICIAL datasource → SECRET LLM → SECRET sink (all with allow_downgrade=True)
         When: Running multi-level pipeline
         Then:
           - Start-time envelope = UNOFFICIAL (min of all components)
-          - SECRET sink requires SECRET but envelope is UNOFFICIAL
-          - Job FAILS at start-time validation (before data retrieval)
+          - SECRET sink with allow_downgrade=True CAN operate at UNOFFICIAL level
+          - Pipeline SUCCEEDS (trusted downgrade model)
+          - Sink is responsible for handling data appropriately
 
-        This shows that even with uplifting, the start-time envelope determines access.
-        Runtime uplifting cannot bypass start-time security validation (T1 prevention).
+        Trusted Downgrade Model:
+        - SECRET sink is CAPABLE of handling SECRET data
+        - When operating at UNOFFICIAL, sink is RESPONSIBLE for appropriate handling
+        - Framework TRUSTS certified plugins to filter/handle correctly
+        - Enforcement = audit + certification, NOT runtime checks
         """
         df = pd.DataFrame({"text": ["data1", "data2"]})
 
-        datasource = MockUnofficialDatasource(df)  # UNOFFICIAL
-        llm_client = MockSecretLLM()  # SECRET
-        sink = MockSecretSink()  # SECRET
+        datasource = MockUnofficialDatasource(df)  # UNOFFICIAL with allow_downgrade=True
+        llm_client = MockSecretLLM()  # SECRET (not BasePlugin, not validated)
+        sink = MockSecretSink()  # SECRET with allow_downgrade=True
 
         experiment = ExperimentConfig(
             name="three_level_mismatched_test",
@@ -263,17 +264,13 @@ class TestADR002MiddlewareIntegration:
         runner = ExperimentSuiteRunner(suite=suite, llm_client=llm_client, sinks=[], datasource=datasource)
 
         # Operating envelope = UNOFFICIAL
-        # SECRET sink requires SECRET
-        # This should FAIL
-        with pytest.raises(SecurityValidationError) as exc_info:
-            runner.run(df, sink_factory=lambda exp: [sink])
+        # SECRET sink with allow_downgrade=True can operate at UNOFFICIAL (trusted downgrade)
+        # Should SUCCEED
+        results = runner.run(df, sink_factory=lambda exp: [sink])
 
-        error_msg = str(exc_info.value)
-        assert "ADR-002" in error_msg, "Error should reference ADR-002 validation"
-        assert isinstance(exc_info.value, SecurityValidationError), \
-            "Should raise SecurityValidationError"
-        assert any(level in error_msg for level in ["SECRET", "UNOFFICIAL"]), \
-            "Error should mention security level mismatch"
+        # Verify execution succeeded
+        assert "three_level_mismatched_test" in results, "Experiment should complete successfully"
+        assert len(sink.written) > 0, "Sink should receive data (trusted downgrade)"
 
     def test_middleware_preserves_classification(self):
         """Middleware chains preserve classification without downgrading.

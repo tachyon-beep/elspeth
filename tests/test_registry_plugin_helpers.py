@@ -132,14 +132,20 @@ def test_create_plugin_none_without_allow_none(mock_registry):
 
 
 def test_create_plugin_requires_security_even_with_parent(mock_registry, parent_context):
-    """Helper refuses to inherit security_level; plugin must declare it."""
+    """Helper prevents downgrade from parent security level (ADR-002-B).
+
+    With ADR-002-B, security_level is optional (defaults to UNOFFICIAL).
+    If parent has higher level, child defaulting to UNOFFICIAL triggers downgrade error.
+    """
     definition = {
         "name": "test",
         "options": {"value": "test_value"},
         "determinism_level": "high",
+        # No security_level → defaults to UNOFFICIAL
     }
 
-    with pytest.raises(ConfigurationError, match="security_level must be declared"):
+    # Parent has PROTECTED, child defaults to UNOFFICIAL → downgrade error
+    with pytest.raises(ConfigurationError, match="cannot downgrade parent level"):
         create_plugin_with_inheritance(
             mock_registry,
             definition,
@@ -330,13 +336,19 @@ def test_create_plugin_provenance_from_options(mock_registry):
 
 
 def test_create_plugin_missing_levels_raises(mock_registry, parent_context):
-    """Plugins without explicit security/determinism fail to instantiate."""
+    """Plugins without explicit determinism_level fail to instantiate (ADR-002-B).
+
+    With ADR-002-B, security_level is optional (defaults to UNOFFICIAL),
+    but determinism_level is REQUIRED and must be explicitly declared.
+    """
     definition = {
         "name": "test",
         "options": {"value": "test_value"},
+        # No security_level → OK (defaults to UNOFFICIAL)
+        # No determinism_level → ERROR (required)
     }
 
-    with pytest.raises(ConfigurationError, match="security_level must be declared"):
+    with pytest.raises(ConfigurationError, match="determinism_level must be declared"):
         create_plugin_with_inheritance(
             mock_registry,
             definition,

@@ -56,6 +56,13 @@ class MockRunner:
         self.datasource = datasource
         self.llm_client = llm_client
         self.llm_middlewares = llm_middlewares or []
+        # Add attributes expected by _propagate_operating_level()
+        self.row_plugins = []
+        self.aggregator_plugins = []  # Note: aggregator_plugins, not aggregators
+        self.validation_plugins = []  # Note: validation_plugins, not validators
+        self.early_stop_plugins = []  # Note: plural, not singular
+        self.rate_limiter = None
+        self.cost_tracker = None
 
 
 # ============================================================================
@@ -101,12 +108,18 @@ class TestValidateExperimentSecurity:
         # Assert
         assert ctx.operating_security_level == SecurityLevel.OFFICIAL
 
-    def test_mixed_levels_fails_at_start(self):
-        """Test validation FAILS when SECRET component mixed with UNOFFICIAL.
+    def test_mixed_levels_succeeds_with_trusted_downgrade(self):
+        """Test validation SUCCEEDS when SECRET datasource trusted to downgrade to UNOFFICIAL.
 
-        Given: SECRET datasource, UNOFFICIAL sink
+        Given: SECRET datasource (allow_downgrade=True), UNOFFICIAL sink
         When: Validating security
-        Then: SecurityValidationError raised before job starts
+        Then: Validation succeeds, operating_level = UNOFFICIAL
+
+        Trusted Downgrade Model:
+        - SECRET datasource is CAPABLE of accessing UNOFFICIAL→SECRET data
+        - When operating at UNOFFICIAL, datasource is RESPONSIBLE for filtering
+        - Framework TRUSTS certified plugins to enforce filtering correctly
+        - Enforcement = audit + certification, NOT runtime checks
         """
         # Setup
         experiment = ExperimentConfig(
@@ -127,23 +140,22 @@ class TestValidateExperimentSecurity:
             preflight_info={},
         )
 
-        # Execute - should raise
-        with pytest.raises(SecurityValidationError) as exc_info:
-            suite_runner._validate_experiment_security(experiment, runner, sinks, ctx)
+        # Execute - should NOT raise (trusted downgrade)
+        suite_runner._validate_experiment_security(experiment, runner, sinks, ctx)
 
-        # Assert error message quality
-        error_msg = str(exc_info.value)
-        assert "ADR-002 Start-Time Validation Failed" in error_msg
-        assert "SECRET" in error_msg
-        assert "UNOFFICIAL" in error_msg
-        assert experiment.name in error_msg
+        # Assert operating level = minimum
+        assert ctx.operating_security_level == SecurityLevel.UNOFFICIAL
 
     def test_minimum_envelope_computed_correctly(self):
         """Test minimum clearance envelope = MIN(all plugin levels).
 
-        Given: SECRET, OFFICIAL, OFFICIAL plugins
+        Given: SECRET datasource, OFFICIAL llm, OFFICIAL sink (all with allow_downgrade=True)
         When: Computing envelope
-        Then: operating_security_level = OFFICIAL (minimum)
+        Then: operating_security_level = OFFICIAL (minimum), validation succeeds
+
+        Trusted Downgrade:
+        - SECRET datasource CAN downgrade to OFFICIAL (allow_downgrade=True)
+        - Datasource is trusted to filter and return only OFFICIAL-level data
         """
         # Setup
         experiment = ExperimentConfig(
@@ -157,7 +169,7 @@ class TestValidateExperimentSecurity:
         suite_runner = ExperimentSuiteRunner(suite, llm_client=object(), sinks=[])
 
         runner = MockRunner(
-            datasource=MockSecureComponent("datasource"),
+            datasource=MockSecureComponent("datasource"),  # SECRET with allow_downgrade=True
             llm_client=MockOfficialComponent("llm"),
         )
         sinks = [MockOfficialComponent("sink")]
@@ -167,9 +179,11 @@ class TestValidateExperimentSecurity:
             preflight_info={},
         )
 
-        # Execute - SECRET datasource should REJECT OFFICIAL envelope
-        with pytest.raises(SecurityValidationError):
-            suite_runner._validate_experiment_security(experiment, runner, sinks, ctx)
+        # Execute - should succeed (trusted downgrade)
+        suite_runner._validate_experiment_security(experiment, runner, sinks, ctx)
+
+        # Assert operating level = minimum
+        assert ctx.operating_security_level == SecurityLevel.OFFICIAL
 
     def test_backward_compatibility_non_baseplugin(self):
         """Test validation skipped for components not implementing BasePlugin.
@@ -255,14 +269,15 @@ Unit Test Coverage:
    - Verifies: Validation succeeds when security levels match
    - Property: operating_level = common level
 
-❌ test_mixed_levels_fails_at_start
-   - Verifies: Validation BLOCKS when SECRET + UNOFFICIAL mixed
-   - Property: Start-time validation prevents classification breach
-   - CRITICAL: Main certification test for ADR-002 T1
+✅ test_mixed_levels_succeeds_with_trusted_downgrade
+   - Verifies: Validation SUCCEEDS with trusted downgrade
+   - Property: SECRET datasource trusted to filter to UNOFFICIAL
+   - Model: Trusted downgrade (audit + certification)
 
-❌ test_minimum_envelope_computed_correctly
+✅ test_minimum_envelope_computed_correctly
    - Verifies: Envelope = MIN(all plugin levels)
    - Property: Weakest-link principle enforced
+   - Verifies: Trusted downgrade allows operation
 
 ✅ test_backward_compatibility_non_baseplugin
    - Verifies: Legacy components without BasePlugin work
