@@ -197,6 +197,48 @@ sinks:
 
 ---
 
+### Environmental Monitoring & Alerting (Sense-Decide-Act)
+
+```yaml
+# Weather monitoring with automated public safety alerts
+datasource:
+  type: satellite_telemetry  # Custom plugin: satellite weather data stream
+  refresh_interval: 300  # Poll every 5 minutes
+  security_level: OFFICIAL
+
+transform:
+  type: meteorology_analyzer  # Custom plugin: specialist analysis system
+  thresholds:
+    severe_weather: 0.8
+    flood_risk: 0.7
+    fire_danger: 0.9
+  security_level: OFFICIAL
+
+sinks:
+  # Conditional routing based on analysis results
+  - type: emergency_broadcast  # Custom plugin: SMS/radio alert system
+    condition: severity >= 0.8
+    recipients: regional_contacts
+    security_level: OFFICIAL
+
+  - type: weather_api  # Custom plugin: public weather service
+    condition: severity >= 0.5
+    security_level: OFFICIAL
+
+  - type: archive_csv  # Standard plugin: historical record
+    path: data/weather_log.csv
+    security_level: OFFICIAL
+```
+
+**Real-world pattern**:
+- **Sense**: Satellite telemetry ingress (temperature, pressure, humidity)
+- **Decide**: Specialist meteorology system analyzes conditions, assigns severity scores
+- **Act**: Route alerts to emergency broadcast systems based on thresholds (high severity → SMS alerts, moderate → API updates, all → archive)
+
+**Use for**: Environmental monitoring, infrastructure sensors (IoT), industrial process control, public safety alerting, automated operations
+
+---
+
 ### LLM Experimentation (Development & Testing)
 
 ```yaml
