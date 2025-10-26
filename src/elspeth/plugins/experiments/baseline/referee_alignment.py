@@ -311,6 +311,7 @@ register_baseline_plugin(
     "referee_alignment",
     _create_referee_alignment,
     schema=_REFEREE_SCHEMA,
+    declared_security_level="UNOFFICIAL",  # ADR-002-B: Baseline analyzers work with experiment results
 )
 
 

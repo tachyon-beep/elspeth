@@ -175,6 +175,7 @@ register_baseline_plugin(
     "score_flip_analysis",
     _create_score_flip_analysis,
     schema=_SCORE_FLIP_SCHEMA,
+    declared_security_level="UNOFFICIAL",  # ADR-002-B: Baseline analyzers work with experiment results
 )
 
 

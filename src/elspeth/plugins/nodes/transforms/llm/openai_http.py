@@ -20,9 +20,9 @@ logger = logging.getLogger(__name__)
 class HttpOpenAIClient(BasePlugin, LLMClientProtocol):
     """Minimal client for standard /v1/chat/completions endpoints.
 
+    Security policy: Public HTTP OpenAI operates at OFFICIAL level (ADR-002-B).
+
     Args:
-        security_level: Security clearance for this LLM adapter (MANDATORY per ADR-004).
-        allow_downgrade: Whether adapter can operate at lower pipeline levels (MANDATORY per ADR-005).
         api_base: Base URL for OpenAI-compatible API endpoint.
         api_key: API key for authentication (optional if using api_key_env).
         api_key_env: Environment variable name containing API key.
@@ -38,8 +38,6 @@ class HttpOpenAIClient(BasePlugin, LLMClientProtocol):
     def __init__(
         self,
         *,
-        security_level: SecurityLevel,
-        allow_downgrade: bool,
         api_base: str,
         api_key: str | None = None,
         api_key_env: str | None = None,
@@ -51,13 +49,21 @@ class HttpOpenAIClient(BasePlugin, LLMClientProtocol):
         backoff_factor: float = 0.5,
         status_forcelist: tuple[int, ...] | None = None,
     ) -> None:
-        super().__init__(security_level=security_level, allow_downgrade=allow_downgrade)
+        """Initialize HTTP OpenAI client with hard-coded security policy.
+
+        ADR-002-B: Security policy is immutable. HTTP OpenAI operates at OFFICIAL level
+        (public API endpoint) and can be trusted to downgrade.
+        """
+        super().__init__(
+            security_level=SecurityLevel.OFFICIAL,  # ADR-002-B: Immutable policy
+            allow_downgrade=True,  # ADR-002-B: Immutable policy
+        )
         self.api_base = api_base.rstrip("/")
         # Defense-in-depth: validate endpoint even when instantiated directly
         try:
             from elspeth.core.security import validate_http_api_endpoint
 
-            validate_http_api_endpoint(endpoint=self.api_base, security_level=security_level)
+            validate_http_api_endpoint(endpoint=self.api_base, security_level=SecurityLevel.OFFICIAL)
         except ValueError as exc:  # pragma: no cover - validation path exercised via registry tests
             # Surface endpoint validation issues as ValueError
             raise ValueError(f"HTTP API endpoint validation failed for '{self.api_base}': {exc}") from exc

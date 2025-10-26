@@ -19,7 +19,6 @@ def test_datasource_registry_csv_variants(tmp_path):
             "retain_local": False,
             "determinism_level": "guaranteed",
         },
-        require_security=False,  # ADR-002-B: Plugin hard-codes security_level
         require_determinism=True,
     )
     assert hasattr(ds1, "load")
@@ -32,7 +31,6 @@ def test_datasource_registry_csv_variants(tmp_path):
             "retain_local": False,
             "determinism_level": "guaranteed",
         },
-        require_security=False,  # ADR-002-B: Plugin hard-codes security_level
         require_determinism=True,
     )
     assert hasattr(ds2, "load")
@@ -55,7 +53,6 @@ def test_datasource_registry_azure_blob_validation(monkeypatch, tmp_path):
             "retain_local": False,
             "determinism_level": "guaranteed",
         },
-        require_security=False,  # ADR-002-B: Plugin hard-codes security_level
         require_determinism=True,
     )
     assert hasattr(ds, "load")
@@ -83,7 +80,6 @@ def test_datasource_registry_azure_blob_validation_error(monkeypatch, tmp_path):
                 "retain_local": False,
                 "determinism_level": "guaranteed",
             },
-            require_security=False,  # ADR-002-B: Plugin hard-codes security_level
             require_determinism=True,
         )
 

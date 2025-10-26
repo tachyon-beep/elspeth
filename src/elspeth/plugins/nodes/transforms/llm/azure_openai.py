@@ -13,9 +13,9 @@ from elspeth.core.base.types import SecurityLevel
 class AzureOpenAIClient(BasePlugin, LLMClientProtocol):
     """Thin wrapper around OpenAI's Azure client implementing LLMClientProtocol.
 
+    Security policy: Enterprise Azure OpenAI operates at PROTECTED level (ADR-002-B).
+
     Args:
-        security_level: Security clearance for this LLM adapter (MANDATORY per ADR-004).
-        allow_downgrade: Whether adapter can operate at lower pipeline levels (MANDATORY per ADR-005).
         deployment: Azure deployment name (optional, can be resolved from config or env).
         config: Azure OpenAI configuration dict (endpoint, API keys, model parameters).
         client: Pre-configured OpenAI client (optional, for dependency injection).
@@ -24,13 +24,19 @@ class AzureOpenAIClient(BasePlugin, LLMClientProtocol):
     def __init__(
         self,
         *,
-        security_level: SecurityLevel,
-        allow_downgrade: bool,
         deployment: str | None = None,
         config: dict[str, Any],
         client: Any | None = None,
     ):
-        super().__init__(security_level=security_level, allow_downgrade=allow_downgrade)
+        """Initialize Azure OpenAI client with hard-coded security policy.
+
+        ADR-002-B: Security policy is immutable. Azure OpenAI operates at PROTECTED level
+        (maximum clearance for enterprise-managed endpoints) and can be trusted to downgrade.
+        """
+        super().__init__(
+            security_level=SecurityLevel.PROTECTED,  # ADR-002-B: Immutable policy
+            allow_downgrade=True,  # ADR-002-B: Immutable policy
+        )
         self.config = config
         self.temperature = config.get("temperature")
         self.max_tokens = config.get("max_tokens")

@@ -26,10 +26,11 @@ class _BadSink:
 def test_job_runner_accumulates_sink_failures(monkeypatch):
     calls: list[tuple[str, dict]] = []
 
-    def fake_ds_create(name, options, parent_context=None):
+    # ADR-002-B: Mock registry.create() signature includes require_security/require_determinism
+    def fake_ds_create(name, options, parent_context=None, require_security=True, require_determinism=True):
         return _FakeDatasource()
 
-    def fake_sink_create(name, options, parent_context=None):
+    def fake_sink_create(name, options, parent_context=None, require_security=True, require_determinism=True):
         if name == "good":
             return _GoodSink(calls)
         if name == "bad":

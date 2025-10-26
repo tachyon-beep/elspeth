@@ -89,7 +89,6 @@ def create_llm_from_definition(
         options,
         provenance=tuple(sources or (f"llm:{plugin_name}.resolved",)),
         parent_context=parent_context,
-        require_security=False,
     )
 
 
@@ -129,17 +128,8 @@ def _create_azure_openai(options: dict[str, Any], context: PluginContext) -> Azu
             logger.error("Azure OpenAI endpoint validation failed: %s", exc)
             raise ConfigurationError(f"Azure OpenAI endpoint validation failed: {exc}") from exc
 
-    # Create a copy to avoid mutating input
-    options = dict(options)
-
-    # Ensure security_level is set (from options or context)
-    if "security_level" not in options and context:
-        options["security_level"] = context.security_level
-
-    # Ensure allow_downgrade is set (default to True - standard trusted downgrade)
-    if "allow_downgrade" not in options:
-        options["allow_downgrade"] = True
-
+    # ADR-002-B: Security level and allow_downgrade are hard-coded in plugin constructor
+    # No need to pass them via options - plugin declares its own immutable policy
     return AzureOpenAIClient(**options)
 
 
@@ -173,17 +163,8 @@ def _create_http_openai(options: dict[str, Any], context: PluginContext) -> Http
             logger.error("HTTP API endpoint validation failed: %s", exc)
             raise ConfigurationError(f"HTTP API endpoint validation failed: {exc}") from exc
 
-    # Create a copy to avoid mutating input
-    options = dict(options)
-
-    # Ensure security_level is set (from options or context)
-    if "security_level" not in options and context:
-        options["security_level"] = context.security_level
-
-    # Ensure allow_downgrade is set (default to True - standard trusted downgrade)
-    if "allow_downgrade" not in options:
-        options["allow_downgrade"] = True
-
+    # ADR-002-B: Security level and allow_downgrade are hard-coded in plugin constructor
+    # No need to pass them via options - plugin declares its own immutable policy
     return HttpOpenAIClient(**options)
 
 
@@ -201,17 +182,8 @@ def _create_mock_llm(options: dict[str, Any], context: PluginContext) -> MockLLM
         For test/mock usage, defaults to allow_downgrade=True if not specified.
         This provides standard trusted downgrade behavior (ADR-002).
     """
-    # Create a copy to avoid mutating input
-    options = dict(options)
-
-    # Ensure security_level is set (from options or context)
-    if "security_level" not in options and context:
-        options["security_level"] = context.security_level
-
-    # Ensure allow_downgrade is set (default to True for mock clients - standard behavior)
-    if "allow_downgrade" not in options:
-        options["allow_downgrade"] = True
-
+    # ADR-002-B: Security level and allow_downgrade are hard-coded in plugin constructor
+    # No need to pass them via options - plugin declares its own immutable policy
     return MockLLMClient(**options)
 
 
@@ -234,17 +206,8 @@ def _create_static_llm(options: dict[str, Any], context: PluginContext) -> Stati
             "static_test LLM requires explicit 'content' parameter. Provide the test response content explicitly in configuration."
         )
 
-    # Create a copy to avoid mutating input
-    options = dict(options)
-
-    # Ensure security_level is set (from options or context)
-    if "security_level" not in options and context:
-        options["security_level"] = context.security_level
-
-    # Ensure allow_downgrade is set (default to True - standard trusted downgrade)
-    if "allow_downgrade" not in options:
-        options["allow_downgrade"] = True
-
+    # ADR-002-B: Security level and allow_downgrade are hard-coded in plugin constructor
+    # No need to pass them via options - plugin declares its own immutable policy
     return StaticLLMClient(**options)
 
 
@@ -362,24 +325,28 @@ llm_registry.register(
     "azure_openai",
     _create_azure_openai,
     schema=_AZURE_OPENAI_SCHEMA,
+    declared_security_level="PROTECTED",  # ADR-002-B: Enterprise Azure OpenAI, maximum clearance
 )
 
 llm_registry.register(
     "http_openai",
     _create_http_openai,
     schema=_HTTP_OPENAI_SCHEMA,
+    declared_security_level="UNOFFICIAL",  # ADR-002-B: Public OpenAI, lowest clearance
 )
 
 llm_registry.register(
     "mock",
     _create_mock_llm,
     schema=_MOCK_LLM_SCHEMA,
+    declared_security_level="UNOFFICIAL",  # ADR-002-B: Test-only transform
 )
 
 llm_registry.register(
     "static_test",
     _create_static_llm,
     schema=_STATIC_LLM_SCHEMA,
+    declared_security_level="UNOFFICIAL",  # ADR-002-B: Test-only transform
 )
 
 

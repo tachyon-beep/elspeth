@@ -284,7 +284,9 @@ def test_experiment_suite_runner(tmp_path):
         sink_factory=lambda exp: [_secure_sink(DummySink())],
     )
 
-    assert set(results.keys()) == {"expA", "expB"}
+    # ADR-002-B: Filter out special metadata keys
+    experiment_names = {k for k in results.keys() if not k.startswith("_")}
+    assert experiment_names == {"expA", "expB"}
     assert results["expA"]["payload"]["results"][0]["response"]["content"] == "A 1"
 
 

@@ -20,19 +20,17 @@ from elspeth.plugins.experiments.baseline.score_delta import ScoreDeltaBaselineP
 def context():
     """Create test plugin context."""
     return PluginContext(
-        security_level="internal",
+        security_level=SecurityLevel.UNOFFICIAL,
         determinism_level="guaranteed",  # Use valid value
         provenance=["test"],
         plugin_kind="baseline_plugin",
-        plugin_name="score_delta",
+        plugin_name="score_delta"
     )
 
 
 def test_score_delta_empty_stats(context):
     """Test score_delta with empty/missing stats - line 41."""
-    plugin = ScoreDeltaBaselinePlugin(
-        security_level=context.security_level,
-        metric="mean"
+    plugin = ScoreDeltaBaselinePlugin(metric="mean"
     )
 
     # Both baseline and variant have no score_stats
@@ -52,9 +50,7 @@ def test_score_delta_empty_stats(context):
 def test_score_delta_criteria_filtering(context):
     """Test criteria filtering - line 47."""
     # Only include specific criteria
-    plugin = ScoreDeltaBaselinePlugin(
-        security_level=context.security_level,
-        metric="mean",
+    plugin = ScoreDeltaBaselinePlugin(metric="mean",
         criteria=["accuracy"]
     )
 
@@ -88,9 +84,7 @@ def test_score_delta_criteria_filtering(context):
 
 def test_score_delta_missing_metrics(context):
     """Test handling of missing metrics in criteria - line 51."""
-    plugin = ScoreDeltaBaselinePlugin(
-        security_level=context.security_level,
-        metric="median"
+    plugin = ScoreDeltaBaselinePlugin(metric="median"
     )
 
     baseline = {
@@ -123,7 +117,7 @@ def test_score_delta_missing_metrics(context):
 
 def test_extract_stats_not_mapping(context):
     """Test _extract_stats with non-mapping payload - line 59."""
-    plugin = ScoreDeltaBaselinePlugin(security_level=context.security_level)
+    plugin = ScoreDeltaBaselinePlugin()
 
     # Non-dict payload
     result = plugin._extract_stats("not a dict")
@@ -140,7 +134,7 @@ def test_extract_stats_not_mapping(context):
 
 def test_extract_stats_no_aggregates(context):
     """Test _extract_stats with missing aggregates - line 62."""
-    plugin = ScoreDeltaBaselinePlugin(security_level=context.security_level)
+    plugin = ScoreDeltaBaselinePlugin()
 
     # aggregates is not a mapping
     result = plugin._extract_stats({"aggregates": "string"})
@@ -155,7 +149,7 @@ def test_extract_stats_no_aggregates(context):
 
 def test_extract_stats_no_score_stats(context):
     """Test _extract_stats with missing/invalid score_stats - line 65."""
-    plugin = ScoreDeltaBaselinePlugin(security_level=context.security_level)
+    plugin = ScoreDeltaBaselinePlugin()
 
     # score_stats is not a mapping
     result = plugin._extract_stats({"aggregates": {"score_stats": "string"}})
@@ -178,9 +172,7 @@ def test_extract_stats_no_score_stats(context):
 
 def test_score_delta_with_criteria_none_values(context):
     """Test when criteria values are None."""
-    plugin = ScoreDeltaBaselinePlugin(
-        security_level=context.security_level,
-        metric="mean"
+    plugin = ScoreDeltaBaselinePlugin(metric="mean"
     )
 
     baseline = {
@@ -230,7 +222,6 @@ def test_score_delta_metric_variants():
 
     # Test with std metric
     plugin = ScoreDeltaBaselinePlugin(
-        security_level=SecurityLevel.UNOFFICIAL,
         metric="std"
     )
     result = plugin.compare(baseline, variant)
@@ -238,7 +229,6 @@ def test_score_delta_metric_variants():
 
     # Test with min metric
     plugin = ScoreDeltaBaselinePlugin(
-        security_level=SecurityLevel.UNOFFICIAL,
         metric="min"
     )
     result = plugin.compare(baseline, variant)
@@ -246,7 +236,6 @@ def test_score_delta_metric_variants():
 
     # Test with max metric
     plugin = ScoreDeltaBaselinePlugin(
-        security_level=SecurityLevel.UNOFFICIAL,
         metric="max"
     )
     result = plugin.compare(baseline, variant)

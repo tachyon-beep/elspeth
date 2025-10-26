@@ -60,6 +60,7 @@ class BasePluginFactory(Generic[T]):
     plugin_type: str = "plugin"
     requires_input_schema: bool = False
     capabilities: frozenset[str] = field(default_factory=frozenset)
+    declared_security_level: str | None = None  # ADR-002-B: Plugin author's security declaration
     _compiled_validator: Any | None = field(default=None, init=False, repr=False)
 
     def validate(self, options: dict[str, Any], *, context: str) -> None:
@@ -192,15 +193,18 @@ class BasePluginRegistry(Generic[T]):
         schema: Mapping[str, Any] | None = None,
         requires_input_schema: bool = False,
         capabilities: Iterable[str] | None = None,
+        declared_security_level: str | None = None,
     ) -> None:
         """
-        Register a plugin factory.
+        Register a plugin factory with its immutable security policy.
 
         Args:
             name: Plugin name (used for lookup)
-        factory: Factory callable that creates plugin instances
-        schema: Optional JSON schema for validation
-        capabilities: Optional iterable of capability flags exposed to callers
+            factory: Factory callable that creates plugin instances
+            schema: Optional JSON schema for validation
+            capabilities: Optional iterable of capability flags exposed to callers
+            declared_security_level: Plugin's hard-coded security level (ADR-002-B).
+                This is the security level declared by the plugin author, not configurable by users.
         """
         plugin_factory = BasePluginFactory(
             create=factory,
@@ -208,6 +212,7 @@ class BasePluginRegistry(Generic[T]):
             plugin_type=self.plugin_type,
             requires_input_schema=requires_input_schema,
             capabilities=frozenset(capabilities or ()),
+            declared_security_level=declared_security_level,
         )
         # Pre-compile JSON schema validator once at registration to avoid first-call latency
         if schema is not None:
@@ -265,7 +270,6 @@ class BasePluginRegistry(Generic[T]):
         *,
         provenance: Iterable[str] | None = None,
         parent_context: PluginContext | None = None,
-        require_security: bool = True,
         require_determinism: bool = True,
     ) -> T:
         """
@@ -283,7 +287,6 @@ class BasePluginRegistry(Generic[T]):
             options: Plugin configuration options
             provenance: Optional provenance source identifiers
             parent_context: Optional parent context for inheritance
-            require_security: Whether security_level is required
             require_determinism: Whether determinism_level is required
 
         Returns:
@@ -295,14 +298,22 @@ class BasePluginRegistry(Generic[T]):
         """
         factory = self._get_factory(name)
 
-        # Extract and normalize security levels
+        # ADR-002-B: ALWAYS include plugin's declared_security_level in coalescing
+        # SECURITY: Factory default MUST participate regardless of parent_context
+        # to enforce weakest-link model (prevents parent SECRET from bypassing child UNOFFICIAL)
+        definition_for_extraction = dict(options)
+        if (factory.declared_security_level is not None
+            and "security_level" not in options):
+            # ALWAYS add declared level - coalesce_security_level will enforce weakest-link
+            definition_for_extraction["security_level"] = factory.declared_security_level
+
+        # Extract and normalize security levels (ADR-001: always required, no backdoors)
         security_level, determinism_level, sources = extract_security_levels(
-            definition=options,
+            definition=definition_for_extraction,
             options=options,
             plugin_type=self.plugin_type,
             plugin_name=name,
             parent_context=parent_context,
-            require_security=require_security,
             require_determinism=require_determinism,
         )
 
@@ -430,7 +441,15 @@ class BasePluginRegistry(Generic[T]):
         @contextmanager
         def _override() -> Iterator[None]:
             original = self._plugins.get(name)
-            self.register(name, factory, schema=schema)
+            # ADR-002-B: Preserve declared_security_level from original factory
+            # For new plugins (no original), default to UNOFFICIAL for testing
+            original_declared_security_level = original.declared_security_level if original else "UNOFFICIAL"
+            self.register(
+                name,
+                factory,
+                schema=schema,
+                declared_security_level=original_declared_security_level,
+            )
             try:
                 yield
             finally:

@@ -197,9 +197,7 @@ def _instantiate_plugin(
             kwargs["provenance"] = provenance
         if "parent_context" in param_kinds or allows_kwargs:
             kwargs["parent_context"] = None
-        # ADR-002-B: Security level is plugin-author-owned, not configuration-owned
-        if "require_security" in param_kinds or allows_kwargs:
-            kwargs["require_security"] = False
+        # ADR-001/002-B: Security is ALWAYS required (no backdoors), determinism still required
         if "require_determinism" in param_kinds or allows_kwargs:
             kwargs["require_determinism"] = True  # determinism still required
     else:

@@ -56,8 +56,6 @@ def http_server():
 def test_http_openai_client_roundtrip(http_server):
     host, port = http_server.server_address
     client = HttpOpenAIClient(
-        security_level=SecurityLevel.UNOFFICIAL,
-        allow_downgrade=True,
         api_base=f"http://{host}:{port}",
         model="test-model"
     )
@@ -71,8 +69,6 @@ def test_http_openai_client_env_key(monkeypatch, http_server):
     host, port = http_server.server_address
     monkeypatch.setenv("HTTP_OPENAI_KEY", "secret")
     client = HttpOpenAIClient(
-        security_level=SecurityLevel.UNOFFICIAL,
-        allow_downgrade=True,
         api_base=f"http://{host}:{port}",
         api_key_env="HTTP_OPENAI_KEY",
         temperature=0.1,

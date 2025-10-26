@@ -41,6 +41,7 @@ def test_cli_artifact_publish_dry_run(monkeypatch, tmp_path: Path) -> None:
             },
             "llm": {
                 "plugin": "mock",
+                # ADR-002-B: security_level removed - plugin-author-owned via registration
                 "determinism_level": "guaranteed",
                 "options": {"seed": 1},
             },

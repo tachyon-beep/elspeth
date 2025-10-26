@@ -13,20 +13,26 @@ from elspeth.core.base.types import SecurityLevel
 class MockLLMClient(BasePlugin, LLMClientProtocol):
     """Deterministic mock client for tests and offline runs.
 
+    Security policy: Test-only transform operates at UNOFFICIAL level (ADR-002-B).
+
     Args:
-        security_level: Security clearance for this LLM adapter (MANDATORY).
-        allow_downgrade: Whether adapter can operate at lower pipeline levels (MANDATORY).
         seed: Optional seed for deterministic response generation (default: 0).
     """
 
     def __init__(
         self,
         *,
-        security_level: SecurityLevel,
-        allow_downgrade: bool,
         seed: int | None = None
     ):
-        super().__init__(security_level=security_level, allow_downgrade=allow_downgrade)
+        """Initialize mock LLM client with hard-coded security policy.
+
+        ADR-002-B: Security policy is immutable. Mock LLMs operate at UNOFFICIAL level
+        and can be trusted to downgrade (test-only transform).
+        """
+        super().__init__(
+            security_level=SecurityLevel.UNOFFICIAL,  # ADR-002-B: Immutable policy
+            allow_downgrade=True,  # ADR-002-B: Immutable policy
+        )
         self.seed = seed or 0
 
     def generate(

@@ -80,11 +80,11 @@ def test_load_settings(tmp_path, monkeypatch):
     assert settings.datasource.kind == "datasource"
     assert settings.llm.kind == "llm"
     assert settings.sinks[0].kind == "sink"
-    # ADR-002-B: security_level comes from plugin (not configuration)
-    # Mock plugins use UNOFFICIAL default since they don't hard-code a level
-    assert settings.datasource._elspeth_security_level == "UNOFFICIAL"
-    assert settings.llm._elspeth_security_level == "UNOFFICIAL"
-    assert settings.sinks[0]._elspeth_security_level == "UNOFFICIAL"
+    # ADR-002-B: security_level comes from plugin's declared_security_level
+    # Mock overrides now inherit declared_security_level from original registration
+    assert settings.datasource._elspeth_security_level == "UNOFFICIAL"  # azure_blob default
+    assert settings.llm._elspeth_security_level == "PROTECTED"  # azure_openai default
+    assert settings.sinks[0]._elspeth_security_level == "UNOFFICIAL"  # csv default
     assert settings.orchestrator_config.llm_prompt["system"] == "sys"
     assert settings.orchestrator_config.prompt_fields == ["id"]
     assert settings.orchestrator_config.criteria[0]["name"] == "crit"

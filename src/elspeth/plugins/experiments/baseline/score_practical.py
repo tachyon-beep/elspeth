@@ -120,6 +120,7 @@ register_baseline_plugin(
     "score_practical",
     _create_score_practical,
     schema=_PRACTICAL_SCHEMA,
+    declared_security_level="UNOFFICIAL",  # ADR-002-B: Baseline analyzers work with experiment results
 )
 
 

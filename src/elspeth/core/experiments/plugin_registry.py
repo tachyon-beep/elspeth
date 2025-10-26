@@ -47,12 +47,22 @@ def register_row_plugin(
     *,
     schema: dict[str, Any] | None = None,
     requires_input_schema: bool = False,
+    declared_security_level: str | None = None,
 ) -> None:
     """Register a row-level experiment plugin.
 
     NOTE: This function now delegates to the migrated row_plugin_registry.
+
+    Args:
+        declared_security_level: Plugin's immutable security clearance (ADR-002-B)
     """
-    row_plugin_registry.register(name, factory, schema=schema, requires_input_schema=requires_input_schema)
+    row_plugin_registry.register(
+        name,
+        factory,
+        schema=schema,
+        requires_input_schema=requires_input_schema,
+        declared_security_level=declared_security_level,
+    )
 
 
 def register_aggregation_plugin(
@@ -61,12 +71,22 @@ def register_aggregation_plugin(
     *,
     schema: dict[str, Any] | None = None,
     requires_input_schema: bool = False,
+    declared_security_level: str | None = None,
 ) -> None:
     """Register an aggregation experiment plugin.
 
     NOTE: This function now delegates to the migrated aggregation_plugin_registry.
+
+    Args:
+        declared_security_level: Plugin's immutable security clearance (ADR-002-B)
     """
-    aggregation_plugin_registry.register(name, factory, schema=schema, requires_input_schema=requires_input_schema)
+    aggregation_plugin_registry.register(
+        name,
+        factory,
+        schema=schema,
+        requires_input_schema=requires_input_schema,
+        declared_security_level=declared_security_level,
+    )
 
 
 def register_baseline_plugin(
@@ -74,12 +94,16 @@ def register_baseline_plugin(
     factory: Callable[[dict[str, Any], PluginContext], BaselineComparisonPlugin],
     *,
     schema: dict[str, Any] | None = None,
+    declared_security_level: str | None = None,
 ) -> None:
     """Register a baseline comparison plugin.
 
     NOTE: This function now delegates to the migrated baseline_plugin_registry.
+
+    Args:
+        declared_security_level: Plugin's immutable security clearance (ADR-002-B)
     """
-    baseline_plugin_registry.register(name, factory, schema=schema)
+    baseline_plugin_registry.register(name, factory, schema=schema, declared_security_level=declared_security_level)
 
 
 def register_validation_plugin(
@@ -88,12 +112,22 @@ def register_validation_plugin(
     *,
     schema: dict[str, Any] | None = None,
     requires_input_schema: bool = False,
+    declared_security_level: str | None = None,
 ) -> None:
     """Register a suite validation plugin.
 
     NOTE: This function now delegates to the migrated validation_plugin_registry.
+
+    Args:
+        declared_security_level: Plugin's immutable security clearance (ADR-002-B)
     """
-    validation_plugin_registry.register(name, factory, schema=schema, requires_input_schema=requires_input_schema)
+    validation_plugin_registry.register(
+        name,
+        factory,
+        schema=schema,
+        requires_input_schema=requires_input_schema,
+        declared_security_level=declared_security_level,
+    )
 
 
 def register_early_stop_plugin(

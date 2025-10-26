@@ -165,7 +165,6 @@ def test_registry_create_via_registry():
         "noop",
         {},
         parent_context=parent_context,
-        require_security=False,
         require_determinism=False,
     )
     assert limiter is not None
@@ -175,7 +174,6 @@ def test_registry_create_via_registry():
         "fixed_window",
         {"requests": 10, "per_seconds": 1.0},
         parent_context=parent_context,
-        require_security=False,
         require_determinism=False,
     )
     assert limiter is not None
@@ -185,7 +183,6 @@ def test_registry_create_via_registry():
         "adaptive",
         {"requests_per_minute": 100, "interval_seconds": 1.0},
         parent_context=parent_context,
-        require_security=False,
         require_determinism=False,
     )
     assert limiter is not None

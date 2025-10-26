@@ -40,12 +40,15 @@ class ScoreStatsAggregator(BasePlugin):
     def __init__(
         self,
         *,
-        security_level: SecurityLevel,
         source_field: str = "scores",
         flag_field: str = "score_flags",
         ddof: int = 0,
     ) -> None:
-        super().__init__(security_level=security_level, allow_downgrade=True)  # ADR-005: Aggregators trusted to operate at lower levels
+        # ADR-002-B: Security policy is immutable and hard-coded in plugin code
+        super().__init__(
+            security_level=SecurityLevel.UNOFFICIAL,  # Aggregators work with experiment results
+            allow_downgrade=True,  # Trusted to operate at lower levels if needed (ADR-005)
+        )
         self._source_field = source_field
         self._flag_field = flag_field
         self._ddof = ddof
@@ -121,15 +124,14 @@ class ScoreStatsAggregator(BasePlugin):
         """ScoreStatsAggregator does not require specific input columns."""
         return None
 def _create_score_stats(options: dict[str, Any], context: PluginContext) -> ScoreStatsAggregator:
-    """Create score stats aggregator with smart security defaults."""
-    opts = dict(options)
-    if "security_level" not in opts and context:
-        opts["security_level"] = context.security_level
+    """Create score stats aggregator.
+
+    ADR-002-B: Security policy is hard-coded in plugin __init__, not injected by factory.
+    """
     return ScoreStatsAggregator(
-        security_level=opts["security_level"],
-        source_field=opts.get("source_field", "scores"),
-        flag_field=opts.get("flag_field", "score_flags"),
-        ddof=int(opts.get("ddof", 0)),
+        source_field=options.get("source_field", "scores"),
+        flag_field=options.get("flag_field", "score_flags"),
+        ddof=int(options.get("ddof", 0)),
     )
 
 
@@ -137,6 +139,7 @@ register_aggregation_plugin(
     "score_stats",
     _create_score_stats,
     schema=_STATS_SCHEMA,
+    declared_security_level="UNOFFICIAL",  # ADR-002-B: Aggregators work with experiment results
 )
 
 

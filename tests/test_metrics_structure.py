@@ -18,8 +18,6 @@ class DummySink:
 def _build_runner():
     return ExperimentRunner(
         llm_client=MockLLMClient(
-            security_level=SecurityLevel.UNOFFICIAL,
-            allow_downgrade=True,
             seed=123
         ),
         sinks=[DummySink()],

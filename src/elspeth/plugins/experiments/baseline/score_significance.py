@@ -45,7 +45,6 @@ class ScoreSignificanceBaselinePlugin(BasePlugin):
     def __init__(
         self,
         *,
-        security_level: SecurityLevel,
         criteria: Sequence[str] | None = None,
         min_samples: int = 2,
         equal_var: bool = False,
@@ -53,7 +52,11 @@ class ScoreSignificanceBaselinePlugin(BasePlugin):
         family_size: int | None = None,
         on_error: str = "abort",
     ) -> None:
-        super().__init__(security_level=security_level, allow_downgrade=True)  # ADR-005: Baseline statistic plugins trusted to downgrade
+        # ADR-002-B: Security policy is immutable and hard-coded in plugin code
+        super().__init__(
+            security_level=SecurityLevel.UNOFFICIAL,  # Baseline analyzers work with experiment results
+            allow_downgrade=True,  # Trusted to operate at lower levels if needed (ADR-005)
+        )
         self._criteria = set(criteria) if criteria else None
         self._min_samples = max(int(min_samples), 2)
         self._equal_var = bool(equal_var)
@@ -136,18 +139,17 @@ class ScoreSignificanceBaselinePlugin(BasePlugin):
 
 
 def _create_score_significance(options: dict[str, Any], context: PluginContext) -> ScoreSignificanceBaselinePlugin:
-    """Create score significance baseline plugin with smart security defaults."""
-    opts = dict(options)
-    if "security_level" not in opts and context:
-        opts["security_level"] = context.security_level
+    """Create score significance baseline plugin.
+
+    ADR-002-B: Security policy is hard-coded in plugin __init__, not injected by factory.
+    """
     return ScoreSignificanceBaselinePlugin(
-        security_level=opts["security_level"],
-        criteria=opts.get("criteria"),
-        min_samples=int(opts.get("min_samples", 2)),
-        equal_var=bool(opts.get("equal_var", False)),
-        adjustment=opts.get("adjustment", "none"),
-        family_size=opts.get("family_size"),
-        on_error=opts.get("on_error", "abort"),
+        criteria=options.get("criteria"),
+        min_samples=int(options.get("min_samples", 2)),
+        equal_var=bool(options.get("equal_var", False)),
+        adjustment=options.get("adjustment", "none"),
+        family_size=options.get("family_size"),
+        on_error=options.get("on_error", "abort"),
     )
 
 
@@ -155,6 +157,7 @@ register_baseline_plugin(
     "score_significance",
     _create_score_significance,
     schema=_SIGNIFICANCE_SCHEMA,
+    declared_security_level="UNOFFICIAL",  # ADR-002-B: Baseline analyzers work with experiment results
 )
 
 

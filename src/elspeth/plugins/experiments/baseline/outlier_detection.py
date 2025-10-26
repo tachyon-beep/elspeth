@@ -177,6 +177,7 @@ register_baseline_plugin(
     "outlier_detection",
     _create_outlier_detection,
     schema=_OUTLIER_SCHEMA,
+    declared_security_level="UNOFFICIAL",  # ADR-002-B: Baseline analyzers work with experiment results
 )
 
 

@@ -27,9 +27,12 @@ def create_mock_plugin(options, context):
 
 @pytest.fixture
 def mock_registry():
-    """Create a mock registry for testing."""
+    """Create a mock registry for testing.
+
+    ADR-002-B: All plugins must declare security level at registration.
+    """
     registry = BasePluginRegistry[MockPlugin]("test_plugin")
-    registry.register("test", create_mock_plugin, schema=None)
+    registry.register("test", create_mock_plugin, schema=None, declared_security_level="UNOFFICIAL")
     return registry
 
 

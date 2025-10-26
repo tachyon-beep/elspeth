@@ -36,11 +36,14 @@ class ScoreDeltaBaselinePlugin(BasePlugin):
     def __init__(
         self,
         *,
-        security_level: SecurityLevel,
         metric: str = "mean",
         criteria: list[str] | None = None,
     ) -> None:
-        super().__init__(security_level=security_level, allow_downgrade=True)  # Baseline computation trusted to downgrade (ADR-005)
+        # ADR-002-B: Security policy is immutable and hard-coded in plugin code
+        super().__init__(
+            security_level=SecurityLevel.UNOFFICIAL,  # Baseline analyzers work with experiment results
+            allow_downgrade=True,  # Trusted to operate at lower levels if needed
+        )
         self._metric = metric
         self._criteria = set(criteria) if criteria else None
 
@@ -77,14 +80,13 @@ class ScoreDeltaBaselinePlugin(BasePlugin):
 
 
 def _create_score_delta(options: dict[str, Any], context: PluginContext) -> ScoreDeltaBaselinePlugin:
-    """Create score delta baseline plugin with smart security defaults."""
-    opts = dict(options)
-    if "security_level" not in opts and context:
-        opts["security_level"] = context.security_level
+    """Create score delta baseline plugin.
+
+    ADR-002-B: Security policy is hard-coded in plugin __init__, not injected by factory.
+    """
     return ScoreDeltaBaselinePlugin(
-        security_level=opts["security_level"],
-        metric=opts.get("metric", "mean"),
-        criteria=opts.get("criteria"),
+        metric=options.get("metric", "mean"),
+        criteria=options.get("criteria"),
     )
 
 
@@ -92,6 +94,7 @@ register_baseline_plugin(
     "score_delta",
     _create_score_delta,
     schema=_DELTA_SCHEMA,
+    declared_security_level="UNOFFICIAL",  # ADR-002-B: Baseline analyzers work with experiment results
 )
 
 

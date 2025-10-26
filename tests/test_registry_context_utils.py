@@ -14,21 +14,21 @@ from elspeth.core.validation import ConfigurationError
 
 
 def test_extract_from_options():
-    """Extract levels from options dictionary."""
-    security, determinism, sources = extract_security_levels(
-        definition={},
-        options={
-            "security_level": "PROTECTED",
-            "determinism_level": "high",
-        },
-        plugin_type="datasource",
-        plugin_name="csv",
-    )
+    """SECURITY: Reject security_level in options (ADR-002-B violation).
 
-    assert security == "PROTECTED"
-    assert determinism == "high"
-    assert "datasource:csv.options.security_level" in sources
-    assert "datasource:csv.options.determinism_level" in sources
+    Security level must come from declared_security_level ONLY, never from
+    configuration options. Attempts to set it in options should crash.
+    """
+    with pytest.raises(ConfigurationError, match="security_level cannot be set in options"):
+        extract_security_levels(
+            definition={},
+            options={
+                "security_level": "PROTECTED",  # SECURITY VIOLATION
+                "determinism_level": "high",
+            },
+            plugin_type="datasource",
+            plugin_name="csv",
+        )
 
 
 def test_extract_from_definition():
@@ -50,7 +50,11 @@ def test_extract_from_definition():
 
 
 def test_extract_with_parent_context():
-    """Inherit levels from parent context."""
+    """SECURITY: Reject inheritance from parent context (ADR-002-B).
+
+    Old behavior: Child without security_level inherited from parent (SECURITY HOLE).
+    New behavior: Fail loud - security must be declared, never inherited.
+    """
     parent = PluginContext(
         plugin_name="parent",
         plugin_kind="parent",
@@ -59,39 +63,40 @@ def test_extract_with_parent_context():
         provenance=("parent",),
     )
 
-    security, determinism, _ = extract_security_levels(
-        definition={},
-        options={},
-        plugin_type="utility",
-        plugin_name="helper",
-        parent_context=parent,
-        require_security=False,
-        require_determinism=False,
-    )
-
-    # Should inherit from parent when not specified
-    assert security == "SECRET"
-    assert determinism == "high"
+    # ADR-002-B: Attempting to create plugin without declared security_level
+    # must FAIL LOUD, even if parent context exists
+    with pytest.raises(ConfigurationError, match="security_level is required.*ADR-002-B"):
+        extract_security_levels(
+            definition={},
+            options={},
+            plugin_type="utility",
+            plugin_name="helper",
+            parent_context=parent,
+            require_determinism=False,
+        )
 
 
 def test_extract_missing_required_security():
-    """Raise error when required security_level missing."""
-    with pytest.raises(ConfigurationError, match="security_level is required"):
+    """Raise error when security_level missing (ADR-001: always required, no backdoors)."""
+    # ADR-001/002-B: Security is ALWAYS required in high-security systems (no require_security parameter)
+    with pytest.raises(ConfigurationError, match="security_level is required.*ADR-002-B"):
         extract_security_levels(
             definition={},
             options={},
             plugin_type="datasource",
             plugin_name="csv",
-            require_security=True,
         )
 
 
 def test_extract_missing_required_determinism():
-    """Raise error when required determinism_level missing."""
+    """Raise error when required determinism_level missing.
+
+    ADR-002-B: security_level must come from definition, not options.
+    """
     with pytest.raises(ConfigurationError, match="determinism_level is required"):
         extract_security_levels(
-            definition={},
-            options={"security_level": "OFFICIAL"},
+            definition={"security_level": "OFFICIAL"},
+            options={},
             plugin_type="datasource",
             plugin_name="csv",
             require_determinism=True,
@@ -99,21 +104,28 @@ def test_extract_missing_required_determinism():
 
 
 def test_extract_conflicting_security_levels():
-    """Raise error when definition and options conflict."""
-    with pytest.raises(ConfigurationError, match="Conflicting security_level"):
+    """SECURITY: Reject security_level in options (ADR-002-B).
+
+    Old behavior: Detected conflicts between definition and options.
+    New behavior: Reject options security_level immediately (before conflict check).
+    """
+    with pytest.raises(ConfigurationError, match="security_level cannot be set in options"):
         extract_security_levels(
             definition={"security_level": "UNOFFICIAL"},
-            options={"security_level": "PROTECTED"},
+            options={"security_level": "PROTECTED"},  # ← Rejected immediately
             plugin_type="sink",
             plugin_name="csv",
         )
 
 
 def test_extract_determinism_defaults_to_none():
-    """Determinism defaults to 'none' when not specified."""
+    """Determinism defaults to 'none' when not specified.
+
+    ADR-002-B: security_level must come from definition, not options.
+    """
     _, determinism, _ = extract_security_levels(
-        definition={},
-        options={"security_level": "OFFICIAL"},
+        definition={"security_level": "OFFICIAL"},
+        options={},
         plugin_type="datasource",
         plugin_name="csv",
         require_determinism=False,
@@ -137,12 +149,17 @@ def test_extract_provenance_tracking():
 
 
 def test_extract_normalizes_levels():
-    """Security and determinism levels are normalized."""
+    """Security and determinism levels are normalized.
+
+    ADR-002-B: security_level must come from definition (declared_security_level),
+    never from options.
+    """
     security, determinism, _ = extract_security_levels(
-        definition={},
+        definition={
+            "security_level": "confidential",  # lowercase - will be normalized
+        },
         options={
-            "security_level": "confidential",  # lowercase
-            "determinism_level": "HIGH",  # uppercase
+            "determinism_level": "HIGH",  # uppercase - will be normalized
         },
         plugin_type="datasource",
         plugin_name="test",

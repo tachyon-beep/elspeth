@@ -40,12 +40,12 @@ def test_resolve_security_level_picks_most_restrictive():
 
 def test_coalesce_security_level_agrees_or_raises():
     # Matching inputs -> normalized canonical string
-    assert coalesce_security_level("internal", "OFFICIAL") == "OFFICIAL"
+    assert coalesce_security_level("internal", "OFFICIAL") == SecurityLevel.OFFICIAL
     # Conflicting inputs -> error
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="Conflicting"):
         coalesce_security_level("OFFICIAL", "PROTECTED")
-    # No inputs -> error
-    with pytest.raises(ValueError):
+    # No inputs -> error (fail loud - security_level is required)
+    with pytest.raises(ValueError, match="required"):
         coalesce_security_level(None, None)
 
 

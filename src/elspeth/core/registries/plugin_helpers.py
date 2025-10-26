@@ -104,7 +104,7 @@ def create_plugin_with_inheritance(
 
     # Check if plugin exists early for better error messages
     try:
-        registry._get_factory(name)
+        factory = registry._get_factory(name)
     except ValueError as exc:
         # Re-raise with expected format for backward compatibility
         raise ValueError(f"Unknown {plugin_kind} '{name}'") from exc
@@ -137,10 +137,20 @@ def create_plugin_with_inheritance(
     if provenance:
         sources.extend(provenance)
 
-    # ADR-002-B: security_level is now optional (plugin-author-owned)
+    # ADR-002-B: security_level is ALWAYS plugin-author-owned, NEVER inherited from parent
+    # SECURITY: No parent fallback - fail loud if factory doesn't declare declared_security_level
     if definition_sec_level is None and option_sec_level is None:
-        # Default to UNOFFICIAL if not provided (plugin can override)
-        child_sec_level = SecurityLevel.UNOFFICIAL
+        # Always check factory.declared_security_level FIRST
+        # DO NOT fall back to parent_sec_level (security escalation vulnerability)
+        declared_sec_level = getattr(factory, "declared_security_level", None)
+        if declared_sec_level is None:
+            raise ConfigurationError(
+                f"{plugin_kind}:{name}: security_level is required. "
+                f"ADR-002-B: Plugin registrations must declare declared_security_level. "
+                f"No backdoors - security is ALWAYS plugin-author-owned, never inherited."
+            )
+        child_sec_level = ensure_security_level(declared_sec_level)
+        sources.append(f"{plugin_kind}:{name}.factory.declared_security_level")
     else:
         # Coalesce security level with downgrade prevention
         try:
@@ -205,7 +215,6 @@ def create_plugin_with_inheritance(
     # We use the factory directly instead of registry.create() because
     # registry.create() would create a NEW context derived from our context,
     # resulting in double-nesting. We've already built the exact context we want.
-    factory = registry._get_factory(name)
     plugin = factory.instantiate(
         payload,
         plugin_context=context,

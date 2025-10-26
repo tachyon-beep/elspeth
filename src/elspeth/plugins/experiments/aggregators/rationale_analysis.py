@@ -57,6 +57,11 @@ class RationaleAnalysisAggregator(BasePlugin):
         top_keywords: int = 10,
         on_error: str = "abort",
     ) -> None:
+        # ADR-002-B: Security policy is immutable and hard-coded in plugin code
+        super().__init__(
+            security_level=SecurityLevel.UNOFFICIAL,  # Aggregators work with experiment results
+            allow_downgrade=True,  # Trusted to operate at lower levels if needed (ADR-005)
+        )
         self._rationale_field = rationale_field
         self._score_field = score_field
         self._criteria = set(criteria) if criteria else None

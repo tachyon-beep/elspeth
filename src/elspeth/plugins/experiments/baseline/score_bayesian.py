@@ -99,6 +99,7 @@ register_baseline_plugin(
     "score_bayes",
     _create_score_bayesian,
     schema=_BAYESIAN_SCHEMA,
+    declared_security_level="UNOFFICIAL",  # ADR-002-B: Baseline analyzers work with experiment results
 )
 
 

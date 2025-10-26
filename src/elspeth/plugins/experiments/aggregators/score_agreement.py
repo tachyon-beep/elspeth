@@ -40,12 +40,15 @@ class ScoreAgreementAggregator(BasePlugin):
     def __init__(
         self,
         *,
-        security_level: SecurityLevel,
         criteria: Sequence[str] | None = None,
         min_items: int = 2,
         on_error: str = "abort",
     ) -> None:
-        super().__init__(security_level=security_level, allow_downgrade=True)  # ADR-005: Aggregator trusted to downgrade
+        # ADR-002-B: Security policy is immutable and hard-coded in plugin code
+        super().__init__(
+            security_level=SecurityLevel.UNOFFICIAL,  # Aggregators work with experiment results
+            allow_downgrade=True,  # Trusted to operate at lower levels if needed (ADR-005)
+        )
         self._criteria = list(criteria) if criteria else None
         self._min_items = max(int(min_items), 2)
         if on_error not in {"abort", "skip"}:
@@ -143,15 +146,14 @@ class ScoreAgreementAggregator(BasePlugin):
 
 
 def _create_score_agreement(options: dict[str, Any], context: PluginContext) -> ScoreAgreementAggregator:
-    """Create score agreement aggregator with smart security defaults."""
-    opts = dict(options)
-    if "security_level" not in opts and context:
-        opts["security_level"] = context.security_level
+    """Create score agreement aggregator.
+
+    ADR-002-B: Security policy is hard-coded in plugin __init__, not injected by factory.
+    """
     return ScoreAgreementAggregator(
-        security_level=opts["security_level"],
-        criteria=opts.get("criteria"),
-        min_items=int(opts.get("min_items", 2)),
-        on_error=opts.get("on_error", "abort"),
+        criteria=options.get("criteria"),
+        min_items=int(options.get("min_items", 2)),
+        on_error=options.get("on_error", "abort"),
     )
 
 
@@ -159,6 +161,7 @@ register_aggregation_plugin(
     "score_agreement",
     _create_score_agreement,
     schema=_AGREEMENT_SCHEMA,
+    declared_security_level="UNOFFICIAL",  # ADR-002-B: Aggregators work with experiment results
 )
 
 

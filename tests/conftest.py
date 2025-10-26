@@ -137,7 +137,7 @@ def _register_test_sinks():
         "additionalProperties": True,
     }
 
-    sink_registry.register("collecting", _create_collecting_sink, schema=schema)
+    sink_registry.register("collecting", _create_collecting_sink, schema=schema, declared_security_level="UNOFFICIAL")
 
     yield  # Test run happens here
 

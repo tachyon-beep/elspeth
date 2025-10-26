@@ -140,6 +140,7 @@ def test_create_row_plugin_inherits_parent_context():
     plugin = plugin_registry.create_row_plugin(
         {
             "name": "score_extractor",
+            # ADR-002-B Phase 2: security_level in config is IGNORED (plugin-author-owned)
             "security_level": "SECRET",
             "determinism_level": "guaranteed",
             "options": {
@@ -154,7 +155,8 @@ def test_create_row_plugin_inherits_parent_context():
     )
     assert plugin.plugin_context.parent == parent_context
     assert plugin.plugin_context.security_level == "SECRET"
-    assert plugin.security_level == "SECRET"
+    # ADR-002-B Phase 2: plugin.security_level is immutably UNOFFICIAL (hard-coded in plugin __init__)
+    assert plugin.security_level == "UNOFFICIAL"
 
 
 def test_normalize_early_stop_definitions_handles_various_forms():

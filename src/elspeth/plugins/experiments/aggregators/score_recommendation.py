@@ -39,17 +39,20 @@ class ScoreRecommendationAggregator(BasePlugin):
     def __init__(
         self,
         *,
-        security_level: SecurityLevel,
         min_samples: int = 5,
         improvement_margin: float = 0.05,
         source_field: str = "scores",
         flag_field: str = "score_flags",
     ) -> None:
-        super().__init__(security_level=security_level, allow_downgrade=True)  # ADR-005: Aggregator trusted to downgrade
+        # ADR-002-B: Security policy is immutable and hard-coded in plugin code
+        super().__init__(
+            security_level=SecurityLevel.UNOFFICIAL,  # Aggregators work with experiment results
+            allow_downgrade=True,  # Trusted to operate at lower levels if needed (ADR-005)
+        )
         self._min_samples = min_samples
         self._improvement_margin = improvement_margin
+        # ADR-002-B: ScoreStatsAggregator now hard-codes security_level internally
         self._stats = ScoreStatsAggregator(
-            security_level=security_level,
             source_field=source_field,
             flag_field=flag_field,
         )
@@ -114,17 +117,15 @@ class ScoreRecommendationAggregator(BasePlugin):
 
 
 def _create_score_recommendation(options: dict[str, Any], context: PluginContext) -> ScoreRecommendationAggregator:
-    """Create score recommendation aggregator with smart security defaults."""
-    opts = dict(options)
-    if "security_level" not in opts and context:
-        opts["security_level"] = context.security_level
+    """Create score recommendation aggregator.
 
+    ADR-002-B: Security policy is hard-coded in plugin __init__, not injected by factory.
+    """
     return ScoreRecommendationAggregator(
-        security_level=opts["security_level"],
-        min_samples=int(opts.get("min_samples", 5)),
-        improvement_margin=float(opts.get("improvement_margin", 0.05)),
-        source_field=opts.get("source_field", "scores"),
-        flag_field=opts.get("flag_field", "score_flags"),
+        min_samples=int(options.get("min_samples", 5)),
+        improvement_margin=float(options.get("improvement_margin", 0.05)),
+        source_field=options.get("source_field", "scores"),
+        flag_field=options.get("flag_field", "score_flags"),
     )
 
 
@@ -132,6 +133,7 @@ register_aggregation_plugin(
     "score_recommendation",
     _create_score_recommendation,
     schema=_RECOMMENDATION_SCHEMA,
+    declared_security_level="UNOFFICIAL",  # ADR-002-B: Aggregators work with experiment results
 )
 
 

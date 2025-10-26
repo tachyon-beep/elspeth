@@ -121,7 +121,6 @@ _BLOB_DATASOURCE_SCHEMA = with_security_properties(
         "required": ["config_path", "retain_local"],  # Must explicitly set retain_local
         "additionalProperties": True,
     },
-    require_security=False,  # Will be enforced by registry
     require_determinism=False,
 )
 
@@ -141,7 +140,6 @@ _CSV_BLOB_DATASOURCE_SCHEMA = with_security_properties(
         "required": ["path", "retain_local"],  # Must explicitly set retain_local
         "additionalProperties": True,
     },
-    require_security=False,
     require_determinism=False,
 )
 
@@ -161,7 +159,6 @@ _CSV_DATASOURCE_SCHEMA = with_security_properties(
         "required": ["path", "retain_local"],  # Must explicitly set retain_local
         "additionalProperties": True,
     },
-    require_security=False,
     require_determinism=False,
 )
 
@@ -174,18 +171,21 @@ datasource_registry.register(
     "azure_blob",
     _create_blob_datasource,
     schema=_BLOB_DATASOURCE_SCHEMA,
+    declared_security_level="UNOFFICIAL",  # ADR-002-B: Plugin author's security declaration
 )
 
 datasource_registry.register(
     "csv_blob",
     _create_csv_blob_datasource,
     schema=_CSV_BLOB_DATASOURCE_SCHEMA,
+    declared_security_level="UNOFFICIAL",  # ADR-002-B: Plugin author's security declaration
 )
 
 datasource_registry.register(
     "local_csv",
     _create_csv_datasource,
     schema=_CSV_DATASOURCE_SCHEMA,
+    declared_security_level="UNOFFICIAL",  # ADR-002-B: Plugin author's security declaration
 )
 
 
@@ -203,7 +203,6 @@ try:  # pragma: no cover - non-functional warm-up path
     _ = datasource_registry.create(
         name="local_csv",
         options={"path": "__warmup__.csv", "retain_local": False},
-        require_security=False,
         require_determinism=False,
     )
 except Exception:

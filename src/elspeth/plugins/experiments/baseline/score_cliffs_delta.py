@@ -40,12 +40,15 @@ class ScoreCliffsDeltaPlugin(BasePlugin):
     def __init__(
         self,
         *,
-        security_level: SecurityLevel,
         criteria: Sequence[str] | None = None,
         min_samples: int = 1,
         on_error: str = "abort",
     ) -> None:
-        super().__init__(security_level=security_level, allow_downgrade=True)  # ADR-005: Baseline plugins trusted to downgrade
+        # ADR-002-B: Security policy is immutable and hard-coded in plugin code
+        super().__init__(
+            security_level=SecurityLevel.UNOFFICIAL,  # Baseline analyzers work with experiment results
+            allow_downgrade=True,  # Trusted to operate at lower levels if needed (ADR-005)
+        )
         self._criteria = set(criteria) if criteria else None
         self._min_samples = max(int(min_samples), 1)
         if on_error not in {"abort", "skip"}:
@@ -85,15 +88,14 @@ class ScoreCliffsDeltaPlugin(BasePlugin):
 
 
 def _create_score_cliffs_delta(options: dict[str, Any], context: PluginContext) -> ScoreCliffsDeltaPlugin:
-    """Create Cliff's delta baseline plugin with smart security defaults."""
-    opts = dict(options)
-    if "security_level" not in opts and context:
-        opts["security_level"] = context.security_level
+    """Create Cliff's delta baseline plugin.
+
+    ADR-002-B: Security policy is hard-coded in plugin __init__, not injected by factory.
+    """
     return ScoreCliffsDeltaPlugin(
-        security_level=opts["security_level"],
-        criteria=opts.get("criteria"),
-        min_samples=int(opts.get("min_samples", 1)),
-        on_error=opts.get("on_error", "abort"),
+        criteria=options.get("criteria"),
+        min_samples=int(options.get("min_samples", 1)),
+        on_error=options.get("on_error", "abort"),
     )
 
 
@@ -101,6 +103,7 @@ register_baseline_plugin(
     "score_cliffs_delta",
     _create_score_cliffs_delta,
     schema=_CLIFFS_SCHEMA,
+    declared_security_level="UNOFFICIAL",  # ADR-002-B: Baseline analyzers work with experiment results
 )
 
 

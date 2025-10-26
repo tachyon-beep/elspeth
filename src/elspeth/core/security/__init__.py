@@ -159,8 +159,10 @@ def coalesce_security_level(*levels: SecurityLevel | str | None) -> SecurityLeve
             continue
         normalized.append(_ensure_security_level(text))
 
+    # ADR-002-B: security_level is plugin-author-owned (hard-coded in plugin)
+    # If no security_level is provided, that's a programming error - fail loud
     if not normalized:
-        raise ValueError("security_level is required")
+        raise ValueError("security_level is required (plugin must hard-code it)")
 
     if len(set(normalized)) > 1:
         raise ValueError("Conflicting security_level values")

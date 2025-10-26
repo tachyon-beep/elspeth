@@ -25,8 +25,6 @@ def test_end_to_end_local_pipeline(tmp_path, assert_sanitized_artifact):
 
     runner = ExperimentRunner(
         llm_client=MockLLMClient(
-            security_level=SecurityLevel.UNOFFICIAL,
-            allow_downgrade=True,
             seed=7
         ),
         sinks=[bundle_sink, csv_sink],
@@ -112,8 +110,6 @@ def test_suite_runner_end_to_end_without_azure(tmp_path, assert_sanitized_artifa
     runner = ExperimentSuiteRunner(
         suite=suite,
         llm_client=MockLLMClient(
-            security_level=SecurityLevel.UNOFFICIAL,
-            allow_downgrade=True,
             seed=13
         ),
         sinks=[],
@@ -180,7 +176,9 @@ def test_suite_runner_end_to_end_without_azure(tmp_path, assert_sanitized_artifa
     df = pd.DataFrame({"value": ["alpha", "beta"]})
     results = runner.run(df, defaults=defaults)
 
-    assert set(results.keys()) == {"baseline", "variant"}
+    # ADR-002-B: Filter out special metadata keys added by suite_runner
+    experiment_names = {k for k in results.keys() if not k.startswith("_")}
+    assert experiment_names == {"baseline", "variant"}
     baseline_payload = results["baseline"]["payload"]
     variant_payload = results["variant"]["payload"]
 

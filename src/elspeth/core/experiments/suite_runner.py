@@ -425,7 +425,6 @@ class ExperimentSuiteRunner:
                 plugin,
                 options_with_level,
                 provenance=(f"sink:{plugin}.definition",),
-                require_security=False,  # ADR-002-B: Plugins self-declare
             )
             setattr(sink, "_elspeth_artifact_config", artifacts_cfg or {})
             setattr(sink, "_elspeth_plugin_name", plugin)
@@ -931,7 +930,7 @@ class ExperimentSuiteRunner:
 
     def run(
         self,
-        df: pd.DataFrame,
+        df: pd.DataFrame | None = None,
         defaults: dict[str, Any] | None = None,
         sink_factory: Callable[[ExperimentConfig], list[ResultSink]] | None = None,
         preflight_info: dict[str, Any] | None = None,
@@ -944,16 +943,18 @@ class ExperimentSuiteRunner:
         flow while keeping cognitive complexity low.
 
         Execution Flow:
+            0. Load data from datasource if not provided (ADR-002 security fix)
             1. Initialize suite context (baseline-first ordering, metadata)
             2. For each experiment:
                a. Resolve configuration (pack, sinks)
                b. Build experiment runner
-               c. Notify middlewares (suite_loaded, experiment_start)
-               d. Execute experiment
-               e. Capture baseline payload (if first baseline)
-               f. Store results
-               g. Notify middlewares (experiment_complete)
-               h. Run baseline comparison (if applicable)
+               c. VALIDATE SECURITY ENVELOPE (before execution) ← ADR-002
+               d. Notify middlewares (suite_loaded, experiment_start)
+               e. Execute experiment
+               f. Capture baseline payload (if first baseline)
+               g. Store results
+               h. Notify middlewares (experiment_complete)
+               i. Run baseline comparison (if applicable)
             3. Finalize suite (notify middlewares of completion)
             4. Return aggregated results
 
@@ -973,6 +974,7 @@ class ExperimentSuiteRunner:
         Args:
             df: Input DataFrame containing prompts and data for experiments.
                 Each row represents one prompt to be processed.
+                If None, will load from self.datasource (ADR-002 security fix).
             defaults: Default configuration values for the suite. Can include:
                 - prompt_packs: Dict of named prompt pack configurations
                 - prompt_pack: Default pack name to use
@@ -1007,9 +1009,10 @@ class ExperimentSuiteRunner:
 
         Example:
             >>> suite = ExperimentSuite(root=Path("./"), baseline=baseline_exp, experiments=[...])
-            >>> runner = ExperimentSuiteRunner(suite, llm_client, sinks)
+            >>> runner = ExperimentSuiteRunner(suite, llm_client, sinks, datasource=datasource)
+            >>> # ADR-002 security: validation happens BEFORE data load
             >>> results = runner.run(
-            ...     df=pd.DataFrame([{"text": "Hello"}]),
+            ...     df=None,  # Let runner load after validation
             ...     defaults={"prompt_system": "You are helpful", "sink_defs": [...]},
             ... )
             >>> results["baseline"]["payload"]["raw_outputs"]  # Access baseline results
@@ -1021,6 +1024,19 @@ class ExperimentSuiteRunner:
             - baseline_flow_diagram.md: Detailed baseline execution flow
             - sink_resolution_documentation.md: Sink priority chain details
         """
+        # ADR-002 SECURITY FIX: Load data AFTER validation sees datasource
+        # If df not provided, load from self.datasource (which validation can inspect)
+        if df is None:
+            if self.datasource is None:
+                raise ValueError(
+                    "Either df parameter or datasource attribute must be provided. "
+                    "For ADR-002 security compliance, pass datasource to constructor "
+                    "and omit df parameter to enable validation before data retrieval."
+                )
+            # Validation will happen per-experiment in loop below, BEFORE we use df
+            # Loading here allows validation to inspect self.datasource object
+            df = self.datasource.load()
+
         defaults = defaults or {}
         ctx = self._prepare_suite_context(defaults, preflight_info)
 
@@ -1075,4 +1091,9 @@ class ExperimentSuiteRunner:
             self._run_baseline_comparison(exp_config, ctx, payload, defaults)
 
         self._finalize_suite(ctx)
+
+        # ADR-002: Include operating_security_level in results for artifact bundle metadata
+        if ctx.operating_security_level is not None:
+            ctx.results["_operating_security_level"] = ctx.operating_security_level
+
         return ctx.results

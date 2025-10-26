@@ -27,12 +27,15 @@ class ScoreVariantRankingAggregator(BasePlugin):
     def __init__(
         self,
         *,
-        security_level: SecurityLevel,
         threshold: float = 0.7,
         weight_mean: float = 1.0,
         weight_pass: float = 1.0,
     ) -> None:
-        super().__init__(security_level=security_level, allow_downgrade=True)  # ADR-005: Aggregator trusted to downgrade
+        # ADR-002-B: Security policy is immutable and hard-coded in plugin code
+        super().__init__(
+            security_level=SecurityLevel.UNOFFICIAL,  # Aggregators work with experiment results
+            allow_downgrade=True,  # Trusted to operate at lower levels if needed (ADR-005)
+        )
         self._threshold = float(threshold)
         self._weight_mean = float(weight_mean)
         self._weight_pass = float(weight_pass)
@@ -86,15 +89,14 @@ class ScoreVariantRankingAggregator(BasePlugin):
 
 
 def _create_score_variant_ranking(options: dict[str, Any], context: PluginContext) -> ScoreVariantRankingAggregator:
-    """Create score variant ranking aggregator with smart security defaults."""
-    opts = dict(options)
-    if "security_level" not in opts and context:
-        opts["security_level"] = context.security_level
+    """Create score variant ranking aggregator.
+
+    ADR-002-B: Security policy is hard-coded in plugin __init__, not injected by factory.
+    """
     return ScoreVariantRankingAggregator(
-        security_level=opts["security_level"],
-        threshold=float(opts.get("threshold", 0.7)),
-        weight_mean=float(opts.get("weight_mean", 1.0)),
-        weight_pass=float(opts.get("weight_pass", 1.0)),
+        threshold=float(options.get("threshold", 0.7)),
+        weight_mean=float(options.get("weight_mean", 1.0)),
+        weight_pass=float(options.get("weight_pass", 1.0)),
     )
 
 

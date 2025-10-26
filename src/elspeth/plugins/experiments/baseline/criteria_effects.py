@@ -151,6 +151,7 @@ register_baseline_plugin(
     "criteria_effects",
     _create_criteria_effects,
     schema=_CRITERIA_EFFECTS_SCHEMA,
+    declared_security_level="UNOFFICIAL",  # ADR-002-B: Baseline analyzers work with experiment results
 )
 
 

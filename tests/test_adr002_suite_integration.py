@@ -518,12 +518,10 @@ class TestADR002SuiteIntegration:
         datasource = MockOfficialDatasource(df)
 
         # Use REAL StaticLLMClient (production plugin)
-        # ADR-005: security_level and allow_downgrade are now mandatory
+        # ADR-002-B: security_level and allow_downgrade hard-coded in plugin
         llm_client = StaticLLMClient(
             content="Static LLM response for testing",
             score=0.85,
-            security_level=SecurityLevel.OFFICIAL,
-            allow_downgrade=True
         )
 
         # Simple sink for capturing output (similar to production pattern)

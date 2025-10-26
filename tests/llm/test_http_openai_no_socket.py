@@ -47,9 +47,7 @@ def test_http_openai_client_generate_without_socket(monkeypatch):
     # Use a localhost endpoint (allowed by endpoint validator) but do not bind sockets
     # Provide API key via environment and extra params to exercise headers and payload branches
     monkeypatch.setenv("HTTP_OPENAI_KEY", "secret")
-    client = HttpOpenAIClient(
-        security_level=SecurityLevel.UNOFFICIAL,
-        allow_downgrade=True,
+    client = HttpOpenAIClient(  # ADR-002-B: security hard-coded in plugin
         api_base="http://127.0.0.1:12345",
         model="m",
         api_key_env="HTTP_OPENAI_KEY",

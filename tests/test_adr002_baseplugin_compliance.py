@@ -504,15 +504,12 @@ class TestCategory3SecurityProperties:
         assert callable(ds.validate_can_operate_at_level), \
             "validate_can_operate_at_level must be callable"
 
-    @pytest.mark.xfail(
-        reason="Phase 1 not started - plugins don't implement BasePlugin yet",
-        strict=True
-    )
     def test_all_sinks_implement_baseplugin(self, tmp_path: Path) -> None:
         """All sinks MUST implement BasePlugin protocol after Phase 1.
 
         **TEST TYPE**: Security property (success criteria)
-        **EXPECTED**: XFAIL (plugins lack methods) → PASS after Phase 1
+        **PHASE 1 STATUS**: ✅ COMPLETE - Sinks now implement BasePlugin
+        **EXPECTED**: PASS (methods inherited from BasePlugin ABC)
         """
         output_file = tmp_path / "output.csv"
 

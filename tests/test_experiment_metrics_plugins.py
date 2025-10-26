@@ -22,8 +22,7 @@ SCORE_EXTRACTOR_REQUIRED = {
         ({"metrics": {"score": "3.5"}}, 3.5),
         ({"content": '{"score": 2.25}'}, 2.25),
         ({"content": "not json"}, math.nan),
-    ],
-)
+    ])
 def test_score_extractor_basic(response, expected):
     plugin = create_row_plugin(
         {
@@ -319,7 +318,6 @@ def test_score_significance_on_error_skip(monkeypatch):
     from elspeth.plugins.experiments.baseline.score_significance import ScoreSignificanceBaselinePlugin
 
     plugin = ScoreSignificanceBaselinePlugin(
-        security_level=SecurityLevel.UNOFFICIAL,
         on_error="skip"
     )
 
@@ -362,7 +360,6 @@ def test_score_agreement_on_error_skip(monkeypatch):
     from elspeth.plugins.experiments.aggregators.score_agreement import ScoreAgreementAggregator
 
     plugin = ScoreAgreementAggregator(
-        security_level=SecurityLevel.UNOFFICIAL,
         on_error="skip"
     )
 
@@ -631,7 +628,6 @@ def test_cost_summary_on_error_skip(monkeypatch):
     from elspeth.plugins.experiments.aggregators.cost_summary import CostSummaryAggregator
 
     plugin = CostSummaryAggregator(
-        security_level=SecurityLevel.UNOFFICIAL,
         on_error="skip"
     )
 
@@ -646,7 +642,6 @@ def test_latency_summary_on_error_skip(monkeypatch):
     from elspeth.plugins.experiments.aggregators.latency_summary import LatencySummaryAggregator
 
     plugin = LatencySummaryAggregator(
-        security_level=SecurityLevel.UNOFFICIAL,
         on_error="skip"
     )
 

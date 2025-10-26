@@ -26,9 +26,7 @@ class _FakeClient:
 
 def test_azure_openai_client_timeout_parsing_invalid():
     # Invalid timeout is coerced to default (30.0)
-    client = AzureOpenAIClient(
-        security_level=SecurityLevel.UNOFFICIAL,
-        allow_downgrade=True,
+    client = AzureOpenAIClient(  # ADR-002-B: security hard-coded in plugin
         deployment="dep",
         config={"timeout": "not-a-float", "api_key": "k", "api_version": "v", "azure_endpoint": "e"},
         client=_FakeClient(SimpleNamespace(choices=[])),
@@ -39,9 +37,7 @@ def test_azure_openai_client_timeout_parsing_invalid():
 def test_azure_openai_client_generate_handles_missing_content():
     # Missing nested attributes should not raise and should return None content
     fake_response = SimpleNamespace(choices=[])
-    client = AzureOpenAIClient(
-        security_level=SecurityLevel.UNOFFICIAL,
-        allow_downgrade=True,
+    client = AzureOpenAIClient(  # ADR-002-B: security hard-coded in plugin
         deployment="dep",
         config={"timeout": 5, "api_key": "k", "api_version": "v", "azure_endpoint": "e"},
         client=_FakeClient(fake_response),

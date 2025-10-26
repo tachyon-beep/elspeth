@@ -8,8 +8,6 @@ from elspeth.plugins.nodes.transforms.llm.static import StaticLLMClient
 
 def test_static_llm_client_returns_constant_metrics() -> None:
     client = StaticLLMClient(
-        security_level=SecurityLevel.UNOFFICIAL,
-        allow_downgrade=True,
         content="Hello",
         score=0.75,
         metrics={"flag": True}

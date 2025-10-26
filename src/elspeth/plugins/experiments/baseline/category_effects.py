@@ -209,6 +209,7 @@ register_baseline_plugin(
     "category_effects",
     _create_category_effects,
     schema=_CATEGORY_SCHEMA,
+    declared_security_level="UNOFFICIAL",  # ADR-002-B: Baseline analyzers work with experiment results
 )
 
 

@@ -62,7 +62,6 @@ def test_sink_registry_factory_branches(monkeypatch, name, options):
             "determinism_level": "guaranteed",
         },
         parent_context=parent_context,
-        require_security=False,
         require_determinism=True,
     )
     assert isinstance(plugin, _Dummy)
@@ -91,7 +90,6 @@ def test_sink_registry_azure_blob_minimal(monkeypatch, tmp_path):
             "determinism_level": "guaranteed",
         },
         parent_context=parent_context,
-        require_security=False,
         require_determinism=True,
     )
     assert isinstance(plugin, _Dummy)

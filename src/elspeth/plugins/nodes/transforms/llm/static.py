@@ -12,9 +12,9 @@ from elspeth.core.base.types import SecurityLevel
 class StaticLLMClient(BasePlugin, LLMClientProtocol):
     """Return predefined content and metrics for every request.
 
+    Security policy: Test-only transform operates at UNOFFICIAL level (ADR-002-B).
+
     Args:
-        security_level: Security clearance for this LLM adapter (MANDATORY per ADR-004).
-        allow_downgrade: Whether adapter can operate at lower pipeline levels (MANDATORY per ADR-005).
         content: Static response content to return for all requests (REQUIRED).
         score: Optional score metric to include in response.
         metrics: Optional additional metrics to include in response.
@@ -23,13 +23,19 @@ class StaticLLMClient(BasePlugin, LLMClientProtocol):
     def __init__(
         self,
         *,
-        security_level: SecurityLevel,
-        allow_downgrade: bool,
         content: str,  # Required - no default allowed
         score: float | None = None,
         metrics: Mapping[str, Any] | None = None,
     ) -> None:
-        super().__init__(security_level=security_level, allow_downgrade=allow_downgrade)
+        """Initialize static LLM client with hard-coded security policy.
+
+        ADR-002-B: Security policy is immutable. Static LLMs operate at UNOFFICIAL level
+        and can be trusted to downgrade (test-only transform).
+        """
+        super().__init__(
+            security_level=SecurityLevel.UNOFFICIAL,  # ADR-002-B: Immutable policy
+            allow_downgrade=True,  # ADR-002-B: Immutable policy
+        )
         self.content = content
         self.score = score
         self.extra_metrics = dict(metrics or {})

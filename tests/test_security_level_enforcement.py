@@ -192,7 +192,14 @@ def test_child_plugin_can_upgrade_parent_security_level():
 
 
 def test_child_plugin_inherits_when_no_explicit_level():
-    """Child SHOULD inherit parent's security level when not specified."""
+    """SECURITY: Child MUST NOT inherit parent's security level (ADR-002-B).
+
+    This test verifies the fix for the security escalation vulnerability where
+    a plugin without declared_security_level could inherit from parent, allowing
+    privilege escalation to SECRET by being instantiated under a SECRET parent.
+
+    Correct behavior: Fail loud if plugin doesn't declare security level.
+    """
     registry = BasePluginRegistry[object]("test_plugin")
 
     class TestPlugin:
@@ -201,6 +208,7 @@ def test_child_plugin_inherits_when_no_explicit_level():
     def create_plugin(opts, ctx):
         return TestPlugin()
 
+    # Register WITHOUT declared_security_level (insecure plugin)
     registry.register("test", create_plugin)
 
     parent_context = PluginContext(
@@ -210,16 +218,16 @@ def test_child_plugin_inherits_when_no_explicit_level():
         determinism_level="none",
     )
 
-    # Child does not specify security_level or determinism_level (ADR-002-B)
+    # Child does not specify security_level (ADR-002-B violation)
     definition = {
         "name": "test",
-        # No security_level → OK (defaults to UNOFFICIAL)
-        # No determinism_level → ERROR (required)
+        # No security_level in definition
+        # No declared_security_level in registration
+        # → MUST FAIL LOUD (no inheritance, no defaults)
     }
 
-    # ADR-002-B: security_level is optional (defaults to UNOFFICIAL),
-    # but determinism_level is REQUIRED
-    with pytest.raises(ConfigurationError, match="determinism_level must be declared"):
+    # ADR-001/002: NO DEFAULTS, NO INHERITANCE - must fail loud
+    with pytest.raises(ConfigurationError, match="Plugin registrations must declare declared_security_level"):
         create_plugin_with_inheritance(
             registry,
             definition,

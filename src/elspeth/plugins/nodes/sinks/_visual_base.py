@@ -24,7 +24,11 @@ logger = logging.getLogger(__name__)
 class BaseVisualSink(BasePlugin, ResultSink):
     """Base class for visual analytics sinks with shared validation and rendering.
 
-    Inherits from BasePlugin to provide security enforcement (ADR-004).
+    Inherits from BasePlugin to provide security enforcement (ADR-002-B).
+
+    **IMPORTANT**: security_level and allow_downgrade are internal parameters for subclass
+    use only. Subclasses MUST hard-code these values per ADR-002-B immutable policy.
+    They are NOT exposed in YAML configuration.
 
     Provides common functionality for sinks that generate visual analytics artifacts:
     - Plot module loading (matplotlib, seaborn)
@@ -51,11 +55,11 @@ class BaseVisualSink(BasePlugin, ResultSink):
         default_figure_size: tuple[float, float] = (10.0, 6.0),
         seaborn_style: str | None = "darkgrid",
         on_error: str = "abort",
-        security_level: SecurityLevel = SecurityLevel.OFFICIAL,  # ADR-004: Default for testing (YAML configs must be explicit)
-        allow_downgrade: bool,  # ADR-005: Trusted downgrade for sinks (explicit choice, matches default suite)
+        security_level: SecurityLevel,  # ADR-002-B: Required - subclasses must hard-code (no default to prevent backdoor)
+        allow_downgrade: bool,  # ADR-002-B: Required - subclasses must hard-code explicit policy
         **_kwargs: Any,  # Reserved for future subclass extensions
     ):
-        # Initialize BasePlugin with security level and downgrade policy (ADR-004, ADR-005)
+        # Initialize BasePlugin with security level and downgrade policy (ADR-002-B)
         super().__init__(security_level=security_level, allow_downgrade=allow_downgrade)
         """Initialize base visual sink.
 

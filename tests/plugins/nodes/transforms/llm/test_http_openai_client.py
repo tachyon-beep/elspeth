@@ -9,9 +9,7 @@ from elspeth.plugins.nodes.transforms.llm.openai_http import HttpOpenAIClient
 
 
 def test_http_openai_client_mounts_http_for_localhost() -> None:
-    client = HttpOpenAIClient(
-        security_level=SecurityLevel.UNOFFICIAL,
-        allow_downgrade=True,
+    client = HttpOpenAIClient(  # ADR-002-B: security hard-coded in plugin
         api_base="http://localhost:8080",
         model="gpt-test"
     )
@@ -21,9 +19,7 @@ def test_http_openai_client_mounts_http_for_localhost() -> None:
 
 
 def test_http_openai_client_generate(monkeypatch) -> None:
-    client = HttpOpenAIClient(
-        security_level=SecurityLevel.UNOFFICIAL,
-        allow_downgrade=True,
+    client = HttpOpenAIClient(  # ADR-002-B: security hard-coded in plugin
         api_base="http://localhost:8080",
         model="gpt-test",
         timeout=1.5
@@ -57,9 +53,7 @@ def test_http_openai_client_generate(monkeypatch) -> None:
 def test_http_openai_client_rejects_non_localhost_http():
     # http:// must be restricted to localhost/loopback by endpoint validator
     with pytest.raises(ValueError):
-        _ = HttpOpenAIClient(
-            security_level=SecurityLevel.UNOFFICIAL,
-            allow_downgrade=True,
+        _ = HttpOpenAIClient(  # ADR-002-B: security hard-coded in plugin
             api_base="http://example.com",
             model="gpt-test"
         )

@@ -24,7 +24,11 @@ logger = logging.getLogger(__name__)
 class BaseCSVDataSource(BasePlugin, DataSource):
     """Base class for CSV datasources with common functionality.
 
-    Inherits from BasePlugin to provide security enforcement (ADR-004).
+    Inherits from BasePlugin to provide security enforcement (ADR-002-B).
+
+    **IMPORTANT**: security_level and allow_downgrade are internal parameters for subclass
+    use only. Subclasses MUST hard-code these values per ADR-002-B immutable policy.
+    They are NOT exposed in YAML configuration.
     """
 
     def __init__(
@@ -36,15 +40,15 @@ class BaseCSVDataSource(BasePlugin, DataSource):
         dtype: dict[str, Any] | None = None,
         encoding: str = "utf-8",
         on_error: str = "abort",
-        security_level: SecurityLevel = SecurityLevel.OFFICIAL,  # ADR-004: Default for testing (YAML configs must be explicit)
-        allow_downgrade: bool,  # ADR-005: Trusted downgrade for datasources (explicit choice)
+        security_level: SecurityLevel,  # ADR-002-B: Required - subclasses must hard-code (no default to prevent backdoor)
+        allow_downgrade: bool,  # ADR-002-B: Required - subclasses must hard-code explicit policy
         determinism_level: DeterminismLevel | None = None,
         schema: dict[str, str | dict[str, Any]] | None = None,
         infer_schema: bool = True,
         retain_local: bool,  # REQUIRED - no default
         retain_local_path: str | None = None,
     ):
-        # Initialize BasePlugin with security level and downgrade policy (ADR-004, ADR-005)
+        # Initialize BasePlugin with security level and downgrade policy (ADR-002-B)
         super().__init__(security_level=security_level, allow_downgrade=allow_downgrade)
 
         # Resolve input path relative to base_path or ELSPETH_INPUTS_DIR when provided

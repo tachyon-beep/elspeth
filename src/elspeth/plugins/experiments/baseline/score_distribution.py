@@ -98,6 +98,7 @@ register_baseline_plugin(
     "score_distribution",
     _create_score_distribution,
     schema=_DISTRIBUTION_SCHEMA,
+    declared_security_level="UNOFFICIAL",  # ADR-002-B: Baseline analyzers work with experiment results
 )
 
 

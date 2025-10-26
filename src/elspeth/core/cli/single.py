@@ -89,6 +89,10 @@ def maybe_write_artifacts_single(args: Any, settings: Any, payload: dict[str, An
     art_dir = ensure_artifacts_dir(art_base)
     write_simple_artifacts(art_dir, "single", payload, settings)
     if getattr(args, "signed_bundle", False):
+        # ADR-002: Extract operating_level from metadata for bundle creation
+        # For single runs, metadata.security_level is the pipeline operating level
+        operating_level = payload.get("metadata", {}).get("security_level")
+
         bundle_dir = create_signed_bundle(
             art_dir,
             "single",
@@ -96,12 +100,14 @@ def maybe_write_artifacts_single(args: Any, settings: Any, payload: dict[str, An
             settings,
             df,
             signing_key_env=getattr(args, "signing_key_env", "ELSPETH_SIGNING_KEY"),
+            operating_level=operating_level,
         )
         if bundle_dir:
             maybe_publish_artifacts_bundle(
                 bundle_dir,
                 plugin_name=getattr(args, "artifact_sink_plugin", None),
                 config_path=getattr(args, "artifact_sink_config", None),
+                operating_level=operating_level,
             )
 
 

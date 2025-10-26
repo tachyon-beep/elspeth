@@ -95,7 +95,7 @@ def _create_datasource(defn: Mapping[str, Any], ctx: PluginContext):
     opts = dict(defn.get("options", {}) or {})
     if defn.get("determinism_level") is not None:
         opts["determinism_level"] = defn.get("determinism_level")
-    return datasource_registry.create(name, opts, parent_context=ctx, require_security=False)
+    return datasource_registry.create(name, opts, parent_context=ctx)
 
 
 def _create_sinks(defs: Sequence[Mapping[str, Any]], ctx: PluginContext):
@@ -111,7 +111,7 @@ def _create_sinks(defs: Sequence[Mapping[str, Any]], ctx: PluginContext):
         artifacts_cfg = raw_options.pop("artifacts", None)
         if entry.get("determinism_level") is not None:
             raw_options["determinism_level"] = entry.get("determinism_level")
-        sink = sink_registry.create(plugin, raw_options, parent_context=ctx, require_security=False)
+        sink = sink_registry.create(plugin, raw_options, parent_context=ctx)
         # Attach artifact metadata used by ArtifactPipeline binding preparation
         setattr(sink, "_elspeth_artifact_config", artifacts_cfg or {})
         setattr(sink, "_elspeth_plugin_name", plugin)

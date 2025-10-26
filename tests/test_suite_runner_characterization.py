@@ -402,7 +402,9 @@ def test_experiment_execution_order_and_completeness(tmp_path: Path) -> None:
     results = runner.run(pd.DataFrame([{"text": "test"}]), defaults)
 
     # INVARIANT 1: All experiments present
-    assert set(results.keys()) == {"baseline", "exp1", "exp2", "exp3"}, (
+    # ADR-002-B: Filter out special metadata keys
+    experiment_names = {k for k in results.keys() if not k.startswith("_")}
+    assert experiment_names == {"baseline", "exp1", "exp2", "exp3"}, (
         "All experiments must be in results"
     )
 

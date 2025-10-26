@@ -41,10 +41,13 @@ class CostSummaryAggregator(BasePlugin):
     def __init__(
         self,
         *,
-        security_level: SecurityLevel,
         on_error: str = "abort",
     ) -> None:
-        super().__init__(security_level=security_level, allow_downgrade=True)  # ADR-005: Aggregator trusted to downgrade
+        # ADR-002-B: Security policy is immutable and hard-coded in plugin code
+        super().__init__(
+            security_level=SecurityLevel.UNOFFICIAL,  # Aggregators work with experiment results
+            allow_downgrade=True,  # Trusted to operate at lower levels if needed (ADR-005)
+        )
         if on_error not in {"abort", "skip"}:
             raise ValueError("on_error must be 'abort' or 'skip'")
         self._on_error = on_error
@@ -130,13 +133,12 @@ class CostSummaryAggregator(BasePlugin):
 
 
 def _create_cost_summary(options: dict[str, Any], context: PluginContext) -> CostSummaryAggregator:
-    """Create cost summary aggregator with smart security defaults."""
-    opts = dict(options)
-    if "security_level" not in opts and context:
-        opts["security_level"] = context.security_level
+    """Create cost summary aggregator.
+
+    ADR-002-B: Security policy is hard-coded in plugin __init__, not injected by factory.
+    """
     return CostSummaryAggregator(
-        security_level=opts["security_level"],
-        on_error=opts.get("on_error", "abort"),
+        on_error=options.get("on_error", "abort"),
     )
 
 
@@ -144,6 +146,7 @@ register_aggregation_plugin(
     "cost_summary",
     _create_cost_summary,
     schema=_COST_SCHEMA,
+    declared_security_level="UNOFFICIAL",  # ADR-002-B: Aggregators work with experiment results
 )
 
 

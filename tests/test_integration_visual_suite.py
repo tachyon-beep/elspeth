@@ -60,8 +60,9 @@ def _build_runner(tmp_path: Path) -> ExperimentRunner:
         },
     )
     visual_sink.produces = lambda: []  # type: ignore[assignment]
-    llm = StaticLLMClient(content="Static completion", score=0.85, security_level="official", allow_downgrade=True)
+    llm = StaticLLMClient(content="Static completion", score=0.85)  # ADR-002-B: security hard-coded in plugin
 
+    # ADR-002-B: Security level hard-coded in plugins, not passed as parameters
     return ExperimentRunner(
         llm_client=llm,
         sinks=[analytics_sink, visual_sink],
@@ -69,8 +70,8 @@ def _build_runner(tmp_path: Path) -> ExperimentRunner:
         prompt_template="Evaluate colour {{ colour }}",
         prompt_fields=["colour"],
         criteria=None,
-        row_plugins=[ScoreExtractorPlugin(security_level="official")],
-        aggregator_plugins=[ScoreStatsAggregator(security_level="official")],
+        row_plugins=[ScoreExtractorPlugin()],
+        aggregator_plugins=[ScoreStatsAggregator()],
         validation_plugins=None,
         rate_limiter=None,
         cost_tracker=None,

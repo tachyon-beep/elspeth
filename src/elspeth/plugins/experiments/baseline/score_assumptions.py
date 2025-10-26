@@ -138,6 +138,7 @@ register_baseline_plugin(
     "score_assumptions",
     _create_score_assumptions,
     schema=_ASSUMPTION_SCHEMA,
+    declared_security_level="UNOFFICIAL",  # ADR-002-B: Baseline analyzers work with experiment results
 )
 
 

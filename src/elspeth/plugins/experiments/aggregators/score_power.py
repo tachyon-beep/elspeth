@@ -54,6 +54,11 @@ class ScorePowerAggregator(BasePlugin):
         null_mean: float = 0.0,
         on_error: str = "abort",
     ) -> None:
+        # ADR-002-B: Security policy is immutable and hard-coded in plugin code
+        super().__init__(
+            security_level=SecurityLevel.UNOFFICIAL,  # Aggregators work with experiment results
+            allow_downgrade=True,  # Trusted to operate at lower levels if needed (ADR-005)
+        )
         self._criteria = set(criteria) if criteria else None
         self._min_samples = max(int(min_samples), 2)
         self._alpha = min(max(float(alpha), 1e-6), 0.25)

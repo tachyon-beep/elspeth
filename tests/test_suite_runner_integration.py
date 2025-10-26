@@ -82,12 +82,12 @@ def test_suite_runner_executes_with_defaults_and_packs(tmp_path):
         suite_root,
         "variant",
         prompt_pack="variant_pack",
+        # ADR-002-B: security_level removed from config (plugin-author-owned)
         extra_config={
-            "baseline_plugins": [{"name": "noop", "security_level": "OFFICIAL", "determinism_level": "guaranteed"}],
+            "baseline_plugins": [{"name": "noop", "determinism_level": "guaranteed"}],
             "sinks": [
                 {
                     "plugin": "local_bundle",
-                    "security_level": "OFFICIAL",
                     "determinism_level": "guaranteed",
                     "options": {
                         "base_path": bundle_root.as_posix(),
@@ -104,8 +104,6 @@ def test_suite_runner_executes_with_defaults_and_packs(tmp_path):
     runner = ExperimentSuiteRunner(
         suite=suite,
         llm_client=MockLLMClient(
-            security_level=SecurityLevel.UNOFFICIAL,
-            allow_downgrade=True,
             seed=7
         ),
         sinks=[],
@@ -116,10 +114,10 @@ def test_suite_runner_executes_with_defaults_and_packs(tmp_path):
         "prompt_template": "",
         "prompt_fields": ["colour"],
         "prompt_defaults": {"audience": "reviewers"},
+        # ADR-002-B: security_level removed from all plugin definitions
         "sink_defs": [
             {
                 "plugin": "local_bundle",
-                "security_level": "OFFICIAL",
                 "determinism_level": "guaranteed",
                 "options": {
                     "base_path": bundle_root.as_posix(),
@@ -132,7 +130,6 @@ def test_suite_runner_executes_with_defaults_and_packs(tmp_path):
         "aggregator_plugin_defs": [
             {
                 "name": "prompt_variants",
-                "security_level": "OFFICIAL",
                 "determinism_level": "guaranteed",
                 "options": {
                     "prompt_template": (
@@ -142,7 +139,6 @@ def test_suite_runner_executes_with_defaults_and_packs(tmp_path):
                     "max_attempts": 1,
                     "variant_llm": {
                         "plugin": "mock",
-                        "security_level": "OFFICIAL",
                         "determinism_level": "guaranteed",
                         "options": {"seed": 11},
                     },
@@ -152,12 +148,11 @@ def test_suite_runner_executes_with_defaults_and_packs(tmp_path):
         "validation_plugin_defs": [
             {
                 "name": "regex_match",
-                "security_level": "OFFICIAL",
                 "determinism_level": "guaranteed",
                 "options": {"pattern": r".+", "flags": "DOTALL"},
             },
         ],
-        "baseline_plugin_defs": [{"name": "noop", "security_level": "OFFICIAL", "determinism_level": "guaranteed"}],
+        "baseline_plugin_defs": [{"name": "noop", "determinism_level": "guaranteed"}],
         "prompt_packs": {
             "baseline_pack": {
                 "prompts": {
@@ -178,7 +173,9 @@ def test_suite_runner_executes_with_defaults_and_packs(tmp_path):
     df = pd.DataFrame({"colour": ["red", "green"]})
     results = runner.run(df, defaults=defaults)
 
-    assert set(results.keys()) == {"baseline", "variant"}
+    # ADR-002-B: Filter out special metadata keys
+    experiment_names = {k for k in results.keys() if not k.startswith("_")}
+    assert experiment_names == {"baseline", "variant"}
 
     baseline_payload = results["baseline"]["payload"]
     # Check that metadata includes row counts
@@ -212,8 +209,6 @@ def test_suite_runner_requires_prompts_when_missing(tmp_path):
     runner = ExperimentSuiteRunner(
         suite=suite,
         llm_client=MockLLMClient(
-            security_level=SecurityLevel.UNOFFICIAL,
-            allow_downgrade=True,
             seed=1
         ),
         sinks=[]
@@ -236,8 +231,6 @@ def test_suite_runner_builds_controls_and_early_stop(tmp_path):
     runner = ExperimentSuiteRunner(
         suite=suite,
         llm_client=MockLLMClient(
-            security_level=SecurityLevel.UNOFFICIAL,
-            allow_downgrade=True,
             seed=2
         ),
         sinks=[]

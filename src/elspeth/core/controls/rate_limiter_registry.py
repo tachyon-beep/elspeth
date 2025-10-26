@@ -110,6 +110,7 @@ _ADAPTIVE_SCHEMA = {
 }
 
 # Register plugins
-rate_limiter_registry.register("noop", _create_noop_rate_limiter, schema=_NOOP_SCHEMA)
-rate_limiter_registry.register("fixed_window", _create_fixed_window_rate_limiter, schema=_FIXED_WINDOW_SCHEMA)
-rate_limiter_registry.register("adaptive", _create_adaptive_rate_limiter, schema=_ADAPTIVE_SCHEMA)
+# ADR-002-B: Control plugins are infrastructure - UNOFFICIAL clearance
+rate_limiter_registry.register("noop", _create_noop_rate_limiter, schema=_NOOP_SCHEMA, declared_security_level="UNOFFICIAL")
+rate_limiter_registry.register("fixed_window", _create_fixed_window_rate_limiter, schema=_FIXED_WINDOW_SCHEMA, declared_security_level="UNOFFICIAL")
+rate_limiter_registry.register("adaptive", _create_adaptive_rate_limiter, schema=_ADAPTIVE_SCHEMA, declared_security_level="UNOFFICIAL")

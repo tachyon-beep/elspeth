@@ -66,7 +66,6 @@ class ScoreExtractorPlugin(BasePlugin):
     def __init__(
         self,
         *,
-        security_level: SecurityLevel,
         key: str = "score",
         criteria: list[str] | None = None,
         parse_json_content: bool = True,
@@ -75,7 +74,11 @@ class ScoreExtractorPlugin(BasePlugin):
         threshold_mode: str = "gte",
         flag_field: str = "score_flags",
     ) -> None:
-        super().__init__(security_level=security_level, allow_downgrade=True)  # ADR-005: Row computation plugin trusted to downgrade
+        # ADR-002-B: Security policy is immutable and hard-coded in plugin code
+        super().__init__(
+            security_level=SecurityLevel.UNOFFICIAL,  # Row plugins process experiment results
+            allow_downgrade=True  # ADR-005: Row computation plugin trusted to downgrade
+        )
         self._key = key
         self._criteria = set(criteria) if criteria else None
         self._parse_json = parse_json_content
@@ -173,27 +176,19 @@ class ScoreExtractorPlugin(BasePlugin):
 
 
 def _create_score_extractor(options: dict[str, Any], context: PluginContext) -> ScoreExtractorPlugin:
-    """Create a score extractor plugin with all required fields and smart security defaults.
+    """Create a score extractor plugin with all required fields.
 
-    Security defaults:
-    - Falls back to context.security_level if not provided in options
-    - Hard-codes allow_downgrade=True (trusted computation plugin)
+    ADR-002-B: Security policy is hard-coded in plugin __init__, not injected by factory.
     """
-    opts = dict(options)
-    if "security_level" not in opts and context:
-        opts["security_level"] = context.security_level
-
-    validated = _create_score_extractor_factory(opts)
-    return ScoreExtractorPlugin(
-        security_level=opts["security_level"],
-        **validated,
-    )
+    validated = _create_score_extractor_factory(options)
+    return ScoreExtractorPlugin(**validated)
 
 
 register_row_plugin(
     "score_extractor",
     _create_score_extractor,
     schema=_ROW_SCHEMA,
+    declared_security_level="UNOFFICIAL",  # ADR-002-B: Row plugins process experiment results
 )
 
 
