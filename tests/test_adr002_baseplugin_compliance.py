@@ -307,9 +307,12 @@ class TestCategory1Characterization:
         csv_file = tmp_path / "test.csv"
         csv_file.write_text("col1,col2\n1,2\n")
 
+        # ADR-005: allow_downgrade is now mandatory parameter
         ds = BaseCSVDataSource(
             path=str(csv_file),
-            retain_local=False
+            retain_local=False,
+            security_level="UNOFFICIAL",
+            allow_downgrade=True
         )
 
         # POST-MIGRATION: Method exists (inherited from BasePlugin)
@@ -328,9 +331,12 @@ class TestCategory1Characterization:
         csv_file = tmp_path / "test.csv"
         csv_file.write_text("col1,col2\n1,2\n")
 
+        # ADR-005: allow_downgrade is now mandatory parameter
         ds = BaseCSVDataSource(
             path=str(csv_file),
-            retain_local=False
+            retain_local=False,
+            security_level="UNOFFICIAL",
+            allow_downgrade=True
         )
 
         # POST-MIGRATION: Method exists (inherited from BasePlugin)

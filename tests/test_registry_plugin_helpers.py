@@ -554,13 +554,13 @@ def test_create_plugin_rate_limiter_pattern(mock_registry):
     )
     assert plugin is None
 
-    # With definition missing levels - should raise
+    # With definition missing determinism_level - should raise (ADR-002-B: determinism_level is REQUIRED)
     definition = {
         "name": "test",
         "options": {"rate": 100},
     }
 
-    with pytest.raises(ConfigurationError, match="security_level must be declared"):
+    with pytest.raises(ConfigurationError, match="determinism_level must be declared"):
         create_plugin_with_inheritance(
             mock_registry,
             definition,
