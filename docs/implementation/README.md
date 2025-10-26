@@ -101,6 +101,12 @@ Only **VULN-004 (Registry Enforcement)** remains to complete the security archit
 - Deliverables: FEAT-001 complete, classes renamed for generic orchestration model
 - See: [FEAT-001-class-renaming-orchestration.md](./FEAT-001-class-renaming-orchestration.md)
 
+#### Sprint 5: Namespace Reorganization (P4 - Post-Merge)
+- Duration: 1-2 days (8-12 hours)
+- Deliverables: FEAT-002 complete, namespace aligned with framework vs features architecture
+- **Breaking Changes**: Pre-1.0 clean cut-over, no backward compatibility
+- See: [FEAT-002-namespace-reorganization.md](./FEAT-002-namespace-reorganization.md)
+
 ---
 
 ## Detailed Implementation Plans
@@ -138,6 +144,13 @@ Each implementation task has a dedicated document with:
    - Effort: 8-12 hours
    - Aligns class names with sense-decide-act model
    - Removes "experiment runner" framing for generic orchestration
+
+5. **[FEAT-002: Namespace Reorganization](./FEAT-002-namespace-reorganization.md)**
+   - Priority: P4 (POST-MERGE)
+   - Effort: 8-12 hours
+   - Moves stray directories (adapters, retrieval, tools) into plugin architecture
+   - Aligns namespace with framework primitives vs domain features pattern
+   - **Breaking changes** - pre-1.0 clean cut-over, no backward compatibility
 
 ---
 
