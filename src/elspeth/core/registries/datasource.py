@@ -24,7 +24,7 @@ except Exception:  # pragma: no cover - non-critical
     logging.getLogger(__name__).debug("Logging utils warm-up failed; proceeding without warm-up", exc_info=True)
 
 from .base import BasePluginRegistry
-from .schemas import ON_ERROR_ENUM, with_security_properties
+from .schemas import ON_ERROR_ENUM
 
 logger = logging.getLogger(__name__)
 
@@ -107,60 +107,54 @@ def _create_csv_datasource(options: dict[str, Any], context: PluginContext) -> C
 # Schema Definitions
 # ============================================================================
 
-_BLOB_DATASOURCE_SCHEMA = with_security_properties(
-    {
-        "type": "object",
-        "properties": {
-            "config_path": {"type": "string"},
-            "profile": {"type": "string"},
-            "pandas_kwargs": {"type": "object"},
-            "on_error": ON_ERROR_ENUM,
-            "retain_local": {"type": "boolean"},  # REQUIRED - audit trail
-            "retain_local_path": {"type": "string"},
-        },
-        "required": ["config_path", "retain_local"],  # Must explicitly set retain_local
-        "additionalProperties": True,
+_BLOB_DATASOURCE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "config_path": {"type": "string"},
+        "profile": {"type": "string"},
+        "pandas_kwargs": {"type": "object"},
+        "on_error": ON_ERROR_ENUM,
+        "retain_local": {"type": "boolean"},  # REQUIRED - audit trail
+        "retain_local_path": {"type": "string"},
+        "determinism_level": {"type": "string"},  # Allowed (runtime context, not security policy)
     },
-    require_determinism=False,
-)
+    "required": ["config_path", "retain_local"],  # Must explicitly set retain_local
+    "additionalProperties": False,  # VULN-004 Layer 1: Reject security policy fields
+}
 
-_CSV_BLOB_DATASOURCE_SCHEMA = with_security_properties(
-    {
-        "type": "object",
-        "properties": {
-            "path": {"type": "string"},
-            "base_path": {"type": "string"},
-            "allowed_base_path": {"type": "string"},
-            "dtype": {"type": "object"},
-            "encoding": {"type": "string"},
-            "on_error": ON_ERROR_ENUM,
-            "retain_local": {"type": "boolean"},  # REQUIRED - audit trail
-            "retain_local_path": {"type": "string"},
-        },
-        "required": ["path", "retain_local"],  # Must explicitly set retain_local
-        "additionalProperties": True,
+_CSV_BLOB_DATASOURCE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "path": {"type": "string"},
+        "base_path": {"type": "string"},
+        "allowed_base_path": {"type": "string"},
+        "dtype": {"type": "object"},
+        "encoding": {"type": "string"},
+        "on_error": ON_ERROR_ENUM,
+        "retain_local": {"type": "boolean"},  # REQUIRED - audit trail
+        "retain_local_path": {"type": "string"},
+        "determinism_level": {"type": "string"},  # Allowed (runtime context, not security policy)
     },
-    require_determinism=False,
-)
+    "required": ["path", "retain_local"],  # Must explicitly set retain_local
+    "additionalProperties": False,  # VULN-004 Layer 1: Reject security policy fields
+}
 
-_CSV_DATASOURCE_SCHEMA = with_security_properties(
-    {
-        "type": "object",
-        "properties": {
-            "path": {"type": "string"},
-            "base_path": {"type": "string"},
-            "allowed_base_path": {"type": "string"},
-            "dtype": {"type": "object"},
-            "encoding": {"type": "string"},
-            "on_error": ON_ERROR_ENUM,
-            "retain_local": {"type": "boolean"},  # REQUIRED - audit trail
-            "retain_local_path": {"type": "string"},
-        },
-        "required": ["path", "retain_local"],  # Must explicitly set retain_local
-        "additionalProperties": True,
+_CSV_DATASOURCE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "path": {"type": "string"},
+        "base_path": {"type": "string"},
+        "allowed_base_path": {"type": "string"},
+        "dtype": {"type": "object"},
+        "encoding": {"type": "string"},
+        "on_error": ON_ERROR_ENUM,
+        "retain_local": {"type": "boolean"},  # REQUIRED - audit trail
+        "retain_local_path": {"type": "string"},
+        "determinism_level": {"type": "string"},  # Allowed (runtime context, not security policy)
     },
-    require_determinism=False,
-)
+    "required": ["path", "retain_local"],  # Must explicitly set retain_local
+    "additionalProperties": False,  # VULN-004 Layer 1: Reject security policy fields
+}
 
 
 # ============================================================================
