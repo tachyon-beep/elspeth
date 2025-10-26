@@ -17,7 +17,7 @@ from elspeth.plugins.experiments.baseline.score_flip_analysis import ScoreFlipAn
 
 def test_outlier_detection_finds_top_outliers() -> None:
     """Test that outlier detection identifies rows with largest deltas."""
-    plugin = OutlierDetectionAggregator(security_level=SecurityLevel.OFFICIAL, top_n=3)
+    plugin = OutlierDetectionAggregator(top_n=3)
 
     baseline = {
         "results": [
@@ -54,7 +54,7 @@ def test_outlier_detection_finds_top_outliers() -> None:
 
 def test_outlier_detection_with_min_delta() -> None:
     """Test that min_delta filters out small differences."""
-    plugin = OutlierDetectionAggregator(security_level=SecurityLevel.OFFICIAL, top_n=10, min_delta=1.0)
+    plugin = OutlierDetectionAggregator(top_n=10, min_delta=1.0)
 
     baseline = {
         "results": [
@@ -81,7 +81,7 @@ def test_outlier_detection_with_min_delta() -> None:
 
 def test_outlier_detection_with_criteria_filter() -> None:
     """Test that criteria filtering works for outlier detection."""
-    plugin = OutlierDetectionAggregator(security_level=SecurityLevel.OFFICIAL, top_n=10, criteria=["quality"])
+    plugin = OutlierDetectionAggregator(top_n=10, criteria=["quality"])
 
     baseline = {
         "results": [
@@ -113,7 +113,7 @@ def test_outlier_detection_with_criteria_filter() -> None:
 
 def test_outlier_detection_with_direction() -> None:
     """Test that outlier direction (higher/lower) is reported correctly."""
-    plugin = OutlierDetectionAggregator(security_level=SecurityLevel.OFFICIAL, top_n=10)
+    plugin = OutlierDetectionAggregator(top_n=10)
 
     baseline = {
         "results": [
@@ -142,7 +142,7 @@ def test_outlier_detection_with_direction() -> None:
 
 def test_outlier_detection_empty_results() -> None:
     """Test that outlier detection handles empty results gracefully."""
-    plugin = OutlierDetectionAggregator(security_level=SecurityLevel.OFFICIAL, top_n=10)
+    plugin = OutlierDetectionAggregator(top_n=10)
 
     baseline = {"results": []}
     variant = {"results": []}
@@ -154,7 +154,7 @@ def test_outlier_detection_empty_results() -> None:
 
 def test_outlier_detection_no_common_ids() -> None:
     """Test that outlier detection handles disjoint ID sets."""
-    plugin = OutlierDetectionAggregator(security_level=SecurityLevel.OFFICIAL, top_n=10)
+    plugin = OutlierDetectionAggregator(top_n=10)
 
     baseline = {"results": [{"row": {"id": 1}, "metrics": {"scores": {"quality": 4.0}}}]}
 
@@ -167,7 +167,7 @@ def test_outlier_detection_no_common_ids() -> None:
 
 def test_outlier_detection_on_error_skip() -> None:
     """Test that on_error=skip suppresses exceptions."""
-    plugin = OutlierDetectionAggregator(security_level=SecurityLevel.OFFICIAL, top_n=10, on_error="skip")
+    plugin = OutlierDetectionAggregator(top_n=10, on_error="skip")
 
     # Malformed payload
     baseline = {"results": [{"row": None}]}
@@ -186,7 +186,7 @@ def test_outlier_detection_on_error_skip() -> None:
 
 def test_score_flip_analysis_fail_to_pass() -> None:
     """Test detection of fail→pass transitions."""
-    plugin = ScoreFlipAnalysisAggregator(security_level=SecurityLevel.OFFICIAL, fail_threshold=2.0, pass_threshold=3.0)
+    plugin = ScoreFlipAnalysisAggregator(fail_threshold=2.0, pass_threshold=3.0)
 
     baseline = {
         "results": [
@@ -214,7 +214,7 @@ def test_score_flip_analysis_fail_to_pass() -> None:
 
 def test_score_flip_analysis_pass_to_fail() -> None:
     """Test detection of pass→fail transitions."""
-    plugin = ScoreFlipAnalysisAggregator(security_level=SecurityLevel.OFFICIAL, fail_threshold=2.0, pass_threshold=3.0)
+    plugin = ScoreFlipAnalysisAggregator(fail_threshold=2.0, pass_threshold=3.0)
 
     baseline = {
         "results": [
@@ -240,7 +240,7 @@ def test_score_flip_analysis_pass_to_fail() -> None:
 
 def test_score_flip_analysis_major_changes() -> None:
     """Test detection of major score drops and gains."""
-    plugin = ScoreFlipAnalysisAggregator(security_level=SecurityLevel.OFFICIAL, major_change=2.0)
+    plugin = ScoreFlipAnalysisAggregator(major_change=2.0)
 
     baseline = {
         "results": [
@@ -268,7 +268,7 @@ def test_score_flip_analysis_major_changes() -> None:
 
 def test_score_flip_analysis_per_criterion() -> None:
     """Test that per-criterion breakdown is computed."""
-    plugin = ScoreFlipAnalysisAggregator(security_level=SecurityLevel.OFFICIAL)
+    plugin = ScoreFlipAnalysisAggregator()
 
     baseline = {
         "results": [
@@ -302,7 +302,7 @@ def test_score_flip_analysis_per_criterion() -> None:
 
 def test_score_flip_analysis_criteria_filter() -> None:
     """Test that criteria filtering applies to flip analysis."""
-    plugin = ScoreFlipAnalysisAggregator(security_level=SecurityLevel.OFFICIAL, criteria=["quality"])
+    plugin = ScoreFlipAnalysisAggregator(criteria=["quality"])
 
     baseline = {"results": [{"metrics": {"scores": {"quality": 2.0, "safety": 2.0}}}]}
 
@@ -318,7 +318,7 @@ def test_score_flip_analysis_criteria_filter() -> None:
 
 def test_score_flip_analysis_empty_results() -> None:
     """Test that flip analysis handles empty results."""
-    plugin = ScoreFlipAnalysisAggregator(security_level=SecurityLevel.OFFICIAL)
+    plugin = ScoreFlipAnalysisAggregator()
 
     baseline = {"results": []}
     variant = {"results": []}
@@ -330,7 +330,7 @@ def test_score_flip_analysis_empty_results() -> None:
 
 def test_score_flip_analysis_on_error_skip() -> None:
     """Test that on_error=skip suppresses exceptions."""
-    plugin = ScoreFlipAnalysisAggregator(security_level=SecurityLevel.OFFICIAL, on_error="skip")
+    plugin = ScoreFlipAnalysisAggregator(on_error="skip")
 
     # Malformed payload
     baseline = {"results": [{"metrics": None}]}
@@ -348,7 +348,7 @@ def test_score_flip_analysis_on_error_skip() -> None:
 
 def test_category_effects_discovers_categories() -> None:
     """Test that category effects discovers categories from baseline."""
-    plugin = CategoryEffectsAggregator(security_level=SecurityLevel.OFFICIAL, category_field="document_type")
+    plugin = CategoryEffectsAggregator(category_field="document_type")
 
     baseline = {
         "results": [
@@ -378,7 +378,7 @@ def test_category_effects_discovers_categories() -> None:
 
 def test_category_effects_computes_statistics() -> None:
     """Test that category effects computes correct statistics."""
-    plugin = CategoryEffectsAggregator(security_level=SecurityLevel.OFFICIAL, category_field="category", min_samples=2)
+    plugin = CategoryEffectsAggregator(category_field="category", min_samples=2)
 
     baseline = {
         "results": [
@@ -407,7 +407,7 @@ def test_category_effects_computes_statistics() -> None:
 
 def test_category_effects_ranks_by_effect_size() -> None:
     """Test that categories are ranked by absolute effect size or delta."""
-    plugin = CategoryEffectsAggregator(security_level=SecurityLevel.OFFICIAL, top_n=2)
+    plugin = CategoryEffectsAggregator(top_n=2)
 
     baseline = {
         "results": [
@@ -455,7 +455,7 @@ def test_category_effects_ranks_by_effect_size() -> None:
 
 def test_category_effects_min_samples() -> None:
     """Test that min_samples filters out small categories."""
-    plugin = CategoryEffectsAggregator(security_level=SecurityLevel.OFFICIAL, min_samples=3)
+    plugin = CategoryEffectsAggregator(min_samples=3)
 
     baseline = {
         "results": [
@@ -481,7 +481,7 @@ def test_category_effects_min_samples() -> None:
 
 def test_category_effects_criteria_filter() -> None:
     """Test that criteria filtering works for category effects."""
-    plugin = CategoryEffectsAggregator(security_level=SecurityLevel.OFFICIAL, criteria=["quality"])
+    plugin = CategoryEffectsAggregator(criteria=["quality"])
 
     baseline = {
         "results": [
@@ -507,7 +507,7 @@ def test_category_effects_criteria_filter() -> None:
 
 def test_category_effects_empty_results() -> None:
     """Test that category effects handles empty results."""
-    plugin = CategoryEffectsAggregator(security_level=SecurityLevel.OFFICIAL)
+    plugin = CategoryEffectsAggregator()
 
     baseline = {"results": []}
     variant = {"results": []}
@@ -519,7 +519,7 @@ def test_category_effects_empty_results() -> None:
 
 def test_category_effects_on_error_skip() -> None:
     """Test that on_error=skip suppresses exceptions."""
-    plugin = CategoryEffectsAggregator(security_level=SecurityLevel.OFFICIAL, on_error="skip")
+    plugin = CategoryEffectsAggregator(on_error="skip")
 
     # Malformed payload
     baseline = {"results": [{"row": None}]}
@@ -537,7 +537,7 @@ def test_category_effects_on_error_skip() -> None:
 
 def test_criteria_effects_per_criterion_stats() -> None:
     """Test that criteria effects computes per-criterion statistics."""
-    plugin = CriteriaEffectsBaselinePlugin(security_level=SecurityLevel.OFFICIAL)
+    plugin = CriteriaEffectsBaselinePlugin()
 
     baseline = {
         "results": [
@@ -573,7 +573,7 @@ def test_criteria_effects_per_criterion_stats() -> None:
 
 def test_criteria_effects_mann_whitney_u() -> None:
     """Test that Mann-Whitney U test p-values are computed."""
-    plugin = CriteriaEffectsBaselinePlugin(security_level=SecurityLevel.OFFICIAL)
+    plugin = CriteriaEffectsBaselinePlugin()
 
     baseline = {
         "results": [
@@ -611,7 +611,7 @@ def test_criteria_effects_mann_whitney_u() -> None:
 
 def test_criteria_effects_significance_flag() -> None:
     """Test that significance flag is computed based on alpha threshold."""
-    plugin = CriteriaEffectsBaselinePlugin(security_level=SecurityLevel.OFFICIAL, alpha=0.05)
+    plugin = CriteriaEffectsBaselinePlugin(alpha=0.05)
 
     baseline = {
         "results": [
@@ -641,7 +641,7 @@ def test_criteria_effects_significance_flag() -> None:
 
 def test_criteria_effects_criteria_filter() -> None:
     """Test that criteria filtering works."""
-    plugin = CriteriaEffectsBaselinePlugin(security_level=SecurityLevel.OFFICIAL, criteria=["quality"])
+    plugin = CriteriaEffectsBaselinePlugin(criteria=["quality"])
 
     baseline = {
         "results": [
@@ -665,7 +665,7 @@ def test_criteria_effects_criteria_filter() -> None:
 
 def test_criteria_effects_min_samples() -> None:
     """Test that min_samples filters criteria with insufficient data."""
-    plugin = CriteriaEffectsBaselinePlugin(security_level=SecurityLevel.OFFICIAL, min_samples=3)
+    plugin = CriteriaEffectsBaselinePlugin(min_samples=3)
 
     baseline = {
         "results": [
@@ -689,7 +689,7 @@ def test_criteria_effects_min_samples() -> None:
 
 def test_criteria_effects_sample_counts() -> None:
     """Test that sample counts are reported correctly."""
-    plugin = CriteriaEffectsBaselinePlugin(security_level=SecurityLevel.OFFICIAL)
+    plugin = CriteriaEffectsBaselinePlugin()
 
     baseline = {
         "results": [
@@ -714,7 +714,7 @@ def test_criteria_effects_sample_counts() -> None:
 
 def test_criteria_effects_empty_results() -> None:
     """Test that criteria effects handles empty results."""
-    plugin = CriteriaEffectsBaselinePlugin(security_level=SecurityLevel.OFFICIAL)
+    plugin = CriteriaEffectsBaselinePlugin()
 
     baseline = {"results": []}
     variant = {"results": []}
@@ -726,7 +726,7 @@ def test_criteria_effects_empty_results() -> None:
 
 def test_criteria_effects_on_error_skip() -> None:
     """Test that on_error=skip suppresses exceptions."""
-    plugin = CriteriaEffectsBaselinePlugin(security_level=SecurityLevel.OFFICIAL, on_error="skip")
+    plugin = CriteriaEffectsBaselinePlugin(on_error="skip")
 
     # Malformed payload
     baseline = {"results": [{"metrics": None}]}
@@ -745,22 +745,22 @@ def test_criteria_effects_on_error_skip() -> None:
 def test_outlier_detection_invalid_on_error() -> None:
     """Test that invalid on_error value raises ValueError."""
     with pytest.raises(ValueError, match="on_error must be 'abort' or 'skip'"):
-        OutlierDetectionAggregator(security_level=SecurityLevel.OFFICIAL, on_error="invalid")
+        OutlierDetectionAggregator(on_error="invalid")
 
 
 def test_score_flip_analysis_invalid_on_error() -> None:
     """Test that invalid on_error value raises ValueError."""
     with pytest.raises(ValueError, match="on_error must be 'abort' or 'skip'"):
-        ScoreFlipAnalysisAggregator(security_level=SecurityLevel.OFFICIAL, on_error="invalid")
+        ScoreFlipAnalysisAggregator(on_error="invalid")
 
 
 def test_category_effects_invalid_on_error() -> None:
     """Test that invalid on_error value raises ValueError."""
     with pytest.raises(ValueError, match="on_error must be 'abort' or 'skip'"):
-        CategoryEffectsAggregator(security_level=SecurityLevel.OFFICIAL, on_error="invalid")
+        CategoryEffectsAggregator(on_error="invalid")
 
 
 def test_criteria_effects_invalid_on_error() -> None:
     """Test that invalid on_error value raises ValueError."""
     with pytest.raises(ValueError, match="on_error must be 'abort' or 'skip'"):
-        CriteriaEffectsBaselinePlugin(security_level=SecurityLevel.OFFICIAL, on_error="invalid")
+        CriteriaEffectsBaselinePlugin(on_error="invalid")

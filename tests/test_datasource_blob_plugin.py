@@ -1,6 +1,7 @@
 import pandas as pd
 import pytest
 
+from elspeth.core.base.types import SecurityLevel
 from elspeth.plugins.nodes.sources.blob import BlobDataSource
 
 
@@ -16,17 +17,16 @@ def test_blob_datasource_loads_with_kwargs(monkeypatch, tmp_path):
     monkeypatch.setattr("elspeth.plugins.nodes.sources.blob.load_blob_csv", fake_load)
 
     datasource = BlobDataSource(
-        config_path=str(tmp_path / "config.yaml", security_level=SecurityLevel.OFFICIAL),
+        config_path=str(tmp_path / "config.yaml"),
         profile="alt",
         pandas_kwargs={"sep": ";"},
-        security_level="Secret",
         determinism_level="guaranteed",
         retain_local=False,
     )
 
     df = datasource.load()
 
-    assert df.attrs["security_level"] == "SECRET"
+    assert df.attrs["security_level"] == "UNOFFICIAL"
     assert df.attrs["determinism_level"] == "guaranteed"
     assert calls == {
         "path": str(tmp_path / "config.yaml"),
@@ -42,9 +42,8 @@ def test_blob_datasource_skip_on_error(monkeypatch, caplog, tmp_path):
     monkeypatch.setattr("elspeth.plugins.nodes.sources.blob.load_blob_csv", boom)
 
     datasource = BlobDataSource(
-        config_path=str(tmp_path / "config.yaml", security_level=SecurityLevel.OFFICIAL),
+        config_path=str(tmp_path / "config.yaml"),
         on_error="skip",
-        security_level="official-sensitive",
         determinism_level="guaranteed",
         retain_local=False,
     )
@@ -53,11 +52,11 @@ def test_blob_datasource_skip_on_error(monkeypatch, caplog, tmp_path):
         df = datasource.load()
 
     assert df.empty
-    assert df.attrs["security_level"] == "OFFICIAL: SENSITIVE"
+    assert df.attrs["security_level"] == "UNOFFICIAL"
     assert df.attrs["determinism_level"] == "guaranteed"
     assert any("Blob datasource failed" in record.message for record in caplog.records)
 
 
 def test_blob_datasource_invalid_on_error(tmp_path):
     with pytest.raises(ValueError):
-        BlobDataSource(config_path=str(tmp_path / "config.yaml", security_level=SecurityLevel.OFFICIAL), on_error="ignore", retain_local=False)
+        BlobDataSource(config_path=str(tmp_path / "config.yaml"), on_error="ignore", retain_local=False)

@@ -87,16 +87,17 @@ class _RepoSinkBase(BasePlugin, ResultSink):
     request_timeout: int = DEFAULT_REQUEST_TIMEOUT
     _last_payloads: list[dict[str, Any]] = field(default_factory=list, init=False)
     on_error: str = "abort"
-    security_level: SecurityLevel = SecurityLevel.OFFICIAL  # REQUIRED (ADR-004) - default to OFFICIAL
-    allow_downgrade: bool = True  # ADR-005: Sinks are trusted to downgrade (hard-coded policy, not user-configurable)
     _allow_missing_token: bool = field(default=False, init=False, repr=False)
     # Throttle spammy warnings to once per process
     _dry_run_warned_once: bool = False
     _strict_dry_run_warned_once: bool = False
 
     def __post_init__(self) -> None:
-        # Initialize BasePlugin with security level and downgrade policy (ADR-004, ADR-005)
-        super().__init__(security_level=self.security_level, allow_downgrade=self.allow_downgrade)
+        # Initialize BasePlugin with security level and downgrade policy (ADR-002-B: Immutable security policy)
+        super().__init__(
+            security_level=SecurityLevel.UNOFFICIAL,  # ADR-002-B: Immutable
+            allow_downgrade=True
+        )
 
         # Validate on_error early for clearer error messages
         if self.on_error not in {"abort", "skip"}:

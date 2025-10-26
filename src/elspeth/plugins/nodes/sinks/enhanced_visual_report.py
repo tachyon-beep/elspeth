@@ -44,7 +44,6 @@ class EnhancedVisualAnalyticsSink(BaseVisualSink):
         seaborn_style: str | None = "darkgrid",
         color_palette: str | None = "Set2",
         on_error: str = "abort",
-        security_level: SecurityLevel = SecurityLevel.OFFICIAL,  # ADR-004: Default for testing (YAML configs must be explicit)   
     ) -> None:
         # Initialize base class with common parameters
         super().__init__(
@@ -56,8 +55,8 @@ class EnhancedVisualAnalyticsSink(BaseVisualSink):
             default_figure_size=(10.0, 6.0),  # Custom default for this sink
             seaborn_style=seaborn_style,
             on_error=on_error,
-            security_level=security_level,  # Pass security level to BaseVisualSink (ADR-004)
-            allow_downgrade=True,  # ADR-005: Enhanced visual sinks can operate at lower security levels
+            security_level=SecurityLevel.UNOFFICIAL,  # ADR-002-B: Immutable policy
+            allow_downgrade=True,  # ADR-002-B: Immutable policy
         )
 
         # Sink-specific parameters: chart type validation

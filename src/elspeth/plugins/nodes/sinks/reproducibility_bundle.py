@@ -74,8 +74,6 @@ class ReproducibilityBundleSink(BasePlugin, ResultSink):
     sanitize_formulas: bool = True
     sanitize_guard: str = "'"
     compression: str = "gz"  # gz, bz2, xz, or none
-    security_level: SecurityLevel = SecurityLevel.OFFICIAL  # REQUIRED (ADR-004) - default to OFFICIAL
-    allow_downgrade: bool = True  # ADR-005: Sinks are trusted to downgrade (hard-coded policy, not user-configurable)
 
     # Internal state
     _temp_dir: Path | None = field(default=None, init=False, repr=False)
@@ -85,8 +83,11 @@ class ReproducibilityBundleSink(BasePlugin, ResultSink):
 
     def __post_init__(self) -> None:
         """Normalize configuration and validate on_error early."""
-        # Initialize BasePlugin with security level and downgrade policy (ADR-004, ADR-005)
-        super().__init__(security_level=self.security_level, allow_downgrade=self.allow_downgrade)
+        # Initialize BasePlugin with security level and downgrade policy (ADR-002-B: Immutable security policy)
+        super().__init__(
+            security_level=SecurityLevel.UNOFFICIAL,  # ADR-002-B: Immutable
+            allow_downgrade=True
+        )
 
         self.base_path = Path(self.base_path)
         if self.on_error not in {"abort", "skip"}:
@@ -199,7 +200,6 @@ class ReproducibilityBundleSink(BasePlugin, ResultSink):
             overwrite=True,
             sanitize_formulas=self.sanitize_formulas,
             sanitize_guard=self.sanitize_guard,
-            security_level=self.security_level,  # Propagate security level to nested sink (ADR-004)
         )
         csv_sink.write(results, metadata=metadata)
         if path.exists():

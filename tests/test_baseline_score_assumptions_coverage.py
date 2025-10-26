@@ -13,19 +13,18 @@ from __future__ import annotations
 
 import pytest
 
-from elspeth.core.base.types import SecurityLevel
 from elspeth.plugins.experiments.baseline.score_assumptions import ScoreAssumptionsBaselinePlugin
 
 
 def test_invalid_on_error_raises():
     """Test that invalid on_error raises ValueError - line 51."""
     with pytest.raises(ValueError, match="on_error must be 'abort' or 'skip'"):
-        ScoreAssumptionsBaselinePlugin(security_level=SecurityLevel.OFFICIAL, on_error="invalid")
+        ScoreAssumptionsBaselinePlugin(on_error="invalid")
 
 
 def test_criteria_filtering():
     """Test criteria filtering - line 70."""
-    plugin = ScoreAssumptionsBaselinePlugin(security_level=SecurityLevel.OFFICIAL, criteria=["accuracy"], min_samples=3)
+    plugin = ScoreAssumptionsBaselinePlugin(criteria=["accuracy"], min_samples=3)
 
     baseline = {
         "results": [
@@ -53,7 +52,7 @@ def test_criteria_filtering():
 
 def test_insufficient_baseline_samples():
     """Test handling when baseline has insufficient samples - line 89."""
-    plugin = ScoreAssumptionsBaselinePlugin(security_level=SecurityLevel.OFFICIAL, min_samples=3)
+    plugin = ScoreAssumptionsBaselinePlugin(min_samples=3)
 
     # Only 2 baseline samples, 4 variant samples
     baseline = {
@@ -81,7 +80,7 @@ def test_insufficient_baseline_samples():
 
 def test_insufficient_variant_samples():
     """Test handling when variant has insufficient samples - line 102."""
-    plugin = ScoreAssumptionsBaselinePlugin(security_level=SecurityLevel.OFFICIAL, min_samples=3)
+    plugin = ScoreAssumptionsBaselinePlugin(min_samples=3)
 
     # 4 baseline samples, only 2 variant samples
     baseline = {
@@ -109,7 +108,7 @@ def test_insufficient_variant_samples():
 
 def test_insufficient_samples_for_variance_test():
     """Test handling when samples insufficient for variance test - line 114."""
-    plugin = ScoreAssumptionsBaselinePlugin(security_level=SecurityLevel.OFFICIAL, min_samples=3)  # min_samples >= 3
+    plugin = ScoreAssumptionsBaselinePlugin(min_samples=3)  # min_samples >= 3
 
     # Only 1 sample each (insufficient for normality/variance tests)
     baseline = {
@@ -138,7 +137,7 @@ def test_insufficient_samples_for_variance_test():
 
 def test_empty_results():
     """Test with completely empty results."""
-    plugin = ScoreAssumptionsBaselinePlugin(security_level=SecurityLevel.OFFICIAL)
+    plugin = ScoreAssumptionsBaselinePlugin()
 
     baseline = {"results": []}
     variant = {"results": []}
@@ -149,7 +148,7 @@ def test_empty_results():
 
 def test_normality_tests_with_minimal_data():
     """Test normality tests with exactly min_samples."""
-    plugin = ScoreAssumptionsBaselinePlugin(security_level=SecurityLevel.OFFICIAL, min_samples=3, alpha=0.05)
+    plugin = ScoreAssumptionsBaselinePlugin(min_samples=3, alpha=0.05)
 
     # Exactly 3 samples for baseline and variant
     baseline = {
@@ -184,7 +183,7 @@ def test_normality_tests_with_minimal_data():
 
 def test_variance_test_with_exactly_two_samples():
     """Test variance test with exactly 2 samples each - line 103."""
-    plugin = ScoreAssumptionsBaselinePlugin(security_level=SecurityLevel.OFFICIAL, min_samples=2)
+    plugin = ScoreAssumptionsBaselinePlugin(min_samples=2)
 
     baseline = {
         "results": [
@@ -209,7 +208,7 @@ def test_variance_test_with_exactly_two_samples():
 
 def test_no_common_criteria():
     """Test when baseline and variant have no common criteria."""
-    plugin = ScoreAssumptionsBaselinePlugin(security_level=SecurityLevel.OFFICIAL)
+    plugin = ScoreAssumptionsBaselinePlugin()
 
     baseline = {
         "results": [
@@ -232,7 +231,7 @@ def test_no_common_criteria():
 
 def test_mixed_missing_scores():
     """Test with some records missing scores."""
-    plugin = ScoreAssumptionsBaselinePlugin(security_level=SecurityLevel.OFFICIAL, min_samples=3)
+    plugin = ScoreAssumptionsBaselinePlugin(min_samples=3)
 
     baseline = {
         "results": [
@@ -259,23 +258,23 @@ def test_mixed_missing_scores():
 
 def test_min_samples_enforced_to_minimum():
     """Test that min_samples is enforced to be at least 3."""
-    plugin = ScoreAssumptionsBaselinePlugin(security_level=SecurityLevel.OFFICIAL, min_samples=1)
+    plugin = ScoreAssumptionsBaselinePlugin(min_samples=1)
     assert plugin._min_samples == 3
 
-    plugin = ScoreAssumptionsBaselinePlugin(security_level=SecurityLevel.OFFICIAL, min_samples=0)
+    plugin = ScoreAssumptionsBaselinePlugin(min_samples=0)
     assert plugin._min_samples == 3
 
-    plugin = ScoreAssumptionsBaselinePlugin(security_level=SecurityLevel.OFFICIAL, min_samples=-5)
+    plugin = ScoreAssumptionsBaselinePlugin(min_samples=-5)
     assert plugin._min_samples == 3
 
 
 def test_on_error_abort_default():
     """Test that on_error defaults to abort."""
-    plugin = ScoreAssumptionsBaselinePlugin(security_level=SecurityLevel.OFFICIAL)
+    plugin = ScoreAssumptionsBaselinePlugin()
     assert plugin._on_error == "abort"
 
 
 def test_on_error_skip():
     """Test on_error='skip' mode."""
-    plugin = ScoreAssumptionsBaselinePlugin(security_level=SecurityLevel.OFFICIAL, on_error="skip")
+    plugin = ScoreAssumptionsBaselinePlugin(on_error="skip")
     assert plugin._on_error == "skip"

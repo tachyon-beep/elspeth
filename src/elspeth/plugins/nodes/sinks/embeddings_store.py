@@ -241,7 +241,6 @@ class EmbeddingsStoreSink(BasePlugin, ResultSink):
         *,
         provider: str,
         namespace: str | None = None,
-        security_level: SecurityLevel = SecurityLevel.OFFICIAL,  # ADR-004: Default for testing (YAML configs must be explicit)
         dsn: str | None = None,
         table: str = "elspeth_rag",
         text_field: str = DEFAULT_TEXT_FIELD,
@@ -255,8 +254,11 @@ class EmbeddingsStoreSink(BasePlugin, ResultSink):
         embedder_factory: Callable[[Mapping[str, Any]], Embedder] | None = None,
         provider_options: Mapping[str, Any] | None = None,
     ) -> None:
-        # Initialize BasePlugin with security level and downgrade policy (ADR-004, ADR-005)
-        super().__init__(security_level=security_level, allow_downgrade=True)  # ADR-005: Plugin hard-codes security policy
+        # Initialize BasePlugin with security level and downgrade policy (ADR-002-B)
+        super().__init__(
+            security_level=SecurityLevel.UNOFFICIAL,  # ADR-002-B: Immutable policy
+            allow_downgrade=True,  # ADR-002-B: Immutable policy
+        )
 
         self.provider_name = provider
         self._namespace_override = namespace

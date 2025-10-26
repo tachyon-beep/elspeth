@@ -42,12 +42,15 @@ class ScoreAssumptionsBaselinePlugin(BasePlugin):
     def __init__(
         self,
         *,
-        security_level: SecurityLevel,        criteria: Sequence[str] | None = None,
+        criteria: Sequence[str] | None = None,
         min_samples: int = 3,
         alpha: float = 0.05,
         on_error: str = "abort",
     ) -> None:
-        super().__init__(security_level=security_level, allow_downgrade=True)  # ADR-005: Baseline plugins trusted to downgrade
+        super().__init__(
+            security_level=SecurityLevel.UNOFFICIAL,  # ADR-002-B: Immutable policy
+            allow_downgrade=True  # ADR-002-B: Immutable policy
+        )
         self._criteria = set(criteria) if criteria else None
         self._min_samples = max(int(min_samples), 3)
         self._alpha = float(alpha)
@@ -123,11 +126,7 @@ class ScoreAssumptionsBaselinePlugin(BasePlugin):
 
 def _create_score_assumptions(options: dict[str, Any], context: PluginContext) -> ScoreAssumptionsBaselinePlugin:
     """Create score_assumptions baseline plugin with smart security defaults."""
-    opts = dict(options)
-    if "security_level" not in opts and context:
-        opts["security_level"] = context.security_level
     return ScoreAssumptionsBaselinePlugin(
-        security_level=opts["security_level"],
         criteria=options.get("criteria"),
         min_samples=int(options.get("min_samples", 3)),
         alpha=float(options.get("alpha", 0.05)),

@@ -32,7 +32,6 @@ class VisualAnalyticsSink(BaseVisualSink):
         chart_title: str | None = None,
         seaborn_style: str | None = "darkgrid",
         on_error: str = "abort",
-        security_level: SecurityLevel = SecurityLevel.OFFICIAL,  # ADR-004: Default for testing (YAML configs must be explicit)   
     ) -> None:
         # Initialize base class with common parameters
         super().__init__(
@@ -44,8 +43,8 @@ class VisualAnalyticsSink(BaseVisualSink):
             default_figure_size=(8.0, 4.5),  # Custom default for this sink
             seaborn_style=seaborn_style,
             on_error=on_error,
-            security_level=security_level,  # Pass security level to BaseVisualSink (ADR-004)
-            allow_downgrade=True,  # ADR-005: Visual sinks can operate at lower security levels
+            security_level=SecurityLevel.UNOFFICIAL,  # ADR-002-B: Immutable policy
+            allow_downgrade=True,  # ADR-002-B: Immutable policy
         )
 
         # Sink-specific parameters

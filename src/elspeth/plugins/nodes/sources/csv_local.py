@@ -25,7 +25,6 @@ class CSVDataSource(BaseCSVDataSource):
         dtype: dict[str, Any] | None = None,
         encoding: str = "utf-8",
         on_error: str = "abort",
-        security_level: SecurityLevel = SecurityLevel.OFFICIAL,
         determinism_level: DeterminismLevel | None = None,
         schema: dict[str, str | dict[str, Any]] | None = None,
         infer_schema: bool = True,
@@ -34,8 +33,8 @@ class CSVDataSource(BaseCSVDataSource):
     ) -> None:
         """Initialize CSV datasource with hard-coded security policy.
 
-        ADR-005: allow_downgrade is set by plugin author, not configurable by users.
-        CSV datasources default to trusted downgrade (can operate at lower security levels).
+        ADR-002-B: Security policy is immutable. CSV datasources operate at UNOFFICIAL level
+        and can be trusted to downgrade (filter/sanitize data for lower-security pipelines).
         """
         super().__init__(
             path=path,
@@ -44,8 +43,8 @@ class CSVDataSource(BaseCSVDataSource):
             dtype=dtype,
             encoding=encoding,
             on_error=on_error,
-            security_level=security_level,
-            allow_downgrade=True,  # Hard-coded policy: CSV datasources can operate at lower levels
+            security_level=SecurityLevel.UNOFFICIAL,  # ADR-002-B: Immutable policy
+            allow_downgrade=True,  # ADR-002-B: Immutable policy
             determinism_level=determinism_level,
             schema=schema,
             infer_schema=infer_schema,

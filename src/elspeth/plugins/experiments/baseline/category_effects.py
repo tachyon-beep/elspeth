@@ -52,13 +52,16 @@ class CategoryEffectsAggregator(BasePlugin):
     def __init__(
         self,
         *,
-        security_level: SecurityLevel,        category_field: str = "category",
+        category_field: str = "category",
         criteria: list[str] | None = None,
         min_samples: int = 2,
         top_n: int = 10,
         on_error: str = "abort",
     ) -> None:
-        super().__init__(security_level=security_level, allow_downgrade=True)  # ADR-005: Baseline plugins trusted to downgrade
+        super().__init__(
+            security_level=SecurityLevel.UNOFFICIAL,  # ADR-002-B: Immutable policy
+            allow_downgrade=True  # ADR-002-B: Immutable policy
+        )
         self._category_field = category_field
         self._criteria = set(criteria) if criteria else None
         self._min_samples = max(int(min_samples), 1)
@@ -193,10 +196,7 @@ class CategoryEffectsAggregator(BasePlugin):
 def _create_category_effects(options: dict[str, Any], context: PluginContext) -> CategoryEffectsAggregator:
     """Create category effects baseline plugin with smart security defaults."""
     opts = dict(options)
-    if "security_level" not in opts and context:
-        opts["security_level"] = context.security_level
     return CategoryEffectsAggregator(
-        security_level=opts["security_level"],
         category_field=opts.get("category_field", "category"),
         criteria=opts.get("criteria"),
         min_samples=int(opts.get("min_samples", 2)),
