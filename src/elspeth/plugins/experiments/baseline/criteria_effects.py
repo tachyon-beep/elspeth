@@ -9,6 +9,9 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 from scipy import stats as scipy_stats
 
+from elspeth.core.base.plugin import BasePlugin
+from elspeth.core.base.plugin_context import PluginContext
+from elspeth.core.base.types import SecurityLevel
 from elspeth.core.experiments.plugin_registry import register_baseline_plugin
 from elspeth.plugins.experiments._stats_helpers import (
     _collect_scores_by_criterion,
@@ -33,7 +36,7 @@ _CRITERIA_EFFECTS_SCHEMA = {
 }
 
 
-class CriteriaEffectsBaselinePlugin:
+class CriteriaEffectsBaselinePlugin(BasePlugin):
     """Perform per-criterion statistical comparisons between baseline and variant.
 
     Computes detailed statistics for each scoring criterion individually, including
@@ -49,11 +52,14 @@ class CriteriaEffectsBaselinePlugin:
     def __init__(
         self,
         *,
+        security_level: SecurityLevel,
+        allow_downgrade: bool,
         criteria: list[str] | None = None,
         min_samples: int = 2,
         alpha: float = 0.05,
         on_error: str = "abort",
     ) -> None:
+        super().__init__(security_level=security_level, allow_downgrade=allow_downgrade)
         self._criteria = set(criteria) if criteria else None
         self._min_samples = max(int(min_samples), 2)
         self._alpha = float(alpha)
@@ -129,14 +135,26 @@ class CriteriaEffectsBaselinePlugin:
         return results
 
 
+def _create_criteria_effects(options: dict[str, Any], context: PluginContext) -> CriteriaEffectsBaselinePlugin:
+    """Create criteria effects baseline plugin with smart security defaults."""
+    opts = dict(options)
+    if "security_level" not in opts and context:
+        opts["security_level"] = context.security_level
+    allow_downgrade = opts.get("allow_downgrade", True)
+
+    return CriteriaEffectsBaselinePlugin(
+        security_level=opts["security_level"],
+        allow_downgrade=allow_downgrade,
+        criteria=opts.get("criteria"),
+        min_samples=int(opts.get("min_samples", 2)),
+        alpha=float(opts.get("alpha", 0.05)),
+        on_error=opts.get("on_error", "abort"),
+    )
+
+
 register_baseline_plugin(
     "criteria_effects",
-    lambda options, context: CriteriaEffectsBaselinePlugin(
-        criteria=options.get("criteria"),
-        min_samples=int(options.get("min_samples", 2)),
-        alpha=float(options.get("alpha", 0.05)),
-        on_error=options.get("on_error", "abort"),
-    ),
+    _create_criteria_effects,
     schema=_CRITERIA_EFFECTS_SCHEMA,
 )
 

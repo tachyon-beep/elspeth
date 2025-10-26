@@ -8,6 +8,9 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
+from elspeth.core.base.plugin import BasePlugin
+from elspeth.core.base.plugin_context import PluginContext
+from elspeth.core.base.types import SecurityLevel
 from elspeth.core.experiments.plugin_registry import register_baseline_plugin
 from elspeth.plugins.experiments._stats_helpers import (
     _collect_scores_by_criterion,
@@ -33,7 +36,7 @@ _CATEGORY_SCHEMA = {
 }
 
 
-class CategoryEffectsAggregator:
+class CategoryEffectsAggregator(BasePlugin):
     """Analyze how categorical variables affect score distributions.
 
     Discovers categories dynamically from row data, computes per-category statistics,
@@ -49,12 +52,15 @@ class CategoryEffectsAggregator:
     def __init__(
         self,
         *,
+        security_level: SecurityLevel,
+        allow_downgrade: bool,
         category_field: str = "category",
         criteria: list[str] | None = None,
         min_samples: int = 2,
         top_n: int = 10,
         on_error: str = "abort",
     ) -> None:
+        super().__init__(security_level=security_level, allow_downgrade=allow_downgrade)
         self._category_field = category_field
         self._criteria = set(criteria) if criteria else None
         self._min_samples = max(int(min_samples), 1)
@@ -186,15 +192,27 @@ class CategoryEffectsAggregator:
         return float((mean_var - mean_base) / math.sqrt(pooled_var))
 
 
+def _create_category_effects(options: dict[str, Any], context: PluginContext) -> CategoryEffectsAggregator:
+    """Create category effects baseline plugin with smart security defaults."""
+    opts = dict(options)
+    if "security_level" not in opts and context:
+        opts["security_level"] = context.security_level
+    allow_downgrade = opts.get("allow_downgrade", True)
+
+    return CategoryEffectsAggregator(
+        security_level=opts["security_level"],
+        allow_downgrade=allow_downgrade,
+        category_field=opts.get("category_field", "category"),
+        criteria=opts.get("criteria"),
+        min_samples=int(opts.get("min_samples", 2)),
+        top_n=int(opts.get("top_n", 10)),
+        on_error=opts.get("on_error", "abort"),
+    )
+
+
 register_baseline_plugin(
     "category_effects",
-    lambda options, context: CategoryEffectsAggregator(
-        category_field=options.get("category_field", "category"),
-        criteria=options.get("criteria"),
-        min_samples=int(options.get("min_samples", 2)),
-        top_n=int(options.get("top_n", 10)),
-        on_error=options.get("on_error", "abort"),
-    ),
+    _create_category_effects,
     schema=_CATEGORY_SCHEMA,
 )
 

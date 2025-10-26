@@ -8,6 +8,9 @@ from typing import TYPE_CHECKING, Any, Mapping
 
 import numpy as np
 
+from elspeth.core.base.plugin import BasePlugin
+from elspeth.core.base.plugin_context import PluginContext
+from elspeth.core.base.types import SecurityLevel
 from elspeth.core.experiments.plugin_registry import register_baseline_plugin
 
 if TYPE_CHECKING:
@@ -29,7 +32,7 @@ _OUTLIER_SCHEMA = {
 }
 
 
-class OutlierDetectionAggregator:
+class OutlierDetectionAggregator(BasePlugin):
     """Identify rows with largest score disagreements between baseline and variant.
 
     This plugin finds cases where experiments disagree most, helping identify
@@ -45,11 +48,14 @@ class OutlierDetectionAggregator:
     def __init__(
         self,
         *,
+        security_level: SecurityLevel,
+        allow_downgrade: bool,
         top_n: int = 10,
         criteria: list[str] | None = None,
         min_delta: float = 0.0,
         on_error: str = "abort",
     ) -> None:
+        super().__init__(security_level=security_level, allow_downgrade=allow_downgrade)
         self._top_n = max(int(top_n), 1)
         self._criteria = set(criteria) if criteria else None
         self._min_delta = float(min_delta)
@@ -155,14 +161,26 @@ class OutlierDetectionAggregator:
         return extracted
 
 
+def _create_outlier_detection(options: dict[str, Any], context: PluginContext) -> OutlierDetectionAggregator:
+    """Create outlier detection baseline plugin with smart security defaults."""
+    opts = dict(options)
+    if "security_level" not in opts and context:
+        opts["security_level"] = context.security_level
+    allow_downgrade = opts.get("allow_downgrade", True)
+
+    return OutlierDetectionAggregator(
+        security_level=opts["security_level"],
+        allow_downgrade=allow_downgrade,
+        top_n=int(opts.get("top_n", 10)),
+        criteria=opts.get("criteria"),
+        min_delta=float(opts.get("min_delta", 0.0)),
+        on_error=opts.get("on_error", "abort"),
+    )
+
+
 register_baseline_plugin(
     "outlier_detection",
-    lambda options, context: OutlierDetectionAggregator(
-        top_n=int(options.get("top_n", 10)),
-        criteria=options.get("criteria"),
-        min_delta=float(options.get("min_delta", 0.0)),
-        on_error=options.get("on_error", "abort"),
-    ),
+    _create_outlier_detection,
     schema=_OUTLIER_SCHEMA,
 )
 

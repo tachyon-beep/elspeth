@@ -5,6 +5,9 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any, Sequence
 
+from elspeth.core.base.plugin import BasePlugin
+from elspeth.core.base.plugin_context import PluginContext
+from elspeth.core.base.types import SecurityLevel
 from elspeth.core.experiments.plugin_registry import register_baseline_plugin
 from elspeth.plugins.experiments._stats_helpers import (
     _collect_scores_by_criterion,
@@ -29,7 +32,7 @@ _DISTRIBUTION_SCHEMA = {
 }
 
 
-class ScoreDistributionAggregator:
+class ScoreDistributionAggregator(BasePlugin):
     """Assess distribution shifts between baseline and variant deployments."""
 
     name = "score_distribution"
@@ -37,10 +40,13 @@ class ScoreDistributionAggregator:
     def __init__(
         self,
         *,
+        security_level: SecurityLevel,
+        allow_downgrade: bool,
         criteria: Sequence[str] | None = None,
         min_samples: int = 2,
         on_error: str = "abort",
     ) -> None:
+        super().__init__(security_level=security_level, allow_downgrade=allow_downgrade)
         self._criteria = set(criteria) if criteria else None
         self._min_samples = max(int(min_samples), 2)
         if on_error not in {"abort", "skip"}:
@@ -78,13 +84,25 @@ class ScoreDistributionAggregator:
         return results
 
 
+def _create_score_distribution(options: dict[str, Any], context: PluginContext) -> ScoreDistributionAggregator:
+    """Create score distribution baseline plugin with smart security defaults."""
+    opts = dict(options)
+    if "security_level" not in opts and context:
+        opts["security_level"] = context.security_level
+    allow_downgrade = opts.get("allow_downgrade", True)
+
+    return ScoreDistributionAggregator(
+        security_level=opts["security_level"],
+        allow_downgrade=allow_downgrade,
+        criteria=opts.get("criteria"),
+        min_samples=int(opts.get("min_samples", 2)),
+        on_error=opts.get("on_error", "abort"),
+    )
+
+
 register_baseline_plugin(
     "score_distribution",
-    lambda options, context: ScoreDistributionAggregator(
-        criteria=options.get("criteria"),
-        min_samples=int(options.get("min_samples", 2)),
-        on_error=options.get("on_error", "abort"),
-    ),
+    _create_score_distribution,
     schema=_DISTRIBUTION_SCHEMA,
 )
 

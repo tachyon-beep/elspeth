@@ -8,6 +8,9 @@ from typing import TYPE_CHECKING, Any, Mapping
 
 import numpy as np
 
+from elspeth.core.base.plugin import BasePlugin
+from elspeth.core.base.plugin_context import PluginContext
+from elspeth.core.base.types import SecurityLevel
 from elspeth.core.experiments.plugin_registry import register_baseline_plugin
 
 if TYPE_CHECKING:
@@ -31,7 +34,7 @@ _REFEREE_SCHEMA = {
 }
 
 
-class RefereeAlignmentBaselinePlugin:
+class RefereeAlignmentBaselinePlugin(BasePlugin):
     """Compare LLM scores against human referee/expert judgments.
 
     This plugin measures how well LLM scores align with human expert assessments
@@ -48,6 +51,8 @@ class RefereeAlignmentBaselinePlugin:
     def __init__(
         self,
         *,
+        security_level: SecurityLevel,
+        allow_downgrade: bool,
         referee_fields: list[str] | None = None,
         score_field: str = "scores",
         criteria: list[str] | None = None,
@@ -55,6 +60,7 @@ class RefereeAlignmentBaselinePlugin:
         value_mapping: dict[str, float] | None = None,
         on_error: str = "abort",
     ) -> None:
+        super().__init__(security_level=security_level, allow_downgrade=allow_downgrade)
         self._referee_fields = referee_fields or ["referee_score"]
         self._score_field = score_field
         self._criteria = set(criteria) if criteria else None
@@ -287,16 +293,28 @@ class RefereeAlignmentBaselinePlugin:
         }
 
 
+def _create_referee_alignment(options: dict[str, Any], context: PluginContext) -> RefereeAlignmentBaselinePlugin:
+    """Create referee alignment baseline plugin with smart security defaults."""
+    opts = dict(options)
+    if "security_level" not in opts and context:
+        opts["security_level"] = context.security_level
+    allow_downgrade = opts.get("allow_downgrade", True)
+
+    return RefereeAlignmentBaselinePlugin(
+        security_level=opts["security_level"],
+        allow_downgrade=allow_downgrade,
+        referee_fields=opts.get("referee_fields"),
+        score_field=opts.get("score_field", "scores"),
+        criteria=opts.get("criteria"),
+        min_samples=int(opts.get("min_samples", 2)),
+        value_mapping=opts.get("value_mapping"),
+        on_error=opts.get("on_error", "abort"),
+    )
+
+
 register_baseline_plugin(
     "referee_alignment",
-    lambda options, context: RefereeAlignmentBaselinePlugin(
-        referee_fields=options.get("referee_fields"),
-        score_field=options.get("score_field", "scores"),
-        criteria=options.get("criteria"),
-        min_samples=int(options.get("min_samples", 2)),
-        value_mapping=options.get("value_mapping"),
-        on_error=options.get("on_error", "abort"),
-    ),
+    _create_referee_alignment,
     schema=_REFEREE_SCHEMA,
 )
 
