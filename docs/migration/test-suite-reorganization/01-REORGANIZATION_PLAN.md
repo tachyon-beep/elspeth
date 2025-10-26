@@ -2,8 +2,11 @@
 
 **Objective**: Move 136 root-level test files into structured subdirectories WITHOUT merging files
 
-**Estimated Effort**: 6-8 hours
-**Prerequisites**: Phase 1 complete, stakeholder approval received
+**Estimated Effort**: 10-14 hours (includes verification and import updates)
+**Prerequisites**:
+- **Phase 0 complete** (58 existing subdirectory files consolidated)
+- Phase 1 complete (audit reports reviewed)
+- Stakeholder approval received
 **Risk Level**: Medium (file moves can break imports, but git mv preserves history)
 
 ---
@@ -11,6 +14,8 @@
 ## Overview
 
 Phase 2 executes the physical reorganization of test files from the flat root structure into the hierarchical structure designed in Phase 1. Files are moved **as-is** without consolidation (that happens in Phase 3).
+
+**Note**: Phase 0 has already consolidated the 58 existing subdirectory files (tests/sinks/, tests/plugins/sinks/, etc.) into tests/plugins/nodes/sinks/ with proper subcategories. Phase 2 focuses on the 136 root-level test files.
 
 ### Key Principles
 
@@ -562,7 +567,7 @@ git commit -m "test: Move remaining tests to structured directories (Phase 2.7)"
 
 ### Step 2.3: Import Path Updates (1 hour)
 
-**Script**: `scripts/migrate_tests.py update-imports`
+**Script**: ✅ **IMPLEMENTED** - `docs/migration/test-suite-reorganization/migrate_tests.py update-imports` (see `TOOLS.md`)
 
 **Strategy**:
 1. Scan all moved test files for relative imports
@@ -580,8 +585,8 @@ from elspeth.plugins.nodes.sinks.csv_file import CsvResultSink
 
 **Execution**:
 ```bash
-# Automated import rewrite
-python scripts/migrate_tests.py update-imports --test-dir tests/
+# Automated import rewrite (will be copied to scripts/ during execution)
+python docs/migration/test-suite-reorganization/migrate_tests.py update-imports --test-dir tests/
 
 # Verify no import errors
 pytest --collect-only -q
@@ -719,6 +724,6 @@ Once Phase 2 complete:
 
 ---
 
-**Phase 2 Time Estimate**: 6-8 hours
+**Phase 2 Time Estimate**: 10-14 hours (includes Phase 0 integration, verification, import updates)
 **Risk Level**: Medium (mitigated by frequent commits, git mv)
-**Dependencies**: Phase 1 complete
+**Dependencies**: Phase 0 complete, Phase 1 complete

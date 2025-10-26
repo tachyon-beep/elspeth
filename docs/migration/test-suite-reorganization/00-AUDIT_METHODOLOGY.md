@@ -2,8 +2,10 @@
 
 **Objective**: Comprehensive analysis of test suite quality, duplication, and organization WITHOUT moving files
 
-**Estimated Effort**: 4-6 hours
-**Prerequisites**: Test suite stable, all tests passing or properly xfailed
+**Estimated Effort**: 6-8 hours (with implemented automation scripts)
+**Prerequisites**:
+- **Phase 0 complete** (existing subdirectories consolidated)
+- Test suite stable, all tests passing or properly xfailed
 **Deliverables**: 4 analysis documents
 
 ---
@@ -14,23 +16,24 @@ Phase 1 builds a complete understanding of the test suite's current state throug
 
 ### Success Criteria
 
-- ✅ All 218 test files analyzed
+- ✅ All test files analyzed (~175-185 files post-Phase 0)
 - ✅ Duplicate detection complete (exact, functional, overlapping)
+- ✅ Fixture analysis complete (see `03-FIXTURE_STRATEGY.md` and `analyze_fixtures.py`)
 - ✅ Value assessment identifies low-ROI tests
 - ✅ Proposed structure finalized with file mappings
 - ✅ Stakeholders review and approve findings
 
 ---
 
-## Step 1.1: Automated Metadata Analysis (1 hour)
+## Step 1.1: Automated Metadata Analysis (1.5 hours)
 
 ### Objective
 
-Extract comprehensive metadata from all test files to understand distribution, complexity, and dependencies.
+Extract comprehensive metadata from all test files to understand distribution, complexity, dependencies, and fixture usage.
 
 ### Implementation
 
-**Script**: `scripts/audit_tests.py` (see `TOOLS.md` for specification)
+**Script**: ✅ **IMPLEMENTED** - `docs/migration/test-suite-reorganization/audit_tests.py` (see `TOOLS.md` for usage)
 
 **Data to Extract**:
 1. **Per-File Metrics**:
@@ -54,14 +57,19 @@ Extract comprehensive metadata from all test files to understand distribution, c
 ### Execution
 
 ```bash
-# Run audit script
-python scripts/audit_tests.py \
+# Run audit script (will be copied to scripts/ during execution)
+python docs/migration/test-suite-reorganization/audit_tests.py \
     --test-dir tests \
-    --output TEST_AUDIT_REPORT.md \
+    --output docs/migration/test-suite-reorganization/TEST_AUDIT_REPORT.md \
     --format markdown
 
 # Verify output
-cat TEST_AUDIT_REPORT.md | grep "Total test files"
+cat docs/migration/test-suite-reorganization/TEST_AUDIT_REPORT.md | grep "Total test files"
+
+# Also run fixture analysis
+python docs/migration/test-suite-reorganization/analyze_fixtures.py \
+    --test-dir tests \
+    --output docs/migration/test-suite-reorganization/FIXTURE_ANALYSIS.md
 ```
 
 ### Output Format
@@ -217,19 +225,18 @@ def test_sink_writes_successfully(sink_class, ext, tmp_path):
 
 ### Implementation
 
-**Script**: `scripts/find_duplicates.py` (see `TOOLS.md`)
+**Script**: ✅ **IMPLEMENTED** - `docs/migration/test-suite-reorganization/find_duplicates.py` (see `TOOLS.md` for usage)
 
 **Execution**:
 ```bash
-# Run duplication detection
-python scripts/find_duplicates.py \
+# Run duplication detection (will be copied to scripts/ during execution)
+python docs/migration/test-suite-reorganization/find_duplicates.py \
     --test-dir tests \
-    --coverage-data .coverage \
-    --output DUPLICATES_ANALYSIS.md \
+    --output docs/migration/test-suite-reorganization/DUPLICATES_ANALYSIS.md \
     --threshold 0.85
 
 # Preview findings
-grep "DUPLICATE" DUPLICATES_ANALYSIS.md | wc -l
+grep "DUPLICATE" docs/migration/test-suite-reorganization/DUPLICATES_ANALYSIS.md | wc -l
 ```
 
 ### Output Format
@@ -404,19 +411,22 @@ def test_plugin_exists():
 
 ### Implementation
 
-**Script**: `scripts/assess_value.py` (see `TOOLS.md`)
+**Manual Process** (based on `TEST_AUDIT_REPORT.md` and `DUPLICATES_ANALYSIS.md` outputs)
 
 **Execution**:
 ```bash
-# Run value assessment
-python scripts/assess_value.py \
-    --test-dir tests \
-    --audit-report TEST_AUDIT_REPORT.md \
-    --output POINTLESS_TESTS_CANDIDATES.md
+# Review audit report for low-value patterns
+cat docs/migration/test-suite-reorganization/TEST_AUDIT_REPORT.md
 
-# Review candidates
-cat POINTLESS_TESTS_CANDIDATES.md | grep "VERDICT: DELETE" | wc -l
+# Review duplication analysis
+cat docs/migration/test-suite-reorganization/DUPLICATES_ANALYSIS.md
+
+# Create candidates list manually
+# Based on criteria above (trivial assertions, implementation details, etc.)
+vim docs/migration/test-suite-reorganization/POINTLESS_TESTS_CANDIDATES.md
 ```
+
+**Note**: Value assessment requires human judgment and stakeholder input. Use automation outputs as guidance.
 
 ### Output Format
 
@@ -569,6 +579,7 @@ tests/
 ## Phase 1 Deliverables Checklist
 
 - [ ] `TEST_AUDIT_REPORT.md` generated (Step 1.1)
+- [ ] `FIXTURE_ANALYSIS.md` generated (Step 1.1)
 - [ ] `DUPLICATES_ANALYSIS.md` generated (Step 1.2)
 - [ ] `POINTLESS_TESTS_CANDIDATES.md` generated (Step 1.3)
 - [ ] `PROPOSED_STRUCTURE.md` finalized (Step 1.4)
@@ -613,7 +624,8 @@ Once Phase 1 complete:
 ---
 
 **Phase 1 Success Criteria**:
-✅ All 218 files analyzed
+✅ All test files analyzed (~175-185 post-Phase 0)
+✅ Fixture dependencies mapped
 ✅ Duplicates identified with high confidence
 ✅ Value assessment complete
 ✅ Structure approved by stakeholders
