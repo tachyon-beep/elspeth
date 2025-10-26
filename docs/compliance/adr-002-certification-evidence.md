@@ -29,8 +29,8 @@ This package documents the implementation of **ADR-002** (suite-level security e
 |------------|----------------|----------|
 | **R1: Minimum Clearance Envelope** | `compute_minimum_clearance_envelope()` computes MIN(all plugin levels) | `test_adr002_invariants.py::TestInvariantMinimumClearanceEnvelope` (4 tests) |
 | **R2: Start-Time Validation** | `_validate_experiment_security()` validates ALL plugins before job starts | `test_adr002_validation.py::TestValidateExperimentSecurity` (5 tests) |
-| **R3: Runtime Failsafe** | `ClassifiedDataFrame.validate_access_by()` provides defense-in-depth | `test_adr002_invariants.py::TestInvariantNoConfigurationAllowsBreach` (2 tests) |
-| **R4: Automatic Classification Uplifting** | `with_uplifted_classification()` uses max() operation | `test_adr002_invariants.py::TestInvariantClassificationUplifting` (3 tests) |
+| **R3: Runtime Failsafe** | `SecureDataFrame.validate_compatible_with()` provides defense-in-depth | `test_adr002_invariants.py::TestInvariantNoConfigurationAllowsBreach` (2 tests) |
+| **R4: Automatic Classification Uplifting** | `with_uplifted_security_level()` uses max() operation | `test_adr002_invariants.py::TestInvariantClassificationUplifting` (3 tests) |
 | **R5: Immutability** | Frozen dataclass prevents classification downgrade | `test_adr002_properties.py::TestPropertyImmutability` (2 tests, 1000 examples) |
 
 ### ADR-002-A Requirements
@@ -39,7 +39,7 @@ This package documents the implementation of **ADR-002** (suite-level security e
 |------------|----------------|----------|
 | **R1: Constructor Protection** | `__post_init__()` frame inspection blocks non-datasource creation | `test_adr002a_invariants.py::test_invariant_plugin_cannot_create_frame_directly` |
 | **R2: Datasource Factory** | `create_from_datasource()` class method for trusted sources | `test_adr002a_invariants.py::test_invariant_datasource_can_create_frame` |
-| **R3: Plugin Uplifting Pattern** | `with_uplifted_classification()` bypasses validation (internal method) | `test_adr002a_invariants.py::test_invariant_with_uplifted_classification_bypasses_check` |
+| **R3: Plugin Uplifting Pattern** | `with_uplifted_security_level()` bypasses validation (internal method) | `test_adr002a_invariants.py::test_invariant_with_uplifted_security_level_bypasses_check` |
 | **R4: Plugin Data Generation** | `with_new_data()` preserves classification for LLM/aggregation patterns | `test_adr002a_invariants.py::test_invariant_with_new_data_preserves_classification` |
 | **R5: Attack Prevention** | End-to-end laundering attack blocked | `test_adr002a_invariants.py::test_invariant_malicious_classification_laundering_blocked` |
 
@@ -53,7 +53,7 @@ This package documents the implementation of **ADR-002** (suite-level security e
 |-----------|-------------------|---------------|--------|---------------|
 | **T1** | Classification Breach: SECRET data reaches UNOFFICIAL sink | Start-time validation blocks mismatched configs | ✅ BLOCKED | `tests/test_adr002_suite_integration.py:175-211` (test_fail_path_secret_datasource_unofficial_sink) |
 | **T2** | Security Downgrade Attack: Attacker configures weak plugin to lower envelope | MIN envelope enforces weakest-link principle | ✅ PREVENTED | `tests/test_adr002_invariants.py:73-81` (test_minimum_envelope_unofficial_weakest_link) |
-| **T3** | Runtime Bypass: Start-time validation bypassed somehow | Runtime failsafe in ClassifiedDataFrame | ✅ PREPARED | `src/elspeth/core/security/classified_data.py:136-149` (validate_access_by method) |
+| **T3** | Runtime Bypass: Start-time validation bypassed somehow | Runtime failsafe in SecureDataFrame | ✅ PREPARED | `src/elspeth/core/security/secure_data.py:136-149` (validate_compatible_with method) |
 | **T4** | Classification Mislabeling: Plugin creates "fresh" frame with lower classification | Constructor protection blocks laundering | ✅ BLOCKED | `tests/test_adr002a_invariants.py:103-121` (test_invariant_malicious_classification_laundering_blocked) |
 
 **Detailed Test Coverage by Threat**:
@@ -76,8 +76,8 @@ This package documents the implementation of **ADR-002** (suite-level security e
   - `tests/test_adr002_properties.py:62-73` (test_envelope_never_higher_than_any_plugin - 1000 examples)
 
 **T3 - Runtime Bypass Defense**:
-- Implementation: `src/elspeth/core/security/classified_data.py:136-149`
-  - Method: `validate_access_by(component_level)`
+- Implementation: `src/elspeth/core/security/secure_data.py:136-149`
+  - Method: `validate_compatible_with(component_level)`
   - Checks: `component_level >= self.classification`
   - Raises: SecurityValidationError if breach detected
 - Test: `tests/test_adr002_invariants.py:150-162`
@@ -85,9 +85,9 @@ This package documents the implementation of **ADR-002** (suite-level security e
 
 **T4 - Classification Mislabeling/Laundering Prevention**:
 - Primary Test: `tests/test_adr002a_invariants.py:103-121`
-  - Simulates: Malicious plugin attempting `ClassifiedDataFrame(data, SecurityLevel.OFFICIAL)`
+  - Simulates: Malicious plugin attempting `SecureDataFrame(data, SecurityLevel.OFFICIAL)`
   - Verifies: SecurityValidationError raised with ADR-002-A reference
-  - Confirms: Error message explains correct patterns (create_from_datasource, with_uplifted_classification)
+  - Confirms: Error message explains correct patterns (create_from_datasource, with_uplifted_security_level)
 - Supporting Tests:
   - `tests/test_adr002a_invariants.py:24-38` (test_invariant_plugin_cannot_create_frame_directly)
   - `tests/test_adr002a_invariants.py:40-52` (test_invariant_datasource_can_create_frame)
@@ -138,7 +138,7 @@ tests/test_adr002_invariants.py::TestInvariantNoConfigurationAllowsBreach
 tests/test_adr002a_invariants.py::TestADR002ATrustedContainerModel
   ✅ test_invariant_plugin_cannot_create_frame_directly
   ✅ test_invariant_datasource_can_create_frame
-  ✅ test_invariant_with_uplifted_classification_bypasses_check
+  ✅ test_invariant_with_uplifted_security_level_bypasses_check
   ✅ test_invariant_with_new_data_preserves_classification
   ✅ test_invariant_malicious_classification_laundering_blocked
 ```
@@ -215,7 +215,7 @@ pytest -m "not slow" --tb=short -q
 **Coverage**:
 - Overall: 89% (up from baseline)
 - Security-critical modules:
-  - `classified_data.py`: 78% (3 uncovered lines are defensive edge cases)
+  - `secure_data.py`: 78% (3 uncovered lines are defensive edge cases)
   - `suite_runner.py`: 90%
   - `protocols.py`: 85%
 
@@ -233,7 +233,7 @@ pytest -m "not slow" --tb=short -q
 
 ### 4.1 Core Components
 
-**ClassifiedDataFrame** (`src/elspeth/core/security/classified_data.py`):
+**SecureDataFrame** (`src/elspeth/core/security/secure_data.py`):
 - **Purpose**: Trusted container for classified data with automatic uplifting
 - **Security Properties**:
   - Frozen dataclass (immutable classification)
@@ -243,9 +243,9 @@ pytest -m "not slow" --tb=short -q
 - **Lines of Code**: 243 lines (including documentation)
 - **Key Methods**:
   - `create_from_datasource(data, level)` - Factory for datasources
-  - `with_uplifted_classification(level)` - Plugin transformation pattern
+  - `with_uplifted_security_level(level)` - Plugin transformation pattern
   - `with_new_data(data)` - LLM/aggregation pattern
-  - `validate_access_by(component_level)` - Runtime failsafe
+  - `validate_compatible_with(component_level)` - Runtime failsafe
 
 **Minimum Clearance Envelope** (`src/elspeth/core/experiments/suite_runner.py`):
 - **Purpose**: Compute operating security level for suite execution
@@ -288,10 +288,10 @@ def compute_minimum_clearance_envelope(plugins: List[BasePlugin]) -> SecurityLev
 
 **I2: Classification Never Decreases**
 ```python
-def with_uplifted_classification(self, level: SecurityLevel) -> "ClassifiedDataFrame":
+def with_uplifted_security_level(self, level: SecurityLevel) -> "SecureDataFrame":
     """Uplift classification (cannot downgrade via max())."""
     new_level = max(self.classification, level)  # max() prevents downgrade
-    return ClassifiedDataFrame(data=self.data, classification=new_level, ...)
+    return SecureDataFrame(data=self.data, security_level=new_level, ...)
 ```
 - **Proof**: `test_adr002_properties.py::test_uplifting_sequence_monotonic` (1000 random sequences)
 - **Mathematical Property**: ∀ sequence of uplifts, final_level = max(initial_level, all_transform_levels)
@@ -315,19 +315,19 @@ def __post_init__(self) -> None:
         current_frame = current_frame.f_back
         caller_name = current_frame.f_code.co_name
 
-        # Allow internal methods (with_uplifted_classification, with_new_data)
-        # SECURITY FIX (CVE-ADR-002-A-001): Verify caller's 'self' is ClassifiedDataFrame instance
-        if caller_name in ("with_uplifted_classification", "with_new_data"):
+        # Allow internal methods (with_uplifted_security_level, with_new_data)
+        # SECURITY FIX (CVE-ADR-002-A-001): Verify caller's 'self' is SecureDataFrame instance
+        if caller_name in ("with_uplifted_security_level", "with_new_data"):
             caller_self = current_frame.f_locals.get('self')
-            if isinstance(caller_self, ClassifiedDataFrame):
+            if isinstance(caller_self, SecureDataFrame):
                 return  # Legitimate internal method call (instance verification prevents spoofing)
 
     # Block all other attempts (plugins, direct construction)
-    raise SecurityValidationError("ClassifiedDataFrame can only be created by datasources...")
+    raise SecurityValidationError("SecureDataFrame can only be created by datasources...")
 ```
 - **Proof**: `test_adr002a_invariants.py::test_invariant_malicious_classification_laundering_blocked`
-- **Attack Scenario Blocked**: Malicious plugin tries `ClassifiedDataFrame(data, SecurityLevel.OFFICIAL)` → SecurityValidationError
-- **CVE-ADR-002-A-001**: Instance verification prevents method name spoofing attack where attacker defines function named `with_uplifted_classification()` to bypass frame inspection
+- **Attack Scenario Blocked**: Malicious plugin tries `SecureDataFrame(data, SecurityLevel.OFFICIAL)` → SecurityValidationError
+- **CVE-ADR-002-A-001**: Instance verification prevents method name spoofing attack where attacker defines function named `with_uplifted_security_level()` to bypass frame inspection
 - **Evidence**: `tests/test_adr002a_cve.py:25-50` (test_cve_adr002a_001_method_name_spoofing_blocked)
 
 **I4: All Plugins Accept Envelope OR Job Fails**
@@ -355,12 +355,12 @@ def _validate_experiment_security(self, experiment: Experiment) -> None:
 
 **Layer 2: Constructor Protection** (ADR-002-A - Classification Laundering Prevention)
 - **What**: Frame inspection blocks plugins from creating frames
-- **When**: Every ClassifiedDataFrame construction attempt
+- **When**: Every SecureDataFrame construction attempt
 - **Strength**: Technical control vs. manual certification review
 - **Weakness**: Frame inspection could be bypassed if stack walking fails (defensive fail-open)
 
 **Layer 3: Runtime Failsafe** (Defense in Depth)
-- **What**: validate_access_by() checks at data access time
+- **What**: validate_compatible_with() checks at data access time
 - **When**: Runtime, when component attempts to access data
 - **Strength**: Catches bypasses of layers 1-2
 - **Weakness**: Data already processed (too late to prevent, but detects breach)
@@ -373,9 +373,9 @@ def _validate_experiment_security(self, experiment: Experiment) -> None:
 
 ### 5.1 Breaking Changes
 
-**ClassifiedDataFrame Construction**:
-- **Before**: `ClassifiedDataFrame(data, level)` (direct construction)
-- **After**: `ClassifiedDataFrame.create_from_datasource(data, level)` (factory method)
+**SecureDataFrame Construction**:
+- **Before**: `SecureDataFrame(data, level)` (direct construction)
+- **After**: `SecureDataFrame.create_from_datasource(data, level)` (factory method)
 
 **Reason**: ADR-002-A constructor protection blocks direct construction to prevent classification laundering attacks.
 
@@ -383,7 +383,7 @@ def _validate_experiment_security(self, experiment: Experiment) -> None:
 
 | Component Type | Count | Migration Status | Notes |
 |---------------|-------|------------------|-------|
-| **Production Datasources** | 0 | ✅ N/A | ClassifiedDataFrame not yet in production |
+| **Production Datasources** | 0 | ✅ N/A | SecureDataFrame not yet in production |
 | **Test Datasources** | 3 | ✅ Complete | Updated in Phase 1 (d83d7fd) |
 | **Test Fixtures** | 12 | ✅ Complete | Updated in Phase 1 + ADR-002-A Phase 1 |
 | **Docstring Examples** | 3 | ✅ Complete | Updated in ADR-002-A Phase 2 |
@@ -426,11 +426,11 @@ To fix:
 
 **Scenario 2: Classification Laundering Attempt**
 ```python
-# Plugin tries: ClassifiedDataFrame(data, SecurityLevel.OFFICIAL)
+# Plugin tries: SecureDataFrame(data, SecurityLevel.OFFICIAL)
 # Error: SecurityValidationError
 
-"ClassifiedDataFrame can only be created by datasources using create_from_datasource().
-Plugins must use with_uplifted_classification() to uplift existing frames or
+"SecureDataFrame can only be created by datasources using create_from_datasource().
+Plugins must use with_uplifted_security_level() to uplift existing frames or
 with_new_data() to generate new data.
 This prevents classification laundering attacks (ADR-002-A)."
 ```
@@ -471,22 +471,22 @@ This prevents classification laundering attacks (ADR-002-A)."
 
 - [x] **Constructor Protection Active**: Direct construction blocked
   - Test: `tests/test_adr002a_invariants.py:24-38` (test_invariant_plugin_cannot_create_frame_directly)
-  - Verify: `ClassifiedDataFrame(data, level)` raises SecurityValidationError
-  - Error Message: Contains "create_from_datasource", "with_uplifted_classification", "ADR-002-A"
+  - Verify: `SecureDataFrame(data, level)` raises SecurityValidationError
+  - Error Message: Contains "create_from_datasource", "with_uplifted_security_level", "ADR-002-A"
 
 - [x] **Datasource Factory Method Works**: Trusted sources can create frames
   - Test: `tests/test_adr002a_invariants.py:40-52` (test_invariant_datasource_can_create_frame)
-  - Verify: `ClassifiedDataFrame.create_from_datasource(data, level)` succeeds
+  - Verify: `SecureDataFrame.create_from_datasource(data, level)` succeeds
   - Implementation: Uses `cls.__new__(cls)` bypass to avoid `__post_init__` validation
 
 - [x] **Plugin Uplifting Pattern Works**: Plugins can transform data correctly
-  - Test: `tests/test_adr002a_invariants.py:54-74` (test_invariant_with_uplifted_classification_bypasses_check)
-  - Verify: `frame.with_uplifted_classification(level)` succeeds (internal method trusted)
+  - Test: `tests/test_adr002a_invariants.py:54-74` (test_invariant_with_uplifted_security_level_bypasses_check)
+  - Verify: `frame.with_uplifted_security_level(level)` succeeds (internal method trusted)
   - Security: Instance verification prevents method name spoofing (CVE-ADR-002-A-001)
 
 - [x] **Plugin Data Generation Pattern Works**: LLMs/aggregators can generate new data
   - Test: `tests/test_adr002a_invariants.py:76-101` (test_invariant_with_new_data_preserves_classification)
-  - Verify: `frame.with_new_data(new_df).with_uplifted_classification(level)` preserves classification
+  - Verify: `frame.with_new_data(new_df).with_uplifted_security_level(level)` preserves classification
   - Semantic: New data inherits input classification (cannot launder by generating fresh data)
 
 - [x] **Classification Laundering Attack Blocked**: End-to-end attack scenario fails
@@ -496,8 +496,8 @@ This prevents classification laundering attacks (ADR-002-A)."
 
 - [x] **CVE-ADR-002-A-001 Mitigated**: Method name spoofing attack prevented
   - Test: `tests/test_adr002a_cve.py:25-50` (test_cve_adr002a_001_method_name_spoofing_blocked)
-  - Attack: Attacker defines function named `with_uplifted_classification()` to bypass frame inspection
-  - Defense: Instance verification (`isinstance(caller_self, ClassifiedDataFrame)`) prevents spoofing
+  - Attack: Attacker defines function named `with_uplifted_security_level()` to bypass frame inspection
+  - Defense: Instance verification (`isinstance(caller_self, SecureDataFrame)`) prevents spoofing
   - Evidence: Commit c660e24 "Security: Fix CVE-ADR-002-A-001 auth bypass + P1 equality semantics"
 
 - [x] **End-to-End Integration Works**: Full datasource → plugin → sink flow
@@ -596,7 +596,7 @@ This prevents classification laundering attacks (ADR-002-A)."
 - Archive implementation working directory
 
 **Phase 2: User Communication**
-- Announce breaking change (ClassifiedDataFrame construction)
+- Announce breaking change (SecureDataFrame construction)
 - Publish plugin developer guide updates
 - Publish datasource developer guide updates
 
@@ -609,13 +609,13 @@ This prevents classification laundering attacks (ADR-002-A)."
 
 **If critical issue discovered**:
 1. Revert PR #13 (5 commits)
-2. Restore previous behavior (direct ClassifiedDataFrame construction)
+2. Restore previous behavior (direct SecureDataFrame construction)
 3. Document issue in THREAT_MODEL.md
 4. Fix and re-submit
 
 **Rollback Risk**: Low
 - All existing tests passing (no regressions)
-- Breaking change only affects ClassifiedDataFrame (not yet in production)
+- Breaking change only affects SecureDataFrame (not yet in production)
 - Can revert cleanly via git
 
 ---

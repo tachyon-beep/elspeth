@@ -71,10 +71,10 @@ This directory contains the following planning and implementation tracking docum
 - Classification uplifting (high water mark principle)
 
 **ADR-002-A: Trusted Container Model**
-- `ClassifiedDataFrame` with immutable classification metadata
+- `SecureDataFrame` with immutable classification metadata
 - Constructor protection (datasource-only creation)
-- Automatic uplifting (`with_uplifted_classification()`)
-- Access validation (`validate_access_by()`)
+- Automatic uplifting (`with_uplifted_security_level()`)
+- Access validation (`validate_compatible_with()`)
 
 **Security Fixes**:
 - CVE-ADR-002-A-001: Frame equality bypass in `__post_init__`
@@ -136,7 +136,7 @@ ADR-002 implementation is **complete**. The next phase is:
 2. **ADR-004**: Mandatory BasePlugin Inheritance (Nominal Typing)
    - Planning: `docs/architecture/decisions/004-mandatory-baseplugin-inheritance.md`
 
-3. **Container Migration**: Universal adoption of `ClassifiedDataFrame`
+3. **Container Migration**: Universal adoption of `SecureDataFrame`
    - Migration Plan: `docs/migration/adr-003-004-classified-containers/INTEGRATED_ROADMAP.md`
    - Estimated Effort: 30-40 hours (4-5 days)
 

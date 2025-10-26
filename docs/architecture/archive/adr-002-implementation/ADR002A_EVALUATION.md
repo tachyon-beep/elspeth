@@ -37,7 +37,7 @@ ADR-002-A ("Trusted Container Model") implementation is **well ahead of schedule
 2. test_invariant_datasource_can_create_frame
    → Verifies create_from_datasource() factory works
 
-3. test_invariant_with_uplifted_classification_bypasses_check
+3. test_invariant_with_uplifted_security_level_bypasses_check
    → Verifies internal methods bypass validation
 
 4. test_invariant_with_new_data_preserves_classification
@@ -62,12 +62,12 @@ ADR-002-A ("Trusted Container Model") implementation is **well ahead of schedule
 - ✅ `__post_init__` constructor validation with frame inspection
 - ✅ `create_from_datasource()` class method (trusted source factory)
 - ✅ `with_new_data()` instance method (new data pattern)
-- ✅ Updated `with_uplifted_classification()` to bypass checks
+- ✅ Updated `with_uplifted_security_level()` to bypass checks
 - ✅ All 28 tests passing (5 ADR-002-A + 14 ADR-002 + 9 suite validation)
 
 **Code Changes**:
 ```diff
-src/elspeth/core/security/classified_data.py
+src/elspeth/core/security/secure_data.py
   +107 lines (implementation)
   - Added _created_by_datasource field
   - Added __post_init__ validation
@@ -79,14 +79,14 @@ src/elspeth/core/security/classified_data.py
 **Security Properties Verified** (via passing tests):
 1. ✅ Constructor protection (plugins blocked)
 2. ✅ Trusted source factory (datasources only)
-3. ✅ Internal method bypass (with_uplifted_classification, with_new_data)
+3. ✅ Internal method bypass (with_uplifted_security_level, with_new_data)
 4. ✅ Data generation pattern (preserves classification)
 5. ✅ Attack prevention (end-to-end laundering blocked)
 
 **Code Quality**:
 - MyPy: ✅ Clean (no type errors)
 - Ruff: ✅ Clean (no style issues)
-- Coverage: 78% on `classified_data.py` (3 uncovered: edge case fail-open paths)
+- Coverage: 78% on `secure_data.py` (3 uncovered: edge case fail-open paths)
 
 **Key Implementation Detail**:
 ```python
@@ -105,7 +105,7 @@ def __post_init__(self) -> None:
         if current_frame is None or current_frame.f_back is None:
             break
         current_frame = current_frame.f_back
-        if current_frame.f_code.co_name in ("with_uplifted_classification", "with_new_data"):
+        if current_frame.f_code.co_name in ("with_uplifted_security_level", "with_new_data"):
             return
 
     # Block all other attempts
@@ -121,12 +121,12 @@ def __post_init__(self) -> None:
 **Time**: 30 minutes (estimated: 1-2h) - **50-75% faster than estimate**
 
 **Deliverables**:
-- ✅ Searched all production code for `ClassifiedDataFrame()` usage
+- ✅ Searched all production code for `SecureDataFrame()` usage
 - ✅ Updated docstring examples to `create_from_datasource()`
 - ✅ Verified zero breaking changes in production
 
 **Findings**:
-- **Zero production code using ClassifiedDataFrame** - Feature defined but not yet integrated
+- **Zero production code using SecureDataFrame** - Feature defined but not yet integrated
 - Only usage: Internal methods (correctly bypass validation)
 - Future datasources will use factory method from day 1
 
@@ -199,7 +199,7 @@ Future datasources: Will use factory ✅
 ```
 ✅ test_invariant_plugin_cannot_create_frame_directly
 ✅ test_invariant_datasource_can_create_frame
-✅ test_invariant_with_uplifted_classification_bypasses_check
+✅ test_invariant_with_uplifted_security_level_bypasses_check
 ✅ test_invariant_with_new_data_preserves_classification
 ✅ test_invariant_malicious_classification_laundering_blocked
 ```
@@ -230,7 +230,7 @@ Future datasources: Will use factory ✅
 
 **T4 Defense Strengthened**:
 ```
-Before: "Certification must verify all transformations use with_uplifted_classification()"
+Before: "Certification must verify all transformations use with_uplifted_security_level()"
         → Human review required for EVERY plugin transformation
 
 After:  "Constructor protection prevents plugins from creating frames"
@@ -247,9 +247,9 @@ After:  "Constructor protection prevents plugins from creating frames"
 ```python
 # ❌ POSSIBLE: Malicious plugin creates fresh frame
 class MaliciousPlugin(TransformNode):
-    def process(self, input_frame: ClassifiedDataFrame) -> ClassifiedDataFrame:
+    def process(self, input_frame: SecureDataFrame) -> SecureDataFrame:
         # Attack: Create "fresh" frame with lower classification
-        return ClassifiedDataFrame(input_frame.data, SecurityLevel.OFFICIAL)
+        return SecureDataFrame(input_frame.data, SecurityLevel.OFFICIAL)
         # ☠️ Launders SECRET data as OFFICIAL
 ```
 
@@ -257,8 +257,8 @@ class MaliciousPlugin(TransformNode):
 ```python
 # ✅ BLOCKED: Constructor validation prevents attack
 class MaliciousPlugin(TransformNode):
-    def process(self, input_frame: ClassifiedDataFrame) -> ClassifiedDataFrame:
-        return ClassifiedDataFrame(input_frame.data, SecurityLevel.OFFICIAL)
+    def process(self, input_frame: SecureDataFrame) -> SecureDataFrame:
+        return SecureDataFrame(input_frame.data, SecurityLevel.OFFICIAL)
         # 🛡️ SecurityValidationError raised immediately
 ```
 
@@ -283,7 +283,7 @@ ADR-002-A adds a **fourth layer** to the security model:
                     ↓
 ┌──────────────────────────────────────────────────────┐
 │ Layer 3: Runtime Validation (ADR-002 Phase 1)        │
-│ → validate_access_by() checks clearance at hand-off  │
+│ → validate_compatible_with() checks clearance at hand-off  │
 └──────────────────────────────────────────────────────┘
                     ↓
 ┌──────────────────────────────────────────────────────┐
@@ -299,17 +299,17 @@ ADR-002-A adds a **fourth layer** to the security model:
 ### Static Analysis
 
 ```bash
-$ python -m mypy src/elspeth/core/security/classified_data.py
+$ python -m mypy src/elspeth/core/security/secure_data.py
 Success: no issues found in 1 source file ✅
 
-$ python -m ruff check src/elspeth/core/security/classified_data.py
+$ python -m ruff check src/elspeth/core/security/secure_data.py
 All checks passed! ✅
 ```
 
 ### Test Coverage
 
 ```
-classified_data.py: 78% coverage
+secure_data.py: 78% coverage
 - 43 statements
 - 7 uncovered (edge case fail-open paths)
 - 12 branches
@@ -318,7 +318,7 @@ classified_data.py: 78% coverage
 
 **Uncovered Lines**:
 - Line 86, 93, 99: Edge case fail-open paths (cannot determine caller → allow)
-- Line 254-259: validate_access_by error path (requires BasePlugin mock)
+- Line 254-259: validate_compatible_with error path (requires BasePlugin mock)
 
 **Assessment**: ✅ Excellent - Core security paths 100% covered
 
@@ -337,7 +337,7 @@ classified_data.py: 78% coverage
 
 ### Memory Impact
 
-- Shared DataFrame pattern: Multiple `ClassifiedDataFrame` instances share same pandas DataFrame
+- Shared DataFrame pattern: Multiple `SecureDataFrame` instances share same pandas DataFrame
 - Memory overhead: 2 fields per instance (`classification`, `_created_by_datasource`)
 - **Total impact**: ~16 bytes per frame (negligible)
 
@@ -349,7 +349,7 @@ classified_data.py: 78% coverage
 
 **Search Results**:
 ```bash
-$ git grep "ClassifiedDataFrame(" -- src/elspeth
+$ git grep "SecureDataFrame(" -- src/elspeth
 (no matches)
 ```
 
@@ -359,8 +359,8 @@ $ git grep "ClassifiedDataFrame(" -- src/elspeth
 
 **Changes Required**:
 ```diff
-- df = ClassifiedDataFrame(data, SecurityLevel.OFFICIAL)
-+ df = ClassifiedDataFrame.create_from_datasource(data, SecurityLevel.OFFICIAL)
+- df = SecureDataFrame(data, SecurityLevel.OFFICIAL)
++ df = SecureDataFrame.create_from_datasource(data, SecurityLevel.OFFICIAL)
 ```
 
 **Files Modified**:
@@ -378,7 +378,7 @@ $ git grep "ClassifiedDataFrame(" -- src/elspeth
 | Risk | Likelihood | Impact | Status | Mitigation |
 |------|-----------|--------|--------|------------|
 | Frame inspection fragile | LOW | MEDIUM | ✅ MITIGATED | Stack walking handles dataclass machinery, 5-frame depth provides buffer |
-| Breaking changes in production | NONE | N/A | ✅ ZERO | No production code uses ClassifiedDataFrame yet |
+| Breaking changes in production | NONE | N/A | ✅ ZERO | No production code uses SecureDataFrame yet |
 | Test regression | LOW | HIGH | ✅ PREVENTED | All 28 tests passing, no regressions detected |
 | Performance degradation | LOW | LOW | ✅ MEASURED | <0.1ms overhead confirmed negligible |
 

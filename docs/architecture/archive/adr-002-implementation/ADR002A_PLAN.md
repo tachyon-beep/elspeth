@@ -9,7 +9,7 @@
 
 ## Quick Summary
 
-**What**: Add constructor protection to `ClassifiedDataFrame` preventing plugins from creating arbitrary classifications.
+**What**: Add constructor protection to `SecureDataFrame` preventing plugins from creating arbitrary classifications.
 
 **Why**: Moves T4 (Classification Mislabeling) defense from certification (human review) to technical control (framework enforcement).
 
@@ -53,14 +53,14 @@
 **Tests to Write** (5 core invariants):
 
 1. **`test_invariant_plugin_cannot_create_frame_directly`**
-   - Property: Plugins calling `ClassifiedDataFrame(data, level)` → SecurityValidationError
+   - Property: Plugins calling `SecureDataFrame(data, level)` → SecurityValidationError
    - Attack prevented: Classification laundering
 
 2. **`test_invariant_datasource_can_create_frame`**
    - Property: Datasources calling `create_from_datasource()` → Success
    - Functionality preserved: Trusted sources work
 
-3. **`test_invariant_with_uplifted_classification_bypasses_check`**
+3. **`test_invariant_with_uplifted_security_level_bypasses_check`**
    - Property: Internal uplifting method doesn't trigger validation
    - Functionality preserved: Uplifting still works
 
@@ -86,9 +86,9 @@
 
 **Objective**: Implement minimal code to make security tests pass.
 
-### 1.1 Update ClassifiedDataFrame
+### 1.1 Update SecureDataFrame
 
-**File**: `src/elspeth/core/security/classified_data.py`
+**File**: `src/elspeth/core/security/secure_data.py`
 
 **Changes**:
 
@@ -106,7 +106,7 @@
        # Skip validation for internal methods
        caller = inspect.currentframe().f_back
        if caller and caller.f_code.co_name in (
-           'with_uplifted_classification',
+           'with_uplifted_security_level',
            'with_new_data',
            'create_from_datasource'
        ):
@@ -118,8 +118,8 @@
 
        # Block all other attempts
        raise SecurityValidationError(
-           "ClassifiedDataFrame can only be created by datasources using "
-           "create_from_datasource(). Plugins must use with_uplifted_classification() "
+           "SecureDataFrame can only be created by datasources using "
+           "create_from_datasource(). Plugins must use with_uplifted_security_level() "
            "or mutate .data directly. See ADR-002-A for details."
        )
    ```
@@ -131,22 +131,22 @@
        cls,
        data: pd.DataFrame,
        classification: SecurityLevel
-   ) -> "ClassifiedDataFrame":
+   ) -> "SecureDataFrame":
        """Create initial classified frame (datasources only).
 
-       This is the ONLY way to create a ClassifiedDataFrame from scratch.
-       Plugins must use with_uplifted_classification() or mutate .data.
+       This is the ONLY way to create a SecureDataFrame from scratch.
+       Plugins must use with_uplifted_security_level() or mutate .data.
 
        Args:
            data: The DataFrame to wrap
            classification: Initial classification level
 
        Returns:
-           ClassifiedDataFrame with datasource creation flag set
+           SecureDataFrame with datasource creation flag set
 
        Example:
            >>> df = pd.DataFrame({'col': [1, 2, 3]})
-           >>> frame = ClassifiedDataFrame.create_from_datasource(
+           >>> frame = SecureDataFrame.create_from_datasource(
            ...     df, SecurityLevel.SECRET
            ... )
        """
@@ -157,31 +157,31 @@
        return instance
    ```
 
-4. **Add `with_new_data()` method** (after `with_uplifted_classification`)
+4. **Add `with_new_data()` method** (after `with_uplifted_security_level`)
    ```python
-   def with_new_data(self, new_data: pd.DataFrame) -> "ClassifiedDataFrame":
+   def with_new_data(self, new_data: pd.DataFrame) -> "SecureDataFrame":
        """Create frame with different data, preserving current classification.
 
        Use this when generating entirely new DataFrames (LLM responses,
        aggregations, etc.) that derive from classified input.
 
-       IMPORTANT: Still call with_uplifted_classification() afterwards to
+       IMPORTANT: Still call with_uplifted_security_level() afterwards to
        account for the transformation's security level.
 
        Args:
            new_data: The new DataFrame (different structure/content)
 
        Returns:
-           ClassifiedDataFrame with same classification, new data
+           SecureDataFrame with same classification, new data
 
        Example:
            >>> llm_output = generate_responses(input_frame.data)
            >>> output_frame = input_frame.with_new_data(llm_output)
-           >>> output_frame = output_frame.with_uplifted_classification(
+           >>> output_frame = output_frame.with_uplifted_security_level(
            ...     self.get_security_level()
            ... )
        """
-       instance = ClassifiedDataFrame.__new__(ClassifiedDataFrame)
+       instance = SecureDataFrame.__new__(SecureDataFrame)
        object.__setattr__(instance, 'data', new_data)
        object.__setattr__(instance, 'classification', self.classification)
        object.__setattr__(instance, '_created_by_datasource', False)
@@ -189,7 +189,7 @@
    ```
 
 **Checklist**:
-- [ ] Add all 4 changes to `classified_data.py`
+- [ ] Add all 4 changes to `secure_data.py`
 - [ ] Update `__all__` exports if needed
 - [ ] Run MyPy - verify type safety
 - [ ] Run Ruff - verify style
@@ -214,7 +214,7 @@
 
 **Search Pattern**:
 ```bash
-grep -r "ClassifiedDataFrame(" src/elspeth/plugins/nodes/datasources/ --include="*.py"
+grep -r "SecureDataFrame(" src/elspeth/plugins/nodes/datasources/ --include="*.py"
 ```
 
 **Expected Files** (~5-10):
@@ -227,12 +227,12 @@ grep -r "ClassifiedDataFrame(" src/elspeth/plugins/nodes/datasources/ --include=
 
 **Before**:
 ```python
-return ClassifiedDataFrame(df, self.security_level)
+return SecureDataFrame(df, self.security_level)
 ```
 
 **After**:
 ```python
-return ClassifiedDataFrame.create_from_datasource(df, self.security_level)
+return SecureDataFrame.create_from_datasource(df, self.security_level)
 ```
 
 **Checklist**:
@@ -246,10 +246,10 @@ return ClassifiedDataFrame.create_from_datasource(df, self.security_level)
 
 **Search Pattern**:
 ```bash
-grep -r "ClassifiedDataFrame(" tests/ --include="*.py" | grep -v "test_adr002a"
+grep -r "SecureDataFrame(" tests/ --include="*.py" | grep -v "test_adr002a"
 ```
 
-**Action**: Update any test fixtures that create `ClassifiedDataFrame` for testing datasources.
+**Action**: Update any test fixtures that create `SecureDataFrame` for testing datasources.
 
 **Checklist**:
 - [ ] Find test fixtures using direct constructor
@@ -304,7 +304,7 @@ pytest tests/ -k "not slow" --tb=short
 import timeit
 
 setup = """
-from elspeth.core.security.classified_data import ClassifiedDataFrame
+from elspeth.core.security.classified_data import SecureDataFrame
 from elspeth.core.base.types import SecurityLevel
 import pandas as pd
 
@@ -313,7 +313,7 @@ df = pd.DataFrame({'col': [1, 2, 3]})
 
 # Measure factory method creation time
 result = timeit.timeit(
-    "ClassifiedDataFrame.create_from_datasource(df, SecurityLevel.SECRET)",
+    "SecureDataFrame.create_from_datasource(df, SecurityLevel.SECRET)",
     setup=setup,
     number=1000
 )
@@ -333,19 +333,19 @@ print(f"Average creation time: {result/1000*1000:.3f} μs")
 
 **Objective**: Update all relevant documentation.
 
-### 4.1 Update ClassifiedDataFrame Docstring
+### 4.1 Update SecureDataFrame Docstring
 
-**File**: `src/elspeth/core/security/classified_data.py`
+**File**: `src/elspeth/core/security/secure_data.py`
 
 **Add to module docstring**:
 ```python
-"""ClassifiedDataFrame: Trusted container for classified data (ADR-002 & ADR-002-A).
+"""SecureDataFrame: Trusted container for classified data (ADR-002 & ADR-002-A).
 
 Lifecycle:
 1. Datasources create initial frames via create_from_datasource()
 2. Plugins transform data via mutation or with_new_data()
-3. Plugins uplift classification via with_uplifted_classification()
-4. Runtime validation via validate_access_by() before access
+3. Plugins uplift classification via with_uplifted_security_level()
+4. Runtime validation via validate_compatible_with() before access
 
 Security Properties (ADR-002-A):
 - Only datasources can create frames (constructor protected)
@@ -355,14 +355,14 @@ Security Properties (ADR-002-A):
 
 Plugin Patterns:
     # Pattern 1: In-place mutation (recommended)
-    def process(self, frame: ClassifiedDataFrame) -> ClassifiedDataFrame:
+    def process(self, frame: SecureDataFrame) -> SecureDataFrame:
         frame.data['processed'] = transform(frame.data['input'])
-        return frame.with_uplifted_classification(self.get_security_level())
+        return frame.with_uplifted_security_level(self.get_security_level())
 
     # Pattern 2: New data generation
-    def process(self, frame: ClassifiedDataFrame) -> ClassifiedDataFrame:
+    def process(self, frame: SecureDataFrame) -> SecureDataFrame:
         new_df = self.llm.generate(...)
-        return frame.with_new_data(new_df).with_uplifted_classification(
+        return frame.with_new_data(new_df).with_uplifted_security_level(
             self.get_security_level()
         )
 """
@@ -378,13 +378,13 @@ Plugin Patterns:
 
 **Defense Layers**:
 - **Primary (Constructor Protection - ADR-002-A)**: ✅ TECHNICAL CONTROL
-  - ClassifiedDataFrame.__post_init__() blocks plugin creation
+  - SecureDataFrame.__post_init__() blocks plugin creation
   - Only datasources can create frames via create_from_datasource()
-  - Plugins MUST use with_uplifted_classification() (no alternative)
+  - Plugins MUST use with_uplifted_security_level() (no alternative)
   - Enforced by constructor validation
 
 - **Secondary (Automatic Uplifting)**: ✅ TECHNICAL CONTROL
-  - ClassifiedDataFrame.with_uplifted_classification() uses max()
+  - SecureDataFrame.with_uplifted_security_level() uses max()
   - Classification can only increase, never decrease
   - Immutable via frozen dataclass
 
@@ -399,39 +399,39 @@ Plugin Patterns:
 
 **Add section**:
 ```markdown
-## Working with ClassifiedDataFrame
+## Working with SecureDataFrame
 
 ### Creating Classified Frames
 
 **Datasources** (trusted sources):
 ```python
 # ✅ CORRECT - Use factory method
-frame = ClassifiedDataFrame.create_from_datasource(
+frame = SecureDataFrame.create_from_datasource(
     data=df,
-    classification=SecurityLevel.SECRET
+    security_level=SecurityLevel.SECRET
 )
 ```
 
 **Plugins** (transformations):
 ```python
 # ❌ WRONG - Direct constructor blocked
-frame = ClassifiedDataFrame(df, SecurityLevel.OFFICIAL)  # SecurityValidationError!
+frame = SecureDataFrame(df, SecurityLevel.OFFICIAL)  # SecurityValidationError!
 
 # ✅ CORRECT - Mutate existing frame
-def process(self, frame: ClassifiedDataFrame) -> ClassifiedDataFrame:
+def process(self, frame: SecureDataFrame) -> SecureDataFrame:
     frame.data['new_col'] = transform(frame.data['input'])
-    return frame.with_uplifted_classification(self.get_security_level())
+    return frame.with_uplifted_security_level(self.get_security_level())
 
 # ✅ CORRECT - Generate new data
-def process(self, frame: ClassifiedDataFrame) -> ClassifiedDataFrame:
+def process(self, frame: SecureDataFrame) -> SecureDataFrame:
     new_df = self.generate(frame.data)
-    return frame.with_new_data(new_df).with_uplifted_classification(
+    return frame.with_new_data(new_df).with_uplifted_security_level(
         self.get_security_level()
     )
 ```
 
 **Checklist**:
-- [ ] Update `classified_data.py` module docstring
+- [ ] Update `secure_data.py` module docstring
 - [ ] Update `THREAT_MODEL.md` T4 section
 - [ ] Create/update plugin development guide
 - [ ] Add examples to all new methods
@@ -456,7 +456,7 @@ def process(self, frame: ClassifiedDataFrame) -> ClassifiedDataFrame:
 ### 5.2 Commit Message Template
 
 ```
-Feat: ADR-002-A - Trusted Container Model for ClassifiedDataFrame
+Feat: ADR-002-A - Trusted Container Model for SecureDataFrame
 
 **What**: Constructor protection preventing plugins from creating arbitrary classifications.
 
@@ -477,7 +477,7 @@ Feat: ADR-002-A - Trusted Container Model for ClassifiedDataFrame
 **Tests** (5/5 passing):
 - test_invariant_plugin_cannot_create_frame_directly
 - test_invariant_datasource_can_create_frame
-- test_invariant_with_uplifted_classification_bypasses_check
+- test_invariant_with_uplifted_security_level_bypasses_check
 - test_invariant_with_new_data_preserves_classification
 - test_invariant_malicious_classification_laundering_blocked
 
@@ -490,7 +490,7 @@ Feat: ADR-002-A - Trusted Container Model for ClassifiedDataFrame
 - ✅ Suite runner characterization: 6/6 passing
 
 **Documentation**:
-- Updated ClassifiedDataFrame module docstring
+- Updated SecureDataFrame module docstring
 - Updated THREAT_MODEL.md T4 section
 - Added plugin development guide section
 

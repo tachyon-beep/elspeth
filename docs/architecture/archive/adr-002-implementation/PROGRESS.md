@@ -11,7 +11,7 @@
 | Phase | Status | Time Spent | Commits | Notes |
 |-------|--------|------------|---------|-------|
 | Phase 0: Security Properties & Threat Model | ✅ COMPLETE | 1.5h | 532d102 | Security invariants, threat model |
-| Phase 1: Core Security Primitives | ✅ COMPLETE | 1h | d83d7fd | ClassifiedDataFrame, envelope computation |
+| Phase 1: Core Security Primitives | ✅ COMPLETE | 1h | d83d7fd | SecureDataFrame, envelope computation |
 | Phase 2: Suite Runner Integration | ✅ COMPLETE | 3h | d07b867 | Start-time validation, integration tests |
 | **ADR-002-A: Trusted Container Model** | ✅ COMPLETE | 5.5h | 51c6d7f | Classification laundering prevention |
 | - Phase 0: Security Invariants | ✅ COMPLETE | 0.75h | - | 5 invariant tests (RED→GREEN) |
@@ -61,10 +61,10 @@
 
 ## Phase 1 Checkpoint (Not Yet Reached)
 
-**Commit**: `git commit -m "Feat: Core ADR-002 security primitives (ClassifiedDataFrame, envelope)"`
+**Commit**: `git commit -m "Feat: Core ADR-002 security primitives (SecureDataFrame, envelope)"`
 
 **Evidence**:
-- [ ] ClassifiedDataFrame implemented
+- [ ] SecureDataFrame implemented
 - [ ] Minimum clearance envelope computation working
 - [ ] BasePlugin validation methods added
 - [ ] All Phase 1 tests GREEN
@@ -80,7 +80,7 @@
 **Evidence**:
 - [ ] SuiteExecutionContext includes operating_security_level
 - [ ] suite_runner.py validates all plugins at start
-- [ ] Runtime failsafe in ClassifiedDataFrame.validate_access_by()
+- [ ] Runtime failsafe in SecureDataFrame.validate_compatible_with()
 - [ ] All Phase 2 tests GREEN
 - [ ] Integration with existing suite_runner working
 
@@ -236,10 +236,10 @@ None yet.
 
 **Time**: 1 hour
 
-**Commit**: d83d7fd - "Feat: Core ADR-002 security primitives (ClassifiedDataFrame, envelope)"
+**Commit**: d83d7fd - "Feat: Core ADR-002 security primitives (SecureDataFrame, envelope)"
 
 **Completed**:
-- ✅ ClassifiedDataFrame implemented (136 lines)
+- ✅ SecureDataFrame implemented (136 lines)
   - Frozen dataclass with immutable classification
   - Automatic uplifting via max() operation
   - Runtime validation failsafe
@@ -270,7 +270,7 @@ None yet.
 
 **Files Modified/Created**:
 ```
-A  src/elspeth/core/security/classified_data.py (NEW - 136 lines)
+A  src/elspeth/core/security/secure_data.py (NEW - 136 lines)
 M  src/elspeth/core/base/protocols.py (+51 lines - BasePlugin protocol)
 M  src/elspeth/core/experiments/suite_runner.py (+37 lines - envelope func)
 M  src/elspeth/core/security/__init__.py (+1 export)
@@ -379,7 +379,7 @@ A  docs/security/adr-002-classified-dataframe-hardening-delta.md (NEW)
 - Phase 5: Commit & review (0.5h) - Clean commit message
 
 **Security Property**:
-Only datasources can create ClassifiedDataFrame instances. Plugins can only uplift, never relabel. This prevents classification laundering attacks.
+Only datasources can create SecureDataFrame instances. Plugins can only uplift, never relabel. This prevents classification laundering attacks.
 
 **Risk Assessment**:
 - Low risk: Isolated change, clear scope
@@ -406,7 +406,7 @@ Only datasources can create ClassifiedDataFrame instances. Plugins can only upli
 - 5/5 tests in RED state (FAILING as expected) ✅
 - test_invariant_plugin_cannot_create_frame_directly → FAIL (no __post_init__)
 - test_invariant_datasource_can_create_frame → FAIL (no create_from_datasource())
-- test_invariant_with_uplifted_classification_bypasses_check → FAIL (no factory method)
+- test_invariant_with_uplifted_security_level_bypasses_check → FAIL (no factory method)
 - test_invariant_with_new_data_preserves_classification → FAIL (no with_new_data())
 - test_invariant_malicious_classification_laundering_blocked → FAIL (no protection)
 
@@ -423,7 +423,7 @@ Only datasources can create ClassifiedDataFrame instances. Plugins can only upli
 - Attack scenario from ADR-002-A specification captured in test
 - Tests define exact security properties implementation must satisfy
 
-**Next**: Phase 1 - Implement ClassifiedDataFrame hardening (make tests GREEN)
+**Next**: Phase 1 - Implement SecureDataFrame hardening (make tests GREEN)
 
 ---
 
@@ -437,7 +437,7 @@ Only datasources can create ClassifiedDataFrame instances. Plugins can only upli
 - ✅ Implemented __post_init__ constructor validation (frame inspection pattern)
 - ✅ Added create_from_datasource() class method (trusted source factory)
 - ✅ Added with_new_data() instance method (LLM/aggregation pattern)
-- ✅ Updated with_uplifted_classification() to bypass validation
+- ✅ Updated with_uplifted_security_level() to bypass validation
 - ✅ Fixed stack walking logic (walks up 5 frames to find trusted callers)
 - ✅ Updated Phase 1 tests to use new factory method
 - ✅ All 28 tests PASSING (no regressions)
@@ -452,7 +452,7 @@ Only datasources can create ClassifiedDataFrame instances. Plugins can only upli
 
 **Files Modified**:
 ```
-M  src/elspeth/core/security/classified_data.py (+107 lines)
+M  src/elspeth/core/security/secure_data.py (+107 lines)
    - Added _created_by_datasource field
    - Added __post_init__ validation with frame inspection
    - Added create_from_datasource() class method
@@ -468,7 +468,7 @@ M  tests/test_adr002_invariants.py (~15 lines)
 **Security Properties Verified**:
 1. ✅ **Constructor Protection**: Plugins cannot create frames directly (SecurityValidationError)
 2. ✅ **Trusted Source**: Datasources use factory method (create_from_datasource)
-3. ✅ **Internal Method Bypass**: with_uplifted_classification() and with_new_data() bypass validation
+3. ✅ **Internal Method Bypass**: with_uplifted_security_level() and with_new_data() bypass validation
 4. ✅ **Data Generation Pattern**: with_new_data() preserves classification
 5. ✅ **Attack Prevention**: Classification laundering attack blocked (end-to-end test)
 
@@ -476,12 +476,12 @@ M  tests/test_adr002_invariants.py (~15 lines)
 - Frame inspection walks up 5 stack frames to find trusted callers
 - Handles dataclass __init__ machinery (generated code)
 - Factory method uses __new__ to bypass __init__ and set _created_by_datasource=True
-- Breaking change: Direct construction ClassifiedDataFrame(data, level) now blocked
+- Breaking change: Direct construction SecureDataFrame(data, level) now blocked
 
 **Key Insights**:
 - Stack walking required accounting for dataclass machinery (__init__ is generated)
 - Breaking change handled gracefully - tests updated to demonstrate correct patterns
-- 78% code coverage on classified_data.py (3 uncovered: edge case fail-open paths)
+- 78% code coverage on secure_data.py (3 uncovered: edge case fail-open paths)
 - Classification laundering defense moved from certification to technical control
 
 **Next**: Phase 2 - Datasource migration (factory method adoption)
@@ -495,37 +495,37 @@ M  tests/test_adr002_invariants.py (~15 lines)
 **Status**: COMPLETE
 
 **Completed**:
-- ✅ Searched for all ClassifiedDataFrame() usage in production code
+- ✅ Searched for all SecureDataFrame() usage in production code
 - ✅ Updated docstring examples to use create_from_datasource()
-- ✅ Verified no datasources currently use ClassifiedDataFrame (future-proof)
+- ✅ Verified no datasources currently use SecureDataFrame (future-proof)
 - ✅ All 28 tests PASSING (no regressions)
 - ✅ MyPy clean ✅, Ruff clean ✅
 
 **Findings**:
-- **Zero production code using ClassifiedDataFrame** - feature defined in Phase 1 but not yet integrated
-- Only usage: Internal methods (with_uplifted_classification, with_new_data) - correctly bypass validation
+- **Zero production code using SecureDataFrame** - feature defined in Phase 1 but not yet integrated
+- Only usage: Internal methods (with_uplifted_security_level, with_new_data) - correctly bypass validation
 - Docstring examples updated to demonstrate correct patterns
 
 **Files Modified**:
 ```
-M  src/elspeth/core/security/classified_data.py (~10 lines)
-   - Updated with_uplifted_classification() docstring example
-   - Updated validate_access_by() docstring example
+M  src/elspeth/core/security/secure_data.py (~10 lines)
+   - Updated with_uplifted_security_level() docstring example
+   - Updated validate_compatible_with() docstring example
    - All examples now show create_from_datasource() pattern
 ```
 
 **Migration Status**:
-- Production datasources: 0 to migrate (not yet using ClassifiedDataFrame)
+- Production datasources: 0 to migrate (not yet using SecureDataFrame)
 - Test datasources: Already migrated in Phase 1 ✅
 - Future datasources: Will use create_from_datasource() from day 1 ✅
 
 **Test Status**:
 - 28/28 tests PASSING (no regressions) ✅
-- Coverage: 78% on classified_data.py (unchanged)
+- Coverage: 78% on secure_data.py (unchanged)
 
 **Key Insights**:
 - Phase 2 simpler than expected - no production migrations needed
-- ClassifiedDataFrame ready for adoption with correct patterns documented
+- SecureDataFrame ready for adoption with correct patterns documented
 - Factory method enforced for all future datasources (technical control)
 
 **Next**: Phase 3 - Integration testing & regression verification
@@ -564,7 +564,7 @@ A  tests/adr002_test_helpers.py (57 lines)
 ```
 M  tests/test_adr002_properties.py (~20 edits)
    - Fixed @settings decorator positioning (class → method level)
-   - Updated ClassifiedDataFrame() → create_from_datasource()
+   - Updated SecureDataFrame() → create_from_datasource()
    - Changed imports from test_adr002_invariants → adr002_test_helpers
 M  tests/test_adr002_invariants.py (no functional changes)
    - Uses shared test helpers
@@ -615,7 +615,7 @@ M  ADR002_IMPLEMENTATION/PROGRESS.md (all phase entries, status table)
 - **Commit SHA**: 51c6d7f
 - **Message**: "Feat: ADR-002-A Trusted Container Model - classification laundering prevention"
 - **Files Changed**: 4 files, +161/-25 lines
-  - classified_data.py: Constructor protection implementation
+  - secure_data.py: Constructor protection implementation
   - test_adr002a_invariants.py: 5 security invariant tests
   - test_adr002_invariants.py: Updated to use factory method
   - test_adr002_properties.py: Fixed decorators, updated patterns
@@ -628,7 +628,7 @@ M  ADR002_IMPLEMENTATION/PROGRESS.md (all phase entries, status table)
 - Foundation for test-first security development
 
 **Phase 1** (1h - d83d7fd):
-- ClassifiedDataFrame: Frozen, auto-uplifting container
+- SecureDataFrame: Frozen, auto-uplifting container
 - Minimum clearance envelope: MIN(all plugin levels)
 - BasePlugin protocol: Security level methods
 - 14/14 tests passing
@@ -642,7 +642,7 @@ M  ADR002_IMPLEMENTATION/PROGRESS.md (all phase entries, status table)
 **ADR-002-A** (5.5h - 51c6d7f):
 - Constructor protection: Frame inspection blocks plugins
 - Datasource factory: create_from_datasource() only
-- Plugin patterns: with_uplifted_classification(), with_new_data()
+- Plugin patterns: with_uplifted_security_level(), with_new_data()
 - 5/5 invariant tests + 177 total tests passing
 - 7500+ Hypothesis property examples
 
@@ -665,7 +665,7 @@ M  ADR002_IMPLEMENTATION/PROGRESS.md (all phase entries, status table)
 - Test-first security development extremely effective (RED→GREEN workflow)
 - ADR-002-A moved T4 defense from certification review to technical control
 - Breaking change (constructor blocking) handled cleanly via factory method
-- Zero production migrations needed (ClassifiedDataFrame not yet adopted)
+- Zero production migrations needed (SecureDataFrame not yet adopted)
 - Property-based testing found no edge cases (high confidence)
 
 **Status**: ✅ **IMPLEMENTATION COMPLETE**

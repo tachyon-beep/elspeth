@@ -17,7 +17,7 @@ and some descriptions reflect WRONG semantics. Use corrected ADR-002 specificati
 **Problem**: ADR-002 (accepted 2025-10-23) requires two-layer security enforcement:
 1. ✅ **Plugin-level** - Child plugins can't downgrade parent security levels (DONE - 9 tests passing)
 2. 🔄 **Suite-level** - Orchestrator operates at minimum clearance, high-security components refuse low-clearance envelopes (IN PROGRESS)
-   - ✅ Phase 1: Core primitives (ClassifiedDataFrame, envelope computation, BasePlugin) - 14/14 tests passing
+   - ✅ Phase 1: Core primitives (SecureDataFrame, envelope computation, BasePlugin) - 14/14 tests passing
    - 🔄 Phase 2: Suite runner integration (start-time validation, runtime failsafe)
 
 **Solution**: Add "minimum clearance envelope" model to `suite_runner.py` - orchestrator computes operating level, validates ALL components before data retrieval, with runtime failsafes in plugins.

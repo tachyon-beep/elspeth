@@ -56,7 +56,7 @@ We will establish formal **testing strategy** with **component-specific coverage
 **Components**:
 - `src/elspeth/core/security/` – Security enforcement, signing, audit logging
 - `src/elspeth/core/base/plugin.py` – BasePlugin security bones (ADR-004)
-- `src/elspeth/core/data/classified_data.py` – ClassifiedDataFrame (ADR-002-A)
+- `src/elspeth/core/data/secure_data.py` – SecureDataFrame (ADR-002-A)
 - `src/elspeth/core/pipeline/artifact_pipeline.py` – Security-aware artifact flow
 - Middleware: Content safety, prompt shielding
 

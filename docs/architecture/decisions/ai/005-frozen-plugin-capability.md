@@ -32,7 +32,7 @@ Add **mandatory `allow_downgrade: bool` parameter** to `BasePlugin.__init__()`:
 
 **Data Classifications (Can Only INCREASE)**:
 
-- UNOFFICIAL → OFFICIAL → SECRET (via `with_uplifted_classification()`)
+- UNOFFICIAL → OFFICIAL → SECRET (via `with_uplifted_security_level()`)
 - SECRET **CANNOT** downgrade to OFFICIAL/UNOFFICIAL (Bell-LaPadula "no write down")
 - Classification increases are EXPLICIT and AUDITED (never implicit)
 
@@ -134,12 +134,12 @@ class AzureDataSource(BasePlugin, DataSource):
             allow_downgrade=True  # ← Explicit
         )
     
-    def load_data(self, context: PluginContext) -> ClassifiedDataFrame:
+    def load_data(self, context: PluginContext) -> SecureDataFrame:
         effective = self.get_effective_level()
         # Filter blobs based on effective level
         if effective == SecurityLevel.OFFICIAL:
             blobs = [b for b in blobs if b.classification <= SecurityLevel.OFFICIAL]
-        return ClassifiedDataFrame.create_from_datasource(data, effective)
+        return SecureDataFrame.create_from_datasource(data, effective)
 ```
 
 **Frozen Plugin (Strict Enforcement)**:
@@ -152,10 +152,10 @@ class DedicatedSecretDataSource(BasePlugin, DataSource):
             allow_downgrade=False  # ← Frozen
         )
     
-    def load_data(self, context: PluginContext) -> ClassifiedDataFrame:
+    def load_data(self, context: PluginContext) -> SecureDataFrame:
         # Only participates in SECRET pipelines
         # No filtering needed - all data is SECRET
-        return ClassifiedDataFrame.create_from_datasource(data, SecurityLevel.SECRET)
+        return SecureDataFrame.create_from_datasource(data, SecurityLevel.SECRET)
 ```
 
 ## Behavior Matrix

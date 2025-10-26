@@ -39,14 +39,14 @@ class SecretClearedSink(BasePlugin, ResultSink):
 
 **Type**: `SecurityLevel` enum (same values as security_level)
 
-**Usage**: Data property, tracked by `ClassifiedDataFrame` (ADR-002-A)
+**Usage**: Data property, tracked by `SecureDataFrame` (ADR-002-A)
 
 **Example**:
 ```python
 # Note: Direct construction is blocked; only datasources can create frames
-classified_df = ClassifiedDataFrame.create_from_datasource(
+classified_df = SecureDataFrame.create_from_datasource(
     data=df,
-    classification=SecurityLevel.PROTECTED
+    security_level=SecurityLevel.PROTECTED
 )
 # This data requires PROTECTED clearance to access
 ```
@@ -302,7 +302,7 @@ Under normal operation, `operating_level = min(all clearances)`, so all componen
 
 ## Data Security Concepts
 
-### ClassifiedDataFrame
+### SecureDataFrame
 
 **Definition**: Immutable container for classified data that tracks security level and enforces access controls
 
@@ -316,9 +316,9 @@ Under normal operation, `operating_level = min(all clearances)`, so all componen
 **Example**:
 ```python
 # Datasource creates classified frame (factory method required)
-classified_df = ClassifiedDataFrame.create_from_datasource(
+classified_df = SecureDataFrame.create_from_datasource(
     data=df,
-    classification=SecurityLevel.PROTECTED
+    security_level=SecurityLevel.PROTECTED
 )
 
 # Data access is tracked but not validated at retrieval
@@ -339,17 +339,17 @@ df = classified_df.data  # Access underlying DataFrame
 **Example (ALLOWED)**:
 ```python
 # Datasource creates frame
-df = ClassifiedDataFrame.create_from_datasource(data, classification=SecurityLevel.OFFICIAL)
+df = SecureDataFrame.create_from_datasource(data, security_level=SecurityLevel.OFFICIAL)
 # Upgrade allowed (enforced by max() operation)
-df_upgraded = df.with_uplifted_classification(SecurityLevel.SECRET)  # ✅ OK
+df_upgraded = df.with_uplifted_security_level(SecurityLevel.SECRET)  # ✅ OK
 ```
 
 **Example (FORBIDDEN)**:
 ```python
-# Attempting to downgrade is prevented by with_uplifted_classification() using max()
-df = ClassifiedDataFrame.create_from_datasource(data, classification=SecurityLevel.SECRET)
+# Attempting to downgrade is prevented by with_uplifted_security_level() using max()
+df = SecureDataFrame.create_from_datasource(data, security_level=SecurityLevel.SECRET)
 # Attempting "downgrade" - max(SECRET, OFFICIAL) = SECRET (no downgrade occurs)
-df_attempted_downgrade = df.with_uplifted_classification(SecurityLevel.OFFICIAL)
+df_attempted_downgrade = df.with_uplifted_security_level(SecurityLevel.OFFICIAL)
 # Result: df_attempted_downgrade.classification == SECRET (not OFFICIAL)
 ```
 
@@ -633,7 +633,7 @@ plugin = MyPlugin(security_level=SecurityLevel.SECRET)
 | Term | Definition | Example Value | Where Used |
 |------|------------|---------------|------------|
 | `security_level` | Component clearance (capability) | `SecurityLevel.SECRET` | Plugin property |
-| `classification` | Data label (constraint) | `SecurityLevel.PROTECTED` | ClassifiedDataFrame |
+| `classification` | Data label (constraint) | `SecurityLevel.PROTECTED` | SecureDataFrame |
 | `operating_level` | Pipeline envelope (minimum) | `SecurityLevel.OFFICIAL` | Pipeline validation |
 | `allow_downgrade` | Downgrade permission (REQUIRED, no default) | `True` or `False` | Plugin constructor |
 | `correlation_id` | Request trace ID | `550e8400-...` | PluginContext.run_id |
@@ -647,7 +647,7 @@ plugin = MyPlugin(security_level=SecurityLevel.SECRET)
 
 - **[ADR-001](decisions/001-design-philosophy.md)** – Fail-closed principle, security-first priority
 - **[ADR-002](decisions/002-security-architecture.md)** – Bell-LaPadula MLS model, operating_level
-- **[ADR-002-A](decisions/002-a-trusted-container-model.md)** – ClassifiedDataFrame, high water mark
+- **[ADR-002-A](decisions/002-a-trusted-container-model.md)** – SecureDataFrame, high water mark
 - **[ADR-004](decisions/004-mandatory-baseplugin-inheritance.md)** – Security bones pattern (proposed)
 - **[ADR-005](decisions/005-frozen-plugin-capability.md)** – Frozen plugin capability (implemented)
 - **[ADR-006](decisions/006-security-critical-exception-policy.md)** – Exception taxonomy (proposed)

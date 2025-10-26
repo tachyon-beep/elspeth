@@ -4,7 +4,7 @@ These tests measure the performance overhead of ADR-002-A constructor protection
 to ensure the security features don't significantly impact suite execution time.
 
 Benchmarking Strategy:
-- Measure ClassifiedDataFrame creation time
+- Measure SecureDataFrame creation time
 - Compare with/without frame inspection overhead
 - Verify overhead is acceptable (<10μs per creation)
 
@@ -22,14 +22,14 @@ import pandas as pd
 import pytest
 
 from elspeth.core.base.types import SecurityLevel
-from elspeth.core.security.classified_data import ClassifiedDataFrame
+from elspeth.core.security.secure_data import SecureDataFrame
 
 
 class TestADR002APerformance:
     """Performance benchmarks for ADR-002-A constructor protection."""
 
     def test_constructor_overhead_acceptable(self):
-        """Verify ClassifiedDataFrame creation overhead is <10μs.
+        """Verify SecureDataFrame creation overhead is <10μs.
 
         Requirement from code review: Constructor protection should add
         minimal overhead (<10μs per frame creation).
@@ -50,8 +50,8 @@ class TestADR002APerformance:
 
         # Benchmark: Measure creation time (10,000 iterations)
         total_time = timeit.timeit(
-            "ClassifiedDataFrame.create_from_datasource(df, SecurityLevel.SECRET)",
-            setup="from elspeth.core.security.classified_data import ClassifiedDataFrame\n"
+            "SecureDataFrame.create_from_datasource(df, SecurityLevel.SECRET)",
+            setup="from elspeth.core.security.secure_data import SecureDataFrame\n"
                   "from elspeth.core.base.types import SecurityLevel\n"
                   "import pandas as pd\n"
                   "df = pd.DataFrame({'col1': [1, 2, 3], 'col2': ['a', 'b', 'c']})",
@@ -76,7 +76,7 @@ class TestADR002APerformance:
         print(f"   Status: {'PASS' if avg_time_per_creation < 10e-6 else 'FAIL'}")
 
     def test_uplifting_overhead_acceptable(self):
-        """Verify with_uplifted_classification() overhead is <5μs.
+        """Verify with_uplifted_security_level() overhead is <5μs.
 
         Uplifting is more common than creation (happens at every transform),
         so we use a tighter threshold (<5μs).
@@ -89,11 +89,11 @@ class TestADR002APerformance:
         """
         # Setup: Create initial frame
         df = pd.DataFrame({"col1": [1, 2, 3]})
-        frame = ClassifiedDataFrame.create_from_datasource(df, SecurityLevel.OFFICIAL)
+        frame = SecureDataFrame.create_from_datasource(df, SecurityLevel.OFFICIAL)
 
         # Benchmark: Measure uplifting time (10,000 iterations)
         total_time = timeit.timeit(
-            "frame.with_uplifted_classification(SecurityLevel.SECRET)",
+            "frame.with_uplifted_security_level(SecurityLevel.SECRET)",
             setup="from elspeth.core.base.types import SecurityLevel",
             number=10000,
             globals={"frame": frame, "SecurityLevel": SecurityLevel}
@@ -129,7 +129,7 @@ class TestADR002APerformance:
         # Setup: Create initial frame and replacement data
         df1 = pd.DataFrame({"input": [1, 2, 3]})
         df2 = pd.DataFrame({"output": [4, 5, 6]})
-        frame = ClassifiedDataFrame.create_from_datasource(df1, SecurityLevel.SECRET)
+        frame = SecureDataFrame.create_from_datasource(df1, SecurityLevel.SECRET)
 
         # Benchmark: Measure with_new_data time (10,000 iterations)
         total_time = timeit.timeit(
@@ -160,11 +160,11 @@ class TestADR002APerformance:
 
         Simulates a typical suite execution:
         - 1 datasource creation (create_from_datasource)
-        - 3 plugin transforms (with_uplifted_classification)
+        - 3 plugin transforms (with_uplifted_security_level)
         - 1 LLM data generation (with_new_data)
-        - 1 sink write (with_uplifted_classification)
+        - 1 sink write (with_uplifted_security_level)
 
-        Total: 6 ClassifiedDataFrame operations per suite
+        Total: 6 SecureDataFrame operations per suite
         Threshold: <100μs (0.1ms) for all operations
 
         Context: Typical suite runs ~5 minutes (300,000ms)
@@ -177,20 +177,20 @@ class TestADR002APerformance:
         # Benchmark: Simulate suite execution (1,000 iterations)
         def simulate_suite_execution():
             # Step 1: Datasource creates frame
-            frame1 = ClassifiedDataFrame.create_from_datasource(
+            frame1 = SecureDataFrame.create_from_datasource(
                 df_source, SecurityLevel.SECRET
             )
 
             # Step 2-4: Three plugin transforms
-            frame2 = frame1.with_uplifted_classification(SecurityLevel.SECRET)
-            frame3 = frame2.with_uplifted_classification(SecurityLevel.SECRET)
-            frame4 = frame3.with_uplifted_classification(SecurityLevel.SECRET)
+            frame2 = frame1.with_uplifted_security_level(SecurityLevel.SECRET)
+            frame3 = frame2.with_uplifted_security_level(SecurityLevel.SECRET)
+            frame4 = frame3.with_uplifted_security_level(SecurityLevel.SECRET)
 
             # Step 5: LLM generates new data
             frame5 = frame4.with_new_data(df_llm_output)
 
             # Step 6: Sink uplift
-            frame6 = frame5.with_uplifted_classification(SecurityLevel.SECRET)
+            frame6 = frame5.with_uplifted_security_level(SecurityLevel.SECRET)
 
             return frame6
 
@@ -233,7 +233,7 @@ ADR-002-A Performance Benchmark Coverage:
    - Rationale: Frame inspection (5-frame stack walk) overhead
 
 ✅ test_uplifting_overhead_acceptable
-   - Measures: with_uplifted_classification() time
+   - Measures: with_uplifted_security_level() time
    - Threshold: <5μs per uplift
    - Rationale: Most common operation, needs tighter bound
 

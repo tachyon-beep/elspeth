@@ -9,12 +9,14 @@
 ## Context
 
 Elspeth handles classified data and must provide comprehensive audit trails for compliance, security visibility, and operational monitoring. Multiple observability mechanisms exist:
+
 - **Audit logging** (`docs/architecture/audit-logging.md`) – Security events, data access
 - **Telemetry middleware** (Azure ML integration) – Performance metrics, cost tracking
 - **Health monitoring** middleware – Component health, dependency status
 - **Cost tracking** – LLM usage, storage costs
 
 These mechanisms are **implemented and working**, but **not architecturally governed**. Key questions remain unanswered:
+
 - What MUST be logged vs MAY be logged?
 - What MUST NOT be logged (PII, classified content)?
 - How long are logs retained?
@@ -24,6 +26,7 @@ These mechanisms are **implemented and working**, but **not architecturally gove
 ### Current State
 
 **Implemented and Working**:
+
 - ✅ Audit logging (`src/elspeth/core/security/audit.py`)
 - ✅ Telemetry middleware (Azure ML)
 - ✅ Health monitoring middleware
@@ -31,6 +34,7 @@ These mechanisms are **implemented and working**, but **not architecturally gove
 - ✅ Correlation ID propagation (partial)
 
 **Problems**:
+
 1. **No Global Policy**: What to log decided ad-hoc per component
 2. **Inconsistent PII Handling**: Some logs scrub PII, some don't
 3. **Undefined Retention**: Log retention varies by implementation
@@ -40,12 +44,14 @@ These mechanisms are **implemented and working**, but **not architecturally gove
 ### Compliance Requirements
 
 **Audit Trail Obligations**:
+
 - Government classifications: PSPF (Australian), FedRAMP (US)
 - Healthcare: HIPAA audit trail (access logs, data modification)
 - Finance: PCI-DSS audit logs (cardholder data access)
 - General: GDPR right to access (data processing logs)
 
 **Retention Requirements**:
+
 - Security events: 90 days minimum (compliance)
 - Performance metrics: 30 days (operational)
 - Cost data: 12 months (financial audit)
@@ -59,6 +65,7 @@ These mechanisms are **implemented and working**, but **not architecturally gove
 ## Decision
 
 We will establish a **Global Observability Policy** that defines:
+
 1. What MUST be logged (required for compliance)
 2. What MUST NOT be logged (PII, classified content)
 3. Retention policy requirements
@@ -76,6 +83,7 @@ We will establish a **Global Observability Policy** that defines:
 **Purpose**: Audit trail for security compliance, incident response
 
 **Events**:
+
 - **Authentication**: Login attempts, token issuance/revocation
 - **Authorization**: Access denied (clearance violations), permission checks
 - **Data Access**: Datasource loads, classified data retrieval
@@ -84,6 +92,7 @@ We will establish a **Global Observability Policy** that defines:
 - **Configuration Changes**: Security-related config modifications
 
 **Log Fields** (minimum):
+
 ```json
 {
   "event_type": "security_validation_failure",
@@ -110,6 +119,7 @@ We will establish a **Global Observability Policy** that defines:
 **Purpose**: Provenance, reproducibility, compliance (GDPR right to access)
 
 **Events**:
+
 - **Datasource Loads**: Which data retrieved, when, by whom
 - **Transform Executions**: LLM calls, middleware processing
 - **Sink Writes**: Where data written, format, destination
@@ -117,6 +127,7 @@ We will establish a **Global Observability Policy** that defines:
 - **Pipeline Execution**: Start/end, duration, row count
 
 **Log Fields** (minimum):
+
 ```json
 {
   "event_type": "datasource_load",
@@ -143,12 +154,14 @@ We will establish a **Global Observability Policy** that defines:
 **Purpose**: Debugging, incident response, reliability monitoring
 
 **Events**:
+
 - **All Exceptions**: Stack traces, error context
 - **Retry Attempts**: Transient errors, retry count, backoff delays
 - **Checkpoint Failures**: Checkpoint save/load errors
 - **Configuration Errors**: Validation failures, merge errors
 
 **Log Fields** (minimum):
+
 ```json
 {
   "event_type": "exception",
@@ -175,11 +188,13 @@ We will establish a **Global Observability Policy** that defines:
 **Purpose**: Financial audit, cost optimization
 
 **Events**:
+
 - **LLM Usage**: Tokens consumed, model, cost
 - **Storage Usage**: Blob storage operations, cost
 - **Compute Usage**: Pipeline execution time, resource utilization
 
 **Log Fields** (minimum):
+
 ```json
 {
   "event_type": "llm_usage",
@@ -206,6 +221,7 @@ We will establish a **Global Observability Policy** that defines:
 **Critical Principle**: PII and classified content **CAN be logged** because sink clearance is **enforced at pipeline construction** (Part 4). Lower-clearance sinks are **rejected immediately** (fail-fast), making cross-level leakage structurally impossible.
 
 **Security Model**:
+
 - **MLS Enforcement** (Part 4): Sink clearance validated at construction, mismatched sinks **abort pipeline immediately**
 - **No Lower-Cleared Sinks**: You cannot connect an UNOFFICIAL sink to a SECRET pipeline (construction fails)
 - **Data Minimization** (Part 2): Scrubbing is **operational choice** (full content vs metadata), not security requirement
@@ -231,6 +247,7 @@ We will establish a **Global Observability Policy** that defines:
 | **IP addresses** | ✅ Log for security events | ⚠️ Scrub for general logs | Security triage needs IP, but scrub non-security logs |
 
 **Example 1** (full context logging - operational choice):
+
 ```json
 {
   "event_type": "authentication_failure",
@@ -245,6 +262,7 @@ We will establish a **Global Observability Policy** that defines:
 ```
 
 **Example 2** (metadata-only logging - data minimization choice):
+
 ```json
 {
   "event_type": "authentication_failure",
@@ -280,6 +298,7 @@ We will establish a **Global Observability Policy** that defines:
 | **Artifact payloads** | ⚠️ Log for critical audit | ✅ Log metadata only | Bundle sink captures payloads, log metadata avoids duplication |
 
 **Example 1** (full content logging - debugging/audit choice):
+
 ```json
 {
   "event_type": "llm_call",
@@ -295,6 +314,7 @@ We will establish a **Global Observability Policy** that defines:
 ```
 
 **Example 2** (metadata-only logging - efficiency choice):
+
 ```json
 {
   "event_type": "llm_call",
@@ -314,6 +334,7 @@ We will establish a **Global Observability Policy** that defines:
 **Note**: Both examples use SECRET-cleared sinks (construction validated). The difference is **operational choice** (full text vs metadata), not security validation.
 
 **Scrubbing Recommendation**:
+
 - **For debugging/audit**: Log full content (sink already cleared, security enforced at construction)
 - **For performance/cost**: Log metadata only (reduces storage 90%+, sufficient for monitoring)
 - **Decision**: Based on compliance requirements vs operational efficiency
@@ -325,6 +346,7 @@ We will establish a **Global Observability Policy** that defines:
 **Policy**: **MUST NOT log** secrets, even to cleared sinks. Credentials are **never safe** in logs.
 
 **Prohibited Content** (no exceptions):
+
 - API keys, tokens, passwords
 - Encryption keys, signing keys (HMAC, RSA, ECDSA)
 - Connection strings with embedded credentials
@@ -332,12 +354,14 @@ We will establish a **Global Observability Policy** that defines:
 - Database passwords, service account credentials
 
 **Rationale**:
+
 - Credentials enable impersonation (lateral movement)
 - Log breaches would compromise authentication
 - No legitimate debugging use case for credential values
 - Key rotation invalidates logged credentials (noise)
 
 **Example** (correct handling):
+
 ```json
 {
   "event_type": "azure_openai_configured",
@@ -349,6 +373,7 @@ We will establish a **Global Observability Policy** that defines:
 ```
 
 **Example** (violation):
+
 ```json
 {
   "event_type": "azure_openai_configured",
@@ -363,6 +388,7 @@ We will establish a **Global Observability Policy** that defines:
 ### Scrubbing Implementation (Optional, Recommended)
 
 **When to Scrub**:
+
 - **Lower-cleared sinks**: MUST scrub classified content exceeding sink clearance
 - **Data minimization**: SHOULD scrub PII even for cleared sinks (reduce breach impact)
 - **Storage efficiency**: SHOULD use metadata instead of full payloads (reduce costs)
@@ -371,6 +397,7 @@ We will establish a **Global Observability Policy** that defines:
 **Scrubbing Mechanisms**:
 
 #### 1. Regex-Based Scrubbing
+
 ```python
 import re
 
@@ -392,6 +419,7 @@ def scrub_pii(text: str) -> str:
 ```
 
 #### 2. Field Allowlist
+
 ```python
 def scrub_log_entry(entry: dict, allowed_fields: set[str]) -> dict:
     """Scrub log entry to allowlist fields only."""
@@ -408,6 +436,7 @@ scrubbed = scrub_log_entry(raw_entry, ALLOWED_FIELDS)
 ```
 
 #### 3. Content-Based Scrubbing
+
 ```python
 def scrub_classified_content(entry: dict, sink_level: SecurityLevel) -> dict:
     """Scrub content exceeding sink clearance."""
@@ -425,11 +454,12 @@ def scrub_classified_content(entry: dict, sink_level: SecurityLevel) -> dict:
 ```
 
 **Scrubbing at Sink Boundary** (recommended):
+
 ```python
 class AuditLogSink(BasePlugin, ResultSink):
     """Audit log sink with automatic scrubbing."""
 
-    def write(self, log: ClassifiedAuditLog) -> None:
+    def write(self, log: SecureAuditLog) -> None:
         """Write logs with optional scrubbing based on sink clearance."""
         scrubbed_entries = []
 
@@ -462,9 +492,10 @@ class AuditLogSink(BasePlugin, ResultSink):
 | **Content Scrubbing** (Part 2) | Data minimization, efficiency | Optional, at logging or sink | ⚠️ Recommended |
 
 **Example**:
+
 ```python
 # SECRET pipeline with SECRET sink
-log = ClassifiedAuditLog(security_level=SecurityLevel.SECRET)
+log = SecureAuditLog(security_level=SecurityLevel.SECRET)
 sink = AzureBlobSink(security_level=SecurityLevel.SECRET)
 
 # Sink clearance: PASS (SECRET ≥ SECRET)
@@ -482,6 +513,7 @@ if sink.config.get("scrub_for_efficiency"):
 ### Key Architectural Innovation: Logs Flow to Sinks
 
 **Traditional Observability** (pre-ADR-013):
+
 ```python
 # ❌ Direct file writes - no clearance validation
 with open(f"logs/run_{run_id}.jsonl", "a") as f:
@@ -495,9 +527,10 @@ with open(f"logs/run_{run_id}.jsonl", "a") as f:
 ```
 
 **Elspeth Observability** (ADR-013):
+
 ```python
 # ✅ Logs flow through artifact pipeline with clearance validation
-audit_log = ClassifiedAuditLog(
+audit_log = SecureAuditLog(
     security_level=pipeline.effective_level,  # Inherits from pipeline
     entries=[...],
 )
@@ -522,13 +555,14 @@ if log_sink.security_level < audit_log.security_level:
 **Key Innovation**: **Logs are routed to sinks, not written to disk**. This enables:
 
 1. **Security by Construction**: Lower-clearance sinks rejected at pipeline construction (impossible to leak)
-2. **Uniform Treatment**: Logs treated as security artifacts (ClassifiedAuditLog ≈ ClassifiedDataFrame)
+2. **Uniform Treatment**: Logs treated as security artifacts (SecureAuditLog ≈ SecureDataFrame)
 3. **Environment Portability**: Same pipeline works with local file (dev) or Azure Blob Gov Cloud (prod)
 4. **Separation of Concerns**:
    - **Part 2 (Scrubbing)**: Operational efficiency (full content vs metadata)
    - **Part 4 (Sinks)**: Security enforcement (MLS clearance validation)
 
 **Example Configuration** (environment-specific sinks):
+
 ```yaml
 # Development environment
 audit_logging:
@@ -570,11 +604,13 @@ audit_logging:
 #### Rule 1: Generated at Entry Point
 
 **Entry points**:
+
 - Suite runner start: Generate `run_id`
 - Experiment start: Generate `experiment_id`
 - HTTP request: Extract from header or generate
 
 **Example**:
+
 ```python
 def run_suite():
     run_id = str(uuid.uuid4())  # Generate at entry
@@ -589,6 +625,7 @@ def run_suite():
 **Mechanism**: `PluginContext` object
 
 **Example**:
+
 ```python
 class PluginContext:
     run_id: str             # Suite-level correlation ID
@@ -598,6 +635,7 @@ class PluginContext:
 ```
 
 **All plugins receive context**:
+
 ```python
 def datasource_load(self, context: PluginContext):
     self.audit_logger.log_event(
@@ -614,6 +652,7 @@ def datasource_load(self, context: PluginContext):
 **Mandatory field**: All log entries MUST include `correlation_id`
 
 **Example**:
+
 ```json
 {
   "correlation_id": "550e8400-e29b-41d4-a716-446655440000",
@@ -697,6 +736,7 @@ for idx, row in enumerate(datasource.load_data()):
 #### End-to-End Trace Example
 
 **Suite execution trace**:
+
 ```
 run_20251026_143000_550e8400          (Suite starts)
   ├─ exp_baseline_comparison_abc123de  (Experiment 1 starts)
@@ -709,11 +749,13 @@ run_20251026_143000_550e8400          (Suite starts)
 ```
 
 **Log Query** (find all logs for Experiment 1):
+
 ```bash
 jq 'select(.experiment_id == "exp_baseline_comparison_abc123de")' logs/run_*.jsonl
 ```
 
 **Log Query** (find all logs for Item 2 in Experiment 1):
+
 ```bash
 jq 'select(.experiment_id == "exp_baseline_comparison_abc123de" and .item_id == "item_002")' logs/run_*.jsonl
 ```
@@ -723,6 +765,7 @@ jq 'select(.experiment_id == "exp_baseline_comparison_abc123de" and .item_id == 
 #### Cross-Component Propagation
 
 **PluginContext Structure**:
+
 ```python
 @dataclass
 class PluginContext:
@@ -735,6 +778,7 @@ class PluginContext:
 ```
 
 **Propagation Flow**:
+
 ```python
 # Suite runner creates context
 context = PluginContext(
@@ -756,6 +800,7 @@ for row in datasource.load_data(context):
 ```
 
 **All log entries include full hierarchy**:
+
 ```json
 {
   "run_id": "run_20251026_143000_550e8400",
@@ -774,6 +819,7 @@ for row in datasource.load_data(context):
 When Elspeth calls external APIs (Azure OpenAI, blob storage), correlation IDs propagate via HTTP headers:
 
 **Outbound HTTP Headers**:
+
 ```http
 X-Elspeth-Run-ID: run_20251026_143000_550e8400
 X-Elspeth-Experiment-ID: exp_baseline_comparison_abc123de
@@ -782,6 +828,7 @@ X-Request-ID: 550e8400-e29b-41d4-a716-446655440000  # Standard header
 ```
 
 **Implementation**:
+
 ```python
 import requests
 
@@ -822,6 +869,7 @@ def call_azure_openai(prompt: str, context: PluginContext):
 #### Scenario 1: User reports "Experiment failed"
 
 **Step 1**: Find run_id from user report
+
 ```bash
 # User provides: "My suite failed at 2:30 PM on Oct 26"
 ls logs/ | grep "run_20251026_1430"
@@ -829,12 +877,14 @@ ls logs/ | grep "run_20251026_1430"
 ```
 
 **Step 2**: Find all errors in that run
+
 ```bash
 jq 'select(.run_id == "run_20251026_143000_550e8400" and .event_type == "exception")' \
   logs/run_20251026_143000_550e8400.jsonl
 ```
 
 **Step 3**: Identify failing experiment
+
 ```bash
 jq 'select(.event_type == "exception") | .experiment_id' \
   logs/run_20251026_143000_550e8400.jsonl | sort | uniq
@@ -842,6 +892,7 @@ jq 'select(.event_type == "exception") | .experiment_id' \
 ```
 
 **Step 4**: Trace specific item that failed
+
 ```bash
 jq 'select(.experiment_id == "exp_baseline_comparison_abc123de" and .event_type == "exception") | .item_id' \
   logs/run_20251026_143000_550e8400.jsonl
@@ -849,12 +900,14 @@ jq 'select(.experiment_id == "exp_baseline_comparison_abc123de" and .event_type 
 ```
 
 **Step 5**: Get full trace for failing item
+
 ```bash
 jq 'select(.item_id == "item_002")' \
   logs/run_20251026_143000_550e8400.jsonl
 ```
 
 **Output** (chronological trace):
+
 ```json
 {"event_type": "datasource_load", "item_id": "item_002", "timestamp": "14:30:10Z"}
 {"event_type": "llm_call", "item_id": "item_002", "timestamp": "14:30:11Z"}
@@ -879,6 +932,7 @@ jq -s 'sort_by(.latency_ms) | reverse | .[0:10]'
 ```
 
 **Output** (top 10 slowest items):
+
 ```json
 [
   {"item_id": "item_042", "latency_ms": 15000},
@@ -893,11 +947,13 @@ jq -s 'sort_by(.latency_ms) | reverse | .[0:10]'
 ### Correlation with External Systems
 
 **Azure Application Insights Integration**:
+
 - Elspeth logs include `run_id`, `experiment_id`, `item_id`
 - Azure OpenAI logs include `X-Request-ID` (from HTTP header)
 - Join on `request_id` field to correlate Elspeth → Azure
 
 **Example Query** (Azure Kusto KQL):
+
 ```kql
 // Find all Azure OpenAI calls for Elspeth run
 requests
@@ -906,6 +962,7 @@ requests
 ```
 
 **SonarQube/Security Scanning Integration**:
+
 - Elspeth logs include `run_id` in security events
 - SonarQube analysis includes `run_id` in scan metadata
 - Join on `run_id` to correlate pipeline execution with security scan
@@ -929,9 +986,10 @@ requests
 **Critical Principle**: Logs are **metadata about classified operations** and inherit the security level of the system/pipeline that generated them.
 
 **Rationale** (ADR-002-A Trusted Container Model):
+
 - A log entry stating "Processed SECRET document X" is itself SECRET metadata
 - Even scrubbed logs (no payload content) reveal operational patterns at the system's classification level
-- Logs are trusted containers analogous to `ClassifiedDataFrame`
+- Logs are trusted containers analogous to `SecureDataFrame`
 
 **Inheritance Rules**:
 
@@ -955,21 +1013,23 @@ audit_log = AuditLog(
 **Design Principle**: Logs use the **same trusted container pattern** as pipeline data.
 
 **Container Model**:
-- **Data**: Wrapped in `ClassifiedDataFrame` (ADR-002-A)
-- **Logs**: Wrapped in `ClassifiedAuditLog` (analogous container)
+
+- **Data**: Wrapped in `SecureDataFrame` (ADR-002-A)
+- **Logs**: Wrapped in `SecureAuditLog` (analogous container)
 
 **Implementation**:
+
 ```python
 from dataclasses import dataclass
-from elspeth.core.data import ClassifiedDataFrame  # ADR-002-A
+from elspeth.core.data import SecureDataFrame  # ADR-002-A
 
 @dataclass
-class ClassifiedAuditLog:
-    """Trusted container for audit logs (analogous to ClassifiedDataFrame).
+class SecureAuditLog:
+    """Trusted container for audit logs (analogous to SecureDataFrame).
 
     Logs are metadata about classified operations and inherit the security
     level of the pipeline that generated them. This container enforces the
-    same security properties as ClassifiedDataFrame:
+    same security properties as SecureDataFrame:
 
     - Security level is immutable after creation
     - Cannot be downgraded (unless created with allow_downgrade=True)
@@ -992,20 +1052,21 @@ class ClassifiedAuditLog:
         """Prevent modification of security level after creation."""
         if hasattr(self, "_frozen") and self._frozen and name == "security_level":
             raise SecurityCriticalError(
-                "Cannot modify security_level of ClassifiedAuditLog after creation. "
+                "Cannot modify security_level of SecureAuditLog after creation. "
                 "Logs are trusted containers with immutable classification (ADR-002-A)."
             )
         super().__setattr__(name, value)
 ```
 
 **Factory Pattern** (only suite runner can create):
+
 ```python
 class ExperimentSuiteRunner:
-    """Suite runner creates ClassifiedAuditLog via factory."""
+    """Suite runner creates SecureAuditLog via factory."""
 
-    def _create_audit_log(self) -> ClassifiedAuditLog:
+    def _create_audit_log(self) -> SecureAuditLog:
         """Factory: Create audit log with pipeline security level."""
-        return ClassifiedAuditLog(
+        return SecureAuditLog(
             security_level=self.effective_level,  # Pipeline level
             allow_downgrade=self._pipeline_allow_downgrade,  # Pipeline policy
             entries=[],
@@ -1026,7 +1087,7 @@ class ExperimentSuiteRunner:
 
         # ... suite execution ...
 
-        # Validate sink clearance (same pattern as ClassifiedDataFrame)
+        # Validate sink clearance (same pattern as SecureDataFrame)
         if log_sink.security_level < audit_log.security_level:
             raise SecurityValidationError(
                 f"Sink lacks clearance for {audit_log.security_level} logs"
@@ -1036,10 +1097,11 @@ class ExperimentSuiteRunner:
         log_sink.write(audit_log)  # ✅ Clearance validated
 ```
 
-**Direct Creation Prevention** (same as ClassifiedDataFrame):
+**Direct Creation Prevention** (same as SecureDataFrame):
+
 ```python
 # ❌ Direct creation bypasses security controls
-audit_log = ClassifiedAuditLog(
+audit_log = SecureAuditLog(
     security_level=SecurityLevel.UNOFFICIAL,  # Lies about level!
     entries=[{"event": "processed SECRET data"}],  # Actually SECRET metadata
 )
@@ -1050,14 +1112,16 @@ audit_log = suite_runner._create_audit_log()  # Enforces pipeline level
 ```
 
 **Analogy to Data Containers**:
+
 | Component | Data Container | Log Container | Security Property |
 |-----------|---------------|---------------|-------------------|
-| **Pipeline Data** | `ClassifiedDataFrame` | `ClassifiedAuditLog` | Immutable security level |
+| **Pipeline Data** | `SecureDataFrame` | `SecureAuditLog` | Immutable security level |
 | **Factory** | Datasource only | Suite runner only | Authorized creation |
 | **Validation** | At sink boundary | At sink boundary | Clearance enforcement |
 | **Downgrade** | Via `allow_downgrade` | Via `allow_downgrade` | Explicit policy (ADR-005) |
 
 **Benefit**: Logs receive the **same security guarantees** as data:
+
 - ✅ Factory creation prevents manual classification tampering
 - ✅ Immutable security level after creation
 - ✅ Clearance validation at sink boundary
@@ -1070,6 +1134,7 @@ audit_log = suite_runner._create_audit_log()  # Enforces pipeline level
 **Requirement**: All log sinks MUST have clearance ≥ log security level (ADR-002 MLS enforcement).
 
 **Validation** (fail-fast):
+
 ```python
 def validate_log_sink_clearance(log: AuditLog, sink: ResultSink) -> None:
     """Validate sink has clearance for log security level."""
@@ -1083,6 +1148,7 @@ def validate_log_sink_clearance(log: AuditLog, sink: ResultSink) -> None:
 ```
 
 **Example** (clearance violation):
+
 ```python
 # Pipeline processes SECRET data
 pipeline = Pipeline(effective_security_level=SecurityLevel.SECRET)
@@ -1149,6 +1215,7 @@ class AuditLogger(BasePlugin):
 ```
 
 **Pipeline Integration**:
+
 ```python
 # Suite runner configures audit logger
 audit_logger = AuditLogger(
@@ -1208,6 +1275,7 @@ audit_logging:
 ```
 
 **Runtime Sink Selection**:
+
 ```python
 def select_log_sink(pipeline_level: SecurityLevel, config: dict) -> ResultSink:
     """Select appropriate log sink for pipeline security level."""
@@ -1240,16 +1308,19 @@ def select_log_sink(pipeline_level: SecurityLevel, config: dict) -> ResultSink:
 **Important Distinction**:
 
 **Log Scrubbing (Part 2)**: Removes PII, credentials, payload content
+
 - **Purpose**: Data minimization, prevent PII leakage
 - **Applies to**: Log content (fields within entries)
 - **Does NOT change**: Log security level (metadata is still classified)
 
 **Sink Clearance (Part 4)**: Routes logs to appropriately cleared storage
+
 - **Purpose**: MLS enforcement, ensure logs don't leak to lower-cleared systems
 - **Applies to**: Log destination (where logs are written)
 - **Validates**: Sink clearance ≥ log security level
 
 **Example**:
+
 ```python
 # SECRET pipeline processes PII data
 log_entry = {
@@ -1274,6 +1345,7 @@ audit_log = AuditLog(
 ```
 
 **Both mechanisms are REQUIRED**:
+
 - Scrubbing prevents PII leakage within a security level
 - Sink clearance prevents classification leakage across security levels
 
@@ -1330,6 +1402,7 @@ class ExperimentSuiteRunner:
 **Attack**: Exfiltrate SECRET operational metadata via misconfigured log sink
 
 **Without ADR-013 Part 4**:
+
 ```python
 # Attacker configures SECRET pipeline with UNOFFICIAL log sink
 settings = {
@@ -1350,6 +1423,7 @@ suite_runner.run()
 ```
 
 **With ADR-013 Part 4** (fail-fast validation):
+
 ```python
 # Same attacker configuration
 settings = {...}  # Local file sink for SECRET logs
@@ -1391,11 +1465,13 @@ suite_runner = ExperimentSuiteRunner(settings, suite_root)
 ### Cleanup Mechanism
 
 **Automatic Cleanup**:
+
 - Daily cron job: Delete logs older than retention period
 - Environment variable: `ELSPETH_LOG_MAX_AGE_DAYS` (override retention)
 - Graceful degradation: If cleanup fails, log warning (don't block pipeline)
 
 **Manual Cleanup**:
+
 - CLI command: `elspeth logs clean --before 2025-09-26`
 - Confirmation required for bulk deletion
 
@@ -1412,6 +1488,7 @@ suite_runner = ExperimentSuiteRunner(settings, suite_root)
 **Rationale**: Security audit trail is non-negotiable. If we can't log security events, operation is insecure.
 
 **Example**:
+
 ```python
 try:
     audit_logger.log_security_event("clearance_violation", ...)
@@ -1431,6 +1508,7 @@ except Exception as exc:
 **Rationale**: Observability is important but should not block pipeline execution (ADR-001 priority #3: Availability).
 
 **Example**:
+
 ```python
 try:
     telemetry_logger.log_performance("llm_latency", ...)
@@ -1448,6 +1526,7 @@ except Exception as exc:
 **Rationale**: Disk full should trigger cleanup, not abort pipeline.
 
 **Example**:
+
 ```python
 try:
     log_file.write(log_entry)
@@ -1476,6 +1555,7 @@ except OSError as exc:
 **Configuration**: Minimal (file path, retention)
 
 **Example**:
+
 ```python
 class GenericAuditLogger(AuditLogger):
     """Generic file-based audit logger."""
@@ -1501,6 +1581,7 @@ class GenericAuditLogger(AuditLogger):
 **Purpose**: Azure ML workspace integration (performance, cost)
 
 **Features**:
+
 - Azure ML Run tracking
 - Cost attribution (Azure Cost Management)
 - Performance dashboards (Azure Monitor)
@@ -1508,6 +1589,7 @@ class GenericAuditLogger(AuditLogger):
 **Configuration**: Azure ML workspace, experiment name
 
 **Example**:
+
 ```python
 class AzureMLTelemetryMiddleware(TelemetryMiddleware):
     """Azure ML-specific telemetry."""
@@ -1524,6 +1606,7 @@ class AzureMLTelemetryMiddleware(TelemetryMiddleware):
 **Purpose**: Component health checks, dependency monitoring
 
 **Features**:
+
 - HTTP health endpoints (`/health`, `/ready`)
 - Dependency checks (database, blob storage)
 - Circuit breaker integration
@@ -1593,15 +1676,18 @@ middleware:
 ### Implementation Checklist
 
 **Phase 1: Policy Formalization** (P1, 1 hour):
+
 - [ ] Formalize as ADR (this document)
 - [ ] Update audit logging documentation
 
 **Phase 2: Scrubbing Enhancement** (P1, 2 hours):
+
 - [ ] Implement sensitive data scrubbing (regex + allowlist)
 - [ ] Add PII detection (emails, SSNs, phone numbers)
 - [ ] Test scrubbing with realistic data
 
 **Phase 3: Compliance Validation** (P1, 1 hour):
+
 - [ ] Verify 90-day retention for security events
 - [ ] Verify correlation ID propagation
 - [ ] Verify prohibited content not logged
@@ -1623,6 +1709,7 @@ middleware:
 
 **Document Status**: DRAFT – Requires review and acceptance
 **Next Steps**:
+
 1. Review with team (retention periods, failure handling)
 2. Implement sensitive data scrubbing
 3. Validate compliance (90-day retention, correlation IDs)

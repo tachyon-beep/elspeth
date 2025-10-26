@@ -2,7 +2,7 @@
 
 ## Overview
 
-This analysis provides a comprehensive inventory and migration plan for adapting the Elspeth plugin architecture to use ClassifiedDataFrame/ClassifiedData containers for ADR-002 security enforcement.
+This analysis provides a comprehensive inventory and migration plan for adapting the Elspeth plugin architecture to use SecureDataFrame/ClassifiedData containers for ADR-002 security enforcement.
 
 **Three documents are provided:**
 
@@ -28,7 +28,7 @@ This analysis provides a comprehensive inventory and migration plan for adapting
 - Artifact pipeline (already supports security metadata)
 
 ### What Needs Classification
-1. **DataFrames** → ClassifiedDataFrame (4 source plugins)
+1. **DataFrames** → SecureDataFrame (4 source plugins)
 2. **Row context dicts** → ClassifiedData[dict] (in runner)
 3. **LLM request metadata** → ClassifiedData[dict] (optional, in middleware)
 4. **Row result dicts** → wrapped in ClassifiedData[dict] (in aggregators)
@@ -75,13 +75,13 @@ These 6 changes form the critical path and must be completed first.
 ### Phase 1: Infrastructure (2-3 hours)
 1. Create `ClassifiedData[T]` generic wrapper (if not existing)
 2. Add utility functions (unwrap, wrap, uplift)
-3. Add ClassifiedDataFrame.head() support
+3. Add SecureDataFrame.head() support
 
 ### Phase 2: Critical Path (8-10 hours)
 1. Update DataSource protocol
 2. Update all 4 datasources
 3. Update orchestrator.py
-4. Update runner.py for ClassifiedDataFrame input
+4. Update runner.py for SecureDataFrame input
 5. Wrap row context in ClassifiedData[dict]
 
 ### Phase 3: Middleware (5-7 hours)
@@ -106,8 +106,8 @@ These 6 changes form the critical path and must be completed first.
 
 ### 1. Strict vs Flexible Type Signatures?
 **Recommendation: STRICT**
-- `DataSource.load()` → `ClassifiedDataFrame` (not union)
-- `ExperimentRunner.run(df)` → accepts `ClassifiedDataFrame`
+- `DataSource.load()` → `SecureDataFrame` (not union)
+- `ExperimentRunner.run(df)` → accepts `SecureDataFrame`
 - Enforces security guarantees at type level
 
 ### 2. Where to wrap row context?
@@ -134,7 +134,7 @@ These 6 changes form the critical path and must be completed first.
 All relative to `/home/john/elspeth/src/elspeth/`
 
 ### Critical Path Files
-- `core/security/classified_data.py` - Existing ClassifiedDataFrame
+- `core/security/secure_data.py` - Existing SecureDataFrame
 - `core/orchestrator.py` - Main entry point (181 lines)
 - `core/experiments/runner.py` - Core runner (950+ lines)
 - `core/base/protocols.py` - Protocol definitions
@@ -158,9 +158,9 @@ def load(self) -> pd.DataFrame:
 
 ### After: Datasource
 ```python
-def load(self) -> ClassifiedDataFrame:
+def load(self) -> SecureDataFrame:
     df = pd.read_csv(...)
-    return ClassifiedDataFrame.create_from_datasource(
+    return SecureDataFrame.create_from_datasource(
         df, 
         SecurityLevel(self.security_level)
     )
@@ -176,7 +176,7 @@ payload = runner.run(df)
 
 ### After: Orchestrator
 ```python
-classified_df = self.datasource.load()  # Returns ClassifiedDataFrame
+classified_df = self.datasource.load()  # Returns SecureDataFrame
 if self.config.max_rows:
     classified_df = classified_df.head(self.config.max_rows)  # New method
 payload = runner.run(classified_df)  # Updated signature
@@ -203,7 +203,7 @@ context = ClassifiedData(context_dict, frame.classification)
 - `test_security_uplifting.py` - max() operation on classifications
 
 ### Integration Tests
-- `test_datasource_to_orchestrator.py` - ClassifiedDataFrame propagation
+- `test_datasource_to_orchestrator.py` - SecureDataFrame propagation
 - `test_orchestrator_to_runner.py` - DataFrame passing
 - `test_runner_row_processing.py` - Row context classification
 - `test_middleware_uplifting.py` - Classification through middleware chain
@@ -211,7 +211,7 @@ context = ClassifiedData(context_dict, frame.classification)
 ### End-to-End Tests
 - `test_full_pipeline_classification.py` - Complete data flow
 - `test_classification_high_water_mark.py` - Verify uplifting works
-- `test_runtime_failsafes.py` - validate_access_by() enforcement
+- `test_runtime_failsafes.py` - validate_compatible_with() enforcement
 
 ### Security Tests
 - `test_unauthorized_access_bypass.py` - Catch clearance violations
@@ -225,20 +225,20 @@ If migration encounters critical issues:
 1. **Code Review**: Revert to using DataFrame.attrs for classification
 2. **Keep ClassifiedData**: Even if not used in runner, keep infrastructure
 3. **Partial Migration**: Migrate critical path only, defer plugins for later
-4. **Feature Flag**: Make ClassifiedDataFrame optional during transition
+4. **Feature Flag**: Make SecureDataFrame optional during transition
 
 ## Success Criteria
 
 Migration is complete when:
 
-1. All datasources return ClassifiedDataFrame
-2. Orchestrator handles ClassifiedDataFrame
-3. Runner processes ClassifiedDataFrame
+1. All datasources return SecureDataFrame
+2. Orchestrator handles SecureDataFrame
+3. Runner processes SecureDataFrame
 4. Row context is wrapped in ClassifiedData[dict]
 5. Middleware chain preserves and uplifts classification
 6. All 70 plugins verified (changed or confirmed no change needed)
 7. Classification uplifting tested through full pipeline
-8. Runtime failsafes (validate_access_by) tested
+8. Runtime failsafes (validate_compatible_with) tested
 9. No regression in existing functionality
 10. Performance impact < 5%
 

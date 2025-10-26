@@ -180,7 +180,7 @@ mutmut run --paths-to-mutate src/elspeth/core/base/plugin.py
               allow_downgrade=False  # ← Frozen behavior
           )
 
-      def load_data(self, context: PluginContext) -> ClassifiedDataFrame:
+      def load_data(self, context: PluginContext) -> SecureDataFrame:
           # Will only operate in SECRET pipelines
           ...
   ```

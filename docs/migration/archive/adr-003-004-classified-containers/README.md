@@ -24,7 +24,7 @@ This migration implements **universal adoption** of the ADR-002-A Trusted Contai
 ### Two-Phase Approach (INTEGRATED)
 
 **Phase 0: Terminology Rename** (12-16 hours, 1.5-2 days)
-- Rename `ClassifiedDataFrame` → `SecureDataFrame`
+- Rename `SecureDataFrame` → `SecureDataFrame`
 - Rename `.classification` → `.security_level` (aligns with existing 529 uses of `security_level`)
 - Update all documentation for universal applicability (removes government-specific connotations)
 - **Pre-1.0 Approach**: Clean cut-over, no deprecation shims (fix-on-fail)
@@ -40,7 +40,7 @@ This migration implements **universal adoption** of the ADR-002-A Trusted Contai
 ### What We're Doing
 
 **Terminology Rename** (Phase 0):
-- `ClassifiedDataFrame` → `SecureDataFrame` (universal terminology)
+- `SecureDataFrame` → `SecureDataFrame` (universal terminology)
 - `.classification` field → `.security_level` field (semantic alignment with codebase)
 - `classified_material` middleware → `sensitive_material` middleware (content detection clarity)
 
@@ -205,10 +205,10 @@ This folder contains all planning artifacts for the ADR-003+004 migration:
 **Branch**: `refactor/terminology-secure-data`
 
 **Sub-Phase 0.1: Core Code** (4-5 hours)
-- Rename module: `classified_data.py` → `secure_data.py`
-- Rename class: `ClassifiedDataFrame` → `SecureDataFrame`
+- Rename module: `secure_data.py` → `secure_data.py`
+- Rename class: `SecureDataFrame` → `SecureDataFrame`
 - Rename field: `.classification` → `.security_level`
-- Rename methods: `with_uplifted_classification()` → `with_uplifted_security_level()`
+- Rename methods: `with_uplifted_security_level()` → `with_uplifted_security_level()`
 - Rename middleware: `classified_material` → `sensitive_material`
 - Update all imports across codebase
 - **Exit Criteria**: MyPy clean, Ruff clean (tests will fail - expected)
@@ -645,8 +645,8 @@ Without this, ADR-002 security validation **never runs** in production (isinstan
 
 | Category | Files | Examples | Change |
 |----------|-------|----------|--------|
-| **Core Module** | 1 | `classified_data.py` | → `secure_data.py` |
-| **Core Class** | 14 source + 14 test | `ClassifiedDataFrame` | → `SecureDataFrame` |
+| **Core Module** | 1 | `secure_data.py` | → `secure_data.py` |
+| **Core Class** | 14 source + 14 test | `SecureDataFrame` | → `SecureDataFrame` |
 | **Field Name** | 14 source + 14 test | `.classification` | → `.security_level` |
 | **Middleware** | 1 + tests | `classified_material.py` | → `sensitive_material.py` |
 | **Documentation** | 50 files | "classified data" | → "secure data" |
@@ -765,7 +765,7 @@ result = secure_df.with_uplifted_security_level(plugin.get_security_level())
 - ✅ All method names updated (`with_uplifted_security_level`)
 - ✅ All 800+ tests passing (100%)
 - ✅ MyPy clean, Ruff clean
-- ✅ **No "ClassifiedDataFrame" references anywhere** (clean cut-over, pre-1.0)
+- ✅ **No "SecureDataFrame" references anywhere** (clean cut-over, pre-1.0)
 - ✅ All current documentation updated
 - ✅ All config files updated (`classified_material` → `sensitive_material`)
 - ✅ Sample suite runs with new terminology
@@ -845,7 +845,7 @@ result = secure_df.with_uplifted_security_level(plugin.get_security_level())
 ### Phase 0: Rename Testing
 - **After code rename**: Tests will fail (expected) - 14 test files need updating
 - **After test rename**: All 800+ tests must pass (100%)
-- **Verification**: MyPy clean, Ruff clean, no "ClassifiedDataFrame" references
+- **Verification**: MyPy clean, Ruff clean, no "SecureDataFrame" references
 
 ### Phase 1: Invariant Tests (SecureData[T])
 - **5+ core properties**: Constructor protection, uplifting, immutability, unwrap/wrap round-trip
@@ -869,7 +869,7 @@ result = secure_df.with_uplifted_security_level(plugin.get_security_level())
 
 ### ✅ Ready (Unblocked)
 - ADR-002-A Trusted Container Model complete (72 passing tests)
-- `ClassifiedDataFrame` fully implemented with constructor protection
+- `SecureDataFrame` fully implemented with constructor protection
 - Comprehensive test suite exists (800+ tests)
 - Clear migration path documented (rename + adoption)
 
@@ -1019,7 +1019,7 @@ During complex function refactoring work, we identified a **critical security ga
 - **Quick Summary**: `MIGRATION_SUMMARY.txt` (this folder)
 
 ### Code References (After Phase 0)
-- **SecureDataFrame**: `src/elspeth/core/security/secure_data.py` (renamed from `classified_data.py`)
+- **SecureDataFrame**: `src/elspeth/core/security/secure_data.py` (renamed from `secure_data.py`)
 - **Datasources**: `src/elspeth/plugins/nodes/sources/_csv_base.py`
 - **Orchestrator**: `src/elspeth/core/orchestrator.py`
 - **Runner**: `src/elspeth/core/experiments/runner.py`

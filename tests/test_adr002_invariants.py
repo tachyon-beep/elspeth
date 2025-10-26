@@ -21,7 +21,7 @@ from pathlib import Path
 from typing import Any
 
 # Import types that already exist
-from elspeth.core.security import SecurityLevel, ClassifiedDataFrame
+from elspeth.core.security import SecurityLevel, SecureDataFrame
 
 # NOTE: These imports will fail until Phase 1-2 implementation
 # This is EXPECTED for test-first development
@@ -259,7 +259,7 @@ class TestInvariantClassificationUplifting:
     THREAT: If uplifting manual/forgotten → classification mislabeling
             (OFFICIAL data through SECRET LLM stays labeled OFFICIAL).
 
-    DEFENSE: ClassifiedDataFrame.with_uplifted_classification() enforces uplifting.
+    DEFENSE: SecureDataFrame.with_uplifted_security_level() enforces uplifting.
     """
 
     def test_uplifting_to_higher_classification(self):
@@ -267,19 +267,19 @@ class TestInvariantClassificationUplifting:
 
         Given: OFFICIAL data
         When: Uplifting to SECRET
-        Then: New ClassifiedDataFrame with SECRET classification
+        Then: New SecureDataFrame with SECRET classification
         """
         import pandas as pd
 
-        df = ClassifiedDataFrame.create_from_datasource(
+        df = SecureDataFrame.create_from_datasource(
             data=pd.DataFrame({"col": [1, 2, 3]}),
-            classification=SecurityLevel.OFFICIAL
+            security_level=SecurityLevel.OFFICIAL
         )
 
-        uplifted = df.with_uplifted_classification(SecurityLevel.SECRET)
+        uplifted = df.with_uplifted_security_level(SecurityLevel.SECRET)
 
-        assert uplifted.classification == SecurityLevel.SECRET
-        assert df.classification == SecurityLevel.OFFICIAL, \
+        assert uplifted.security_level == SecurityLevel.SECRET
+        assert df.security_level == SecurityLevel.OFFICIAL, \
             "Original should remain unchanged (immutability)"
 
     def test_uplifting_does_not_downgrade(self):
@@ -291,33 +291,33 @@ class TestInvariantClassificationUplifting:
         """
         import pandas as pd
 
-        df = ClassifiedDataFrame.create_from_datasource(
+        df = SecureDataFrame.create_from_datasource(
             data=pd.DataFrame({"col": [1, 2, 3]}),
-            classification=SecurityLevel.SECRET
+            security_level=SecurityLevel.SECRET
         )
 
         # "Uplift" to lower level should keep higher level
-        result = df.with_uplifted_classification(SecurityLevel.OFFICIAL)
+        result = df.with_uplifted_security_level(SecurityLevel.OFFICIAL)
 
-        assert result.classification == SecurityLevel.SECRET, \
+        assert result.security_level == SecurityLevel.SECRET, \
             "Classification must not downgrade (max operation)"
 
     def test_classification_immutable(self):
         """Classification MUST be immutable after creation.
 
-        Given: ClassifiedDataFrame created
+        Given: SecureDataFrame created
         When: Attempting to modify classification attribute
         Then: AttributeError (frozen dataclass)
         """
         import pandas as pd
 
-        df = ClassifiedDataFrame.create_from_datasource(
+        df = SecureDataFrame.create_from_datasource(
             data=pd.DataFrame({"col": [1, 2, 3]}),
-            classification=SecurityLevel.OFFICIAL
+            security_level=SecurityLevel.OFFICIAL
         )
 
         with pytest.raises(AttributeError):
-            df.classification = SecurityLevel.UNOFFICIAL
+            df.security_level = SecurityLevel.UNOFFICIAL
 
 
 # ============================================================================
@@ -326,7 +326,7 @@ class TestInvariantClassificationUplifting:
 
 
 @pytest.mark.skipif(
-    ClassifiedDataFrame is None,
+    SecureDataFrame is None,
     reason="Phase 1 not implemented yet (expected for test-first)"
 )
 class TestInvariantOutputClassification:
@@ -346,21 +346,21 @@ class TestInvariantOutputClassification:
         """
         import pandas as pd
 
-        input_df = ClassifiedDataFrame.create_from_datasource(
+        input_df = SecureDataFrame.create_from_datasource(
             data=pd.DataFrame({"text": ["test"]}),
-            classification=SecurityLevel.OFFICIAL
+            security_level=SecurityLevel.OFFICIAL
         )
 
         # Simulate transform by SECRET component using proper pattern
         component_level = SecurityLevel.SECRET
 
-        # Proper ADR-002-A pattern: with_new_data() then with_uplifted_classification()
+        # Proper ADR-002-A pattern: with_new_data() then with_uplifted_security_level()
         output_df = input_df.with_new_data(
             pd.DataFrame({"transformed": ["result"]})
-        ).with_uplifted_classification(component_level)
+        ).with_uplifted_security_level(component_level)
 
-        assert output_df.classification >= input_df.classification
-        assert output_df.classification == SecurityLevel.SECRET
+        assert output_df.security_level >= input_df.security_level
+        assert output_df.security_level == SecurityLevel.SECRET
 
     def test_same_level_transform_preserves_classification(self):
         """Transform at same level MUST preserve classification.
@@ -371,20 +371,20 @@ class TestInvariantOutputClassification:
         """
         import pandas as pd
 
-        input_df = ClassifiedDataFrame.create_from_datasource(
+        input_df = SecureDataFrame.create_from_datasource(
             data=pd.DataFrame({"text": ["test"]}),
-            classification=SecurityLevel.OFFICIAL
+            security_level=SecurityLevel.OFFICIAL
         )
 
         # Simulate transform by OFFICIAL component using proper pattern
         component_level = SecurityLevel.OFFICIAL
 
-        # Proper ADR-002-A pattern: with_new_data() then with_uplifted_classification()
+        # Proper ADR-002-A pattern: with_new_data() then with_uplifted_security_level()
         output_df = input_df.with_new_data(
             pd.DataFrame({"transformed": ["result"]})
-        ).with_uplifted_classification(component_level)
+        ).with_uplifted_security_level(component_level)
 
-        assert output_df.classification == input_df.classification
+        assert output_df.security_level == input_df.security_level
 
 
 # ============================================================================

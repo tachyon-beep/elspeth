@@ -9,7 +9,7 @@ Proposed (2025-10-25)
 Elspeth implements Bell-LaPadula Multi-Level Security (MLS) for handling classified data ranging from UNOFFICIAL to SECRET (ADR-002, ADR-002-A). The security model relies on **security invariants** that must hold at all times:
 
 1. **Classification monotonicity** (ADR-002-A) – Classifications can only increase (high water mark), never decrease
-2. **Container integrity** (ADR-002-A) – Classified data cannot escape `ClassifiedDataFrame` boundaries without explicit authorization
+2. **Container integrity** (ADR-002-A) – Classified data cannot escape `SecureDataFrame` boundaries without explicit authorization
 3. **Metadata immutability** (ADR-002-A) – Security metadata (classification levels, provenance) cannot be tampered with
 4. **Start-time envelope validation** (ADR-002) – Operating envelope computed before data retrieval
 
@@ -56,7 +56,7 @@ def process_batch(items):
 ```python
 # Test code pattern that accidentally deployed to production
 try:
-    classified.with_uplifted_classification(SecurityLevel.UNOFFICIAL)  # Bug - downgrade!
+    classified.with_uplifted_security_level(SecurityLevel.UNOFFICIAL)  # Bug - downgrade!
 except SecurityValidationError:
     pass  # ❌ Test code catches invariant violation, masks critical bug
 ```
@@ -234,14 +234,14 @@ class SecurityCriticalError(Exception):
 #### Production Code - Invariant Violations (Fail-Loud)
 
 ```python
-# src/elspeth/core/security/classified_data.py
+# src/elspeth/core/security/secure_data.py
 
 from elspeth.core.security.exceptions import (
     SecurityCriticalError,
     ENABLE_SECURITY_CRITICAL_EXCEPTIONS,
 )
 
-def with_uplifted_classification(self, new_level: SecurityLevel) -> ClassifiedDataFrame:
+def with_uplifted_security_level(self, new_level: SecurityLevel) -> SecureDataFrame:
     """Uplift classification (high water mark principle).
 
     Raises:
@@ -264,11 +264,11 @@ def with_uplifted_classification(self, new_level: SecurityLevel) -> ClassifiedDa
                 cve_id="CVE-ADR-002-A-004",
                 classification_level=self.classification,
             )
-        return ClassifiedDataFrame(self.data, new_level)
+        return SecureDataFrame(self.data, new_level)
     else:
         # OLD BEHAVIOR (during migration): Silent downgrade prevention
         uplifted_classification = max(self.classification, new_level)
-        return ClassifiedDataFrame(self.data, uplifted_classification)
+        return SecureDataFrame(self.data, uplifted_classification)
 
 
 def __setattr__(self, name: str, value: Any) -> None:
@@ -334,11 +334,11 @@ def test_classification_downgrade_raises_critical_error():
     from elspeth.core.security.exceptions import SecurityCriticalError
 
     df = pd.DataFrame({"data": [1, 2, 3]})
-    classified = ClassifiedDataFrame.create_from_datasource(df, SecurityLevel.SECRET)
+    classified = SecureDataFrame.create_from_datasource(df, SecurityLevel.SECRET)
 
     # ✅ Tests ARE allowed to catch SecurityCriticalError
     with pytest.raises(SecurityCriticalError) as exc_info:
-        classified.with_uplifted_classification(SecurityLevel.UNOFFICIAL)  # Downgrade!
+        classified.with_uplifted_security_level(SecurityLevel.UNOFFICIAL)  # Downgrade!
 
     # Verify error details
     assert "downgrade" in str(exc_info.value).lower()
@@ -351,7 +351,7 @@ def test_classification_downgrade_raises_critical_error():
 def test_metadata_tampering_raises_critical_error():
     """Verify security metadata cannot be modified after creation."""
 
-    classified = ClassifiedDataFrame.create_from_datasource(df, SecurityLevel.SECRET)
+    classified = SecureDataFrame.create_from_datasource(df, SecurityLevel.SECRET)
 
     with pytest.raises(SecurityCriticalError) as exc_info:
         classified.security_level = SecurityLevel.UNOFFICIAL  # Tampering!
@@ -663,13 +663,13 @@ Pull request template reminder:
 
 ## Breaking Changes
 
-### 1. with_uplifted_classification() Behavior Change
+### 1. with_uplifted_security_level() Behavior Change
 
 **Current Behavior (Pre-ADR-005):**
 ```python
 # Silent downgrade prevention via max()
-secret_frame = ClassifiedDataFrame.create_from_datasource(df, SecurityLevel.SECRET)
-result = secret_frame.with_uplifted_classification(SecurityLevel.OFFICIAL)
+secret_frame = SecureDataFrame.create_from_datasource(df, SecurityLevel.SECRET)
+result = secret_frame.with_uplifted_security_level(SecurityLevel.OFFICIAL)
 # → Returns secret_frame unchanged (max(SECRET, OFFICIAL) = SECRET)
 # No exception raised, operation is idempotent
 ```
@@ -677,8 +677,8 @@ result = secret_frame.with_uplifted_classification(SecurityLevel.OFFICIAL)
 **New Behavior (Post-ADR-005):**
 ```python
 # Explicit downgrade detection via SecurityCriticalError
-secret_frame = ClassifiedDataFrame.create_from_datasource(df, SecurityLevel.SECRET)
-result = secret_frame.with_uplifted_classification(SecurityLevel.OFFICIAL)
+secret_frame = SecureDataFrame.create_from_datasource(df, SecurityLevel.SECRET)
+result = secret_frame.with_uplifted_security_level(SecurityLevel.OFFICIAL)
 # → Raises SecurityCriticalError! 💥
 # Platform terminates immediately with emergency logging
 ```
@@ -696,23 +696,23 @@ However, defensive plugin code might use conservative patterns that will break:
 
 ```python
 # ❌ Potentially broken pattern (will raise SecurityCriticalError):
-def transform(self, frame: ClassifiedDataFrame) -> ClassifiedDataFrame:
+def transform(self, frame: SecureDataFrame) -> SecureDataFrame:
     # Process data...
-    return frame.with_uplifted_classification(SecurityLevel.OFFICIAL)
+    return frame.with_uplifted_security_level(SecurityLevel.OFFICIAL)
     # ↑ BREAKS if frame.classification > OFFICIAL!
 
 # ✅ ADR-005 compatible pattern:
-def transform(self, frame: ClassifiedDataFrame) -> ClassifiedDataFrame:
+def transform(self, frame: SecureDataFrame) -> SecureDataFrame:
     # Process data...
     plugin_level = self.get_security_level()
     target_level = max(frame.classification, plugin_level)
-    return frame.with_uplifted_classification(target_level)
+    return frame.with_uplifted_security_level(target_level)
 ```
 
 **Detection & Migration:**
 
 Pre-deployment audit checklist:
-1. Search codebase for all `with_uplifted_classification()` calls
+1. Search codebase for all `with_uplifted_security_level()` calls
 2. Verify each call uses `max(current, target)` or equivalent logic
 3. Add linter rule to detect suspicious patterns (constant security levels passed)
 4. Deploy with feature flag first (see rollout strategy below)
@@ -732,7 +732,7 @@ Pre-deployment audit checklist:
 
 ## Integration with ADR-002-A (Classification Container)
 
-ADR-002-A established the `ClassifiedDataFrame` trusted container model with invariant
+ADR-002-A established the `SecureDataFrame` trusted container model with invariant
 enforcement through stack inspection. ADR-006 strengthens this enforcement by introducing
 fail-loud semantics for invariant violations.
 
@@ -741,7 +741,7 @@ fail-loud semantics for invariant violations.
 Classification laundering attempts currently raise `SecurityValidationError`:
 
 ```python
-# src/elspeth/core/security/classified_data.py (ADR-002-A implementation)
+# src/elspeth/core/security/secure_data.py (ADR-002-A implementation)
 def __post_init__(self) -> None:
     """Verify container created via authorized factory methods only."""
     if object.__getattribute__(self, '_created_by_datasource'):
@@ -753,8 +753,8 @@ def __post_init__(self) -> None:
 
     # CURRENT: Raises SecurityValidationError
     raise SecurityValidationError(
-        "ClassifiedDataFrame can only be created by datasources or authorized "
-        "factory methods (with_uplifted_classification, with_new_data). "
+        "SecureDataFrame can only be created by datasources or authorized "
+        "factory methods (with_uplifted_security_level, with_new_data). "
         "Direct construction prevents classification tracking (ADR-002-A)."
     )
 ```
@@ -765,7 +765,7 @@ Classification laundering is an **invariant violation** (should never happen wit
 code), therefore it should raise `SecurityCriticalError` instead:
 
 ```python
-# src/elspeth/core/security/classified_data.py (UPDATED for ADR-006)
+# src/elspeth/core/security/secure_data.py (UPDATED for ADR-006)
 from elspeth.core.security.exceptions import SecurityCriticalError
 
 def __post_init__(self) -> None:
@@ -779,7 +779,7 @@ def __post_init__(self) -> None:
 
     # UPDATED: Raise SecurityCriticalError (invariant violation)
     raise SecurityCriticalError(
-        "CRITICAL: ClassifiedDataFrame created outside datasource factory - "
+        "CRITICAL: SecureDataFrame created outside datasource factory - "
         "possible classification laundering attack (ADR-002-A)",
         evidence={
             "stack_trace": traceback.format_stack(),
@@ -825,14 +825,14 @@ Update all tests expecting `SecurityValidationError` from container code:
 # BEFORE (ADR-002-A original tests)
 def test_direct_construction_blocked():
     with pytest.raises(SecurityValidationError):
-        ClassifiedDataFrame(df, SecurityLevel.SECRET)  # Direct construction
+        SecureDataFrame(df, SecurityLevel.SECRET)  # Direct construction
 
 # AFTER (ADR-006 integration)
 from elspeth.core.security.exceptions import SecurityCriticalError
 
 def test_direct_construction_blocked():
     with pytest.raises(SecurityCriticalError) as exc_info:
-        ClassifiedDataFrame(df, SecurityLevel.SECRET)  # Direct construction
+        SecureDataFrame(df, SecurityLevel.SECRET)  # Direct construction
 
     assert "classification laundering" in str(exc_info.value).lower()
     assert exc_info.value.cve_id == "CVE-ADR-002-A-001"
@@ -842,16 +842,16 @@ def test_direct_construction_blocked():
 
 **Files to Update** (search for `SecurityValidationError` raises in container contexts):
 
-- [ ] `src/elspeth/core/security/classified_data.py:__post_init__()` - Container creation violation
-- [ ] `src/elspeth/core/security/classified_data.py:with_uplifted_classification()` - Classification downgrade
-- [ ] `src/elspeth/core/security/classified_data.py:__setattr__()` - Metadata tampering
+- [ ] `src/elspeth/core/security/secure_data.py:__post_init__()` - Container creation violation
+- [ ] `src/elspeth/core/security/secure_data.py:with_uplifted_security_level()` - Classification downgrade
+- [ ] `src/elspeth/core/security/secure_data.py:__setattr__()` - Metadata tampering
 - [ ] `tests/test_adr002a_*.py` - Update ~15 tests expecting `SecurityValidationError`
 - [ ] `tests/test_classified_dataframe.py` - Update container violation tests
 
 **Verification**:
 ```bash
 # Find all SecurityValidationError raises in container code
-grep -r "SecurityValidationError" src/elspeth/core/security/classified_data.py
+grep -r "SecurityValidationError" src/elspeth/core/security/secure_data.py
 
 # Find all tests catching SecurityValidationError from container
 grep -r "pytest.raises(SecurityValidationError)" tests/ | grep -i "classified\|container"
@@ -942,7 +942,7 @@ ensuring violations cannot be silently handled or ignored.
 
 #### Modified Files
 
-- `src/elspeth/core/security/classified_data.py` – Add invariant checks with `SecurityCriticalError`
+- `src/elspeth/core/security/secure_data.py` – Add invariant checks with `SecurityCriticalError`
 - `src/elspeth/core/security/__init__.py` – Export `SecurityCriticalError`
 - `pyproject.toml` – Add Ruff linting rules
 - `.pre-commit-config.yaml` – Add policy enforcement hook
@@ -961,7 +961,7 @@ ensuring violations cannot be silently handled or ignored.
 - Update PR template
 
 **Phase 3: Code Updates (Week 2-3)**
-- Add invariant checks to `ClassifiedDataFrame`:
+- Add invariant checks to `SecureDataFrame`:
   - Classification downgrade prevention
   - Metadata immutability enforcement
   - Container boundary checks
@@ -993,15 +993,15 @@ ensuring violations cannot be silently handled or ignored.
        # ... (implementation as shown above)
    ```
 
-2. **Update `with_uplifted_classification()` with conditional behavior:**
+2. **Update `with_uplifted_security_level()` with conditional behavior:**
    ```python
-   # src/elspeth/core/security/classified_data.py
+   # src/elspeth/core/security/secure_data.py
    from elspeth.core.security.exceptions import (
        SecurityCriticalError,
        ENABLE_SECURITY_CRITICAL_EXCEPTIONS,
    )
 
-   def with_uplifted_classification(self, new_level: SecurityLevel):
+   def with_uplifted_security_level(self, new_level: SecurityLevel):
        """Uplift classification (high water mark principle)."""
 
        if ENABLE_SECURITY_CRITICAL_EXCEPTIONS:
@@ -1017,11 +1017,11 @@ ensuring violations cannot be silently handled or ignored.
                    cve_id="CVE-ADR-002-A-004",
                    classification_level=self.classification,
                )
-           return ClassifiedDataFrame(self.data, new_level)
+           return SecureDataFrame(self.data, new_level)
        else:
            # OLD BEHAVIOR (Pre-ADR-005): Silent downgrade prevention
            uplifted_classification = max(self.classification, new_level)
-           return ClassifiedDataFrame(self.data, uplifted_classification)
+           return SecureDataFrame(self.data, uplifted_classification)
    ```
 
 3. **Add "would-be violation" logging (observability mode):**
@@ -1043,7 +1043,7 @@ ensuring violations cannot be silently handled or ignored.
                }
            )
 
-       return ClassifiedDataFrame(self.data, uplifted_classification)
+       return SecureDataFrame(self.data, uplifted_classification)
    ```
 
 4. **Monitor "would-be violations" in development/staging:**
@@ -1118,7 +1118,7 @@ export ELSPETH_ENABLE_SECURITY_CRITICAL_EXCEPTIONS=false
 - [ADR-004: Mandatory BasePlugin Inheritance](004-mandatory-baseplugin-inheritance.md) – Plugin protocol enforcement
 - `docs/migration/adr-003-004-classified-containers/` – Potential integration point for implementation
 - `docs/compliance/incident-response.md` – Incident response procedures for security violations
-- `src/elspeth/core/security/classified_data.py` – Primary implementation location
+- `src/elspeth/core/security/secure_data.py` – Primary implementation location
 
 ---
 
@@ -1131,5 +1131,5 @@ export ELSPETH_ENABLE_SECURITY_CRITICAL_EXCEPTIONS=false
 - 2025-10-25: Updated with:
   - AST-based policy enforcement (replaces regex approach)
   - Mandatory feature flag rollout strategy with 3-phase deployment
-  - Breaking changes section documenting `with_uplifted_classification()` behavior change
+  - Breaking changes section documenting `with_uplifted_security_level()` behavior change
   - Enhanced monitoring and rollback procedures

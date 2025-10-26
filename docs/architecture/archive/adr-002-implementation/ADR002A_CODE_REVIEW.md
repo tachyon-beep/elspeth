@@ -29,7 +29,7 @@ Lines Added: +2270
 Lines Removed: -66
 Net Change: +2204
 
-Core Implementation:  +107 lines (classified_data.py)
+Core Implementation:  +107 lines (secure_data.py)
 Tests:                +626 lines (3 files)
 Documentation:        +1537 lines (7 files)
 ```
@@ -40,13 +40,13 @@ Documentation:        +1537 lines (7 files)
 
 ## Core Implementation Review
 
-### File: `src/elspeth/core/security/classified_data.py` (+107 lines)
+### File: `src/elspeth/core/security/secure_data.py` (+107 lines)
 
 #### 1. Security Field Addition (Lines 58-59)
 
 ```python
 @dataclass(frozen=True)
-class ClassifiedDataFrame:
+class SecureDataFrame:
     data: pd.DataFrame
     classification: SecurityLevel
     _created_by_datasource: bool = False  # ✅ NEW
@@ -86,16 +86,16 @@ def __post_init__(self) -> None:
         current_frame = current_frame.f_back
         caller_name = current_frame.f_code.co_name
 
-        # Allow internal methods (with_uplifted_classification, with_new_data)
-        if caller_name in ("with_uplifted_classification", "with_new_data"):
+        # Allow internal methods (with_uplifted_security_level, with_new_data)
+        if caller_name in ("with_uplifted_security_level", "with_new_data"):
             return
 
     # Block all other attempts (plugins, direct construction)
     from elspeth.core.validation.base import SecurityValidationError
 
     raise SecurityValidationError(
-        "ClassifiedDataFrame can only be created by datasources using "
-        "create_from_datasource(). Plugins must use with_uplifted_classification() "
+        "SecureDataFrame can only be created by datasources using "
+        "create_from_datasource(). Plugins must use with_uplifted_security_level() "
         "to uplift existing frames or with_new_data() to generate new data. "
         "This prevents classification laundering attacks (ADR-002-A)."
     )
@@ -154,8 +154,8 @@ With 3-5 frames per suite execution:
 @classmethod
 def create_from_datasource(
     cls, data: pd.DataFrame, classification: SecurityLevel
-) -> "ClassifiedDataFrame":
-    """Create ClassifiedDataFrame from datasource (trusted source only)."""
+) -> "SecureDataFrame":
+    """Create SecureDataFrame from datasource (trusted source only)."""
     # Use __new__ to bypass __init__ and set fields manually
     instance = cls.__new__(cls)
     object.__setattr__(instance, "data", data)
@@ -182,12 +182,12 @@ def create_from_datasource(
 #### 4. New Data Method (`with_new_data`, Lines 151-223)
 
 ```python
-def with_new_data(self, new_data: pd.DataFrame) -> "ClassifiedDataFrame":
+def with_new_data(self, new_data: pd.DataFrame) -> "SecureDataFrame":
     """Create frame with different data, preserving current classification."""
-    # Use ClassifiedDataFrame constructor (will bypass __post_init__ check)
-    return ClassifiedDataFrame(
+    # Use SecureDataFrame constructor (will bypass __post_init__ check)
+    return SecureDataFrame(
         data=new_data,
-        classification=self.classification,
+        security_level=self.classification,
         _created_by_datasource=False
     )
 ```
@@ -200,7 +200,7 @@ def with_new_data(self, new_data: pd.DataFrame) -> "ClassifiedDataFrame":
 1. Called from `with_new_data()` method
 2. Stack walker finds "with_new_data" in frame names → allows creation
 3. Preserves original classification (cannot downgrade)
-4. Plugin must still call `with_uplifted_classification()` afterwards
+4. Plugin must still call `with_uplifted_security_level()` afterwards
 
 **Security Property**: Output classification ≥ input classification (enforced by subsequent uplifting)
 
@@ -208,7 +208,7 @@ def with_new_data(self, new_data: pd.DataFrame) -> "ClassifiedDataFrame":
 ```python
 # LLM generates entirely new DataFrame
 new_df = llm.generate(prompt)
-result = input_frame.with_new_data(new_df).with_uplifted_classification(
+result = input_frame.with_new_data(new_df).with_uplifted_security_level(
     self.get_security_level()
 )
 ```
@@ -241,7 +241,7 @@ class TestADR002ATrustedContainerModel:
     # 5 security invariant tests
     def test_invariant_plugin_cannot_create_frame_directly()
     def test_invariant_datasource_can_create_frame()
-    def test_invariant_with_uplifted_classification_bypasses_check()
+    def test_invariant_with_uplifted_security_level_bypasses_check()
     def test_invariant_with_new_data_preserves_classification()
     def test_invariant_malicious_classification_laundering_blocked()
 ```
@@ -253,12 +253,12 @@ class TestADR002ATrustedContainerModel:
 **Test 1: Plugin Creation Blocked** (Lines 81-109)
 ```python
 def test_invariant_plugin_cannot_create_frame_directly(self):
-    """SECURITY INVARIANT: Plugins cannot create ClassifiedDataFrame directly."""
+    """SECURITY INVARIANT: Plugins cannot create SecureDataFrame directly."""
     df = pd.DataFrame({"secret_data": ["classified1", "classified2"]})
 
     # Simulate plugin attempting to create frame directly
     with pytest.raises(SecurityValidationError) as exc_info:
-        ClassifiedDataFrame(df, SecurityLevel.OFFICIAL)
+        SecureDataFrame(df, SecurityLevel.OFFICIAL)
 
     error_msg = str(exc_info.value)
     assert "datasource" in error_msg.lower()
@@ -278,14 +278,14 @@ def test_invariant_malicious_classification_laundering_blocked(self):
     """SECURITY INVARIANT: Classification laundering attack is technically blocked."""
 
     class SubtlyMaliciousPlugin(BasePlugin):
-        def process(self, input_data: ClassifiedDataFrame) -> ClassifiedDataFrame:
+        def process(self, input_data: SecureDataFrame) -> SecureDataFrame:
             result = input_data.data.copy()
 
             # ❌ ATTACK: Try to create "fresh" OFFICIAL frame
-            return ClassifiedDataFrame(result, SecurityLevel.OFFICIAL)
+            return SecureDataFrame(result, SecurityLevel.OFFICIAL)
 
     # Create SECRET frame
-    secret_frame = ClassifiedDataFrame.create_from_datasource(
+    secret_frame = SecureDataFrame.create_from_datasource(
         pd.DataFrame({"secret": ["classified"]}),
         SecurityLevel.SECRET
     )
@@ -317,8 +317,8 @@ This is the key test proving ADR-002-A solves the problem.
 
 **Example**:
 ```diff
-- df = ClassifiedDataFrame(data, SecurityLevel.OFFICIAL)
-+ df = ClassifiedDataFrame.create_from_datasource(
+- df = SecureDataFrame(data, SecurityLevel.OFFICIAL)
++ df = SecureDataFrame.create_from_datasource(
 +     data, SecurityLevel.OFFICIAL
 + )
 ```
@@ -425,9 +425,9 @@ Scenario: Plugin receives SECRET data, creates "fresh" frame claiming OFFICIAL
 
 Attack Vector:
 ```python
-def process(self, input: ClassifiedDataFrame) -> ClassifiedDataFrame:
-    return ClassifiedDataFrame(input.data, SecurityLevel.OFFICIAL)
-    # Bypasses with_uplifted_classification()
+def process(self, input: SecureDataFrame) -> SecureDataFrame:
+    return SecureDataFrame(input.data, SecurityLevel.OFFICIAL)
+    # Bypasses with_uplifted_security_level()
 ```
 
 **Defense Layers (ADR-002-A)**:
@@ -545,7 +545,7 @@ Both are now technically controlled, not certification-only.
    → Plugins cannot create arbitrary classifications
 
 3. Runtime Validation (ADR-002 Phase 1)
-   → validate_access_by() checks clearance
+   → validate_compatible_with() checks clearance
 
 4. Certification (Reduced Scope) ✨ IMPROVED
    → Verify datasource labeling + get_security_level() honesty
@@ -562,13 +562,13 @@ Both are now technically controlled, not certification-only.
 ```bash
 ✅ MyPy: Clean (no type errors)
 ✅ Ruff: Clean (no style violations)
-✅ Coverage: 78% on classified_data.py (core security paths 100%)
+✅ Coverage: 78% on secure_data.py (core security paths 100%)
 ```
 
 **Uncovered Lines Analysis**:
 - Lines 86, 93, 99: Edge case fail-open paths (cannot determine caller)
   - **Assessment**: Acceptable - testing framework edge cases
-- Lines 254-259: validate_access_by error path
+- Lines 254-259: validate_compatible_with error path
   - **Assessment**: Not critical - requires BasePlugin mock
 
 **Overall**: ✅ Excellent coverage on security-critical paths
@@ -620,7 +620,7 @@ TOTAL:                     177/177 ✅
 
 **Search Results**:
 ```bash
-$ git grep "ClassifiedDataFrame(" -- src/elspeth
+$ git grep "SecureDataFrame(" -- src/elspeth
 (no matches)
 ```
 
@@ -635,8 +635,8 @@ $ git grep "ClassifiedDataFrame(" -- src/elspeth
 
 **Pattern**:
 ```diff
-- ClassifiedDataFrame(data, level)
-+ ClassifiedDataFrame.create_from_datasource(data, level)
+- SecureDataFrame(data, level)
++ SecureDataFrame.create_from_datasource(data, level)
 ```
 
 **Migration Effort**: ✅ Minimal (~5 minutes)

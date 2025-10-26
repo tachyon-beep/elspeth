@@ -109,7 +109,7 @@ Graceful degradation creates situations where:
 - Programming errors (wrong lifecycle usage) MUST raise `RuntimeError` (loud and obvious)
 
 **Reference Implementations**:
-- `classified_data.py:90-102` – Fail-closed when stack inspection unavailable (CVE-ADR-002-A-003 fix)
+- `secure_data.py:90-102` – Fail-closed when stack inspection unavailable (CVE-ADR-002-A-003 fix)
 - `path_guard.py` – Fail-closed when `allowed_base_path` missing (test_runner_characterization.py:378)
 - `plugin.py:get_effective_level()` – `RuntimeError` if operating_level not set (no fallback to security_level)
 - `suite_runner._validate_experiment_security()` – `SecurityValidationError` on insufficient clearance (aborts pipeline)

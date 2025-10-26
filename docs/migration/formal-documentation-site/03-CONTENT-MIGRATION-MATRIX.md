@@ -168,7 +168,7 @@
 | API Area | Examples Needed | Priority | Effort | Quality Gate | Status |
 |----------|-----------------|----------|--------|--------------|--------|
 | BasePlugin | Implement custom plugin | ⚡ HIGH | 1h | Tested, works | ⏸️ TODO |
-| ClassifiedDataFrame | create_from_datasource, uplifting | 🔥 CRITICAL | 1-2h | Tested, works | ⏸️ TODO |
+| SecureDataFrame | create_from_datasource, uplifting | 🔥 CRITICAL | 1-2h | Tested, works | ⏸️ TODO |
 | Artifact Pipeline | Multi-sink chaining | ⚡ HIGH | 1h | Tested, works | ⏸️ TODO |
 | BasePluginRegistry | Register/retrieve plugins | ⚡ HIGH | 1h | Tested, works | ⏸️ TODO |
 

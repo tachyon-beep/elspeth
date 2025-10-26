@@ -260,11 +260,11 @@ class TestADR002SuiteIntegration:
         assert len(sink.written) > 0, "Legacy sink should still work"
 
     def test_e2e_adr002a_datasource_plugin_sink_flow(self):
-        """END-TO-END: Full ADR-002-A flow with ClassifiedDataFrame creation and transformation.
+        """END-TO-END: Full ADR-002-A flow with SecureDataFrame creation and transformation.
 
         This test verifies the complete secure data flow:
-        1. Datasource creates ClassifiedDataFrame via create_from_datasource()
-        2. Plugin transforms data via with_uplifted_classification()
+        1. Datasource creates SecureDataFrame via create_from_datasource()
+        2. Plugin transforms data via with_uplifted_security_level()
         3. Sink receives properly classified data
         4. All components validate at start-time (ADR-002)
 
@@ -279,38 +279,38 @@ class TestADR002SuiteIntegration:
 
         This is the COMPREHENSIVE integration test requested by code review.
         """
-        from elspeth.core.security.classified_data import ClassifiedDataFrame
+        from elspeth.core.security.secure_data import SecureDataFrame
 
         df = pd.DataFrame({"text": ["secret1", "secret2"]})
 
         # Create datasource that uses ADR-002-A factory pattern
         class ADR002ACompliantDatasource(BasePlugin):
-            """Datasource that correctly creates ClassifiedDataFrame."""
+            """Datasource that correctly creates SecureDataFrame."""
 
             def __init__(self):
                 super().__init__(security_level=SecurityLevel.SECRET, allow_downgrade=True)
 
             def load(self) -> pd.DataFrame:
-                """Load data as ClassifiedDataFrame using correct pattern."""
+                """Load data as SecureDataFrame using correct pattern."""
                 # ✅ CORRECT: Use factory method (ADR-002-A compliant)
-                classified_frame = ClassifiedDataFrame.create_from_datasource(
+                classified_frame = SecureDataFrame.create_from_datasource(
                     df, SecurityLevel.SECRET
                 )
                 return classified_frame.data  # Return underlying DataFrame
 
         # Create plugin that uses ADR-002-A transformation pattern
         class ADR002ACompliantPlugin(BasePlugin):
-            """Plugin that correctly transforms ClassifiedDataFrame."""
+            """Plugin that correctly transforms SecureDataFrame."""
 
             def __init__(self):
                 super().__init__(security_level=SecurityLevel.SECRET, allow_downgrade=True)
 
             def transform(self, data: pd.DataFrame) -> pd.DataFrame:
                 """Transform data using ADR-002-A pattern."""
-                # In real usage, plugin would receive ClassifiedDataFrame from previous stage
+                # In real usage, plugin would receive SecureDataFrame from previous stage
                 # For this test, we simulate the transform pattern
-                # ✅ CORRECT: Use with_uplifted_classification() for transforms
-                classified_input = ClassifiedDataFrame.create_from_datasource(
+                # ✅ CORRECT: Use with_uplifted_security_level() for transforms
+                classified_input = SecureDataFrame.create_from_datasource(
                     data, SecurityLevel.SECRET
                 )
 
@@ -320,7 +320,7 @@ class TestADR002SuiteIntegration:
 
                 # ✅ CORRECT: Uplift classification (ADR-002-A compliant)
                 output_frame = classified_input.with_new_data(result)
-                uplifted = output_frame.with_uplifted_classification(SecurityLevel.SECRET)
+                uplifted = output_frame.with_uplifted_security_level(SecurityLevel.SECRET)
 
                 return uplifted.data  # Return underlying DataFrame
 
@@ -370,7 +370,7 @@ class TestADR002SuiteIntegration:
         Shows that components with higher clearances (SECRET LLM) can process data
         at lower envelope levels (OFFICIAL).
         """
-        from elspeth.core.security.classified_data import ClassifiedDataFrame
+        from elspeth.core.security.secure_data import SecureDataFrame
 
         df = pd.DataFrame({"text": ["data1", "data2"]})
 
@@ -380,7 +380,7 @@ class TestADR002SuiteIntegration:
                 super().__init__(security_level=SecurityLevel.OFFICIAL, allow_downgrade=True)
 
             def load(self) -> pd.DataFrame:
-                classified = ClassifiedDataFrame.create_from_datasource(df, SecurityLevel.OFFICIAL)
+                classified = SecureDataFrame.create_from_datasource(df, SecurityLevel.OFFICIAL)
                 return classified.data
 
         # OFFICIAL transform (stays at OFFICIAL)
@@ -389,15 +389,15 @@ class TestADR002SuiteIntegration:
                 super().__init__(security_level=SecurityLevel.OFFICIAL, allow_downgrade=True)
 
             def transform(self, data: pd.DataFrame) -> pd.DataFrame:
-                # Simulate receiving ClassifiedDataFrame
-                classified_input = ClassifiedDataFrame.create_from_datasource(data, SecurityLevel.OFFICIAL)
+                # Simulate receiving SecureDataFrame
+                classified_input = SecureDataFrame.create_from_datasource(data, SecurityLevel.OFFICIAL)
 
                 result = data.copy()
                 result["stage1_processed"] = True
 
                 # Uplift to OFFICIAL (no change since already OFFICIAL)
                 output = classified_input.with_new_data(result)
-                uplifted = output.with_uplifted_classification(SecurityLevel.OFFICIAL)
+                uplifted = output.with_uplifted_security_level(SecurityLevel.OFFICIAL)
                 return uplifted.data
 
         # SECRET LLM client (can operate at OFFICIAL level, taints to SECRET at runtime)
@@ -590,7 +590,7 @@ Integration Test Coverage:
    - Security Property: Validation is opt-in via BasePlugin protocol
 
 ✅ test_e2e_adr002a_datasource_plugin_sink_flow
-   - Verifies: Complete ADR-002-A flow with ClassifiedDataFrame
+   - Verifies: Complete ADR-002-A flow with SecureDataFrame
    - Security Property: Datasource → Plugin → Sink with proper uplifting
 
 ✅ test_multi_stage_classification_uplifting [NEW]

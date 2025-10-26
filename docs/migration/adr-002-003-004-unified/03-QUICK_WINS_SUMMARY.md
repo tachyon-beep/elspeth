@@ -157,9 +157,9 @@ python /tmp/fix_test_helpers.py \
 
 **Fix Required**: Rewrite tests for correct Bell-LaPadula semantics (1 hour)
 
-**Category 2: ClassifiedDataFrame Dependencies** (unknown count)
+**Category 2: SecureDataFrame Dependencies** (unknown count)
 - Tests blocked on ADR-003 secure container implementation
-- Tests expect `ClassifiedDataFrame.create_from_datasource()` and uplifting
+- Tests expect `SecureDataFrame.create_from_datasource()` and uplifting
 
 **Fix Required**: Implement ADR-003 or mark as `@pytest.mark.xfail`
 
@@ -227,7 +227,7 @@ python /tmp/fix_test_helpers.py \
 ### What's Still Challenging ⚠️
 
 1. **Inverted Logic Tests** - Need careful rewrite to validate correct behavior
-2. **ClassifiedDataFrame Gaps** - Some tests blocked until ADR-003 complete
+2. **SecureDataFrame Gaps** - Some tests blocked until ADR-003 complete
 3. **Remaining Integration Issues** - Need investigation to understand root causes
 
 ---
@@ -244,11 +244,11 @@ python /tmp/fix_test_helpers.py \
 
 1. **Coverage Analysis** - Measure suite_runner.py coverage (target ≥80%)
 2. **Rewrite inverted logic tests** - Fix 3 tests with wrong expectations
-3. **Mark ClassifiedDataFrame blockers** - Use `@pytest.mark.xfail` with reason
+3. **Mark SecureDataFrame blockers** - Use `@pytest.mark.xfail` with reason
 
 ### Deferred (Phase 1+)
 
-1. **ClassifiedDataFrame implementation** - Required for full test coverage
+1. **SecureDataFrame implementation** - Required for full test coverage
 2. **Investigate non-ADR-002 failures** - blob_datasource, embeddings_store, etc.
 3. **Achieve 95%+ test success** - Once all ADR-002/003/004 work complete
 
@@ -258,7 +258,7 @@ python /tmp/fix_test_helpers.py \
 
 **Quick wins delivered as promised**: 20 minutes of mechanical fixes resolved 8 test failures and improved ADR-002 suite success rate by 18 percentage points. The suite integration tests saw a remarkable 50% improvement (13% → 63% pass rate).
 
-**High confidence going forward**: The fact that all 27 test helper fixes worked on first try, with no regressions, proves our understanding of the breaking change is correct. The remaining 30 failures are well-understood (inverted logic tests, ClassifiedDataFrame dependencies, and other integration issues).
+**High confidence going forward**: The fact that all 27 test helper fixes worked on first try, with no regressions, proves our understanding of the breaking change is correct. The remaining 30 failures are well-understood (inverted logic tests, SecureDataFrame dependencies, and other integration issues).
 
 **Phase 0 is 90% complete**: With test helpers fixed, we're ready for Phase 0.5 (coverage analysis) and can proceed with high confidence that the test suite is healthy and the migration approach is sound.
 

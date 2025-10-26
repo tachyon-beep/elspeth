@@ -35,7 +35,7 @@ The BasePlugin ABC with "Security Bones" design has been successfully implemente
    - ✅ Added explanatory note about move to plugin module
 
 #### 3. **Updated All Imports** (16 files total)
-   - ✅ Production code: `suite_runner.py`, `classified_data.py`
+   - ✅ Production code: `suite_runner.py`, `secure_data.py`
    - ✅ Test files: 7 `test_adr002_*.py` files
    - ✅ Documentation: 5 files (ADR-004, migration docs, plugin guide)
    - ✅ All imports now use: `from elspeth.core.base.plugin import BasePlugin`
@@ -84,7 +84,7 @@ The BasePlugin ABC with "Security Bones" design has been successfully implemente
 - `docs/migration/adr-002-baseplugin-completion/PHASE_0_STATUS.md` (this file)
 
 **Modified Files**:
-- Production: `suite_runner.py`, `classified_data.py`, `protocols.py`
+- Production: `suite_runner.py`, `secure_data.py`, `protocols.py`
 - Tests: 7 test files
 - Docs: 5 documentation files
 

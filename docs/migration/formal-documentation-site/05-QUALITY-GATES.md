@@ -160,7 +160,7 @@
 
 **Specific Modules**:
 - [ ] `elspeth.core.base.plugin` - All methods documented
-- [ ] `elspeth.core.security.classified_data` - ClassifiedDataFrame API complete
+- [ ] `elspeth.core.security.classified_data` - SecureDataFrame API complete
 - [ ] `elspeth.core.pipeline.artifact_pipeline` - Chaining behavior explained
 - [ ] `elspeth.core.registries.base` - Registration patterns documented
 
@@ -194,7 +194,7 @@
 
 **Specific Examples Required**:
 - [ ] BasePlugin: Implement custom plugin (complete example)
-- [ ] ClassifiedDataFrame: create_from_datasource + uplifting (2 examples)
+- [ ] SecureDataFrame: create_from_datasource + uplifting (2 examples)
 - [ ] Artifact Pipeline: Multi-sink chaining (1 example)
 - [ ] BasePluginRegistry: Register and retrieve plugins (1 example)
 

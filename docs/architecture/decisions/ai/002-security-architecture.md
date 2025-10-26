@@ -24,15 +24,15 @@ Elspeth handles classified data (PSPF UNOFFICIAL→SECRET, HIPAA, PCI-DSS). Trad
 
 ### Layer 2: Data Classification (Bell-LaPadula "No Write Down")
 
-- **Enforcement**: `ClassifiedDataFrame` immutability (frozen dataclass) - see ADR-002-A
+- **Enforcement**: `SecureDataFrame` immutability (frozen dataclass) - see ADR-002-A
 - **Rule**: Data tagged SECRET CANNOT be downgraded to UNOFFICIAL
-- **Mechanism**: No downgrade API exists, only `with_uplifted_classification()`
+- **Mechanism**: No downgrade API exists, only `with_uplifted_security_level()`
 
 ### Architectural Split (CRITICAL CONCEPT)
 
 **"No Write Down" (Data)** - ADR-002-A:
 
-- Controls: `ClassifiedDataFrame` objects
+- Controls: `SecureDataFrame` objects
 - Enforcement: Immutable classification (no downgrade API)
 - Violation: SECRET data → UNOFFICIAL sink = TypeError
 
@@ -54,7 +54,7 @@ Elspeth handles classified data (PSPF UNOFFICIAL→SECRET, HIPAA, PCI-DSS). Trad
 
 1. Compute: `operating_level = MIN(SECRET, UNOFFICIAL) = UNOFFICIAL`
 2. Datasource validates: "Can I operate at UNOFFICIAL?" → YES (trusted downgrade)
-3. Datasource operates at UNOFFICIAL → produces `ClassifiedDataFrame(..., UNOFFICIAL)`
+3. Datasource operates at UNOFFICIAL → produces `SecureDataFrame(..., UNOFFICIAL)`
 4. UNOFFICIAL sink receives UNOFFICIAL data → ✅ Valid
 
 **Key**: SECRET datasource does NOT produce SECRET data at UNOFFICIAL operating level. Filtering responsibility validated through certification.
@@ -72,7 +72,7 @@ Plugin Operation (Layer 2):
 **Forbidden**:
 
 - ❌ UNOFFICIAL plugin at SECRET level (insufficient clearance)
-- ❌ SECRET ClassifiedDataFrame downgraded to UNOFFICIAL (no API)
+- ❌ SECRET SecureDataFrame downgraded to UNOFFICIAL (no API)
 
 ## API: get_effective_level()
 
@@ -145,7 +145,7 @@ def test_datasource_filters_at_lower_level():
 
 ## Related
 
-ADR-001 (Philosophy), ADR-002-A (ClassifiedDataFrame), ADR-004 (BasePlugin), ADR-005 (Plugin registry)
+ADR-001 (Philosophy), ADR-002-A (SecureDataFrame), ADR-004 (BasePlugin), ADR-005 (Plugin registry)
 
 ---
 **Last Updated**: 2025-10-26

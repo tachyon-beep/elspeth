@@ -39,16 +39,16 @@ We're migrating ADR-002 (Multi-Level Security), ADR-003 (Secure Container Adopti
 **What We Documented**:
 1. **What Works** (Recent Implementations):
    - ✅ BasePlugin ABC with ADR-005 frozen plugin capability (33/33 tests passing)
-   - ✅ ClassifiedDataFrame with constructor protection (ADR-002-A complete)
+   - ✅ SecureDataFrame with constructor protection (ADR-002-A complete)
    - ✅ Suite runner validation logic (calls plugin validation)
 
 2. **What's Partially Done**:
-   - ⚠️ Datasource plugins: Inherit from BasePlugin ✅, BUT return plain DataFrame ❌ (not ClassifiedDataFrame)
+   - ⚠️ Datasource plugins: Inherit from BasePlugin ✅, BUT return plain DataFrame ❌ (not SecureDataFrame)
    - ❓ LLM client plugins: Unknown compliance status
    - ❓ Sink plugins: Unknown compliance status
 
 3. **What's NOT Done**:
-   - ❌ Terminology rename (ClassifiedDataFrame → SecureDataFrame)
+   - ❌ Terminology rename (SecureDataFrame → SecureDataFrame)
    - ❌ Secure container adoption (ADR-003)
    - ❌ Generic SecureData[T] wrapper (ADR-004)
 
@@ -75,7 +75,7 @@ We're migrating ADR-002 (Multi-Level Security), ADR-003 (Secure Container Adopti
 - ❓ `test_adr002_invariants.py` - Security invariants (need to check)
 - ❓ `test_adr002_properties.py` - Security properties (need to check)
 - ❓ `test_adr002_suite_integration.py` - Suite-level integration (need to check)
-- ❓ `test_adr002a_invariants.py` - ClassifiedDataFrame invariants (need to check)
+- ❓ `test_adr002a_invariants.py` - SecureDataFrame invariants (need to check)
 - (Plus 19 more security/validation test files)
 
 **Test Results** (from `test_adr002_baseplugin_compliance.py`):
@@ -148,7 +148,7 @@ We're migrating ADR-002 (Multi-Level Security), ADR-003 (Secure Container Adopti
 - ✅ Security level validation runs in suite_runner
 
 **What's Missing for Datasources**:
-- ❌ Don't use `ClassifiedDataFrame.create_from_datasource()`
+- ❌ Don't use `SecureDataFrame.create_from_datasource()`
 - ❌ Return plain `pd.DataFrame` with `.attrs` metadata (not secure container)
 - ❌ No constructor protection on returned data
 - ❌ No uplifting enforcement at data boundaries
@@ -225,8 +225,8 @@ We're migrating ADR-002 (Multi-Level Security), ADR-003 (Secure Container Adopti
 **Critical Paths Needing Coverage**:
 1. `suite_runner._validate_component_clearances()` (validation logic)
 2. `plugin.validate_can_operate_at_level()` (with ADR-005 frozen behavior)
-3. `ClassifiedDataFrame.__post_init__()` (constructor protection)
-4. `ClassifiedDataFrame.with_uplifted_classification()` (uplifting enforcement)
+3. `SecureDataFrame.__post_init__()` (constructor protection)
+4. `SecureDataFrame.with_uplifted_security_level()` (uplifting enforcement)
 5. Security level computation (`compute_minimum_clearance_envelope`)
 
 **Deliverable**: Test suite with ≥80% coverage on validation code

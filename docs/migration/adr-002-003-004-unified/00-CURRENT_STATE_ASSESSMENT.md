@@ -52,9 +52,9 @@ def validate_can_operate_at_level(self, operating_level: SecurityLevel) -> None:
 
 ---
 
-### ✅ ClassifiedDataFrame (ADR-002-A) - IMPLEMENTED
+### ✅ SecureDataFrame (ADR-002-A) - IMPLEMENTED
 
-**File**: `src/elspeth/core/security/classified_data.py`
+**File**: `src/elspeth/core/security/secure_data.py`
 
 **Status**: ✅ Fully implemented with constructor protection
 
@@ -63,12 +63,12 @@ def validate_can_operate_at_level(self, operating_level: SecurityLevel) -> None:
 - **Constructor protection** via `__post_init__` stack inspection
 - Datasource-only creation via `create_from_datasource()` factory
 - Plugin-safe methods:
-  - `with_uplifted_classification()` - uplift to higher level (prevents downgrade)
+  - `with_uplifted_security_level()` - uplift to higher level (prevents downgrade)
   - `with_new_data()` - generate new data, preserve classification
 - Fail-closed behavior when stack inspection unavailable
 - Prevents classification laundering attacks (T4 threat)
 
-**Current Name**: `ClassifiedDataFrame` (NOT renamed to `SecureDataFrame` yet)
+**Current Name**: `SecureDataFrame` (NOT renamed to `SecureDataFrame` yet)
 **Current Field**: `.classification` (NOT renamed to `.security_level` yet)
 
 **Usage Status**: ❌ **NOT used by datasources** - they return plain `pd.DataFrame`
@@ -105,7 +105,7 @@ for plugin in plugins:
 
 **Example**: `src/elspeth/plugins/nodes/sources/_csv_base.py`
 
-**Status**: ✅ Inherits from BasePlugin, ❌ Returns plain DataFrame (not ClassifiedDataFrame)
+**Status**: ✅ Inherits from BasePlugin, ❌ Returns plain DataFrame (not SecureDataFrame)
 
 ```python
 class BaseCSVDataSource(BasePlugin, DataSource):
@@ -120,7 +120,7 @@ class BaseCSVDataSource(BasePlugin, DataSource):
         ...
 
     def load(self) -> pd.DataFrame:
-        # ❌ WRONG: Returns plain DataFrame, not ClassifiedDataFrame
+        # ❌ WRONG: Returns plain DataFrame, not SecureDataFrame
         df = pd.read_csv(self.path, ...)
         df.attrs["security_level"] = self.security_level  # ← Metadata only, not container
         return df
@@ -134,7 +134,7 @@ class BaseCSVDataSource(BasePlugin, DataSource):
 - ✅ Security level validation will run in suite_runner
 
 **What's Missing**:
-- ❌ Doesn't use `ClassifiedDataFrame.create_from_datasource()`
+- ❌ Doesn't use `SecureDataFrame.create_from_datasource()`
 - ❌ Returns plain `pd.DataFrame` with `attrs` metadata (not secure container)
 - ❌ No constructor protection on returned data
 - ❌ No uplifting enforcement at data boundaries
@@ -163,7 +163,7 @@ class BaseCSVDataSource(BasePlugin, DataSource):
 **Status**: UNKNOWN - need to check if they:
 - ✅ Inherit from BasePlugin?
 - ✅ Call `super().__init__(security_level=...)`?
-- ❓ Handle ClassifiedDataFrame?
+- ❓ Handle SecureDataFrame?
 - ❓ Uplift security levels correctly?
 
 ---
@@ -178,20 +178,20 @@ class BaseCSVDataSource(BasePlugin, DataSource):
 **Status**: UNKNOWN - need to check if they:
 - ✅ Inherit from BasePlugin?
 - ✅ Call `super().__init__(security_level=...)`?
-- ❓ Accept ClassifiedDataFrame?
+- ❓ Accept SecureDataFrame?
 - ❓ Validate security levels at write time?
 
 ---
 
 ## What's NOT Done
 
-### ❌ Terminology Rename (ClassifiedDataFrame → SecureDataFrame)
+### ❌ Terminology Rename (SecureDataFrame → SecureDataFrame)
 
 **Status**: NOT STARTED
 
 **Scope** (from archive assessment):
 - 86 files, 1,450 occurrences
-- Rename: `ClassifiedDataFrame` → `SecureDataFrame`
+- Rename: `SecureDataFrame` → `SecureDataFrame`
 - Rename: `.classification` → `.security_level`
 - Rename: `classified_material` middleware → `sensitive_material`
 
@@ -205,7 +205,7 @@ class BaseCSVDataSource(BasePlugin, DataSource):
 
 **Status**: NOT STARTED
 
-**Goal**: All datasources return `ClassifiedDataFrame` (or `SecureDataFrame` after rename)
+**Goal**: All datasources return `SecureDataFrame` (or `SecureDataFrame` after rename)
 
 **Current**: Datasources return plain `pd.DataFrame` with `.attrs` metadata
 
@@ -218,12 +218,12 @@ def load(self) -> pd.DataFrame:
     return df
 
 # AFTER (target)
-def load(self) -> ClassifiedDataFrame:
+def load(self) -> SecureDataFrame:
     df = pd.read_csv(self.path, ...)
-    return ClassifiedDataFrame.create_from_datasource(df, self.security_level)
+    return SecureDataFrame.create_from_datasource(df, self.security_level)
 ```
 
-**Downstream Impact**: Orchestrator, runner, suite_runner must accept ClassifiedDataFrame
+**Downstream Impact**: Orchestrator, runner, suite_runner must accept SecureDataFrame
 
 ---
 
@@ -233,7 +233,7 @@ def load(self) -> ClassifiedDataFrame:
 
 **Goal**: Type-safe security level propagation for dicts, metadata, middleware context
 
-**Current**: Only `ClassifiedDataFrame` exists (DataFrame-specific)
+**Current**: Only `SecureDataFrame` exists (DataFrame-specific)
 
 **Need**: Generic wrapper for ANY data type:
 ```python
@@ -329,7 +329,7 @@ class SecureData[T]:
 2. Check BasePlugin inheritance (nominal typing)
 3. Check `super().__init__(security_level=...)` calls
 4. Check for override attempts (should raise TypeError)
-5. Check return types (DataFrame vs. ClassifiedDataFrame)
+5. Check return types (DataFrame vs. SecureDataFrame)
 
 **Output Format**:
 ```markdown
@@ -388,7 +388,7 @@ class SecureData[T]:
 **Test Categories**:
 1. **Compliance Tests** - Which plugins inherit from BasePlugin?
 2. **Validation Tests** - Does validation actually run?
-3. **Container Tests** - Do datasources use ClassifiedDataFrame?
+3. **Container Tests** - Do datasources use SecureDataFrame?
 4. **Security Tests** - Are security properties enforced?
 
 **Pattern**:
@@ -400,11 +400,11 @@ def test_datasource_basepl<bolthole>in_compliance():
     assert isinstance(ds, BasePlugin)  # ✅ Should PASS (already compliant)
 
 def test_datasource_returns_classified_dataframe():
-    """CHARACTERIZATION: Prove datasources DON'T use ClassifiedDataFrame yet."""
+    """CHARACTERIZATION: Prove datasources DON'T use SecureDataFrame yet."""
     ds = BaseCSVDataSource(path="test.csv", security_level=SecurityLevel.SECRET, retain_local=False)
     result = ds.load()
     assert isinstance(result, pd.DataFrame)  # ✅ Currently TRUE
-    assert not isinstance(result, ClassifiedDataFrame)  # ✅ Currently TRUE (NOT using secure container)
+    assert not isinstance(result, SecureDataFrame)  # ✅ Currently TRUE (NOT using secure container)
 ```
 
 ---
@@ -423,12 +423,12 @@ def test_datasource_returns_classified_dataframe():
 
 **Pattern**:
 ```python
-@pytest.mark.xfail(reason="Datasources don't use ClassifiedDataFrame yet", strict=True)
+@pytest.mark.xfail(reason="Datasources don't use SecureDataFrame yet", strict=True)
 def test_datasource_returns_secure_container():
-    """SECURITY PROPERTY: Datasources MUST return ClassifiedDataFrame."""
+    """SECURITY PROPERTY: Datasources MUST return SecureDataFrame."""
     ds = BaseCSVDataSource(path="test.csv", security_level=SecurityLevel.SECRET, retain_local=False)
     result = ds.load()
-    assert isinstance(result, ClassifiedDataFrame)  # ❌ Will FAIL (not using container yet)
+    assert isinstance(result, SecureDataFrame)  # ❌ Will FAIL (not using container yet)
 
 @pytest.mark.xfail(reason="ADR-002 validation may not run for all plugins", strict=True)
 def test_validation_runs_for_all_plugins():

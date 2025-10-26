@@ -478,9 +478,9 @@ docs-deploy:  ## Deploy documentation to GitHub Pages
 - Add usage examples to class docstring
 
 **Audit Security Module** (`src/elspeth/core/security/`) - 60 minutes
-- `classified_data.py`: ClassifiedDataFrame API
+- `secure_data.py`: SecureDataFrame API
 - Ensure all methods documented
-- Add examples to key methods (create_from_datasource, with_uplifted_classification)
+- Add examples to key methods (create_from_datasource, with_uplifted_security_level)
 
 **Audit Pipeline Module** (`src/elspeth/core/pipeline/`) - 60 minutes
 - `artifact_pipeline.py`: Artifact pipeline orchestration
@@ -531,14 +531,14 @@ docs-deploy:  ## Deploy documentation to GitHub Pages
 ```markdown
 # Security API Reference
 
-## ClassifiedDataFrame
+## SecureDataFrame
 
-::: elspeth.core.security.classified_data.ClassifiedDataFrame
+::: elspeth.core.security.classified_data.SecureDataFrame
     options:
       show_root_heading: true
       members:
         - create_from_datasource
-        - with_uplifted_classification
+        - with_uplifted_security_level
 
 ## SecurityLevel
 
@@ -561,23 +561,23 @@ docs-deploy:  ## Deploy documentation to GitHub Pages
 
 **Pattern**:
 ```markdown
-# ClassifiedDataFrame API Reference
+# SecureDataFrame API Reference
 
-::: elspeth.core.security.classified_data.ClassifiedDataFrame
+::: elspeth.core.security.classified_data.SecureDataFrame
 
 ## Usage Examples
 
 ### Creating from Datasource
 
 ```python
-from elspeth.core.security import ClassifiedDataFrame, SecurityLevel
+from elspeth.core.security import SecureDataFrame, SecurityLevel
 import pandas as pd
 
 # Create classified dataframe
 df = pd.DataFrame({"col1": [1, 2, 3]})
-classified_df = ClassifiedDataFrame.create_from_datasource(
+classified_df = SecureDataFrame.create_from_datasource(
     df,
-    source_classification=SecurityLevel.OFFICIAL
+    source_security_level=SecurityLevel.OFFICIAL
 )
 
 # Access security level

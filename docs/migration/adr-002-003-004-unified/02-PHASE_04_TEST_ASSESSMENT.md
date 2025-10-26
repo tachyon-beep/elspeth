@@ -13,7 +13,7 @@ Assessed 6 ADR-002 test files with **38 total failures**. Failures fall into two
 
 1. **Test Helper Breakage** (17 failures): Missing `allow_downgrade` parameter in test mocks
 2. **Inverted Logic Tests** (3 failures): Tests explicitly marked as based on wrong Bell-LaPadula logic
-3. **Integration Issues** (18 failures): Combination of both issues plus ClassifiedDataFrame gaps
+3. **Integration Issues** (18 failures): Combination of both issues plus SecureDataFrame gaps
 
 **Good News**: All failures are expected, well-documented, and fixable. No surprises found.
 
@@ -131,7 +131,7 @@ class MockSecureDatasource(BasePlugin, DataSource):
 ### Files with Mixed Issues
 
 **`test_adr002_suite_integration.py`** (7 failures, 1 passed)
-- **Issues**: Test helper breakage + ClassifiedDataFrame gaps
+- **Issues**: Test helper breakage + SecureDataFrame gaps
 - **Status**: Highest failure rate (13% pass)
 - **Risk**: Medium - These are end-to-end tests
 
@@ -148,7 +148,7 @@ FAILED test_real_plugin_integration_static_llm
 
 **Root Causes**:
 1. Test helpers missing `allow_downgrade`
-2. Tests may reference ClassifiedDataFrame which isn't fully implemented yet
+2. Tests may reference SecureDataFrame which isn't fully implemented yet
 3. Tests may expect old (inverted) validation logic
 
 ---
@@ -234,8 +234,8 @@ FAILED test_real_plugin_integration_static_llm
 1. `test_happy_path_matching_security_levels` - `MockSecureDatasource` missing `allow_downgrade`
 2. `test_fail_path_secret_datasource_unofficial_sink` - Mock helpers
 3. `test_upgrade_path_official_datasource_secret_sink` - Mock helpers
-4. `test_e2e_adr002a_datasource_plugin_sink_flow` - Mock helpers + ClassifiedDataFrame gaps
-5. `test_multi_stage_classification_uplifting` - ClassifiedDataFrame not implemented
+4. `test_e2e_adr002a_datasource_plugin_sink_flow` - Mock helpers + SecureDataFrame gaps
+5. `test_multi_stage_classification_uplifting` - SecureDataFrame not implemented
 6. `test_mixed_security_multi_sink` - Mock helpers
 7. `test_real_plugin_integration_static_llm` - Mock helpers
 
@@ -255,7 +255,7 @@ FAILED test_real_plugin_integration_static_llm
 ### ⚠️ Concerns
 
 1. **Suite Integration**: Only 13% passing - highest-value integration tests are broken
-2. **ClassifiedDataFrame**: Some tests reference features not yet implemented
+2. **SecureDataFrame**: Some tests reference features not yet implemented
 3. **Coverage**: Missing coverage on validation code (suite_runner.py at 16%)
 
 ### 📊 Quantitative Assessment
@@ -316,7 +316,7 @@ grep -r "super().__init__(security_level=" tests/ | grep -v "allow_downgrade"
 
 **Strategy**:
 1. Fix test helpers first (Phase 1)
-2. Identify which tests require ClassifiedDataFrame implementation
+2. Identify which tests require SecureDataFrame implementation
 3. Mark those as `@pytest.mark.xfail` with clear reason
 4. Fix remaining integration issues
 
@@ -335,7 +335,7 @@ grep -r "super().__init__(security_level=" tests/ | grep -v "allow_downgrade"
 ### Medium Risk ⚠️
 
 - **Suite integration**: Only 13% passing, but failures are expected
-- **ClassifiedDataFrame dependency**: Some tests blocked on Phase 2 work
+- **SecureDataFrame dependency**: Some tests blocked on Phase 2 work
 - **Coverage gaps**: suite_runner.py at 16% (target: 80%+)
 
 ### High Risk ❌
@@ -356,12 +356,12 @@ grep -r "super().__init__(security_level=" tests/ | grep -v "allow_downgrade"
 
 1. **Coverage analysis** - Measure suite_runner.py coverage
 2. **Rewrite inverted tests** - Improve test quality
-3. **Mark ClassifiedDataFrame blockers** - Use @pytest.mark.xfail
+3. **Mark SecureDataFrame blockers** - Use @pytest.mark.xfail
 
 ### Deferred (Phase 1+)
 
-1. **ClassifiedDataFrame implementation** - ADR-003 work
-2. **Full suite integration** - After ClassifiedDataFrame complete
+1. **SecureDataFrame implementation** - ADR-003 work
+2. **Full suite integration** - After SecureDataFrame complete
 3. **Comprehensive validation coverage** - 80%+ on suite_runner.py
 
 ---

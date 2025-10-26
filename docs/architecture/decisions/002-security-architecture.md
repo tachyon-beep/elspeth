@@ -92,11 +92,11 @@ Elspeth implements Bell-LaPadula MLS with a critical **architectural split** bet
 
 **"No Write Down" (Data Classification Layer)** - ADR-002-A:
 
-- **What it controls**: ClassifiedDataFrame objects (data containers)
+- **What it controls**: SecureDataFrame objects (data containers)
 - **Enforcement**: Immutable classification via frozen dataclass
 - **Rule**: Data tagged SECRET CANNOT be downgraded to UNOFFICIAL
-- **Mechanism**: Runtime prevention - `ClassifiedDataFrame` has no downgrade method, only `with_uplifted_classification()`
-- **Violation example**: Attempting to write `ClassifiedDataFrame(data, SecurityLevel.SECRET)` to UNOFFICIAL sink
+- **Mechanism**: Runtime prevention - `SecureDataFrame` has no downgrade method, only `with_uplifted_security_level()`
+- **Violation example**: Attempting to write `SecureDataFrame(data, SecurityLevel.SECRET)` to UNOFFICIAL sink
 - **Result**: TypeError or AttributeError (no downgrade API exists)
 
 **"No Read Up" (Plugin Clearance Layer)** - ADR-002/ADR-004:
@@ -124,7 +124,7 @@ Elspeth implements Bell-LaPadula MLS with a critical **architectural split** bet
 
 1. Pipeline computes `operating_level = MIN(SECRET datasource, UNOFFICIAL sink) = UNOFFICIAL`
 2. SECRET datasource validates: "Can I operate at UNOFFICIAL level?" → YES (trusted downgrade)
-3. Datasource operates at UNOFFICIAL level → produces `ClassifiedDataFrame(data, SecurityLevel.UNOFFICIAL)`
+3. Datasource operates at UNOFFICIAL level → produces `SecureDataFrame(data, SecurityLevel.UNOFFICIAL)`
 4. UNOFFICIAL sink receives UNOFFICIAL data → ✅ No violation
 
 **Key Insight**: The SECRET datasource **does not produce SECRET data** when operating at UNOFFICIAL level. It is responsible for filtering and producing UNOFFICIAL-classified data only. This filtering responsibility is validated through:
@@ -134,14 +134,14 @@ Elspeth implements Bell-LaPadula MLS with a critical **architectural split** bet
 - Attestation that datasource correctly handles multi-level data sources
 - **NOT** runtime enforcement (system trusts certified plugins)
 
-**What WOULD be a violation**: If the datasource produced `ClassifiedDataFrame(data, SecurityLevel.SECRET)` while operating at UNOFFICIAL level, the sink would reject it (ClassifiedDataFrame cannot be downgraded). This is the "no write down" enforcement working correctly.
+**What WOULD be a violation**: If the datasource produced `SecureDataFrame(data, SecurityLevel.SECRET)` while operating at UNOFFICIAL level, the sink would reject it (SecureDataFrame cannot be downgraded). This is the "no write down" enforcement working correctly.
 
 #### Asymmetry Summary
 
 ```
 Layer 1 - Data Classification:
   UNOFFICIAL → OFFICIAL → SECRET  (can only increase via explicit uplift)
-  Enforcement: ClassifiedDataFrame immutability (ADR-002-A)
+  Enforcement: SecureDataFrame immutability (ADR-002-A)
 
 Layer 2 - Plugin Operation:
   SECRET → OFFICIAL → UNOFFICIAL  (can decrease via trusted downgrade if allow_downgrade=True)
@@ -151,13 +151,13 @@ Layer 2 - Plugin Operation:
 **Forbidden Operations**:
 
 - ❌ **Plugin clearance violation**: UNOFFICIAL plugin running at SECRET level (insufficient clearance - "no read up")
-- ❌ **Data classification violation**: SECRET ClassifiedDataFrame downgraded to UNOFFICIAL (impossible - no API exists - "no write down")
+- ❌ **Data classification violation**: SECRET SecureDataFrame downgraded to UNOFFICIAL (impossible - no API exists - "no write down")
 - ❌ **Frozen plugin violation**: Plugin with `allow_downgrade=False` operating below its clearance (ADR-005 strict enforcement)
 
 **Allowed Operations**:
 
 - ✅ **Trusted downgrade**: SECRET plugin operating at UNOFFICIAL level (if `allow_downgrade=True`) - trusted to filter appropriately
-- ✅ **Explicit uplift**: UNOFFICIAL data uplifted to SECRET (via `with_uplifted_classification()` - explicit and audited)
+- ✅ **Explicit uplift**: UNOFFICIAL data uplifted to SECRET (via `with_uplifted_security_level()` - explicit and audited)
 - ✅ **Exact match**: Frozen plugin operating at EXACT declared level only (strict enforcement)
 
 **See Also**: ADR-005 (Frozen Plugin Capability) for detailed frozen behavior specification.
@@ -184,7 +184,7 @@ sink.validate_can_operate_at_level(SecurityLevel.UNOFFICIAL)
 # ✅ PASSES: UNOFFICIAL clearance == UNOFFICIAL operating level (exact match)
 
 # Runtime execution
-data = datasource.load_data()  # Returns ClassifiedDataFrame(df, SecurityLevel.UNOFFICIAL)
+data = datasource.load_data()  # Returns SecureDataFrame(df, SecurityLevel.UNOFFICIAL)
 # ↑ Datasource filtered appropriately - only UNOFFICIAL data retrieved
 
 sink.write(data)  # ✅ SUCCEEDS: UNOFFICIAL sink receiving UNOFFICIAL data
@@ -194,10 +194,10 @@ sink.write(data)  # ✅ SUCCEEDS: UNOFFICIAL sink receiving UNOFFICIAL data
 
 ```python
 # Buggy/malicious datasource returns wrong classification
-data = ClassifiedDataFrame(secret_df, SecurityLevel.SECRET)  # ❌ BUG: wrong level
+data = SecureDataFrame(secret_df, SecurityLevel.SECRET)  # ❌ BUG: wrong level
 
 sink.write(data)  # ❌ FAILS: Sink validation rejects SECRET data
-# ClassifiedDataFrame cannot be downgraded, so sink must reject it
+# SecureDataFrame cannot be downgraded, so sink must reject it
 # This is the "no write down" protection working correctly
 ```
 
@@ -205,7 +205,7 @@ sink.write(data)  # ❌ FAILS: Sink validation rejects SECRET data
 
 | Layer | Rule | Enforced By | When | Failure Mode |
 |-------|------|-------------|------|--------------|
-| **Data** | No write down | `ClassifiedDataFrame` immutability | Runtime (construction) | TypeError (no downgrade API) |
+| **Data** | No write down | `SecureDataFrame` immutability | Runtime (construction) | TypeError (no downgrade API) |
 | **Plugin** | No read up | `BasePlugin.validate_can_operate_at_level()` | Pipeline construction | SecurityValidationError |
 | **Plugin** | Trusted downgrade | Certification + audit | Pre-deployment | Manual audit failure |
 
@@ -280,7 +280,7 @@ Plugins should use `get_effective_level()` for:
 ✅ **Filtering Optimization** (datasources):
 
 ```python
-def load_data(self) -> ClassifiedDataFrame:
+def load_data(self) -> SecureDataFrame:
     effective_level = self.get_effective_level()
 
     # Filter data retrieval to only fetch blobs at effective level
@@ -290,13 +290,13 @@ def load_data(self) -> ClassifiedDataFrame:
         blobs = self._fetch_blobs_with_tag("classification:unofficial|official|secret")
 
     # Tag retrieved data at effective level
-    return ClassifiedDataFrame(data, classification=effective_level)
+    return SecureDataFrame(data, security_level=effective_level)
 ```
 
 ✅ **Conditional Processing** (transforms):
 
 ```python
-def transform(self, df: ClassifiedDataFrame) -> ClassifiedDataFrame:
+def transform(self, df: SecureDataFrame) -> SecureDataFrame:
     effective_level = self.get_effective_level()
 
     # Skip expensive compliance checks at lower levels
@@ -309,7 +309,7 @@ def transform(self, df: ClassifiedDataFrame) -> ClassifiedDataFrame:
 ✅ **Audit Logging** (all plugins):
 
 ```python
-def load_data(self) -> ClassifiedDataFrame:
+def load_data(self) -> SecureDataFrame:
     effective_level = self.get_effective_level()
     declared_level = self.get_security_level()
 
@@ -359,12 +359,12 @@ def load_data(self):
     data = self._fetch_data()
     effective_level = self.get_effective_level()
     # "Data is at effective level, so tag it as such"
-    return ClassifiedDataFrame(data, effective_level)  # ❌ Data may be UNOFFICIAL!
+    return SecureDataFrame(data, effective_level)  # ❌ Data may be UNOFFICIAL!
 ```
 
 **Why Wrong**: Operating level is pipeline constraint, not data classification. Data
 classification is determined by content, not pipeline level. Use
-`with_uplifted_classification()` if data needs higher classification.
+`with_uplifted_security_level()` if data needs higher classification.
 
 ❌ **Skipping Validation**:
 

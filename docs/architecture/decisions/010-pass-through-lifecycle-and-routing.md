@@ -96,7 +96,7 @@ We will adopt a **Pass-Through Artifact Lifecycle Model** with **three-tier plug
   `allow_downgrade` policy**. Trusted downgrade is opt-in (`True`), frozen
   behavior (`False`) is available for dedicated classification domains.
 - Artifact transforms, routing nodes, and file writers **preserve the artifact's
-  `SecurityLevel`** and invoke MLS clearance checks (`validate_access_by` or the
+  `SecurityLevel`** and invoke MLS clearance checks (`validate_compatible_with` or the
   artifact equivalent) at each hop. Routing logic never downgrades security
   metadata implicitly.
 - Frozen plugins in the chain will refuse to pass artifacts to lower-clearance

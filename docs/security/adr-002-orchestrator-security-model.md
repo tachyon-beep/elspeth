@@ -108,10 +108,10 @@ or LOWER levels (trusted to filter). Plugins CANNOT operate ABOVE their clearanc
 
 ...the DataFrame itself carries its classification, and components validate incoming data.
 
-### Implementation: ClassifiedDataFrame Wrapper
+### Implementation: SecureDataFrame Wrapper
 
 ```python
-class ClassifiedDataFrame:
+class SecureDataFrame:
     """DataFrame wrapper that carries immutable classification metadata.
 
     This enables runtime validation: every component receiving data can verify
@@ -148,7 +148,7 @@ class UnofficialSink:
 
     security_level = SecurityLevel.UNOFFICIAL
 
-    def write(self, df: ClassifiedDataFrame):
+    def write(self, df: SecureDataFrame):
         """Write data with classification validation.
 
         CRITICAL: Validate incoming data classification BEFORE processing.
@@ -176,7 +176,7 @@ class OfficialSink:
 
     security_level = SecurityLevel.OFFICIAL
 
-    def write(self, df: ClassifiedDataFrame):
+    def write(self, df: SecureDataFrame):
         """Write with classification validation."""
         incoming = df.classification
 
@@ -203,7 +203,7 @@ class AzureDataSource:
         blob_metadata = azure.get_blob_metadata(container)
         return SecurityLevel.from_string(blob_metadata['classification'])
 
-    def read_data(self, config: dict) -> ClassifiedDataFrame:
+    def read_data(self, config: dict) -> SecureDataFrame:
         """Read data and tag with classification metadata."""
         # Read the raw data
         raw_data = pd.read_csv(azure_blob_url)
@@ -211,8 +211,8 @@ class AzureDataSource:
         # Get actual classification from blob metadata
         classification = self.get_security_level_for_job(config)
 
-        # Wrap in ClassifiedDataFrame with immutable classification
-        return ClassifiedDataFrame(raw_data, classification)
+        # Wrap in SecureDataFrame with immutable classification
+        return SecureDataFrame(raw_data, classification)
 ```
 
 ### Classification Uplifting: The "High Water Mark" Principle
@@ -234,7 +234,7 @@ class LLMTransform:
 
     security_level = SecurityLevel.SECRET  # LLM trained on SECRET data
 
-    def transform(self, input_df: ClassifiedDataFrame) -> ClassifiedDataFrame:
+    def transform(self, input_df: SecureDataFrame) -> SecureDataFrame:
         """Transform data with automatic classification uplifting.
 
         Output classification = max(input classification, LLM classification)
@@ -253,26 +253,26 @@ class LLMTransform:
         # OFFICIAL input → SECRET LLM → SECRET output (automatically)
         output_classification = max(input_df.classification, self.security_level)
 
-        return ClassifiedDataFrame(transformed, output_classification)
+        return SecureDataFrame(transformed, output_classification)
 ```
 
 **Example Scenarios**:
 
 ```python
 # Scenario 1: OFFICIAL data through SECRET LLM
-input_df = ClassifiedDataFrame(data, SecurityLevel.OFFICIAL)
+input_df = SecureDataFrame(data, SecurityLevel.OFFICIAL)
 secret_llm = LLMTransform(security_level=SecurityLevel.SECRET)
 output_df = secret_llm.transform(input_df)
 # output_df.classification == SecurityLevel.SECRET (uplifted)
 
 # Scenario 2: OFFICIAL data through OFFICIAL LLM
-input_df = ClassifiedDataFrame(data, SecurityLevel.OFFICIAL)
+input_df = SecureDataFrame(data, SecurityLevel.OFFICIAL)
 official_llm = LLMTransform(security_level=SecurityLevel.OFFICIAL)
 output_df = official_llm.transform(input_df)
 # output_df.classification == SecurityLevel.OFFICIAL (no uplift)
 
 # Scenario 3: SECRET data through SECRET LLM
-input_df = ClassifiedDataFrame(data, SecurityLevel.SECRET)
+input_df = SecureDataFrame(data, SecurityLevel.SECRET)
 secret_llm = LLMTransform(security_level=SecurityLevel.SECRET)
 output_df = secret_llm.transform(input_df)
 # output_df.classification == SecurityLevel.SECRET (already at max)
@@ -330,7 +330,7 @@ class BasePlugin(ABC):
 
     security_level: SecurityLevel
 
-    def _validate_can_handle_data(self, df: ClassifiedDataFrame) -> None:
+    def _validate_can_handle_data(self, df: SecureDataFrame) -> None:
         """Inherited validation: refuse data above clearance.
 
         CRITICAL: This is called AUTOMATICALLY before any data processing.
@@ -346,11 +346,11 @@ class BasePlugin(ABC):
             )
 
     @abstractmethod
-    def _process_data(self, df: ClassifiedDataFrame) -> Any:
+    def _process_data(self, df: SecureDataFrame) -> Any:
         """Subclasses implement actual data processing logic."""
         pass
 
-    def process(self, df: ClassifiedDataFrame) -> Any:
+    def process(self, df: SecureDataFrame) -> Any:
         """Public method with automatic classification validation.
 
         All data processing goes through this method, ensuring validation
@@ -374,7 +374,7 @@ class UnofficialSink(BasePlugin):
 
     security_level = SecurityLevel.UNOFFICIAL
 
-    def _process_data(self, df: ClassifiedDataFrame) -> None:
+    def _process_data(self, df: SecureDataFrame) -> None:
         """Write data to storage.
 
         By the time this runs, BasePlugin._validate_can_handle_data()
@@ -394,14 +394,14 @@ class AzureDataSource(BasePlugin):
     Inherits classification validation when passing data to next component.
     """
 
-    def read_data(self, config: dict) -> ClassifiedDataFrame:
+    def read_data(self, config: dict) -> SecureDataFrame:
         """Read and classify data."""
         raw_data = pd.read_csv(azure_blob_url)
         classification = self._inspect_blob_classification(config)
-        return ClassifiedDataFrame(raw_data, classification)
+        return SecureDataFrame(raw_data, classification)
 
     def pass_to_next_component(
-        self, df: ClassifiedDataFrame, recipient: BasePlugin
+        self, df: SecureDataFrame, recipient: BasePlugin
     ) -> None:
         """Pass data to next component with validation.
 
@@ -681,7 +681,7 @@ class MaliciousSECRETSink(ResultSink):
 
     security_level = SecurityLevel.SECRET  # Correctly declared
 
-    def write(self, df: ClassifiedDataFrame):
+    def write(self, df: SecureDataFrame):
         # Inherited validation - correctly implemented
         self._validate_can_handle_data(df)  # Passes: SECRET sink, SECRET data
 
@@ -704,7 +704,7 @@ class MaliciousSECRETSink(ResultSink):
 # - Sink checks orchestrator.operating_level == SECRET → PASS
 
 # Layer 3 (Data classification): ✅ PASS
-# - Sink receives ClassifiedDataFrame with classification=SECRET
+# - Sink receives SecureDataFrame with security_level=SECRET
 # - Sink's security_level == SECRET
 # - Validation: Can handle SECRET data → PASS
 ```
@@ -769,7 +769,7 @@ The framework solves all decidable security questions (configuration, validation
 | Insider threat (developer)      | Code review + Separation of duties         | Human      |
 | Insider threat (operator)       | Audit logs + Monitoring + Least privilege  | Operational|
 | Configuration drift             | Framework validation (every job start)     | Technical  |
-| Data mislabeling                | Framework Layer 3 (ClassifiedDataFrame)    | Technical  |
+| Data mislabeling                | Framework Layer 3 (SecureDataFrame)    | Technical  |
 
 **Coverage Analysis**:
 - **Decidable threats** (configuration, validation): Caught by framework (100% technical enforcement)

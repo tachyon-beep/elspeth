@@ -14,7 +14,7 @@
 
 ✅ **85.7% ADR-002 test suite success** (target: ≥85%)
 ✅ **88% coverage on BasePlugin security enforcement** (target: ≥80%)
-✅ **82% coverage on ClassifiedDataFrame** (target: ≥80%)
+✅ **82% coverage on SecureDataFrame** (target: ≥80%)
 ✅ **Zero behavioral changes** - Only test fixes, no production code changes
 ✅ **All MyPy and Ruff checks passing**
 ✅ **97.9% overall test suite success** (1,381/1,411 tests passing)
@@ -25,7 +25,7 @@
 |--------|--------|--------|--------|
 | ADR-002 Success Rate | 85.7% (60/70) | ≥85% | ✅ PASS |
 | BasePlugin Coverage | 88% | ≥80% | ✅ PASS |
-| ClassifiedDataFrame Coverage | 82% | ≥80% | ✅ PASS |
+| SecureDataFrame Coverage | 82% | ≥80% | ✅ PASS |
 | Overall Test Success | 97.9% | No regressions | ✅ PASS |
 | Type Checking | Clean | Clean | ✅ PASS |
 | Linting | Clean | Clean | ✅ PASS |
@@ -52,7 +52,7 @@ Result: Reduced XPASS(strict) errors from 8 to 0.
 **Failure Categories**:
 1. **Inverted Logic Tests (3)** - Tests explicitly documented as expecting wrong Bell-LaPadula behavior
 2. **Test Helper Breakage (27)** - Missing `allow_downgrade` parameter from ADR-005 breaking change
-3. **Integration Gaps (10)** - Phase 1+ blockers (ClassifiedDataFrame, suite runner, etc.)
+3. **Integration Gaps (10)** - Phase 1+ blockers (SecureDataFrame, suite runner, etc.)
 
 **Documentation**: `02-PHASE_04_TEST_ASSESSMENT.md` (425 lines)
 
@@ -96,7 +96,7 @@ super().__init__(security_level=SecurityLevel.SECRET, allow_downgrade=True)
   - 10 branches, 2 partial
   - **Missing**: Lines 175, 227, 300 (error handling edge cases)
 
-- ✅ **`src/elspeth/core/security/classified_data.py`:** 82% coverage
+- ✅ **`src/elspeth/core/security/secure_data.py`:** 82% coverage
   - 54 statements, 7 missed
   - 14 branches, 3 partial
   - **Missing**: Lines 86, 108, 118, 271-276 (advanced features)
@@ -152,7 +152,7 @@ These failures require Phase 1 implementation work (BasePlugin integration in re
 3-4. **Middleware Integration Tests (2 failures)**
    - `test_four_level_uplifting_chain`
    - `test_three_level_uplifting_with_mismatched_sink`
-   - **Blocker**: ClassifiedDataFrame integration with middleware (ADR-003 Phase 2)
+   - **Blocker**: SecureDataFrame integration with middleware (ADR-003 Phase 2)
 
 5-7. **Suite Integration Tests (3 failures)**
    - `test_fail_path_secret_datasource_unofficial_sink`
@@ -198,12 +198,12 @@ All 10 remaining failures are **legitimate Phase 1+ blockers**, not gaps in Phas
 | `test_adr002_validation.py` | 3 | 2 | 60% | 2 validation integration failures |
 | `test_adr002_suite_integration.py` | 5 | 3 | 63% | Up from 13%! Quick wins +50% |
 | `test_adr002_error_handling.py` | 2 | 1 | 67% | 1 error message validation failure |
-| `test_adr002_middleware_integration.py` | 1 | 2 | 33% | 2 ClassifiedDataFrame integration failures |
+| `test_adr002_middleware_integration.py` | 1 | 2 | 33% | 2 SecureDataFrame integration failures |
 | `test_adr002_baseplugin_compliance.py` | 16 | 1 | 94% | 6 xfail (Phase 1+), 1 fail |
 
 ### Coverage on Critical Paths
 - **BasePlugin (`src/elspeth/core/base/plugin.py`)**: 88% ✅
-- **ClassifiedDataFrame (`src/elspeth/core/security/classified_data.py`)**: 82% ✅
+- **SecureDataFrame (`src/elspeth/core/security/secure_data.py`)**: 82% ✅
 - **Suite Runner (`src/elspeth/core/experiments/suite_runner.py`)**: 58% (acceptable - separate refactoring target)
 
 ---
@@ -230,7 +230,7 @@ All commits on branch `feature/adr-002-security-enforcement`:
 | **All tests passing (or expected failures)** | ✅ PASS | 97.9% overall, 85.7% ADR-002, 10 failures are Phase 1+ blockers |
 | **MyPy clean** | ✅ PASS | No type errors |
 | **Ruff clean** | ✅ PASS | No lint errors |
-| **ADR-002 coverage ≥80%** | ✅ PASS | BasePlugin 88%, ClassifiedDataFrame 82% |
+| **ADR-002 coverage ≥80%** | ✅ PASS | BasePlugin 88%, SecureDataFrame 82% |
 | **Zero behavioral changes** | ✅ PASS | Only test fixes, no production code changes |
 | **Mutation testing (optional)** | ⏭️ DEFERRED | Not critical for Phase 0, can run in Phase 1+ |
 
@@ -283,8 +283,8 @@ All commits on branch `feature/adr-002-security-enforcement`:
    - **Risk**: Suite runner doesn't implement security validation yet (58% coverage)
    - **Mitigation**: Phase 1.5 will implement validation - already have tests ready
 
-3. **ClassifiedDataFrame Integration**
-   - **Risk**: 2 middleware integration tests failing due to ClassifiedDataFrame dependencies
+3. **SecureDataFrame Integration**
+   - **Risk**: 2 middleware integration tests failing due to SecureDataFrame dependencies
    - **Mitigation**: ADR-003 Phase 2 will implement full integration
 
 ---

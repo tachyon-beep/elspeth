@@ -49,10 +49,10 @@
 
 ## Phase 1: Core Security Primitives (1-2 hours)
 
-### Step 1: ClassifiedDataFrame (30 min)
+### Step 1: SecureDataFrame (30 min)
 - [ ] Write test: `test_classified_dataframe_immutable_classification` (RED)
-- [ ] Implement ClassifiedDataFrame with frozen dataclass (GREEN)
-- [ ] Add `with_uplifted_classification()` method
+- [ ] Implement SecureDataFrame with frozen dataclass (GREEN)
+- [ ] Add `with_uplifted_security_level()` method
 - [ ] Test passes
 
 ### Step 2: Minimum Clearance Envelope (30 min)
@@ -91,7 +91,7 @@
 
 ### Step 3: Runtime Failsafe (30 min)
 - [ ] Write test: `test_classified_dataframe_rejects_access_above_clearance` (RED)
-- [ ] Add `validate_access_by()` to ClassifiedDataFrame (GREEN)
+- [ ] Add `validate_compatible_with()` to SecureDataFrame (GREEN)
 - [ ] Test passes
 
 ### Checkpoint

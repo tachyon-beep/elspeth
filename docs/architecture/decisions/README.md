@@ -14,7 +14,7 @@ These decisions are currently in effect and guide ongoing development:
 |-----|-------|------|--------|---------|
 | [001](001-design-philosophy.md) | Design Philosophy | 2025-10-23 | ✅ Accepted | Establishes security-first priority hierarchy: Security → Data Integrity → Availability → Usability |
 | [002](002-security-architecture.md) | Multi-Level Security Enforcement | 2025-10-23 | ✅ Accepted | Implements Bell-LaPadula MLS model with pipeline-wide minimum evaluation for fail-fast security |
-| [002-A](002-a-trusted-container-model.md) | Trusted Container Model | 2025-10-25 | ✅ Accepted | Introduces ClassifiedDataFrame for immutable classification tracking and high water mark enforcement |
+| [002-A](002-a-trusted-container-model.md) | Trusted Container Model | 2025-10-25 | ✅ Accepted | Introduces SecureDataFrame for immutable classification tracking and high water mark enforcement |
 | [002-B](002-b-security-policy-metadata.md) | Immutable Security Policy Metadata | 2025-10-26 | 📝 Draft | Declares security policy fields (security_level, allow_downgrade, etc.) author-owned and immutable; registries strip config overrides |
 | [014](014-reproducibility-bundle.md) | Tamper-Evident Reproducibility Bundle | 2025-10-26 | ✅ Accepted | Requires every run to emit a signed reproducibility bundle containing artefacts, config, prompts, plugins and manifest/signature |
 | [003](003-plugin-type-registry.md) | Central Plugin Type Registry | 2025-10-25 | ✅ Accepted | Central registry for plugin security validation with type-safe plugin composition |

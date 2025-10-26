@@ -288,7 +288,7 @@ We will implement a **Universal Dual-Output Protocol** where ALL plugins produce
   `BasePlugin.__init__(..., allow_downgrade=...)`. There is no default—plugins must
   opt-in to trusted downgrade or remain frozen.
 - **MLS propagation**: Artifact transforms, routing nodes, and file writers
-  propagate `SecurityLevel` and invoke `validate_access_by()` (or equivalent
+  propagate `SecurityLevel` and invoke `validate_compatible_with()` (or equivalent
   artifact clearance checks) on every hop. Artifacts never bypass the MLS guard
   rail when routed.
 - **Frozen plugins**: Components with `allow_downgrade=False` will refuse to

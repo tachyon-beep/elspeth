@@ -1,10 +1,10 @@
 """ADR-002-A Trusted Container Model - Security Invariant Tests
 
-This module tests the security properties of the ClassifiedDataFrame trusted
+This module tests the security properties of the SecureDataFrame trusted
 container model, which prevents classification laundering attacks.
 
 Security Model (ADR-002-A):
-    - Only datasources can create ClassifiedDataFrame instances
+    - Only datasources can create SecureDataFrame instances
     - Plugins can only uplift classifications, never create fresh ones
     - This prevents malicious plugins from relabeling data
 
@@ -28,7 +28,7 @@ import pytest
 
 from elspeth.core.base.plugin import BasePlugin  # ADR-004: ABC with nominal typing
 from elspeth.core.base.types import SecurityLevel
-from elspeth.core.security.classified_data import ClassifiedDataFrame
+from elspeth.core.security.secure_data import SecureDataFrame
 from elspeth.core.validation.base import SecurityValidationError
 
 
@@ -67,15 +67,15 @@ class TestADR002ATrustedContainerModel:
     """
 
     def test_invariant_plugin_cannot_create_frame_directly(self):
-        """SECURITY INVARIANT: Plugins cannot create ClassifiedDataFrame directly.
+        """SECURITY INVARIANT: Plugins cannot create SecureDataFrame directly.
 
         Attack Prevented: Classification laundering
             - Malicious plugin creates "fresh" frame with lower classification
-            - Bypasses with_uplifted_classification() uplifting logic
+            - Bypasses with_uplifted_security_level() uplifting logic
             - Allows SECRET data to be relabeled as OFFICIAL
 
         Security Property:
-            ClassifiedDataFrame(data, level) from plugin context → SecurityValidationError
+            SecureDataFrame(data, level) from plugin context → SecurityValidationError
 
         Expected State: FAILS (RED) - No __post_init__ validation yet
         """
@@ -85,14 +85,14 @@ class TestADR002ATrustedContainerModel:
         # (In real attack, this would be inside plugin.process() method)
         with pytest.raises(SecurityValidationError) as exc_info:
             # ❌ ATTACK: Plugin creates frame claiming OFFICIAL classification
-            ClassifiedDataFrame(df, SecurityLevel.OFFICIAL)
+            SecureDataFrame(df, SecurityLevel.OFFICIAL)
 
         error_msg = str(exc_info.value)
         assert "datasource" in error_msg.lower(), (
             "Error should explain only datasources can create frames"
         )
         assert "plugin" in error_msg.lower() or "must use" in error_msg.lower(), (
-            "Error should guide plugins to use with_uplifted_classification()"
+            "Error should guide plugins to use with_uplifted_security_level()"
         )
 
     def test_cve_adr002a_002_bypass_flag_not_exposed(self):
@@ -100,7 +100,7 @@ class TestADR002ATrustedContainerModel:
 
         Vulnerability:
             Without init=False on _created_by_datasource field, attackers could call:
-                ClassifiedDataFrame(data, level, _created_by_datasource=True)
+                SecureDataFrame(data, level, _created_by_datasource=True)
             This bypasses __post_init__ security check, allowing classification laundering.
 
         Attack Scenario:
@@ -112,7 +112,7 @@ class TestADR002ATrustedContainerModel:
             it from __init__ signature entirely.
 
         Security Property:
-            ClassifiedDataFrame(..., _created_by_datasource=True) → TypeError
+            SecureDataFrame(..., _created_by_datasource=True) → TypeError
 
         Discovery: Code review by GPT-4 (2025-10-25)
         """
@@ -120,9 +120,9 @@ class TestADR002ATrustedContainerModel:
 
         # Attempt bypass by passing _created_by_datasource=True
         with pytest.raises(TypeError) as exc_info:
-            ClassifiedDataFrame(
+            SecureDataFrame(
                 data=df,
-                classification=SecurityLevel.UNOFFICIAL,  # DOWNGRADE attempt
+                security_level=SecurityLevel.UNOFFICIAL,  # DOWNGRADE attempt
                 _created_by_datasource=True  # Bypass flag
             )
 
@@ -135,7 +135,7 @@ class TestADR002ATrustedContainerModel:
         )
 
     def test_invariant_datasource_can_create_frame(self):
-        """SECURITY INVARIANT: Datasources can create ClassifiedDataFrame instances.
+        """SECURITY INVARIANT: Datasources can create SecureDataFrame instances.
 
         Trusted Source Principle:
             - Datasources are TRUSTED to label data correctly
@@ -143,47 +143,47 @@ class TestADR002ATrustedContainerModel:
             - Certification verifies datasource classification labeling
 
         Security Property:
-            ClassifiedDataFrame.create_from_datasource(data, level) → Success
+            SecureDataFrame.create_from_datasource(data, level) → Success
 
         Expected State: FAILS (RED) - No create_from_datasource() method yet
         """
         df = pd.DataFrame({"data": [1, 2, 3]})
 
         # Datasource should be able to create frames using factory method
-        frame = ClassifiedDataFrame.create_from_datasource(
+        frame = SecureDataFrame.create_from_datasource(
             df, SecurityLevel.OFFICIAL
         )
 
         assert frame.data.equals(df), "Data should be preserved"
-        assert frame.classification == SecurityLevel.OFFICIAL, (
+        assert frame.security_level == SecurityLevel.OFFICIAL, (
             "Classification should match datasource labeling"
         )
 
-    def test_invariant_with_uplifted_classification_bypasses_check(self):
-        """SECURITY INVARIANT: with_uplifted_classification() bypasses constructor check.
+    def test_invariant_with_uplifted_security_level_bypasses_check(self):
+        """SECURITY INVARIANT: with_uplifted_security_level() bypasses constructor check.
 
         Uplifting Design:
-            - Uplifting is the ONLY way plugins can create new ClassifiedDataFrame
+            - Uplifting is the ONLY way plugins can create new SecureDataFrame
             - Uses max() operation (cannot downgrade)
             - Bypasses __post_init__ check (internal method, trusted)
 
         Security Property:
-            frame.with_uplifted_classification(level) → Success (no validation error)
+            frame.with_uplifted_security_level(level) → Success (no validation error)
 
         Expected State: MAY FAIL (RED) - Depends on __post_init__ implementation
         """
         # Create initial frame via datasource (trusted source)
         df = pd.DataFrame({"data": [1, 2, 3]})
-        initial_frame = ClassifiedDataFrame.create_from_datasource(
+        initial_frame = SecureDataFrame.create_from_datasource(
             df, SecurityLevel.OFFICIAL
         )
 
         # Uplifting should succeed (bypasses __post_init__ check)
-        uplifted_frame = initial_frame.with_uplifted_classification(
+        uplifted_frame = initial_frame.with_uplifted_security_level(
             SecurityLevel.SECRET
         )
 
-        assert uplifted_frame.classification == SecurityLevel.SECRET, (
+        assert uplifted_frame.security_level == SecurityLevel.SECRET, (
             "Uplifting should create SECRET frame"
         )
         assert uplifted_frame.data is initial_frame.data, (
@@ -191,8 +191,8 @@ class TestADR002ATrustedContainerModel:
         )
 
         # Attempting to "downgrade" should preserve higher classification
-        result = uplifted_frame.with_uplifted_classification(SecurityLevel.OFFICIAL)
-        assert result.classification == SecurityLevel.SECRET, (
+        result = uplifted_frame.with_uplifted_security_level(SecurityLevel.OFFICIAL)
+        assert result.security_level == SecurityLevel.SECRET, (
             "max() operation should prevent downgrade"
         )
 
@@ -206,13 +206,13 @@ class TestADR002ATrustedContainerModel:
 
         Security Property:
             frame.with_new_data(df) → New frame with SAME classification
-            Must still call with_uplifted_classification() afterwards
+            Must still call with_uplifted_security_level() afterwards
 
         Expected State: FAILS (RED) - No with_new_data() method yet
         """
         # Create initial frame via datasource
         initial_df = pd.DataFrame({"input": ["row1", "row2"]})
-        initial_frame = ClassifiedDataFrame.create_from_datasource(
+        initial_frame = SecureDataFrame.create_from_datasource(
             initial_df, SecurityLevel.SECRET
         )
 
@@ -223,14 +223,14 @@ class TestADR002ATrustedContainerModel:
         result_frame = initial_frame.with_new_data(new_df)
 
         assert result_frame.data.equals(new_df), "Data should be replaced"
-        assert result_frame.classification == SecurityLevel.SECRET, (
+        assert result_frame.security_level == SecurityLevel.SECRET, (
             "Classification should be preserved from input frame"
         )
 
         # Plugin must still uplift to its own security level
         plugin_level = SecurityLevel.SECRET
-        final_frame = result_frame.with_uplifted_classification(plugin_level)
-        assert final_frame.classification == SecurityLevel.SECRET
+        final_frame = result_frame.with_uplifted_security_level(plugin_level)
+        assert final_frame.security_level == SecurityLevel.SECRET
 
     def test_invariant_malicious_classification_laundering_blocked(self):
         """SECURITY INVARIANT: Classification laundering attack is technically blocked.
@@ -257,16 +257,16 @@ class TestADR002ATrustedContainerModel:
             """Plugin that attempts classification laundering attack.
 
             This is a malicious actor that doesn't follow BasePlugin protocol.
-            The test verifies that ClassifiedDataFrame blocks the attack regardless.
+            The test verifies that SecureDataFrame blocks the attack regardless.
             """
 
             def process(
-                self, input_data: ClassifiedDataFrame
-            ) -> ClassifiedDataFrame:
+                self, input_data: SecureDataFrame
+            ) -> SecureDataFrame:
                 """Process SECRET data, attempt to launder classification.
 
                 Attack: Create "fresh" frame claiming OFFICIAL classification,
-                bypassing with_uplifted_classification() uplifting logic.
+                bypassing with_uplifted_security_level() uplifting logic.
                 """
                 # Transform data (legitimate operation)
                 result = input_data.data.copy()
@@ -274,11 +274,11 @@ class TestADR002ATrustedContainerModel:
 
                 # ❌ ATTACK: Create "fresh" frame claiming lower classification
                 # This is the EXACT attack from ADR-002-A specification
-                return ClassifiedDataFrame(result, SecurityLevel.OFFICIAL)
+                return SecureDataFrame(result, SecurityLevel.OFFICIAL)
 
         # Set up attack scenario
         secret_data = pd.DataFrame({"classified": ["secret1", "secret2"]})
-        secret_frame = ClassifiedDataFrame.create_from_datasource(
+        secret_frame = SecureDataFrame.create_from_datasource(
             secret_data, SecurityLevel.SECRET
         )
 
@@ -297,14 +297,14 @@ class TestADR002ATrustedContainerModel:
         """SECURITY INVARIANT: Method name spoofing attack is blocked (CVE-ADR-002-A-001).
 
         Attack Scenario (from Security Review):
-            1. Malicious plugin defines a method named 'with_uplifted_classification'
-            2. Inside this method, attacker creates ClassifiedDataFrame with arbitrary classification
-            3. Frame inspection finds matching name 'with_uplifted_classification'
+            1. Malicious plugin defines a method named 'with_uplifted_security_level'
+            2. Inside this method, attacker creates SecureDataFrame with arbitrary classification
+            3. Frame inspection finds matching name 'with_uplifted_security_level'
             4. ❌ BLOCKED: Instance verification detects this is NOT our method
 
         Vulnerability:
             Before fix: Frame inspection only checked function name
-            After fix: Frame inspection verifies caller's 'self' is ClassifiedDataFrame instance
+            After fix: Frame inspection verifies caller's 'self' is SecureDataFrame instance
 
         Security Property:
             Plugin spoofing method name → Still blocked by instance verification
@@ -318,24 +318,24 @@ class TestADR002ATrustedContainerModel:
             """Plugin that attempts to bypass constructor protection via name spoofing.
 
             This is a malicious actor that doesn't follow BasePlugin protocol.
-            The test verifies that ClassifiedDataFrame blocks the attack regardless.
+            The test verifies that SecureDataFrame blocks the attack regardless.
             """
 
-            def with_uplifted_classification(self, input_data: ClassifiedDataFrame) -> ClassifiedDataFrame:
+            def with_uplifted_security_level(self, input_data: SecureDataFrame) -> SecureDataFrame:
                 """Spoofed method name - attempt to bypass frame inspection.
 
-                Attack: Create "fresh" frame inside a method named 'with_uplifted_classification'
+                Attack: Create "fresh" frame inside a method named 'with_uplifted_security_level'
                 to trick frame inspection into thinking this is a legitimate internal call.
 
                 Before Fix: Would succeed (only checked name)
-                After Fix: Blocked (verifies 'self' is ClassifiedDataFrame, not NameSpoofingPlugin)
+                After Fix: Blocked (verifies 'self' is SecureDataFrame, not NameSpoofingPlugin)
                 """
                 # ❌ ATTACK: Create frame with lower classification inside spoofed method
-                return ClassifiedDataFrame(input_data.data, SecurityLevel.OFFICIAL)
+                return SecureDataFrame(input_data.data, SecurityLevel.OFFICIAL)
 
         # Set up attack scenario
         secret_data = pd.DataFrame({"classified": ["secret1", "secret2"]})
-        secret_frame = ClassifiedDataFrame.create_from_datasource(
+        secret_frame = SecureDataFrame.create_from_datasource(
             secret_data, SecurityLevel.SECRET
         )
 
@@ -343,7 +343,7 @@ class TestADR002ATrustedContainerModel:
 
         # Attack should be BLOCKED by instance verification
         with pytest.raises(SecurityValidationError) as exc_info:
-            spoofing_plugin.with_uplifted_classification(secret_frame)
+            spoofing_plugin.with_uplifted_security_level(secret_frame)
 
         error_msg = str(exc_info.value)
         assert "datasource" in error_msg.lower(), (
@@ -378,7 +378,7 @@ class TestADR002ATrustedContainerModel:
 
         # Should BLOCK creation with clear error (fail-closed)
         with pytest.raises(SecurityValidationError) as exc_info:
-            ClassifiedDataFrame(df, SecurityLevel.OFFICIAL)
+            SecureDataFrame(df, SecurityLevel.OFFICIAL)
 
         error_msg = str(exc_info.value)
         # Verify error explains the security control failure
@@ -410,7 +410,7 @@ ADR-002-A Security Invariant Test Coverage:
    - Trusted Source: Datasources are authoritative for classification labels
    - Implementation: create_from_datasource() class method
 
-✅ test_invariant_with_uplifted_classification_bypasses_check
+✅ test_invariant_with_uplifted_security_level_bypasses_check
    - Property: Uplifting bypasses __post_init__ validation
    - Design: Uplifting is internal, trusted operation
    - Implementation: Check caller name in __post_init__

@@ -188,7 +188,7 @@
 | Module | Status | Docstring Quality | Examples | Notes |
 |--------|--------|-------------------|----------|-------|
 | `elspeth.core.base` | ⏸️ TODO | ❓ Unknown | ❓ Unknown | BasePlugin, types |
-| `elspeth.core.security` | ⏸️ TODO | ❓ Unknown | ❓ Unknown | SecurityLevel, ClassifiedDataFrame |
+| `elspeth.core.security` | ⏸️ TODO | ❓ Unknown | ❓ Unknown | SecurityLevel, SecureDataFrame |
 | `elspeth.core.pipeline` | ⏸️ TODO | ❓ Unknown | ❓ Unknown | Artifact pipeline |
 | `elspeth.core.registries` | ⏸️ TODO | ❓ Unknown | ❓ Unknown | BasePluginRegistry |
 | `elspeth.plugins.nodes` | ⏸️ TODO | ❓ Unknown | ❓ Unknown | Sources, transforms, sinks |

@@ -26,7 +26,7 @@ levels (trusted to filter). Plugins CANNOT operate above their clearance (insuff
 
 **How**: Four-layer defense:
 1. **Start-time validation** (PRIMARY - ADR-002): Job fails to start if any plugin requires higher security than minimum envelope
-2. **Constructor protection** (TECHNICAL CONTROL - ADR-002-A): Framework blocks plugins from creating arbitrary ClassifiedDataFrame instances, preventing classification laundering attacks
+2. **Constructor protection** (TECHNICAL CONTROL - ADR-002-A): Framework blocks plugins from creating arbitrary SecureDataFrame instances, preventing classification laundering attacks
 3. **Runtime failsafe** (DEFENSE IN DEPTH - ADR-002): Data access blocked if component clearance insufficient
 4. **Certification** (VERIFICATION): Human review confirms Layers 1-3 correctly implemented
 
@@ -67,7 +67,7 @@ suite = ExperimentSuite(
   - Validation: UNOFFICIAL-cleared sink CAN operate at UNOFFICIAL level (exact match)
   - **Note**: Start-time validation does NOT reject higher-clearance components at lower operating levels.
     It only rejects insufficient-clearance scenarios (component clearance < operating level).
-- **Failsafe (Runtime)**: `ClassifiedDataFrame.validate_access_by()` blocks data hand-off if classification exceeds clearance
+- **Failsafe (Runtime)**: `SecureDataFrame.validate_compatible_with()` blocks data hand-off if classification exceeds clearance
   - Datasource must filter SECRET-tagged data when operating at UNOFFICIAL level (certified behavior)
   - If filtering fails and SECRET data reaches UNOFFICIAL sink → runtime validation catches it
   - If start-time validation bypassed/broken → runtime validation provides defense-in-depth
@@ -92,7 +92,7 @@ class MaliciousSecretSink(BasePlugin):
     def get_security_level(self) -> SecurityLevel:
         return SecurityLevel.UNOFFICIAL  # LIE - actually stores SECRET data
 
-    def write(self, data: ClassifiedDataFrame) -> None:
+    def write(self, data: SecureDataFrame) -> None:
         # Secretly writes to UNOFFICIAL storage → classification breach
         write_to_unofficial_storage(data)
 ```
@@ -149,7 +149,7 @@ plugin.write(secret_data)  # Now at wrong level
 
 **Defense Layers**:
 - **Primary (Start-time)**: Careful implementation (no swallowing validation errors)
-- **Failsafe (Runtime)**: `ClassifiedDataFrame.validate_access_by()` catches this
+- **Failsafe (Runtime)**: `SecureDataFrame.validate_compatible_with()` catches this
   - Even if start-time validation bypassed
   - Every data hand-off re-checks clearance
   - BLOCKS access with SecurityValidationError
@@ -174,7 +174,7 @@ plugin.write(secret_data)  # Now at wrong level
 **Attack Vector 1** (Forgotten Uplifting):
 ```python
 # OFFICIAL data enters SECRET LLM
-input_df = ClassifiedDataFrame(data, SecurityLevel.OFFICIAL)
+input_df = SecureDataFrame(data, SecurityLevel.OFFICIAL)
 secret_llm = SecretLLM()  # Trained on SECRET data
 
 # Without automatic uplifting:
@@ -197,14 +197,14 @@ class SubtlyMaliciousPlugin(BasePlugin):
     def get_security_level(self) -> SecurityLevel:
         return SecurityLevel.SECRET  # ✅ Truthful - passes start-time validation
 
-    def process(self, input_data: ClassifiedDataFrame) -> ClassifiedDataFrame:
+    def process(self, input_data: SecureDataFrame) -> SecureDataFrame:
         # input_data.classification == SECRET (legitimate)
         result = input_data.data.copy()
         result["processed"] = True
 
         # ❌ ATTACK: Create "fresh" frame claiming OFFICIAL classification
-        # Bypasses with_uplifted_classification() enforcement
-        return ClassifiedDataFrame(result, SecurityLevel.OFFICIAL)
+        # Bypasses with_uplifted_security_level() enforcement
+        return SecureDataFrame(result, SecurityLevel.OFFICIAL)
 
 # Without ADR-002-A: Attack succeeds, SECRET data relabeled as OFFICIAL
 # With ADR-002-A: SecurityValidationError raised at construction
@@ -219,12 +219,12 @@ class SubtlyMaliciousPlugin(BasePlugin):
 **Subtlety**: **VERY HIGH** - "Blended data" problem, not obvious; laundering attack looks like legitimate code
 
 **Defense Layers**:
-- **Primary (Automatic Uplifting)**: `ClassifiedDataFrame.with_uplifted_classification()`
+- **Primary (Automatic Uplifting)**: `SecureDataFrame.with_uplifted_security_level()`
   - Every component MUST uplift: `max(input.classification, self.get_security_level())`
   - NOT optional, NOT manual
   - Enforced by inherited BasePlugin behavior
 - **Technical Control (ADR-002-A - Constructor Protection)**: **NEW** ✅
-  - Only datasources can create ClassifiedDataFrame via `create_from_datasource()`
+  - Only datasources can create SecureDataFrame via `create_from_datasource()`
   - Plugins BLOCKED from direct construction (SecurityValidationError)
   - Frame inspection in `__post_init__` enforces trusted creation path
   - Prevents classification laundering attack (Scenario 2)
@@ -232,15 +232,15 @@ class SubtlyMaliciousPlugin(BasePlugin):
   - **Security Hardening**: Fail-closed behavior (see below) - blocks when inspection unavailable
 - **Failsafe (Immutability)**: Classification cannot be downgraded
   - `@dataclass(frozen=True)` prevents modification
-  - Only `with_uplifted_classification()` and `with_new_data()` allowed (internal methods)
+  - Only `with_uplifted_security_level()` and `with_new_data()` allowed (internal methods)
 - **Certification**: Code review verifies datasources label correctly (reduced scope vs. before)
 
 **Constructor Protection Implementation Details** (ADR-002-A):
 
-Frame inspection mechanism (`src/elspeth/core/security/classified_data.py:70-119`):
+Frame inspection mechanism (`src/elspeth/core/security/secure_data.py:70-119`):
 1. Walks up 5 stack frames to find caller method name
-2. Allows: `create_from_datasource()`, `with_uplifted_classification()`, `with_new_data()`
-3. Verifies caller's `self` is ClassifiedDataFrame instance (prevents method name spoofing - CVE-ADR-002-A-001)
+2. Allows: `create_from_datasource()`, `with_uplifted_security_level()`, `with_new_data()`
+3. Verifies caller's `self` is SecureDataFrame instance (prevents method name spoofing - CVE-ADR-002-A-001)
 4. Blocks all other construction attempts with SecurityValidationError
 
 **Security Hardening - Fail-Closed Behavior** (Updated post-CVE-ADR-002-A-003):
@@ -255,14 +255,14 @@ Frame inspection mechanism (`src/elspeth/core/security/classified_data.py:70-119
   - Acceptable for high-security deployments where fail-closed is mandatory
   - Standard CPython 3.12+ supports stack inspection (target platform)
 - **Verification**:
-  - Caller identity verification (CVE-ADR-002-A-001): Checks `caller_self` is ClassifiedDataFrame
+  - Caller identity verification (CVE-ADR-002-A-001): Checks `caller_self` is SecureDataFrame
   - Prevents spoofing via external functions with matching names
   - Test coverage validates both fail-closed path and caller verification
 
 **Mitigation**:
 - Make uplifting automatic and unavoidable
 - Block direct construction to prevent laundering (ADR-002-A)
-- Type system enforces: `transform(input: ClassifiedDataFrame) -> ClassifiedDataFrame`
+- Type system enforces: `transform(input: SecureDataFrame) -> SecureDataFrame`
 - Property test: `output.classification >= input.classification` ALWAYS
 
 **Test Evidence**:

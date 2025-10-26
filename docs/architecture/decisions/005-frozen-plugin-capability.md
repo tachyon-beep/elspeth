@@ -32,7 +32,7 @@ We will add **frozen plugin capability** via a **mandatory configuration paramet
 **CRITICAL DISTINCTION**: Data classifications and plugin operations move in OPPOSITE directions under Bell-LaPadula:
 
 **Data Classifications (Can Only INCREASE)**:
-- Data tagged UNOFFICIAL can be **uplifted** to OFFICIAL or SECRET (via `with_uplifted_classification()`)
+- Data tagged UNOFFICIAL can be **uplifted** to OFFICIAL or SECRET (via `with_uplifted_security_level()`)
 - Data tagged SECRET **CANNOT** be downgraded to OFFICIAL or UNOFFICIAL
 - Violates Bell-LaPadula "no write down" rule
 - Example: SECRET-tagged DataFrame cannot be written to UNOFFICIAL sink
@@ -58,7 +58,7 @@ Plugin:  SECRET → OFFICIAL → UNOFFICIAL  (can only decrease via trusted down
 
 **Allowed Operations**:
 - ✅ SECRET plugin operating at UNOFFICIAL level (if allow_downgrade=True) - trusted to filter
-- ✅ UNOFFICIAL data uplifted to SECRET (explicit via with_uplifted_classification())
+- ✅ UNOFFICIAL data uplifted to SECRET (explicit via with_uplifted_security_level())
 - ✅ Frozen plugin operating at EXACT declared level only
 
 ### Implementation: Configuration-Driven Approach
@@ -183,7 +183,7 @@ class AzureDataSource(BasePlugin, DataSource):
         # MUST explicitly declare allow_downgrade (no default)
         super().__init__(security_level=security_level, allow_downgrade=True)
 
-    def load_data(self, context: PluginContext) -> ClassifiedDataFrame:
+    def load_data(self, context: PluginContext) -> SecureDataFrame:
         # Can operate at OFFICIAL, UNOFFICIAL if pipeline requires
         # Responsible for filtering SECRET-tagged blobs appropriately
         ...
@@ -199,7 +199,7 @@ class DedicatedSecretDataSource(BasePlugin, DataSource):
             allow_downgrade=False
         )
 
-    def load_data(self, context: PluginContext) -> ClassifiedDataFrame:
+    def load_data(self, context: PluginContext) -> SecureDataFrame:
         # Will ONLY operate in SECRET pipelines
         # Pipeline construction fails if configured with lower-clearance components
         ...

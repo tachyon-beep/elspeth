@@ -38,10 +38,10 @@
 
 | Current Term | New Term | Occurrences | Rationale |
 |--------------|----------|-------------|-----------|
-| `ClassifiedDataFrame` | `SecureDataFrame` | ~24 | Main container class |
+| `SecureDataFrame` | `SecureDataFrame` | ~24 | Main container class |
 | `ClassifiedData[T]` | `SecureData[T]` | ~10 (planned) | Generic wrapper |
 | `classification` (field) | `security_level` | ~66 | Align with existing naming |
-| `with_uplifted_classification()` | `with_uplifted_security_level()` | ~12 | Method clarity |
+| `with_uplifted_security_level()` | `with_uplifted_security_level()` | ~12 | Method clarity |
 | `classified_material` (middleware) | `sensitive_material` | ~22 | Content detection, not data wrapper |
 | `classification_bypass` (test) | `security_bypass` | ~6 | Test scenario naming |
 | "classification" (docs) | "security level" | ~1,000+ | Documentation clarity |
@@ -54,20 +54,20 @@
 
 #### Core Security Module
 
-**`src/elspeth/core/security/classified_data.py`** (66 occurrences)
+**`src/elspeth/core/security/secure_data.py`** (66 occurrences)
 - **File rename**: → `secure_data.py`
-- **Class**: `ClassifiedDataFrame` → `SecureDataFrame`
+- **Class**: `SecureDataFrame` → `SecureDataFrame`
 - **Field**: `classification: SecurityLevel` → `security_level: SecurityLevel`
 - **Methods**:
   - `create_from_datasource(classification)` → `create_from_datasource(security_level)`
-  - `with_uplifted_classification(new_level)` → `with_uplifted_security_level(new_level)`
-  - `validate_access_by()` - No change (method name is clear)
+  - `with_uplifted_security_level(new_level)` → `with_uplifted_security_level(new_level)`
+  - `validate_compatible_with()` - No change (method name is clear)
 - **Docstrings**: ~40 occurrences of "classification" → "security level"
 - **Comments**: ~10 occurrences
 - **Risk**: LOW - Single file, mechanical rename, comprehensive tests
 
 **`src/elspeth/core/security/__init__.py`** (5 occurrences)
-- **Import**: `from .classified_data import ClassifiedDataFrame` → `from .secure_data import SecureDataFrame`
+- **Import**: `from .classified_data import SecureDataFrame` → `from .secure_data import SecureDataFrame`
 - **Export**: Update `__all__`
 - **Risk**: VERY LOW - Simple import/export changes
 
@@ -82,7 +82,7 @@
 
 **Other Source Files** (11 files, ~25 occurrences)
 - Mostly imports and type annotations
-- Pattern: `ClassifiedDataFrame` → `SecureDataFrame`
+- Pattern: `SecureDataFrame` → `SecureDataFrame`
 - Risk: VERY LOW - IDE refactoring tools handle easily
 
 ---
@@ -108,7 +108,7 @@
 **Patterns to Replace**:
 ```python
 # Before:
-classified_df = ClassifiedDataFrame.create_from_datasource(...)
+classified_df = SecureDataFrame.create_from_datasource(...)
 assert classified_df.classification == SecurityLevel.SECRET
 
 # After:
@@ -194,11 +194,11 @@ assert secure_df.security_level == SecurityLevel.SECRET
 
 | Category | Before | After | Files Affected |
 |----------|--------|-------|----------------|
-| **Core Class** | `ClassifiedDataFrame` | `SecureDataFrame` | 14 source, 14 test |
+| **Core Class** | `SecureDataFrame` | `SecureDataFrame` | 14 source, 14 test |
 | **Generic Wrapper** | `ClassifiedData[T]` | `SecureData[T]` | TBD (new in ADR-004) |
 | **Field Name** | `.classification` | `.security_level` | 14 source, 14 test |
 | **Factory Method** | `create_from_datasource(..., classification)` | `create_from_datasource(..., security_level)` | 4 datasources |
-| **Uplift Method** | `with_uplifted_classification(level)` | `with_uplifted_security_level(level)` | 14 source, 14 test |
+| **Uplift Method** | `with_uplifted_security_level(level)` | `with_uplifted_security_level(level)` | 14 source, 14 test |
 | **Middleware Class** | `ClassifiedMaterialMiddleware` | `SensitiveMaterialMiddleware` | 1 middleware |
 | **Middleware Name** | `"classified_material"` | `"sensitive_material"` | 1 middleware + configs |
 
@@ -206,7 +206,7 @@ assert secure_df.security_level == SecurityLevel.SECRET
 
 | Category | Before | After | Risk |
 |----------|--------|-------|------|
-| **Core Module** | `classified_data.py` | `secure_data.py` | LOW |
+| **Core Module** | `secure_data.py` | `secure_data.py` | LOW |
 | **Middleware** | `classified_material.py` | `sensitive_material.py` | MEDIUM (config refs) |
 | **Test File** | `test_classified_material_middleware.py` | `test_sensitive_material_middleware.py` | LOW |
 | **Test Data** | `classification_bypass.yaml` | `security_bypass.yaml` | LOW |
@@ -244,25 +244,25 @@ assert secure_df.security_level == SecurityLevel.SECRET
 
 **Steps**:
 1. **Rename core module** (30 min):
-   - `classified_data.py` → `secure_data.py`
+   - `secure_data.py` → `secure_data.py`
    - Update imports in `__init__.py`
 
-2. **Rename ClassifiedDataFrame** (2 hours):
-   - Class name: `ClassifiedDataFrame` → `SecureDataFrame`
+2. **Rename SecureDataFrame** (2 hours):
+   - Class name: `SecureDataFrame` → `SecureDataFrame`
    - Field: `classification` → `security_level`
-   - Methods: `with_uplifted_classification()` → `with_uplifted_security_level()`
+   - Methods: `with_uplifted_security_level()` → `with_uplifted_security_level()`
    - Docstrings: Update all references (~40 occurrences)
    - Run tests after each change
 
 3. **Update imports across codebase** (1 hour):
    - Use IDE refactoring: "Find and Replace in Files"
    - Pattern: `from .classified_data import` → `from .secure_data import`
-   - Pattern: `ClassifiedDataFrame` → `SecureDataFrame`
-   - Verify with grep: `grep -r "ClassifiedDataFrame" src/`
+   - Pattern: `SecureDataFrame` → `SecureDataFrame`
+   - Verify with grep: `grep -r "SecureDataFrame" src/`
 
 4. **Update datasources** (30 min):
    - 4 files: `_csv_base.py`, `csv_local.py`, `csv_blob.py`, `blob.py`
-   - Pattern: `classification=` → `security_level=` (parameter names)
+   - Pattern: `security_level=` → `security_level=` (parameter names)
 
 5. **Update middleware** (1 hour):
    - Rename file: `classified_material.py` → `sensitive_material.py`
@@ -292,10 +292,10 @@ assert secure_df.security_level == SecurityLevel.SECRET
 
 2. **Update test code** (2.5 hours):
    - 14 test files with 307 occurrences
-   - Pattern: `ClassifiedDataFrame` → `SecureDataFrame`
+   - Pattern: `SecureDataFrame` → `SecureDataFrame`
    - Pattern: `.classification` → `.security_level`
    - Pattern: `classified_df` → `secure_df` (variable names)
-   - Pattern: `with_uplifted_classification` → `with_uplifted_security_level`
+   - Pattern: `with_uplifted_security_level` → `with_uplifted_security_level`
    - Use IDE refactoring for speed
 
 3. **Update test docstrings** (30 min):
@@ -394,7 +394,7 @@ assert secure_df.security_level == SecurityLevel.SECRET
   1. **No shims** - remove old module entirely
   2. Update all in-tree imports
   3. Document migration in CHANGELOG
-- **Approach**: **Fail-fast** - `ImportError` with clear message: "ClassifiedDataFrame renamed to SecureDataFrame in v0.X"
+- **Approach**: **Fail-fast** - `ImportError` with clear message: "SecureDataFrame renamed to SecureDataFrame in v0.X"
 
 **Risk 3: Documentation Inconsistency** (LOW RISK)
 - **Impact**: Users see "classified" in old docs, "secure" in new code
@@ -440,7 +440,7 @@ assert secure_df.security_level == SecurityLevel.SECRET
 - ✅ All method names updated (`with_uplifted_security_level`)
 - ✅ All tests passing (100%)
 - ✅ MyPy clean, Ruff clean
-- ✅ **No "ClassifiedDataFrame" references in code** (clean removal, no shims)
+- ✅ **No "SecureDataFrame" references in code** (clean removal, no shims)
 - ✅ Sample suite runs successfully with new terminology
 
 ### Should-Have (Quality)
@@ -525,10 +525,10 @@ assert secure_df.security_level == SecurityLevel.SECRET
 **Patterns for Find/Replace**:
 ```regex
 # Code
-ClassifiedDataFrame → SecureDataFrame
+SecureDataFrame → SecureDataFrame
 ClassifiedData\[ → SecureData[
 \.classification → .security_level
-with_uplifted_classification → with_uplifted_security_level
+with_uplifted_security_level → with_uplifted_security_level
 
 # Variables (more selective)
 classified_df → secure_df
@@ -545,7 +545,7 @@ classification mislabeling → security level mislabeling
 **Post-rename checks**:
 ```bash
 # No old class names in source (except deprecation shims)
-grep -r "ClassifiedDataFrame" src/ | grep -v "__init__.py" | wc -l
+grep -r "SecureDataFrame" src/ | grep -v "__init__.py" | wc -l
 # Should be 0
 
 # No old module references
@@ -572,10 +572,10 @@ python -m ruff check src tests
 ### User-Facing Breaking Changes (Pre-1.0 Clean Cut-Over)
 
 **Python API** (Immediate Breaking Changes):
-- ❌ `ClassifiedDataFrame` → ✅ `SecureDataFrame` (**No shim - ImportError**)
+- ❌ `SecureDataFrame` → ✅ `SecureDataFrame` (**No shim - ImportError**)
 - ❌ `from elspeth.core.security.classified_data` → ✅ `from elspeth.core.security.secure_data` (**Module removed**)
 - ❌ `.classification` → ✅ `.security_level` (**AttributeError**)
-- ❌ `with_uplifted_classification()` → ✅ `with_uplifted_security_level()` (**AttributeError**)
+- ❌ `with_uplifted_security_level()` → ✅ `with_uplifted_security_level()` (**AttributeError**)
 
 **Config Files** (Immediate Breaking Changes):
 - ❌ `classified_material` middleware → ✅ `sensitive_material` (**No auto-mapping - ConfigError**)
@@ -594,9 +594,9 @@ python -m ruff check src tests
 # Old code will fail immediately with clear errors:
 
 # ImportError:
-from elspeth.core.security.classified_data import ClassifiedDataFrame
+from elspeth.core.security.classified_data import SecureDataFrame
 # → ImportError: No module named 'elspeth.core.security.classified_data'
-#   See CHANGELOG for v0.X migration guide (ClassifiedDataFrame → SecureDataFrame)
+#   See CHANGELOG for v0.X migration guide (SecureDataFrame → SecureDataFrame)
 
 # AttributeError:
 secure_df.classification
@@ -607,7 +607,7 @@ secure_df.classification
 **Migration Steps**:
 1. Update imports: `from elspeth.core.security.secure_data import SecureDataFrame`
 2. Update field access: `.security_level` (not `.classification`)
-3. Update method calls: `.with_uplifted_security_level()` (not `with_uplifted_classification()`)
+3. Update method calls: `.with_uplifted_security_level()` (not `with_uplifted_security_level()`)
 4. Update configs: `sensitive_material` middleware (not `classified_material`)
 
 **Timeline**: Single version (no gradual migration)

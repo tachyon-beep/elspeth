@@ -57,7 +57,7 @@ When priorities conflict, higher rank wins:
 
 ## Reference Implementations
 
-- `classified_data.py:90-102` – Fail-closed stack inspection
+- `secure_data.py:90-102` – Fail-closed stack inspection
 - `plugin.py:get_effective_level()` – RuntimeError if operating_level not set
 - `suite_runner._validate_experiment_security()` – SecurityValidationError aborts pipeline
 

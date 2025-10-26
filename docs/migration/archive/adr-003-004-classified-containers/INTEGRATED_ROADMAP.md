@@ -24,7 +24,7 @@ This roadmap integrates **two migrations** into a single cohesive plan:
 ┌─────────────────────────────────────────────────────────────────────┐
 │  PRELIMINARY: Merge ADR-002-A Branch                                │
 │  Branch: feature/adr-002-security-enforcement                       │
-│  Action: Merge to main (ClassifiedDataFrame implementation ready)  │
+│  Action: Merge to main (SecureDataFrame implementation ready)  │
 └─────────────────────────────────────────────────────────────────────┘
                               ↓
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -32,10 +32,10 @@ This roadmap integrates **two migrations** into a single cohesive plan:
 │  Branch: refactor/terminology-secure-data                          │
 ├─────────────────────────────────────────────────────────────────────┤
 │  Sub-Phase 0.1: Core Code Rename (4-5 hours)                       │
-│    - Module: classified_data.py → secure_data.py                   │
-│    - Class: ClassifiedDataFrame → SecureDataFrame                  │
+│    - Module: secure_data.py → secure_data.py                   │
+│    - Class: SecureDataFrame → SecureDataFrame                  │
 │    - Field: .classification → .security_level                      │
-│    - Methods: with_uplifted_classification() →                     │
+│    - Methods: with_uplifted_security_level() →                     │
 │               with_uplifted_security_level()                        │
 │    - Middleware: classified_material → sensitive_material           │
 │    - Update all imports across 14 source files                     │
@@ -198,7 +198,7 @@ This roadmap integrates **two migrations** into a single cohesive plan:
 main
  │
  ├─ feature/adr-002-security-enforcement (MERGE FIRST)
- │   └─ ClassifiedDataFrame implementation (ADR-002-A complete)
+ │   └─ SecureDataFrame implementation (ADR-002-A complete)
  │
  ├─ refactor/terminology-secure-data (Phase 0)
  │   ├─ Sub-phase 0.1: Core code rename

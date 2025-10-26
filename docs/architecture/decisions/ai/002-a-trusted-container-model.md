@@ -1,4 +1,4 @@
-# ADR 002-A – Trusted Container Model for ClassifiedDataFrame (LITE)
+# ADR 002-A – Trusted Container Model for SecureDataFrame (LITE)
 
 ## Status
 
@@ -6,16 +6,16 @@ Accepted (2025-10-25) - Extends ADR-002
 
 ## Context
 
-ADR-002 Phase 1 introduced `ClassifiedDataFrame` with immutable classification and `with_uplifted_classification()`. However, **classification laundering vulnerability exists**: nothing prevents plugins from calling `ClassifiedDataFrame(data, lower_level)` directly, bypassing uplifting.
+ADR-002 Phase 1 introduced `SecureDataFrame` with immutable classification and `with_uplifted_security_level()`. However, **classification laundering vulnerability exists**: nothing prevents plugins from calling `SecureDataFrame(data, lower_level)` directly, bypassing uplifting.
 
 **Attack Scenario**:
 
 ```python
-def process(self, input_data: ClassifiedDataFrame) -> ClassifiedDataFrame:
+def process(self, input_data: SecureDataFrame) -> SecureDataFrame:
     # Input: SECRET data
     result = transform(input_data.data)
     # ❌ ATTACK: Create "fresh" frame claiming OFFICIAL
-    return ClassifiedDataFrame(result, SecurityLevel.OFFICIAL)
+    return SecureDataFrame(result, SecurityLevel.OFFICIAL)
 ```
 
 Plugin truthfully reports clearance (passes start-time validation) but lies about output data lineage (SECRET → mislabeled as OFFICIAL). Current defense relies on certification reviewing every transformation (high burden).
@@ -34,7 +34,7 @@ Separates classification metadata (immutable, trusted) from data content (mutabl
 
 3. **Content mutability**: Data content (`.data`) is explicitly mutable for in-place transforms.
 
-4. **Uplifting-only modification**: `with_uplifted_classification()` enforces upward-only via `max()`.
+4. **Uplifting-only modification**: `with_uplifted_security_level()` enforces upward-only via `max()`.
 
 ### Constructor Protection (Fail-Closed)
 
@@ -51,11 +51,11 @@ def __post_init__(self) -> None:
     if frame is None:
         raise SecurityValidationError(
             "Cannot verify caller identity - stack inspection unavailable. "
-            "ClassifiedDataFrame creation blocked."
+            "SecureDataFrame creation blocked."
         )
     
-    # Walk stack to find trusted methods (with_uplifted_classification, with_new_data)
-    # Verify caller's 'self' is ClassifiedDataFrame instance (prevents spoofing)
+    # Walk stack to find trusted methods (with_uplifted_security_level, with_new_data)
+    # Verify caller's 'self' is SecureDataFrame instance (prevents spoofing)
     # Block all other attempts
 ```
 
@@ -66,7 +66,7 @@ def __post_init__(self) -> None:
 ```python
 @classmethod
 def create_from_datasource(cls, data: pd.DataFrame, 
-                          classification: SecurityLevel) -> "ClassifiedDataFrame":
+                          classification: SecurityLevel) -> "SecureDataFrame":
     """Create initial classified frame (datasources only)."""
     # Bypass __post_init__ validation
 ```
@@ -74,7 +74,7 @@ def create_from_datasource(cls, data: pd.DataFrame,
 **Plugin new data generation**:
 
 ```python
-def with_new_data(self, new_data: pd.DataFrame) -> "ClassifiedDataFrame":
+def with_new_data(self, new_data: pd.DataFrame) -> "SecureDataFrame":
     """Create frame with different data, preserving classification."""
     # Used when plugin generates entirely new DataFrame
 ```
@@ -84,17 +84,17 @@ def with_new_data(self, new_data: pd.DataFrame) -> "ClassifiedDataFrame":
 ✅ **Pattern 1: In-place mutation** (recommended)
 
 ```python
-def process(self, frame: ClassifiedDataFrame) -> ClassifiedDataFrame:
+def process(self, frame: SecureDataFrame) -> SecureDataFrame:
     frame.data['processed'] = transform(frame.data['input'])
-    return frame.with_uplifted_classification(self.get_security_level())
+    return frame.with_uplifted_security_level(self.get_security_level())
 ```
 
 ✅ **Pattern 2: New data generation**
 
 ```python
-def process(self, frame: ClassifiedDataFrame) -> ClassifiedDataFrame:
+def process(self, frame: SecureDataFrame) -> SecureDataFrame:
     new_df = self.llm.generate(...)
-    return frame.with_new_data(new_df).with_uplifted_classification(
+    return frame.with_new_data(new_df).with_uplifted_security_level(
         self.get_security_level()
     )
 ```
@@ -102,7 +102,7 @@ def process(self, frame: ClassifiedDataFrame) -> ClassifiedDataFrame:
 ❌ **Anti-pattern: Direct creation** (blocked)
 
 ```python
-return ClassifiedDataFrame(new_data, SecurityLevel.OFFICIAL)  # SecurityValidationError
+return SecureDataFrame(new_data, SecurityLevel.OFFICIAL)  # SecurityValidationError
 ```
 
 ## Interaction with Frozen Plugins (ADR-002/005)
@@ -115,12 +115,12 @@ return ClassifiedDataFrame(new_data, SecurityLevel.OFFICIAL)  # SecurityValidati
 Frozen plugins MUST use factory method:
 
 ```python
-def load_data(self, context: PluginContext) -> ClassifiedDataFrame:
+def load_data(self, context: PluginContext) -> SecureDataFrame:
     # ✅ CORRECT
-    return ClassifiedDataFrame.create_from_datasource(data, SecurityLevel.SECRET)
+    return SecureDataFrame.create_from_datasource(data, SecurityLevel.SECRET)
     
     # ❌ WRONG: Blocked by container model
-    # return ClassifiedDataFrame(data, SecurityLevel.SECRET)
+    # return SecureDataFrame(data, SecurityLevel.SECRET)
 ```
 
 **Key**: Freezing affects WHEN plugins run (pipeline construction), not HOW they manage classification (runtime).
@@ -143,7 +143,7 @@ def load_data(self, context: PluginContext) -> ClassifiedDataFrame:
 
 ## Implementation Impact
 
-- Core: `classified_data.py` updated with `__post_init__`, factories
+- Core: `secure_data.py` updated with `__post_init__`, factories
 - Datasources: ~5-10 files updated to factory method
 - Tests: 5 new security tests
 - Docs: Plugin guide updated with lifecycle patterns

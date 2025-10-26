@@ -21,7 +21,7 @@ from elspeth.core.base.plugin import BasePlugin  # ADR-004: ABC with nominal typ
 from elspeth.core.base.types import SecurityLevel
 from elspeth.core.experiments.config import ExperimentConfig, ExperimentSuite
 from elspeth.core.experiments.suite_runner import ExperimentSuiteRunner
-from elspeth.core.security.classified_data import ClassifiedDataFrame
+from elspeth.core.security.secure_data import SecureDataFrame
 from elspeth.core.validation.base import SecurityValidationError
 
 # ============================================================================
@@ -38,7 +38,7 @@ class MockUnofficialDatasource(BasePlugin):
 
     def load(self) -> pd.DataFrame:
         """Load data at UNOFFICIAL level."""
-        classified = ClassifiedDataFrame.create_from_datasource(self.df, SecurityLevel.UNOFFICIAL)
+        classified = SecureDataFrame.create_from_datasource(self.df, SecurityLevel.UNOFFICIAL)
         return classified.data
 
 
@@ -50,11 +50,11 @@ class MockOfficialTransform(BasePlugin):
 
     def transform(self, data: pd.DataFrame) -> pd.DataFrame:
         """Transform data and uplift to OFFICIAL."""
-        classified_input = ClassifiedDataFrame.create_from_datasource(data, SecurityLevel.UNOFFICIAL)
+        classified_input = SecureDataFrame.create_from_datasource(data, SecurityLevel.UNOFFICIAL)
         result = data.copy()
         result["stage1_official"] = True
         output = classified_input.with_new_data(result)
-        uplifted = output.with_uplifted_classification(SecurityLevel.OFFICIAL)
+        uplifted = output.with_uplifted_security_level(SecurityLevel.OFFICIAL)
         return uplifted.data
 
 
@@ -289,7 +289,7 @@ class TestADR002MiddlewareIntegration:
         This is critical for T4 prevention - middleware must not create
         classification breaches through careless handling.
         """
-        from elspeth.core.security.classified_data import ClassifiedDataFrame
+        from elspeth.core.security.secure_data import SecureDataFrame
 
         df = pd.DataFrame({"text": ["secret_data_1", "secret_data_2"]})
 
@@ -299,7 +299,7 @@ class TestADR002MiddlewareIntegration:
                 super().__init__(security_level=SecurityLevel.SECRET, allow_downgrade=True)
 
             def load(self) -> pd.DataFrame:
-                classified = ClassifiedDataFrame.create_from_datasource(df, SecurityLevel.SECRET)
+                classified = SecureDataFrame.create_from_datasource(df, SecurityLevel.SECRET)
                 return classified.data
 
         # LLM client wrapped with middleware

@@ -1,4 +1,4 @@
-# Plugin Architecture & ClassifiedDataFrame Migration Analysis
+# Plugin Architecture & SecureDataFrame Migration Analysis
 
 ## Executive Summary
 
@@ -8,7 +8,7 @@ The Elspeth system processes data through a plugin-based architecture with **70 
 - **Experiment plugins** (row, aggregator, baseline, validation, early-stop)
 - **Orchestration layer** coordinating the entire flow
 
-Currently, all plugins work with **raw pandas DataFrames** and plain **dict[str, Any]** objects. The migration to ClassifiedDataFrame/ClassifiedData containers requires updates to data passing patterns throughout the entire pipeline.
+Currently, all plugins work with **raw pandas DataFrames** and plain **dict[str, Any]** objects. The migration to SecureDataFrame/ClassifiedData containers requires updates to data passing patterns throughout the entire pipeline.
 
 ---
 
@@ -37,8 +37,8 @@ class DataSource(Protocol):
 - Framework applies DataFrame-level attrs: `df.attrs['security_level']`
 
 **Migration Impact**:
-- Need to wrap DataFrame in `ClassifiedDataFrame.create_from_datasource(df, security_level)`
-- Must return `ClassifiedDataFrame` instead of raw `pd.DataFrame`
+- Need to wrap DataFrame in `SecureDataFrame.create_from_datasource(df, security_level)`
+- Must return `SecureDataFrame` instead of raw `pd.DataFrame`
 - Orchestrator (`orchestrator.py` line 159) currently calls `df = self.datasource.load()`
 
 ### 1.2 Sink Plugins (Result Sinks)
@@ -86,7 +86,7 @@ class ResultSink(Protocol):
 **Migration Impact**:
 - Data at sink level is **already dict-based** (not DataFrame)
 - Classification metadata flows through `metadata["security_level"]` (scalar)
-- Sinks don't need direct `ClassifiedDataFrame` access
+- Sinks don't need direct `SecureDataFrame` access
 - But they need awareness of `ClassifiedData` for individual row/record fields
 - Artifact pipeline (`artifact_pipeline.py`) manages security levels for artifacts
 
@@ -123,7 +123,7 @@ class LLMClientProtocol(Protocol):
 
 **Migration Impact**:
 - Prompts themselves are already string-based (no DataFrame data directly)
-- LLM clients don't need ClassifiedDataFrame access
+- LLM clients don't need SecureDataFrame access
 - But middleware needs to inspect row-level ClassifiedData
 
 #### LLM Middleware
@@ -294,9 +294,9 @@ def load(self) -> pd.DataFrame:
     return df
 
 # Migration: Must change to
-def load(self) -> ClassifiedDataFrame:
+def load(self) -> SecureDataFrame:
     df = pd.read_csv(...)
-    return ClassifiedDataFrame.create_from_datasource(
+    return SecureDataFrame.create_from_datasource(
         df, 
         SecurityLevel(self.security_level)
     )
@@ -337,7 +337,7 @@ class LLMRequest:
 # 1. Unwrap: unwrapped = request.metadata.data
 # 2. Process: processed = transform(unwrapped)
 # 3. Re-wrap with uplifting: 
-#    request.metadata.with_uplifted_classification(plugin_level)
+#    request.metadata.with_uplifted_security_level(plugin_level)
 ```
 
 #### Aggregation Layer
@@ -399,9 +399,9 @@ def run(self) -> dict[str, Any]:
 ```
 
 **Migration Points**:
-1. Line 159: `datasource.load()` must return `ClassifiedDataFrame` (or still DataFrame?)
-2. Line 163: If ClassifiedDataFrame, need method to handle `.head()` slicing
-3. Line 179: `runner.run(df)` - runner expects DataFrame, may need to handle ClassifiedDataFrame
+1. Line 159: `datasource.load()` must return `SecureDataFrame` (or still DataFrame?)
+2. Line 163: If SecureDataFrame, need method to handle `.head()` slicing
+3. Line 179: `runner.run(df)` - runner expects DataFrame, may need to handle SecureDataFrame
 
 ### 3.2 Experiment Runner
 
@@ -464,8 +464,8 @@ self._dispatch_to_sinks(payload, metadata)
 ```
 
 **Migration Impact**:
-- Must accept `ClassifiedDataFrame | pd.DataFrame` in `run()` method (line 767)
-- `_prepare_rows_to_process()` needs to handle ClassifiedDataFrame
+- Must accept `SecureDataFrame | pd.DataFrame` in `run()` method (line 767)
+- `_prepare_rows_to_process()` needs to handle SecureDataFrame
 - Row processing chain needs to propagate ClassifiedData through row/context dicts
 - Aggregation plugins need to handle ClassifiedData-wrapped dicts
 - Result dicts might contain ClassifiedData fields
@@ -599,7 +599,7 @@ middlewares = create_middlewares(config.llm_middleware_defs, parent_context=expe
 
 | Component | Type | Count | Current Pattern | Migration Requirement |
 |-----------|------|-------|-----------------|----------------------|
-| Sources | Plugins | 4 | Return `pd.DataFrame` | Return `ClassifiedDataFrame` |
+| Sources | Plugins | 4 | Return `pd.DataFrame` | Return `SecureDataFrame` |
 | Sinks | Plugins | 16 | Accept `dict[str, Any]` | Accept dict, manage artifact security |
 | LLM Transforms | Plugins | 4 | Accept prompts (str) | No change to interface |
 | LLM Middleware | Plugins | 6 | Process `LLMRequest` | Unwrap/rewrap `metadata` |
@@ -607,8 +607,8 @@ middlewares = create_middlewares(config.llm_middleware_defs, parent_context=expe
 | Aggregator Plugins | Plugins | 6 | Accept `list[dict]` | Unwrap/rewrap `ClassifiedData` |
 | Baseline Plugins | Plugins | 9 | Accept `dict[str, Any]` | No direct data handling |
 | Validation Plugins | Plugins | ~5+ | Accept `dict[str, Any]` | No change (validation at schema level) |
-| Orchestrator | Core | 1 | Calls datasource.load() | Handle `ClassifiedDataFrame` |
-| Runner | Core | 1 | Processes `pd.DataFrame` | Accept `ClassifiedDataFrame` |
+| Orchestrator | Core | 1 | Calls datasource.load() | Handle `SecureDataFrame` |
+| Runner | Core | 1 | Processes `pd.DataFrame` | Accept `SecureDataFrame` |
 | Artifact Pipeline | Core | 1 | Manages artifacts | Already has security_level metadata |
 
 ### 5.2 Interfaces Needing Updates
@@ -620,14 +620,14 @@ class DataSource(Protocol):
     def load(self) -> pd.DataFrame:
         """Return the experiment dataset."""
 
-# AFTER (Option A: Strict - always ClassifiedDataFrame)
+# AFTER (Option A: Strict - always SecureDataFrame)
 class DataSource(Protocol):
-    def load(self) -> ClassifiedDataFrame:
+    def load(self) -> SecureDataFrame:
         """Return the experiment dataset."""
 
 # AFTER (Option B: Flexible - Union type)
 class DataSource(Protocol):
-    def load(self) -> pd.DataFrame | ClassifiedDataFrame:
+    def load(self) -> pd.DataFrame | SecureDataFrame:
         """Return the experiment dataset."""
 ```
 
@@ -637,10 +637,10 @@ class DataSource(Protocol):
 def run(self, df: pd.DataFrame) -> dict[str, Any]:
 
 # AFTER (Option A: Strict)
-def run(self, df: ClassifiedDataFrame) -> dict[str, Any]:
+def run(self, df: SecureDataFrame) -> dict[str, Any]:
 
 # AFTER (Option B: Flexible)
-def run(self, df: pd.DataFrame | ClassifiedDataFrame) -> dict[str, Any]:
+def run(self, df: pd.DataFrame | SecureDataFrame) -> dict[str, Any]:
 ```
 
 **3. LLMRequest** (`protocols.py` line 207-227)
@@ -717,7 +717,7 @@ def process_row(
 
 ## 6. DATA STRUCTURE MAPPINGS
 
-### 6.1 DataFrame → ClassifiedDataFrame
+### 6.1 DataFrame → SecureDataFrame
 
 **Current State**:
 ```python
@@ -727,7 +727,7 @@ df.attrs = {'security_level': SecurityLevel.OFFICIAL}
 
 **Migration Target**:
 ```python
-frame: ClassifiedDataFrame
+frame: SecureDataFrame
 frame.data: pd.DataFrame  # Underlying data
 frame.classification: SecurityLevel  # Immutable classification
 ```
@@ -735,11 +735,11 @@ frame.classification: SecurityLevel  # Immutable classification
 **Operations**:
 ```python
 # Creation (only in datasources)
-frame = ClassifiedDataFrame.create_from_datasource(df, SecurityLevel.OFFICIAL)
+frame = SecureDataFrame.create_from_datasource(df, SecurityLevel.OFFICIAL)
 
 # Uplifting (in plugins)
 if plugin_security_level > frame.classification:
-    frame = frame.with_uplifted_classification(plugin_security_level)
+    frame = frame.with_uplifted_security_level(plugin_security_level)
 
 # Data access
 df = frame.data
@@ -748,11 +748,11 @@ col = frame.data['column_name']
 
 ### 6.2 dict[str, Any] → ClassifiedData[dict]
 
-**Problem**: ClassifiedData doesn't exist yet (ClassifiedDataFrame exists)
+**Problem**: ClassifiedData doesn't exist yet (SecureDataFrame exists)
 
 **Solution Options**:
-1. Create `ClassifiedData[T]` generic wrapper (parallel to ClassifiedDataFrame)
-2. Extend ClassifiedDataFrame to support dict wrapping
+1. Create `ClassifiedData[T]` generic wrapper (parallel to SecureDataFrame)
+2. Extend SecureDataFrame to support dict wrapping
 3. Keep dicts as-is, embed ClassifiedData only at schema field level
 4. Create field-level `ClassifiedValue` for individual sensitive fields
 
@@ -771,11 +771,11 @@ col = frame.data['column_name']
    - Effort: 4 small changes
    - Risk: HIGH (orchestrator depends on this)
 
-2. **Orchestrator datasource.load() call** - Must handle ClassifiedDataFrame
+2. **Orchestrator datasource.load() call** - Must handle SecureDataFrame
    - Effort: 1 change in orchestrator.py
    - Risk: HIGH (critical path)
 
-3. **Runner.run() input type** - Must accept ClassifiedDataFrame
+3. **Runner.run() input type** - Must accept SecureDataFrame
    - Effort: 1 change but impacts many internal methods
    - Risk: MEDIUM (internal refactoring)
 
@@ -814,7 +814,7 @@ col = frame.data['column_name']
 ### 7.4 New Code Needed
 
 - `ClassifiedData[T]` generic wrapper (if not already existing)
-- Test infrastructure for ClassifiedDataFrame propagation
+- Test infrastructure for SecureDataFrame propagation
 - Test infrastructure for ClassifiedData[dict] propagation
 - Utilities for unwrap/rewrap in middleware
 - Utilities for uplifting in plugins
@@ -843,18 +843,18 @@ col = frame.data['column_name']
 
 **Path 1: Datasource → Runner → Sinks**
 ```
-datasource.load() [CHANGE: return ClassifiedDataFrame]
+datasource.load() [CHANGE: return SecureDataFrame]
     ↓
-orchestrator.run() [CHANGE: handle ClassifiedDataFrame]
+orchestrator.run() [CHANGE: handle SecureDataFrame]
     ↓
-runner.run(df) [CHANGE: accept ClassifiedDataFrame]
+runner.run(df) [CHANGE: accept SecureDataFrame]
     ↓
 runner._dispatch_to_sinks() [CHANGE: propagate classification]
 ```
 
 **Path 2: Row Processing → Middleware → Aggregation**
 ```
-Extract row dict from ClassifiedDataFrame [CHANGE: wrap in ClassifiedData]
+Extract row dict from SecureDataFrame [CHANGE: wrap in ClassifiedData]
     ↓
 Build context dict [CHANGE: wrap in ClassifiedData]
     ↓
@@ -867,9 +867,9 @@ Aggregators process list[dict] [CHANGE: handle ClassifiedData]
 
 ### 8.4 Design Decisions Needed
 
-1. **ClassifiedDataFrame handling**: 
-   - Should orchestrator.run(df) require strict ClassifiedDataFrame or accept pd.DataFrame?
-   - Answer: Accept both for backward compat, prefer ClassifiedDataFrame
+1. **SecureDataFrame handling**: 
+   - Should orchestrator.run(df) require strict SecureDataFrame or accept pd.DataFrame?
+   - Answer: Accept both for backward compat, prefer SecureDataFrame
 
 2. **Row dict classification**:
    - Should every row dict become ClassifiedData[dict]?

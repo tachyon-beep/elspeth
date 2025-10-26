@@ -25,7 +25,7 @@ This working directory contains all materials for implementing ADR-002 suite-lev
 
 **ADR-002-A** (Trusted Container Model):
 4. Constructor protection prevents classification laundering attacks
-5. Only datasources can create ClassifiedDataFrame instances
+5. Only datasources can create SecureDataFrame instances
 6. Plugins blocked from creating arbitrary frames (technical control vs manual review)
 
 **Security Invariant**: No configuration can allow SECRET data to reach UNOFFICIAL sink, and no plugin can relabel data to bypass classification.
@@ -89,7 +89,7 @@ ADR002_IMPLEMENTATION/
 - ✅ 10 property tests defined (7500+ examples)
 
 **Phase 1 ✅ COMPLETE**:
-- ✅ ClassifiedDataFrame implemented (frozen, auto-uplifting)
+- ✅ SecureDataFrame implemented (frozen, auto-uplifting)
 - ✅ Minimum clearance envelope computation
 - ✅ BasePlugin protocol with validation methods
 - ✅ 14/14 invariant tests PASSING

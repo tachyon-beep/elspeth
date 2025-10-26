@@ -141,12 +141,12 @@ def test_sink_writes_successfully(sink_class, file_ext, reader, tmp_path):
 ```python
 def test_a():
     df = pd.DataFrame({"a": [1, 2], "b": [3, 4]})
-    classified = ClassifiedDataFrame.create_from_datasource(df, SecurityLevel.OFFICIAL)
+    classified = SecureDataFrame.create_from_datasource(df, SecurityLevel.OFFICIAL)
     # test logic
 
 def test_b():
     df = pd.DataFrame({"a": [1, 2], "b": [3, 4]})
-    classified = ClassifiedDataFrame.create_from_datasource(df, SecurityLevel.OFFICIAL)
+    classified = SecureDataFrame.create_from_datasource(df, SecurityLevel.OFFICIAL)
     # test logic
 ```
 
@@ -155,7 +155,7 @@ def test_b():
 @pytest.fixture
 def sample_classified_dataframe():
     df = pd.DataFrame({"a": [1, 2], "b": [3, 4]})
-    return ClassifiedDataFrame.create_from_datasource(df, SecurityLevel.OFFICIAL)
+    return SecureDataFrame.create_from_datasource(df, SecurityLevel.OFFICIAL)
 
 def test_a(sample_classified_dataframe):
     # test logic

@@ -41,7 +41,7 @@
 
 | Test File | Purpose | Status |
 |-----------|---------|--------|
-| `tests/test_adr002a_invariants.py` | ClassifiedDataFrame invariants | ❓ Need to check |
+| `tests/test_adr002a_invariants.py` | SecureDataFrame invariants | ❓ Need to check |
 | `tests/test_adr002a_performance.py` | Performance benchmarks | ❓ Need to check |
 
 ### ADR-005 Specific Tests
@@ -268,7 +268,7 @@ Need to run and assess these test files:
 | **P0** | `test_adr002_validation.py` | Validation logic | Run, check for Bell-LaPadula inversion issues |
 | **P0** | `test_adr002_invariants.py` | Security invariants | Run, check for failures due to ADR-005 changes |
 | **P1** | `test_adr002_properties.py` | Security properties | Run, assess xfail status |
-| **P1** | `test_adr002_suite_integration.py` | Suite integration | Run, check for ClassifiedDataFrame usage |
+| **P1** | `test_adr002_suite_integration.py` | Suite integration | Run, check for SecureDataFrame usage |
 | **P2** | `test_adr002_middleware_integration.py` | Middleware | Run, check container handling |
 | **P2** | `test_adr002_error_handling.py` | Error handling | Run, assess completeness |
 
@@ -348,7 +348,7 @@ src/elspeth/core/experiments/suite_runner.py  282 219 114 0  16%  ...many lines.
 1. Run `test_adr002_validation.py` → Check for Bell-LaPadula inversion
 2. Run `test_adr002_invariants.py` → Check for ADR-005 compatibility
 3. Run `test_adr002_properties.py` → Assess xfail status
-4. Run `test_adr002_suite_integration.py` → Check ClassifiedDataFrame usage
+4. Run `test_adr002_suite_integration.py` → Check SecureDataFrame usage
 5. Document failures with root cause analysis
 
 **Exit Criteria**: ✅ All test files assessed, failure root causes identified

@@ -27,7 +27,7 @@
 ### Achievements
 - ✅ **85.7% ADR-002 test suite success** (60/70 tests passing)
 - ✅ **88% coverage on BasePlugin** security enforcement logic
-- ✅ **82% coverage on ClassifiedDataFrame**
+- ✅ **82% coverage on SecureDataFrame**
 - ✅ **97.9% overall test success** (1,381/1,411 tests)
 - ✅ **Zero behavioral changes** (only test fixes, no production code changes)
 - ✅ **Zero regressions** (MyPy clean, Ruff clean)
@@ -130,10 +130,10 @@ All 10 failures are **expected Phase 1+ blockers** (not Phase 0 gaps):
 - **Blocker**: Suite runner validation exists but not triggered (isinstance checks fail)
 - **Resolution**: Phase 1.3-1.5 will enable validation triggering
 
-### Category 3: ClassifiedDataFrame Integration (2 tests)
+### Category 3: SecureDataFrame Integration (2 tests)
 - `test_four_level_uplifting_chain`
 - `test_three_level_uplifting_with_mismatched_sink`
-- **Blocker**: ADR-003 ClassifiedDataFrame not fully integrated
+- **Blocker**: ADR-003 SecureDataFrame not fully integrated
 - **Resolution**: Phase 2 (ADR-003 full implementation)
 
 ---
@@ -275,7 +275,7 @@ class AzureOpenAIClient(BasePlugin, LLMClientProtocol):
 ### Future Sessions
 - Phase 1.4: Middleware migration (8 hours)
 - Phase 1.5: Suite runner integration (4-6 hours)
-- Phase 2: ADR-003 ClassifiedDataFrame full implementation
+- Phase 2: ADR-003 SecureDataFrame full implementation
 
 ---
 

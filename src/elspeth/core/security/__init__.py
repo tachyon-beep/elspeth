@@ -11,7 +11,7 @@ from .approved_endpoints import (
     validate_endpoint,
     validate_http_api_endpoint,
 )
-from .classified_data import ClassifiedDataFrame
+from .secure_data import SecureDataFrame
 from .secure_mode import (
     SecureMode,
     get_mode_description,
@@ -224,7 +224,7 @@ __all__ = [
     "public_key_fingerprint",
     "SecurityLevel",
     "DeterminismLevel",
-    "ClassifiedDataFrame",
+    "SecureDataFrame",
     "ensure_security_level",
     "ensure_determinism_level",
     "is_security_level_allowed",

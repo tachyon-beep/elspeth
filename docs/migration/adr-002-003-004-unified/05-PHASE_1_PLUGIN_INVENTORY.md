@@ -417,7 +417,7 @@ For each plugin migration, follow this checklist:
 - ✅ Overall test suite: ≥98% success
 - ✅ MyPy clean
 - ✅ Ruff clean
-- ✅ Ready for Phase 2 (ADR-003: ClassifiedDataFrame integration)
+- ✅ Ready for Phase 2 (ADR-003: SecureDataFrame integration)
 
 ---
 
@@ -427,7 +427,7 @@ For each plugin migration, follow this checklist:
 2. **Phase 1.3** (5.5 hours): Migrate LLM adapters to BasePlugin
 3. **Phase 1.4** (8 hours): Migrate middleware to BasePlugin
 4. **Phase 1.5** (4-6 hours): Integrate and validate suite runner
-5. **Phase 2** (future): ADR-003 ClassifiedDataFrame full implementation
+5. **Phase 2** (future): ADR-003 SecureDataFrame full implementation
 
 **Total Phase 1 Estimated Effort**: 17.5-19.5 hours
 

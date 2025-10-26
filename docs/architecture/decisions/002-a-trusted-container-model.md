@@ -1,4 +1,4 @@
-# ADR 002-A – Trusted Container Model for ClassifiedDataFrame
+# ADR 002-A – Trusted Container Model for SecureDataFrame
 
 ## Status
 
@@ -8,15 +8,15 @@ Extends [ADR-002](002-security-architecture.md)
 
 ## Context
 
-ADR-002 established Multi-Level Security (MLS) enforcement with two layers: start-time validation (orchestrator rejects misconfigured pipelines) and runtime validation (`ClassifiedDataFrame` validates access at every data hand-off).
+ADR-002 established Multi-Level Security (MLS) enforcement with two layers: start-time validation (orchestrator rejects misconfigured pipelines) and runtime validation (`SecureDataFrame` validates access at every data hand-off).
 
-Phase 1 implementation (commit d83d7fd) introduced `ClassifiedDataFrame` with:
+Phase 1 implementation (commit d83d7fd) introduced `SecureDataFrame` with:
 
 - **Immutable classification** – `@dataclass(frozen=True)` prevents modification
-- **Uplifting enforcement** – `with_uplifted_classification()` uses `max()` to prevent downgrades
-- **Runtime failsafe** – `validate_access_by()` checks clearance at every hand-off
+- **Uplifting enforcement** – `with_uplifted_security_level()` uses `max()` to prevent downgrades
+- **Runtime failsafe** – `validate_compatible_with()` checks clearance at every hand-off
 
-However, code review identified a **classification laundering vulnerability**: nothing prevents plugins from calling `ClassifiedDataFrame(data, lower_level)` directly, bypassing uplifting logic entirely.
+However, code review identified a **classification laundering vulnerability**: nothing prevents plugins from calling `SecureDataFrame(data, lower_level)` directly, bypassing uplifting logic entirely.
 
 ### The Attack Scenario
 
@@ -25,13 +25,13 @@ class SubtlyMaliciousPlugin(TransformNode):
     def get_security_level(self) -> SecurityLevel:
         return SecurityLevel.SECRET  # Truthful - can handle SECRET
 
-    def process(self, input_data: ClassifiedDataFrame) -> ClassifiedDataFrame:
+    def process(self, input_data: SecureDataFrame) -> SecureDataFrame:
         # Input: SECRET data (validated at start-time)
         result = transform(input_data.data)
 
         # ❌ ATTACK: Create "fresh" frame claiming OFFICIAL classification
-        return ClassifiedDataFrame(result, SecurityLevel.OFFICIAL)
-        # Bypasses with_uplifted_classification() entirely
+        return SecureDataFrame(result, SecurityLevel.OFFICIAL)
+        # Bypasses with_uplifted_security_level() entirely
 ```
 
 This is more subtle than T2 (malicious plugins lying about capabilities) because:
@@ -52,13 +52,13 @@ We will adopt a **Trusted Container Model** that separates classification metada
 
 ### Container Model Implementation
 
-1. **Datasource-only creation** – Only datasources can create `ClassifiedDataFrame` instances via `create_from_datasource()` factory method. Plugins attempting direct construction will raise `SecurityValidationError`.
+1. **Datasource-only creation** – Only datasources can create `SecureDataFrame` instances via `create_from_datasource()` factory method. Plugins attempting direct construction will raise `SecurityValidationError`.
 
 2. **Container immutability** – Classification metadata remains frozen (existing). The container itself cannot be created by plugins.
 
 3. **Content mutability** – Data content (`.data` field) is explicitly mutable. Plugins transform data in-place within the trusted container.
 
-4. **Uplifting-only modification** – `with_uplifted_classification()` is the only way plugins can change classification, and it enforces upward-only movement via `max()` operation (existing).
+4. **Uplifting-only modification** – `with_uplifted_security_level()` is the only way plugins can change classification, and it enforces upward-only movement via `max()` operation (existing).
 
 ### Implementation
 
@@ -66,7 +66,7 @@ We will adopt a **Trusted Container Model** that separates classification metada
 
 ```python
 @dataclass(frozen=True)
-class ClassifiedDataFrame:
+class SecureDataFrame:
     data: pd.DataFrame
     classification: SecurityLevel
     _created_by_datasource: bool = field(default=False, init=False, compare=False, repr=False)
@@ -89,9 +89,9 @@ class ClassifiedDataFrame:
             # SECURITY: Fail-closed when stack inspection unavailable
             raise SecurityValidationError(
                 "Cannot verify caller identity - stack inspection is unavailable in this Python runtime. "
-                "ClassifiedDataFrame creation blocked for security. "
-                "Datasources must use ClassifiedDataFrame.create_from_datasource(). "
-                "Plugins must use with_uplifted_classification() or with_new_data()."
+                "SecureDataFrame creation blocked for security. "
+                "Datasources must use SecureDataFrame.create_from_datasource(). "
+                "Plugins must use with_uplifted_security_level() or with_new_data()."
             )
 
         # Walk up call stack to find trusted methods
@@ -102,18 +102,18 @@ class ClassifiedDataFrame:
             current_frame = current_frame.f_back
             caller_name = current_frame.f_code.co_name
 
-            # Allow internal methods (with_uplifted_classification, with_new_data)
-            if caller_name in ("with_uplifted_classification", "with_new_data"):
-                # SECURITY: Verify the caller's 'self' is actually a ClassifiedDataFrame instance
+            # Allow internal methods (with_uplifted_security_level, with_new_data)
+            if caller_name in ("with_uplifted_security_level", "with_new_data"):
+                # SECURITY: Verify the caller's 'self' is actually a SecureDataFrame instance
                 # Prevents spoofing via external functions with same name
                 caller_self = current_frame.f_locals.get('self')
-                if isinstance(caller_self, ClassifiedDataFrame):
+                if isinstance(caller_self, SecureDataFrame):
                     return  # Legitimate internal method call
 
         # Block all other attempts (plugins, direct construction)
         raise SecurityValidationError(
-            "ClassifiedDataFrame can only be created by datasources using "
-            "create_from_datasource(). Plugins must use with_uplifted_classification() "
+            "SecureDataFrame can only be created by datasources using "
+            "create_from_datasource(). Plugins must use with_uplifted_security_level() "
             "to uplift existing frames or with_new_data() to generate new data. "
             "This prevents classification laundering attacks (ADR-002-A)."
         )
@@ -125,7 +125,7 @@ class ClassifiedDataFrame:
 @classmethod
 def create_from_datasource(
     cls, data: pd.DataFrame, classification: SecurityLevel
-) -> "ClassifiedDataFrame":
+) -> "SecureDataFrame":
     """Create initial classified frame (datasources only)."""
     instance = cls.__new__(cls)
     object.__setattr__(instance, 'data', data)
@@ -137,9 +137,9 @@ def create_from_datasource(
 **New data method** for plugins generating entirely new DataFrames:
 
 ```python
-def with_new_data(self, new_data: pd.DataFrame) -> "ClassifiedDataFrame":
+def with_new_data(self, new_data: pd.DataFrame) -> "SecureDataFrame":
     """Create frame with different data, preserving current classification."""
-    instance = ClassifiedDataFrame.__new__(ClassifiedDataFrame)
+    instance = SecureDataFrame.__new__(SecureDataFrame)
     object.__setattr__(instance, 'data', new_data)
     object.__setattr__(instance, 'classification', self.classification)
     object.__setattr__(instance, '_created_by_datasource', False)
@@ -151,17 +151,17 @@ def with_new_data(self, new_data: pd.DataFrame) -> "ClassifiedDataFrame":
 **Pattern 1: In-place mutation (recommended)**
 
 ```python
-def process(self, frame: ClassifiedDataFrame) -> ClassifiedDataFrame:
+def process(self, frame: SecureDataFrame) -> SecureDataFrame:
     frame.data['processed'] = transform(frame.data['input'])
-    return frame.with_uplifted_classification(self.get_security_level())
+    return frame.with_uplifted_security_level(self.get_security_level())
 ```
 
 **Pattern 2: New data generation**
 
 ```python
-def process(self, frame: ClassifiedDataFrame) -> ClassifiedDataFrame:
+def process(self, frame: SecureDataFrame) -> SecureDataFrame:
     new_df = self.llm.generate(...)
-    return frame.with_new_data(new_df).with_uplifted_classification(
+    return frame.with_new_data(new_df).with_uplifted_security_level(
         self.get_security_level()
     )
 ```
@@ -169,8 +169,8 @@ def process(self, frame: ClassifiedDataFrame) -> ClassifiedDataFrame:
 **Anti-pattern: Direct creation (blocked)**
 
 ```python
-def process(self, frame: ClassifiedDataFrame) -> ClassifiedDataFrame:
-    return ClassifiedDataFrame(new_data, SecurityLevel.OFFICIAL)  # SecurityValidationError
+def process(self, frame: SecureDataFrame) -> SecureDataFrame:
+    return SecureDataFrame(new_data, SecurityLevel.OFFICIAL)  # SecurityValidationError
 ```
 
 ## Consequences
@@ -189,28 +189,28 @@ def process(self, frame: ClassifiedDataFrame) -> ClassifiedDataFrame:
 
 ### Limitations / Trade-offs
 
-- **Shared DataFrame references** – Multiple `ClassifiedDataFrame` instances may share the same pandas DataFrame. Mutations to `.data` are visible across all references. *Mitigation*: Document clearly; add `.copy()` option if parallel processing requires isolation.
+- **Shared DataFrame references** – Multiple `SecureDataFrame` instances may share the same pandas DataFrame. Mutations to `.data` are visible across all references. *Mitigation*: Document clearly; add `.copy()` option if parallel processing requires isolation.
 
 - **Frame inspection overhead** – `__post_init__` uses `inspect.currentframe()` (~1-5μs per creation). *Impact*: Negligible (<0.1ms per suite with typical 3-5 frame operations). *Mitigation*: Can cache validation in production if profiling shows impact.
 
-- **Datasource migration required** – All datasources must change from `ClassifiedDataFrame(data, level)` to `ClassifiedDataFrame.create_from_datasource(data, level)`. *Scope*: ~5-10 datasources in codebase. *Effort*: ~30 minutes total.
+- **Datasource migration required** – All datasources must change from `SecureDataFrame(data, level)` to `SecureDataFrame.create_from_datasource(data, level)`. *Scope*: ~5-10 datasources in codebase. *Effort*: ~30 minutes total.
 
 - **Does not prevent T2** – Malicious plugins can still lie about `get_security_level()` (out of scope per Rice's Theorem). *Mitigation*: Certification continues to verify `get_security_level()` honesty.
 
 ### Implementation Impact
 
-- **Core module** – `src/elspeth/core/security/classified_data.py` updated with `__post_init__`, `create_from_datasource()`, `with_new_data()`
+- **Core module** – `src/elspeth/core/security/secure_data.py` updated with `__post_init__`, `create_from_datasource()`, `with_new_data()`
 
 - **Datasources** – All datasource plugins updated to use factory method (~5-10 files)
 
 - **Testing** – 5 new security tests added to validate constructor protection:
   - `test_plugin_cannot_create_frame_directly`
   - `test_datasource_can_create_frame`
-  - `test_with_uplifted_classification_bypasses_check`
+  - `test_with_uplifted_security_level_bypasses_check`
   - `test_with_new_data_preserves_classification`
   - `test_malicious_classification_laundering_blocked`
 
-- **Documentation** – Plugin development guide updated with lifecycle section showing correct patterns. `ClassifiedDataFrame` docstring updated with container vs. content model.
+- **Documentation** – Plugin development guide updated with lifecycle section showing correct patterns. `SecureDataFrame` docstring updated with container vs. content model.
 
 - **Threat model** – `ADR002_IMPLEMENTATION/THREAT_MODEL.md` T4 section updated to reflect technical enforcement rather than certification-only defense.
 
@@ -219,7 +219,7 @@ def process(self, frame: ClassifiedDataFrame) -> ClassifiedDataFrame:
 ## Interaction with Plugin Customization (ADR-002 / ADR-005)
 
 ADR-002 and ADR-005 document the frozen plugin capability (`allow_downgrade=False`) that enables
-strict level enforcement. This customization is **orthogonal to the ClassifiedDataFrame container model**:
+strict level enforcement. This customization is **orthogonal to the SecureDataFrame container model**:
 
 **Two Independent Security Layers**:
 
@@ -233,7 +233,7 @@ strict level enforcement. This customization is **orthogonal to the ClassifiedDa
 
 **Frozen Plugin Container Usage**:
 
-Frozen plugins still MUST respect the ClassifiedDataFrame container model:
+Frozen plugins still MUST respect the SecureDataFrame container model:
 
 ```python
 class FrozenSecretDataSource(BasePlugin, DataSource):
@@ -245,17 +245,17 @@ class FrozenSecretDataSource(BasePlugin, DataSource):
         if operating_level != SecurityLevel.SECRET:
             raise SecurityValidationError("Must operate at SECRET level exactly")
 
-    def load_data(self, context: PluginContext) -> ClassifiedDataFrame:
+    def load_data(self, context: PluginContext) -> SecureDataFrame:
         data = fetch_data()
 
         # ✅ CORRECT: Use factory method (container model requirement)
-        return ClassifiedDataFrame.create_from_datasource(
+        return SecureDataFrame.create_from_datasource(
             data=data,
-            classification=SecurityLevel.SECRET
+            security_level=SecurityLevel.SECRET
         )
 
         # ❌ WRONG: Direct construction blocked by container model
-        # return ClassifiedDataFrame(data, SecurityLevel.SECRET)  # SecurityValidationError
+        # return SecureDataFrame(data, SecurityLevel.SECRET)  # SecurityValidationError
 ```
 
 **Key Insight**: Freezing behavior affects WHEN plugins can run (clearance checks at pipeline
@@ -273,7 +273,7 @@ AND correct container model usage.
 - [ADR-002](002-security-architecture.md) – Multi-Level Security Enforcement
 - `docs/security/adr-002-classified-dataframe-hardening-delta.md` – Detailed delta document with full implementation specification
 - `ADR002_IMPLEMENTATION/THREAT_MODEL.md` – Threat model and risk assessment
-- `src/elspeth/core/security/classified_data.py` – ClassifiedDataFrame implementation (commit d83d7fd)
+- `src/elspeth/core/security/secure_data.py` – SecureDataFrame implementation (commit d83d7fd)
 
 ---
 

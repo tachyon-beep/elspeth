@@ -23,7 +23,7 @@ from elspeth.core.base.plugin import BasePlugin  # ADR-004: ABC with nominal typ
 from elspeth.core.base.types import SecurityLevel
 from elspeth.core.experiments.config import ExperimentConfig, ExperimentSuite
 from elspeth.core.experiments.suite_runner import ExperimentSuiteRunner
-from elspeth.core.security.classified_data import ClassifiedDataFrame
+from elspeth.core.security.secure_data import SecureDataFrame
 from elspeth.core.validation.base import SecurityValidationError
 
 # ============================================================================
@@ -40,7 +40,7 @@ class MockSecretDatasource(BasePlugin):
 
     def load(self) -> pd.DataFrame:
         """Load SECRET data."""
-        classified = ClassifiedDataFrame.create_from_datasource(self.df, SecurityLevel.SECRET)
+        classified = SecureDataFrame.create_from_datasource(self.df, SecurityLevel.SECRET)
         return classified.data
 
 
@@ -288,7 +288,7 @@ class TestADR002ErrorHandling:
                 self.df = df
 
             def load(self) -> pd.DataFrame:
-                classified = ClassifiedDataFrame.create_from_datasource(self.df, SecurityLevel.OFFICIAL)
+                classified = SecureDataFrame.create_from_datasource(self.df, SecurityLevel.OFFICIAL)
                 return classified.data
 
         # Datasource with sensitive data

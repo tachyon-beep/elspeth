@@ -18,7 +18,7 @@ from hypothesis import given, strategies as st, settings
 from pathlib import Path
 from typing import List
 
-from elspeth.core.security import SecurityLevel, ClassifiedDataFrame
+from elspeth.core.security import SecurityLevel, SecureDataFrame
 from elspeth.core.experiments.suite_runner import (
     compute_minimum_clearance_envelope,
     ExperimentSuiteRunner,
@@ -224,16 +224,16 @@ class TestPropertyClassificationUplifting:
         """
         import pandas as pd
 
-        current_df = ClassifiedDataFrame.create_from_datasource(
+        current_df = SecureDataFrame.create_from_datasource(
             data=pd.DataFrame({"col": [1]}),
-            classification=initial_level
+            security_level=initial_level
         )
 
         previous_level = initial_level
 
         for transform_level in transform_levels:
-            current_df = current_df.with_uplifted_classification(transform_level)
-            current_level = current_df.classification
+            current_df = current_df.with_uplifted_security_level(transform_level)
+            current_level = current_df.security_level
 
             assert current_level >= previous_level, \
                 f"Classification decreased: {previous_level.name} -> {current_level.name}"
@@ -266,19 +266,19 @@ class TestPropertyClassificationUplifting:
         """
         import pandas as pd
 
-        current_df = ClassifiedDataFrame.create_from_datasource(
+        current_df = SecureDataFrame.create_from_datasource(
             data=pd.DataFrame({"col": [1]}),
-            classification=initial_level
+            security_level=initial_level
         )
 
         for transform_level in transform_levels:
-            current_df = current_df.with_uplifted_classification(transform_level)
+            current_df = current_df.with_uplifted_security_level(transform_level)
 
         all_levels = [initial_level] + transform_levels
         expected_max = max(all_levels)
 
-        assert current_df.classification == expected_max, \
-            f"Final classification {current_df.classification.name} != " \
+        assert current_df.security_level == expected_max, \
+            f"Final classification {current_df.security_level.name} != " \
             f"max {expected_max.name}"
 
 
@@ -288,7 +288,7 @@ class TestPropertyClassificationUplifting:
 
 
 class TestPropertyImmutability:
-    """PROPERTY: ClassifiedDataFrame immutability prevents accidental downgrades.
+    """PROPERTY: SecureDataFrame immutability prevents accidental downgrades.
 
     THREAT: Mutable classification allows accidental security violations.
     """
@@ -309,21 +309,21 @@ class TestPropertyImmutability:
     def test_uplifting_creates_new_instance(self, initial_level, uplift_level):
         """PROPERTY: Uplifting MUST create new instance, not modify original.
 
-        Given: ClassifiedDataFrame at initial level
+        Given: SecureDataFrame at initial level
         When: Uplifting to different level
         Then: Original unchanged, new instance returned
         """
         import pandas as pd
 
-        original = ClassifiedDataFrame.create_from_datasource(
+        original = SecureDataFrame.create_from_datasource(
             data=pd.DataFrame({"col": [1]}),
-            classification=initial_level
+            security_level=initial_level
         )
 
-        uplifted = original.with_uplifted_classification(uplift_level)
+        uplifted = original.with_uplifted_security_level(uplift_level)
 
         # Original must be unchanged
-        assert original.classification == initial_level
+        assert original.security_level == initial_level
 
         # New instance returned
         assert uplifted is not original
@@ -339,19 +339,19 @@ class TestPropertyImmutability:
     def test_classification_attribute_immutable(self, level):
         """PROPERTY: Classification attribute MUST be immutable (frozen).
 
-        Given: ClassifiedDataFrame at any level
+        Given: SecureDataFrame at any level
         When: Attempting to modify classification attribute
         Then: AttributeError raised (frozen dataclass)
         """
         import pandas as pd
 
-        df = ClassifiedDataFrame.create_from_datasource(
+        df = SecureDataFrame.create_from_datasource(
             data=pd.DataFrame({"col": [1]}),
-            classification=level
+            security_level=level
         )
 
         with pytest.raises(AttributeError):
-            df.classification = SecurityLevel.UNOFFICIAL
+            df.security_level = SecurityLevel.UNOFFICIAL
 
 
 # ============================================================================

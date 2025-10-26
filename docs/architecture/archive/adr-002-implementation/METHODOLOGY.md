@@ -135,13 +135,13 @@ Identify implementation risks and mitigations:
 
 ## Phase 1: Core Security Primitives (1-2 hours)
 
-### Step 1: ClassifiedDataFrame (30 min)
+### Step 1: SecureDataFrame (30 min)
 
 **Test First** (Red):
 ```python
 def test_classified_dataframe_immutable_classification():
     """Classification metadata MUST be immutable after creation."""
-    df = ClassifiedDataFrame(pd.DataFrame(), SecurityLevel.SECRET)
+    df = SecureDataFrame(pd.DataFrame(), SecurityLevel.SECRET)
 
     with pytest.raises(AttributeError):
         df.classification = SecurityLevel.UNOFFICIAL  # MUST fail
@@ -150,13 +150,13 @@ def test_classified_dataframe_immutable_classification():
 **Implementation** (Green):
 ```python
 @dataclass(frozen=True)  # Immutability guaranteed by dataclass
-class ClassifiedDataFrame:
+class SecureDataFrame:
     data: pd.DataFrame
     classification: SecurityLevel
 
-    def with_uplifted_classification(self, new_level: SecurityLevel) -> "ClassifiedDataFrame":
+    def with_uplifted_security_level(self, new_level: SecurityLevel) -> "SecureDataFrame":
         """Return new instance with uplifted classification (immutable update)."""
-        return ClassifiedDataFrame(self.data, max(self.classification, new_level))
+        return SecureDataFrame(self.data, max(self.classification, new_level))
 ```
 
 ### Step 2: Minimum Clearance Envelope Computation (30 min)
@@ -228,7 +228,7 @@ class BasePlugin(ABC):
             )
 ```
 
-**Commit Phase 1**: `git commit -m "Feat: Core ADR-002 security primitives (ClassifiedDataFrame, envelope)"`
+**Commit Phase 1**: `git commit -m "Feat: Core ADR-002 security primitives (SecureDataFrame, envelope)"`
 
 ---
 
@@ -331,11 +331,11 @@ class ExperimentSuiteRunner:
 **Test First** (Red):
 ```python
 def test_classified_dataframe_rejects_access_above_clearance():
-    """ClassifiedDataFrame MUST refuse to expose data to low-clearance component.
+    """SecureDataFrame MUST refuse to expose data to low-clearance component.
 
     FAILSAFE: Even if start-time validation bypassed, runtime check prevents leakage.
     """
-    secret_df = ClassifiedDataFrame(data, SecurityLevel.SECRET)
+    secret_df = SecureDataFrame(data, SecurityLevel.SECRET)
     unofficial_sink = UnofficialSink()  # Reports UNOFFICIAL level
 
     with pytest.raises(SecurityValidationError, match="SECRET data.*UNOFFICIAL sink"):
@@ -344,8 +344,8 @@ def test_classified_dataframe_rejects_access_above_clearance():
 
 **Implementation** (Green):
 ```python
-class ClassifiedDataFrame:
-    def validate_access_by(self, accessor: BasePlugin) -> None:
+class SecureDataFrame:
+    def validate_compatible_with(self, accessor: BasePlugin) -> None:
         """Validate accessor has sufficient clearance for this data.
 
         FAILSAFE: Defense-in-depth check if start-time validation bypassed.
@@ -497,7 +497,7 @@ Create `ADR002_CERTIFICATION_EVIDENCE.md`:
 |--------|---------|----------|
 | T1: Classification breach | Start-time validation | `test_INTEGRATION_secret_datasource_rejects_unofficial_sink` |
 | T2: Security downgrade | Minimum envelope computation | `test_PROPERTY_minimum_envelope_never_exceeds_weakest_link` |
-| T3: Runtime bypass | ClassifiedDataFrame failsafe | `test_classified_dataframe_rejects_access_above_clearance` |
+| T3: Runtime bypass | SecureDataFrame failsafe | `test_classified_dataframe_rejects_access_above_clearance` |
 | T4: Classification mislabeling | Automatic uplifting | `test_INTEGRATION_classification_uplifting_through_secret_llm` |
 
 ## Test Results
@@ -598,7 +598,7 @@ Unlike refactoring where we check for behavioral changes, security implementatio
 | Phase | Time | Checkpoint |
 |-------|------|------------|
 | Phase 0: Properties & Threat Model | 2-3 hours | Security invariants defined |
-| Phase 1: Core Primitives | 1-2 hours | ClassifiedDataFrame, envelope working |
+| Phase 1: Core Primitives | 1-2 hours | SecureDataFrame, envelope working |
 | Phase 2: Integration | 1-2 hours | Suite runner enforces security |
 | Phase 3: Certification Tests | 1-2 hours | Evidence package complete |
 | Phase 4: Documentation | 1 hour | Ready for security review |
