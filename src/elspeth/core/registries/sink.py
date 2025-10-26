@@ -47,7 +47,6 @@ from .base import BasePluginRegistry
 from .schemas import (
     with_artifact_properties,
     with_error_handling,
-    with_security_properties,
 )
 
 # Capability flags exposed by sink plugins. Keep constants centralized to avoid drift.
@@ -249,12 +248,23 @@ def _create_reproducibility_bundle_sink(options: dict[str, Any], context: Plugin
 
 # Helper to build sink schemas with common properties
 def _sink_schema(properties: dict[str, Any], required: list[str]) -> dict[str, Any]:
-    """Build a sink schema with security, determinism, artifacts, and error handling."""
+    """Build a sink schema with artifacts and error handling.
+
+    SECURITY (VULN-004): Does NOT add security policy fields (security_level,
+    allow_downgrade, max_operating_level) to schema. These are immutable and
+    declared in plugin code per ADR-002-B.
+    """
+    # Add determinism_level (allowed runtime context) to properties
+    properties_with_runtime = {
+        **properties,
+        "determinism_level": {"type": "string"},  # Allowed (runtime context, not security policy)
+    }
+
     schema = {
         "type": "object",
-        "properties": properties,
+        "properties": properties_with_runtime,
         "required": required,
-        "additionalProperties": True,
+        "additionalProperties": False,  # VULN-004 Layer 1: Reject security policy fields
     }
     schema = with_artifact_properties(schema)
     schema = with_error_handling(schema)
@@ -485,33 +495,31 @@ _ENHANCED_VISUAL_SINK_SCHEMA = _sink_schema(
     ["base_path"],
 )
 
-_EMBEDDINGS_STORE_SINK_SCHEMA = with_security_properties(
-    {
-        "type": "object",
-        "properties": {
-            "provider": {"type": "string"},
-            "namespace": {"type": "string"},
-            "dsn": {"type": "string"},
-            "table": {"type": "string"},
-            "text_field": {"type": "string"},
-            "embedding_source": {"type": "string"},
-            "embed_model": {"type": "object"},
-            "metadata_fields": {"type": "array", "items": {"type": "string"}},
-            "id_field": {"type": "string"},
-            "batch_size": {"type": "integer", "minimum": 1},
-            "upsert_conflict": {"type": "string", "enum": ["replace", "skip", "merge"]},
-            "endpoint": {"type": "string"},
-            "index": {"type": "string"},
-            "api_key": {"type": "string"},
-            "api_key_env": {"type": "string"},
-            "vector_field": {"type": "string"},
-            "namespace_field": {"type": "string"},
-        },
-        "required": ["provider"],
-        "additionalProperties": True,
+_EMBEDDINGS_STORE_SINK_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "provider": {"type": "string"},
+        "namespace": {"type": "string"},
+        "dsn": {"type": "string"},
+        "table": {"type": "string"},
+        "text_field": {"type": "string"},
+        "embedding_source": {"type": "string"},
+        "embed_model": {"type": "object"},
+        "metadata_fields": {"type": "array", "items": {"type": "string"}},
+        "id_field": {"type": "string"},
+        "batch_size": {"type": "integer", "minimum": 1},
+        "upsert_conflict": {"type": "string", "enum": ["replace", "skip", "merge"]},
+        "endpoint": {"type": "string"},
+        "index": {"type": "string"},
+        "api_key": {"type": "string"},
+        "api_key_env": {"type": "string"},
+        "vector_field": {"type": "string"},
+        "namespace_field": {"type": "string"},
+        "determinism_level": {"type": "string"},  # Allowed (runtime context, not security policy)
     },
-    require_determinism=False,
-)
+    "required": ["provider"],
+    "additionalProperties": False,  # VULN-004 Layer 1: Reject security policy fields
+}
 _EMBEDDINGS_STORE_SINK_SCHEMA = with_artifact_properties(_EMBEDDINGS_STORE_SINK_SCHEMA)
 
 _REPRODUCIBILITY_BUNDLE_SINK_SCHEMA = _sink_schema(
