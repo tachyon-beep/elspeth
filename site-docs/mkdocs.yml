@@ -1,0 +1,102 @@
+# Elspeth Formal Documentation Site Configuration
+
+site_name: Elspeth Documentation
+site_description: Extensible Layered Secure Pipeline Engine for Transformation and Handling
+site_url: https://elspeth.readthedocs.io
+
+repo_url: https://github.com/yourusername/elspeth
+repo_name: elspeth
+edit_uri: edit/main/site-docs/docs/
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [../src]  # Point to elspeth source code
+          options:
+            docstring_style: google
+            docstring_section_style: table
+            show_root_heading: true
+            show_root_full_path: false
+            show_symbol_type_heading: true
+            show_symbol_type_toc: true
+            members_order: source
+            group_by_category: true
+            show_category_heading: true
+            show_if_no_docstring: false
+            show_signature: true
+            show_signature_annotations: true
+            separate_signature: true
+            line_length: 80
+            merge_init_into_class: true
+            show_source: true
+            heading_level: 2
+
+markdown_extensions:
+  - toc:
+      permalink: true
+  - tables
+  - admonition
+  - pymdownx.details
+  - pymdownx.highlight
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+
+nav:
+  - Home: index.md
+  - Getting Started:
+    - Installation: getting-started/installation.md
+    - Quickstart: getting-started/quickstart.md
+    - First Experiment: getting-started/first-experiment.md
+  - User Guide:
+    - Security Model: user-guide/security-model.md
+    - Configuration: user-guide/configuration.md
+  - Plugins:
+    - Overview: plugins/overview.md
+  - Architecture:
+    - Overview: architecture/overview.md
+    - Execution Flow: architecture/execution-flow.md
+    - Security Policy: architecture/security-policy.md
+    - ADR Catalogue: architecture/adrs.md
+  - API Reference:
+    - Overview: api-reference/index.md
+    - Core:
+      - BasePlugin: api-reference/core/base-plugin.md
+      - ClassifiedDataFrame: api-reference/core/classified-dataframe.md
+      - SecurityLevel: api-reference/core/security-level.md
+    - Registries:
+      - Plugin Registry: api-reference/registries/base.md
+    - Plugins:
+      - Datasources: api-reference/plugins/datasources.md
+      - Transforms: api-reference/plugins/transforms.md
+      - Sinks: api-reference/plugins/sinks.md
+    - Pipeline:
+      - Artifact Pipeline: api-reference/pipeline/artifact-pipeline.md
+
+copyright: Copyright &copy; 2025 Elspeth Contributors

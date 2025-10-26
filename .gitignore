@@ -160,3 +160,7 @@ audit.json
 AGENTS.md
 CLAUDE.md
 .claude/
+
+# MkDocs build output
+/site/
+/site-docs/site/
