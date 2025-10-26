@@ -125,13 +125,15 @@ venv.bak/
 
 # Project data/artifacts
 /data/
-/outputs/
-/artifacts/
+/artifacts/*
+!/artifacts/.gitkeep
 /scorecard-artifacts/
 /orchestration_packs/*/
 !/orchestration_packs/.gitkeep
 !/orchestration_packs/README.md
-/logs/
+/outputs/*
+!/outputs/.gitkeep
+/logs/*
 !/logs/.gitkeep
 # Legacy reference material (tracked separately)
 /external/
@@ -166,9 +168,5 @@ CLAUDE.md
 /site-docs/site/
 
 # Auto-generated documentation
-# Phase 2 (ACTIVE as of 2025-10-26): Generated on-demand, not committed
-# Generated locally via: make docs-generate
-# Generated in CI before build
-# Policy: DOCUMENTATION_HYGIENE.md
 site-docs/docs/api-reference/plugins/generated-*.md
 site-docs/docs/plugins/generated-catalogue.md
