@@ -82,6 +82,7 @@ nav:
   - Architecture:
     - Overview: architecture/overview.md
     - Execution Flow: architecture/execution-flow.md
+    - Security Policy: architecture/security-policy.md
     - ADR Catalogue: architecture/adrs.md
   - API Reference:
     - Overview: api-reference/index.md
