@@ -2,7 +2,8 @@
 
 ## Status
 
-**DRAFT** (2025-10-26)
+**IMPLEMENTED** (2025-10-26)
+**Enhanced**: Sprint 2 - CentralPluginRegistry (2025-10-27)
 
 ## Context
 
@@ -178,14 +179,58 @@ datasource: DataSource = datasource_registry.instantiate("csv_local", config)
 
 ### Migration
 
-Phase 2 (historical/A002) completed:
+**Phase 2 (ADR-002-B)** - ✅ COMPLETE:
 - ✅ All plugin types migrated to `BasePluginRegistry[T]`
 - ✅ Security level stamping consistent
-- ⚠️ **This ADR formalizes the implemented pattern**
+- ✅ Pattern fully implemented across codebase
+
+**Sprint 2 Enhancement (ADR-003)** - ✅ COMPLETE:
+- ✅ `CentralPluginRegistry` facade added
+- ✅ Unified access via `central_registry.get_registry()`
+- ✅ Automatic plugin discovery with validation
+- ✅ Single enforcement point for all plugin operations
+
+### Sprint 2 Enhancement: CentralPluginRegistry
+
+**Component**: `src/elspeth/core/registry/central.py`
+
+**Purpose**: Provide unified facade over all `BasePluginRegistry[T]` instances
+
+**Architecture**:
+```python
+class CentralPluginRegistry:
+    def __init__(self):
+        self._registries: dict[str, BasePluginRegistry[Any]] = {
+            "datasource": datasource_registry,
+            "llm": llm_registry,
+            "sink": sink_registry,
+            # ... 9 more types
+        }
+
+        # SECURITY: Auto-discover + validate on init
+        auto_discover_internal_plugins()
+        validate_discovery(self._registries)
+
+    def get_registry(self, plugin_type: str) -> BasePluginRegistry[Any]:
+        """Get type-specific registry through central access point."""
+        return self._registries[plugin_type]
+```
+
+**Benefits**:
+- Single import: `from elspeth.core.registry import central_registry`
+- Unified access pattern across all plugin types
+- Automatic discovery + validation (security)
+- Easy testing (mock one facade vs 12 registries)
+
+**Status**: ✅ IMPLEMENTED
+- 12 registry types consolidated
+- 1480 tests passing
+- Zero regressions
+- Documentation complete
 
 ## Related
 
-ADR-002 (MLS), ADR-003 (Plugin registry), ADR-004 (BasePlugin)
+ADR-002 (MLS), ADR-003 (Central Plugin Registry), ADR-004 (BasePlugin)
 
 ---
-**Last Updated**: 2025-10-26
+**Last Updated**: 2025-10-27 (Sprint 2 Enhancement Complete)

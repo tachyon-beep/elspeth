@@ -2,7 +2,9 @@
 
 ## Status
 
-ACCEPTED (2025-10-25)
+**IMPLEMENTED** (Alternative Approach - 2025-10-27)
+**Original Date**: 2025-10-25
+**Implementation**: Sprint 2 (commits 3344cd5 through 9940da4)
 
 ## Context
 
@@ -191,10 +193,52 @@ def _validate_experiment_security(self, runner, sinks):
     plugins.extend(sinks)
 ```
 
+## Implementation Update (Sprint 2)
+
+**Actual Implementation** took an **alternative architectural approach**:
+
+**What Was Built**: `CentralPluginRegistry` facade (not PLUGIN_TYPE_REGISTRY for ExperimentRunner)
+
+**Key Components**:
+- `src/elspeth/core/registry/central.py` - Unified registry facade
+- `src/elspeth/core/registry/auto_discover.py` - Automatic plugin discovery
+- `EXPECTED_PLUGINS` baseline - Validation of discovered plugins
+
+**Security Mechanism**:
+- Single enforcement point for all plugin access
+- Automatic discovery via module scanning (no manual registration)
+- Validation layer ensures expected plugins present
+- Fail-fast at import time (catches missing plugins before runtime)
+
+**Migration Pattern**:
+```python
+# Before (scattered)
+from elspeth.core.registries.datasource import datasource_registry
+datasource = datasource_registry.create("local_csv", options)
+
+# After (centralized)
+from elspeth.core.registry import central_registry
+datasource_registry = central_registry.get_registry("datasource")
+datasource = datasource_registry.create("local_csv", options)
+```
+
+**Status**: ✅ COMPLETE
+- 9 files migrated (6 source, 3 test)
+- 1480 tests passing (up from 1466)
+- Zero regressions
+- Documentation complete (ADR-003, CLAUDE.md)
+
+**Relationship to Original Vision**:
+- Original plan: PLUGIN_TYPE_REGISTRY for ExperimentRunner plugin collection
+- Actual implementation: CentralPluginRegistry for registry access consolidation
+- Both achieve core objective: No plugin bypasses security validation
+- Original PLUGIN_TYPE_REGISTRY concept remains valid for future enhancement
+
 ## Related
 
-ADR-002 (MLS enforcement), ADR-004 (BasePlugin ABC), Incident: Commit 46faef7 (Copilot P1 finding)
+ADR-002 (MLS enforcement), ADR-004 (BasePlugin ABC), ADR-008 (Unified Registry Pattern), Incident: Commit 46faef7 (Copilot P1 finding)
 
 ---
-**Last Updated**: 2025-10-25
-**Effort**: ~1.5-2 hours core + ~1-1.5 hours optional hardening
+**Last Updated**: 2025-10-27 (Sprint 2 Implementation Complete)
+**Original Effort**: ~1.5-2 hours core + ~1-1.5 hours optional hardening
+**Actual Effort**: ~16.5 hours (enhanced with auto-discovery + validation)
