@@ -57,11 +57,14 @@ def create_llm_from_definition(
     entry_det = definition.get("determinism_level")
     opts_det = options.get("determinism_level")
 
+    # ADR-002-B: Reject security_level in configuration (plugin-author-owned)
+    if entry_sec is not None or opts_sec is not None:
+        raise ConfigurationError(
+            f"llm:{plugin_name}: security_level cannot be specified in configuration (ADR-002-B). "
+            "Security level is plugin-author-owned and inherited from parent context."
+        )
+
     sources = []
-    if entry_sec:
-        sources.append(f"llm:{plugin_name}.definition.security_level")
-    if opts_sec:
-        sources.append(f"llm:{plugin_name}.options.security_level")
     if entry_det is not None:
         sources.append(f"llm:{plugin_name}.definition.determinism_level")
     if opts_det is not None:

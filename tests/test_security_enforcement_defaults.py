@@ -316,9 +316,10 @@ class TestHighPriorityDefaults:
         from elspeth.core.experiments.plugin_registry import create_validation_plugin
         from elspeth.core.validation.base import ConfigurationError
 
+        # ADR-002-B: security_level removed from LLM definition (plugin-author-owned)
+        # LLM inherits security_level from parent validation plugin context
         validator_llm_def = {
             "plugin": "static_test",
-            "security_level": "internal",
             "options": {"content": "VALID"},
         }
 

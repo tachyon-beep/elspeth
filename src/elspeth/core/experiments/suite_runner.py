@@ -521,6 +521,9 @@ class ExperimentSuiteRunner:
         plugin_context attribute. If not present, it creates a fallback context
         with proper security level resolution and provenance tracking.
 
+        Note: The operating_level field is populated separately by _propagate_operating_level()
+        after validation completes.
+
         Args:
             runner: The experiment runner instance
             experiment: Experiment configuration
@@ -548,6 +551,81 @@ class ExperimentSuiteRunner:
                 config_path=self.config_path,
             ),
         )
+
+    def _propagate_operating_level(
+        self,
+        runner: ExperimentRunner,
+        sinks: list[ResultSink],
+        operating_level: SecurityLevel,
+    ) -> None:
+        """Propagate computed operating_level through all plugin contexts.
+
+        After ADR-002 validation computes the pipeline operating level, this method
+        updates all plugin contexts to include the operating_level field. This allows
+        plugins to access the effective security level via get_effective_level().
+
+        Since PluginContext is frozen (immutable), we derive new contexts with
+        operating_level and reassign them to plugins.
+
+        Args:
+            runner: Experiment runner instance
+            sinks: List of result sinks
+            operating_level: Computed minimum clearance envelope
+
+        Complexity Reduction:
+            Extracted from inline loop to dedicated propagation method
+        """
+        # Update runner context
+        if hasattr(runner, 'plugin_context'):
+            runner.plugin_context = runner.plugin_context.derive(
+                plugin_name=runner.plugin_context.plugin_name,
+                plugin_kind=runner.plugin_context.plugin_kind,
+                operating_level=operating_level,
+            )
+
+        # Update sink contexts
+        for sink in sinks:
+            if hasattr(sink, 'plugin_context'):
+                sink.plugin_context = sink.plugin_context.derive(
+                    plugin_name=sink.plugin_context.plugin_name,
+                    plugin_kind=sink.plugin_context.plugin_kind,
+                    operating_level=operating_level,
+                )
+
+        # Update middleware contexts
+        if runner.llm_middlewares:
+            for mw in runner.llm_middlewares:
+                if hasattr(mw, 'plugin_context'):
+                    mw.plugin_context = mw.plugin_context.derive(
+                        plugin_name=mw.plugin_context.plugin_name,
+                        plugin_kind=mw.plugin_context.plugin_kind,
+                        operating_level=operating_level,
+                    )
+
+        # Update plugin contexts (row/aggregator/validation/early_stop)
+        for plugin_list in [
+            runner.row_plugins,
+            runner.aggregator_plugins,
+            runner.validation_plugins,
+            runner.early_stop_plugins,
+        ]:
+            if plugin_list:
+                for plugin in plugin_list:
+                    if hasattr(plugin, 'plugin_context'):
+                        plugin.plugin_context = plugin.plugin_context.derive(
+                            plugin_name=plugin.plugin_context.plugin_name,
+                            plugin_kind=plugin.plugin_context.plugin_kind,
+                            operating_level=operating_level,
+                        )
+
+        # Update rate_limiter and cost_tracker contexts
+        for component in [runner.rate_limiter, runner.cost_tracker]:
+            if component and hasattr(component, 'plugin_context'):
+                component.plugin_context = component.plugin_context.derive(
+                    plugin_name=component.plugin_context.plugin_name,
+                    plugin_kind=component.plugin_context.plugin_kind,
+                    operating_level=operating_level,
+                )
 
     def _validate_experiment_security(
         self,
@@ -660,6 +738,9 @@ class ExperimentSuiteRunner:
 
         # Set operating level in context for runtime validation failsafe (Layer 2)
         ctx.operating_security_level = operating_level
+
+        # Propagate operating_level through all plugin contexts so plugins can access it
+        self._propagate_operating_level(runner, sinks, operating_level)
 
     def _finalize_suite(self, ctx: SuiteExecutionContext) -> None:
         """Notify all middlewares that suite execution is complete.
@@ -957,8 +1038,10 @@ class ExperimentSuiteRunner:
 
             # ADR-002: Start-time security validation (PRIMARY control)
             # Collect all plugins, compute minimum clearance envelope, validate all can operate
+            # After validation, _propagate_operating_level() updates all plugin contexts with operating_level
             self._validate_experiment_security(experiment, runner, sinks, ctx)
 
+            # Retrieve experiment context (now includes operating_level from propagation)
             experiment_context = self._get_experiment_context(runner, experiment, defaults)
             middlewares = cast(list[Any], runner.llm_middlewares or [])
 

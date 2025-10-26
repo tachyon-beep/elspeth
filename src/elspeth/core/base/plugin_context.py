@@ -25,7 +25,15 @@ class PluginContext(BaseModel):
 
     plugin_name: str = Field(..., min_length=1, description="Name of the plugin instance")
     plugin_kind: str = Field(..., min_length=1, description="Type of plugin (datasource, llm, sink, etc)")
-    security_level: SecurityLevel = Field(..., description="Security classification level")
+    security_level: SecurityLevel = Field(..., description="Security classification level (plugin's declared clearance)")
+    operating_level: SecurityLevel | None = Field(
+        default=None,
+        description=(
+            "Pipeline operating level (computed minimum clearance envelope). "
+            "Plugins operate at this effective level, not their declared security_level. "
+            "None indicates operating level not yet computed (pre-validation state)."
+        ),
+    )
     determinism_level: DeterminismLevel = Field(
         default=DeterminismLevel.NONE, description="Determinism level (none, low, high, guaranteed)"
     )
@@ -60,6 +68,17 @@ class PluginContext(BaseModel):
         """Accept strings or enum; normalize via security.ensure_security_level."""
         return ensure_security_level(v)
 
+    @field_validator("operating_level", mode="before")
+    @classmethod
+    def parse_operating_level(cls, v: SecurityLevel | str | None) -> SecurityLevel | None:
+        """Accept strings or enum for operating_level; normalize via security.ensure_security_level.
+
+        Returns None if value is None (pre-validation state).
+        """
+        if v is None:
+            return None
+        return ensure_security_level(v)
+
     @field_validator("determinism_level", mode="before")
     @classmethod
     def parse_determinism_level(cls, v: DeterminismLevel | str | None) -> DeterminismLevel:
@@ -72,6 +91,7 @@ class PluginContext(BaseModel):
         plugin_name: str,
         plugin_kind: str,
         security_level: SecurityLevel | None = None,
+        operating_level: SecurityLevel | None = None,
         determinism_level: DeterminismLevel | None = None,
         provenance: Iterable[str] | None = None,
         metadata: Mapping[str, Any] | None = None,
@@ -80,13 +100,15 @@ class PluginContext(BaseModel):
     ) -> PluginContext:
         """Create a child context inheriting from this context.
 
-        If security_level, determinism_level, suite_root, or config_path are not provided,
-        inherits from parent.
+        If security_level, operating_level, determinism_level, suite_root, or config_path
+        are not provided, inherits from parent.
 
         This method creates a new immutable context (since the model is frozen)
         using Pydantic's model_validate to ensure all validators run.
         """
         sec_level = security_level or self.security_level
+        # operating_level requires explicit check since None is a valid value (pre-validation)
+        op_level = operating_level if operating_level is not None else self.operating_level
         det_level = determinism_level or self.determinism_level
         sources = tuple(provenance or ())
         data: Mapping[str, Any] = metadata or {}
@@ -99,6 +121,7 @@ class PluginContext(BaseModel):
                 "plugin_name": plugin_name,
                 "plugin_kind": plugin_kind,
                 "security_level": sec_level,
+                "operating_level": op_level,
                 "determinism_level": det_level,
                 "provenance": sources,
                 "parent": self,

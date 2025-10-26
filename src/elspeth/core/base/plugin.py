@@ -92,7 +92,8 @@ class BasePlugin(ABC):
         allow_downgrade (bool): Read-only access to downgrade permission.
 
     Methods:
-        get_security_level() -> SecurityLevel: Returns plugin's security clearance.
+        get_security_level() -> SecurityLevel: Returns plugin's declared clearance.
+        get_effective_level() -> SecurityLevel: Returns pipeline operating level (effective level).
         validate_can_operate_at_level(SecurityLevel) -> None: Validates operating level.
     """
 
@@ -118,7 +119,7 @@ class BasePlugin(ABC):
         super().__init_subclass__(**kwargs)
 
         # Sealed methods that cannot be overridden (ADR-004 security invariants)
-        sealed_methods = ("get_security_level", "validate_can_operate_at_level")
+        sealed_methods = ("get_security_level", "get_effective_level", "validate_can_operate_at_level")
 
         for method_name in sealed_methods:
             if method_name in cls.__dict__:
@@ -249,6 +250,88 @@ class BasePlugin(ABC):
             SecurityLevel.SECRET
         """
         return self._security_level
+
+    @final
+    def get_effective_level(self) -> SecurityLevel:
+        """Return the pipeline operating level (effective security level - SEALED).
+
+        This method provides plugin authors with controlled access to the pipeline's
+        computed operating level (minimum clearance envelope). Plugins should use this
+        level for security-aware decisions (filtering, conditional processing, audit logging).
+
+        **Operating Level vs Security Level**:
+        - security_level: Plugin's declared clearance (what it CAN handle)
+        - operating_level: Pipeline's effective level (what it SHOULD produce)
+
+        **Example Scenarios**:
+        - SECRET datasource in UNOFFICIAL pipeline → effective_level = UNOFFICIAL
+          (datasource must filter to only retrieve UNOFFICIAL data)
+        - OFFICIAL transform in OFFICIAL pipeline → effective_level = OFFICIAL
+          (exact match - no filtering needed)
+
+        **Fail-Fast Behavior**:
+        This method raises RuntimeError if operating_level has not been set. In a
+        high-security system, we want LOUD CATASTROPHIC FAILURE rather than graceful
+        degradation. If you see this error, it means the plugin is being used before
+        pipeline validation has completed (programming error, not user error).
+
+        Returns:
+            SecurityLevel: Pipeline operating level.
+
+        Raises:
+            RuntimeError: If operating_level not set (pre-validation state or missing context).
+                This indicates a programming error - plugins should only access effective
+                level AFTER validation completes.
+
+        Design Notes:
+            - @final prevents plugin override (consistent access pattern)
+            - Read-only access (context is frozen)
+            - Fail-fast on missing operating_level (no graceful degradation in high-security system)
+            - Plugin must still pass validate_can_operate_at_level() before execution
+
+        Correct Usage Patterns:
+            ✅ Filter data based on effective level (datasource optimization)
+            ✅ Conditional processing (skip expensive operations at lower levels)
+            ✅ Audit logging with effective level context
+            ✅ Performance optimization (different algorithms per level)
+
+        Anti-Patterns (DO NOT):
+            ❌ Bypass filtering based on effective level (still must filter correctly)
+            ❌ Assume effective_level == data classification (data may be uplifted)
+            ❌ Skip validation based on effective level (validation is mandatory)
+
+        Example:
+            >>> # SECRET datasource operating at UNOFFICIAL level
+            >>> plugin = MyDatasource(security_level=SecurityLevel.SECRET, allow_downgrade=True)
+            >>> # After suite_runner sets operating_level in context
+            >>> plugin.get_effective_level()  # Returns UNOFFICIAL (from context)
+            >>> plugin.get_security_level()   # Returns SECRET (declared clearance)
+
+            >>> # Pre-validation (operating_level not yet set)
+            >>> plugin.get_effective_level()  # RuntimeError! Fail loudly.
+
+        See Also:
+            ADR-002 "Exposing Operating Level to Plugins" section for certification requirements.
+        """
+        # Access context via duck-typing (apply_plugin_context attaches plugin_context)
+        context = getattr(self, 'plugin_context', None)
+
+        if context is None:
+            raise RuntimeError(
+                f"{type(self).__name__}.get_effective_level() called before plugin_context attached. "
+                f"This is a programming error - plugins must not call get_effective_level() during "
+                f"construction. Context attachment happens during pipeline initialization."
+            )
+
+        if context.operating_level is None:
+            raise RuntimeError(
+                f"{type(self).__name__}.get_effective_level() called before pipeline validation. "
+                f"This is a programming error - plugins must not call get_effective_level() before "
+                f"ExperimentSuiteRunner._validate_experiment_security() completes. "
+                f"Operating level is computed during validation and propagated via _propagate_operating_level()."
+            )
+
+        return context.operating_level
 
     @final
     def validate_can_operate_at_level(self, operating_level: SecurityLevel) -> None:
