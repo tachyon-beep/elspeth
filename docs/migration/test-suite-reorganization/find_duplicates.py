@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Duplicate test detection script for Phase 1 analysis.
+r"""Duplicate test detection script for Phase 1 analysis.
 
 Detects exact duplicates, functional duplicates, and overlapping test coverage.
 
 Usage:
-    python find_duplicates.py \\
-        --test-dir tests \\
-        --output DUPLICATES_ANALYSIS.md \\
+    python find_duplicates.py \
+        --test-dir tests \
+        --output DUPLICATES_ANALYSIS.md \
         --threshold 0.85
 
 Outputs:
@@ -22,7 +22,6 @@ import sys
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 
 @dataclass
@@ -59,7 +58,7 @@ class TestDeduplicator:
 
     def ast_to_string(self, node: ast.AST) -> str:
         """Convert AST to normalized string for comparison."""
-        return ast.unparse(node) if hasattr(ast, "unparse") else ast.dump(node)
+        return ast.unparse(node)  # Available since Python 3.9
 
     def find_exact_duplicates(self) -> None:
         """Find tests with identical names across files."""

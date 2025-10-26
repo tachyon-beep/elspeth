@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fixture dependency analysis script for Phase 1.
+r"""Fixture dependency analysis script for Phase 1.
 
 Analyzes fixture definitions and usage across test suite to inform migration strategy.
 
@@ -21,7 +21,6 @@ import sys
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 
 @dataclass
@@ -86,16 +85,14 @@ class FixtureAnalyzer:
                             # Extract scope
                             for keyword in decorator.keywords:
                                 if keyword.arg == "scope":
-                                    if isinstance(keyword.value, ast.Constant):
+                                    if isinstance(keyword.value, ast.Constant) and isinstance(
+                                        keyword.value.value, str
+                                    ):
                                         fixture_scope = keyword.value.value
 
                 if is_fixture:
                     # Get fixture dependencies (params)
-                    depends_on = [
-                        arg.arg
-                        for arg in node.args.args
-                        if arg.arg not in ("self", "cls", "request")
-                    ]
+                    depends_on = [arg.arg for arg in node.args.args if arg.arg not in ("self", "cls", "request")]
 
                     self.definitions.append(
                         FixtureDefinition(
@@ -129,10 +126,7 @@ class FixtureAnalyzer:
         for file_path in test_files:
             self.analyze_file(file_path)
 
-        print(
-            f"Found {len(self.definitions)} fixture definitions and "
-            f"{len(self.usages)} fixture usages"
-        )
+        print(f"Found {len(self.definitions)} fixture definitions and {len(self.usages)} fixture usages")
 
     def generate_markdown_report(self, output_path: Path) -> None:
         """Generate markdown fixture analysis report."""
@@ -143,7 +137,7 @@ class FixtureAnalyzer:
         lines.append("---\n")
 
         # Summary by scope
-        scope_counts = defaultdict(int)
+        scope_counts: defaultdict[str, int] = defaultdict(int)
         for fixture in self.definitions:
             scope_counts[fixture.scope] += 1
 
@@ -154,7 +148,7 @@ class FixtureAnalyzer:
         lines.append("\n---\n")
 
         # Fixtures by file
-        file_counts = defaultdict(int)
+        file_counts: defaultdict[str, int] = defaultdict(int)
         for fixture in self.definitions:
             file_counts[fixture.file_path] += 1
 
@@ -167,7 +161,7 @@ class FixtureAnalyzer:
         lines.append("\n---\n")
 
         # Most used fixtures
-        usage_counts = defaultdict(int)
+        usage_counts: defaultdict[str, int] = defaultdict(int)
         for usage in self.usages:
             usage_counts[usage.fixture_name] += 1
 
@@ -178,9 +172,7 @@ class FixtureAnalyzer:
 
         for fixture_name, count in sorted_usages:
             # Find definition
-            definition = next(
-                (f for f in self.definitions if f.name == fixture_name), None
-            )
+            definition = next((f for f in self.definitions if f.name == fixture_name), None)
             def_loc = definition.file_path if definition else "Unknown"
             lines.append(f"| {fixture_name} | {count} | {def_loc} |\n")
         lines.append("\n---\n")
@@ -205,16 +197,10 @@ class FixtureAnalyzer:
         session_fixtures = [f for f in self.definitions if f.scope == "session"]
         if session_fixtures:
             lines.append("### Session Fixtures (Global)\n")
-            lines.append(
-                "These fixtures should be in `tests/fixtures/conftest.py` "
-                "(accessible from all tests):\n\n"
-            )
+            lines.append("These fixtures should be in `tests/fixtures/conftest.py` (accessible from all tests):\n\n")
             for fixture in session_fixtures:
                 usage_count = usage_counts.get(fixture.name, 0)
-                lines.append(
-                    f"- `{fixture.name}` ({fixture.file_path}) - "
-                    f"Used {usage_count} times\n"
-                )
+                lines.append(f"- `{fixture.name}` ({fixture.file_path}) - Used {usage_count} times\n")
             lines.append("\n")
 
         # Module fixtures should be local
@@ -224,27 +210,17 @@ class FixtureAnalyzer:
             lines.append("These fixtures should remain in category-specific conftest.py:\n\n")
             for fixture in module_fixtures:
                 usage_count = usage_counts.get(fixture.name, 0)
-                lines.append(
-                    f"- `{fixture.name}` ({fixture.file_path}) - "
-                    f"Used {usage_count} times\n"
-                )
+                lines.append(f"- `{fixture.name}` ({fixture.file_path}) - Used {usage_count} times\n")
             lines.append("\n")
 
         # ADR-002 specific fixtures
-        adr002_fixtures = [
-            f for f in self.definitions if "adr002" in f.file_path.lower()
-        ]
+        adr002_fixtures = [f for f in self.definitions if "adr002" in f.file_path.lower()]
         if adr002_fixtures:
             lines.append("### ADR-002 Fixtures\n")
-            lines.append(
-                "These fixtures should be in `tests/fixtures/adr002_test_helpers.py`:\n\n"
-            )
+            lines.append("These fixtures should be in `tests/fixtures/adr002_test_helpers.py`:\n\n")
             for fixture in adr002_fixtures:
                 usage_count = usage_counts.get(fixture.name, 0)
-                lines.append(
-                    f"- `{fixture.name}` ({fixture.file_path}) - "
-                    f"Used {usage_count} times\n"
-                )
+                lines.append(f"- `{fixture.name}` ({fixture.file_path}) - Used {usage_count} times\n")
             lines.append("\n")
 
         # Unused fixtures
@@ -254,10 +230,7 @@ class FixtureAnalyzer:
 
         if unused:
             lines.append("### Potentially Unused Fixtures\n")
-            lines.append(
-                "These fixtures are defined but not found in test parameters "
-                "(may be used indirectly):\n\n"
-            )
+            lines.append("These fixtures are defined but not found in test parameters (may be used indirectly):\n\n")
             for fixture_name in sorted(unused):
                 fixture_def = next(f for f in self.definitions if f.name == fixture_name)
                 lines.append(f"- `{fixture_name}` ({fixture_def.file_path})\n")

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Test suite audit script for Phase 1 analysis.
+r"""Test suite audit script for Phase 1 analysis.
 
 Extracts metadata from all test files to inform reorganization decisions.
 
@@ -22,11 +22,6 @@ import sys
 from collections import defaultdict
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any
-
-# Add project root to path
-ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 
 
 @dataclass
@@ -179,10 +174,7 @@ class TestAuditor:
         lines.append("|------|-------|-------|----------|\n")
         sorted_by_lines = sorted(self.metadata, key=lambda m: m.line_count, reverse=True)[:20]
         for meta in sorted_by_lines:
-            lines.append(
-                f"| {meta.path} | {meta.line_count} | {meta.test_function_count} | "
-                f"{meta.size_bytes / 1024:.1f} |\n"
-            )
+            lines.append(f"| {meta.path} | {meta.line_count} | {meta.test_function_count} | {meta.size_bytes / 1024:.1f} |\n")
         lines.append("\n---\n")
 
         # Files with most tests
@@ -191,14 +183,11 @@ class TestAuditor:
         lines.append("|------|-------|-------|----------|\n")
         sorted_by_tests = sorted(self.metadata, key=lambda m: m.test_function_count, reverse=True)[:20]
         for meta in sorted_by_tests:
-            lines.append(
-                f"| {meta.path} | {meta.test_function_count} | {meta.line_count} | "
-                f"{meta.test_class_count} |\n"
-            )
+            lines.append(f"| {meta.path} | {meta.test_function_count} | {meta.line_count} | {meta.test_class_count} |\n")
         lines.append("\n---\n")
 
         # Most common imports
-        import_counts = defaultdict(int)
+        import_counts: defaultdict[str, int] = defaultdict(int)
         for meta in self.metadata:
             for imp in meta.imports:
                 import_counts[imp] += 1
@@ -212,7 +201,7 @@ class TestAuditor:
         lines.append("\n---\n")
 
         # Most used fixtures
-        fixture_usage_counts = defaultdict(int)
+        fixture_usage_counts: defaultdict[str, int] = defaultdict(int)
         for meta in self.metadata:
             for fixture in meta.fixtures_used:
                 fixture_usage_counts[fixture] += 1
@@ -226,7 +215,9 @@ class TestAuditor:
         lines.append("\n---\n")
 
         # Files by directory
-        dir_counts = defaultdict(lambda: {"files": 0, "tests": 0, "lines": 0})
+        dir_counts: defaultdict[str, dict[str, int]] = defaultdict(
+            lambda: {"files": 0, "tests": 0, "lines": 0}
+        )
         for meta in self.metadata:
             dir_path = str(Path(meta.path).parent)
             dir_counts[dir_path]["files"] += 1
@@ -238,9 +229,7 @@ class TestAuditor:
         lines.append("|-----------|-------|-------|-------|\n")
         sorted_dirs = sorted(dir_counts.items(), key=lambda x: x[1]["files"], reverse=True)
         for dir_path, counts in sorted_dirs:
-            lines.append(
-                f"| {dir_path} | {counts['files']} | {counts['tests']} | {counts['lines']} |\n"
-            )
+            lines.append(f"| {dir_path} | {counts['files']} | {counts['tests']} | {counts['lines']} |\n")
         lines.append("\n---\n")
 
         # Write report

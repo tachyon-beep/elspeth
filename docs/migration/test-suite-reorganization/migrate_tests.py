@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Test migration script for Phase 2 execution.
+r"""Test migration script for Phase 2 execution.
 
 Automates file movement and import path updates with git mv.
 
@@ -32,7 +32,6 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 try:
     import yaml
@@ -64,9 +63,7 @@ class TestMigrator:
         data = yaml.safe_load(mapping_path.read_text())
 
         for move in data.get("moves", []):
-            self.moves.append(
-                FileMove(old_path=Path(move["old"]), new_path=Path(move["new"]))
-            )
+            self.moves.append(FileMove(old_path=Path(move["old"]), new_path=Path(move["new"])))
 
         print(f"Loaded {len(self.moves)} file moves from {mapping_path}")
 
@@ -91,12 +88,13 @@ class TestMigrator:
                 print(f"Would execute: {' '.join(cmd)}")
             else:
                 try:
-                    result = subprocess.run(
-                        cmd, check=True, capture_output=True, text=True
-                    )
+                    subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=30)
                     print(f"✓ Moved {move.old_path} → {move.new_path}")
                 except subprocess.CalledProcessError as e:
                     print(f"ERROR moving {move.old_path}: {e.stderr}", file=sys.stderr)
+                    return 1
+                except subprocess.TimeoutExpired:
+                    print(f"ERROR: git mv timed out for {move.old_path}", file=sys.stderr)
                     return 1
 
         if self.dry_run:
@@ -119,14 +117,13 @@ class ImportUpdater:
         """Update import paths in a single file."""
         try:
             content = file_path.read_text(encoding="utf-8")
-            original_content = content
         except UnicodeDecodeError:
             print(f"WARNING: Could not read {file_path}", file=sys.stderr)
             return
 
-        # Parse AST to find imports
+        # Validate syntax before processing
         try:
-            tree = ast.parse(content, filename=str(file_path))
+            ast.parse(content, filename=str(file_path))
         except SyntaxError:
             print(f"WARNING: Syntax error in {file_path}", file=sys.stderr)
             return
@@ -137,20 +134,14 @@ class ImportUpdater:
         # Pattern 1: Relative imports → Absolute imports
         # from ..plugins.sinks.csv import CsvSink
         # → from elspeth.plugins.nodes.sinks.csv import CsvSink
-        relative_import_pattern = re.compile(
-            r"^from (\.\.[^\s]+) import (.+)$", re.MULTILINE
-        )
+        relative_import_pattern = re.compile(r"^from (\.\.[^\s]+) import (.+)$", re.MULTILINE)
 
-        def replace_relative(match: re.Match) -> str:
+        def replace_relative(match: re.Match[str]) -> str:
             rel_path = match.group(1)
             imports = match.group(2)
 
             # Convert relative to absolute
-            # .. = parent directory
-            # Count dots to determine level
-            dots = len(rel_path) - len(rel_path.lstrip("."))
-
-            # Build absolute path
+            # Strip leading dots and build absolute path
             parts = rel_path.lstrip(".").split(".")
             absolute_path = "elspeth." + ".".join(parts)
 
@@ -168,7 +159,7 @@ class ImportUpdater:
             re.MULTILINE,
         )
 
-        def replace_plugin_path(match: re.Match) -> str:
+        def replace_plugin_path(match: re.Match[str]) -> str:
             plugin_type = match.group(1)  # sinks/sources/transforms
             module = match.group(2)
 
@@ -182,11 +173,9 @@ class ImportUpdater:
 
         # Pattern 3: Update conftest imports
         # Fixture imports may need updating after moves
-        conftest_pattern = re.compile(
-            r"from conftest import (.+)$", re.MULTILINE
-        )
+        conftest_pattern = re.compile(r"from conftest import (.+)$", re.MULTILINE)
 
-        def replace_conftest(match: re.Match) -> str:
+        def replace_conftest(match: re.Match[str]) -> str:
             imports = match.group(1)
             # Check if we're in a subdirectory that needs parent conftest
             depth = len(file_path.relative_to(self.test_dir).parents) - 1
