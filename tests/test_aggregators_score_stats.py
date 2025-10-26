@@ -9,15 +9,14 @@ import math
 
 import pytest
 
-from elspeth.plugins.experiments.aggregators.score_stats import (
-    ScoreDeltaBaselinePlugin,
-    ScoreStatsAggregator,
-)
+from elspeth.core.base.types import SecurityLevel
+from elspeth.plugins.experiments.aggregators.score_stats import ScoreStatsAggregator
+from elspeth.plugins.experiments.baseline.score_delta import ScoreDeltaBaselinePlugin
 
 
 def test_score_stats_empty_records():
     """Test ScoreStatsAggregator with empty records."""
-    aggregator = ScoreStatsAggregator()
+    aggregator = ScoreStatsAggregator(security_level=SecurityLevel.UNOFFICIAL, allow_downgrade=True)
     result = aggregator.finalize([])
 
     assert result["criteria"] == {}
@@ -27,7 +26,7 @@ def test_score_stats_empty_records():
 
 def test_score_stats_no_scores():
     """Test ScoreStatsAggregator with records but no scores."""
-    aggregator = ScoreStatsAggregator()
+    aggregator = ScoreStatsAggregator(security_level=SecurityLevel.UNOFFICIAL, allow_downgrade=True)
     records = [
         {"metrics": {}},
         {"metrics": None},
@@ -40,7 +39,7 @@ def test_score_stats_no_scores():
 
 def test_score_stats_with_scores():
     """Test ScoreStatsAggregator with valid scores."""
-    aggregator = ScoreStatsAggregator()
+    aggregator = ScoreStatsAggregator(security_level=SecurityLevel.UNOFFICIAL, allow_downgrade=True)
     records = [
         {"metrics": {"scores": {"accuracy": 0.8, "precision": 0.9}}},
         {"metrics": {"scores": {"accuracy": 0.9, "precision": 0.85}}},
@@ -58,7 +57,7 @@ def test_score_stats_with_scores():
 
 def test_score_stats_with_none_values():
     """Test ScoreStatsAggregator handles None score values (lines 57-59)."""
-    aggregator = ScoreStatsAggregator()
+    aggregator = ScoreStatsAggregator(security_level=SecurityLevel.UNOFFICIAL, allow_downgrade=True)
     records = [
         {"metrics": {"scores": {"accuracy": None}}},
         {"metrics": {"scores": {"accuracy": 0.8}}},
@@ -71,7 +70,7 @@ def test_score_stats_with_none_values():
 
 def test_score_stats_with_nan_values():
     """Test ScoreStatsAggregator handles NaN score values (lines 57-59)."""
-    aggregator = ScoreStatsAggregator()
+    aggregator = ScoreStatsAggregator(security_level=SecurityLevel.UNOFFICIAL, allow_downgrade=True)
     records = [
         {"metrics": {"scores": {"accuracy": math.nan}}},
         {"metrics": {"scores": {"accuracy": 0.8}}},
@@ -84,7 +83,7 @@ def test_score_stats_with_nan_values():
 
 def test_score_stats_with_flags():
     """Test ScoreStatsAggregator with score flags (lines 61-66)."""
-    aggregator = ScoreStatsAggregator()
+    aggregator = ScoreStatsAggregator(security_level=SecurityLevel.UNOFFICIAL, allow_downgrade=True)
     records = [
         {
             "metrics": {
@@ -113,7 +112,7 @@ def test_score_stats_with_flags():
 
 def test_score_stats_custom_fields():
     """Test ScoreStatsAggregator with custom source and flag fields."""
-    aggregator = ScoreStatsAggregator(source_field="custom_scores", flag_field="custom_flags")
+    aggregator = ScoreStatsAggregator(security_level=SecurityLevel.UNOFFICIAL, allow_downgrade=True, source_field="custom_scores", flag_field="custom_flags")
     records = [
         {
             "metrics": {
@@ -130,7 +129,7 @@ def test_score_stats_custom_fields():
 
 def test_score_stats_custom_ddof():
     """Test ScoreStatsAggregator with custom ddof."""
-    aggregator = ScoreStatsAggregator(ddof=1)
+    aggregator = ScoreStatsAggregator(security_level=SecurityLevel.UNOFFICIAL, allow_downgrade=True, ddof=1)
     records = [
         {"metrics": {"scores": {"accuracy": 0.8}}},
         {"metrics": {"scores": {"accuracy": 0.9}}},
@@ -145,7 +144,7 @@ def test_score_stats_custom_ddof():
 
 def test_score_stats_single_value():
     """Test ScoreStatsAggregator with single value (lines 106-109)."""
-    aggregator = ScoreStatsAggregator()
+    aggregator = ScoreStatsAggregator(security_level=SecurityLevel.UNOFFICIAL, allow_downgrade=True)
     records = [
         {"metrics": {"scores": {"accuracy": 0.8}}},
     ]
@@ -158,7 +157,7 @@ def test_score_stats_single_value():
 
 def test_score_stats_overall_aggregation():
     """Test ScoreStatsAggregator overall aggregation across criteria."""
-    aggregator = ScoreStatsAggregator()
+    aggregator = ScoreStatsAggregator(security_level=SecurityLevel.UNOFFICIAL, allow_downgrade=True)
     records = [
         {"metrics": {"scores": {"accuracy": 0.8, "precision": 0.9}}},
         {"metrics": {"scores": {"accuracy": 0.9, "precision": None}}},
@@ -172,7 +171,7 @@ def test_score_stats_overall_aggregation():
 
 def test_score_stats_pass_rate_calculation():
     """Test ScoreStatsAggregator pass_rate calculation (lines 110-112)."""
-    aggregator = ScoreStatsAggregator()
+    aggregator = ScoreStatsAggregator(security_level=SecurityLevel.UNOFFICIAL, allow_downgrade=True)
     records = [
         {
             "metrics": {
@@ -196,7 +195,7 @@ def test_score_stats_pass_rate_calculation():
 
 def test_score_stats_no_passes_no_total():
     """Test ScoreStatsAggregator when total is 0 (no pass_rate calculated)."""
-    aggregator = ScoreStatsAggregator()
+    aggregator = ScoreStatsAggregator(security_level=SecurityLevel.UNOFFICIAL, allow_downgrade=True)
     records = []
     result = aggregator.finalize(records)
 
@@ -206,7 +205,7 @@ def test_score_stats_no_passes_no_total():
 
 def test_score_stats_summarize_values_no_values():
     """Test _summarize_values with no values (lines 96-113)."""
-    aggregator = ScoreStatsAggregator()
+    aggregator = ScoreStatsAggregator(security_level=SecurityLevel.UNOFFICIAL, allow_downgrade=True)
     summary = aggregator._summarize_values([], missing=2, passes=1)
 
     assert summary["count"] == 0
@@ -219,7 +218,7 @@ def test_score_stats_summarize_values_no_values():
 
 def test_score_stats_summarize_values_with_values():
     """Test _summarize_values with values (lines 96-113)."""
-    aggregator = ScoreStatsAggregator()
+    aggregator = ScoreStatsAggregator(security_level=SecurityLevel.UNOFFICIAL, allow_downgrade=True)
     summary = aggregator._summarize_values([0.7, 0.8, 0.9], missing=1, passes=3)
 
     assert summary["count"] == 3
@@ -235,20 +234,20 @@ def test_score_stats_summarize_values_with_values():
 
 def test_score_stats_input_schema():
     """Test ScoreStatsAggregator input_schema method."""
-    aggregator = ScoreStatsAggregator()
+    aggregator = ScoreStatsAggregator(security_level=SecurityLevel.UNOFFICIAL, allow_downgrade=True)
     assert aggregator.input_schema() is None
 
 
 def test_score_delta_baseline_empty_stats():
     """Test ScoreDeltaBaselinePlugin with empty stats (lines 132-133)."""
-    plugin = ScoreDeltaBaselinePlugin()
+    plugin = ScoreDeltaBaselinePlugin(security_level=SecurityLevel.UNOFFICIAL, allow_downgrade=True)
     result = plugin.compare({}, {})
     assert result == {}
 
 
 def test_score_delta_baseline_no_aggregates():
     """Test ScoreDeltaBaselinePlugin with no aggregates (lines 148-151)."""
-    plugin = ScoreDeltaBaselinePlugin()
+    plugin = ScoreDeltaBaselinePlugin(security_level=SecurityLevel.UNOFFICIAL, allow_downgrade=True)
     baseline = {"results": []}
     variant = {"results": []}
     result = plugin.compare(baseline, variant)
@@ -257,7 +256,7 @@ def test_score_delta_baseline_no_aggregates():
 
 def test_score_delta_baseline_no_score_stats():
     """Test ScoreDeltaBaselinePlugin with no score_stats in aggregates (lines 152-154)."""
-    plugin = ScoreDeltaBaselinePlugin()
+    plugin = ScoreDeltaBaselinePlugin(security_level=SecurityLevel.UNOFFICIAL, allow_downgrade=True)
     baseline = {"aggregates": {}}
     variant = {"aggregates": {}}
     result = plugin.compare(baseline, variant)
@@ -266,7 +265,7 @@ def test_score_delta_baseline_no_score_stats():
 
 def test_score_delta_baseline_no_criteria():
     """Test ScoreDeltaBaselinePlugin with no criteria (lines 155-158)."""
-    plugin = ScoreDeltaBaselinePlugin()
+    plugin = ScoreDeltaBaselinePlugin(security_level=SecurityLevel.UNOFFICIAL, allow_downgrade=True)
     baseline = {"aggregates": {"score_stats": {}}}
     variant = {"aggregates": {"score_stats": {}}}
     result = plugin.compare(baseline, variant)
@@ -275,7 +274,7 @@ def test_score_delta_baseline_no_criteria():
 
 def test_score_delta_baseline_valid_comparison():
     """Test ScoreDeltaBaselinePlugin with valid comparison (lines 129-145)."""
-    plugin = ScoreDeltaBaselinePlugin()
+    plugin = ScoreDeltaBaselinePlugin(security_level=SecurityLevel.UNOFFICIAL, allow_downgrade=True)
     baseline = {
         "aggregates": {
             "score_stats": {
@@ -306,7 +305,7 @@ def test_score_delta_baseline_valid_comparison():
 
 def test_score_delta_baseline_custom_metric():
     """Test ScoreDeltaBaselinePlugin with custom metric."""
-    plugin = ScoreDeltaBaselinePlugin(metric="median")
+    plugin = ScoreDeltaBaselinePlugin(security_level=SecurityLevel.UNOFFICIAL, allow_downgrade=True, metric="median")
     baseline = {
         "aggregates": {
             "score_stats": {
@@ -333,7 +332,7 @@ def test_score_delta_baseline_custom_metric():
 
 def test_score_delta_baseline_criteria_filter():
     """Test ScoreDeltaBaselinePlugin with criteria filter (lines 138-139)."""
-    plugin = ScoreDeltaBaselinePlugin(criteria=["accuracy"])
+    plugin = ScoreDeltaBaselinePlugin(security_level=SecurityLevel.UNOFFICIAL, allow_downgrade=True, criteria=["accuracy"])
     baseline = {
         "aggregates": {
             "score_stats": {
@@ -363,7 +362,7 @@ def test_score_delta_baseline_criteria_filter():
 
 def test_score_delta_baseline_missing_metric():
     """Test ScoreDeltaBaselinePlugin with missing metric in one variant (lines 140-143)."""
-    plugin = ScoreDeltaBaselinePlugin()
+    plugin = ScoreDeltaBaselinePlugin(security_level=SecurityLevel.UNOFFICIAL, allow_downgrade=True)
     baseline = {
         "aggregates": {
             "score_stats": {
@@ -390,7 +389,7 @@ def test_score_delta_baseline_missing_metric():
 
 def test_score_delta_baseline_different_criteria_sets():
     """Test ScoreDeltaBaselinePlugin with different criteria in baseline vs variant."""
-    plugin = ScoreDeltaBaselinePlugin()
+    plugin = ScoreDeltaBaselinePlugin(security_level=SecurityLevel.UNOFFICIAL, allow_downgrade=True)
     baseline = {
         "aggregates": {
             "score_stats": {
@@ -421,7 +420,7 @@ def test_score_delta_baseline_different_criteria_sets():
 
 def test_score_stats_non_mapping_scores():
     """Test ScoreStatsAggregator handles non-mapping scores gracefully (line 54)."""
-    aggregator = ScoreStatsAggregator()
+    aggregator = ScoreStatsAggregator(security_level=SecurityLevel.UNOFFICIAL, allow_downgrade=True)
     records = [
         {"metrics": {"scores": "not a mapping"}},
         {"metrics": {"scores": ["list", "not", "dict"]}},
@@ -435,7 +434,7 @@ def test_score_stats_non_mapping_scores():
 
 def test_score_stats_non_mapping_flags():
     """Test ScoreStatsAggregator handles non-mapping flags gracefully (line 62)."""
-    aggregator = ScoreStatsAggregator()
+    aggregator = ScoreStatsAggregator(security_level=SecurityLevel.UNOFFICIAL, allow_downgrade=True)
     records = [
         {
             "metrics": {

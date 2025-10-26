@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from elspeth.core.base.types import SecurityLevel
 from elspeth.plugins.experiments.baseline.score_significance import (
     ScoreSignificanceBaselinePlugin,
 )
@@ -18,26 +19,38 @@ from elspeth.plugins.experiments.baseline.score_significance import (
 def test_score_significance_invalid_adjustment():
     """Test ScoreSignificanceBaselinePlugin with invalid adjustment (line 57)."""
     # Invalid adjustment should be normalized to "none"
-    plugin = ScoreSignificanceBaselinePlugin(adjustment="invalid_value")
+    plugin = ScoreSignificanceBaselinePlugin(
+        security_level=SecurityLevel.UNOFFICIAL,
+        allow_downgrade=True,
+        adjustment="invalid_value")
     assert plugin._adjustment == "none"
 
 
 def test_score_significance_invalid_on_error():
     """Test ScoreSignificanceBaselinePlugin raises on invalid on_error (line 61)."""
     with pytest.raises(ValueError, match="on_error must be 'abort' or 'skip'"):
-        ScoreSignificanceBaselinePlugin(on_error="invalid")
+        ScoreSignificanceBaselinePlugin(
+        security_level=SecurityLevel.UNOFFICIAL,
+        allow_downgrade=True,
+        on_error="invalid")
 
 
 def test_score_significance_empty_baseline_variant():
     """Test with empty baseline and variant."""
-    plugin = ScoreSignificanceBaselinePlugin()
+    plugin = ScoreSignificanceBaselinePlugin(
+        security_level=SecurityLevel.UNOFFICIAL,
+        allow_downgrade=True
+    )
     result = plugin.compare({}, {})
     assert result == {}
 
 
 def test_score_significance_no_common_criteria():
     """Test with no common criteria between baseline and variant."""
-    plugin = ScoreSignificanceBaselinePlugin()
+    plugin = ScoreSignificanceBaselinePlugin(
+        security_level=SecurityLevel.UNOFFICIAL,
+        allow_downgrade=True
+    )
     baseline = {
         "results": [
             {"metrics": {"scores": {"accuracy": 0.8}}},
@@ -54,7 +67,10 @@ def test_score_significance_no_common_criteria():
 
 def test_score_significance_criteria_filter():
     """Test with criteria filter (lines 78-79)."""
-    plugin = ScoreSignificanceBaselinePlugin(criteria=["accuracy"])
+    plugin = ScoreSignificanceBaselinePlugin(
+        security_level=SecurityLevel.UNOFFICIAL,
+        allow_downgrade=True,
+        criteria=["accuracy"])
     baseline = {
         "results": [
             {"metrics": {"scores": {"accuracy": 0.8, "precision": 0.9}}},
@@ -76,7 +92,10 @@ def test_score_significance_criteria_filter():
 
 def test_score_significance_min_samples():
     """Test min_samples requirement (lines 84-85)."""
-    plugin = ScoreSignificanceBaselinePlugin(min_samples=3)
+    plugin = ScoreSignificanceBaselinePlugin(
+        security_level=SecurityLevel.UNOFFICIAL,
+        allow_downgrade=True,
+        min_samples=3)
     baseline = {
         "results": [
             {"metrics": {"scores": {"accuracy": 0.8}}},
@@ -97,7 +116,10 @@ def test_score_significance_min_samples():
 
 def test_score_significance_valid_comparison():
     """Test valid comparison with sufficient samples (lines 86-93)."""
-    plugin = ScoreSignificanceBaselinePlugin(min_samples=2)
+    plugin = ScoreSignificanceBaselinePlugin(
+        security_level=SecurityLevel.UNOFFICIAL,
+        allow_downgrade=True,
+        min_samples=2)
     baseline = {
         "results": [
             {"metrics": {"scores": {"accuracy": 0.7}}},
@@ -121,7 +143,10 @@ def test_score_significance_valid_comparison():
 
 def test_score_significance_p_value_validation():
     """Test p_value validation for finiteness (lines 89-93)."""
-    plugin = ScoreSignificanceBaselinePlugin()
+    plugin = ScoreSignificanceBaselinePlugin(
+        security_level=SecurityLevel.UNOFFICIAL,
+        allow_downgrade=True
+    )
     baseline = {
         "results": [
             {"metrics": {"scores": {"accuracy": 0.8}}},
@@ -150,7 +175,10 @@ def test_score_significance_p_value_validation():
 
 def test_score_significance_bonferroni_adjustment():
     """Test Bonferroni adjustment (lines 95-107)."""
-    plugin = ScoreSignificanceBaselinePlugin(adjustment="bonferroni", family_size=2)
+    plugin = ScoreSignificanceBaselinePlugin(
+        security_level=SecurityLevel.UNOFFICIAL,
+        allow_downgrade=True,
+        adjustment="bonferroni", family_size=2)
     baseline = {
         "results": [
             {"metrics": {"scores": {"accuracy": 0.7, "precision": 0.75}}},
@@ -173,7 +201,10 @@ def test_score_significance_bonferroni_adjustment():
 
 def test_score_significance_bonferroni_none_p_value():
     """Test Bonferroni adjustment with None p_value (lines 100-101)."""
-    plugin = ScoreSignificanceBaselinePlugin(adjustment="bonferroni")
+    plugin = ScoreSignificanceBaselinePlugin(
+        security_level=SecurityLevel.UNOFFICIAL,
+        allow_downgrade=True,
+        adjustment="bonferroni")
     baseline = {
         "results": [
             {"metrics": {"scores": {"accuracy": 0.8}}},
@@ -199,7 +230,10 @@ def test_score_significance_bonferroni_none_p_value():
 
 def test_score_significance_fdr_with_statsmodels():
     """Test FDR adjustment using statsmodels (lines 108-114)."""
-    plugin = ScoreSignificanceBaselinePlugin(adjustment="fdr")
+    plugin = ScoreSignificanceBaselinePlugin(
+        security_level=SecurityLevel.UNOFFICIAL,
+        allow_downgrade=True,
+        adjustment="fdr")
     baseline = {
         "results": [
             {"metrics": {"scores": {"accuracy": 0.7, "precision": 0.75}}},
@@ -224,7 +258,10 @@ def test_score_significance_fdr_with_statsmodels():
 
 def test_score_significance_fdr_fallback():
     """Test FDR adjustment fallback when statsmodels fails (lines 115-118)."""
-    plugin = ScoreSignificanceBaselinePlugin(adjustment="fdr")
+    plugin = ScoreSignificanceBaselinePlugin(
+        security_level=SecurityLevel.UNOFFICIAL,
+        allow_downgrade=True,
+        adjustment="fdr")
     baseline = {
         "results": [
             {"metrics": {"scores": {"accuracy": 0.7}}},
@@ -262,7 +299,10 @@ def test_score_significance_fdr_fallback():
 
 def test_score_significance_fdr_missing_criteria():
     """Test FDR adjustment handles missing criteria (lines 124-129)."""
-    plugin = ScoreSignificanceBaselinePlugin(adjustment="fdr")
+    plugin = ScoreSignificanceBaselinePlugin(
+        security_level=SecurityLevel.UNOFFICIAL,
+        allow_downgrade=True,
+        adjustment="fdr")
     baseline = {
         "results": [
             {"metrics": {"scores": {"accuracy": 0.7}}},
@@ -289,7 +329,10 @@ def test_score_significance_fdr_missing_criteria():
 
 def test_score_significance_equal_var():
     """Test with equal_var parameter."""
-    plugin = ScoreSignificanceBaselinePlugin(equal_var=True)
+    plugin = ScoreSignificanceBaselinePlugin(
+        security_level=SecurityLevel.UNOFFICIAL,
+        allow_downgrade=True,
+        equal_var=True)
     baseline = {
         "results": [
             {"metrics": {"scores": {"accuracy": 0.8}}},
@@ -315,7 +358,10 @@ def test_score_significance_equal_var():
 
 def test_score_significance_on_error_skip():
     """Test on_error='skip' behavior."""
-    plugin = ScoreSignificanceBaselinePlugin(on_error="skip")
+    plugin = ScoreSignificanceBaselinePlugin(
+        security_level=SecurityLevel.UNOFFICIAL,
+        allow_downgrade=True,
+        on_error="skip")
 
     # Normal operation should work
     baseline = {
@@ -336,7 +382,10 @@ def test_score_significance_on_error_skip():
 
 def test_score_significance_custom_family_size():
     """Test with custom family_size for adjustment (line 96)."""
-    plugin = ScoreSignificanceBaselinePlugin(adjustment="bonferroni", family_size=5)
+    plugin = ScoreSignificanceBaselinePlugin(
+        security_level=SecurityLevel.UNOFFICIAL,
+        allow_downgrade=True,
+        adjustment="bonferroni", family_size=5)
     baseline = {
         "results": [
             {"metrics": {"scores": {"accuracy": 0.7}}},
@@ -358,7 +407,10 @@ def test_score_significance_custom_family_size():
 
 def test_score_significance_auto_family_size():
     """Test automatic family_size calculation (line 96)."""
-    plugin = ScoreSignificanceBaselinePlugin(adjustment="bonferroni")  # No family_size
+    plugin = ScoreSignificanceBaselinePlugin(
+        security_level=SecurityLevel.UNOFFICIAL,
+        allow_downgrade=True,
+        adjustment="bonferroni")  # No family_size
     baseline = {
         "results": [
             {"metrics": {"scores": {"accuracy": 0.7, "precision": 0.75}}},
@@ -379,7 +431,10 @@ def test_score_significance_auto_family_size():
 
 def test_score_significance_none_adjustment():
     """Test with adjustment='none' (line 95)."""
-    plugin = ScoreSignificanceBaselinePlugin(adjustment="none")
+    plugin = ScoreSignificanceBaselinePlugin(
+        security_level=SecurityLevel.UNOFFICIAL,
+        allow_downgrade=True,
+        adjustment="none")
     baseline = {
         "results": [
             {"metrics": {"scores": {"accuracy": 0.8}}},
@@ -401,7 +456,10 @@ def test_score_significance_none_adjustment():
 
 def test_score_significance_empty_p_values():
     """Test when no valid p_values are collected (line 95)."""
-    plugin = ScoreSignificanceBaselinePlugin(adjustment="bonferroni")
+    plugin = ScoreSignificanceBaselinePlugin(
+        security_level=SecurityLevel.UNOFFICIAL,
+        allow_downgrade=True,
+        adjustment="bonferroni")
     baseline = {
         "results": [
             {"metrics": {"scores": {"accuracy": 0.8}}},
@@ -420,6 +478,9 @@ def test_score_significance_empty_p_values():
 
 def test_score_significance_min_samples_boundary():
     """Test min_samples is enforced as minimum 2 (line 53)."""
-    plugin = ScoreSignificanceBaselinePlugin(min_samples=1)
+    plugin = ScoreSignificanceBaselinePlugin(
+        security_level=SecurityLevel.UNOFFICIAL,
+        allow_downgrade=True,
+        min_samples=1)
     # Should be enforced to at least 2
     assert plugin._min_samples >= 2

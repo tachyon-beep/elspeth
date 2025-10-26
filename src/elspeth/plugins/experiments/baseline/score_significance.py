@@ -6,6 +6,9 @@ import logging
 import math
 from typing import TYPE_CHECKING, Any, Sequence
 
+from elspeth.core.base.plugin import BasePlugin
+from elspeth.core.base.plugin_context import PluginContext
+from elspeth.core.base.types import SecurityLevel
 from elspeth.core.experiments.plugin_registry import register_baseline_plugin
 from elspeth.plugins.experiments._stats_helpers import (
     _benjamini_hochberg,
@@ -34,7 +37,7 @@ _SIGNIFICANCE_SCHEMA = {
 }
 
 
-class ScoreSignificanceBaselinePlugin:
+class ScoreSignificanceBaselinePlugin(BasePlugin):
     """Compare baseline and variant using effect sizes and t-tests."""
 
     name = "score_significance"
@@ -42,6 +45,8 @@ class ScoreSignificanceBaselinePlugin:
     def __init__(
         self,
         *,
+        security_level: SecurityLevel,
+        allow_downgrade: bool,
         criteria: Sequence[str] | None = None,
         min_samples: int = 2,
         equal_var: bool = False,
@@ -49,6 +54,7 @@ class ScoreSignificanceBaselinePlugin:
         family_size: int | None = None,
         on_error: str = "abort",
     ) -> None:
+        super().__init__(security_level=security_level, allow_downgrade=allow_downgrade)
         self._criteria = set(criteria) if criteria else None
         self._min_samples = max(int(min_samples), 2)
         self._equal_var = bool(equal_var)
@@ -130,16 +136,28 @@ class ScoreSignificanceBaselinePlugin:
         return results
 
 
+def _create_score_significance(options: dict[str, Any], context: PluginContext) -> ScoreSignificanceBaselinePlugin:
+    """Create score significance baseline plugin with smart security defaults."""
+    opts = dict(options)
+    if "security_level" not in opts and context:
+        opts["security_level"] = context.security_level
+    allow_downgrade = opts.get("allow_downgrade", True)
+
+    return ScoreSignificanceBaselinePlugin(
+        security_level=opts["security_level"],
+        allow_downgrade=allow_downgrade,
+        criteria=opts.get("criteria"),
+        min_samples=int(opts.get("min_samples", 2)),
+        equal_var=bool(opts.get("equal_var", False)),
+        adjustment=opts.get("adjustment", "none"),
+        family_size=opts.get("family_size"),
+        on_error=opts.get("on_error", "abort"),
+    )
+
+
 register_baseline_plugin(
     "score_significance",
-    lambda options, context: ScoreSignificanceBaselinePlugin(
-        criteria=options.get("criteria"),
-        min_samples=int(options.get("min_samples", 2)),
-        equal_var=bool(options.get("equal_var", False)),
-        adjustment=options.get("adjustment", "none"),
-        family_size=options.get("family_size"),
-        on_error=options.get("on_error", "abort"),
-    ),
+    _create_score_significance,
     schema=_SIGNIFICANCE_SCHEMA,
 )
 

@@ -8,7 +8,9 @@ from typing import TYPE_CHECKING, Any, Mapping
 
 import numpy as np
 
+from elspeth.core.base.plugin import BasePlugin
 from elspeth.core.base.plugin_context import PluginContext
+from elspeth.core.base.types import SecurityLevel
 from elspeth.core.experiments.plugin_registry import register_row_plugin
 from elspeth.plugins.experiments._stats_helpers import _create_score_extractor_factory
 
@@ -50,7 +52,7 @@ _ROW_SCHEMA = {
 }
 
 
-class ScoreExtractorPlugin:
+class ScoreExtractorPlugin(BasePlugin):
     """Extract numeric scores from LLM responses.
 
     The plugin inspects the per-criteria response payload for numeric values under
@@ -64,6 +66,8 @@ class ScoreExtractorPlugin:
     def __init__(
         self,
         *,
+        security_level: SecurityLevel,
+        allow_downgrade: bool,
         key: str = "score",
         criteria: list[str] | None = None,
         parse_json_content: bool = True,
@@ -72,6 +76,7 @@ class ScoreExtractorPlugin:
         threshold_mode: str = "gte",
         flag_field: str = "score_flags",
     ) -> None:
+        super().__init__(security_level=security_level, allow_downgrade=allow_downgrade)
         self._key = key
         self._criteria = set(criteria) if criteria else None
         self._parse_json = parse_json_content
@@ -168,10 +173,24 @@ class ScoreExtractorPlugin:
         return None
 
 
-def _create_score_extractor(options: dict[str, Any], _context: PluginContext) -> ScoreExtractorPlugin:
-    """Create a score extractor plugin with all required fields."""
-    validated = _create_score_extractor_factory(options)
-    return ScoreExtractorPlugin(**validated)
+def _create_score_extractor(options: dict[str, Any], context: PluginContext) -> ScoreExtractorPlugin:
+    """Create a score extractor plugin with all required fields and smart security defaults.
+
+    Security defaults:
+    - Falls back to context.security_level if not provided in options
+    - Defaults allow_downgrade=True (trusted computation plugin)
+    """
+    opts = dict(options)
+    if "security_level" not in opts and context:
+        opts["security_level"] = context.security_level
+    allow_downgrade = opts.get("allow_downgrade", True)
+
+    validated = _create_score_extractor_factory(opts)
+    return ScoreExtractorPlugin(
+        security_level=opts["security_level"],
+        allow_downgrade=allow_downgrade,
+        **validated,
+    )
 
 
 register_row_plugin(

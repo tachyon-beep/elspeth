@@ -8,6 +8,9 @@ from typing import TYPE_CHECKING, Any, Sequence
 import numpy as np
 from statsmodels.stats.power import TTestPower
 
+from elspeth.core.base.plugin import BasePlugin
+from elspeth.core.base.plugin_context import PluginContext
+from elspeth.core.base.types import SecurityLevel
 from elspeth.core.experiments.plugin_registry import register_aggregation_plugin
 from elspeth.plugins.experiments._stats_helpers import (
     _collect_scores_by_criterion,
@@ -35,7 +38,7 @@ _POWER_SCHEMA = {
 }
 
 
-class ScorePowerAggregator:
+class ScorePowerAggregator(BasePlugin):
     """Estimate power and required sample size for mean comparisons."""
 
     name = "score_power"

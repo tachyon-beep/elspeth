@@ -8,6 +8,9 @@ from typing import TYPE_CHECKING, Any, Mapping, Sequence
 
 import numpy as np
 
+from elspeth.core.base.plugin import BasePlugin
+from elspeth.core.base.plugin_context import PluginContext
+from elspeth.core.base.types import SecurityLevel
 from elspeth.core.experiments.plugin_registry import register_aggregation_plugin
 from elspeth.plugins.experiments._stats_helpers import krippendorff_alpha_interval
 
@@ -29,12 +32,14 @@ _AGREEMENT_SCHEMA = {
 }
 
 
-class ScoreAgreementAggregator:
+class ScoreAgreementAggregator(BasePlugin):
     """Assess agreement/reliability across criteria scores."""
 
     name = "score_agreement"
 
-    def __init__(self, *, criteria: Sequence[str] | None = None, min_items: int = 2, on_error: str = "abort") -> None:
+    def __init__(self, *,
+        security_level: SecurityLevel, allow_downgrade: bool, criteria: Sequence[str] | None = None, min_items: int = 2, on_error: str = "abort",
+    ) -> None:
         self._criteria = list(criteria) if criteria else None
         self._min_items = max(int(min_items), 2)
         if on_error not in {"abort", "skip"}:
@@ -131,13 +136,25 @@ class ScoreAgreementAggregator:
         return None
 
 
+def _create_score_agreement(options: dict[str, Any], context: PluginContext) -> ScoreAgreementAggregator:
+    """Create score agreement aggregator with smart security defaults."""
+    opts = dict(options)
+    if "security_level" not in opts and context:
+        opts["security_level"] = context.security_level
+    allow_downgrade = opts.get("allow_downgrade", True)
+
+    return ScoreAgreementAggregator(
+        security_level=opts["security_level"],
+        allow_downgrade=allow_downgrade,
+        criteria=opts.get("criteria"),
+        min_items=int(opts.get("min_items", 2)),
+        on_error=opts.get("on_error", "abort"),
+    )
+
+
 register_aggregation_plugin(
     "score_agreement",
-    lambda options, context: ScoreAgreementAggregator(
-        criteria=options.get("criteria"),
-        min_items=int(options.get("min_items", 2)),
-        on_error=options.get("on_error", "abort"),
-    ),
+    _create_score_agreement,
     schema=_AGREEMENT_SCHEMA,
 )
 

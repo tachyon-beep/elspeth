@@ -2,6 +2,7 @@ import math
 
 import pytest
 
+from elspeth.core.base.types import SecurityLevel
 from elspeth.core.experiments.plugin_registry import create_aggregation_plugin, create_baseline_plugin, create_row_plugin
 
 # Required options for score_extractor plugin (no defaults allowed)
@@ -317,7 +318,11 @@ def test_score_significance_on_error_skip(monkeypatch):
     import elspeth.plugins.experiments._stats_helpers as stats_helpers
     from elspeth.plugins.experiments.baseline.score_significance import ScoreSignificanceBaselinePlugin
 
-    plugin = ScoreSignificanceBaselinePlugin(on_error="skip")
+    plugin = ScoreSignificanceBaselinePlugin(
+        security_level=SecurityLevel.UNOFFICIAL,
+        allow_downgrade=True,
+        on_error="skip"
+    )
 
     def boom(*args, **kwargs):
         raise RuntimeError("boom")
@@ -357,7 +362,11 @@ def test_score_agreement_on_error_skip(monkeypatch):
     import elspeth.plugins.experiments._stats_helpers as stats_helpers
     from elspeth.plugins.experiments.aggregators.score_agreement import ScoreAgreementAggregator
 
-    plugin = ScoreAgreementAggregator(on_error="skip")
+    plugin = ScoreAgreementAggregator(
+        security_level=SecurityLevel.UNOFFICIAL,
+        allow_downgrade=True,
+        on_error="skip"
+    )
 
     def boom(*args, **kwargs):
         raise RuntimeError("boom")
@@ -623,7 +632,11 @@ def test_latency_summary_aggregator_no_latency():
 def test_cost_summary_on_error_skip(monkeypatch):
     from elspeth.plugins.experiments.aggregators.cost_summary import CostSummaryAggregator
 
-    plugin = CostSummaryAggregator(on_error="skip")
+    plugin = CostSummaryAggregator(
+        security_level=SecurityLevel.UNOFFICIAL,
+        allow_downgrade=True,
+        on_error="skip"
+    )
 
     def boom(*args, **kwargs):
         raise RuntimeError("boom")
@@ -635,7 +648,11 @@ def test_cost_summary_on_error_skip(monkeypatch):
 def test_latency_summary_on_error_skip(monkeypatch):
     from elspeth.plugins.experiments.aggregators.latency_summary import LatencySummaryAggregator
 
-    plugin = LatencySummaryAggregator(on_error="skip")
+    plugin = LatencySummaryAggregator(
+        security_level=SecurityLevel.UNOFFICIAL,
+        allow_downgrade=True,
+        on_error="skip"
+    )
 
     def boom(*args, **kwargs):
         raise RuntimeError("boom")

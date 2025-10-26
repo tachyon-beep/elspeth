@@ -10,6 +10,9 @@ from typing import TYPE_CHECKING, Any, Mapping
 
 import numpy as np
 
+from elspeth.core.base.plugin import BasePlugin
+from elspeth.core.base.plugin_context import PluginContext
+from elspeth.core.base.types import SecurityLevel
 from elspeth.core.experiments.plugin_registry import register_aggregation_plugin
 
 if TYPE_CHECKING:
@@ -33,7 +36,7 @@ _RATIONALE_SCHEMA = {
 }
 
 
-class RationaleAnalysisAggregator:
+class RationaleAnalysisAggregator(BasePlugin):
     """Analyze LLM rationales to understand scoring patterns and provide interpretability.
 
     This plugin extracts rationales from response content, analyzes common themes

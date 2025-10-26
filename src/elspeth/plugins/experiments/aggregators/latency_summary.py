@@ -8,6 +8,9 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
+from elspeth.core.base.plugin import BasePlugin
+from elspeth.core.base.plugin_context import PluginContext
+from elspeth.core.base.types import SecurityLevel
 from elspeth.core.experiments.plugin_registry import register_aggregation_plugin
 
 if TYPE_CHECKING:
@@ -26,7 +29,7 @@ _LATENCY_SCHEMA = {
 }
 
 
-class LatencySummaryAggregator:
+class LatencySummaryAggregator(BasePlugin):
     """Aggregate latency metrics across all rows.
 
     Collects latency_seconds from response metrics and computes
@@ -35,7 +38,14 @@ class LatencySummaryAggregator:
 
     name = "latency_summary"
 
-    def __init__(self, *, on_error: str = "abort") -> None:
+    def __init__(
+        self,
+        *,
+        security_level: SecurityLevel,
+        allow_downgrade: bool,
+        on_error: str = "abort",
+    ) -> None:
+        super().__init__(security_level=security_level, allow_downgrade=allow_downgrade)
         if on_error not in {"abort", "skip"}:
             raise ValueError("on_error must be 'abort' or 'skip'")
         self._on_error = on_error
@@ -95,11 +105,23 @@ class LatencySummaryAggregator:
         return None
 
 
+def _create_latency_summary(options: dict[str, Any], context: PluginContext) -> LatencySummaryAggregator:
+    """Create latency summary aggregator with smart security defaults."""
+    opts = dict(options)
+    if "security_level" not in opts and context:
+        opts["security_level"] = context.security_level
+    allow_downgrade = opts.get("allow_downgrade", True)
+
+    return LatencySummaryAggregator(
+        security_level=opts["security_level"],
+        allow_downgrade=allow_downgrade,
+        on_error=opts.get("on_error", "abort"),
+    )
+
+
 register_aggregation_plugin(
     "latency_summary",
-    lambda options, context: LatencySummaryAggregator(
-        on_error=options.get("on_error", "abort"),
-    ),
+    _create_latency_summary,
     schema=_LATENCY_SCHEMA,
 )
 

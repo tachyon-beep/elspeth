@@ -5,6 +5,9 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any, Mapping
 
+from elspeth.core.base.plugin import BasePlugin
+from elspeth.core.base.plugin_context import PluginContext
+from elspeth.core.base.types import SecurityLevel
 from elspeth.core.experiments.plugin_registry import register_aggregation_plugin
 from elspeth.plugins.experiments.aggregators.score_stats import ScoreStatsAggregator
 
@@ -28,7 +31,7 @@ _RECOMMENDATION_SCHEMA = {
 }
 
 
-class ScoreRecommendationAggregator:
+class ScoreRecommendationAggregator(BasePlugin):
     """Generate a lightweight recommendation based on score statistics."""
 
     name = "score_recommendation"
@@ -36,14 +39,22 @@ class ScoreRecommendationAggregator:
     def __init__(
         self,
         *,
+        security_level: SecurityLevel,
+        allow_downgrade: bool,
         min_samples: int = 5,
         improvement_margin: float = 0.05,
         source_field: str = "scores",
         flag_field: str = "score_flags",
     ) -> None:
+        super().__init__(security_level=security_level, allow_downgrade=allow_downgrade)
         self._min_samples = min_samples
         self._improvement_margin = improvement_margin
-        self._stats = ScoreStatsAggregator(source_field=source_field, flag_field=flag_field)
+        self._stats = ScoreStatsAggregator(
+            security_level=security_level,
+            allow_downgrade=allow_downgrade,
+            source_field=source_field,
+            flag_field=flag_field,
+        )
 
     def finalize(self, records: list[dict[str, Any]]) -> dict[str, Any]:
         stats = self._stats.finalize(records)
@@ -102,14 +113,28 @@ class ScoreRecommendationAggregator:
         return None
 
 
+
+
+def _create_score_recommendation(options: dict[str, Any], context: PluginContext) -> ScoreRecommendationAggregator:
+    "Create score recommendation aggregator with smart security defaults."
+    opts = dict(options)
+    if "security_level" not in opts and context:
+        opts["security_level"] = context.security_level
+    allow_downgrade = opts.get("allow_downgrade", True)
+
+    return ScoreRecommendationAggregator(
+        security_level=opts["security_level"],
+        allow_downgrade=allow_downgrade,
+        min_samples=int(opts.get("min_samples", 5)),
+        improvement_margin=float(opts.get("improvement_margin", 0.05)),
+        source_field=opts.get("source_field", "scores"),
+        flag_field=opts.get("flag_field", "score_flags"),
+    )
+
+
 register_aggregation_plugin(
     "score_recommendation",
-    lambda options, context: ScoreRecommendationAggregator(
-        min_samples=int(options.get("min_samples", 5)),
-        improvement_margin=float(options.get("improvement_margin", 0.05)),
-        source_field=options.get("source_field", "scores"),
-        flag_field=options.get("flag_field", "score_flags"),
-    ),
+    _create_score_recommendation,
     schema=_RECOMMENDATION_SCHEMA,
 )
 

@@ -5,6 +5,9 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any, Mapping
 
+from elspeth.core.base.plugin import BasePlugin
+from elspeth.core.base.plugin_context import PluginContext
+from elspeth.core.base.types import SecurityLevel
 from elspeth.core.experiments.plugin_registry import register_baseline_plugin
 
 if TYPE_CHECKING:
@@ -25,12 +28,20 @@ _DELTA_SCHEMA = {
 }
 
 
-class ScoreDeltaBaselinePlugin:
+class ScoreDeltaBaselinePlugin(BasePlugin):
     """Compare score statistics between baseline and variant."""
 
     name = "score_delta"
 
-    def __init__(self, *, metric: str = "mean", criteria: list[str] | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        security_level: SecurityLevel,
+        allow_downgrade: bool,
+        metric: str = "mean",
+        criteria: list[str] | None = None,
+    ) -> None:
+        super().__init__(security_level=security_level, allow_downgrade=allow_downgrade)
         self._metric = metric
         self._criteria = set(criteria) if criteria else None
 
@@ -66,12 +77,24 @@ class ScoreDeltaBaselinePlugin:
         return dict(criteria)
 
 
+def _create_score_delta(options: dict[str, Any], context: PluginContext) -> ScoreDeltaBaselinePlugin:
+    """Create score delta baseline plugin with smart security defaults."""
+    opts = dict(options)
+    if "security_level" not in opts and context:
+        opts["security_level"] = context.security_level
+    allow_downgrade = opts.get("allow_downgrade", True)
+
+    return ScoreDeltaBaselinePlugin(
+        security_level=opts["security_level"],
+        allow_downgrade=allow_downgrade,
+        metric=opts.get("metric", "mean"),
+        criteria=opts.get("criteria"),
+    )
+
+
 register_baseline_plugin(
     "score_delta",
-    lambda options, context: ScoreDeltaBaselinePlugin(
-        metric=options.get("metric", "mean"),
-        criteria=options.get("criteria"),
-    ),
+    _create_score_delta,
     schema=_DELTA_SCHEMA,
 )
 
