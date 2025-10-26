@@ -143,15 +143,22 @@ class CentralPluginRegistry:
 
         logger.info("CentralPluginRegistry initialization complete")
 
-    def get_plugin(self, plugin_type: str, plugin_name: str, **kwargs: Any) -> Any:
-        """Get a plugin by type and name.
+    def create_plugin(
+        self,
+        plugin_type: str,
+        plugin_name: str,
+        options: dict[str, Any],
+        **kwargs: Any,
+    ) -> Any:
+        """Create a plugin instance by type and name.
 
-        Unified interface for retrieving plugins across all types.
+        Unified interface for creating plugins across all types.
 
         Args:
             plugin_type: Plugin type (e.g., "datasource", "llm", "sink")
             plugin_name: Plugin name (e.g., "local_csv", "azure_openai")
-            **kwargs: Additional arguments passed to registry.get()
+            options: Plugin configuration options
+            **kwargs: Additional arguments passed to registry.create()
 
         Returns:
             Plugin instance
@@ -161,7 +168,7 @@ class CentralPluginRegistry:
             Exception: If plugin_name not found (depends on registry implementation)
 
         Example:
-            >>> datasource = central_registry.get_plugin("datasource", "local_csv", options={...})
+            >>> datasource = central_registry.create_plugin("datasource", "local_csv", options={...})
         """
         if plugin_type not in self._registries:
             raise KeyError(
@@ -170,7 +177,34 @@ class CentralPluginRegistry:
             )
 
         registry = self._registries[plugin_type]
-        return registry.get(plugin_name, **kwargs)
+        return registry.create(plugin_name, options, **kwargs)
+
+    def get_registry(self, plugin_type: str) -> BasePluginRegistry[Any]:
+        """Get the underlying registry for a plugin type.
+
+        This is useful when you need direct access to the registry (e.g., for passing
+        factory functions around).
+
+        Args:
+            plugin_type: Plugin type (e.g., "datasource", "llm", "sink")
+
+        Returns:
+            The underlying BasePluginRegistry instance
+
+        Raises:
+            KeyError: If plugin_type is unknown
+
+        Example:
+            >>> datasource_registry = central_registry.get_registry("datasource")
+            >>> datasource = datasource_registry.create("local_csv", options={...})
+        """
+        if plugin_type not in self._registries:
+            raise KeyError(
+                f"Unknown plugin type: {plugin_type}. "
+                f"Available types: {', '.join(sorted(self._registries.keys()))}"
+            )
+
+        return self._registries[plugin_type]
 
     def list_plugins(self, plugin_type: str) -> list[str]:
         """List all registered plugin names for a specific type.
@@ -219,61 +253,65 @@ class CentralPluginRegistry:
     # Convenience Methods
     # ============================================================================
 
-    def get_datasource(self, name: str, **kwargs: Any) -> Any:
-        """Convenience method: get datasource plugin.
+    def create_datasource(self, name: str, options: dict[str, Any], **kwargs: Any) -> Any:
+        """Convenience method: create datasource plugin.
 
-        Shorthand for get_plugin("datasource", name).
+        Shorthand for create_plugin("datasource", name, options).
 
         Args:
             name: Datasource plugin name (e.g., "local_csv")
+            options: Plugin configuration options
             **kwargs: Additional arguments passed to registry
 
         Returns:
             Datasource plugin instance
         """
-        return self.get_plugin("datasource", name, **kwargs)
+        return self.create_plugin("datasource", name, options, **kwargs)
 
-    def get_llm(self, name: str, **kwargs: Any) -> Any:
-        """Convenience method: get LLM plugin.
+    def create_llm(self, name: str, options: dict[str, Any], **kwargs: Any) -> Any:
+        """Convenience method: create LLM plugin.
 
-        Shorthand for get_plugin("llm", name).
+        Shorthand for create_plugin("llm", name, options).
 
         Args:
             name: LLM plugin name (e.g., "azure_openai")
+            options: Plugin configuration options
             **kwargs: Additional arguments passed to registry
 
         Returns:
             LLM plugin instance
         """
-        return self.get_plugin("llm", name, **kwargs)
+        return self.create_plugin("llm", name, options, **kwargs)
 
-    def get_sink(self, name: str, **kwargs: Any) -> Any:
-        """Convenience method: get sink plugin.
+    def create_sink(self, name: str, options: dict[str, Any], **kwargs: Any) -> Any:
+        """Convenience method: create sink plugin.
 
-        Shorthand for get_plugin("sink", name).
+        Shorthand for create_plugin("sink", name, options).
 
         Args:
             name: Sink plugin name (e.g., "csv")
+            options: Plugin configuration options
             **kwargs: Additional arguments passed to registry
 
         Returns:
             Sink plugin instance
         """
-        return self.get_plugin("sink", name, **kwargs)
+        return self.create_plugin("sink", name, options, **kwargs)
 
-    def get_middleware(self, name: str, **kwargs: Any) -> Any:
-        """Convenience method: get middleware plugin.
+    def create_middleware(self, name: str, options: dict[str, Any], **kwargs: Any) -> Any:
+        """Convenience method: create middleware plugin.
 
-        Shorthand for get_plugin("middleware", name).
+        Shorthand for create_plugin("middleware", name, options).
 
         Args:
             name: Middleware plugin name
+            options: Plugin configuration options
             **kwargs: Additional arguments passed to registry
 
         Returns:
             Middleware plugin instance
         """
-        return self.get_plugin("middleware", name, **kwargs)
+        return self.create_plugin("middleware", name, options, **kwargs)
 
 
 # ============================================================================

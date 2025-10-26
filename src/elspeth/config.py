@@ -10,12 +10,10 @@ from typing import Any
 
 import yaml
 
-import elspeth.core.registries.llm as _llm_module
 from elspeth.core.controls import create_cost_tracker, create_rate_limiter
 from elspeth.core.experiments.plugin_registry import normalize_early_stop_definitions
 from elspeth.core.orchestrator import OrchestratorConfig
-from elspeth.core.registries.datasource import datasource_registry
-from elspeth.core.registries.sink import sink_registry
+from elspeth.core.registry import central_registry
 from elspeth.core.security import coalesce_determinism_level, coalesce_security_level
 from elspeth.core.validation.base import ConfigurationError
 
@@ -406,6 +404,7 @@ def _instantiate_sinks(sink_defs: list[dict[str, Any]]) -> list[Any]:
     """Instantiate sink plugins with security level metadata."""
 
     instances: list[Any] = []
+    sink_registry = central_registry.get_registry("sink")
     for definition in sink_defs:
         instances.append(_instantiate_plugin(definition, "sink", sink_registry.create))
     return instances
@@ -468,9 +467,11 @@ def load_settings(path: str | Path, profile: str = "default") -> Settings:
     prompt_pack_name = profile_data.get("prompt_pack")
     pack = prompt_packs.get(prompt_pack_name) if prompt_pack_name else None
 
+    datasource_registry = central_registry.get_registry("datasource")
+    llm_registry = central_registry.get_registry("llm")
+
     datasource = _instantiate_plugin(profile_data["datasource"], "datasource", datasource_registry.create)
-    # Resolve LLM registry dynamically to support test monkeypatching of llm_registry
-    llm = _instantiate_plugin(profile_data["llm"], "llm", _llm_module.llm_registry.create)
+    llm = _instantiate_plugin(profile_data["llm"], "llm", llm_registry.create)
 
     prompt_config = _collect_prompt_configuration(profile_data)
     plugin_defs = _collect_plugin_definitions(profile_data)
