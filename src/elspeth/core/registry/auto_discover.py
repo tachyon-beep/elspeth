@@ -53,10 +53,66 @@ logger = logging.getLogger(__name__)
 
 # Minimum expected plugins for each type (used for validation)
 # If these are missing, it indicates a registration bypass or incomplete discovery
+#
+# VULN-010 FIX: Expanded from 8/29 plugins (27.6%) to 29/29 plugins (100% coverage)
+# for production-critical types (datasource, llm, sink, middleware).
 EXPECTED_PLUGINS = {
+    # Datasources: 3/3 = 100% ✅ (unchanged)
     "datasource": ["local_csv", "csv_blob", "azure_blob"],
-    "llm": ["mock", "azure_openai"],  # Minimum set
-    "sink": ["csv", "signed_artifact", "local_bundle"],  # Core output formats
+
+    # LLMs: 4/4 = 100% ✅ (was 2/4 = 50%)
+    "llm": [
+        "mock",           # Test/mock LLM
+        "azure_openai",   # Enterprise Azure OpenAI
+        "http_openai",    # Public HTTP OpenAI
+        "static_test",    # Static test LLM
+    ],
+
+    # Sinks: 17/17 = 100% ✅ (was 3/17 = 17.6%)
+    "sink": [
+        # Core outputs
+        "csv",
+        "signed_artifact",
+        "local_bundle",
+
+        # Document formats
+        "excel_workbook",
+
+        # Cloud storage
+        "azure_blob",
+        "azure_blob_artifacts",
+
+        # Artifact bundles
+        "zip_bundle",
+        "reproducibility_bundle",
+
+        # Repository integrations
+        "github_repo",
+        "azure_devops_repo",
+        "azure_devops_artifact_repo",
+
+        # Analytics & visualization
+        "analytics_report",
+        "analytics_visual",
+        "enhanced_visual",
+
+        # Specialized sinks
+        "embeddings_store",  # Vector storage
+        "file_copy",         # File copy utility
+        "collecting",        # Collection sink
+    ],
+
+    # Middleware: 7/7 = 100% ✅ (was 0/7 = 0%)
+    "middleware": [
+        "audit_logger",         # Audit logging
+        "azure_content_safety", # Azure Content Safety
+        "azure_environment",    # Azure environment middleware
+        "classified_material",  # Classified material validation
+        "health_monitor",       # Health monitoring
+        "pii_shield",           # PII protection
+        "prompt_shield",        # Prompt validation
+    ],
+
     # Other plugin types have no minimum (optional plugins)
 }
 
