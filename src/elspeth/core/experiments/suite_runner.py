@@ -25,6 +25,7 @@ from elspeth.core.experiments.plugin_registry import (
 )
 from elspeth.core.experiments.runner import ExperimentRunner
 from elspeth.core.registries.middleware import create_middleware
+
 # BUG-001 FIX: Lazy import to break circular dependency
 # Was: from elspeth.core.registry import central_registry
 # Moved inside _instantiate_sinks() to defer import until after module initialization
