@@ -72,7 +72,7 @@ def test_plugin_requires_input_schema_but_missing(monkeypatch):
 
         return _Plugin()
 
-    register_row_plugin("needs_schema", factory, requires_input_schema=True)
+    register_row_plugin("needs_schema", factory, requires_input_schema=True, declared_security_level="UNOFFICIAL")  # ADR-002-B
 
     class DS(DataFrameSchema):  # noqa: N801
         x: int
@@ -82,7 +82,7 @@ def test_plugin_requires_input_schema_but_missing(monkeypatch):
 
     settings = _mk_settings(
         df,
-        row_plugins=[{"name": "needs_schema", "security_level": "OFFICIAL", "determinism_level": "guaranteed"}],
+        row_plugins=[{"name": "needs_schema", "determinism_level": "guaranteed"}],
     )
     monkeypatch.setattr(cli, "load_settings", lambda *a, **k: settings)
     monkeypatch.setattr(cli, "validate_settings", lambda *a, **k: ValidationReport())
@@ -109,7 +109,7 @@ def test_plugin_requires_input_schema_and_provides(monkeypatch, capsys):
 
         return _Plugin()
 
-    register_row_plugin("has_schema", factory, requires_input_schema=True)
+    register_row_plugin("has_schema", factory, requires_input_schema=True, declared_security_level="UNOFFICIAL")  # ADR-002-B
 
     class DS(DataFrameSchema):  # noqa: N801
         x: int
@@ -119,7 +119,7 @@ def test_plugin_requires_input_schema_and_provides(monkeypatch, capsys):
 
     settings = _mk_settings(
         df,
-        row_plugins=[{"name": "has_schema", "security_level": "OFFICIAL", "determinism_level": "guaranteed"}],
+        row_plugins=[{"name": "has_schema", "determinism_level": "guaranteed"}],  # security_level removed: ADR-002-B
     )
     monkeypatch.setattr(cli, "load_settings", lambda *a, **k: settings)
     monkeypatch.setattr(cli, "validate_settings", lambda *a, **k: ValidationReport())
@@ -158,8 +158,8 @@ def test_agg_plugin_requires_input_schema(monkeypatch):
 
         return _Agg()
 
-    register_aggregation_plugin("agg_needs_schema", factory_missing, requires_input_schema=True)
-    register_aggregation_plugin("agg_has_schema", factory_ok, requires_input_schema=True)
+    register_aggregation_plugin("agg_needs_schema", factory_missing, requires_input_schema=True, declared_security_level="UNOFFICIAL")  # ADR-002-B
+    register_aggregation_plugin("agg_has_schema", factory_ok, requires_input_schema=True, declared_security_level="UNOFFICIAL")  # ADR-002-B
 
     class DS(DataFrameSchema):  # noqa: N801
         x: int
@@ -168,7 +168,7 @@ def test_agg_plugin_requires_input_schema(monkeypatch):
     df.attrs["schema"] = DS
 
     # Missing case
-    settings = _mk_settings(df, agg_plugins=[{"name": "agg_needs_schema", "security_level": "OFFICIAL", "determinism_level": "guaranteed"}])
+    settings = _mk_settings(df, agg_plugins=[{"name": "agg_needs_schema", "determinism_level": "guaranteed"}])
     monkeypatch.setattr(cli, "load_settings", lambda *a, **k: settings)
     monkeypatch.setattr(cli, "validate_settings", lambda *a, **k: ValidationReport())
     parser = cli.build_parser()
@@ -178,7 +178,7 @@ def test_agg_plugin_requires_input_schema(monkeypatch):
 
     # Providing schema succeeds
     settings_ok = _mk_settings(
-        df, agg_plugins=[{"name": "agg_has_schema", "security_level": "OFFICIAL", "determinism_level": "guaranteed"}]
+        df, agg_plugins=[{"name": "agg_has_schema", "determinism_level": "guaranteed"}]
     )
     monkeypatch.setattr(cli, "load_settings", lambda *a, **k: settings_ok)
     args_ok = parser.parse_args(["validate-schemas", "--settings", "cfg.yaml", "--profile", "default"])
@@ -213,8 +213,8 @@ def test_validation_plugin_requires_input_schema(monkeypatch):
 
         return _V()
 
-    register_validation_plugin("val_needs_schema", factory_missing, requires_input_schema=True)
-    register_validation_plugin("val_has_schema", factory_ok, requires_input_schema=True)
+    register_validation_plugin("val_needs_schema", factory_missing, requires_input_schema=True, declared_security_level="UNOFFICIAL")  # ADR-002-B
+    register_validation_plugin("val_has_schema", factory_ok, requires_input_schema=True, declared_security_level="UNOFFICIAL")  # ADR-002-B
 
     class DS(DataFrameSchema):  # noqa: N801
         x: int
@@ -223,7 +223,7 @@ def test_validation_plugin_requires_input_schema(monkeypatch):
     df.attrs["schema"] = DS
 
     settings_missing = _mk_settings(
-        df, val_plugins=[{"name": "val_needs_schema", "security_level": "OFFICIAL", "determinism_level": "guaranteed"}]
+        df, val_plugins=[{"name": "val_needs_schema", "determinism_level": "guaranteed"}]
     )
     monkeypatch.setattr(cli, "load_settings", lambda *a, **k: settings_missing)
     monkeypatch.setattr(cli, "validate_settings", lambda *a, **k: ValidationReport())
@@ -233,7 +233,7 @@ def test_validation_plugin_requires_input_schema(monkeypatch):
         cli.run(args)
 
     settings_ok = _mk_settings(
-        df, val_plugins=[{"name": "val_has_schema", "security_level": "OFFICIAL", "determinism_level": "guaranteed"}]
+        df, val_plugins=[{"name": "val_has_schema", "determinism_level": "guaranteed"}]
     )
     monkeypatch.setattr(cli, "load_settings", lambda *a, **k: settings_ok)
     args_ok = parser.parse_args(["validate-schemas", "--settings", "cfg.yaml", "--profile", "default"])

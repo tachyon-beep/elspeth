@@ -126,23 +126,23 @@ def test_create_row_plugin_validates_schema():
 
     with pytest.raises(ConfigurationError):
         plugin_registry.validate_row_plugin_definition(
-            {"name": "limited", "security_level": "OFFICIAL", "determinism_level": "guaranteed", "options": {}}
+            {"name": "limited", "determinism_level": "guaranteed", "options": {}}
         )
 
     plugin_registry.validate_row_plugin_definition(
-        {"name": "limited", "security_level": "OFFICIAL", "determinism_level": "guaranteed", "options": {"threshold": 0.5}}
+        {"name": "limited", "determinism_level": "guaranteed", "options": {"threshold": 0.5}}
     )
 
 
 def test_create_row_plugin_inherits_parent_context():
     from elspeth.core.base.plugin_context import PluginContext
 
-    parent_context = PluginContext(plugin_name="suite", plugin_kind="suite", security_level="SECRET", determinism_level="none")
+    # ADR-002-B: Parent must have security level <= plugin's declared level (UNOFFICIAL)
+    parent_context = PluginContext(plugin_name="suite", plugin_kind="suite", security_level="UNOFFICIAL", determinism_level="none")
     plugin = plugin_registry.create_row_plugin(
         {
             "name": "score_extractor",
-            # ADR-002-B Phase 2: security_level in config is IGNORED (plugin-author-owned)
-            "security_level": "SECRET",
+            # ADR-002-B Phase 2: security_level in config is REMOVED (plugin-author-owned)
             "determinism_level": "guaranteed",
             "options": {
                 "key": "score",
@@ -155,7 +155,7 @@ def test_create_row_plugin_inherits_parent_context():
         parent_context=parent_context,
     )
     assert plugin.plugin_context.parent == parent_context
-    assert plugin.plugin_context.security_level == "SECRET"
+    assert plugin.plugin_context.security_level == "UNOFFICIAL"
     # ADR-002-B Phase 2: plugin.security_level is immutably UNOFFICIAL (hard-coded in plugin __init__)
     assert plugin.security_level == "UNOFFICIAL"
 

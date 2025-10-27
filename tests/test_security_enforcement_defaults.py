@@ -55,7 +55,6 @@ class TestValidationPatternEnforcement:
             create_validation_plugin(
                 {
                     "name": "regex_match",
-                    "security_level": "internal",
                     "determinism_level": "guaranteed",
                     "options": {},  # Missing pattern
                 }
@@ -65,7 +64,6 @@ class TestValidationPatternEnforcement:
         plugin = create_validation_plugin(
             {
                 "name": "regex_match",
-                "security_level": "internal",
                 "determinism_level": "guaranteed",
                 "options": {"pattern": r"\d+"},
             }
@@ -328,7 +326,6 @@ class TestHighPriorityDefaults:
             create_validation_plugin(
                 {
                     "name": "llm_guard",
-                    "security_level": "internal",
                     "determinism_level": "guaranteed",
                     "options": {
                         "validator_llm": validator_llm_def,
@@ -344,7 +341,6 @@ class TestHighPriorityDefaults:
             create_validation_plugin(
                 {
                     "name": "llm_guard",
-                    "security_level": "internal",
                     "determinism_level": "guaranteed",
                     "options": {
                         "validator_llm": validator_llm_def,
@@ -360,7 +356,6 @@ class TestHighPriorityDefaults:
             create_validation_plugin(
                 {
                     "name": "llm_guard",
-                    "security_level": "internal",
                     "determinism_level": "guaranteed",
                     "options": {
                         "validator_llm": validator_llm_def,
@@ -375,7 +370,6 @@ class TestHighPriorityDefaults:
         plugin = create_validation_plugin(
             {
                 "name": "llm_guard",
-                "security_level": "internal",
                 "determinism_level": "guaranteed",
                 "options": {
                     "validator_llm": validator_llm_def,
@@ -398,7 +392,6 @@ class TestHighPriorityDefaults:
             create_row_plugin(
                 {
                     "name": "score_extractor",
-                    "security_level": "internal",
                     "determinism_level": "guaranteed",
                     "options": {
                         "parse_json_content": True,
@@ -414,7 +407,6 @@ class TestHighPriorityDefaults:
             create_row_plugin(
                 {
                     "name": "score_extractor",
-                    "security_level": "internal",
                     "determinism_level": "guaranteed",
                     "options": {
                         "key": "score",
@@ -430,7 +422,6 @@ class TestHighPriorityDefaults:
             create_row_plugin(
                 {
                     "name": "score_extractor",
-                    "security_level": "internal",
                     "determinism_level": "guaranteed",
                     "options": {
                         "key": "score",
@@ -446,7 +437,6 @@ class TestHighPriorityDefaults:
             create_row_plugin(
                 {
                     "name": "score_extractor",
-                    "security_level": "internal",
                     "determinism_level": "guaranteed",
                     "options": {
                         "key": "score",
@@ -462,7 +452,6 @@ class TestHighPriorityDefaults:
             create_row_plugin(
                 {
                     "name": "score_extractor",
-                    "security_level": "internal",
                     "determinism_level": "guaranteed",
                     "options": {
                         "key": "score",
@@ -477,7 +466,6 @@ class TestHighPriorityDefaults:
         plugin = create_row_plugin(
             {
                 "name": "score_extractor",
-                "security_level": "internal",
                 "determinism_level": "guaranteed",
                 "options": {
                     "key": "score",

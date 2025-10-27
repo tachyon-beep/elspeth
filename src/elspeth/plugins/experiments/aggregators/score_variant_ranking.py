@@ -112,6 +112,7 @@ register_aggregation_plugin(
         },
         "additionalProperties": True,
     },
+    declared_security_level="UNOFFICIAL",  # ADR-002-B: Aggregators process experiment results
 )
 
 

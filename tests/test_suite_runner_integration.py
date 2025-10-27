@@ -243,19 +243,16 @@ def test_suite_runner_builds_controls_and_early_stop(tmp_path):
         "prompt_fields": ["value"],
         "rate_limiter_def": {
             "plugin": "fixed_window",
-            "security_level": "OFFICIAL",
             "determinism_level": "guaranteed",
             "options": {"requests": 1, "per_seconds": 1},
         },
         "cost_tracker_def": {
             "plugin": "fixed_price",
-            "security_level": "OFFICIAL",
             "determinism_level": "guaranteed",
             "options": {"prompt_token_price": 0.0, "completion_token_price": 0.0},
         },
         "early_stop_config": {
             "name": "threshold",
-            "security_level": "OFFICIAL",
             "determinism_level": "guaranteed",
             "options": {"metric": "score", "threshold": 0.5, "comparison": "gte", "min_rows": 1},
         },

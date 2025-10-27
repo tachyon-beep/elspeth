@@ -27,7 +27,6 @@ def test_score_extractor_basic(response, expected):
     plugin = create_row_plugin(
         {
             "name": "score_extractor",
-            "security_level": "unofficial",
             "determinism_level": "guaranteed",
             "options": SCORE_EXTRACTOR_REQUIRED,
         }
@@ -45,7 +44,6 @@ def test_score_extractor_threshold_flag():
     plugin = create_row_plugin(
         {
             "name": "score_extractor",
-            "security_level": "unofficial",
             "determinism_level": "guaranteed",
             "options": {**SCORE_EXTRACTOR_REQUIRED, "threshold": 0.7},
         }
@@ -65,7 +63,6 @@ def test_score_extractor_allow_missing():
     plugin = create_row_plugin(
         {
             "name": "score_extractor",
-            "security_level": "unofficial",
             "determinism_level": "guaranteed",
             "options": {**SCORE_EXTRACTOR_REQUIRED, "allow_missing": True},
         }
@@ -78,7 +75,6 @@ def test_score_stats_aggregator():
     row_plugin = create_row_plugin(
         {
             "name": "score_extractor",
-            "security_level": "unofficial",
             "determinism_level": "guaranteed",
             "options": {**SCORE_EXTRACTOR_REQUIRED, "threshold": 0.7},
         }
@@ -93,7 +89,7 @@ def test_score_stats_aggregator():
         metrics = row_plugin.process_row({}, resp)
         records.append({"metrics": metrics})
 
-    agg_plugin = create_aggregation_plugin({"name": "score_stats", "security_level": "unofficial", "determinism_level": "guaranteed"})
+    agg_plugin = create_aggregation_plugin({"name": "score_stats", "determinism_level": "guaranteed"})
     summary = agg_plugin.finalize(records)
     crit_summary = summary["criteria"]["critA"]
 
@@ -104,7 +100,7 @@ def test_score_stats_aggregator():
 
 
 def test_score_delta_baseline_plugin():
-    agg_plugin = create_aggregation_plugin({"name": "score_stats", "security_level": "unofficial", "determinism_level": "guaranteed"})
+    agg_plugin = create_aggregation_plugin({"name": "score_stats", "determinism_level": "guaranteed"})
     baseline_payload = {
         "aggregates": {
             "score_stats": agg_plugin.finalize(
@@ -124,14 +120,14 @@ def test_score_delta_baseline_plugin():
         }
     }
 
-    plugin = create_baseline_plugin({"name": "score_delta", "security_level": "unofficial", "determinism_level": "guaranteed"})
+    plugin = create_baseline_plugin({"name": "score_delta", "determinism_level": "guaranteed"})
     delta = plugin.compare(baseline_payload, variant_payload)
     assert delta["crit"] == pytest.approx(0.8 - 0.5)
 
 
 def test_score_recommendation_aggregator():
     row_plugin = create_row_plugin(
-        {"name": "score_extractor", "security_level": "unofficial", "determinism_level": "guaranteed", "options": SCORE_EXTRACTOR_REQUIRED}
+        {"name": "score_extractor", "determinism_level": "guaranteed", "options": SCORE_EXTRACTOR_REQUIRED}
     )
     records = []
     for value in [0.4, 0.6, 0.7, 0.9, 0.85]:
@@ -141,7 +137,6 @@ def test_score_recommendation_aggregator():
     rec_plugin = create_aggregation_plugin(
         {
             "name": "score_recommendation",
-            "security_level": "unofficial",
             "determinism_level": "guaranteed",
             "options": {"min_samples": 3, "improvement_margin": 0.01},
         }
@@ -177,7 +172,7 @@ def test_score_significance_baseline_plugin(monkeypatch):
         ]
     }
 
-    plugin = create_baseline_plugin({"name": "score_significance", "security_level": "unofficial", "determinism_level": "guaranteed"})
+    plugin = create_baseline_plugin({"name": "score_significance", "determinism_level": "guaranteed"})
     result = plugin.compare(baseline_payload, variant_payload)
     stats = result["crit"]
     assert stats["baseline_samples"] == 3
@@ -190,7 +185,7 @@ def test_score_significance_baseline_plugin(monkeypatch):
 
 
 def test_score_cliffs_delta():
-    plugin = create_baseline_plugin({"name": "score_cliffs_delta", "security_level": "unofficial", "determinism_level": "guaranteed"})
+    plugin = create_baseline_plugin({"name": "score_cliffs_delta", "determinism_level": "guaranteed"})
     baseline = {
         "results": [
             {"metrics": {"scores": {"crit": 1}}},
@@ -213,7 +208,7 @@ def test_score_cliffs_delta():
 
 
 def test_score_assumptions_baseline_plugin():
-    plugin = create_baseline_plugin({"name": "score_assumptions", "security_level": "unofficial", "determinism_level": "guaranteed"})
+    plugin = create_baseline_plugin({"name": "score_assumptions", "determinism_level": "guaranteed"})
     baseline = {
         "results": [
             {"metrics": {"scores": {"crit": 3}}},
@@ -240,7 +235,6 @@ def test_score_practical_baseline_plugin():
     plugin = create_baseline_plugin(
         {
             "name": "score_practical",
-            "security_level": "unofficial",
             "determinism_level": "guaranteed",
             "options": {"threshold": 1.0, "success_threshold": 4.0},
         }
@@ -284,7 +278,6 @@ def test_score_significance_with_adjustments():
     plugin = create_baseline_plugin(
         {
             "name": "score_significance",
-            "security_level": "unofficial",
             "determinism_level": "guaranteed",
             "options": {"adjustment": "bonferroni", "family_size": 10},
         }
@@ -297,7 +290,6 @@ def test_score_variant_ranking():
     aggregator = create_aggregation_plugin(
         {
             "name": "score_variant_ranking",
-            "security_level": "unofficial",
             "determinism_level": "guaranteed",
             "options": {"threshold": 0.6, "weight_mean": 1.0, "weight_pass": 1.0},
         }
@@ -329,7 +321,7 @@ def test_score_significance_on_error_skip(monkeypatch):
 
 
 def test_score_agreement_aggregator(monkeypatch):
-    plugin = create_aggregation_plugin({"name": "score_agreement", "security_level": "unofficial", "determinism_level": "guaranteed"})
+    plugin = create_aggregation_plugin({"name": "score_agreement", "determinism_level": "guaranteed"})
     records = []
     values = [
         {"scores": {"critA": 0.6, "critB": 0.65}},
@@ -405,7 +397,7 @@ def test_score_bayes_baseline_plugin(monkeypatch):
     monkeypatch.setattr(stats_helpers, "scipy_stats", DummyStats())
 
     plugin = create_baseline_plugin(
-        {"name": "score_bayes", "security_level": "unofficial", "determinism_level": "guaranteed", "options": {"credible_interval": 0.9}}
+        {"name": "score_bayes", "determinism_level": "guaranteed", "options": {"credible_interval": 0.9}}
     )
     result = plugin.compare(baseline, variant)
     stats = result["crit"]
@@ -445,7 +437,6 @@ def test_score_power_aggregator(monkeypatch):
     plugin = create_aggregation_plugin(
         {
             "name": "score_power",
-            "security_level": "unofficial",
             "determinism_level": "guaranteed",
             "options": {"null_mean": 0.5, "alpha": 0.05, "target_power": 0.8},
         }
@@ -506,7 +497,7 @@ def test_score_distribution_baseline_plugin(monkeypatch):
 
     monkeypatch.setattr(stats_helpers, "scipy_stats", DummyStats())
 
-    plugin = create_baseline_plugin({"name": "score_distribution", "security_level": "unofficial", "determinism_level": "guaranteed"})
+    plugin = create_baseline_plugin({"name": "score_distribution", "determinism_level": "guaranteed"})
     result = plugin.compare(baseline, variant)
     stats = result["crit"]
     assert stats["ks_statistic"] == pytest.approx(0.5)
@@ -528,7 +519,7 @@ def test_score_distribution_on_error_skip(monkeypatch):
 
 
 def test_cost_summary_aggregator():
-    plugin = create_aggregation_plugin({"name": "cost_summary", "security_level": "unofficial", "determinism_level": "guaranteed"})
+    plugin = create_aggregation_plugin({"name": "cost_summary", "determinism_level": "guaranteed"})
     records = [
         {"metrics": {"prompt_tokens": 100, "completion_tokens": 50, "cost": 0.005}},
         {"metrics": {"prompt_tokens": 150, "completion_tokens": 75, "cost": 0.0075}},
@@ -549,7 +540,7 @@ def test_cost_summary_aggregator():
 
 
 def test_cost_summary_aggregator_partial_data():
-    plugin = create_aggregation_plugin({"name": "cost_summary", "security_level": "unofficial", "determinism_level": "guaranteed"})
+    plugin = create_aggregation_plugin({"name": "cost_summary", "determinism_level": "guaranteed"})
     records = [
         {"metrics": {"prompt_tokens": 100}},
         {"metrics": {"completion_tokens": 50}},
@@ -567,13 +558,13 @@ def test_cost_summary_aggregator_partial_data():
 
 
 def test_cost_summary_aggregator_empty():
-    plugin = create_aggregation_plugin({"name": "cost_summary", "security_level": "unofficial", "determinism_level": "guaranteed"})
+    plugin = create_aggregation_plugin({"name": "cost_summary", "determinism_level": "guaranteed"})
     result = plugin.finalize([])
     assert result == {}
 
 
 def test_latency_summary_aggregator():
-    plugin = create_aggregation_plugin({"name": "latency_summary", "security_level": "unofficial", "determinism_level": "guaranteed"})
+    plugin = create_aggregation_plugin({"name": "latency_summary", "determinism_level": "guaranteed"})
     records = [
         {"metrics": {"latency_seconds": 0.5}},
         {"metrics": {"latency_seconds": 1.2}},
@@ -596,7 +587,7 @@ def test_latency_summary_aggregator():
 
 
 def test_latency_summary_aggregator_missing_data():
-    plugin = create_aggregation_plugin({"name": "latency_summary", "security_level": "unofficial", "determinism_level": "guaranteed"})
+    plugin = create_aggregation_plugin({"name": "latency_summary", "determinism_level": "guaranteed"})
     records = [
         {"metrics": {"latency_seconds": 0.5}},
         {"metrics": {}},
@@ -611,7 +602,7 @@ def test_latency_summary_aggregator_missing_data():
 
 
 def test_latency_summary_aggregator_no_latency():
-    plugin = create_aggregation_plugin({"name": "latency_summary", "security_level": "unofficial", "determinism_level": "guaranteed"})
+    plugin = create_aggregation_plugin({"name": "latency_summary", "determinism_level": "guaranteed"})
     records = [
         {"metrics": {}},
         {"metrics": {}},
@@ -654,7 +645,7 @@ def test_latency_summary_on_error_skip(monkeypatch):
 
 def test_rationale_analysis_basic():
     """Test basic rationale analysis with rationales in metrics."""
-    plugin = create_aggregation_plugin({"name": "rationale_analysis", "security_level": "unofficial", "determinism_level": "guaranteed"})
+    plugin = create_aggregation_plugin({"name": "rationale_analysis", "determinism_level": "guaranteed"})
 
     records = [
         {
@@ -692,7 +683,7 @@ def test_rationale_analysis_basic():
 
 def test_rationale_analysis_from_json_content():
     """Test rationale extraction from JSON content."""
-    plugin = create_aggregation_plugin({"name": "rationale_analysis", "security_level": "unofficial", "determinism_level": "guaranteed"})
+    plugin = create_aggregation_plugin({"name": "rationale_analysis", "determinism_level": "guaranteed"})
 
     records = [
         {
@@ -717,7 +708,6 @@ def test_rationale_analysis_keyword_filtering():
     plugin = create_aggregation_plugin(
         {
             "name": "rationale_analysis",
-            "security_level": "unofficial",
             "determinism_level": "guaranteed",
             "options": {"min_word_length": 4},
         }
@@ -751,7 +741,7 @@ def test_rationale_analysis_keyword_filtering():
 
 def test_rationale_analysis_confidence_detection():
     """Test confidence indicator detection."""
-    plugin = create_aggregation_plugin({"name": "rationale_analysis", "security_level": "unofficial", "determinism_level": "guaranteed"})
+    plugin = create_aggregation_plugin({"name": "rationale_analysis", "determinism_level": "guaranteed"})
 
     records = [
         {
@@ -784,7 +774,7 @@ def test_rationale_analysis_confidence_detection():
 
 def test_rationale_analysis_length_score_correlation():
     """Test length-score correlation computation."""
-    plugin = create_aggregation_plugin({"name": "rationale_analysis", "security_level": "unofficial", "determinism_level": "guaranteed"})
+    plugin = create_aggregation_plugin({"name": "rationale_analysis", "determinism_level": "guaranteed"})
 
     # Create records where longer rationales correlate with higher scores
     records = [
@@ -812,7 +802,7 @@ def test_rationale_analysis_length_score_correlation():
 
 def test_rationale_analysis_multiple_criteria():
     """Test analysis across multiple criteria."""
-    plugin = create_aggregation_plugin({"name": "rationale_analysis", "security_level": "unofficial", "determinism_level": "guaranteed"})
+    plugin = create_aggregation_plugin({"name": "rationale_analysis", "determinism_level": "guaranteed"})
 
     records = [
         {
@@ -845,7 +835,6 @@ def test_rationale_analysis_criteria_filter():
     plugin = create_aggregation_plugin(
         {
             "name": "rationale_analysis",
-            "security_level": "unofficial",
             "determinism_level": "guaranteed",
             "options": {"criteria": ["analysis"]},
         }
@@ -873,7 +862,6 @@ def test_rationale_analysis_top_keywords_limit():
     plugin = create_aggregation_plugin(
         {
             "name": "rationale_analysis",
-            "security_level": "unofficial",
             "determinism_level": "guaranteed",
             "options": {"top_keywords": 3},
         }
@@ -904,7 +892,7 @@ def test_rationale_analysis_top_keywords_limit():
 
 def test_rationale_analysis_missing_rationales():
     """Test handling of missing rationales."""
-    plugin = create_aggregation_plugin({"name": "rationale_analysis", "security_level": "unofficial", "determinism_level": "guaranteed"})
+    plugin = create_aggregation_plugin({"name": "rationale_analysis", "determinism_level": "guaranteed"})
 
     records = [
         {
@@ -925,7 +913,7 @@ def test_rationale_analysis_missing_rationales():
 
 def test_rationale_analysis_empty_records():
     """Test with empty record list."""
-    plugin = create_aggregation_plugin({"name": "rationale_analysis", "security_level": "unofficial", "determinism_level": "guaranteed"})
+    plugin = create_aggregation_plugin({"name": "rationale_analysis", "determinism_level": "guaranteed"})
 
     result = plugin.finalize([])
 
@@ -967,7 +955,6 @@ def test_rationale_analysis_custom_field_names():
     plugin = create_aggregation_plugin(
         {
             "name": "rationale_analysis",
-            "security_level": "unofficial",
             "determinism_level": "guaranteed",
             "options": {"rationale_field": "explanation", "score_field": "rating"},
         }
@@ -991,7 +978,6 @@ def test_referee_alignment_basic():
     plugin = create_baseline_plugin(
         {
             "name": "referee_alignment",
-            "security_level": "unofficial",
             "determinism_level": "guaranteed",
             "options": {"referee_fields": ["referee_score"]},
         }
@@ -1031,7 +1017,6 @@ def test_referee_alignment_string_values():
     plugin = create_baseline_plugin(
         {
             "name": "referee_alignment",
-            "security_level": "unofficial",
             "determinism_level": "guaranteed",
             "options": {"referee_fields": ["referee_judgment"]},
         }
@@ -1067,7 +1052,6 @@ def test_referee_alignment_multiple_referee_fields():
     plugin = create_baseline_plugin(
         {
             "name": "referee_alignment",
-            "security_level": "unofficial",
             "determinism_level": "guaranteed",
             "options": {"referee_fields": ["referee_1", "referee_2", "referee_3"]},
         }
@@ -1112,7 +1096,6 @@ def test_referee_alignment_criteria_filter():
     plugin = create_baseline_plugin(
         {
             "name": "referee_alignment",
-            "security_level": "unofficial",
             "determinism_level": "guaranteed",
             "options": {"referee_fields": ["referee_score"], "criteria": ["analysis"]},
         }
@@ -1149,7 +1132,6 @@ def test_referee_alignment_correlation():
     plugin = create_baseline_plugin(
         {
             "name": "referee_alignment",
-            "security_level": "unofficial",
             "determinism_level": "guaranteed",
         }
     )
@@ -1192,7 +1174,6 @@ def test_referee_alignment_agreement_rate():
     plugin = create_baseline_plugin(
         {
             "name": "referee_alignment",
-            "security_level": "unofficial",
             "determinism_level": "guaranteed",
         }
     )
@@ -1226,7 +1207,6 @@ def test_referee_alignment_custom_value_mapping():
     plugin = create_baseline_plugin(
         {
             "name": "referee_alignment",
-            "security_level": "unofficial",
             "determinism_level": "guaranteed",
             "options": {
                 "referee_fields": ["referee_rating"],
@@ -1262,7 +1242,6 @@ def test_referee_alignment_min_samples():
     plugin = create_baseline_plugin(
         {
             "name": "referee_alignment",
-            "security_level": "unofficial",
             "determinism_level": "guaranteed",
             "options": {"min_samples": 5},
         }
@@ -1294,7 +1273,6 @@ def test_referee_alignment_missing_referee_scores():
     plugin = create_baseline_plugin(
         {
             "name": "referee_alignment",
-            "security_level": "unofficial",
             "determinism_level": "guaranteed",
         }
     )

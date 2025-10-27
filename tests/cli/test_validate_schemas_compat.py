@@ -106,7 +106,7 @@ def test_validate_schemas_succeeds_with_compatible_plugin_schema(monkeypatch, ca
 
         return _Plugin()
 
-    register_row_plugin("require_x", factory_ok)
+    register_row_plugin("require_x", factory_ok, declared_security_level="UNOFFICIAL")  # ADR-002-B
 
     df = pd.DataFrame({"x": [1]})
 
@@ -117,7 +117,7 @@ def test_validate_schemas_succeeds_with_compatible_plugin_schema(monkeypatch, ca
 
     settings = _make_settings(
         df,
-        row_plugins=[{"name": "require_x", "security_level": "OFFICIAL", "determinism_level": "guaranteed"}],
+        row_plugins=[{"name": "require_x", "determinism_level": "guaranteed"}],  # security_level removed: ADR-002-B
     )
 
     monkeypatch.setattr(cli, "load_settings", lambda *a, **k: settings)

@@ -87,6 +87,7 @@ register_middleware(
     "prompt_shield",
     _create_prompt_shield_middleware,
     schema=_PROMPT_SHIELD_SCHEMA,
+    declared_security_level="UNOFFICIAL",
 )
 
 

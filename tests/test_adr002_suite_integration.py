@@ -142,7 +142,6 @@ class TestADR002SuiteIntegration:
             prompt_template="Test: {text}",
             temperature=0.7,
             max_tokens=100,
-            security_level="SECRET",  # Match datasource and sink security level
         )
         suite = ExperimentSuite(root=".", baseline=experiment, experiments=[experiment])
 
@@ -184,7 +183,6 @@ class TestADR002SuiteIntegration:
             prompt_template="Test: {text}",
             temperature=0.7,
             max_tokens=100,
-            security_level="UNOFFICIAL",  # Operating level for trusted downgrade
         )
         suite = ExperimentSuite(root=".", baseline=experiment, experiments=[experiment])
 
@@ -220,7 +218,6 @@ class TestADR002SuiteIntegration:
             prompt_template="Test: {text}",
             temperature=0.7,
             max_tokens=100,
-            security_level="OFFICIAL",  # Match datasource level (weakest link)
         )
         suite = ExperimentSuite(root=".", baseline=experiment, experiments=[experiment])
 
@@ -347,7 +344,6 @@ class TestADR002SuiteIntegration:
             prompt_template="Test: {text}",
             temperature=0.7,
             max_tokens=100,
-            security_level="SECRET",  # All components at SECRET level
         )
         suite = ExperimentSuite(root=".", baseline=experiment, experiments=[experiment])
 
@@ -446,7 +442,6 @@ class TestADR002SuiteIntegration:
             prompt_template="Process: {text}",
             temperature=0.7,
             max_tokens=100,
-            security_level="OFFICIAL",  # Operating envelope (min of all components)
         )
         suite = ExperimentSuite(root=".", baseline=experiment, experiments=[experiment])
 
@@ -500,7 +495,6 @@ class TestADR002SuiteIntegration:
             prompt_template="Test: {text}",
             temperature=0.7,
             max_tokens=100,
-            security_level="OFFICIAL",  # Envelope = min(datasource, sinks) = OFFICIAL
         )
         suite = ExperimentSuite(root=".", baseline=experiment, experiments=[experiment])
 
@@ -521,7 +515,7 @@ class TestADR002SuiteIntegration:
         This test verifies ADR-002/002-A works with actual production plugins,
         not just test mocks. Uses StaticLLMClient for deterministic output.
 
-        Given: OFFICIAL datasource + StaticLLMClient + Real sink
+        Given: UNOFFICIAL datasource + StaticLLMClient (UNOFFICIAL) + Real sink
         When: Running with real plugin implementations
         Then:
           - Complete E2E execution with production code
@@ -533,7 +527,7 @@ class TestADR002SuiteIntegration:
         from elspeth.plugins.nodes.transforms.llm.static import StaticLLMClient
 
         df = pd.DataFrame({"text": ["test_row_1", "test_row_2"]})
-        datasource = MockOfficialDatasource(df)
+        datasource = MockUnofficialDatasource(df)  # Match StaticLLMClient's UNOFFICIAL level
 
         # Use REAL StaticLLMClient (production plugin)
         # ADR-002-B: security_level and allow_downgrade hard-coded in plugin
@@ -547,7 +541,7 @@ class TestADR002SuiteIntegration:
             """Real sink pattern that captures output for testing."""
 
             def __init__(self):
-                super().__init__(security_level=SecurityLevel.OFFICIAL, allow_downgrade=True)
+                super().__init__(security_level=SecurityLevel.UNOFFICIAL, allow_downgrade=True)  # Match StaticLLMClient
                 self.written = []
 
             def write(self, results: dict, *, metadata: dict | None = None) -> None:
@@ -561,13 +555,12 @@ class TestADR002SuiteIntegration:
             prompt_template="Analyze: {text}",
             temperature=0.0,
             max_tokens=50,
-            security_level="OFFICIAL",  # Match datasource and sink level
         )
         suite = ExperimentSuite(root=".", baseline=experiment, experiments=[experiment])
 
         runner = ExperimentSuiteRunner(suite=suite, llm_client=llm_client, sinks=[], datasource=datasource)
 
-        # Should succeed - all at OFFICIAL level with real plugins
+        # Should succeed - all at UNOFFICIAL level with real plugins
         results = runner.run(sink_factory=lambda exp: [sink])
 
         # Verify execution with real plugins

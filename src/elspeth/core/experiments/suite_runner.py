@@ -274,12 +274,9 @@ class ExperimentSuiteRunner:
         rate_limiter_def = cast(dict[str, Any] | None, merger.merge_scalar("rate_limiter_def", "rate_limiter"))
         cost_tracker_def = cast(dict[str, Any] | None, merger.merge_scalar("cost_tracker_def", "cost_tracker"))
 
-        # Resolve security level (most restrictive wins)
-        security_level = resolve_security_level(
-            config.security_level,
-            pack.get("security_level") if pack else None,
-            defaults.get("security_level"),
-        )
+        # ADR-002-B: security_level is NOT configured, it's computed from plugins
+        # Use UNOFFICIAL as experiment context placeholder (plugins have their own hardcoded levels)
+        security_level = SecurityLevel.UNOFFICIAL
 
         determinism_level = resolve_determinism_level(
             config.determinism_level,
@@ -287,11 +284,11 @@ class ExperimentSuiteRunner:
             defaults.get("determinism_level"),
         )
 
-        # Create experiment context
+        # Create experiment context (security_level is just a placeholder, actual level computed from plugins)
         experiment_context = PluginContext(
             plugin_name=config.name,
             plugin_kind="experiment",
-            security_level=security_level,
+            security_level=security_level,  # Placeholder: plugins declare their own levels
             determinism_level=determinism_level,
             provenance=(f"experiment:{config.name}.resolved",),
             suite_root=self.suite_root,
@@ -550,10 +547,7 @@ class ExperimentSuiteRunner:
             PluginContext(
                 plugin_name=experiment.name,
                 plugin_kind="experiment",
-                security_level=resolve_security_level(
-                    experiment.security_level,
-                    defaults.get("security_level"),
-                ),
+                security_level=SecurityLevel.UNOFFICIAL,  # ADR-002-B: placeholder, actual level from plugins
                 provenance=(f"experiment:{experiment.name}.fallback",),
                 suite_root=self.suite_root,
                 config_path=self.config_path,
@@ -583,6 +577,9 @@ class ExperimentSuiteRunner:
         Complexity Reduction:
             Extracted from inline loop to dedicated propagation method
         """
+        # Update runner's security_level to computed operating level (ADR-002-B)
+        runner.security_level = operating_level
+
         # Update runner context
         if hasattr(runner, 'plugin_context'):
             runner.plugin_context = runner.plugin_context.derive(

@@ -56,7 +56,6 @@ def test_create_plugin_basic(mock_registry):
     definition = {
         "name": "test",
         "options": {"value": "test_value"},
-        "security_level": "OFFICIAL",
         "determinism_level": "high",
     }
 
@@ -70,7 +69,7 @@ def test_create_plugin_basic(mock_registry):
     assert isinstance(plugin, MockPlugin)
     assert plugin.value == "test_value"
     assert hasattr(plugin, "_elspeth_context")
-    assert plugin._elspeth_context.security_level == "OFFICIAL"
+    assert plugin._elspeth_context.security_level == "UNOFFICIAL"  # From factory registration
     assert plugin._elspeth_context.determinism_level == "high"
 
 
@@ -79,7 +78,6 @@ def test_create_plugin_with_plugin_key(mock_registry):
     definition = {
         "plugin": "test",  # Use 'plugin' instead of 'name'
         "options": {"value": "test_value"},
-        "security_level": "OFFICIAL",
         "determinism_level": "high",
     }
 
@@ -162,7 +160,6 @@ def test_create_plugin_requires_determinism_even_with_parent(mock_registry, pare
     definition = {
         "name": "test",
         "options": {"value": "test_value"},
-        "security_level": "PROTECTED",
     }
 
     with pytest.raises(ConfigurationError, match="determinism_level must be declared"):
@@ -174,23 +171,29 @@ def test_create_plugin_requires_determinism_even_with_parent(mock_registry, pare
         )
 
 
-def test_create_plugin_overrides_parent_security(mock_registry, parent_context):
-    """Helper uses explicit security_level instead of parent's."""
+def test_create_plugin_overrides_parent_security(parent_context):
+    """Helper uses factory security_level (not inherited from parent).
+
+    ADR-002-B: Security levels come from factory registration, not config.
+    """
+    # Create a registry with SECRET-level plugin
+    secret_registry = BasePluginRegistry[MockPlugin]("test_plugin")
+    secret_registry.register("test", create_mock_plugin, schema=None, declared_security_level="SECRET")
+
     definition = {
         "name": "test",
         "options": {"value": "test_value"},
-        "security_level": "SECRET",  # Override parent's PROTECTED
         "determinism_level": "high",
     }
 
     plugin = create_plugin_with_inheritance(
-        mock_registry,
+        secret_registry,
         definition,
         plugin_kind="test_plugin",
         parent_context=parent_context,
     )
 
-    # Should use explicit SECRET, not inherit PROTECTED
+    # Should use factory's SECRET, not inherit parent's PROTECTED
     assert plugin._elspeth_context.security_level == "SECRET"
     assert plugin._elspeth_context.parent == parent_context
 
@@ -200,7 +203,6 @@ def test_create_plugin_requires_determinism_when_no_parent(mock_registry):
     definition = {
         "name": "test",
         "options": {"value": "test_value"},
-        "security_level": "OFFICIAL",
     }
 
     with pytest.raises(ConfigurationError, match="determinism_level must be declared"):
@@ -216,56 +218,53 @@ def test_create_plugin_requires_determinism_when_no_parent(mock_registry):
 
 
 def test_create_plugin_security_in_definition(mock_registry):
-    """Helper uses security_level from definition."""
+    """Helper REJECTS security_level from definition (ADR-002-B)."""
     definition = {
         "name": "test",
-        "security_level": "PROTECTED",  # In definition
+        "security_level": "PROTECTED",  # In definition - should be rejected
         "options": {"value": "test_value"},
         "determinism_level": "high",
     }
 
-    plugin = create_plugin_with_inheritance(
-        mock_registry,
-        definition,
-        plugin_kind="test_plugin",
-    )
-
-    assert plugin._elspeth_context.security_level == "PROTECTED"
+    with pytest.raises(ConfigurationError, match="security_level must NOT be specified in configuration"):
+        create_plugin_with_inheritance(
+            mock_registry,
+            definition,
+            plugin_kind="test_plugin",
+        )
 
 
 def test_create_plugin_security_in_options(mock_registry):
-    """Helper uses security_level from options."""
+    """Helper REJECTS security_level from options (ADR-002-B)."""
     definition = {
         "name": "test",
         "options": {
             "value": "test_value",
-            "security_level": "PROTECTED",  # In options
+            "security_level": "PROTECTED",  # In options - should be rejected
         },
         "determinism_level": "high",
     }
 
-    plugin = create_plugin_with_inheritance(
-        mock_registry,
-        definition,
-        plugin_kind="test_plugin",
-    )
-
-    assert plugin._elspeth_context.security_level == "PROTECTED"
+    with pytest.raises(ConfigurationError, match="security_level must NOT be specified in configuration"):
+        create_plugin_with_inheritance(
+            mock_registry,
+            definition,
+            plugin_kind="test_plugin",
+        )
 
 
 def test_create_plugin_security_coalescing_error(mock_registry):
-    """Helper raises ConfigurationError on conflicting security levels."""
+    """Helper raises ConfigurationError when security_level appears anywhere in config (ADR-002-B)."""
     definition = {
         "name": "test",
         "security_level": "PROTECTED",
         "options": {
             "value": "test_value",
-            "security_level": "SECRET",  # Conflict!
         },
         "determinism_level": "high",
     }
 
-    with pytest.raises(ConfigurationError, match="test_plugin:test"):
+    with pytest.raises(ConfigurationError, match="security_level must NOT be specified in configuration"):
         create_plugin_with_inheritance(
             mock_registry,
             definition,
@@ -277,7 +276,6 @@ def test_create_plugin_determinism_coalescing_error(mock_registry):
     """Helper raises ConfigurationError on conflicting determinism levels."""
     definition = {
         "name": "test",
-        "security_level": "OFFICIAL",
         "determinism_level": "high",
         "options": {
             "value": "test_value",
@@ -297,10 +295,9 @@ def test_create_plugin_determinism_coalescing_error(mock_registry):
 
 
 def test_create_plugin_provenance_from_definition(mock_registry):
-    """Helper tracks provenance from definition security_level."""
+    """Helper tracks provenance from factory and definition (ADR-002-B)."""
     definition = {
         "name": "test",
-        "security_level": "PROTECTED",
         "options": {"value": "test_value"},
         "determinism_level": "high",
     }
@@ -312,17 +309,16 @@ def test_create_plugin_provenance_from_definition(mock_registry):
     )
 
     provenance = plugin._elspeth_context.provenance
-    assert "test_plugin:test.definition.security_level" in provenance
+    assert "test_plugin:test.factory.declared_security_level" in provenance
     assert "test_plugin:test.definition.determinism_level" in provenance
 
 
 def test_create_plugin_provenance_from_options(mock_registry):
-    """Helper tracks provenance from options security_level."""
+    """Helper tracks provenance from factory and options (ADR-002-B)."""
     definition = {
         "name": "test",
         "options": {
             "value": "test_value",
-            "security_level": "PROTECTED",
             "determinism_level": "high",
         },
     }
@@ -334,7 +330,7 @@ def test_create_plugin_provenance_from_options(mock_registry):
     )
 
     provenance = plugin._elspeth_context.provenance
-    assert "test_plugin:test.options.security_level" in provenance
+    assert "test_plugin:test.factory.declared_security_level" in provenance
     assert "test_plugin:test.options.determinism_level" in provenance
 
 
@@ -364,7 +360,6 @@ def test_create_plugin_additional_provenance(mock_registry):
     """Helper appends additional provenance sources."""
     definition = {
         "name": "test",
-        "security_level": "OFFICIAL",
         "options": {"value": "test_value"},
         "determinism_level": "high",
     }
@@ -389,7 +384,6 @@ def test_create_plugin_missing_name(mock_registry):
     definition = {
         # No 'name' or 'plugin' key
         "options": {"value": "test_value"},
-        "security_level": "OFFICIAL",
         "determinism_level": "high",
     }
 
@@ -406,7 +400,6 @@ def test_create_plugin_unknown_plugin(mock_registry):
     definition = {
         "name": "nonexistent",
         "options": {"value": "test_value"},
-        "security_level": "OFFICIAL",
         "determinism_level": "high",
     }
 
@@ -422,13 +415,12 @@ def test_create_plugin_unknown_plugin(mock_registry):
 
 
 def test_create_plugin_strips_security_from_options(mock_registry):
-    """Helper strips security_level and determinism_level from options payload."""
+    """Helper strips determinism_level from options payload (security_level rejected by ADR-002-B)."""
     definition = {
         "name": "test",
         "options": {
             "value": "test_value",
             "other_option": "other_value",
-            "security_level": "OFFICIAL",  # Should be stripped
             "determinism_level": "high",  # Should be stripped
         },
     }
@@ -439,13 +431,13 @@ def test_create_plugin_strips_security_from_options(mock_registry):
         plugin_kind="test_plugin",
     )
 
-    # Plugin should have other_option but not security_level/determinism_level from options
+    # Plugin should have other_option but not determinism_level from options
     # (They're in the context, not as plugin attributes)
     assert plugin.value == "test_value"
     assert plugin.other_option == "other_value"
-    # Note: plugin might have security_level from context application,
+    # Note: plugin might have determinism_level from context application,
     # but it won't have it from the **options dict
-    assert plugin._elspeth_context.security_level == "OFFICIAL"
+    assert plugin._elspeth_context.security_level == "UNOFFICIAL"  # From factory
     assert plugin._elspeth_context.determinism_level == "high"
 
 
@@ -454,7 +446,6 @@ def test_create_plugin_empty_options(mock_registry):
     definition = {
         "name": "test",
         "options": {},
-        "security_level": "OFFICIAL",
         "determinism_level": "high",
     }
 
@@ -472,7 +463,6 @@ def test_create_plugin_none_options(mock_registry):
     definition = {
         "name": "test",
         "options": None,
-        "security_level": "OFFICIAL",
         "determinism_level": "high",
     }
 
@@ -488,17 +478,23 @@ def test_create_plugin_none_options(mock_registry):
 # Context derivation tests
 
 
-def test_create_plugin_derives_from_parent(mock_registry, parent_context):
-    """Helper derives context from parent when parent exists."""
+def test_create_plugin_derives_from_parent(parent_context):
+    """Helper derives context from parent when parent exists.
+
+    ADR-002-B: Plugin gets factory's security level (not from parent or config).
+    """
+    # Create registry with PROTECTED-level plugin
+    protected_registry = BasePluginRegistry[MockPlugin]("test_plugin")
+    protected_registry.register("test", create_mock_plugin, schema=None, declared_security_level="PROTECTED")
+
     definition = {
         "name": "test",
         "options": {"value": "test_value"},
-        "security_level": "PROTECTED",
         "determinism_level": "high",
     }
 
     plugin = create_plugin_with_inheritance(
-        mock_registry,
+        protected_registry,
         definition,
         plugin_kind="test_plugin",
         parent_context=parent_context,
@@ -516,7 +512,6 @@ def test_create_plugin_creates_root_context(mock_registry):
     definition = {
         "name": "test",
         "options": {"value": "test_value"},
-        "security_level": "OFFICIAL",
         "determinism_level": "high",
     }
 
@@ -536,8 +531,11 @@ def test_create_plugin_creates_root_context(mock_registry):
 # Integration test with real use case
 
 
-def test_create_plugin_rate_limiter_pattern(mock_registry):
-    """Helper enforces explicit levels for rate_limiter pattern."""
+def test_create_plugin_rate_limiter_pattern():
+    """Helper enforces explicit levels for rate_limiter pattern.
+
+    ADR-002-B: Security level from factory, determinism_level required in config.
+    """
     # Rate limiters are optional but must declare their own levels
     parent = PluginContext(
         plugin_name="experiment",
@@ -547,9 +545,13 @@ def test_create_plugin_rate_limiter_pattern(mock_registry):
         provenance=("experiment:test",),
     )
 
+    # Create registry with PROTECTED-level plugin
+    protected_registry = BasePluginRegistry[MockPlugin]("test_plugin")
+    protected_registry.register("test", create_mock_plugin, schema=None, declared_security_level="PROTECTED")
+
     # None definition - should return None
     plugin = create_plugin_with_inheritance(
-        mock_registry,
+        protected_registry,
         None,
         plugin_kind="rate_limiter",
         parent_context=parent,
@@ -565,17 +567,17 @@ def test_create_plugin_rate_limiter_pattern(mock_registry):
 
     with pytest.raises(ConfigurationError, match="determinism_level must be declared"):
         create_plugin_with_inheritance(
-            mock_registry,
+            protected_registry,
             definition,
             plugin_kind="rate_limiter",
             parent_context=parent,
             allow_none=True,
         )
 
-    # Providing explicit levels allows instantiation
-    definition.update({"security_level": "PROTECTED", "determinism_level": "high"})
+    # Providing explicit determinism_level allows instantiation (security_level from factory)
+    definition.update({"determinism_level": "high"})
     plugin = create_plugin_with_inheritance(
-        mock_registry,
+        protected_registry,
         definition,
         plugin_kind="rate_limiter",
         parent_context=parent,
@@ -584,12 +586,15 @@ def test_create_plugin_rate_limiter_pattern(mock_registry):
 
     assert plugin is not None
     assert plugin.rate == 100
-    assert plugin._elspeth_context.security_level == "PROTECTED"
+    assert plugin._elspeth_context.security_level == "PROTECTED"  # From factory
     assert plugin._elspeth_context.determinism_level == "high"
 
 
-def test_create_plugin_experiment_plugin_pattern(mock_registry):
-    """Helper works with experiment plugin pattern (required, explicit security)."""
+def test_create_plugin_experiment_plugin_pattern():
+    """Helper works with experiment plugin pattern (required, explicit security).
+
+    ADR-002-B: Security level from factory registration, not config.
+    """
     parent = PluginContext(
         plugin_name="experiment",
         plugin_kind="experiment",
@@ -598,15 +603,18 @@ def test_create_plugin_experiment_plugin_pattern(mock_registry):
         provenance=("experiment:test",),
     )
 
+    # Create registry with SECRET-level plugin
+    secret_registry = BasePluginRegistry[MockPlugin]("test_plugin")
+    secret_registry.register("test", create_mock_plugin, schema=None, declared_security_level="SECRET")
+
     definition = {
         "name": "test",
-        "security_level": "SECRET",  # Experiment plugins often specify explicitly
         "determinism_level": "high",
         "options": {"threshold": 0.5},
     }
 
     plugin = create_plugin_with_inheritance(
-        mock_registry,
+        secret_registry,
         definition,
         plugin_kind="row_plugin",
         parent_context=parent,
@@ -615,5 +623,5 @@ def test_create_plugin_experiment_plugin_pattern(mock_registry):
 
     assert plugin is not None
     assert plugin.threshold == 0.5
-    assert plugin._elspeth_context.security_level == "SECRET"  # Explicit, not inherited
+    assert plugin._elspeth_context.security_level == "SECRET"  # From factory, not inherited
     assert plugin._elspeth_context.determinism_level == "high"

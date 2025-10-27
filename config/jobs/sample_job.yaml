@@ -1,18 +1,15 @@
 job:
   name: sample_job
-  security_level: UNOFFICIAL
   determinism_level: high
 
   datasource:
     plugin: csv_local
-    security_level: UNOFFICIAL
     options:
       path: config/sample_suite/data/sample_input.csv
       retain_local: true
 
   llm:
     plugin: mock
-    security_level: UNOFFICIAL
     options:
       seed: 42
 
@@ -26,6 +23,5 @@ job:
 
   sinks:
     - plugin: csv
-      security_level: UNOFFICIAL
       options:
         path: outputs/job_results.csv

@@ -36,7 +36,6 @@ def test_end_to_end_local_pipeline(tmp_path, assert_sanitized_artifact):
             plugin_registry.create_row_plugin(
                 {
                     "name": "score_extractor",
-                    "security_level": "OFFICIAL",
                     "determinism_level": "guaranteed",
                     "options": {
                         "key": "score",
@@ -50,14 +49,13 @@ def test_end_to_end_local_pipeline(tmp_path, assert_sanitized_artifact):
         ],
         aggregator_plugins=[
             plugin_registry.create_aggregation_plugin(
-                {"name": "score_stats", "security_level": "OFFICIAL", "determinism_level": "guaranteed"}
+                {"name": "score_stats", "determinism_level": "guaranteed"}
             )
         ],
         validation_plugins=[
             plugin_registry.create_validation_plugin(
                 {
                     "name": "regex_match",
-                    "security_level": "OFFICIAL",
                     "determinism_level": "guaranteed",
                     "options": {"pattern": r"(?s).*\[mock\].*"},
                 }
@@ -123,7 +121,6 @@ def test_suite_runner_end_to_end_without_azure(tmp_path, assert_sanitized_artifa
         "row_plugin_defs": [
             {
                 "name": "score_extractor",
-                "security_level": "OFFICIAL",
                 "determinism_level": "guaranteed",
                 "options": {
                     "key": "score",
@@ -134,11 +131,10 @@ def test_suite_runner_end_to_end_without_azure(tmp_path, assert_sanitized_artifa
                 },
             }
         ],
-        "aggregator_plugin_defs": [{"name": "score_stats", "security_level": "OFFICIAL", "determinism_level": "guaranteed"}],
+        "aggregator_plugin_defs": [{"name": "score_stats", "determinism_level": "guaranteed"}],
         "validation_plugin_defs": [
             {
                 "name": "regex_match",
-                "security_level": "OFFICIAL",
                 "determinism_level": "guaranteed",
                 "options": {"pattern": r"(?s).*\[mock\].*"},
             }
@@ -146,7 +142,6 @@ def test_suite_runner_end_to_end_without_azure(tmp_path, assert_sanitized_artifa
         "sink_defs": [
             {
                 "plugin": "local_bundle",
-                "security_level": "OFFICIAL",
                 "determinism_level": "guaranteed",
                 "options": {
                     "base_path": bundle_root.as_posix(),

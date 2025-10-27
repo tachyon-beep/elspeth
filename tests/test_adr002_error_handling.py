@@ -151,7 +151,6 @@ class TestADR002ErrorHandling:
             prompt_template="Process: {username}",
             temperature=0.7,
             max_tokens=100,
-            security_level="SECRET",  # Match SECRET datasource and sink
         )
         suite = ExperimentSuite(root=".", baseline=experiment, experiments=[experiment])
 

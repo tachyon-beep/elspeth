@@ -135,12 +135,13 @@ def register_early_stop_plugin(
     factory: Callable[[dict[str, Any], PluginContext], EarlyStopPlugin],
     *,
     schema: dict[str, Any] | None = None,
+    declared_security_level: str | None = None,
 ) -> None:
     """Register an early-stop plugin.
 
     NOTE: This function now delegates to the migrated early_stop_plugin_registry.
     """
-    early_stop_plugin_registry.register(name, factory, schema=schema)
+    early_stop_plugin_registry.register(name, factory, schema=schema, declared_security_level=declared_security_level)
 
 
 # Create functions delegate to registries with manual context creation (experiment plugin pattern)
@@ -296,15 +297,10 @@ def validate_row_plugin_definition(definition: dict[str, Any]) -> None:
     elif not isinstance(options, dict):
         raise ConfigurationError("Row plugin options must be a mapping")
 
-    # Validate security level coalescing
-    try:
-        level = coalesce_security_level(definition.get("security_level"), options.get("security_level"))
-    except ValueError as exc:
-        raise ConfigurationError(f"row_plugin:{name}: {exc}") from exc
-
+    # ADR-002-B: security_level is plugin-owned (no validation needed)
+    # Remove security_level from options if accidentally included
     prepared = dict(options)
     prepared.pop("security_level", None)
-    prepared["security_level"] = level
 
     try:
         row_plugin_registry.validate(name, prepared)
@@ -331,14 +327,10 @@ def validate_aggregation_plugin_definition(definition: dict[str, Any]) -> None:
     elif not isinstance(options, dict):
         raise ConfigurationError("Aggregation plugin options must be a mapping")
 
-    try:
-        level = coalesce_security_level(definition.get("security_level"), options.get("security_level"))
-    except ValueError as exc:
-        raise ConfigurationError(f"aggregation_plugin:{name}: {exc}") from exc
-
+    # ADR-002-B: security_level is plugin-owned (no validation needed)
+    # Remove security_level from options if accidentally included
     prepared = dict(options)
     prepared.pop("security_level", None)
-    prepared["security_level"] = level
 
     try:
         aggregation_plugin_registry.validate(name, prepared)
@@ -365,14 +357,10 @@ def validate_baseline_plugin_definition(definition: dict[str, Any]) -> None:
     elif not isinstance(options, dict):
         raise ConfigurationError("Baseline plugin options must be a mapping")
 
-    try:
-        level = coalesce_security_level(definition.get("security_level"), options.get("security_level"))
-    except ValueError as exc:
-        raise ConfigurationError(f"baseline_plugin:{name}: {exc}") from exc
-
+    # ADR-002-B: security_level is plugin-owned (no validation needed)
+    # Remove security_level from options if accidentally included
     prepared = dict(options)
     prepared.pop("security_level", None)
-    prepared["security_level"] = level
 
     try:
         baseline_plugin_registry.validate(name, prepared)
@@ -399,14 +387,10 @@ def validate_validation_plugin_definition(definition: dict[str, Any]) -> None:
     elif not isinstance(options, dict):
         raise ConfigurationError("Validation plugin options must be a mapping")
 
-    try:
-        level = coalesce_security_level(definition.get("security_level"), options.get("security_level"))
-    except ValueError as exc:
-        raise ConfigurationError(f"validation_plugin:{name}: {exc}") from exc
-
+    # ADR-002-B: security_level is plugin-owned (no validation needed)
+    # Remove security_level from options if accidentally included
     prepared = dict(options)
     prepared.pop("security_level", None)
-    prepared["security_level"] = level
 
     try:
         validation_plugin_registry.validate(name, prepared)
@@ -433,14 +417,10 @@ def validate_early_stop_plugin_definition(definition: dict[str, Any]) -> None:
     elif not isinstance(options, dict):
         raise ConfigurationError("Early-stop plugin options must be a mapping")
 
-    try:
-        level = coalesce_security_level(definition.get("security_level"), options.get("security_level"))
-    except ValueError as exc:
-        raise ConfigurationError(f"early_stop_plugin:{name}: {exc}") from exc
-
+    # ADR-002-B: security_level is plugin-owned (no validation needed)
+    # Remove security_level from options if accidentally included
     prepared = dict(options)
     prepared.pop("security_level", None)
-    prepared["security_level"] = level
 
     try:
         early_stop_plugin_registry.validate(name, prepared)

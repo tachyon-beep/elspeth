@@ -152,6 +152,7 @@ register_aggregation_plugin(
         on_error=options.get("on_error", "abort"),
     ),
     schema=_POWER_SCHEMA,
+    declared_security_level="UNOFFICIAL",  # ADR-002-B: Aggregators process experiment results
 )
 
 

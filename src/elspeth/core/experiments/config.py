@@ -64,7 +64,7 @@ class ExperimentConfig(BaseModel):
     prompt_pack: str | None = None
     prompt_defaults: dict[str, Any] | None = None
     concurrency_config: dict[str, Any] | None = None
-    security_level: str | None = None
+    # security_level removed: ADR-002-B - computed from plugin security levels, not configured
     determinism_level: str | None = None
     early_stop_config: dict[str, Any] | None = None
 
@@ -163,7 +163,7 @@ class ExperimentConfig(BaseModel):
             "prompt_defaults": data.get("prompt_defaults"),
             "llm_middleware_defs": data.get("llm_middlewares", []),
             "concurrency_config": data.get("concurrency"),
-            "security_level": data.get("security_level"),
+            # security_level removed: ADR-002-B - computed from plugins, not configured
             "determinism_level": data.get("determinism_level"),
             "early_stop_plugin_defs": early_stop_plugin_defs,
             "early_stop_config": data.get("early_stop"),

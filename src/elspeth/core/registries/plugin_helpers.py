@@ -137,26 +137,26 @@ def create_plugin_with_inheritance(
     if provenance:
         sources.extend(provenance)
 
-    # ADR-002-B: security_level is ALWAYS plugin-author-owned, NEVER inherited from parent
-    # SECURITY: No parent fallback - fail loud if factory doesn't declare declared_security_level
-    if definition_sec_level is None and option_sec_level is None:
-        # Always check factory.declared_security_level FIRST
-        # DO NOT fall back to parent_sec_level (security escalation vulnerability)
-        declared_sec_level = getattr(factory, "declared_security_level", None)
-        if declared_sec_level is None:
-            raise ConfigurationError(
-                f"{plugin_kind}:{name}: security_level is required. "
-                f"ADR-002-B: Plugin registrations must declare declared_security_level. "
-                f"No backdoors - security is ALWAYS plugin-author-owned, never inherited."
-            )
-        child_sec_level = ensure_security_level(declared_sec_level)
-        sources.append(f"{plugin_kind}:{name}.factory.declared_security_level")
-    else:
-        # Coalesce security level with downgrade prevention
-        try:
-            child_sec_level = coalesce_security_level(definition_sec_level, option_sec_level)
-        except ValueError as exc:
-            raise ConfigurationError(f"{plugin_kind}:{name}: {exc}") from exc
+    # ADR-002-B: security_level is ALWAYS plugin-author-owned, NEVER user-configurable
+    # SECURITY: Reject security_level from config - it must ONLY come from factory registration
+    if definition_sec_level is not None or option_sec_level is not None:
+        raise ConfigurationError(
+            f"{plugin_kind}:{name}: security_level must NOT be specified in configuration. "
+            f"ADR-002-B immutable policy: Security levels are hardcoded by plugin authors "
+            f"during registration. Config files cannot override them. "
+            f"Remove 'security_level' from your YAML configuration."
+        )
+
+    # Always use factory.declared_security_level (set during plugin registration)
+    declared_sec_level = getattr(factory, "declared_security_level", None)
+    if declared_sec_level is None:
+        raise ConfigurationError(
+            f"{plugin_kind}:{name}: Plugin registration missing declared_security_level. "
+            f"ADR-002-B: All plugins must declare security_level at registration time. "
+            f"This is a plugin implementation bug, not a configuration error."
+        )
+    child_sec_level = ensure_security_level(declared_sec_level)
+    sources.append(f"{plugin_kind}:{name}.factory.declared_security_level")
 
     if definition_det_level is None and option_det_level is None:
         raise ConfigurationError(f"{plugin_kind}:{name}: determinism_level must be declared on the plugin definition or options")

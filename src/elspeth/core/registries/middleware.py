@@ -23,9 +23,10 @@ def register_middleware(
     factory: Callable[[dict[str, Any], PluginContext], LLMMiddleware],
     *,
     schema: Mapping[str, Any] | None = None,
+    declared_security_level: str | None = None,
 ) -> None:
     """Register a middleware plugin with the registry."""
-    _middleware_registry.register(name, factory, schema=schema)
+    _middleware_registry.register(name, factory, schema=schema, declared_security_level=declared_security_level)
 
 
 def create_middleware(
@@ -94,14 +95,9 @@ def validate_middleware_definition(definition: dict[str, Any]) -> None:
     else:
         options_dict = dict(options_raw)
 
-    # Validate security level coalescing
-    try:
-        coalesce_security_level(definition.get("security_level"), options_dict.get("security_level"))
-    except ValueError as exc:
-        raise ConfigurationError(f"llm_middleware:{name}: {exc}") from exc
-
+    # ADR-002-B: security_level is plugin-owned (no validation needed)
     # Validate options against schema
-    options_dict.pop("security_level", None)
+    options_dict.pop("security_level", None)  # Remove if accidentally included
     try:
         _middleware_registry.validate(name, options_dict)
     except ValueError as exc:

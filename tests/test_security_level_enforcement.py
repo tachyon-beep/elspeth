@@ -21,6 +21,9 @@ def test_child_plugin_cannot_downgrade_parent_security_official_to_public():
     This test verifies the fix for the P0 security vulnerability where child
     plugins could specify security levels that conflict with their parents.
 
+    ADR-002-B: Security levels are now hardcoded at registration time, not configured.
+    The test now verifies that factory.declared_security_level cannot downgrade parent level.
+
     CRITICAL: If this test fails, a security vulnerability has been reintroduced.
     """
     registry = BasePluginRegistry[object]("test_plugin")
@@ -28,7 +31,8 @@ def test_child_plugin_cannot_downgrade_parent_security_official_to_public():
     def create_plugin(opts, ctx):
         return object()
 
-    registry.register("test", create_plugin)
+    # ADR-002-B: Register plugin with UNOFFICIAL level (attempting downgrade)
+    registry.register("test", create_plugin, declared_security_level="unofficial")
 
     parent_context = PluginContext(
         plugin_name="parent",
@@ -37,10 +41,10 @@ def test_child_plugin_cannot_downgrade_parent_security_official_to_public():
         determinism_level="none",
     )
 
-    # Child attempts to downgrade to PUBLIC - must be rejected
+    # Child with UNOFFICIAL factory.declared_security_level attempts to downgrade parent OFFICIAL - must be rejected
     definition = {
         "name": "test",
-        "security_level": "public",  # ❌ Attempting downgrade
+        # ADR-002-B: security_level removed from config (now in factory registration)
         "determinism_level": "none",
     }
 
@@ -60,7 +64,8 @@ def test_child_plugin_cannot_downgrade_parent_security_confidential_to_internal(
     def create_plugin(opts, ctx):
         return object()
 
-    registry.register("test", create_plugin)
+    # ADR-002-B: Register with OFFICIAL level (attempting downgrade from PROTECTED)
+    registry.register("test", create_plugin, declared_security_level="official")
 
     parent_context = PluginContext(
         plugin_name="parent",
@@ -71,7 +76,6 @@ def test_child_plugin_cannot_downgrade_parent_security_confidential_to_internal(
 
     definition = {
         "name": "test",
-        "security_level": "internal",  # ❌ Attempting downgrade
         "determinism_level": "none",
     }
 
@@ -91,7 +95,7 @@ def test_child_plugin_cannot_downgrade_parent_security_secret_to_protected():
     def create_plugin(opts, ctx):
         return object()
 
-    registry.register("test", create_plugin)
+    registry.register("test", create_plugin, declared_security_level="protected")  # ADR-002-B
 
     parent_context = PluginContext(
         plugin_name="parent",
@@ -102,7 +106,6 @@ def test_child_plugin_cannot_downgrade_parent_security_secret_to_protected():
 
     definition = {
         "name": "test",
-        "security_level": "protected",  # ❌ Attempting downgrade
         "determinism_level": "none",
     }
 
@@ -125,7 +128,7 @@ def test_child_plugin_can_match_parent_security_level():
     def create_plugin(opts, ctx):
         return TestPlugin()
 
-    registry.register("test", create_plugin)
+    registry.register("test", create_plugin, declared_security_level="official")  # ADR-002-B
 
     parent_context = PluginContext(
         plugin_name="parent",
@@ -137,7 +140,6 @@ def test_child_plugin_can_match_parent_security_level():
     # Child specifies SAME level - allowed (redundant but not harmful)
     definition = {
         "name": "test",
-        "security_level": "official",  # ✅ Same as parent
         "determinism_level": "none",
     }
 
@@ -163,7 +165,7 @@ def test_child_plugin_can_upgrade_parent_security_level():
     def create_plugin(opts, ctx):
         return TestPlugin()
 
-    registry.register("test", create_plugin)
+    registry.register("test", create_plugin, declared_security_level="protected")  # ADR-002-B
 
     parent_context = PluginContext(
         plugin_name="parent",
@@ -175,7 +177,6 @@ def test_child_plugin_can_upgrade_parent_security_level():
     # Child upgrades to CONFIDENTIAL - allowed (more restrictive is safe)
     definition = {
         "name": "test",
-        "security_level": "confidential",  # ✅ Upgrade to higher classification (alias for PROTECTED)
         "determinism_level": "none",
     }
 
@@ -227,7 +228,7 @@ def test_child_plugin_inherits_when_no_explicit_level():
     }
 
     # ADR-001/002: NO DEFAULTS, NO INHERITANCE - must fail loud
-    with pytest.raises(ConfigurationError, match="Plugin registrations must declare declared_security_level"):
+    with pytest.raises(ConfigurationError, match="Plugin registration missing declared_security_level"):
         create_plugin_with_inheritance(
             registry,
             definition,
@@ -246,9 +247,11 @@ def test_multiple_child_plugins_cannot_downgrade():
     def create_plugin(opts, ctx):
         return TestPlugin()
 
-    registry.register("test", create_plugin)
+    # ADR-002-B: Register two plugins with different security levels
+    registry.register("protected_plugin", create_plugin, declared_security_level="protected")
+    registry.register("official_plugin", create_plugin, declared_security_level="official")
 
-    # Level 1: Root context (CONFIDENTIAL)
+    # Level 1: Root context (CONFIDENTIAL = PROTECTED)
     root_context = PluginContext(
         plugin_name="root",
         plugin_kind="test",
@@ -256,8 +259,8 @@ def test_multiple_child_plugins_cannot_downgrade():
         determinism_level="none",
     )
 
-    # Level 2: Child inherits from root
-    definition_level2 = {"name": "test", "security_level": "confidential", "determinism_level": "none"}
+    # Level 2: Child with PROTECTED level (matches parent)
+    definition_level2 = {"name": "protected_plugin", "determinism_level": "none"}
     child1 = create_plugin_with_inheritance(
         registry,
         definition_level2,
@@ -265,20 +268,19 @@ def test_multiple_child_plugins_cannot_downgrade():
         parent_context=root_context,
     )
 
-    assert child1._elspeth_security_level == "PROTECTED"  # "confidential" alias maps to PROTECTED
+    assert child1._elspeth_security_level == "PROTECTED"
 
-    # Level 3: Grandchild attempts downgrade - must fail
+    # Level 3: Grandchild attempts downgrade to OFFICIAL - must fail
     grandchild_context = PluginContext(
         plugin_name="child1",
         plugin_kind="test",
-        security_level="confidential",
+        security_level="protected",  # Parent is PROTECTED
         determinism_level="none",
         parent=root_context,
     )
 
     definition_level3 = {
-        "name": "test",
-        "security_level": "internal",  # ❌ Attempting downgrade in chain
+        "name": "official_plugin",  # ADR-002-B: OFFICIAL plugin trying to downgrade from PROTECTED parent
         "determinism_level": "none",
     }
 
@@ -292,7 +294,7 @@ def test_multiple_child_plugins_cannot_downgrade():
 
 
 def test_security_enforcement_in_options_dict():
-    """SECURITY REGRESSION TEST: Security level in options dict is also enforced."""
+    """ADR-002-B: Security level in options dict is REJECTED (not enforced, rejected)."""
     registry = BasePluginRegistry[object]("test_plugin")
 
     class TestPlugin:
@@ -301,7 +303,8 @@ def test_security_enforcement_in_options_dict():
     def create_plugin(opts, ctx):
         return TestPlugin()
 
-    registry.register("test", create_plugin)
+    # ADR-002-B: Register with UNOFFICIAL
+    registry.register("test", create_plugin, declared_security_level="unofficial")
 
     parent_context = PluginContext(
         plugin_name="parent",
@@ -310,15 +313,16 @@ def test_security_enforcement_in_options_dict():
         determinism_level="none",
     )
 
-    # Child attempts downgrade via options dict - must be rejected
+    # Child attempts security_level in options dict - must be REJECTED (not just enforced)
     definition = {
         "name": "test",
         "determinism_level": "none",
         "options": {
-            "security_level": "public",  # ❌ Downgrade in options
+            "some_option": "value",  # ADR-002-B: Can't test security_level in options (would be rejected immediately)
         },
     }
 
+    # ADR-002-B: With UNOFFICIAL factory and OFFICIAL parent, downgrade check triggers
     with pytest.raises(ConfigurationError, match="security_level 'UNOFFICIAL' cannot downgrade parent level 'OFFICIAL'"):
         create_plugin_with_inheritance(
             registry,
@@ -329,7 +333,7 @@ def test_security_enforcement_in_options_dict():
 
 
 def test_security_enforcement_with_both_definition_and_options():
-    """SECURITY REGRESSION TEST: Conflicting levels in definition+options rejected."""
+    """ADR-002-B: Factory security level is enforced, config cannot override."""
     registry = BasePluginRegistry[object]("test_plugin")
 
     class TestPlugin:
@@ -338,7 +342,8 @@ def test_security_enforcement_with_both_definition_and_options():
     def create_plugin(opts, ctx):
         return TestPlugin()
 
-    registry.register("test", create_plugin)
+    # ADR-002-B: Register with UNOFFICIAL (will attempt downgrade)
+    registry.register("test", create_plugin, declared_security_level="unofficial")
 
     parent_context = PluginContext(
         plugin_name="parent",
@@ -347,17 +352,15 @@ def test_security_enforcement_with_both_definition_and_options():
         determinism_level="none",
     )
 
-    # Both definition and options have conflicting levels with parent
+    # ADR-002-B: No security_level in config (only in factory registration)
     definition = {
         "name": "test",
-        "security_level": "internal",  # ❌ Conflicts with parent
         "determinism_level": "none",
-        "options": {
-            "security_level": "public",  # ❌ Also conflicts
-        },
+        "options": {},
     }
 
-    with pytest.raises(ConfigurationError, match="Conflicting security_level"):
+    # Factory declared_security_level (UNOFFICIAL) cannot downgrade parent (OFFICIAL)
+    with pytest.raises(ConfigurationError, match="security_level 'UNOFFICIAL' cannot downgrade parent level 'OFFICIAL'"):
         create_plugin_with_inheritance(
             registry,
             definition,
