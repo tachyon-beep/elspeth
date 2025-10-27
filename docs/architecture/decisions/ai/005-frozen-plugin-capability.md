@@ -6,7 +6,7 @@
 
 ## Context
 
-ADR-002 establishes **trusted downgrade as default**: plugins with HIGHER clearance can operate at LOWER levels (e.g., SECRET datasource operating at OFFICIAL by filtering).
+ADR-002 establishes **trusted downgrade capability**: plugins with HIGHER clearance can operate at LOWER levels (e.g., SECRET datasource operating at OFFICIAL by filtering) **when explicitly configured with `allow_downgrade=True`**.
 
 However, some scenarios require **strict level enforcement** where plugins refuse ALL operations below their declared level:
 
