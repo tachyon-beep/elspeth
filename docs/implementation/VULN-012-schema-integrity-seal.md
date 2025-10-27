@@ -7,7 +7,7 @@
 **Completed**: N/A
 **Depends On**: VULN-011 (Container Hardening - capability token + tamper seal)
 **Pre-1.0**: Non-breaking enhancement (opt-in feature)
-**GitHub Issue**: #TBD
+**GitHub Issue**: #31
 
 **Implementation Note**: Current HMAC seal (VULN-011) protects classification metadata but not DataFrame schema. This enhancement adds optional "strong seal" that includes schema signature (column names + dtypes) to detect sneaky dtype downgrades without hashing row data.
 

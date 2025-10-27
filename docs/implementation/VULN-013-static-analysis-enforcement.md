@@ -7,7 +7,7 @@
 **Completed**: N/A
 **Depends On**: VULN-011 (Container Hardening), ADR-002-A (Trusted Container Model)
 **Pre-1.0**: Non-breaking enhancement (additional linting only)
-**GitHub Issue**: #TBD
+**GitHub Issue**: #32
 
 **Implementation Note**: VULN-011 establishes runtime security controls (capability token, tamper seal). This enhancement adds compile-time enforcement via Ruff custom rules to catch policy violations during development, not deployment.
 

@@ -190,6 +190,10 @@ def test_expected_plugins_covers_all_middleware():
     expected = set(EXPECTED_PLUGINS.get("middleware", []))
     actual = set(_middleware_registry.list_plugins())
 
+    # Filter out test-only plugins (registered in tests/conftest.py or test files)
+    TEST_ONLY_MIDDLEWARE = {"dummy", "dummy2"}
+    actual = actual - TEST_ONLY_MIDDLEWARE
+
     missing = actual - expected
     assert not missing, (
         f"middleware: Missing {len(missing)} plugins from EXPECTED_PLUGINS baseline: {missing}\n"

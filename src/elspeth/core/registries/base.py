@@ -133,17 +133,32 @@ class BasePluginFactory(Generic[T]):
 
         # Layer 3: Verify declared security_level matches actual (ADR-002-B, VULN-004)
         if self.declared_security_level is not None:
-            # Only verify if plugin has security_level attribute AND it's a string (not Mock/etc)
+            # Only verify if plugin has security_level attribute
             if hasattr(plugin, "security_level"):
                 actual_security_level = plugin.security_level
-                # Only verify if it's a real security level (string), not a mock/placeholder
-                if isinstance(actual_security_level, str):
-                    if actual_security_level != self.declared_security_level:
-                        raise ConfigurationError(
-                            f"{schema_context}: Plugin declares security_level={self.declared_security_level} "
-                            f"but has actual security_level={actual_security_level}. "
-                            "Plugin implementation must match registry declaration (ADR-002-B)."
-                        )
+
+                # SECURITY VALIDATION: Enforce SecurityLevel enum (ADR-002-B immutable policy)
+                # SecurityLevel is defined as class SecurityLevel(str, Enum), so isinstance(SecurityLevel.X, str) is True
+                # We check for SecurityLevel enum specifically to reject plain strings or other types
+                from elspeth.core.base.types import SecurityLevel  # pylint: disable=import-outside-toplevel
+
+                if not isinstance(actual_security_level, SecurityLevel):
+                    # Plain string or other type - not a SecurityLevel enum
+                    # This prevents regressions where plugins return strings instead of enums
+                    raise ConfigurationError(
+                        f"CRITICAL SECURITY POLICY VIOLATION: Plugin {type(plugin).__name__} "
+                        f"returns {type(actual_security_level).__name__} security_level='{actual_security_level}'. "
+                        f"ALL plugins MUST return SecurityLevel enum instance. "
+                        f"Update plugin to use SecurityLevel.{str(actual_security_level).upper()} instead."
+                    )
+
+                # SecurityLevel enum comparison: compare enum.value (string) against declared (string)
+                if actual_security_level.value != self.declared_security_level:
+                    raise ConfigurationError(
+                        f"{schema_context}: Plugin declares security_level={self.declared_security_level} "
+                        f"but has actual security_level={actual_security_level.value}. "
+                        "Plugin implementation must match registry declaration (ADR-002-B)."
+                    )
 
         # Attach factory metadata for downstream enforcement (e.g., input_schema requirement)
         try:

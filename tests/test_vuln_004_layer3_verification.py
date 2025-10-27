@@ -14,12 +14,13 @@ import pytest
 from elspeth.core.validation.base import ConfigurationError
 from elspeth.core.registries.base import BasePluginRegistry
 from elspeth.core.base.plugin_context import PluginContext
+from elspeth.core.base.types import SecurityLevel
 
 
 class MockPlugin:
     """Mock plugin for testing with configurable security_level."""
 
-    def __init__(self, security_level: str = "UNOFFICIAL", **kwargs):
+    def __init__(self, security_level: SecurityLevel = SecurityLevel.UNOFFICIAL, **kwargs):
         self._security_level = security_level
         self.options = kwargs
 
@@ -43,7 +44,7 @@ class TestLayer3PostCreationVerification:
         # But factory creates plugin with SECRET (simulating implementation bug)
         def create_buggy_plugin(options: dict, context: PluginContext) -> MockPlugin:
             # BUG: Implementation returns SECRET instead of declared UNOFFICIAL
-            return MockPlugin(security_level="SECRET", **options)
+            return MockPlugin(security_level=SecurityLevel.SECRET, **options)
 
         registry.register(
             "buggy",
@@ -68,7 +69,7 @@ class TestLayer3PostCreationVerification:
 
         # Register plugin with matching declaration and implementation
         def create_correct_plugin(options: dict, context: PluginContext) -> MockPlugin:
-            return MockPlugin(security_level="UNOFFICIAL", **options)
+            return MockPlugin(security_level=SecurityLevel.UNOFFICIAL, **options)
 
         registry.register(
             "correct",
@@ -84,17 +85,17 @@ class TestLayer3PostCreationVerification:
                 require_determinism=False,
             )
             assert plugin is not None
-            assert plugin.security_level == "UNOFFICIAL"
+            assert plugin.security_level == SecurityLevel.UNOFFICIAL
         except ConfigurationError as exc:
             pytest.fail(f"Valid matching plugin rejected: {exc}")
 
     def test_all_security_levels_verified(self):
         """Test verification for all security levels."""
         test_cases = [
-            ("UNOFFICIAL", "PROTECTED"),     # Declared UNOFFICIAL, actual PROTECTED
-            ("PROTECTED", "SECRET"),         # Declared PROTECTED, actual SECRET
-            ("SECRET", "UNOFFICIAL"),        # Declared SECRET, actual UNOFFICIAL
-            ("OFFICIAL", "SECRET"),          # Declared OFFICIAL, actual SECRET
+            (SecurityLevel.UNOFFICIAL, SecurityLevel.PROTECTED),     # Declared UNOFFICIAL, actual PROTECTED
+            (SecurityLevel.PROTECTED, SecurityLevel.SECRET),         # Declared PROTECTED, actual SECRET
+            (SecurityLevel.SECRET, SecurityLevel.UNOFFICIAL),        # Declared SECRET, actual UNOFFICIAL
+            (SecurityLevel.OFFICIAL, SecurityLevel.SECRET),          # Declared OFFICIAL, actual SECRET
         ]
 
         for declared, actual in test_cases:
@@ -104,17 +105,17 @@ class TestLayer3PostCreationVerification:
                 return MockPlugin(security_level=actual, **options)
 
             registry.register(
-                f"test_{declared}_{actual}",
+                f"test_{declared.value}_{actual.value}",
                 create_mismatched,
-                declared_security_level=declared,
+                declared_security_level=declared.value,  # Registry expects string
             )
 
             with pytest.raises(
                 ConfigurationError,
-                match=f"Plugin declares security_level={declared}.*actual security_level={actual}"
+                match=f"Plugin declares security_level={declared.value}.*actual security_level={actual.value}"
             ):
                 registry.create(
-                    f"test_{declared}_{actual}",
+                    f"test_{declared.value}_{actual.value}",
                     options={},
                     require_determinism=False,
                 )

@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from elspeth.core.base.plugin_context import PluginContext
+from elspeth.core.base.types import SecurityLevel
 from elspeth.core.registries.datasource import datasource_registry
 from elspeth.core.validation.base import ConfigurationError
 
@@ -48,7 +49,10 @@ def test_csv_blob_datasource_creation():
     )
 
     with patch("elspeth.core.registries.datasource.CSVBlobDataSource") as mock_csv_blob:
-        mock_csv_blob.return_value = MagicMock()  # Return an object that can have attrs set
+        # Mock plugin with proper security_level enum (VULN-004 Layer 3 verification)
+        mock_plugin = MagicMock()
+        mock_plugin.security_level = SecurityLevel.UNOFFICIAL  # Match declared_security_level
+        mock_csv_blob.return_value = mock_plugin
 
         result = datasource_registry.create(
             "csv_blob",
@@ -74,7 +78,10 @@ def test_local_csv_datasource_creation():
     )
 
     with patch("elspeth.core.registries.datasource.CSVDataSource") as mock_csv:
-        mock_csv.return_value = MagicMock()  # Return an object that can have attrs set
+        # Mock plugin with proper security_level enum (VULN-004 Layer 3 verification)
+        mock_plugin = MagicMock()
+        mock_plugin.security_level = SecurityLevel.UNOFFICIAL  # Match declared_security_level
+        mock_csv.return_value = mock_plugin
 
         result = datasource_registry.create(
             "local_csv",
