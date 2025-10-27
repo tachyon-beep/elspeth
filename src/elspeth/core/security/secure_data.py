@@ -20,7 +20,7 @@ import pandas as pd
 from elspeth.core.base.types import SecurityLevel
 
 if TYPE_CHECKING:
-    from elspeth.core.base.plugin import BasePlugin  # ADR-004: ABC with nominal typing
+    pass  # ADR-004: ABC with nominal typing
 
 
 @dataclass(frozen=True)

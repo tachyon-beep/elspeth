@@ -331,7 +331,9 @@ class BasePlugin(ABC):
                 f"Operating level is computed during validation and propagated via _propagate_operating_level()."
             )
 
-        return context.operating_level
+        # Type narrowing: After None check above, MyPy knows operating_level is SecurityLevel
+        operating_level: SecurityLevel = context.operating_level
+        return operating_level
 
     @final
     def validate_can_operate_at_level(self, operating_level: SecurityLevel) -> None:

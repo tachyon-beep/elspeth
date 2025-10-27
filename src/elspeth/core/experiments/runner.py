@@ -346,14 +346,20 @@ class ExperimentRunner:
 
         return retry_summary if retry_present else None
 
-    def _resolve_security_level(self, df: pd.DataFrame) -> SecurityLevel:
-        """Resolve final security level from DataFrame and configuration."""
+    def _resolve_security_level(self, df: pd.DataFrame | SecureDataFrame) -> SecurityLevel:
+        """Resolve final security level from DataFrame and configuration.
+
+        ADR-002: Accepts both DataFrame and SecureDataFrame for security-aware processing.
+        """
         df_security_level = getattr(df, "attrs", {}).get("security_level") if hasattr(df, "attrs") else None
         self._active_security_level = resolve_security_level(self.security_level, df_security_level)
         return self._active_security_level
 
-    def _resolve_determinism_level(self, df: pd.DataFrame) -> DeterminismLevel:
-        """Resolve final determinism level from DataFrame and configuration."""
+    def _resolve_determinism_level(self, df: pd.DataFrame | SecureDataFrame) -> DeterminismLevel:
+        """Resolve final determinism level from DataFrame and configuration.
+
+        ADR-002: Accepts both DataFrame and SecureDataFrame for security-aware processing.
+        """
         df_determinism_level = getattr(df, "attrs", {}).get("determinism_level") if hasattr(df, "attrs") else None
         self._active_determinism_level = resolve_determinism_level(self.determinism_level, df_determinism_level)
         return self._active_determinism_level
@@ -419,9 +425,11 @@ class ExperimentRunner:
         results: list[dict[str, Any]],
         failures: list[dict[str, Any]],
         aggregates: dict[str, Any] | None,
-        df: pd.DataFrame,
+        df: pd.DataFrame | SecureDataFrame,
     ) -> ExecutionMetadata:
         """Assemble execution metadata from results and configuration.
+
+        ADR-002: Accepts both DataFrame and SecureDataFrame for security-aware processing.
 
         Returns ExecutionMetadata dataclass with all metadata fields populated.
         """
@@ -470,13 +478,15 @@ class ExperimentRunner:
 
     def _prepare_rows_to_process(
         self,
-        df: pd.DataFrame,
+        df: pd.DataFrame | SecureDataFrame,
         checkpoint_manager: CheckpointManager | None,
     ) -> list[tuple[int, pd.Series, dict[str, Any], str | None]]:
         """Prepare list of rows to process, filtering checkpointed and early-stopped rows.
 
+        ADR-002: Accepts both DataFrame and SecureDataFrame for security-aware processing.
+
         Args:
-            df: Input DataFrame with rows to process
+            df: Input DataFrame with rows to process (DataFrame or SecureDataFrame)
             checkpoint_manager: Optional CheckpointManager for resumption tracking
 
         Returns:
@@ -585,8 +595,11 @@ class ExperimentRunner:
 
         return engine, system_template, user_template, criteria_templates
 
-    def _init_validation(self, df: pd.DataFrame) -> None:
-        """Initialize schema validation and malformed data tracking."""
+    def _init_validation(self, df: pd.DataFrame | SecureDataFrame) -> None:
+        """Initialize schema validation and malformed data tracking.
+
+        ADR-002: Accepts both DataFrame and SecureDataFrame for security-aware processing.
+        """
         datasource_schema = df.attrs.get("schema") if hasattr(df, "attrs") else None
         if datasource_schema:
             self._validate_plugin_schemas(datasource_schema)

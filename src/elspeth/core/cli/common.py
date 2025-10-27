@@ -23,6 +23,7 @@ import elspeth.core.registries.sink as sink_reg
 from elspeth.core.base.plugin_context import PluginContext
 from elspeth.core.base.types import SecurityLevel
 from elspeth.core.registries.sink import CAP_SUPPORTS_FOLDER_PATH_INJECTION
+from elspeth.core.security import resolve_determinism_level, resolve_security_level
 from elspeth.core.validation.base import ConfigurationError
 
 # Optional sink; not required for all CLI flows
@@ -185,11 +186,15 @@ def maybe_publish_artifacts_bundle(
         opts["folder_path"] = str(bundle_dir)
 
     # ADR-002-B: Create parent_context at bundle's operating level (bundles contain classified data)
+    # Type safety: Ensure security_level and determinism_level are proper enum types
+    sec_level = resolve_security_level(operating_level)
+    det_level = resolve_determinism_level("guaranteed")
+
     artifact_context = PluginContext(
         plugin_name="cli_artifact_publisher",
         plugin_kind="artifact_sink",
-        security_level=operating_level,  # Match the bundle's classification level
-        determinism_level="guaranteed",
+        security_level=sec_level,  # Match the bundle's classification level
+        determinism_level=det_level,
         provenance=("cli.artifact_publisher",),
     )
 

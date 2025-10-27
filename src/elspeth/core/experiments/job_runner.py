@@ -173,7 +173,7 @@ def run_job_config(job: Mapping[str, Any]) -> dict[str, Any]:
             {
                 "plugin": llm_def.get("plugin"),
                 "options": llm_def.get("options", {}),
-                "security_level": llm_def.get("security_level"),
+                # ADR-002-B: security_level is plugin-author-owned, not configurable
                 "determinism_level": llm_def.get("determinism_level"),
             },
             parent_context=ctx,

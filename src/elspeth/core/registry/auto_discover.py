@@ -199,8 +199,8 @@ def validate_discovery(registries: dict[str, BasePluginRegistry[Any]]) -> None:
             "",
             "Missing plugins by type:",
         ]
-        for plugin_type, missing in missing_plugins.items():
-            error_lines.append(f"  {plugin_type}: {', '.join(missing)}")
+        for plugin_type, missing_list in missing_plugins.items():
+            error_lines.append(f"  {plugin_type}: {', '.join(missing_list)}")
 
         error_lines.extend([
             "",

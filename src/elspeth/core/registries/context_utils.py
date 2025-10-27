@@ -12,7 +12,6 @@ from elspeth.core.base.plugin_context import PluginContext
 from elspeth.core.base.types import DeterminismLevel, SecurityLevel
 from elspeth.core.security import (
     coalesce_determinism_level,
-    coalesce_security_level,
 )
 from elspeth.core.validation.base import ConfigurationError
 
@@ -68,7 +67,7 @@ def extract_security_levels(
     # Extract levels from various sources
     entry_sec_level = definition.get("security_level")
     option_sec_level = options.get("security_level")
-    parent_sec_level = getattr(parent_context, "security_level", None)
+    getattr(parent_context, "security_level", None)
 
     entry_det_level = definition.get("determinism_level")
     option_det_level = options.get("determinism_level")
