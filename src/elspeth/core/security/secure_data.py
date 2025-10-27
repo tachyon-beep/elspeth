@@ -23,7 +23,7 @@ if TYPE_CHECKING:
     pass  # ADR-004: ABC with nominal typing
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class SecureDataFrame:
     """DataFrame wrapper with immutable security level metadata.
 
