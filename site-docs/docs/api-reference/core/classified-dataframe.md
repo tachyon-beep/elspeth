@@ -1,15 +1,15 @@
-# ClassifiedDataFrame
+# SecureDataFrame
 
 DataFrame wrapper with immutable classification metadata implementing ADR-002 security enforcement.
 
 !!! warning "Security-Critical Component"
-    `ClassifiedDataFrame` enforces **immutable classification** and **automatic uplifting**. Classification can only increase (UNOFFICIAL → SECRET), never decrease. This prevents data laundering attacks.
+    `SecureDataFrame` enforces **immutable classification** and **automatic uplifting**. Classification can only increase (UNOFFICIAL → SECRET), never decrease. This prevents data laundering attacks.
 
 ---
 
 ## Overview
 
-`ClassifiedDataFrame` wraps Pandas DataFrames with a security classification that:
+`SecureDataFrame` wraps Pandas DataFrames with a security classification that:
 
 - ✅ **Cannot be downgraded** (classification only increases)
 - ✅ **Is immutable** (frozen dataclass)
@@ -22,7 +22,7 @@ DataFrame wrapper with immutable classification metadata implementing ADR-002 se
 
 ## Class Documentation
 
-::: elspeth.core.security.classified_data.ClassifiedDataFrame
+::: elspeth.core.security.secure_data.SecureDataFrame
     options:
       members:
         - create_from_datasource
@@ -41,16 +41,16 @@ DataFrame wrapper with immutable classification metadata implementing ADR-002 se
 
 ### Pattern 1: Datasource Creation (Trusted Source)
 
-Only datasources can create `ClassifiedDataFrame` instances from scratch:
+Only datasources can create `SecureDataFrame` instances from scratch:
 
 ```python
-from elspeth.core.security.classified_data import ClassifiedDataFrame
+from elspeth.core.security.secure_data import SecureDataFrame
 from elspeth.core.base.types import SecurityLevel
 import pandas as pd
 
 # Datasource creates classified frame
 raw_data = pd.DataFrame({'text': ['Hello', 'World'], 'score': [0.9, 0.8]})
-frame = ClassifiedDataFrame.create_from_datasource(
+frame = SecureDataFrame.create_from_datasource(
     raw_data, SecurityLevel.OFFICIAL
 )
 
@@ -100,13 +100,13 @@ Direct construction is prohibited to prevent classification laundering:
 
 ```python
 import pandas as pd
-from elspeth.core.security.classified_data import ClassifiedDataFrame
+from elspeth.core.security.secure_data import SecureDataFrame
 from elspeth.core.base.types import SecurityLevel
 
 # ❌ Direct construction raises SecurityValidationError
 df = pd.DataFrame({'data': [1, 2, 3]})
-frame = ClassifiedDataFrame(df, SecurityLevel.OFFICIAL)
-# Raises: SecurityValidationError: ClassifiedDataFrame must be created via create_from_datasource
+frame = SecureDataFrame(df, SecurityLevel.OFFICIAL)
+# Raises: SecurityValidationError: SecureDataFrame must be created via create_from_datasource
 ```
 
 ---
@@ -118,7 +118,7 @@ frame = ClassifiedDataFrame(df, SecurityLevel.OFFICIAL)
 Classification cannot be modified after creation (frozen dataclass):
 
 ```python
-frame = ClassifiedDataFrame.create_from_datasource(
+frame = SecureDataFrame.create_from_datasource(
     data, SecurityLevel.OFFICIAL
 )
 
@@ -132,7 +132,7 @@ Classification can only increase, never decrease:
 
 ```python
 # Start with OFFICIAL data
-frame = ClassifiedDataFrame.create_from_datasource(
+frame = SecureDataFrame.create_from_datasource(
     data, SecurityLevel.OFFICIAL
 )
 
@@ -162,12 +162,12 @@ Only datasources can create instances:
 
 ```python
 # ✅ Datasource context (trusted)
-frame = ClassifiedDataFrame.create_from_datasource(
+frame = SecureDataFrame.create_from_datasource(
     data, SecurityLevel.OFFICIAL
 )
 
 # ❌ Plugin context (untrusted)
-frame = ClassifiedDataFrame(data, SecurityLevel.OFFICIAL)
+frame = SecureDataFrame(data, SecurityLevel.OFFICIAL)
 # Raises: SecurityValidationError
 ```
 
@@ -195,7 +195,7 @@ Runtime failsafe ensuring component has sufficient clearance:
 from elspeth.core.base.plugin import BasePlugin
 
 # Create PROTECTED data
-frame = ClassifiedDataFrame.create_from_datasource(
+frame = SecureDataFrame.create_from_datasource(
     data, SecurityLevel.PROTECTED
 )
 
@@ -220,7 +220,7 @@ frame.validate_access_by(plugin_low)  # ❌ Raises SecurityValidationError
 ### Accessing Underlying DataFrame
 
 ```python
-frame = ClassifiedDataFrame.create_from_datasource(
+frame = SecureDataFrame.create_from_datasource(
     data, SecurityLevel.OFFICIAL
 )
 
@@ -276,13 +276,13 @@ from elspeth.core.validation.base import SecurityValidationError
 
 try:
     # Direct construction (blocked)
-    frame = ClassifiedDataFrame(data, SecurityLevel.OFFICIAL)
+    frame = SecureDataFrame(data, SecurityLevel.OFFICIAL)
 except SecurityValidationError as e:
     print(f"Security violation: {e}")
 
 try:
     # Insufficient clearance
-    frame = ClassifiedDataFrame.create_from_datasource(
+    frame = SecureDataFrame.create_from_datasource(
         data, SecurityLevel.SECRET
     )
     plugin = MyPlugin(security_level=SecurityLevel.UNOFFICIAL)
@@ -295,7 +295,7 @@ except SecurityValidationError as e:
 
 ## ADR Threat Prevention
 
-ClassifiedDataFrame prevents ADR-002 threat scenarios:
+SecureDataFrame prevents ADR-002 threat scenarios:
 
 | Threat | Prevention Mechanism |
 |--------|----------------------|
@@ -315,5 +315,5 @@ ClassifiedDataFrame prevents ADR-002 threat scenarios:
 
 ## ADR Cross-References
 
-- **ADR-002**: Multi-Level Security Enforcement - ClassifiedDataFrame implements trusted container
-- **ADR-002a**: ClassifiedDataFrame Constructor - Constructor protection design
+- **ADR-002**: Multi-Level Security Enforcement - SecureDataFrame implements trusted container
+- **ADR-002a**: SecureDataFrame Constructor - Constructor protection design
