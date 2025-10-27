@@ -158,10 +158,23 @@ class TestDiscoveryValidation:
         from elspeth.core.registry.auto_discover import validate_discovery
 
         # Mock registries with ALL expected plugins registered (from EXPECTED_PLUGINS)
+        # Updated for VULN-010 fix: Expanded from 8 to 29 plugins (100% coverage)
         mock_registries = {
             "datasource": MagicMock(list_plugins=lambda: ["local_csv", "csv_blob", "azure_blob"]),
-            "llm": MagicMock(list_plugins=lambda: ["mock", "azure_openai"]),
-            "sink": MagicMock(list_plugins=lambda: ["csv", "signed_artifact", "local_bundle"]),
+            "llm": MagicMock(list_plugins=lambda: ["mock", "azure_openai", "http_openai", "static_test"]),
+            "sink": MagicMock(list_plugins=lambda: [
+                "csv", "signed_artifact", "local_bundle",
+                "excel_workbook",
+                "azure_blob", "azure_blob_artifacts",
+                "zip_bundle", "reproducibility_bundle",
+                "github_repo", "azure_devops_repo", "azure_devops_artifact_repo",
+                "analytics_report", "analytics_visual", "enhanced_visual",
+                "embeddings_store", "file_copy",
+            ]),
+            "middleware": MagicMock(list_plugins=lambda: [
+                "audit_logger", "azure_content_safety", "azure_environment",
+                "classified_material", "health_monitor", "pii_shield", "prompt_shield",
+            ]),
         }
 
         # Should pass with expected plugins present

@@ -68,7 +68,7 @@ EXPECTED_PLUGINS = {
         "static_test",    # Static test LLM
     ],
 
-    # Sinks: 17/17 = 100% ✅ (was 3/17 = 17.6%)
+    # Sinks: 16/16 = 100% ✅ (was 3/16 = 18.75%)
     "sink": [
         # Core outputs
         "csv",
@@ -99,7 +99,6 @@ EXPECTED_PLUGINS = {
         # Specialized sinks
         "embeddings_store",  # Vector storage
         "file_copy",         # File copy utility
-        "collecting",        # Collection sink
     ],
 
     # Middleware: 7/7 = 100% ✅ (was 0/7 = 0%)

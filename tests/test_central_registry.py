@@ -53,14 +53,29 @@ class TestCentralRegistryInit:
         from elspeth.core.registry.central import CentralPluginRegistry
 
         # Mock type-specific registries with list_plugins() returning expected plugins
+        # Updated for VULN-010 fix: Expanded from 8 to 29 plugins (100% coverage)
         mock_datasource = MagicMock()
         mock_datasource.list_plugins.return_value = ["local_csv", "csv_blob", "azure_blob"]
 
         mock_llm = MagicMock()
-        mock_llm.list_plugins.return_value = ["mock", "azure_openai"]
+        mock_llm.list_plugins.return_value = ["mock", "azure_openai", "http_openai", "static_test"]
 
         mock_sink = MagicMock()
-        mock_sink.list_plugins.return_value = ["csv", "signed_artifact", "local_bundle"]
+        mock_sink.list_plugins.return_value = [
+            "csv", "signed_artifact", "local_bundle",
+            "excel_workbook",
+            "azure_blob", "azure_blob_artifacts",
+            "zip_bundle", "reproducibility_bundle",
+            "github_repo", "azure_devops_repo", "azure_devops_artifact_repo",
+            "analytics_report", "analytics_visual", "enhanced_visual",
+            "embeddings_store", "file_copy",
+        ]
+
+        mock_middleware = MagicMock()
+        mock_middleware.list_plugins.return_value = [
+            "audit_logger", "azure_content_safety", "azure_environment",
+            "classified_material", "health_monitor", "pii_shield", "prompt_shield",
+        ]
 
         # Should accept registries as constructor arguments
         with patch("elspeth.core.registry.central.auto_discover_internal_plugins"):
@@ -69,6 +84,7 @@ class TestCentralRegistryInit:
                     datasource_registry=mock_datasource,
                     llm_registry=mock_llm,
                     sink_registry=mock_sink,
+                    middleware_registry=mock_middleware,
                 )
                 assert registry is not None
             except TypeError as e:
@@ -83,14 +99,29 @@ class TestCentralRegistryInit:
         from elspeth.core.registry.central import CentralPluginRegistry
 
         # Mock registries with list_plugins()
+        # Updated for VULN-010 fix: Expanded from 8 to 29 plugins (100% coverage)
         mock_datasource = MagicMock()
         mock_datasource.list_plugins.return_value = ["local_csv", "csv_blob", "azure_blob"]
 
         mock_llm = MagicMock()
-        mock_llm.list_plugins.return_value = ["mock", "azure_openai"]
+        mock_llm.list_plugins.return_value = ["mock", "azure_openai", "http_openai", "static_test"]
 
         mock_sink = MagicMock()
-        mock_sink.list_plugins.return_value = ["csv", "signed_artifact", "local_bundle"]
+        mock_sink.list_plugins.return_value = [
+            "csv", "signed_artifact", "local_bundle",
+            "excel_workbook",
+            "azure_blob", "azure_blob_artifacts",
+            "zip_bundle", "reproducibility_bundle",
+            "github_repo", "azure_devops_repo", "azure_devops_artifact_repo",
+            "analytics_report", "analytics_visual", "enhanced_visual",
+            "embeddings_store", "file_copy",
+        ]
+
+        mock_middleware = MagicMock()
+        mock_middleware.list_plugins.return_value = [
+            "audit_logger", "azure_content_safety", "azure_environment",
+            "classified_material", "health_monitor", "pii_shield", "prompt_shield",
+        ]
 
         # Mock auto_discover to verify it's called
         with patch("elspeth.core.registry.central.auto_discover_internal_plugins") as mock_discover:
@@ -99,6 +130,7 @@ class TestCentralRegistryInit:
                 datasource_registry=mock_datasource,
                 llm_registry=mock_llm,
                 sink_registry=mock_sink,
+                middleware_registry=mock_middleware,
             )
 
             # Should have called auto_discover once
