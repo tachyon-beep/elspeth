@@ -43,7 +43,6 @@ jobs:
 
       - name: Install documentation dependencies
         run: |
-          python -m pip install --upgrade pip
           python -m pip install -r site-docs/requirements-docs.lock --require-hashes
           python -m pip install -e . --no-deps
 
@@ -117,7 +116,6 @@ jobs:
 
       - name: Install documentation dependencies
         run: |
-          python -m pip install --upgrade pip
           python -m pip install -r site-docs/requirements-docs.lock --require-hashes
           python -m pip install -e . --no-deps
 

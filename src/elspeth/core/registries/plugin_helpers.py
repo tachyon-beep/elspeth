@@ -21,7 +21,6 @@ from elspeth.core.base.plugin_context import PluginContext
 from elspeth.core.base.types import SecurityLevel
 from elspeth.core.security import (
     coalesce_determinism_level,
-    coalesce_security_level,
     ensure_security_level,
 )
 from elspeth.core.validation.base import ConfigurationError

@@ -29,7 +29,7 @@ from elspeth.core.registries.middleware import create_middleware
 # BUG-001 FIX: Lazy import to break circular dependency
 # Was: from elspeth.core.registry import central_registry
 # Moved inside _instantiate_sinks() to defer import until after module initialization
-from elspeth.core.security import resolve_determinism_level, resolve_security_level
+from elspeth.core.security import resolve_determinism_level
 from elspeth.core.validation.base import ConfigurationError
 
 # ============================================================================

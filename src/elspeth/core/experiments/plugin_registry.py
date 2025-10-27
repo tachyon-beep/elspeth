@@ -23,7 +23,6 @@ from elspeth.core.experiments.experiment_registries import (
     validation_plugin_registry,
 )
 from elspeth.core.registries.plugin_helpers import create_plugin_with_inheritance
-from elspeth.core.security import coalesce_security_level  # Still needed for validation functions
 from elspeth.core.validation.base import ConfigurationError
 from elspeth.plugins.orchestrators.experiment.protocols import (
     AggregationExperimentPlugin,
