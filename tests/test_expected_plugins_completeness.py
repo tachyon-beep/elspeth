@@ -25,11 +25,7 @@ def get_expected_plugins():
     import sys
     from pathlib import Path
 
-    # Read EXPECTED_PLUGINS directly from auto_discover.py as text
-    auto_discover_path = Path(__file__).parent.parent / "src" / "elspeth" / "core" / "registry" / "auto_discover.py"
-    content = auto_discover_path.read_text()
-
-    # Extract EXPECTED_PLUGINS dict (lines 59-116)
+    # Extract EXPECTED_PLUGINS dict (lines 59-116 from auto_discover.py)
     # Use exec to evaluate just the EXPECTED_PLUGINS definition
     namespace = {}
     exec(
