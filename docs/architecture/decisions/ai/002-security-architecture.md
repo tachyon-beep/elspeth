@@ -4,6 +4,8 @@
 
 Accepted (2025-10-23)
 
+**Implementation**: See VULN-001-002 (Sprint 1, 2025-10-27)
+
 ## Context
 
 Elspeth handles classified data (PSPF UNOFFICIAL→SECRET, HIPAA, PCI-DSS). Traditional access control checks clearance at consumption time - too late if data is already in memory. Need fail-fast mechanism.

@@ -2,7 +2,12 @@
 
 ## Status
 
-**DRAFT** (2025-10-26)
+**IMPLEMENTED** (2025-10-26)
+
+**Implementation**: Sprint 2 (ADR-003/VULN-003)
+- BasePluginRegistry[T] generic implemented in `src/elspeth/core/registries/base.py`
+- All 5 plugin type registries migrated (datasource, llm, sink, middleware, experiment)
+- Enhanced with CentralPluginRegistry facade (2025-10-27)
 
 ## Context
 

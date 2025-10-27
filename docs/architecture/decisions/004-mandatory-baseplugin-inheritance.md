@@ -1,9 +1,15 @@
 # ADR-004: Mandatory BasePlugin Inheritance (Breaking Change)
 
-**Status**: PROPOSED
+**Status**: IMPLEMENTED (2025-10-27)
 **Date**: 2025-10-25
 **Deciders**: Security Team, Core Platform Team
 **Related**: ADR-002 (Suite-level security), ADR-003 (Plugin type registry)
+**Implementation**: Sprint 1-2 (commits 3943102 through e0e44f1)
+- Phase 1.2: All 8 sinks migrated to BasePlugin
+- Phase 1.3: All LLM adapters migrated
+- Phase 1.4: All 6 middleware plugins migrated
+- Phase 2.3: All 9 baseline analyzers migrated
+- Result: All plugins now inherit from BasePlugin ABC
 
 ---
 

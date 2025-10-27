@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (2025-10-25) - Extends ADR-002
+**Accepted & IMPLEMENTED** (2025-10-25, impl 2025-10-27) - Extends ADR-002
 
 ## Context
 

@@ -2,8 +2,12 @@
 
 ## Status
 
-**Accepted** (2025-10-26)
-**Implemented** (2025-10-26)
+**Accepted & IMPLEMENTED** (2025-10-26)
+
+**Implementation**: Sprint 1 (commits 621b32b, 9508881)
+- Made `allow_downgrade` mandatory parameter (breaking change)
+- Hardened enforcement in all plugins
+- See: ADR-002-B for immutability enforcement
 
 ## Context
 

@@ -2,7 +2,7 @@
 
 ## Status
 
-PROPOSED (2025-10-25)
+**IMPLEMENTED** (2025-10-27) - Sprints 1-2
 
 ## TL;DR - "Security Bones" Design
 

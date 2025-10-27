@@ -2,7 +2,7 @@
 
 ## Status
 
-**Proposed** (2025-10-26) - Extends ADR-002, ADR-005
+**IMPLEMENTED** (2025-10-27) - Sprint 3 (VULN-004)
 
 ## Context
 

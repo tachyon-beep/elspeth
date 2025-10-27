@@ -4,6 +4,11 @@
 
 Accepted (2025-10-23)
 
+**Implementation**: See VULN-001-002 (Sprint 1, 2025-10-27)
+- SecureDataFrame trusted container (ADR-002-A)
+- Runtime clearance validation (suite_runner.py)
+- Plugin type registry completeness (ADR-003)
+
 ## Context
 
 Elspeth orchestrates experiments that chain datasources, LLM transforms, and sinks. Many

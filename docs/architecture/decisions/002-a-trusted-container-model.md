@@ -6,6 +6,12 @@ Accepted (2025-10-25)
 
 Extends [ADR-002](002-security-architecture.md)
 
+**Implementation**: Sprint 1 (VULN-001-002, 2025-10-27)
+- SecureDataFrame with constructor protection via `__post_init__`
+- Factory method `create_from_datasource()` with stack inspection
+- Runtime validation at every data hand-off
+- Commit: 5ef1110 (Sprint 1 completion)
+
 ## Context
 
 ADR-002 established Multi-Level Security (MLS) enforcement with two layers: start-time validation (orchestrator rejects misconfigured pipelines) and runtime validation (`SecureDataFrame` validates access at every data hand-off).

@@ -2,9 +2,15 @@
 
 ## Status
 
-**Proposed** (2025-10-26)
+**IMPLEMENTED** (2025-10-27)
 
 Extends [ADR-002](002-security-architecture.md), [ADR-005](005-frozen-plugin-capability.md)
+
+**Implementation**: Sprint 3 (VULN-004) - Three-layer defense
+- Layer 1 (e8c1c80): Schema enforcement with `additionalProperties: false`
+- Layer 2 (e23aee3): Registry runtime rejection of security policy fields
+- Layer 3 (6a92546, 3d18f10): Post-creation verification of declared vs actual
+- See: `docs/implementation/VULN-004-registry-enforcement.md`
 
 ## Context
 
