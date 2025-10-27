@@ -31,9 +31,6 @@ class BasePluginFactory(Generic[T]):
     Consolidates the factory pattern repeated across 5 registries.
     Provides schema validation and consistent plugin instantiation.
 
-    Type Parameters:
-        T: The type of plugin this factory creates
-
     Attributes:
         create: Factory callable that creates plugin instances
         schema: Optional JSON schema for validation
@@ -183,9 +180,6 @@ class BasePluginRegistry(Generic[T]):
     Provides common functionality for registering, validating, and creating
     plugins with consistent security context handling. This class consolidates
     the registry pattern previously duplicated across 5 implementations.
-
-    Type Parameters:
-        T: The type of plugin this registry manages
 
     Attributes:
         plugin_type: Human-readable plugin type name
