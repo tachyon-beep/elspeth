@@ -14,9 +14,10 @@ CRITICAL: Each property test should run 1000+ examples to have confidence
 """
 
 import pytest
-from hypothesis import given, strategies as st, settings
 from pathlib import Path
 from typing import List
+
+from hypothesis import given, strategies as st, settings
 
 from elspeth.core.security import SecurityLevel, SecureDataFrame
 from elspeth.core.experiments.suite_runner import (

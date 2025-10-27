@@ -16,9 +16,10 @@ CRITICAL: These are not regression tests - they define NEW security behavior.
 """
 
 import pytest
-from hypothesis import given, strategies as st
 from pathlib import Path
 from typing import Any
+
+from hypothesis import given, strategies as st
 
 # Import types that already exist
 from elspeth.core.security import SecurityLevel, SecureDataFrame
