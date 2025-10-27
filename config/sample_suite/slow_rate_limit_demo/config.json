@@ -7,7 +7,6 @@
   "prompt_pack": "sample",
   "rate_limiter": {
     "plugin": "fixed_window",
-    "security_level": "official",
     "determinism_level": "guaranteed",
     "options": {
       "requests": 1,
@@ -16,7 +15,6 @@
   },
   "cost_tracker": {
     "plugin": "fixed_price",
-    "security_level": "official",
     "determinism_level": "guaranteed",
     "options": {
       "prompt_token_price": 0.0001,
@@ -29,7 +27,6 @@
   "baseline_plugins": [
     {
       "name": "score_delta",
-      "security_level": "official",
       "determinism_level": "guaranteed"
     }
   ]

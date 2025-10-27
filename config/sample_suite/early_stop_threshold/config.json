@@ -8,7 +8,6 @@
   "early_stop_plugins": [
     {
       "name": "threshold",
-      "security_level": "official",
       "determinism_level": "guaranteed",
       "options": {
         "metric": "scores.analysis",
@@ -20,7 +19,6 @@
     },
     {
       "name": "threshold",
-      "security_level": "official",
       "determinism_level": "guaranteed",
       "options": {
         "metric": "score",
