@@ -51,6 +51,7 @@ dev = [
   "types-requests==2.32.4.20250913",
   "types-PyYAML==6.0.12.20250915",
   "pip-tools==7.5.1",
+  "setuptools==80.9.0",  # Required by opentelemetry-instrumentation (via semgrep)
   "pip-audit==2.9.0",
   "cyclonedx-bom==7.2.0",
   "bandit==1.8.6",
