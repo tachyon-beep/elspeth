@@ -107,19 +107,22 @@ class TestADR002ATrustedContainerModel:
             Malicious plugin creates "fresh" frame with UNOFFICIAL classification,
             bypassing uplifting requirements and laundering SECRET data.
 
-        Fix:
-            Add init=False to _created_by_datasource field definition to remove
-            it from __init__ signature entirely.
+        Defense Layers (as of VULN-011):
+            1. Capability token gating in __new__() blocks ALL direct construction
+            2. init=False on _created_by_datasource removes from signature (defense-in-depth)
 
         Security Property:
-            SecureDataFrame(..., _created_by_datasource=True) → TypeError
+            SecureDataFrame(..., _created_by_datasource=True) → SecurityValidationError
+            (Token gating catches attack before __init__ signature check)
 
         Discovery: Code review by GPT-4 (2025-10-25)
+        Updated: VULN-011 token gating (2025-10-29)
         """
         df = pd.DataFrame({"secret": ["classified1", "classified2"]})
 
         # Attempt bypass by passing _created_by_datasource=True
-        with pytest.raises(TypeError) as exc_info:
+        # NOTE: Token gating in __new__() now catches this BEFORE __init__
+        with pytest.raises(SecurityValidationError) as exc_info:
             SecureDataFrame(
                 data=df,
                 security_level=SecurityLevel.UNOFFICIAL,  # DOWNGRADE attempt
@@ -127,11 +130,8 @@ class TestADR002ATrustedContainerModel:
             )
 
         error_msg = str(exc_info.value)
-        assert "_created_by_datasource" in error_msg, (
-            "Error should mention the invalid parameter name"
-        )
-        assert "unexpected keyword argument" in error_msg, (
-            "Error should indicate parameter not in __init__ signature"
+        assert "authorized factory methods" in error_msg, (
+            "Error should explain only factory methods can create frames"
         )
 
     def test_invariant_datasource_can_create_frame(self):
@@ -353,7 +353,7 @@ class TestADR002ATrustedContainerModel:
         assert exc_info.value is not None, "Spoofing attack should raise SecurityValidationError"
 
     def test_security_fail_closed_when_frame_unavailable(self, monkeypatch):
-        """SECURITY INVARIANT: Fail-closed when stack inspection unavailable (CVE-ADR-002-A-003).
+        """SECURITY INVARIANT: Fail-closed regardless of runtime environment (CVE-ADR-002-A-003).
 
         Attack Prevented: Bypass via exotic runtime or C extension
             - Attacker runs code in environment where inspect.currentframe() returns None
@@ -361,17 +361,24 @@ class TestADR002ATrustedContainerModel:
             - Could be malicious C extension that hides call stack
 
         Security Property (ADR-001 Fail-Closed Principle):
-            When security control unavailable (can't inspect stack) → DENY operation
-            Never fail-open for convenience - classified data systems MUST fail-closed
+            Construction blocked regardless of runtime environment or stack visibility.
 
-        Before Fix: Returned (fail-open) → allowed creation
-        After Fix: Raises SecurityValidationError (fail-closed) → denies creation
+        Historical Context (CVE-ADR-002-A-003):
+            - Original defense: Stack inspection (fragile, runtime-dependent)
+            - VULN-011 upgrade: Capability token gating (robust, runtime-independent)
 
-        Expected State: PASSES (GREEN) after CVE-ADR-002-A-003 fix
+        Current Defense (VULN-011):
+            Capability token gating in __new__() blocks ALL direct construction attempts,
+            regardless of inspect.currentframe() availability. More robust than stack
+            inspection because it doesn't depend on runtime introspection support.
+
+        Expected State: PASSES (GREEN) with token gating (as of VULN-011)
         """
         import inspect
 
         # Mock inspect.currentframe() to return None (simulates unavailable stack inspection)
+        # NOTE: This no longer matters with capability token gating, but we keep the test
+        # to verify fail-closed behavior works regardless of runtime environment
         monkeypatch.setattr(inspect, "currentframe", lambda: None)
 
         df = pd.DataFrame({"data": [1, 2, 3]})
@@ -381,12 +388,9 @@ class TestADR002ATrustedContainerModel:
             SecureDataFrame(df, SecurityLevel.OFFICIAL)
 
         error_msg = str(exc_info.value)
-        # Verify error explains the security control failure
-        assert "stack inspection" in error_msg.lower(), (
-            "Error should explain stack inspection unavailable"
-        )
-        assert "unavailable" in error_msg.lower(), (
-            "Error should mention runtime limitation"
+        # Verify error explains the security control (updated for token gating)
+        assert "authorized factory methods" in error_msg.lower(), (
+            "Error should explain only factory methods can create frames"
         )
         assert "create_from_datasource" in error_msg.lower(), (
             "Error should guide to safe factory method"
