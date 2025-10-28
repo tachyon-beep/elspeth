@@ -169,7 +169,7 @@ def test_error_message_guides_developers():
 
     Expected: Clear error message on attempted access
     """
-    with pytest.raises((AttributeError, TypeError)) as exc_info:
+    with pytest.raises((AttributeError, TypeError)):
         SecureDataFrame._compute_seal(pd.DataFrame(), SecurityLevel.OFFICIAL)
 
     # Error message should indicate method not available or internal-only

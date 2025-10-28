@@ -148,7 +148,7 @@ def test_end_to_end_construction_performance():
     baseline_us = 49.458
     change_pct = ((avg_per_call_us - baseline_us) / baseline_us) * 100
 
-    print(f"\n📊 End-to-End Construction + Validation:")
+    print("\n📊 End-to-End Construction + Validation:")
     print(f"   Current: {avg_per_call_us:.3f}µs per call")
     print(f"   Baseline: {baseline_us}µs")
     print(f"   Change: {change_pct:+.1f}%")
@@ -294,5 +294,5 @@ def test_performance_comparison_summary():
     print(f"{'  Uplifting':<30} {results['Uplifting']:>10.3f}     {'New seal computed':<30}")
     print("=" * 75)
     print(f"\nValidation: Security overhead ({security_overhead:.1f}µs) is minimal")
-    print(f"DataFrame construction (~50µs) dominates timing as expected")
+    print("DataFrame construction (~50µs) dominates timing as expected")
     print("✅ VULN-011 Phase 4 Performance Validation: PASSED")
