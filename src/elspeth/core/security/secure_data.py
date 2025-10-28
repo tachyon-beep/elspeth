@@ -362,6 +362,10 @@ class SecureDataFrame:
             >>> result = output_df.with_uplifted_security_level(SecurityLevel.OFFICIAL)
             >>> assert result.security_level == SecurityLevel.SECRET  # max() wins
         """
+        # SECURITY (VULN-011 Critical): Verify seal BEFORE reading security_level
+        # Attack: Tamper security_level→UNOFFICIAL, call uplift(UNOFFICIAL), get "legitimate" UNOFFICIAL frame
+        self._verify_seal()
+
         uplifted_level = max(self.security_level, new_level)
 
         # Pass token to __new__ for authorization (VULN-011)
@@ -405,6 +409,10 @@ class SecureDataFrame:
             ...     SecurityLevel.SECRET
             ... )
         """
+        # SECURITY (VULN-011 Critical): Verify seal BEFORE reading security_level
+        # Attack: Tamper security_level→UNOFFICIAL, call with_new_data(), get "legitimate" UNOFFICIAL frame
+        self._verify_seal()
+
         # Pass token to __new__ for authorization (VULN-011)
         instance = SecureDataFrame.__new__(SecureDataFrame, _token=_CONSTRUCTION_TOKEN)
         object.__setattr__(instance, "data", new_data)
