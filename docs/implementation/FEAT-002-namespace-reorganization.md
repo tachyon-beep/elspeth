@@ -6,6 +6,7 @@
 **Status**: PLANNED (Execute after VULN-004 + FEAT-001 merge)
 **Depends On**: VULN-004 (registry enforcement), FEAT-001 (class renaming)
 **Breaking Changes**: Yes (pre-1.0 = breaking changes acceptable, no backward compatibility needed)
+**GitHub Issue**: #23
 
 ---
 
