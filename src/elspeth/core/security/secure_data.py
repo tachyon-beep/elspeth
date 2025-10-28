@@ -10,6 +10,44 @@ Security Properties:
 
 CRITICAL: Security level uplifting is NOT optional - it's enforced by the
           type system and immutability guarantees.
+
+╔═══════════════════════════════════════════════════════════════════════════╗
+║ KNOWN SECURITY LIMITATION (CVE-ADR-002-A-009)                            ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+
+CURRENT IMPLEMENTATION: Secrets stored in-process via closure encapsulation
+
+VULNERABILITY: Exported functions (_get_construction_token) return secrets,
+making them accessible to determined plugins with Python introspection.
+
+Example Attack:
+    from elspeth.core.security.secure_data import _get_construction_token
+    token = _get_construction_token()  # Returns closure-encapsulated secret
+    SecureDataFrame.__new__(SecureDataFrame, _token=token)  # Bypass!
+
+DEFENSE-IN-DEPTH CONTEXT:
+- Primary: Positively audited plugins in secure environment
+- Secondary: This closure encapsulation blocks casual imports
+- Tertiary: Secrets accessible to determined attacker with Python access
+
+FUTURE SOLUTION: Sidecar security daemon with process boundary isolation
+- Secrets in separate process (OS-enforced boundary)
+- IPC for authorization/seal computation
+- Requires daemon for classified data (SECRET+)
+- Standalone mode limited to OFFICIAL_SENSITIVE maximum
+
+TRACKING: See issue #40 for full implementation plan and timeline
+         (Target: Q2 2025 when operational maturity achieved)
+
+POLICY: Current implementation acceptable for:
+- Vetted plugins in secure environment
+- OFFICIAL and OFFICIAL_SENSITIVE classifications
+- Defense-in-depth layer (not sole protection)
+
+NOT ACCEPTABLE for:
+- Untrusted plugin code
+- Classified data (SECRET+) without sidecar daemon
+- Sole security boundary (must be layered)
 """
 
 import secrets
@@ -24,8 +62,20 @@ from elspeth.core.base.types import SecurityLevel
 def _create_secure_factories():
     """Create factory functions with closure-encapsulated secrets.
 
+    ⚠️  SECURITY LIMITATION (CVE-ADR-002-A-009): See module docstring above
+
+    This function returns get_token() which exposes the closure-encapsulated
+    secret to callers. While better than module-level globals, this is still
+    vulnerable to determined attackers:
+
+        from secure_data import _get_construction_token
+        token = _get_construction_token()  # Gets secret from closure!
+
+    FUTURE FIX: Sidecar daemon (issue #40) - secrets in separate process,
+    never returned to Python code. Target: Q2 2025.
+
     Secrets exist ONLY in closure scope, never as module attributes.
-    This prevents untrusted plugins from importing secrets:
+    This prevents untrusted plugins from importing secrets directly:
 
     BLOCKED ATTACK:
         from elspeth.core.security.secure_data import _CONSTRUCTION_TOKEN
@@ -38,12 +88,14 @@ def _create_secure_factories():
 
     This is pure-Python hardening. For nation-state threat model, use:
     - C extension for secret storage
-    - Separate trusted process with IPC
+    - Separate trusted process with IPC (see issue #40)
     - Hardware security module (HSM)
 
     Returns:
         Tuple of (compute_seal, verify_token, get_token) functions
         with secrets encapsulated in their closures
+
+    WARNING: get_token() returns the secret - vulnerable to export attack
     """
     # Secrets exist ONLY in this closure scope (VULN-011 Phase 1 + CVE-ADR-002-A-008)
     # 256-bit entropy, process-local, NOT accessible via module namespace
@@ -111,12 +163,22 @@ def _create_secure_factories():
     def get_token() -> bytes:
         """Return construction token for internal factory methods.
 
+        ⚠️  SECURITY VULNERABILITY (CVE-ADR-002-A-009): This function
+        exposes the secret to callers, defeating closure encapsulation.
+
+        Plugin code CAN import and call this:
+            from secure_data import _get_construction_token
+            token = _get_construction_token()  # Returns secret!
+
+        This is a KNOWN LIMITATION. Fix tracked in issue #40.
+
         Returns:
-            Closure-encapsulated construction token
+            Closure-encapsulated construction token (VULNERABLE TO EXPORT)
 
         Security:
-            - Only called by trusted factory methods in this module
-            - Plugin code cannot import or call this function
+            - VULNERABLE: Exporting this function returns the secret
+            - Future: Sidecar daemon (issue #40) - no function returns secrets
+            - Current: Acceptable for vetted plugins in secure environment
         """
         return _construction_token
 
@@ -125,6 +187,11 @@ def _create_secure_factories():
 
 # Module-level: Only factory functions, NEVER secrets themselves
 # Secrets are encapsulated in closure scope, unreachable via import
+#
+# ⚠️  SECURITY LIMITATION (CVE-ADR-002-A-009):
+# While secrets aren't module attributes, _get_construction_token() RETURNS
+# the secret, making it accessible to plugins. This is a known vulnerability.
+# See module docstring and issue #40 for sidecar daemon solution (Q2 2025).
 _compute_seal, _verify_construction_token, _get_construction_token = (
     _create_secure_factories()
 )
