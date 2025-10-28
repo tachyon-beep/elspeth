@@ -121,10 +121,8 @@ class BasePluginRegistry(Generic[T], ABC):
         plugin_class = self.get(name)
         return plugin_class(**config)
 
-    # NOTE: jsonschema remains the canonical validation engine for registry
-    # schemas. Pydantic is deliberately not used here to avoid a split-brain
-    # validation model—plugin authors rely on a single technology path when
-    # publishing schemas.
+    # NOTE: See "Technology Choices" in Consequences section for rationale
+    # on jsonschema vs Pydantic decision.
 
     @abstractmethod
     def _validate_schema(self, schema: dict) -> None:
@@ -254,6 +252,35 @@ Registry enforces security at multiple layers:
 
 4. **Schema Coupling**: Plugin schema must be defined at registration time
    - *Mitigation*: Lazy schema loading supported via callable schema factory
+
+### Technology Choices
+
+#### jsonschema vs Pydantic
+
+**Decision**: `jsonschema` is the canonical validation engine for registry schemas. Pydantic is **deliberately not used** for plugin validation.
+
+**Rationale**:
+
+1. **Single Technology Path**: Plugin authors rely on one validation approach when publishing schemas
+   - Using both jsonschema and Pydantic creates a "split-brain" validation model
+   - Different validation semantics between the two libraries leads to confusion
+   - Single path simplifies documentation, examples, and troubleshooting
+
+2. **Schema Portability**: JSON Schema is language-agnostic
+   - Schemas can be validated outside Python (CLI tools, web UIs, other languages)
+   - Pydantic schemas are Python-specific and require code execution to validate
+
+3. **Configuration Separation**: Plugin configs are user-provided dictionaries
+   - jsonschema validates dictionaries directly (natural fit)
+   - Pydantic requires instantiating Python objects (adds complexity layer)
+
+4. **Existing Investment**: Pre-Phase-2 codebase already used jsonschema extensively
+   - Migration to Pydantic would require rewriting all existing schemas
+   - No compelling benefit to justify rewrite cost
+
+**Trade-off**: We lose Pydantic's automatic model generation, editor autocomplete for configs, and Python-native validation errors. This is acceptable because plugin validation happens at registration time (fail-fast), not runtime, and schema validation errors are developer-facing (not end-user).
+
+**Future Consideration**: If we add an interactive plugin authoring CLI or web UI, we could generate Pydantic models *from* JSON Schema for editor support, but JSON Schema remains the canonical source of truth.
 
 ### Migration Path
 
