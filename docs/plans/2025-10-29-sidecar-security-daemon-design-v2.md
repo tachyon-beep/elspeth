@@ -186,14 +186,14 @@ os.chown("/run/sidecar/.session", sidecar_uid, appuser_gid)
 
 **At Orchestrator Startup:**
 ```python
-# orchestrator (runs as UID appuser, member of appuser group)
+# orchestrator (runs as UID 1000 appuser, member of appuser group GID 1000)
 session_key = Path("/run/sidecar/.session").read_bytes()  # Can read (group-readable)
 # Use session_key to authenticate every request
 ```
 
 **Security Properties:**
 - Session key changes on every daemon restart (ephemeral)
-- Plugin worker (UID appuser, but NOT in appuser group for session file) cannot read
+- Plugin worker (UID 1002 appplugin, GID 1002 appplugin, NOT in appuser group) cannot read `/run/sidecar/.session`
 - Session key never logged or exposed via API
 
 ### Operation 1: Authorize Frame Construction (Step 1 of 2)
@@ -598,6 +598,53 @@ class SecureFrameProxy:
     # NO access to _compute_seal, _verify_seal, or seal internals
 
 
+# SECUREDATAFRAME INTERNAL CONSTRUCTOR (orchestrator-side only)
+class SecureDataFrame:
+    """SecureDataFrame with internal constructor for sidecar integration.
+
+    The _from_sidecar() class method is ONLY callable by orchestrator code.
+    It bypasses all validation and applies the daemon-provided seal verbatim,
+    ensuring the local closure secret is NEVER used.
+    """
+
+    @classmethod
+    def _from_sidecar(
+        cls,
+        *,
+        data: pd.DataFrame,
+        security_level: SecurityLevel,
+        seal: bytes,
+        created_by_datasource: bool
+    ) -> 'SecureDataFrame':
+        """Create SecureDataFrame with daemon-provided seal (orchestrator-only).
+
+        CRITICAL: This method bypasses all validation and uses the seal
+        provided by the sidecar daemon verbatim. It NEVER uses the local
+        closure secret (_compute_seal), ensuring ALL seal computation
+        happens in the daemon.
+
+        This is the ONLY way the orchestrator should create frames when
+        mediating proxy RPC calls. Using with_uplifted_security_level() or
+        with_new_data() would invoke local seal computation, which we want
+        to avoid (all seals must come from daemon).
+
+        Args:
+            data: The DataFrame to wrap
+            security_level: Security classification level
+            seal: Seal bytes from sidecar daemon (already computed)
+            created_by_datasource: Flag for constructor protection
+
+        Returns:
+            SecureDataFrame instance with daemon-provided seal
+        """
+        inst = object.__new__(cls)
+        object.__setattr__(inst, "data", data)
+        object.__setattr__(inst, "security_level", security_level)
+        object.__setattr__(inst, "_created_by_datasource", created_by_datasource)
+        object.__setattr__(inst, "_seal", seal)
+        return inst
+
+
 # ORCHESTRATOR RPC HANDLER (UID 1000)
 class OrchestratorRPCHandler:
     """Handles proxy RPC calls from plugin worker.
@@ -610,16 +657,30 @@ class OrchestratorRPCHandler:
         self._sidecar = sidecar_client
 
     def handle_uplift(self, proxy_id: str, level: str) -> dict:
-        """Handle with_uplifted_security_level RPC."""
+        """Handle with_uplifted_security_level RPC.
+
+        CRITICAL: Uses _from_sidecar() to apply daemon-provided seal verbatim.
+        This ensures the local closure secret is NEVER used - all seal
+        computation happens in the sidecar daemon.
+        """
         # Get real frame from registry
         frame = self._frames[proxy_id]
 
-        # Compute seal via sidecar daemon (NOT in plugin worker)
+        # Compute seal via sidecar daemon (NOT in plugin worker, NOT locally)
         response = self._sidecar.compute_seal(id(frame.data), level)
         seal = base64.b64decode(response["seal"])
 
-        # Create uplifted frame (orchestrator-side only)
-        new_frame = frame.with_uplifted_security_level(SecurityLevel[level])
+        # Compute uplifted level (max of current and requested)
+        uplifted_level = max(frame.security_level, SecurityLevel[level])
+
+        # Create uplifted frame using daemon-provided seal (orchestrator-side only)
+        # Uses _from_sidecar() to apply seal verbatim (no local computation)
+        new_frame = SecureDataFrame._from_sidecar(
+            data=frame.data,
+            security_level=uplifted_level,
+            seal=seal,
+            created_by_datasource=False
+        )
 
         # Register new frame, return new proxy ID
         new_proxy_id = secrets.token_hex(16)
@@ -628,16 +689,27 @@ class OrchestratorRPCHandler:
         return {"new_proxy_id": new_proxy_id}
 
     def handle_with_new_data(self, proxy_id: str, data_dict: dict) -> dict:
-        """Handle with_new_data RPC."""
+        """Handle with_new_data RPC.
+
+        CRITICAL: Uses _from_sidecar() to apply daemon-provided seal verbatim.
+        This ensures the local closure secret is NEVER used - all seal
+        computation happens in the sidecar daemon.
+        """
         frame = self._frames[proxy_id]
         new_data = pd.DataFrame(data_dict)
 
-        # Compute seal via sidecar (orchestrator mediates)
+        # Compute seal via sidecar daemon (NOT locally)
         response = self._sidecar.compute_seal(id(new_data), frame.security_level.value)
         seal = base64.b64decode(response["seal"])
 
-        # Update frame with new data (orchestrator-side only)
-        new_frame = frame.with_new_data(new_data)
+        # Create new frame with updated data using daemon-provided seal
+        # Uses _from_sidecar() to apply seal verbatim (no local computation)
+        new_frame = SecureDataFrame._from_sidecar(
+            data=new_data,
+            security_level=frame.security_level,  # Preserve classification
+            seal=seal,
+            created_by_datasource=False
+        )
 
         new_proxy_id = secrets.token_hex(16)
         self._frames[new_proxy_id] = new_frame
@@ -666,13 +738,21 @@ Every operation follows this pattern to ensure seal computation ONLY happens in 
    ```python
    # Inside OrchestratorRPCHandler.handle_uplift()
    seal_response = self._sidecar.compute_seal(data_id, "SECRET")
+   seal = base64.b64decode(seal_response["seal"])
    # Sidecar returns seal (NO token exposure)
    ```
 
-4. **Orchestrator Updates Real Frame**:
+4. **Orchestrator Creates New Frame with Daemon-Provided Seal**:
    ```python
-   # Orchestrator creates new frame with updated seal
-   new_frame = frame.with_uplifted_security_level(SecurityLevel.SECRET)
+   # Orchestrator uses _from_sidecar() to apply daemon seal verbatim
+   # CRITICAL: Does NOT call with_uplifted_security_level() (would use local closure)
+   uplifted_level = max(frame.security_level, SecurityLevel.SECRET)
+   new_frame = SecureDataFrame._from_sidecar(
+       data=frame.data,
+       security_level=uplifted_level,
+       seal=seal,  # Daemon-provided seal applied verbatim
+       created_by_datasource=False
+   )
    self._frames[new_proxy_id] = new_frame
    ```
 
@@ -696,6 +776,7 @@ Plugin workers can ONLY invoke these operations via proxy:
 
 - ✅ **No Seal Computation in Plugin Worker**: All seal operations happen in orchestrator via sidecar
 - ✅ **No Seal Verification in Plugin Worker**: Legitimate workflows still pass (orchestrator validates)
+- ✅ **No Local Closure Secret Used**: Every proxy call routes through `_from_sidecar()`, ensuring the daemon-provided seal is applied verbatim and the orchestrator's local closure secret is NEVER used for seal computation
 - ✅ **Fail-Closed on RPC Errors**: Plugin worker cannot proceed if orchestrator RPC fails
 - ✅ **Proxy Objects Cannot Be Forged**: Proxy IDs are secrets.token_hex(16) (128-bit random)
 - ✅ **Orchestrator Validates Proxy IDs**: Unknown proxy_id → error, prevents forgery
