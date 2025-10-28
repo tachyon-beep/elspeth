@@ -10,7 +10,7 @@
 
 ### Problem Statement
 
-Elspeth orchestrates experiments that may process sensitive data subject to stringent regulatory requirements, including Australian Government security frameworks (Protected Security Policy Framework, Information Security Manual), healthcare regulations (HIPAA), and financial compliance standards (PCI-DSS). The system must support:
+Elspeth orchestrates experiments that may process sensitive data subject to stringent regulatory requirements, including Australian Government security frameworks (Protected Security Policy Framework, Information Security Manual), US healthcare regulations (HIPAA), and financial compliance standards (PCI-DSS). The system must support:
 
 1. **Confidentiality controls** for classified data at multiple security levels
 2. **Reproducible analytics** with tamper-evident audit trails
@@ -113,6 +113,7 @@ Fail-open behaviour creates exploitable attack surfaces where adversaries can de
 The following production code demonstrates fail-closed enforcement:
 
 1. **Stack Inspection Failure** (`src/elspeth/core/security/secure_data.py:88-102`)
+
    ```python
    frame = inspect.currentframe()
    if frame is None:
@@ -122,9 +123,11 @@ The following production code demonstrates fail-closed enforcement:
            "SecureDataFrame creation blocked for security."
        )
    ```
+
    **Context**: `SecureDataFrame` uses stack inspection to verify creation only from trusted callers (datasources or trusted container methods). If Python runtime doesn't support stack inspection, deny creation rather than allowing unverified construction.
 
 2. **Path Validation Enforcement** (`src/elspeth/core/utils/path_guard.py:18-38`)
+
    ```python
    def resolve_under_base(target: Path, base: Path) -> Path:
        """Resolve target under base without following the final component.
@@ -136,9 +139,11 @@ The following production code demonstrates fail-closed enforcement:
        if common != base_resolved:
            raise ValueError(f"Path parent '{parent_resolved}' escapes allowed base")
    ```
+
    **Context**: File sinks validate all write paths remain within allowed directories. If validation cannot confirm path safety, reject write operation. Verified by `tests/test_runner_characterization.py:377-400`.
 
 3. **Operating Level Access** (`src/elspeth/core/base/plugin.py:254-336`)
+
    ```python
    @final
    def get_effective_level(self) -> SecurityLevel:
@@ -155,9 +160,11 @@ The following production code demonstrates fail-closed enforcement:
            )
        return context.operating_level
    ```
+
    **Context**: Plugins access pipeline operating level for security-aware decisions. If operating level hasn't been computed (programming error), fail loudly rather than returning a default or fallback value.
 
 4. **Security Validation** (`src/elspeth/core/experiments/suite_runner.py:635-680`)
+
    ```python
    def _validate_experiment_security(
        self, experiment: ExperimentConfig, runner: ExperimentRunner,
@@ -171,6 +178,7 @@ The following production code demonstrates fail-closed enforcement:
        # Collect all plugins, compute minimum, validate all can operate
        # Abort pipeline construction on any validation failure
    ```
+
    **Context**: Suite runner validates all plugins have sufficient clearance for pipeline operating level. Any insufficient clearance aborts pipeline construction before data access.
 
 **Testing Requirements**:
@@ -244,6 +252,7 @@ By failing loud and failing immediately, we:
    - **Remediation hint**: Where to look or what to fix (when applicable)
 
    **Example**:
+
    ```python
    raise SecurityValidationError(
        f"{type(self).__name__} has clearance {self._security_level.name}, "
@@ -270,6 +279,7 @@ By failing loud and failing immediately, we:
 The following production code demonstrates fail-loud enforcement:
 
 1. **Operating Level Not Set** (`src/elspeth/core/base/plugin.py:319-332`)
+
    ```python
    if context is None:
        raise RuntimeError(
@@ -282,9 +292,11 @@ The following production code demonstrates fail-loud enforcement:
            f"Operating level is computed during validation and propagated via _propagate_operating_level()."
        )
    ```
+
    **Context**: Plugins accessing operating level before validation completes indicates programming error (wrong lifecycle usage). Fail immediately with detailed diagnostic rather than returning fallback value.
 
 2. **Insufficient Clearance** (`src/elspeth/core/base/plugin.py:376-382`)
+
    ```python
    @final
    def validate_can_operate_at_level(self, operating_level: SecurityLevel) -> None:
@@ -296,9 +308,11 @@ The following production code demonstrates fail-loud enforcement:
                f"Insufficient clearance for higher classification (Bell-LaPadula MLS violation)."
            )
    ```
+
    **Context**: Plugins with insufficient clearance cannot access higher-classification data. Fail immediately rather than attempting to run with limited access or skipping the plugin.
 
 3. **Frozen Plugin Downgrade Rejection** (`src/elspeth/core/base/plugin.py:384-390`)
+
    ```python
    if operating_level < self._security_level and not self._allow_downgrade:
        raise SecurityValidationError(
@@ -307,6 +321,7 @@ The following production code demonstrates fail-loud enforcement:
            f"This plugin requires exact level matching and does not support trusted downgrade."
        )
    ```
+
    **Context**: Frozen plugins (ADR-005) require exact security level matching. Attempting to use at different level fails loudly rather than adapting behaviour.
 
 **Architectural Boundaries for Recovery**:
@@ -318,6 +333,7 @@ While security controls fail loud immediately, system-level recovery is handled 
 - **CLI Entry Point**: Catches suite-level failures, reports to user, exits with error code
 
 Recovery at these boundaries MUST NOT:
+
 - Retry with weakened security controls
 - Bypass validation that failed
 - Mask security failures with generic error messages
@@ -548,18 +564,21 @@ This ADR affects all subsequent development:
 ### Implementation References
 
 **Core Security Modules**:
+
 - `src/elspeth/core/base/plugin.py` – BasePlugin with sealed security methods (`get_security_level`, `get_effective_level`, `validate_can_operate_at_level`)
 - `src/elspeth/core/security/secure_data.py` – SecureDataFrame with fail-closed stack inspection (lines 88-102)
 - `src/elspeth/core/experiments/suite_runner.py` – Pipeline security validation (`_validate_experiment_security`, line 635+)
 - `src/elspeth/core/utils/path_guard.py` – Fail-closed path validation for sink writes
 
 **Security Control Documentation**:
+
 - `docs/architecture/security-controls.md` – Comprehensive security control inventory with ISM mapping
 - `docs/architecture/plugin-security-model.md` – Plugin security architecture and clearance model
 - `docs/compliance/CONTROL_INVENTORY.md` – Security control evidence for certification
 - `docs/compliance/TRACEABILITY_MATRIX.md` – ISM control traceability to implementation
 
 **Testing References**:
+
 - `tests/test_runner_characterization.py` – Characterisation tests verifying fail-closed behaviour (line 377: `test_checkpoint_config_fails_closed_on_missing_allowed_base`)
 - `tests/test_security_*.py` – Security validation test suites
 - `tests/security/test_security_hardening.py` – Security hardening integration tests
