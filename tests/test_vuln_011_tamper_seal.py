@@ -192,26 +192,30 @@ def test_seal_preserved_with_same_data():
 
 
 def test_seal_key_is_module_private():
-    """SECURITY: Verify seal key follows module-private convention.
+    """SECURITY: Verify seal key is closure-encapsulated (CVE-ADR-002-A-008).
 
-    The HMAC key should be module-private (like _CONSTRUCTION_TOKEN).
-    Python convention: leading underscore = internal use only.
+    The HMAC key should NOT be accessible as module attribute.
+    This prevents plugins from importing the key and forging seals.
 
-    Expected: Key exists, is bytes, follows naming convention
+    Expected: Key does NOT exist as module attribute (closure-encapsulated)
     """
     import elspeth.core.security.secure_data as module
 
-    # Verify key exists and is bytes
-    assert hasattr(module, "_SEAL_KEY"), "_SEAL_KEY should exist in module"
-    assert isinstance(module._SEAL_KEY, bytes), "_SEAL_KEY should be bytes"
-    assert len(module._SEAL_KEY) == 32, "_SEAL_KEY should be 32 bytes (256-bit)"
+    # CRITICAL: _SEAL_KEY should NOT exist as module attribute
+    assert not hasattr(module, "_SEAL_KEY"), (
+        "_SEAL_KEY is accessible via import! This allows seal forgery. "
+        "CVE-ADR-002-A-008: Seal key must be closure-encapsulated."
+    )
 
-    # Verify it's not exported via __all__ (if __all__ is defined)
+    # Verify __all__ doesn't export it either (if __all__ is defined)
     if hasattr(module, "__all__"):
         assert "_SEAL_KEY" not in module.__all__, "_SEAL_KEY should not be in __all__"
 
-    # Document: Leading underscore is Python's module-private convention
-    # Technically still importable, but signals "internal use only"
+    # Verify _CONSTRUCTION_TOKEN also not accessible (same fix)
+    assert not hasattr(module, "_CONSTRUCTION_TOKEN"), (
+        "_CONSTRUCTION_TOKEN is accessible via import! This allows bypass. "
+        "CVE-ADR-002-A-008: Token must be closure-encapsulated."
+    )
 
 
 def test_error_message_is_security_conscious():

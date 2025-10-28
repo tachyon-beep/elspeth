@@ -138,23 +138,27 @@ def test_compute_seal_not_accessible_from_plugins():
 
 
 def test_seal_key_remains_module_private():
-    """SECURITY: Verify _SEAL_KEY still accessible to module internals.
+    """SECURITY: Verify seal key is NOT accessible via import (CVE-ADR-002-A-008).
 
-    After moving _compute_seal() out of class, _SEAL_KEY must remain
-    accessible to module-level seal computation function.
+    After closure encapsulation, _SEAL_KEY must NOT exist as module attribute.
+    This prevents plugins from importing and using it to forge seals.
 
-    Expected: Module can compute seals, plugins cannot
+    Expected: Module attribute does NOT exist, but seals still work (closure-based)
     """
     import elspeth.core.security.secure_data as module
 
-    # Module should have _SEAL_KEY
-    assert hasattr(module, "_SEAL_KEY")
-    assert isinstance(module._SEAL_KEY, bytes)
-    assert len(module._SEAL_KEY) == 32
+    # CRITICAL: _SEAL_KEY should NOT be importable (closure-encapsulated)
+    assert not hasattr(module, "_SEAL_KEY"), (
+        "_SEAL_KEY is accessible via import! This allows seal forgery. "
+        "CVE-ADR-002-A-008: Seal key must be closure-encapsulated."
+    )
 
-    # But _compute_seal should not be on SecureDataFrame class
-    # (or should require internal token if still there)
-    # This is verified by test_compute_seal_not_accessible_from_plugins
+    # But seal computation should still work (via closure)
+    frame = SecureDataFrame.create_from_datasource(
+        pd.DataFrame({"data": [1]}), SecurityLevel.OFFICIAL
+    )
+    # If seal computation failed, create_from_datasource would have raised
+    assert frame.security_level == SecurityLevel.OFFICIAL
 
 
 def test_error_message_guides_developers():
