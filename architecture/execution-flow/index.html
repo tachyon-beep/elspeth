@@ -1,0 +1,2515 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Extensible Layered Secure Pipeline Engine for Transformation and Handling - Security-first orchestration with Bell-LaPadula MLS enforcement">
+      
+      
+        <meta name="author" content="Elspeth Contributors">
+      
+      
+        <link rel="canonical" href="https://elspeth.readthedocs.io/architecture/execution-flow/">
+      
+      
+        <link rel="prev" href="../overview/">
+      
+      
+        <link rel="next" href="../security-policy/">
+      
+      
+      <link rel="icon" href="../../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.6.22">
+    
+    
+      
+        <title>Execution Flow - Elspeth Documentation</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.84d31ad4.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.06af60db.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/_mkdocstrings.css">
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#execution-flow" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+      <div data-md-color-scheme="default" data-md-component="outdated" hidden>
+        
+      </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="Elspeth Documentation" class="md-header__button md-logo" aria-label="Elspeth Documentation" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            Elspeth Documentation
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Execution Flow
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+          <a href="javascript:void(0)" class="md-search__icon md-icon" title="Share" aria-label="Share" data-clipboard data-clipboard-text="" data-md-component="search-share" tabindex="-1">
+            
+            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7c.05-.23.09-.46.09-.7s-.04-.47-.09-.7l7.05-4.11c.54.5 1.25.81 2.04.81a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3c0 .24.04.47.09.7L8.04 9.81C7.5 9.31 6.79 9 6 9a3 3 0 0 0-3 3 3 3 0 0 0 3 3c.79 0 1.5-.31 2.04-.81l7.12 4.15c-.05.21-.08.43-.08.66 0 1.61 1.31 2.91 2.92 2.91s2.92-1.3 2.92-2.91A2.92 2.92 0 0 0 18 16.08"/></svg>
+          </a>
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/johnm-dta/elspeth" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    johnm-dta/elspeth
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href="../.." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../getting-started/installation/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Getting Started
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../user-guide/security-model/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  User Guide
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../plugins/overview/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Plugins
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../overview/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Architecture
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../../api-reference/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  API Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+  
+
+<nav class="md-nav md-nav--primary md-nav--lifted md-nav--integrated" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="Elspeth Documentation" class="md-nav__button md-logo" aria-label="Elspeth Documentation" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    Elspeth Documentation
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/johnm-dta/elspeth" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+  </div>
+  <div class="md-source__repository">
+    johnm-dta/elspeth
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Home
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    Getting Started
+    
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            Getting Started
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Installation
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Quickstart
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../getting-started/first-experiment/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    First Experiment
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    User Guide
+    
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            User Guide
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../user-guide/security-model/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Security Model
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../user-guide/security-controls/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Security Controls
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../user-guide/configuration/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Configuration
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    Plugins
+    
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            Plugins
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../plugins/overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Overview
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    Architecture
+    
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            Architecture
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../overview/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Overview
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    Execution Flow
+    
+  </span>
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    Execution Flow
+    
+  </span>
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#quick-navigation" class="md-nav__link">
+    <span class="md-ellipsis">
+      Quick Navigation
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#logical-flow-overview" class="md-nav__link">
+    <span class="md-ellipsis">
+      Logical Flow Overview
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Logical Flow Overview">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#stage-breakdown" class="md-nav__link">
+    <span class="md-ellipsis">
+      Stage Breakdown
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#detailed-trace" class="md-nav__link">
+    <span class="md-ellipsis">
+      Detailed Trace
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Detailed Trace">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#stage-1-cli-entry-argument-parsing" class="md-nav__link">
+    <span class="md-ellipsis">
+      Stage 1: CLI Entry &amp; Argument Parsing
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#stage-2-configuration-loading-validation" class="md-nav__link">
+    <span class="md-ellipsis">
+      Stage 2: Configuration Loading &amp; Validation
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#stage-3-suiteworkflow-initialization" class="md-nav__link">
+    <span class="md-ellipsis">
+      Stage 3: Suite/Workflow Initialization
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#stage-4-security-level-computation-validation" class="md-nav__link">
+    <span class="md-ellipsis">
+      Stage 4: Security Level Computation &amp; Validation
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#stage-5-workflow-execution-row-by-row-processing" class="md-nav__link">
+    <span class="md-ellipsis">
+      Stage 5: Workflow Execution (Row-by-Row Processing)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#stage-6-aggregation-post-processing" class="md-nav__link">
+    <span class="md-ellipsis">
+      Stage 6: Aggregation &amp; Post-Processing
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#stage-7-artifact-pipeline-sink-execution" class="md-nav__link">
+    <span class="md-ellipsis">
+      Stage 7: Artifact Pipeline &amp; Sink Execution
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#security-checkpoints" class="md-nav__link">
+    <span class="md-ellipsis">
+      Security Checkpoints
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#debugging-guide" class="md-nav__link">
+    <span class="md-ellipsis">
+      Debugging Guide
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Debugging Guide">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#common-issues-diagnosis" class="md-nav__link">
+    <span class="md-ellipsis">
+      Common Issues &amp; Diagnosis
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Common Issues &amp; Diagnosis">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#issue-securityvalidationerror-insufficient-clearance" class="md-nav__link">
+    <span class="md-ellipsis">
+      Issue: "SecurityValidationError: Insufficient clearance"
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#issue-config-validation-failed-missing-required-field" class="md-nav__link">
+    <span class="md-ellipsis">
+      Issue: "Config validation failed: Missing required field"
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#issue-retry-exhausted-transform-keeps-failing" class="md-nav__link">
+    <span class="md-ellipsis">
+      Issue: "Retry exhausted" / Transform keeps failing
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#issue-sink-fails-to-write" class="md-nav__link">
+    <span class="md-ellipsis">
+      Issue: Sink fails to write
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#issue-slow-execution-hangs" class="md-nav__link">
+    <span class="md-ellipsis">
+      Issue: Slow execution / Hangs
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#related-documentation" class="md-nav__link">
+    <span class="md-ellipsis">
+      Related Documentation
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#code-references" class="md-nav__link">
+    <span class="md-ellipsis">
+      Code References
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../security-policy/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Security Policy
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../adrs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    ADR Catalogue
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../../api-reference/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    API Reference
+    
+  </span>
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_6" id="__nav_6_label" tabindex="0">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6">
+            <span class="md-nav__icon md-icon"></span>
+            API Reference
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_6_2" id="__nav_6_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    Core
+    
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_6_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6_2">
+            <span class="md-nav__icon md-icon"></span>
+            Core
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api-reference/core/base-plugin/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    BasePlugin
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api-reference/core/classified-dataframe/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    ClassifiedDataFrame
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api-reference/core/security-level/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    SecurityLevel
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_6_3" id="__nav_6_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    Registries
+    
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_6_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6_3">
+            <span class="md-nav__icon md-icon"></span>
+            Registries
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api-reference/registries/base/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Plugin Registry
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_6_4" id="__nav_6_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    Plugins
+    
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_6_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6_4">
+            <span class="md-nav__icon md-icon"></span>
+            Plugins
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api-reference/plugins/generated-datasources/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Datasources
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api-reference/plugins/generated-transforms/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Transforms
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api-reference/plugins/generated-middlewares/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Middleware
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api-reference/plugins/generated-sinks/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Sinks
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api-reference/plugins/generated-aggregators/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Aggregators
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api-reference/plugins/generated-baselines/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Baselines
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_6_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_6_5" id="__nav_6_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    Pipeline
+    
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_6_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_6_5">
+            <span class="md-nav__icon md-icon"></span>
+            Pipeline
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../api-reference/pipeline/artifact-pipeline/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Artifact Pipeline
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="execution-flow">Execution Flow<a class="headerlink" href="#execution-flow" title="Anchor link to this section">&para;</a></h1>
+<p>Complete trace of Elspeth's execution from CLI invocation to artifact generation.</p>
+<div class="admonition info">
+<p class="admonition-title">Purpose</p>
+<p>This document provides both <strong>logical flow</strong> (high-level stages) and <strong>detailed trace</strong> (function-by-function execution) to help developers understand the system and debug issues.</p>
+</div>
+<hr />
+<h2 id="quick-navigation">Quick Navigation<a class="headerlink" href="#quick-navigation" title="Anchor link to this section">&para;</a></h2>
+<ul>
+<li><a href="#logical-flow-overview">Logical Flow Overview</a> - High-level stages with decision points</li>
+<li><a href="#detailed-trace">Detailed Trace</a> - Function-by-function execution with code references</li>
+<li><a href="#security-checkpoints">Security Checkpoints</a> - Where/when/what security validation happens</li>
+<li><a href="#debugging-guide">Debugging Guide</a> - What to check at each stage</li>
+</ul>
+<hr />
+<h2 id="logical-flow-overview">Logical Flow Overview<a class="headerlink" href="#logical-flow-overview" title="Anchor link to this section">&para;</a></h2>
+<p>Elspeth execution follows a <strong>seven-stage pipeline</strong> with validation at each boundary:</p>
+<pre class="mermaid"><code>graph TD
+    START([python -m elspeth.cli]) --&gt; STAGE1[1. CLI Entry &amp; Argument Parsing]
+    STAGE1 --&gt; STAGE2[2. Configuration Loading &amp; Validation]
+    STAGE2 --&gt; STAGE3[3. Suite/Workflow Initialization]
+    STAGE3 --&gt; STAGE4[4. Security Level Computation]
+    STAGE4 --&gt; STAGE5[5. Workflow Execution Row by Row]
+    STAGE5 --&gt; STAGE6[6. Aggregation &amp; Post-Processing]
+    STAGE6 --&gt; STAGE7[7. Artifact Pipeline &amp; Sink Execution]
+    STAGE7 --&gt; END([Artifacts Written, Exit])
+
+    STAGE2 -.-&gt;|Validation Fails| ERROR1[❌ Exit: Config Invalid]
+    STAGE4 -.-&gt;|Security Violation| ERROR2[❌ Exit: Insufficient Clearance]
+    STAGE5 -.-&gt;|Retry Exhausted| ERROR3[❌ Exit: Processing Failed]
+    STAGE7 -.-&gt;|Sink Fails| ERROR4[❌ Exit: Artifact Write Failed]
+
+    style START fill:#E6F3FF
+    style END fill:#90EE90
+    style ERROR1 fill:#FFB6C1
+    style ERROR2 fill:#FFB6C1
+    style ERROR3 fill:#FFB6C1
+    style ERROR4 fill:#FFB6C1</code></pre>
+<h3 id="stage-breakdown">Stage Breakdown<a class="headerlink" href="#stage-breakdown" title="Anchor link to this section">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Stage</th>
+<th>Responsible Component</th>
+<th>Key Actions</th>
+<th>Exit on Failure?</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>1. CLI Entry</strong></td>
+<td><code>src/elspeth/core/cli/suite.py</code></td>
+<td>Parse arguments, setup logging</td>
+<td>✅ Yes (invalid args)</td>
+</tr>
+<tr>
+<td><strong>2. Config Loading</strong></td>
+<td><code>src/elspeth/core/cli/config_utils.py</code></td>
+<td>Load YAML, merge configs, validate schemas</td>
+<td>✅ Yes (invalid config)</td>
+</tr>
+<tr>
+<td><strong>3. Suite Init</strong></td>
+<td><code>src/elspeth/core/experiments/suite_runner.py</code></td>
+<td>Instantiate plugins, bind components</td>
+<td>✅ Yes (plugin errors)</td>
+</tr>
+<tr>
+<td><strong>4. Security Computation</strong></td>
+<td><code>ExperimentOrchestrator</code></td>
+<td>Compute operating level (min of all), validate clearances</td>
+<td>✅ Yes (security violation)</td>
+</tr>
+<tr>
+<td><strong>5. Workflow Execution</strong></td>
+<td><code>src/elspeth/core/experiments/runner.py</code></td>
+<td>Process rows with transforms + middleware</td>
+<td>⚠️ Configurable (retry/skip)</td>
+</tr>
+<tr>
+<td><strong>6. Aggregation</strong></td>
+<td>Aggregator plugins</td>
+<td>Compute statistics, cost summaries</td>
+<td>🔹 Optional (may skip)</td>
+</tr>
+<tr>
+<td><strong>7. Artifact Pipeline</strong></td>
+<td><code>src/elspeth/core/pipeline/artifact_pipeline.py</code></td>
+<td>Write sinks in dependency order</td>
+<td>✅ Yes (sink failures)</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="detailed-trace">Detailed Trace<a class="headerlink" href="#detailed-trace" title="Anchor link to this section">&para;</a></h2>
+<h3 id="stage-1-cli-entry-argument-parsing">Stage 1: CLI Entry &amp; Argument Parsing<a class="headerlink" href="#stage-1-cli-entry-argument-parsing" title="Anchor link to this section">&para;</a></h3>
+<p><strong>File</strong>: <code>src/elspeth/core/cli/suite.py</code></p>
+<p><strong>Entry Point</strong>: <code>python -m elspeth.cli --settings &lt;path&gt; --suite-root &lt;path&gt;</code></p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-0-1"><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># Execution path:</span>
+</span><span id="__span-0-2"><a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a><span class="mf">1.</span> <span class="n">__main__</span><span class="o">.</span><span class="n">py</span> <span class="err">→</span> <span class="n">dispatch</span> <span class="n">to</span> <span class="n">suite</span><span class="o">.</span><span class="n">main</span><span class="p">()</span>
+</span><span id="__span-0-3"><a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="mf">2.</span> <span class="n">suite</span><span class="o">.</span><span class="n">main</span><span class="p">()</span>
+</span><span id="__span-0-4"><a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>   <span class="err">├─</span> <span class="n">Parse</span> <span class="n">CLI</span> <span class="n">arguments</span> <span class="p">(</span><span class="n">argparse</span><span class="p">)</span>
+</span><span id="__span-0-5"><a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>   <span class="err">├─</span> <span class="n">Setup</span> <span class="n">logging</span> <span class="n">configuration</span>
+</span><span id="__span-0-6"><a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>   <span class="err">├─</span> <span class="n">Validate</span> <span class="n">required</span> <span class="n">arguments</span> <span class="p">(</span><span class="n">settings</span><span class="p">,</span> <span class="n">suite</span><span class="o">-</span><span class="n">root</span><span class="p">)</span>
+</span><span id="__span-0-7"><a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>   <span class="err">└─</span> <span class="n">Call</span> <span class="n">run_suite</span><span class="p">()</span>
+</span></code></pre></div>
+<p><strong>Arguments Parsed</strong>:
+- <code>--settings</code> (required) → Path to settings.yaml
+- <code>--suite-root</code> (required) → Directory containing experiments/
+- <code>--reports-dir</code> (optional) → Output directory for reports
+- <code>--head</code> (optional) → Preview N rows before execution
+- <code>--live-outputs</code> (optional) → Enable real-time output display</p>
+<p><strong>Debug Checkpoint</strong>: If CLI fails, check:
+- ✅ File paths exist (<code>settings.yaml</code>, suite root directory)
+- ✅ Correct argument names (check <code>--help</code> output)
+- ✅ Logging configured (should see log initialization messages)</p>
+<hr />
+<h3 id="stage-2-configuration-loading-validation">Stage 2: Configuration Loading &amp; Validation<a class="headerlink" href="#stage-2-configuration-loading-validation" title="Anchor link to this section">&para;</a></h3>
+<p><strong>File</strong>: <code>src/elspeth/core/cli/config_utils.py</code></p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-1-1"><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># Execution sequence:</span>
+</span><span id="__span-1-2"><a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="mf">1.</span> <span class="n">load_suite_config</span><span class="p">(</span><span class="n">settings_path</span><span class="p">,</span> <span class="n">suite_root</span><span class="p">)</span>
+</span><span id="__span-1-3"><a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>   <span class="err">├─</span> <span class="n">Load</span> <span class="n">settings</span><span class="o">.</span><span class="n">yaml</span> <span class="p">(</span><span class="n">YAML</span> <span class="n">parse</span><span class="p">)</span>
+</span><span id="__span-1-4"><a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>   <span class="err">├─</span> <span class="n">Discover</span> <span class="n">experiments</span> <span class="ow">in</span> <span class="n">suite_root</span><span class="o">/</span><span class="n">experiments</span><span class="o">/</span>
+</span><span id="__span-1-5"><a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>   <span class="err">├─</span> <span class="n">For</span> <span class="n">each</span> <span class="n">experiment</span><span class="p">:</span>
+</span><span id="__span-1-6"><a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>   <span class="err">│</span>  <span class="err">├─</span> <span class="n">Load</span> <span class="n">experiment</span> <span class="n">YAML</span>
+</span><span id="__span-1-7"><a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>   <span class="err">│</span>  <span class="err">├─</span> <span class="n">Merge</span><span class="p">:</span> <span class="n">suite</span> <span class="n">defaults</span> <span class="err">→</span> <span class="n">prompt</span> <span class="n">packs</span> <span class="err">→</span> <span class="n">experiment</span> <span class="n">overrides</span>
+</span><span id="__span-1-8"><a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>   <span class="err">│</span>  <span class="err">└─</span> <span class="n">Validate</span> <span class="n">merged</span> <span class="n">config</span> <span class="n">against</span> <span class="n">JSON</span> <span class="n">schemas</span>
+</span><span id="__span-1-9"><a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>   <span class="err">└─</span> <span class="n">Return</span><span class="p">:</span> <span class="n">SuiteConfig</span> <span class="nb">object</span>
+</span><span id="__span-1-10"><a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>
+</span><span id="__span-1-11"><a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a><span class="mf">2.</span> <span class="n">validate_schemas</span><span class="p">(</span><span class="n">config</span><span class="p">)</span>
+</span><span id="__span-1-12"><a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>   <span class="err">├─</span> <span class="n">Validate</span> <span class="n">datasource</span> <span class="n">schema</span>
+</span><span id="__span-1-13"><a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>   <span class="err">├─</span> <span class="n">Validate</span> <span class="n">transform</span> <span class="n">schema</span> <span class="p">(</span><span class="n">LLM</span><span class="o">/</span><span class="n">custom</span><span class="p">)</span>
+</span><span id="__span-1-14"><a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a>   <span class="err">├─</span> <span class="n">Validate</span> <span class="n">sink</span> <span class="n">schemas</span> <span class="p">(</span><span class="n">each</span> <span class="n">sink</span><span class="p">)</span>
+</span><span id="__span-1-15"><a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a>   <span class="err">└─</span> <span class="n">Validate</span> <span class="n">middleware</span> <span class="n">schemas</span>
+</span></code></pre></div>
+<p><strong>Merge Order</strong> (per ADR-009):
+<div class="language-text highlight"><pre><span></span><code><span id="__span-2-1"><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>1. Suite defaults (settings.yaml → defaults:)
+</span><span id="__span-2-2"><a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>        ↓ (deep merge)
+</span><span id="__span-2-3"><a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>2. Prompt packs (if prompt_pack: specified)
+</span><span id="__span-2-4"><a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>        ↓ (deep merge)
+</span><span id="__span-2-5"><a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>3. Experiment overrides (experiments/&lt;name&gt;.yaml)
+</span><span id="__span-2-6"><a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>        ↓ (final result)
+</span><span id="__span-2-7"><a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>Merged Configuration
+</span></code></pre></div></p>
+<p><strong>Environment Variable Resolution</strong>:
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-3-1"><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># Before resolution:</span>
+</span><span id="__span-3-2"><a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="nt">llm</span><span class="p">:</span>
+</span><span id="__span-3-3"><a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="w">  </span><span class="nt">api_key</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">${AZURE_OPENAI_KEY}</span>
+</span><span id="__span-3-4"><a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>
+</span><span id="__span-3-5"><a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="c1"># After resolution:</span>
+</span><span id="__span-3-6"><a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="nt">llm</span><span class="p">:</span>
+</span><span id="__span-3-7"><a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="w">  </span><span class="nt">api_key</span><span class="p">:</span><span class="w"> </span><span class="s">&quot;sk-actual-key-value&quot;</span><span class="w">  </span><span class="c1"># From environment</span>
+</span></code></pre></div></p>
+<p><strong>Debug Checkpoint</strong>: If config loading fails:
+- ✅ Valid YAML syntax (<code>yamllint settings.yaml</code>)
+- ✅ All required fields present (datasource, transform, sinks)
+- ✅ Environment variables set (check <code>${VAR}</code> references)
+- ✅ Schema validation errors → Check plugin-specific required fields</p>
+<hr />
+<h3 id="stage-3-suiteworkflow-initialization">Stage 3: Suite/Workflow Initialization<a class="headerlink" href="#stage-3-suiteworkflow-initialization" title="Anchor link to this section">&para;</a></h3>
+<p><strong>File</strong>: <code>src/elspeth/core/experiments/suite_runner.py</code></p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-4-1"><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="c1"># Execution sequence:</span>
+</span><span id="__span-4-2"><a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="mf">1.</span> <span class="n">SuiteRunner</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="n">suite_config</span><span class="p">)</span>
+</span><span id="__span-4-3"><a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>   <span class="err">├─</span> <span class="n">Store</span> <span class="n">suite</span> <span class="n">configuration</span>
+</span><span id="__span-4-4"><a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a>   <span class="err">├─</span> <span class="n">Initialize</span> <span class="n">shared</span> <span class="n">middleware</span> <span class="n">instances</span>
+</span><span id="__span-4-5"><a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>   <span class="err">└─</span> <span class="n">Create</span> <span class="n">experiment</span> <span class="n">orchestrators</span> <span class="p">(</span><span class="n">one</span> <span class="n">per</span> <span class="n">experiment</span><span class="p">)</span>
+</span><span id="__span-4-6"><a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>
+</span><span id="__span-4-7"><a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="mf">2.</span> <span class="n">For</span> <span class="n">each</span> <span class="n">experiment</span> <span class="ow">in</span> <span class="n">suite</span><span class="p">:</span>
+</span><span id="__span-4-8"><a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>   <span class="n">ExperimentOrchestrator</span><span class="o">.</span><span class="fm">__init__</span><span class="p">(</span><span class="n">experiment_config</span><span class="p">)</span>
+</span><span id="__span-4-9"><a id="__codelineno-4-9" name="__codelineno-4-9" href="#__codelineno-4-9"></a>   <span class="err">├─</span> <span class="n">Instantiate</span> <span class="n">datasource</span> <span class="n">plugin</span>
+</span><span id="__span-4-10"><a id="__codelineno-4-10" name="__codelineno-4-10" href="#__codelineno-4-10"></a>   <span class="err">│</span>  <span class="err">└─</span> <span class="n">DatasourceRegistry</span><span class="o">.</span><span class="n">create_from_config</span><span class="p">(</span><span class="n">config</span><span class="o">.</span><span class="n">datasource</span><span class="p">)</span>
+</span><span id="__span-4-11"><a id="__codelineno-4-11" name="__codelineno-4-11" href="#__codelineno-4-11"></a>   <span class="err">├─</span> <span class="n">Instantiate</span> <span class="n">transform</span> <span class="n">plugin</span> <span class="p">(</span><span class="n">LLM</span><span class="o">/</span><span class="n">custom</span><span class="p">)</span>
+</span><span id="__span-4-12"><a id="__codelineno-4-12" name="__codelineno-4-12" href="#__codelineno-4-12"></a>   <span class="err">│</span>  <span class="err">└─</span> <span class="n">TransformRegistry</span><span class="o">.</span><span class="n">create_from_config</span><span class="p">(</span><span class="n">config</span><span class="o">.</span><span class="n">llm</span><span class="p">)</span>
+</span><span id="__span-4-13"><a id="__codelineno-4-13" name="__codelineno-4-13" href="#__codelineno-4-13"></a>   <span class="err">├─</span> <span class="n">Instantiate</span> <span class="n">sink</span> <span class="n">plugins</span> <span class="p">(</span><span class="nb">list</span><span class="p">)</span>
+</span><span id="__span-4-14"><a id="__codelineno-4-14" name="__codelineno-4-14" href="#__codelineno-4-14"></a>   <span class="err">│</span>  <span class="err">└─</span> <span class="n">SinkRegistry</span><span class="o">.</span><span class="n">create_from_config</span><span class="p">(</span><span class="n">sink_config</span><span class="p">)</span> <span class="k">for</span> <span class="n">each</span>
+</span><span id="__span-4-15"><a id="__codelineno-4-15" name="__codelineno-4-15" href="#__codelineno-4-15"></a>   <span class="err">├─</span> <span class="n">Instantiate</span> <span class="n">middleware</span> <span class="n">plugins</span>
+</span><span id="__span-4-16"><a id="__codelineno-4-16" name="__codelineno-4-16" href="#__codelineno-4-16"></a>   <span class="err">│</span>  <span class="err">└─</span> <span class="n">MiddlewareRegistry</span><span class="o">.</span><span class="n">create_from_config</span><span class="p">(</span><span class="n">mw_config</span><span class="p">)</span> <span class="k">for</span> <span class="n">each</span>
+</span><span id="__span-4-17"><a id="__codelineno-4-17" name="__codelineno-4-17" href="#__codelineno-4-17"></a>   <span class="err">└─</span> <span class="n">Store</span> <span class="n">component</span> <span class="n">references</span>
+</span></code></pre></div>
+<p><strong>Plugin Instantiation Pattern</strong>:
+<div class="language-python highlight"><pre><span></span><code><span id="__span-5-1"><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="c1"># All plugins follow this pattern:</span>
+</span><span id="__span-5-2"><a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a><span class="mf">1.</span> <span class="n">Registry</span><span class="o">.</span><span class="n">create_from_config</span><span class="p">(</span><span class="n">config_dict</span><span class="p">)</span>
+</span><span id="__span-5-3"><a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a><span class="mf">2.</span> <span class="n">Registry</span> <span class="n">validates</span> <span class="n">config</span> <span class="n">against</span> <span class="n">plugin</span> <span class="n">schema</span>
+</span><span id="__span-5-4"><a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="mf">3.</span> <span class="n">Registry</span> <span class="n">calls</span> <span class="n">PluginClass</span><span class="p">(</span><span class="o">**</span><span class="n">config</span><span class="p">)</span>
+</span><span id="__span-5-5"><a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a><span class="mf">4.</span> <span class="n">Plugin</span><span class="o">.</span><span class="fm">__init__</span><span class="p">()</span> <span class="n">validates</span> <span class="n">security_level</span>
+</span><span id="__span-5-6"><a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a><span class="mf">5.</span> <span class="n">Plugin</span> <span class="n">stores</span> <span class="n">configuration</span>
+</span><span id="__span-5-7"><a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="mf">6.</span> <span class="n">Return</span> <span class="n">initialized</span> <span class="n">plugin</span> <span class="n">instance</span>
+</span></code></pre></div></p>
+<p><strong>Debug Checkpoint</strong>: If suite initialization fails:
+- ✅ Plugin type exists in registry (check available plugins)
+- ✅ Plugin configuration matches schema (required fields)
+- ✅ Security level is valid enum value (UNOFFICIAL, OFFICIAL, etc.)
+- ✅ Plugin dependencies available (e.g., azure-storage-blob for azure_blob)</p>
+<hr />
+<h3 id="stage-4-security-level-computation-validation">Stage 4: Security Level Computation &amp; Validation<a class="headerlink" href="#stage-4-security-level-computation-validation" title="Anchor link to this section">&para;</a></h3>
+<p><strong>Execution sequence</strong>:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-6-1"><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a><span class="mf">1.</span> <span class="n">orchestrator</span><span class="o">.</span><span class="n">compute_operating_level</span><span class="p">()</span>
+</span><span id="__span-6-2"><a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a>   <span class="err">├─</span> <span class="n">Collect</span> <span class="n">security</span> <span class="n">levels</span><span class="p">:</span>
+</span><span id="__span-6-3"><a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a>   <span class="err">│</span>  <span class="err">├─</span> <span class="n">datasource_level</span> <span class="o">=</span> <span class="n">datasource</span><span class="o">.</span><span class="n">get_security_level</span><span class="p">()</span>
+</span><span id="__span-6-4"><a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a>   <span class="err">│</span>  <span class="err">├─</span> <span class="n">transform_level</span> <span class="o">=</span> <span class="n">transform</span><span class="o">.</span><span class="n">get_security_level</span><span class="p">()</span>
+</span><span id="__span-6-5"><a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a>   <span class="err">│</span>  <span class="err">└─</span> <span class="n">sink_levels</span> <span class="o">=</span> <span class="p">[</span><span class="n">sink</span><span class="o">.</span><span class="n">get_security_level</span><span class="p">()</span> <span class="k">for</span> <span class="n">sink</span> <span class="ow">in</span> <span class="n">sinks</span><span class="p">]</span>
+</span><span id="__span-6-6"><a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a>   <span class="err">│</span>
+</span><span id="__span-6-7"><a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a>   <span class="err">├─</span> <span class="n">Compute</span> <span class="n">minimum</span><span class="p">:</span>
+</span><span id="__span-6-8"><a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a>   <span class="err">│</span>  <span class="n">operating_level</span> <span class="o">=</span> <span class="nb">min</span><span class="p">(</span><span class="n">datasource_level</span><span class="p">,</span> <span class="n">transform_level</span><span class="p">,</span> <span class="o">*</span><span class="n">sink_levels</span><span class="p">)</span>
+</span><span id="__span-6-9"><a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a>   <span class="err">│</span>
+</span><span id="__span-6-10"><a id="__codelineno-6-10" name="__codelineno-6-10" href="#__codelineno-6-10"></a>   <span class="err">└─</span> <span class="n">Return</span> <span class="n">operating_level</span> <span class="p">(</span><span class="n">e</span><span class="o">.</span><span class="n">g</span><span class="o">.</span><span class="p">,</span> <span class="n">SecurityLevel</span><span class="o">.</span><span class="n">OFFICIAL</span><span class="p">)</span>
+</span><span id="__span-6-11"><a id="__codelineno-6-11" name="__codelineno-6-11" href="#__codelineno-6-11"></a>
+</span><span id="__span-6-12"><a id="__codelineno-6-12" name="__codelineno-6-12" href="#__codelineno-6-12"></a><span class="mf">2.</span> <span class="n">orchestrator</span><span class="o">.</span><span class="n">validate_security</span><span class="p">()</span>
+</span><span id="__span-6-13"><a id="__codelineno-6-13" name="__codelineno-6-13" href="#__codelineno-6-13"></a>   <span class="n">For</span> <span class="n">each</span> <span class="n">component</span><span class="p">:</span>
+</span><span id="__span-6-14"><a id="__codelineno-6-14" name="__codelineno-6-14" href="#__codelineno-6-14"></a>   <span class="err">├─</span> <span class="n">component</span><span class="o">.</span><span class="n">validate_can_operate_at_level</span><span class="p">(</span><span class="n">operating_level</span><span class="p">)</span>
+</span><span id="__span-6-15"><a id="__codelineno-6-15" name="__codelineno-6-15" href="#__codelineno-6-15"></a>   <span class="err">│</span>  <span class="err">├─</span> <span class="n">If</span> <span class="n">component</span><span class="o">.</span><span class="n">security_level</span> <span class="o">&lt;</span> <span class="n">operating_level</span><span class="p">:</span>
+</span><span id="__span-6-16"><a id="__codelineno-6-16" name="__codelineno-6-16" href="#__codelineno-6-16"></a>   <span class="err">│</span>  <span class="err">│</span>  <span class="err">└─</span> <span class="n">Raise</span> <span class="n">SecurityValidationError</span><span class="p">(</span><span class="s2">&quot;Insufficient clearance&quot;</span><span class="p">)</span>
+</span><span id="__span-6-17"><a id="__codelineno-6-17" name="__codelineno-6-17" href="#__codelineno-6-17"></a>   <span class="err">│</span>  <span class="err">└─</span> <span class="n">Else</span><span class="p">:</span> <span class="n">Pass</span> <span class="p">(</span><span class="n">component</span> <span class="n">can</span> <span class="n">downgrade</span> <span class="ow">or</span> <span class="n">exact</span> <span class="n">match</span><span class="p">)</span>
+</span><span id="__span-6-18"><a id="__codelineno-6-18" name="__codelineno-6-18" href="#__codelineno-6-18"></a>   <span class="err">└─</span> <span class="n">Continue</span> <span class="n">to</span> <span class="nb">next</span> <span class="n">component</span>
+</span></code></pre></div>
+<p><strong>Security Validation Logic</strong> (per ADR-002):
+<div class="language-text highlight"><pre><span></span><code><span id="__span-7-1"><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>Component Clearance: SECRET
+</span><span id="__span-7-2"><a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a>Operating Level: OFFICIAL
+</span><span id="__span-7-3"><a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a>Validation: SECRET ≥ OFFICIAL → ✅ PASS (trusted downgrade)
+</span><span id="__span-7-4"><a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a>
+</span><span id="__span-7-5"><a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a>Component Clearance: UNOFFICIAL
+</span><span id="__span-7-6"><a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a>Operating Level: OFFICIAL
+</span><span id="__span-7-7"><a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a>Validation: UNOFFICIAL &lt; OFFICIAL → ❌ FAIL (insufficient clearance)
+</span></code></pre></div></p>
+<p><strong>Mermaid Flow</strong>:
+<pre class="mermaid"><code>graph TD
+    START[Collect Security Levels] --&gt; COMPUTE[Compute min of all components]
+    COMPUTE --&gt; VALIDATE{For each component}
+    VALIDATE --&gt;|Clearance ≥ Operating Level| PASS[✅ Component Valid]
+    VALIDATE --&gt;|Clearance &lt; Operating Level| FAIL[❌ SecurityValidationError]
+    PASS --&gt; NEXT{More components?}
+    NEXT --&gt;|Yes| VALIDATE
+    NEXT --&gt;|No| SUCCESS[✅ All Validated]
+    FAIL --&gt; ERROR[Exit: Security Violation]
+
+    style SUCCESS fill:#90EE90
+    style ERROR fill:#FFB6C1</code></pre></p>
+<p><strong>Debug Checkpoint</strong>: If security validation fails:
+- ✅ Check <code>security_level</code> on failing component (should be ≥ operating level)
+- ✅ Verify operating level computation (may be lower than expected due to min())
+- ✅ Review Bell-LaPadula rules: <a href="../../user-guide/security-model/">Security Model</a>
+- ✅ Common fix: Increase component's <code>security_level</code> to match operating level</p>
+<hr />
+<h3 id="stage-5-workflow-execution-row-by-row-processing">Stage 5: Workflow Execution (Row-by-Row Processing)<a class="headerlink" href="#stage-5-workflow-execution-row-by-row-processing" title="Anchor link to this section">&para;</a></h3>
+<p><strong>File</strong>: <code>src/elspeth/core/experiments/runner.py</code></p>
+<p>This is the <strong>core execution loop</strong> where actual data processing happens.</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-8-1"><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="c1"># High-level execution:</span>
+</span><span id="__span-8-2"><a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="mf">1.</span> <span class="n">runner</span><span class="o">.</span><span class="n">run</span><span class="p">(</span><span class="n">datasource</span><span class="p">,</span> <span class="n">transform</span><span class="p">,</span> <span class="n">sinks</span><span class="p">,</span> <span class="n">middleware</span><span class="p">)</span>
+</span><span id="__span-8-3"><a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a>   <span class="err">├─</span> <span class="n">datasource</span><span class="o">.</span><span class="n">load_data</span><span class="p">()</span> <span class="err">→</span> <span class="n">ClassifiedDataFrame</span>
+</span><span id="__span-8-4"><a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a>   <span class="err">├─</span> <span class="n">For</span> <span class="n">each</span> <span class="n">row</span> <span class="ow">in</span> <span class="n">frame</span><span class="p">:</span>
+</span><span id="__span-8-5"><a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a>   <span class="err">│</span>  <span class="err">├─</span> <span class="n">Apply</span> <span class="n">middleware</span><span class="o">.</span><span class="n">before_request</span><span class="p">(</span><span class="n">row</span><span class="p">)</span>
+</span><span id="__span-8-6"><a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a>   <span class="err">│</span>  <span class="err">├─</span> <span class="n">transform</span><span class="o">.</span><span class="n">transform</span><span class="p">(</span><span class="n">row</span><span class="p">)</span> <span class="err">→</span> <span class="n">result</span>
+</span><span id="__span-8-7"><a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a>   <span class="err">│</span>  <span class="err">├─</span> <span class="n">Apply</span> <span class="n">middleware</span><span class="o">.</span><span class="n">after_response</span><span class="p">(</span><span class="n">row</span><span class="p">,</span> <span class="n">result</span><span class="p">)</span>
+</span><span id="__span-8-8"><a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a>   <span class="err">│</span>  <span class="err">├─</span> <span class="n">Validate</span> <span class="n">result</span> <span class="p">(</span><span class="n">JSON</span> <span class="n">schema</span><span class="p">,</span> <span class="n">regex</span><span class="p">,</span> <span class="n">etc</span><span class="o">.</span><span class="p">)</span>
+</span><span id="__span-8-9"><a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a>   <span class="err">│</span>  <span class="err">└─</span> <span class="n">Store</span> <span class="n">result</span> <span class="ow">or</span> <span class="n">retry</span> <span class="n">on</span> <span class="n">error</span>
+</span><span id="__span-8-10"><a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a>   <span class="err">└─</span> <span class="n">Return</span><span class="p">:</span> <span class="n">results</span> <span class="n">DataFrame</span>
+</span></code></pre></div>
+<p><strong>Detailed Row Processing</strong>:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-9-1"><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="c1"># For each row (sequential or concurrent):</span>
+</span><span id="__span-9-2"><a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="mf">1.</span> <span class="n">Extract</span> <span class="n">row</span> <span class="n">data</span> <span class="err">→</span> <span class="nb">dict</span>
+</span><span id="__span-9-3"><a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a>
+</span><span id="__span-9-4"><a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="mf">2.</span> <span class="n">Middleware</span><span class="o">.</span><span class="n">before_request</span><span class="p">(</span><span class="n">row_data</span><span class="p">)</span>
+</span><span id="__span-9-5"><a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a>   <span class="err">├─</span> <span class="n">pii_shield</span><span class="p">:</span> <span class="n">Check</span> <span class="k">for</span> <span class="n">PII</span> <span class="n">patterns</span>
+</span><span id="__span-9-6"><a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a>   <span class="err">├─</span> <span class="n">classified_material</span><span class="p">:</span> <span class="n">Check</span> <span class="k">for</span> <span class="n">classified</span> <span class="n">markings</span>
+</span><span id="__span-9-7"><a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a>   <span class="err">├─</span> <span class="n">prompt_shield</span><span class="p">:</span> <span class="n">Check</span> <span class="k">for</span> <span class="n">banned</span> <span class="n">terms</span>
+</span><span id="__span-9-8"><a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a>   <span class="err">└─</span> <span class="n">If</span> <span class="nb">any</span> <span class="n">middleware</span> <span class="n">blocks</span> <span class="err">→</span> <span class="n">skip</span> <span class="n">row</span> <span class="ow">or</span> <span class="n">abort</span>
+</span><span id="__span-9-9"><a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a>
+</span><span id="__span-9-10"><a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a><span class="mf">3.</span> <span class="n">Transform</span><span class="o">.</span><span class="n">transform</span><span class="p">(</span><span class="n">row_data</span><span class="p">)</span>
+</span><span id="__span-9-11"><a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a>   <span class="err">├─</span> <span class="n">Render</span> <span class="n">prompt</span> <span class="n">template</span> <span class="p">(</span><span class="n">Jinja2</span> <span class="n">strict</span><span class="p">)</span>
+</span><span id="__span-9-12"><a id="__codelineno-9-12" name="__codelineno-9-12" href="#__codelineno-9-12"></a>   <span class="err">├─</span> <span class="n">Call</span> <span class="n">LLM</span> <span class="n">API</span> <span class="o">/</span> <span class="n">custom</span> <span class="n">transform</span> <span class="n">logic</span>
+</span><span id="__span-9-13"><a id="__codelineno-9-13" name="__codelineno-9-13" href="#__codelineno-9-13"></a>   <span class="err">├─</span> <span class="n">Parse</span> <span class="n">response</span>
+</span><span id="__span-9-14"><a id="__codelineno-9-14" name="__codelineno-9-14" href="#__codelineno-9-14"></a>   <span class="err">└─</span> <span class="n">Return</span> <span class="n">transformed</span> <span class="n">data</span>
+</span><span id="__span-9-15"><a id="__codelineno-9-15" name="__codelineno-9-15" href="#__codelineno-9-15"></a>
+</span><span id="__span-9-16"><a id="__codelineno-9-16" name="__codelineno-9-16" href="#__codelineno-9-16"></a><span class="mf">4.</span> <span class="n">Middleware</span><span class="o">.</span><span class="n">after_response</span><span class="p">(</span><span class="n">row_data</span><span class="p">,</span> <span class="n">response</span><span class="p">)</span>
+</span><span id="__span-9-17"><a id="__codelineno-9-17" name="__codelineno-9-17" href="#__codelineno-9-17"></a>   <span class="err">├─</span> <span class="n">audit_logger</span><span class="p">:</span> <span class="n">Log</span> <span class="n">request</span><span class="o">/</span><span class="n">response</span>
+</span><span id="__span-9-18"><a id="__codelineno-9-18" name="__codelineno-9-18" href="#__codelineno-9-18"></a>   <span class="err">├─</span> <span class="n">health_monitor</span><span class="p">:</span> <span class="n">Track</span> <span class="n">latency</span><span class="p">,</span> <span class="n">success</span> <span class="n">rate</span>
+</span><span id="__span-9-19"><a id="__codelineno-9-19" name="__codelineno-9-19" href="#__codelineno-9-19"></a>   <span class="err">├─</span> <span class="n">azure_content_safety</span><span class="p">:</span> <span class="n">Check</span> <span class="n">response</span> <span class="n">safety</span>
+</span><span id="__span-9-20"><a id="__codelineno-9-20" name="__codelineno-9-20" href="#__codelineno-9-20"></a>   <span class="err">└─</span> <span class="n">If</span> <span class="nb">any</span> <span class="n">middleware</span> <span class="n">blocks</span> <span class="err">→</span> <span class="n">retry</span> <span class="ow">or</span> <span class="n">skip</span>
+</span><span id="__span-9-21"><a id="__codelineno-9-21" name="__codelineno-9-21" href="#__codelineno-9-21"></a>
+</span><span id="__span-9-22"><a id="__codelineno-9-22" name="__codelineno-9-22" href="#__codelineno-9-22"></a><span class="mf">5.</span> <span class="n">Validate</span> <span class="n">response</span>
+</span><span id="__span-9-23"><a id="__codelineno-9-23" name="__codelineno-9-23" href="#__codelineno-9-23"></a>   <span class="err">├─</span> <span class="n">JSON</span> <span class="n">schema</span> <span class="n">validation</span> <span class="p">(</span><span class="k">if</span> <span class="n">specified</span><span class="p">)</span>
+</span><span id="__span-9-24"><a id="__codelineno-9-24" name="__codelineno-9-24" href="#__codelineno-9-24"></a>   <span class="err">├─</span> <span class="n">Regex</span> <span class="n">pattern</span> <span class="n">validation</span> <span class="p">(</span><span class="k">if</span> <span class="n">specified</span><span class="p">)</span>
+</span><span id="__span-9-25"><a id="__codelineno-9-25" name="__codelineno-9-25" href="#__codelineno-9-25"></a>   <span class="err">└─</span> <span class="n">If</span> <span class="n">validation</span> <span class="n">fails</span> <span class="err">→</span> <span class="n">retry</span> <span class="ow">or</span> <span class="n">skip</span>
+</span><span id="__span-9-26"><a id="__codelineno-9-26" name="__codelineno-9-26" href="#__codelineno-9-26"></a>
+</span><span id="__span-9-27"><a id="__codelineno-9-27" name="__codelineno-9-27" href="#__codelineno-9-27"></a><span class="mf">6.</span> <span class="n">Handle</span> <span class="n">result</span><span class="p">:</span>
+</span><span id="__span-9-28"><a id="__codelineno-9-28" name="__codelineno-9-28" href="#__codelineno-9-28"></a>   <span class="err">├─</span> <span class="n">Success</span> <span class="err">→</span> <span class="n">Store</span> <span class="n">result</span><span class="p">,</span> <span class="n">increment</span> <span class="n">row</span> <span class="n">counter</span>
+</span><span id="__span-9-29"><a id="__codelineno-9-29" name="__codelineno-9-29" href="#__codelineno-9-29"></a>   <span class="err">├─</span> <span class="n">Transient</span> <span class="n">error</span> <span class="err">→</span> <span class="n">Retry</span> <span class="k">with</span> <span class="n">exponential</span> <span class="n">backoff</span>
+</span><span id="__span-9-30"><a id="__codelineno-9-30" name="__codelineno-9-30" href="#__codelineno-9-30"></a>   <span class="err">└─</span> <span class="n">Permanent</span> <span class="n">error</span> <span class="err">→</span> <span class="n">Log</span> <span class="n">failure</span><span class="p">,</span> <span class="k">continue</span> <span class="ow">or</span> <span class="n">abort</span>
+</span></code></pre></div>
+<p><strong>Retry Logic</strong>:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-10-1"><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="c1"># Retry with exponential backoff:</span>
+</span><span id="__span-10-2"><a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="n">max_retries</span> <span class="o">=</span> <span class="mi">3</span>
+</span><span id="__span-10-3"><a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="n">base_delay</span> <span class="o">=</span> <span class="mf">1.0</span>  <span class="c1"># seconds</span>
+</span><span id="__span-10-4"><a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a>
+</span><span id="__span-10-5"><a id="__codelineno-10-5" name="__codelineno-10-5" href="#__codelineno-10-5"></a><span class="k">for</span> <span class="n">attempt</span> <span class="ow">in</span> <span class="nb">range</span><span class="p">(</span><span class="mi">1</span><span class="p">,</span> <span class="n">max_retries</span> <span class="o">+</span> <span class="mi">1</span><span class="p">):</span>
+</span><span id="__span-10-6"><a id="__codelineno-10-6" name="__codelineno-10-6" href="#__codelineno-10-6"></a>    <span class="k">try</span><span class="p">:</span>
+</span><span id="__span-10-7"><a id="__codelineno-10-7" name="__codelineno-10-7" href="#__codelineno-10-7"></a>        <span class="n">result</span> <span class="o">=</span> <span class="n">transform</span><span class="o">.</span><span class="n">transform</span><span class="p">(</span><span class="n">row</span><span class="p">)</span>
+</span><span id="__span-10-8"><a id="__codelineno-10-8" name="__codelineno-10-8" href="#__codelineno-10-8"></a>        <span class="k">return</span> <span class="n">result</span>  <span class="c1"># Success</span>
+</span><span id="__span-10-9"><a id="__codelineno-10-9" name="__codelineno-10-9" href="#__codelineno-10-9"></a>    <span class="k">except</span> <span class="n">TransientError</span> <span class="k">as</span> <span class="n">e</span><span class="p">:</span>
+</span><span id="__span-10-10"><a id="__codelineno-10-10" name="__codelineno-10-10" href="#__codelineno-10-10"></a>        <span class="k">if</span> <span class="n">attempt</span> <span class="o">&lt;</span> <span class="n">max_retries</span><span class="p">:</span>
+</span><span id="__span-10-11"><a id="__codelineno-10-11" name="__codelineno-10-11" href="#__codelineno-10-11"></a>            <span class="n">delay</span> <span class="o">=</span> <span class="n">base_delay</span> <span class="o">*</span> <span class="p">(</span><span class="mi">2</span> <span class="o">**</span> <span class="p">(</span><span class="n">attempt</span> <span class="o">-</span> <span class="mi">1</span><span class="p">))</span>  <span class="c1"># 1s, 2s, 4s</span>
+</span><span id="__span-10-12"><a id="__codelineno-10-12" name="__codelineno-10-12" href="#__codelineno-10-12"></a>            <span class="n">sleep</span><span class="p">(</span><span class="n">delay</span><span class="p">)</span>
+</span><span id="__span-10-13"><a id="__codelineno-10-13" name="__codelineno-10-13" href="#__codelineno-10-13"></a>            <span class="k">continue</span>
+</span><span id="__span-10-14"><a id="__codelineno-10-14" name="__codelineno-10-14" href="#__codelineno-10-14"></a>        <span class="k">else</span><span class="p">:</span>
+</span><span id="__span-10-15"><a id="__codelineno-10-15" name="__codelineno-10-15" href="#__codelineno-10-15"></a>            <span class="c1"># Retry exhausted</span>
+</span><span id="__span-10-16"><a id="__codelineno-10-16" name="__codelineno-10-16" href="#__codelineno-10-16"></a>            <span class="n">handle_exhaustion</span><span class="p">(</span><span class="n">row</span><span class="p">,</span> <span class="n">e</span><span class="p">)</span>
+</span></code></pre></div>
+<p><strong>Concurrency Model</strong> (if enabled):</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-11-1"><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a><span class="c1"># Concurrent execution with ThreadPoolExecutor:</span>
+</span><span id="__span-11-2"><a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a><span class="k">if</span> <span class="n">concurrency</span><span class="o">.</span><span class="n">enabled</span> <span class="ow">and</span> <span class="ow">not</span> <span class="n">rate_limiter</span><span class="o">.</span><span class="n">saturated</span><span class="p">():</span>
+</span><span id="__span-11-3"><a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>    <span class="k">with</span> <span class="n">ThreadPoolExecutor</span><span class="p">(</span><span class="n">max_workers</span><span class="o">=</span><span class="n">concurrency</span><span class="o">.</span><span class="n">max_workers</span><span class="p">)</span> <span class="k">as</span> <span class="n">executor</span><span class="p">:</span>
+</span><span id="__span-11-4"><a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>        <span class="n">futures</span> <span class="o">=</span> <span class="p">[</span><span class="n">executor</span><span class="o">.</span><span class="n">submit</span><span class="p">(</span><span class="n">process_row</span><span class="p">,</span> <span class="n">row</span><span class="p">)</span> <span class="k">for</span> <span class="n">row</span> <span class="ow">in</span> <span class="n">rows</span><span class="p">]</span>
+</span><span id="__span-11-5"><a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>        <span class="n">results</span> <span class="o">=</span> <span class="p">[</span><span class="n">future</span><span class="o">.</span><span class="n">result</span><span class="p">()</span> <span class="k">for</span> <span class="n">future</span> <span class="ow">in</span> <span class="n">futures</span><span class="p">]</span>
+</span><span id="__span-11-6"><a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a><span class="k">else</span><span class="p">:</span>
+</span><span id="__span-11-7"><a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a>    <span class="c1"># Sequential fallback</span>
+</span><span id="__span-11-8"><a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a>    <span class="n">results</span> <span class="o">=</span> <span class="p">[</span><span class="n">process_row</span><span class="p">(</span><span class="n">row</span><span class="p">)</span> <span class="k">for</span> <span class="n">row</span> <span class="ow">in</span> <span class="n">rows</span><span class="p">]</span>
+</span></code></pre></div>
+<p><strong>Debug Checkpoint</strong>: If row processing fails:
+- ✅ Check middleware logs (which middleware blocked?)
+- ✅ Inspect transform errors (API failures, timeout, rate limit?)
+- ✅ Review retry count (exhausted all retries?)
+- ✅ Validation errors (response doesn't match expected schema?)
+- ✅ Check <code>logs/run_*.jsonl</code> for audit trail</p>
+<hr />
+<h3 id="stage-6-aggregation-post-processing">Stage 6: Aggregation &amp; Post-Processing<a class="headerlink" href="#stage-6-aggregation-post-processing" title="Anchor link to this section">&para;</a></h3>
+<p><strong>Execution sequence</strong>:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-12-1"><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a><span class="mf">1.</span> <span class="n">runner</span><span class="o">.</span><span class="n">run_aggregation_plugins</span><span class="p">(</span><span class="n">results_df</span><span class="p">,</span> <span class="n">metadata</span><span class="p">)</span>
+</span><span id="__span-12-2"><a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>   <span class="n">For</span> <span class="n">each</span> <span class="n">aggregation</span> <span class="n">plugin</span><span class="p">:</span>
+</span><span id="__span-12-3"><a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>   <span class="err">├─</span> <span class="n">plugin</span><span class="o">.</span><span class="n">aggregate</span><span class="p">(</span><span class="n">results_df</span><span class="p">,</span> <span class="n">metadata</span><span class="p">)</span>
+</span><span id="__span-12-4"><a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a>   <span class="err">├─</span> <span class="n">Compute</span> <span class="n">statistics</span> <span class="p">(</span><span class="n">mean</span><span class="p">,</span> <span class="n">std</span><span class="p">,</span> <span class="n">percentiles</span><span class="p">)</span>
+</span><span id="__span-12-5"><a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a>   <span class="err">├─</span> <span class="n">Generate</span> <span class="n">cost</span> <span class="n">summaries</span> <span class="p">(</span><span class="n">token</span> <span class="n">usage</span><span class="p">,</span> <span class="n">API</span> <span class="n">cost</span><span class="p">)</span>
+</span><span id="__span-12-6"><a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a>   <span class="err">├─</span> <span class="n">Baseline</span> <span class="n">comparison</span> <span class="p">(</span><span class="k">if</span> <span class="n">baseline</span> <span class="n">specified</span><span class="p">)</span>
+</span><span id="__span-12-7"><a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a>   <span class="err">└─</span> <span class="n">Store</span> <span class="n">aggregation</span> <span class="n">results</span> <span class="ow">in</span> <span class="n">metadata</span>
+</span><span id="__span-12-8"><a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a>
+</span><span id="__span-12-9"><a id="__codelineno-12-9" name="__codelineno-12-9" href="#__codelineno-12-9"></a><span class="mf">2.</span> <span class="n">Examples</span> <span class="n">of</span> <span class="n">aggregators</span><span class="p">:</span>
+</span><span id="__span-12-10"><a id="__codelineno-12-10" name="__codelineno-12-10" href="#__codelineno-12-10"></a>   <span class="err">├─</span> <span class="n">score_stats</span><span class="p">:</span> <span class="n">Calculate</span> <span class="n">mean</span><span class="o">/</span><span class="n">median</span><span class="o">/</span><span class="n">std</span> <span class="n">of</span> <span class="n">numeric</span> <span class="n">columns</span>
+</span><span id="__span-12-11"><a id="__codelineno-12-11" name="__codelineno-12-11" href="#__codelineno-12-11"></a>   <span class="err">├─</span> <span class="n">cost_summary</span><span class="p">:</span> <span class="n">Sum</span> <span class="n">prompt_tokens</span><span class="p">,</span> <span class="n">completion_tokens</span><span class="p">,</span> <span class="n">total_cost</span>
+</span><span id="__span-12-12"><a id="__codelineno-12-12" name="__codelineno-12-12" href="#__codelineno-12-12"></a>   <span class="err">├─</span> <span class="n">score_significance</span><span class="p">:</span> <span class="n">Compare</span> <span class="n">to</span> <span class="n">baseline</span> <span class="k">with</span> <span class="n">t</span><span class="o">-</span><span class="n">test</span>
+</span><span id="__span-12-13"><a id="__codelineno-12-13" name="__codelineno-12-13" href="#__codelineno-12-13"></a>   <span class="err">└─</span> <span class="n">rationale_analysis</span><span class="p">:</span> <span class="n">Extract</span> <span class="n">common</span> <span class="n">patterns</span> <span class="kn">from</span><span class="w"> </span><span class="nn">text</span>
+</span></code></pre></div>
+<p><strong>Baseline Comparison Flow</strong>:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-13-1"><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="c1"># If baseline specified:</span>
+</span><span id="__span-13-2"><a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a><span class="mf">1.</span> <span class="n">Load</span> <span class="n">baseline</span> <span class="n">results</span> <span class="kn">from</span><span class="w"> </span><span class="nn">previous</span> <span class="n">experiment</span>
+</span><span id="__span-13-3"><a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a><span class="mf">2.</span> <span class="n">For</span> <span class="n">each</span> <span class="n">comparison</span> <span class="n">criterion</span> <span class="p">(</span><span class="n">e</span><span class="o">.</span><span class="n">g</span><span class="o">.</span><span class="p">,</span> <span class="n">accuracy</span><span class="p">):</span>
+</span><span id="__span-13-4"><a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a>   <span class="err">├─</span> <span class="n">Extract</span> <span class="n">current</span> <span class="n">values</span><span class="p">:</span> <span class="n">current_scores</span>
+</span><span id="__span-13-5"><a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a>   <span class="err">├─</span> <span class="n">Extract</span> <span class="n">baseline</span> <span class="n">values</span><span class="p">:</span> <span class="n">baseline_scores</span>
+</span><span id="__span-13-6"><a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a>   <span class="err">├─</span> <span class="n">Compute</span> <span class="n">delta</span><span class="p">:</span> <span class="n">mean</span><span class="p">(</span><span class="n">current</span><span class="p">)</span> <span class="o">-</span> <span class="n">mean</span><span class="p">(</span><span class="n">baseline</span><span class="p">)</span>
+</span><span id="__span-13-7"><a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a>   <span class="err">├─</span> <span class="n">Statistical</span> <span class="n">test</span><span class="p">:</span> <span class="n">t_test</span><span class="p">(</span><span class="n">current</span><span class="p">,</span> <span class="n">baseline</span><span class="p">)</span>
+</span><span id="__span-13-8"><a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a>   <span class="err">├─</span> <span class="n">Effect</span> <span class="n">size</span><span class="p">:</span> <span class="n">cohens_d</span><span class="p">(</span><span class="n">current</span><span class="p">,</span> <span class="n">baseline</span><span class="p">)</span>
+</span><span id="__span-13-9"><a id="__codelineno-13-9" name="__codelineno-13-9" href="#__codelineno-13-9"></a>   <span class="err">└─</span> <span class="n">Store</span> <span class="ow">in</span> <span class="n">metadata</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;delta&quot;</span><span class="p">:</span> <span class="mf">0.12</span><span class="p">,</span> <span class="s2">&quot;p_value&quot;</span><span class="p">:</span> <span class="mf">0.03</span><span class="p">,</span> <span class="s2">&quot;significant&quot;</span><span class="p">:</span> <span class="n">true</span><span class="p">}</span>
+</span></code></pre></div>
+<p><strong>Debug Checkpoint</strong>: If aggregation fails:
+- ✅ Check aggregator plugin configuration
+- ✅ Baseline experiment exists (if baseline comparison requested)
+- ✅ Required columns present in results (e.g., "accuracy" for score_significance)
+- ✅ Data types match expected (numeric for statistical aggregators)</p>
+<hr />
+<h3 id="stage-7-artifact-pipeline-sink-execution">Stage 7: Artifact Pipeline &amp; Sink Execution<a class="headerlink" href="#stage-7-artifact-pipeline-sink-execution" title="Anchor link to this section">&para;</a></h3>
+<p><strong>File</strong>: <code>src/elspeth/core/pipeline/artifact_pipeline.py</code></p>
+<p>Final stage: write all outputs in <strong>dependency order</strong>.</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-14-1"><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="mf">1.</span> <span class="n">ArtifactPipeline</span><span class="o">.</span><span class="n">execute</span><span class="p">(</span><span class="n">results_df</span><span class="p">,</span> <span class="n">metadata</span><span class="p">)</span>
+</span><span id="__span-14-2"><a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>   <span class="err">├─</span> <span class="n">Topological</span> <span class="n">sort</span> <span class="n">sinks</span> <span class="n">by</span> <span class="n">dependencies</span>
+</span><span id="__span-14-3"><a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a>   <span class="err">│</span>  <span class="err">├─</span> <span class="n">Independent</span> <span class="n">sinks</span> <span class="n">first</span> <span class="p">(</span><span class="n">no</span> <span class="n">consumes</span><span class="o">=</span><span class="p">[])</span>
+</span><span id="__span-14-4"><a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a>   <span class="err">│</span>  <span class="err">└─</span> <span class="n">Dependent</span> <span class="n">sinks</span> <span class="n">after</span> <span class="n">their</span> <span class="n">dependencies</span>
+</span><span id="__span-14-5"><a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a>   <span class="err">│</span>
+</span><span id="__span-14-6"><a id="__codelineno-14-6" name="__codelineno-14-6" href="#__codelineno-14-6"></a>   <span class="err">├─</span> <span class="n">For</span> <span class="n">each</span> <span class="n">sink</span> <span class="p">(</span><span class="ow">in</span> <span class="n">dependency</span> <span class="n">order</span><span class="p">):</span>
+</span><span id="__span-14-7"><a id="__codelineno-14-7" name="__codelineno-14-7" href="#__codelineno-14-7"></a>   <span class="err">│</span>  <span class="err">├─</span> <span class="n">Validate</span> <span class="n">sink</span> <span class="n">can</span> <span class="n">operate</span> <span class="n">at</span> <span class="n">operating_level</span>
+</span><span id="__span-14-8"><a id="__codelineno-14-8" name="__codelineno-14-8" href="#__codelineno-14-8"></a>   <span class="err">│</span>  <span class="err">├─</span> <span class="n">sink</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="n">results_df</span><span class="p">,</span> <span class="n">metadata</span><span class="p">)</span>
+</span><span id="__span-14-9"><a id="__codelineno-14-9" name="__codelineno-14-9" href="#__codelineno-14-9"></a>   <span class="err">│</span>  <span class="err">├─</span> <span class="n">Capture</span> <span class="n">sink</span> <span class="n">output</span> <span class="n">metadata</span>
+</span><span id="__span-14-10"><a id="__codelineno-14-10" name="__codelineno-14-10" href="#__codelineno-14-10"></a>   <span class="err">│</span>  <span class="err">└─</span> <span class="n">Merge</span> <span class="n">into</span> <span class="k">global</span> <span class="n">metadata</span>
+</span><span id="__span-14-11"><a id="__codelineno-14-11" name="__codelineno-14-11" href="#__codelineno-14-11"></a>   <span class="err">│</span>
+</span><span id="__span-14-12"><a id="__codelineno-14-12" name="__codelineno-14-12" href="#__codelineno-14-12"></a>   <span class="err">└─</span> <span class="n">Return</span> <span class="n">aggregated</span> <span class="n">metadata</span>
+</span></code></pre></div>
+<p><strong>Dependency Resolution Example</strong>:</p>
+<div class="language-yaml highlight"><pre><span></span><code><span id="__span-15-1"><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="c1"># Configuration:</span>
+</span><span id="__span-15-2"><a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a><span class="nt">sinks</span><span class="p">:</span>
+</span><span id="__span-15-3"><a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">csv_output</span>
+</span><span id="__span-15-4"><a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">csv</span>
+</span><span id="__span-15-5"><a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a><span class="w">    </span><span class="nt">path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">results.csv</span>
+</span><span id="__span-15-6"><a id="__codelineno-15-6" name="__codelineno-15-6" href="#__codelineno-15-6"></a>
+</span><span id="__span-15-7"><a id="__codelineno-15-7" name="__codelineno-15-7" href="#__codelineno-15-7"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">excel_report</span>
+</span><span id="__span-15-8"><a id="__codelineno-15-8" name="__codelineno-15-8" href="#__codelineno-15-8"></a><span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">excel_workbook</span>
+</span><span id="__span-15-9"><a id="__codelineno-15-9" name="__codelineno-15-9" href="#__codelineno-15-9"></a><span class="w">    </span><span class="nt">base_path</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">reports/</span>
+</span><span id="__span-15-10"><a id="__codelineno-15-10" name="__codelineno-15-10" href="#__codelineno-15-10"></a>
+</span><span id="__span-15-11"><a id="__codelineno-15-11" name="__codelineno-15-11" href="#__codelineno-15-11"></a><span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">signed_bundle</span>
+</span><span id="__span-15-12"><a id="__codelineno-15-12" name="__codelineno-15-12" href="#__codelineno-15-12"></a><span class="w">    </span><span class="nt">type</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">signed_artifact</span>
+</span><span id="__span-15-13"><a id="__codelineno-15-13" name="__codelineno-15-13" href="#__codelineno-15-13"></a><span class="w">    </span><span class="nt">consumes</span><span class="p">:</span><span class="w"> </span><span class="p p-Indicator">[</span><span class="nv">csv_output</span><span class="p p-Indicator">]</span><span class="w">  </span><span class="c1"># Depends on CSV</span>
+</span><span id="__span-15-14"><a id="__codelineno-15-14" name="__codelineno-15-14" href="#__codelineno-15-14"></a>
+</span><span id="__span-15-15"><a id="__codelineno-15-15" name="__codelineno-15-15" href="#__codelineno-15-15"></a><span class="c1"># Execution order:</span>
+</span><span id="__span-15-16"><a id="__codelineno-15-16" name="__codelineno-15-16" href="#__codelineno-15-16"></a><span class="l l-Scalar l-Scalar-Plain">1. csv_output, excel_report (parallel - no dependencies)</span>
+</span><span id="__span-15-17"><a id="__codelineno-15-17" name="__codelineno-15-17" href="#__codelineno-15-17"></a><span class="l l-Scalar l-Scalar-Plain">2. signed_bundle (after csv_output completes)</span>
+</span></code></pre></div>
+<p><strong>Sink Execution Detail</strong>:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-16-1"><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="c1"># For each sink:</span>
+</span><span id="__span-16-2"><a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a><span class="mf">1.</span> <span class="n">sink</span><span class="o">.</span><span class="n">validate_can_operate_at_level</span><span class="p">(</span><span class="n">operating_level</span><span class="p">)</span>
+</span><span id="__span-16-3"><a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a>   <span class="err">└─</span> <span class="n">If</span> <span class="n">sink</span><span class="o">.</span><span class="n">security_level</span> <span class="o">&lt;</span> <span class="n">operating_level</span><span class="p">:</span>
+</span><span id="__span-16-4"><a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a>      <span class="n">Raise</span> <span class="n">SecurityValidationError</span>
+</span><span id="__span-16-5"><a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a>
+</span><span id="__span-16-6"><a id="__codelineno-16-6" name="__codelineno-16-6" href="#__codelineno-16-6"></a><span class="mf">2.</span> <span class="n">sink</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="n">results_df</span><span class="p">,</span> <span class="n">metadata</span><span class="p">)</span>
+</span><span id="__span-16-7"><a id="__codelineno-16-7" name="__codelineno-16-7" href="#__codelineno-16-7"></a>   <span class="err">├─</span> <span class="n">Sanitize</span> <span class="n">output</span> <span class="p">(</span><span class="n">formula</span> <span class="n">injection</span> <span class="n">prevention</span><span class="p">)</span>
+</span><span id="__span-16-8"><a id="__codelineno-16-8" name="__codelineno-16-8" href="#__codelineno-16-8"></a>   <span class="err">├─</span> <span class="n">Write</span> <span class="n">to</span> <span class="n">destination</span> <span class="p">(</span><span class="n">file</span><span class="p">,</span> <span class="n">blob</span><span class="p">,</span> <span class="n">API</span><span class="p">)</span>
+</span><span id="__span-16-9"><a id="__codelineno-16-9" name="__codelineno-16-9" href="#__codelineno-16-9"></a>   <span class="err">├─</span> <span class="n">Generate</span> <span class="n">metadata</span> <span class="p">(</span><span class="n">file</span> <span class="n">paths</span><span class="p">,</span> <span class="n">checksums</span><span class="p">,</span> <span class="n">timestamps</span><span class="p">)</span>
+</span><span id="__span-16-10"><a id="__codelineno-16-10" name="__codelineno-16-10" href="#__codelineno-16-10"></a>   <span class="err">└─</span> <span class="n">Return</span> <span class="n">sink</span><span class="o">-</span><span class="n">specific</span> <span class="n">metadata</span>
+</span><span id="__span-16-11"><a id="__codelineno-16-11" name="__codelineno-16-11" href="#__codelineno-16-11"></a>
+</span><span id="__span-16-12"><a id="__codelineno-16-12" name="__codelineno-16-12" href="#__codelineno-16-12"></a><span class="mf">3.</span> <span class="n">Merge</span> <span class="n">sink</span> <span class="n">metadata</span><span class="p">:</span>
+</span><span id="__span-16-13"><a id="__codelineno-16-13" name="__codelineno-16-13" href="#__codelineno-16-13"></a>   <span class="n">metadata</span><span class="p">[</span><span class="n">sink_name</span><span class="p">]</span> <span class="o">=</span> <span class="n">sink</span><span class="o">.</span><span class="n">write</span><span class="p">(</span><span class="o">...</span><span class="p">)</span> <span class="k">return</span> <span class="n">value</span>
+</span></code></pre></div>
+<p><strong>Metadata Chaining</strong>:</p>
+<div class="language-python highlight"><pre><span></span><code><span id="__span-17-1"><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="c1"># Metadata flows between sinks:</span>
+</span><span id="__span-17-2"><a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a><span class="n">metadata</span> <span class="o">=</span> <span class="p">{}</span>
+</span><span id="__span-17-3"><a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a>
+</span><span id="__span-17-4"><a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a><span class="c1"># First: csv_output writes</span>
+</span><span id="__span-17-5"><a id="__codelineno-17-5" name="__codelineno-17-5" href="#__codelineno-17-5"></a><span class="n">metadata</span><span class="p">[</span><span class="s2">&quot;csv_output&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">{</span><span class="s2">&quot;path&quot;</span><span class="p">:</span> <span class="s2">&quot;results.csv&quot;</span><span class="p">,</span> <span class="s2">&quot;rows&quot;</span><span class="p">:</span> <span class="mi">100</span><span class="p">}</span>
+</span><span id="__span-17-6"><a id="__codelineno-17-6" name="__codelineno-17-6" href="#__codelineno-17-6"></a>
+</span><span id="__span-17-7"><a id="__codelineno-17-7" name="__codelineno-17-7" href="#__codelineno-17-7"></a><span class="c1"># Later: signed_bundle accesses CSV path</span>
+</span><span id="__span-17-8"><a id="__codelineno-17-8" name="__codelineno-17-8" href="#__codelineno-17-8"></a><span class="n">csv_path</span> <span class="o">=</span> <span class="n">metadata</span><span class="p">[</span><span class="s2">&quot;csv_output&quot;</span><span class="p">][</span><span class="s2">&quot;path&quot;</span><span class="p">]</span>
+</span><span id="__span-17-9"><a id="__codelineno-17-9" name="__codelineno-17-9" href="#__codelineno-17-9"></a><span class="n">create_signed_bundle</span><span class="p">(</span><span class="n">csv_path</span><span class="p">,</span> <span class="o">...</span><span class="p">)</span>
+</span></code></pre></div>
+<p><strong>Debug Checkpoint</strong>: If sink execution fails:
+- ✅ Check sink security level (≥ operating level)
+- ✅ Destination writable (file permissions, network access)
+- ✅ Dependency available (if consumes=[] specified)
+- ✅ Sink-specific errors (blob auth, API keys, disk space)</p>
+<hr />
+<h2 id="security-checkpoints">Security Checkpoints<a class="headerlink" href="#security-checkpoints" title="Anchor link to this section">&para;</a></h2>
+<p>Security validation happens at <strong>five critical points</strong>:</p>
+<table>
+<thead>
+<tr>
+<th>Checkpoint</th>
+<th>Location</th>
+<th>What's Validated</th>
+<th>Failure Mode</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>1. Plugin Init</strong></td>
+<td>Plugin <code>__init__()</code></td>
+<td>Security level is valid enum</td>
+<td>Raises <code>ValueError</code></td>
+</tr>
+<tr>
+<td><strong>2. Operating Level Computation</strong></td>
+<td>Orchestrator</td>
+<td>Min of all components computed correctly</td>
+<td>N/A (computation always succeeds)</td>
+</tr>
+<tr>
+<td><strong>3. Component Clearance</strong></td>
+<td>Orchestrator</td>
+<td>Each component ≥ operating level</td>
+<td>Raises <code>SecurityValidationError</code></td>
+</tr>
+<tr>
+<td><strong>4. Data Classification</strong></td>
+<td>Transform execution</td>
+<td>Data classification ≤ component clearance</td>
+<td>Raises <code>SecurityValidationError</code></td>
+</tr>
+<tr>
+<td><strong>5. Sink Write</strong></td>
+<td>Each sink</td>
+<td>Sink ≥ data classification</td>
+<td>Raises <code>SecurityValidationError</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Security Enforcement Sequence</strong>:</p>
+<pre class="mermaid"><code>sequenceDiagram
+    participant Config
+    participant Orchestrator
+    participant Plugin
+    participant Runner
+    participant Sink
+
+    Config-&gt;&gt;Plugin: Instantiate with security_level
+    Plugin-&gt;&gt;Plugin: Validate security_level enum ✅
+
+    Orchestrator-&gt;&gt;Orchestrator: Compute operating_level = min(all)
+    Orchestrator-&gt;&gt;Plugin: validate_can_operate_at_level(operating_level)
+    Plugin--&gt;&gt;Orchestrator: ✅ or ❌ SecurityValidationError
+
+    Runner-&gt;&gt;Plugin: transform(row)
+    Plugin-&gt;&gt;Plugin: Check data.classification ≤ self.security_level ✅
+    Plugin--&gt;&gt;Runner: result
+
+    Runner-&gt;&gt;Sink: write(data, metadata)
+    Sink-&gt;&gt;Sink: Check data.classification ≤ self.security_level ✅
+    Sink--&gt;&gt;Runner: metadata</code></pre>
+<hr />
+<h2 id="debugging-guide">Debugging Guide<a class="headerlink" href="#debugging-guide" title="Anchor link to this section">&para;</a></h2>
+<h3 id="common-issues-diagnosis">Common Issues &amp; Diagnosis<a class="headerlink" href="#common-issues-diagnosis" title="Anchor link to this section">&para;</a></h3>
+<h4 id="issue-securityvalidationerror-insufficient-clearance">Issue: "SecurityValidationError: Insufficient clearance"<a class="headerlink" href="#issue-securityvalidationerror-insufficient-clearance" title="Anchor link to this section">&para;</a></h4>
+<p><strong>Where</strong>: Stage 4 (Security Validation)</p>
+<p><strong>Diagnosis</strong>:
+<div class="language-python highlight"><pre><span></span><code><span id="__span-18-1"><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="c1"># Find the failing component:</span>
+</span><span id="__span-18-2"><a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a><span class="mf">1.</span> <span class="n">Check</span> <span class="n">error</span> <span class="n">message</span> <span class="k">for</span> <span class="n">component</span> <span class="n">name</span>
+</span><span id="__span-18-3"><a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a><span class="mf">2.</span> <span class="n">Check</span> <span class="n">component</span><span class="s1">&#39;s security_level</span>
+</span><span id="__span-18-4"><a id="__codelineno-18-4" name="__codelineno-18-4" href="#__codelineno-18-4"></a><span class="mf">3.</span> <span class="n">Check</span> <span class="n">computed</span> <span class="n">operating_level</span>
+</span><span id="__span-18-5"><a id="__codelineno-18-5" name="__codelineno-18-5" href="#__codelineno-18-5"></a><span class="mf">4.</span> <span class="n">Compare</span><span class="p">:</span> <span class="n">component</span><span class="o">.</span><span class="n">security_level</span> <span class="err">≥</span> <span class="n">operating_level</span><span class="err">?</span>
+</span></code></pre></div></p>
+<p><strong>Solution</strong>: Increase component's <code>security_level</code> to at least <code>operating_level</code></p>
+<hr />
+<h4 id="issue-config-validation-failed-missing-required-field">Issue: "Config validation failed: Missing required field"<a class="headerlink" href="#issue-config-validation-failed-missing-required-field" title="Anchor link to this section">&para;</a></h4>
+<p><strong>Where</strong>: Stage 2 (Config Loading)</p>
+<p><strong>Diagnosis</strong>:
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-19-1"><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="c1"># Check which plugin/field failed:</span>
+</span><span id="__span-19-2"><a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a><span class="m">1</span>.<span class="w"> </span>Error<span class="w"> </span>message<span class="w"> </span>shows:<span class="w"> </span><span class="s2">&quot;datasource.path&quot;</span><span class="w"> </span>or<span class="w"> </span><span class="s2">&quot;llm.api_key&quot;</span>
+</span><span id="__span-19-3"><a id="__codelineno-19-3" name="__codelineno-19-3" href="#__codelineno-19-3"></a><span class="m">2</span>.<span class="w"> </span>Check<span class="w"> </span>that<span class="w"> </span>field<span class="w"> </span>exists<span class="w"> </span><span class="k">in</span><span class="w"> </span>YAML<span class="w"> </span>config
+</span><span id="__span-19-4"><a id="__codelineno-19-4" name="__codelineno-19-4" href="#__codelineno-19-4"></a><span class="m">3</span>.<span class="w"> </span>Check<span class="w"> </span>field<span class="w"> </span>name<span class="w"> </span>spelling<span class="w"> </span><span class="o">(</span><span class="k">case</span>-sensitive<span class="o">)</span>
+</span></code></pre></div></p>
+<p><strong>Solution</strong>: Add missing field to configuration YAML</p>
+<hr />
+<h4 id="issue-retry-exhausted-transform-keeps-failing">Issue: "Retry exhausted" / Transform keeps failing<a class="headerlink" href="#issue-retry-exhausted-transform-keeps-failing" title="Anchor link to this section">&para;</a></h4>
+<p><strong>Where</strong>: Stage 5 (Row Processing)</p>
+<p><strong>Diagnosis</strong>:
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-20-1"><a id="__codelineno-20-1" name="__codelineno-20-1" href="#__codelineno-20-1"></a><span class="c1"># Check audit logs:</span>
+</span><span id="__span-20-2"><a id="__codelineno-20-2" name="__codelineno-20-2" href="#__codelineno-20-2"></a>tail<span class="w"> </span>-f<span class="w"> </span>logs/run_*.jsonl<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>ERROR
+</span><span id="__span-20-3"><a id="__codelineno-20-3" name="__codelineno-20-3" href="#__codelineno-20-3"></a>
+</span><span id="__span-20-4"><a id="__codelineno-20-4" name="__codelineno-20-4" href="#__codelineno-20-4"></a><span class="c1"># Look for:</span>
+</span><span id="__span-20-5"><a id="__codelineno-20-5" name="__codelineno-20-5" href="#__codelineno-20-5"></a><span class="m">1</span>.<span class="w"> </span>API<span class="w"> </span>errors<span class="w"> </span><span class="o">(</span>rate<span class="w"> </span>limit,<span class="w"> </span>auth<span class="w"> </span>failure,<span class="w"> </span>timeout<span class="o">)</span>
+</span><span id="__span-20-6"><a id="__codelineno-20-6" name="__codelineno-20-6" href="#__codelineno-20-6"></a><span class="m">2</span>.<span class="w"> </span>Middleware<span class="w"> </span>blocks<span class="w"> </span><span class="o">(</span>PII<span class="w"> </span>detected,<span class="w"> </span>content<span class="w"> </span>safety<span class="o">)</span>
+</span><span id="__span-20-7"><a id="__codelineno-20-7" name="__codelineno-20-7" href="#__codelineno-20-7"></a><span class="m">3</span>.<span class="w"> </span>Validation<span class="w"> </span>failures<span class="w"> </span><span class="o">(</span>response<span class="w"> </span>doesn<span class="err">&#39;</span>t<span class="w"> </span>match<span class="w"> </span>schema<span class="o">)</span>
+</span></code></pre></div></p>
+<p><strong>Solution</strong>:
+- API errors → Check credentials, rate limits, network
+- Middleware blocks → Adjust middleware thresholds or disable
+- Validation → Fix response schema or transform output</p>
+<hr />
+<h4 id="issue-sink-fails-to-write">Issue: Sink fails to write<a class="headerlink" href="#issue-sink-fails-to-write" title="Anchor link to this section">&para;</a></h4>
+<p><strong>Where</strong>: Stage 7 (Artifact Pipeline)</p>
+<p><strong>Diagnosis</strong>:
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-21-1"><a id="__codelineno-21-1" name="__codelineno-21-1" href="#__codelineno-21-1"></a><span class="c1"># Check:</span>
+</span><span id="__span-21-2"><a id="__codelineno-21-2" name="__codelineno-21-2" href="#__codelineno-21-2"></a><span class="m">1</span>.<span class="w"> </span>File<span class="w"> </span>permissions<span class="w"> </span><span class="o">(</span>can<span class="w"> </span>write<span class="w"> </span>to<span class="w"> </span>output<span class="w"> </span>directory?<span class="o">)</span>
+</span><span id="__span-21-3"><a id="__codelineno-21-3" name="__codelineno-21-3" href="#__codelineno-21-3"></a><span class="m">2</span>.<span class="w"> </span>Disk<span class="w"> </span>space<span class="w"> </span><span class="o">(</span>df<span class="w"> </span>-h<span class="o">)</span>
+</span><span id="__span-21-4"><a id="__codelineno-21-4" name="__codelineno-21-4" href="#__codelineno-21-4"></a><span class="m">3</span>.<span class="w"> </span>Network<span class="w"> </span>access<span class="w"> </span><span class="o">(</span><span class="k">if</span><span class="w"> </span>cloud<span class="w"> </span>sink<span class="w"> </span>like<span class="w"> </span>azure_blob<span class="o">)</span>
+</span><span id="__span-21-5"><a id="__codelineno-21-5" name="__codelineno-21-5" href="#__codelineno-21-5"></a><span class="m">4</span>.<span class="w"> </span>Credentials<span class="w"> </span><span class="o">(</span>API<span class="w"> </span>keys,<span class="w"> </span>connection<span class="w"> </span>strings<span class="o">)</span>
+</span></code></pre></div></p>
+<p><strong>Solution</strong>: Fix infrastructure issue (permissions, network, auth)</p>
+<hr />
+<h4 id="issue-slow-execution-hangs">Issue: Slow execution / Hangs<a class="headerlink" href="#issue-slow-execution-hangs" title="Anchor link to this section">&para;</a></h4>
+<p><strong>Where</strong>: Stage 5 (Row Processing)</p>
+<p><strong>Diagnosis</strong>:
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-22-1"><a id="__codelineno-22-1" name="__codelineno-22-1" href="#__codelineno-22-1"></a><span class="c1"># Check:</span>
+</span><span id="__span-22-2"><a id="__codelineno-22-2" name="__codelineno-22-2" href="#__codelineno-22-2"></a><span class="m">1</span>.<span class="w"> </span>Concurrency<span class="w"> </span>disabled?<span class="w"> </span><span class="o">(</span>sequential<span class="w"> </span>processing<span class="w"> </span>is<span class="w"> </span>slow<span class="o">)</span>
+</span><span id="__span-22-3"><a id="__codelineno-22-3" name="__codelineno-22-3" href="#__codelineno-22-3"></a><span class="m">2</span>.<span class="w"> </span>Rate<span class="w"> </span>limiter<span class="w"> </span>saturated?<span class="w"> </span><span class="o">(</span>waiting<span class="w"> </span><span class="k">for</span><span class="w"> </span>quota<span class="o">)</span>
+</span><span id="__span-22-4"><a id="__codelineno-22-4" name="__codelineno-22-4" href="#__codelineno-22-4"></a><span class="m">3</span>.<span class="w"> </span>Network<span class="w"> </span>latency?<span class="w"> </span><span class="o">(</span>slow<span class="w"> </span>API<span class="w"> </span>responses<span class="o">)</span>
+</span><span id="__span-22-5"><a id="__codelineno-22-5" name="__codelineno-22-5" href="#__codelineno-22-5"></a><span class="m">4</span>.<span class="w"> </span>Large<span class="w"> </span>dataset?<span class="w"> </span><span class="o">(</span>how<span class="w"> </span>many<span class="w"> </span>rows?<span class="o">)</span>
+</span></code></pre></div></p>
+<p><strong>Solution</strong>:
+- Enable concurrency (if not enabled)
+- Increase rate limit quota
+- Use checkpoint recovery for large datasets
+- Monitor with <code>--live-outputs</code> flag</p>
+<hr />
+<h2 id="related-documentation">Related Documentation<a class="headerlink" href="#related-documentation" title="Anchor link to this section">&para;</a></h2>
+<ul>
+<li><strong><a href="../overview/">Architecture Overview</a></strong> - System components</li>
+<li><strong><a href="../../user-guide/security-model/">Security Model</a></strong> - Bell-LaPadula MLS details</li>
+<li><strong><a href="../../user-guide/configuration/">Configuration Guide</a></strong> - Config structure and merge order</li>
+<li><strong><a href="../../api-reference/">API Reference</a></strong> - Plugin interfaces</li>
+</ul>
+<hr />
+<h2 id="code-references">Code References<a class="headerlink" href="#code-references" title="Anchor link to this section">&para;</a></h2>
+<p>Key files for deep diving:</p>
+<table>
+<thead>
+<tr>
+<th>Component</th>
+<th>File Path</th>
+<th>Lines of Interest</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>CLI Entry</strong></td>
+<td><code>src/elspeth/core/cli/suite.py</code></td>
+<td>CLI argument parsing</td>
+</tr>
+<tr>
+<td><strong>Config Loading</strong></td>
+<td><code>src/elspeth/core/cli/config_utils.py</code></td>
+<td>Merge logic, validation</td>
+</tr>
+<tr>
+<td><strong>Suite Runner</strong></td>
+<td><code>src/elspeth/core/experiments/suite_runner.py</code></td>
+<td>Orchestration</td>
+</tr>
+<tr>
+<td><strong>Row Processing</strong></td>
+<td><code>src/elspeth/core/experiments/runner.py</code></td>
+<td>Core execution loop</td>
+</tr>
+<tr>
+<td><strong>Artifact Pipeline</strong></td>
+<td><code>src/elspeth/core/pipeline/artifact_pipeline.py</code></td>
+<td>Dependency resolution</td>
+</tr>
+<tr>
+<td><strong>Security Validation</strong></td>
+<td><code>src/elspeth/core/base/plugin.py</code></td>
+<td><code>validate_can_operate_at_level()</code></td>
+</tr>
+</tbody>
+</table>
+<hr />
+<div class="admonition tip">
+<p class="admonition-title">Execution Tracing</p>
+<p>For detailed execution traces, enable debug logging:
+<div class="language-bash highlight"><pre><span></span><code><span id="__span-23-1"><a id="__codelineno-23-1" name="__codelineno-23-1" href="#__codelineno-23-1"></a><span class="nb">export</span><span class="w"> </span><span class="nv">ELSPETH_LOG_LEVEL</span><span class="o">=</span>DEBUG
+</span><span id="__span-23-2"><a id="__codelineno-23-2" name="__codelineno-23-2" href="#__codelineno-23-2"></a>python<span class="w"> </span>-m<span class="w"> </span>elspeth.cli<span class="w"> </span>--settings<span class="w"> </span>...
+</span></code></pre></div></p>
+<p>Check <code>logs/run_*.jsonl</code> for complete audit trail with correlation IDs.</p>
+</div>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../overview/" class="md-footer__link md-footer__link--prev" aria-label="Previous: Overview">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                Overview
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../security-policy/" class="md-footer__link md-footer__link--next" aria-label="Next: Security Policy">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                Security Policy
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M4 11v2h12l-5.5 5.5 1.42 1.42L19.84 12l-7.92-7.92L10.5 5.5 16 11z"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      Copyright &copy; 2025 Elspeth Contributors
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+        
+<div class="md-social">
+  
+    
+    
+    
+    
+    <a href="https://github.com/johnm-dta/elspeth" target="_blank" rel="noopener" title="GitHub Repository" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M173.9 397.4c0 2-2.3 3.6-5.2 3.6-3.3.3-5.6-1.3-5.6-3.6 0-2 2.3-3.6 5.2-3.6 3-.3 5.6 1.3 5.6 3.6m-31.1-4.5c-.7 2 1.3 4.3 4.3 4.9 2.6 1 5.6 0 6.2-2s-1.3-4.3-4.3-5.2c-2.6-.7-5.5.3-6.2 2.3m44.2-1.7c-2.9.7-4.9 2.6-4.6 4.9.3 2 2.9 3.3 5.9 2.6 2.9-.7 4.9-2.6 4.6-4.6-.3-1.9-3-3.2-5.9-2.9M252.8 8C114.1 8 8 113.3 8 252c0 110.9 69.8 205.8 169.5 239.2 12.8 2.3 17.3-5.6 17.3-12.1 0-6.2-.3-40.4-.3-61.4 0 0-70 15-84.7-29.8 0 0-11.4-29.1-27.8-36.6 0 0-22.9-15.7 1.6-15.4 0 0 24.9 2 38.6 25.8 21.9 38.6 58.6 27.5 72.9 20.9 2.3-16 8.8-27.1 16-33.7-55.9-6.2-112.3-14.3-112.3-110.5 0-27.5 7.6-41.3 23.6-58.9-2.6-6.5-11.1-33.3 2.6-67.9 20.9-6.5 69 27 69 27 20-5.6 41.5-8.5 62.8-8.5s42.8 2.9 62.8 8.5c0 0 48.1-33.6 69-27 13.7 34.7 5.2 61.4 2.6 67.9 16 17.7 25.8 31.5 25.8 58.9 0 96.5-58.9 104.2-114.8 110.5 9.2 7.9 17 22.9 17 46.4 0 33.7-.3 75.4-.3 83.6 0 6.5 4.6 14.4 17.3 12.1C436.2 457.8 504 362.9 504 252 504 113.3 391.5 8 252.8 8M105.2 352.9c-1.3 1-1 3.3.7 5.2 1.6 1.6 3.9 2.3 5.2 1 1.3-1 1-3.3-.7-5.2-1.6-1.6-3.9-2.3-5.2-1m-10.8-8.1c-.7 1.3.3 2.9 2.3 3.9 1.6 1 3.6.7 4.3-.7.7-1.3-.3-2.9-2.3-3.9-2-.6-3.6-.3-4.3.7m32.4 35.6c-1.6 1.3-1 4.3 1.3 6.2 2.3 2.3 5.2 2.6 6.5 1 1.3-1.3.7-4.3-1.3-6.2-2.2-2.3-5.2-2.6-6.5-1m-11.4-14.7c-1.6 1-1.6 3.6 0 5.9s4.3 3.3 5.6 2.3c1.6-1.3 1.6-3.9 0-6.2-1.4-2.3-4-3.3-5.6-2"/></svg>
+    </a>
+  
+    
+    
+    
+    
+    <a href="https://github.com/johnm-dta/elspeth/issues" target="_blank" rel="noopener" title="Report an Issue" class="md-social__link">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 576 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M192 96c0-53 43-96 96-96s96 43 96 96v3.6c0 15.7-12.7 28.4-28.4 28.4H220.5c-15.7 0-28.4-12.7-28.4-28.4V96zm345.6 12.8c10.6 14.1 7.7 34.2-6.4 44.8l-97.8 73.3c5.3 8.9 9.3 18.7 11.8 29.1H544c17.7 0 32 14.3 32 32s-14.3 32-32 32h-96v32c0 2.6-.1 5.3-.2 7.9l83.4 62.5c14.1 10.6 17 30.7 6.4 44.8s-30.7 17-44.8 6.4l-63.1-47.3c-23.2 44.2-66.5 76.2-117.7 83.9V280c0-13.3-10.7-24-24-24s-24 10.7-24 24v230.2c-51.2-7.7-94.5-39.7-117.7-83.9l-63.1 47.3c-14.1 10.6-34.2 7.7-44.8-6.4s-7.7-34.2 6.4-44.8l83.4-62.5c-.1-2.6-.2-5.2-.2-7.9v-32H32c-17.7 0-32-14.3-32-32s14.3-32 32-32h98.8c2.5-10.4 6.5-20.2 11.8-29.1l-97.8-73.3c-14.1-10.6-17-30.7-6.4-44.8s30.7-17 44.8-6.4L192 184c12.3-5.1 25.8-8 40-8h112c14.2 0 27.7 2.8 40 8l108.8-81.6c14.1-10.6 34.2-7.7 44.8 6.4"/></svg>
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      <script id="__config" type="application/json">{"base": "../..", "features": ["navigation.tabs", "navigation.sections", "navigation.expand", "navigation.top", "navigation.path", "navigation.indexes", "navigation.footer", "toc.follow", "toc.integrate", "search.suggest", "search.highlight", "search.share", "content.code.copy", "content.code.annotate", "content.tabs.link"], "search": "../../assets/javascripts/workers/search.973d3a69.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"default": "latest", "provider": "mike"}}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.f55a23d4.min.js"></script>
+      
+    
+  </body>
+</html>
