@@ -109,9 +109,12 @@ cython_debug/
 # macOS
 .DS_Store
 
-# dotenv
+# dotenv (actual secrets only - allow .env.example, .env.template)
 .env
-.env.*
+.env.local
+.env.production
+.env.development
+.env.test
 
 # Config files with secrets
 config/blob_store.yaml
@@ -126,14 +129,24 @@ venv.bak/
 # Git worktrees (isolated development workspaces)
 .worktrees/
 
-# Project data/artifacts
+# Project data/artifacts (production data never committed)
 /data/
 /artifacts/*
 !/artifacts/.gitkeep
 /scorecard-artifacts/
-/orchestration_packs/*/
+
+# Orchestration Packs: Block all except approved demos
+# Defense-in-depth: Prevents production runs with sensitive data from being committed
+# Pre-commit hook + CI provide additional validation layers
+/orchestration_packs/*
 !/orchestration_packs/.gitkeep
 !/orchestration_packs/README.md
+!/orchestration_packs/product_analysis_demo/
+# Workaround: gitignore can't un-ignore subdirs after ignoring parent, so:
+/orchestration_packs/product_analysis_demo/*
+!/orchestration_packs/product_analysis_demo/**
+
+# Runtime outputs (production data never committed)
 /outputs/*
 !/outputs/.gitkeep
 /logs/*
@@ -161,7 +174,8 @@ sbom.json
 sbom.*.json
 audit.json
 
-# Agent instruction files (developer-local)
+# Developer-local agent configuration (not part of repo)
+# AI coding is acceptable, but personal AI preferences stay local
 AGENTS.md
 CLAUDE.md
 .claude/

@@ -66,6 +66,47 @@ jobs:
           path: results.sarif
           retention-days: 7
 
+  production-data-guard:
+    name: Production Data Guard (orchestration_packs/)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Validate no production data in orchestration_packs/
+        run: |
+          echo "🔍 Scanning orchestration_packs/ for production data..."
+          echo ""
+
+          # Find all files in orchestration_packs/, excluding allowed patterns
+          DISALLOWED=$(find orchestration_packs/ -type f 2>/dev/null | \
+            grep -v -E '(\.gitkeep|README\.md|product_analysis_demo/)' || true)
+
+          if [ -n "$DISALLOWED" ]; then
+            echo "❌ ERROR: Production data found in orchestration_packs/"
+            echo ""
+            echo "Blocked files:"
+            echo "$DISALLOWED" | sed 's/^/  - /'
+            echo ""
+            echo "Why this failed:"
+            echo "  Only approved demos should be committed to orchestration_packs/"
+            echo "  Production runs with real data must NEVER be in the repository"
+            echo ""
+            echo "Where production data should go:"
+            echo "  ✅ outputs/ directory (gitignored)"
+            echo "  ✅ CI/CD pipelines (ephemeral)"
+            echo "  ✅ Secure artifact storage (external)"
+            echo ""
+            echo "This is Layer 3 of defense-in-depth (.gitignore + pre-commit + CI)"
+            exit 1
+          fi
+
+          echo "✅ No production data found - orchestration_packs/ is clean"
+
   ci-core:
     name: CI Core (Lint, Types, Tests)
     needs: [secrets-scan, changes]
