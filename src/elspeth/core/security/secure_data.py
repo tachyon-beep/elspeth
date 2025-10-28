@@ -52,7 +52,7 @@ NOT ACCEPTABLE for:
 
 import secrets
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 import pandas as pd
 
@@ -447,7 +447,9 @@ class SecureDataFrame:
         """
         # Pass token to __new__ for authorization (VULN-011)
         # Token retrieved from closure-encapsulated secret
-        instance = cls.__new__(cls, _token=_get_construction_token())
+        instance = cast(
+            "SecureDataFrame", cls.__new__(cls, _token=_get_construction_token())
+        )
         object.__setattr__(instance, "data", data)
         object.__setattr__(instance, "security_level", security_level)
         object.__setattr__(instance, "_created_by_datasource", True)
@@ -498,7 +500,10 @@ class SecureDataFrame:
 
         # Pass token to __new__ for authorization (VULN-011)
         # Token retrieved from closure-encapsulated secret
-        instance = SecureDataFrame.__new__(SecureDataFrame, _token=_get_construction_token())
+        instance = cast(
+            SecureDataFrame,
+            SecureDataFrame.__new__(SecureDataFrame, _token=_get_construction_token()),
+        )
         object.__setattr__(instance, "data", self.data)
         object.__setattr__(instance, "security_level", uplifted_level)
         object.__setattr__(instance, "_created_by_datasource", False)
@@ -544,7 +549,10 @@ class SecureDataFrame:
 
         # Pass token to __new__ for authorization (VULN-011)
         # Token retrieved from closure-encapsulated secret
-        instance = SecureDataFrame.__new__(SecureDataFrame, _token=_get_construction_token())
+        instance = cast(
+            SecureDataFrame,
+            SecureDataFrame.__new__(SecureDataFrame, _token=_get_construction_token()),
+        )
         object.__setattr__(instance, "data", new_data)
         object.__setattr__(instance, "security_level", self.security_level)
         object.__setattr__(instance, "_created_by_datasource", False)
