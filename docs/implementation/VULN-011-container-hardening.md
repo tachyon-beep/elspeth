@@ -1,9 +1,9 @@
 # VULN-011: SecureDataFrame Container Hardening (Stack Inspection → Capability Token + Tamper-Evident Seal)
 
 **Priority**: P1 (HIGH - Security Enhancement)
-**Effort**: 4-5 hours (updated from 3-4h based on security review feedback)
-**Sprint**: Post-PR#15 / Security Hardening Sprint
-**Status**: PLANNED
+**Effort**: 5.5-6 hours (includes Phase 0 baseline + mutation testing)
+**Sprint**: Post-PR#15 / Security Hardening Sprint (PR #16)
+**Status**: IN PROGRESS (Phase 0)
 **Completed**: N/A
 **Depends On**: ADR-002-A (SecureDataFrame trusted container), VULN-009 (slots=True immutability)
 **Pre-1.0**: Breaking changes acceptable (though this maintains API compatibility)
@@ -238,12 +238,155 @@ Python's `object.__setattr__()` **cannot be blocked** in pure Python. C extensio
 
 ---
 
-## Implementation Phases (TDD Approach)
+## Implementation Phases (Enhanced TDD with Risk Reduction)
 
-### Phase 1.0: Capability Token Implementation (1-1.5 hours)
+### Phase 0: Baseline Characterization Tests (30 minutes) 🆕
+
+#### Objective
+Capture existing behavior BEFORE making changes. Creates "known good" snapshot for regression detection.
+
+#### Rationale
+- Proves current implementation works (baseline for comparison)
+- Measures existing performance (validates 50x improvement claim)
+- Documents current behavior patterns (what should NOT change)
+- Enables quick regression detection (compare to baseline)
+
+#### TDD Cycle
+
+**RED - Write Characterization Tests**:
+```python
+# tests/test_vuln_011_phase0_baseline.py (NEW FILE)
+
+def test_baseline_factory_methods_work():
+    """BASELINE: Document current factory method behavior before hardening."""
+    import pandas as pd
+    from elspeth.core.security.secure_data import SecureDataFrame
+    from elspeth.core.base.types import SecurityLevel
+
+    # create_from_datasource
+    frame1 = SecureDataFrame.create_from_datasource(
+        pd.DataFrame({"a": [1, 2, 3]}),
+        SecurityLevel.OFFICIAL
+    )
+    assert frame1.classification == SecurityLevel.OFFICIAL
+    assert len(frame1.data) == 3
+
+    # with_uplifted_security_level
+    frame2 = frame1.with_uplifted_security_level(SecurityLevel.SECRET)
+    assert frame2.classification == SecurityLevel.SECRET
+    assert len(frame2.data) == 3  # Data unchanged
+
+    # with_new_data
+    frame3 = frame1.with_new_data(pd.DataFrame({"b": [4, 5]}))
+    assert frame3.classification == SecurityLevel.OFFICIAL  # Classification preserved
+    assert "b" in frame3.data.columns
+    assert len(frame3.data) == 2
+
+def test_baseline_direct_construction_blocked():
+    """BASELINE: Verify current stack inspection blocks direct construction."""
+    import pandas as pd
+    from elspeth.core.security.secure_data import SecureDataFrame
+    from elspeth.core.base.types import SecurityLevel
+    from elspeth.core.validation.base import SecurityValidationError
+
+    with pytest.raises(SecurityValidationError):
+        SecureDataFrame(
+            data=pd.DataFrame({"col": [1]}),
+            classification=SecurityLevel.SECRET
+        )
+
+def test_baseline_stack_inspection_performance():
+    """BASELINE: Measure current stack inspection overhead (for comparison)."""
+    import timeit
+    import pandas as pd
+    from elspeth.core.security.secure_data import SecureDataFrame
+    from elspeth.core.base.types import SecurityLevel
+
+    def create_frame():
+        return SecureDataFrame.create_from_datasource(
+            pd.DataFrame({"col": [1]}),
+            SecurityLevel.OFFICIAL
+        )
+
+    # Run 10k iterations (smaller than Phase 4 for quick baseline)
+    time = timeit.timeit(create_frame, number=10000)
+    avg_per_call = (time / 10000) * 1_000_000  # Microseconds
+
+    # Document baseline (expected ~5µs with stack inspection)
+    print(f"📊 BASELINE Construction: {avg_per_call:.3f}µs per call")
+
+    # No assertion - just document current performance
+    # Phase 4 will compare against this baseline
+
+def test_baseline_integration_with_orchestrator():
+    """BASELINE: Verify containers work in suite runner context."""
+    import pandas as pd
+    from elspeth.core.security.secure_data import SecureDataFrame
+    from elspeth.core.base.types import SecurityLevel
+
+    # Simulate orchestrator pattern: create → uplift → validate
+    frame = SecureDataFrame.create_from_datasource(
+        pd.DataFrame({"col": [1, 2, 3]}),
+        SecurityLevel.OFFICIAL
+    )
+
+    uplifted = frame.with_uplifted_security_level(SecurityLevel.SECRET)
+
+    # Validate compatibility (used by sinks)
+    uplifted.validate_compatible_with(SecurityLevel.SECRET)  # Should not raise
+    uplifted.validate_compatible_with(SecurityLevel.OFFICIAL)  # Should not raise (downward compatible)
+```
+
+**GREEN - All Baseline Tests Pass**:
+- Run: `pytest tests/test_vuln_011_phase0_baseline.py -v`
+- Expected: 4/4 passing (confirms current implementation works)
+- Document baseline performance (~5µs expected)
+
+**REFACTOR - N/A** (Characterization tests don't need refactoring)
+
+#### Exit Criteria
+- [x] 4 baseline tests passing (factory methods, blocking, performance, integration)
+- [x] Baseline performance documented (~5µs construction overhead)
+- [x] Current behavior captured (regression detection ready)
+- [x] No changes to production code (pure observation)
+
+#### Commit Plan
+
+**Commit 0**: Test: Add Phase 0 baseline characterization (VULN-011)
+```
+Test: Add Phase 0 baseline characterization tests (VULN-011)
+
+Capture current SecureDataFrame behavior before hardening:
+- Factory methods (create_from_datasource, with_uplifted, with_new_data)
+- Direct construction blocking (stack inspection)
+- Performance baseline (~5µs expected)
+- Integration with orchestrator patterns
+
+These tests document "known good" behavior and enable regression detection
+during hardening phases. No production code changes.
+
+Tests: 4 new baseline characterization tests
+Relates to VULN-011 (Container Hardening - Phase 0)
+```
+
+---
+
+### Phase 1.0: Capability Token Implementation (2 hours - Enhanced with Progressive Rollout)
 
 #### Objective
 Replace stack inspection with capability token gating in `__new__`.
+
+#### Enhanced Risk Reduction Strategy 🆕
+**Progressive Rollout**: Implement token check as WARNING first, then upgrade to ERROR:
+1. Phase 1a: Token check warns but allows (discover all call sites)
+2. Phase 1b: Fix any warning sites
+3. Phase 1c: Upgrade warning to error (hard enforcement)
+
+**Stay Green Rule**: After EVERY code edit, run:
+```bash
+pytest tests/test_vuln_011_capability_token.py -v --tb=short
+```
+If RED → Fix immediately. If GREEN → Proceed to next change.
 
 #### TDD Cycle
 
@@ -366,10 +509,29 @@ Addresses VULN-011 (Container Hardening)
 
 ---
 
-### Phase 2.0: Tamper-Evident Seal (1-1.5 hours)
+### Phase 2.0: Tamper-Evident Seal + Mutation Testing (1.5 hours)
 
 #### Objective
 Add HMAC seal to detect `object.__setattr__()` tampering.
+
+#### Enhanced Risk Reduction Strategy 🆕
+**Mutation Testing Validation**: After implementing seal, validate test quality:
+```bash
+# Install mutmut (if not already installed)
+pip install mutmut
+
+# Run mutation testing on seal implementation
+mutmut run --paths-to-mutate src/elspeth/core/security/secure_data.py
+
+# Goal: ≤10% survivors (tests catch 90%+ of mutations)
+```
+
+**Why**: Proves your tampering detection tests actually work (not just cosmetic).
+
+**Stay Green Rule**: After each seal-related edit, run:
+```bash
+pytest tests/test_vuln_011_tamper_seal.py -v --tb=short
+```
 
 #### TDD Cycle
 
@@ -999,11 +1161,12 @@ pytest
 
 | Phase | Estimated | Actual | Notes |
 |-------|-----------|--------|-------|
-| Phase 1.0 | 1-1.5h | TBD | Token gating |
-| Phase 2.0 | 1-1.5h | TBD | Tamper-evident seal |
-| Phase 3.0 | 1-1.5h | TBD | Comprehensive guards (updated from 30-45min) |
-| Phase 4.0 | 30min | TBD | Performance benchmarks (optional verification) |
-| **Total** | **4-5h** | **TBD** | Four-phase enhancement |
+| **Phase 0** | **30min** | **TBD** | **Baseline characterization (NEW)** |
+| Phase 1.0 | 2h | TBD | Token gating (progressive rollout) |
+| Phase 2.0 | 1.5h | TBD | Tamper-evident seal + mutation testing |
+| Phase 3.0 | 1.5h | TBD | Comprehensive guards |
+| Phase 4.0 | 30min | TBD | Performance benchmarks |
+| **Total** | **5.5-6h** | **TBD** | **Enhanced five-phase implementation** |
 
 **Methodology**: TDD (RED-GREEN-REFACTOR)
 **Skills Used**: test-driven-development, security-hardening, performance-optimization
