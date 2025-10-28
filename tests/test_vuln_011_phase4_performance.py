@@ -19,7 +19,7 @@ import pandas as pd
 import pytest
 
 from elspeth.core.base.types import SecurityLevel
-from elspeth.core.security.secure_data import SecureDataFrame
+from elspeth.core.security.secure_data import SecureDataFrame, _compute_seal
 
 
 def test_token_gating_performance():
@@ -67,7 +67,7 @@ def test_seal_computation_performance():
     data = pd.DataFrame({"col": [1, 2, 3]})
 
     def compute_seal():
-        return SecureDataFrame._compute_seal(data, SecurityLevel.SECRET)
+        return _compute_seal(data, SecurityLevel.SECRET)
 
     # Warmup
     for _ in range(100):
@@ -250,7 +250,7 @@ def test_performance_comparison_summary():
 
     # Seal computation (isolated)
     def compute_seal():
-        return SecureDataFrame._compute_seal(data, SecurityLevel.SECRET)
+        return _compute_seal(data, SecurityLevel.SECRET)
 
     time_s = timeit.timeit(compute_seal, number=100000)
     results["Seal Computation"] = (time_s / 100000) * 1_000_000

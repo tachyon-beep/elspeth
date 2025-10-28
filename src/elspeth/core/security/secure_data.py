@@ -30,6 +30,54 @@ _CONSTRUCTION_TOKEN = secrets.token_bytes(32)
 # Used to compute HMAC-BLAKE2s seal over (data identity, security_level)
 _SEAL_KEY = secrets.token_bytes(32)
 
+
+def _compute_seal(data: pd.DataFrame, security_level: SecurityLevel) -> bytes:
+    """Compute HMAC-BLAKE2s seal for tamper detection (VULN-011 Phase 2).
+
+    Module-private function (not accessible to plugins). Moving from @staticmethod
+    to module-level prevents seal forgery attacks where untrusted plugins could
+    call SecureDataFrame._compute_seal() to forge valid seals after tampering.
+
+    The seal binds together:
+    - DataFrame identity (id(data))
+    - Security level (enum value)
+
+    This prevents two tampering attacks:
+    1. Relabeling: Changing security_level via object.__setattr__()
+    2. Data swapping: Swapping .data reference to different DataFrame
+
+    Args:
+        data: DataFrame to seal
+        security_level: Security level to seal
+
+    Returns:
+        32-byte HMAC-BLAKE2s digest
+
+    Security Properties:
+        - BLAKE2s provides 128-bit security (NIST SP 800-185)
+        - HMAC-BLAKE2s is quantum-resistant (no Grover speedup for <256-bit)
+        - Identity-based (id(data)) catches DataFrame swaps
+        - Level-based (enum value) catches relabeling
+        - Process-local key (_SEAL_KEY) prevents external forgery
+        - Module-private function prevents plugin-level seal forgery
+
+    Performance:
+        - ~1.6µs per seal computation (measured baseline)
+
+    CVE Prevention:
+        - CVE-ADR-002-A-002: Detects object.__setattr__() bypass
+        - CVE-ADR-002-A-007: Prevents seal forgery via exposed method (P0 fix)
+    """
+    import hashlib
+
+    # Compute seal over (data identity, security_level)
+    # Using id() for DataFrame identity (object address)
+    seal_input = f"{id(data)}:{security_level.value}".encode("utf-8")
+
+    # HMAC-BLAKE2s for tamper detection
+    return hashlib.blake2s(seal_input, key=_SEAL_KEY, digest_size=32).digest()
+
+
 if TYPE_CHECKING:
     pass  # ADR-004: ABC with nominal typing
 
@@ -216,48 +264,6 @@ class SecureDataFrame:
             "Use with_new_data() or with_uplifted_security_level() instead."
         )
 
-    @staticmethod
-    def _compute_seal(data: pd.DataFrame, security_level: SecurityLevel) -> bytes:
-        """Compute HMAC-BLAKE2s seal for tamper detection (VULN-011 Phase 2).
-
-        The seal binds together:
-        - DataFrame identity (id(data))
-        - Security level (enum value)
-
-        This prevents two tampering attacks:
-        1. Relabeling: Changing security_level via object.__setattr__()
-        2. Data swapping: Swapping .data reference to different DataFrame
-
-        Args:
-            data: DataFrame to seal
-            security_level: Security level to seal
-
-        Returns:
-            32-byte HMAC-BLAKE2s digest
-
-        Security Properties:
-            - BLAKE2s provides 128-bit security (NIST SP 800-185)
-            - HMAC-BLAKE2s is quantum-resistant (no Grover speedup for <256-bit)
-            - Identity-based (id(data)) catches DataFrame swaps
-            - Level-based (enum value) catches relabeling
-            - Process-local key (_SEAL_KEY) prevents external forgery
-
-        Performance:
-            - ~200ns per seal computation
-            - No significant overhead vs token check
-
-        CVE Prevention:
-            - CVE-ADR-002-A-002: Detects object.__setattr__() bypass
-        """
-        import hashlib
-
-        # Compute seal over (data identity, security_level)
-        # Using id() for DataFrame identity (object address)
-        seal_input = f"{id(data)}:{security_level.value}".encode("utf-8")
-
-        # HMAC-BLAKE2s for tamper detection
-        return hashlib.blake2s(seal_input, key=_SEAL_KEY, digest_size=32).digest()
-
     def _verify_seal(self) -> None:
         """Verify seal integrity, raise if tampered (VULN-011 Phase 2).
 
@@ -278,7 +284,7 @@ class SecureDataFrame:
         from elspeth.core.validation.base import SecurityValidationError
 
         # Recompute seal from current state
-        expected_seal = self._compute_seal(self.data, self.security_level)
+        expected_seal = _compute_seal(self.data, self.security_level)
 
         # Compare to stored seal (constant-time comparison)
         stored_seal = object.__getattribute__(self, "_seal")
@@ -325,7 +331,7 @@ class SecureDataFrame:
         object.__setattr__(instance, "_created_by_datasource", True)
 
         # Compute and set tamper-evident seal (VULN-011 Phase 2)
-        seal = cls._compute_seal(data, security_level)
+        seal = _compute_seal(data, security_level)
         object.__setattr__(instance, "_seal", seal)
 
         return instance
@@ -375,7 +381,7 @@ class SecureDataFrame:
         object.__setattr__(instance, "_created_by_datasource", False)
 
         # Compute and set tamper-evident seal (VULN-011 Phase 2)
-        seal = SecureDataFrame._compute_seal(self.data, uplifted_level)
+        seal = _compute_seal(self.data, uplifted_level)
         object.__setattr__(instance, "_seal", seal)
 
         return instance
@@ -420,7 +426,7 @@ class SecureDataFrame:
         object.__setattr__(instance, "_created_by_datasource", False)
 
         # Compute and set tamper-evident seal (VULN-011 Phase 2)
-        seal = SecureDataFrame._compute_seal(new_data, self.security_level)
+        seal = _compute_seal(new_data, self.security_level)
         object.__setattr__(instance, "_seal", seal)
 
         return instance
