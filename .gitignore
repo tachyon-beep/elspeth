@@ -187,3 +187,7 @@ CLAUDE.md
 # Auto-generated documentation
 site-docs/docs/api-reference/plugins/generated-*.md
 site-docs/docs/plugins/generated-catalogue.md
+
+# Mutation testing artifacts
+.mutmut-config.py
+mutants/
