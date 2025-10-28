@@ -1,0 +1,12 @@
+# Gitleaks configuration for Elspeth project
+# Excludes design documents and plans from secret scanning
+
+title = "Elspeth gitleaks config"
+
+[allowlist]
+description = "Allowlist for demo/documentation content"
+
+# Exclude design documents and plans (contain example tokens/secrets for demonstration)
+paths = [
+    '''docs/plans/.*\.md''',
+]
