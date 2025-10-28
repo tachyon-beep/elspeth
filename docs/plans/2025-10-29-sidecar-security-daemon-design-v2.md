@@ -110,31 +110,43 @@ appplugin (1002)    -               |  denied       |  denied (SO_PEERCRED)
 **Problem:** Plugin code runs in same interpreter as orchestrator.
 - Python's dynamic nature: `import socket; socket.socket().connect("/run/sidecar/auth.sock")`
 - Even with different UID for daemon, plugin in same process can inherit orchestrator's auth
+- Plugins could access SecureDataFrame internals (_compute_seal, _verify_seal) via introspection
 
-**Solution:** Move plugin execution to separate subprocess.
-- Orchestrator: Trusted code only (suite runner, registry, config loading)
-- Plugin worker: Runs plugin.load_data(), plugin.transform(), etc.
-- Communication: Orchestrator ↔ Plugin worker via pickle/msgpack IPC
-- Plugin worker cannot access sidecar (no session key, no socket access)
+**Solution:** Move plugin execution to separate subprocess with proxy-based RPC.
+- **Orchestrator (UID 1000)**: Trusted code only (suite runner, registry, config loading)
+  - Holds all real SecureDataFrame instances
+  - Mediates all seal operations via sidecar daemon
+  - Exposes only safe proxy objects to plugin worker
+- **Plugin Worker (UID 1002)**: Runs plugin.load_data(), plugin.transform(), etc.
+  - Receives SecureFrameProxy objects (opaque handles)
+  - Cannot access sidecar (no session key, SO_PEERCRED rejects UID 1002)
+  - Cannot access seal computation (no real frames, only proxies)
+- **Communication**: Orchestrator ↔ Plugin worker via proxy RPC channel
+  - **Request/Response Schema**: JSON-serializable messages with operation allowlist
+  - **Enforced Operations**: Only `with_uplifted_security_level`, `with_new_data`, `.data` accessor
+  - **Security-Sensitive Methods**: All mediated by orchestrator code (never executed in plugin)
+  - **Proxy Flow**: Plugin calls proxy.method() → RPC to orchestrator → orchestrator invokes sidecar → orchestrator updates real frame → returns new proxy ID
 
 **Trust Boundaries:**
 ```
 ┌─────────────────┐
-│ Sidecar Daemon  │  ← SECRETS NEVER LEAVE HERE
-│ (UID sidecar)   │
+│ Sidecar Daemon  │  ← SECRETS NEVER LEAVE HERE (token, seal key)
+│ (UID 1001)      │  ← Computes seals, issues grants
 └────────┬────────┘
          │ Mutual auth (session key)
-         │ One-shot handles only
+         │ Grant-based protocol (no token exposure)
 ┌────────▼────────┐
 │ Orchestrator    │  ← TRUSTED CODE (vetted, signed)
-│ (UID appuser)   │  ← Has session key
+│ (UID 1000)      │  ← Has session key, holds real SecureDataFrame instances
+│                 │  ← Mediates all seal operations via sidecar
 └────────┬────────┘
-         │ IPC (no secrets)
-         │ Pickle/msgpack
+         │ Proxy RPC (SecureFrameProxy objects)
+         │ Allowlist of safe operations only
 ┌────────▼────────┐
 │ Plugin Worker   │  ← UNTRUSTED PLUGIN CODE
-│ (UID appuser,   │  ← NO session key
-│  no sidecar grp)│  ← Cannot reach daemon
+│ (UID 1002)      │  ← NO session key, NO socket access
+│ (appplugin)     │  ← Receives ONLY proxy handles (never real frames)
+│                 │  ← Cannot compute/verify seals
 └─────────────────┘
 ```
 
@@ -532,6 +544,163 @@ def execute_plugin(plugin: Plugin) -> SecureDataFrame:
 - ✅ Token stays in daemon, used only for internal validation
 - ✅ CVE-ADR-002-A-009 CLOSED
 
+### SecureFrameProxy: Plugin Worker Isolation via RPC
+
+**CRITICAL ISOLATION LAYER**: Every SecureDataFrame instance lives ONLY inside the orchestrator process (UID 1000). The plugin worker (UID 1002) receives opaque `SecureFrameProxy` objects that marshal all operations back to the orchestrator via RPC.
+
+**Why Proxy Objects Are Essential:**
+
+Without proxies, plugin workers would need real SecureDataFrame instances, which would give them access to:
+- `_compute_seal()` and `_verify_seal()` methods (even if private)
+- Python introspection to access internals
+- Potential to forge seals if they had the seal key
+
+By using proxies, we ensure plugins can NEVER touch seal computation/verification code.
+
+**Proxy Architecture:**
+
+```python
+# ORCHESTRATOR PROCESS (UID 1000)
+class SecureFrameProxy:
+    """Opaque proxy for SecureDataFrame (plugin worker side).
+
+    All methods marshal back to orchestrator via RPC.
+    Plugin worker never holds real SecureDataFrame instances.
+    """
+    def __init__(self, proxy_id: str, rpc_client: OrchestratorRPCClient):
+        self._proxy_id = proxy_id  # Opaque handle
+        self._rpc = rpc_client
+
+    def with_uplifted_security_level(self, level: SecurityLevel) -> 'SecureFrameProxy':
+        """Uplift security level (marshals to orchestrator)."""
+        # RPC call to orchestrator
+        response = self._rpc.call("uplift", {
+            "proxy_id": self._proxy_id,
+            "level": level.value
+        })
+        # Return new proxy (orchestrator updated real frame)
+        return SecureFrameProxy(response["new_proxy_id"], self._rpc)
+
+    def with_new_data(self, data: pd.DataFrame) -> 'SecureFrameProxy':
+        """Replace data (marshals to orchestrator)."""
+        response = self._rpc.call("with_new_data", {
+            "proxy_id": self._proxy_id,
+            "data": data.to_dict()  # Serialize for RPC
+        })
+        return SecureFrameProxy(response["new_proxy_id"], self._rpc)
+
+    @property
+    def data(self) -> pd.DataFrame:
+        """Access underlying DataFrame (marshals to orchestrator)."""
+        response = self._rpc.call("get_data", {"proxy_id": self._proxy_id})
+        return pd.DataFrame(response["data"])
+
+    # NO access to _compute_seal, _verify_seal, or seal internals
+
+
+# ORCHESTRATOR RPC HANDLER (UID 1000)
+class OrchestratorRPCHandler:
+    """Handles proxy RPC calls from plugin worker.
+
+    Maintains registry of real SecureDataFrame instances.
+    All seal operations happen HERE via sidecar daemon.
+    """
+    def __init__(self, sidecar_client: SidecarClient):
+        self._frames: dict[str, SecureDataFrame] = {}  # proxy_id → real frame
+        self._sidecar = sidecar_client
+
+    def handle_uplift(self, proxy_id: str, level: str) -> dict:
+        """Handle with_uplifted_security_level RPC."""
+        # Get real frame from registry
+        frame = self._frames[proxy_id]
+
+        # Compute seal via sidecar daemon (NOT in plugin worker)
+        response = self._sidecar.compute_seal(id(frame.data), level)
+        seal = base64.b64decode(response["seal"])
+
+        # Create uplifted frame (orchestrator-side only)
+        new_frame = frame.with_uplifted_security_level(SecurityLevel[level])
+
+        # Register new frame, return new proxy ID
+        new_proxy_id = secrets.token_hex(16)
+        self._frames[new_proxy_id] = new_frame
+
+        return {"new_proxy_id": new_proxy_id}
+
+    def handle_with_new_data(self, proxy_id: str, data_dict: dict) -> dict:
+        """Handle with_new_data RPC."""
+        frame = self._frames[proxy_id]
+        new_data = pd.DataFrame(data_dict)
+
+        # Compute seal via sidecar (orchestrator mediates)
+        response = self._sidecar.compute_seal(id(new_data), frame.security_level.value)
+        seal = base64.b64decode(response["seal"])
+
+        # Update frame with new data (orchestrator-side only)
+        new_frame = frame.with_new_data(new_data)
+
+        new_proxy_id = secrets.token_hex(16)
+        self._frames[new_proxy_id] = new_frame
+
+        return {"new_proxy_id": new_proxy_id}
+```
+
+**SecureDataFrame Lifecycle (Complete Flow):**
+
+Every operation follows this pattern to ensure seal computation ONLY happens in orchestrator:
+
+1. **Plugin Worker Calls Proxy Method**:
+   ```python
+   # Plugin code (UID 1002)
+   proxy = get_proxy_from_orchestrator()  # Receives SecureFrameProxy
+   uplifted = proxy.with_uplifted_security_level(SecurityLevel.SECRET)
+   ```
+
+2. **Proxy Marshals to Orchestrator**:
+   ```python
+   # Inside SecureFrameProxy.with_uplifted_security_level()
+   response = self._rpc.call("uplift", {"proxy_id": "abc123", "level": "SECRET"})
+   ```
+
+3. **Orchestrator Invokes Sidecar for Seal**:
+   ```python
+   # Inside OrchestratorRPCHandler.handle_uplift()
+   seal_response = self._sidecar.compute_seal(data_id, "SECRET")
+   # Sidecar returns seal (NO token exposure)
+   ```
+
+4. **Orchestrator Updates Real Frame**:
+   ```python
+   # Orchestrator creates new frame with updated seal
+   new_frame = frame.with_uplifted_security_level(SecurityLevel.SECRET)
+   self._frames[new_proxy_id] = new_frame
+   ```
+
+5. **Orchestrator Returns New Proxy**:
+   ```python
+   # Plugin worker receives new proxy ID (never sees real frame)
+   return {"new_proxy_id": "def456"}
+   ```
+
+**Enforced Operation Allowlist:**
+
+Plugin workers can ONLY invoke these operations via proxy:
+- ✅ `with_uplifted_security_level(level)` → RPC to orchestrator → sidecar seal computation
+- ✅ `with_new_data(data)` → RPC to orchestrator → sidecar seal computation
+- ✅ `.data` property → RPC to orchestrator → returns raw DataFrame (no seal)
+- ❌ `_compute_seal()` → NOT ACCESSIBLE (method doesn't exist on proxy)
+- ❌ `_verify_seal()` → NOT ACCESSIBLE (method doesn't exist on proxy)
+- ❌ Direct frame construction → NOT ACCESSIBLE (proxy has no constructor access)
+
+**Security Guarantees:**
+
+- ✅ **No Seal Computation in Plugin Worker**: All seal operations happen in orchestrator via sidecar
+- ✅ **No Seal Verification in Plugin Worker**: Legitimate workflows still pass (orchestrator validates)
+- ✅ **Fail-Closed on RPC Errors**: Plugin worker cannot proceed if orchestrator RPC fails
+- ✅ **Proxy Objects Cannot Be Forged**: Proxy IDs are secrets.token_hex(16) (128-bit random)
+- ✅ **Orchestrator Validates Proxy IDs**: Unknown proxy_id → error, prevents forgery
+- ✅ **Plugin Worker Never Sees Real Frames**: Only opaque proxy handles cross process boundary
+
 **Sidecar Client:**
 
 ```python
@@ -742,6 +911,9 @@ class StandaloneClient:
 | Plugin opens socket directly | ❌ Same UID (1000) | ✅ Three UIDs + SO_PEERCRED validation |
 | Plugin inherits orchestrator auth | ❌ Same process | ✅ Plugin runs as UID 1002 in subprocess |
 | Plugin reads session key | ❌ Same UID/group | ✅ UID 1002 cannot read (appuser group only) |
+| **Plugin accesses seal computation** | ❌ Real frames in plugin | ✅ **SecureFrameProxy**: Plugin receives ONLY proxy objects |
+| **Plugin accesses seal verification** | ❌ Real frames in plugin | ✅ **Orchestrator mediates**: All seal ops via sidecar RPC |
+| **Plugin forges seals locally** | ❌ Has _compute_seal access | ✅ **Proxy RPC**: No seal methods on proxy, all ops in orchestrator |
 | Token in logs | ❌ Plaintext logging | ✅ Zero secret logging (audit metadata only) |
 | Replay attack | ❌ No grant expiry | ✅ One-time grants + 60s expiration |
 | Eavesdropping | ⚠️ Unix socket only | ✅ HMAC-authenticated requests |
