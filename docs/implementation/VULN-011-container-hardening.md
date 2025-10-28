@@ -55,7 +55,7 @@ Post-implementation security review of ADR-002-A identified two opportunities to
 @dataclass(frozen=True, slots=True)
 class SecureDataFrame:
     data: pd.DataFrame
-    classification: SecurityLevel
+    security_level: SecurityLevel
     _created_by_datasource: bool = field(default=False, init=False, compare=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -209,7 +209,7 @@ def _seal_value(data: pd.DataFrame, level: SecurityLevel) -> int:
     return int.from_bytes(m.digest()[:8], "little")  # 64-bit int
 
 def _assert_seal(self) -> None:
-    expected = self._seal_value(self.data, self.classification)
+    expected = self._seal_value(self.data, self.security_level)
     actual = object.__getattribute__(self, "_seal")
     if expected != actual:
         raise SecurityValidationError("Integrity check failed - tampering detected")
@@ -268,17 +268,17 @@ def test_baseline_factory_methods_work():
         pd.DataFrame({"a": [1, 2, 3]}),
         SecurityLevel.OFFICIAL
     )
-    assert frame1.classification == SecurityLevel.OFFICIAL
+    assert frame1.security_level == SecurityLevel.OFFICIAL
     assert len(frame1.data) == 3
 
     # with_uplifted_security_level
     frame2 = frame1.with_uplifted_security_level(SecurityLevel.SECRET)
-    assert frame2.classification == SecurityLevel.SECRET
+    assert frame2.security_level == SecurityLevel.SECRET
     assert len(frame2.data) == 3  # Data unchanged
 
     # with_new_data
     frame3 = frame1.with_new_data(pd.DataFrame({"b": [4, 5]}))
-    assert frame3.classification == SecurityLevel.OFFICIAL  # Classification preserved
+    assert frame3.security_level == SecurityLevel.OFFICIAL  # Security level preserved
     assert "b" in frame3.data.columns
     assert len(frame3.data) == 2
 
@@ -292,7 +292,7 @@ def test_baseline_direct_construction_blocked():
     with pytest.raises(SecurityValidationError):
         SecureDataFrame(
             data=pd.DataFrame({"col": [1]}),
-            classification=SecurityLevel.SECRET
+            security_level=SecurityLevel.SECRET
         )
 
 def test_baseline_stack_inspection_performance():
@@ -333,8 +333,8 @@ def test_baseline_integration_with_orchestrator():
     uplifted = frame.with_uplifted_security_level(SecurityLevel.SECRET)
 
     # Validate compatibility (used by sinks)
-    uplifted.validate_compatible_with(SecurityLevel.SECRET)  # Should not raise
-    uplifted.validate_compatible_with(SecurityLevel.OFFICIAL)  # Should not raise (downward compatible)
+    uplifted.validate_compatible_with(SecurityLevel.SECRET)  # Should not raise (sufficient clearance)
+    # uplifted.validate_compatible_with(SecurityLevel.OFFICIAL)  # WOULD raise (no write down)
 ```
 
 **GREEN - All Baseline Tests Pass**:
@@ -405,7 +405,7 @@ def test_direct_construction_blocked_without_token():
 def test_direct_init_blocked():
     """SECURITY: Verify direct dataclass construction blocked."""
     with pytest.raises(SecurityValidationError):
-        SecureDataFrame(data=pd.DataFrame(), classification=SecurityLevel.SECRET)
+        SecureDataFrame(data=pd.DataFrame(), security_level=SecurityLevel.SECRET)
 
 def test_factory_method_succeeds_with_token():
     """SECURITY: Verify authorized factory can create instances."""
@@ -414,7 +414,7 @@ def test_factory_method_succeeds_with_token():
         pd.DataFrame({"col": [1, 2, 3]}),
         SecurityLevel.OFFICIAL
     )
-    assert frame.classification == SecurityLevel.OFFICIAL
+    assert frame.security_level == SecurityLevel.OFFICIAL
 ```
 
 **GREEN - Implement Token Gating**:
@@ -429,7 +429,7 @@ _CONSTRUCTION_TOKEN = secrets.token_bytes(32)
 @dataclass(frozen=True, slots=True)
 class SecureDataFrame:
     data: pd.DataFrame
-    classification: SecurityLevel
+    security_level: SecurityLevel
     _created_by_datasource: bool = field(default=False, init=False, compare=False, repr=False)
     _seal: int = field(default=0, init=False, compare=False, repr=False)
 
@@ -440,7 +440,7 @@ class SecureDataFrame:
                 "SecureDataFrame can only be created via authorized factory methods. "
                 "Use create_from_datasource() for datasources, or "
                 "with_uplifted_security_level()/with_new_data() for plugins. "
-                "Direct construction prevents classification tracking (ADR-002-A)."
+                "Direct construction prevents security_level tracking (ADR-002-A)."
             )
         return super().__new__(cls)
 
@@ -450,19 +450,19 @@ class SecureDataFrame:
 **Update Factory Methods**:
 ```python
 @classmethod
-def create_from_datasource(cls, data: pd.DataFrame, classification: SecurityLevel):
+def create_from_datasource(cls, data: pd.DataFrame, security_level: SecurityLevel):
     inst = cls.__new__(cls, _token=_CONSTRUCTION_TOKEN)
     object.__setattr__(inst, "data", data)
-    object.__setattr__(inst, "classification", classification)
+    object.__setattr__(inst, "security_level", security_level)
     object.__setattr__(inst, "_created_by_datasource", True)
     # Seal computation added in Phase 2
     return inst
 
 def with_uplifted_security_level(self, new_level: SecurityLevel):
-    uplift = max(self.classification, new_level)
+    uplift = max(self.security_level, new_level)
     inst = SecureDataFrame.__new__(SecureDataFrame, _token=_CONSTRUCTION_TOKEN)
     object.__setattr__(inst, "data", self.data)
-    object.__setattr__(inst, "classification", uplift)
+    object.__setattr__(inst, "security_level", uplift)
     object.__setattr__(inst, "_created_by_datasource", False)
     # Seal computation added in Phase 2
     return inst
@@ -539,15 +539,15 @@ pytest tests/test_vuln_011_tamper_seal.py -v --tb=short
 ```python
 # tests/test_vuln_011_tamper_seal.py (NEW FILE)
 
-def test_seal_detects_classification_tampering():
-    """SECURITY: Verify seal detects illicit classification mutation."""
+def test_seal_detects_security_level_tampering():
+    """SECURITY: Verify seal detects illicit security_level mutation."""
     frame = SecureDataFrame.create_from_datasource(
         pd.DataFrame({"col": [1, 2, 3]}),
         SecurityLevel.OFFICIAL
     )
 
     # Illicit tampering (bypass frozen + slots)
-    object.__setattr__(frame, "classification", SecurityLevel.UNOFFICIAL)
+    object.__setattr__(frame, "security_level", SecurityLevel.UNOFFICIAL)
 
     # Seal should detect tampering at next boundary
     with pytest.raises(SecurityValidationError, match="Integrity check failed"):
@@ -576,7 +576,7 @@ def test_seal_verification_on_boundary_methods():
     )
 
     # Tamper
-    object.__setattr__(frame, "classification", SecurityLevel.UNOFFICIAL)
+    object.__setattr__(frame, "security_level", SecurityLevel.UNOFFICIAL)
 
     # All boundary methods should detect tampering
     with pytest.raises(SecurityValidationError):
@@ -609,7 +609,7 @@ def _seal_value(data: pd.DataFrame, level: SecurityLevel) -> int:
 
 def _assert_seal(self) -> None:
     """Verify container integrity (detects metadata tampering)."""
-    expected = self._seal_value(self.data, self.classification)
+    expected = self._seal_value(self.data, self.security_level)
     actual = object.__getattribute__(self, "_seal")
     if expected != actual:
         # TODO: Upgrade to SecurityCriticalError when ADR-006 implemented
@@ -620,12 +620,12 @@ def _assert_seal(self) -> None:
 
 # Update factory methods to compute seal
 @classmethod
-def create_from_datasource(cls, data: pd.DataFrame, classification: SecurityLevel):
+def create_from_datasource(cls, data: pd.DataFrame, security_level: SecurityLevel):
     inst = cls.__new__(cls, _token=_CONSTRUCTION_TOKEN)
     object.__setattr__(inst, "data", data)
-    object.__setattr__(inst, "classification", classification)
+    object.__setattr__(inst, "security_level", security_level)
     object.__setattr__(inst, "_created_by_datasource", True)
-    object.__setattr__(inst, "_seal", cls._seal_value(data, classification))  # NEW
+    object.__setattr__(inst, "_seal", cls._seal_value(data, security_level))  # NEW
     return inst
 
 # Add seal checks to boundary methods
@@ -819,13 +819,13 @@ def __init_subclass__(cls, **kwargs):
 # Update _assert_seal() to include proper logging (no data content)
 def _assert_seal(self) -> None:
     """Verify container integrity (detects metadata tampering)."""
-    expected = self._seal_value(self.data, self.classification)
+    expected = self._seal_value(self.data, self.security_level)
     actual = object.__getattribute__(self, "_seal")
     if expected != actual:
         # ⚠️ SECURITY: Log classification level and seal values, NOT data content
         raise SecurityValidationError(
             f"SecureDataFrame integrity check failed - metadata tampering detected. "
-            f"Classification: {self.classification.name}, "
+            f"Classification: {self.security_level.name}, "
             f"Expected seal: {expected:016x}, Actual: {actual:016x}. "
             f"This indicates illicit mutation via object.__setattr__() (ADR-002-A)."
             # ❌ NEVER include: f"Data: {self.data}" ← Would leak classified content!
