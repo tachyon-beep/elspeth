@@ -120,6 +120,102 @@ class SecureDataFrame:
             )
         return object.__new__(cls)
 
+    def __init_subclass__(cls, **kwargs):
+        """Block subclassing to prevent security bypass (VULN-011 Phase 3).
+
+        Attack scenario:
+        1. Create malicious subclass
+        2. Override _verify_seal() to always return True
+        3. Override __new__ to bypass token check
+        4. Bypass all security controls
+
+        Raises:
+            TypeError: Always (subclassing forbidden)
+
+        Security:
+            - Prevents inheritance-based bypasses
+            - Ensures all instances use exact SecureDataFrame implementation
+            - Part of defense-in-depth (token + seal + no-subclass)
+
+        CVE Prevention:
+            - CVE-ADR-002-A-004: Prevents inheritance bypass
+        """
+        raise TypeError(
+            f"Subclassing SecureDataFrame is forbidden (security policy ADR-002-A). "
+            f"Attempted subclass: {cls.__name__}. "
+            f"Use composition instead of inheritance."
+        )
+
+    def __reduce_ex__(self, protocol):
+        """Block pickle serialization (VULN-011 Phase 3).
+
+        Pickle can bypass:
+        - Token gating (__new__ not called on unpickle)
+        - Seal verification (seal is serialized and restored)
+        - Any future security controls
+
+        Raises:
+            TypeError: Always (pickling forbidden)
+
+        Security:
+            - Prevents serialization bypass
+            - Ensures frames cannot leave process boundary
+            - Part of defense-in-depth
+
+        CVE Prevention:
+            - CVE-ADR-002-A-005: Prevents pickle bypass
+        """
+        raise TypeError(
+            "Pickling SecureDataFrame is forbidden (security policy ADR-002-A). "
+            "SecureDataFrame is process-local and cannot be serialized. "
+            "Serialize the underlying DataFrame instead and re-uplift on load."
+        )
+
+    def __reduce__(self):
+        """Block legacy pickle protocol (VULN-011 Phase 3).
+
+        See __reduce_ex__ for rationale.
+        """
+        raise TypeError(
+            "Pickling SecureDataFrame is forbidden (security policy ADR-002-A). "
+            "SecureDataFrame is process-local and cannot be serialized."
+        )
+
+    def __copy__(self):
+        """Block shallow copy to prevent seal bypass (VULN-011 Phase 3).
+
+        Shallow copy creates new instance without calling __new__,
+        bypassing token gating and seal computation.
+
+        Raises:
+            TypeError: Always (copying forbidden)
+
+        Security:
+            - Prevents copy-based bypass
+            - Use factory methods (with_new_data, with_uplifted) instead
+
+        CVE Prevention:
+            - CVE-ADR-002-A-006: Prevents copy bypass
+        """
+        raise TypeError(
+            "Copying SecureDataFrame is forbidden (security policy ADR-002-A). "
+            "Use with_new_data() or with_uplifted_security_level() instead."
+        )
+
+    def __deepcopy__(self, memo):
+        """Block deep copy to prevent seal bypass (VULN-011 Phase 3).
+
+        Deep copy creates entire new object graph without calling __new__,
+        bypassing all security controls.
+
+        Raises:
+            TypeError: Always (copying forbidden)
+        """
+        raise TypeError(
+            "Copying SecureDataFrame is forbidden (security policy ADR-002-A). "
+            "Use with_new_data() or with_uplifted_security_level() instead."
+        )
+
     @staticmethod
     def _compute_seal(data: pd.DataFrame, security_level: SecurityLevel) -> bytes:
         """Compute HMAC-BLAKE2s seal for tamper detection (VULN-011 Phase 2).
