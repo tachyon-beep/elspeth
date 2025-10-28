@@ -1161,7 +1161,7 @@ pytest
 
 | Phase | Estimated | Actual | Notes |
 |-------|-----------|--------|-------|
-| **Phase 0** | **30min** | **TBD** | **Baseline characterization (NEW)** |
+| **Phase 0** | **30min** | **~20min** | **Baseline: 49.458µs/call (4/4 tests ✅)** |
 | Phase 1.0 | 2h | TBD | Token gating (progressive rollout) |
 | Phase 2.0 | 1.5h | TBD | Tamper-evident seal + mutation testing |
 | Phase 3.0 | 1.5h | TBD | Comprehensive guards |
