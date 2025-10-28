@@ -2,11 +2,11 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Implement production-grade Rust sidecar daemon to eliminate CVE-ADR-002-A-009 (secret export vulnerability) by moving `_CONSTRUCTION_TOKEN` and `_SEAL_KEY` into OS-isolated process with capability-based authorization.
+**Goal:** Implement production-grade Rust sidecar daemon to eliminate CVE-ADR-002-A-009 (secret export vulnerability) by moving `_CONSTRUCTION_TOKEN` and `_SEAL_KEY` into OS-isolated process with digest-bound capability authorization.
 
-**Architecture:** Three-process model (Rust daemon UID 1001, Python orchestrator UID 1000, plugin workers UID 1002) communicating via Unix sockets with HMAC-authenticated CBOR protocol. Daemon holds secrets in Rust memory, orchestrator uses `_from_sidecar()` factory to create frames with daemon-provided seals, plugins receive only opaque `SecureFrameProxy` handles.
+**Architecture:** Three-process model (Rust daemon UID 1001, Python orchestrator UID 1000, plugin workers UID 1002) communicating via Unix sockets with HMAC-authenticated CBOR protocol. Daemon holds secrets in Rust memory and computes digest-bound seals (`HMAC-BLAKE2s(seal_key, frame_id || level || data_digest)` where digest is BLAKE3 of canonical Parquet bytes). Orchestrator maintains FrameRegistry with stable UUIDs and uses `_from_sidecar()` factory. Plugins receive only opaque `SecureFrameProxy` handles with FD_CLOEXEC hygiene preventing descriptor leaks.
 
-**Tech Stack:** Rust 1.77+ (tokio, ring, serde_cbor, dashmap, tracing), Python 3.12 (asyncio, msgpack), Docker multi-stage build, supervisord
+**Tech Stack:** Rust 1.77+ (tokio, ring/blake3, serde_cbor, dashmap, tracing, uuid), Python 3.12 (asyncio, msgpack, blake3, pyarrow), Docker multi-stage build, supervisord
 
 **Related Documents:**
 - Design: `docs/plans/2025-10-29-sidecar-security-daemon-design-v3.md`
@@ -136,6 +136,8 @@ tokio-util = { version = "0.7", features = ["codec"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_cbor = "0.11"
 ring = "0.17"
+blake3 = "1.5"
+uuid = { version = "1.6", features = ["v4", "serde"] }
 dashmap = "5.5"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
@@ -1674,6 +1676,89 @@ This plan provides:
 **Rust memory safety** eliminates entire vulnerability classes (buffer overflows, use-after-free) that plague C/C++ security code, while `ring` provides FIPS-validated cryptographic primitives.
 
 `─────────────────────────────────────────────────`
+
+---
+
+## V3 Design Security Enhancements (2025-10-29)
+
+**This implementation plan incorporates critical security upgrades from the v3 design iteration:**
+
+### 1. Digest-Bound Seals
+
+**Problem:** Original design bound seals only to `(frame_id, level)`. An attacker could swap DataFrame contents after construction without invalidating the seal.
+
+**Solution:** Every seal operation includes `data_digest = BLAKE3(canonical_parquet_bytes)`:
+```rust
+seal = HMAC-BLAKE2s(_SEAL_KEY, frame_id || level || data_digest)
+```
+
+**Implementation Impact:**
+- Rust crypto module computes seals over 3 components (not 2)
+- Python orchestrator computes BLAKE3 digest on every frame mutation
+- Protocol messages include `data_digest: bytes[32]` field
+- Dependencies: Add `blake3` crate (Rust) and `blake3` package (Python)
+
+### 2. Stable Frame Identifiers
+
+**Problem:** Using Python `id()` pointers as frame identifiers creates reuse vulnerabilities after garbage collection.
+
+**Solution:** Orchestrator generates stable 128-bit UUIDs via `uuid.uuid4()` and maintains FrameRegistry:
+```python
+frame_registry: Dict[UUID, FrameRegistryEntry] = {}
+# FrameRegistryEntry = {frame, digest, level, created_at}
+```
+
+**Implementation Impact:**
+- Daemon stores `RegisteredFrameTable: DashMap<Uuid, (level, digest)>`
+- Grant redemption inserts into RegisteredFrameTable
+- `ComputeSeal`/`VerifySeal` reject unknown frame_ids
+- Dependencies: Add `uuid` crate with "v4" feature
+
+### 3. FD_CLOEXEC Descriptor Hygiene
+
+**Problem:** Plugin workers spawned via `fork()` inherit file descriptors, potentially leaking authenticated sidecar socket handles.
+
+**Solution:**
+- All Unix sockets opened with `O_CLOEXEC` flag
+- Session key file opened with `FD_CLOEXEC` via `fcntl()`
+- Orchestrator establishes sidecar connection AFTER spawning workers
+- Or use `socketpair()` + explicit close in child process
+
+**Implementation Impact:**
+- Rust: Use `OFlag::O_CLOEXEC` when binding Unix sockets
+- Python: Set `FD_CLOEXEC` on session key file descriptor
+- Docker: Supervisord spawns processes in correct order (daemon → orchestrator → workers)
+
+### 4. Protocol Message Updates
+
+**Old Protocol:**
+```rust
+AuthorizeConstruct { data_id: u64, level: u32 }
+ComputeSeal { data_id: u64, level: u32 }
+VerifySeal { data_id: u64, level: u32, seal: [u8; 32] }
+```
+
+**New Protocol (v3):**
+```rust
+AuthorizeConstruct { frame_id: [u8; 16], level: u32, data_digest: [u8; 32] }
+ComputeSeal { frame_id: [u8; 16], level: u32, data_digest: [u8; 32] }
+VerifySeal { frame_id: [u8; 16], level: u32, data_digest: [u8; 32], seal: [u8; 32] }
+```
+
+**Implementation Impact:**
+- All protocol messages use UUID frame_ids (not u64 pointers)
+- Every seal operation includes digest parameter
+- Grant state stores `(frame_id, level, digest)` tuple
+- CBOR serialization handles 16-byte arrays natively
+
+### Security Properties Gained
+
+✅ **Post-creation tampering prevention:** Data swaps invalidate seals
+✅ **Frame ID stability:** No pointer reuse vulnerabilities
+✅ **Descriptor isolation:** Workers cannot inherit authenticated handles
+✅ **Audit traceability:** Stable UUIDs enable long-term log correlation
+
+**Estimated Additional Work:** +2-3 hours (mostly Python FrameRegistry and digest computation)
 
 ---
 
