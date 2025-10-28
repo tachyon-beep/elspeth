@@ -12,16 +12,24 @@ from typing import Any, Type
 
 import pandas as pd
 
+from elspeth.core.base.plugin import BasePlugin
 from elspeth.core.base.protocols import DataSource
 from elspeth.core.base.schema import DataFrameSchema, infer_schema_from_dataframe, schema_from_config
 from elspeth.core.base.types import DeterminismLevel, SecurityLevel
-from elspeth.core.security import ensure_determinism_level, ensure_security_level
+from elspeth.core.security import SecureDataFrame, ensure_determinism_level
 
 logger = logging.getLogger(__name__)
 
 
-class BaseCSVDataSource(DataSource):
-    """Base class for CSV datasources with common functionality."""
+class BaseCSVDataSource(BasePlugin, DataSource):
+    """Base class for CSV datasources with common functionality.
+
+    Inherits from BasePlugin to provide security enforcement (ADR-002-B).
+
+    **IMPORTANT**: security_level and allow_downgrade are internal parameters for subclass
+    use only. Subclasses MUST hard-code these values per ADR-002-B immutable policy.
+    They are NOT exposed in YAML configuration.
+    """
 
     def __init__(
         self,
@@ -32,13 +40,17 @@ class BaseCSVDataSource(DataSource):
         dtype: dict[str, Any] | None = None,
         encoding: str = "utf-8",
         on_error: str = "abort",
-        security_level: SecurityLevel | None = None,
+        security_level: SecurityLevel,  # ADR-002-B: Required - subclasses must hard-code (no default to prevent backdoor)
+        allow_downgrade: bool,  # ADR-002-B: Required - subclasses must hard-code explicit policy
         determinism_level: DeterminismLevel | None = None,
         schema: dict[str, str | dict[str, Any]] | None = None,
         infer_schema: bool = True,
         retain_local: bool,  # REQUIRED - no default
         retain_local_path: str | None = None,
     ):
+        # Initialize BasePlugin with security level and downgrade policy (ADR-002-B)
+        super().__init__(security_level=security_level, allow_downgrade=allow_downgrade)
+
         # Resolve input path relative to base_path or ELSPETH_INPUTS_DIR when provided
         raw_path = Path(path) if isinstance(path, str) else path
         base_candidate: Path | None = None
@@ -76,7 +88,7 @@ class BaseCSVDataSource(DataSource):
         if on_error not in {"abort", "skip"}:
             raise ValueError("on_error must be 'abort' or 'skip'")
         self.on_error = on_error
-        self.security_level = ensure_security_level(security_level)
+        # security_level is now set by BasePlugin.__init__() (ADR-004)
         self.determinism_level = ensure_determinism_level(determinism_level)
         self.schema_config = schema
         self.infer_schema = infer_schema
@@ -90,8 +102,13 @@ class BaseCSVDataSource(DataSource):
         """Override in subclass to specify datasource type for messages."""
         return "CSV"
 
-    def load(self) -> pd.DataFrame:
-        """Load CSV file with optional logging and retention."""
+    def load(self) -> SecureDataFrame:
+        """Load CSV file with optional logging and retention.
+
+        Returns:
+            SecureDataFrame: Wrapped DataFrame with immutable security level metadata.
+                             Created via datasource-trusted factory method per ADR-002-A.
+        """
         plugin_logger = getattr(self, "plugin_logger", None)
 
         # Log file check
@@ -128,7 +145,8 @@ class BaseCSVDataSource(DataSource):
                 self._log_retention(plugin_logger, df, local_path)
 
             self._df_loaded = True
-            return df
+            # ADR-002-A: Wrap DataFrame with SecureDataFrame using datasource-trusted factory
+            return SecureDataFrame.create_from_datasource(df, self.security_level)
         except (OSError, ValueError, pd.errors.ParserError, RuntimeError) as exc:
             return self._handle_load_error(plugin_logger, exc)
 
@@ -137,7 +155,7 @@ class BaseCSVDataSource(DataSource):
         # Pandas dtype parameter has strict typing; our dict[str, Any] is compatible at runtime
         return pd.read_csv(self.path, dtype=self.dtype, encoding=self.encoding)  # type: ignore[arg-type]
 
-    def _handle_missing_file(self, plugin_logger) -> pd.DataFrame:
+    def _handle_missing_file(self, plugin_logger) -> SecureDataFrame:
         """Handle missing file based on on_error strategy."""
         if plugin_logger:
             plugin_logger.log_error(
@@ -152,11 +170,12 @@ class BaseCSVDataSource(DataSource):
             df.attrs["security_level"] = self.security_level
             df.attrs["determinism_level"] = self.determinism_level
             df.attrs["schema"] = self.output_schema()
-            return df
+            # ADR-002-A: Wrap empty DataFrame with SecureDataFrame
+            return SecureDataFrame.create_from_datasource(df, self.security_level)
 
         raise FileNotFoundError(f"{self.datasource_type} datasource file not found: {self.path}")
 
-    def _handle_load_error(self, plugin_logger, exc: OSError | ValueError | pd.errors.ParserError | RuntimeError) -> pd.DataFrame:
+    def _handle_load_error(self, plugin_logger, exc: OSError | ValueError | pd.errors.ParserError | RuntimeError) -> SecureDataFrame:
         """Handle errors during CSV loading.
 
         Args:
@@ -164,7 +183,7 @@ class BaseCSVDataSource(DataSource):
             exc: The specific exception that occurred during loading
 
         Returns:
-            Empty DataFrame if on_error='skip', otherwise re-raises the exception
+            Empty SecureDataFrame if on_error='skip', otherwise re-raises the exception
 
         Raises:
             OSError: For file access errors
@@ -185,7 +204,8 @@ class BaseCSVDataSource(DataSource):
             df.attrs["security_level"] = self.security_level
             df.attrs["determinism_level"] = self.determinism_level
             df.attrs["schema"] = self.output_schema()
-            return df
+            # ADR-002-A: Wrap empty DataFrame with SecureDataFrame
+            return SecureDataFrame.create_from_datasource(df, self.security_level)
         raise exc
 
     def _copy_to_audit_location(self) -> Path:

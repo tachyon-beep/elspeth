@@ -24,7 +24,7 @@ except Exception:  # pragma: no cover - non-critical
     logging.getLogger(__name__).debug("Logging utils warm-up failed; proceeding without warm-up", exc_info=True)
 
 from .base import BasePluginRegistry
-from .schemas import ON_ERROR_ENUM, with_security_properties
+from .schemas import ON_ERROR_ENUM
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +71,12 @@ def _create_blob_datasource(options: dict[str, Any], context: PluginContext) -> 
             logger.error("Azure Blob endpoint validation failed: %s", exc)
             raise ConfigurationError(f"Azure Blob datasource endpoint validation failed: {exc}") from exc
 
-    return BlobDataSource(**options)
+    # ADR-002-B: Plugins now hard-code security_level and allow_downgrade
+    # Only pass determinism_level from context (it's not hard-coded)
+    return BlobDataSource(
+        **options,
+        determinism_level=context.determinism_level,
+    )
 
 
 def _create_csv_blob_datasource(options: dict[str, Any], context: PluginContext) -> CSVBlobDataSource:
@@ -80,75 +85,76 @@ def _create_csv_blob_datasource(options: dict[str, Any], context: PluginContext)
     Note: Despite the name, CSVBlobDataSource reads from local files, not actual blob storage.
     It's used for testing/mocking blob scenarios. No endpoint validation needed.
     """
-    return CSVBlobDataSource(**options)
+    # ADR-002-B: Plugins now hard-code security_level and allow_downgrade
+    # Only pass determinism_level from context (it's not hard-coded)
+    return CSVBlobDataSource(
+        **options,
+        determinism_level=context.determinism_level,
+    )
 
 
 def _create_csv_datasource(options: dict[str, Any], context: PluginContext) -> CSVDataSource:
     """Create local CSV datasource."""
-    return CSVDataSource(**options)
+    # ADR-002-B: Plugins now hard-code security_level and allow_downgrade
+    # Only pass determinism_level from context (it's not hard-coded)
+    return CSVDataSource(
+        **options,
+        determinism_level=context.determinism_level,
+    )
 
 
 # ============================================================================
 # Schema Definitions
 # ============================================================================
 
-_BLOB_DATASOURCE_SCHEMA = with_security_properties(
-    {
-        "type": "object",
-        "properties": {
-            "config_path": {"type": "string"},
-            "profile": {"type": "string"},
-            "pandas_kwargs": {"type": "object"},
-            "on_error": ON_ERROR_ENUM,
-            "retain_local": {"type": "boolean"},  # REQUIRED - audit trail
-            "retain_local_path": {"type": "string"},
-        },
-        "required": ["config_path", "retain_local"],  # Must explicitly set retain_local
-        "additionalProperties": True,
+_BLOB_DATASOURCE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "config_path": {"type": "string"},
+        "profile": {"type": "string"},
+        "pandas_kwargs": {"type": "object"},
+        "on_error": ON_ERROR_ENUM,
+        "retain_local": {"type": "boolean"},  # REQUIRED - audit trail
+        "retain_local_path": {"type": "string"},
+        "determinism_level": {"type": "string"},  # Allowed (runtime context, not security policy)
     },
-    require_security=False,  # Will be enforced by registry
-    require_determinism=False,
-)
+    "required": ["config_path", "retain_local"],  # Must explicitly set retain_local
+    "additionalProperties": False,  # VULN-004 Layer 1: Reject security policy fields
+}
 
-_CSV_BLOB_DATASOURCE_SCHEMA = with_security_properties(
-    {
-        "type": "object",
-        "properties": {
-            "path": {"type": "string"},
-            "base_path": {"type": "string"},
-            "allowed_base_path": {"type": "string"},
-            "dtype": {"type": "object"},
-            "encoding": {"type": "string"},
-            "on_error": ON_ERROR_ENUM,
-            "retain_local": {"type": "boolean"},  # REQUIRED - audit trail
-            "retain_local_path": {"type": "string"},
-        },
-        "required": ["path", "retain_local"],  # Must explicitly set retain_local
-        "additionalProperties": True,
+_CSV_BLOB_DATASOURCE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "path": {"type": "string"},
+        "base_path": {"type": "string"},
+        "allowed_base_path": {"type": "string"},
+        "dtype": {"type": "object"},
+        "encoding": {"type": "string"},
+        "on_error": ON_ERROR_ENUM,
+        "retain_local": {"type": "boolean"},  # REQUIRED - audit trail
+        "retain_local_path": {"type": "string"},
+        "determinism_level": {"type": "string"},  # Allowed (runtime context, not security policy)
     },
-    require_security=False,
-    require_determinism=False,
-)
+    "required": ["path", "retain_local"],  # Must explicitly set retain_local
+    "additionalProperties": False,  # VULN-004 Layer 1: Reject security policy fields
+}
 
-_CSV_DATASOURCE_SCHEMA = with_security_properties(
-    {
-        "type": "object",
-        "properties": {
-            "path": {"type": "string"},
-            "base_path": {"type": "string"},
-            "allowed_base_path": {"type": "string"},
-            "dtype": {"type": "object"},
-            "encoding": {"type": "string"},
-            "on_error": ON_ERROR_ENUM,
-            "retain_local": {"type": "boolean"},  # REQUIRED - audit trail
-            "retain_local_path": {"type": "string"},
-        },
-        "required": ["path", "retain_local"],  # Must explicitly set retain_local
-        "additionalProperties": True,
+_CSV_DATASOURCE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "path": {"type": "string"},
+        "base_path": {"type": "string"},
+        "allowed_base_path": {"type": "string"},
+        "dtype": {"type": "object"},
+        "encoding": {"type": "string"},
+        "on_error": ON_ERROR_ENUM,
+        "retain_local": {"type": "boolean"},  # REQUIRED - audit trail
+        "retain_local_path": {"type": "string"},
+        "determinism_level": {"type": "string"},  # Allowed (runtime context, not security policy)
     },
-    require_security=False,
-    require_determinism=False,
-)
+    "required": ["path", "retain_local"],  # Must explicitly set retain_local
+    "additionalProperties": False,  # VULN-004 Layer 1: Reject security policy fields
+}
 
 
 # ============================================================================
@@ -159,18 +165,21 @@ datasource_registry.register(
     "azure_blob",
     _create_blob_datasource,
     schema=_BLOB_DATASOURCE_SCHEMA,
+    declared_security_level="UNOFFICIAL",  # ADR-002-B: Plugin author's security declaration
 )
 
 datasource_registry.register(
     "csv_blob",
     _create_csv_blob_datasource,
     schema=_CSV_BLOB_DATASOURCE_SCHEMA,
+    declared_security_level="UNOFFICIAL",  # ADR-002-B: Plugin author's security declaration
 )
 
 datasource_registry.register(
     "local_csv",
     _create_csv_datasource,
     schema=_CSV_DATASOURCE_SCHEMA,
+    declared_security_level="UNOFFICIAL",  # ADR-002-B: Plugin author's security declaration
 )
 
 
@@ -188,7 +197,6 @@ try:  # pragma: no cover - non-functional warm-up path
     _ = datasource_registry.create(
         name="local_csv",
         options={"path": "__warmup__.csv", "retain_local": False},
-        require_security=False,
         require_determinism=False,
     )
 except Exception:

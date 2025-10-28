@@ -17,13 +17,12 @@ def test_blob_datasource_success_and_retain_local(monkeypatch, tmp_path):
         retain_local=True,
         retain_local_path=str(retain_path),
         on_error="abort",
-        security_level="official",
-        determinism_level="low",
+        determinism_level="low",  # User-configurable per ADR-002-B
     )
 
     df = ds.load()
     assert len(df) == 2
-    assert df.attrs["security_level"] == "OFFICIAL"
+    assert df.attrs["security_level"] == "UNOFFICIAL"  # ADR-002-B: Hard-coded in BlobDataSource
     assert df.attrs["determinism_level"] == "low"
     assert retain_path.exists()
 
@@ -39,13 +38,12 @@ def test_blob_datasource_skip_on_error_returns_empty(monkeypatch):
         profile="default",
         retain_local=False,
         on_error="skip",
-        security_level="public",
-        determinism_level="none",
+        determinism_level="none",  # User-configurable per ADR-002-B
     )
 
     df = ds.load()
     assert df.empty
-    assert df.attrs["security_level"] == "UNOFFICIAL"
+    assert df.attrs["security_level"] == "UNOFFICIAL"  # ADR-002-B: Hard-coded in BlobDataSource
     assert df.attrs["determinism_level"] == "none"
 
 
@@ -56,6 +54,5 @@ def test_blob_datasource_invalid_on_error_raises():
             profile="p",
             retain_local=False,
             on_error="halt",  # invalid
-            security_level="public",
-            determinism_level="none",
+            determinism_level="none",  # User-configurable per ADR-002-B
         )

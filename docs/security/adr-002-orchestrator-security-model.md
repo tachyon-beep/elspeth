@@ -1,7 +1,19 @@
 # ADR-002 Orchestrator Security Model - Clarification
 
+**⚠️ WARNING - DOCUMENT REQUIRES COMPREHENSIVE REVIEW**
+
+This document was written during Phase 1 implementation when Bell-LaPadula validation logic
+was INVERTED. While specific code examples have been corrected, the test scenarios and some
+prose descriptions may still reflect the WRONG semantics. This document should be reviewed
+comprehensively before being used as implementation guidance.
+
+**Correct Model**: Plugin `security_level` = maximum clearance. Plugins can operate at SAME
+or LOWER levels (trusted to filter). Plugins CANNOT operate ABOVE their clearance.
+
+---
+
 **Document Purpose**: Clarifies the correct "minimum clearance envelope" model for ADR-002 implementation
-**Date**: 2025-10-25
+**Date**: 2025-10-25 (Pre-correction), 2025-10-26 (Warning added)
 **Related**: `adr-002-implementation-gap.md`
 
 ---
@@ -65,18 +77,20 @@
 
    ```python
    class SecretDataSource:
-       security_level = SecurityLevel.SECRET
+       security_level = SecurityLevel.SECRET  # Clearance: up to SECRET
 
        def get_data(self, orchestrator_context):
            # Runtime check: Should NEVER come up if start-time validation works
            # BUT: If someone tricks the orchestrator, plugins still protect themselves
-           if orchestrator_context.operating_level < self.security_level:
+           # Reject if asked to operate ABOVE clearance (Bell-LaPadula "no read up")
+           if orchestrator_context.operating_level > self.security_level:
                raise SecurityError(
-                   f"Datasource requires {self.security_level}, "
-                   f"orchestrator operating at {orchestrator_context.operating_level}. "
-                   f"REFUSING to hand over data (defense in depth failsafe)."
+                   f"Datasource cleared for {self.security_level}, "
+                   f"but orchestrator requires {orchestrator_context.operating_level}. "
+                   f"INSUFFICIENT CLEARANCE - refusing to operate (defense in depth failsafe)."
                )
-           return self._actual_classified_data
+           # If operating_level <= self.security_level, we can operate (possibly filtering data)
+           return self._get_filtered_data(orchestrator_context.operating_level)
    ```
 
 ---
@@ -94,10 +108,10 @@
 
 ...the DataFrame itself carries its classification, and components validate incoming data.
 
-### Implementation: ClassifiedDataFrame Wrapper
+### Implementation: SecureDataFrame Wrapper
 
 ```python
-class ClassifiedDataFrame:
+class SecureDataFrame:
     """DataFrame wrapper that carries immutable classification metadata.
 
     This enables runtime validation: every component receiving data can verify
@@ -134,7 +148,7 @@ class UnofficialSink:
 
     security_level = SecurityLevel.UNOFFICIAL
 
-    def write(self, df: ClassifiedDataFrame):
+    def write(self, df: SecureDataFrame):
         """Write data with classification validation.
 
         CRITICAL: Validate incoming data classification BEFORE processing.
@@ -162,7 +176,7 @@ class OfficialSink:
 
     security_level = SecurityLevel.OFFICIAL
 
-    def write(self, df: ClassifiedDataFrame):
+    def write(self, df: SecureDataFrame):
         """Write with classification validation."""
         incoming = df.classification
 
@@ -189,7 +203,7 @@ class AzureDataSource:
         blob_metadata = azure.get_blob_metadata(container)
         return SecurityLevel.from_string(blob_metadata['classification'])
 
-    def read_data(self, config: dict) -> ClassifiedDataFrame:
+    def read_data(self, config: dict) -> SecureDataFrame:
         """Read data and tag with classification metadata."""
         # Read the raw data
         raw_data = pd.read_csv(azure_blob_url)
@@ -197,8 +211,8 @@ class AzureDataSource:
         # Get actual classification from blob metadata
         classification = self.get_security_level_for_job(config)
 
-        # Wrap in ClassifiedDataFrame with immutable classification
-        return ClassifiedDataFrame(raw_data, classification)
+        # Wrap in SecureDataFrame with immutable classification
+        return SecureDataFrame(raw_data, classification)
 ```
 
 ### Classification Uplifting: The "High Water Mark" Principle
@@ -220,7 +234,7 @@ class LLMTransform:
 
     security_level = SecurityLevel.SECRET  # LLM trained on SECRET data
 
-    def transform(self, input_df: ClassifiedDataFrame) -> ClassifiedDataFrame:
+    def transform(self, input_df: SecureDataFrame) -> SecureDataFrame:
         """Transform data with automatic classification uplifting.
 
         Output classification = max(input classification, LLM classification)
@@ -239,26 +253,26 @@ class LLMTransform:
         # OFFICIAL input → SECRET LLM → SECRET output (automatically)
         output_classification = max(input_df.classification, self.security_level)
 
-        return ClassifiedDataFrame(transformed, output_classification)
+        return SecureDataFrame(transformed, output_classification)
 ```
 
 **Example Scenarios**:
 
 ```python
 # Scenario 1: OFFICIAL data through SECRET LLM
-input_df = ClassifiedDataFrame(data, SecurityLevel.OFFICIAL)
+input_df = SecureDataFrame(data, SecurityLevel.OFFICIAL)
 secret_llm = LLMTransform(security_level=SecurityLevel.SECRET)
 output_df = secret_llm.transform(input_df)
 # output_df.classification == SecurityLevel.SECRET (uplifted)
 
 # Scenario 2: OFFICIAL data through OFFICIAL LLM
-input_df = ClassifiedDataFrame(data, SecurityLevel.OFFICIAL)
+input_df = SecureDataFrame(data, SecurityLevel.OFFICIAL)
 official_llm = LLMTransform(security_level=SecurityLevel.OFFICIAL)
 output_df = official_llm.transform(input_df)
 # output_df.classification == SecurityLevel.OFFICIAL (no uplift)
 
 # Scenario 3: SECRET data through SECRET LLM
-input_df = ClassifiedDataFrame(data, SecurityLevel.SECRET)
+input_df = SecureDataFrame(data, SecurityLevel.SECRET)
 secret_llm = LLMTransform(security_level=SecurityLevel.SECRET)
 output_df = secret_llm.transform(input_df)
 # output_df.classification == SecurityLevel.SECRET (already at max)
@@ -316,7 +330,7 @@ class BasePlugin(ABC):
 
     security_level: SecurityLevel
 
-    def _validate_can_handle_data(self, df: ClassifiedDataFrame) -> None:
+    def _validate_can_handle_data(self, df: SecureDataFrame) -> None:
         """Inherited validation: refuse data above clearance.
 
         CRITICAL: This is called AUTOMATICALLY before any data processing.
@@ -332,11 +346,11 @@ class BasePlugin(ABC):
             )
 
     @abstractmethod
-    def _process_data(self, df: ClassifiedDataFrame) -> Any:
+    def _process_data(self, df: SecureDataFrame) -> Any:
         """Subclasses implement actual data processing logic."""
         pass
 
-    def process(self, df: ClassifiedDataFrame) -> Any:
+    def process(self, df: SecureDataFrame) -> Any:
         """Public method with automatic classification validation.
 
         All data processing goes through this method, ensuring validation
@@ -360,7 +374,7 @@ class UnofficialSink(BasePlugin):
 
     security_level = SecurityLevel.UNOFFICIAL
 
-    def _process_data(self, df: ClassifiedDataFrame) -> None:
+    def _process_data(self, df: SecureDataFrame) -> None:
         """Write data to storage.
 
         By the time this runs, BasePlugin._validate_can_handle_data()
@@ -380,14 +394,14 @@ class AzureDataSource(BasePlugin):
     Inherits classification validation when passing data to next component.
     """
 
-    def read_data(self, config: dict) -> ClassifiedDataFrame:
+    def read_data(self, config: dict) -> SecureDataFrame:
         """Read and classify data."""
         raw_data = pd.read_csv(azure_blob_url)
         classification = self._inspect_blob_classification(config)
-        return ClassifiedDataFrame(raw_data, classification)
+        return SecureDataFrame(raw_data, classification)
 
     def pass_to_next_component(
-        self, df: ClassifiedDataFrame, recipient: BasePlugin
+        self, df: SecureDataFrame, recipient: BasePlugin
     ) -> None:
         """Pass data to next component with validation.
 
@@ -458,13 +472,16 @@ class AzureDataSourcePlugin:
 
 ```python
 # WRONG: Only datasource validates
-if datasource.security_level > pipeline_min:
-    raise SecurityError("Datasource can't operate")
+if pipeline_min > datasource.security_level:
+    raise SecurityError("Datasource has insufficient clearance")
 
-# CORRECT: ALL components validate
+# CORRECT: ALL components validate (Bell-LaPadula "no read up")
+# Each component checks: Can I operate at this level?
 for component in all_components:
-    if component.security_level > orchestrator.operating_level:
-        raise SecurityError(f"{component} can't operate at {orchestrator.operating_level}")
+    if orchestrator.operating_level > component.security_level:
+        raise SecurityError(
+            f"{component} has insufficient clearance for {orchestrator.operating_level} pipeline"
+        )
 ```
 
 ### 3. Defense in Depth: Start-Time + Runtime
@@ -664,7 +681,7 @@ class MaliciousSECRETSink(ResultSink):
 
     security_level = SecurityLevel.SECRET  # Correctly declared
 
-    def write(self, df: ClassifiedDataFrame):
+    def write(self, df: SecureDataFrame):
         # Inherited validation - correctly implemented
         self._validate_can_handle_data(df)  # Passes: SECRET sink, SECRET data
 
@@ -687,7 +704,7 @@ class MaliciousSECRETSink(ResultSink):
 # - Sink checks orchestrator.operating_level == SECRET → PASS
 
 # Layer 3 (Data classification): ✅ PASS
-# - Sink receives ClassifiedDataFrame with classification=SECRET
+# - Sink receives SecureDataFrame with security_level=SECRET
 # - Sink's security_level == SECRET
 # - Validation: Can handle SECRET data → PASS
 ```
@@ -752,7 +769,7 @@ The framework solves all decidable security questions (configuration, validation
 | Insider threat (developer)      | Code review + Separation of duties         | Human      |
 | Insider threat (operator)       | Audit logs + Monitoring + Least privilege  | Operational|
 | Configuration drift             | Framework validation (every job start)     | Technical  |
-| Data mislabeling                | Framework Layer 3 (ClassifiedDataFrame)    | Technical  |
+| Data mislabeling                | Framework Layer 3 (SecureDataFrame)    | Technical  |
 
 **Coverage Analysis**:
 - **Decidable threats** (configuration, validation): Caught by framework (100% technical enforcement)
@@ -949,15 +966,19 @@ def test_adr002_secret_datasource_unofficial_sink_fails_at_start():
         llm_client=SimpleLLM(security_level="secret"),
     )
 
-    # Expected flow:
+    # ⚠️ WARNING: This test scenario is based on INVERTED logic!
+    # With CORRECT Bell-LaPadula semantics, this test should PASS, not FAIL:
     # 1. Orchestrator collects levels: {datasource: SECRET, llm: SECRET, sink: UNOFFICIAL}
     # 2. Orchestrator computes operating level: min(...) = UNOFFICIAL
-    # 3. Orchestrator validates components:
-    #    - datasource requires SECRET but orchestrator at UNOFFICIAL → FAIL
-    #    - llm requires SECRET but orchestrator at UNOFFICIAL → FAIL
-    #    - sink requires UNOFFICIAL, orchestrator at UNOFFICIAL → OK
-    # 4. Job FAILS TO START (before any data retrieval)
+    # 3. Orchestrator validates components (CORRECT):
+    #    - datasource: SECRET clearance, operate at UNOFFICIAL → ✅ OK (can downgrade/filter)
+    #    - llm: SECRET clearance, operate at UNOFFICIAL → ✅ OK (can downgrade)
+    #    - sink: UNOFFICIAL clearance, operate at UNOFFICIAL → ✅ OK (same level)
+    # 4. Job STARTS SUCCESSFULLY - SECRET datasource trusted to filter data to UNOFFICIAL
+    #
+    # The scenario that SHOULD fail: UNOFFICIAL datasource in SECRET pipeline
 
+    # ⚠️ This test expectation is WRONG - kept for reference only
     with pytest.raises(SecurityError, match="requires SECRET but orchestrator operating at UNOFFICIAL"):
         runner.run(dataframe, defaults)
 ```
@@ -1005,16 +1026,24 @@ class CSVDataSource:
 ### Start-Time (Primary Enforcement)
 
 ```text
+⚠️ WRONG ERROR MESSAGE (based on inverted logic):
 SecurityError: Component 'datasource' requires SECRET but orchestrator operating at UNOFFICIAL.
-Job cannot start - remove low-security component or create separate pipeline.
+
+✅ CORRECT ERROR MESSAGE (Bell-LaPadula "no read up"):
+SecurityError: Component 'datasource' has clearance OFFICIAL but pipeline requires SECRET.
+Job cannot start - component has insufficient clearance for required level.
 ADR-002 fail-fast enforcement.
 ```
 
 ### Runtime (Failsafe - Should Never Happen)
 
 ```text
+⚠️ WRONG ERROR MESSAGE (based on inverted logic):
 SecurityError: RUNTIME FAILSAFE: Datasource requires SECRET but orchestrator operating at UNOFFICIAL.
-Refusing to hand over data.
+
+✅ CORRECT ERROR MESSAGE (Bell-LaPadula "no read up"):
+SecurityError: RUNTIME FAILSAFE: Datasource has clearance OFFICIAL but pipeline requires SECRET.
+Insufficient clearance - refusing to operate.
 This should have been caught at start-time - possible security bypass attempt.
 ADR-002 defense-in-depth enforcement.
 ```

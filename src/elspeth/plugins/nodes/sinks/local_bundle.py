@@ -9,7 +9,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping
 
+from elspeth.core.base.plugin import BasePlugin
 from elspeth.core.base.protocols import Artifact, ArtifactDescriptor, ResultSink
+from elspeth.core.base.types import SecurityLevel
 from elspeth.core.utils.path_guard import resolve_under_base, safe_atomic_write
 from elspeth.plugins.nodes.sinks.csv_file import CsvResultSink
 
@@ -17,8 +19,11 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-class LocalBundleSink(ResultSink):
-    """Create a local folder bundle with payload, metadata, and artifacts."""
+class LocalBundleSink(BasePlugin, ResultSink):
+    """Create a local folder bundle with payload, metadata, and artifacts.
+
+    Inherits from BasePlugin to provide security enforcement (ADR-004).
+    """
 
     base_path: str | Path
     bundle_name: str | None = None
@@ -36,6 +41,12 @@ class LocalBundleSink(ResultSink):
 
     def __post_init__(self) -> None:
         """Normalize configuration and validate on_error early."""
+        # Initialize BasePlugin with security level and downgrade policy (ADR-002-B: Immutable security policy)
+        super().__init__(
+            security_level=SecurityLevel.UNOFFICIAL,  # ADR-002-B: Immutable
+            allow_downgrade=True
+        )
+
         self.base_path: Path = Path(self.base_path)
         if self.on_error not in {"abort", "skip"}:
             raise ValueError("on_error must be 'abort' or 'skip'")

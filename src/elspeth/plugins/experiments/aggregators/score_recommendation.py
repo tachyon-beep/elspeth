@@ -5,6 +5,9 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any, Mapping
 
+from elspeth.core.base.plugin import BasePlugin
+from elspeth.core.base.plugin_context import PluginContext
+from elspeth.core.base.types import SecurityLevel
 from elspeth.core.experiments.plugin_registry import register_aggregation_plugin
 from elspeth.plugins.experiments.aggregators.score_stats import ScoreStatsAggregator
 
@@ -28,7 +31,7 @@ _RECOMMENDATION_SCHEMA = {
 }
 
 
-class ScoreRecommendationAggregator:
+class ScoreRecommendationAggregator(BasePlugin):
     """Generate a lightweight recommendation based on score statistics."""
 
     name = "score_recommendation"
@@ -41,9 +44,18 @@ class ScoreRecommendationAggregator:
         source_field: str = "scores",
         flag_field: str = "score_flags",
     ) -> None:
+        # ADR-002-B: Security policy is immutable and hard-coded in plugin code
+        super().__init__(
+            security_level=SecurityLevel.UNOFFICIAL,  # Aggregators work with experiment results
+            allow_downgrade=True,  # Trusted to operate at lower levels if needed (ADR-005)
+        )
         self._min_samples = min_samples
         self._improvement_margin = improvement_margin
-        self._stats = ScoreStatsAggregator(source_field=source_field, flag_field=flag_field)
+        # ADR-002-B: ScoreStatsAggregator now hard-codes security_level internally
+        self._stats = ScoreStatsAggregator(
+            source_field=source_field,
+            flag_field=flag_field,
+        )
 
     def finalize(self, records: list[dict[str, Any]]) -> dict[str, Any]:
         stats = self._stats.finalize(records)
@@ -102,15 +114,26 @@ class ScoreRecommendationAggregator:
         return None
 
 
-register_aggregation_plugin(
-    "score_recommendation",
-    lambda options, context: ScoreRecommendationAggregator(
+
+
+def _create_score_recommendation(options: dict[str, Any], context: PluginContext) -> ScoreRecommendationAggregator:
+    """Create score recommendation aggregator.
+
+    ADR-002-B: Security policy is hard-coded in plugin __init__, not injected by factory.
+    """
+    return ScoreRecommendationAggregator(
         min_samples=int(options.get("min_samples", 5)),
         improvement_margin=float(options.get("improvement_margin", 0.05)),
         source_field=options.get("source_field", "scores"),
         flag_field=options.get("flag_field", "score_flags"),
-    ),
+    )
+
+
+register_aggregation_plugin(
+    "score_recommendation",
+    _create_score_recommendation,
     schema=_RECOMMENDATION_SCHEMA,
+    declared_security_level="UNOFFICIAL",  # ADR-002-B: Aggregators work with experiment results
 )
 
 

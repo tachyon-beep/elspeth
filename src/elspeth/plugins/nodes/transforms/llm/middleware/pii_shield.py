@@ -9,7 +9,10 @@ import os
 import re
 from typing import Any, Sequence
 
+from elspeth.core.base.plugin import BasePlugin
+from elspeth.core.base.plugin_context import PluginContext
 from elspeth.core.base.protocols import LLMMiddleware, LLMRequest
+from elspeth.core.base.types import SecurityLevel
 from elspeth.core.registries.middleware import register_middleware
 from elspeth.core.security.pii_validators import (
     canonicalize_identifier,
@@ -62,7 +65,7 @@ _PII_SHIELD_SCHEMA = {
 }
 
 
-class PIIShieldMiddleware(LLMMiddleware):
+class PIIShieldMiddleware(BasePlugin, LLMMiddleware):
     """Enhanced PII detection with blind review, checksum validation, and severity scoring.
 
     Features:
@@ -298,6 +301,10 @@ class PIIShieldMiddleware(LLMMiddleware):
             redaction_salt: Salt for deterministic pseudonym generation
             bsb_account_window: Max distance (chars) for BSB+Account combo detection
         """
+        super().__init__(
+            security_level=SecurityLevel.UNOFFICIAL,  # ADR-002-B: Immutable policy
+            allow_downgrade=True,  # ADR-002-B: Immutable policy
+        )
         mode = (on_violation or "abort").lower()
         if mode not in {"abort", "mask", "log"}:
             mode = "abort"
@@ -636,23 +643,30 @@ class PIIShieldMiddleware(LLMMiddleware):
         return request
 
 
+def _create_pii_shield_middleware(options: dict[str, Any], context: PluginContext) -> PIIShieldMiddleware:
+    """Factory for PII shield middleware (ADR-002-B: security policy is immutable)."""
+    opts = dict(options)
+    # ADR-002-B: security_level is hard-coded in plugin, not passed as parameter
+    return PIIShieldMiddleware(
+        patterns=opts.get("patterns"),
+        on_violation=opts.get("on_violation", "abort"),
+        mask=opts.get("mask", "[PII REDACTED]"),
+        channel=opts.get("channel"),
+        include_defaults=opts.get("include_defaults", True),
+        severity_scoring=opts.get("severity_scoring", True),
+        min_severity=opts.get("min_severity", "LOW"),
+        checksum_validation=opts.get("checksum_validation", True),
+        context_boosting=opts.get("context_boosting", True),
+        context_suppression=opts.get("context_suppression", True),
+        blind_review_mode=opts.get("blind_review_mode", False),
+        redaction_salt=opts.get("redaction_salt"),
+        bsb_account_window=opts.get("bsb_account_window", 80),
+    )
+
+
 register_middleware(
     "pii_shield",
-    lambda options, context: PIIShieldMiddleware(
-        patterns=options.get("patterns"),
-        on_violation=options.get("on_violation", "abort"),
-        mask=options.get("mask", "[PII REDACTED]"),
-        channel=options.get("channel"),
-        include_defaults=options.get("include_defaults", True),
-        severity_scoring=options.get("severity_scoring", True),
-        min_severity=options.get("min_severity", "LOW"),
-        checksum_validation=options.get("checksum_validation", True),
-        context_boosting=options.get("context_boosting", True),
-        context_suppression=options.get("context_suppression", True),
-        blind_review_mode=options.get("blind_review_mode", False),
-        redaction_salt=options.get("redaction_salt"),
-        bsb_account_window=options.get("bsb_account_window", 80),
-    ),
+    _create_pii_shield_middleware,
     schema=_PII_SHIELD_SCHEMA,
 )
 

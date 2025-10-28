@@ -327,6 +327,7 @@ register_middleware(
         on_error=options.get("on_error", "skip"),
     ),
     schema=_AZURE_ENV_SCHEMA,
+    declared_security_level="UNOFFICIAL",
 )
 
 

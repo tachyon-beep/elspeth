@@ -64,5 +64,6 @@ _FIXED_PRICE_SCHEMA = {
 }
 
 # Register plugins
-cost_tracker_registry.register("noop", _create_noop_cost_tracker, schema=_NOOP_SCHEMA)
-cost_tracker_registry.register("fixed_price", _create_fixed_price_cost_tracker, schema=_FIXED_PRICE_SCHEMA)
+# ADR-002-B: Control plugins are infrastructure - UNOFFICIAL clearance
+cost_tracker_registry.register("noop", _create_noop_cost_tracker, schema=_NOOP_SCHEMA, declared_security_level="UNOFFICIAL")
+cost_tracker_registry.register("fixed_price", _create_fixed_price_cost_tracker, schema=_FIXED_PRICE_SCHEMA, declared_security_level="UNOFFICIAL")

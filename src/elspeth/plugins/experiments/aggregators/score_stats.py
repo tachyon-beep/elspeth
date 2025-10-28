@@ -8,6 +8,9 @@ from typing import TYPE_CHECKING, Any, Mapping
 
 import numpy as np
 
+from elspeth.core.base.plugin import BasePlugin
+from elspeth.core.base.plugin_context import PluginContext
+from elspeth.core.base.types import SecurityLevel
 from elspeth.core.experiments.plugin_registry import register_aggregation_plugin
 
 if TYPE_CHECKING:
@@ -29,7 +32,7 @@ _STATS_SCHEMA = {
 }
 
 
-class ScoreStatsAggregator:
+class ScoreStatsAggregator(BasePlugin):
     """Aggregate score statistics across all rows."""
 
     name = "score_stats"
@@ -41,6 +44,11 @@ class ScoreStatsAggregator:
         flag_field: str = "score_flags",
         ddof: int = 0,
     ) -> None:
+        # ADR-002-B: Security policy is immutable and hard-coded in plugin code
+        super().__init__(
+            security_level=SecurityLevel.UNOFFICIAL,  # Aggregators work with experiment results
+            allow_downgrade=True,  # Trusted to operate at lower levels if needed (ADR-005)
+        )
         self._source_field = source_field
         self._flag_field = flag_field
         self._ddof = ddof
@@ -115,57 +123,23 @@ class ScoreStatsAggregator:
     def input_schema(self) -> type["DataFrameSchema"] | None:
         """ScoreStatsAggregator does not require specific input columns."""
         return None
+def _create_score_stats(options: dict[str, Any], context: PluginContext) -> ScoreStatsAggregator:
+    """Create score stats aggregator.
 
-
-class ScoreDeltaBaselinePlugin:
-    """Compare score statistics between baseline and variant."""
-
-    name = "score_delta"
-
-    def __init__(self, *, metric: str = "mean", criteria: list[str] | None = None) -> None:
-        self._metric = metric
-        self._criteria = set(criteria) if criteria else None
-
-    def compare(self, baseline: dict[str, Any], variant: dict[str, Any]) -> dict[str, Any]:
-        base_stats = self._extract_stats(baseline)
-        var_stats = self._extract_stats(variant)
-        if not base_stats or not var_stats:
-            return {}
-
-        diffs: dict[str, Any] = {}
-        keys = set(base_stats.keys()) & set(var_stats.keys())
-        for crit in sorted(keys):
-            if self._criteria and crit not in self._criteria:
-                continue
-            base_metric = base_stats[crit].get(self._metric)
-            var_metric = var_stats[crit].get(self._metric)
-            if base_metric is None or var_metric is None:
-                continue
-            diffs[crit] = var_metric - base_metric
-        return diffs
-
-    @staticmethod
-    def _extract_stats(payload: dict[str, Any]) -> dict[str, dict[str, Any]]:
-        aggregates = payload.get("aggregates") if isinstance(payload, Mapping) else None
-        if not isinstance(aggregates, Mapping):
-            return {}
-        stats = aggregates.get("score_stats")
-        if not isinstance(stats, Mapping):
-            return {}
-        criteria = stats.get("criteria")
-        if not isinstance(criteria, Mapping):
-            return {}
-        return dict(criteria)
+    ADR-002-B: Security policy is hard-coded in plugin __init__, not injected by factory.
+    """
+    return ScoreStatsAggregator(
+        source_field=options.get("source_field", "scores"),
+        flag_field=options.get("flag_field", "score_flags"),
+        ddof=int(options.get("ddof", 0)),
+    )
 
 
 register_aggregation_plugin(
     "score_stats",
-    lambda options, context: ScoreStatsAggregator(
-        source_field=options.get("source_field", "scores"),
-        flag_field=options.get("flag_field", "score_flags"),
-        ddof=int(options.get("ddof", 0)),
-    ),
+    _create_score_stats,
     schema=_STATS_SCHEMA,
+    declared_security_level="UNOFFICIAL",  # ADR-002-B: Aggregators work with experiment results
 )
 
 

@@ -4,6 +4,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 
 import pytest
 
+from elspeth.core.base.types import SecurityLevel
 from elspeth.plugins.nodes.transforms.llm.openai_http import HttpOpenAIClient
 
 
@@ -54,7 +55,10 @@ def http_server():
 
 def test_http_openai_client_roundtrip(http_server):
     host, port = http_server.server_address
-    client = HttpOpenAIClient(api_base=f"http://{host}:{port}", model="test-model")
+    client = HttpOpenAIClient(
+        api_base=f"http://{host}:{port}",
+        model="test-model"
+    )
     result = client.generate(system_prompt="sys", user_prompt="hello", metadata={"k": "v"})
     assert result["content"] == "mocked response"
     assert result["metadata"] == {"k": "v"}

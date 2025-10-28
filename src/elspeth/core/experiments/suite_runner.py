@@ -8,8 +8,10 @@ from typing import Any, Callable, cast
 
 import pandas as pd
 
+from elspeth.core.base.plugin import BasePlugin  # ADR-004: ABC with nominal typing
 from elspeth.core.base.plugin_context import PluginContext, apply_plugin_context
 from elspeth.core.base.protocols import LLMClientProtocol, ResultSink
+from elspeth.core.base.types import SecurityLevel
 from elspeth.core.controls import create_cost_tracker, create_rate_limiter
 from elspeth.core.experiments.config import ExperimentConfig, ExperimentSuite
 from elspeth.core.experiments.config_merger import ConfigMerger
@@ -23,9 +25,51 @@ from elspeth.core.experiments.plugin_registry import (
 )
 from elspeth.core.experiments.runner import ExperimentRunner
 from elspeth.core.registries.middleware import create_middleware
-from elspeth.core.registries.sink import sink_registry
-from elspeth.core.security import resolve_determinism_level, resolve_security_level
+
+# BUG-001 FIX: Lazy import to break circular dependency
+# Was: from elspeth.core.registry import central_registry
+# Moved inside _instantiate_sinks() to defer import until after module initialization
+from elspeth.core.security import resolve_determinism_level
 from elspeth.core.validation.base import ConfigurationError
+
+# ============================================================================
+# ADR-002 Security Primitives
+# ============================================================================
+
+
+def compute_minimum_clearance_envelope(plugins: list[BasePlugin]) -> SecurityLevel:
+    """Compute minimum security level across all plugins (weakest-link principle).
+
+    This implements ADR-002's "minimum clearance envelope" - the orchestrator
+    operates at the LOWEST security level that ALL plugins can handle.
+
+    Why MIN not MAX?
+    - If we operated at MAX, low-security plugins would receive high-security data
+    - MIN ensures NO plugin receives data above its clearance
+    - This enforces the weakest-link security model
+
+    Args:
+        plugins: List of all plugins in the suite (datasources, LLMs, sinks, middleware)
+
+    Returns:
+        SecurityLevel: Minimum security level (UNOFFICIAL if empty)
+
+    Example:
+        >>> plugins = [SecretPlugin(), OfficialPlugin(), SecretPlugin()]
+        >>> level = compute_minimum_clearance_envelope(plugins)
+        >>> assert level == SecurityLevel.OFFICIAL  # Weakest link wins
+
+    ADR-002 Threat Prevention:
+        - T1 (Classification Breach): Prevents SECRET data reaching UNOFFICIAL sink
+        - Ensures orchestrator never operates above weakest plugin's capability
+    """
+    if not plugins:
+        # Safe default: lowest security level (no plugins = no security requirements)
+        return SecurityLevel.UNOFFICIAL
+
+    # Weakest-link principle: operate at minimum level across ALL plugins
+    plugin_levels = [plugin.get_security_level() for plugin in plugins]
+    return min(plugin_levels)
 
 
 @dataclass
@@ -45,6 +89,9 @@ class SuiteExecutionContext:
         preflight_info: Metadata about the run environment
         notified_middlewares: Tracks middleware instances that received on_suite_loaded
             (uses id(middleware) as key to prevent duplicate notifications)
+        operating_security_level: ADR-002 minimum clearance envelope computed from
+            all plugin security levels. Set during suite startup and used for
+            runtime validation failsafe. None until security validation complete.
     """
 
     defaults: dict[str, Any]
@@ -55,6 +102,7 @@ class SuiteExecutionContext:
     results: dict[str, Any] = field(default_factory=dict)
     preflight_info: dict[str, Any] = field(default_factory=dict)
     notified_middlewares: dict[int, Any] = field(default_factory=dict)
+    operating_security_level: SecurityLevel | None = None
 
     @classmethod
     def create(
@@ -152,6 +200,7 @@ class ExperimentSuiteRunner:
     suite: ExperimentSuite
     llm_client: LLMClientProtocol
     sinks: list[ResultSink]
+    datasource: Any = None  # Optional datasource for ADR-002 security validation
     suite_root: Any = None
     config_path: Any = None
     _shared_middlewares: dict[str, Any] = field(default_factory=dict, init=False)
@@ -225,12 +274,9 @@ class ExperimentSuiteRunner:
         rate_limiter_def = cast(dict[str, Any] | None, merger.merge_scalar("rate_limiter_def", "rate_limiter"))
         cost_tracker_def = cast(dict[str, Any] | None, merger.merge_scalar("cost_tracker_def", "cost_tracker"))
 
-        # Resolve security level (most restrictive wins)
-        security_level = resolve_security_level(
-            config.security_level,
-            pack.get("security_level") if pack else None,
-            defaults.get("security_level"),
-        )
+        # ADR-002-B: security_level is NOT configured, it's computed from plugins
+        # Use UNOFFICIAL as experiment context placeholder (plugins have their own hardcoded levels)
+        security_level = SecurityLevel.UNOFFICIAL
 
         determinism_level = resolve_determinism_level(
             config.determinism_level,
@@ -238,11 +284,11 @@ class ExperimentSuiteRunner:
             defaults.get("determinism_level"),
         )
 
-        # Create experiment context
+        # Create experiment context (security_level is just a placeholder, actual level computed from plugins)
         experiment_context = PluginContext(
             plugin_name=config.name,
             plugin_kind="experiment",
-            security_level=security_level,
+            security_level=security_level,  # Placeholder: plugins declare their own levels
             determinism_level=determinism_level,
             provenance=(f"experiment:{config.name}.resolved",),
             suite_root=self.suite_root,
@@ -360,6 +406,12 @@ class ExperimentSuiteRunner:
         return instances
 
     def _instantiate_sinks(self, defs: list[dict[str, Any]]) -> list[ResultSink]:
+        # BUG-001 FIX: Lazy import breaks circular dependency
+        # Import chain: registry → experiment_registries → suite_runner → registry (DEADLOCK)
+        # Lazy import defers until after all modules are initialized
+        from elspeth.core.registry import central_registry
+
+        sink_registry = central_registry.get_registry("sink")
         sinks: list[ResultSink] = []
         for _, entry in enumerate(defs):
             plugin = entry.get("plugin")
@@ -367,14 +419,12 @@ class ExperimentSuiteRunner:
                 raise ConfigurationError("Each sink definition must include a 'plugin' string")
             raw_options = dict(entry.get("options", {}))
             artifacts_cfg = raw_options.pop("artifacts", None)
-            security_level = entry.get("security_level", raw_options.get("security_level"))
-            if security_level is None:
-                raise ConfigurationError(f"sink '{plugin}' requires a security_level")
+            # ADR-002-B: security_level is plugin-author-owned, not user-configurable
+            # Don't require or inject it - plugins hard-code their own security level
             determinism_level = entry.get("determinism_level", raw_options.get("determinism_level"))
             if determinism_level is None:
                 raise ConfigurationError(f"sink '{plugin}' requires a determinism_level")
             options_with_level = dict(raw_options)
-            options_with_level["security_level"] = security_level
             options_with_level["determinism_level"] = determinism_level
             sink_registry.validate(plugin, options_with_level)
             sink = sink_registry.create(
@@ -476,6 +526,9 @@ class ExperimentSuiteRunner:
         plugin_context attribute. If not present, it creates a fallback context
         with proper security level resolution and provenance tracking.
 
+        Note: The operating_level field is populated separately by _propagate_operating_level()
+        after validation completes.
+
         Args:
             runner: The experiment runner instance
             experiment: Experiment configuration
@@ -494,15 +547,205 @@ class ExperimentSuiteRunner:
             PluginContext(
                 plugin_name=experiment.name,
                 plugin_kind="experiment",
-                security_level=resolve_security_level(
-                    experiment.security_level,
-                    defaults.get("security_level"),
-                ),
+                security_level=SecurityLevel.UNOFFICIAL,  # ADR-002-B: placeholder, actual level from plugins
                 provenance=(f"experiment:{experiment.name}.fallback",),
                 suite_root=self.suite_root,
                 config_path=self.config_path,
             ),
         )
+
+    def _propagate_operating_level(
+        self,
+        runner: ExperimentRunner,
+        sinks: list[ResultSink],
+        operating_level: SecurityLevel,
+    ) -> None:
+        """Propagate computed operating_level through all plugin contexts.
+
+        After ADR-002 validation computes the pipeline operating level, this method
+        updates all plugin contexts to include the operating_level field. This allows
+        plugins to access the effective security level via get_effective_level().
+
+        Since PluginContext is frozen (immutable), we derive new contexts with
+        operating_level and reassign them to plugins.
+
+        Args:
+            runner: Experiment runner instance
+            sinks: List of result sinks
+            operating_level: Computed minimum clearance envelope
+
+        Complexity Reduction:
+            Extracted from inline loop to dedicated propagation method
+        """
+        # Update runner's security_level to computed operating level (ADR-002-B)
+        runner.security_level = operating_level
+
+        # Update runner context
+        if hasattr(runner, 'plugin_context'):
+            runner.plugin_context = runner.plugin_context.derive(
+                plugin_name=runner.plugin_context.plugin_name,
+                plugin_kind=runner.plugin_context.plugin_kind,
+                operating_level=operating_level,
+            )
+
+        # Update sink contexts
+        for sink in sinks:
+            if hasattr(sink, 'plugin_context'):
+                sink.plugin_context = sink.plugin_context.derive(
+                    plugin_name=sink.plugin_context.plugin_name,
+                    plugin_kind=sink.plugin_context.plugin_kind,
+                    operating_level=operating_level,
+                )
+
+        # Update middleware contexts
+        if runner.llm_middlewares:
+            for mw in runner.llm_middlewares:
+                if hasattr(mw, 'plugin_context'):
+                    mw.plugin_context = mw.plugin_context.derive(
+                        plugin_name=mw.plugin_context.plugin_name,
+                        plugin_kind=mw.plugin_context.plugin_kind,
+                        operating_level=operating_level,
+                    )
+
+        # Update plugin contexts (row/aggregator/validation/early_stop)
+        for plugin_list in [
+            runner.row_plugins,
+            runner.aggregator_plugins,
+            runner.validation_plugins,
+            runner.early_stop_plugins,
+        ]:
+            if plugin_list:
+                for plugin in plugin_list:
+                    if hasattr(plugin, 'plugin_context'):
+                        plugin.plugin_context = plugin.plugin_context.derive(
+                            plugin_name=plugin.plugin_context.plugin_name,
+                            plugin_kind=plugin.plugin_context.plugin_kind,
+                            operating_level=operating_level,
+                        )
+
+        # Update rate_limiter and cost_tracker contexts
+        for component in [runner.rate_limiter, runner.cost_tracker]:
+            if component and hasattr(component, 'plugin_context'):
+                component.plugin_context = component.plugin_context.derive(
+                    plugin_name=component.plugin_context.plugin_name,
+                    plugin_kind=component.plugin_context.plugin_kind,
+                    operating_level=operating_level,
+                )
+
+    def _validate_experiment_security(
+        self,
+        experiment: ExperimentConfig,
+        runner: ExperimentRunner,
+        sinks: list[ResultSink],
+        ctx: SuiteExecutionContext,
+    ) -> None:
+        """Validate experiment security using ADR-002 minimum clearance envelope model.
+
+        This method implements ADR-002 start-time security validation (PRIMARY control):
+        1. Collect all plugins that implement BasePlugin protocol
+        2. Compute minimum clearance envelope (weakest-link principle)
+        3. Validate ALL plugins can operate at that level
+        4. Set operating_security_level in context for runtime failsafe
+
+        Security Model:
+            - Orchestrator operates at MIN(all plugin security levels)
+            - ANY plugin requiring > operating level causes job to FAIL AT START
+            - This prevents classification breaches BEFORE data retrieval
+
+        Args:
+            experiment: Experiment configuration being validated
+            runner: Experiment runner with datasource, LLM, middleware
+            sinks: List of result sinks for this experiment
+            ctx: Suite execution context (operating_security_level will be set)
+
+        Raises:
+            SecurityValidationError: If any plugin cannot operate at the envelope level
+
+        ADR-002 Threats Prevented:
+            - T1 (Classification Breach): Prevents SECRET data reaching UNOFFICIAL sink
+            - T3 (Runtime Bypass): Sets ctx.operating_security_level for failsafe
+
+        Example:
+            >>> # Experiment with SECRET datasource, OFFICIAL sink
+            >>> # compute_minimum_clearance_envelope([SECRET, OFFICIAL]) = OFFICIAL
+            >>> # SECRET datasource.validate_can_operate_at_level(OFFICIAL) raises!
+            >>> # Job FAILS TO START (before data retrieval)
+        """
+        from elspeth.core.validation.base import SecurityValidationError
+
+        # Collect all plugins that implement BasePlugin protocol
+        plugins: list[BasePlugin] = []
+
+        # Datasource (from suite runner or experiment runner)
+        datasource = self.datasource or getattr(runner, "datasource", None)
+        if datasource and isinstance(datasource, BasePlugin):
+            plugins.append(datasource)
+
+        # LLM client (from runner)
+        llm_client = getattr(runner, "llm_client", None)
+        if llm_client and isinstance(llm_client, BasePlugin):
+            plugins.append(llm_client)
+
+        # Middleware (from runner)
+        middlewares = getattr(runner, "llm_middlewares", None) or []
+        for middleware in middlewares:
+            if isinstance(middleware, BasePlugin):
+                plugins.append(middleware)
+
+        # Row plugins (from runner) - process individual rows
+        row_plugins = getattr(runner, "row_plugins", None) or []
+        for plugin in row_plugins:
+            if isinstance(plugin, BasePlugin):
+                plugins.append(plugin)
+
+        # Aggregator plugins (from runner) - process aggregated results
+        aggregator_plugins = getattr(runner, "aggregator_plugins", None) or []
+        for plugin in aggregator_plugins:
+            if isinstance(plugin, BasePlugin):
+                plugins.append(plugin)
+
+        # Validation plugins (from runner) - validate LLM responses
+        validation_plugins = getattr(runner, "validation_plugins", None) or []
+        for plugin in validation_plugins:
+            if isinstance(plugin, BasePlugin):
+                plugins.append(plugin)
+
+        # Early stop plugins (from runner) - observe and signal halt
+        early_stop_plugins = getattr(runner, "early_stop_plugins", None) or []
+        for plugin in early_stop_plugins:
+            if isinstance(plugin, BasePlugin):
+                plugins.append(plugin)
+
+        # Sinks (passed as parameter)
+        for sink in sinks:
+            if isinstance(sink, BasePlugin):
+                plugins.append(sink)
+
+        # If no plugins implement BasePlugin, skip validation (no security requirements)
+        if not plugins:
+            return
+
+        # Compute minimum clearance envelope (weakest-link principle)
+        operating_level = compute_minimum_clearance_envelope(plugins)
+
+        # Validate ALL plugins can operate at this level (fail-fast if any rejects)
+        for plugin in plugins:
+            try:
+                plugin.validate_can_operate_at_level(operating_level)
+            except SecurityValidationError as e:
+                # Enrich error message with experiment context
+                raise SecurityValidationError(
+                    f"ADR-002 Start-Time Validation Failed for experiment '{experiment.name}': "
+                    f"{str(e)}. Orchestrator operating at {operating_level.name}, "
+                    f"but {plugin.__class__.__name__} requires higher clearance. "
+                    f"Job cannot start - adjust plugin security levels or split into separate experiments."
+                ) from e
+
+        # Set operating level in context for runtime validation failsafe (Layer 2)
+        ctx.operating_security_level = operating_level
+
+        # Propagate operating_level through all plugin contexts so plugins can access it
+        self._propagate_operating_level(runner, sinks, operating_level)
 
     def _finalize_suite(self, ctx: SuiteExecutionContext) -> None:
         """Notify all middlewares that suite execution is complete.
@@ -693,7 +936,7 @@ class ExperimentSuiteRunner:
 
     def run(
         self,
-        df: pd.DataFrame,
+        df: pd.DataFrame | None = None,
         defaults: dict[str, Any] | None = None,
         sink_factory: Callable[[ExperimentConfig], list[ResultSink]] | None = None,
         preflight_info: dict[str, Any] | None = None,
@@ -706,16 +949,18 @@ class ExperimentSuiteRunner:
         flow while keeping cognitive complexity low.
 
         Execution Flow:
+            0. Load data from datasource if not provided (ADR-002 security fix)
             1. Initialize suite context (baseline-first ordering, metadata)
             2. For each experiment:
                a. Resolve configuration (pack, sinks)
                b. Build experiment runner
-               c. Notify middlewares (suite_loaded, experiment_start)
-               d. Execute experiment
-               e. Capture baseline payload (if first baseline)
-               f. Store results
-               g. Notify middlewares (experiment_complete)
-               h. Run baseline comparison (if applicable)
+               c. VALIDATE SECURITY ENVELOPE (before execution) ← ADR-002
+               d. Notify middlewares (suite_loaded, experiment_start)
+               e. Execute experiment
+               f. Capture baseline payload (if first baseline)
+               g. Store results
+               h. Notify middlewares (experiment_complete)
+               i. Run baseline comparison (if applicable)
             3. Finalize suite (notify middlewares of completion)
             4. Return aggregated results
 
@@ -735,6 +980,7 @@ class ExperimentSuiteRunner:
         Args:
             df: Input DataFrame containing prompts and data for experiments.
                 Each row represents one prompt to be processed.
+                If None, will load from self.datasource (ADR-002 security fix).
             defaults: Default configuration values for the suite. Can include:
                 - prompt_packs: Dict of named prompt pack configurations
                 - prompt_pack: Default pack name to use
@@ -769,9 +1015,10 @@ class ExperimentSuiteRunner:
 
         Example:
             >>> suite = ExperimentSuite(root=Path("./"), baseline=baseline_exp, experiments=[...])
-            >>> runner = ExperimentSuiteRunner(suite, llm_client, sinks)
+            >>> runner = ExperimentSuiteRunner(suite, llm_client, sinks, datasource=datasource)
+            >>> # ADR-002 security: validation happens BEFORE data load
             >>> results = runner.run(
-            ...     df=pd.DataFrame([{"text": "Hello"}]),
+            ...     df=None,  # Let runner load after validation
             ...     defaults={"prompt_system": "You are helpful", "sink_defs": [...]},
             ... )
             >>> results["baseline"]["payload"]["raw_outputs"]  # Access baseline results
@@ -783,6 +1030,20 @@ class ExperimentSuiteRunner:
             - baseline_flow_diagram.md: Detailed baseline execution flow
             - sink_resolution_documentation.md: Sink priority chain details
         """
+        # ADR-002 SECURITY FIX: Load data AFTER validation sees datasource
+        # If df not provided, load from self.datasource (which validation can inspect)
+        if df is None:
+            if self.datasource is None:
+                raise ValueError(
+                    "Either df parameter or datasource attribute must be provided. "
+                    "For ADR-002 security compliance, pass datasource to constructor "
+                    "and omit df parameter to enable validation before data retrieval."
+                )
+            # Validation will happen per-experiment in loop below, BEFORE we use df
+            # Loading here allows validation to inspect self.datasource object
+            df = self.datasource.load()  # Returns SecureDataFrame (ADR-002-A)
+            # Clearance validation happens when runner.run(df) is called for each experiment
+
         defaults = defaults or {}
         ctx = self._prepare_suite_context(defaults, preflight_info)
 
@@ -797,6 +1058,13 @@ class ExperimentSuiteRunner:
                 {**defaults, "prompt_packs": ctx.prompt_packs, "prompt_pack": pack_name},
                 sinks,
             )
+
+            # ADR-002: Start-time security validation (PRIMARY control)
+            # Collect all plugins, compute minimum clearance envelope, validate all can operate
+            # After validation, _propagate_operating_level() updates all plugin contexts with operating_level
+            self._validate_experiment_security(experiment, runner, sinks, ctx)
+
+            # Retrieve experiment context (now includes operating_level from propagation)
             experiment_context = self._get_experiment_context(runner, experiment, defaults)
             middlewares = cast(list[Any], runner.llm_middlewares or [])
 
@@ -830,4 +1098,9 @@ class ExperimentSuiteRunner:
             self._run_baseline_comparison(exp_config, ctx, payload, defaults)
 
         self._finalize_suite(ctx)
+
+        # ADR-002: Include operating_security_level in results for artifact bundle metadata
+        if ctx.operating_security_level is not None:
+            ctx.results["_operating_security_level"] = ctx.operating_security_level
+
         return ctx.results

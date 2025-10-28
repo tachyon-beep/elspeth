@@ -121,9 +121,9 @@ def maybe_write_artifacts_suite(args: Any, settings: Any, suite: Any, results: d
     if art_base is None and not getattr(args, "signed_bundle", False):
         return
     art_dir = ensure_artifacts_dir(art_base)
-    # Write each experiment payload and the suite config
+    # Write each experiment payload and the suite config (filter out special keys)
     (art_dir / "suite.json").write_text(
-        json.dumps({k: v["payload"] for k, v in results.items()}, indent=2, sort_keys=True), encoding="utf-8"
+        json.dumps({k: v["payload"] for k, v in results.items() if k != "_operating_security_level"}, indent=2, sort_keys=True), encoding="utf-8"
     )
     try:
         cfg_path = Path(getattr(settings, "config_path", ""))
@@ -132,6 +132,9 @@ def maybe_write_artifacts_suite(args: Any, settings: Any, suite: Any, results: d
     except (OSError, UnicodeError):
         pass
     if getattr(args, "signed_bundle", False):
+        # ADR-002: Extract operating_security_level from results for bundle metadata
+        operating_level = results.pop("_operating_security_level", None)
+
         # For bundle, assemble a combined payload and pass the original DataFrame from datasource
         combined: dict[str, Any] = {"results": []}
         for _, entry in results.items():
@@ -147,12 +150,14 @@ def maybe_write_artifacts_suite(args: Any, settings: Any, suite: Any, results: d
             settings,
             df,
             signing_key_env=getattr(args, "signing_key_env", "ELSPETH_SIGNING_KEY"),
+            operating_level=operating_level,
         )
         if bundle_dir:
             maybe_publish_artifacts_bundle(
                 bundle_dir,
                 plugin_name=getattr(args, "artifact_sink_plugin", None),
                 config_path=getattr(args, "artifact_sink_config", None),
+                operating_level=operating_level,
             )
 
 
@@ -210,23 +215,30 @@ def run_suite(
     logger = logging.getLogger(__name__)
     logger.info("Running suite at %s", suite_root)
     suite = suite or ExperimentSuite.load(suite_root)
-    df = settings.datasource.load()
+
+    # ADR-002 SECURITY FIX: Pass datasource OBJECT to suite_runner for validation
+    # DO NOT load data yet - let runner validate security envelope first
     suite_runner = ExperimentSuiteRunner(
         suite=suite,
         llm_client=settings.llm,
         sinks=settings.sinks,
+        datasource=settings.datasource,  # ← SECURITY: Pass for validation
         suite_root=settings.suite_root,
         config_path=settings.config_path,
     )
     defaults = assemble_suite_defaults(settings)
+
+    # Runner will validate security envelope THEN load data
     results = suite_runner.run(
-        df,
+        df=None,  # ← Let runner load after validation
         defaults=defaults,
         sink_factory=lambda exp: clone_suite_sinks(settings.sinks, exp.name),
         preflight_info=dict(preflight) if isinstance(preflight, Mapping) else preflight,
     )
+    # Log completion for each experiment (filter out special metadata keys)
     for name, entry in results.items():
-        logger.info("Experiment %s completed with %s rows", name, len(entry["payload"].get("results", [])))
+        if name != "_operating_security_level":
+            logger.info("Experiment %s completed with %s rows", name, len(entry["payload"].get("results", [])))
     reports_dir = getattr(args, "reports_dir", None)
     if reports_dir:
         if getattr(args, "single_run", False):

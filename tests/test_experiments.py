@@ -284,7 +284,9 @@ def test_experiment_suite_runner(tmp_path):
         sink_factory=lambda exp: [_secure_sink(DummySink())],
     )
 
-    assert set(results.keys()) == {"expA", "expB"}
+    # ADR-002-B: Filter out special metadata keys
+    experiment_names = {k for k in results.keys() if not k.startswith("_")}
+    assert experiment_names == {"expA", "expB"}
     assert results["expA"]["payload"]["results"][0]["response"]["content"] == "A 1"
 
 
@@ -374,24 +376,21 @@ def test_suite_runner_with_plugin_definitions(tmp_path, monkeypatch):
                 "row_plugins": [
                     {
                         "name": "test_row",
-                        "security_level": "OFFICIAL",
-                        "determinism_level": "guaranteed",  # Inherits security_level from parent
+                        "determinism_level": "guaranteed",
                         "options": {"value": 5},
                     }
                 ],
                 "aggregator_plugins": [
                     {
                         "name": "test_agg",
-                        "security_level": "OFFICIAL",
-                        "determinism_level": "guaranteed",  # Inherits security_level from parent
+                        "determinism_level": "guaranteed",
                         "options": {"key": "total"},
                     }
                 ],
                 "baseline_plugins": [
                     {
                         "name": "noop",
-                        "security_level": "OFFICIAL",
-                        "determinism_level": "guaranteed",  # Inherits security_level from parent
+                        "determinism_level": "guaranteed",
                         "options": {},
                     }
                 ],
@@ -419,8 +418,8 @@ def test_suite_runner_with_plugin_definitions(tmp_path, monkeypatch):
         def finalize(self, records):
             return {self._key: len(records)}
 
-    exp_plugin_registry.register_row_plugin("test_row", lambda opts, context: CustomRowPlugin(opts.get("value", 0)))
-    exp_plugin_registry.register_aggregation_plugin("test_agg", lambda opts, context: CustomAggPlugin(opts.get("key", "total")))
+    exp_plugin_registry.register_row_plugin("test_row", lambda opts, context: CustomRowPlugin(opts.get("value", 0)), declared_security_level="official")
+    exp_plugin_registry.register_aggregation_plugin("test_agg", lambda opts, context: CustomAggPlugin(opts.get("key", "total")), declared_security_level="official")
 
     class DummyLLM:
         def generate(self, *, system_prompt, user_prompt, metadata=None):
@@ -650,7 +649,6 @@ def test_experiment_runner_early_stop():
             "threshold": 2,
             "comparison": "gte",
             "min_rows": 2,
-            "security_level": "OFFICIAL",
             "determinism_level": "guaranteed",
         },
     )

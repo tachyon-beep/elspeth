@@ -21,14 +21,12 @@ suite:
     # Datasource: CSV from Azure Blob Storage
     datasource:
       type: csv_blob
-      security_level: confidential
       path: "https://mystorageaccount.blob.core.windows.net/experiments/input_data.csv"
       on_error: skip
 
     # LLM: Azure OpenAI with security middleware stack
     llm:
       type: azure_openai
-      security_level: confidential
       config: azure_openai_config  # References ~/.elspeth/azure_openai.json
       deployment: gpt-4
       temperature: 0.0

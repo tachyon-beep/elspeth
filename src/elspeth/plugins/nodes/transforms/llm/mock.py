@@ -5,13 +5,34 @@ from __future__ import annotations
 import hashlib
 from typing import Any
 
+from elspeth.core.base.plugin import BasePlugin
 from elspeth.core.base.protocols import LLMClientProtocol
+from elspeth.core.base.types import SecurityLevel
 
 
-class MockLLMClient(LLMClientProtocol):
-    """Deterministic mock client for tests and offline runs."""
+class MockLLMClient(BasePlugin, LLMClientProtocol):
+    """Deterministic mock client for tests and offline runs.
 
-    def __init__(self, *, seed: int | None = None):
+    Security policy: Test-only transform operates at UNOFFICIAL level (ADR-002-B).
+
+    Args:
+        seed: Optional seed for deterministic response generation (default: 0).
+    """
+
+    def __init__(
+        self,
+        *,
+        seed: int | None = None
+    ):
+        """Initialize mock LLM client with hard-coded security policy.
+
+        ADR-002-B: Security policy is immutable. Mock LLMs operate at UNOFFICIAL level
+        and can be trusted to downgrade (test-only transform).
+        """
+        super().__init__(
+            security_level=SecurityLevel.UNOFFICIAL,  # ADR-002-B: Immutable policy
+            allow_downgrade=True,  # ADR-002-B: Immutable policy
+        )
         self.seed = seed or 0
 
     def generate(

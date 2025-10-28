@@ -11,7 +11,9 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from elspeth.adapters.blob_store import BlobConfig, load_blob_config
+from elspeth.core.base.plugin import BasePlugin
 from elspeth.core.base.protocols import Artifact, ArtifactDescriptor, ResultSink
+from elspeth.core.base.types import SecurityLevel
 from elspeth.core.security.secure_mode import SecureMode, get_secure_mode
 
 logger = logging.getLogger(__name__)
@@ -23,7 +25,7 @@ except ImportError:  # pragma: no cover
     ContentSettings = None  # type: ignore[assignment,misc]
 
 
-class BlobResultSink(ResultSink):
+class BlobResultSink(BasePlugin, ResultSink):
     """Upload artifacts to Azure Blob Storage with optional path constraints.
 
     Persist experiment payloads to Azure Blob Storage.
@@ -32,6 +34,8 @@ class BlobResultSink(ResultSink):
     operators can target workspace datastores or ad-hoc storage accounts. The
     uploaded assets include a JSON payload of the experiment results and an
     optional manifest describing auxiliary metadata.
+
+    Inherits from BasePlugin to provide security enforcement (ADR-004).
     """
 
     def __init__(
@@ -52,6 +56,12 @@ class BlobResultSink(ResultSink):
         upload_chunk_size: int = 4 * 1024 * 1024,
         on_error: str = "abort",
     ) -> None:
+        # Initialize BasePlugin with security level and downgrade policy (ADR-002-B, ADR-005)
+        super().__init__(
+            security_level=SecurityLevel.UNOFFICIAL,  # ADR-002-B: Immutable policy
+            allow_downgrade=True,  # ADR-002-B: Immutable policy
+        )
+
         self.config = load_blob_config(config_path, profile)
         self.path_template = path_template
         self.filename = filename

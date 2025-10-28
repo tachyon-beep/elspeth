@@ -4,11 +4,21 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
+from elspeth.core.base.plugin import BasePlugin
 from elspeth.core.base.protocols import LLMClientProtocol
+from elspeth.core.base.types import SecurityLevel
 
 
-class StaticLLMClient(LLMClientProtocol):
-    """Return predefined content and metrics for every request."""
+class StaticLLMClient(BasePlugin, LLMClientProtocol):
+    """Return predefined content and metrics for every request.
+
+    Security policy: Test-only transform operates at UNOFFICIAL level (ADR-002-B).
+
+    Args:
+        content: Static response content to return for all requests (REQUIRED).
+        score: Optional score metric to include in response.
+        metrics: Optional additional metrics to include in response.
+    """
 
     def __init__(
         self,
@@ -17,6 +27,15 @@ class StaticLLMClient(LLMClientProtocol):
         score: float | None = None,
         metrics: Mapping[str, Any] | None = None,
     ) -> None:
+        """Initialize static LLM client with hard-coded security policy.
+
+        ADR-002-B: Security policy is immutable. Static LLMs operate at UNOFFICIAL level
+        and can be trusted to downgrade (test-only transform).
+        """
+        super().__init__(
+            security_level=SecurityLevel.UNOFFICIAL,  # ADR-002-B: Immutable policy
+            allow_downgrade=True,  # ADR-002-B: Immutable policy
+        )
         self.content = content
         self.score = score
         self.extra_metrics = dict(metrics or {})

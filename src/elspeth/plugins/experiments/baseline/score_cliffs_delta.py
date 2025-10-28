@@ -5,6 +5,9 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any, Sequence
 
+from elspeth.core.base.plugin import BasePlugin
+from elspeth.core.base.plugin_context import PluginContext
+from elspeth.core.base.types import SecurityLevel
 from elspeth.core.experiments.plugin_registry import register_baseline_plugin
 from elspeth.plugins.experiments._stats_helpers import (
     _calculate_cliffs_delta,
@@ -29,12 +32,23 @@ _CLIFFS_SCHEMA = {
 }
 
 
-class ScoreCliffsDeltaPlugin:
+class ScoreCliffsDeltaPlugin(BasePlugin):
     """Compute Cliff's delta effect size between baseline and variant."""
 
     name = "score_cliffs_delta"
 
-    def __init__(self, *, criteria: Sequence[str] | None = None, min_samples: int = 1, on_error: str = "abort") -> None:
+    def __init__(
+        self,
+        *,
+        criteria: Sequence[str] | None = None,
+        min_samples: int = 1,
+        on_error: str = "abort",
+    ) -> None:
+        # ADR-002-B: Security policy is immutable and hard-coded in plugin code
+        super().__init__(
+            security_level=SecurityLevel.UNOFFICIAL,  # Baseline analyzers work with experiment results
+            allow_downgrade=True,  # Trusted to operate at lower levels if needed (ADR-005)
+        )
         self._criteria = set(criteria) if criteria else None
         self._min_samples = max(int(min_samples), 1)
         if on_error not in {"abort", "skip"}:
@@ -73,14 +87,23 @@ class ScoreCliffsDeltaPlugin:
         return results
 
 
-register_baseline_plugin(
-    "score_cliffs_delta",
-    lambda options, context: ScoreCliffsDeltaPlugin(
+def _create_score_cliffs_delta(options: dict[str, Any], context: PluginContext) -> ScoreCliffsDeltaPlugin:
+    """Create Cliff's delta baseline plugin.
+
+    ADR-002-B: Security policy is hard-coded in plugin __init__, not injected by factory.
+    """
+    return ScoreCliffsDeltaPlugin(
         criteria=options.get("criteria"),
         min_samples=int(options.get("min_samples", 1)),
         on_error=options.get("on_error", "abort"),
-    ),
+    )
+
+
+register_baseline_plugin(
+    "score_cliffs_delta",
+    _create_score_cliffs_delta,
     schema=_CLIFFS_SCHEMA,
+    declared_security_level="UNOFFICIAL",  # ADR-002-B: Baseline analyzers work with experiment results
 )
 
 

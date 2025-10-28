@@ -1,0 +1,9 @@
+{
+  "name": "product_analysis_baseline",
+  "description": "Baseline product analysis demonstrating advanced Jinja2 templating features",
+  "enabled": true,
+  "is_baseline": true,
+  "temperature": 0.7,
+  "max_tokens": 500,
+  "prompt_pack": "product_analysis"
+}

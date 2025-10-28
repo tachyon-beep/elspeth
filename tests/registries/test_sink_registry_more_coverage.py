@@ -5,6 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 import elspeth.core.registries.sink as sink_mod
+from elspeth.core.base.plugin_context import PluginContext
 from elspeth.core.registries.sink import sink_registry
 
 
@@ -45,13 +46,22 @@ def test_sink_registry_factory_branches(monkeypatch, name, options):
     monkeypatch.setattr(sink_mod, "AzureDevOpsRepoSink", _Dummy)
     monkeypatch.setattr(sink_mod, "AzureDevOpsArtifactsRepoSink", _Dummy)
 
+    # ADR-002-B: Provide parent context so plugins can derive security_level
+    parent_context = PluginContext(
+        plugin_name="test_suite",
+        plugin_kind="suite",
+        security_level="OFFICIAL",
+        determinism_level="guaranteed",
+        provenance=("test",),
+    )
+
     plugin = sink_registry.create(
         name=name,
         options={
             **options,
-            "security_level": "OFFICIAL",
             "determinism_level": "guaranteed",
         },
+        parent_context=parent_context,
         require_determinism=True,
     )
     assert isinstance(plugin, _Dummy)
@@ -62,14 +72,24 @@ def test_sink_registry_azure_blob_minimal(monkeypatch, tmp_path):
     monkeypatch.setattr(sink_mod, "BlobResultSink", _Dummy)
     monkeypatch.setattr(sink_mod, "load_blob_config", lambda *a, **k: SimpleNamespace(account_url="https://acct.blob.core.windows.net"))
     monkeypatch.setattr(sink_mod, "validate_azure_blob_endpoint", lambda **_k: None)
+
+    # ADR-002-B: Provide parent context so plugins can derive security_level
+    parent_context = PluginContext(
+        plugin_name="test_suite",
+        plugin_kind="suite",
+        security_level="OFFICIAL",
+        determinism_level="guaranteed",
+        provenance=("test",),
+    )
+
     plugin = sink_registry.create(
         name="azure_blob",
         options={
             "config_path": str(tmp_path / "blob.yaml"),
             "profile": "default",
-            "security_level": "OFFICIAL",
             "determinism_level": "guaranteed",
         },
+        parent_context=parent_context,
         require_determinism=True,
     )
     assert isinstance(plugin, _Dummy)

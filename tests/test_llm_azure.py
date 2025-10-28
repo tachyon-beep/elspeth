@@ -2,6 +2,7 @@ import os
 
 import pytest
 
+from elspeth.core.base.types import SecurityLevel
 from elspeth.plugins.nodes.transforms.llm.azure_openai import AzureOpenAIClient
 
 

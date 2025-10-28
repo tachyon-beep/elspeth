@@ -10,7 +10,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal, Mapping
 
+from elspeth.core.base.plugin import BasePlugin
 from elspeth.core.base.protocols import Artifact, ArtifactDescriptor, ResultSink
+from elspeth.core.base.types import SecurityLevel
 from elspeth.core.security import generate_signature, public_key_fingerprint
 from elspeth.core.security.keyvault import fetch_secret_from_keyvault
 from elspeth.core.security.secure_mode import SecureMode, get_secure_mode
@@ -19,8 +21,11 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-class SignedArtifactSink(ResultSink):
-    """Write a signed artifact bundle (e.g., SBOM + signature) to disk."""
+class SignedArtifactSink(BasePlugin, ResultSink):
+    """Write a signed artifact bundle (e.g., SBOM + signature) to disk.
+
+    Inherits from BasePlugin to provide security enforcement (ADR-004).
+    """
 
     base_path: str | Path
     bundle_name: str | None = None
@@ -37,6 +42,12 @@ class SignedArtifactSink(ResultSink):
 
     def __post_init__(self) -> None:
         """Normalize configuration and validate on_error early."""
+        # Initialize BasePlugin with security level and downgrade policy (ADR-002-B: Immutable security policy)
+        super().__init__(
+            security_level=SecurityLevel.UNOFFICIAL,  # ADR-002-B: Immutable
+            allow_downgrade=True
+        )
+
         self.base_path: Path = Path(self.base_path)
         if self.on_error not in {"abort", "skip"}:
             raise ValueError("on_error must be 'abort' or 'skip'")

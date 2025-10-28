@@ -62,3 +62,34 @@ sbom:
 
 audit:
 	@.venv/bin/pip-audit -r requirements.lock --require-hashes
+
+# ============================================================================
+# Documentation Targets
+# ============================================================================
+
+.PHONY: docs-deps
+docs-deps:  ## Install documentation dependencies from hash-pinned lockfile
+	@echo "Installing documentation dependencies..."
+	@.venv/bin/python -m pip install -r site-docs/requirements-docs.lock --require-hashes
+	@echo "Installing Elspeth package in editable mode (no deps)..."
+	@.venv/bin/python -m pip install -e . --no-deps
+
+.PHONY: docs-generate
+docs-generate:  ## Regenerate auto-generated plugin documentation
+	@echo "Generating plugin documentation..."
+	@.venv/bin/python scripts/generate_plugin_docs.py
+
+.PHONY: docs-serve
+docs-serve:  ## Serve formal documentation locally
+	@echo "Starting documentation server at http://127.0.0.1:8000..."
+	cd site-docs && ../.venv/bin/mkdocs serve
+
+.PHONY: docs-build
+docs-build:  ## Build formal documentation (strict mode)
+	@echo "Building documentation with strict mode..."
+	cd site-docs && ../.venv/bin/mkdocs build --strict
+
+.PHONY: docs-deploy
+docs-deploy:  ## Deploy documentation to GitHub Pages
+	@echo "Deploying documentation to GitHub Pages..."
+	cd site-docs && ../.venv/bin/mkdocs gh-deploy --force

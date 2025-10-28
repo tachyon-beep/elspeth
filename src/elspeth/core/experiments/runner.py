@@ -21,7 +21,7 @@ from elspeth.core.experiments.validation import validate_plugin_schemas
 from elspeth.core.pipeline.artifact_pipeline import ArtifactPipeline, SinkBinding
 from elspeth.core.pipeline.processing import prepare_prompt_context
 from elspeth.core.prompts import PromptEngine, PromptRenderingError, PromptTemplate, PromptValidationError
-from elspeth.core.security import ensure_security_level, resolve_determinism_level, resolve_security_level
+from elspeth.core.security import SecureDataFrame, ensure_security_level, resolve_determinism_level, resolve_security_level
 from elspeth.core.utils.path_guard import check_and_prepare_dir, ensure_destination_is_not_symlink, resolve_under_base
 from elspeth.plugins.orchestrators.experiment.protocols import (
     AggregationExperimentPlugin,
@@ -346,14 +346,20 @@ class ExperimentRunner:
 
         return retry_summary if retry_present else None
 
-    def _resolve_security_level(self, df: pd.DataFrame) -> SecurityLevel:
-        """Resolve final security level from DataFrame and configuration."""
+    def _resolve_security_level(self, df: pd.DataFrame | SecureDataFrame) -> SecurityLevel:
+        """Resolve final security level from DataFrame and configuration.
+
+        ADR-002: Accepts both DataFrame and SecureDataFrame for security-aware processing.
+        """
         df_security_level = getattr(df, "attrs", {}).get("security_level") if hasattr(df, "attrs") else None
         self._active_security_level = resolve_security_level(self.security_level, df_security_level)
         return self._active_security_level
 
-    def _resolve_determinism_level(self, df: pd.DataFrame) -> DeterminismLevel:
-        """Resolve final determinism level from DataFrame and configuration."""
+    def _resolve_determinism_level(self, df: pd.DataFrame | SecureDataFrame) -> DeterminismLevel:
+        """Resolve final determinism level from DataFrame and configuration.
+
+        ADR-002: Accepts both DataFrame and SecureDataFrame for security-aware processing.
+        """
         df_determinism_level = getattr(df, "attrs", {}).get("determinism_level") if hasattr(df, "attrs") else None
         self._active_determinism_level = resolve_determinism_level(self.determinism_level, df_determinism_level)
         return self._active_determinism_level
@@ -419,15 +425,17 @@ class ExperimentRunner:
         results: list[dict[str, Any]],
         failures: list[dict[str, Any]],
         aggregates: dict[str, Any] | None,
-        df: pd.DataFrame,
+        df: pd.DataFrame | SecureDataFrame,
     ) -> ExecutionMetadata:
         """Assemble execution metadata from results and configuration.
+
+        ADR-002: Accepts both DataFrame and SecureDataFrame for security-aware processing.
 
         Returns ExecutionMetadata dataclass with all metadata fields populated.
         """
         metadata = ExecutionMetadata(
             processed_rows=len(results),
-            total_rows=len(df),
+            total_rows=len(df.data),  # df is SecureDataFrame - access underlying DataFrame
         )
 
         # Calculate retry summary
@@ -470,13 +478,15 @@ class ExperimentRunner:
 
     def _prepare_rows_to_process(
         self,
-        df: pd.DataFrame,
+        df: pd.DataFrame | SecureDataFrame,
         checkpoint_manager: CheckpointManager | None,
     ) -> list[tuple[int, pd.Series, dict[str, Any], str | None]]:
         """Prepare list of rows to process, filtering checkpointed and early-stopped rows.
 
+        ADR-002: Accepts both DataFrame and SecureDataFrame for security-aware processing.
+
         Args:
-            df: Input DataFrame with rows to process
+            df: Input DataFrame with rows to process (DataFrame or SecureDataFrame)
             checkpoint_manager: Optional CheckpointManager for resumption tracking
 
         Returns:
@@ -495,7 +505,8 @@ class ExperimentRunner:
             'B'
         """
         rows_to_process: list[tuple[int, pd.Series, dict[str, Any], str | None]] = []
-        for idx, (_, row) in enumerate(df.iterrows()):
+        # df is SecureDataFrame - access underlying DataFrame via .data
+        for idx, (_, row) in enumerate(df.data.iterrows()):
             context = prepare_prompt_context(row, include_fields=self.prompt_fields)
 
             # Skip checkpoint-filtered rows (guard clause pattern)
@@ -584,8 +595,11 @@ class ExperimentRunner:
 
         return engine, system_template, user_template, criteria_templates
 
-    def _init_validation(self, df: pd.DataFrame) -> None:
-        """Initialize schema validation and malformed data tracking."""
+    def _init_validation(self, df: pd.DataFrame | SecureDataFrame) -> None:
+        """Initialize schema validation and malformed data tracking.
+
+        ADR-002: Accepts both DataFrame and SecureDataFrame for security-aware processing.
+        """
         datasource_schema = df.attrs.get("schema") if hasattr(df, "attrs") else None
         if datasource_schema:
             self._validate_plugin_schemas(datasource_schema)
@@ -764,8 +778,28 @@ class ExperimentRunner:
         results = self._sort_and_extract_records(records_with_index)
         return ProcessingResult(records=results, failures=failures)
 
-    def run(self, df: pd.DataFrame) -> dict[str, Any]:
-        """Execute the run, returning a structured payload for sinks and reports."""
+    def run(self, df: pd.DataFrame | SecureDataFrame) -> dict[str, Any]:
+        """Execute the run, returning a structured payload for sinks and reports.
+
+        Args:
+            df: Either a SecureDataFrame (preferred) or raw DataFrame (auto-wrapped for backward compatibility)
+        """
+        # ADR-002-A: Auto-wrap raw DataFrames for backward compatibility
+        # Datasources return SecureDataFrame, but tests/legacy code may pass raw DataFrames
+        if isinstance(df, pd.DataFrame) and not isinstance(df, SecureDataFrame):
+            # Infer security level from attrs if available, otherwise use self.security_level
+            security_level = df.attrs.get("security_level")
+            if security_level is None:
+                security_level = ensure_security_level(self.security_level)
+            else:
+                security_level = ensure_security_level(security_level)
+            df = SecureDataFrame.create_from_datasource(df, security_level)
+
+        # ADR-002-A: Runtime clearance validation (defense-in-depth failsafe)
+        # Verify runner has sufficient clearance to process this data
+        runner_clearance = ensure_security_level(self.security_level)
+        df.validate_compatible_with(runner_clearance)
+
         self._init_early_stop()
         checkpoint_manager = self._init_checkpoint()
 

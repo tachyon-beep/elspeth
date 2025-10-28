@@ -28,9 +28,12 @@ from elspeth.core.validation.base import ConfigurationError
 
 @pytest.fixture
 def test_context():
-    """Create test plugin context."""
+    """Create test plugin context.
+
+    ADR-002-B: Must use UNOFFICIAL or lower to match experiment plugins' declared security level.
+    """
     return PluginContext(
-        security_level="internal",
+        security_level="UNOFFICIAL",
         determinism_level="guaranteed",
         provenance=["test"],
         plugin_kind="experiment",
@@ -66,7 +69,7 @@ def test_validate_row_plugin_none_options():
     """Test validation treats None options as empty dict."""
     # Should not raise on None options (treated as {})
     try:
-        validate_row_plugin_definition({"name": "noop", "options": None, "security_level": "internal"})
+        validate_row_plugin_definition({"name": "noop", "options": None})
     except ConfigurationError as exc:
         # May fail on unknown plugin, but not on None options
         assert "options" not in str(exc)
@@ -87,7 +90,7 @@ def test_validate_aggregation_plugin_empty_definition():
 def test_validate_aggregation_plugin_none_options():
     """Test validation treats None options as empty dict."""
     try:
-        validate_aggregation_plugin_definition({"name": "score_stats", "options": None, "security_level": "internal"})
+        validate_aggregation_plugin_definition({"name": "score_stats", "options": None})
     except ConfigurationError as exc:
         assert "options" not in str(exc)
 
@@ -101,7 +104,7 @@ def test_validate_baseline_plugin_empty_definition():
 def test_validate_baseline_plugin_none_options():
     """Test validation treats None options as empty dict."""
     try:
-        validate_baseline_plugin_definition({"name": "row_count", "options": None, "security_level": "internal"})
+        validate_baseline_plugin_definition({"name": "row_count", "options": None})
     except ConfigurationError as exc:
         assert "options" not in str(exc)
 
@@ -115,7 +118,7 @@ def test_validate_validation_plugin_empty_definition():
 def test_validate_validation_plugin_none_options():
     """Test validation treats None options as empty dict."""
     try:
-        validate_validation_plugin_definition({"name": "regex", "options": None, "security_level": "internal"})
+        validate_validation_plugin_definition({"name": "regex", "options": None})
     except ConfigurationError as exc:
         assert "options" not in str(exc)
 
@@ -129,7 +132,7 @@ def test_validate_early_stop_plugin_empty_definition():
 def test_validate_early_stop_plugin_none_options():
     """Test validation treats None options as empty dict."""
     try:
-        validate_early_stop_plugin_definition({"name": "threshold", "options": None, "security_level": "internal"})
+        validate_early_stop_plugin_definition({"name": "threshold", "options": None})
     except ConfigurationError as exc:
         assert "options" not in str(exc)
 
@@ -226,29 +229,28 @@ def test_normalize_early_stop_plugin_key():
 def test_create_plugins_with_valid_definitions(test_context):
     """Test creating all plugin types with valid definitions."""
     # Row plugin
-    row_def = {"name": "noop", "security_level": "internal", "determinism_level": "guaranteed"}
+    row_def = {"name": "noop", "determinism_level": "guaranteed"}
     row_plugin = create_row_plugin(row_def, parent_context=test_context)
     assert row_plugin is not None
 
     # Aggregation plugin
-    agg_def = {"name": "score_stats", "security_level": "internal", "determinism_level": "guaranteed"}
+    agg_def = {"name": "score_stats", "determinism_level": "guaranteed"}
     agg_plugin = create_aggregation_plugin(agg_def, parent_context=test_context)
     assert agg_plugin is not None
 
     # Baseline plugin
-    baseline_def = {"name": "score_delta", "security_level": "internal", "determinism_level": "guaranteed"}
+    baseline_def = {"name": "score_delta", "determinism_level": "guaranteed"}
     baseline_plugin = create_baseline_plugin(baseline_def, parent_context=test_context)
     assert baseline_plugin is not None
 
     # Validation plugin
-    validation_def = {"name": "regex_match", "security_level": "internal", "determinism_level": "guaranteed", "options": {"pattern": ".*"}}
+    validation_def = {"name": "regex_match", "determinism_level": "guaranteed", "options": {"pattern": ".*"}}
     validation_plugin = create_validation_plugin(validation_def, parent_context=test_context)
     assert validation_plugin is not None
 
     # Early stop plugin
     early_stop_def = {
         "name": "threshold",
-        "security_level": "internal",
         "determinism_level": "guaranteed",
         "options": {"metric": "score", "threshold": 10},
     }
@@ -257,51 +259,45 @@ def test_create_plugins_with_valid_definitions(test_context):
 
 
 def test_validate_plugins_with_security_level_conflicts():
-    """Test validation with conflicting security levels."""
-    # Row plugin
-    with pytest.raises(ConfigurationError, match="row_plugin:noop"):
-        validate_row_plugin_definition({"name": "noop", "security_level": "public", "options": {"security_level": "restricted"}})
+    """Test validation with security_level in options (ADR-002-B: silently removed, no longer raises)."""
+    # Row plugin - security_level in options is now silently removed (no error)
+    validate_row_plugin_definition({"name": "noop", "options": {"security_level": "restricted"}})
 
     # Aggregation plugin
-    with pytest.raises(ConfigurationError, match="aggregation_plugin:score_stats"):
-        validate_aggregation_plugin_definition(
-            {"name": "score_stats", "security_level": "public", "options": {"security_level": "restricted"}}
-        )
+    validate_aggregation_plugin_definition(
+        {"name": "score_stats", "options": {"security_level": "restricted"}}
+    )
 
-    # Baseline plugin
-    with pytest.raises(ConfigurationError, match="baseline_plugin:row_count"):
-        validate_baseline_plugin_definition({"name": "row_count", "security_level": "public", "options": {"security_level": "restricted"}})
+    # Baseline plugin (using valid baseline plugin name)
+    validate_baseline_plugin_definition({"name": "score_delta", "options": {"security_level": "restricted"}})
 
     # Validation plugin
-    with pytest.raises(ConfigurationError, match="validation_plugin:regex"):
-        validate_validation_plugin_definition(
-            {"name": "regex", "security_level": "public", "options": {"security_level": "restricted", "pattern": ".*"}}
-        )
+    validate_validation_plugin_definition(
+        {"name": "regex_match", "options": {"security_level": "restricted", "pattern": ".*"}}
+    )
 
     # Early stop plugin
-    with pytest.raises(ConfigurationError, match="early_stop_plugin:threshold"):
-        validate_early_stop_plugin_definition(
-            {
-                "name": "threshold",
-                "security_level": "public",
-                "options": {"security_level": "restricted", "metric": "score", "threshold": 10},
-            }
-        )
+    validate_early_stop_plugin_definition(
+        {
+            "name": "threshold",
+            "options": {"security_level": "restricted", "metric": "score", "threshold": 10},
+        }
+    )
 
 
 def test_validate_plugins_with_unknown_names():
     """Test validation with unknown plugin names."""
     with pytest.raises(ConfigurationError):
-        validate_row_plugin_definition({"name": "totally_unknown_row_plugin", "security_level": "internal"})
+        validate_row_plugin_definition({"name": "totally_unknown_row_plugin"})
 
     with pytest.raises(ConfigurationError):
-        validate_aggregation_plugin_definition({"name": "totally_unknown_agg_plugin", "security_level": "internal"})
+        validate_aggregation_plugin_definition({"name": "totally_unknown_agg_plugin"})
 
     with pytest.raises(ConfigurationError):
-        validate_baseline_plugin_definition({"name": "totally_unknown_baseline_plugin", "security_level": "internal"})
+        validate_baseline_plugin_definition({"name": "totally_unknown_baseline_plugin"})
 
     with pytest.raises(ConfigurationError):
-        validate_validation_plugin_definition({"name": "totally_unknown_validation_plugin", "security_level": "internal"})
+        validate_validation_plugin_definition({"name": "totally_unknown_validation_plugin"})
 
     with pytest.raises(ConfigurationError):
-        validate_early_stop_plugin_definition({"name": "totally_unknown_early_stop_plugin", "security_level": "internal"})
+        validate_early_stop_plugin_definition({"name": "totally_unknown_early_stop_plugin"})

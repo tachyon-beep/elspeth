@@ -10,8 +10,10 @@ from typing import Any, Sequence
 
 import requests
 
+from elspeth.core.base.plugin import BasePlugin
+from elspeth.core.base.plugin_context import PluginContext
 from elspeth.core.base.protocols import LLMMiddleware, LLMRequest
-from elspeth.core.base.types import DeterminismLevel
+from elspeth.core.base.types import DeterminismLevel, SecurityLevel
 from elspeth.core.registries.middleware import register_middleware
 
 logger = logging.getLogger(__name__)
@@ -35,7 +37,7 @@ _CONTENT_SAFETY_SCHEMA = {
 }
 
 
-class AzureContentSafetyMiddleware(LLMMiddleware):
+class AzureContentSafetyMiddleware(BasePlugin, LLMMiddleware):
     """Use Azure Content Safety service to screen prompts before submission."""
 
     name = "azure_content_safety"
@@ -55,6 +57,10 @@ class AzureContentSafetyMiddleware(LLMMiddleware):
         on_error: str = "abort",
         retry_attempts: int = 3,
     ) -> None:
+        super().__init__(
+            security_level=SecurityLevel.UNOFFICIAL,  # ADR-002-B: Immutable policy
+            allow_downgrade=True,  # ADR-002-B: Immutable policy
+        )
         if not endpoint:
             raise ValueError("Azure Content Safety requires an endpoint")
         self.endpoint = endpoint.rstrip("/")
@@ -141,20 +147,27 @@ class AzureContentSafetyMiddleware(LLMMiddleware):
         return {"flagged": flagged, "max_severity": max_severity, "raw": data}
 
 
+def _create_azure_content_safety_middleware(options: dict[str, Any], context: PluginContext) -> AzureContentSafetyMiddleware:
+    """Factory for Azure Content Safety middleware (ADR-002-B: security policy is immutable)."""
+    opts = dict(options)
+    # ADR-002-B: security_level is hard-coded in plugin, not passed as parameter
+    return AzureContentSafetyMiddleware(
+        endpoint=str(opts.get("endpoint", "")),
+        key=str(opts.get("key")) if opts.get("key") is not None else None,
+        key_env=str(opts.get("key_env")) if opts.get("key_env") is not None else None,
+        api_version=str(opts.get("api_version")) if opts.get("api_version") is not None else None,
+        categories=opts.get("categories"),
+        severity_threshold=int(opts.get("severity_threshold", 4)),
+        on_violation=opts.get("on_violation", "abort"),
+        mask=opts.get("mask", "[CONTENT BLOCKED]"),
+        channel=opts.get("channel"),
+        on_error=opts.get("on_error", "abort"),
+    )
+
+
 register_middleware(
     "azure_content_safety",
-    lambda options, context: AzureContentSafetyMiddleware(
-        endpoint=str(options.get("endpoint", "")),
-        key=str(options.get("key")) if options.get("key") is not None else None,
-        key_env=str(options.get("key_env")) if options.get("key_env") is not None else None,
-        api_version=str(options.get("api_version")) if options.get("api_version") is not None else None,
-        categories=options.get("categories"),
-        severity_threshold=int(options.get("severity_threshold", 4)),
-        on_violation=options.get("on_violation", "abort"),
-        mask=options.get("mask", "[CONTENT BLOCKED]"),
-        channel=options.get("channel"),
-        on_error=options.get("on_error", "abort"),
-    ),
+    _create_azure_content_safety_middleware,
     schema=_CONTENT_SAFETY_SCHEMA,
 )
 

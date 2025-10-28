@@ -1,0 +1,129 @@
+name: Documentation
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'site-docs/**'
+      - 'scripts/generate_plugin_docs.py'
+      - 'src/elspeth/plugins/**'
+      - 'docs/architecture/decisions/*.md'
+      - '.github/workflows/docs.yml'
+  pull_request:
+    paths:
+      - 'site-docs/**'
+      - 'scripts/generate_plugin_docs.py'
+      - 'src/elspeth/plugins/**'
+      - 'docs/architecture/decisions/*.md'
+      - '.github/workflows/docs.yml'
+  workflow_dispatch:  # Allow manual triggering
+
+permissions:
+  contents: write  # Needed for GitHub Pages deployment
+  pages: write
+  id-token: write
+
+jobs:
+  build:
+    name: Build Documentation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          fetch-depth: 0  # Needed for git metadata
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: 'site-docs/requirements-docs.lock'
+
+      - name: Install documentation dependencies
+        run: |
+          python -m pip install -r site-docs/requirements-docs.lock --require-hashes
+          python -m pip install -e . --no-deps --no-index --no-build-isolation
+
+      - name: Generate plugin documentation
+        run: |
+          python scripts/generate_plugin_docs.py
+
+      - name: Ensure generated docs are not committed (Phase 2)
+        run: |
+          if git ls-files 'site-docs/docs/**/generated-*.md' | grep -q .; then
+            echo "❌ ERROR: Generated documentation files should NOT be committed!"
+            echo ""
+            echo "The following generated files are tracked in git:"
+            git ls-files 'site-docs/docs/**/generated-*.md'
+            echo ""
+            echo "Phase 2 documentation hygiene policy requires generated files to be gitignored."
+            echo ""
+            echo "To fix:"
+            echo "  1. Ensure .gitignore includes: site-docs/docs/api-reference/plugins/generated-*.md"
+            echo "  2. Run: git rm --cached <file>"
+            echo "  3. Commit the removal"
+            echo ""
+            echo "See: site-docs/DOCUMENTATION_HYGIENE.md"
+            exit 1
+          else
+            echo "✅ No generated documentation files are committed (Phase 2 compliant)"
+          fi
+
+      - name: Build documentation (strict mode)
+        run: |
+          cd site-docs
+          mkdocs build --strict
+
+      - name: Upload documentation artifact
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: documentation-site
+          path: site-docs/site/
+          retention-days: 7
+
+      - name: Check for broken links (optional)
+        if: github.event_name == 'pull_request'
+        run: |
+          # Install linkchecker (optional - comment out if not needed)
+          # python -m pip install linkchecker
+          # cd site-docs/site
+          # linkchecker --check-extern --ignore-url="^https://github.com/johnm-dta/elspeth" index.html
+          echo "Link checking skipped (install linkchecker to enable)"
+        continue-on-error: true
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: 'site-docs/requirements-docs.lock'
+
+      - name: Install documentation dependencies
+        run: |
+          python -m pip install -r site-docs/requirements-docs.lock --require-hashes
+          python -m pip install -e . --no-deps --no-index --no-build-isolation
+
+      - name: Generate plugin documentation
+        run: |
+          python scripts/generate_plugin_docs.py
+
+      - name: Deploy to GitHub Pages
+        run: |
+          cd site-docs
+          mkdocs gh-deploy --force --no-history

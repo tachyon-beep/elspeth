@@ -9,10 +9,10 @@ import math
 
 import pytest
 
-from elspeth.plugins.experiments.aggregators.cost_summary import (
-    CostSummaryAggregator,
-    LatencySummaryAggregator,
-)
+from elspeth.core.base.types import SecurityLevel
+
+from elspeth.plugins.experiments.aggregators.cost_summary import CostSummaryAggregator
+from elspeth.plugins.experiments.aggregators.latency_summary import LatencySummaryAggregator
 
 
 def test_cost_summary_invalid_on_error():

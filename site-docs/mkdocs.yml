@@ -1,0 +1,149 @@
+# Elspeth Formal Documentation Site Configuration
+
+site_name: Elspeth Documentation
+site_description: Extensible Layered Secure Pipeline Engine for Transformation and Handling - Security-first orchestration with Bell-LaPadula MLS enforcement
+site_author: Elspeth Contributors
+site_url: https://elspeth.readthedocs.io
+
+repo_url: https://github.com/johnm-dta/elspeth
+repo_name: johnm-dta/elspeth
+edit_uri: edit/main/site-docs/docs/
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/johnm-dta/elspeth
+      name: GitHub Repository
+    - icon: fontawesome/solid/bug
+      link: https://github.com/johnm-dta/elspeth/issues
+      name: Report an Issue
+  version:
+    provider: mike
+    default: latest
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - navigation.path  # Breadcrumbs
+    - navigation.indexes  # Section index pages
+    - navigation.footer  # Footer navigation
+    - toc.follow  # Table of contents follows scroll
+    - toc.integrate  # Integrate TOC in navigation
+    - search.suggest
+    - search.highlight
+    - search.share  # Share search results
+    - content.code.copy
+    - content.code.annotate  # Code annotations
+    - content.tabs.link  # Link tabbed content
+  icon:
+    repo: fontawesome/brands/github
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            docstring_style: google
+            docstring_section_style: table
+            show_root_heading: true
+            show_root_full_path: false
+            show_symbol_type_heading: true
+            show_symbol_type_toc: true
+            members_order: source
+            group_by_category: true
+            show_category_heading: true
+            show_if_no_docstring: false
+            show_signature: true
+            show_signature_annotations: true
+            separate_signature: true
+            line_length: 80
+            merge_init_into_class: true
+            show_source: true
+            heading_level: 2
+
+markdown_extensions:
+  - toc:
+      permalink: true
+      permalink_title: Anchor link to this section
+  - tables
+  - admonition
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - pymdownx.keys
+  - pymdownx.mark
+  - pymdownx.smartsymbols
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - attr_list
+  - md_in_html
+  - def_list
+
+nav:
+  - Home: index.md
+  - Getting Started:
+    - Installation: getting-started/installation.md
+    - Quickstart: getting-started/quickstart.md
+    - First Experiment: getting-started/first-experiment.md
+  - User Guide:
+    - Security Model: user-guide/security-model.md
+    - Security Controls: user-guide/security-controls.md
+    - Configuration: user-guide/configuration.md
+  - Plugins:
+    - Overview: plugins/overview.md
+  - Architecture:
+    - Overview: architecture/overview.md
+    - Execution Flow: architecture/execution-flow.md
+    - Security Policy: architecture/security-policy.md
+    - ADR Catalogue: architecture/adrs.md
+  - API Reference:
+    - Overview: api-reference/index.md
+    - Core:
+      - BasePlugin: api-reference/core/base-plugin.md
+      - ClassifiedDataFrame: api-reference/core/classified-dataframe.md
+      - SecurityLevel: api-reference/core/security-level.md
+    - Registries:
+      - Plugin Registry: api-reference/registries/base.md
+    - Plugins:
+      - Datasources: api-reference/plugins/generated-datasources.md
+      - Transforms: api-reference/plugins/generated-transforms.md
+      - Middleware: api-reference/plugins/generated-middlewares.md
+      - Sinks: api-reference/plugins/generated-sinks.md
+      - Aggregators: api-reference/plugins/generated-aggregators.md
+      - Baselines: api-reference/plugins/generated-baselines.md
+    - Pipeline:
+      - Artifact Pipeline: api-reference/pipeline/artifact-pipeline.md
+
+copyright: Copyright &copy; 2025 Elspeth Contributors

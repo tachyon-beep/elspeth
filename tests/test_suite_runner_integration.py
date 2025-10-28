@@ -4,6 +4,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
+from elspeth.core.base.types import SecurityLevel
 from elspeth.core.experiments.config import ExperimentConfig, ExperimentSuite
 from elspeth.core.experiments.suite_runner import ExperimentSuiteRunner
 from elspeth.core.validation import ConfigurationError
@@ -81,12 +82,12 @@ def test_suite_runner_executes_with_defaults_and_packs(tmp_path):
         suite_root,
         "variant",
         prompt_pack="variant_pack",
+        # ADR-002-B: security_level removed from config (plugin-author-owned)
         extra_config={
-            "baseline_plugins": [{"name": "noop", "security_level": "OFFICIAL", "determinism_level": "guaranteed"}],
+            "baseline_plugins": [{"name": "noop", "determinism_level": "guaranteed"}],
             "sinks": [
                 {
                     "plugin": "local_bundle",
-                    "security_level": "OFFICIAL",
                     "determinism_level": "guaranteed",
                     "options": {
                         "base_path": bundle_root.as_posix(),
@@ -102,7 +103,9 @@ def test_suite_runner_executes_with_defaults_and_packs(tmp_path):
     suite = ExperimentSuite.load(suite_root)
     runner = ExperimentSuiteRunner(
         suite=suite,
-        llm_client=MockLLMClient(seed=7),
+        llm_client=MockLLMClient(
+            seed=7
+        ),
         sinks=[],
     )
 
@@ -111,10 +114,10 @@ def test_suite_runner_executes_with_defaults_and_packs(tmp_path):
         "prompt_template": "",
         "prompt_fields": ["colour"],
         "prompt_defaults": {"audience": "reviewers"},
+        # ADR-002-B: security_level removed from all plugin definitions
         "sink_defs": [
             {
                 "plugin": "local_bundle",
-                "security_level": "OFFICIAL",
                 "determinism_level": "guaranteed",
                 "options": {
                     "base_path": bundle_root.as_posix(),
@@ -127,7 +130,6 @@ def test_suite_runner_executes_with_defaults_and_packs(tmp_path):
         "aggregator_plugin_defs": [
             {
                 "name": "prompt_variants",
-                "security_level": "OFFICIAL",
                 "determinism_level": "guaranteed",
                 "options": {
                     "prompt_template": (
@@ -137,7 +139,6 @@ def test_suite_runner_executes_with_defaults_and_packs(tmp_path):
                     "max_attempts": 1,
                     "variant_llm": {
                         "plugin": "mock",
-                        "security_level": "OFFICIAL",
                         "determinism_level": "guaranteed",
                         "options": {"seed": 11},
                     },
@@ -147,12 +148,11 @@ def test_suite_runner_executes_with_defaults_and_packs(tmp_path):
         "validation_plugin_defs": [
             {
                 "name": "regex_match",
-                "security_level": "OFFICIAL",
                 "determinism_level": "guaranteed",
                 "options": {"pattern": r".+", "flags": "DOTALL"},
             },
         ],
-        "baseline_plugin_defs": [{"name": "noop", "security_level": "OFFICIAL", "determinism_level": "guaranteed"}],
+        "baseline_plugin_defs": [{"name": "noop", "determinism_level": "guaranteed"}],
         "prompt_packs": {
             "baseline_pack": {
                 "prompts": {
@@ -173,7 +173,9 @@ def test_suite_runner_executes_with_defaults_and_packs(tmp_path):
     df = pd.DataFrame({"colour": ["red", "green"]})
     results = runner.run(df, defaults=defaults)
 
-    assert set(results.keys()) == {"baseline", "variant"}
+    # ADR-002-B: Filter out special metadata keys
+    experiment_names = {k for k in results.keys() if not k.startswith("_")}
+    assert experiment_names == {"baseline", "variant"}
 
     baseline_payload = results["baseline"]["payload"]
     # Check that metadata includes row counts
@@ -204,7 +206,13 @@ def test_suite_runner_executes_with_defaults_and_packs(tmp_path):
 def test_suite_runner_requires_prompts_when_missing(tmp_path):
     config = ExperimentConfig(name="empty", temperature=0.0, max_tokens=64)
     suite = ExperimentSuite(root=tmp_path, experiments=[config], baseline=config)
-    runner = ExperimentSuiteRunner(suite=suite, llm_client=MockLLMClient(seed=1), sinks=[])
+    runner = ExperimentSuiteRunner(
+        suite=suite,
+        llm_client=MockLLMClient(
+            seed=1
+        ),
+        sinks=[]
+    )
 
     with pytest.raises(ConfigurationError, match="no system prompt"):
         runner.build_runner(config, defaults={"prompt_packs": {}}, sinks=[])
@@ -220,7 +228,13 @@ def test_suite_runner_builds_controls_and_early_stop(tmp_path):
         determinism_level="high",
     )
     suite = ExperimentSuite(root=tmp_path, experiments=[config], baseline=config)
-    runner = ExperimentSuiteRunner(suite=suite, llm_client=MockLLMClient(seed=2), sinks=[])
+    runner = ExperimentSuiteRunner(
+        suite=suite,
+        llm_client=MockLLMClient(
+            seed=2
+        ),
+        sinks=[]
+    )
 
     defaults = {
         "prompt_packs": {},
@@ -229,19 +243,16 @@ def test_suite_runner_builds_controls_and_early_stop(tmp_path):
         "prompt_fields": ["value"],
         "rate_limiter_def": {
             "plugin": "fixed_window",
-            "security_level": "OFFICIAL",
             "determinism_level": "guaranteed",
             "options": {"requests": 1, "per_seconds": 1},
         },
         "cost_tracker_def": {
             "plugin": "fixed_price",
-            "security_level": "OFFICIAL",
             "determinism_level": "guaranteed",
             "options": {"prompt_token_price": 0.0, "completion_token_price": 0.0},
         },
         "early_stop_config": {
             "name": "threshold",
-            "security_level": "OFFICIAL",
             "determinism_level": "guaranteed",
             "options": {"metric": "score", "threshold": 0.5, "comparison": "gte", "min_rows": 1},
         },

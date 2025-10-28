@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+from elspeth.core.base.types import SecurityLevel
 from elspeth.plugins.nodes.transforms.llm.openai_http import HttpOpenAIClient
 
 
@@ -46,7 +47,7 @@ def test_http_openai_client_generate_without_socket(monkeypatch):
     # Use a localhost endpoint (allowed by endpoint validator) but do not bind sockets
     # Provide API key via environment and extra params to exercise headers and payload branches
     monkeypatch.setenv("HTTP_OPENAI_KEY", "secret")
-    client = HttpOpenAIClient(
+    client = HttpOpenAIClient(  # ADR-002-B: security hard-coded in plugin
         api_base="http://127.0.0.1:12345",
         model="m",
         api_key_env="HTTP_OPENAI_KEY",

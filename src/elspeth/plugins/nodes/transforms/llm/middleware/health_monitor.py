@@ -8,7 +8,10 @@ import time
 from collections import deque
 from typing import Any
 
+from elspeth.core.base.plugin import BasePlugin
+from elspeth.core.base.plugin_context import PluginContext
 from elspeth.core.base.protocols import LLMMiddleware, LLMRequest
+from elspeth.core.base.types import SecurityLevel
 from elspeth.core.registries.middleware import register_middleware
 
 logger = logging.getLogger(__name__)
@@ -25,8 +28,15 @@ _HEALTH_SCHEMA = {
 }
 
 
-class HealthMonitorMiddleware(LLMMiddleware):
-    """Emit heartbeat logs summarising middleware activity."""
+class HealthMonitorMiddleware(BasePlugin, LLMMiddleware):
+    """Emit heartbeat logs summarising middleware activity.
+
+    Args:
+        heartbeat_interval: Seconds between heartbeat emissions (default: 60.0).
+        stats_window: Number of recent requests to track for statistics (default: 50).
+        channel: Logger channel name (default: 'elspeth.health').
+        include_latency: Whether to include latency stats in heartbeat (default: True).
+    """
 
     name = "health_monitor"
 
@@ -38,6 +48,10 @@ class HealthMonitorMiddleware(LLMMiddleware):
         channel: str | None = None,
         include_latency: bool = True,
     ) -> None:
+        super().__init__(
+            security_level=SecurityLevel.UNOFFICIAL,  # ADR-002-B: Immutable policy
+            allow_downgrade=True,  # ADR-002-B: Immutable policy
+        )
         if heartbeat_interval < 0:
             raise ValueError("heartbeat_interval must be non-negative")
         self.interval = float(heartbeat_interval)
@@ -93,14 +107,21 @@ class HealthMonitorMiddleware(LLMMiddleware):
         self._last_heartbeat = now
 
 
+def _create_health_monitor_middleware(options: dict[str, Any], context: PluginContext) -> HealthMonitorMiddleware:
+    """Factory for health monitor middleware (ADR-002-B: security policy is immutable)."""
+    opts = dict(options)
+    # ADR-002-B: security_level is hard-coded in plugin, not passed as parameter
+    return HealthMonitorMiddleware(
+        heartbeat_interval=float(opts.get("heartbeat_interval", 60.0)),
+        stats_window=int(opts.get("stats_window", 50)),
+        channel=opts.get("channel"),
+        include_latency=bool(opts.get("include_latency", True)),
+    )
+
+
 register_middleware(
     "health_monitor",
-    lambda options, context: HealthMonitorMiddleware(
-        heartbeat_interval=float(options.get("heartbeat_interval", 60.0)),
-        stats_window=int(options.get("stats_window", 50)),
-        channel=options.get("channel"),
-        include_latency=bool(options.get("include_latency", True)),
-    ),
+    _create_health_monitor_middleware,
     schema=_HEALTH_SCHEMA,
 )
 

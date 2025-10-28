@@ -8,6 +8,9 @@ from typing import TYPE_CHECKING, Any, Mapping
 
 import numpy as np
 
+from elspeth.core.base.plugin import BasePlugin
+from elspeth.core.base.plugin_context import PluginContext
+from elspeth.core.base.types import SecurityLevel
 from elspeth.core.experiments.plugin_registry import register_aggregation_plugin
 
 if TYPE_CHECKING:
@@ -16,12 +19,23 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class ScoreVariantRankingAggregator:
+class ScoreVariantRankingAggregator(BasePlugin):
     """Compute a simple composite ranking score for an experiment."""
 
     name = "score_variant_ranking"
 
-    def __init__(self, *, threshold: float = 0.7, weight_mean: float = 1.0, weight_pass: float = 1.0) -> None:
+    def __init__(
+        self,
+        *,
+        threshold: float = 0.7,
+        weight_mean: float = 1.0,
+        weight_pass: float = 1.0,
+    ) -> None:
+        # ADR-002-B: Security policy is immutable and hard-coded in plugin code
+        super().__init__(
+            security_level=SecurityLevel.UNOFFICIAL,  # Aggregators work with experiment results
+            allow_downgrade=True,  # Trusted to operate at lower levels if needed (ADR-005)
+        )
         self._threshold = float(threshold)
         self._weight_mean = float(weight_mean)
         self._weight_pass = float(weight_pass)
@@ -74,13 +88,21 @@ class ScoreVariantRankingAggregator:
         return None
 
 
-register_aggregation_plugin(
-    "score_variant_ranking",
-    lambda options, context: ScoreVariantRankingAggregator(
+def _create_score_variant_ranking(options: dict[str, Any], context: PluginContext) -> ScoreVariantRankingAggregator:
+    """Create score variant ranking aggregator.
+
+    ADR-002-B: Security policy is hard-coded in plugin __init__, not injected by factory.
+    """
+    return ScoreVariantRankingAggregator(
         threshold=float(options.get("threshold", 0.7)),
         weight_mean=float(options.get("weight_mean", 1.0)),
         weight_pass=float(options.get("weight_pass", 1.0)),
-    ),
+    )
+
+
+register_aggregation_plugin(
+    "score_variant_ranking",
+    _create_score_variant_ranking,
     schema={
         "type": "object",
         "properties": {
@@ -90,6 +112,7 @@ register_aggregation_plugin(
         },
         "additionalProperties": True,
     },
+    declared_security_level="UNOFFICIAL",  # ADR-002-B: Aggregators process experiment results
 )
 
 

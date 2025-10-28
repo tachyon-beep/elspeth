@@ -9,10 +9,9 @@ import math
 
 import pytest
 
-from elspeth.plugins.experiments.aggregators.score_stats import (
-    ScoreDeltaBaselinePlugin,
-    ScoreStatsAggregator,
-)
+from elspeth.core.base.types import SecurityLevel
+from elspeth.plugins.experiments.aggregators.score_stats import ScoreStatsAggregator
+from elspeth.plugins.experiments.baseline.score_delta import ScoreDeltaBaselinePlugin
 
 
 def test_score_stats_empty_records():
@@ -113,7 +112,10 @@ def test_score_stats_with_flags():
 
 def test_score_stats_custom_fields():
     """Test ScoreStatsAggregator with custom source and flag fields."""
-    aggregator = ScoreStatsAggregator(source_field="custom_scores", flag_field="custom_flags")
+    aggregator = ScoreStatsAggregator(
+        source_field="custom_scores",
+        flag_field="custom_flags"
+    )
     records = [
         {
             "metrics": {

@@ -47,7 +47,6 @@ from .base import BasePluginRegistry
 from .schemas import (
     with_artifact_properties,
     with_error_handling,
-    with_security_properties,
 )
 
 # Capability flags exposed by sink plugins. Keep constants centralized to avoid drift.
@@ -249,14 +248,24 @@ def _create_reproducibility_bundle_sink(options: dict[str, Any], context: Plugin
 
 # Helper to build sink schemas with common properties
 def _sink_schema(properties: dict[str, Any], required: list[str]) -> dict[str, Any]:
-    """Build a sink schema with security, determinism, artifacts, and error handling."""
+    """Build a sink schema with artifacts and error handling.
+
+    SECURITY (VULN-004): Does NOT add security policy fields (security_level,
+    allow_downgrade, max_operating_level) to schema. These are immutable and
+    declared in plugin code per ADR-002-B.
+    """
+    # Add determinism_level (allowed runtime context) to properties
+    properties_with_runtime = {
+        **properties,
+        "determinism_level": {"type": "string"},  # Allowed (runtime context, not security policy)
+    }
+
     schema = {
         "type": "object",
-        "properties": properties,
+        "properties": properties_with_runtime,
         "required": required,
-        "additionalProperties": True,
+        "additionalProperties": False,  # VULN-004 Layer 1: Reject security policy fields
     }
-    schema = with_security_properties(schema, require_security=False, require_determinism=False)
     schema = with_artifact_properties(schema)
     schema = with_error_handling(schema)
     return schema
@@ -486,34 +495,31 @@ _ENHANCED_VISUAL_SINK_SCHEMA = _sink_schema(
     ["base_path"],
 )
 
-_EMBEDDINGS_STORE_SINK_SCHEMA = with_security_properties(
-    {
-        "type": "object",
-        "properties": {
-            "provider": {"type": "string"},
-            "namespace": {"type": "string"},
-            "dsn": {"type": "string"},
-            "table": {"type": "string"},
-            "text_field": {"type": "string"},
-            "embedding_source": {"type": "string"},
-            "embed_model": {"type": "object"},
-            "metadata_fields": {"type": "array", "items": {"type": "string"}},
-            "id_field": {"type": "string"},
-            "batch_size": {"type": "integer", "minimum": 1},
-            "upsert_conflict": {"type": "string", "enum": ["replace", "skip", "merge"]},
-            "endpoint": {"type": "string"},
-            "index": {"type": "string"},
-            "api_key": {"type": "string"},
-            "api_key_env": {"type": "string"},
-            "vector_field": {"type": "string"},
-            "namespace_field": {"type": "string"},
-        },
-        "required": ["provider"],
-        "additionalProperties": True,
+_EMBEDDINGS_STORE_SINK_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "provider": {"type": "string"},
+        "namespace": {"type": "string"},
+        "dsn": {"type": "string"},
+        "table": {"type": "string"},
+        "text_field": {"type": "string"},
+        "embedding_source": {"type": "string"},
+        "embed_model": {"type": "object"},
+        "metadata_fields": {"type": "array", "items": {"type": "string"}},
+        "id_field": {"type": "string"},
+        "batch_size": {"type": "integer", "minimum": 1},
+        "upsert_conflict": {"type": "string", "enum": ["replace", "skip", "merge"]},
+        "endpoint": {"type": "string"},
+        "index": {"type": "string"},
+        "api_key": {"type": "string"},
+        "api_key_env": {"type": "string"},
+        "vector_field": {"type": "string"},
+        "namespace_field": {"type": "string"},
+        "determinism_level": {"type": "string"},  # Allowed (runtime context, not security policy)
     },
-    require_security=False,
-    require_determinism=False,
-)
+    "required": ["provider"],
+    "additionalProperties": False,  # VULN-004 Layer 1: Reject security policy fields
+}
 _EMBEDDINGS_STORE_SINK_SCHEMA = with_artifact_properties(_EMBEDDINGS_STORE_SINK_SCHEMA)
 
 _REPRODUCIBILITY_BUNDLE_SINK_SCHEMA = _sink_schema(
@@ -543,27 +549,28 @@ _REPRODUCIBILITY_BUNDLE_SINK_SCHEMA = _sink_schema(
 # Register Sinks
 # ============================================================================
 
-sink_registry.register("azure_blob", _create_azure_blob_sink, schema=_AZURE_BLOB_SINK_SCHEMA)
-sink_registry.register("azure_blob_artifacts", _create_azure_blob_artifacts_sink, schema=_AZURE_BLOB_ARTIFACTS_SINK_SCHEMA)
-sink_registry.register("csv", _create_csv_sink, schema=_CSV_SINK_SCHEMA)
-sink_registry.register("local_bundle", _create_local_bundle_sink, schema=_LOCAL_BUNDLE_SINK_SCHEMA)
-sink_registry.register("excel_workbook", _create_excel_sink, schema=_EXCEL_SINK_SCHEMA)
-sink_registry.register("zip_bundle", _create_zip_bundle_sink, schema=_ZIP_BUNDLE_SINK_SCHEMA)
-sink_registry.register("file_copy", _create_file_copy_sink, schema=_FILE_COPY_SINK_SCHEMA)
-sink_registry.register("github_repo", _create_github_repo_sink, schema=_GITHUB_REPO_SINK_SCHEMA)
-sink_registry.register("azure_devops_repo", _create_azure_devops_repo_sink, schema=_AZURE_DEVOPS_REPO_SINK_SCHEMA)
+sink_registry.register("azure_blob", _create_azure_blob_sink, schema=_AZURE_BLOB_SINK_SCHEMA, declared_security_level="UNOFFICIAL")
+sink_registry.register("azure_blob_artifacts", _create_azure_blob_artifacts_sink, schema=_AZURE_BLOB_ARTIFACTS_SINK_SCHEMA, declared_security_level="UNOFFICIAL")
+sink_registry.register("csv", _create_csv_sink, schema=_CSV_SINK_SCHEMA, declared_security_level="UNOFFICIAL")
+sink_registry.register("local_bundle", _create_local_bundle_sink, schema=_LOCAL_BUNDLE_SINK_SCHEMA, declared_security_level="UNOFFICIAL")
+sink_registry.register("excel_workbook", _create_excel_sink, schema=_EXCEL_SINK_SCHEMA, declared_security_level="UNOFFICIAL")
+sink_registry.register("zip_bundle", _create_zip_bundle_sink, schema=_ZIP_BUNDLE_SINK_SCHEMA, declared_security_level="UNOFFICIAL")
+sink_registry.register("file_copy", _create_file_copy_sink, schema=_FILE_COPY_SINK_SCHEMA, declared_security_level="UNOFFICIAL")
+sink_registry.register("github_repo", _create_github_repo_sink, schema=_GITHUB_REPO_SINK_SCHEMA, declared_security_level="UNOFFICIAL")
+sink_registry.register("azure_devops_repo", _create_azure_devops_repo_sink, schema=_AZURE_DEVOPS_REPO_SINK_SCHEMA, declared_security_level="UNOFFICIAL")
 sink_registry.register(
     "azure_devops_artifact_repo",
     _create_azure_devops_artifacts_repo_sink,
     schema=_AZURE_DEVOPS_ARTIFACTS_REPO_SINK_SCHEMA,
     capabilities={CAP_SUPPORTS_FOLDER_PATH_INJECTION},
+    declared_security_level="UNOFFICIAL",
 )
-sink_registry.register("signed_artifact", _create_signed_artifact_sink, schema=_SIGNED_ARTIFACT_SINK_SCHEMA)
-sink_registry.register("analytics_report", _create_analytics_report_sink, schema=_ANALYTICS_REPORT_SINK_SCHEMA)
-sink_registry.register("analytics_visual", _create_visual_analytics_sink, schema=_VISUAL_ANALYTICS_SINK_SCHEMA)
-sink_registry.register("enhanced_visual", _create_enhanced_visual_sink, schema=_ENHANCED_VISUAL_SINK_SCHEMA)
-sink_registry.register("embeddings_store", _create_embeddings_store_sink, schema=_EMBEDDINGS_STORE_SINK_SCHEMA)
-sink_registry.register("reproducibility_bundle", _create_reproducibility_bundle_sink, schema=_REPRODUCIBILITY_BUNDLE_SINK_SCHEMA)
+sink_registry.register("signed_artifact", _create_signed_artifact_sink, schema=_SIGNED_ARTIFACT_SINK_SCHEMA, declared_security_level="UNOFFICIAL")
+sink_registry.register("analytics_report", _create_analytics_report_sink, schema=_ANALYTICS_REPORT_SINK_SCHEMA, declared_security_level="UNOFFICIAL")
+sink_registry.register("analytics_visual", _create_visual_analytics_sink, schema=_VISUAL_ANALYTICS_SINK_SCHEMA, declared_security_level="UNOFFICIAL")
+sink_registry.register("enhanced_visual", _create_enhanced_visual_sink, schema=_ENHANCED_VISUAL_SINK_SCHEMA, declared_security_level="UNOFFICIAL")
+sink_registry.register("embeddings_store", _create_embeddings_store_sink, schema=_EMBEDDINGS_STORE_SINK_SCHEMA, declared_security_level="UNOFFICIAL")
+sink_registry.register("reproducibility_bundle", _create_reproducibility_bundle_sink, schema=_REPRODUCIBILITY_BUNDLE_SINK_SCHEMA, declared_security_level="UNOFFICIAL")
 
 
 # ============================================================================
@@ -581,7 +588,6 @@ try:  # pragma: no cover - non-functional warm-up path
     _ = sink_registry.create(
         name="csv",
         options={"path": "__warmup__.csv"},
-        require_security=False,
         require_determinism=False,
     )
 except Exception:

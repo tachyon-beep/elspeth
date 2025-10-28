@@ -1,20 +1,17 @@
 prompt_variants_demo:
   datasource:
     plugin: local_csv
-    security_level: OFFICIAL
     determinism_level: guaranteed
     options:
       retain_local: false
       path: config/data/prompt_variants_demo.csv
   llm:
     plugin: mock
-    security_level: OFFICIAL
     determinism_level: high
     options:
       seed: 31415
   sinks:
     - plugin: csv
-      security_level: OFFICIAL
       determinism_level: guaranteed
       options:
         path: outputs/prompt_variants/latest_results.csv
@@ -31,7 +28,6 @@ prompt_variants_demo:
     - tone
   aggregator_plugins:
     - name: prompt_variants
-      security_level: OFFICIAL
       determinism_level: high
       options:
         prompt_template: |
@@ -46,7 +42,6 @@ prompt_variants_demo:
         max_attempts: 3
         variant_llm:
           plugin: mock
-          security_level: OFFICIAL
           determinism_level: high
           options:
             seed: 27182

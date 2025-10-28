@@ -1,8 +1,11 @@
+from elspeth.core.base.types import SecurityLevel
 from elspeth.plugins.nodes.transforms.llm.mock import MockLLMClient
 
 
 def test_mock_llm_generates_deterministic_scores():
-    client = MockLLMClient(seed=123)
+    client = MockLLMClient(
+        seed=123
+    )
     response1 = client.generate(system_prompt="sys", user_prompt="user", metadata={"criteria": "c1"})
     response2 = client.generate(system_prompt="sys", user_prompt="user", metadata={"criteria": "c1"})
 

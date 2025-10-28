@@ -121,4 +121,5 @@ register_early_stop_plugin(
         "required": ["metric", "threshold"],
         "additionalProperties": True,
     },
+    declared_security_level="OFFICIAL",
 )

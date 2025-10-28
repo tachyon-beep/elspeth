@@ -33,10 +33,10 @@ def test_register_rate_limiter_single_param_factory():
         return NoopRateLimiter()
 
     # Should work with old-style factory
-    register_rate_limiter("test_old_rl", old_factory, schema={"type": "object"})
+    register_rate_limiter("test_old_rl", old_factory, schema={"type": "object"}, declared_security_level="internal")
 
-    # Should be able to create with it (need security_level and determinism_level)
-    result = create_rate_limiter({"name": "test_old_rl", "security_level": "internal", "determinism_level": "guaranteed", "options": {}})
+    # Should be able to create with it (need determinism_level, security_level now at registration)
+    result = create_rate_limiter({"name": "test_old_rl", "determinism_level": "guaranteed", "options": {}})
     assert result is not None
 
 
@@ -50,9 +50,9 @@ def test_register_rate_limiter_two_param_factory():
         limiter = NoopRateLimiter()
         return limiter
 
-    register_rate_limiter("test_new_rl", new_factory, schema={"type": "object"})
+    register_rate_limiter("test_new_rl", new_factory, schema={"type": "object"}, declared_security_level="internal")
 
-    result = create_rate_limiter({"name": "test_new_rl", "security_level": "internal", "determinism_level": "guaranteed", "options": {}})
+    result = create_rate_limiter({"name": "test_new_rl", "determinism_level": "guaranteed", "options": {}})
     assert result is not None
 
 
@@ -65,9 +65,9 @@ def test_register_cost_tracker_single_param_factory():
 
         return NoopCostTracker()
 
-    register_cost_tracker("test_old_ct", old_factory, schema={"type": "object"})
+    register_cost_tracker("test_old_ct", old_factory, schema={"type": "object"}, declared_security_level="internal")
 
-    result = create_cost_tracker({"name": "test_old_ct", "security_level": "internal", "determinism_level": "guaranteed", "options": {}})
+    result = create_cost_tracker({"name": "test_old_ct", "determinism_level": "guaranteed", "options": {}})
     assert result is not None
 
 
@@ -81,9 +81,9 @@ def test_register_cost_tracker_two_param_factory():
         tracker = NoopCostTracker()
         return tracker
 
-    register_cost_tracker("test_new_ct", new_factory, schema={"type": "object"})
+    register_cost_tracker("test_new_ct", new_factory, schema={"type": "object"}, declared_security_level="internal")
 
-    result = create_cost_tracker({"name": "test_new_ct", "security_level": "internal", "determinism_level": "guaranteed", "options": {}})
+    result = create_cost_tracker({"name": "test_new_ct", "determinism_level": "guaranteed", "options": {}})
     assert result is not None
 
 
@@ -130,7 +130,7 @@ def test_validate_rate_limiter_invalid_options_type():
 def test_validate_rate_limiter_unknown_plugin():
     """Test validation with unknown plugin raises ConfigurationError - line 152."""
     with pytest.raises(ConfigurationError):
-        validate_rate_limiter({"name": "totally_unknown_plugin", "options": {}, "security_level": "internal"})
+        validate_rate_limiter({"name": "totally_unknown_plugin", "options": {}})
 
 
 def test_validate_cost_tracker_none_definition():
@@ -176,29 +176,31 @@ def test_validate_cost_tracker_invalid_options_type():
 def test_validate_cost_tracker_unknown_plugin():
     """Test validation with unknown plugin raises ConfigurationError - line 191."""
     with pytest.raises(ConfigurationError):
-        validate_cost_tracker({"name": "totally_unknown_plugin", "options": {}, "security_level": "internal"})
+        validate_cost_tracker({"name": "totally_unknown_plugin", "options": {}})
 
 
 def test_validate_rate_limiter_conflicting_security_levels():
-    """Test validation with conflicting security levels - line 140."""
-    with pytest.raises(ConfigurationError, match="rate_limiter:noop"):
+    """Test validation rejects security_level in definition (ADR-002-B) - line 140."""
+    # Under ADR-002-B, security_level in definition is an error (must use declared_security_level at registration)
+    with pytest.raises(ConfigurationError, match="security_level must not be in plugin definition"):
         validate_rate_limiter(
             {
                 "name": "noop",
-                "security_level": "public",
-                "options": {"security_level": "restricted"},  # Conflict
+                "security_level": "public",  # This is now forbidden
+                "options": {},
             }
         )
 
 
 def test_validate_cost_tracker_conflicting_security_levels():
-    """Test validation with conflicting security levels - line 179."""
-    with pytest.raises(ConfigurationError, match="cost_tracker:noop"):
+    """Test validation rejects security_level in definition (ADR-002-B) - line 179."""
+    # Under ADR-002-B, security_level in definition is an error (must use declared_security_level at registration)
+    with pytest.raises(ConfigurationError, match="security_level must not be in plugin definition"):
         validate_cost_tracker(
             {
                 "name": "noop",
-                "security_level": "public",
-                "options": {"security_level": "restricted"},  # Conflict
+                "security_level": "public",  # This is now forbidden
+                "options": {},
             }
         )
 

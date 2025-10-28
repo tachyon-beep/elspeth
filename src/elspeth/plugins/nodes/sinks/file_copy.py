@@ -7,6 +7,7 @@ import shutil
 from pathlib import Path
 from typing import Mapping
 
+from elspeth.core.base.plugin import BasePlugin
 from elspeth.core.base.protocols import Artifact, ResultSink
 from elspeth.core.base.types import DeterminismLevel, SecurityLevel
 from elspeth.core.security import ensure_determinism_level, ensure_security_level
@@ -15,14 +16,28 @@ from elspeth.core.utils.path_guard import resolve_under_base, safe_atomic_write
 logger = logging.getLogger(__name__)
 
 
-class FileCopySink(ResultSink):
+class FileCopySink(BasePlugin, ResultSink):
     """Copy a single input artifact to a destination path.
 
     Honors overwrite and on_error semantics and enforces base-path containment
     via `allowed_base_path` when provided.
+
+    Inherits from BasePlugin to provide security enforcement (ADR-004).
     """
 
-    def __init__(self, *, destination: str, overwrite: bool = True, on_error: str = "abort", allowed_base_path: str | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        destination: str,
+        overwrite: bool = True,
+        on_error: str = "abort",
+        allowed_base_path: str | None = None,
+    ) -> None:
+        # Initialize BasePlugin with security level and downgrade policy (ADR-002-B, ADR-005)
+        super().__init__(
+            security_level=SecurityLevel.UNOFFICIAL,  # ADR-002-B: Immutable policy
+            allow_downgrade=True,  # ADR-002-B: Immutable policy
+        )
         self.destination = Path(destination)
         self.overwrite = overwrite
         if on_error not in {"abort", "skip"}:
@@ -31,8 +46,11 @@ class FileCopySink(ResultSink):
         self._source_artifact: Artifact | None = None
         self._written_path: Path | None = None
         self._output_type: str | None = None
-        self._security_level: SecurityLevel | None = None
-        self._determinism_level: DeterminismLevel | None = None
+        # Runtime data classification tracking (separate from sink's security clearance)
+        # security_level (from BasePlugin) = sink's clearance level
+        # _artifact_security_level = runtime classification of written data (for artifact metadata)
+        self._artifact_security_level: SecurityLevel | None = None
+        self._artifact_determinism_level: DeterminismLevel | None = None
         # Configure allowed base path for containment checks
         try:
             default_base = self.destination.parent.resolve()
@@ -55,7 +73,7 @@ class FileCopySink(ResultSink):
                     raise ValueError(message)
                 self._source_artifact = values[0]
                 self._output_type = self._source_artifact.type
-                self._security_level = self._source_artifact.security_level
+                self._artifact_security_level = self._source_artifact.security_level
                 return
 
     def write(self, results: dict, *, metadata: dict | None = None) -> None:
@@ -109,8 +127,8 @@ class FileCopySink(ResultSink):
         if metadata and metadata.get("security_level"):
             level = metadata.get("security_level")
             det = metadata.get("determinism_level")
-            self._security_level = level if isinstance(level, SecurityLevel) else ensure_security_level(level)
-            self._determinism_level = det if isinstance(det, DeterminismLevel) else ensure_determinism_level(det)
+            self._artifact_security_level = level if isinstance(level, SecurityLevel) else ensure_security_level(level)
+            self._artifact_determinism_level = det if isinstance(det, DeterminismLevel) else ensure_determinism_level(det)
 
     def collect_artifacts(self) -> dict[str, Artifact]:  # pragma: no cover - optional
         if not self._written_path:
@@ -118,8 +136,8 @@ class FileCopySink(ResultSink):
         metadata = {
             "source": self._source_artifact.id if self._source_artifact else None,
             "source_path": self._source_artifact.path if self._source_artifact else None,
-            "security_level": self._security_level,
-            "determinism_level": self._determinism_level,
+            "security_level": self._artifact_security_level,
+            "determinism_level": self._artifact_determinism_level,
         }
         if self._source_artifact and self._source_artifact.metadata:
             source_ct = self._source_artifact.metadata.get("content_type")
@@ -131,12 +149,12 @@ class FileCopySink(ResultSink):
             path=str(self._written_path),
             metadata=metadata,
             persist=True,
-            security_level=self._security_level,
-            determinism_level=self._determinism_level,
+            security_level=self._artifact_security_level,
+            determinism_level=self._artifact_determinism_level,
         )
         self._written_path = None
         self._source_artifact = None
         self._output_type = None
-        self._security_level = None
-        self._determinism_level = None
+        self._artifact_security_level = None
+        self._artifact_determinism_level = None
         return {"file": artifact}

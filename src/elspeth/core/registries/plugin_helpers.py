@@ -21,7 +21,6 @@ from elspeth.core.base.plugin_context import PluginContext
 from elspeth.core.base.types import SecurityLevel
 from elspeth.core.security import (
     coalesce_determinism_level,
-    coalesce_security_level,
     ensure_security_level,
 )
 from elspeth.core.validation.base import ConfigurationError
@@ -104,7 +103,7 @@ def create_plugin_with_inheritance(
 
     # Check if plugin exists early for better error messages
     try:
-        registry._get_factory(name)
+        factory = registry._get_factory(name)
     except ValueError as exc:
         # Re-raise with expected format for backward compatibility
         raise ValueError(f"Unknown {plugin_kind} '{name}'") from exc
@@ -137,20 +136,33 @@ def create_plugin_with_inheritance(
     if provenance:
         sources.extend(provenance)
 
-    if definition_sec_level is None and option_sec_level is None:
-        raise ConfigurationError(f"{plugin_kind}:{name}: security_level must be declared on the plugin definition or options")
+    # ADR-002-B: security_level is ALWAYS plugin-author-owned, NEVER user-configurable
+    # SECURITY: Reject security_level from config - it must ONLY come from factory registration
+    if definition_sec_level is not None or option_sec_level is not None:
+        raise ConfigurationError(
+            f"{plugin_kind}:{name}: security_level must NOT be specified in configuration. "
+            f"ADR-002-B immutable policy: Security levels are hardcoded by plugin authors "
+            f"during registration. Config files cannot override them. "
+            f"Remove 'security_level' from your YAML configuration."
+        )
+
+    # Always use factory.declared_security_level (set during plugin registration)
+    declared_sec_level = getattr(factory, "declared_security_level", None)
+    if declared_sec_level is None:
+        raise ConfigurationError(
+            f"{plugin_kind}:{name}: Plugin registration missing declared_security_level. "
+            f"ADR-002-B: All plugins must declare security_level at registration time. "
+            f"This is a plugin implementation bug, not a configuration error."
+        )
+    child_sec_level = ensure_security_level(declared_sec_level)
+    sources.append(f"{plugin_kind}:{name}.factory.declared_security_level")
+
     if definition_det_level is None and option_det_level is None:
         raise ConfigurationError(f"{plugin_kind}:{name}: determinism_level must be declared on the plugin definition or options")
 
-    # Coalesce security level with downgrade prevention
     # Security enforcement: child plugins CANNOT downgrade parent's security classification
     # but CAN upgrade or match it
-    try:
-        child_sec_level = coalesce_security_level(definition_sec_level, option_sec_level)
-    except ValueError as exc:
-        raise ConfigurationError(f"{plugin_kind}:{name}: {exc}") from exc
-
-    level = coalesce_security_level(child_sec_level)
+    level = child_sec_level
     if parent_sec_level is not None:
         parent_level = parent_sec_level if isinstance(parent_sec_level, SecurityLevel) else ensure_security_level(parent_sec_level)
         if level < parent_level:
@@ -202,7 +214,6 @@ def create_plugin_with_inheritance(
     # We use the factory directly instead of registry.create() because
     # registry.create() would create a NEW context derived from our context,
     # resulting in double-nesting. We've already built the exact context we want.
-    factory = registry._get_factory(name)
     plugin = factory.instantiate(
         payload,
         plugin_context=context,

@@ -1,0 +1,1054 @@
+# ADR-003 + ADR-004 Migration: Secure Data Container Adoption
+
+**Migration Type**: Terminology + Architecture Enhancement - Secure Container Adoption
+**Status**: Planning Complete - Ready for Execution
+**Target ADRs**:
+- **Terminology Rename** (Phase 0): "Classified" → "Secure" for universal applicability
+- **ADR-003** (Phases 1-5): SecureDataFrame adoption across all plugins
+- **ADR-004** (Phases 1-5): SecureData[T] generic wrapper for dicts/metadata
+
+**Total Estimated Effort**: 35-47 hours (5-6 days)
+- Terminology Rename (Phase 0): 12-16 hours (1.5-2 days, no deprecation shims needed)
+- Container Adoption (Phases 1-6): 23-31 hours (3-4 days, includes BasePlugin inheritance migration using ADR-004 "Security Bones" design)
+
+**Risk Level**: MEDIUM (ADR-003/004), LOW (Rename)
+**Confidence**: HIGH
+**Approach**: Pre-1.0 fix-on-fail (no backward compatibility, breaking changes acceptable)
+
+---
+
+## Overview
+
+This migration implements **universal adoption** of the ADR-002-A Trusted Container Model across the entire Elspeth codebase, with **terminology standardization** for broader industry applicability.
+
+### Two-Phase Approach (INTEGRATED)
+
+**Phase 0: Terminology Rename** (12-16 hours, 1.5-2 days)
+- Rename `SecureDataFrame` → `SecureDataFrame`
+- Rename `.classification` → `.security_level` (aligns with existing 529 uses of `security_level`)
+- Update all documentation for universal applicability (removes government-specific connotations)
+- **Pre-1.0 Approach**: Clean cut-over, no deprecation shims (fix-on-fail)
+- **Why First**: ADR-003/004 implementation uses correct terminology from day one
+
+**Phases 1-6: Container Adoption** (24-32 hours, 3-4 days)
+- Migrate all datasources, orchestrators, runners to use `SecureDataFrame`
+- Create generic `SecureData[T]` wrapper for dicts, metadata, middleware integration
+- **[NEW] Phase 1.5**: Add BasePlugin protocol compliance to all concrete plugins (CRITICAL for ADR-002 validation)
+- **Pre-1.0 Approach**: Direct migration, breaking changes acceptable
+- **Why After Rename**: Clean implementation without terminology churn
+
+### What We're Doing
+
+**Terminology Rename** (Phase 0):
+- `SecureDataFrame` → `SecureDataFrame` (universal terminology)
+- `.classification` field → `.security_level` field (semantic alignment with codebase)
+- `classified_material` middleware → `sensitive_material` middleware (content detection clarity)
+
+**ADR-003** (Phases 1-5): Migrate all datasources, orchestrators, and runners to use `SecureDataFrame`
+
+**ADR-004** (Phases 1-5): Create generic `SecureData[T]` wrapper for dicts, metadata, and middleware integration
+
+### Why This Sequencing
+
+1. **ADR-002-A is complete** - 72 passing tests, CVE fixed, performance validated
+2. **Terminology first** - Clean slate, no renaming during functional migration
+3. **Semantic alignment** - Codebase already uses `security_level` 529 times vs. `classification` 118 times
+4. **Universal applicability** - "Secure data" works for healthcare, finance, enterprise, research (not just government)
+5. **Type safety** - Prevent security level laundering at compile time
+
+---
+
+## Documentation Structure
+
+This folder contains all planning artifacts for the ADR-003+004 migration:
+
+### 📋 Planning & Assessment
+
+**`RENAMING_ASSESSMENT.md`** (PHASE 0 - READ FIRST FOR TERMINOLOGY)
+- Why "Secure" vs "Classified" (universal applicability)
+- Complete renaming map (86 files, 1,450 occurrences)
+- 3-phase rename strategy (Code → Tests → Documentation)
+- Effort: 12-16 hours, LOW complexity, VERY HIGH confidence
+- Breaking changes and deprecation strategy
+- Sequencing rationale: Rename BEFORE ADR-003/004
+
+**`MIGRATION_COMPLEXITY_ASSESSMENT.md`** (PHASES 1-5 - ADR-003/004 PLAN)
+- Executive summary with effort estimates (18-24 hours)
+- Current state analysis (what's done, what's not)
+- Complete migration scope (critical/medium/low impact files)
+- 5-phase migration strategy (Infrastructure → Datasources → Core → Middleware → Plugins → Verification)
+- Risk assessment with mitigation strategies
+- Success criteria and exit conditions
+- **Note**: References `SecureDataFrame` (assumes Phase 0 complete)
+
+**`README_MIGRATION_ANALYSIS.md`** (QUICK REFERENCE)
+- Overview and quick facts
+- Document guide (which to read when)
+- Key decisions with recommendations
+- Code examples (before/after)
+- Testing strategy
+- 5-phase migration summary
+
+**`MIGRATION_SUMMARY.txt`** (AT-A-GLANCE VIEW)
+- All 70 plugins inventoried
+- 5 critical data flow paths
+- New infrastructure needed
+- Interface changes required
+- Effort/risk assessment table
+- Decision points with recommendations
+
+### 🔍 Technical Deep Dives
+
+**`plugin_migration_analysis.md`** (DETAILED TECHNICAL SPEC - 600+ lines)
+- Complete plugin inventory with file paths and line numbers
+- Current vs target behavior specifications
+- Data passing patterns (6-tier architecture)
+- Interface changes before/after
+- Design decisions with rationale
+- Testing requirements per component
+
+**`DATA_FLOW_DIAGRAM.txt`** (VISUAL REFERENCE)
+- Tier-by-tier architecture diagrams (Tier 0-3)
+- Data structure transformations at each boundary
+- Middleware unwrap/wrap options
+- Classification uplifting flow (high water mark principle)
+- Detailed row processing steps
+
+---
+
+## Quick Start Guide
+
+### For Implementers (Starting the Migration)
+
+**Phase 0: Terminology Rename** (12-16 hours)
+1. **Read**: `RENAMING_ASSESSMENT.md` (terminology change rationale and plan)
+2. **Execute**: Follow 3-phase rename strategy (Code → Tests → Docs)
+3. **Verify**: All tests passing, MyPy clean, documentation updated
+4. **Checkpoint**: `SecureDataFrame` exists, all references updated
+
+**Phases 1-5: Container Adoption** (18-24 hours)
+1. **Read**: `MIGRATION_COMPLEXITY_ASSESSMENT.md` (full migration plan)
+2. **Reference**: `plugin_migration_analysis.md` (technical specs)
+3. **Visualize**: `DATA_FLOW_DIAGRAM.txt` (see data flow)
+4. **Execute**: Follow 5-phase strategy (Infrastructure → Datasources → Core → Middleware → Plugins → Verification)
+5. **Track**: Use TodoWrite tool to track progress through phases
+
+### For Reviewers (Code Review)
+
+**Phase 0 Review** (Terminology):
+1. **Rationale**: `RENAMING_ASSESSMENT.md` (why "Secure" vs "Classified")
+2. **Scope**: 86 files, 1,450 occurrences
+3. **Verify**: Deprecation shims in place, configs updated, tests passing
+
+**Phases 1-5 Review** (Container Adoption):
+1. **Context**: `README_MIGRATION_ANALYSIS.md` (quick overview)
+2. **Scope**: `MIGRATION_SUMMARY.txt` (what's changing)
+3. **Details**: `MIGRATION_COMPLEXITY_ASSESSMENT.md` (risk assessment, success criteria)
+4. **Verify**: Each phase's exit criteria (100% tests passing, MyPy clean, etc.)
+
+### For Approvers (Management/Architecture Review)
+
+1. **Executive Summary**: This README (Overview + Timeline sections)
+2. **Terminology Rationale**: `RENAMING_ASSESSMENT.md` (universal applicability)
+3. **Container Migration**: `MIGRATION_COMPLEXITY_ASSESSMENT.md` (effort, risk, success criteria)
+4. **Total Effort Estimate**: 30-40 hours (4-5 days), MEDIUM complexity, HIGH confidence
+4. **Dependencies**: ADR-002-A complete (ready to merge), no external blockers
+
+---
+
+## Integrated Migration Timeline
+
+### Complete Migration: 7 Phases (36-48 hours, 5-6 days)
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│ PHASE 0: Terminology Rename (12-16 hours, 1.5-2 days)          │
+│   Sub-phases: Core Code → Tests → Documentation                │
+│   Output: SecureDataFrame, .security_level, sensitive_material │
+│   Branch: refactor/terminology-secure-data                     │
+├─────────────────────────────────────────────────────────────────┤
+│ Checkpoint: Merge Phase 0, create ADR-003/004 branch           │
+├─────────────────────────────────────────────────────────────────┤
+│ PHASE 1: Infrastructure (2-3 hours)                            │
+│   Output: SecureData[T] generic wrapper                        │
+├─────────────────────────────────────────────────────────────────┤
+│ PHASE 1.5: BasePlugin Inheritance Migration (3-5 hours) 🚨 NEW │
+│   Output: All 26 plugins inherit from BasePlugin ABC           │
+│   CRITICAL: Enables ADR-002 validation (stops isinstance fail) │
+│   Design: ADR-004 "Security Bones" - inherit, don't implement  │
+├─────────────────────────────────────────────────────────────────┤
+│ PHASE 2: Datasource Migration (2 hours)                        │
+│   Output: 4 datasources return SecureDataFrame                 │
+├─────────────────────────────────────────────────────────────────┤
+│ PHASE 3: Orchestrator & Runner Core (3-4 hours)                │
+│   Output: SecureDataFrame propagates through pipeline          │
+├─────────────────────────────────────────────────────────────────┤
+│ PHASE 4: Middleware Integration (3-4 hours)                    │
+│   Output: Middleware handles SecureData[dict]                  │
+├─────────────────────────────────────────────────────────────────┤
+│ PHASE 5: Row Plugins & Aggregators (2-3 hours)                 │
+│   Output: All plugins compatible with secure containers        │
+├─────────────────────────────────────────────────────────────────┤
+│ PHASE 6: Verification & Documentation (1-2 hours)              │
+│   Output: ADR-003, ADR-004, updated guides, zero regressions   │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Phase-by-Phase Breakdown
+
+### Phase 0: Terminology Rename (12-16 hours) 🔄
+
+**Objective**: Standardize terminology for universal applicability
+
+**Branch**: `refactor/terminology-secure-data`
+
+**Sub-Phase 0.1: Core Code** (4-5 hours)
+- Rename module: `secure_data.py` → `secure_data.py`
+- Rename class: `SecureDataFrame` → `SecureDataFrame`
+- Rename field: `.classification` → `.security_level`
+- Rename methods: `with_uplifted_security_level()` → `with_uplifted_security_level()`
+- Rename middleware: `classified_material` → `sensitive_material`
+- Update all imports across codebase
+- **Exit Criteria**: MyPy clean, Ruff clean (tests will fail - expected)
+
+**Sub-Phase 0.2: Tests** (3-4 hours)
+- Update 14 test files, 307 occurrences
+- Rename test data files
+- Update variable names (`classified_df` → `secure_df`)
+- **Exit Criteria**: All 800+ tests passing (100%)
+
+**Sub-Phase 0.3: Documentation** (4-6 hours)
+- Update plugin development guide (69 occurrences)
+- Update architecture docs (~200 occurrences)
+- Update examples & guides (~100 occurrences)
+- Add editorial notes to ADRs (preserve historical context)
+- **Exit Criteria**: All current docs use "secure data" terminology
+
+**Deliverables**:
+- ✅ `SecureDataFrame` class with all methods
+- ✅ `.security_level` field (aligned with codebase standard)
+- ✅ `SensitiveMaterialMiddleware` (content detection)
+- ✅ All documentation updated
+- ✅ All config files updated (`classified_material` → `sensitive_material`)
+
+**Pre-1.0 Note**: No deprecation shims - clean breaking change (fix-on-fail approach)
+
+**See**: `RENAMING_ASSESSMENT.md` for full details
+
+---
+
+### Phase 1: Infrastructure (2-3 hours) 🏗️
+
+**Objective**: Build `SecureData[T]` generic wrapper and utilities
+
+**Branch**: `feature/adr-003-004-secure-containers`
+
+- Create `SecureData[T]` generic class (mirrors `SecureDataFrame` for any type T)
+- Add utility functions: `unwrap(secure: SecureData[T]) -> T` (public, safe extraction)
+- Add `SecureDataFrame.create_secure_dict(data: dict) -> SecureData[dict]` factory method
+- **NO public `wrap()` helper** - would allow classification laundering (CVE-ADR-002-A-003)
+- Write invariant tests (5+ core properties: immutability, uplifting, factory safety)
+- **Exit Criteria**: All new tests passing, MyPy clean, no wrap() in public API
+
+---
+
+### Phase 1.5: BasePlugin Inheritance Migration (3-5 hours) 🔐
+
+**Objective**: Convert all plugins to inherit from `BasePlugin` ABC (CRITICAL - enables ADR-002 validation)
+
+**Background**: Current plugins store `security_level` as an attribute but don't inherit from `BasePlugin` ABC. This causes ADR-002 validation to short-circuit (isinstance checks fail), allowing SECRET→UNOFFICIAL paths unchecked!
+
+**NEW DESIGN (ADR-004 "Security Bones")**:
+- BasePlugin is now an **Abstract Base Class** with CONCRETE implementation (not Protocol)
+- Plugins **INHERIT** security methods, they don't implement them
+- Security enforcement is **centralized** in BasePlugin - cannot be overridden
+- Runtime enforcement via `__init_subclass__` prevents security method override
+- **Much simpler migration** - just inherit and call super().__init__()
+
+**Scope**:
+- **26 plugin classes**: 4 datasources, 6 LLM clients, 16 sinks
+- **1 Protocol replacement**: Remove old BasePlugin Protocol, create new ABC
+- **All isinstance() checks**: Update validation code to use ABC (nominal typing)
+- **All imports**: Switch from `core.base.protocols` to `core.base.plugin`
+
+**Migration Steps:**
+
+### Step 0: Create BasePlugin ABC and Remove Old Protocol (CRITICAL - Do This FIRST!)
+
+**Objective**: Replace Protocol-based BasePlugin with ABC-based version to enforce nominal typing.
+
+**⚠️ CRITICAL**: If you skip this step, the old Protocol will remain and continue accepting duck-typed helpers, defeating the entire "security bones" design!
+
+**Sub-Step 0.1: Create New BasePlugin ABC** (15 minutes)
+
+Create **NEW FILE**: `src/elspeth/core/base/plugin.py`
+
+```python
+"""BasePlugin ABC with concrete security enforcement (ADR-004).
+
+This module replaces the old Protocol-based BasePlugin from protocols.py.
+All plugins MUST inherit from this ABC to participate in ADR-002 validation.
+"""
+
+from abc import ABC
+from typing import final
+
+from elspeth.core.base.types import SecurityLevel
+from elspeth.core.validation.base import SecurityValidationError
+
+
+class BasePlugin(ABC):
+    """Base class providing mandatory "security bones" for ALL plugins.
+
+    SECURITY INVARIANTS (ADR-004):
+    1. All plugins MUST explicitly inherit from this class (nominal typing)
+    2. Security level is MANDATORY at construction (keyword-only arg)
+    3. Security methods are FINAL and cannot be overridden by subclasses
+    4. Validation logic is centralized in BasePlugin (single source of truth)
+    """
+
+    def __init_subclass__(cls, **kwargs):
+        """Runtime enforcement: prevent subclasses from overriding security methods."""
+        super().__init_subclass__(**kwargs)
+
+        sealed_methods = ("get_security_level", "validate_can_operate_at_level")
+        for method_name in sealed_methods:
+            if method_name in cls.__dict__:
+                raise TypeError(
+                    f"{cls.__name__} may not override {method_name} (ADR-004 security invariant). "
+                    f"Security enforcement is provided by BasePlugin and cannot be customized."
+                )
+
+    def __init__(self, *, security_level: SecurityLevel, **kwargs):
+        """Initialize plugin with MANDATORY security level."""
+        if security_level is None:
+            raise ValueError(f"{type(self).__name__}: security_level cannot be None")
+        self._security_level = security_level
+        super().__init__(**kwargs)
+
+    @property
+    def security_level(self) -> SecurityLevel:
+        """Read-only property for security level (convenience accessor)."""
+        return self._security_level
+
+    @final
+    def get_security_level(self) -> SecurityLevel:
+        """Return the minimum security level (FINAL - do not override)."""
+        return self._security_level
+
+    @final
+    def validate_can_operate_at_level(self, operating_level: SecurityLevel) -> None:
+        """Validate security level (FINAL - do not override). Bell-LaPadula 'no read up'."""
+        if operating_level > self._security_level:
+            raise SecurityValidationError(
+                f"{type(self).__name__} has clearance {self._security_level.name}, "
+                f"but pipeline requires {operating_level.name} - insufficient clearance"
+            )
+```
+
+**Sub-Step 0.2: Remove Old Protocol from protocols.py** (5 minutes)
+
+**File**: `src/elspeth/core/base/protocols.py`
+
+Find and **DELETE** the old Protocol-based BasePlugin (approximately lines 62-79):
+
+```python
+# ❌ DELETE THIS ENTIRE BLOCK:
+@runtime_checkable
+class BasePlugin(Protocol):
+    """Base protocol defining security requirements for all plugins."""
+
+    def get_security_level(self) -> SecurityLevel:
+        """Return the minimum security level this plugin requires."""
+        raise NotImplementedError
+
+    def validate_can_operate_at_level(self, operating_level: SecurityLevel) -> None:
+        """Validate this plugin can operate at the given security level."""
+        raise NotImplementedError
+```
+
+**ALTERNATIVE (if protocols.py needs to stay for backward compatibility)**: Re-export the ABC
+
+```python
+# In protocols.py, add this at the top:
+from elspeth.core.base.plugin import BasePlugin  # Re-export ABC (ADR-004)
+
+# Then DELETE the old Protocol definition
+```
+
+**Sub-Step 0.3: Update All Imports** (10 minutes)
+
+Find all files that import the old Protocol:
+
+```bash
+# Find all imports of old BasePlugin
+grep -r "from elspeth.core.base.protocols import.*BasePlugin" src/
+grep -r "from elspeth.core.base.protocols import.*BasePlugin" tests/
+```
+
+**Replace** in all files:
+
+```python
+# BEFORE (Protocol import)
+from elspeth.core.base.plugin import BasePlugin
+
+# AFTER (ABC import)
+from elspeth.core.base.plugin import BasePlugin
+```
+
+**Expected files to update** (minimum):
+- `src/elspeth/core/experiments/suite_runner.py` (validation code)
+- `tests/test_adr002_*.py` (all ADR-002 tests)
+- Any other files that use `isinstance(obj, BasePlugin)`
+
+**Sub-Step 0.4: Verify Protocol Removal** (5 minutes)
+
+```bash
+# Verify no code still imports Protocol-based BasePlugin
+grep -r "runtime_checkable.*BasePlugin" src/
+# Should return NOTHING
+
+# Verify all imports use ABC
+grep -r "from elspeth.core.base.plugin import BasePlugin" src/
+# Should return multiple files
+
+# Verify isinstance checks use ABC
+grep -r "isinstance.*BasePlugin" src/
+# Should use the ABC, not Protocol
+```
+
+**Exit Criteria for Step 0**:
+- ✅ New file `src/elspeth/core/base/plugin.py` exists with BasePlugin ABC
+- ✅ Old Protocol removed from `src/elspeth/core/base/protocols.py`
+- ✅ All imports updated to use ABC from `plugin.py`
+- ✅ No `runtime_checkable` Protocol references remain
+- ✅ MyPy clean (no import errors)
+
+**Why This Step Is CRITICAL**:
+Without this, the old Protocol continues to accept duck-typed helpers via structural typing, and ADR-002 validation keeps short-circuiting. The ABC **MUST** replace the Protocol for nominal typing enforcement to work!
+
+---
+
+### Step 1: Add BasePlugin to Plugin Inheritance Chains
+
+**Changes per plugin class:**
+
+1. **Add BasePlugin to inheritance chain**:
+   ```python
+   from elspeth.core.base.plugin import BasePlugin
+
+   class CSVLocalDataSource(BasePlugin, DataSourceProtocol):  # ← Add BasePlugin
+       """CSV datasource with BasePlugin security enforcement."""
+   ```
+
+2. **Update `__init__` to call BasePlugin constructor**:
+   ```python
+   def __init__(
+       self,
+       *,
+       path: str,
+       security_level: SecurityLevel,  # ← Must be keyword-only
+       retain_local: bool = False,
+       **kwargs
+   ):
+       # Pass security_level to BasePlugin (stores in self._security_level)
+       super().__init__(security_level=security_level, **kwargs)
+
+       # Plugin-specific initialization
+       self.path = path
+       self.retain_local = retain_local
+   ```
+
+3. **Remove any existing get_security_level() or validate_can_operate_at_level() implementations**:
+   ```python
+   # ❌ DELETE these if present - they're now inherited from BasePlugin:
+   # def get_security_level(self) -> SecurityLevel:
+   #     return self.security_level
+   #
+   # def validate_can_operate_at_level(self, operating_level: SecurityLevel) -> None:
+   #     ...
+   ```
+
+4. **For plugins WITHOUT existing security_level parameter**: Add it to constructor
+   ```python
+   # BEFORE (StaticLLMClient example)
+   def __init__(self, *, content: str, score: float | None = None):
+       self.content = content
+       self.score = score
+
+   # AFTER
+   def __init__(
+       self,
+       *,
+       content: str,
+       security_level: SecurityLevel,  # ← ADD mandatory parameter
+       score: float | None = None,
+   ):
+       super().__init__(security_level=security_level)  # ← Pass to BasePlugin
+       self.content = content
+       self.score = score
+   ```
+
+**What BasePlugin Provides (Inherited, NOT Implemented)**:
+```python
+# These methods are FINAL - subclasses inherit them, cannot override
+def get_security_level(self) -> SecurityLevel:
+    """Returns self._security_level (provided by BasePlugin)."""
+
+def validate_can_operate_at_level(self, operating_level: SecurityLevel) -> None:
+    """Bell-LaPadula 'no read up': Raises SecurityValidationError if operating_level > self._security_level."""
+```
+
+**Runtime Enforcement** (prevents override attempts):
+```python
+# BasePlugin.__init_subclass__ hook (automatic):
+>>> class BrokenPlugin(BasePlugin):
+...     def get_security_level(self):  # ← Override attempt
+...         return SecurityLevel.UNOFFICIAL
+TypeError: BrokenPlugin may not override get_security_level (ADR-004 security invariant)
+```
+
+**Testing** (CRITICAL):
+```python
+# Test 1: Validation ACTUALLY RUNS (not short-circuits)
+def test_secret_datasource_unofficial_sink_blocked():
+    """Verify ADR-002 validation catches mismatch (not short-circuits)."""
+    secret_ds = CSVLocalDataSource(
+        path="data/secret.csv",
+        security_level=SecurityLevel.SECRET,
+        retain_local=False
+    )
+    unofficial_sink = CsvResultSink(
+        path="outputs/public.csv",
+        security_level=SecurityLevel.UNOFFICIAL
+    )
+
+    # MUST raise during _validate_component_clearances
+    with pytest.raises(SecurityValidationError, match="requires SECRET.*UNOFFICIAL"):
+        runner.run(pd.DataFrame({"text": ["test"]}), sink_factory=lambda exp: [unofficial_sink])
+
+# Test 2: Runtime enforcement prevents override
+def test_cannot_override_security_methods():
+    """BasePlugin prevents override of security methods at class definition time."""
+    with pytest.raises(TypeError, match="may not override get_security_level"):
+        class BrokenPlugin(BasePlugin):
+            def get_security_level(self) -> SecurityLevel:
+                return SecurityLevel.UNOFFICIAL  # ← Rejected at class definition!
+```
+
+**Files to Update**:
+
+**Step 0 (Protocol Removal - CRITICAL)**:
+- **Create**: `src/elspeth/core/base/plugin.py` (new file with BasePlugin ABC)
+- **Update**: `src/elspeth/core/base/protocols.py` (remove old Protocol OR re-export ABC)
+- **Update imports**: `src/elspeth/core/experiments/suite_runner.py` (validation code)
+- **Update imports**: `tests/test_adr002_*.py` (all ADR-002 tests)
+- **Update imports**: Any file with `isinstance(obj, BasePlugin)` checks
+
+**Step 1-4 (Plugin Migration)**:
+- **Datasources**: `src/elspeth/plugins/nodes/sources/_csv_base.py`, `csv_local.py`, `csv_blob.py`, `blob.py`
+- **LLM Clients**: `src/elspeth/plugins/nodes/transforms/llm/*.py` (all 6 clients)
+- **Sinks**: `src/elspeth/plugins/nodes/sinks/*.py` (all 16 implementations)
+
+**Exit Criteria**:
+
+**Step 0 (Protocol Removal)**:
+- ✅ New file `src/elspeth/core/base/plugin.py` exists with BasePlugin ABC
+- ✅ Old Protocol removed/replaced in `src/elspeth/core/base/protocols.py`
+- ✅ All imports updated from `protocols` to `plugin` module
+- ✅ No `runtime_checkable` Protocol references remain
+- ✅ MyPy clean (no import errors)
+
+**Step 1-4 (Plugin Migration)**:
+- ✅ All 26 plugin classes inherit from BasePlugin ABC
+- ✅ All plugins call `super().__init__(security_level=...)` in their constructors
+- ✅ Integration test proves validation runs (SECRET→UNOFFICIAL blocked)
+- ✅ MyPy clean (BasePlugin inheritance verified)
+- ✅ **isinstance(plugin, BasePlugin) returns True** for all plugins (uses ABC, not Protocol!)
+- ✅ **No more isinstance short-circuiting** in validation code
+- ✅ Runtime enforcement test passes (cannot override security methods)
+
+**Why This Phase Is CRITICAL**:
+Without this, ADR-002 security validation **never runs** in production (isinstance checks short-circuit), allowing classified data to flow to unauthorized sinks! This is a P0 security blocker for the migration.
+
+**Why "Security Bones" Design Is Better**:
+- ✅ **Simpler migration** - No need to copy validation logic to 26 classes
+- ✅ **Cannot break security** - Runtime enforcement prevents override
+- ✅ **Single source of truth** - Validation logic in ONE place (BasePlugin)
+- ✅ **Type-safe** - isinstance() checks + MyPy protocol verification
+- ✅ **Fail-fast** - TypeError at class definition if override attempted
+
+---
+
+### Phase 2: Datasource Migration (2 hours) 📊
+
+**Objective**: Datasources return `SecureDataFrame`
+
+- 4 datasources: `_csv_base.py`, `csv_local.py`, `csv_blob.py`, `blob.py`
+- Change: `return df` → `return SecureDataFrame.create_from_datasource(df, self.security_level)`
+- Update `DataSource` protocol signature
+- Migrate datasource tests
+- **Exit Criteria**: All datasource tests passing, constructor protection verified
+
+---
+
+### Phase 3: Orchestrator & Runner Core (3-4 hours) ⚙️
+
+**Objective**: Propagate `SecureDataFrame` through execution pipeline
+
+- Orchestrator accepts `SecureDataFrame` from datasources
+- Runner processes `SecureDataFrame.data` for row iteration
+- Suite runner passes `SecureDataFrame` between experiments
+- **Exit Criteria**: Integration tests passing, security level uplifts correctly
+
+---
+
+### Phase 4: Middleware Integration (3-4 hours) 🔌
+
+**Objective**: Middleware handles `SecureData[dict]`
+
+- Wrap row context dicts in `SecureData[dict]`
+- Update middleware protocol to accept `SecureData[dict]`
+- 6 middleware plugins: unwrap → process → wrap with uplifting
+- **Exit Criteria**: All middleware tests passing, uplifting preserves high water mark
+
+---
+
+### Phase 5: Row Plugins & Aggregators (2-3 hours) 🧩
+
+**Objective**: All plugins compatible with secure containers
+
+- Update row plugin signatures (if needed)
+- Verify aggregator compatibility
+- Test baseline plugins with `SecureDataFrame`
+- **Exit Criteria**: All plugins compatible, tests passing
+
+---
+
+### Phase 6: Verification & Documentation (1-2 hours) ✅
+
+**Objective**: Confirm end-to-end security level propagation
+
+- Run full test suite (800+ tests)
+- Sample suite with security level debug logging
+- Update plugin development guide
+- Create ADR-003 and ADR-004 documents
+- **Exit Criteria**: Zero regressions, MyPy clean, Ruff clean, docs complete
+
+---
+
+## Critical Files Inventory
+
+### Phase 0: Terminology Rename (86 files, 1,450 occurrences)
+
+| Category | Files | Examples | Change |
+|----------|-------|----------|--------|
+| **Core Module** | 1 | `secure_data.py` | → `secure_data.py` |
+| **Core Class** | 14 source + 14 test | `SecureDataFrame` | → `SecureDataFrame` |
+| **Field Name** | 14 source + 14 test | `.classification` | → `.security_level` |
+| **Middleware** | 1 + tests | `classified_material.py` | → `sensitive_material.py` |
+| **Documentation** | 50 files | "classified data" | → "secure data" |
+
+### Phases 1-6: Container Adoption
+
+#### Critical Path (MUST CHANGE)
+
+| File | Current State | Target State | Phase |
+|------|---------------|--------------|-------|
+| `src/elspeth/core/security/secure_data.py` | `SecureDataFrame` only | Add `SecureData[T]` generic | Phase 1 |
+| `src/elspeth/plugins/nodes/sources/_csv_base.py` | Returns `pd.DataFrame` | Returns `SecureDataFrame` | Phase 2 |
+| `src/elspeth/plugins/nodes/sources/blob.py` | Returns `pd.DataFrame` | Returns `SecureDataFrame` | Phase 2 |
+| `src/elspeth/core/orchestrator.py` | Accepts `pd.DataFrame` | Accepts `SecureDataFrame` | Phase 3 |
+| `src/elspeth/core/experiments/runner.py` | Accepts `pd.DataFrame` | Accepts `SecureDataFrame` | Phase 3 |
+| `src/elspeth/core/experiments/suite_runner.py` | Passes plain DataFrames | Passes `SecureDataFrame` | Phase 3 |
+
+#### Medium Impact (SHOULD CHANGE)
+
+| Component | Files | Change | Phase |
+|-----------|-------|--------|-------|
+| Generic Wrapper | `secure_data.py` | Add `SecureData[T]` class | Phase 1 |
+| LLM Middleware | 6 files in `transforms/llm/middleware/` | Unwrap/wrap `SecureData[dict]` | Phase 4 |
+| Row Plugins | ~10 files in `plugins/experiments/row/` | Accept `SecureData[dict]` | Phase 5 |
+
+#### Low Impact (VERIFY COMPATIBILITY)
+
+| Component | Files | Action | Phase |
+|-----------|-------|--------|-------|
+| Sinks | 16 sink implementations | Verify compatibility | Phase 6 |
+| Aggregators | 6 aggregator plugins | Test with secure data | Phase 5 |
+| Baseline Plugins | 9 baseline comparison plugins | Verify no changes needed | Phase 5 |
+
+---
+
+## Key Design Decisions
+
+### ✅ Decision 1: Rename "Classified" → "Secure" First (Phase 0)
+
+**Rationale**: Terminology change BEFORE functional migration
+
+**Benefits**:
+- ADR-003/004 implementation uses correct terminology from day one
+- Clean separation: terminology change (mechanical) vs. functional migration (architectural)
+- Semantic alignment: Codebase already uses `security_level` 529 times vs. `classification` 118 times
+- Universal applicability: "Secure data" works for healthcare, finance, enterprise, not just government
+
+**Impact**: 86 files, 1,450 occurrences, 12-16 hours
+
+**See**: `RENAMING_ASSESSMENT.md` for full rationale
+
+---
+
+### ✅ Decision 2: Create SecureData[T] Generic (Phase 1)
+
+**Rationale**: `SecureDataFrame` only handles DataFrames, but we need security level propagation for dicts (row context, metadata, aggregation results).
+
+**Pattern**:
+```python
+@dataclass(frozen=True)
+class SecureData[T]:
+    data: T
+    security_level: SecurityLevel
+
+    def with_uplifted_security_level(self, new_level: SecurityLevel) -> SecureData[T]:
+        return SecureData(data=self.data, security_level=max(self.security_level, new_level))
+```
+
+**Benefits**: Type-safe security level propagation for ANY data type, not just DataFrames.
+
+---
+
+### ✅ Decision 3: Direct Middleware Migration (Pre-1.0 Clean Break - Phase 4)
+
+**Rationale**: Pre-1.0 allows clean migration without backward compatibility. Migrate middleware directly to `SecureData[dict]` protocol.
+
+**Pattern** (SAFE - uses factory from existing container):
+```python
+# Direct migration (pre-1.0) - SECURITY: NO public wrap()!
+# Create SecureData[dict] from existing SecureDataFrame (maintains security level)
+secure_context = input_frame.create_secure_dict(context)
+secure_response = middleware_chain(secure_context)  # Middleware handles SecureData directly
+uplifted_context = secure_response.with_uplifted_security_level(middleware.get_security_level())
+```
+
+**CRITICAL SECURITY NOTE**: There is **NO public `SecureData.wrap()` helper** - it would allow classification laundering (CVE-ADR-002-A-003). Only factory methods on `SecureDataFrame` can create new `SecureData[T]` instances.
+
+**Benefits**: Simpler code (no unwrap/wrap shims), cleaner architecture, faster execution, maintains security invariants.
+
+---
+
+### ✅ Decision 4: In-Place DataFrame Mutation Allowed
+
+**Rationale**: `SecureDataFrame.data` is mutable (pandas DataFrame), enabling in-place transformations without copying large datasets.
+
+**Pattern**:
+```python
+# Plugin can mutate .data in-place:
+secure_df.data['processed'] = transform(secure_df.data['input'])
+
+# Then uplift security level:
+result = secure_df.with_uplifted_security_level(plugin.get_security_level())
+```
+
+**Security**: Security level is immutable (frozen dataclass), only data mutations allowed.
+
+**Benefits**: Performance (no DataFrame copies), ergonomic plugin API.
+
+---
+
+## Success Criteria
+
+### Phase 0: Terminology Rename (Must-Have)
+- ✅ All source code uses `SecureDataFrame` / `SecureData[T]`
+- ✅ All field names use `.security_level`
+- ✅ All method names updated (`with_uplifted_security_level`)
+- ✅ All 800+ tests passing (100%)
+- ✅ MyPy clean, Ruff clean
+- ✅ **No "SecureDataFrame" references anywhere** (clean cut-over, pre-1.0)
+- ✅ All current documentation updated
+- ✅ All config files updated (`classified_material` → `sensitive_material`)
+- ✅ Sample suite runs with new terminology
+
+### Phases 1-6: Container Adoption (Must-Have)
+- ✅ All 4 datasources return `SecureDataFrame`
+- ✅ Orchestrator and runner propagate `SecureDataFrame`
+- ✅ Security level uplifts at each boundary (datasource → runner → middleware)
+- ✅ All 800+ tests passing (zero regressions after rename)
+- ✅ MyPy clean, Ruff clean
+- ✅ End-to-end suite test with security level logging
+
+### Should-Have (Quality)
+- ✅ Middleware integrates `SecureData[dict]` (direct migration, no unwrap shims)
+- ✅ Row plugins compatible
+- ✅ Performance validation (<0.1ms overhead per suite)
+- ✅ Plugin development guide updated (uses `SecureDataFrame` examples)
+- ✅ ADR-003 and ADR-004 created in `docs/architecture/decisions/`
+
+### Nice-to-Have (Future)
+- ⭕ Aggregators explicitly use `SecureData[dict]`
+- ⭕ Baseline plugins handle security levels
+- ⭕ Security level audit logging (track uplifts across pipeline)
+
+---
+
+## Risk Mitigation
+
+### Critical Risk 1: Breaking Middleware Configurations (Phase 0)
+
+**Impact**: Configs referencing `classified_material` middleware will fail
+**Probability**: HIGH (pre-1.0, no auto-mapping)
+
+**Mitigation**:
+1. **Update all in-tree configs**: `config/sample_suite/**/*.yaml`
+2. **Search codebase**: `grep -r "classified_material" config/` to find all references
+3. **Documentation**: Breaking change in CHANGELOG
+4. **Pre-1.0 Approach**: Fail fast with clear error message if old name used
+
+**Fallback**: Fix on fail - update configs when errors occur (acceptable pre-1.0)
+
+---
+
+### Critical Risk 2: Breaking Middleware Protocol (Phase 4)
+
+**Impact**: All 6 middleware plugins fail
+**Probability**: MEDIUM (protocol changes are risky)
+
+**Mitigation**:
+1. **Direct migration**: Update all 6 middleware plugins to accept `SecureData[dict]`
+2. **Test after each**: Update middleware one at a time, run tests immediately
+3. **Pre-1.0 Approach**: No unwrap shims, cleaner code
+
+**Fallback**: Revert Phase 4 if tests fail, Phases 0-3 still deliver value
+
+**Test Coverage**: Each middleware has integration tests, full suite test validates end-to-end.
+
+---
+
+### Critical Risk 3: Type System Complexity (Phase 1)
+
+**Impact**: MyPy errors with `SecureData[T]` generics
+**Probability**: MEDIUM (Python generics can be tricky)
+
+**Mitigation**:
+1. **Comprehensive annotations**: All `SecureData[T]` methods fully typed
+2. **Test type checker**: Run `mypy --strict` on new code before integration
+3. **Incremental typing**: Use `typing.cast` where needed, fix incrementally
+4. **Examples**: Provide clear usage examples in docstrings
+
+**Test Coverage**: MyPy clean is exit criteria for every phase.
+
+---
+
+## Testing Strategy
+
+### Phase 0: Rename Testing
+- **After code rename**: Tests will fail (expected) - 14 test files need updating
+- **After test rename**: All 800+ tests must pass (100%)
+- **Verification**: MyPy clean, Ruff clean, no "SecureDataFrame" references
+
+### Phase 1: Invariant Tests (SecureData[T])
+- **5+ core properties**: Constructor protection, uplifting, immutability, unwrap/wrap round-trip
+- **Pattern**: Test-first (RED → GREEN → REFACTOR)
+- **Coverage**: Minimum 90% on new `SecureData[T]` code
+
+### Phases 2-5: Integration Tests
+- **Datasource → Orchestrator → Runner**: End-to-end with `SecureDataFrame`
+- **Middleware chain**: Security level propagates correctly
+- **Suite runner**: Security level uplifts between experiments
+- **Pattern**: Modify existing integration tests to verify security level propagation
+
+### Phase 6: Regression Tests
+- **Full suite**: All 800+ tests must pass (zero regressions)
+- **Sample suite**: Run with security level debug logging enabled
+- **Performance**: <0.1ms overhead per suite (ADR-002-A benchmark baseline)
+
+---
+
+## Dependencies & Prerequisites
+
+### ✅ Ready (Unblocked)
+- ADR-002-A Trusted Container Model complete (72 passing tests)
+- `SecureDataFrame` fully implemented with constructor protection
+- Comprehensive test suite exists (800+ tests)
+- Clear migration path documented (rename + adoption)
+
+### ⭕ Before Starting Phase 0
+- Merge current branch (`feature/adr-002-security-enforcement`)
+- Create rename branch (`refactor/terminology-secure-data`)
+- Team approval of terminology change
+
+### ⭕ Before Starting Phases 1-6
+- Phase 0 complete (`SecureDataFrame` exists, all tests passing)
+- Merge rename branch
+- Create ADR-003/004 branch (`feature/adr-003-004-secure-containers`)
+
+### ❌ No External Dependencies
+All work is internal to Elspeth codebase.
+
+---
+
+## Timeline & Effort
+
+**Total Estimated Effort**: 35-47 hours (5-6 days) - **Reduced from 36-48 hours** (Phase 1.5 simplified with ADR-004 "Security Bones" design)
+
+**Breakdown by Migration**:
+- **Phase 0: Terminology Rename**: 12-16 hours (1.5-2 days, no deprecation shims)
+- **Phases 1-6: Container Adoption**: 23-31 hours (3-4 days, includes BasePlugin inheritance migration using ADR-004 design)
+
+**Detailed Phase Breakdown**:
+| Phase | Hours | Complexity | Risk | Notes |
+|-------|-------|------------|------|-------|
+| **Phase 0: Rename** | **12-16** | **LOW** | **LOW** | **No shims, clean cut-over** |
+| - Sub-phase 0.1: Core Code | 4-5 | LOW | LOW | No deprecation shims needed |
+| - Sub-phase 0.2: Tests | 3-4 | LOW | LOW | Clean rename, no compat tests |
+| - Sub-phase 0.3: Docs + Configs | 4-6 | MEDIUM | LOW | Update configs directly |
+| **Checkpoint: Merge Phase 0** | - | - | - | - |
+| **Phase 1: Infrastructure** | **2-3** | **MEDIUM** | **MEDIUM** | SecureData[T] generic |
+| **Phase 1.5: BasePlugin Inheritance** | **3-5** | **MEDIUM** | **HIGH** | **26 plugins inherit from ABC, ADR-004 "Security Bones" design** |
+| **Phase 2: Datasources** | **2** | **LOW** | **LOW** | 4 files, simple change |
+| **Phase 3: Core Engine** | **3-4** | **HIGH** | **MEDIUM** | Orchestrator/runner |
+| **Phase 4: Middleware** | **3-4** | **HIGH** | **MEDIUM** | **Direct migration, safe factory** |
+| **Phase 5: Plugins** | **2-3** | **MEDIUM** | **LOW** | Row/aggregator/baseline |
+| **Phase 6: Verification** | **1-2** | **LOW** | **LOW** | Tests/docs/ADRs |
+
+**Pre-1.0 Simplifications**:
+- ✅ No deprecation warnings to write/test
+- ✅ No backward compatibility shims to maintain
+- ✅ No unwrap/rewrap compatibility layers
+- ✅ Simpler, cleaner code
+- ✅ Faster execution (less code to write)
+
+---
+
+## Next Steps
+
+### Immediate (Pre-Migration)
+
+1. ✅ **Planning complete** - All documentation in place (rename + adoption)
+2. ⭕ **Review with team** - Approve integrated migration plan (6 phases, 30-40 hours)
+3. ⭕ **Approve terminology change** - "Secure" vs "Classified" for universal applicability
+4. ⭕ **Merge ADR-002-A** - Current branch (`feature/adr-002-security-enforcement`) ready
+
+### Phase 0: Terminology Rename (12-16 hours, 1.5-2 days)
+
+5. ⭕ **Create rename branch** - `refactor/terminology-secure-data`
+6. ⭕ **Execute Sub-phase 0.1** - Core code (4-5 hours)
+7. ⭕ **Execute Sub-phase 0.2** - Tests (3-4 hours)
+8. ⭕ **Execute Sub-phase 0.3** - Documentation (4-6 hours)
+9. ⭕ **Merge rename branch** - All tests passing, `SecureDataFrame` exists
+
+**Checkpoint**: `SecureDataFrame` available, `.security_level` field, all docs updated
+
+### Phases 1-6: Container Adoption (18-24 hours, 2-3 days)
+
+10. ⭕ **Create ADR-003/004 branch** - `feature/adr-003-004-secure-containers`
+11. ⭕ **Execute Phase 1** - Infrastructure (`SecureData[T]` generic, 2-3 hours)
+12. ⭕ **Execute Phase 2** - Datasources (4 files, 2 hours)
+13. ⭕ **Execute Phase 3** - Core engine (orchestrator/runner, 3-4 hours)
+14. ⭕ **Execute Phase 4** - Middleware (6 plugins, 3-4 hours)
+15. ⭕ **Execute Phase 5** - Plugins (row/aggregator/baseline, 2-3 hours)
+16. ⭕ **Execute Phase 6** - Verification (tests/docs/ADRs, 1-2 hours)
+17. ⭕ **Merge ADR-003/004 branch** - Zero regressions, all success criteria met
+
+### Post-Migration
+
+18. ⭕ **Create ADRs** - ADR-003 and ADR-004 in `docs/architecture/decisions/`
+19. ⭕ **Update CHANGELOG** - Breaking changes, deprecation warnings
+20. ⭕ **Deprecation timeline** - Plan for removing shims (next major version)
+
+---
+
+## ⚠️ IMPORTANT: Follow-On Work After ADR-003/004
+
+**DO NOT RETURN TO COMPLEX FUNCTION REFACTORING YET**
+
+After completing this migration, the **immediate next priority** is:
+
+### 🔴 ADR-005: Security-Critical Exception Policy (12-16 hours)
+
+**Location**: `docs/architecture/decisions/005-security-critical-exception-policy.md`
+
+**Why This Is Next**:
+1. **Security Hardening Window** - ADR-003/004 delivers secure containers, but lacks fail-loud invariants
+2. **Code is Fresh** - Team context on `SecureDataFrame` is still warm
+3. **Natural Integration Point** - Invariant checks belong in `SecureDataFrame` methods we just migrated
+4. **Prevents Regression** - Without fail-loud policy, future code changes could accidentally bypass security checks
+
+**What ADR-005 Delivers**:
+- `SecurityCriticalError` exception for invariant violations (classification downgrade, metadata tampering)
+- Emergency logging infrastructure (stderr + audit log + SIEM)
+- CI/pre-commit policy enforcement (blocks catching `SecurityCriticalError` in production code)
+- Fail-loud behavior for "impossible" security states
+
+**Effort**: 12-16 hours (phased rollout with feature flags)
+
+**Phases**:
+1. **Foundation** (Week 1) - Create exception class, emergency logging, CI enforcement
+2. **Integration** (Week 2) - Add invariant checks to `SecureDataFrame` with feature flags
+3. **Validation** (Week 3) - Mutation testing, load testing, team training
+4. **Rollout** (Week 4) - Enable in production, monitor for false positives
+
+**After ADR-005 Completion**: THEN return to complex function refactoring backlog
+
+### Why We Paused Refactoring for This
+
+During complex function refactoring work, we identified a **critical security gap**:
+- Current code uses catchable `SecurityValidationError` for BOTH expected validation failures AND impossible invariant violations
+- This creates risk of accidental catch blocks hiding security breaches
+- ADR-005 provides fail-loud exceptions that policy-enforce "never catch this"
+
+**Priority Justification**: Security > Code Quality (per ADR-001 Design Philosophy)
+
+---
+
+## References
+
+### Internal Documentation
+- **ADR-002**: Multi-Level Security Enforcement (`docs/architecture/decisions/002-security-architecture.md`)
+- **ADR-002-A**: Trusted Container Model (`docs/architecture/decisions/002-a-trusted-container-model.md`)
+- **ADR-005**: Security-Critical Exception Policy ⚠️ **FOLLOW-ON WORK** (`docs/architecture/decisions/005-security-critical-exception-policy.md`)
+- **Plugin Development Guide**: ADR-002-A patterns (`docs/guides/plugin-development-adr002a.md`)
+- **Threat Model**: ADR-002 security controls (`docs/security/adr-002-threat-model.md`)
+
+### Migration Documentation
+- **Terminology Rename**: `RENAMING_ASSESSMENT.md` (this folder)
+- **Container Adoption**: `MIGRATION_COMPLEXITY_ASSESSMENT.md` (this folder)
+- **Technical Analysis**: `plugin_migration_analysis.md` (this folder)
+- **Visual Reference**: `DATA_FLOW_DIAGRAM.txt` (this folder)
+- **Quick Summary**: `MIGRATION_SUMMARY.txt` (this folder)
+
+### Code References (After Phase 0)
+- **SecureDataFrame**: `src/elspeth/core/security/secure_data.py` (renamed from `secure_data.py`)
+- **Datasources**: `src/elspeth/plugins/nodes/sources/_csv_base.py`
+- **Orchestrator**: `src/elspeth/core/orchestrator.py`
+- **Runner**: `src/elspeth/core/experiments/runner.py`
+- **Suite Runner**: `src/elspeth/core/experiments/suite_runner.py`
+- **Middleware**: `src/elspeth/plugins/nodes/transforms/llm/middleware/sensitive_material.py` (renamed)
+
+---
+
+## Confidence & Approval
+
+**Confidence Level**: **HIGH** (based on comprehensive codebase exploration)
+
+**Why High Confidence**:
+1. ✅ Similar pattern to ADR-002-A (successful implementation, zero regressions)
+2. ✅ Clear migration path with 5 phases
+3. ✅ Comprehensive safety net (800+ tests)
+4. ✅ Well-defined interfaces (DataSource protocol, runner signatures)
+5. ✅ Risk mitigation strategies in place
+
+**Approval Required From**:
+- [ ] Technical Lead (architecture approval)
+- [ ] Security Team (ADR-003+004 alignment with ADR-002)
+- [ ] Development Team (effort estimate, timeline)
+
+---
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+**Migration Prepared By**: Claude Code
+**Planning Date**: 2025-10-25
+**Status**: Ready for Execution
+**Version**: 1.0

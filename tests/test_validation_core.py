@@ -46,6 +46,12 @@ def test_validate_plugin_list_requires_sequence():
 
 
 def test_validate_plugin_reference_requires_security_level():
+    """Test plugin reference validation when security_level is omitted.
+
+    ADR-002-B: security_level is OPTIONAL (defaults to UNOFFICIAL if not provided).
+    Even with require_security_level=True, validation should succeed when security_level
+    is omitted (the parameter is deprecated under ADR-002-B).
+    """
     report = ValidationReport()
 
     _validate_plugin_reference(
@@ -53,8 +59,8 @@ def test_validate_plugin_reference_requires_security_level():
         entry={"plugin": "known", "options": {}},
         kind="sink",
         validator=lambda *_: None,
-        require_security_level=True,
+        require_security_level=True,  # Deprecated parameter under ADR-002-B
     )
 
-    messages = [msg.format() for msg in report.errors]
-    assert any("security_level" in message for message in messages)
+    # ADR-002-B: No error expected (security_level is optional)
+    assert not report.has_errors()

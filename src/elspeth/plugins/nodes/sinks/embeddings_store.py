@@ -9,8 +9,10 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
+from elspeth.core.base.plugin import BasePlugin
 from elspeth.core.base.plugin_context import PluginContext
 from elspeth.core.base.protocols import Artifact, ArtifactDescriptor, ResultSink
+from elspeth.core.base.types import SecurityLevel
 from elspeth.core.validation.base import ConfigurationError
 from elspeth.retrieval.embedding import AzureOpenAIEmbedder, Embedder, OpenAIEmbedder
 
@@ -226,10 +228,13 @@ class AzureSearchVectorClient(VectorStoreClient):
         return UpsertResponse(count=count, took=0.0, namespace=namespace)
 
 
-class EmbeddingsStoreSink(ResultSink):
-    """Persist embeddings into a vector store backend (pgvector/Azure Search)."""
+class EmbeddingsStoreSink(BasePlugin, ResultSink):
+    """Persist embeddings into a vector store backend (pgvector/Azure Search).
 
-    """Persist experiment outputs into a vector store for RAG workflows."""
+    Inherits from BasePlugin to provide security enforcement (ADR-004).
+
+    Persist experiment outputs into a vector store for RAG workflows.
+    """
 
     def __init__(
         self,
@@ -249,6 +254,12 @@ class EmbeddingsStoreSink(ResultSink):
         embedder_factory: Callable[[Mapping[str, Any]], Embedder] | None = None,
         provider_options: Mapping[str, Any] | None = None,
     ) -> None:
+        # Initialize BasePlugin with security level and downgrade policy (ADR-002-B)
+        super().__init__(
+            security_level=SecurityLevel.UNOFFICIAL,  # ADR-002-B: Immutable policy
+            allow_downgrade=True,  # ADR-002-B: Immutable policy
+        )
+
         self.provider_name = provider
         self._namespace_override = namespace
         self._dsn = dsn

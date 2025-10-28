@@ -7,6 +7,9 @@ from typing import TYPE_CHECKING, Any, Sequence
 
 from scipy import stats as scipy_stats
 
+from elspeth.core.base.plugin import BasePlugin
+from elspeth.core.base.plugin_context import PluginContext
+from elspeth.core.base.types import SecurityLevel
 from elspeth.core.experiments.plugin_registry import register_baseline_plugin
 from elspeth.plugins.experiments._stats_helpers import (
     _collect_scores_by_criterion,
@@ -31,7 +34,7 @@ _ASSUMPTION_SCHEMA = {
 }
 
 
-class ScoreAssumptionsBaselinePlugin:
+class ScoreAssumptionsBaselinePlugin(BasePlugin):
     """Report normality and variance diagnostics for baseline vs. variant scores."""
 
     name = "score_assumptions"
@@ -44,6 +47,10 @@ class ScoreAssumptionsBaselinePlugin:
         alpha: float = 0.05,
         on_error: str = "abort",
     ) -> None:
+        super().__init__(
+            security_level=SecurityLevel.UNOFFICIAL,  # ADR-002-B: Immutable policy
+            allow_downgrade=True  # ADR-002-B: Immutable policy
+        )
         self._criteria = set(criteria) if criteria else None
         self._min_samples = max(int(min_samples), 3)
         self._alpha = float(alpha)
@@ -117,15 +124,21 @@ class ScoreAssumptionsBaselinePlugin:
         return results
 
 
-register_baseline_plugin(
-    "score_assumptions",
-    lambda options, context: ScoreAssumptionsBaselinePlugin(
+def _create_score_assumptions(options: dict[str, Any], context: PluginContext) -> ScoreAssumptionsBaselinePlugin:
+    """Create score_assumptions baseline plugin with smart security defaults."""
+    return ScoreAssumptionsBaselinePlugin(
         criteria=options.get("criteria"),
         min_samples=int(options.get("min_samples", 3)),
         alpha=float(options.get("alpha", 0.05)),
         on_error=options.get("on_error", "abort"),
-    ),
+    )
+
+
+register_baseline_plugin(
+    "score_assumptions",
+    _create_score_assumptions,
     schema=_ASSUMPTION_SCHEMA,
+    declared_security_level="UNOFFICIAL",  # ADR-002-B: Baseline analyzers work with experiment results
 )
 
 

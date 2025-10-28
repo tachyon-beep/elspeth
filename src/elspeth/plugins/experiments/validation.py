@@ -8,8 +8,10 @@ from typing import Any
 
 from jinja2 import Template
 
+from elspeth.core.base.plugin import BasePlugin
 from elspeth.core.base.plugin_context import PluginContext
 from elspeth.core.base.protocols import LLMClientProtocol
+from elspeth.core.base.types import SecurityLevel
 from elspeth.core.experiments.plugin_registry import register_validation_plugin
 from elspeth.core.registries.llm import create_llm_from_definition
 from elspeth.plugins.orchestrators.experiment.protocols import ValidationError, ValidationPlugin
@@ -24,12 +26,18 @@ def _extract_content(response: dict[str, Any]) -> str:
     return ""
 
 
-class RegexValidationPlugin(ValidationPlugin):
+class RegexValidationPlugin(BasePlugin, ValidationPlugin):
     """Validate that response content fully matches a provided regex pattern."""
 
     name = "regex_match"
 
     def __init__(self, *, pattern: str, flags: str | None = None):
+        # ADR-002-B: Security policy is immutable and hard-coded in plugin code
+        # Validation plugins check UNOFFICIAL experiment results
+        super().__init__(
+            security_level=SecurityLevel.UNOFFICIAL,
+            allow_downgrade=True  # ADR-005: Validation plugins trusted to downgrade
+        )
         self.pattern = pattern
         self.flags = self._parse_flags(flags)
         self._compiled = re.compile(pattern, self.flags)
@@ -60,12 +68,18 @@ class RegexValidationPlugin(ValidationPlugin):
             raise ValidationError(f"Response did not match required pattern '{self.pattern}'")
 
 
-class JsonValidationPlugin(ValidationPlugin):
+class JsonValidationPlugin(BasePlugin, ValidationPlugin):
     """Validate that response content is valid JSON (optionally object)."""
 
     name = "json"
 
     def __init__(self, *, ensure_object: bool = False):
+        # ADR-002-B: Security policy is immutable and hard-coded in plugin code
+        # Validation plugins check UNOFFICIAL experiment results
+        super().__init__(
+            security_level=SecurityLevel.UNOFFICIAL,
+            allow_downgrade=True  # ADR-005: Validation plugins trusted to downgrade
+        )
         self.ensure_object = ensure_object
 
     def validate(
@@ -84,7 +98,7 @@ class JsonValidationPlugin(ValidationPlugin):
             raise ValidationError("JSON response must be an object")
 
 
-class LLMGuardValidationPlugin(ValidationPlugin):
+class LLMGuardValidationPlugin(BasePlugin, ValidationPlugin):
     """Use an LLM to evaluate responses against rules, expecting verdict tokens."""
 
     name = "llm_guard"
@@ -99,6 +113,12 @@ class LLMGuardValidationPlugin(ValidationPlugin):
         invalid_token: str = "INVALID",  # noqa: S107 - marker tokens, not secrets
         strip_whitespace: bool = True,
     ):
+        # ADR-002-B: Security policy is immutable and hard-coded in plugin code
+        # Validation plugins check UNOFFICIAL experiment results
+        super().__init__(
+            security_level=SecurityLevel.UNOFFICIAL,
+            allow_downgrade=True  # ADR-005: Validation plugins trusted to downgrade
+        )
         self.validator_llm = validator_llm
         self.system_prompt = system_prompt or "You evaluate whether a response meets the rules."
         self.template = Template(user_prompt_template)
@@ -158,6 +178,7 @@ register_validation_plugin(
         "required": ["pattern"],
         "additionalProperties": True,
     },
+    declared_security_level="UNOFFICIAL",  # ADR-002-B: Validators check response content
 )
 
 register_validation_plugin(
@@ -170,6 +191,7 @@ register_validation_plugin(
         },
         "additionalProperties": True,
     },
+    declared_security_level="UNOFFICIAL",  # ADR-002-B: Validators check response content
 )
 
 
@@ -233,6 +255,7 @@ register_validation_plugin(
         "required": ["valid_token", "invalid_token", "strip_whitespace"],
         "additionalProperties": True,
     },
+    declared_security_level="UNOFFICIAL",  # ADR-002-B: Validators check response content
 )
 
 

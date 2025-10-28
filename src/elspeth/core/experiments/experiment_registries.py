@@ -74,9 +74,10 @@ class _NoopBaselinePlugin:  # pylint: disable=too-few-public-methods
 
 
 # Register default noop plugins
-row_plugin_registry.register("noop", lambda opts, ctx: _NoopRowPlugin())
-aggregation_plugin_registry.register("noop", lambda opts, ctx: _NoopAggPlugin())
-baseline_plugin_registry.register("noop", lambda opts, ctx: _NoopBaselinePlugin())
+# ADR-002-B: Noop plugins are test stubs - UNOFFICIAL clearance
+row_plugin_registry.register("noop", lambda opts, ctx: _NoopRowPlugin(), declared_security_level="UNOFFICIAL")
+aggregation_plugin_registry.register("noop", lambda opts, ctx: _NoopAggPlugin(), declared_security_level="UNOFFICIAL")
+baseline_plugin_registry.register("noop", lambda opts, ctx: _NoopBaselinePlugin(), declared_security_level="UNOFFICIAL")
 
 # Note: Validation and early-stop plugins have no default noop implementations
 # All concrete plugins are registered via side-effects when elspeth.plugins.experiments is imported

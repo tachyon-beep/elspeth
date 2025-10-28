@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from elspeth.core.base.types import SecurityLevel
 from elspeth.plugins.experiments.baseline.category_effects import CategoryEffectsAggregator
 from elspeth.plugins.experiments.baseline.criteria_effects import CriteriaEffectsBaselinePlugin
 from elspeth.plugins.experiments.baseline.outlier_detection import OutlierDetectionAggregator

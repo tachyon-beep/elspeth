@@ -7,10 +7,13 @@ from elspeth.core.experiments import plugin_registry
 from elspeth.core.registries.datasource import datasource_registry
 from elspeth.core.registries.llm import llm_registry
 from elspeth.core.registries.sink import sink_registry
+from elspeth.core.security import SecureDataFrame
 from elspeth.core.validation import ConfigurationError
 
 
 def test_registry_creates_blob_datasource(tmp_path, monkeypatch):
+    from elspeth.core.base.plugin_context import PluginContext
+
     cfg = tmp_path / "blob.yaml"
     cfg.write_text(
         """
@@ -34,14 +37,18 @@ def test_registry_creates_blob_datasource(tmp_path, monkeypatch):
 
     monkeypatch.setattr(blob_module, "load_blob_csv", fake_load_blob_csv)
 
+    parent_context = PluginContext(
+        plugin_name="test", plugin_kind="test", security_level="OFFICIAL", determinism_level="guaranteed"
+    )
     ds = datasource_registry.create(
         "azure_blob",
-        {"config_path": cfg.as_posix(), "security_level": "OFFICIAL", "determinism_level": "guaranteed", "retain_local": False},
+        {"config_path": cfg.as_posix(), "determinism_level": "guaranteed", "retain_local": False},
+        parent_context=parent_context,
     )
 
     frame = ds.load()
-    assert isinstance(frame, pd.DataFrame)
-    assert list(frame.columns) == ["value"]
+    assert isinstance(frame, SecureDataFrame)
+    assert list(frame.columns) == ["value"]  # SecureDataFrame has .columns proxy
 
 
 def test_registry_unknown_plugin_raises():
@@ -50,11 +57,17 @@ def test_registry_unknown_plugin_raises():
 
 
 def test_registry_creates_csv_blob_datasource(tmp_path):
+    from elspeth.core.base.plugin_context import PluginContext
+
     csv_path = tmp_path / "data.csv"
     pd.DataFrame({"value": [1, 2]}).to_csv(csv_path, index=False)
 
+    parent_context = PluginContext(
+        plugin_name="test", plugin_kind="test", security_level="OFFICIAL", determinism_level="guaranteed"
+    )
     ds = datasource_registry.create(
-        "csv_blob", {"path": csv_path.as_posix(), "security_level": "OFFICIAL", "determinism_level": "guaranteed", "retain_local": False}
+        "csv_blob", {"path": csv_path.as_posix(), "determinism_level": "guaranteed", "retain_local": False},
+        parent_context=parent_context,
     )
     frame = ds.load()
 
@@ -62,6 +75,8 @@ def test_registry_creates_csv_blob_datasource(tmp_path):
 
 
 def test_registry_constructs_llm_and_sink(monkeypatch):
+    from elspeth.core.base.plugin_context import PluginContext
+
     class DummyLLM:
         def __init__(self, **kwargs):
             self.kwargs = kwargs
@@ -70,12 +85,15 @@ def test_registry_constructs_llm_and_sink(monkeypatch):
         def __init__(self, **kwargs):
             self.kwargs = kwargs
 
+    parent_context = PluginContext(
+        plugin_name="test", plugin_kind="test", security_level="OFFICIAL", determinism_level="guaranteed"
+    )
     with (
         llm_registry.temporary_override("dummy", lambda options, context: DummyLLM(**options)),
         sink_registry.temporary_override("dummy", lambda options, context: DummySink(**options)),
     ):
-        llm = llm_registry.create("dummy", {"name": "llm", "security_level": "OFFICIAL", "determinism_level": "guaranteed"})
-        sink = sink_registry.create("dummy", {"name": "sink", "security_level": "OFFICIAL", "determinism_level": "guaranteed"})
+        llm = llm_registry.create("dummy", {"name": "llm", "determinism_level": "guaranteed"}, parent_context=parent_context)
+        sink = sink_registry.create("dummy", {"name": "sink", "determinism_level": "guaranteed"}, parent_context=parent_context)
 
     assert isinstance(llm, DummyLLM)
     assert isinstance(sink, DummySink)
@@ -108,35 +126,23 @@ def test_create_row_plugin_validates_schema():
 
     with pytest.raises(ConfigurationError):
         plugin_registry.validate_row_plugin_definition(
-            {"name": "limited", "security_level": "OFFICIAL", "determinism_level": "guaranteed", "options": {}}
+            {"name": "limited", "determinism_level": "guaranteed", "options": {}}
         )
 
     plugin_registry.validate_row_plugin_definition(
-        {"name": "limited", "security_level": "OFFICIAL", "determinism_level": "guaranteed", "options": {"threshold": 0.5}}
+        {"name": "limited", "determinism_level": "guaranteed", "options": {"threshold": 0.5}}
     )
-
-
-def test_create_row_plugin_conflicting_security_levels():
-    with pytest.raises(ConfigurationError) as exc:
-        plugin_registry.create_row_plugin(
-            {
-                "name": "score_extractor",
-                "security_level": "OFFICIAL",
-                "determinism_level": "guaranteed",
-                "options": {"security_level": "SECRET", "determinism_level": "guaranteed"},
-            }
-        )
-    assert "Conflicting security_level values" in str(exc.value)
 
 
 def test_create_row_plugin_inherits_parent_context():
     from elspeth.core.base.plugin_context import PluginContext
 
-    parent_context = PluginContext(plugin_name="suite", plugin_kind="suite", security_level="SECRET", determinism_level="none")
+    # ADR-002-B: Parent must have security level <= plugin's declared level (UNOFFICIAL)
+    parent_context = PluginContext(plugin_name="suite", plugin_kind="suite", security_level="UNOFFICIAL", determinism_level="none")
     plugin = plugin_registry.create_row_plugin(
         {
             "name": "score_extractor",
-            "security_level": "SECRET",
+            # ADR-002-B Phase 2: security_level in config is REMOVED (plugin-author-owned)
             "determinism_level": "guaranteed",
             "options": {
                 "key": "score",
@@ -149,21 +155,22 @@ def test_create_row_plugin_inherits_parent_context():
         parent_context=parent_context,
     )
     assert plugin.plugin_context.parent == parent_context
-    assert plugin.plugin_context.security_level == "SECRET"
-    assert plugin.security_level == "SECRET"
+    assert plugin.plugin_context.security_level == "UNOFFICIAL"
+    # ADR-002-B Phase 2: plugin.security_level is immutably UNOFFICIAL (hard-coded in plugin __init__)
+    assert plugin.security_level == "UNOFFICIAL"
 
 
 def test_normalize_early_stop_definitions_handles_various_forms():
     entries = [
-        {"name": "custom", "options": {"limit": 5}, "security_level": "OFFICIAL", "determinism_level": "guaranteed"},
-        {"plugin": "custom", "threshold": 2, "security_level": "OFFICIAL", "determinism_level": "guaranteed"},
-        {"limit": 3, "security_level": "OFFICIAL", "determinism_level": "guaranteed"},
+        {"name": "custom", "options": {"limit": 5}, "determinism_level": "guaranteed"},
+        {"plugin": "custom", "threshold": 2, "determinism_level": "guaranteed"},
+        {"limit": 3, "determinism_level": "guaranteed"},
     ]
     normalized = plugin_registry.normalize_early_stop_definitions(entries)
     assert normalized == [
-        {"name": "custom", "options": {"limit": 5, "security_level": "OFFICIAL", "determinism_level": "guaranteed"}},
-        {"name": "custom", "options": {"threshold": 2, "security_level": "OFFICIAL", "determinism_level": "guaranteed"}},
-        {"name": "threshold", "options": {"limit": 3, "security_level": "OFFICIAL", "determinism_level": "guaranteed"}},
+        {"name": "custom", "options": {"limit": 5, "determinism_level": "guaranteed"}},
+        {"name": "custom", "options": {"threshold": 2, "determinism_level": "guaranteed"}},
+        {"name": "threshold", "options": {"limit": 3, "determinism_level": "guaranteed"}},
     ]
 
 
@@ -176,17 +183,24 @@ def test_normalize_early_stop_definitions_rejects_invalid_types():
 
 def test_registry_validate_sink_schema_errors():
     with pytest.raises(ConfigurationError):
-        sink_registry.validate("csv", {"path": None, "security_level": "OFFICIAL", "determinism_level": "guaranteed"})
+        sink_registry.validate("csv", {"path": None})
     with pytest.raises(ConfigurationError):
-        sink_registry.validate("file_copy", {"destination": None, "security_level": "OFFICIAL", "determinism_level": "guaranteed"})
+        sink_registry.validate("file_copy", {"destination": None})
 
 
 def test_registry_sink_schema_success(tmp_path):
+    from elspeth.core.base.plugin_context import PluginContext
+
     dest = tmp_path / "out.txt"
-    sink_registry.validate("csv", {"path": dest.as_posix(), "security_level": "OFFICIAL", "determinism_level": "guaranteed"})
-    sink_registry.validate("file_copy", {"destination": dest.as_posix(), "security_level": "OFFICIAL", "determinism_level": "guaranteed"})
+    sink_registry.validate("csv", {"path": dest.as_posix()})
+    sink_registry.validate("file_copy", {"destination": dest.as_posix()})
+
+    parent_context = PluginContext(
+        plugin_name="test", plugin_kind="test", security_level="OFFICIAL", determinism_level="guaranteed"
+    )
     sink = sink_registry.create(
-        "file_copy", {"destination": dest.as_posix(), "security_level": "OFFICIAL", "determinism_level": "guaranteed"}
+        "file_copy", {"destination": dest.as_posix()},
+        parent_context=parent_context,
     )
     from elspeth.core.base.protocols import Artifact
 

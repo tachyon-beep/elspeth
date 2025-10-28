@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from elspeth.core.base.types import SecurityLevel
 from elspeth.core.experiments import plugin_registry
 from elspeth.core.experiments.config import ExperimentSuite
 from elspeth.core.experiments.runner import ExperimentRunner
@@ -23,7 +24,9 @@ def test_end_to_end_local_pipeline(tmp_path, assert_sanitized_artifact):
     setattr(csv_sink, "_elspeth_security_level", "official")
 
     runner = ExperimentRunner(
-        llm_client=MockLLMClient(seed=7),
+        llm_client=MockLLMClient(
+            seed=7
+        ),
         sinks=[bundle_sink, csv_sink],
         prompt_system="Rate the submission",
         prompt_template="Value: {{ value }}",
@@ -33,7 +36,6 @@ def test_end_to_end_local_pipeline(tmp_path, assert_sanitized_artifact):
             plugin_registry.create_row_plugin(
                 {
                     "name": "score_extractor",
-                    "security_level": "OFFICIAL",
                     "determinism_level": "guaranteed",
                     "options": {
                         "key": "score",
@@ -47,14 +49,13 @@ def test_end_to_end_local_pipeline(tmp_path, assert_sanitized_artifact):
         ],
         aggregator_plugins=[
             plugin_registry.create_aggregation_plugin(
-                {"name": "score_stats", "security_level": "OFFICIAL", "determinism_level": "guaranteed"}
+                {"name": "score_stats", "determinism_level": "guaranteed"}
             )
         ],
         validation_plugins=[
             plugin_registry.create_validation_plugin(
                 {
                     "name": "regex_match",
-                    "security_level": "OFFICIAL",
                     "determinism_level": "guaranteed",
                     "options": {"pattern": r"(?s).*\[mock\].*"},
                 }
@@ -106,7 +107,9 @@ def test_suite_runner_end_to_end_without_azure(tmp_path, assert_sanitized_artifa
     suite = ExperimentSuite.load(suite_root)
     runner = ExperimentSuiteRunner(
         suite=suite,
-        llm_client=MockLLMClient(seed=13),
+        llm_client=MockLLMClient(
+            seed=13
+        ),
         sinks=[],
     )
 
@@ -118,7 +121,6 @@ def test_suite_runner_end_to_end_without_azure(tmp_path, assert_sanitized_artifa
         "row_plugin_defs": [
             {
                 "name": "score_extractor",
-                "security_level": "OFFICIAL",
                 "determinism_level": "guaranteed",
                 "options": {
                     "key": "score",
@@ -129,11 +131,10 @@ def test_suite_runner_end_to_end_without_azure(tmp_path, assert_sanitized_artifa
                 },
             }
         ],
-        "aggregator_plugin_defs": [{"name": "score_stats", "security_level": "OFFICIAL", "determinism_level": "guaranteed"}],
+        "aggregator_plugin_defs": [{"name": "score_stats", "determinism_level": "guaranteed"}],
         "validation_plugin_defs": [
             {
                 "name": "regex_match",
-                "security_level": "OFFICIAL",
                 "determinism_level": "guaranteed",
                 "options": {"pattern": r"(?s).*\[mock\].*"},
             }
@@ -141,7 +142,6 @@ def test_suite_runner_end_to_end_without_azure(tmp_path, assert_sanitized_artifa
         "sink_defs": [
             {
                 "plugin": "local_bundle",
-                "security_level": "OFFICIAL",
                 "determinism_level": "guaranteed",
                 "options": {
                     "base_path": bundle_root.as_posix(),
@@ -171,7 +171,9 @@ def test_suite_runner_end_to_end_without_azure(tmp_path, assert_sanitized_artifa
     df = pd.DataFrame({"value": ["alpha", "beta"]})
     results = runner.run(df, defaults=defaults)
 
-    assert set(results.keys()) == {"baseline", "variant"}
+    # ADR-002-B: Filter out special metadata keys added by suite_runner
+    experiment_names = {k for k in results.keys() if not k.startswith("_")}
+    assert experiment_names == {"baseline", "variant"}
     baseline_payload = results["baseline"]["payload"]
     variant_payload = results["variant"]["payload"]
 

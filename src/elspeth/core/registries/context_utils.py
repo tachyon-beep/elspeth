@@ -12,7 +12,6 @@ from elspeth.core.base.plugin_context import PluginContext
 from elspeth.core.base.types import DeterminismLevel, SecurityLevel
 from elspeth.core.security import (
     coalesce_determinism_level,
-    coalesce_security_level,
 )
 from elspeth.core.validation.base import ConfigurationError
 
@@ -24,9 +23,8 @@ def extract_security_levels(
     plugin_type: str,
     plugin_name: str,
     parent_context: PluginContext | None = None,
-    require_security: bool = True,
     require_determinism: bool = True,
-) -> tuple[SecurityLevel | None, DeterminismLevel, list[str]]:
+) -> tuple[SecurityLevel, DeterminismLevel, list[str]]:
     """
     Extract and normalize security/determinism levels from definition and options.
 
@@ -44,7 +42,6 @@ def extract_security_levels(
         plugin_type: Type of plugin (e.g., "datasource", "llm")
         plugin_name: Name of the plugin
         parent_context: Optional parent context for inheritance
-        require_security: Whether security_level is required
         require_determinism: Whether determinism_level is required
 
     Returns:
@@ -70,7 +67,7 @@ def extract_security_levels(
     # Extract levels from various sources
     entry_sec_level = definition.get("security_level")
     option_sec_level = options.get("security_level")
-    parent_sec_level = getattr(parent_context, "security_level", None)
+    getattr(parent_context, "security_level", None)
 
     entry_det_level = definition.get("determinism_level")
     option_det_level = options.get("determinism_level")
@@ -87,24 +84,29 @@ def extract_security_levels(
     if option_det_level is not None:
         sources.append(f"{plugin_type}:{plugin_name}.options.determinism_level")
 
-    # Coalesce security level
-    # Note: coalesce_security_level() always returns SecurityLevel (never None) or raises ValueError
-    # if all arguments are None. When require_security=True, the ValueError provides
-    # the validation. When require_security=False, we catch and allow None result.
-    security_level: SecurityLevel | None
-    try:
-        if parent_sec_level is not None:
-            security_level = coalesce_security_level(parent_sec_level, entry_sec_level, option_sec_level)
-        else:
-            security_level = coalesce_security_level(entry_sec_level, option_sec_level)
-    except ValueError as exc:
-        # If all levels are None, coalesce raises ValueError
-        if require_security:
-            raise ConfigurationError(f"{plugin_type}:{plugin_name}: {exc}") from exc
-        # If security not required, allow None (will be handled by context creation)
-        security_level = None
+    # Extract plugin's CLEARANCE level (NO coalescing - defined once at creation)
+    # ADR-002-B: Plugin clearance defined ONCE in declared_security_level, that's it
+    # base.py already added declared_security_level to definition, so entry_sec_level has it
 
-    # Already normalized to SecurityLevel by coalesce_security_level
+    # SECURITY: Reject configuration attempting to override security_level
+    if option_sec_level is not None:
+        raise ConfigurationError(
+            f"{plugin_type}:{plugin_name}: security_level cannot be set in options. "
+            f"ADR-002-B: Security policy is immutable and plugin-author-owned."
+        )
+
+    security_level: SecurityLevel
+    if entry_sec_level is None:
+        # No security level found - FAIL LOUD
+        raise ConfigurationError(
+            f"{plugin_type}:{plugin_name}: security_level is required. "
+            f"ADR-002-B: Plugins must declare declared_security_level in registration. "
+            f"No backdoors, no coalescing, no defaults - defined ONCE at creation."
+        )
+
+    # Normalize to SecurityLevel enum
+    from elspeth.core.security import ensure_security_level
+    security_level = ensure_security_level(entry_sec_level)
 
     # Coalesce determinism level
     determinism_level: DeterminismLevel | None
@@ -175,10 +177,14 @@ def create_plugin_context(
             provenance=provenance_tuple,
         )
 
-    # Creating new context without parent - security_level must be provided
+    # Creating new context without parent
+    # ADR-001 Fail-Loud: security_level MUST be explicit (no defaults, no graceful degradation)
     if security_level is None:
-        raise ConfigurationError(
-            f"Cannot create plugin context for {plugin_kind}:{plugin_name} without security_level (no parent context to inherit from)"
+        raise RuntimeError(
+            f"create_plugin_context() called with security_level=None for {plugin_kind}:{plugin_name}. "
+            f"Security level must be explicit (ADR-001 fail-loud principle). "
+            f"This indicates a programming error in plugin registration or context creation. "
+            f"Plugins must declare security_level - no defaults permitted in high-security systems."
         )
 
     return PluginContext(
@@ -223,8 +229,17 @@ def prepare_plugin_payload(
         {'path': 'data.csv'}
     """
     payload = dict(options)
-    if strip_security:
-        payload.pop("security_level", None)
+    # ADR-002-B: Reject security policy in configuration
+    if "security_level" in payload:
+        raise ConfigurationError(
+            "Plugin security policy is author-owned (ADR-002-B). "
+            "Remove security_level from configuration."
+        )
+    if "allow_downgrade" in payload:
+        raise ConfigurationError(
+            "Plugin downgrade policy is author-owned (ADR-002-B). "
+            "Remove allow_downgrade from configuration."
+        )
     if strip_determinism:
         payload.pop("determinism_level", None)
     return payload

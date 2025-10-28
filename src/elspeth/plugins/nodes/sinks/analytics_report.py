@@ -7,6 +7,7 @@ import logging
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+from elspeth.core.base.plugin import BasePlugin
 from elspeth.core.base.protocols import Artifact, ArtifactDescriptor, ResultSink
 from elspeth.core.base.types import DeterminismLevel, SecurityLevel
 from elspeth.core.security import ensure_determinism_level, ensure_security_level
@@ -14,8 +15,11 @@ from elspeth.core.security import ensure_determinism_level, ensure_security_leve
 logger = logging.getLogger(__name__)
 
 
-class AnalyticsReportSink(ResultSink):
-    """Generate a JSON analytics report (and optional Markdown) summarizing results and failures."""
+class AnalyticsReportSink(BasePlugin, ResultSink):
+    """Generate a JSON analytics report (and optional Markdown) summarizing results and failures.
+
+    Inherits from BasePlugin to provide security enforcement (ADR-004).
+    """
 
     def __init__(
         self,
@@ -28,6 +32,11 @@ class AnalyticsReportSink(ResultSink):
         include_comparisons: bool = True,
         on_error: str = "abort",
     ) -> None:
+        # Initialize BasePlugin with security level and downgrade policy (ADR-002-B, ADR-005)
+        super().__init__(
+            security_level=SecurityLevel.UNOFFICIAL,  # ADR-002-B: Immutable policy
+            allow_downgrade=True,  # ADR-002-B: Immutable policy
+        )
         self.base_path = Path(base_path)
         self.file_stem = file_stem or "analytics_report"
         selected = []
@@ -45,8 +54,11 @@ class AnalyticsReportSink(ResultSink):
         self.include_aggregates = include_aggregates
         self.include_comparisons = include_comparisons
         self._last_written_files: list[Path] = []
-        self._security_level: SecurityLevel | None = None
-        self._determinism_level: DeterminismLevel | None = None
+        # Runtime data classification tracking (separate from sink's security clearance)
+        # security_level (from BasePlugin) = sink's clearance level
+        # _artifact_security_level = runtime classification of written data (for artifact metadata)
+        self._artifact_security_level: SecurityLevel | None = None
+        self._artifact_determinism_level: DeterminismLevel | None = None
 
     def write(self, results: dict[str, Any], *, metadata: dict[str, Any] | None = None) -> None:
         try:
@@ -73,8 +85,8 @@ class AnalyticsReportSink(ResultSink):
             if metadata:
                 level = metadata.get("security_level")
                 det = metadata.get("determinism_level")
-                self._security_level = level if isinstance(level, SecurityLevel) else ensure_security_level(level)
-                self._determinism_level = det if isinstance(det, DeterminismLevel) else ensure_determinism_level(det)
+                self._artifact_security_level = level if isinstance(level, SecurityLevel) else ensure_security_level(level)
+                self._artifact_determinism_level = det if isinstance(det, DeterminismLevel) else ensure_determinism_level(det)
             if plugin_logger:
                 total_bytes = 0
                 for p in written:
@@ -115,8 +127,8 @@ class AnalyticsReportSink(ResultSink):
                 path=str(path),
                 metadata={"path": str(path), "content_type": content_type},
                 persist=True,
-                security_level=self._security_level,
-                determinism_level=self._determinism_level,
+                security_level=self._artifact_security_level,
+                determinism_level=self._artifact_determinism_level,
             )
         self._last_written_files = []
         return artifacts

@@ -8,7 +8,9 @@ from typing import TYPE_CHECKING, Any, Mapping
 
 import numpy as np
 
+from elspeth.core.base.plugin import BasePlugin
 from elspeth.core.base.plugin_context import PluginContext
+from elspeth.core.base.types import SecurityLevel
 from elspeth.core.experiments.plugin_registry import register_row_plugin
 from elspeth.plugins.experiments._stats_helpers import _create_score_extractor_factory
 
@@ -50,7 +52,7 @@ _ROW_SCHEMA = {
 }
 
 
-class ScoreExtractorPlugin:
+class ScoreExtractorPlugin(BasePlugin):
     """Extract numeric scores from LLM responses.
 
     The plugin inspects the per-criteria response payload for numeric values under
@@ -72,6 +74,11 @@ class ScoreExtractorPlugin:
         threshold_mode: str = "gte",
         flag_field: str = "score_flags",
     ) -> None:
+        # ADR-002-B: Security policy is immutable and hard-coded in plugin code
+        super().__init__(
+            security_level=SecurityLevel.UNOFFICIAL,  # Row plugins process experiment results
+            allow_downgrade=True  # ADR-005: Row computation plugin trusted to downgrade
+        )
         self._key = key
         self._criteria = set(criteria) if criteria else None
         self._parse_json = parse_json_content
@@ -168,8 +175,11 @@ class ScoreExtractorPlugin:
         return None
 
 
-def _create_score_extractor(options: dict[str, Any], _context: PluginContext) -> ScoreExtractorPlugin:
-    """Create a score extractor plugin with all required fields."""
+def _create_score_extractor(options: dict[str, Any], context: PluginContext) -> ScoreExtractorPlugin:
+    """Create a score extractor plugin with all required fields.
+
+    ADR-002-B: Security policy is hard-coded in plugin __init__, not injected by factory.
+    """
     validated = _create_score_extractor_factory(options)
     return ScoreExtractorPlugin(**validated)
 
@@ -178,6 +188,7 @@ register_row_plugin(
     "score_extractor",
     _create_score_extractor,
     schema=_ROW_SCHEMA,
+    declared_security_level="UNOFFICIAL",  # ADR-002-B: Row plugins process experiment results
 )
 
 

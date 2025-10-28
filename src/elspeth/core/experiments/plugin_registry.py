@@ -23,7 +23,6 @@ from elspeth.core.experiments.experiment_registries import (
     validation_plugin_registry,
 )
 from elspeth.core.registries.plugin_helpers import create_plugin_with_inheritance
-from elspeth.core.security import coalesce_security_level  # Still needed for validation functions
 from elspeth.core.validation.base import ConfigurationError
 from elspeth.plugins.orchestrators.experiment.protocols import (
     AggregationExperimentPlugin,
@@ -47,12 +46,22 @@ def register_row_plugin(
     *,
     schema: dict[str, Any] | None = None,
     requires_input_schema: bool = False,
+    declared_security_level: str | None = None,
 ) -> None:
     """Register a row-level experiment plugin.
 
     NOTE: This function now delegates to the migrated row_plugin_registry.
+
+    Args:
+        declared_security_level: Plugin's immutable security clearance (ADR-002-B)
     """
-    row_plugin_registry.register(name, factory, schema=schema, requires_input_schema=requires_input_schema)
+    row_plugin_registry.register(
+        name,
+        factory,
+        schema=schema,
+        requires_input_schema=requires_input_schema,
+        declared_security_level=declared_security_level,
+    )
 
 
 def register_aggregation_plugin(
@@ -61,12 +70,22 @@ def register_aggregation_plugin(
     *,
     schema: dict[str, Any] | None = None,
     requires_input_schema: bool = False,
+    declared_security_level: str | None = None,
 ) -> None:
     """Register an aggregation experiment plugin.
 
     NOTE: This function now delegates to the migrated aggregation_plugin_registry.
+
+    Args:
+        declared_security_level: Plugin's immutable security clearance (ADR-002-B)
     """
-    aggregation_plugin_registry.register(name, factory, schema=schema, requires_input_schema=requires_input_schema)
+    aggregation_plugin_registry.register(
+        name,
+        factory,
+        schema=schema,
+        requires_input_schema=requires_input_schema,
+        declared_security_level=declared_security_level,
+    )
 
 
 def register_baseline_plugin(
@@ -74,12 +93,16 @@ def register_baseline_plugin(
     factory: Callable[[dict[str, Any], PluginContext], BaselineComparisonPlugin],
     *,
     schema: dict[str, Any] | None = None,
+    declared_security_level: str | None = None,
 ) -> None:
     """Register a baseline comparison plugin.
 
     NOTE: This function now delegates to the migrated baseline_plugin_registry.
+
+    Args:
+        declared_security_level: Plugin's immutable security clearance (ADR-002-B)
     """
-    baseline_plugin_registry.register(name, factory, schema=schema)
+    baseline_plugin_registry.register(name, factory, schema=schema, declared_security_level=declared_security_level)
 
 
 def register_validation_plugin(
@@ -88,12 +111,22 @@ def register_validation_plugin(
     *,
     schema: dict[str, Any] | None = None,
     requires_input_schema: bool = False,
+    declared_security_level: str | None = None,
 ) -> None:
     """Register a suite validation plugin.
 
     NOTE: This function now delegates to the migrated validation_plugin_registry.
+
+    Args:
+        declared_security_level: Plugin's immutable security clearance (ADR-002-B)
     """
-    validation_plugin_registry.register(name, factory, schema=schema, requires_input_schema=requires_input_schema)
+    validation_plugin_registry.register(
+        name,
+        factory,
+        schema=schema,
+        requires_input_schema=requires_input_schema,
+        declared_security_level=declared_security_level,
+    )
 
 
 def register_early_stop_plugin(
@@ -101,12 +134,13 @@ def register_early_stop_plugin(
     factory: Callable[[dict[str, Any], PluginContext], EarlyStopPlugin],
     *,
     schema: dict[str, Any] | None = None,
+    declared_security_level: str | None = None,
 ) -> None:
     """Register an early-stop plugin.
 
     NOTE: This function now delegates to the migrated early_stop_plugin_registry.
     """
-    early_stop_plugin_registry.register(name, factory, schema=schema)
+    early_stop_plugin_registry.register(name, factory, schema=schema, declared_security_level=declared_security_level)
 
 
 # Create functions delegate to registries with manual context creation (experiment plugin pattern)
@@ -262,15 +296,10 @@ def validate_row_plugin_definition(definition: dict[str, Any]) -> None:
     elif not isinstance(options, dict):
         raise ConfigurationError("Row plugin options must be a mapping")
 
-    # Validate security level coalescing
-    try:
-        level = coalesce_security_level(definition.get("security_level"), options.get("security_level"))
-    except ValueError as exc:
-        raise ConfigurationError(f"row_plugin:{name}: {exc}") from exc
-
+    # ADR-002-B: security_level is plugin-owned (no validation needed)
+    # Remove security_level from options if accidentally included
     prepared = dict(options)
     prepared.pop("security_level", None)
-    prepared["security_level"] = level
 
     try:
         row_plugin_registry.validate(name, prepared)
@@ -297,14 +326,10 @@ def validate_aggregation_plugin_definition(definition: dict[str, Any]) -> None:
     elif not isinstance(options, dict):
         raise ConfigurationError("Aggregation plugin options must be a mapping")
 
-    try:
-        level = coalesce_security_level(definition.get("security_level"), options.get("security_level"))
-    except ValueError as exc:
-        raise ConfigurationError(f"aggregation_plugin:{name}: {exc}") from exc
-
+    # ADR-002-B: security_level is plugin-owned (no validation needed)
+    # Remove security_level from options if accidentally included
     prepared = dict(options)
     prepared.pop("security_level", None)
-    prepared["security_level"] = level
 
     try:
         aggregation_plugin_registry.validate(name, prepared)
@@ -331,14 +356,10 @@ def validate_baseline_plugin_definition(definition: dict[str, Any]) -> None:
     elif not isinstance(options, dict):
         raise ConfigurationError("Baseline plugin options must be a mapping")
 
-    try:
-        level = coalesce_security_level(definition.get("security_level"), options.get("security_level"))
-    except ValueError as exc:
-        raise ConfigurationError(f"baseline_plugin:{name}: {exc}") from exc
-
+    # ADR-002-B: security_level is plugin-owned (no validation needed)
+    # Remove security_level from options if accidentally included
     prepared = dict(options)
     prepared.pop("security_level", None)
-    prepared["security_level"] = level
 
     try:
         baseline_plugin_registry.validate(name, prepared)
@@ -365,14 +386,10 @@ def validate_validation_plugin_definition(definition: dict[str, Any]) -> None:
     elif not isinstance(options, dict):
         raise ConfigurationError("Validation plugin options must be a mapping")
 
-    try:
-        level = coalesce_security_level(definition.get("security_level"), options.get("security_level"))
-    except ValueError as exc:
-        raise ConfigurationError(f"validation_plugin:{name}: {exc}") from exc
-
+    # ADR-002-B: security_level is plugin-owned (no validation needed)
+    # Remove security_level from options if accidentally included
     prepared = dict(options)
     prepared.pop("security_level", None)
-    prepared["security_level"] = level
 
     try:
         validation_plugin_registry.validate(name, prepared)
@@ -399,14 +416,10 @@ def validate_early_stop_plugin_definition(definition: dict[str, Any]) -> None:
     elif not isinstance(options, dict):
         raise ConfigurationError("Early-stop plugin options must be a mapping")
 
-    try:
-        level = coalesce_security_level(definition.get("security_level"), options.get("security_level"))
-    except ValueError as exc:
-        raise ConfigurationError(f"early_stop_plugin:{name}: {exc}") from exc
-
+    # ADR-002-B: security_level is plugin-owned (no validation needed)
+    # Remove security_level from options if accidentally included
     prepared = dict(options)
     prepared.pop("security_level", None)
-    prepared["security_level"] = level
 
     try:
         early_stop_plugin_registry.validate(name, prepared)

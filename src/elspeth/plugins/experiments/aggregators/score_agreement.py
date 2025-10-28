@@ -8,6 +8,9 @@ from typing import TYPE_CHECKING, Any, Mapping, Sequence
 
 import numpy as np
 
+from elspeth.core.base.plugin import BasePlugin
+from elspeth.core.base.plugin_context import PluginContext
+from elspeth.core.base.types import SecurityLevel
 from elspeth.core.experiments.plugin_registry import register_aggregation_plugin
 from elspeth.plugins.experiments._stats_helpers import krippendorff_alpha_interval
 
@@ -29,12 +32,23 @@ _AGREEMENT_SCHEMA = {
 }
 
 
-class ScoreAgreementAggregator:
+class ScoreAgreementAggregator(BasePlugin):
     """Assess agreement/reliability across criteria scores."""
 
     name = "score_agreement"
 
-    def __init__(self, *, criteria: Sequence[str] | None = None, min_items: int = 2, on_error: str = "abort") -> None:
+    def __init__(
+        self,
+        *,
+        criteria: Sequence[str] | None = None,
+        min_items: int = 2,
+        on_error: str = "abort",
+    ) -> None:
+        # ADR-002-B: Security policy is immutable and hard-coded in plugin code
+        super().__init__(
+            security_level=SecurityLevel.UNOFFICIAL,  # Aggregators work with experiment results
+            allow_downgrade=True,  # Trusted to operate at lower levels if needed (ADR-005)
+        )
         self._criteria = list(criteria) if criteria else None
         self._min_items = max(int(min_items), 2)
         if on_error not in {"abort", "skip"}:
@@ -131,14 +145,23 @@ class ScoreAgreementAggregator:
         return None
 
 
-register_aggregation_plugin(
-    "score_agreement",
-    lambda options, context: ScoreAgreementAggregator(
+def _create_score_agreement(options: dict[str, Any], context: PluginContext) -> ScoreAgreementAggregator:
+    """Create score agreement aggregator.
+
+    ADR-002-B: Security policy is hard-coded in plugin __init__, not injected by factory.
+    """
+    return ScoreAgreementAggregator(
         criteria=options.get("criteria"),
         min_items=int(options.get("min_items", 2)),
         on_error=options.get("on_error", "abort"),
-    ),
+    )
+
+
+register_aggregation_plugin(
+    "score_agreement",
+    _create_score_agreement,
     schema=_AGREEMENT_SCHEMA,
+    declared_security_level="UNOFFICIAL",  # ADR-002-B: Aggregators work with experiment results
 )
 
 

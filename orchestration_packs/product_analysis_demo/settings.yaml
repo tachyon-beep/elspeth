@@ -1,0 +1,160 @@
+# Product Analysis Demo
+# Demonstrates advanced Jinja2 templating with real-world product analysis pipeline
+# Pipeline: CSV source → LLM transform → CSV sink with enriched analysis
+
+default:
+  datasource:
+    plugin: local_csv
+    determinism_level: guaranteed
+    options:
+      retain_local: false
+      path: orchestration_packs/product_analysis_demo/data/products.csv
+      schema:
+        product_id: str
+        name: str
+        price: float
+        category: str
+        tags: str
+        rating: float
+
+  llm:
+    plugin: http_openai
+    determinism_level: low
+    options:
+      api_base: "http://localhost:5000"
+      api_key: "test-key"
+      model: "local-model"
+      temperature: 0.7
+      max_tokens: 500
+      timeout: 120
+
+  sinks:
+    - plugin: csv
+      determinism_level: guaranteed
+      options:
+        path: outputs/product_analysis_demo/analysis_results.csv
+
+  prompt_packs:
+    product_analysis:
+      prompts:
+        system: |
+          You are a product analysis assistant that provides structured feedback.
+          Focus on market fit, pricing strategy, and customer appeal.
+
+        user: |
+          {# Advanced Jinja2 Template - Testing Multiple Features #}
+
+          Product Analysis Request
+          ========================
+
+          Product ID: {{ product_id | upper }}
+          Name: "{{ name }}"
+
+          {# Conditional formatting based on category #}
+          {% if category == "Electronics" %}
+          🔌 TECH PRODUCT ANALYSIS
+          {% elif category == "Food & Beverage" %}
+          🍽️ F&B PRODUCT ANALYSIS
+          {% elif category == "Sports" %}
+          🏃 SPORTS PRODUCT ANALYSIS
+          {% else %}
+          📦 GENERAL PRODUCT ANALYSIS
+          {% endif %}
+
+          Price Point: ${{ "%.2f" | format(price) }}
+          {% if price > 100 %}
+          💰 Premium pricing tier (>${{ 100 }})
+          {% elif price > 50 %}
+          💵 Mid-range pricing tier ($50-$100)
+          {% else %}
+          💸 Budget-friendly tier (<$50)
+          {% endif %}
+
+          Category: {{ category | title }}
+          Customer Rating: {{ rating }}/5.0 ⭐
+
+          {# Parse and iterate through tags #}
+          Product Tags:
+          {% set tag_list = tags.split(',') %}
+          {% for tag in tag_list %}
+            • {{ tag | trim | upper }}
+          {% endfor %}
+
+          {# Calculate derived metrics #}
+          Quality Score: {{ rating * 20 }}%
+          {% set price_per_star = price / rating %}
+          Value Ratio: ${{ "%.2f" | format(price_per_star) }} per rating point
+
+          {# Conditional recommendations #}
+          {% if rating >= 4.5 and price < 50 %}
+          🎯 PRIORITY: High-rated budget product - excellent value proposition
+          {% elif rating >= 4.5 %}
+          🎯 PRIORITY: Premium product with strong customer satisfaction
+          {% elif price < 30 %}
+          🎯 PRIORITY: Budget option - evaluate quality improvements
+          {% else %}
+          🎯 PRIORITY: Standard analysis required
+          {% endif %}
+
+          Task: Provide a JSON response with the following structure:
+          {
+            "market_appeal": <0-1 score>,
+            "pricing_assessment": "<underpriced|fair|overpriced>",
+            "strengths": ["<strength1>", "<strength2>"],
+            "recommendations": ["<rec1>", "<rec2>"],
+            "target_audience": "<description>"
+          }
+
+      prompt_fields:
+        - product_id
+        - name
+        - price
+        - category
+        - tags
+        - rating
+
+      prompt_defaults:
+        tags: "general"
+
+      criteria:
+        - name: market_analysis
+          template: |
+            Analyze market positioning for {{ product_id }}:
+            {{ name }} at ${{ price }} in {{ category | upper }}.
+            Rating: {{ rating }}/5.
+            Return JSON with "market_score" (0-1) and "positioning" (string).
+
+        - name: price_evaluation
+          template: |
+            {% set category_lower = category | lower %}
+            Evaluate pricing for {{ category_lower }} product "{{ name }}":
+            - Current price: ${{ price }}
+            - Rating: {{ rating }}/5
+            - Tags: {{ tags }}
+
+            {% if rating >= 4.5 %}
+            High customer satisfaction suggests pricing flexibility.
+            {% endif %}
+
+            Return JSON: {"price_score": <0-1>, "recommendation": "<keep|increase|decrease>"}
+
+      row_plugins:
+        - name: score_extractor
+          determinism_level: guaranteed
+          options:
+            key: market_appeal
+            parse_json_content: true
+            allow_missing: false
+            threshold_mode: gte
+            flag_field: analysis_flags
+            threshold: 0.6
+
+      aggregator_plugins:
+        - name: score_stats
+          determinism_level: guaranteed
+
+  prompt_pack: product_analysis
+  suite_defaults:
+    prompt_pack: product_analysis
+    concurrency:
+      enabled: false  # Disable for demo simplicity

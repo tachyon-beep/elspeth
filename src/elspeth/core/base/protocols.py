@@ -23,6 +23,7 @@ import pandas as pd
 if TYPE_CHECKING:
     from elspeth.core.base.schema import DataFrameSchema
     from elspeth.core.base.types import DeterminismLevel, SecurityLevel
+    from elspeth.core.security.secure_data import SecureDataFrame
 
 
 # ============================================================================
@@ -62,8 +63,12 @@ class OrchestratorPlugin(Protocol):
 class DataSource(Protocol):
     """Source node: where data comes from."""
 
-    def load(self) -> pd.DataFrame:
-        """Return the experiment dataset."""
+    def load(self) -> pd.DataFrame | SecureDataFrame:
+        """Return the experiment dataset.
+
+        ADR-002: Returns SecureDataFrame for security-aware datasources,
+        pd.DataFrame for legacy datasources. Consumers should handle both types.
+        """
         raise NotImplementedError
 
     def output_schema(self) -> type[DataFrameSchema] | None:  # pragma: no cover - optional
@@ -225,9 +230,13 @@ class CostTracker:
 
 @dataclass
 class ExperimentContext:
-    """Data structure passed to orchestrator containing runtime info."""
+    """Data structure passed to orchestrator containing runtime info.
 
-    data: pd.DataFrame
+    ADR-002: data field accepts both DataFrame and SecureDataFrame
+    to support security-aware orchestration.
+    """
+
+    data: pd.DataFrame | SecureDataFrame
     config: dict[str, Any]
 
 
@@ -264,6 +273,7 @@ __all__ = [
     # Orchestrator protocols
     "OrchestratorPlugin",
     # Node protocols
+    # NOTE: BasePlugin moved to src/elspeth/core/base/plugin.py (ADR-004: ABC with nominal typing)
     "DataSource",
     "ResultSink",
     "TransformNode",

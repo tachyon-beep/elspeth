@@ -6,6 +6,9 @@ import logging
 import math
 from typing import TYPE_CHECKING, Any, Sequence
 
+from elspeth.core.base.plugin import BasePlugin
+from elspeth.core.base.plugin_context import PluginContext
+from elspeth.core.base.types import SecurityLevel
 from elspeth.core.experiments.plugin_registry import register_baseline_plugin
 from elspeth.plugins.experiments._stats_helpers import (
     _benjamini_hochberg,
@@ -34,7 +37,7 @@ _SIGNIFICANCE_SCHEMA = {
 }
 
 
-class ScoreSignificanceBaselinePlugin:
+class ScoreSignificanceBaselinePlugin(BasePlugin):
     """Compare baseline and variant using effect sizes and t-tests."""
 
     name = "score_significance"
@@ -49,6 +52,11 @@ class ScoreSignificanceBaselinePlugin:
         family_size: int | None = None,
         on_error: str = "abort",
     ) -> None:
+        # ADR-002-B: Security policy is immutable and hard-coded in plugin code
+        super().__init__(
+            security_level=SecurityLevel.UNOFFICIAL,  # Baseline analyzers work with experiment results
+            allow_downgrade=True,  # Trusted to operate at lower levels if needed (ADR-005)
+        )
         self._criteria = set(criteria) if criteria else None
         self._min_samples = max(int(min_samples), 2)
         self._equal_var = bool(equal_var)
@@ -130,17 +138,26 @@ class ScoreSignificanceBaselinePlugin:
         return results
 
 
-register_baseline_plugin(
-    "score_significance",
-    lambda options, context: ScoreSignificanceBaselinePlugin(
+def _create_score_significance(options: dict[str, Any], context: PluginContext) -> ScoreSignificanceBaselinePlugin:
+    """Create score significance baseline plugin.
+
+    ADR-002-B: Security policy is hard-coded in plugin __init__, not injected by factory.
+    """
+    return ScoreSignificanceBaselinePlugin(
         criteria=options.get("criteria"),
         min_samples=int(options.get("min_samples", 2)),
         equal_var=bool(options.get("equal_var", False)),
         adjustment=options.get("adjustment", "none"),
         family_size=options.get("family_size"),
         on_error=options.get("on_error", "abort"),
-    ),
+    )
+
+
+register_baseline_plugin(
+    "score_significance",
+    _create_score_significance,
     schema=_SIGNIFICANCE_SCHEMA,
+    declared_security_level="UNOFFICIAL",  # ADR-002-B: Baseline analyzers work with experiment results
 )
 
 

@@ -60,8 +60,9 @@ def _build_runner(tmp_path: Path) -> ExperimentRunner:
         },
     )
     visual_sink.produces = lambda: []  # type: ignore[assignment]
-    llm = StaticLLMClient(content="Static completion", score=0.85)
+    llm = StaticLLMClient(content="Static completion", score=0.85)  # ADR-002-B: security hard-coded in plugin
 
+    # ADR-002-B: Security level hard-coded in plugins, not passed as parameters
     return ExperimentRunner(
         llm_client=llm,
         sinks=[analytics_sink, visual_sink],

@@ -1,4 +1,10 @@
-"""Suite reporting utilities producing consolidated artefacts."""
+"""Suite reporting utilities producing consolidated artefacts.
+
+TODO (FEAT-002): This module will be moved to plugins/nodes/sinks/reporting/suite_reporter.py
+                 in the namespace reorganization (BREAKING CHANGE - pre-1.0).
+                 See docs/implementation/FEAT-002-namespace-reorganization.md
+                 Expected: Post VULN-004 + FEAT-001 merge
+"""
 
 from __future__ import annotations
 
@@ -79,6 +85,9 @@ class SuiteReportGenerator:
     def _generate_individual_stats(self, output_root: Path) -> None:
         timestamp = datetime.now(timezone.utc).isoformat()
         for name, entry in self.results.items():
+            # Skip metadata keys (like _operating_security_level from ADR-002)
+            if name.startswith("_"):
+                continue
             payload = entry.get("payload")
             if not payload:
                 continue
@@ -105,7 +114,7 @@ class SuiteReportGenerator:
             "generated_at": datetime.now(timezone.utc).isoformat(),
         }
         for name, entry in self.results.items():
-            if name == self.baseline_name:
+            if name == self.baseline_name or name.startswith("_"):
                 continue
             payload = entry.get("payload")
             if not payload:
@@ -120,6 +129,9 @@ class SuiteReportGenerator:
     def _generate_recommendations(self, consolidated: Path) -> dict[str, Any]:
         recommendations: dict[str, Any] = {}
         for name, entry in self.results.items():
+            # Skip metadata keys (like _operating_security_level from ADR-002)
+            if name.startswith("_"):
+                continue
             payload = entry.get("payload") or {}
             aggregates = payload.get("aggregates") or {}
             candidate = aggregates.get("score_recommendation") or {}
@@ -173,6 +185,9 @@ class SuiteReportGenerator:
     def _generate_failure_report(self, consolidated: Path) -> None:
         records = {}
         for name, entry in self.results.items():
+            # Skip metadata keys (like _operating_security_level from ADR-002)
+            if name.startswith("_"):
+                continue
             failures = entry.get("payload", {}).get("failures")
             if failures:
                 records[name] = failures

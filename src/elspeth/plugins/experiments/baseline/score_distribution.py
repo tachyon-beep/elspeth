@@ -5,6 +5,9 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any, Sequence
 
+from elspeth.core.base.plugin import BasePlugin
+from elspeth.core.base.plugin_context import PluginContext
+from elspeth.core.base.types import SecurityLevel
 from elspeth.core.experiments.plugin_registry import register_baseline_plugin
 from elspeth.plugins.experiments._stats_helpers import (
     _collect_scores_by_criterion,
@@ -29,7 +32,7 @@ _DISTRIBUTION_SCHEMA = {
 }
 
 
-class ScoreDistributionAggregator:
+class ScoreDistributionAggregator(BasePlugin):
     """Assess distribution shifts between baseline and variant deployments."""
 
     name = "score_distribution"
@@ -41,6 +44,10 @@ class ScoreDistributionAggregator:
         min_samples: int = 2,
         on_error: str = "abort",
     ) -> None:
+        super().__init__(
+            security_level=SecurityLevel.UNOFFICIAL,  # ADR-002-B: Immutable policy
+            allow_downgrade=True  # ADR-002-B: Immutable policy
+        )
         self._criteria = set(criteria) if criteria else None
         self._min_samples = max(int(min_samples), 2)
         if on_error not in {"abort", "skip"}:
@@ -78,14 +85,20 @@ class ScoreDistributionAggregator:
         return results
 
 
-register_baseline_plugin(
-    "score_distribution",
-    lambda options, context: ScoreDistributionAggregator(
+def _create_score_distribution(options: dict[str, Any], context: PluginContext) -> ScoreDistributionAggregator:
+    """Create score distribution baseline plugin with smart security defaults."""
+    return ScoreDistributionAggregator(
         criteria=options.get("criteria"),
         min_samples=int(options.get("min_samples", 2)),
         on_error=options.get("on_error", "abort"),
-    ),
+    )
+
+
+register_baseline_plugin(
+    "score_distribution",
+    _create_score_distribution,
     schema=_DISTRIBUTION_SCHEMA,
+    declared_security_level="UNOFFICIAL",  # ADR-002-B: Baseline analyzers work with experiment results
 )
 
 

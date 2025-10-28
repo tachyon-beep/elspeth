@@ -5,6 +5,9 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any, Mapping
 
+from elspeth.core.base.plugin import BasePlugin
+from elspeth.core.base.plugin_context import PluginContext
+from elspeth.core.base.types import SecurityLevel
 from elspeth.core.experiments.plugin_registry import register_baseline_plugin
 
 if TYPE_CHECKING:
@@ -25,12 +28,22 @@ _DELTA_SCHEMA = {
 }
 
 
-class ScoreDeltaBaselinePlugin:
+class ScoreDeltaBaselinePlugin(BasePlugin):
     """Compare score statistics between baseline and variant."""
 
     name = "score_delta"
 
-    def __init__(self, *, metric: str = "mean", criteria: list[str] | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        metric: str = "mean",
+        criteria: list[str] | None = None,
+    ) -> None:
+        # ADR-002-B: Security policy is immutable and hard-coded in plugin code
+        super().__init__(
+            security_level=SecurityLevel.UNOFFICIAL,  # Baseline analyzers work with experiment results
+            allow_downgrade=True,  # Trusted to operate at lower levels if needed
+        )
         self._metric = metric
         self._criteria = set(criteria) if criteria else None
 
@@ -66,13 +79,22 @@ class ScoreDeltaBaselinePlugin:
         return dict(criteria)
 
 
-register_baseline_plugin(
-    "score_delta",
-    lambda options, context: ScoreDeltaBaselinePlugin(
+def _create_score_delta(options: dict[str, Any], context: PluginContext) -> ScoreDeltaBaselinePlugin:
+    """Create score delta baseline plugin.
+
+    ADR-002-B: Security policy is hard-coded in plugin __init__, not injected by factory.
+    """
+    return ScoreDeltaBaselinePlugin(
         metric=options.get("metric", "mean"),
         criteria=options.get("criteria"),
-    ),
+    )
+
+
+register_baseline_plugin(
+    "score_delta",
+    _create_score_delta,
     schema=_DELTA_SCHEMA,
+    declared_security_level="UNOFFICIAL",  # ADR-002-B: Baseline analyzers work with experiment results
 )
 
 

@@ -1,6 +1,7 @@
 import pandas as pd
 import pytest
 
+from elspeth.core.base.types import SecurityLevel
 from elspeth.plugins.nodes.sources.blob import BlobDataSource
 
 
@@ -19,15 +20,16 @@ def test_blob_datasource_loads_with_kwargs(monkeypatch, tmp_path):
         config_path=str(tmp_path / "config.yaml"),
         profile="alt",
         pandas_kwargs={"sep": ";"},
-        security_level="Secret",
         determinism_level="guaranteed",
         retain_local=False,
     )
 
     df = datasource.load()
 
-    assert df.attrs["security_level"] == "SECRET"
-    assert df.attrs["determinism_level"] == "guaranteed"
+    # SecureDataFrame wraps the DataFrame - access attrs via .data
+    assert df.data.attrs["security_level"] == "UNOFFICIAL"
+    assert df.data.attrs["determinism_level"] == "guaranteed"
+    assert df.security_level == SecurityLevel.UNOFFICIAL
     assert calls == {
         "path": str(tmp_path / "config.yaml"),
         "profile": "alt",
@@ -44,7 +46,6 @@ def test_blob_datasource_skip_on_error(monkeypatch, caplog, tmp_path):
     datasource = BlobDataSource(
         config_path=str(tmp_path / "config.yaml"),
         on_error="skip",
-        security_level="official-sensitive",
         determinism_level="guaranteed",
         retain_local=False,
     )
@@ -52,9 +53,11 @@ def test_blob_datasource_skip_on_error(monkeypatch, caplog, tmp_path):
     with caplog.at_level("WARNING"):
         df = datasource.load()
 
-    assert df.empty
-    assert df.attrs["security_level"] == "OFFICIAL: SENSITIVE"
-    assert df.attrs["determinism_level"] == "guaranteed"
+    # SecureDataFrame wraps the DataFrame - access via .data
+    assert df.data.empty
+    assert df.data.attrs["security_level"] == "UNOFFICIAL"
+    assert df.data.attrs["determinism_level"] == "guaranteed"
+    assert df.security_level == SecurityLevel.UNOFFICIAL
     assert any("Blob datasource failed" in record.message for record in caplog.records)
 
 

@@ -81,6 +81,35 @@ If you believe a compelling case exists for a non-permissive dependency, discuss
    - Link related issues or roadmap items.
    - Attach screenshots or artefact diffs when outputs change.
 
+## AI-Assisted Development
+
+Elspeth welcomes contributions created with AI coding assistants (GitHub Copilot, Claude Code, ChatGPT, Cursor, etc.). AI tools are powerful productivity multipliers and are **fully acceptable** for:
+
+- Writing code, tests, and documentation
+- Refactoring and optimization
+- Research and problem-solving
+- Review and analysis
+
+**Configuration Policy**: Personal AI assistant configurations (`CLAUDE.md`, `AGENTS.md`, `.claude/`, etc.) **must remain local** and are gitignored. These files contain individual preferences that may conflict with maintainer workflows.
+
+**Why this policy**:
+- AI tools are neutral; configuration preferences are personal
+- Prevents bikeshedding about AI behavior (verbosity, format, emoji usage)
+- Keeps the repository focused on code, not tooling preferences
+- Similar to `.editorconfig` or IDE settings: use what works for you locally
+
+**What to commit**:
+- ✅ Code, tests, documentation (regardless of how they were created)
+- ✅ Architecture decisions (ADRs), implementation plans
+- ✅ Shared tooling that benefits all contributors (pre-commit hooks, CI workflows)
+
+**What stays local**:
+- ❌ Personal AI configuration files (`CLAUDE.md`, `AGENTS.md`)
+- ❌ Tool-specific directories (`.claude/`, `.cursor/`, `.copilot/`)
+- ❌ Custom prompts or assistant instructions
+
+If you believe a shared AI configuration would benefit the project (e.g., universal linting rules via AI), discuss it with maintainers first. The default stance is "AI tools are great, personal configs stay local."
+
 ## Reporting Issues
 
 When filing a bug or feature request, include:

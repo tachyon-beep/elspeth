@@ -16,7 +16,6 @@ import inspect
 from typing import Any, Callable, Iterable
 
 from elspeth.core.base.plugin_context import PluginContext
-from elspeth.core.security import coalesce_security_level  # Still needed for validation functions
 from elspeth.core.validation.base import ConfigurationError
 
 from .cost_tracker import CostTracker
@@ -25,7 +24,7 @@ from .rate_limit import RateLimiter
 from .rate_limiter_registry import rate_limiter_registry
 
 
-def register_rate_limiter(name: str, factory: Callable[..., RateLimiter], schema: dict[str, Any] | None = None) -> None:
+def register_rate_limiter(name: str, factory: Callable[..., RateLimiter], schema: dict[str, Any] | None = None, *, declared_security_level: str = "UNOFFICIAL") -> None:
     """Register a custom rate limiter factory under the given name.
 
     NOTE: This function now delegates to the migrated rate_limiter_registry.
@@ -39,13 +38,13 @@ def register_rate_limiter(name: str, factory: Callable[..., RateLimiter], schema
         def _wrapped(options: dict[str, Any], _context: PluginContext) -> RateLimiter:
             return factory(options)
 
-        rate_limiter_registry.register(name, _wrapped, schema=schema)
+        rate_limiter_registry.register(name, _wrapped, schema=schema, declared_security_level=declared_security_level)
     else:
         # New style: factory(options, context) -> RateLimiter
-        rate_limiter_registry.register(name, factory, schema=schema)
+        rate_limiter_registry.register(name, factory, schema=schema, declared_security_level=declared_security_level)
 
 
-def register_cost_tracker(name: str, factory: Callable[..., CostTracker], schema: dict[str, Any] | None = None) -> None:
+def register_cost_tracker(name: str, factory: Callable[..., CostTracker], schema: dict[str, Any] | None = None, *, declared_security_level: str = "UNOFFICIAL") -> None:
     """Register a custom cost tracker factory under the given name.
 
     NOTE: This function now delegates to the migrated cost_tracker_registry.
@@ -59,10 +58,10 @@ def register_cost_tracker(name: str, factory: Callable[..., CostTracker], schema
         def _wrapped(options: dict[str, Any], _context: PluginContext) -> CostTracker:
             return factory(options)
 
-        cost_tracker_registry.register(name, _wrapped, schema=schema)
+        cost_tracker_registry.register(name, _wrapped, schema=schema, declared_security_level=declared_security_level)
     else:
         # New style: factory(options, context) -> CostTracker
-        cost_tracker_registry.register(name, factory, schema=schema)
+        cost_tracker_registry.register(name, factory, schema=schema, declared_security_level=declared_security_level)
 
 
 def create_rate_limiter(
@@ -126,6 +125,10 @@ def validate_rate_limiter(definition: dict[str, Any] | None) -> None:
     if not name or not isinstance(name, str):
         raise ConfigurationError("Rate limiter definition missing 'name'/'plugin' field or name is not a string")
 
+    # ADR-002-B: security_level must not be in definition (use declared_security_level at registration)
+    if "security_level" in definition:
+        raise ConfigurationError(f"security_level must not be in plugin definition for {name} (use factory parameter declared_security_level='...' at registration instead)")
+
     options = definition.get("options", {})
 
     if options is None:
@@ -133,19 +136,8 @@ def validate_rate_limiter(definition: dict[str, Any] | None) -> None:
     elif not isinstance(options, dict):
         raise ConfigurationError("Rate limiter options must be a mapping")
 
-    # Validate security level coalescing
     try:
-        level = coalesce_security_level(definition.get("security_level"), options.get("security_level"))
-    except ValueError as exc:
-        raise ConfigurationError(f"rate_limiter:{name}: {exc}") from exc
-
-    # Prepare payload and delegate to registry
-    prepared = dict(options)
-    prepared.pop("security_level", None)
-    prepared_with_context = {"security_level": level, **prepared}
-
-    try:
-        rate_limiter_registry.validate(name, prepared_with_context)
+        rate_limiter_registry.validate(name, options)
     except ValueError as exc:
         # BasePluginRegistry raises ValueError for unknown plugins,
         # but we need ConfigurationError for backward compatibility
@@ -165,6 +157,10 @@ def validate_cost_tracker(definition: dict[str, Any] | None) -> None:
     if not name or not isinstance(name, str):
         raise ConfigurationError("Cost tracker definition missing 'name'/'plugin' field or name is not a string")
 
+    # ADR-002-B: security_level must not be in definition (use declared_security_level at registration)
+    if "security_level" in definition:
+        raise ConfigurationError(f"security_level must not be in plugin definition for {name} (use factory parameter declared_security_level='...' at registration instead)")
+
     options = definition.get("options", {})
 
     if options is None:
@@ -172,19 +168,8 @@ def validate_cost_tracker(definition: dict[str, Any] | None) -> None:
     elif not isinstance(options, dict):
         raise ConfigurationError("Cost tracker options must be a mapping")
 
-    # Validate security level coalescing
     try:
-        level = coalesce_security_level(definition.get("security_level"), options.get("security_level"))
-    except ValueError as exc:
-        raise ConfigurationError(f"cost_tracker:{name}: {exc}") from exc
-
-    # Prepare payload and delegate to registry
-    prepared = dict(options)
-    prepared.pop("security_level", None)
-    prepared_with_context = {"security_level": level, **prepared}
-
-    try:
-        cost_tracker_registry.validate(name, prepared_with_context)
+        cost_tracker_registry.validate(name, options)
     except ValueError as exc:
         # BasePluginRegistry raises ValueError for unknown plugins,
         # but we need ConfigurationError for backward compatibility

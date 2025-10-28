@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from elspeth.core.base.plugin_context import PluginContext
-from elspeth.core.base.types import DeterminismLevel, SecurityLevel
+from elspeth.core.base.types import DeterminismLevel, SecurityLevel, SecurityLevel
 
 
 def test_plugin_context_non_empty_fields():

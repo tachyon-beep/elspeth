@@ -12,6 +12,7 @@ from __future__ import annotations
 import pytest
 
 from elspeth.core.base.plugin_context import PluginContext
+from elspeth.core.base.types import SecurityLevel
 from elspeth.plugins.experiments.baseline.score_delta import ScoreDeltaBaselinePlugin
 
 
@@ -19,17 +20,18 @@ from elspeth.plugins.experiments.baseline.score_delta import ScoreDeltaBaselineP
 def context():
     """Create test plugin context."""
     return PluginContext(
-        security_level="internal",
+        security_level=SecurityLevel.UNOFFICIAL,
         determinism_level="guaranteed",  # Use valid value
         provenance=["test"],
         plugin_kind="baseline_plugin",
-        plugin_name="score_delta",
+        plugin_name="score_delta"
     )
 
 
 def test_score_delta_empty_stats(context):
     """Test score_delta with empty/missing stats - line 41."""
-    plugin = ScoreDeltaBaselinePlugin(metric="mean")
+    plugin = ScoreDeltaBaselinePlugin(metric="mean"
+    )
 
     # Both baseline and variant have no score_stats
     baseline = {"aggregates": {}}
@@ -48,7 +50,9 @@ def test_score_delta_empty_stats(context):
 def test_score_delta_criteria_filtering(context):
     """Test criteria filtering - line 47."""
     # Only include specific criteria
-    plugin = ScoreDeltaBaselinePlugin(metric="mean", criteria=["accuracy"])
+    plugin = ScoreDeltaBaselinePlugin(metric="mean",
+        criteria=["accuracy"]
+    )
 
     baseline = {
         "aggregates": {
@@ -80,7 +84,8 @@ def test_score_delta_criteria_filtering(context):
 
 def test_score_delta_missing_metrics(context):
     """Test handling of missing metrics in criteria - line 51."""
-    plugin = ScoreDeltaBaselinePlugin(metric="median")
+    plugin = ScoreDeltaBaselinePlugin(metric="median"
+    )
 
     baseline = {
         "aggregates": {
@@ -167,7 +172,8 @@ def test_extract_stats_no_score_stats(context):
 
 def test_score_delta_with_criteria_none_values(context):
     """Test when criteria values are None."""
-    plugin = ScoreDeltaBaselinePlugin(metric="mean")
+    plugin = ScoreDeltaBaselinePlugin(metric="mean"
+    )
 
     baseline = {
         "aggregates": {
@@ -215,16 +221,22 @@ def test_score_delta_metric_variants():
     }
 
     # Test with std metric
-    plugin = ScoreDeltaBaselinePlugin(metric="std")
+    plugin = ScoreDeltaBaselinePlugin(
+        metric="std"
+    )
     result = plugin.compare(baseline, variant)
     assert result["accuracy"] == pytest.approx(0.05)
 
     # Test with min metric
-    plugin = ScoreDeltaBaselinePlugin(metric="min")
+    plugin = ScoreDeltaBaselinePlugin(
+        metric="min"
+    )
     result = plugin.compare(baseline, variant)
     assert result["accuracy"] == pytest.approx(0.1)
 
     # Test with max metric
-    plugin = ScoreDeltaBaselinePlugin(metric="max")
+    plugin = ScoreDeltaBaselinePlugin(
+        metric="max"
+    )
     result = plugin.compare(baseline, variant)
     assert result["accuracy"] == pytest.approx(0.05)

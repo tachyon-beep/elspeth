@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from elspeth.core.base.types import SecurityLevel
 from elspeth.plugins.nodes.sources.csv_local import CSVDataSource
 
 

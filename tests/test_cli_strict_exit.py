@@ -74,11 +74,20 @@ def test_cli_strict_mode_exits_on_sink_failure(monkeypatch, tmp_path: Path):
         def generate(self, *, system_prompt, user_prompt, metadata=None):
             return {"content": "ok", "raw": {}, "metadata": metadata or {}}
 
-    from elspeth.core.registries import llm as llm_reg_mod
+    from elspeth.core.registry import central_registry
 
-    monkeypatch.setattr(
-        llm_reg_mod, "llm_registry", type("R", (), {"create": staticmethod(lambda name, opts, parent_context=None: DummyLLM())})()
-    )
+    fake_llm_registry = type("R", (), {
+        "create": staticmethod(lambda name, opts, parent_context=None: DummyLLM()),
+        "validate": staticmethod(lambda name, opts: None)  # No-op validator
+    })()
+
+    original_get_registry = central_registry.get_registry
+    def mock_get_registry(plugin_type):
+        if plugin_type == "llm":
+            return fake_llm_registry
+        return original_get_registry(plugin_type)
+
+    monkeypatch.setattr(central_registry, "get_registry", mock_get_registry)
 
     args = cli.build_parser().parse_args(
         [

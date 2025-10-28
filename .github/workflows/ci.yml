@@ -60,11 +60,52 @@ jobs:
           # GITLEAKS_ENABLE_UPLOAD_ARTIFACT: 'true'
       - name: Upload gitleaks report (if generated)
         if: always() && hashFiles('results.sarif') != ''
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         with:
           name: gitleaks-report
           path: results.sarif
           retention-days: 7
+
+  production-data-guard:
+    name: Production Data Guard (orchestration_packs/)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Validate no production data in orchestration_packs/
+        run: |
+          echo "🔍 Scanning orchestration_packs/ for production data..."
+          echo ""
+
+          # Find all files in orchestration_packs/, excluding allowed patterns
+          DISALLOWED=$(find orchestration_packs/ -type f 2>/dev/null | \
+            grep -v -E '(\.gitkeep|README\.md|product_analysis_demo/)' || true)
+
+          if [ -n "$DISALLOWED" ]; then
+            echo "❌ ERROR: Production data found in orchestration_packs/"
+            echo ""
+            echo "Blocked files:"
+            echo "$DISALLOWED" | sed 's/^/  - /'
+            echo ""
+            echo "Why this failed:"
+            echo "  Only approved demos should be committed to orchestration_packs/"
+            echo "  Production runs with real data must NEVER be in the repository"
+            echo ""
+            echo "Where production data should go:"
+            echo "  ✅ outputs/ directory (gitignored)"
+            echo "  ✅ CI/CD pipelines (ephemeral)"
+            echo "  ✅ Secure artifact storage (external)"
+            echo ""
+            echo "This is Layer 3 of defense-in-depth (.gitignore + pre-commit + CI)"
+            exit 1
+          fi
+
+          echo "✅ No production data found - orchestration_packs/ is clean"
 
   ci-core:
     name: CI Core (Lint, Types, Tests)
@@ -112,7 +153,7 @@ jobs:
           bandit -q -r src --severity-level high --confidence-level high -f json -o bandit.json
       - name: Upload bandit report (JSON)
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         with:
           name: bandit-json
           path: bandit.json
@@ -130,7 +171,7 @@ jobs:
 
       - name: Upload semgrep report
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         with:
           name: semgrep-sarif
           path: semgrep.sarif
@@ -156,7 +197,7 @@ jobs:
 
       - name: Upload pip-audit artifact (if generated)
         if: always() && hashFiles('pip-audit.sarif') != ''
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         with:
           name: pip-audit-sarif
           path: pip-audit.sarif
@@ -167,7 +208,7 @@ jobs:
           python -m cyclonedx_py requirements requirements.lock --of JSON --output-file sbom.json --output-reproducible
 
       - name: Upload SBOM artefact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         with:
           name: sbom-json
           path: sbom.json
@@ -260,7 +301,7 @@ jobs:
           output-file: sbom-image.json
 
       - name: Upload SBOM artifacts
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         with:
           name: container-sboms
           path: |
@@ -290,7 +331,7 @@ jobs:
 
       - name: Upload Grype SARIF artifact
         if: always() && steps.grype.outputs.sarif != ''
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
         with:
           name: grype-sarif
           path: ${{ steps.grype.outputs.sarif }}

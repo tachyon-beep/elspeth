@@ -10,14 +10,30 @@ import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
+from elspeth.core.base.plugin import BasePlugin
 from elspeth.core.base.protocols import LLMClientProtocol
 from elspeth.core.base.types import SecurityLevel
 
 logger = logging.getLogger(__name__)
 
 
-class HttpOpenAIClient(LLMClientProtocol):
-    """Minimal client for standard /v1/chat/completions endpoints."""
+class HttpOpenAIClient(BasePlugin, LLMClientProtocol):
+    """Minimal client for standard /v1/chat/completions endpoints.
+
+    Security policy: Public HTTP OpenAI operates at OFFICIAL level (ADR-002-B).
+
+    Args:
+        api_base: Base URL for OpenAI-compatible API endpoint.
+        api_key: API key for authentication (optional if using api_key_env).
+        api_key_env: Environment variable name containing API key.
+        model: Model identifier to use.
+        temperature: Sampling temperature (0-2).
+        max_tokens: Maximum tokens in response.
+        timeout: Request timeout in seconds.
+        retry_total: Total number of retry attempts.
+        backoff_factor: Backoff factor for retries.
+        status_forcelist: HTTP status codes to retry on.
+    """
 
     def __init__(
         self,
@@ -32,14 +48,22 @@ class HttpOpenAIClient(LLMClientProtocol):
         retry_total: int = 3,
         backoff_factor: float = 0.5,
         status_forcelist: tuple[int, ...] | None = None,
-        security_level: SecurityLevel | None = None,
     ) -> None:
+        """Initialize HTTP OpenAI client with hard-coded security policy.
+
+        ADR-002-B: Security policy is immutable. HTTP OpenAI operates at OFFICIAL level
+        (public API endpoint) and can be trusted to downgrade.
+        """
+        super().__init__(
+            security_level=SecurityLevel.OFFICIAL,  # ADR-002-B: Immutable policy
+            allow_downgrade=True,  # ADR-002-B: Immutable policy
+        )
         self.api_base = api_base.rstrip("/")
         # Defense-in-depth: validate endpoint even when instantiated directly
         try:
             from elspeth.core.security import validate_http_api_endpoint
 
-            validate_http_api_endpoint(endpoint=self.api_base, security_level=security_level)
+            validate_http_api_endpoint(endpoint=self.api_base, security_level=SecurityLevel.OFFICIAL)
         except ValueError as exc:  # pragma: no cover - validation path exercised via registry tests
             # Surface endpoint validation issues as ValueError
             raise ValueError(f"HTTP API endpoint validation failed for '{self.api_base}': {exc}") from exc

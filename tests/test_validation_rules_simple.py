@@ -53,7 +53,11 @@ def test_validate_security_level_fields_empty_entry():
 
 
 def test_validate_security_level_fields_neither_set():
-    """Test security level validation when neither level is set."""
+    """Test security level validation when neither level is set.
+
+    ADR-002-B: security_level is OPTIONAL (defaults to UNOFFICIAL if not provided).
+    Validation should succeed when neither entry_level nor options_level is set.
+    """
     report = ValidationReport()
     _validate_security_level_fields(
         report,
@@ -61,8 +65,8 @@ def test_validate_security_level_fields_neither_set():
         entry_level=None,
         options_level=None,
     )
-    assert report.has_errors()
-    assert any("must declare a security_level" in msg.message for msg in report.errors)
+    # ADR-002-B: No error expected when security_level is omitted (optional)
+    assert not report.has_errors()
 
 
 def test_validate_plugin_reference_valid():

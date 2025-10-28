@@ -13,6 +13,7 @@ import matplotlib
 import matplotlib.pyplot as plt
 import seaborn as sns
 
+from elspeth.core.base.plugin import BasePlugin
 from elspeth.core.base.protocols import Artifact, ArtifactDescriptor, ResultSink
 from elspeth.core.base.types import DeterminismLevel, SecurityLevel
 from elspeth.core.security import ensure_determinism_level, ensure_security_level
@@ -20,8 +21,14 @@ from elspeth.core.security import ensure_determinism_level, ensure_security_leve
 logger = logging.getLogger(__name__)
 
 
-class BaseVisualSink(ResultSink):
+class BaseVisualSink(BasePlugin, ResultSink):
     """Base class for visual analytics sinks with shared validation and rendering.
+
+    Inherits from BasePlugin to provide security enforcement (ADR-002-B).
+
+    **IMPORTANT**: security_level and allow_downgrade are internal parameters for subclass
+    use only. Subclasses MUST hard-code these values per ADR-002-B immutable policy.
+    They are NOT exposed in YAML configuration.
 
     Provides common functionality for sinks that generate visual analytics artifacts:
     - Plot module loading (matplotlib, seaborn)
@@ -48,8 +55,12 @@ class BaseVisualSink(ResultSink):
         default_figure_size: tuple[float, float] = (10.0, 6.0),
         seaborn_style: str | None = "darkgrid",
         on_error: str = "abort",
+        security_level: SecurityLevel,  # ADR-002-B: Required - subclasses must hard-code (no default to prevent backdoor)
+        allow_downgrade: bool,  # ADR-002-B: Required - subclasses must hard-code explicit policy
         **_kwargs: Any,  # Reserved for future subclass extensions
     ):
+        # Initialize BasePlugin with security level and downgrade policy (ADR-002-B)
+        super().__init__(security_level=security_level, allow_downgrade=allow_downgrade)
         """Initialize base visual sink.
 
         Args:
@@ -73,8 +84,11 @@ class BaseVisualSink(ResultSink):
 
         # State tracking
         self._plot_modules: tuple[Any, Any, Any] | None = None
-        self._security_level: SecurityLevel | None = None
-        self._determinism_level: DeterminismLevel | None = None
+        # Runtime data classification tracking (separate from sink's security clearance)
+        # security_level (from BasePlugin) = sink's clearance level
+        # _artifact_security_level = runtime classification of written data (for artifact metadata)
+        self._artifact_security_level: SecurityLevel | None = None
+        self._artifact_determinism_level: DeterminismLevel | None = None
         self._last_written_files: list[tuple[Any, Path, dict[str, Any]]] = []
 
     # Validation methods ------------------------------------------------------
@@ -271,8 +285,8 @@ class BaseVisualSink(ResultSink):
             path=str(path),
             metadata=artifact_metadata,
             persist=True,
-            security_level=self._security_level,
-            determinism_level=self._determinism_level,
+            security_level=self._artifact_security_level,
+            determinism_level=self._artifact_determinism_level,
         )
 
     def _update_security_context_from_metadata(self, metadata: dict[str, Any] | None) -> None:
@@ -284,11 +298,11 @@ class BaseVisualSink(ResultSink):
         if metadata:
             level = metadata.get("security_level")
             det = metadata.get("determinism_level")
-            self._security_level = level if isinstance(level, SecurityLevel) else ensure_security_level(level)
-            self._determinism_level = det if isinstance(det, DeterminismLevel) else ensure_determinism_level(det)
+            self._artifact_security_level = level if isinstance(level, SecurityLevel) else ensure_security_level(level)
+            self._artifact_determinism_level = det if isinstance(det, DeterminismLevel) else ensure_determinism_level(det)
         else:
-            self._security_level = None
-            self._determinism_level = None
+            self._artifact_security_level = None
+            self._artifact_determinism_level = None
 
     # Abstract methods (must be implemented by subclasses) -------------------
 

@@ -5,6 +5,9 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
+from elspeth.core.base.plugin import BasePlugin
+from elspeth.core.base.plugin_context import PluginContext
+from elspeth.core.base.types import SecurityLevel
 from elspeth.core.experiments.plugin_registry import register_baseline_plugin
 from elspeth.plugins.experiments._stats_helpers import (
     _collect_paired_scores_by_criterion,
@@ -30,7 +33,7 @@ _SCORE_FLIP_SCHEMA = {
 }
 
 
-class ScoreFlipAnalysisAggregator:
+class ScoreFlipAnalysisAggregator(BasePlugin):
     """Analyze score direction changes (flips) between baseline and variant.
 
     Identifies fail→pass transitions, pass→fail transitions, major score drops,
@@ -51,6 +54,10 @@ class ScoreFlipAnalysisAggregator:
         major_change: float = 2.0,
         on_error: str = "abort",
     ) -> None:
+        super().__init__(
+            security_level=SecurityLevel.UNOFFICIAL,  # ADR-002-B: Immutable policy
+            allow_downgrade=True  # ADR-002-B: Immutable policy
+        )
         self._criteria = set(criteria) if criteria else None
         self._pass_threshold = float(pass_threshold)
         self._fail_threshold = float(fail_threshold)
@@ -153,16 +160,22 @@ class ScoreFlipAnalysisAggregator:
         }
 
 
-register_baseline_plugin(
-    "score_flip_analysis",
-    lambda options, context: ScoreFlipAnalysisAggregator(
+def _create_score_flip_analysis(options: dict[str, Any], context: PluginContext) -> ScoreFlipAnalysisAggregator:
+    """Create score_flip_analysis baseline plugin with smart security defaults."""
+    return ScoreFlipAnalysisAggregator(
         criteria=options.get("criteria"),
         pass_threshold=float(options.get("pass_threshold", 3.0)),
         fail_threshold=float(options.get("fail_threshold", 2.0)),
         major_change=float(options.get("major_change", 2.0)),
         on_error=options.get("on_error", "abort"),
-    ),
+    )
+
+
+register_baseline_plugin(
+    "score_flip_analysis",
+    _create_score_flip_analysis,
     schema=_SCORE_FLIP_SCHEMA,
+    declared_security_level="UNOFFICIAL",  # ADR-002-B: Baseline analyzers work with experiment results
 )
 
 

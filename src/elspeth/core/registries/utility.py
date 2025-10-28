@@ -21,9 +21,10 @@ def register_utility_plugin(
     factory: Callable[[dict[str, Any], PluginContext], Any],
     *,
     schema: Mapping[str, Any] | None = None,
+    declared_security_level: str | None = None,
 ) -> None:
     """Register a named utility plugin."""
-    _utility_registry.register(name, factory, schema=schema)
+    _utility_registry.register(name, factory, schema=schema, declared_security_level=declared_security_level)
 
 
 def create_utility_plugin(

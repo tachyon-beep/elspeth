@@ -5,6 +5,9 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any, Sequence
 
+from elspeth.core.base.plugin import BasePlugin
+from elspeth.core.base.plugin_context import PluginContext
+from elspeth.core.base.types import SecurityLevel
 from elspeth.core.experiments.plugin_registry import register_baseline_plugin
 from elspeth.plugins.experiments._stats_helpers import (
     _collect_scores_by_criterion,
@@ -30,7 +33,7 @@ _BAYESIAN_SCHEMA = {
 }
 
 
-class ScoreBayesianBaselinePlugin:
+class ScoreBayesianBaselinePlugin(BasePlugin):
     """Estimate posterior probability that a variant beats the baseline."""
 
     name = "score_bayes"
@@ -43,6 +46,10 @@ class ScoreBayesianBaselinePlugin:
         credible_interval: float = 0.95,
         on_error: str = "abort",
     ) -> None:
+        super().__init__(
+            security_level=SecurityLevel.UNOFFICIAL,  # ADR-002-B: Immutable policy
+            allow_downgrade=True  # ADR-002-B: Immutable policy
+        )
         self._criteria = set(criteria) if criteria else None
         self._min_samples = max(int(min_samples), 2)
         self._ci = min(max(float(credible_interval), 0.5), 0.999)
@@ -78,15 +85,21 @@ class ScoreBayesianBaselinePlugin:
         return results
 
 
-register_baseline_plugin(
-    "score_bayes",
-    lambda options, context: ScoreBayesianBaselinePlugin(
+def _create_score_bayesian(options: dict[str, Any], context: PluginContext) -> ScoreBayesianBaselinePlugin:
+    """Create score_bayesian baseline plugin with smart security defaults."""
+    return ScoreBayesianBaselinePlugin(
         criteria=options.get("criteria"),
         min_samples=int(options.get("min_samples", 2)),
         credible_interval=float(options.get("credible_interval", 0.95)),
         on_error=options.get("on_error", "abort"),
-    ),
+    )
+
+
+register_baseline_plugin(
+    "score_bayes",
+    _create_score_bayesian,
     schema=_BAYESIAN_SCHEMA,
+    declared_security_level="UNOFFICIAL",  # ADR-002-B: Baseline analyzers work with experiment results
 )
 
 

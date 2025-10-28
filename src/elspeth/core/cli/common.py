@@ -20,7 +20,10 @@ import pandas as pd
 import yaml
 
 import elspeth.core.registries.sink as sink_reg
+from elspeth.core.base.plugin_context import PluginContext
+from elspeth.core.base.types import SecurityLevel
 from elspeth.core.registries.sink import CAP_SUPPORTS_FOLDER_PATH_INJECTION
+from elspeth.core.security import resolve_determinism_level, resolve_security_level
 from elspeth.core.validation.base import ConfigurationError
 
 # Optional sink; not required for all CLI flows
@@ -87,8 +90,12 @@ def create_signed_bundle(
     df: pd.DataFrame,
     *,
     signing_key_env: str,
+    operating_level: SecurityLevel | str | None = None,
 ) -> Path | None:
     """Create a signed reproducibility bundle if the sink is available.
+
+    Args:
+        operating_level: Pipeline operating level (ADR-002) - required for audit trail
 
     Returns the output directory path on success, otherwise ``None``.
     """
@@ -106,6 +113,7 @@ def create_signed_bundle(
     )
     metadata = {
         "security_level": getattr(settings, "security_level", None),
+        "operating_level": operating_level,  # ADR-002: Pipeline operating level for artifact publishing
         "datasource_config": getattr(settings, "datasource_config", None),
         "source_data": df,
     }
@@ -123,15 +131,42 @@ def maybe_publish_artifacts_bundle(
     *,
     plugin_name: str | None,
     config_path: Path | str | None,
+    operating_level: SecurityLevel | str | None = None,
 ) -> None:
     """Publish the bundle via a configured sink if provided.
 
     The sink is created from ``plugin_name`` and optional configuration at
     ``config_path``. Sinks that support folder publishing may receive the
     ``folder_path`` automatically.
+
+    Args:
+        bundle_dir: Path to the signed bundle directory.
+        plugin_name: Name of the artifact publisher sink plugin.
+        config_path: Path to YAML/JSON configuration for the sink.
+        operating_level: Security level at which the bundle was created (pipeline operating level).
+            If None, reads from bundle manifest. This MUST match the classification of data in the bundle.
     """
     if not plugin_name:
         return
+
+    # ADR-002-B: Determine operating_level from bundle manifest if not provided
+    # Bundles contain classified data at the pipeline's operating level
+    if operating_level is None:
+        manifest_path = bundle_dir / "manifest.json"
+        if manifest_path.exists():
+            try:
+                manifest_data = json.loads(manifest_path.read_text(encoding="utf-8"))
+                # Try metadata.security_level first (pipeline operating level), then metadata.operating_level
+                operating_level = (
+                    manifest_data.get("metadata", {}).get("operating_level")
+                    or manifest_data.get("metadata", {}).get("security_level")
+                )
+            except (json.JSONDecodeError, OSError) as exc:
+                logger.warning("Failed to read bundle manifest for security_level: %s", exc)
+
+        if operating_level is None:
+            logger.error("Cannot determine operating_level for artifact bundle - refusing to publish (security risk)")
+            return
 
     cfg_path = Path(config_path) if config_path is not None else None
     opts: dict[str, Any] = {}
@@ -149,8 +184,22 @@ def maybe_publish_artifacts_bundle(
     # Auto-inject folder_path for sinks that advertise capability support
     if CAP_SUPPORTS_FOLDER_PATH_INJECTION in capabilities and not opts.get("folder_path"):
         opts["folder_path"] = str(bundle_dir)
+
+    # ADR-002-B: Create parent_context at bundle's operating level (bundles contain classified data)
+    # Type safety: Ensure security_level and determinism_level are proper enum types
+    sec_level = resolve_security_level(operating_level)
+    det_level = resolve_determinism_level("guaranteed")
+
+    artifact_context = PluginContext(
+        plugin_name="cli_artifact_publisher",
+        plugin_kind="artifact_sink",
+        security_level=sec_level,  # Match the bundle's classification level
+        determinism_level=det_level,
+        provenance=("cli.artifact_publisher",),
+    )
+
     try:
-        sink = sink_reg.sink_registry.create(plugin_name, opts, parent_context=None)
+        sink = sink_reg.sink_registry.create(plugin_name, opts, parent_context=artifact_context)
     except (ValueError, ConfigurationError, RuntimeError) as exc:
         logger.warning("Failed to create artifact sink '%s': %s", plugin_name, exc)
         return

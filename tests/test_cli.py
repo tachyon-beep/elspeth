@@ -137,7 +137,7 @@ def test_single_run_output_csv_includes_metrics(tmp_path, monkeypatch):
 
         return _Plugin()
 
-    register_row_plugin("single_run_row_plugin", make_row_plugin)
+    register_row_plugin("single_run_row_plugin", make_row_plugin, declared_security_level="OFFICIAL")
 
     output_file = tmp_path / "single.csv"
     sink_path = tmp_path / "sink.csv"
@@ -174,7 +174,6 @@ def test_single_run_output_csv_includes_metrics(tmp_path, monkeypatch):
             row_plugin_defs=[
                 {
                     "name": "single_run_row_plugin",
-                    "security_level": "OFFICIAL",
                     "determinism_level": "guaranteed",
                 }
             ],
@@ -389,11 +388,11 @@ def test_disable_metrics_strips_plugins(monkeypatch):
                 llm_prompt={"system": "sys", "user": "Prompt {col}"},
                 prompt_fields=["col"],
                 criteria=None,
-                row_plugin_defs=[{"name": "score_extractor", "security_level": "OFFICIAL", "determinism_level": "guaranteed"}],
-                aggregator_plugin_defs=[{"name": "score_stats", "security_level": "OFFICIAL", "determinism_level": "guaranteed"}],
+                row_plugin_defs=[{"name": "score_extractor", "determinism_level": "guaranteed"}],
+                aggregator_plugin_defs=[{"name": "score_stats", "determinism_level": "guaranteed"}],
                 sink_defs=None,
                 prompt_pack=None,
-                baseline_plugin_defs=[{"name": "score_delta", "security_level": "OFFICIAL", "determinism_level": "guaranteed"}],
+                baseline_plugin_defs=[{"name": "score_delta", "determinism_level": "guaranteed"}],
                 retry_config=None,
                 checkpoint_config=None,
                 llm_middleware_defs=None,
@@ -401,17 +400,17 @@ def test_disable_metrics_strips_plugins(monkeypatch):
             )
             self.suite_root = None
             self.suite_defaults = {
-                "row_plugins": [{"name": "score_extractor", "security_level": "OFFICIAL", "determinism_level": "guaranteed"}],
-                "aggregator_plugins": [{"name": "score_stats", "security_level": "OFFICIAL", "determinism_level": "guaranteed"}],
-                "baseline_plugins": [{"name": "score_delta", "security_level": "OFFICIAL", "determinism_level": "guaranteed"}],
+                "row_plugins": [{"name": "score_extractor", "determinism_level": "guaranteed"}],
+                "aggregator_plugins": [{"name": "score_stats", "determinism_level": "guaranteed"}],
+                "baseline_plugins": [{"name": "score_delta", "determinism_level": "guaranteed"}],
             }
             self.rate_limiter = None
             self.cost_tracker = None
             self.prompt_packs = {
                 "pack": {
-                    "row_plugins": [{"name": "score_extractor", "security_level": "OFFICIAL", "determinism_level": "guaranteed"}],
-                    "aggregator_plugins": [{"name": "score_stats", "security_level": "OFFICIAL", "determinism_level": "guaranteed"}],
-                    "baseline_plugins": [{"name": "score_delta", "security_level": "OFFICIAL", "determinism_level": "guaranteed"}],
+                    "row_plugins": [{"name": "score_extractor", "determinism_level": "guaranteed"}],
+                    "aggregator_plugins": [{"name": "score_stats", "determinism_level": "guaranteed"}],
+                    "baseline_plugins": [{"name": "score_delta", "determinism_level": "guaranteed"}],
                 }
             }
             self.prompt_pack = None

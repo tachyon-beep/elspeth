@@ -46,8 +46,6 @@ coverage.json
 .mypy_cache/
 .ruff_cache/
 .vscode/
-.claude/
-
 
 # Translations
 *.mo
@@ -111,9 +109,12 @@ cython_debug/
 # macOS
 .DS_Store
 
-# dotenv
+# dotenv (actual secrets only - allow .env.example, .env.template)
 .env
-.env.*
+.env.local
+.env.production
+.env.development
+.env.test
 
 # Config files with secrets
 config/blob_store.yaml
@@ -125,12 +126,31 @@ ENV/
 env.bak/
 venv.bak/
 
-# Project data/artifacts
+# Git worktrees (isolated development workspaces)
+.worktrees/
+
+# Project data/artifacts (production data never committed)
 /data/
-/outputs/
-/artifacts/
+/artifacts/*
+!/artifacts/.gitkeep
 /scorecard-artifacts/
-/orchestration_packs/*/
+
+# Orchestration Packs: Block all except approved demos
+# Defense-in-depth: Prevents production runs with sensitive data from being committed
+# Pre-commit hook + CI provide additional validation layers
+/orchestration_packs/*
+!/orchestration_packs/.gitkeep
+!/orchestration_packs/README.md
+!/orchestration_packs/product_analysis_demo/
+# Workaround: gitignore can't un-ignore subdirs after ignoring parent, so:
+/orchestration_packs/product_analysis_demo/*
+!/orchestration_packs/product_analysis_demo/**
+
+# Runtime outputs (production data never committed)
+/outputs/*
+!/outputs/.gitkeep
+/logs/*
+!/logs/.gitkeep
 # Legacy reference material (tracked separately)
 /external/
 # Quarantined historical scripts (tracked)
@@ -145,7 +165,6 @@ venv.bak/
 # MCP config files
 .mcp.json
 
-logs/
 audit_data/
 runlogs/
 gh_failed_logs/
@@ -155,5 +174,16 @@ sbom.json
 sbom.*.json
 audit.json
 
-# Agent instruction files (developer-local)
+# Developer-local agent configuration (not part of repo)
+# AI coding is acceptable, but personal AI preferences stay local
 AGENTS.md
+CLAUDE.md
+.claude/
+
+# MkDocs build output
+/site/
+/site-docs/site/
+
+# Auto-generated documentation
+site-docs/docs/api-reference/plugins/generated-*.md
+site-docs/docs/plugins/generated-catalogue.md

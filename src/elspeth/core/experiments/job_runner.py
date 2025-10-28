@@ -45,9 +45,8 @@ from elspeth.core.base.plugin_context import PluginContext
 from elspeth.core.base.types import SecurityLevel
 from elspeth.core.experiments.runner import ExperimentRunner
 from elspeth.core.pipeline.artifact_pipeline import ArtifactPipeline, SinkBinding
-from elspeth.core.registries.datasource import datasource_registry
 from elspeth.core.registries.llm import create_llm_from_definition
-from elspeth.core.registries.sink import sink_registry
+from elspeth.core.registry import central_registry
 from elspeth.core.security import ensure_determinism_level, ensure_security_level
 
 logger = logging.getLogger(__name__)
@@ -87,30 +86,30 @@ def _context_from_defaults(job: Mapping[str, Any]) -> PluginContext:
 
 
 def _create_datasource(defn: Mapping[str, Any], ctx: PluginContext):
+    datasource_registry = central_registry.get_registry("datasource")
     name = defn.get("plugin")
     if not isinstance(name, str) or not name:
         raise ValueError("datasource.plugin must be a non-empty string")
-    # Merge top-level security/determinism overrides into options before registry
+    # ADR-002-B: Do NOT merge security_level into options (plugin-author-owned)
+    # Only merge determinism_level (user-configurable)
     opts = dict(defn.get("options", {}) or {})
-    if defn.get("security_level") is not None:
-        opts["security_level"] = defn.get("security_level")
     if defn.get("determinism_level") is not None:
         opts["determinism_level"] = defn.get("determinism_level")
     return datasource_registry.create(name, opts, parent_context=ctx)
 
 
 def _create_sinks(defs: Sequence[Mapping[str, Any]], ctx: PluginContext):
+    sink_registry = central_registry.get_registry("sink")
     sinks = []
     for entry in defs:
         plugin = entry.get("plugin") or entry.get("name")
         if not isinstance(plugin, str) or not plugin:
             raise ValueError("sink.plugin must be a non-empty string")
-        # Merge top-level security/determinism overrides into options before registry
+        # ADR-002-B: Do NOT merge security_level into options (plugin-author-owned)
+        # Only merge determinism_level (user-configurable)
         raw_options = dict(entry.get("options", {}) or {})
         # Extract artifacts section so it doesn't get passed to constructor
         artifacts_cfg = raw_options.pop("artifacts", None)
-        if entry.get("security_level") is not None:
-            raw_options["security_level"] = entry.get("security_level")
         if entry.get("determinism_level") is not None:
             raw_options["determinism_level"] = entry.get("determinism_level")
         sink = sink_registry.create(plugin, raw_options, parent_context=ctx)
@@ -174,7 +173,7 @@ def run_job_config(job: Mapping[str, Any]) -> dict[str, Any]:
             {
                 "plugin": llm_def.get("plugin"),
                 "options": llm_def.get("options", {}),
-                "security_level": llm_def.get("security_level"),
+                # ADR-002-B: security_level is plugin-author-owned, not configurable
                 "determinism_level": llm_def.get("determinism_level"),
             },
             parent_context=ctx,
@@ -222,7 +221,8 @@ def run_job_config(job: Mapping[str, Any]) -> dict[str, Any]:
         return payload_out
 
     # Identity: no LLM present -> write rows as-is via ArtifactPipeline
-    results = [{"row": row.to_dict()} for _, row in df.iterrows()]
+    # df is SecureDataFrame - access underlying DataFrame via .data
+    results = [{"row": row.to_dict()} for _, row in df.data.iterrows()]
     payload: dict[str, Any] = {"results": results}
     metadata: dict[str, Any] = {
         "rows": len(results),

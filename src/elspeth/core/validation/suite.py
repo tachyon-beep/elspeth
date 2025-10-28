@@ -10,7 +10,7 @@ from typing import Any, Iterable, Mapping, Sequence
 import elspeth.core.registries.middleware as llm_middleware_registry
 from elspeth.core.controls import registry as controls_registry
 from elspeth.core.experiments import plugin_registry as exp_registry
-from elspeth.core.registries.sink import sink_registry
+from elspeth.core.registry import central_registry
 from elspeth.core.validation.base import ConfigurationError, ValidationReport, validate_schema
 
 from .rules import (
@@ -110,6 +110,7 @@ def _load_experiment_summary(
 ) -> _ExperimentSummary | None:
     """Load and validate an experiment directory returning its summary."""
 
+    sink_registry = central_registry.get_registry("sink")
     config_path = folder / "config.json"
     if not config_path.exists():
         return None

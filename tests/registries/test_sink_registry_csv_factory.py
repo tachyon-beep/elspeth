@@ -32,7 +32,7 @@ def test_csv_factory_uses_preloaded_module(monkeypatch, tmp_path):
 
     sink = sink_registry.create(
         name="csv",
-        options={"security_level": "internal", "path": str(tmp_path / "out.csv")},
+        options={"path": str(tmp_path / "out.csv")},
         require_determinism=False,
     )
 
@@ -54,7 +54,7 @@ def test_csv_factory_fallback_to_export(monkeypatch, tmp_path):
 
     sink = sink_registry.create(
         name="csv",
-        options={"security_level": "internal", "path": str(tmp_path / "out.csv")},
+        options={"path": str(tmp_path / "out.csv")},
         require_determinism=False,
     )
 

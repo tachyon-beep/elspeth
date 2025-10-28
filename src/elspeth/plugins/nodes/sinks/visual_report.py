@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from elspeth.core.base.protocols import Artifact, ArtifactDescriptor
+from elspeth.core.base.types import SecurityLevel
 
 from ._visual_base import BaseVisualSink
 
@@ -42,6 +43,8 @@ class VisualAnalyticsSink(BaseVisualSink):
             default_figure_size=(8.0, 4.5),  # Custom default for this sink
             seaborn_style=seaborn_style,
             on_error=on_error,
+            security_level=SecurityLevel.UNOFFICIAL,  # ADR-002-B: Immutable policy
+            allow_downgrade=True,  # ADR-002-B: Immutable policy
         )
 
         # Sink-specific parameters
@@ -202,8 +205,8 @@ class VisualAnalyticsSink(BaseVisualSink):
                 path=str(path),
                 metadata=metadata,
                 persist=True,
-                security_level=self._security_level,
-                determinism_level=self._determinism_level,
+                security_level=self._artifact_security_level,
+                determinism_level=self._artifact_determinism_level,
             )
             for key in keys:
                 artifacts[key] = artifact

@@ -4,15 +4,17 @@ from __future__ import annotations
 
 from typing import Any
 
+from elspeth.core.base.plugin import BasePlugin
 from elspeth.core.base.plugin_context import PluginContext
 from elspeth.core.base.protocols import LLMClientProtocol
+from elspeth.core.base.types import SecurityLevel
 from elspeth.core.experiments.plugin_registry import register_aggregation_plugin
 from elspeth.core.prompts.engine import PromptEngine
 from elspeth.core.registries.llm import create_llm_from_definition
 from elspeth.plugins.orchestrators.experiment.protocols import AggregationExperimentPlugin
 
 
-class PromptVariantsAggregator(AggregationExperimentPlugin):
+class PromptVariantsAggregator(BasePlugin, AggregationExperimentPlugin):
     """Generate alternative prompt phrasings using a secondary LLM."""
 
     name = "prompt_variants"
@@ -28,6 +30,12 @@ class PromptVariantsAggregator(AggregationExperimentPlugin):
         max_attempts: int = 3,
         variant_system_prompt: str | None = None,
     ) -> None:
+        # ADR-002-B: Security policy is immutable and hard-coded in plugin code
+        # Aggregators work with UNOFFICIAL experiment results (not classified source data)
+        super().__init__(
+            security_level=SecurityLevel.UNOFFICIAL,
+            allow_downgrade=True  # ADR-005: Aggregation plugins trusted to downgrade
+        )
         self.variant_llm = variant_llm
         self.prompt_template = prompt_template
         self.count = max(int(count or 1), 1)
@@ -188,6 +196,7 @@ register_aggregation_plugin(
         "required": ["prompt_template"],
         "additionalProperties": True,
     },
+    declared_security_level="UNOFFICIAL",  # ADR-002-B: Aggregators work with experiment results
 )
 
 

@@ -115,8 +115,8 @@ def test_orchestrator_single_run_executes_plugins(monkeypatch):
 
         return _Plugin()
 
-    register_row_plugin("single_run_row_plugin", make_row_plugin)
-    register_aggregation_plugin("single_run_agg_plugin", make_agg_plugin)
+    register_row_plugin("single_run_row_plugin", make_row_plugin, declared_security_level="OFFICIAL")
+    register_aggregation_plugin("single_run_agg_plugin", make_agg_plugin, declared_security_level="OFFICIAL")
 
     class DummyDatasource:
         def load(self):
@@ -143,8 +143,8 @@ def test_orchestrator_single_run_executes_plugins(monkeypatch):
         config=OrchestratorConfig(
             llm_prompt={"system": "sys", "user": "Hello {name}"},
             prompt_fields=["APPID", "name"],
-            row_plugin_defs=[{"name": "single_run_row_plugin", "security_level": "OFFICIAL", "determinism_level": "guaranteed"}],
-            aggregator_plugin_defs=[{"name": "single_run_agg_plugin", "security_level": "OFFICIAL", "determinism_level": "guaranteed"}],
+            row_plugin_defs=[{"name": "single_run_row_plugin", "determinism_level": "guaranteed"}],
+            aggregator_plugin_defs=[{"name": "single_run_agg_plugin", "determinism_level": "guaranteed"}],
         ),
     )
 

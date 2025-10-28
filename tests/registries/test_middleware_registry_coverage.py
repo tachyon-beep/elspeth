@@ -27,11 +27,12 @@ def test_middleware_definition_validation_and_creation():
             "required": ["tag"],
             "additionalProperties": False,
         },
+        declared_security_level="OFFICIAL",
     )
 
     # Valid definition should pass
     validate_middleware_definition(
-        {"name": "dummy", "security_level": "OFFICIAL", "determinism_level": "guaranteed", "options": {"tag": "x"}}
+        {"name": "dummy", "determinism_level": "guaranteed", "options": {"tag": "x"}}
     )
 
     # Optional batch creation with None input returns empty list
@@ -40,7 +41,7 @@ def test_middleware_definition_validation_and_creation():
     # Create single middleware using controls pattern
     parent = PluginContext(plugin_name="suite", plugin_kind="suite", security_level="OFFICIAL")
     mw = create_middleware(
-        {"name": "dummy", "security_level": "OFFICIAL", "determinism_level": "guaranteed", "options": {"tag": "x"}},
+        {"name": "dummy", "determinism_level": "guaranteed", "options": {"tag": "x"}},
         parent_context=parent,
     )
     assert mw is not None

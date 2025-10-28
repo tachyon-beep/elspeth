@@ -11,26 +11,24 @@ def test_datasource_registry_csv_variants(tmp_path):
     p = tmp_path / "data.csv"
     p.write_text("id\n1\n", encoding="utf-8")
 
-    # CSV blob
+    # CSV blob (ADR-002-B: security_level removed - plugin hard-codes it)
     ds1 = datasource_registry.create(
         name="csv_blob",
         options={
             "path": str(p),
             "retain_local": False,
-            "security_level": "OFFICIAL",
             "determinism_level": "guaranteed",
         },
         require_determinism=True,
     )
     assert hasattr(ds1, "load")
 
-    # Local CSV
+    # Local CSV (ADR-002-B: security_level removed - plugin hard-codes it)
     ds2 = datasource_registry.create(
         name="local_csv",
         options={
             "path": str(p),
             "retain_local": False,
-            "security_level": "OFFICIAL",
             "determinism_level": "guaranteed",
         },
         require_determinism=True,
@@ -46,13 +44,13 @@ def test_datasource_registry_azure_blob_validation(monkeypatch, tmp_path):
     monkeypatch.setattr(mod, "validate_azure_blob_endpoint", lambda **_k: None)
 
     # Use a fake config path; create() should still succeed due to stubs
+    # ADR-002-B: security_level removed - plugin hard-codes it
     ds = datasource_registry.create(
         name="azure_blob",
         options={
             "config_path": str(tmp_path / "blob.yaml"),
             "profile": "default",
             "retain_local": False,
-            "security_level": "OFFICIAL",
             "determinism_level": "guaranteed",
         },
         require_determinism=True,
@@ -72,6 +70,7 @@ def test_datasource_registry_azure_blob_validation_error(monkeypatch, tmp_path):
 
     monkeypatch.setattr(mod, "validate_azure_blob_endpoint", _raise)
 
+    # ADR-002-B: security_level removed - plugin hard-codes it
     with pytest.raises(ConfigurationError):
         datasource_registry.create(
             name="azure_blob",
@@ -79,7 +78,6 @@ def test_datasource_registry_azure_blob_validation_error(monkeypatch, tmp_path):
                 "config_path": str(tmp_path / "blob.yaml"),
                 "profile": "default",
                 "retain_local": False,
-                "security_level": "OFFICIAL",
                 "determinism_level": "guaranteed",
             },
             require_determinism=True,

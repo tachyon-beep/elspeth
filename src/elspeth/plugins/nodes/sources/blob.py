@@ -10,15 +10,19 @@ from typing import Any
 import pandas as pd
 
 from elspeth.adapters import load_blob_csv
+from elspeth.core.base.plugin import BasePlugin
 from elspeth.core.base.protocols import DataSource
 from elspeth.core.base.types import DeterminismLevel, SecurityLevel
-from elspeth.core.security import ensure_determinism_level, ensure_security_level
+from elspeth.core.security import SecureDataFrame, ensure_determinism_level
 
 logger = logging.getLogger(__name__)
 
 
-class BlobDataSource(DataSource):
-    """Read CSV data from Azure Blob Storage using configured profiles."""
+class BlobDataSource(BasePlugin, DataSource):
+    """Read CSV data from Azure Blob Storage using configured profiles.
+
+    Inherits from BasePlugin to provide security enforcement (ADR-004).
+    """
 
     def __init__(
         self,
@@ -27,23 +31,34 @@ class BlobDataSource(DataSource):
         profile: str = "default",
         pandas_kwargs: dict[str, Any] | None = None,
         on_error: str = "abort",
-        security_level: SecurityLevel | None = None,
         determinism_level: DeterminismLevel | None = None,
         retain_local: bool,  # REQUIRED - no default
         retain_local_path: str | None = None,
-    ):
+    ) -> None:
+        # Initialize BasePlugin with security level and downgrade policy (ADR-002-B)
+        super().__init__(
+            security_level=SecurityLevel.UNOFFICIAL,  # ADR-002-B: Immutable policy
+            allow_downgrade=True,  # ADR-002-B: Immutable policy
+        )
+
         self.config_path = config_path
         self.profile = profile
         self.pandas_kwargs = pandas_kwargs or {}
         if on_error not in {"abort", "skip"}:
             raise ValueError("on_error must be 'abort' or 'skip'")
         self.on_error = on_error
-        self.security_level = ensure_security_level(security_level)
+        # security_level is now set by BasePlugin.__init__() (ADR-004)
         self.determinism_level = ensure_determinism_level(determinism_level)
         self.retain_local = retain_local
         self.retain_local_path = retain_local_path
 
-    def load(self) -> pd.DataFrame:
+    def load(self) -> SecureDataFrame:
+        """Load blob data with security enforcement.
+
+        Returns:
+            SecureDataFrame: Wrapped DataFrame with immutable security level metadata.
+                             Created via datasource-trusted factory method per ADR-002-A.
+        """
         import time
 
         # Log connection attempt
@@ -93,8 +108,8 @@ class BlobDataSource(DataSource):
                         metadata={"local_path": str(local_path)},
                     )
 
-            # load_blob_csv return type not fully annotated; returns DataFrame at runtime
-            return df  # type: ignore[no-any-return]
+            # ADR-002-A: Wrap DataFrame with SecureDataFrame using datasource-trusted factory
+            return SecureDataFrame.create_from_datasource(df, self.security_level)
         except Exception as exc:
             if plugin_logger:
                 plugin_logger.log_error(
@@ -108,7 +123,8 @@ class BlobDataSource(DataSource):
                 df = pd.DataFrame()
                 df.attrs["security_level"] = self.security_level
                 df.attrs["determinism_level"] = self.determinism_level
-                return df
+                # ADR-002-A: Wrap empty DataFrame with SecureDataFrame
+                return SecureDataFrame.create_from_datasource(df, self.security_level)
             raise
 
     def _save_local_copy(self, df: pd.DataFrame) -> Path:

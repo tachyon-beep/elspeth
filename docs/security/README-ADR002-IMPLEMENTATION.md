@@ -1,8 +1,14 @@
 # ADR-002 Implementation Guide - START HERE
 
-**Status**: Ready for Implementation (after PR #11 merge)
-**Estimated Effort**: 4-6 hours
-**Priority**: HIGH (Certification Blocker)
+**⚠️ WARNING - DOCUMENT REQUIRES REVIEW**
+
+This document was written when Bell-LaPadula validation logic was INVERTED. Error messages
+and some descriptions reflect WRONG semantics. Use corrected ADR-002 specification instead.
+
+**Status**: ✅ Phase 0-4 Complete | ✅ ADR-002-A Complete
+**Effort**: 11.5h spent / 16-20h estimated (100% complete, under budget)
+**Priority**: HIGH (Certification Blocker) - Implementation COMPLETE, awaiting review
+**Latest**: 3aaba5e - Documentation completion per functional review | 2025-10-26 - Warning added
 
 ---
 
@@ -10,7 +16,9 @@
 
 **Problem**: ADR-002 (accepted 2025-10-23) requires two-layer security enforcement:
 1. ✅ **Plugin-level** - Child plugins can't downgrade parent security levels (DONE - 9 tests passing)
-2. ❌ **Suite-level** - Orchestrator operates at minimum clearance, high-security components refuse low-clearance envelopes (NOT IMPLEMENTED)
+2. 🔄 **Suite-level** - Orchestrator operates at minimum clearance, high-security components refuse low-clearance envelopes (IN PROGRESS)
+   - ✅ Phase 1: Core primitives (SecureDataFrame, envelope computation, BasePlugin) - 14/14 tests passing
+   - 🔄 Phase 2: Suite runner integration (start-time validation, runtime failsafe)
 
 **Solution**: Add "minimum clearance envelope" model to `suite_runner.py` - orchestrator computes operating level, validates ALL components before data retrieval, with runtime failsafes in plugins.
 
@@ -210,15 +218,25 @@ def get_data(self, context):
 
 ### Start-Time (Normal Path)
 ```
+⚠️ WRONG ERROR MESSAGE (based on inverted logic):
 SecurityError: Component 'datasource' requires SECRET but orchestrator
-operating at UNOFFICIAL. Job cannot start - remove low-security component
-or create separate pipeline. ADR-002 fail-fast enforcement.
+operating at UNOFFICIAL.
+
+✅ CORRECT ERROR MESSAGE (Bell-LaPadula "no read up"):
+SecurityError: Component 'datasource' has clearance OFFICIAL but pipeline
+requires SECRET. Job cannot start - component has insufficient clearance.
+ADR-002 fail-fast enforcement.
 ```
 
 ### Runtime (Failsafe - Should Never Happen)
 ```
+⚠️ WRONG ERROR MESSAGE (based on inverted logic):
 SecurityError: RUNTIME FAILSAFE: Datasource requires SECRET but orchestrator
-operating at UNOFFICIAL. Refusing to hand over data. This should have been
+operating at UNOFFICIAL.
+
+✅ CORRECT ERROR MESSAGE (Bell-LaPadula "no read up"):
+SecurityError: RUNTIME FAILSAFE: Datasource has clearance OFFICIAL but pipeline
+requires SECRET. Insufficient clearance - refusing to operate. This should have been
 caught at start-time - possible security bypass attempt.
 ADR-002 defense-in-depth enforcement.
 ```

@@ -27,18 +27,24 @@ Update 2025-10-12: Signed artifact enforcement resides in `src/elspeth/plugins/n
   anything up to `SECRET`.
 - **Pipeline-wide minimum evaluation (proactive prevention)** – Before execution the suite
   runner evaluates the minimum security level across all configured components (datasource,
-  LLM, middleware, sinks). If any component advertises a lower level, the experiment inherits
-  that minimum; higher-classified sources refuse to operate below their clearance, causing the
-  run to abort before data is retrieved.
+  LLM, middleware, sinks). If any component has lower clearance than the pipeline requires,
+  that component refuses to operate (Bell-LaPadula "no read up"). Components with higher
+  clearance are trusted to operate at lower levels, filtering data appropriately.
 
 ```yaml
-# This configuration fails safely before touching SecretDB:
-datasource: SecretDB  # security_level: SECRET
+# Example: UNOFFICIAL datasource in SECRET pipeline - FAILS
+datasource: TestDB       # security_level: UNOFFICIAL (insufficient clearance)
 sinks:
-  - EncryptedVault    # security_level: SECRET
-  - DebugLogger       # security_level: UNOFFICIAL  ← lowers pipeline
+  - EncryptedVault       # security_level: SECRET
+  - SecureStorage        # security_level: SECRET
+# Pipeline minimum = UNOFFICIAL, but FAILS because datasource can't be upgraded to SECRET
 
-# Pipeline level => UNOFFICIAL; SecretDB refuses to operate.
+# Example: SECRET datasource with UNOFFICIAL sink - SUCCEEDS at UNOFFICIAL level
+datasource: SecretDB     # security_level: SECRET (can operate at lower levels)
+sinks:
+  - EncryptedVault       # security_level: SECRET
+  - DebugLogger          # security_level: UNOFFICIAL  ← lowers pipeline to UNOFFICIAL
+# Pipeline minimum = UNOFFICIAL, SecretDB filters data to UNOFFICIAL, pipeline succeeds
 ```
 
 This defence-in-depth pairing stops both inadvertent misconfigurations and malicious downgrade

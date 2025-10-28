@@ -24,20 +24,28 @@ This document specifies the **missing suite-level enforcement** that must be imp
 **From ADR-002 lines 52-60:**
 
 ```python
-# Example: SECRET datasource with misconfigured sink
-datasource.security_level = SecurityLevel.SECRET
+# Example: UNOFFICIAL datasource in SECRET pipeline (insufficient clearance)
+datasource.security_level = SecurityLevel.OFFICIAL  # Only cleared for OFFICIAL
 llm_transform.security_level = SecurityLevel.SECRET
 sink_prod.security_level = SecurityLevel.SECRET
-sink_debug.security_level = SecurityLevel.UNOFFICIAL  # misconfigured
 
 # Compute pipeline minimum
-pipeline_level = min(SecurityLevel.SECRET, SecurityLevel.SECRET,
-                     SecurityLevel.SECRET, SecurityLevel.UNOFFICIAL)
-# => SecurityLevel.UNOFFICIAL
+pipeline_level = min(SecurityLevel.OFFICIAL, SecurityLevel.SECRET, SecurityLevel.SECRET)
+# => SecurityLevel.OFFICIAL
 
-# Datasource refuses to initialise below its classification
-if datasource.security_level > pipeline_level:
-    raise SecurityError("Cannot operate SECRET datasource in UNOFFICIAL pipeline")
+# Each component validates: Can I operate at this level?
+# Datasource: OFFICIAL clearance, asked to operate at OFFICIAL → ✅ OK
+# LLM: SECRET clearance, asked to operate at OFFICIAL → ✅ OK (can downgrade)
+# Sink: SECRET clearance, asked to operate at OFFICIAL → ✅ OK (can downgrade)
+
+# Now suppose pipeline requires SECRET (misconfigured - datasource has insufficient clearance):
+pipeline_level_secret = SecurityLevel.SECRET
+
+# Datasource refuses to operate ABOVE its clearance (Bell-LaPadula "no read up")
+if pipeline_level_secret > datasource.security_level:
+    raise SecurityError(
+        "Cannot operate OFFICIAL datasource in SECRET pipeline - insufficient clearance"
+    )
 ```
 
 **Key requirement**: Fail-fast BEFORE data retrieval.
@@ -174,17 +182,19 @@ self.operating_level = orchestrator_operating_level
 **Defense in depth**: Each plugin ALSO validates at runtime:
 ```python
 class SecretDataSource:
-    security_level = SecurityLevel.SECRET
+    security_level = SecurityLevel.SECRET  # Clearance: up to SECRET
 
     def get_data(self, orchestrator_context):
         # Runtime validation (even if start-time check somehow bypassed)
-        if orchestrator_context.operating_level < self.security_level:
+        # Bell-LaPadula "no read up": Reject if asked to operate ABOVE clearance
+        if orchestrator_context.operating_level > self.security_level:
             raise SecurityError(
-                f"Datasource requires {self.security_level}, "
-                f"orchestrator operating at {orchestrator_context.operating_level}. "
-                f"Refusing to handle data."
+                f"Datasource cleared for {self.security_level}, "
+                f"but orchestrator requires {orchestrator_context.operating_level}. "
+                f"Insufficient clearance - refusing to operate."
             )
-        return self._retrieve_data()
+        # If operating_level <= clearance, we can operate (possibly filtering data)
+        return self._retrieve_filtered_data(orchestrator_context.operating_level)
 ```
 
 **Current behavior**: No orchestrator operating level concept exists. No start-time validation. No runtime validation.
@@ -344,15 +354,18 @@ def _compute_pipeline_security_level(
 def _validate_datasource_security(self, pipeline_min_level: str) -> None:
     """Validate datasource can operate at pipeline minimum security level.
 
-    ADR-002 Requirement: Datasources refuse to initialize below their classification.
-    This prevents SECRET data from being retrieved into a pipeline that contains
-    UNOFFICIAL sinks.
+    ADR-002 Requirement: Datasources refuse to operate ABOVE their clearance.
+    This prevents insufficient-clearance datasources from participating in
+    higher-classification pipelines (Bell-LaPadula "no read up" rule).
+
+    Note: Datasources with HIGHER clearance CAN operate at LOWER pipeline levels
+    (trusted to filter data appropriately, validated through certification).
 
     Args:
         pipeline_min_level: Minimum security level across pipeline components
 
     Raises:
-        SecurityError: If datasource security_level > pipeline_min_level
+        SecurityError: If pipeline_min_level > datasource security_level
     """
     from elspeth.core.security import SecurityLevel
 
@@ -367,11 +380,11 @@ def _validate_datasource_security(self, pipeline_min_level: str) -> None:
     datasource_level = SecurityLevel.from_string(datasource_level_str)
     pipeline_level = SecurityLevel.from_string(pipeline_min_level)
 
-    # Fail fast if datasource is more restrictive than pipeline minimum
-    if datasource_level > pipeline_level:
+    # Fail fast if pipeline requires higher clearance than datasource has
+    if pipeline_level > datasource_level:
         raise SecurityError(
             f"Cannot operate {datasource_level.value} datasource in {pipeline_level.value} pipeline. "
-            f"ADR-002 fail-fast enforcement: Remove or upgrade low-security component before data retrieval. "
+            f"ADR-002 fail-fast enforcement: Datasource has insufficient clearance. "
             f"Minimum pipeline security level is {pipeline_level.value}, but datasource requires {datasource_level.value}."
         )
 ```

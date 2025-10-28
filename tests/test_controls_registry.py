@@ -11,8 +11,6 @@ def test_create_rate_limiter_validates_schema():
         controls_registry.create_rate_limiter(
             {
                 "plugin": "fixed_window",
-                "security_level": "OFFICIAL",
-                "determinism_level": "guaranteed",
                 "options": {"requests": 0, "per_seconds": 0},
             }
         )
@@ -20,7 +18,7 @@ def test_create_rate_limiter_validates_schema():
 
 def test_validate_rate_limiter_unknown():
     with pytest.raises(ConfigurationError):
-        controls_registry.validate_rate_limiter({"plugin": "missing", "security_level": "OFFICIAL", "determinism_level": "guaranteed"})
+        controls_registry.validate_rate_limiter({"plugin": "missing"})
 
 
 def test_register_custom_rate_limiter(monkeypatch):
@@ -30,9 +28,9 @@ def test_register_custom_rate_limiter(monkeypatch):
         assert options == {"tag": "blue"}
         return created
 
-    controls_registry.register_rate_limiter("custom", factory)
+    controls_registry.register_rate_limiter("custom", factory, declared_security_level="OFFICIAL")
     limiter = controls_registry.create_rate_limiter(
-        {"plugin": "custom", "security_level": "OFFICIAL", "determinism_level": "guaranteed", "options": {"tag": "blue"}}
+        {"plugin": "custom", "determinism_level": "guaranteed", "options": {"tag": "blue"}}
     )
     assert limiter is created
 
@@ -42,8 +40,6 @@ def test_create_cost_tracker_validates_schema():
         controls_registry.create_cost_tracker(
             {
                 "plugin": "fixed_price",
-                "security_level": "OFFICIAL",
-                "determinism_level": "guaranteed",
                 "options": {"prompt_token_price": -1, "completion_token_price": 0.0},
             }
         )
@@ -56,9 +52,9 @@ def test_register_custom_cost_tracker():
         assert options == {"tier": "gold"}
         return created
 
-    controls_registry.register_cost_tracker("custom_cost", factory)
+    controls_registry.register_cost_tracker("custom_cost", factory, declared_security_level="OFFICIAL")
     tracker = controls_registry.create_cost_tracker(
-        {"plugin": "custom_cost", "security_level": "OFFICIAL", "determinism_level": "guaranteed", "options": {"tier": "gold"}}
+        {"plugin": "custom_cost", "determinism_level": "guaranteed", "options": {"tier": "gold"}}
     )
     assert tracker is created
 
@@ -72,7 +68,7 @@ def test_create_helpers_return_none_for_missing_definitions():
 
 def test_create_cost_tracker_unknown_plugin():
     with pytest.raises(ValueError):
-        controls_registry.create_cost_tracker({"plugin": "unknown", "security_level": "OFFICIAL", "determinism_level": "guaranteed"})
+        controls_registry.create_cost_tracker({"plugin": "unknown"})
 
 
 def test_validate_cost_tracker_success():
@@ -80,8 +76,6 @@ def test_validate_cost_tracker_success():
         controls_registry.validate_cost_tracker(
             {
                 "plugin": "noop",
-                "security_level": "OFFICIAL",
-                "determinism_level": "guaranteed",
             }
         )
         is None
@@ -90,8 +84,6 @@ def test_validate_cost_tracker_success():
         controls_registry.validate_cost_tracker(
             {
                 "plugin": "fixed_price",
-                "security_level": "OFFICIAL",
-                "determinism_level": "guaranteed",
                 "options": {"prompt_token_price": 0.1, "completion_token_price": 0.05},
             }
         )
@@ -101,7 +93,7 @@ def test_validate_cost_tracker_success():
 
 def test_create_rate_limiter_unknown_plugin():
     with pytest.raises(ValueError):
-        controls_registry.create_rate_limiter({"plugin": "unknown", "security_level": "OFFICIAL", "determinism_level": "guaranteed"})
+        controls_registry.create_rate_limiter({"plugin": "unknown"})
 
 
 def test_validate_rate_limiter_success():
@@ -109,8 +101,6 @@ def test_validate_rate_limiter_success():
         controls_registry.validate_rate_limiter(
             {
                 "plugin": "noop",
-                "security_level": "OFFICIAL",
-                "determinism_level": "guaranteed",
             }
         )
         is None

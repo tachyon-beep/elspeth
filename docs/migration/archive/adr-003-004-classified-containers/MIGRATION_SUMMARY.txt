@@ -1,0 +1,250 @@
+================================================================================
+ELSPETH PLUGIN MIGRATION ANALYSIS - QUICK REFERENCE
+================================================================================
+
+SCOPE: Migrate 70+ plugins and orchestration layer to use ClassifiedDataFrame/
+ClassifiedData containers for ADR-002 security enforcement.
+
+================================================================================
+1. PLUGIN INVENTORY (70 files total)
+================================================================================
+
+SOURCES (4 files - CRITICAL PATH):
+  - _csv_base.py, csv_local.py, csv_blob.py, blob.py
+  - Current: Return pd.DataFrame with df.attrs['security_level']
+  - Required: Return ClassifiedDataFrame.create_from_datasource(df, level)
+
+SINKS (16 implementations - LOW IMPACT):
+  - CSV, Excel, Blob, Analytics, Visual, Embeddings, Bundles, Repos, Signed
+  - Current: Accept dict[str, Any] with metadata.security_level
+  - Required: Minimal changes (already dict-based, security in metadata)
+
+LLM TRANSFORMS (4 files - NO CHANGE):
+  - azure_openai.py, openai_http.py, static.py, mock.py
+  - Current: Accept string prompts, return dict
+  - Required: No changes (string-based interface)
+
+LLM MIDDLEWARE (6 files - MEDIUM IMPACT):
+  - classified_material.py, pii_shield.py, prompt_shield.py, health_monitor.py,
+    audit.py, azure_content_safety.py
+  - Current: Process LLMRequest.metadata as dict[str, Any]
+  - Required: Unwrap/rewrap ClassifiedData[dict] with uplifting
+
+ROW PLUGINS (~10 files - MEDIUM IMPACT):
+  - Various in plugins/orchestrators/experiment/
+  - Current: Accept row dict, responses dict
+  - Required: Unwrap/rewrap ClassifiedData[dict]
+
+AGGREGATORS (6 files - LOW IMPACT):
+  - score_stats.py, score_variant_ranking.py, score_recommendation.py, etc.
+  - Current: Accept list[dict[str, Any]]
+  - Required: Unwrap/rewrap ClassifiedData[dict]
+
+BASELINE (9 files - NO CHANGE):
+  - score_delta.py, score_significance.py, outlier_detection.py, etc.
+  - Current: Accept dict[str, Any] at aggregation level
+  - Required: No changes (work with aggregated dicts)
+
+VALIDATORS & EARLY STOP (~5 files - NO CHANGE):
+  - No direct DataFrame/dict manipulation
+  - Required: No changes
+
+================================================================================
+2. CRITICAL DATA FLOW PATHS
+================================================================================
+
+PATH A: DATASOURCE → ORCHESTRATOR → RUNNER (HIGH PRIORITY)
+  ├─ orchestrator.py:159: df = datasource.load()
+  │  CHANGE: df = ClassifiedDataFrame or handle both types
+  │
+  ├─ orchestrator.py:163: df = df.head(max_rows)
+  │  CHANGE: If ClassifiedDataFrame, need .head() support
+  │
+  └─ orchestrator.py:179: runner.run(df)
+     CHANGE: runner.run() must accept ClassifiedDataFrame
+
+PATH B: ROW PROCESSING (MEDIUM PRIORITY)
+  ├─ runner.py:781: Extract rows from DataFrame
+  │  CHANGE: Handle ClassifiedDataFrame.data for row extraction
+  │
+  ├─ runner.py:654-663: Build context dict
+  │  CHANGE: Wrap context in ClassifiedData[dict]
+  │
+  └─ runner.py:784-792: Process rows
+     CHANGE: Row/context can be ClassifiedData[dict]
+
+PATH C: MIDDLEWARE CHAIN (MEDIUM PRIORITY)
+  ├─ runner.py: Build LLMRequest(system_prompt, user_prompt, metadata)
+  │  CHANGE: metadata could be ClassifiedData[dict]
+  │
+  ├─ Middleware.before_request()
+  │  CHANGE: Unwrap request.metadata if ClassifiedData
+  │
+  ├─ LLM client call
+  │  NO CHANGE: Receives unwrapped metadata
+  │
+  └─ Middleware.after_response()
+     CHANGE: Re-wrap response, uplift classification
+
+PATH D: AGGREGATION (LOW PRIORITY)
+  ├─ runner.py:401: Run aggregators
+  │  CHANGE: Aggregators unwrap ClassifiedData[dict]
+  │
+  └─ runner.py:796: Assemble payload with metadata.security_level
+     CHANGE: Payload metadata already has security_level scalar
+
+PATH E: SINKS (LOW PRIORITY)
+  ├─ runner.py:814: Dispatch to artifact pipeline
+  │  CHANGE: Minimal - already supports security metadata
+  │
+  └─ Sinks.write(results, metadata=metadata)
+     CHANGE: Minimal - work with dict, security in metadata
+
+================================================================================
+3. NEW INFRASTRUCTURE NEEDED
+================================================================================
+
+1. ClassifiedData[T] Generic Wrapper:
+   - Parallel to ClassifiedDataFrame
+   - Support: .data (access wrapped value)
+   - Support: .classification (SecurityLevel)
+   - Support: .with_uplifted_classification(level) → new instance
+   - Support: .validate_access_by(plugin) (runtime failsafe)
+
+2. Utilities for Middleware:
+   - unwrap_if_classified(obj) → obj or obj.data
+   - wrap_classified(data, level) → ClassifiedData[T]
+   - uplift_if_classified(obj, level) → new classified instance
+
+3. ClassifiedDataFrame.head() Support:
+   - If orchestrator uses df.head(max_rows)
+   - Return ClassifiedDataFrame with sliced data
+
+================================================================================
+4. INTERFACE CHANGES REQUIRED
+================================================================================
+
+1. DataSource Protocol (protocols.py:115-132):
+   BEFORE: def load(self) -> pd.DataFrame
+   AFTER:  def load(self) -> ClassifiedDataFrame
+           (or pd.DataFrame | ClassifiedDataFrame if flexible)
+
+2. ExperimentRunner.run() (runner.py:767):
+   BEFORE: def run(self, df: pd.DataFrame)
+   AFTER:  def run(self, df: ClassifiedDataFrame)
+           (or pd.DataFrame | ClassifiedDataFrame if flexible)
+
+3. LLMRequest (protocols.py:207-227):
+   BEFORE: metadata: dict[str, Any]
+   AFTER:  metadata: ClassifiedData[dict[str, Any]] | dict[str, Any]
+
+================================================================================
+5. EFFORT & RISK ASSESSMENT
+================================================================================
+
+CRITICAL PATH (Sources → Orchestrator → Runner):
+  Effort: 8-10 hours
+  Risk: HIGH
+  Impact: Breaking changes to main data flow
+  Plugins: 4 sources + orchestrator + runner = 6 changes
+
+MEDIUM PRIORITY (Middleware + Row Plugins):
+  Effort: 5-7 hours
+  Risk: MEDIUM
+  Impact: Plugin interface changes
+  Plugins: 6 middleware + ~10 row plugins = 16 changes
+
+LOW PRIORITY (Aggregators + Sinks):
+  Effort: 3-4 hours
+  Risk: LOW
+  Impact: Minimal (already dict-based)
+  Plugins: 6 aggregators + 16 sinks = 22 changes (mostly trivial)
+
+INFRASTRUCTURE:
+  Effort: 2-3 hours
+  Risk: MEDIUM
+  Impact: New classes and utilities
+
+TOTAL ESTIMATE: 18-24 hours
+
+================================================================================
+6. DECISION POINTS
+================================================================================
+
+A. Strict vs Flexible Type Signatures?
+   - STRICT: Sources/Runner/etc only accept ClassifiedDataFrame
+   - FLEXIBLE: Accept pd.DataFrame | ClassifiedDataFrame with runtime checks
+   RECOMMENDATION: Strict (enforces security guarantees)
+
+B. When to wrap row dicts in ClassifiedData?
+   - EARLY: At row extraction from DataFrame
+   - LATE: Just before passing to middleware/plugins
+   RECOMMENDATION: Early (easier to track)
+
+C. Middleware responsibility for unwrapping?
+   - RUNNER: Runner unwraps before building LLMRequest
+   - MIDDLEWARE: Middleware unwraps request.metadata
+   RECOMMENDATION: Runner unwraps (middleware sees plain dict)
+
+D. How deep does ClassifiedData nesting go?
+   - FLAT: Only container level (ClassifiedData[dict])
+   - NESTED: Individual fields also ClassifiedValue
+   RECOMMENDATION: Flat for phase 1, nested fields in phase 2
+
+================================================================================
+7. FILES TO MODIFY (BY PRIORITY)
+================================================================================
+
+TIER 1 (CRITICAL PATH):
+  ✓ src/elspeth/core/security/classified_data.py (EXISTS - may extend)
+  ✗ src/elspeth/plugins/nodes/sources/_csv_base.py
+  ✗ src/elspeth/plugins/nodes/sources/csv_local.py
+  ✗ src/elspeth/plugins/nodes/sources/csv_blob.py
+  ✗ src/elspeth/plugins/nodes/sources/blob.py
+  ✗ src/elspeth/core/orchestrator.py
+  ✗ src/elspeth/core/experiments/runner.py
+  ✗ src/elspeth/core/base/protocols.py (update DataSource)
+
+TIER 2 (MEDIUM PRIORITY):
+  ✗ src/elspeth/core/base/protocols.py (update LLMRequest)
+  ✗ src/elspeth/plugins/nodes/transforms/llm/middleware/*.py (6 files)
+  ✗ src/elspeth/plugins/orchestrators/experiment/protocols.py (update if needed)
+  ✗ Row plugin implementations (~10 files)
+
+TIER 3 (LOW PRIORITY):
+  ✗ src/elspeth/plugins/nodes/sinks/*.py (16 files - minimal changes)
+  ✗ src/elspeth/plugins/experiments/aggregators/*.py (6 files)
+  ✗ src/elspeth/plugins/experiments/baseline/*.py (9 files - verify no changes needed)
+
+NEW FILES:
+  ✓ src/elspeth/core/security/classified_data.py::ClassifiedData[T] (if new)
+  ✓ src/elspeth/core/security/classified_data.py::utilities (unwrap, uplift)
+
+================================================================================
+8. ALREADY CLASSIFIED (NO CHANGES NEEDED)
+================================================================================
+
+✓ Artifact metadata (artifact_pipeline.py) - already has security_level
+✓ PluginContext - already carries security_level for all plugins
+✓ ExecutionMetadata - already has security_level field
+✓ Artifact classes - already have security_level property
+✓ Sink artifacts - already managed through security_level metadata
+
+================================================================================
+9. RECOMMENDATIONS
+================================================================================
+
+1. Create ClassifiedData[T] as first step (foundation for everything else)
+2. Update DataSource protocol to return ClassifiedDataFrame
+3. Update datasources (4 files) to use ClassifiedDataFrame
+4. Update orchestrator.py to handle ClassifiedDataFrame.head()
+5. Update runner.py to accept ClassifiedDataFrame
+6. Wrap row context in ClassifiedData[dict] during row extraction
+7. Update middleware to unwrap/rewrap LLMRequest.metadata
+8. Update row plugins to handle ClassifiedData[dict]
+9. Update aggregators to unwrap ClassifiedData
+10. Verify sinks work with updated metadata (likely no changes needed)
+11. Add comprehensive tests for classification uplifting through pipeline
+12. Add tests for unauthorized access attempts (runtime failsafes)
+
+================================================================================

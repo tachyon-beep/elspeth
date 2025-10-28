@@ -10,6 +10,8 @@ from typing import TYPE_CHECKING, Any, Mapping
 
 import numpy as np
 
+from elspeth.core.base.plugin import BasePlugin
+from elspeth.core.base.types import SecurityLevel
 from elspeth.core.experiments.plugin_registry import register_aggregation_plugin
 
 if TYPE_CHECKING:
@@ -33,7 +35,7 @@ _RATIONALE_SCHEMA = {
 }
 
 
-class RationaleAnalysisAggregator:
+class RationaleAnalysisAggregator(BasePlugin):
     """Analyze LLM rationales to understand scoring patterns and provide interpretability.
 
     This plugin extracts rationales from response content, analyzes common themes
@@ -54,6 +56,11 @@ class RationaleAnalysisAggregator:
         top_keywords: int = 10,
         on_error: str = "abort",
     ) -> None:
+        # ADR-002-B: Security policy is immutable and hard-coded in plugin code
+        super().__init__(
+            security_level=SecurityLevel.UNOFFICIAL,  # Aggregators work with experiment results
+            allow_downgrade=True,  # Trusted to operate at lower levels if needed (ADR-005)
+        )
         self._rationale_field = rationale_field
         self._score_field = score_field
         self._criteria = set(criteria) if criteria else None
@@ -310,6 +317,7 @@ register_aggregation_plugin(
         on_error=options.get("on_error", "abort"),
     ),
     schema=_RATIONALE_SCHEMA,
+    declared_security_level="UNOFFICIAL",  # ADR-002-B: Aggregators process experiment results
 )
 
 

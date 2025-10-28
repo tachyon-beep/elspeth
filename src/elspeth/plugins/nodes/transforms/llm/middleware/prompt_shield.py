@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import logging
-from typing import Sequence
+from typing import Any, Sequence
 
+from elspeth.core.base.plugin import BasePlugin
+from elspeth.core.base.plugin_context import PluginContext
 from elspeth.core.base.protocols import LLMMiddleware, LLMRequest
+from elspeth.core.base.types import SecurityLevel
 from elspeth.core.registries.middleware import register_middleware
 
 logger = logging.getLogger(__name__)
@@ -22,8 +25,15 @@ _PROMPT_SHIELD_SCHEMA = {
 }
 
 
-class PromptShieldMiddleware(LLMMiddleware):
-    """Basic middleware that masks or blocks unsafe prompts before sending to the LLM."""
+class PromptShieldMiddleware(BasePlugin, LLMMiddleware):
+    """Basic middleware that masks or blocks unsafe prompts before sending to the LLM.
+
+    Args:
+        denied_terms: List of terms to detect and block/mask.
+        mask: Replacement text for masked terms (default: '[REDACTED]').
+        on_violation: Action to take ('abort', 'mask', or 'log', default: 'abort').
+        channel: Logger channel name (default: 'elspeth.prompt_shield').
+    """
 
     name = "prompt_shield"
 
@@ -35,6 +45,10 @@ class PromptShieldMiddleware(LLMMiddleware):
         on_violation: str = "abort",
         channel: str | None = None,
     ):
+        super().__init__(
+            security_level=SecurityLevel.UNOFFICIAL,  # ADR-002-B: Immutable policy
+            allow_downgrade=True,  # ADR-002-B: Immutable policy
+        )
         self.denied_terms = [term.lower() for term in denied_terms or []]
         self.mask = mask
         mode = (on_violation or "abort").lower()
@@ -57,15 +71,23 @@ class PromptShieldMiddleware(LLMMiddleware):
         return request
 
 
+def _create_prompt_shield_middleware(options: dict[str, Any], context: PluginContext) -> PromptShieldMiddleware:
+    """Factory for prompt shield middleware (ADR-002-B: security policy is immutable)."""
+    opts = dict(options)
+    # ADR-002-B: security_level is hard-coded in plugin, not passed as parameter
+    return PromptShieldMiddleware(
+        denied_terms=opts.get("denied_terms", []),
+        mask=opts.get("mask", "[REDACTED]"),
+        on_violation=opts.get("on_violation", "abort"),
+        channel=opts.get("channel"),
+    )
+
+
 register_middleware(
     "prompt_shield",
-    lambda options, context: PromptShieldMiddleware(
-        denied_terms=options.get("denied_terms", []),
-        mask=options.get("mask", "[REDACTED]"),
-        on_violation=options.get("on_violation", "abort"),
-        channel=options.get("channel"),
-    ),
+    _create_prompt_shield_middleware,
     schema=_PROMPT_SHIELD_SCHEMA,
+    declared_security_level="UNOFFICIAL",
 )
 
 

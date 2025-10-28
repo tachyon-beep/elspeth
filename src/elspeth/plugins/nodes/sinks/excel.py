@@ -11,6 +11,7 @@ from typing import Any, Iterable, Mapping
 
 from openpyxl import Workbook  # type: ignore[import-untyped]
 
+from elspeth.core.base.plugin import BasePlugin
 from elspeth.core.base.protocols import Artifact, ArtifactDescriptor, ResultSink
 from elspeth.core.base.types import DeterminismLevel, SecurityLevel
 from elspeth.core.security import ensure_determinism_level, ensure_security_level
@@ -46,8 +47,11 @@ def _load_workbook_dependencies() -> Any:
     return Workbook
 
 
-class ExcelResultSink(ResultSink):
-    """Persist experiment payloads into a timestamped Excel workbook."""
+class ExcelResultSink(BasePlugin, ResultSink):
+    """Persist experiment payloads into a timestamped Excel workbook.
+
+    Inherits from BasePlugin to provide security enforcement (ADR-004).
+    """
 
     def __init__(
         self,
@@ -72,6 +76,12 @@ class ExcelResultSink(ResultSink):
         If config is provided, it takes precedence over individual args.
         This supports both legacy and new usage patterns.
         """
+        # Initialize BasePlugin with security level and downgrade policy (ADR-002-B, ADR-005)
+        super().__init__(
+            security_level=SecurityLevel.UNOFFICIAL,  # ADR-002-B: Immutable policy
+            allow_downgrade=True,  # ADR-002-B: Immutable policy
+        )
+
         # Use config if provided, otherwise use individual args
         if config is not None:
             base_path = config.base_path
@@ -107,8 +117,11 @@ class ExcelResultSink(ResultSink):
         # Ensure dependency availability early for fast failure when configured incorrectly.
         self._workbook_factory = _load_workbook_dependencies()
         self._last_workbook_path: str | None = None
-        self._security_level: SecurityLevel | None = None
-        self._determinism_level: DeterminismLevel | None = None
+        # Runtime data classification tracking (separate from sink's security clearance)
+        # security_level (from BasePlugin) = sink's clearance level
+        # _artifact_security_level = runtime classification of written data (for artifact metadata)
+        self._artifact_security_level: SecurityLevel | None = None
+        self._artifact_determinism_level: DeterminismLevel | None = None
         self._sanitization = {
             "enabled": self.sanitize_formulas,
             "guard": self.sanitize_guard,
@@ -155,8 +168,8 @@ class ExcelResultSink(ResultSink):
             if metadata:
                 level = metadata.get("security_level")
                 det = metadata.get("determinism_level")
-                self._security_level = level if isinstance(level, SecurityLevel) else ensure_security_level(level)
-                self._determinism_level = det if isinstance(det, DeterminismLevel) else ensure_determinism_level(det)
+                self._artifact_security_level = level if isinstance(level, SecurityLevel) else ensure_security_level(level)
+                self._artifact_determinism_level = det if isinstance(det, DeterminismLevel) else ensure_determinism_level(det)
             if plugin_logger:
                 try:
                     size = Path(self._last_workbook_path).stat().st_size if self._last_workbook_path else 0
@@ -299,15 +312,15 @@ class ExcelResultSink(ResultSink):
             metadata={
                 "path": self._last_workbook_path,
                 "content_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                "security_level": self._security_level,
-                "determinism_level": self._determinism_level,
+                "security_level": self._artifact_security_level,
+                "determinism_level": self._artifact_determinism_level,
                 "sanitization": self._sanitization,
             },
             persist=True,
-            security_level=self._security_level,
-            determinism_level=self._determinism_level,
+            security_level=self._artifact_security_level,
+            determinism_level=self._artifact_determinism_level,
         )
         self._last_workbook_path = None
-        self._security_level = None
-        self._determinism_level = None
+        self._artifact_security_level = None
+        self._artifact_determinism_level = None
         return {"excel": artifact}

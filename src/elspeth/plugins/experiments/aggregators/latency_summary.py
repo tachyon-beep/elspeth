@@ -8,6 +8,9 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
+from elspeth.core.base.plugin import BasePlugin
+from elspeth.core.base.plugin_context import PluginContext
+from elspeth.core.base.types import SecurityLevel
 from elspeth.core.experiments.plugin_registry import register_aggregation_plugin
 
 if TYPE_CHECKING:
@@ -26,7 +29,7 @@ _LATENCY_SCHEMA = {
 }
 
 
-class LatencySummaryAggregator:
+class LatencySummaryAggregator(BasePlugin):
     """Aggregate latency metrics across all rows.
 
     Collects latency_seconds from response metrics and computes
@@ -35,7 +38,16 @@ class LatencySummaryAggregator:
 
     name = "latency_summary"
 
-    def __init__(self, *, on_error: str = "abort") -> None:
+    def __init__(
+        self,
+        *,
+        on_error: str = "abort",
+    ) -> None:
+        # ADR-002-B: Security policy is immutable and hard-coded in plugin code
+        super().__init__(
+            security_level=SecurityLevel.UNOFFICIAL,  # Aggregators work with experiment results
+            allow_downgrade=True,  # Trusted to operate at lower levels if needed (ADR-005)
+        )
         if on_error not in {"abort", "skip"}:
             raise ValueError("on_error must be 'abort' or 'skip'")
         self._on_error = on_error
@@ -95,12 +107,21 @@ class LatencySummaryAggregator:
         return None
 
 
+def _create_latency_summary(options: dict[str, Any], context: PluginContext) -> LatencySummaryAggregator:
+    """Create latency summary aggregator.
+
+    ADR-002-B: Security policy is hard-coded in plugin __init__, not injected by factory.
+    """
+    return LatencySummaryAggregator(
+        on_error=options.get("on_error", "abort"),
+    )
+
+
 register_aggregation_plugin(
     "latency_summary",
-    lambda options, context: LatencySummaryAggregator(
-        on_error=options.get("on_error", "abort"),
-    ),
+    _create_latency_summary,
     schema=_LATENCY_SCHEMA,
+    declared_security_level="UNOFFICIAL",  # ADR-002-B: Aggregators work with experiment results
 )
 
 

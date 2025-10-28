@@ -11,6 +11,7 @@ from .approved_endpoints import (
     validate_endpoint,
     validate_http_api_endpoint,
 )
+from .secure_data import SecureDataFrame
 from .secure_mode import (
     SecureMode,
     get_mode_description,
@@ -158,8 +159,10 @@ def coalesce_security_level(*levels: SecurityLevel | str | None) -> SecurityLeve
             continue
         normalized.append(_ensure_security_level(text))
 
+    # ADR-002-B: security_level is plugin-author-owned (hard-coded in plugin)
+    # If no security_level is provided, that's a programming error - fail loud
     if not normalized:
-        raise ValueError("security_level is required")
+        raise ValueError("security_level is required (plugin must hard-code it)")
 
     if len(set(normalized)) > 1:
         raise ValueError("Conflicting security_level values")
@@ -221,6 +224,7 @@ __all__ = [
     "public_key_fingerprint",
     "SecurityLevel",
     "DeterminismLevel",
+    "SecureDataFrame",
     "ensure_security_level",
     "ensure_determinism_level",
     "is_security_level_allowed",

@@ -7,6 +7,9 @@ from typing import TYPE_CHECKING, Any, Sequence
 
 import numpy as np
 
+from elspeth.core.base.plugin import BasePlugin
+from elspeth.core.base.plugin_context import PluginContext
+from elspeth.core.base.types import SecurityLevel
 from elspeth.core.experiments.plugin_registry import register_baseline_plugin
 from elspeth.plugins.experiments._stats_helpers import (
     _collect_paired_scores_by_criterion,
@@ -32,7 +35,7 @@ _PRACTICAL_SCHEMA = {
 }
 
 
-class ScorePracticalBaselinePlugin:
+class ScorePracticalBaselinePlugin(BasePlugin):
     """Assess practical significance (meaningful change, NNT, success deltas)."""
 
     name = "score_practical"
@@ -46,6 +49,10 @@ class ScorePracticalBaselinePlugin:
         min_samples: int = 1,
         on_error: str = "abort",
     ) -> None:
+        super().__init__(
+            security_level=SecurityLevel.UNOFFICIAL,  # ADR-002-B: Immutable policy
+            allow_downgrade=True  # ADR-002-B: Immutable policy
+        )
         self._criteria = set(criteria) if criteria else None
         self._threshold = float(threshold)
         self._success_threshold = float(success_threshold)
@@ -98,16 +105,22 @@ class ScorePracticalBaselinePlugin:
         return results
 
 
-register_baseline_plugin(
-    "score_practical",
-    lambda options, context: ScorePracticalBaselinePlugin(
+def _create_score_practical(options: dict[str, Any], context: PluginContext) -> ScorePracticalBaselinePlugin:
+    """Create score_practical baseline plugin with smart security defaults."""
+    return ScorePracticalBaselinePlugin(
         criteria=options.get("criteria"),
         threshold=float(options.get("threshold", 1.0)),
         success_threshold=float(options.get("success_threshold", 4.0)),
         min_samples=int(options.get("min_samples", 1)),
         on_error=options.get("on_error", "abort"),
-    ),
+    )
+
+
+register_baseline_plugin(
+    "score_practical",
+    _create_score_practical,
     schema=_PRACTICAL_SCHEMA,
+    declared_security_level="UNOFFICIAL",  # ADR-002-B: Baseline analyzers work with experiment results
 )
 
 
