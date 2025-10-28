@@ -1,4 +1,4 @@
-# VULN-009: Orphaned Security-Level Configuration Code
+# VULN-014: Orphaned Security-Level Configuration Code
 
 **Priority**: P2 (MEDIUM)
 **Effort**: 2-3 hours (0.5 days)
@@ -7,7 +7,7 @@
 **Completed**: N/A
 **Depends On**: VULN-004 (Registry enforcement complete)
 **Pre-1.0**: Breaking changes acceptable, no backwards compatibility required
-**GitHub Issue**: TBD
+**GitHub Issue**: #36
 
 **Implementation Note**: Remove legacy security-level extraction code from configuration loader that was orphaned during ADR-002-B migration.
 
@@ -15,7 +15,7 @@
 
 ## Vulnerability Description
 
-### VULN-009: False Sense of Security from Orphaned Config Code
+### VULN-014: False Sense of Security from Orphaned Config Code
 
 **Finding**: Although ADR-002-B established immutable security policies (plugins hard-code security levels in constructors), the configuration loading system (`src/elspeth/config.py`) still contains ~50 lines of code that extracts, validates, and coalesces `security_level` from YAML configurations, then discards the result without using it.
 

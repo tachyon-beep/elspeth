@@ -5,6 +5,7 @@
 **Sprint**: Sprint 4 (post-security)
 **Status**: NOT STARTED
 **Depends On**: VULN-001/002, VULN-003, VULN-004 complete
+**GitHub Issue**: #22
 
 ---
 
