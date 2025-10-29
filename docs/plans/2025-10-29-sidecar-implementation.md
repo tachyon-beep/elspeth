@@ -2316,30 +2316,87 @@ Standalone mode allows local development without running the full sidecar infras
 
 ### Activation
 
+**Behavior Table:**
+
+| Mode | Daemon Required? | Behavior if Daemon Unavailable | Classification Ceiling | CVE Status |
+|------|------------------|--------------------------------|------------------------|------------|
+| `sidecar` | **YES** (fail-hard) | `SecurityValidationError` raised, orchestrator aborts immediately | TOP_SECRET | **FIXED** |
+| `standalone` | **NO** (skipped) | Runs without daemon, logs loud warnings on every operation | OFFICIAL:SENSITIVE | **UNFIXED** |
+| (omitted) | N/A | `SecurityValidationError` raised at startup: "No hidden defaults - ELSPETH_SECURITY_MODE must be explicitly set" | N/A | N/A |
+| (invalid value) | N/A | `SecurityValidationError` raised at startup: "Invalid mode - must be 'sidecar' or 'standalone'" | N/A | N/A |
+
+**Design Principle:** No hidden defaults - security mode must be explicitly specified.
+
 **Option 1: Environment Variable (Orchestrator)**
 
 ```python
 # src/elspeth/core/security/secure_data.py
 
 import os
+import socket
+from pathlib import Path
 
+# NO DEFAULT - explicit opt-in required
 SECURITY_MODE = os.getenv("ELSPETH_SECURITY_MODE", "").lower()
+
+# Rule: No hidden defaults
+if not SECURITY_MODE:
+    raise SecurityValidationError(
+        "ELSPETH_SECURITY_MODE not set. Must explicitly specify 'sidecar' or 'standalone'.\n"
+        "No hidden defaults allowed (security principle).\n"
+        "For development: export ELSPETH_SECURITY_MODE=standalone\n"
+        "For production: export ELSPETH_SECURITY_MODE=sidecar"
+    )
 
 if SECURITY_MODE not in ["sidecar", "standalone"]:
     raise SecurityValidationError(
-        "ELSPETH_SECURITY_MODE must be 'sidecar' or 'standalone' (no default)"
+        f"Invalid ELSPETH_SECURITY_MODE='{SECURITY_MODE}'. "
+        f"Must be 'sidecar' or 'standalone'."
     )
 
-if SECURITY_MODE == "standalone":
+# Sidecar mode: Fail-hard if daemon unavailable
+if SECURITY_MODE == "sidecar":
+    SOCKET_PATH = Path("/run/sidecar/auth.sock")
+
+    # Check socket exists
+    if not SOCKET_PATH.exists():
+        raise SecurityValidationError(
+            f"Sidecar mode enabled but daemon socket not found at {SOCKET_PATH}.\n"
+            f"Start daemon with: /usr/local/bin/elspeth-sidecar-daemon --config /etc/elspeth/sidecar.toml\n"
+            f"Or switch to standalone mode: export ELSPETH_SECURITY_MODE=standalone"
+        )
+
+    # Attempt connection to verify daemon is running
+    try:
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.settimeout(2.0)  # 2-second connection timeout
+        sock.connect(str(SOCKET_PATH))
+        sock.close()
+    except (ConnectionRefusedError, socket.timeout, OSError) as e:
+        raise SecurityValidationError(
+            f"Sidecar mode enabled but daemon not responding at {SOCKET_PATH}: {e}\n"
+            f"Verify daemon is running: systemctl status elspeth-sidecar\n"
+            f"Check logs: journalctl -u elspeth-sidecar -n 50"
+        ) from e
+
+    MAX_SECURITY_LEVEL = SecurityLevel.TOP_SECRET
+    logger.info(
+        "✅ Sidecar mode active - Daemon verified at %s\n"
+        "Classification ceiling: TOP_SECRET\n"
+        "CVE-ADR-002-A-009: FIXED (secrets isolated in Rust daemon)",
+        SOCKET_PATH
+    )
+
+# Standalone mode: Skip daemon check, enforce ceiling
+elif SECURITY_MODE == "standalone":
     MAX_SECURITY_LEVEL = SecurityLevel.OFFICIAL_SENSITIVE
     logger.warning(
         "⚠️  STANDALONE MODE ACTIVE ⚠️\n"
         "Classification ceiling: OFFICIAL:SENSITIVE\n"
         "CVE-ADR-002-A-009 UNFIXED (secrets in Python)\n"
-        "NOT APPROVED for SECRET data"
+        "NOT APPROVED for SECRET data\n"
+        "Daemon check SKIPPED (standalone mode runs without daemon)"
     )
-else:
-    MAX_SECURITY_LEVEL = SecurityLevel.TOP_SECRET
 ```
 
 **Option 2: Config File (Daemon - sidecar mode only)**
