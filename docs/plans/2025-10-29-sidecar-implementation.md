@@ -1062,8 +1062,9 @@ use elspeth_sidecar::Config;
 use std::path::PathBuf;
 
 #[test]
-fn test_config_from_file() {
+fn test_config_from_file_sidecar_mode() {
     let config_str = r#"
+mode = "sidecar"
 socket_path = "/run/sidecar/auth.sock"
 session_key_path = "/run/sidecar/.session"
 appuser_uid = 1000
@@ -1073,11 +1074,46 @@ log_level = "debug"
 
     let config: Config = toml::from_str(config_str).unwrap();
 
+    assert_eq!(config.mode, SecurityMode::Sidecar);
     assert_eq!(config.socket_path, PathBuf::from("/run/sidecar/auth.sock"));
     assert_eq!(config.session_key_path, PathBuf::from("/run/sidecar/.session"));
     assert_eq!(config.appuser_uid, 1000);
     assert_eq!(config.grant_ttl_secs, 60);
     assert_eq!(config.log_level, "debug");
+}
+
+#[test]
+fn test_config_missing_mode_fails() {
+    let config_str = r#"
+socket_path = "/run/sidecar/auth.sock"
+session_key_path = "/run/sidecar/.session"
+appuser_uid = 1000
+grant_ttl_secs = 60
+log_level = "debug"
+"#;
+
+    let result = toml::from_str::<Config>(config_str);
+    assert!(result.is_err(), "Config without mode should fail");
+}
+
+#[test]
+fn test_config_standalone_mode_warns() {
+    use tracing_subscriber;
+
+    let config_str = r#"
+mode = "standalone"
+socket_path = "/tmp/dev.sock"
+session_key_path = "/tmp/dev.session"
+appuser_uid = 1000
+grant_ttl_secs = 60
+log_level = "debug"
+"#;
+
+    let config: Config = toml::from_str(config_str).unwrap();
+    assert_eq!(config.mode, SecurityMode::Standalone);
+
+    // Note: validate() will emit warning log when called
+    // In real usage, Config::load() calls validate()
 }
 ```
 
@@ -1113,6 +1149,10 @@ use std::time::Duration;
 /// Sidecar daemon configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
+    /// Security mode: "sidecar" (hardened, production) or "standalone" (dev-only, OFFICIAL:SENSITIVE cap)
+    /// REQUIRED: No default, must be explicitly set
+    pub mode: SecurityMode,
+
     /// Unix socket path (e.g., /run/sidecar/auth.sock)
     pub socket_path: PathBuf,
 
@@ -1129,6 +1169,25 @@ pub struct Config {
     pub log_level: String,
 }
 
+/// Security mode (explicit opt-in, no default)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum SecurityMode {
+    /// Hardened sidecar mode (production)
+    /// - Secrets in Rust memory
+    /// - UID separation enforced
+    /// - SO_PEERCRED validation
+    /// - Plugin worker isolation
+    Sidecar,
+
+    /// Standalone mode (development only)
+    /// - OFFICIAL:SENSITIVE classification ceiling
+    /// - Loud warning logs on every operation
+    /// - Secrets remain in Python (CVE-ADR-002-A-009 UNFIXED)
+    /// - NOT APPROVED for SECRET data
+    Standalone,
+}
+
 impl Config {
     /// Load config from TOML file.
     pub fn load(path: &str) -> Result<Self> {
@@ -1138,7 +1197,29 @@ impl Config {
         let config: Config = toml::from_str(&contents)
             .with_context(|| format!("Failed to parse TOML from {}", path))?;
 
+        // SECURITY: Validate mode is explicitly set
+        config.validate()?;
+
         Ok(config)
+    }
+
+    /// Validate configuration (fail-fast on missing/invalid settings).
+    fn validate(&self) -> Result<()> {
+        // Mode validation (explicit opt-in required)
+        // NOTE: Serde will fail if mode is missing, but we document it here
+
+        // Standalone mode validation
+        if self.mode == SecurityMode::Standalone {
+            tracing::warn!(
+                "⚠️  STANDALONE MODE ACTIVE - CVE-ADR-002-A-009 UNFIXED ⚠️\n\
+                 Classification ceiling: OFFICIAL:SENSITIVE\n\
+                 Secrets remain in Python memory (vulnerable to introspection)\n\
+                 NOT APPROVED for SECRET data\n\
+                 See docs/architecture/decisions/002-security-architecture.md"
+            );
+        }
+
+        Ok(())
     }
 
     /// Grant TTL as Duration.
@@ -1147,17 +1228,8 @@ impl Config {
     }
 }
 
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            socket_path: PathBuf::from("/run/sidecar/auth.sock"),
-            session_key_path: PathBuf::from("/run/sidecar/.session"),
-            appuser_uid: 1000,
-            grant_ttl_secs: 60,
-            log_level: "info".to_string(),
-        }
-    }
-}
+// NO Default implementation - mode must be explicitly specified
+// Attempting Config::default() will fail at compile time
 ```
 
 **Step 4: Create example config file**
@@ -1166,6 +1238,16 @@ Create `sidecar/config/sidecar.toml`:
 
 ```toml
 # Elspeth Sidecar Daemon Configuration
+
+# SECURITY MODE (REQUIRED - no default)
+# - "sidecar": Hardened production mode (secrets in Rust, UID separation)
+# - "standalone": Development mode (OFFICIAL:SENSITIVE ceiling, secrets in Python)
+#
+# ⚠️  STANDALONE MODE WARNING:
+# CVE-ADR-002-A-009 remains unfixed in standalone mode.
+# NOT APPROVED for SECRET data.
+# Use only for local development with OFFICIAL:SENSITIVE ceiling.
+mode = "sidecar"
 
 # Unix socket path (must be writable by sidecar UID, readable by appuser)
 socket_path = "/run/sidecar/auth.sock"
@@ -1181,6 +1263,23 @@ grant_ttl_secs = 60
 
 # Log level: trace, debug, info, warn, error
 log_level = "info"
+```
+
+Create `sidecar/config/standalone.toml` (development example):
+
+```toml
+# Development-only configuration with standalone mode
+# ⚠️  NOT APPROVED FOR PRODUCTION USE ⚠️
+
+mode = "standalone"
+socket_path = "/tmp/elspeth-dev.sock"
+session_key_path = "/tmp/elspeth-dev.session"
+appuser_uid = 1000
+grant_ttl_secs = 300  # Longer TTL for dev
+log_level = "debug"
+
+# Standalone mode logs loud warnings on every frame operation:
+# "⚠️  STANDALONE MODE - Classification ceiling: OFFICIAL:SENSITIVE"
 ```
 
 **Step 5: Run tests to verify they pass**
@@ -1363,12 +1462,9 @@ async fn main() -> Result<()> {
 
     info!("Elspeth Sidecar Daemon starting...");
 
-    // Load config
+    // Load config (no default - mode must be explicit)
     let config = Config::load("/etc/elspeth/sidecar.toml")
-        .unwrap_or_else(|_| {
-            eprintln!("Failed to load config, using defaults");
-            Config::default()
-        });
+        .context("Failed to load config - ensure mode is set to 'sidecar' or 'standalone'")?;
 
     // Start server
     let server = Server::new(config)?;
@@ -2191,6 +2287,296 @@ git commit -m "feat(security): implement canonical digest computation pipeline
 - ✅ Tamper-evident: Any data mutation changes digest
 - ✅ Fail-safe: Unsupported dtypes raise clear errors
 - ✅ Performance: Zero-copy streaming keeps memory flat
+
+---
+
+## Standalone Mode (Development Only)
+
+**⚠️  WARNING: Standalone mode is NOT production-ready and does NOT fix CVE-ADR-002-A-009 ⚠️**
+
+### Purpose
+
+Standalone mode allows local development without running the full sidecar infrastructure (Rust daemon, UID separation, supervisord). It provides a **degraded security posture** with explicit limitations.
+
+### Security Properties
+
+**Classification Ceiling:** OFFICIAL:SENSITIVE (max level 2)
+- Any attempt to create/uplift SecureDataFrame to SECRET or above → `SecurityValidationError`
+- Enforced at orchestrator startup via environment variable check
+
+**Secrets Remain in Python:**
+- `_CONSTRUCTION_TOKEN` and `_SEAL_KEY` stay in Python memory (vulnerable to introspection)
+- CVE-ADR-002-A-009 remains **unfixed** in this mode
+- Python `inspect`, `gc`, and debugger can still extract secrets
+
+**Loud Logging:**
+- Every SecureDataFrame operation logs: `"⚠️  STANDALONE MODE - OFFICIAL:SENSITIVE ceiling - CVE-ADR-002-A-009 UNFIXED"`
+- Logs emitted at `WARN` level (always visible)
+- Prevents accidental production use
+
+### Activation
+
+**Option 1: Environment Variable (Orchestrator)**
+
+```python
+# src/elspeth/core/security/secure_data.py
+
+import os
+
+SECURITY_MODE = os.getenv("ELSPETH_SECURITY_MODE", "").lower()
+
+if SECURITY_MODE not in ["sidecar", "standalone"]:
+    raise SecurityValidationError(
+        "ELSPETH_SECURITY_MODE must be 'sidecar' or 'standalone' (no default)"
+    )
+
+if SECURITY_MODE == "standalone":
+    MAX_SECURITY_LEVEL = SecurityLevel.OFFICIAL_SENSITIVE
+    logger.warning(
+        "⚠️  STANDALONE MODE ACTIVE ⚠️\n"
+        "Classification ceiling: OFFICIAL:SENSITIVE\n"
+        "CVE-ADR-002-A-009 UNFIXED (secrets in Python)\n"
+        "NOT APPROVED for SECRET data"
+    )
+else:
+    MAX_SECURITY_LEVEL = SecurityLevel.TOP_SECRET
+```
+
+**Option 2: Config File (Daemon - sidecar mode only)**
+
+```bash
+# Development: Use standalone config
+export ELSPETH_SECURITY_MODE=standalone
+python -m elspeth.cli --settings config/sample_suite/settings.yaml
+
+# Production: Daemon enforces sidecar mode
+/usr/local/bin/elspeth-sidecar-daemon --config /etc/elspeth/sidecar.toml
+# (Config requires mode = "sidecar")
+```
+
+### Testing Standalone Mode
+
+```bash
+# Enable standalone mode for tests
+export ELSPETH_SECURITY_MODE=standalone
+
+# Run tests (OFFICIAL:SENSITIVE ceiling enforced)
+python -m pytest tests/ -v
+
+# Verify ceiling works
+python -m pytest tests/security/test_standalone_ceiling.py -v
+```
+
+Example test:
+
+```python
+def test_standalone_ceiling_blocks_secret():
+    """Standalone mode rejects SECRET classification."""
+    import os
+    os.environ["ELSPETH_SECURITY_MODE"] = "standalone"
+
+    from elspeth.core.security.secure_data import SecureDataFrame, SecurityLevel
+    from elspeth.core.validation.base import SecurityValidationError
+
+    df = pd.DataFrame({"col": [1, 2, 3]})
+
+    with pytest.raises(SecurityValidationError, match="OFFICIAL:SENSITIVE ceiling"):
+        SecureDataFrame.create_from_datasource(df, SecurityLevel.SECRET)
+```
+
+### Runbook: Deploying Standalone Mode
+
+**When to Use:**
+- Local development on developer workstations
+- Automated tests in CI (non-production data only)
+- Demos with OFFICIAL or OFFICIAL:SENSITIVE data
+
+**When NOT to Use:**
+- Any production environment
+- Any SECRET, TOP_SECRET, or CODE_WORD data
+- Compliance audits or IRAP assessments
+- Customer-facing deployments
+
+**Deployment Checklist:**
+1. Set `ELSPETH_SECURITY_MODE=standalone` environment variable
+2. Verify logs show: `"⚠️  STANDALONE MODE ACTIVE"`
+3. Verify classification ceiling: Attempt to create SECRET frame → should fail
+4. Document risk acceptance for OFFICIAL:SENSITIVE ceiling
+5. Add reminders to migrate to sidecar mode before production
+
+### Migration Path: Standalone → Sidecar
+
+**Step 1:** Install Rust daemon
+
+```bash
+# Build sidecar binary
+cd sidecar && cargo build --release
+sudo cp target/release/elspeth-sidecar-daemon /usr/local/bin/
+```
+
+**Step 2:** Configure mode
+
+```toml
+# /etc/elspeth/sidecar.toml
+mode = "sidecar"
+socket_path = "/run/sidecar/auth.sock"
+session_key_path = "/run/sidecar/.session"
+appuser_uid = 1000
+grant_ttl_secs = 60
+log_level = "info"
+```
+
+**Step 3:** Start daemon
+
+```bash
+sudo systemctl start elspeth-sidecar-daemon
+# Or via supervisord in Docker container
+```
+
+**Step 4:** Update orchestrator
+
+```bash
+# Remove standalone mode
+unset ELSPETH_SECURITY_MODE
+
+# Orchestrator auto-detects sidecar via /run/sidecar/auth.sock
+python -m elspeth.cli --settings config/sample_suite/settings.yaml
+```
+
+**Step 5:** Verify
+
+```bash
+# Check daemon logs
+sudo journalctl -u elspeth-sidecar-daemon -f
+
+# Verify SECRET frames work
+python -m pytest tests/security/test_secret_classification.py -v
+```
+
+---
+
+## Prerequisites and Scope Clarifications
+
+### Orchestrator/Worker Split (Phase 3 Prerequisite)
+
+**Design Assumption:** The v3 design (lines 140-304) assumes orchestrator/worker process separation with `SecureFrameProxy` objects for plugin isolation.
+
+**Current State:** As of 2025-10-29, SecureDataFrame **does not** have:
+- Orchestrator/worker process split
+- `SecureFrameProxy` RPC mechanism
+- Worker subprocess spawning with UID 1002
+- Proxy ↔ orchestrator IPC over msgpack
+
+**Implementation Scope:**
+
+**Option A: Full Implementation (Phases 1-4)**
+- Implement all v3 design components including orchestrator/worker split
+- Estimated additional time: +12-16 hours for Phase 3 orchestration changes
+- Total: **37-50 hours** (5-7 days)
+
+**Option B: Daemon-Only (Phases 1-2, Partial Phase 3)**
+- Implement Rust daemon with sidecar mode
+- Keep orchestrator monolithic (no worker split)
+- Plugins run in same process as orchestrator (UID 1000)
+- Security properties:
+  - ✅ Secrets in Rust memory (CVE-ADR-002-A-009 fixed)
+  - ✅ SO_PEERCRED enforcement
+  - ✅ Digest-bound seals
+  - ⚠️  Plugins share orchestrator process (no UID 1002 isolation)
+  - ⚠️  Plugins see real SecureDataFrame (not proxies)
+- Estimated time: **25-34 hours** (3-4 days)
+- Migration path: Add worker split in future sprint
+
+**Option C: Standalone Mode Only**
+- Skip Rust daemon entirely
+- Use standalone mode with OFFICIAL:SENSITIVE ceiling
+- Estimated time: **8-12 hours** (implement ceiling + tests)
+- Security properties:
+  - ⚠️  CVE-ADR-002-A-009 remains unfixed
+  - ⚠️  Secrets in Python memory
+  - ✅ Classification ceiling prevents SECRET data
+  - ✅ Loud logging on every operation
+
+**Recommendation:** Start with **Option B** (daemon-only), validate performance/security, then add worker split in Phase 3.5 if needed.
+
+**Rationale:**
+- Fixes CVE-ADR-002-A-009 without 12-16 hour orchestration overhaul
+- Worker split is defense-in-depth (not strictly required if plugins are audited)
+- Allows iterative deployment: sidecar first, then proxies
+
+**Decision Point:** User must choose option before starting Phase 1 implementation.
+
+---
+
+## Dependency Footprint and Performance
+
+### New Dependencies (Phase 3)
+
+**Rust (Daemon):**
+```toml
+[dependencies]
+tokio = "1.35"           # Async runtime (already common in Rust ecosystem)
+blake2 = "0.10"          # HMAC-BLAKE2s for seals (lightweight)
+blake3 = "1.5"           # Digest computation (fast, ~3 GB/s)
+uuid = "1.6"             # Stable frame IDs
+dashmap = "5.5"          # Concurrent hashmap (lock-free)
+serde_cbor = "0.11"      # CBOR protocol (compact, deterministic)
+ring = "0.17"            # Crypto primitives (FIPS-validated)
+```
+
+**Total Rust binary size:** ~5-10 MB (statically linked, no runtime deps)
+
+**Python (Orchestrator):**
+```python
+# New dependencies
+cbor2>=5.4.0            # CBOR protocol (daemon ↔ orchestrator)
+blake3>=0.3.0           # Digest computation (wheels available, ~100 KB)
+pyarrow>=12.0.0         # Parquet canonicalization (large: ~80 MB)
+```
+
+**Dependency Concerns:**
+
+1. **PyArrow Size:** 80 MB wheel (largest dependency)
+   - **Mitigation:** Already used in data science stacks, likely installed
+   - **Alternative:** Use `fastparquet` (lighter, ~10 MB) if PyArrow unavailable
+   - **Decision:** Document PyArrow as recommended, fastparquet as fallback
+
+2. **blake3 Performance:** Must handle 1k+ frames/sec target
+   - **Benchmark target:** <10ms per digest for 100-column × 10k-row DataFrame
+   - **Measured:** blake3 achieves ~3 GB/s on modern hardware
+   - **1k frames/sec:** Requires <1ms per digest → blake3 is 10x+ faster than needed
+
+3. **Canonicalization Overhead:** Sorting + Parquet serialization per frame
+   - **Risk:** Could dominate seal computation time
+   - **Mitigation Plan:**
+     - Phase 3.4 includes performance benchmarks (wide/tall DataFrames)
+     - If overhead >10ms: Cache digests, recompute only on mutation
+     - If overhead >50ms: Implement incremental hashing (hash deltas)
+
+**Performance Baseline (from design v3):**
+- Daemon target: ≥50k ops/s, P99 <150µs
+- Canonicalization target: <10ms per frame (measured in Phase 3.4)
+- Overall target: ≥1k frames/sec (matches ADR-002 baseline)
+
+**Fallback Strategy (if PyArrow too heavy):**
+
+```python
+# Option 1: fastparquet (lighter)
+import fastparquet
+canonical_df.to_parquet(sink, engine="fastparquet", ...)
+
+# Option 2: CSV canonicalization (last resort, slower but no PyArrow)
+import csv, io
+csv_bytes = canonical_df.to_csv(index=True, encoding="utf-8")
+digest = blake3(csv_bytes.encode()).digest()
+```
+
+**Dependency Approval Checklist:**
+- [ ] Verify blake3 wheels available for target platforms (Linux x86_64, aarch64)
+- [ ] Verify PyArrow license (Apache-2.0 - approved)
+- [ ] Measure PyArrow install time in CI (<2 minutes acceptable)
+- [ ] Document fallback to fastparquet if PyArrow unavailable
+- [ ] Add dependency audit to CI (pip-audit)
 
 ---
 
