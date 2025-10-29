@@ -290,9 +290,14 @@ class SidecarClient:
         if len(grant_id) != 16:
             raise ValueError(f"Invalid grant_id length: expected 16 bytes, got {len(grant_id)}")
 
-        expires_at = response.get("expires_at")
-        if not isinstance(expires_at, int):
-            raise TypeError(f"Invalid expires_at type: expected int, got {type(expires_at)}")
+        expires_at_raw = response.get("expires_at")
+        # Daemon sends f64 Unix timestamp (becomes Python float via CBOR)
+        # Accept both float and int for robustness
+        if not isinstance(expires_at_raw, (int, float)):
+            raise TypeError(
+                f"Invalid expires_at type: expected int or float, got {type(expires_at_raw)}"
+            )
+        expires_at = float(expires_at_raw)
 
         return grant_id, expires_at
 
