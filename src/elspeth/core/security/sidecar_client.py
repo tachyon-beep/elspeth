@@ -454,6 +454,7 @@ class SidecarClient:
             - status: "healthy"
             - uptime_secs: Seconds since daemon started
             - requests_served: Total requests processed
+            - auth_failures: Failed HMAC validations (monitoring metric)
 
         Raises:
             ConnectionError: If daemon is unreachable

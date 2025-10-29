@@ -25,6 +25,7 @@ pub struct Server {
     session_key: Vec<u8>,
     start_time: Instant,
     requests_served: Arc<AtomicU64>,
+    auth_failures: Arc<AtomicU64>,
 }
 
 impl Server {
@@ -45,6 +46,7 @@ impl Server {
             session_key: _session_key,
             start_time: Instant::now(),
             requests_served: Arc::new(AtomicU64::new(0)),
+            auth_failures: Arc::new(AtomicU64::new(0)),
         })
     }
 
@@ -84,6 +86,7 @@ impl Server {
                         session_key: self.session_key.clone(),
                         start_time: self.start_time,
                         requests_served: self.requests_served.clone(),
+                        auth_failures: self.auth_failures.clone(),
                     };
 
                     tokio::spawn(async move {
@@ -197,6 +200,11 @@ impl Server {
     pub async fn handle_request(&self, request: Request) -> Result<Response> {
         // Skip HMAC validation for health checks
         if request.requires_auth() && !self.validate_request_auth(&request)? {
+            use tracing::warn;
+            warn!(
+                "HMAC validation failed for request type: {:?}",
+                std::mem::discriminant(&request)
+            );
             return Ok(Response::Error {
                 error: "Authentication failed".to_string(),
                 reason: "Invalid HMAC signature".to_string(),
@@ -255,7 +263,11 @@ impl Server {
         // This prevents timing side-channel attacks
         match hmac::verify(&key, &canonical_bytes, provided_auth) {
             Ok(()) => Ok(true),
-            Err(_) => Ok(false),
+            Err(_) => {
+                // Increment authentication failure counter for monitoring
+                self.auth_failures.fetch_add(1, Ordering::Relaxed);
+                Ok(false)
+            }
         }
     }
 
@@ -263,11 +275,13 @@ impl Server {
     fn handle_health_check(&self) -> Response {
         let uptime_secs = self.start_time.elapsed().as_secs();
         let requests_served = self.requests_served.load(Ordering::Relaxed);
+        let auth_failures = self.auth_failures.load(Ordering::Relaxed);
 
         Response::HealthCheckReply {
             status: "healthy".to_string(),
             uptime_secs,
             requests_served,
+            auth_failures,
         }
     }
 

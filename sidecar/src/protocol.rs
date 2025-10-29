@@ -107,6 +107,7 @@ pub enum Response {
         status: String,       // "healthy"
         uptime_secs: u64,     // Time since daemon started
         requests_served: u64, // Total requests processed
+        auth_failures: u64,   // Failed HMAC validations (monitoring metric)
     },
 
     /// Error response.
