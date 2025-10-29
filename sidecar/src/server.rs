@@ -57,14 +57,17 @@ impl Server {
         loop {
             match listener.accept().await {
                 Ok((stream, _addr)) => {
-                    let config = self.config.clone();
-                    let secrets = self.secrets.clone();
-                    let grants = self.grants.clone();
-                    let frames = self.frames.clone();
-                    let session_key = self.session_key.clone();
+                    // Clone server state for spawn
+                    let server = Server {
+                        config: self.config.clone(),
+                        secrets: self.secrets.clone(),
+                        grants: self.grants.clone(),
+                        frames: self.frames.clone(),
+                        session_key: self.session_key.clone(),
+                    };
 
                     tokio::spawn(async move {
-                        if let Err(e) = Self::handle_client(stream, config, secrets, grants, frames, session_key).await {
+                        if let Err(e) = server.handle_client(stream).await {
                             error!("Client error: {}", e);
                         }
                     });
@@ -77,19 +80,12 @@ impl Server {
     }
 
     /// Handle single client connection.
-    async fn handle_client(
-        mut stream: UnixStream,
-        _config: Arc<Config>,
-        _secrets: Arc<Secrets>,
-        _grants: Arc<GrantTable>,
-        _frames: Arc<RegisteredFrameTable>,
-        _session_key: Vec<u8>,
-    ) -> Result<()> {
-        // TODO: SO_PEERCRED check
+    async fn handle_client(&self, mut stream: UnixStream) -> Result<()> {
+        // TODO: SO_PEERCRED check (Phase 3)
 
         debug!("Client connected");
 
-        // Read CBOR frames
+        // Read CBOR request
         let mut buffer = vec![0u8; 4096];
         let n = stream.read(&mut buffer).await?;
 
@@ -102,17 +98,14 @@ impl Server {
 
         debug!("Received request: {:?}", request);
 
-        // TODO: Validate HMAC using session_key
-        // TODO: Dispatch request
-        // TODO: Send response
+        // Dispatch request (includes HMAC validation)
+        let response = self.handle_request(request).await?;
 
-        let response = Response::Error {
-            error: "Not implemented".to_string(),
-            reason: "Server skeleton only".to_string(),
-        };
-
+        // Send response
         let response_bytes = serde_cbor::to_vec(&response)?;
         stream.write_all(&response_bytes).await?;
+
+        debug!("Response sent successfully");
 
         Ok(())
     }
