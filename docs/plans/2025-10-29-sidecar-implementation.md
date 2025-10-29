@@ -6,7 +6,7 @@
 
 **Architecture:** Three-process model (Rust daemon UID 1001, Python orchestrator UID 1000, plugin workers UID 1002) communicating via Unix sockets with HMAC-authenticated CBOR protocol. Daemon holds secrets in Rust memory and computes digest-bound seals (`HMAC-BLAKE2s(seal_key, frame_id || level || data_digest)` where digest is BLAKE3 of canonical Parquet bytes). Orchestrator maintains FrameRegistry with stable UUIDs and uses `_from_sidecar()` factory. Plugins receive only opaque `SecureFrameProxy` handles with FD_CLOEXEC hygiene preventing descriptor leaks.
 
-**Tech Stack:** Rust 1.77+ (tokio, ring/blake3, serde_cbor, dashmap, tracing, uuid), Python 3.12 (asyncio, msgpack, blake3, pyarrow), Docker multi-stage build, supervisord
+**Tech Stack:** Rust 1.77+ (tokio, ring/blake3, serde_cbor, dashmap, tracing, uuid), Python 3.12 (asyncio, cbor2, msgpack for worker RPC, blake3, pyarrow), Docker multi-stage build, supervisord
 
 **Related Documents:**
 - Design: `docs/plans/2025-10-29-sidecar-security-daemon-design-v3.md`
@@ -14,6 +14,17 @@
 - Vulnerability: CVE-ADR-002-A-009
 
 ---
+
+## Milestones
+
+| Milestone | Scope | Blocking | Notes |
+| --- | --- | --- | --- |
+| M1 | Crypto primitives (`Secrets`, seal compute/verify, TDD harness) | ✅ | Required before any server work; unblocks daemon + client integration |
+| M2 | Grant table + lifecycle tests | ✅ | Needed for authorize/redeem flow and replay protection |
+| M3 | CBOR protocol definitions + round-trip tests | ✅ | Message schema agreement before implementing client/daemon handlers |
+| M4 | Server loop (socket auth, request dispatch, logging) | ✅ | Minimal daemon capable of servicing orchestrator |
+| M5 | Observability + metrics exporters | ❌ | Nice-to-have for prod readiness; can follow once daemon is functional |
+| M6 | Benchmarks / perf harness (`criterion`, load tests) | ❌ | Optional once correctness is locked in |
 
 ## Phase 0: Environment Setup (System Tasks)
 
@@ -135,13 +146,14 @@ tokio = { version = "1.35", features = ["full"] }
 tokio-util = { version = "0.7", features = ["codec"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_cbor = "0.11"
-ring = "0.17"
+blake2 = { version = "0.10", features = ["mac"] }
 blake3 = "1.5"
 uuid = { version = "1.6", features = ["v4", "serde"] }
 dashmap = "5.5"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 anyhow = "1.0"
+ring = "0.17"
 
 [dev-dependencies]
 tempfile = "3.8"
@@ -256,33 +268,34 @@ Create `sidecar/tests/crypto_test.rs`:
 
 ```rust
 use elspeth_sidecar::crypto::Secrets;
+use uuid::Uuid;
+
+fn fixed_digest(tag: u8) -> [u8; 32] {
+    [tag; 32]
+}
 
 #[test]
 fn test_secrets_generate_creates_random_values() {
-    let secrets1 = Secrets::generate();
-    let secrets2 = Secrets::generate();
+    let frame_id = Uuid::new_v4();
+    let digest = fixed_digest(0xAB);
+    let seal1 = Secrets::generate().compute_seal(frame_id, 3, &digest);
+    let seal2 = Secrets::generate().compute_seal(frame_id, 3, &digest);
 
-    // Construction token is 32 bytes
-    assert_eq!(secrets1.construction_token().len(), 32);
-    assert_eq!(secrets2.construction_token().len(), 32);
-
-    // Seal key is 32 bytes
-    assert_eq!(secrets1.seal_key().len(), 32);
-    assert_eq!(secrets2.seal_key().len(), 32);
-
-    // Values are random (not equal)
-    assert_ne!(secrets1.construction_token(), secrets2.construction_token());
-    assert_ne!(secrets1.seal_key(), secrets2.seal_key());
+    // Independent secrets should produce different seals with overwhelming probability.
+    assert_ne!(seal1, seal2);
+    assert_eq!(seal1.len(), 32);
+    assert_eq!(seal2.len(), 32);
 }
 
 #[test]
 fn test_secrets_compute_seal_deterministic() {
     let secrets = Secrets::generate();
-    let data_id = 140235678901234u64;
+    let frame_id = Uuid::new_v4();
+    let digest = fixed_digest(0xAB);
     let level = 3u32; // SECRET
 
-    let seal1 = secrets.compute_seal(data_id, level);
-    let seal2 = secrets.compute_seal(data_id, level);
+    let seal1 = secrets.compute_seal(frame_id, level, &digest);
+    let seal2 = secrets.compute_seal(frame_id, level, &digest);
 
     // Same inputs produce same seal
     assert_eq!(seal1, seal2);
@@ -292,31 +305,46 @@ fn test_secrets_compute_seal_deterministic() {
 #[test]
 fn test_secrets_verify_seal_success() {
     let secrets = Secrets::generate();
-    let data_id = 140235678901234u64;
-    let level = 3u32;
+    let frame_id = Uuid::new_v4();
+    let digest = fixed_digest(0x42);
 
-    let seal = secrets.compute_seal(data_id, level);
+    let seal = secrets.compute_seal(frame_id, 2, &digest);
 
-    // Verification succeeds for matching seal
-    assert!(secrets.verify_seal(data_id, level, &seal));
+    // Verification succeeds for matching tuple
+    assert!(secrets.verify_seal(frame_id, 2, &digest, &seal));
 }
 
 #[test]
-fn test_secrets_verify_seal_fails_wrong_data_id() {
+fn test_secrets_verify_seal_fails_wrong_frame_id() {
     let secrets = Secrets::generate();
-    let seal = secrets.compute_seal(123u64, 3u32);
+    let frame_id = Uuid::new_v4();
+    let other_frame_id = Uuid::new_v4();
+    let digest = fixed_digest(0x11);
 
-    // Wrong data_id fails verification
-    assert!(!secrets.verify_seal(456u64, 3u32, &seal));
+    let seal = secrets.compute_seal(frame_id, 1, &digest);
+
+    assert!(!secrets.verify_seal(other_frame_id, 1, &digest, &seal));
 }
 
 #[test]
 fn test_secrets_verify_seal_fails_wrong_level() {
     let secrets = Secrets::generate();
-    let seal = secrets.compute_seal(123u64, 3u32);
+    let frame_id = Uuid::new_v4();
+    let digest = fixed_digest(0x22);
 
-    // Wrong level fails verification
-    assert!(!secrets.verify_seal(123u64, 4u32, &seal));
+    let seal = secrets.compute_seal(frame_id, 4, &digest);
+
+    assert!(!secrets.verify_seal(frame_id, 3, &digest, &seal));
+}
+
+#[test]
+fn test_secrets_verify_seal_fails_wrong_digest() {
+    let secrets = Secrets::generate();
+    let frame_id = Uuid::new_v4();
+
+    let seal = secrets.compute_seal(frame_id, 3, &fixed_digest(0x33));
+
+    assert!(!secrets.verify_seal(frame_id, 3, &fixed_digest(0x34), &seal));
 }
 ```
 
@@ -343,16 +371,19 @@ Create `sidecar/src/crypto.rs`:
 //! Cryptographic primitives for sidecar daemon.
 //!
 //! - `Secrets`: Holds construction token and seal key in Rust memory
-//! - `compute_seal()`: HMAC-BLAKE2s(seal_key, data_id || level)
+//! - `compute_seal()`: BLAKE2s-MAC(seal_key, frame_id || level || data_digest)
 //! - `verify_seal()`: Constant-time seal comparison
 
-use ring::hmac;
+use blake2::digest::{Update, FixedOutput, KeyInit};
+use blake2::Blake2sMac256;
 use ring::rand::{SecureRandom, SystemRandom};
+use ring::constant_time;
+use uuid::Uuid;
 
 /// Secrets held in Rust memory (never exported to Python).
 pub struct Secrets {
     construction_token: [u8; 32],
-    seal_key: hmac::Key,
+    seal_key: [u8; 32],
 }
 
 impl Secrets {
@@ -365,151 +396,84 @@ impl Secrets {
         rng.fill(&mut construction_token)
             .expect("RNG failure");
 
-        // Generate seal key (256-bit random for HMAC-BLAKE2s)
+        // Generate seal key (256-bit random for BLAKE2s MAC)
         let mut seal_key_bytes = [0u8; 32];
         rng.fill(&mut seal_key_bytes)
             .expect("RNG failure");
 
-        let seal_key = hmac::Key::new(hmac::HMAC_SHA256, &seal_key_bytes);
-
         Self {
             construction_token,
-            seal_key,
+            seal_key: seal_key_bytes,
         }
     }
 
-    /// Returns reference to construction token (for grant validation).
-    pub fn construction_token(&self) -> &[u8; 32] {
-        &self.construction_token
-    }
-
-    /// Returns reference to seal key bytes (for testing only).
-    #[cfg(test)]
-    pub fn seal_key(&self) -> &[u8] {
-        // WARNING: This exposes seal key for testing.
-        // In production, seal_key is only accessed via compute_seal/verify_seal.
-        self.seal_key.algorithm().digest_algorithm().output_len;
-        // We can't actually extract the key bytes from ring::hmac::Key,
-        // so we'll return a dummy value for the test
-        // This test needs to be rewritten
-        &[]
-    }
-
-    /// Compute tamper-evident seal for (data_id, level).
+    /// Compute tamper-evident seal for `(frame_id, level, data_digest)`.
     ///
-    /// Seal = HMAC-SHA256(seal_key, data_id || level)
-    pub fn compute_seal(&self, data_id: u64, level: u32) -> [u8; 32] {
-        let mut message = Vec::with_capacity(12);
-        message.extend_from_slice(&data_id.to_le_bytes());
-        message.extend_from_slice(&level.to_le_bytes());
+    /// Seal = BLAKE2s-MAC(seal_key, frame_id || level || data_digest)
+    pub fn compute_seal(&self, frame_id: Uuid, level: u32, data_digest: &[u8; 32]) -> [u8; 32] {
+        let mut message = Vec::with_capacity(16 + 4 + 32);
+        message.extend_from_slice(frame_id.as_bytes());
+        message.extend_from_slice(&level.to_be_bytes());
+        message.extend_from_slice(data_digest);
 
-        let tag = hmac::sign(&self.seal_key, &message);
+        let mut mac = Blake2sMac256::new_from_slice(&self.seal_key)
+            .expect("seal key length must be 32 bytes");
+        mac.update(&message);
+        let output = mac.finalize_fixed();
         let mut seal = [0u8; 32];
-        seal.copy_from_slice(tag.as_ref());
+        seal.copy_from_slice(&output);
         seal
     }
 
     /// Verify seal using constant-time comparison.
-    pub fn verify_seal(&self, data_id: u64, level: u32, seal: &[u8]) -> bool {
-        let expected = self.compute_seal(data_id, level);
-        ring::constant_time::verify_slices_are_equal(seal, &expected).is_ok()
+    pub fn verify_seal(
+        &self,
+        frame_id: Uuid,
+        level: u32,
+        data_digest: &[u8; 32],
+        seal: &[u8],
+    ) -> bool {
+        let expected = self.compute_seal(frame_id, level, data_digest);
+        constant_time::verify_slices_are_equal(seal, &expected).is_ok()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use uuid::Uuid;
 
     #[test]
     fn test_compute_seal_deterministic() {
         let secrets = Secrets::generate();
-        let seal1 = secrets.compute_seal(123, 3);
-        let seal2 = secrets.compute_seal(123, 3);
+        let frame = Uuid::new_v4();
+        let digest = [0x55; 32];
+        let seal1 = secrets.compute_seal(frame, 3, &digest);
+        let seal2 = secrets.compute_seal(frame, 3, &digest);
         assert_eq!(seal1, seal2);
     }
 
     #[test]
     fn test_verify_seal_success() {
         let secrets = Secrets::generate();
-        let seal = secrets.compute_seal(123, 3);
-        assert!(secrets.verify_seal(123, 3, &seal));
+        let frame = Uuid::new_v4();
+        let digest = [0x66; 32];
+        let seal = secrets.compute_seal(frame, 3, &digest);
+        assert!(secrets.verify_seal(frame, 3, &digest, &seal));
     }
 
     #[test]
-    fn test_verify_seal_wrong_data_id() {
+    fn test_verify_seal_wrong_frame_id() {
         let secrets = Secrets::generate();
-        let seal = secrets.compute_seal(123, 3);
-        assert!(!secrets.verify_seal(456, 3, &seal));
+        let frame = Uuid::new_v4();
+        let digest = [0x44; 32];
+        let seal = secrets.compute_seal(frame, 3, &digest);
+        assert!(!secrets.verify_seal(Uuid::new_v4(), 3, &digest, &seal));
     }
 }
 ```
 
-**Step 4: Fix test to work with ring's API**
-
-Update `sidecar/tests/crypto_test.rs`:
-
-```rust
-use elspeth_sidecar::crypto::Secrets;
-
-#[test]
-fn test_secrets_generate_creates_random_values() {
-    let secrets1 = Secrets::generate();
-    let secrets2 = Secrets::generate();
-
-    // Construction token is 32 bytes
-    assert_eq!(secrets1.construction_token().len(), 32);
-    assert_eq!(secrets2.construction_token().len(), 32);
-
-    // Values are random (not equal)
-    assert_ne!(secrets1.construction_token(), secrets2.construction_token());
-}
-
-#[test]
-fn test_secrets_compute_seal_deterministic() {
-    let secrets = Secrets::generate();
-    let data_id = 140235678901234u64;
-    let level = 3u32; // SECRET
-
-    let seal1 = secrets.compute_seal(data_id, level);
-    let seal2 = secrets.compute_seal(data_id, level);
-
-    // Same inputs produce same seal
-    assert_eq!(seal1, seal2);
-    assert_eq!(seal1.len(), 32);
-}
-
-#[test]
-fn test_secrets_verify_seal_success() {
-    let secrets = Secrets::generate();
-    let data_id = 140235678901234u64;
-    let level = 3u32;
-
-    let seal = secrets.compute_seal(data_id, level);
-
-    // Verification succeeds for matching seal
-    assert!(secrets.verify_seal(data_id, level, &seal));
-}
-
-#[test]
-fn test_secrets_verify_seal_fails_wrong_data_id() {
-    let secrets = Secrets::generate();
-    let seal = secrets.compute_seal(123u64, 3u32);
-
-    // Wrong data_id fails verification
-    assert!(!secrets.verify_seal(456u64, 3u32, &seal));
-}
-
-#[test]
-fn test_secrets_verify_seal_fails_wrong_level() {
-    let secrets = Secrets::generate();
-    let seal = secrets.compute_seal(123u64, 3u32);
-
-    // Wrong level fails verification
-    assert!(!secrets.verify_seal(123u64, 4u32, &seal));
-}
-```
-
-**Step 5: Run tests to verify they pass**
+**Step 4: Run tests to verify they pass**
 
 ```bash
 cargo test crypto
@@ -520,23 +484,24 @@ cargo test crypto
 running 5 tests
 test crypto_test::test_secrets_compute_seal_deterministic ... ok
 test crypto_test::test_secrets_generate_creates_random_values ... ok
-test crypto_test::test_secrets_verify_seal_fails_wrong_data_id ... ok
+test crypto_test::test_secrets_verify_seal_fails_wrong_digest ... ok
+test crypto_test::test_secrets_verify_seal_fails_wrong_frame_id ... ok
 test crypto_test::test_secrets_verify_seal_fails_wrong_level ... ok
 test crypto_test::test_secrets_verify_seal_success ... ok
 
-test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 ```
 
 **Step 6: Commit**
 
 ```bash
 git add sidecar/src/crypto.rs sidecar/tests/crypto_test.rs
-git commit -m "feat(sidecar): implement Secrets with HMAC-SHA256 seals
+git commit -m "feat(sidecar): implement Secrets with BLAKE2s seals
 
 - Secrets::generate() creates random token + seal key
-- compute_seal() produces HMAC-SHA256(seal_key, data_id || level)
+- compute_seal() produces BLAKE2s-MAC(seal_key, frame_id || level || data_digest)
 - verify_seal() uses constant-time comparison
-- 5 passing tests for determinism and verification"
+- 6 passing tests for determinism and verification"
 ```
 
 ---
@@ -552,15 +517,21 @@ git commit -m "feat(sidecar): implement Secrets with HMAC-SHA256 seals
 Create `sidecar/tests/grants_test.rs`:
 
 ```rust
-use elspeth_sidecar::grants::{GrantTable, GrantRequest};
+use elspeth_sidecar::grants::{GrantRequest, GrantTable};
 use std::time::Duration;
+use uuid::Uuid;
+
+fn digest(tag: u8) -> [u8; 32] {
+    [tag; 32]
+}
 
 #[tokio::test]
 async fn test_grant_authorize_and_redeem_success() {
     let table = GrantTable::new(Duration::from_secs(60));
     let request = GrantRequest {
-        data_id: 123,
+        frame_id: Uuid::new_v4(),
         level: 3,
+        data_digest: digest(0x90),
     };
 
     // Authorize creates grant
@@ -571,8 +542,9 @@ async fn test_grant_authorize_and_redeem_success() {
     let result = table.redeem(&grant_id).await;
     assert!(result.is_ok());
     let redeemed = result.unwrap();
-    assert_eq!(redeemed.data_id, 123);
+    assert_eq!(redeemed.frame_id, request.frame_id);
     assert_eq!(redeemed.level, 3);
+    assert_eq!(redeemed.data_digest, request.data_digest);
 
     // Redeem fails second time (one-shot)
     let result2 = table.redeem(&grant_id).await;
@@ -583,8 +555,9 @@ async fn test_grant_authorize_and_redeem_success() {
 async fn test_grant_expires_after_ttl() {
     let table = GrantTable::new(Duration::from_millis(100));
     let request = GrantRequest {
-        data_id: 123,
+        frame_id: Uuid::new_v4(),
         level: 3,
+        data_digest: digest(0x33),
     };
 
     let grant_id = table.authorize(request).await;
@@ -594,7 +567,7 @@ async fn test_grant_expires_after_ttl() {
 
     // Redeem fails (expired)
     let result = table.redeem(&grant_id).await;
-    assert!(result.is_err());
+    assert!(matches!(result, Err(_)));
 }
 
 #[tokio::test]
@@ -602,10 +575,11 @@ async fn test_grant_cleanup_removes_expired() {
     let table = GrantTable::new(Duration::from_millis(50));
 
     // Create 3 grants
-    for i in 0..3 {
+    for tag in 0..3 {
         let request = GrantRequest {
-            data_id: i,
+            frame_id: Uuid::new_v4(),
             level: 3,
+            data_digest: digest(tag),
         };
         table.authorize(request).await;
     }
@@ -644,16 +618,19 @@ Create `sidecar/src/grants.rs`:
 //! - `cleanup_expired()`: Background task removes expired grants
 
 use dashmap::DashMap;
-use std::sync::Arc;
-use std::time::{Duration, Instant};
 use ring::rand::{SecureRandom, SystemRandom};
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+use uuid::Uuid;
 
 /// Request to authorize SecureDataFrame construction.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct GrantRequest {
-    pub data_id: u64,
+    pub frame_id: Uuid,
     pub level: u32,
+    pub data_digest: [u8; 32],
 }
 
 /// Grant state (stored in table until redeemed or expired).
@@ -696,11 +673,11 @@ impl GrantTable {
 
     /// Redeem grant (one-shot, removes from table).
     pub async fn redeem(&self, grant_id: &[u8; 16]) -> Result<GrantRequest, String> {
-        // Remove from table (one-shot)
-        let (_, grant) = self.grants.remove(grant_id)
+        let (_, grant) = self
+            .grants
+            .remove(grant_id)
             .ok_or_else(|| "Grant not found or already redeemed".to_string())?;
 
-        // Check expiry
         if Instant::now() > grant.expires_at {
             return Err("Grant expired".to_string());
         }
@@ -723,11 +700,16 @@ impl GrantTable {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use uuid::Uuid;
 
     #[tokio::test]
     async fn test_authorize_creates_unique_ids() {
         let table = GrantTable::new(Duration::from_secs(60));
-        let request = GrantRequest { data_id: 123, level: 3 };
+        let request = GrantRequest {
+            frame_id: Uuid::new_v4(),
+            level: 3,
+            data_digest: [0xAA; 32],
+        };
 
         let id1 = table.authorize(request.clone()).await;
         let id2 = table.authorize(request.clone()).await;
@@ -781,11 +763,20 @@ Create `sidecar/tests/protocol_test.rs`:
 ```rust
 use elspeth_sidecar::protocol::{Request, Response};
 
+fn digest(tag: u8) -> [u8; 32] {
+    [tag; 32]
+}
+
+fn frame(tag: u8) -> [u8; 16] {
+    [tag; 16]
+}
+
 #[test]
 fn test_authorize_construct_request_serialization() {
     let request = Request::AuthorizeConstruct {
-        data_id: 123,
+        frame_id: frame(0xAA),
         level: 3,
+        data_digest: digest(0xBB),
         auth: vec![0xAB; 32],
     };
 
@@ -796,9 +787,15 @@ fn test_authorize_construct_request_serialization() {
     let decoded: Request = serde_cbor::from_slice(&bytes).unwrap();
 
     match decoded {
-        Request::AuthorizeConstruct { data_id, level, auth } => {
-            assert_eq!(data_id, 123);
+        Request::AuthorizeConstruct {
+            frame_id,
+            level,
+            data_digest,
+            auth,
+        } => {
+            assert_eq!(frame_id, frame(0xAA));
             assert_eq!(level, 3);
+            assert_eq!(data_digest, digest(0xBB));
             assert_eq!(auth, vec![0xAB; 32]);
         }
         _ => panic!("Wrong variant"),
@@ -870,12 +867,13 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "op")]
 pub enum Request {
-    /// Request one-shot grant for (data_id, level).
+    /// Request one-shot grant for `(frame_id, level, data_digest)`.
     #[serde(rename = "authorize_construct")]
     AuthorizeConstruct {
-        data_id: u64,
+        frame_id: [u8; 16],
         level: u32,
-        auth: Vec<u8>, // HMAC of (data_id, level)
+        data_digest: [u8; 32],
+        auth: Vec<u8>, // HMAC over canonical tuple
     },
 
     /// Redeem grant for seal.
@@ -885,19 +883,28 @@ pub enum Request {
         auth: Vec<u8>, // HMAC of grant_id
     },
 
+    /// Consume construction ticket before instantiation.
+    #[serde(rename = "consume_construction_ticket")]
+    ConsumeConstructionTicket {
+        ticket: [u8; 32],
+        auth: Vec<u8>,
+    },
+
     /// Compute seal for existing frame.
     #[serde(rename = "compute_seal")]
     ComputeSeal {
-        data_id: u64,
+        frame_id: [u8; 16],
         level: u32,
+        data_digest: [u8; 32],
         auth: Vec<u8>,
     },
 
     /// Verify seal integrity.
     #[serde(rename = "verify_seal")]
     VerifySeal {
-        data_id: u64,
+        frame_id: [u8; 16],
         level: u32,
+        data_digest: [u8; 32],
         seal: [u8; 32],
         auth: Vec<u8>,
     },
@@ -915,6 +922,7 @@ pub enum Response {
 
     /// Grant redeemed, seal computed.
     RedeemGrantReply {
+        construction_ticket: [u8; 32],
         seal: [u8; 32],
         audit_id: u64,
     },
@@ -922,6 +930,12 @@ pub enum Response {
     /// Seal computed.
     ComputeSealReply {
         seal: [u8; 32],
+        audit_id: u64,
+    },
+
+    /// Ticket consumption acknowledgement.
+    ConsumeTicketReply {
+        consumed: bool,
         audit_id: u64,
     },
 
@@ -944,6 +958,7 @@ impl Request {
         match self {
             Request::AuthorizeConstruct { auth, .. } => auth,
             Request::RedeemGrant { auth, .. } => auth,
+            Request::ConsumeConstructionTicket { auth, .. } => auth,
             Request::ComputeSeal { auth, .. } => auth,
             Request::VerifySeal { auth, .. } => auth,
         }
@@ -952,18 +967,27 @@ impl Request {
     /// Canonical CBOR bytes (without auth field) for HMAC computation.
     pub fn canonical_bytes_without_auth(&self) -> Vec<u8> {
         match self {
-            Request::AuthorizeConstruct { data_id, level, .. } => {
-                serde_cbor::to_vec(&(*data_id, *level)).unwrap()
-            }
-            Request::RedeemGrant { grant_id, .. } => {
-                serde_cbor::to_vec(grant_id).unwrap()
-            }
-            Request::ComputeSeal { data_id, level, .. } => {
-                serde_cbor::to_vec(&(*data_id, *level)).unwrap()
-            }
-            Request::VerifySeal { data_id, level, seal, .. } => {
-                serde_cbor::to_vec(&(*data_id, *level, seal)).unwrap()
-            }
+            Request::AuthorizeConstruct {
+                frame_id,
+                level,
+                data_digest,
+                ..
+            } => serde_cbor::to_vec(&(frame_id, *level, data_digest)).unwrap(),
+            Request::RedeemGrant { grant_id, .. } => serde_cbor::to_vec(grant_id).unwrap(),
+            Request::ConsumeConstructionTicket { ticket, .. } => serde_cbor::to_vec(ticket).unwrap(),
+            Request::ComputeSeal {
+                frame_id,
+                level,
+                data_digest,
+                ..
+            } => serde_cbor::to_vec(&(frame_id, *level, data_digest)).unwrap(),
+            Request::VerifySeal {
+                frame_id,
+                level,
+                data_digest,
+                seal,
+                ..
+            } => serde_cbor::to_vec(&(frame_id, *level, data_digest, seal)).unwrap(),
         }
     }
 }
@@ -975,8 +999,9 @@ mod tests {
     #[test]
     fn test_canonical_bytes_deterministic() {
         let req = Request::AuthorizeConstruct {
-            data_id: 123,
+            frame_id: [0x01; 16],
             level: 3,
+            data_digest: [0x02; 32],
             auth: vec![],
         };
 
@@ -1215,6 +1240,7 @@ pub struct Server {
     secrets: Arc<Secrets>,
     grants: Arc<GrantTable>,
     session_key: Vec<u8>,
+    session_key_path: PathBuf,
 }
 
 impl Server {
@@ -1222,15 +1248,14 @@ impl Server {
     pub fn new(config: Config) -> Result<Self> {
         let secrets = Arc::new(Secrets::generate());
         let grants = Arc::new(GrantTable::new(config.grant_ttl()));
-
-        // Generate session key (256-bit random)
-        let session_key = vec![0u8; 32]; // TODO: Generate random session key
+        let (session_key, session_key_path) = Self::load_or_init_session_key(&config)?;
 
         Ok(Self {
             config: Arc::new(config),
             secrets,
             grants,
             session_key,
+            session_key_path,
         })
     }
 
@@ -1295,7 +1320,7 @@ impl Server {
 
         debug!("Received request: {:?}", request);
 
-        // TODO: Validate HMAC
+        // TODO: Validate HMAC using session_key
         // TODO: Dispatch request
         // TODO: Send response
 
@@ -1308,6 +1333,11 @@ impl Server {
         stream.write_all(&response_bytes).await?;
 
         Ok(())
+    }
+
+    fn load_or_init_session_key(config: &Config) -> Result<(Vec<u8>, PathBuf)> {
+        // TODO: Implement in Task 2.3 (secure session key generation + persistence)
+        unimplemented!("load_or_init_session_key placeholder");
     }
 }
 ```
@@ -1391,23 +1421,157 @@ git commit -m "feat(sidecar): implement Unix socket server skeleton
 
 ---
 
+### Task 2.3: Initialize Session Key Material (Mutual Auth Backbone)
+
+**Files:**
+- Update: `sidecar/src/server.rs`
+- Create: `sidecar/tests/session_key_test.rs`
+
+**Goal:** Replace the placeholder all-zero session key with secure generation, persistence, and reload logic matching the design’s mutual-auth requirements.
+
+**Step 1: Implement `load_or_init_session_key`**
+
+- In `sidecar/src/server.rs`, replace the `unimplemented!` with logic that:
+  - Uses `ring::rand::SystemRandom` to generate 32 random bytes when the session file is absent.
+  - Writes the key to `config.session_key_path` using `OpenOptions` with `O_CREAT | O_EXCL`, `0o640` permissions, owner `sidecar`, group `appuser`.
+  - Calls `fsync` on both file and parent directory.
+  - Reloads the bytes on restart without regenerating.
+  - Returns `(session_key, session_key_path.clone())`.
+- Add explicit error messages when chmod/chown fails so ops know permissions are wrong.
+
+**Step 2: Unit tests**
+
+- Create `sidecar/tests/session_key_test.rs` covering:
+  1. First call creates the file with correct length and `0o640` bits.
+  2. Second call reuses the same key (no regeneration).
+  3. Permission mismatch (e.g., file already exists but mode != 0o640) triggers an error.
+  4. File owned by unexpected UID/GID raises error (simulate via `chown` in temp dir).
+
+**Step 3: Wire into server startup**
+
+- Ensure `Server::new` uses the new function, and store `session_key_path` on the struct.
+- Update `Server::handle_client` TODO comment to reference `session_key`.
+- Log a single structured message that session key was initialized (without printing the key).
+
+**Step 4: Documentation**
+
+- Update `sidecar/config/sidecar.toml` comments to stress that the daemon owns the file and orchestrators only need read access.
+- Add a note in the runbook section explaining how ops rotate the session key (restart daemon).
+
+**Step 5: Commit**
+
+```bash
+git add sidecar/src/server.rs sidecar/tests/session_key_test.rs sidecar/config/sidecar.toml
+git commit -m "feat(sidecar): generate and persist session key material"
+```
+
+---
+
+### Task 2.4: Track Registered Frames and Enforce Known IDs
+
+**Why:** The v3 design requires the daemon to remember which `frame_id` values were legitimately created (grant redeemed) and to reject `compute_seal`/`verify_seal` calls for unknown IDs. Without this gate a rogue client could mint arbitrary frame identifiers and obtain seals, reopening CVE-ADR-002-A-009.
+
+**Files:**
+- Update: `sidecar/src/grants.rs`
+- Update: `sidecar/src/server.rs`
+- Create: `sidecar/src/frames.rs`
+- Create: `sidecar/tests/frames_test.rs`
+
+**Step 1: Define RegisteredFrameTable**
+
+Create `sidecar/src/frames.rs` with a `RegisteredFrameTable` that stores `(frame_id, level, data_digest)` entries in a `DashMap<Uuid, FrameMetadata>`. Provide:
+- `register_from_grant(grant_request: GrantRequest)` – inserts metadata when a grant is redeemed.
+- `update(frame_id, level, digest)` – overwrites metadata on reseal (compute path).
+- `get(frame_id)` – returns metadata if present.
+- `contains(frame_id)` – helper for guard checks.
+
+**Step 2: Add tests**
+
+`sidecar/tests/frames_test.rs` should cover:
+- Registering a frame via `register_from_grant` makes it discoverable.
+- Attempting to update an unknown frame returns an error.
+- Metadata reflects the latest level/digest after an update.
+
+**Step 3: Integrate with GrantTable and Server**
+
+- Modify `GrantTable::redeem` to return `GrantRequest` as today; the server will now call `RegisteredFrameTable::register_from_grant` immediately after a successful redeem.
+- Extend `Server` with a new `frames: Arc<RegisteredFrameTable>` field.
+- In the `compute_seal` and `verify_seal` handlers (implemented in later tasks), look up the frame first; if not found, return a `Response::Error { error: "unknown_frame_id", … }`.
+- When `ComputeSeal` succeeds, call `frames.update(...)` with the new `(level, digest)` so future verifications use the latest metadata.
+
+**Step 4: Tests for guard rails**
+
+Add async integration tests (under `tests/grants_test.rs` or a new `tests/server_guard_test.rs`) that simulate:
+- Calling `compute_seal` before any grant is redeemed → expect error.
+- Redeeming a grant, then calling `compute_seal` → succeeds.
+- Calling `verify_seal` with a known frame id but wrong digest → returns `valid=false`.
+
+**Step 5: Commit**
+
+```bash
+git add sidecar/src/frames.rs sidecar/tests/frames_test.rs sidecar/src/grants.rs sidecar/src/server.rs
+git commit -m "feat(sidecar): track registered frames and guard compute/verify
+
+- RegisteredFrameTable persists frame metadata post-grant
+- Server rejects compute/verify for unknown frame IDs
+- Tests cover registration, updates, and guard failures"
+```
+
+---
+
 ## Phase 3: Python Integration (Sidecar Client + Factories)
+
+### Task 3.0: Establish Plugin Worker Isolation Boundary
+
+**Goal:** Make the trust boundary real before exposing the client. All untrusted plugins must execute in a subprocess running as `appplugin` (UID 1002) with no read access to `/run/sidecar/` or the session key.
+
+**Files:**
+- Create: `src/elspeth/orchestrator/worker_process.py`
+- Update: `src/elspeth/orchestrator/runtime.py`
+- Update: `docker/supervisord.conf`
+- Update: Docker user/entrypoint scripts
+- Add: integration tests under `tests/integration/test_worker_isolation.py`
+
+**Steps:**
+1. **Create worker entrypoint**
+   - Implement `worker_process.py` that imports plugins and executes transformations.
+   - Communicate with orchestrator over a restricted IPC channel (stdin/stdout msgpack or `multiprocessing.Connection`).
+   - Ensure worker never imports `elspeth.core.security.sidecar_client`.
+2. **Spawn worker with separate UID**
+   - In orchestrator runtime, fork/exec the worker via `subprocess.Popen`, using `setuid(appplugin)` (Linux) or run script via `sudo -u appplugin` in container.
+   - Ensure environment lacks `SIDECAR_SESSION_KEY` and has no access to `/run/sidecar/`.
+3. **Descriptor hygiene**
+   - Establish sidecar connection *after* worker spawn.
+   - Mark orchestrator-side sockets/file descriptors with `FD_CLOEXEC`.
+4. **Tests**
+   - Add test that worker process cannot `open("/run/sidecar/.session")` (expect `PermissionError`).
+   - Add test that worker attempting to connect to `/run/sidecar/auth.sock` gets `PermissionError`.
+5. **Docs**
+   - Update runbook to describe the new `appplugin` user and how to rotate credentials.
+
+**Commit Example:**
+```bash
+git add src/elspeth/orchestrator/*.py docker/supervisord.conf tests/integration/test_worker_isolation.py
+git commit -m "feat(orchestrator): isolate plugin workers under appplugin UID"
+```
+
+---
 
 ### Task 3.1: Implement Python Sidecar Client
 
 **Files:**
-- Create: `src/elspeth/core/security/sidecar_client.py`
-- Create: `tests/test_sidecar_client.py`
+- Create: `src/elspeth/orchestrator/sidecar_client.py`
+- Create: `tests/orchestrator/test_sidecar_client.py`
 
 **Step 1: Write failing test for sidecar client**
 
-Create `tests/test_sidecar_client.py`:
+Create `tests/orchestrator/test_sidecar_client.py`:
 
 ```python
 """Tests for sidecar daemon client."""
 
 import pytest
-from elspeth.core.security.sidecar_client import SidecarClient, SidecarError
+from elspeth.orchestrator.sidecar_client import SidecarClient, SidecarError
 
 
 @pytest.mark.asyncio
@@ -1422,31 +1586,31 @@ async def test_sidecar_client_not_implemented():
 **Step 2: Run test to verify it fails**
 
 ```bash
-python -m pytest tests/test_sidecar_client.py -v
+python -m pytest tests/orchestrator/test_sidecar_client.py -v
 ```
 
 **Expected Output:**
 ```
-ModuleNotFoundError: No module named 'elspeth.core.security.sidecar_client'
+ModuleNotFoundError: No module named 'elspeth.orchestrator.sidecar_client'
 ```
 
 **Step 3: Implement minimal SidecarClient**
 
-Create `src/elspeth/core/security/sidecar_client.py`:
+Create `src/elspeth/orchestrator/sidecar_client.py`:
 
 ```python
 """Sidecar daemon client for Python orchestrator.
 
 Communicates with Rust daemon via Unix socket using CBOR protocol.
-All messages are HMAC-authenticated using session key.
+All messages are HMAC-authenticated using session key. This module stays in
+`elspeth.orchestrator` and must never be re-exported to plugin workers.
 """
 
 import asyncio
-import struct
 from pathlib import Path
 from typing import Optional
 
-import msgpack  # Using msgpack instead of cbor2 for better async support
+import cbor2
 
 
 class SidecarError(Exception):
@@ -1507,12 +1671,15 @@ class SidecarClient:
             self.writer.close()
             await self.writer.wait_closed()
 
-    async def authorize_construct(self, data_id: int, level: int) -> bytes:
+    async def authorize_construct(
+        self, frame_id: bytes, level: int, data_digest: bytes
+    ) -> bytes:
         """Request authorization grant for SecureDataFrame construction.
 
         Args:
-            data_id: Python object ID
+            frame_id: 16-byte UUID
             level: Security level (0-4)
+            data_digest: 32-byte BLAKE3 digest of canonical payload
 
         Returns:
             16-byte grant ID
@@ -1522,26 +1689,33 @@ class SidecarClient:
         """
         raise NotImplementedError("authorize_construct not yet implemented")
 
-    async def redeem_grant(self, grant_id: bytes) -> tuple[bytes, int]:
+    async def redeem_grant(self, grant_id: bytes) -> tuple[bytes, bytes, int]:
         """Redeem grant for seal.
 
         Args:
             grant_id: 16-byte grant handle
 
         Returns:
-            (seal, audit_id) tuple
+            (construction_ticket, seal, audit_id)
 
         Raises:
             SidecarError: If redemption fails
         """
         raise NotImplementedError("redeem_grant not yet implemented")
 
-    async def compute_seal(self, data_id: int, level: int) -> tuple[bytes, int]:
+    async def consume_construction_ticket(self, ticket: bytes) -> None:
+        """Consume construction ticket prior to SecureDataFrame instantiation."""
+        raise NotImplementedError("consume_construction_ticket not yet implemented")
+
+    async def compute_seal(
+        self, frame_id: bytes, level: int, data_digest: bytes
+    ) -> tuple[bytes, int]:
         """Compute seal for existing frame.
 
         Args:
-            data_id: Python object ID
+            frame_id: 16-byte UUID
             level: Security level
+            data_digest: 32-byte digest reflecting current payload
 
         Returns:
             (seal, audit_id) tuple
@@ -1552,13 +1726,14 @@ class SidecarClient:
         raise NotImplementedError("compute_seal not yet implemented")
 
     async def verify_seal(
-        self, data_id: int, level: int, seal: bytes
+        self, frame_id: bytes, level: int, data_digest: bytes, seal: bytes
     ) -> tuple[bool, int]:
         """Verify seal integrity.
 
         Args:
-            data_id: Python object ID
+            frame_id: 16-byte UUID
             level: Security level
+            data_digest: Digest of payload being verified
             seal: 32-byte seal
 
         Returns:
@@ -1570,17 +1745,17 @@ class SidecarClient:
         raise NotImplementedError("verify_seal not yet implemented")
 ```
 
-**Step 4: Add msgpack to requirements**
+**Step 4: Add cbor2 to requirements**
 
 ```bash
 # NOTE: This will be added to requirements-dev.lock later via pip-compile
-echo "msgpack>=1.0.0" >> requirements-dev.in
+echo "cbor2>=5.4.0" >> requirements-dev.in
 ```
 
 **Step 5: Run test to verify it passes**
 
 ```bash
-python -m pytest tests/test_sidecar_client.py -v
+python -m pytest tests/orchestrator/test_sidecar_client.py -v
 ```
 
 **Expected Output:**
@@ -1591,7 +1766,7 @@ test_sidecar_client_not_implemented PASSED
 **Step 6: Commit**
 
 ```bash
-git add src/elspeth/core/security/sidecar_client.py tests/test_sidecar_client.py requirements-dev.in
+git add src/elspeth/orchestrator/sidecar_client.py tests/orchestrator/test_sidecar_client.py requirements-dev.in
 git commit -m "feat(sidecar): implement Python SidecarClient skeleton
 
 - SidecarClient with connect(), authorize_construct(), redeem_grant()
@@ -1599,6 +1774,65 @@ git commit -m "feat(sidecar): implement Python SidecarClient skeleton
 - Unix socket connection via asyncio
 - NotImplementedError stubs for methods
 - 1 passing test (skeleton verification)"
+```
+
+---
+
+### Task 3.2: Issue and Enforce Construction Tickets
+
+**Goal:** Replace raw `_CONSTRUCTION_TOKEN` usage with opaque construction tickets that only the daemon can mint and validate.
+
+**Rust Side (Daemon):**
+- Extend `Grant` struct to include a `construction_ticket: [u8; 32]` generated via `SystemRandom`.
+- Update `GrantTable::redeem` to return both the original `GrantRequest` and the ticket.
+- Store the ticket in a new `ConstructionTicketTable` (DashMap) that tracks single-use status.
+- Update `protocol::Response::RedeemGrantReply` to include `construction_ticket` (already reflected in the enum above) and adjust serialization tests accordingly.
+- Add new request variant `consume_construction_ticket` that the orchestrator calls right before object instantiation; the daemon verifies `ticket` is unused, marks it consumed, and replies with `ok`. This replaces the need to hand raw secrets to Python.
+- Write tests ensuring tickets are one-shot, expire if not consumed within TTL, and cannot be guessed.
+
+**Python Side (Orchestrator Client):**
+- Implement `SidecarClient.consume_construction_ticket(ticket: bytes) -> None` which sends the new request type.
+- Ensure tickets are never logged and are zeroed out in memory after consumption if practical.
+
+**Documentation:** Update plan/runbook to describe tickets as the only way to construct frames.
+
+---
+
+### Task 3.3: Rewrite SecureDataFrame Creation Pipeline
+
+**Files:**
+- Update: `src/elspeth/core/security/secure_data.py`
+- Add: `src/elspeth/orchestrator/secure_frame_factory.py`
+- Update: associated tests under `tests/security/`
+
+**Steps:**
+1. **Remove legacy secrets**
+   - Delete `_create_secure_factories()` and module-level `_get_construction_token` / `_compute_seal` exports.
+   - Strip `_token` parameter from `SecureDataFrame.__new__`; replace with `_capability: ConstructionCapability`.
+2. **ConstructionCapability abstraction**
+   - Create `ConstructionCapability` object that wraps a construction ticket and a reference to the orchestrator’s `SidecarClient`.
+   - Its `.consume()` method calls `consume_construction_ticket` and returns the seal used for instance initialization.
+3. **New factory module**
+   - Implement `secure_frame_factory.SecureFrameFactory` that orchestrator code uses to:
+     - Call `authorize_construct` / `redeem_grant` to obtain `(ticket, seal, audit_id)`.
+     - Build `ConstructionCapability` and invoke `SecureDataFrame._from_sidecar(capability, data, level, seal)`.
+4. **SecureDataFrame integration**
+   - Add `_from_sidecar` classmethod that:
+     - Validates seal via daemon (using `SidecarClient.verify_seal`) before instantiation.
+     - Calls `capability.consume()` to mark ticket used.
+     - Sets `_seal` with daemon-provided bytes.
+   - Harden `SecureDataFrame.__new__` so that it requires a `ConstructionCapability`, re-validates the MAC/nonce with the sidecar before object allocation, and rejects any capability that cannot be confirmed by the daemon.
+   - Update `create_from_datasource`, `with_uplifted_security_level`, and `with_new_data` to delegate through the new factory (no direct daemon calls from plugin context).
+5. **Testing**
+   - Adapt existing tests to use a stub `SidecarClient` that emulates ticket issuance/consumption.
+   - Add regression test ensuring plugins cannot call `_from_sidecar` without a valid capability (simulate by passing a fake capability and asserting `SecurityValidationError`).
+6. **Docs**
+   - Update ADRs and README snippets to describe the new ticket-based flow.
+
+**Commit Example:**
+```bash
+git add src/elspeth/core/security/secure_data.py src/elspeth/orchestrator/secure_frame_factory.py tests/security
+git commit -m "feat(security): gate SecureDataFrame construction on daemon-issued tickets"
 ```
 
 ---
@@ -1616,40 +1850,29 @@ This plan provides:
 
 2. **Phase 1: Rust Daemon Foundation (6 tasks)**
    - ✅ Project structure (Cargo.toml, src/main.rs, src/lib.rs)
-   - ✅ Crypto module (Secrets, HMAC-SHA256 seals)
+   - ✅ Crypto module (Secrets, BLAKE2s MAC seals)
    - ✅ Grant table (one-shot handles with TTL)
    - ✅ CBOR protocol messages
    - ✅ Config loading from TOML
    - ✅ Unix socket server skeleton
 
-3. **Phase 2: Complete Rust Implementation (8 tasks remaining)**
-   - HMAC request authentication
-   - SO_PEERCRED UID enforcement
-   - Session key generation and persistence
-   - Request dispatching (authorize, redeem, compute, verify)
-   - Background grant cleanup task
-   - Error handling and logging
-   - Performance benchmarks (criterion)
-   - Integration tests
+3. **Phase 2: Complete Rust Implementation (work in progress)**
+   - Mutual-auth enforcement (HMAC validation, SO_PEERCRED, session key helper from Task 2.3)
+   - Request dispatch table (authorize, redeem, consume_ticket, compute, verify)
+   - Registered frame cache + background cleanup
+   - Error handling, structured logging, benchmarks, integration tests
 
-4. **Phase 3: Python Integration (12 tasks remaining)**
-   - Complete SidecarClient implementation
-   - `_from_sidecar()` factory method
-   - SecureFrameProxy for plugin isolation
-   - Orchestrator RPC handler
-   - Worker subprocess spawning
-   - Standalone mode toggle
-   - Integration tests (Python → Rust)
+4. **Phase 3: Python Integration (upcoming)**
+   - Plugin worker isolation under `appplugin` UID
+   - Orchestrator-only SidecarClient + ticket consumption API
+   - Ticket-backed SecureDataFrame factory rewrite (`_from_sidecar`, ConstructionCapability)
+   - SecureFrameProxy + orchestrator ↔ worker RPC plumbing
+   - Standalone mode guardrails and integration tests
 
-5. **Phase 4: Docker Deployment (6 tasks remaining)**
-   - Multi-stage Dockerfile
-   - Supervisord configuration
-   - UID/GID setup scripts
-   - Session key initialization
-   - Health check endpoint
-   - Container integration tests
+5. **Phase 4: Docker Deployment**
+   - Multi-stage build, supervisord updates, user setup, health checks, container tests
 
-**Total Tasks:** 32 (6 complete in this plan, 26 remaining)
+**Total Tasks:** updated dynamically (6 completed in Phase 1, remaining work tracked per phase above)
 
 **Estimated Timeline:**
 - Phase 0: 30 minutes (John, system setup)
