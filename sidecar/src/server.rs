@@ -2,6 +2,7 @@
 
 use crate::config::Config;
 use crate::crypto::Secrets;
+use crate::frames::RegisteredFrameTable;
 use crate::grants::GrantTable;
 use crate::protocol::{Request, Response};
 use anyhow::{Context, Result};
@@ -16,6 +17,7 @@ pub struct Server {
     config: Arc<Config>,
     secrets: Arc<Secrets>,
     grants: Arc<GrantTable>,
+    frames: Arc<RegisteredFrameTable>,
     session_key: Vec<u8>,
 }
 
@@ -24,12 +26,14 @@ impl Server {
     pub fn new(config: Config) -> Result<Self> {
         let secrets = Arc::new(Secrets::generate());
         let grants = Arc::new(GrantTable::new(config.grant_ttl()));
+        let frames = Arc::new(RegisteredFrameTable::new());
         let (_session_key, _session_key_path) = Self::load_or_init_session_key(&config)?;
 
         Ok(Self {
             config: Arc::new(config),
             secrets,
             grants,
+            frames,
             session_key: _session_key,
         })
     }
@@ -55,10 +59,11 @@ impl Server {
                     let config = self.config.clone();
                     let secrets = self.secrets.clone();
                     let grants = self.grants.clone();
+                    let frames = self.frames.clone();
                     let session_key = self.session_key.clone();
 
                     tokio::spawn(async move {
-                        if let Err(e) = Self::handle_client(stream, config, secrets, grants, session_key).await {
+                        if let Err(e) = Self::handle_client(stream, config, secrets, grants, frames, session_key).await {
                             error!("Client error: {}", e);
                         }
                     });
@@ -76,6 +81,7 @@ impl Server {
         _config: Arc<Config>,
         _secrets: Arc<Secrets>,
         _grants: Arc<GrantTable>,
+        _frames: Arc<RegisteredFrameTable>,
         _session_key: Vec<u8>,
     ) -> Result<()> {
         // TODO: SO_PEERCRED check

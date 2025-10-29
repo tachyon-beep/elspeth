@@ -8,6 +8,7 @@ pub mod crypto;
 pub mod protocol;
 pub mod server;
 pub mod grants;
+pub mod frames;
 
 pub use config::Config;
 pub use server::Server;
