@@ -14,8 +14,15 @@ async fn main() -> Result<()> {
 
     info!("Elspeth Sidecar Daemon starting...");
 
+    // Get config path from command-line argument or use default
+    let config_path = std::env::args()
+        .nth(1)
+        .unwrap_or_else(|| "/etc/elspeth/sidecar.toml".to_string());
+
+    info!("Loading config from: {}", config_path);
+
     // Load config (no default - mode must be explicit)
-    let config = Config::load("/etc/elspeth/sidecar.toml")
+    let config = Config::load(&config_path)
         .context("Failed to load config - ensure mode is set to 'sidecar' or 'standalone'")?;
 
     // Start server

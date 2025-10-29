@@ -93,13 +93,30 @@ impl Server {
             return Ok(()); // EOF
         }
 
+        debug!("Received {} bytes: {:?}", n, &buffer[..n.min(128)]);
+
         let request: Request = serde_cbor::from_slice(&buffer[..n])
+            .map_err(|e| {
+                error!("CBOR parse error: {:?}", e);
+                error!("Received bytes (full): {:?}", &buffer[..n]);
+                e
+            })
             .context("Failed to parse CBOR request")?;
 
         debug!("Received request: {:?}", request);
 
         // Dispatch request (includes HMAC validation)
-        let response = self.handle_request(request).await?;
+        // Convert any errors to Error responses instead of closing connection
+        let response = match self.handle_request(request).await {
+            Ok(resp) => resp,
+            Err(e) => {
+                error!("Request handling error: {:#}", e);
+                Response::Error {
+                    error: "Request failed".to_string(),
+                    reason: format!("{:#}", e),
+                }
+            }
+        };
 
         // Send response
         let response_bytes = serde_cbor::to_vec(&response)?;

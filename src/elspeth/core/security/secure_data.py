@@ -653,6 +653,7 @@ class SecureDataFrame:
         object.__setattr__(instance, "data", data)
         object.__setattr__(instance, "security_level", security_level)
         object.__setattr__(instance, "_created_by_datasource", True)
+        object.__setattr__(instance, "_frame_id", None)  # No frame ID in standalone mode
 
         # Compute and set tamper-evident seal (VULN-011 Phase 2)
         seal = _compute_seal(data, security_level)
