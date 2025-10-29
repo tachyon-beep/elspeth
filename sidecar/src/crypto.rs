@@ -36,6 +36,11 @@ impl Secrets {
         }
     }
 
+    /// Return construction ticket (for grant redemption).
+    pub fn construction_ticket(&self) -> [u8; 32] {
+        self.construction_token
+    }
+
     /// Compute tamper-evident seal for `(frame_id, level, data_digest)`.
     ///
     /// Seal = BLAKE2s-MAC(seal_key, frame_id || level || data_digest)

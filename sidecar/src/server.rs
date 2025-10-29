@@ -11,6 +11,7 @@ use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{UnixListener, UnixStream};
 use tracing::{debug, error, info};
+use uuid::Uuid;
 
 /// Sidecar daemon server.
 pub struct Server {
@@ -122,6 +123,182 @@ impl Server {
     /// should use `Server::new()` which calls this internally.
     pub fn load_or_init_session_key_public(config: &Config) -> Result<(Vec<u8>, PathBuf)> {
         Self::load_or_init_session_key(config)
+    }
+
+    /// Compute HMAC authentication for a request.
+    ///
+    /// Used for testing to generate valid auth values.
+    pub fn compute_request_auth(&self, request: &Request) -> Vec<u8> {
+        use ring::hmac;
+
+        let canonical_bytes = request.canonical_bytes_without_auth();
+        let key = hmac::Key::new(hmac::HMAC_SHA256, &self.session_key);
+        let tag = hmac::sign(&key, &canonical_bytes);
+        tag.as_ref().to_vec()
+    }
+
+    /// Check if frame is registered (exposed for testing).
+    pub fn is_frame_registered(&self, frame_id: Uuid) -> bool {
+        self.frames.contains(frame_id)
+    }
+
+    /// Handle a single request and return response.
+    ///
+    /// Validates HMAC authentication, then dispatches to appropriate handler.
+    pub async fn handle_request(&self, request: Request) -> Result<Response> {
+        // Validate HMAC
+        if !self.validate_request_auth(&request)? {
+            return Ok(Response::Error {
+                error: "Authentication failed".to_string(),
+                reason: "Invalid HMAC signature".to_string(),
+            });
+        }
+
+        // Dispatch to handlers
+        match request {
+            Request::AuthorizeConstruct { frame_id, level, data_digest, .. } => {
+                self.handle_authorize_construct(frame_id, level, data_digest).await
+            }
+            Request::RedeemGrant { grant_id, .. } => {
+                self.handle_redeem_grant(grant_id).await
+            }
+            Request::ComputeSeal { frame_id, level, data_digest, .. } => {
+                self.handle_compute_seal(frame_id, level, data_digest)
+            }
+            Request::VerifySeal { frame_id, level, data_digest, seal, .. } => {
+                self.handle_verify_seal(frame_id, level, data_digest, seal)
+            }
+            Request::ConsumeConstructionTicket { .. } => {
+                // Not implemented in Phase 2
+                Ok(Response::Error {
+                    error: "Not implemented".to_string(),
+                    reason: "ConsumeConstructionTicket will be implemented in Phase 3".to_string(),
+                })
+            }
+        }
+    }
+
+    /// Validate request HMAC authentication.
+    fn validate_request_auth(&self, request: &Request) -> Result<bool> {
+        use ring::hmac;
+
+        let provided_auth = request.auth();
+        let canonical_bytes = request.canonical_bytes_without_auth();
+
+        let key = hmac::Key::new(hmac::HMAC_SHA256, &self.session_key);
+        let expected_tag = hmac::sign(&key, &canonical_bytes);
+
+        // Constant-time comparison
+        Ok(provided_auth.len() == expected_tag.as_ref().len()
+            && provided_auth == expected_tag.as_ref())
+    }
+
+    /// Handle AuthorizeConstruct request.
+    async fn handle_authorize_construct(
+        &self,
+        frame_id: [u8; 16],
+        level: u32,
+        data_digest: [u8; 32],
+    ) -> Result<Response> {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        use crate::grants::GrantRequest;
+
+        // Create grant request
+        let request = GrantRequest {
+            frame_id: Uuid::from_bytes(frame_id),
+            level,
+            data_digest,
+        };
+
+        // Authorize construction
+        let grant_id = self.grants.authorize(request).await;
+
+        // Calculate expiration time
+        let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs_f64();
+        let ttl_secs = self.config.grant_ttl().as_secs_f64();
+        let expires_at = now + ttl_secs;
+
+        Ok(Response::AuthorizeConstructReply {
+            grant_id,
+            expires_at,
+        })
+    }
+
+    /// Handle RedeemGrant request.
+    async fn handle_redeem_grant(&self, grant_id: [u8; 16]) -> Result<Response> {
+        // Redeem grant (consumes one-shot handle)
+        let grant_request = self.grants.redeem(&grant_id).await
+            .map_err(|e| anyhow::anyhow!("Grant redemption failed: {}", e))?;
+
+        // Register frame for future seal operations
+        self.frames.register_from_grant(grant_request.clone());
+
+        // Compute initial seal
+        let uuid_frame_id = grant_request.frame_id;
+        let seal = self.secrets.compute_seal(uuid_frame_id, grant_request.level, &grant_request.data_digest);
+
+        // Return construction ticket (for Phase 3)
+        Ok(Response::RedeemGrantReply {
+            construction_ticket: self.secrets.construction_ticket(),
+            seal,
+            audit_id: 0, // TODO: Implement audit logging in Phase 3
+        })
+    }
+
+    /// Handle ComputeSeal request.
+    fn handle_compute_seal(
+        &self,
+        frame_id: [u8; 16],
+        level: u32,
+        data_digest: [u8; 32],
+    ) -> Result<Response> {
+        let uuid_frame_id = Uuid::from_bytes(frame_id);
+
+        // Security check: frame must be registered
+        if !self.frames.contains(uuid_frame_id) {
+            return Ok(Response::Error {
+                error: "Frame not registered".to_string(),
+                reason: format!("Frame {} must be registered via grant redemption first", uuid_frame_id),
+            });
+        }
+
+        // Compute seal
+        let seal = self.secrets.compute_seal(uuid_frame_id, level, &data_digest);
+
+        // Update frame metadata
+        self.frames.update(uuid_frame_id, level, &data_digest)?;
+
+        Ok(Response::ComputeSealReply {
+            seal,
+            audit_id: 0, // TODO: Implement audit logging in Phase 3
+        })
+    }
+
+    /// Handle VerifySeal request.
+    fn handle_verify_seal(
+        &self,
+        frame_id: [u8; 16],
+        level: u32,
+        data_digest: [u8; 32],
+        seal: [u8; 32],
+    ) -> Result<Response> {
+        let uuid_frame_id = Uuid::from_bytes(frame_id);
+
+        // Security check: frame must be registered
+        if !self.frames.contains(uuid_frame_id) {
+            return Ok(Response::Error {
+                error: "Frame not registered".to_string(),
+                reason: format!("Frame {} must be registered via grant redemption first", uuid_frame_id),
+            });
+        }
+
+        // Verify seal
+        let valid = self.secrets.verify_seal(uuid_frame_id, level, &data_digest, &seal);
+
+        Ok(Response::VerifySealReply {
+            valid,
+            audit_id: 0, // TODO: Implement audit logging in Phase 3
+        })
     }
 
     fn load_or_init_session_key(config: &Config) -> Result<(Vec<u8>, PathBuf)> {
