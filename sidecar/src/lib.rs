@@ -10,3 +10,4 @@ pub mod server;
 pub mod grants;
 
 pub use config::Config;
+pub use server::Server;

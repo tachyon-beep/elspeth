@@ -1,4 +1,5 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
+use elspeth_sidecar::{config::Config, server::Server};
 use tracing::info;
 
 #[tokio::main]
@@ -13,7 +14,13 @@ async fn main() -> Result<()> {
 
     info!("Elspeth Sidecar Daemon starting...");
 
-    // TODO: Load config, start server
+    // Load config (no default - mode must be explicit)
+    let config = Config::load("/etc/elspeth/sidecar.toml")
+        .context("Failed to load config - ensure mode is set to 'sidecar' or 'standalone'")?;
+
+    // Start server
+    let server = Server::new(config)?;
+    server.run().await?;
 
     Ok(())
 }
