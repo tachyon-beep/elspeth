@@ -110,9 +110,103 @@ impl Server {
         Ok(())
     }
 
-    fn load_or_init_session_key(_config: &Config) -> Result<(Vec<u8>, PathBuf)> {
-        // TODO: Implement in Task 2.3 (secure session key generation + persistence)
-        // For now, return placeholder key for compilation
-        Ok((vec![0u8; 32], PathBuf::from("/tmp/placeholder.session")))
+    /// Load or initialize session key (exposed for testing).
+    ///
+    /// **Note:** This is public only for integration tests. Production code
+    /// should use `Server::new()` which calls this internally.
+    pub fn load_or_init_session_key_public(config: &Config) -> Result<(Vec<u8>, PathBuf)> {
+        Self::load_or_init_session_key(config)
+    }
+
+    fn load_or_init_session_key(config: &Config) -> Result<(Vec<u8>, PathBuf)> {
+        use ring::rand::{SecureRandom, SystemRandom};
+        use std::fs::{File, OpenOptions};
+        use std::io::{Read, Write};
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+
+        let session_key_path = &config.session_key_path;
+
+        // If file exists, reload existing key
+        if session_key_path.exists() {
+            debug!("Loading existing session key from {:?}", session_key_path);
+
+            let mut file = File::open(session_key_path)
+                .with_context(|| format!("Failed to open session key file: {:?}", session_key_path))?;
+
+            let mut session_key = Vec::new();
+            file.read_to_end(&mut session_key)
+                .with_context(|| format!("Failed to read session key from {:?}", session_key_path))?;
+
+            if session_key.len() != 32 {
+                anyhow::bail!(
+                    "Invalid session key length: {} bytes (expected 32)",
+                    session_key.len()
+                );
+            }
+
+            info!("Session key loaded from {:?} (32 bytes)", session_key_path);
+            return Ok((session_key, session_key_path.clone()));
+        }
+
+        // Generate new session key
+        info!("Generating new session key at {:?}", session_key_path);
+
+        let rng = SystemRandom::new();
+        let mut session_key = vec![0u8; 32];
+        rng.fill(&mut session_key)
+            .map_err(|_| anyhow::anyhow!("Failed to generate random session key"))?;
+
+        // Create parent directory if needed
+        if let Some(parent) = session_key_path.parent() {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("Failed to create parent directory: {:?}", parent))?;
+        }
+
+        // Write key with 0o640 permissions (owner read/write, group read)
+        let mut file = OpenOptions::new()
+            .create_new(true) // O_CREAT | O_EXCL
+            .write(true)
+            .mode(0o640)
+            .open(session_key_path)
+            .with_context(|| {
+                format!(
+                    "Failed to create session key file: {:?} (ensure parent directory exists and is writable)",
+                    session_key_path
+                )
+            })?;
+
+        file.write_all(&session_key)
+            .context("Failed to write session key")?;
+
+        // fsync file
+        file.sync_all()
+            .context("Failed to fsync session key file")?;
+
+        drop(file);
+
+        // fsync parent directory (ensure directory entry is persisted)
+        if let Some(parent) = session_key_path.parent() {
+            let parent_dir = File::open(parent)
+                .with_context(|| format!("Failed to open parent directory for fsync: {:?}", parent))?;
+            parent_dir.sync_all()
+                .with_context(|| format!("Failed to fsync parent directory: {:?}", parent))?;
+        }
+
+        // Verify permissions
+        let metadata = std::fs::metadata(session_key_path)
+            .context("Failed to read metadata after creation")?;
+        let permissions = metadata.permissions();
+        let mode = permissions.mode();
+
+        if (mode & 0o777) != 0o640 {
+            anyhow::bail!(
+                "Session key file has incorrect permissions: {:o} (expected 0o640)",
+                mode & 0o777
+            );
+        }
+
+        info!("Session key generated and persisted at {:?} (32 bytes, mode 0o640)", session_key_path);
+
+        Ok((session_key, session_key_path.clone()))
     }
 }
