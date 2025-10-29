@@ -53,10 +53,12 @@ fn test_session_key_second_call_reuses_key() {
     let config = test_config(&session_key_path);
 
     // First call creates key
-    let (key1, _) = elspeth_sidecar::server::Server::load_or_init_session_key_public(&config).unwrap();
+    let (key1, _) =
+        elspeth_sidecar::server::Server::load_or_init_session_key_public(&config).unwrap();
 
     // Second call should reload same key
-    let (key2, _) = elspeth_sidecar::server::Server::load_or_init_session_key_public(&config).unwrap();
+    let (key2, _) =
+        elspeth_sidecar::server::Server::load_or_init_session_key_public(&config).unwrap();
 
     assert_eq!(key1, key2, "Session key should be reused on second call");
 }
@@ -67,7 +69,8 @@ fn test_session_key_file_content_matches() {
     let session_key_path = temp_dir.path().join("session.key");
     let config = test_config(&session_key_path);
 
-    let (session_key, _) = elspeth_sidecar::server::Server::load_or_init_session_key_public(&config).unwrap();
+    let (session_key, _) =
+        elspeth_sidecar::server::Server::load_or_init_session_key_public(&config).unwrap();
 
     // Read file contents
     let file_contents = fs::read(&session_key_path).unwrap();
@@ -89,8 +92,10 @@ fn test_session_key_randomness() {
     let config1 = test_config(&path1);
     let config2 = test_config(&path2);
 
-    let (key1, _) = elspeth_sidecar::server::Server::load_or_init_session_key_public(&config1).unwrap();
-    let (key2, _) = elspeth_sidecar::server::Server::load_or_init_session_key_public(&config2).unwrap();
+    let (key1, _) =
+        elspeth_sidecar::server::Server::load_or_init_session_key_public(&config1).unwrap();
+    let (key2, _) =
+        elspeth_sidecar::server::Server::load_or_init_session_key_public(&config2).unwrap();
 
     assert_ne!(
         key1, key2,

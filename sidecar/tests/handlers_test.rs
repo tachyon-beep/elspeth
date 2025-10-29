@@ -51,7 +51,10 @@ async fn test_authorize_construct_creates_grant() {
     let response = server.handle_request(request).await.unwrap();
 
     match response {
-        Response::AuthorizeConstructReply { grant_id, expires_at: _ } => {
+        Response::AuthorizeConstructReply {
+            grant_id,
+            expires_at: _,
+        } => {
             assert_eq!(grant_id.len(), 16, "Grant ID should be 16 bytes");
         }
         _ => panic!("Expected AuthorizeConstructReply, got {:?}", response),
@@ -80,8 +83,11 @@ async fn test_authorize_construct_with_invalid_auth_fails() {
 
     match response {
         Response::Error { error, reason: _ } => {
-            assert!(error.contains("auth") || error.contains("Auth"),
-                    "Error should mention authentication failure, got: {}", error);
+            assert!(
+                error.contains("auth") || error.contains("Auth"),
+                "Error should mention authentication failure, got: {}",
+                error
+            );
         }
         _ => panic!("Expected Error response, got {:?}", response),
     }
@@ -114,7 +120,10 @@ async fn test_redeem_grant_registers_frame() {
 
     let auth_response = server.handle_request(auth_request).await.unwrap();
     let grant_id = match auth_response {
-        Response::AuthorizeConstructReply { grant_id, expires_at: _ } => grant_id,
+        Response::AuthorizeConstructReply {
+            grant_id,
+            expires_at: _,
+        } => grant_id,
         _ => panic!("Expected AuthorizeConstructReply"),
     };
 
@@ -124,10 +133,7 @@ async fn test_redeem_grant_registers_frame() {
         auth: vec![],
     };
     let auth = server.compute_request_auth(&redeem_request);
-    let redeem_request = Request::RedeemGrant {
-        grant_id,
-        auth,
-    };
+    let redeem_request = Request::RedeemGrant { grant_id, auth };
 
     let redeem_response = server.handle_request(redeem_request).await.unwrap();
 
@@ -180,7 +186,10 @@ async fn test_compute_seal_for_registered_frame() {
     };
     let auth_response = server.handle_request(auth_request).await.unwrap();
     let grant_id = match auth_response {
-        Response::AuthorizeConstructReply { grant_id, expires_at: _ } => grant_id,
+        Response::AuthorizeConstructReply {
+            grant_id,
+            expires_at: _,
+        } => grant_id,
         _ => panic!("Expected AuthorizeConstructReply"),
     };
 
@@ -189,10 +198,7 @@ async fn test_compute_seal_for_registered_frame() {
         auth: vec![],
     };
     let auth = server.compute_request_auth(&redeem_request);
-    let redeem_request = Request::RedeemGrant {
-        grant_id,
-        auth,
-    };
+    let redeem_request = Request::RedeemGrant { grant_id, auth };
     server.handle_request(redeem_request).await.unwrap();
 
     // Now compute seal for new data
@@ -282,7 +288,10 @@ async fn test_verify_seal_success() {
     };
     let auth_response = server.handle_request(auth_request).await.unwrap();
     let grant_id = match auth_response {
-        Response::AuthorizeConstructReply { grant_id, expires_at: _ } => grant_id,
+        Response::AuthorizeConstructReply {
+            grant_id,
+            expires_at: _,
+        } => grant_id,
         _ => panic!("Expected AuthorizeConstructReply"),
     };
 
@@ -291,10 +300,7 @@ async fn test_verify_seal_success() {
         auth: vec![],
     };
     let auth = server.compute_request_auth(&redeem_request);
-    let redeem_request = Request::RedeemGrant {
-        grant_id,
-        auth,
-    };
+    let redeem_request = Request::RedeemGrant { grant_id, auth };
     server.handle_request(redeem_request).await.unwrap();
 
     let compute_request = Request::ComputeSeal {

@@ -5,10 +5,10 @@
 
 pub mod config;
 pub mod crypto;
+pub mod frames;
+pub mod grants;
 pub mod protocol;
 pub mod server;
-pub mod grants;
-pub mod frames;
 
 pub use config::Config;
 pub use server::Server;

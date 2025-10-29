@@ -23,7 +23,7 @@ pub struct GrantRequest {
 #[derive(Clone, Debug)]
 struct Grant {
     request: GrantRequest,
-    construction_ticket: [u8; 32],  // Unique random ticket issued with this grant
+    construction_ticket: [u8; 32], // Unique random ticket issued with this grant
     expires_at: Instant,
 }
 
@@ -51,7 +51,9 @@ impl GrantTable {
 
         // Generate unique construction ticket (32-byte random)
         let mut construction_ticket = [0u8; 32];
-        self.rng.fill(&mut construction_ticket).expect("RNG failure");
+        self.rng
+            .fill(&mut construction_ticket)
+            .expect("RNG failure");
 
         let grant = Grant {
             request,
@@ -93,8 +95,12 @@ impl GrantTable {
 
 /// Construction ticket table for one-shot ticket consumption validation.
 ///
-/// Tracks which construction tickets have been consumed to prevent replay attacks.
+/// Tracks both issued and consumed construction tickets to enforce capability security.
+/// Prevents forgery by validating that tickets were actually issued before accepting them.
 pub struct ConstructionTicketTable {
+    /// Tickets that were issued during grant redemption (valid set)
+    issued_tickets: Arc<DashMap<[u8; 32], Instant>>,
+    /// Tickets that have been consumed (spent set)
     consumed_tickets: Arc<DashMap<[u8; 32], Instant>>,
     ttl: Duration,
 }
@@ -103,17 +109,32 @@ impl ConstructionTicketTable {
     /// Create new ticket table with specified TTL.
     pub fn new(ttl: Duration) -> Self {
         Self {
+            issued_tickets: Arc::new(DashMap::new()),
             consumed_tickets: Arc::new(DashMap::new()),
             ttl,
         }
     }
 
+    /// Issue a construction ticket (record it as valid).
+    ///
+    /// Must be called when a ticket is created during grant redemption.
+    /// This records the ticket in the issued set, allowing it to be consumed later.
+    pub async fn issue(&self, ticket: [u8; 32]) {
+        let expires_at = Instant::now() + self.ttl;
+        self.issued_tickets.insert(ticket, expires_at);
+    }
+
     /// Consume a construction ticket (one-shot).
     ///
-    /// Returns Ok(()) if ticket is valid and hasn't been consumed yet.
-    /// Returns Err if ticket was already consumed or is invalid.
+    /// Returns Ok(()) if ticket was issued and hasn't been consumed yet.
+    /// Returns Err if ticket was never issued, already consumed, or expired.
     pub async fn consume(&self, ticket: &[u8; 32]) -> Result<(), String> {
-        // Check if ticket was already consumed
+        // SECURITY: First check if ticket was actually issued (prevents forgery)
+        if !self.issued_tickets.contains_key(ticket) {
+            return Err("Construction ticket not found (never issued or expired)".to_string());
+        }
+
+        // Check if ticket was already consumed (prevents replay)
         if self.consumed_tickets.contains_key(ticket) {
             return Err("Construction ticket already consumed".to_string());
         }
@@ -122,18 +143,36 @@ impl ConstructionTicketTable {
         let expires_at = Instant::now() + self.ttl;
         self.consumed_tickets.insert(*ticket, expires_at);
 
+        // Remove from issued set (ticket is now spent)
+        self.issued_tickets.remove(ticket);
+
         Ok(())
     }
 
-    /// Remove expired consumed tickets (background cleanup task).
+    /// Remove expired tickets (background cleanup task).
+    ///
+    /// Cleans both issued and consumed ticket sets to prevent unbounded growth.
     pub async fn cleanup_expired(&self) {
         let now = Instant::now();
-        self.consumed_tickets.retain(|_, &mut expires_at| expires_at > now);
+        self.issued_tickets
+            .retain(|_, &mut expires_at| expires_at > now);
+        self.consumed_tickets
+            .retain(|_, &mut expires_at| expires_at > now);
     }
 
     /// Check if ticket was consumed (for testing).
     pub async fn is_consumed(&self, ticket: &[u8; 32]) -> bool {
         self.consumed_tickets.contains_key(ticket)
+    }
+
+    /// Check if ticket was issued (for testing).
+    pub async fn is_issued(&self, ticket: &[u8; 32]) -> bool {
+        self.issued_tickets.contains_key(ticket)
+    }
+
+    /// Count issued tickets (for testing).
+    pub async fn issued_count(&self) -> usize {
+        self.issued_tickets.len()
     }
 
     /// Count consumed tickets (for testing).
@@ -167,10 +206,13 @@ mod tests {
         let table = ConstructionTicketTable::new(Duration::from_secs(60));
         let ticket = [0xBB; 32];
 
+        // Issue ticket first (simulates redeem_grant)
+        table.issue(ticket).await;
+
         // First consumption succeeds
         assert!(table.consume(&ticket).await.is_ok());
 
-        // Second consumption fails
+        // Second consumption fails (already consumed)
         assert!(table.consume(&ticket).await.is_err());
     }
 
@@ -180,7 +222,44 @@ mod tests {
         let ticket1 = [0xCC; 32];
         let ticket2 = [0xDD; 32];
 
+        // Issue both tickets first
+        table.issue(ticket1).await;
+        table.issue(ticket2).await;
+
         assert!(table.consume(&ticket1).await.is_ok());
         assert!(table.consume(&ticket2).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_forged_ticket_rejected() {
+        let table = ConstructionTicketTable::new(Duration::from_secs(60));
+        let forged_ticket = [0xEE; 32];
+
+        // Attempt to consume without issuing (simulates forgery attack)
+        let result = table.consume(&forged_ticket).await;
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("never issued"));
+    }
+
+    #[tokio::test]
+    async fn test_issued_tickets_tracked() {
+        let table = ConstructionTicketTable::new(Duration::from_secs(60));
+        let ticket = [0xFF; 32];
+
+        // Before issuing
+        assert!(!table.is_issued(&ticket).await);
+        assert_eq!(table.issued_count().await, 0);
+
+        // After issuing
+        table.issue(ticket).await;
+        assert!(table.is_issued(&ticket).await);
+        assert_eq!(table.issued_count().await, 1);
+
+        // After consuming
+        table.consume(&ticket).await.unwrap();
+        assert!(!table.is_issued(&ticket).await); // Removed from issued set
+        assert!(table.is_consumed(&ticket).await); // Added to consumed set
+        assert_eq!(table.issued_count().await, 0);
+        assert_eq!(table.consumed_count().await, 1);
     }
 }

@@ -4,7 +4,7 @@
 //! - `compute_seal()`: BLAKE2s-MAC(seal_key, frame_id || level || data_digest)
 //! - `verify_seal()`: Constant-time seal comparison
 
-use blake2::digest::{Update, FixedOutput, KeyInit};
+use blake2::digest::{FixedOutput, KeyInit, Update};
 use blake2::Blake2sMac256;
 use ring::rand::{SecureRandom, SystemRandom};
 use uuid::Uuid;
@@ -22,13 +22,11 @@ impl Secrets {
 
         // Generate construction token (256-bit random)
         let mut construction_token = [0u8; 32];
-        rng.fill(&mut construction_token)
-            .expect("RNG failure");
+        rng.fill(&mut construction_token).expect("RNG failure");
 
         // Generate seal key (256-bit random for BLAKE2s MAC)
         let mut seal_key_bytes = [0u8; 32];
-        rng.fill(&mut seal_key_bytes)
-            .expect("RNG failure");
+        rng.fill(&mut seal_key_bytes).expect("RNG failure");
 
         Self {
             construction_token,

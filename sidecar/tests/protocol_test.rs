@@ -50,7 +50,10 @@ fn test_authorize_construct_reply_serialization() {
     let decoded: Response = serde_cbor::from_slice(&bytes).unwrap();
 
     match decoded {
-        Response::AuthorizeConstructReply { grant_id, expires_at } => {
+        Response::AuthorizeConstructReply {
+            grant_id,
+            expires_at,
+        } => {
             assert_eq!(grant_id, [0xFF; 16]);
             assert_eq!(expires_at, 1698765432.123);
         }

@@ -16,7 +16,10 @@ log_level = "debug"
 
     assert_eq!(config.mode, SecurityMode::Sidecar);
     assert_eq!(config.socket_path, PathBuf::from("/run/sidecar/auth.sock"));
-    assert_eq!(config.session_key_path, PathBuf::from("/run/sidecar/.session"));
+    assert_eq!(
+        config.session_key_path,
+        PathBuf::from("/run/sidecar/.session")
+    );
     assert_eq!(config.appuser_uid, 1000);
     assert_eq!(config.grant_ttl_secs, 60);
     assert_eq!(config.log_level, "debug");

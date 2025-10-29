@@ -59,7 +59,11 @@ fn test_update_existing_frame_succeeds() {
     // Verify metadata reflects latest values
     let metadata = table.get(frame_id).unwrap();
     assert_eq!(metadata.level, 4, "Level should be updated");
-    assert_eq!(metadata.data_digest, digest(0xCC), "Digest should be updated");
+    assert_eq!(
+        metadata.data_digest,
+        digest(0xCC),
+        "Digest should be updated"
+    );
 }
 
 #[test]
@@ -67,7 +71,10 @@ fn test_contains_returns_false_for_unknown_frame() {
     let table = RegisteredFrameTable::new();
     let unknown_frame_id = Uuid::new_v4();
 
-    assert!(!table.contains(unknown_frame_id), "Unknown frame should not be contained");
+    assert!(
+        !table.contains(unknown_frame_id),
+        "Unknown frame should not be contained"
+    );
 }
 
 #[test]

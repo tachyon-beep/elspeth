@@ -12,7 +12,7 @@ pub enum Request {
     #[serde(rename = "authorize_construct")]
     AuthorizeConstruct {
         #[serde(with = "serde_bytes")]
-        frame_id: [u8; 16],  // UUID v4 serialized to 16 bytes (Uuid::as_bytes())
+        frame_id: [u8; 16], // UUID v4 serialized to 16 bytes (Uuid::as_bytes())
         level: u32,
         #[serde(with = "serde_bytes")]
         data_digest: [u8; 32],
@@ -97,29 +97,20 @@ pub enum Response {
     },
 
     /// Ticket consumption acknowledgement.
-    ConsumeTicketReply {
-        consumed: bool,
-        audit_id: u64,
-    },
+    ConsumeTicketReply { consumed: bool, audit_id: u64 },
 
     /// Seal verification result.
-    VerifySealReply {
-        valid: bool,
-        audit_id: u64,
-    },
+    VerifySealReply { valid: bool, audit_id: u64 },
 
     /// Health check response.
     HealthCheckReply {
-        status: String,      // "healthy"
-        uptime_secs: u64,    // Time since daemon started
+        status: String,       // "healthy"
+        uptime_secs: u64,     // Time since daemon started
         requests_served: u64, // Total requests processed
     },
 
     /// Error response.
-    Error {
-        error: String,
-        reason: String,
-    },
+    Error { error: String, reason: String },
 }
 
 impl Request {
@@ -131,7 +122,7 @@ impl Request {
             Request::ConsumeConstructionTicket { auth, .. } => Some(auth),
             Request::ComputeSeal { auth, .. } => Some(auth),
             Request::VerifySeal { auth, .. } => Some(auth),
-            Request::HealthCheck => None,  // No authentication required
+            Request::HealthCheck => None, // No authentication required
         }
     }
 
@@ -152,7 +143,8 @@ impl Request {
                 serde_bytes::Bytes::new(frame_id),
                 *level,
                 serde_bytes::Bytes::new(data_digest),
-            )).unwrap(),
+            ))
+            .unwrap(),
             Request::RedeemGrant { grant_id, .. } => {
                 serde_cbor::to_vec(&serde_bytes::Bytes::new(grant_id)).unwrap()
             }
@@ -168,7 +160,8 @@ impl Request {
                 serde_bytes::Bytes::new(frame_id),
                 *level,
                 serde_bytes::Bytes::new(data_digest),
-            )).unwrap(),
+            ))
+            .unwrap(),
             Request::VerifySeal {
                 frame_id,
                 level,
@@ -180,8 +173,9 @@ impl Request {
                 *level,
                 serde_bytes::Bytes::new(data_digest),
                 serde_bytes::Bytes::new(seal),
-            )).unwrap(),
-            Request::HealthCheck => vec![],  // Health check has no canonical bytes
+            ))
+            .unwrap(),
+            Request::HealthCheck => vec![], // Health check has no canonical bytes
         }
     }
 }

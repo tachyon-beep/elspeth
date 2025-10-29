@@ -57,14 +57,13 @@ impl Server {
         }
 
         // Bind Unix socket
-        let listener = UnixListener::bind(&self.config.socket_path)
-            .context("Failed to bind Unix socket")?;
+        let listener =
+            UnixListener::bind(&self.config.socket_path).context("Failed to bind Unix socket")?;
 
         // Set socket permissions to 0600 (owner-only read/write)
         // This prevents unauthorized access even before SO_PEERCRED check
         use std::os::unix::fs::PermissionsExt;
-        let mut perms = std::fs::metadata(&self.config.socket_path)?
-            .permissions();
+        let mut perms = std::fs::metadata(&self.config.socket_path)?.permissions();
         perms.set_mode(0o600);
         std::fs::set_permissions(&self.config.socket_path, perms)
             .context("Failed to set socket permissions to 0600")?;
@@ -129,7 +128,11 @@ impl Server {
             return Ok(()); // EOF
         }
 
-        debug!("Received {} bytes: {:?}", buffer.len(), &buffer[..buffer.len().min(128)]);
+        debug!(
+            "Received {} bytes: {:?}",
+            buffer.len(),
+            &buffer[..buffer.len().min(128)]
+        );
 
         let request: Request = serde_cbor::from_slice(&buffer)
             .map_err(|e| {
@@ -205,21 +208,30 @@ impl Server {
 
         // Dispatch to handlers
         match request {
-            Request::AuthorizeConstruct { frame_id, level, data_digest, .. } => {
-                self.handle_authorize_construct(frame_id, level, data_digest).await
+            Request::AuthorizeConstruct {
+                frame_id,
+                level,
+                data_digest,
+                ..
+            } => {
+                self.handle_authorize_construct(frame_id, level, data_digest)
+                    .await
             }
-            Request::RedeemGrant { grant_id, .. } => {
-                self.handle_redeem_grant(grant_id).await
-            }
-            Request::ComputeSeal { frame_id, level, data_digest, .. } => {
-                self.handle_compute_seal(frame_id, level, data_digest)
-            }
-            Request::VerifySeal { frame_id, level, data_digest, seal, .. } => {
-                self.handle_verify_seal(frame_id, level, data_digest, seal)
-            }
-            Request::HealthCheck => {
-                Ok(self.handle_health_check())
-            }
+            Request::RedeemGrant { grant_id, .. } => self.handle_redeem_grant(grant_id).await,
+            Request::ComputeSeal {
+                frame_id,
+                level,
+                data_digest,
+                ..
+            } => self.handle_compute_seal(frame_id, level, data_digest),
+            Request::VerifySeal {
+                frame_id,
+                level,
+                data_digest,
+                seal,
+                ..
+            } => self.handle_verify_seal(frame_id, level, data_digest, seal),
+            Request::HealthCheck => Ok(self.handle_health_check()),
             Request::ConsumeConstructionTicket { ticket, .. } => {
                 self.handle_consume_construction_ticket(ticket).await
             }
@@ -232,7 +244,7 @@ impl Server {
 
         let provided_auth = match request.auth() {
             Some(auth) => auth,
-            None => return Ok(true),  // No auth required
+            None => return Ok(true), // No auth required
         };
 
         let canonical_bytes = request.canonical_bytes_without_auth();
@@ -266,8 +278,8 @@ impl Server {
         level: u32,
         data_digest: [u8; 32],
     ) -> Result<Response> {
-        use std::time::{SystemTime, UNIX_EPOCH};
         use crate::grants::GrantRequest;
+        use std::time::{SystemTime, UNIX_EPOCH};
 
         // Create grant request
         let request = GrantRequest {
@@ -293,15 +305,26 @@ impl Server {
     /// Handle RedeemGrant request.
     async fn handle_redeem_grant(&self, grant_id: [u8; 16]) -> Result<Response> {
         // Redeem grant (consumes one-shot handle, returns unique construction_ticket)
-        let (grant_request, construction_ticket) = self.grants.redeem(&grant_id).await
+        let (grant_request, construction_ticket) = self
+            .grants
+            .redeem(&grant_id)
+            .await
             .map_err(|e| anyhow::anyhow!("Grant redemption failed: {}", e))?;
+
+        // SECURITY: Record ticket as issued (prevents forgery attacks)
+        // Without this, any random 32-byte value would be accepted as a valid ticket
+        self.tickets.issue(construction_ticket).await;
 
         // Register frame for future seal operations
         self.frames.register_from_grant(grant_request.clone());
 
         // Compute initial seal
         let uuid_frame_id = grant_request.frame_id;
-        let seal = self.secrets.compute_seal(uuid_frame_id, grant_request.level, &grant_request.data_digest);
+        let seal = self.secrets.compute_seal(
+            uuid_frame_id,
+            grant_request.level,
+            &grant_request.data_digest,
+        );
 
         // Return unique construction ticket (one-shot, must be consumed before frame instantiation)
         Ok(Response::RedeemGrantReply {
@@ -324,12 +347,17 @@ impl Server {
         if !self.frames.contains(uuid_frame_id) {
             return Ok(Response::Error {
                 error: "Frame not registered".to_string(),
-                reason: format!("Frame {} must be registered via grant redemption first", uuid_frame_id),
+                reason: format!(
+                    "Frame {} must be registered via grant redemption first",
+                    uuid_frame_id
+                ),
             });
         }
 
         // Compute seal
-        let seal = self.secrets.compute_seal(uuid_frame_id, level, &data_digest);
+        let seal = self
+            .secrets
+            .compute_seal(uuid_frame_id, level, &data_digest);
 
         // Update frame metadata
         self.frames.update(uuid_frame_id, level, &data_digest)?;
@@ -354,12 +382,17 @@ impl Server {
         if !self.frames.contains(uuid_frame_id) {
             return Ok(Response::Error {
                 error: "Frame not registered".to_string(),
-                reason: format!("Frame {} must be registered via grant redemption first", uuid_frame_id),
+                reason: format!(
+                    "Frame {} must be registered via grant redemption first",
+                    uuid_frame_id
+                ),
             });
         }
 
         // Verify seal
-        let valid = self.secrets.verify_seal(uuid_frame_id, level, &data_digest, &seal);
+        let valid = self
+            .secrets
+            .verify_seal(uuid_frame_id, level, &data_digest, &seal);
 
         Ok(Response::VerifySealReply {
             valid,
@@ -377,12 +410,10 @@ impl Server {
                     audit_id: 0, // TODO: Implement audit logging in Phase 3
                 })
             }
-            Err(e) => {
-                Ok(Response::Error {
-                    error: "Ticket consumption failed".to_string(),
-                    reason: e,
-                })
-            }
+            Err(e) => Ok(Response::Error {
+                error: "Ticket consumption failed".to_string(),
+                reason: e,
+            }),
         }
     }
 
@@ -421,7 +452,10 @@ impl Server {
         };
 
         if ret != 0 {
-            anyhow::bail!("getsockopt(SO_PEERCRED) failed: {}", std::io::Error::last_os_error());
+            anyhow::bail!(
+                "getsockopt(SO_PEERCRED) failed: {}",
+                std::io::Error::last_os_error()
+            );
         }
 
         Ok(ucred.uid)
@@ -445,12 +479,14 @@ impl Server {
         if session_key_path.exists() {
             debug!("Loading existing session key from {:?}", session_key_path);
 
-            let mut file = File::open(session_key_path)
-                .with_context(|| format!("Failed to open session key file: {:?}", session_key_path))?;
+            let mut file = File::open(session_key_path).with_context(|| {
+                format!("Failed to open session key file: {:?}", session_key_path)
+            })?;
 
             let mut session_key = Vec::new();
-            file.read_to_end(&mut session_key)
-                .with_context(|| format!("Failed to read session key from {:?}", session_key_path))?;
+            file.read_to_end(&mut session_key).with_context(|| {
+                format!("Failed to read session key from {:?}", session_key_path)
+            })?;
 
             if session_key.len() != 32 {
                 anyhow::bail!(
@@ -501,9 +537,11 @@ impl Server {
 
         // fsync parent directory (ensure directory entry is persisted)
         if let Some(parent) = session_key_path.parent() {
-            let parent_dir = File::open(parent)
-                .with_context(|| format!("Failed to open parent directory for fsync: {:?}", parent))?;
-            parent_dir.sync_all()
+            let parent_dir = File::open(parent).with_context(|| {
+                format!("Failed to open parent directory for fsync: {:?}", parent)
+            })?;
+            parent_dir
+                .sync_all()
                 .with_context(|| format!("Failed to fsync parent directory: {:?}", parent))?;
         }
 
@@ -520,7 +558,10 @@ impl Server {
             );
         }
 
-        info!("Session key generated and persisted at {:?} (32 bytes, mode 0o640)", session_key_path);
+        info!(
+            "Session key generated and persisted at {:?} (32 bytes, mode 0o640)",
+            session_key_path
+        );
 
         Ok((session_key, session_key_path.clone()))
     }
