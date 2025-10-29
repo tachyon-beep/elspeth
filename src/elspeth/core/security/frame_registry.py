@@ -20,8 +20,8 @@ the Python application layer (which holds actual DataFrame instances).
 
 from __future__ import annotations
 
-import time
 import threading
+import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 from uuid import UUID

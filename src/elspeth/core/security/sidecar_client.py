@@ -22,10 +22,8 @@ with OS-enforced process boundary isolation.
 import hashlib
 import hmac
 import socket
-import struct
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 from uuid import UUID
 
 try:
@@ -139,7 +137,10 @@ class SidecarClient:
         Returns:
             CBOR-encoded canonical representation
         """
+        from typing import Any
+
         op = request_dict["op"]
+        canonical: Any  # Type varies by operation
 
         if op == "authorize_construct":
             # Canonicalize as (frame_id, level, data_digest)
@@ -222,8 +223,16 @@ class SidecarClient:
 
             response_bytes = b"".join(response_chunks)
 
-            # Deserialize response
-            response = cbor2.loads(response_bytes)
+            # Deserialize response with type validation
+            response_raw = cbor2.loads(response_bytes)
+
+            # Validate response type for security
+            if not isinstance(response_raw, dict):
+                raise TypeError(
+                    f"Invalid response type from daemon: expected dict, got {type(response_raw)}"
+                )
+
+            response: dict = response_raw
 
             # Check for error response
             if "error" in response:
@@ -274,7 +283,18 @@ class SidecarClient:
 
         response = self._send_request(request)
 
-        return response["grant_id"], response["expires_at"]
+        # Type-safe extraction with validation
+        grant_id = response.get("grant_id")
+        if not isinstance(grant_id, bytes):
+            raise TypeError(f"Invalid grant_id type: expected bytes, got {type(grant_id)}")
+        if len(grant_id) != 16:
+            raise ValueError(f"Invalid grant_id length: expected 16 bytes, got {len(grant_id)}")
+
+        expires_at = response.get("expires_at")
+        if not isinstance(expires_at, int):
+            raise TypeError(f"Invalid expires_at type: expected int, got {type(expires_at)}")
+
+        return grant_id, expires_at
 
     def redeem_grant(self, grant_id: bytes) -> tuple[bytes, bytes]:
         """Redeem one-shot grant for construction_ticket + initial seal.
@@ -301,7 +321,24 @@ class SidecarClient:
 
         response = self._send_request(request)
 
-        return response["construction_ticket"], response["seal"]
+        # Type-safe extraction with validation
+        construction_ticket = response.get("construction_ticket")
+        if not isinstance(construction_ticket, bytes):
+            raise TypeError(
+                f"Invalid construction_ticket type: expected bytes, got {type(construction_ticket)}"
+            )
+        if len(construction_ticket) != 32:
+            raise ValueError(
+                f"Invalid construction_ticket length: expected 32 bytes, got {len(construction_ticket)}"
+            )
+
+        seal = response.get("seal")
+        if not isinstance(seal, bytes):
+            raise TypeError(f"Invalid seal type: expected bytes, got {type(seal)}")
+        if len(seal) != 32:
+            raise ValueError(f"Invalid seal length: expected 32 bytes, got {len(seal)}")
+
+        return construction_ticket, seal
 
     def compute_seal(
         self, frame_id: UUID, level: int, data_digest: bytes
@@ -331,7 +368,14 @@ class SidecarClient:
 
         response = self._send_request(request)
 
-        return response["seal"]
+        # Type-safe extraction with validation
+        seal = response.get("seal")
+        if not isinstance(seal, bytes):
+            raise TypeError(f"Invalid seal type in response: expected bytes, got {type(seal)}")
+        if len(seal) != 32:
+            raise ValueError(f"Invalid seal length: expected 32 bytes, got {len(seal)}")
+
+        return seal
 
     def verify_seal(
         self, frame_id: UUID, level: int, data_digest: bytes, seal: bytes
@@ -361,7 +405,12 @@ class SidecarClient:
 
         response = self._send_request(request)
 
-        return response["valid"]
+        # Type-safe extraction with validation
+        valid = response.get("valid")
+        if not isinstance(valid, bool):
+            raise TypeError(f"Invalid 'valid' type in response: expected bool, got {type(valid)}")
+
+        return valid
 
     def consume_construction_ticket(self, ticket: bytes) -> None:
         """Consume a construction ticket before SecureDataFrame instantiation.
@@ -438,9 +487,16 @@ class SidecarClient:
 
             response_bytes = b"".join(response_chunks)
 
-            # Deserialize response
-            response = cbor2.loads(response_bytes)
+            # Deserialize response with type validation
+            response_raw = cbor2.loads(response_bytes)
 
+            # Validate response type for security
+            if not isinstance(response_raw, dict):
+                raise TypeError(
+                    f"Invalid health check response type: expected dict, got {type(response_raw)}"
+                )
+
+            response: dict = response_raw
             return response
 
         except socket.timeout as e:

@@ -20,7 +20,6 @@ This design ensures:
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Protocol
-from uuid import UUID
 
 import pandas as pd
 

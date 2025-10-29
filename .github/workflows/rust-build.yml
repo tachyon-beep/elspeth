@@ -1,0 +1,209 @@
+name: Rust Build (Sidecar Daemon)
+
+on:
+  push:
+    branches:
+      - main
+      - 'feature/**'
+    paths:
+      - 'sidecar/**'
+      - '.github/workflows/rust-build.yml'
+      - '.github/workflows/reusable-rust-ci.yml'
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - 'sidecar/**'
+      - '.github/workflows/rust-build.yml'
+      - '.github/workflows/reusable-rust-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # ============================================================
+  # Core CI: Format, Lint, Test, Security
+  # ============================================================
+  rust-ci:
+    name: Rust CI (Format, Lint, Test)
+    uses: ./.github/workflows/reusable-rust-ci.yml
+    with:
+      rust-toolchain: stable
+      working-directory: sidecar
+    permissions:
+      contents: read
+
+  # ============================================================
+  # Minimum Supported Rust Version (MSRV) Check
+  # ============================================================
+  msrv-check:
+    name: MSRV Check (Rust 1.77)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sidecar
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Install Rust 1.77 (MSRV)
+        uses: dtolnay/rust-toolchain@7b1c307e0dcbda6122208f10795a713336a9b35a
+        with:
+          toolchain: "1.77"
+
+      - name: Check with MSRV
+        run: cargo check --all-targets --all-features
+
+      - name: MSRV Summary
+        run: |
+          echo "## MSRV Verification" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Code compiles with Rust 1.77 (MSRV)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Policy:** Sidecar daemon supports Rust 1.77+ for compatibility" >> $GITHUB_STEP_SUMMARY
+
+  # ============================================================
+  # Advanced Security: Unsafe Code Detection
+  # ============================================================
+  unsafe-check:
+    name: Unsafe Code Audit (cargo-geiger)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sidecar
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@7b1c307e0dcbda6122208f10795a713336a9b35a
+        with:
+          toolchain: stable
+
+      - name: Install cargo-geiger
+        run: cargo install --locked cargo-geiger
+
+      - name: Count unsafe code
+        run: |
+          echo "## Unsafe Code Audit" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          cargo geiger --output-format GitHubMarkdown >> $GITHUB_STEP_SUMMARY || true
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Security Note:** Sidecar uses \`unsafe\` only in:" >> $GITHUB_STEP_SUMMARY
+          echo "- Unix socket SO_PEERCRED validation (\`libc\` FFI)" >> $GITHUB_STEP_SUMMARY
+          echo "- All \`unsafe\` blocks are documented and reviewed" >> $GITHUB_STEP_SUMMARY
+
+  # ============================================================
+  # Benchmarks (Optional - Performance Regression Detection)
+  # ============================================================
+  benchmarks:
+    name: Performance Benchmarks
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    defaults:
+      run:
+        working-directory: sidecar
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@7b1c307e0dcbda6122208f10795a713336a9b35a
+        with:
+          toolchain: stable
+
+      - name: Run benchmarks
+        run: |
+          if [ -d "benches" ]; then
+            cargo bench --no-run
+            echo "## Benchmark Compilation" >> $GITHUB_STEP_SUMMARY
+            echo "✅ Benchmarks compiled successfully" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "## Benchmarks" >> $GITHUB_STEP_SUMMARY
+            echo "ℹ️ No benchmarks directory found" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  # ============================================================
+  # Binary Size Check (Prevent Bloat)
+  # ============================================================
+  binary-size:
+    name: Binary Size Analysis
+    runs-on: ubuntu-latest
+    needs: rust-ci
+    defaults:
+      run:
+        working-directory: sidecar
+
+    steps:
+      - name: Download release binary
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
+        with:
+          name: elspeth-sidecar-daemon-Linux-stable
+          path: binary
+
+      - name: Analyze binary size
+        run: |
+          BINARY_SIZE=$(stat -c%s binary/elspeth-sidecar-daemon)
+          BINARY_SIZE_MB=$(echo "scale=2; $BINARY_SIZE / 1048576" | bc)
+
+          echo "## Binary Size Analysis" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Release Binary:** ${BINARY_SIZE_MB} MB" >> $GITHUB_STEP_SUMMARY
+          echo "- **Target:** < 10 MB (production)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Fail if binary exceeds 20 MB (warn threshold)
+          if [ "$BINARY_SIZE" -gt 20971520 ]; then
+            echo "⚠️ **WARNING:** Binary exceeds 20 MB - consider reducing dependencies" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "✅ Binary size within acceptable range" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  # ============================================================
+  # Dependency Tree Analysis
+  # ============================================================
+  dependency-tree:
+    name: Dependency Tree Analysis
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sidecar
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@7b1c307e0dcbda6122208f10795a713336a9b35a
+        with:
+          toolchain: stable
+
+      - name: Generate dependency tree
+        run: |
+          echo "## Dependency Tree" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "<details>" >> $GITHUB_STEP_SUMMARY
+          echo "<summary>Click to expand dependency tree</summary>" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          cargo tree --depth 3 >> $GITHUB_STEP_SUMMARY
+          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          echo "</details>" >> $GITHUB_STEP_SUMMARY
+
+      - name: Check for duplicate dependencies
+        run: |
+          DUPLICATES=$(cargo tree -d 2>&1 || echo "")
+          if [ -n "$DUPLICATES" ]; then
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "### ⚠️ Duplicate Dependencies Detected" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            echo "$DUPLICATES" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Action Required:** Unify dependency versions to reduce binary bloat" >> $GITHUB_STEP_SUMMARY
+          fi

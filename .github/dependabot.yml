@@ -212,6 +212,86 @@ updates:
       # - dependency-name: "python"
       #   versions: ["3.13.x"]
 
+  # ============================================================
+  # Rust Dependencies (Sidecar Daemon)
+  # ============================================================
+  - package-ecosystem: "cargo"
+    directory: "/sidecar"
+    schedule:
+      # Check for updates every Thursday at 9 AM UTC
+      # Different day than Python to avoid merge conflicts
+      interval: "weekly"
+      day: "thursday"
+      time: "09:00"
+      timezone: "Australia/Sydney"
+
+    # Group related Rust dependencies
+    groups:
+      # Tokio async runtime and utilities
+      tokio-stack:
+        patterns:
+          - "tokio*"
+        update-types:
+          - "minor"
+          - "patch"
+
+      # Serde serialization ecosystem
+      serde-stack:
+        patterns:
+          - "serde*"
+        update-types:
+          - "minor"
+          - "patch"
+
+      # Cryptography libraries (security-critical)
+      crypto-libs:
+        patterns:
+          - "blake*"
+          - "ring"
+          - "subtle"
+        update-types:
+          - "patch"  # Only patch updates (security fixes)
+
+      # Development and testing tools
+      dev-tools:
+        patterns:
+          - "criterion"
+          - "tempfile"
+        update-types:
+          - "minor"
+          - "patch"
+
+    # Limit concurrent PRs
+    open-pull-requests-limit: 8
+
+    # Add labels for filtering
+    labels:
+      - "dependencies"
+      - "rust"
+      - "sidecar"
+      - "automated"
+
+    # Customize commit messages
+    commit-message:
+      prefix: "deps(rust)"
+      include: "scope"
+
+    # Use Cargo.lock version resolution
+    versioning-strategy: "lockfile-only"
+
+    # Rebase strategy
+    rebase-strategy: "auto"
+
+    # Only update direct dependencies
+    allow:
+      - dependency-type: "direct"
+
+    # Ignore specific versions if needed
+    ignore:
+      # Example: Don't update to major version changes without review
+      # - dependency-name: "tokio"
+      #   update-types: ["version-update:semver-major"]
+
 # ============================================================
 # Notes for Maintainers
 # ============================================================

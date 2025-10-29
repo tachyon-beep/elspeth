@@ -33,6 +33,7 @@ jobs:
             code:
               - 'src/**'
               - 'tests/**'
+              - 'sidecar/**'
               - 'pyproject.toml'
               - 'requirements*.lock'
               - 'Dockerfile'
@@ -107,9 +108,60 @@ jobs:
 
           echo "✅ No production data found - orchestration_packs/ is clean"
 
+  rust-sidecar:
+    name: Rust Sidecar (Format, Lint, Test, Build)
+    runs-on: ubuntu-latest
+    needs: [secrets-scan, changes]
+    if: needs.changes.outputs.code == 'true'
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@7b1c307e0dcbda6122208f10795a713336a9b35a # master
+        with:
+          toolchain: stable
+          components: rustfmt, clippy
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@9bdad043e88c75890e36ad3bbc8d27f0090dd609 # v2
+        with:
+          workspaces: sidecar
+
+      - name: Check Rust formatting
+        working-directory: sidecar
+        run: cargo fmt --check
+
+      - name: Run Clippy (deny warnings)
+        working-directory: sidecar
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Run Rust tests
+        working-directory: sidecar
+        run: cargo test --verbose
+
+      - name: Build sidecar daemon (release)
+        working-directory: sidecar
+        run: cargo build --release
+
+      - name: Run cargo audit (security advisories)
+        working-directory: sidecar
+        run: |
+          cargo install cargo-audit --locked
+          cargo audit --deny warnings
+
+      - name: Upload sidecar binary artifact
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: sidecar-daemon
+          path: sidecar/target/release/elspeth-sidecar
+          retention-days: 7
+
   ci-core:
     name: CI Core (Lint, Types, Tests)
-    needs: [secrets-scan, changes]
+    needs: [secrets-scan, rust-sidecar, changes]
     if: github.event_name != 'pull_request' || github.event.pull_request.draft != true
     uses: ./.github/workflows/reusable-ci.yml
     with:

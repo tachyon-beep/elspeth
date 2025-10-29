@@ -120,12 +120,12 @@ async fn test_redeem_grant_registers_frame() {
 
     // Now redeem grant
     let redeem_request = Request::RedeemGrant {
-        grant_id: grant_id.try_into().unwrap(),
+        grant_id,
         auth: vec![],
     };
     let auth = server.compute_request_auth(&redeem_request);
     let redeem_request = Request::RedeemGrant {
-        grant_id: grant_id.try_into().unwrap(),
+        grant_id,
         auth,
     };
 
@@ -185,12 +185,12 @@ async fn test_compute_seal_for_registered_frame() {
     };
 
     let redeem_request = Request::RedeemGrant {
-        grant_id: grant_id.try_into().unwrap(),
+        grant_id,
         auth: vec![],
     };
     let auth = server.compute_request_auth(&redeem_request);
     let redeem_request = Request::RedeemGrant {
-        grant_id: grant_id.try_into().unwrap(),
+        grant_id,
         auth,
     };
     server.handle_request(redeem_request).await.unwrap();
@@ -287,12 +287,12 @@ async fn test_verify_seal_success() {
     };
 
     let redeem_request = Request::RedeemGrant {
-        grant_id: grant_id.try_into().unwrap(),
+        grant_id,
         auth: vec![],
     };
     let auth = server.compute_request_auth(&redeem_request);
     let redeem_request = Request::RedeemGrant {
-        grant_id: grant_id.try_into().unwrap(),
+        grant_id,
         auth,
     };
     server.handle_request(redeem_request).await.unwrap();
@@ -321,7 +321,7 @@ async fn test_verify_seal_success() {
         frame_id,
         level,
         data_digest,
-        seal: seal.try_into().unwrap(),
+        seal,
         auth: vec![],
     };
     let auth = server.compute_request_auth(&verify_request);
@@ -329,7 +329,7 @@ async fn test_verify_seal_success() {
         frame_id,
         level,
         data_digest,
-        seal: seal.try_into().unwrap(),
+        seal,
         auth,
     };
 

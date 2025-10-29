@@ -31,6 +31,28 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Create a dedicated virtualenv for isolation
 RUN python -m venv /opt/venv
 
+# ========================= RUST SIDECAR BUILD =========================
+FROM rust:1.83-slim AS rust-builder
+WORKDIR /build
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    pkg-config \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy Rust workspace
+COPY sidecar/ sidecar/
+
+# Build sidecar daemon in release mode and strip debug symbols
+WORKDIR /build/sidecar
+RUN cargo build --release --locked && \
+    strip /build/sidecar/target/release/elspeth-sidecar
+
+# Verify binary was created and report size
+RUN test -f /build/sidecar/target/release/elspeth-sidecar || \
+    (echo "ERROR: Sidecar binary not found at expected path" && exit 1) && \
+    echo "Sidecar binary size: $(du -h /build/sidecar/target/release/elspeth-sidecar | cut -f1)"
+
 # ========================= DEV/TEST BUILD =========================
 FROM base AS builder-dev
 WORKDIR /workspace
@@ -58,6 +80,10 @@ COPY --from=builder-dev /workspace/docs /workspace/docs
 COPY --from=builder-dev /workspace/README.md /workspace/README.md
 COPY --from=builder-dev /workspace/LICENSE /workspace/LICENSE
 
+# Copy Rust sidecar daemon binary and config
+COPY --from=rust-builder /build/sidecar/target/release/elspeth-sidecar /usr/local/bin/elspeth-sidecar
+COPY --from=rust-builder /build/sidecar/config/sidecar.toml /etc/elspeth/sidecar.toml
+
 # Copy Docker configuration files (for testing multi-process deployment)
 COPY docker/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 COPY docker/elspeth-sudoers /etc/sudoers.d/elspeth
@@ -66,6 +92,7 @@ COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 # Set permissions
 RUN chmod 0440 /etc/sudoers.d/elspeth && \
     chmod +x /usr/local/bin/entrypoint.sh && \
+    chmod +x /usr/local/bin/elspeth-sidecar && \
     chown -R appuser:appuser /workspace && \
     chmod -R go+rX /workspace/src /workspace/tests /workspace/scripts
 
@@ -94,14 +121,19 @@ RUN python -m pip install . --no-deps --no-index --no-build-isolation
 FROM base AS runtime
 COPY --from=builder-runtime /opt/venv /opt/venv
 
+# Copy Rust sidecar daemon binary and config
+COPY --from=rust-builder /build/sidecar/target/release/elspeth-sidecar /usr/local/bin/elspeth-sidecar
+COPY --from=rust-builder /build/sidecar/config/sidecar.toml /etc/elspeth/sidecar.toml
+
 # Copy Docker configuration files for multi-process deployment
 COPY docker/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 COPY docker/elspeth-sudoers /etc/sudoers.d/elspeth
 COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 
-# Set correct permissions for sudoers and entrypoint
+# Set correct permissions for sudoers, entrypoint, and sidecar daemon
 RUN chmod 0440 /etc/sudoers.d/elspeth && \
-    chmod +x /usr/local/bin/entrypoint.sh
+    chmod +x /usr/local/bin/entrypoint.sh && \
+    chmod +x /usr/local/bin/elspeth-sidecar
 
 # Create workspace directory
 WORKDIR /workspace

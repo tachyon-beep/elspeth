@@ -49,7 +49,7 @@ async fn test_grant_expires_after_ttl() {
 
     // Redeem fails (expired)
     let result = table.redeem(&grant_id).await;
-    assert!(matches!(result, Err(_)));
+    assert!(result.is_err());
 }
 
 #[tokio::test]
