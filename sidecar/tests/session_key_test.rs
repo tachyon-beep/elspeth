@@ -10,6 +10,7 @@ fn test_config(session_key_path: &std::path::Path) -> elspeth_sidecar::config::C
         session_key_path: session_key_path.to_path_buf(),
         appuser_uid: 1000,
         grant_ttl_secs: 60,
+        max_request_size_bytes: 1024 * 1024, // 1 MiB
         log_level: "debug".to_string(),
     }
 }

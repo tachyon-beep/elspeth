@@ -25,6 +25,11 @@ pub struct Config {
     /// Grant TTL in seconds
     pub grant_ttl_secs: u64,
 
+    /// Maximum request size in bytes (DoS protection)
+    /// Default: 1 MiB (sufficient for largest valid CBOR request)
+    #[serde(default = "default_max_request_size")]
+    pub max_request_size_bytes: usize,
+
     /// Log level (trace, debug, info, warn, error)
     pub log_level: String,
 }
@@ -86,6 +91,21 @@ impl Config {
     pub fn grant_ttl(&self) -> Duration {
         Duration::from_secs(self.grant_ttl_secs)
     }
+
+    /// Maximum request size in bytes.
+    pub fn max_request_size(&self) -> usize {
+        self.max_request_size_bytes
+    }
+}
+
+/// Default max request size (1 MiB).
+///
+/// Rationale:
+/// - Largest valid request: authorize_construct with 32-byte digest (~200 bytes CBOR)
+/// - 1 MiB provides 5000x headroom for future protocol extensions
+/// - Prevents multi-gigabyte DoS attacks
+fn default_max_request_size() -> usize {
+    1024 * 1024 // 1 MiB
 }
 
 // NO Default implementation - mode must be explicitly specified

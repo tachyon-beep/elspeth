@@ -10,6 +10,7 @@ fn test_config(temp_dir: &TempDir) -> Config {
         session_key_path: temp_dir.path().join("session.key"),
         appuser_uid: 1000,
         grant_ttl_secs: 60,
+        max_request_size_bytes: 1024 * 1024, // 1 MiB
         log_level: "debug".to_string(),
     }
 }
