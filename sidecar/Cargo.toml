@@ -18,6 +18,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 anyhow = "1.0"
 ring = "0.17"
 subtle = "2.6"
+toml = "0.8"
 
 [dev-dependencies]
 tempfile = "3.8"

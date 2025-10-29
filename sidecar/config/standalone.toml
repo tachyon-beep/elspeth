@@ -1,0 +1,12 @@
+# Development-only configuration with standalone mode
+# ⚠️  NOT APPROVED FOR PRODUCTION USE ⚠️
+
+mode = "standalone"
+socket_path = "/tmp/elspeth-dev.sock"
+session_key_path = "/tmp/elspeth-dev.session"
+appuser_uid = 1000
+grant_ttl_secs = 300  # Longer TTL for dev
+log_level = "debug"
+
+# Standalone mode logs loud warnings on every frame operation:
+# "⚠️  STANDALONE MODE - Classification ceiling: OFFICIAL:SENSITIVE"
