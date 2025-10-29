@@ -264,8 +264,17 @@ def test_invalid_hmac_fails(sidecar_client):
     sock.connect(str(sidecar_client.config.socket_path))
     sock.sendall(request_bytes)
 
-    # Receive response
-    response_bytes = sock.recv(4096)
+    # Signal end of request
+    sock.shutdown(socket.SHUT_WR)
+
+    # Receive response (read until EOF)
+    response_chunks = []
+    while True:
+        chunk = sock.recv(4096)
+        if not chunk:
+            break
+        response_chunks.append(chunk)
+    response_bytes = b"".join(response_chunks)
     response = cbor2.loads(response_bytes)
 
     sock.close()
@@ -329,3 +338,58 @@ def test_securedataframe_standalone_mode_fallback(monkeypatch):
     assert frame._created_by_datasource is True
     assert len(frame._seal) == 32, "Seal should be 32 bytes (from closure)"
     assert frame._frame_id is None, "Frame ID should not be set in standalone mode"
+
+
+def test_health_check(sidecar_client):
+    """Test daemon health check endpoint."""
+    # Call health check
+    health = sidecar_client.health_check()
+
+    # Verify response structure
+    assert "status" in health, "Health check should return status"
+    assert health["status"] == "healthy", "Daemon should report healthy status"
+
+    assert "uptime_secs" in health, "Health check should return uptime"
+    assert isinstance(health["uptime_secs"], int), "uptime_secs should be integer"
+    assert health["uptime_secs"] >= 0, "uptime_secs should be non-negative"
+
+    assert "requests_served" in health, "Health check should return request count"
+    assert isinstance(health["requests_served"], int), "requests_served should be integer"
+    assert health["requests_served"] >= 0, "requests_served should be non-negative"
+
+
+def test_container_healthcheck_script_sidecar_mode(sidecar_daemon, monkeypatch):
+    """Test container health check script with running daemon."""
+    socket_path, session_key_path, _ = sidecar_daemon
+
+    # Set environment for sidecar mode
+    monkeypatch.setenv("ELSPETH_SIDECAR_MODE", "sidecar")
+    monkeypatch.setenv("ELSPETH_SIDECAR_SOCKET", str(socket_path))
+
+    # Run health check script
+    result = subprocess.run(
+        ["python", "scripts/container_healthcheck.py"],
+        capture_output=True,
+        text=True,
+        cwd=Path(__file__).parent.parent,
+    )
+
+    # Should succeed (daemon is running)
+    assert result.returncode == 0, f"Health check should pass with running daemon. stderr: {result.stderr}"
+
+
+def test_container_healthcheck_script_standalone_mode(monkeypatch):
+    """Test container health check script in standalone mode."""
+    # Set environment for standalone mode
+    monkeypatch.setenv("ELSPETH_SIDECAR_MODE", "standalone")
+
+    # Run health check script
+    result = subprocess.run(
+        ["python", "scripts/container_healthcheck.py"],
+        capture_output=True,
+        text=True,
+        cwd=Path(__file__).parent.parent,
+    )
+
+    # Should succeed (standalone doesn't require daemon)
+    assert result.returncode == 0, f"Health check should pass in standalone mode. stderr: {result.stderr}"

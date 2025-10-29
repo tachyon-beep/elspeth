@@ -20,6 +20,7 @@ anyhow = "1.0"
 ring = "0.17"
 subtle = "2.6"
 toml = "0.8"
+libc = "0.2"
 
 [dev-dependencies]
 tempfile = "3.8"

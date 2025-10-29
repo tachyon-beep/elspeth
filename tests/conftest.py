@@ -1,4 +1,5 @@
 import csv
+import os
 import sys
 from pathlib import Path
 from typing import Any, Callable
@@ -11,6 +12,21 @@ from elspeth.plugins.nodes.sinks._sanitize import DANGEROUS_PREFIXES
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _configure_sidecar_mode_for_tests():
+    """Configure standalone mode for test environments.
+
+    Production containers default to sidecar mode (fail-closed security).
+    Test/dev environments explicitly opt-in to standalone mode since the
+    sidecar daemon is not available in CI/development.
+
+    This fixture runs once per test session before any tests execute.
+    """
+    os.environ["ELSPETH_SIDECAR_MODE"] = "standalone"
+    yield
+    # Cleanup not needed - environment persists for entire test session
 
 
 _SANITIZATION_PREFIXES = tuple(prefix for prefix in DANGEROUS_PREFIXES if prefix != "'")

@@ -63,6 +63,10 @@ pub enum Request {
         #[serde(with = "serde_bytes")]
         auth: Vec<u8>,
     },
+
+    /// Health check (no authentication required).
+    #[serde(rename = "health_check")]
+    HealthCheck,
 }
 
 /// Daemon response to client.
@@ -104,6 +108,13 @@ pub enum Response {
         audit_id: u64,
     },
 
+    /// Health check response.
+    HealthCheckReply {
+        status: String,      // "healthy"
+        uptime_secs: u64,    // Time since daemon started
+        requests_served: u64, // Total requests processed
+    },
+
     /// Error response.
     Error {
         error: String,
@@ -112,15 +123,21 @@ pub enum Response {
 }
 
 impl Request {
-    /// Extract auth field for validation.
-    pub fn auth(&self) -> &[u8] {
+    /// Extract auth field for validation (None for unauthenticated requests).
+    pub fn auth(&self) -> Option<&[u8]> {
         match self {
-            Request::AuthorizeConstruct { auth, .. } => auth,
-            Request::RedeemGrant { auth, .. } => auth,
-            Request::ConsumeConstructionTicket { auth, .. } => auth,
-            Request::ComputeSeal { auth, .. } => auth,
-            Request::VerifySeal { auth, .. } => auth,
+            Request::AuthorizeConstruct { auth, .. } => Some(auth),
+            Request::RedeemGrant { auth, .. } => Some(auth),
+            Request::ConsumeConstructionTicket { auth, .. } => Some(auth),
+            Request::ComputeSeal { auth, .. } => Some(auth),
+            Request::VerifySeal { auth, .. } => Some(auth),
+            Request::HealthCheck => None,  // No authentication required
         }
+    }
+
+    /// Check if request requires authentication.
+    pub fn requires_auth(&self) -> bool {
+        !matches!(self, Request::HealthCheck)
     }
 
     /// Canonical CBOR bytes (without auth field) for HMAC computation.
@@ -164,6 +181,7 @@ impl Request {
                 serde_bytes::Bytes::new(data_digest),
                 serde_bytes::Bytes::new(seal),
             )).unwrap(),
+            Request::HealthCheck => vec![],  // Health check has no canonical bytes
         }
     }
 }

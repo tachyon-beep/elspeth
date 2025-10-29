@@ -151,6 +151,9 @@ class SidecarClient:
         elif op == "redeem_grant":
             # Canonicalize as grant_id
             canonical = request_dict["grant_id"]
+        elif op == "consume_construction_ticket":
+            # Canonicalize as ticket
+            canonical = request_dict["ticket"]
         elif op == "compute_seal":
             # Canonicalize as (frame_id, level, data_digest)
             canonical = (
@@ -201,11 +204,23 @@ class SidecarClient:
             # Send request
             sock.sendall(request_bytes)
 
-            # Receive response
-            response_bytes = sock.recv(4096)
+            # Signal end of request (shutdown write side)
+            # This allows daemon to know request is complete without closing connection
+            sock.shutdown(socket.SHUT_WR)
 
-            if not response_bytes:
+            # Receive complete response (read until EOF)
+            # Unix sockets are stream-oriented - must read until connection closes
+            response_chunks = []
+            while True:
+                chunk = sock.recv(4096)
+                if not chunk:
+                    break
+                response_chunks.append(chunk)
+
+            if not response_chunks:
                 raise ConnectionError("Daemon closed connection without response")
+
+            response_bytes = b"".join(response_chunks)
 
             # Deserialize response
             response = cbor2.loads(response_bytes)
@@ -347,3 +362,94 @@ class SidecarClient:
         response = self._send_request(request)
 
         return response["valid"]
+
+    def consume_construction_ticket(self, ticket: bytes) -> None:
+        """Consume a construction ticket before SecureDataFrame instantiation.
+
+        This method validates that the ticket was issued by the daemon and marks it
+        as consumed (one-shot). Must be called before __new__() to prevent replay attacks.
+
+        Args:
+            ticket: 32-byte construction ticket from redeem_grant()
+
+        Raises:
+            ConnectionError: If daemon is unreachable
+            RuntimeError: If ticket is invalid, already consumed, or expired
+        """
+        if len(ticket) != 32:
+            raise ValueError(f"Construction ticket must be 32 bytes, got {len(ticket)}")
+
+        request = {
+            "op": "consume_construction_ticket",
+            "ticket": ticket,
+        }
+
+        response = self._send_request(request)
+
+        # Check if consumption succeeded
+        if not response.get("consumed", False):
+            raise RuntimeError(
+                "Ticket consumption failed - ticket may be invalid or already consumed"
+            )
+
+    def health_check(self) -> dict:
+        """Check daemon health (no authentication required).
+
+        Returns:
+            Dictionary with:
+            - status: "healthy"
+            - uptime_secs: Seconds since daemon started
+            - requests_served: Total requests processed
+
+        Raises:
+            ConnectionError: If daemon is unreachable
+            TimeoutError: If request times out
+        """
+        request = {
+            "op": "health_check",
+        }
+
+        # Health check doesn't require authentication, so send raw request
+        request_bytes = cbor2.dumps(request)
+
+        try:
+            sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            sock.settimeout(self.config.timeout_secs)
+            sock.connect(str(self.config.socket_path))
+
+            # Send request
+            sock.sendall(request_bytes)
+
+            # Signal end of request (shutdown write side)
+            # This allows daemon to know request is complete without closing connection
+            sock.shutdown(socket.SHUT_WR)
+
+            # Receive complete response (read until EOF)
+            # Unix sockets are stream-oriented - must read until connection closes
+            response_chunks = []
+            while True:
+                chunk = sock.recv(4096)
+                if not chunk:
+                    break
+                response_chunks.append(chunk)
+
+            if not response_chunks:
+                raise ConnectionError("Daemon closed connection without response")
+
+            response_bytes = b"".join(response_chunks)
+
+            # Deserialize response
+            response = cbor2.loads(response_bytes)
+
+            return response
+
+        except socket.timeout as e:
+            raise TimeoutError(
+                f"Health check timed out after {self.config.timeout_secs}s"
+            ) from e
+        except OSError as e:
+            raise ConnectionError(
+                f"Failed to connect to daemon at {self.config.socket_path}: {e}"
+            ) from e
+        finally:
+            sock.close()

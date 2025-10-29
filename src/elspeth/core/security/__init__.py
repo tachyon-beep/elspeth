@@ -11,6 +11,9 @@ from .approved_endpoints import (
     validate_endpoint,
     validate_http_api_endpoint,
 )
+from .frame_registry import FrameRegistry, FrameRegistryEntry
+from .proxy import OrchestratorRPCClient, SecureFrameProxy
+from .proxy_table import ProxyEntry, ProxyTable
 from .secure_data import SecureDataFrame
 from .secure_mode import (
     SecureMode,

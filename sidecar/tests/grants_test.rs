@@ -22,10 +22,11 @@ async fn test_grant_authorize_and_redeem_success() {
     // Redeem succeeds once
     let result = table.redeem(&grant_id).await;
     assert!(result.is_ok());
-    let redeemed = result.unwrap();
+    let (redeemed, ticket) = result.unwrap();
     assert_eq!(redeemed.frame_id, request.frame_id);
     assert_eq!(redeemed.level, 3);
     assert_eq!(redeemed.data_digest, request.data_digest);
+    assert_eq!(ticket.len(), 32, "Construction ticket should be 32 bytes");
 
     // Redeem fails second time (one-shot)
     let result2 = table.redeem(&grant_id).await;

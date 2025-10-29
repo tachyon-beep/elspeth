@@ -30,5 +30,8 @@ fn test_canonical_cbor_format() {
     println!("  Length: 53 bytes");
 
     assert_eq!(canonical_bytes.len(), 53, "Canonical CBOR should be 53 bytes to match Python");
-    assert_eq!(&hex_string[..10], "8350", "Should start with array(3) + bytes(16) markers");
+
+    // Verify exact match with Python canonical format
+    let expected_hex = "835062ab9b9025c148d49b4e9d3695d86a72025820aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+    assert_eq!(hex_string, expected_hex, "Rust canonical CBOR must exactly match Python format");
 }

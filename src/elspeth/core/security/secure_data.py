@@ -76,27 +76,34 @@ def _get_sidecar_mode() -> bool:
         True if sidecar mode is enabled, False for standalone mode
 
     Environment Variables:
-        ELSPETH_SIDECAR_MODE: "sidecar" or "standalone" (default: "standalone")
+        ELSPETH_SIDECAR_MODE: "sidecar" (default, secure) or "standalone" (opt-in, vulnerable)
         ELSPETH_SIDECAR_SOCKET: Path to daemon Unix socket (for sidecar mode)
         ELSPETH_SIDECAR_SESSION_KEY: Path to session key file (for sidecar mode)
+
+    Security:
+        Defaults to sidecar mode (fail-closed security). Production containers
+        with 3-UID separation run sidecar daemon by default. Development/test
+        environments must explicitly opt-in to standalone mode via environment variable.
     """
     global _SIDECAR_MODE
     if _SIDECAR_MODE is not None:
         return _SIDECAR_MODE
 
-    mode_str = os.environ.get("ELSPETH_SIDECAR_MODE", "standalone").lower().strip()
+    # Default to sidecar mode (fail-closed security)
+    mode_str = os.environ.get("ELSPETH_SIDECAR_MODE", "sidecar").lower().strip()
     _SIDECAR_MODE = (mode_str == "sidecar")
 
     if _SIDECAR_MODE:
         logger.info(
             "Sidecar mode enabled (CVE-ADR-002-A-009 mitigation active). "
-            "Secrets isolated in separate Rust process."
+            "Secrets isolated in separate Rust process (UID 1001)."
         )
     else:
-        logger.info(
-            "Standalone mode active. Using closure-encapsulated secrets "
-            "(CVE-ADR-002-A-009 vulnerability present). "
-            "For production use with classified data, set ELSPETH_SIDECAR_MODE=sidecar."
+        logger.warning(
+            "Standalone mode active (DEVELOPMENT/TESTING ONLY). "
+            "Using closure-encapsulated secrets (CVE-ADR-002-A-009 vulnerability present). "
+            "This mode is NOT SAFE for production use with classified data. "
+            "Explicitly set ELSPETH_SIDECAR_MODE=standalone to acknowledge this risk."
         )
 
     return _SIDECAR_MODE
@@ -133,7 +140,7 @@ def _get_sidecar_client():
     # Get configuration from environment
     socket_path_str = os.environ.get("ELSPETH_SIDECAR_SOCKET", "/run/sidecar/auth.sock")
     session_key_path_str = os.environ.get(
-        "ELSPETH_SIDECAR_SESSION_KEY", "/var/lib/sidecar/session.key"
+        "ELSPETH_SIDECAR_SESSION_KEY", "/run/sidecar/.session"
     )
 
     socket_path = Path(socket_path_str)
@@ -165,6 +172,11 @@ def _get_sidecar_client():
     logger.info(f"SidecarClient initialized (socket: {socket_path})")
 
     return _SIDECAR_CLIENT
+
+
+# Internal bypass token for trusted operations (with_uplifted_security_level, with_new_data)
+# This sentinel indicates "skip ticket validation for internal frame mutation"
+_INTERNAL_BYPASS = object()
 
 
 def _create_secure_factories():
@@ -387,14 +399,49 @@ class SecureDataFrame:
         """
         from elspeth.core.validation.base import SecurityValidationError
 
-        # Verify capability token using closure-encapsulated verification
-        if _token is None or not _verify_construction_token(_token):
-            raise SecurityValidationError(
-                "SecureDataFrame can only be created via authorized factory methods. "
-                "Use create_from_datasource() for datasources, or "
-                "with_uplifted_security_level()/with_new_data() for plugins. "
-                "Direct construction prevents classification tracking (ADR-002-A)."
-            )
+        # Verify capability token
+        # In sidecar mode: Validate and consume construction_ticket via daemon, or allow internal bypass
+        # In standalone mode: Use closure-encapsulated verification
+        if _get_sidecar_mode():
+            # Sidecar mode: Check for internal bypass token (trusted operations only)
+            if _token is _INTERNAL_BYPASS:
+                # Internal bypass for with_uplifted_security_level() / with_new_data()
+                # These methods have already verified the seal and are creating mutated instances
+                return object.__new__(cls)
+
+            # Regular path: Ticket must be validated by daemon
+            if not (isinstance(_token, bytes) and len(_token) == 32):
+                raise SecurityValidationError(
+                    "SecureDataFrame in sidecar mode requires 32-byte construction ticket. "
+                    "Use create_from_datasource() for datasources, or "
+                    "with_uplifted_security_level()/with_new_data() for plugins."
+                )
+
+            # Consume ticket with daemon (one-shot, prevents replay attacks)
+            try:
+                client = _get_sidecar_client()
+                client.consume_construction_ticket(_token)
+            except RuntimeError as e:
+                raise SecurityValidationError(
+                    f"Construction ticket validation failed: {e}. "
+                    "Ticket may be invalid, already consumed, or expired."
+                ) from e
+        else:
+            # Standalone mode: Use closure-based token verification
+            # Reject internal bypass (only valid in sidecar mode)
+            if _token is _INTERNAL_BYPASS:
+                raise SecurityValidationError(
+                    "Internal bypass token is only valid in sidecar mode."
+                )
+
+            if _token is None or not _verify_construction_token(_token):
+                raise SecurityValidationError(
+                    "SecureDataFrame can only be created via authorized factory methods. "
+                    "Use create_from_datasource() for datasources, or "
+                    "with_uplifted_security_level()/with_new_data() for plugins. "
+                    "Direct construction prevents classification tracking (ADR-002-A)."
+                )
+
         return object.__new__(cls)
 
     def __init_subclass__(cls, **kwargs):
@@ -496,8 +543,8 @@ class SecureDataFrame:
     def _verify_seal(self) -> None:
         """Verify seal integrity, raise if tampered (VULN-011 Phase 2).
 
-        Recomputes seal from current (data, security_level) and compares
-        to stored _seal. Mismatch indicates tampering via object.__setattr__().
+        In sidecar mode: Validates seal via daemon with frame_id + digest
+        In standalone mode: Recomputes seal from closure and compares
 
         Raises:
             SecurityValidationError: If seal verification fails (tampering detected)
@@ -506,24 +553,56 @@ class SecureDataFrame:
             - Called on every access (validate_compatible_with, etc.)
             - Fail-loud principle (raises on tampering)
             - Generic error message (doesn't leak seal internals)
+            - Sidecar mode uses OS-isolated validation (no Python access to seal_key)
 
         CVE Prevention:
             - CVE-ADR-002-A-002: Detects and blocks tampered containers
+            - CVE-ADR-002-A-009: Sidecar mode prevents secret export attacks
         """
         from elspeth.core.validation.base import SecurityValidationError
 
-        # Recompute seal from current state
-        expected_seal = _compute_seal(self.data, self.security_level)
-
-        # Compare to stored seal (constant-time comparison)
         stored_seal = object.__getattribute__(self, "_seal")
 
-        if not secrets.compare_digest(expected_seal, stored_seal):
-            raise SecurityValidationError(
-                "SecureDataFrame integrity verification failed. "
-                "Container metadata has been tampered with (ADR-002-A). "
-                "This indicates a security policy violation."
-            )
+        if _get_sidecar_mode():
+            # Sidecar mode: Validate via daemon
+            frame_id = object.__getattribute__(self, "_frame_id")
+            if frame_id is None:
+                raise SecurityValidationError(
+                    "SecureDataFrame in sidecar mode requires frame_id for seal validation. "
+                    "This indicates an internal error or security bypass attempt."
+                )
+
+            # Compute canonical digest of current data
+            from elspeth.core.security.digest import compute_dataframe_digest
+
+            data_digest = compute_dataframe_digest(self.data)
+            level = self.security_level.to_level_int()
+
+            # Validate seal with daemon
+            try:
+                client = _get_sidecar_client()
+                valid = client.verify_seal(frame_id, level, data_digest, stored_seal)
+
+                if not valid:
+                    raise SecurityValidationError(
+                        "SecureDataFrame integrity verification failed. "
+                        "Container metadata has been tampered with (ADR-002-A). "
+                        "This indicates a security policy violation."
+                    )
+            except (ConnectionError, TimeoutError, RuntimeError) as e:
+                raise SecurityValidationError(
+                    f"Seal verification failed - daemon unreachable or frame not registered: {e}"
+                ) from e
+        else:
+            # Standalone mode: Use closure-based verification
+            expected_seal = _compute_seal(self.data, self.security_level)
+
+            if not secrets.compare_digest(expected_seal, stored_seal):
+                raise SecurityValidationError(
+                    "SecureDataFrame integrity verification failed. "
+                    "Container metadata has been tampered with (ADR-002-A). "
+                    "This indicates a security policy violation."
+                )
 
     @classmethod
     def create_from_datasource(
@@ -598,7 +677,7 @@ class SecureDataFrame:
         # Authorize construction
         grant_id, expires_at = client.authorize_construct(
             frame_id=frame_id,
-            level=security_level.value,
+            level=security_level.to_level_int(),
             data_digest=data_digest
         )
 
@@ -699,18 +778,38 @@ class SecureDataFrame:
 
         uplifted_level = max(self.security_level, new_level)
 
-        # Pass token to __new__ for authorization (VULN-011)
-        # Token retrieved from closure-encapsulated secret
-        instance = cast(
-            SecureDataFrame,
-            SecureDataFrame.__new__(SecureDataFrame, _token=_get_construction_token()),
-        )
+        # In sidecar mode: Use daemon to compute seal
+        # In standalone mode: Use closure-based seal computation
+        if _get_sidecar_mode():
+            # Compute canonical digest
+            from elspeth.core.security.digest import compute_dataframe_digest
+
+            data_digest = compute_dataframe_digest(self.data)
+            frame_id = object.__getattribute__(self, "_frame_id")
+            level_int = uplifted_level.to_level_int()
+
+            # Get new seal from daemon
+            client = _get_sidecar_client()
+            seal = client.compute_seal(frame_id, level_int, data_digest)
+
+            # Create instance with internal bypass (frame already registered)
+            instance = cast(
+                SecureDataFrame,
+                SecureDataFrame.__new__(SecureDataFrame, _token=_INTERNAL_BYPASS),
+            )
+            object.__setattr__(instance, "_frame_id", frame_id)  # Keep same frame_id
+        else:
+            # Standalone mode: Use closure-based token and seal
+            instance = cast(
+                SecureDataFrame,
+                SecureDataFrame.__new__(SecureDataFrame, _token=_get_construction_token()),
+            )
+            seal = _compute_seal(self.data, uplifted_level)
+            object.__setattr__(instance, "_frame_id", None)
+
         object.__setattr__(instance, "data", self.data)
         object.__setattr__(instance, "security_level", uplifted_level)
         object.__setattr__(instance, "_created_by_datasource", False)
-
-        # Compute and set tamper-evident seal (VULN-011 Phase 2)
-        seal = _compute_seal(self.data, uplifted_level)
         object.__setattr__(instance, "_seal", seal)
 
         return instance
@@ -748,18 +847,38 @@ class SecureDataFrame:
         # Attack: Tamper security_level→UNOFFICIAL, call with_new_data(), get "legitimate" UNOFFICIAL frame
         self._verify_seal()
 
-        # Pass token to __new__ for authorization (VULN-011)
-        # Token retrieved from closure-encapsulated secret
-        instance = cast(
-            SecureDataFrame,
-            SecureDataFrame.__new__(SecureDataFrame, _token=_get_construction_token()),
-        )
+        # In sidecar mode: Use daemon to compute seal
+        # In standalone mode: Use closure-based seal computation
+        if _get_sidecar_mode():
+            # Compute canonical digest for NEW data
+            from elspeth.core.security.digest import compute_dataframe_digest
+
+            data_digest = compute_dataframe_digest(new_data)
+            frame_id = object.__getattribute__(self, "_frame_id")
+            level_int = self.security_level.to_level_int()
+
+            # Get new seal from daemon
+            client = _get_sidecar_client()
+            seal = client.compute_seal(frame_id, level_int, data_digest)
+
+            # Create instance with internal bypass (frame already registered)
+            instance = cast(
+                SecureDataFrame,
+                SecureDataFrame.__new__(SecureDataFrame, _token=_INTERNAL_BYPASS),
+            )
+            object.__setattr__(instance, "_frame_id", frame_id)  # Keep same frame_id
+        else:
+            # Standalone mode: Use closure-based token and seal
+            instance = cast(
+                SecureDataFrame,
+                SecureDataFrame.__new__(SecureDataFrame, _token=_get_construction_token()),
+            )
+            seal = _compute_seal(new_data, self.security_level)
+            object.__setattr__(instance, "_frame_id", None)
+
         object.__setattr__(instance, "data", new_data)
         object.__setattr__(instance, "security_level", self.security_level)
         object.__setattr__(instance, "_created_by_datasource", False)
-
-        # Compute and set tamper-evident seal (VULN-011 Phase 2)
-        seal = _compute_seal(new_data, self.security_level)
         object.__setattr__(instance, "_seal", seal)
 
         return instance

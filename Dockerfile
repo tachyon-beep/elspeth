@@ -13,7 +13,20 @@ RUN chmod +x /usr/local/bin/validate-digest.sh \
 ENV PIP_NO_CACHE_DIR=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PATH="/opt/venv/bin:${PATH}"
-RUN useradd -ms /bin/bash appuser
+
+# Create three users for privilege separation (3-UID security model):
+# - sidecar (1001): Rust daemon, owns /run/sidecar/, holds secrets
+# - appuser (1000): Python orchestrator, can read session key, spawns workers
+# - appplugin (1002): Plugin workers, NO access to /run/sidecar/
+RUN useradd -m -u 1000 -s /bin/bash appuser && \
+    useradd -m -u 1001 -s /bin/bash sidecar && \
+    useradd -m -u 1002 -s /bin/bash appplugin
+
+# Install sudo and supervisor for multi-process management
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    sudo \
+    supervisor \
+    && rm -rf /var/lib/apt/lists/*
 
 # Create a dedicated virtualenv for isolation
 RUN python -m venv /opt/venv
@@ -44,12 +57,23 @@ COPY --from=builder-dev /workspace/scripts /workspace/scripts
 COPY --from=builder-dev /workspace/docs /workspace/docs
 COPY --from=builder-dev /workspace/README.md /workspace/README.md
 COPY --from=builder-dev /workspace/LICENSE /workspace/LICENSE
-RUN chown -R appuser:appuser /workspace \
-    && chmod -R go+rX /workspace/src /workspace/tests /workspace/scripts
+
+# Copy Docker configuration files (for testing multi-process deployment)
+COPY docker/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
+COPY docker/elspeth-sudoers /etc/sudoers.d/elspeth
+COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
+
+# Set permissions
+RUN chmod 0440 /etc/sudoers.d/elspeth && \
+    chmod +x /usr/local/bin/entrypoint.sh && \
+    chown -R appuser:appuser /workspace && \
+    chmod -R go+rX /workspace/src /workspace/tests /workspace/scripts
+
 USER appuser
 WORKDIR /workspace
 
 # Default command useful for CI execs
+# Note: For multi-process testing, override entrypoint
 CMD ["pytest", "-m", "not slow", "--maxfail=1", "--disable-warnings"]
 
 # ========================= RUNTIME BUILD =========================
@@ -69,8 +93,23 @@ RUN python -m pip install . --no-deps --no-index --no-build-isolation
 
 FROM base AS runtime
 COPY --from=builder-runtime /opt/venv /opt/venv
-USER appuser
+
+# Copy Docker configuration files for multi-process deployment
+COPY docker/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
+COPY docker/elspeth-sudoers /etc/sudoers.d/elspeth
+COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
+
+# Set correct permissions for sudoers and entrypoint
+RUN chmod 0440 /etc/sudoers.d/elspeth && \
+    chmod +x /usr/local/bin/entrypoint.sh
+
+# Create workspace directory
 WORKDIR /workspace
 
-# Default entrypoint for CLI usage (override as needed)
-CMD ["python", "-m", "elspeth.cli", "--help"]
+# Default entrypoint uses supervisord for multi-process management
+# For development/testing, can override with: docker run --entrypoint python
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
+
+# Default command (can be overridden)
+# Note: In supervisord mode, this is ignored. Set via ORCHESTRATOR_ARGS env var.
+CMD []

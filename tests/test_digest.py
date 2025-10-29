@@ -136,3 +136,67 @@ def test_compute_dataframe_digest_reproducible_across_copies():
     digest2 = compute_dataframe_digest(df2)
 
     assert digest1 == digest2, "DataFrame copy should produce same digest"
+
+
+def test_compute_dataframe_digest_column_order_independence():
+    """Test that digest is same regardless of column order (canonicalization)."""
+    df1 = pd.DataFrame({"a": [1, 2, 3], "b": [4, 5, 6], "c": [7, 8, 9]})
+    df2 = pd.DataFrame({"c": [7, 8, 9], "a": [1, 2, 3], "b": [4, 5, 6]})  # Different column order
+
+    digest1 = compute_dataframe_digest(df1)
+    digest2 = compute_dataframe_digest(df2)
+
+    assert digest1 == digest2, "Column reordering should not change digest (canonical sorting)"
+
+
+def test_compute_dataframe_digest_row_order_independence_with_explicit_index():
+    """Test that digest is same for reordered rows when index determines identity."""
+    df1 = pd.DataFrame({"a": [1, 2, 3]}, index=[0, 1, 2])
+    df2 = pd.DataFrame({"a": [3, 2, 1]}, index=[2, 1, 0])  # Same data, different order
+
+    digest1 = compute_dataframe_digest(df1)
+    digest2 = compute_dataframe_digest(df2)
+
+    assert digest1 == digest2, "Row reordering should not change digest when indexed correctly"
+
+
+def test_compute_dataframe_digest_heterogeneous_columns():
+    """Test digest with mixed int/string column names (heterogeneous labels)."""
+    df = pd.DataFrame({
+        "col_a": [1, 2, 3],
+        1: [4, 5, 6],
+        "col_b": [7, 8, 9],
+        0: [10, 11, 12],
+    })
+
+    # Should not raise TypeError during canonicalization
+    digest = compute_dataframe_digest(df)
+
+    assert len(digest) == 32, "Heterogeneous columns should produce valid digest"
+
+
+def test_compute_dataframe_digest_categorical_dtype():
+    """Test digest with categorical dtype (extension type conversion)."""
+    df = pd.DataFrame({
+        "category": pd.Categorical(["a", "b", "c", "a"]),
+        "value": [1, 2, 3, 4],
+    })
+
+    # Should not raise during type-safe conversion
+    digest = compute_dataframe_digest(df)
+
+    assert len(digest) == 32, "Categorical dtype should be handled via _as_type_safe()"
+
+
+def test_compute_dataframe_digest_datetime_with_timezone():
+    """Test digest with timezone-aware datetime (extension type conversion)."""
+    import datetime
+    df = pd.DataFrame({
+        "timestamp": pd.date_range("2025-01-01", periods=3, freq="h", tz="US/Eastern"),
+        "value": [1, 2, 3],
+    })
+
+    # Should not raise during type-safe conversion (tz-aware → UTC → tz-naive)
+    digest = compute_dataframe_digest(df)
+
+    assert len(digest) == 32, "Timezone-aware datetime should be handled via _as_type_safe()"
