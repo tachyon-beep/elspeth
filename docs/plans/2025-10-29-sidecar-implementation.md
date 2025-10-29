@@ -870,7 +870,7 @@ pub enum Request {
     /// Request one-shot grant for `(frame_id, level, data_digest)`.
     #[serde(rename = "authorize_construct")]
     AuthorizeConstruct {
-        frame_id: [u8; 16],
+        frame_id: [u8; 16],  // UUID v4 serialized to 16 bytes (Uuid::as_bytes())
         level: u32,
         data_digest: [u8; 32],
         auth: Vec<u8>, // HMAC over canonical tuple
@@ -1240,7 +1240,7 @@ pub struct Server {
     secrets: Arc<Secrets>,
     grants: Arc<GrantTable>,
     session_key: Vec<u8>,
-    session_key_path: PathBuf,
+    session_key_path: PathBuf,  // Stored for session key persistence/reload
 }
 
 impl Server {
@@ -1604,6 +1604,10 @@ Create `src/elspeth/orchestrator/sidecar_client.py`:
 Communicates with Rust daemon via Unix socket using CBOR protocol.
 All messages are HMAC-authenticated using session key. This module stays in
 `elspeth.orchestrator` and must never be re-exported to plugin workers.
+
+Protocol Notes:
+- Orchestrator ↔ Daemon: CBOR (matches Rust serde_cbor)
+- Orchestrator ↔ Worker: msgpack (Python IPC, separate module)
 """
 
 import asyncio
@@ -1837,6 +1841,359 @@ git commit -m "feat(security): gate SecureDataFrame construction on daemon-issue
 
 ---
 
+### Task 3.4: Implement Canonical Digest Computation Pipeline
+
+**Goal:** Implement the deterministic digest computation pipeline that produces BLAKE3 hashes of canonical Parquet representations, as specified in the v3 design.
+
+**Files:**
+- Create: `src/elspeth/core/security/digest.py`
+- Create: `tests/security/test_digest_canonicalization.py`
+
+**Step 1: Write failing test for digest determinism**
+
+Create `tests/security/test_digest_canonicalization.py`:
+
+```python
+"""Tests for canonical digest computation."""
+
+import pandas as pd
+import pytest
+
+from elspeth.core.security.digest import compute_canonical_digest
+
+
+def test_digest_determinism_identical_frames():
+    """Identical DataFrames produce identical digests."""
+    df1 = pd.DataFrame({"col1": [1, 2, 3], "col2": ["a", "b", "c"]})
+    df2 = pd.DataFrame({"col1": [1, 2, 3], "col2": ["a", "b", "c"]})
+
+    digest1 = compute_canonical_digest(df1)
+    digest2 = compute_canonical_digest(df2)
+
+    assert digest1 == digest2
+    assert len(digest1) == 32  # BLAKE3 produces 32-byte digests
+
+
+def test_digest_determinism_reordered_columns():
+    """Column order doesn't affect digest (sorted during canonicalization)."""
+    df1 = pd.DataFrame({"a": [1, 2], "b": [3, 4]})
+    df2 = pd.DataFrame({"b": [3, 4], "a": [1, 2]})
+
+    digest1 = compute_canonical_digest(df1)
+    digest2 = compute_canonical_digest(df2)
+
+    assert digest1 == digest2
+
+
+def test_digest_changes_on_data_mutation():
+    """Digest changes when data is mutated."""
+    df = pd.DataFrame({"col": [1, 2, 3]})
+    digest1 = compute_canonical_digest(df)
+
+    df.loc[0, "col"] = 999
+    digest2 = compute_canonical_digest(df)
+
+    assert digest1 != digest2
+
+
+def test_digest_fails_on_unsupported_dtype():
+    """Unsupported dtypes raise SecurityValidationError with clear message."""
+    from elspeth.core.validation.base import SecurityValidationError
+
+    # Create DataFrame with unsupported complex dtype
+    df = pd.DataFrame({"complex": [complex(1, 2), complex(3, 4)]})
+
+    with pytest.raises(SecurityValidationError, match="complex"):
+        compute_canonical_digest(df)
+
+
+def test_stable_sort_key_heterogeneous_labels():
+    """_stable_sort_key handles mixed-type column names."""
+    from elspeth.core.security.digest import _stable_sort_key
+
+    # Mixed int/string labels
+    labels = [1, "a", 2, "b"]
+    sorted_labels = sorted(labels, key=_stable_sort_key)
+
+    # Should produce consistent ordering (type name first, then value)
+    assert sorted_labels == [1, 2, "a", "b"]
+```
+
+**Step 2: Run test to verify it fails**
+
+```bash
+python -m pytest tests/security/test_digest_canonicalization.py -v
+```
+
+**Expected Output:**
+```
+ModuleNotFoundError: No module named 'elspeth.core.security.digest'
+```
+
+**Step 3: Implement digest computation pipeline**
+
+Create `src/elspeth/core/security/digest.py`:
+
+```python
+"""Canonical digest computation for SecureDataFrame.
+
+Produces deterministic BLAKE3 digests of DataFrame payloads by:
+1. Sorting rows and columns with stable ordering
+2. Converting unsupported dtypes to Arrow-compatible representations
+3. Streaming Parquet bytes directly into BLAKE3 hasher (zero-copy)
+"""
+
+import pandas as pd
+from blake3 import blake3
+from typing import Hashable
+
+from elspeth.core.validation.base import SecurityValidationError
+
+
+# Arrow-compatible dtypes that can be serialized deterministically
+_SUPPORTED_ARROW_DTYPES = {
+    "int8", "int16", "int32", "int64",
+    "uint8", "uint16", "uint32", "uint64",
+    "float32", "float64",
+    "bool",
+    "object",  # Strings
+    "datetime64[ns]",
+    "timedelta64[ns]",
+    "category",
+}
+
+
+def compute_canonical_digest(df: pd.DataFrame) -> bytes:
+    """Compute BLAKE3 digest over canonical Parquet representation.
+
+    Args:
+        df: DataFrame to digest
+
+    Returns:
+        32-byte BLAKE3 digest
+
+    Raises:
+        SecurityValidationError: If DataFrame contains unsupported dtypes
+    """
+    hasher = blake3()
+    sink = _Blake3Sink(hasher)
+
+    try:
+        # Sort rows and columns deterministically
+        canonical_df = (
+            df.sort_index(axis=0, key=_stable_sort_key)
+            .sort_index(axis=1, key=_stable_sort_key)
+        )
+
+        # Convert unsupported dtypes to Arrow-compatible representations
+        canonical_df = _as_type_safe(canonical_df)
+
+        # Stream Parquet bytes into BLAKE3 hasher
+        canonical_df.to_parquet(
+            sink,
+            engine="pyarrow",
+            compression=None,
+            index=True,
+            coerce_timestamps="us",
+            use_deprecated_int96_timestamps=False,
+        )
+
+    except Exception as e:
+        raise SecurityValidationError(
+            f"Failed to compute canonical digest: {e}"
+        ) from e
+
+    return hasher.digest()
+
+
+def _stable_sort_key(label: Hashable) -> tuple:
+    """Return total-orderable key for heterogeneous labels.
+
+    Enables sorting of mixed-type column/index names (e.g., [1, "a", 2, "b"])
+    by grouping by type first, then value.
+
+    Args:
+        label: Column or index label
+
+    Returns:
+        Tuple of (type_name, stringified_value)
+    """
+    from pathlib import Path
+    from enum import Enum
+
+    return (
+        type(label).__name__,
+        str(label) if isinstance(label, (Enum, Path)) else label,
+    )
+
+
+def _as_type_safe(df: pd.DataFrame) -> pd.DataFrame:
+    """Map unsupported dtypes into deterministic Arrow-friendly encodings.
+
+    Args:
+        df: DataFrame with potentially unsupported dtypes
+
+    Returns:
+        DataFrame with all columns using Arrow-compatible dtypes
+
+    Raises:
+        SecurityValidationError: If dtype cannot be safely converted
+    """
+    converted = {}
+
+    for name, series in df.items():
+        dtype_str = str(series.dtype)
+
+        if any(supported in dtype_str for supported in _SUPPORTED_ARROW_DTYPES):
+            converted[name] = series
+        else:
+            # Attempt string canonicalization for unsupported types
+            try:
+                converted[name] = series.astype(str)
+            except Exception as e:
+                raise SecurityValidationError(
+                    f"Column '{name}' has unsupported dtype '{dtype_str}' "
+                    f"that cannot be canonicalized. Error: {e}"
+                ) from e
+
+    return pd.DataFrame(converted, index=df.index)
+
+
+class _Blake3Sink:
+    """PyArrow writeable sink that streams bytes into a BLAKE3 hasher.
+
+    Implements the minimal interface required by PyArrow's to_parquet().
+    Enables zero-copy hashing by streaming Parquet bytes directly into
+    the hasher without intermediate BytesIO allocation.
+    """
+
+    def __init__(self, hasher: blake3):
+        """Initialize sink with BLAKE3 hasher.
+
+        Args:
+            hasher: BLAKE3 hasher instance
+        """
+        self._hasher = hasher
+
+    def write(self, data: bytes) -> None:
+        """Write bytes to hasher (PyArrow-compatible sink API).
+
+        Args:
+            data: Parquet bytes chunk
+        """
+        self._hasher.update(data)
+
+    def close(self) -> None:
+        """Close sink (no-op, hasher remains usable)."""
+        pass
+```
+
+**Step 4: Add blake3 dependency**
+
+```bash
+# Add to requirements-dev.in
+echo "blake3>=0.3.0" >> requirements-dev.in
+
+# Compile lockfile (run later as part of bootstrap)
+# python -m pip install pip-tools
+# pip-compile requirements-dev.in --generate-hashes --output-file requirements-dev.lock
+```
+
+**Step 5: Run tests to verify they pass**
+
+```bash
+python -m pytest tests/security/test_digest_canonicalization.py -v
+```
+
+**Expected Output:**
+```
+test_digest_determinism_identical_frames PASSED
+test_digest_determinism_reordered_columns PASSED
+test_digest_changes_on_data_mutation PASSED
+test_digest_fails_on_unsupported_dtype PASSED
+test_stable_sort_key_heterogeneous_labels PASSED
+
+5 passed in 0.23s
+```
+
+**Step 6: Performance benchmark (optional but recommended)**
+
+Add performance test to verify digest computation scales:
+
+```python
+def test_digest_performance_wide_frame():
+    """Benchmark digest computation on wide DataFrame."""
+    import timeit
+
+    # Wide frame: 100 columns × 1000 rows
+    df = pd.DataFrame({f"col_{i}": range(1000) for i in range(100)})
+
+    time_seconds = timeit.timeit(
+        lambda: compute_canonical_digest(df),
+        number=10,
+    )
+    avg_ms = (time_seconds / 10) * 1000
+
+    print(f"\n📊 Wide frame digest: {avg_ms:.2f}ms per digest")
+    assert avg_ms < 100, f"Digest too slow: {avg_ms:.2f}ms"
+
+
+def test_digest_performance_tall_frame():
+    """Benchmark digest computation on tall DataFrame."""
+    import timeit
+
+    # Tall frame: 10 columns × 10,000 rows
+    df = pd.DataFrame({f"col_{i}": range(10000) for i in range(10)})
+
+    time_seconds = timeit.timeit(
+        lambda: compute_canonical_digest(df),
+        number=10,
+    )
+    avg_ms = (time_seconds / 10) * 1000
+
+    print(f"\n📊 Tall frame digest: {avg_ms:.2f}ms per digest")
+    assert avg_ms < 100, f"Digest too slow: {avg_ms:.2f}ms"
+```
+
+**Step 7: Integration with SidecarClient**
+
+Update `sidecar_client.py` methods to use `compute_canonical_digest`:
+
+```python
+from elspeth.core.security.digest import compute_canonical_digest
+
+async def authorize_construct(
+    self, frame_id: bytes, level: int, df: pd.DataFrame
+) -> bytes:
+    """Request authorization grant for SecureDataFrame construction."""
+    data_digest = compute_canonical_digest(df)
+    # ... send AuthorizeConstruct with (frame_id, level, data_digest)
+```
+
+**Step 8: Commit**
+
+```bash
+git add src/elspeth/core/security/digest.py tests/security/test_digest_canonicalization.py requirements-dev.in
+git commit -m "feat(security): implement canonical digest computation pipeline
+
+- compute_canonical_digest() with BLAKE3 streaming
+- _stable_sort_key() for heterogeneous column/index labels
+- _as_type_safe() with dtype conversion and error handling
+- _Blake3Sink for zero-copy PyArrow → BLAKE3 streaming
+- 5+ passing tests for determinism, mutations, errors
+- Performance benchmarks for wide/tall DataFrames"
+```
+
+**Estimated Time:** 3-4 hours
+
+**Security Properties:**
+- ✅ Deterministic: Same DataFrame → same digest (sorted rows/columns)
+- ✅ Tamper-evident: Any data mutation changes digest
+- ✅ Fail-safe: Unsupported dtypes raise clear errors
+- ✅ Performance: Zero-copy streaming keeps memory flat
+
+---
+
 ## Summary and Next Steps
 
 **Plan complete and saved to `docs/plans/2025-10-29-sidecar-implementation.md`.**
@@ -1865,6 +2222,7 @@ This plan provides:
 4. **Phase 3: Python Integration (upcoming)**
    - Plugin worker isolation under `appplugin` UID
    - Orchestrator-only SidecarClient + ticket consumption API
+   - Canonical digest computation pipeline (BLAKE3 + Parquet streaming)
    - Ticket-backed SecureDataFrame factory rewrite (`_from_sidecar`, ConstructionCapability)
    - SecureFrameProxy + orchestrator ↔ worker RPC plumbing
    - Standalone mode guardrails and integration tests
@@ -1878,10 +2236,10 @@ This plan provides:
 - Phase 0: 30 minutes (John, system setup)
 - Phase 1: 4-6 hours (Rust foundation) - **6 tasks complete**
 - Phase 2: 6-8 hours (Rust completion)
-- Phase 3: 8-10 hours (Python integration)
+- Phase 3: 11-14 hours (Python integration, includes Task 3.4 digest pipeline)
 - Phase 4: 4-6 hours (Docker deployment)
 
-**Total: 22-30 hours** (3-4 days of focused work)
+**Total: 25-34 hours** (3-4 days of focused work)
 
 ---
 
