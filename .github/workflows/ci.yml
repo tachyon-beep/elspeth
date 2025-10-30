@@ -291,6 +291,8 @@ jobs:
           python -m pip install -e . --no-deps --no-index --no-build-isolation
 
       - name: Run sample suite smoke test
+        env:
+          ELSPETH_SIDECAR_MODE: "standalone"
         run: |
           python -m elspeth.cli \
             --settings config/sample_suite/settings.yaml \
@@ -359,7 +361,21 @@ jobs:
           docker run --rm \
             -e ELSPETH_SIDECAR_MODE=standalone \
             elspeth:devtest \
-            timeout 10 /usr/local/bin/elspeth-sidecar-daemon /etc/elspeth/sidecar.toml || \
+            bash -c '
+              # Create temporary config with writable paths
+              mkdir -p /tmp/sidecar-test
+              cat > /tmp/sidecar-test/test-config.toml <<EOF
+              mode = "standalone"
+              socket_path = "/tmp/sidecar-test/auth.sock"
+              session_key_path = "/tmp/sidecar-test/.session"
+              appuser_uid = 1000
+              grant_ttl_secs = 60
+              log_level = "info"
+              EOF
+
+              # Run daemon with test config
+              timeout 10 /usr/local/bin/elspeth-sidecar-daemon /tmp/sidecar-test/test-config.toml
+            ' || \
             ([ $? -eq 124 ] && echo "✓ Daemon ran for 10s without crash (timeout expected)")
 
       - name: Test multi-process container with supervisord
