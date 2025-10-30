@@ -96,7 +96,8 @@ RUN chmod 0440 /etc/sudoers.d/elspeth && \
     chown -R appuser:appuser /workspace && \
     chmod -R go+rX /workspace/src /workspace/tests /workspace/scripts
 
-USER appuser
+# NOTE: Do NOT set USER here - entrypoint needs root to create /run/sidecar
+# Supervisord will spawn processes with correct UIDs
 WORKDIR /workspace
 
 # Default command useful for CI execs
