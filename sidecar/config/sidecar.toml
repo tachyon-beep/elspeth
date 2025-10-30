@@ -22,5 +22,8 @@ appuser_uid = 1000
 # Grant TTL in seconds (default: 60s)
 grant_ttl_secs = 60
 
+# Maximum request size in bytes (default: 1MB)
+max_request_size_bytes = 1048576
+
 # Log level: trace, debug, info, warn, error
 log_level = "info"
