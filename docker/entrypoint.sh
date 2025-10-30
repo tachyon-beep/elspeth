@@ -71,6 +71,11 @@ ls -la /run/sidecar/
 mkdir -p /var/log/supervisor
 chmod 0755 /var/log/supervisor
 
+# Set default ORCHESTRATOR_ARGS if not provided (for supervisord expansion)
+# Users can override via: docker run -e ORCHESTRATOR_ARGS="--settings ..."
+export ORCHESTRATOR_ARGS="${ORCHESTRATOR_ARGS:-}"
+echo "[entrypoint] ORCHESTRATOR_ARGS=${ORCHESTRATOR_ARGS}"
+
 # Start supervisord (manages sidecar daemon and orchestrator)
 echo "[entrypoint] Starting supervisord..."
 exec /usr/bin/supervisord -c /etc/supervisor/conf.d/supervisord.conf
