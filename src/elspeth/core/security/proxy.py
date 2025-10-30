@@ -143,7 +143,7 @@ class SecureFrameProxy:
 
         # Deserialize Arrow IPC bytes back to DataFrame
         # (In Task 3.0, will use pyarrow.ipc.open_stream)
-        view_data = response["view"]  # Arrow IPC bytes
+        # view_data = response["view"]  # Arrow IPC bytes - will be used in Task 3.0
         version = response["version"]
 
         # Cache version for subsequent operations

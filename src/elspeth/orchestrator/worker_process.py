@@ -57,8 +57,6 @@ import msgpack
 # CRITICAL: Do NOT import elspeth.core.security.sidecar_client
 # Worker must never have access to sidecar communication
 
-from elspeth.core.security.proxy import SecureFrameProxy
-
 
 class WorkerError(Exception):
     """Worker process error."""

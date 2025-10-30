@@ -29,8 +29,6 @@ from typing import Any, Generator
 
 import msgpack
 
-from elspeth.core.security.proxy import SecureFrameProxy
-
 
 class WorkerRuntimeError(Exception):
     """Worker runtime error."""
@@ -140,7 +138,7 @@ class WorkerProcess:
             # Spawn worker with stdin/stdout pipes
             # FD_CLOEXEC is set automatically on pipes in Python 3.4+
             # stderr → DEVNULL prevents back-pressure from filling stderr buffer
-            self.process = subprocess.Popen(
+            self.process = subprocess.Popen(  # noqa: S603 - cmd is trusted worker entry point, not user input
                 cmd,
                 stdin=subprocess.PIPE,
                 stdout=subprocess.PIPE,
@@ -196,7 +194,7 @@ class WorkerProcess:
                     self.process.kill()
                     self.process.wait()
 
-        except Exception as e:
+        except Exception:
             # Best effort cleanup
             if self.process and self.process.poll() is None:
                 self.process.kill()

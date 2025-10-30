@@ -140,26 +140,6 @@ def test_worker_environment_has_no_sidecar_key():
             # Send request that checks environment
             # We'll use a custom script embedded in transform request
 
-            # Create test script
-            test_script = """
-import sys
-import os
-import json
-
-# Check for sidecar secrets in environment
-secrets_found = []
-for key in os.environ:
-    if 'SIDECAR' in key or 'SESSION_KEY' in key:
-        secrets_found.append(key)
-
-# Print result as JSON to stdout
-import msgpack
-result = {"secrets_found": secrets_found}
-packer = msgpack.Packer(use_bin_type=True)
-sys.stdout.buffer.write(packer.pack(result))
-sys.stdout.buffer.flush()
-"""
-
             # For this test, we'll manually check the worker's sanitized environment
             env = worker._sanitize_environment()
 
@@ -236,7 +216,7 @@ def test_worker_close_fds_prevents_descriptor_leaks():
     """
     # Create a file descriptor in orchestrator
     with tempfile.NamedTemporaryFile(mode="w", delete=True) as temp_fd:
-        orchestrator_fd = temp_fd.fileno()
+        _orchestrator_fd = temp_fd.fileno()  # Used to demonstrate FD isolation
 
         # Spawn worker
         with WorkerProcess(worker_uid=None) as worker:
@@ -250,7 +230,7 @@ def test_worker_close_fds_prevents_descriptor_leaks():
             assert worker.process is not None
 
             # The test passes if worker spawned successfully
-            # In production, worker attempting to access orchestrator_fd
+            # In production, worker attempting to access _orchestrator_fd
             # would get EBADF (bad file descriptor)
 
 
