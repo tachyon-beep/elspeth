@@ -16,6 +16,7 @@ allow = [
     "Unlicense",
     "0BSD",           # Zero-Clause BSD (even more permissive)
     "Zlib",           # Zlib License (permissive, used by compression libs)
+    "Unicode-3.0",    # Unicode License v3 (OSI-approved, permissive)
 ]
 
 # cargo-deny 0.16+ behavior:
@@ -60,7 +61,43 @@ deny = [
 allow = []
 
 # Skip checking certain crates (rare, use with caution)
-skip = []
+# Note: These duplicates are unavoidable due to transitive dependencies
+skip = [
+    # getrandom: ring@0.17 requires 0.2.x, uuid@1.18 requires 0.3.x
+    { name = "getrandom", version = "=0.2.16" },
+    { name = "getrandom", version = "=0.3.4" },
+
+    # hashbrown: dashmap@5.5 requires 0.14.x, indexmap@2.12 requires 0.16.x
+    { name = "hashbrown", version = "=0.14.5" },
+    { name = "hashbrown", version = "=0.16.0" },
+
+    # windows-sys: ring requires 0.52.x, tokio ecosystem requires 0.60.x+
+    { name = "windows-sys", version = "=0.52.0" },
+    { name = "windows-sys", version = "=0.60.2" },
+    { name = "windows-sys", version = "=0.61.2" },
+
+    # windows-targets: transitive from windows-sys
+    { name = "windows-targets", version = "=0.52.6" },
+    { name = "windows-targets", version = "=0.53.5" },
+
+    # windows_*: architecture-specific windows crates (transitive)
+    { name = "windows_aarch64_gnullvm", version = "=0.52.6" },
+    { name = "windows_aarch64_gnullvm", version = "=0.53.1" },
+    { name = "windows_aarch64_msvc", version = "=0.52.6" },
+    { name = "windows_aarch64_msvc", version = "=0.53.1" },
+    { name = "windows_i686_gnu", version = "=0.52.6" },
+    { name = "windows_i686_gnu", version = "=0.53.1" },
+    { name = "windows_i686_gnullvm", version = "=0.52.6" },
+    { name = "windows_i686_gnullvm", version = "=0.53.1" },
+    { name = "windows_i686_msvc", version = "=0.52.6" },
+    { name = "windows_i686_msvc", version = "=0.53.1" },
+    { name = "windows_x86_64_gnu", version = "=0.52.6" },
+    { name = "windows_x86_64_gnu", version = "=0.53.1" },
+    { name = "windows_x86_64_gnullvm", version = "=0.52.6" },
+    { name = "windows_x86_64_gnullvm", version = "=0.53.1" },
+    { name = "windows_x86_64_msvc", version = "=0.52.6" },
+    { name = "windows_x86_64_msvc", version = "=0.53.1" },
+]
 
 # Skip checking crates from a specific source
 skip-tree = []
