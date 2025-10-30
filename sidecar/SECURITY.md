@@ -158,6 +158,40 @@ In containerized deployments (Docker, Kubernetes), environment variables are set
 
 ---
 
+## DoS Protection
+
+### Request Size Limits
+
+**Maximum Request Size:** 1 MiB (default, configurable via `max_request_size_bytes`)
+
+**Rationale:**
+- Largest valid CBOR request: ~200 bytes (`authorize_construct` with 32-byte digest)
+- 1 MiB provides 5000× safety margin for future protocol extensions
+- Prevents memory exhaustion attacks from multi-gigabyte payloads
+
+**Implementation:**
+- Daemon reads requests in 4 KiB chunks
+- Rejects requests exceeding `max_request_size_bytes` with error response
+- Client connection closed after error (no partial processing)
+
+**Attack Mitigation:**
+- Attacker sends 10 GB CBOR payload → Daemon rejects at 1 MiB, responds with error
+- Memory usage bounded to configured limit + small overhead
+- No daemon crash or service degradation
+
+**Configuration:**
+
+```toml
+# sidecar.toml
+max_request_size_bytes = 1048576  # 1 MiB (default)
+```
+
+**Monitoring:**
+- Large request rejections logged at `ERROR` level
+- Metric: `requests_served` excludes rejected oversized requests
+
+---
+
 ## Vulnerability Disclosure
 
 **CVE-ADR-002-A-010:** Construction Ticket Forgery Vulnerability
