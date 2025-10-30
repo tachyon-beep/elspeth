@@ -391,12 +391,15 @@ class TestADR002ATrustedContainerModel:
         with pytest.raises(SecurityValidationError) as exc_info:
             SecureDataFrame(df, SecurityLevel.OFFICIAL)
 
-        error_msg = str(exc_info.value)
+        error_msg = str(exc_info.value).lower()
         # Verify error explains the security control (updated for token gating)
-        assert "authorized factory methods" in error_msg.lower(), (
-            "Error should explain only factory methods can create frames"
+        # Accept either standalone mode message or sidecar mode message
+        # Standalone: "authorized factory methods"
+        # Sidecar: "construction ticket" + lists factory methods
+        assert ("authorized factory methods" in error_msg or "construction ticket" in error_msg), (
+            f"Error should explain only factory methods can create frames. Got: {exc_info.value}"
         )
-        assert "create_from_datasource" in error_msg.lower(), (
+        assert "create_from_datasource" in error_msg, (
             "Error should guide to safe factory method"
         )
 
