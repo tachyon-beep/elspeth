@@ -119,6 +119,13 @@ jobs:
             echo "cargo-audit already installed (from cache)"
           fi
 
+      - name: Clean advisory database cache (if corrupted)
+        run: |
+          # Remove potentially corrupted advisory database
+          # (GitHub Actions cache issues can leave it in bad state)
+          rm -rf ~/.cargo/advisory-db
+          echo "Cleared advisory database cache"
+
       - name: Security audit (RustSec advisories)
         run: cargo audit
 
