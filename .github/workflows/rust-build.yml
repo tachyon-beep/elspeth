@@ -135,9 +135,6 @@ jobs:
     name: Binary Size Analysis
     runs-on: ubuntu-latest
     needs: rust-ci
-    defaults:
-      run:
-        working-directory: sidecar
 
     steps:
       - name: Download release binary
