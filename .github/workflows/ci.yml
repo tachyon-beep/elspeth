@@ -359,7 +359,7 @@ jobs:
           docker run --rm \
             -e ELSPETH_SIDECAR_MODE=standalone \
             elspeth:devtest \
-            timeout 10 /usr/local/bin/elspeth-sidecar /etc/elspeth/sidecar.toml || \
+            timeout 10 /usr/local/bin/elspeth-sidecar-daemon /etc/elspeth/sidecar.toml || \
             ([ $? -eq 124 ] && echo "✓ Daemon ran for 10s without crash (timeout expected)")
 
       - name: Test multi-process container with supervisord
@@ -409,7 +409,7 @@ jobs:
 
           # Verify sidecar daemon is running
           echo "Verifying sidecar daemon is running..."
-          docker exec $CONTAINER_ID pgrep -f elspeth-sidecar || \
+          docker exec $CONTAINER_ID pgrep -f elspeth-sidecar-daemon || \
             (echo "✗ Sidecar daemon not running"; docker logs $CONTAINER_ID; exit 1)
           echo "✓ Sidecar daemon is running"
 
@@ -448,7 +448,7 @@ jobs:
           docker run --rm \
             elspeth:devtest \
             bash -c '
-              /usr/local/bin/elspeth-sidecar /etc/elspeth/sidecar.toml &
+              /usr/local/bin/elspeth-sidecar-daemon /etc/elspeth/sidecar.toml &
               DAEMON_PID=$!
               sleep 2
               python /workspace/scripts/container_healthcheck.py
@@ -471,7 +471,7 @@ jobs:
             test -d /run/sidecar || echo "Note: /run/sidecar/ created at runtime by entrypoint"
 
             echo "Checking sidecar binary permissions:"
-            ls -l /usr/local/bin/elspeth-sidecar | tee /dev/stderr | grep -q "rwxr-xr-x"
+            ls -l /usr/local/bin/elspeth-sidecar-daemon | tee /dev/stderr | grep -q "rwxr-xr-x"
 
             echo "✓ 3-UID security model verified"
           '
@@ -480,7 +480,7 @@ jobs:
         run: |
           echo "Verifying FD_CLOEXEC is set on sidecar socket..."
           docker run --rm elspeth:devtest bash -c '
-            /usr/local/bin/elspeth-sidecar /etc/elspeth/sidecar.toml &
+            /usr/local/bin/elspeth-sidecar-daemon /etc/elspeth/sidecar.toml &
             DAEMON_PID=$!
             sleep 2
 

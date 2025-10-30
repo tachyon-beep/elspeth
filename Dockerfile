@@ -46,12 +46,12 @@ COPY sidecar/ sidecar/
 # Build sidecar daemon in release mode and strip debug symbols
 WORKDIR /build/sidecar
 RUN cargo build --release --locked && \
-    strip /build/sidecar/target/release/elspeth-sidecar
+    strip /build/sidecar/target/release/elspeth-sidecar-daemon
 
 # Verify binary was created and report size
-RUN test -f /build/sidecar/target/release/elspeth-sidecar || \
+RUN test -f /build/sidecar/target/release/elspeth-sidecar-daemon || \
     (echo "ERROR: Sidecar binary not found at expected path" && exit 1) && \
-    echo "Sidecar binary size: $(du -h /build/sidecar/target/release/elspeth-sidecar | cut -f1)"
+    echo "Sidecar binary size: $(du -h /build/sidecar/target/release/elspeth-sidecar-daemon | cut -f1)"
 
 # ========================= DEV/TEST BUILD =========================
 FROM base AS builder-dev
@@ -81,7 +81,7 @@ COPY --from=builder-dev /workspace/README.md /workspace/README.md
 COPY --from=builder-dev /workspace/LICENSE /workspace/LICENSE
 
 # Copy Rust sidecar daemon binary and config
-COPY --from=rust-builder /build/sidecar/target/release/elspeth-sidecar /usr/local/bin/elspeth-sidecar
+COPY --from=rust-builder /build/sidecar/target/release/elspeth-sidecar-daemon /usr/local/bin/elspeth-sidecar-daemon
 COPY --from=rust-builder /build/sidecar/config/sidecar.toml /etc/elspeth/sidecar.toml
 
 # Copy Docker configuration files (for testing multi-process deployment)
@@ -92,7 +92,7 @@ COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 # Set permissions
 RUN chmod 0440 /etc/sudoers.d/elspeth && \
     chmod +x /usr/local/bin/entrypoint.sh && \
-    chmod +x /usr/local/bin/elspeth-sidecar && \
+    chmod +x /usr/local/bin/elspeth-sidecar-daemon && \
     chown -R appuser:appuser /workspace && \
     chmod -R go+rX /workspace/src /workspace/tests /workspace/scripts
 
@@ -122,7 +122,7 @@ FROM base AS runtime
 COPY --from=builder-runtime /opt/venv /opt/venv
 
 # Copy Rust sidecar daemon binary and config
-COPY --from=rust-builder /build/sidecar/target/release/elspeth-sidecar /usr/local/bin/elspeth-sidecar
+COPY --from=rust-builder /build/sidecar/target/release/elspeth-sidecar-daemon /usr/local/bin/elspeth-sidecar-daemon
 COPY --from=rust-builder /build/sidecar/config/sidecar.toml /etc/elspeth/sidecar.toml
 
 # Copy Docker configuration files for multi-process deployment
@@ -133,7 +133,7 @@ COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 # Set correct permissions for sudoers, entrypoint, and sidecar daemon
 RUN chmod 0440 /etc/sudoers.d/elspeth && \
     chmod +x /usr/local/bin/entrypoint.sh && \
-    chmod +x /usr/local/bin/elspeth-sidecar
+    chmod +x /usr/local/bin/elspeth-sidecar-daemon
 
 # Create workspace directory
 WORKDIR /workspace
