@@ -352,8 +352,8 @@ async fn test_verify_seal_success() {
 
 #[tokio::test]
 async fn test_oversized_request_rejected() {
-    use std::os::unix::net::UnixStream as StdUnixStream;
     use std::io::Write;
+    use std::os::unix::net::UnixStream as StdUnixStream;
     use tempfile::tempdir;
 
     // Create config with 1 KiB limit
@@ -406,7 +406,9 @@ log_level = "debug"
         stream.shutdown(std::net::Shutdown::Write).unwrap();
 
         // Set read timeout to avoid infinite hang
-        stream.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
+        stream
+            .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+            .unwrap();
 
         // Read response (should be error)
         let mut response = Vec::new();
@@ -417,7 +419,10 @@ log_level = "debug"
     .unwrap();
 
     // Should receive error response (not crash/hang)
-    assert!(!response.is_empty(), "Should receive error response, not hang");
+    assert!(
+        !response.is_empty(),
+        "Should receive error response, not hang"
+    );
 
     // Parse CBOR response
     let resp: elspeth_sidecar::protocol::Response = serde_cbor::from_slice(&response).unwrap();
@@ -425,8 +430,11 @@ log_level = "debug"
     // Should be Error variant
     match resp {
         elspeth_sidecar::protocol::Response::Error { error: _, reason } => {
-            assert!(reason.contains("exceeds maximum") || reason.contains("too large"),
-                    "Error should mention size limit, got: {}", reason);
+            assert!(
+                reason.contains("exceeds maximum") || reason.contains("too large"),
+                "Error should mention size limit, got: {}",
+                reason
+            );
         }
         _ => panic!("Expected Error response, got: {:?}", resp),
     }
