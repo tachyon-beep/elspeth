@@ -161,7 +161,7 @@ def test_worker_pool_basic():
         assert all(w.process is not None for w in workers)
 
         # All workers should be running
-        assert all(w.process.poll() is None for w in workers)
+        assert all(w.process.poll() is None for w in workers if w.process is not None)
 
     # After context, all workers stopped
     # (process attribute is None after stop())
@@ -213,3 +213,70 @@ def test_worker_process_request_id_correlation():
         worker.transform("proxy3", "plugin", {})  # req_3
 
         assert worker._request_counter == 3
+
+
+def test_worker_process_start_failure():
+    """Test that start failure raises WorkerRuntimeError."""
+    with patch("subprocess.Popen", side_effect=OSError("Mock spawn failure")):
+        worker = WorkerProcess(worker_uid=None)
+
+        # Should raise WorkerRuntimeError wrapping the OSError
+        with pytest.raises(WorkerRuntimeError, match="Failed to spawn worker"):
+            worker.start()
+
+
+def test_worker_process_stop_when_not_started():
+    """Test that calling stop() on non-started worker is safe."""
+    worker = WorkerProcess(worker_uid=None)
+
+    # Should not raise (line 166 return early)
+    worker.stop()
+
+    assert worker.process is None
+
+
+def test_worker_process_stop_with_broken_pipe():
+    """Test that stop() handles broken pipe gracefully."""
+    worker = WorkerProcess(worker_uid=None)
+    worker.start()
+
+    try:
+        if worker.process and worker.process.stdin:
+            with patch.object(worker.process.stdin, "write", side_effect=BrokenPipeError):
+                # Should not raise - handles BrokenPipeError gracefully (line 179)
+                worker.stop()
+    finally:
+        # Clean up if still running
+        if worker.process and worker.process.poll() is None:
+            worker.process.kill()
+
+
+def test_worker_process_stop_with_timeout():
+    """Test that stop() uses SIGTERM/SIGKILL if worker doesn't exit."""
+    # Create worker that ignores shutdown signal
+    worker = WorkerProcess(worker_uid=None)
+    worker.start()
+
+    if worker.process:
+        # Mock wait() to always timeout
+        call_count = [0]
+
+        def mock_wait_timeout(timeout=None):
+            call_count[0] += 1
+            if call_count[0] <= 2:  # First two waits timeout
+                import subprocess
+                raise subprocess.TimeoutExpired(cmd="worker", timeout=timeout)
+            # Third wait (after kill) succeeds
+            return 0
+
+        try:
+            with patch.object(worker.process, "wait", side_effect=mock_wait_timeout):
+                # Should handle timeout and eventually kill (lines 187-195)
+                worker.stop()
+
+                # Should have called wait() 3 times (initial, after terminate, after kill)
+                assert call_count[0] == 3
+        finally:
+            # Ensure cleanup
+            if worker.process and worker.process.poll() is None:
+                worker.process.kill()

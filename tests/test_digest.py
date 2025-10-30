@@ -200,3 +200,81 @@ def test_compute_dataframe_digest_datetime_with_timezone():
     digest = compute_dataframe_digest(df)
 
     assert len(digest) == 32, "Timezone-aware datetime should be handled via _as_type_safe()"
+
+
+def test_compute_dataframe_digest_datetime_without_timezone():
+    """Test digest with timezone-naive datetime (hits return series path)."""
+    df = pd.DataFrame({
+        "timestamp": pd.date_range("2025-01-01", periods=3, freq="h"),
+        "value": [1, 2, 3],
+    })
+
+    # Should not raise - hits line 141 return series path
+    digest = compute_dataframe_digest(df)
+
+    assert len(digest) == 32, "Timezone-naive datetime should be handled correctly"
+
+
+def test_compute_dataframe_digest_period_dtype():
+    """Test digest with Period dtype (extension type conversion)."""
+    df = pd.DataFrame({
+        "period": pd.period_range("2025-01", periods=3, freq="M"),
+        "value": [1, 2, 3],
+    })
+
+    # Should not raise during type-safe conversion (Period → str)
+    digest = compute_dataframe_digest(df)
+
+    assert len(digest) == 32, "Period dtype should be handled via _as_type_safe()"
+
+
+def test_compute_dataframe_digest_interval_dtype():
+    """Test digest with Interval dtype (extension type conversion)."""
+    df = pd.DataFrame({
+        "interval": pd.IntervalIndex.from_tuples([(0, 1), (1, 2), (2, 3)]),
+        "value": [1, 2, 3],
+    })
+
+    # Should not raise during type-safe conversion (Interval → str)
+    digest = compute_dataframe_digest(df)
+
+    assert len(digest) == 32, "Interval dtype should be handled via _as_type_safe()"
+
+
+def test_compute_dataframe_digest_sparse_dtype():
+    """Test digest with Sparse dtype (extension type conversion)."""
+    df = pd.DataFrame({
+        "sparse": pd.arrays.SparseArray([1, 0, 0, 2, 0]),
+        "value": [1, 2, 3, 4, 5],
+    })
+
+    # Should not raise during type-safe conversion (Sparse → dense)
+    digest = compute_dataframe_digest(df)
+
+    assert len(digest) == 32, "Sparse dtype should be handled via _as_type_safe()"
+
+
+def test_compute_dataframe_digest_unsupported_dtype():
+    """Test that unsupported dtypes raise clear error."""
+    # Create DataFrame with complex numbers (unsupported by Arrow/Parquet)
+    df = pd.DataFrame({
+        "complex": [1 + 2j, 3 + 4j, 5 + 6j],
+        "value": [1, 2, 3],
+    })
+
+    # Should raise ValueError with clear message about unsupported dtype
+    with pytest.raises(ValueError, match="Unsupported dtype.*complex.*Cannot safely encode"):
+        compute_dataframe_digest(df)
+
+
+def test_compute_dataframe_digest_error_with_column_context():
+    """Test that dtype errors include column name in message."""
+    # Create DataFrame with unsupported dtype in specific column
+    df = pd.DataFrame({
+        "good_col": [1, 2, 3],
+        "bad_col": [1 + 2j, 3 + 4j, 5 + 6j],  # Complex numbers unsupported
+    })
+
+    # Should raise ValueError mentioning the problematic column name
+    with pytest.raises(ValueError, match="Column 'bad_col'"):
+        compute_dataframe_digest(df)
