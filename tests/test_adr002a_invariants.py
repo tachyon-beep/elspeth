@@ -129,9 +129,13 @@ class TestADR002ATrustedContainerModel:
                 _created_by_datasource=True  # Bypass flag
             )
 
-        error_msg = str(exc_info.value)
-        assert "authorized factory methods" in error_msg, (
-            "Error should explain only factory methods can create frames"
+        error_msg = str(exc_info.value).lower()
+        # Accept either standalone mode message or sidecar mode message
+        # Standalone: "authorized factory methods"
+        # Sidecar: "construction ticket" + lists factory methods
+        assert ("authorized factory methods" in error_msg or
+                ("construction ticket" in error_msg and "create_from_datasource" in error_msg)), (
+            f"Error should explain only factory methods can create frames. Got: {exc_info.value}"
         )
 
     def test_invariant_datasource_can_create_frame(self):
