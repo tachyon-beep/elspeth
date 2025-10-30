@@ -35,6 +35,36 @@ def _configure_sidecar_mode_for_tests():
     # Cleanup not needed - environment persists for entire test session
 
 
+@pytest.fixture(autouse=True)
+def _reset_sidecar_cache(request):
+    """Reset sidecar mode cache for non-integration tests.
+
+    When ELSPETH_RUN_INTEGRATION_TESTS=1, the sidecar mode cache (_SIDECAR_MODE global)
+    gets initialized during session startup. Non-integration tests that create
+    SecureDataFrame objects with tmp_path need to force standalone mode, but the
+    cached value prevents monkeypatch from working.
+
+    This fixture resets the cache before each non-integration test to allow
+    monkeypatch.setenv("ELSPETH_SIDECAR_MODE", "standalone") to work correctly.
+
+    Integration tests (marked with @pytest.mark.integration) skip this reset.
+    """
+    # Skip cache reset for integration tests - they need sidecar mode
+    if "integration" in [mark.name for mark in request.node.iter_markers()]:
+        yield
+        return
+
+    # Only reset cache if running integration tests globally (cache would be set)
+    if os.environ.get("ELSPETH_RUN_INTEGRATION_TESTS") == "1":
+        try:
+            import elspeth.core.security.secure_data
+            # Reset cache to allow test-specific mode configuration
+            elspeth.core.security.secure_data._SIDECAR_MODE = None
+        except (ImportError, AttributeError):
+            pass  # Module not loaded yet or _SIDECAR_MODE doesn't exist
+    yield
+
+
 _SANITIZATION_PREFIXES = tuple(prefix for prefix in DANGEROUS_PREFIXES if prefix != "'")
 _BOM = "\ufeff"
 
