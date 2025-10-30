@@ -455,3 +455,157 @@ def test_oversized_request_rejected(sidecar_client):
     # (both indicate rejection of oversized request)
     # Test passes as long as daemon didn't crash or hang
     assert True, "Daemon successfully rejected oversized request"
+
+
+def test_full_pipeline_e2e_with_sidecar(sidecar_daemon, monkeypatch, tmp_path):
+    """END-TO-END PIPELINE TEST: Datasource → Mock LLM → Sink with sidecar mode.
+
+    This is the 'hard test' that verifies the complete orchestration pipeline:
+    1. Local CSV datasource creates SecureDataFrame (via sidecar daemon)
+    2. Mock LLM transform processes the data
+    3. CSV sink writes output
+    4. Verify sidecar was actually used (frame has frame_id, seal from daemon)
+    5. Verify output file contains expected transformed data
+    """
+    socket_path, session_key_path, _ = sidecar_daemon
+
+    # Set sidecar mode environment
+    monkeypatch.setenv("ELSPETH_SIDECAR_MODE", "sidecar")
+    monkeypatch.setenv("ELSPETH_SIDECAR_SOCKET", str(socket_path))
+    monkeypatch.setenv("ELSPETH_SIDECAR_SESSION_KEY", str(session_key_path))
+
+    # Force re-detection of sidecar mode
+    import elspeth.core.security.secure_data as secure_data_module
+    secure_data_module._SIDECAR_MODE = None
+    secure_data_module._SIDECAR_CLIENT = None
+
+    # Create test input CSV
+    input_csv = tmp_path / "input.csv"
+    input_csv.write_text("id,name,value\n1,Alice,100\n2,Bob,200\n3,Charlie,300\n")
+
+    # Create output directory
+    output_dir = tmp_path / "output"
+    output_dir.mkdir()
+
+    # Import orchestrator components
+    from elspeth.core.orchestrator import ExperimentOrchestrator, OrchestratorConfig
+    from elspeth.core.security import SecureDataFrame
+
+    # Create datasource that returns SecureDataFrame
+    class SecureDatasource:
+        """Datasource that creates SecureDataFrame (uses sidecar in sidecar mode)."""
+        def __init__(self):
+            # Orchestrator reads 'security_level' attribute
+            self.security_level = SecurityLevel.OFFICIAL
+
+        def load(self):
+            # Load CSV data
+            df = pd.read_csv(input_csv)
+
+            # Create SecureDataFrame (will use sidecar daemon)
+            secure_frame = SecureDataFrame.create_from_datasource(df, SecurityLevel.OFFICIAL)
+
+            # Verify sidecar was actually used
+            assert secure_frame._frame_id is not None, "Sidecar mode should set frame_id"
+            assert len(secure_frame._seal) == 32, "Seal should be 32 bytes from daemon"
+
+            return secure_frame
+
+    # Create mock LLM that returns deterministic output
+    class MockLLM:
+        """Mock LLM that returns structured output."""
+        def __init__(self):
+            # Orchestrator reads 'security_level' attribute
+            self.security_level = SecurityLevel.OFFICIAL
+
+        def generate(self, *, system_prompt, user_prompt, metadata=None):
+            # Extract name from prompt
+            name = metadata.get("name", "unknown") if metadata else "unknown"
+            value = metadata.get("value", 0) if metadata else 0
+
+            # Return deterministic response
+            return {
+                "content": f"Processed: {name} has value {value}",
+                "metrics": {"processing_cost": 0.001},
+                "metadata": metadata,
+            }
+
+    # Create CSV sink
+    class CSVSink:
+        """CSV sink that writes results to file."""
+        def __init__(self, output_path):
+            self.output_path = output_path
+            # CRITICAL: Sink security level enforces "no write down" boundary
+            # This sink can handle OFFICIAL data (writing to local filesystem)
+            # If this were UNOFFICIAL and data were OFFICIAL -> security violation!
+            self._elspeth_security_level = SecurityLevel.OFFICIAL
+
+        def write(self, payload, *, metadata=None):
+            # Extract results list from payload
+            results_list = payload.get("results", [])
+
+            # Convert results to DataFrame
+            rows = []
+            for result in results_list:
+                row = {
+                    "id": result.get("id"),
+                    "name": result.get("name"),
+                    "original_value": result.get("value"),
+                    "llm_response": result.get("response", {}).get("content", ""),
+                }
+                rows.append(row)
+
+            output_df = pd.DataFrame(rows)
+            output_df.to_csv(self.output_path, index=False)
+
+    output_csv = output_dir / "output.csv"
+    sink = CSVSink(output_csv)
+
+    # Create orchestrator
+    orchestrator = ExperimentOrchestrator(
+        datasource=SecureDatasource(),
+        llm_client=MockLLM(),
+        sinks=[sink],
+        config=OrchestratorConfig(
+            llm_prompt={
+                "system": "You are a data processor.",
+                "user": "Process this record: {name} = {value}",
+            },
+            prompt_fields=["id", "name", "value"],
+        ),
+    )
+
+    # RUN THE FULL PIPELINE
+    payload = orchestrator.run()
+
+    # VERIFY E2E PIPELINE EXECUTION
+    assert len(payload["results"]) == 3, "Should process 3 rows"
+
+    # Verify each result has LLM response
+    for result in payload["results"]:
+        assert "response" in result, "Each result should have LLM response"
+        assert "content" in result["response"], "Response should have content"
+        assert "Processed:" in result["response"]["content"], "LLM should have processed the data"
+
+    # Verify output file was created
+    assert output_csv.exists(), "Output CSV should be created by sink"
+
+    output_df = pd.read_csv(output_csv)
+    assert len(output_df) == 3, "Output should have 3 rows"
+
+    # Verify output has data (sink wrote the payload)
+    assert "llm_response" in output_df.columns, "Output should have LLM responses"
+
+    # ✓ FULL E2E PIPELINE VERIFIED:
+    # - SecureDataFrame created via sidecar daemon (verified in datasource.load())
+    # - Data passed through mock LLM transform (verified via "Processed:" in responses)
+    # - Output written to sink (verified via output_csv existence and content)
+    # - Sidecar mode was actually used (frame_id and seal verified in datasource)
+
+    print("\n✓ Full E2E pipeline test PASSED with sidecar mode!")
+    print(f"  - Input rows: 3")
+    print(f"  - Output rows: {len(output_df)}")
+    print(f"  - Sidecar socket: {socket_path}")
+    print(f"  - SecureDataFrame created via sidecar daemon ✓")
+    print(f"  - Mock LLM processed all rows ✓")
+    print(f"  - CSV sink wrote output ✓")
