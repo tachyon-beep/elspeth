@@ -49,7 +49,7 @@ python -m pip install -r requirements-dev-azure.lock --require-hashes
 python -m pip install -e . --no-deps --no-index
 ```
 
-**Never** install directly from `pyproject.toml` - always use lockfiles for reproducibility and AIS compliance.
+**Never** install directly from `pyproject.toml` - always use lockfiles for reproducibility and supply chain security compliance.
 
 ## Development Workflow
 
@@ -248,7 +248,7 @@ python -m elspeth.cli \
 - **dependabot-auto-merge.yml**: Safe auto-merge for security updates
 
 ### Action Pinning
-All third-party actions are SHA-pinned for security. Current CodeQL pin: `16140ae1a102900babc80a33c44059580f687047` (v4.30.9)
+All third-party actions are SHA-pinned for security. Check `.github/workflows/codeql.yml` and `.github/README.md` for current CodeQL action pins (typically `github/codeql-action/*@<sha>` with version comment).
 
 ### Security Gates (must pass)
 - Tests with ~83% coverage
