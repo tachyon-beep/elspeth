@@ -60,7 +60,7 @@ log_level = "debug"
         daemon_binary = Path(__file__).parent.parent / "sidecar" / "target" / "release" / "elspeth-sidecar-daemon"
 
     if not daemon_binary.exists():
-        pytest.skip(f"Daemon binary not found. Run 'cargo build' in sidecar/ directory first.")
+        pytest.skip("Daemon binary not found. Run 'cargo build' in sidecar/ directory first.")
 
     # Start daemon
     # Use DEVNULL to avoid pipe buffer filling (which would block daemon)
@@ -414,7 +414,6 @@ def test_oversized_request_rejected(sidecar_client):
     sock.connect(str(sidecar_client.config.socket_path))
 
     # Try to send oversized request (may get BrokenPipeError)
-    bytes_sent = 0
     error_received = False
 
     try:
@@ -603,9 +602,9 @@ def test_full_pipeline_e2e_with_sidecar(sidecar_daemon, monkeypatch, tmp_path):
     # - Sidecar mode was actually used (frame_id and seal verified in datasource)
 
     print("\n✓ Full E2E pipeline test PASSED with sidecar mode!")
-    print(f"  - Input rows: 3")
+    print("  - Input rows: 3")
     print(f"  - Output rows: {len(output_df)}")
     print(f"  - Sidecar socket: {socket_path}")
-    print(f"  - SecureDataFrame created via sidecar daemon ✓")
-    print(f"  - Mock LLM processed all rows ✓")
-    print(f"  - CSV sink wrote output ✓")
+    print("  - SecureDataFrame created via sidecar daemon ✓")
+    print("  - Mock LLM processed all rows ✓")
+    print("  - CSV sink wrote output ✓")

@@ -32,7 +32,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN python -m venv /opt/venv
 
 # ========================= RUST SIDECAR BUILD =========================
-FROM rust:1.83-slim AS rust-builder
+FROM rust:1.83-slim@sha256:540c902e99c384163b688bbd8b5b8520e94e7731b27f7bd0eaa56ae1960627ab AS rust-builder
 WORKDIR /build
 
 # Install build dependencies
