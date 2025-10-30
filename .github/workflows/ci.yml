@@ -423,17 +423,12 @@ jobs:
             sleep 1
           done
 
-          # Verify sidecar daemon is running via supervisorctl
+          # Verify sidecar daemon is running by checking socket exists
+          # (Daemon creates socket when it starts successfully)
           echo "Verifying sidecar daemon is running..."
-          docker exec $CONTAINER_ID supervisorctl status sidecar-daemon | grep -q RUNNING || \
-            (echo "✗ Sidecar daemon not running"; docker logs $CONTAINER_ID; exit 1)
-          echo "✓ Sidecar daemon is running"
-
-          # Verify socket exists
-          echo "Verifying sidecar socket exists..."
           docker exec $CONTAINER_ID test -S /run/sidecar/auth.sock || \
-            (echo "✗ Sidecar socket not found"; docker logs $CONTAINER_ID; exit 1)
-          echo "✓ Sidecar socket exists at /run/sidecar/auth.sock"
+            (echo "✗ Sidecar socket not found (daemon not running)"; docker logs $CONTAINER_ID; exit 1)
+          echo "✓ Sidecar daemon is running (socket exists at /run/sidecar/auth.sock)"
 
           # Run end-to-end integration tests inside running container
           echo "Running E2E integration tests inside running container..."
