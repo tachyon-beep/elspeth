@@ -22,7 +22,7 @@ from elspeth.core.experiments.runner import (
     RowBatch,
 )
 from elspeth.core.prompts import PromptEngine
-from tests.conftest import SimpleLLM
+from conftest import SimpleLLM
 
 
 class CollectingSink(ResultSink):
