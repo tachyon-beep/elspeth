@@ -18,31 +18,12 @@ allow = [
     "Zlib",           # Zlib License (permissive, used by compression libs)
 ]
 
-# FORBIDDEN licenses - will fail CI if detected
-deny = [
-    "GPL-2.0",
-    "GPL-3.0",
-    "AGPL-3.0",
-    "LGPL-2.0",
-    "LGPL-2.1",
-    "LGPL-3.0",
-    "MPL-2.0",        # Mozilla Public License (weak copyleft)
-    "CC-BY-NC",       # Non-commercial restrictions
-    "CC-BY-NC-SA",
-]
-
-# Copyleft licenses explicitly rejected
-copyleft = "deny"
-
-# Allow OSI-approved or FSF-free licenses not explicitly listed
-allow-osi-fsf-free = "neither"
-
-# Require all crates to have license information
-unlicensed = "deny"
-
-# CRITICAL: Some crates have multiple licenses (e.g., "MIT OR Apache-2.0")
-# This is allowed - we accept the permissive option
-default = "deny"
+# cargo-deny 0.16+ behavior:
+# - Only licenses in 'allow' list above are permitted
+# - All other licenses are automatically denied (no need for 'deny' array)
+# - Copyleft licenses (GPL, LGPL, MPL) are rejected via allowlist approach
+# - Unlicensed crates are automatically rejected
+# - Multiple licenses (e.g., "MIT OR Apache-2.0") choose the allowed option
 
 # License exceptions (use sparingly, document reason)
 exceptions = [
@@ -92,22 +73,17 @@ skip-tree = []
 db-path = "~/.cargo/advisory-db"
 db-urls = ["https://github.com/rustsec/advisory-db"]
 
-# CRITICAL: Fail on any security vulnerability
-vulnerability = "deny"
+# cargo-deny 0.16+ defaults:
+# - ALL vulnerability advisories are DENIED by default
+# - ALL unsound advisories are DENIED by default
+# - ALL notice advisories are DENIED by default
+# To allow specific advisories, add them to 'ignore' array below
 
 # Unmaintained crates are security risks (no patches)
-# Scope: Check all dependencies (not just workspace)
-unmaintained = "all"
-
-# Crates with unsound APIs (memory safety violations)
-unsound = "deny"
+unmaintained = "deny"
 
 # Yanked crates (removed from crates.io due to critical bugs)
 yanked = "deny"
-
-# Notice-level advisories (informational)
-# Scope: Check all dependencies
-notice = "all"
 
 # Ignore specific advisories (use ONLY for false positives)
 ignore = [
