@@ -140,42 +140,51 @@ impl Request {
                 level,
                 data_digest,
                 ..
-            } => serde_cbor::to_vec(&(
-                serde_bytes::Bytes::new(frame_id),
-                *level,
-                serde_bytes::Bytes::new(data_digest),
-            ))
-            .unwrap(),
+            } => {
+                let mut buf = Vec::new();
+                ciborium::into_writer(&(
+                    serde_bytes::Bytes::new(frame_id),
+                    *level,
+                    serde_bytes::Bytes::new(data_digest),
+                ), &mut buf).unwrap();
+                buf
+            }
             Request::RedeemGrant { grant_id, .. } => {
-                serde_cbor::to_vec(&serde_bytes::Bytes::new(grant_id)).unwrap()
+                { let mut buf = Vec::new(); ciborium::into_writer(&serde_bytes::Bytes::new(grant_id), &mut buf).unwrap(); buf }
             }
             Request::ConsumeConstructionTicket { ticket, .. } => {
-                serde_cbor::to_vec(&serde_bytes::Bytes::new(ticket)).unwrap()
+                { let mut buf = Vec::new(); ciborium::into_writer(&serde_bytes::Bytes::new(ticket), &mut buf).unwrap(); buf }
             }
             Request::ComputeSeal {
                 frame_id,
                 level,
                 data_digest,
                 ..
-            } => serde_cbor::to_vec(&(
-                serde_bytes::Bytes::new(frame_id),
-                *level,
-                serde_bytes::Bytes::new(data_digest),
-            ))
-            .unwrap(),
+            } => {
+                let mut buf = Vec::new();
+                ciborium::into_writer(&(
+                    serde_bytes::Bytes::new(frame_id),
+                    *level,
+                    serde_bytes::Bytes::new(data_digest),
+                ), &mut buf).unwrap();
+                buf
+            }
             Request::VerifySeal {
                 frame_id,
                 level,
                 data_digest,
                 seal,
                 ..
-            } => serde_cbor::to_vec(&(
-                serde_bytes::Bytes::new(frame_id),
-                *level,
-                serde_bytes::Bytes::new(data_digest),
-                serde_bytes::Bytes::new(seal),
-            ))
-            .unwrap(),
+            } => {
+                let mut buf = Vec::new();
+                ciborium::into_writer(&(
+                    serde_bytes::Bytes::new(frame_id),
+                    *level,
+                    serde_bytes::Bytes::new(data_digest),
+                    serde_bytes::Bytes::new(seal),
+                ), &mut buf).unwrap();
+                buf
+            }
             Request::HealthCheck => vec![], // Health check has no canonical bytes
         }
     }

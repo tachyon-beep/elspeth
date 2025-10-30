@@ -18,10 +18,10 @@ fn test_authorize_construct_request_serialization() {
     };
 
     // Serialize to CBOR
-    let bytes = serde_cbor::to_vec(&request).unwrap();
+    let mut bytes = Vec::new(); ciborium::ser::into_writer(&request, &mut bytes).unwrap();
 
     // Deserialize back
-    let decoded: Request = serde_cbor::from_slice(&bytes).unwrap();
+    let decoded: Request = ciborium::de::from_reader(&bytes[..]).unwrap();
 
     match decoded {
         Request::AuthorizeConstruct {
@@ -46,8 +46,8 @@ fn test_authorize_construct_reply_serialization() {
         expires_at: 1698765432.123,
     };
 
-    let bytes = serde_cbor::to_vec(&response).unwrap();
-    let decoded: Response = serde_cbor::from_slice(&bytes).unwrap();
+    let mut bytes = Vec::new(); ciborium::ser::into_writer(&response, &mut bytes).unwrap();
+    let decoded: Response = ciborium::de::from_reader(&bytes[..]).unwrap();
 
     match decoded {
         Response::AuthorizeConstructReply {
@@ -68,8 +68,8 @@ fn test_error_response_serialization() {
         reason: "Already redeemed".to_string(),
     };
 
-    let bytes = serde_cbor::to_vec(&response).unwrap();
-    let decoded: Response = serde_cbor::from_slice(&bytes).unwrap();
+    let mut bytes = Vec::new(); ciborium::ser::into_writer(&response, &mut bytes).unwrap();
+    let decoded: Response = ciborium::de::from_reader(&bytes[..]).unwrap();
 
     match decoded {
         Response::Error { error, reason } => {
@@ -87,8 +87,8 @@ fn test_redeem_grant_round_trip() {
         auth: vec![0xDD; 32],
     };
 
-    let bytes = serde_cbor::to_vec(&request).unwrap();
-    let decoded: Request = serde_cbor::from_slice(&bytes).unwrap();
+    let mut bytes = Vec::new(); ciborium::ser::into_writer(&request, &mut bytes).unwrap();
+    let decoded: Request = ciborium::de::from_reader(&bytes[..]).unwrap();
 
     match decoded {
         Request::RedeemGrant { grant_id, auth } => {
@@ -108,8 +108,8 @@ fn test_compute_seal_round_trip() {
         auth: vec![0x33; 32],
     };
 
-    let bytes = serde_cbor::to_vec(&request).unwrap();
-    let decoded: Request = serde_cbor::from_slice(&bytes).unwrap();
+    let mut bytes = Vec::new(); ciborium::ser::into_writer(&request, &mut bytes).unwrap();
+    let decoded: Request = ciborium::de::from_reader(&bytes[..]).unwrap();
 
     match decoded {
         Request::ComputeSeal {
@@ -137,8 +137,8 @@ fn test_verify_seal_round_trip() {
         auth: vec![0x77; 32],
     };
 
-    let bytes = serde_cbor::to_vec(&request).unwrap();
-    let decoded: Request = serde_cbor::from_slice(&bytes).unwrap();
+    let mut bytes = Vec::new(); ciborium::ser::into_writer(&request, &mut bytes).unwrap();
+    let decoded: Request = ciborium::de::from_reader(&bytes[..]).unwrap();
 
     match decoded {
         Request::VerifySeal {

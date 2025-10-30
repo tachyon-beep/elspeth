@@ -147,7 +147,8 @@ impl Server {
                                 total_read, max_size
                             ),
                         };
-                        let response_bytes = serde_cbor::to_vec(&error_response)?;
+                        let mut response_bytes = Vec::new();
+                        ciborium::into_writer(&error_response, &mut response_bytes)?;
                         stream.write_all(&response_bytes).await?;
                         stream.shutdown().await?;
                         anyhow::bail!("Request exceeds size limit");
@@ -169,7 +170,7 @@ impl Server {
             &buffer[..buffer.len().min(128)]
         );
 
-        let request: Request = serde_cbor::from_slice(&buffer)
+        let request: Request = ciborium::from_reader(&buffer[..])
             .map_err(|e| {
                 error!("CBOR parse error: {:?}", e);
                 error!("Received bytes (full): {:?}", &buffer);
@@ -193,7 +194,8 @@ impl Server {
         };
 
         // Send response
-        let response_bytes = serde_cbor::to_vec(&response)?;
+        let mut response_bytes = Vec::new();
+        ciborium::into_writer(&response, &mut response_bytes)?;
         stream.write_all(&response_bytes).await?;
 
         debug!("Response sent successfully");
