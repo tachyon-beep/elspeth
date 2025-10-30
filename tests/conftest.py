@@ -16,15 +16,21 @@ if str(ROOT) not in sys.path:
 
 @pytest.fixture(scope="session", autouse=True)
 def _configure_sidecar_mode_for_tests():
-    """Configure standalone mode for test environments.
+    """Configure sidecar mode for test environments.
+
+    - If ELSPETH_RUN_INTEGRATION_TESTS=1: Preserve sidecar mode (daemon available in CI)
+    - Otherwise: Use standalone mode (no daemon required for unit tests)
 
     Production containers default to sidecar mode (fail-closed security).
-    Test/dev environments explicitly opt-in to standalone mode since the
-    sidecar daemon is not available in CI/development.
+    Test/dev environments can explicitly opt-in to standalone mode when the
+    sidecar daemon is not available.
 
     This fixture runs once per test session before any tests execute.
     """
-    os.environ["ELSPETH_SIDECAR_MODE"] = "standalone"
+    # Only override to standalone if NOT running integration tests
+    if os.environ.get("ELSPETH_RUN_INTEGRATION_TESTS") != "1":
+        os.environ["ELSPETH_SIDECAR_MODE"] = "standalone"
+    # else: preserve existing ELSPETH_SIDECAR_MODE from environment (sidecar)
     yield
     # Cleanup not needed - environment persists for entire test session
 
