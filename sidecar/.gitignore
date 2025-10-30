@@ -1,5 +1,6 @@
 /target
-Cargo.lock
+# Cargo.lock is tracked for binary crates (ensures reproducible builds)
+# Do not ignore: Cargo.lock
 *.pem
 *.key
 .session
