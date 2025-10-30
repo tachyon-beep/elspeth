@@ -35,6 +35,12 @@ The system uses three distinct UIDs to enforce OS-level security boundaries:
 - `SO_PEERCRED` validates peer UID before processing requests
 - HMAC-SHA256 prevents request tampering even if socket is accessible
 
+**File Descriptor Isolation (FD_CLOEXEC):**
+- Unix socket file descriptor has `FD_CLOEXEC` flag set
+- Prevents inheritance by child processes (plugin workers)
+- Verified by `tests/fd_cloexec_test.rs`
+- tokio's `UnixListener` sets `SOCK_CLOEXEC` by default (Linux kernel ≥2.6.27)
+
 ### 3. Cryptographic Authentication
 
 **Algorithm:** HMAC-SHA256
