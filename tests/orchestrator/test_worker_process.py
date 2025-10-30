@@ -1,6 +1,7 @@
 """Tests for worker process protocol handling."""
 
 import io
+import os
 from unittest.mock import patch
 
 import msgpack
@@ -109,20 +110,36 @@ def test_handle_request_shutdown_operation():
     assert response is None
 
 
-def test_worker_process_no_sidecar_import():
-    """Test worker_process module never imports sidecar_client."""
+def test_worker_process_no_sidecar_import(monkeypatch):
+    """Test worker_process module never imports sidecar_client.
+
+    This security test MUST run in standalone mode to verify architectural
+    isolation. Worker processes should never import sidecar_client regardless
+    of integration test mode.
+    """
     import sys
 
-    # Import worker_process
+    # Force standalone mode for this security test
+    monkeypatch.setenv("ELSPETH_SIDECAR_MODE", "standalone")
+
+    # Clear any sidecar_client modules from sys.modules (may have been loaded by integration tests)
+    sidecar_modules_before = [name for name in list(sys.modules.keys()) if "sidecar_client" in name]
+    for module_name in sidecar_modules_before:
+        del sys.modules[module_name]
+
+    # Also clear worker_process if it was already loaded
+    if "elspeth.orchestrator.worker_process" in sys.modules:
+        del sys.modules["elspeth.orchestrator.worker_process"]
+
+    # Now import worker_process in standalone mode
     import elspeth.orchestrator.worker_process
 
-    # Verify sidecar_client is NOT imported
-    sidecar_modules = [
+    # Verify sidecar_client was NOT imported as a result of importing worker_process
+    sidecar_modules_after = [
         name for name in sys.modules if "sidecar_client" in name
     ]
 
     # This should be empty - worker never imports sidecar_client
-    # (The Rust client doesn't exist yet, but the Python stub shouldn't be imported either)
-    assert len(sidecar_modules) == 0, (
-        f"Worker process should never import sidecar_client, found: {sidecar_modules}"
+    assert len(sidecar_modules_after) == 0, (
+        f"Worker process should never import sidecar_client, found: {sidecar_modules_after}"
     )
