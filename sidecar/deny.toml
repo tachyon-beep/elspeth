@@ -80,7 +80,8 @@ db-urls = ["https://github.com/rustsec/advisory-db"]
 # To allow specific advisories, add them to 'ignore' array below
 
 # Unmaintained crates are security risks (no patches)
-unmaintained = "deny"
+# "all" means check all dependencies (workspace + transitive)
+unmaintained = "all"
 
 # Yanked crates (removed from crates.io due to critical bugs)
 yanked = "deny"
