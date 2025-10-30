@@ -122,13 +122,45 @@ impl Server {
 
         debug!("Client connected (UID {} verified)", peer_uid);
 
-        // Read complete CBOR request (read until EOF)
-        // Unix sockets are stream-oriented - must read until connection closes
-        let mut buffer = Vec::new();
-        stream.read_to_end(&mut buffer).await?;
+        // Read CBOR request with size limit (DoS protection)
+        let max_size = self.config.max_request_size();
+        let mut buffer = Vec::with_capacity(4096.min(max_size)); // Start with 4 KiB or max_size
+        let mut total_read = 0;
+
+        loop {
+            let mut chunk = vec![0u8; 4096];
+            match stream.read(&mut chunk).await {
+                Ok(0) => break, // EOF
+                Ok(n) => {
+                    total_read += n;
+
+                    // Enforce size limit
+                    if total_read > max_size {
+                        error!(
+                            "Request size {} bytes exceeds maximum {} bytes",
+                            total_read, max_size
+                        );
+                        let error_response = Response::Error {
+                            error: "Request too large".to_string(),
+                            reason: format!(
+                                "Request size {} bytes exceeds maximum {} bytes (DoS protection)",
+                                total_read, max_size
+                            ),
+                        };
+                        let response_bytes = serde_cbor::to_vec(&error_response)?;
+                        stream.write_all(&response_bytes).await?;
+                        stream.shutdown().await?;
+                        anyhow::bail!("Request exceeds size limit");
+                    }
+
+                    buffer.extend_from_slice(&chunk[..n]);
+                }
+                Err(e) => return Err(e.into()),
+            }
+        }
 
         if buffer.is_empty() {
-            return Ok(()); // EOF
+            return Ok(()); // EOF without data
         }
 
         debug!(

@@ -349,3 +349,85 @@ async fn test_verify_seal_success() {
         _ => panic!("Expected VerifySealReply, got {:?}", verify_response),
     }
 }
+
+#[tokio::test]
+async fn test_oversized_request_rejected() {
+    use std::os::unix::net::UnixStream as StdUnixStream;
+    use std::io::Write;
+    use tempfile::tempdir;
+
+    // Create config with 1 KiB limit
+    let dir = tempdir().unwrap();
+    let socket_path = dir.path().join("test.sock");
+    let session_key_path = dir.path().join("session.key");
+
+    let config_content = format!(
+        r#"
+mode = "standalone"
+socket_path = "{}"
+session_key_path = "{}"
+appuser_uid = {}
+grant_ttl_secs = 30
+max_request_size_bytes = 1024
+log_level = "debug"
+"#,
+        socket_path.display(),
+        session_key_path.display(),
+        unsafe { libc::getuid() }
+    );
+
+    let config_path = dir.path().join("config.toml");
+    std::fs::write(&config_path, config_content).unwrap();
+
+    let config = elspeth_sidecar::config::Config::load(config_path.to_str().unwrap()).unwrap();
+    let server = elspeth_sidecar::server::Server::new(config.clone()).unwrap();
+
+    // Start server in background
+    tokio::spawn(async move {
+        server.run().await.ok();
+    });
+
+    // Wait for server to start and socket to be created
+    for _ in 0..50 {
+        if socket_path.exists() {
+            break;
+        }
+        tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
+    }
+    assert!(socket_path.exists(), "Socket should be created");
+
+    // Send 2 KiB request (exceeds 1 KiB limit) using blocking I/O in spawn_blocking
+    let oversized_payload = vec![0x42; 2048]; // 2 KiB of 0x42 bytes
+    let socket_path_for_client = socket_path.clone();
+
+    let response = tokio::task::spawn_blocking(move || {
+        let mut stream = StdUnixStream::connect(&socket_path_for_client).unwrap();
+        stream.write_all(&oversized_payload).unwrap();
+        stream.shutdown(std::net::Shutdown::Write).unwrap();
+
+        // Set read timeout to avoid infinite hang
+        stream.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
+
+        // Read response (should be error)
+        let mut response = Vec::new();
+        std::io::Read::read_to_end(&mut stream, &mut response).unwrap();
+        response
+    })
+    .await
+    .unwrap();
+
+    // Should receive error response (not crash/hang)
+    assert!(!response.is_empty(), "Should receive error response, not hang");
+
+    // Parse CBOR response
+    let resp: elspeth_sidecar::protocol::Response = serde_cbor::from_slice(&response).unwrap();
+
+    // Should be Error variant
+    match resp {
+        elspeth_sidecar::protocol::Response::Error { error: _, reason } => {
+            assert!(reason.contains("exceeds maximum") || reason.contains("too large"),
+                    "Error should mention size limit, got: {}", reason);
+        }
+        _ => panic!("Expected Error response, got: {:?}", resp),
+    }
+}
