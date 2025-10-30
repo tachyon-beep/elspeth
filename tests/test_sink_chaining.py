@@ -76,7 +76,10 @@ def test_csv_to_file_copy_pipeline(tmp_path):
     assert copied is not None and copied.security_level == "SECRET"
 
 
-def test_runner_chaining(tmp_path):
+def test_runner_chaining(tmp_path, monkeypatch):
+    # Force standalone mode for this test - testing sink chaining logic, not sidecar integration
+    monkeypatch.setenv("ELSPETH_SIDECAR_MODE", "standalone")
+
     class DummyLLM:
         def generate(self, *, system_prompt, user_prompt, metadata=None):
             return {"content": user_prompt}
