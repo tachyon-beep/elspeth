@@ -423,9 +423,9 @@ jobs:
             sleep 1
           done
 
-          # Verify sidecar daemon is running
+          # Verify sidecar daemon is running via supervisorctl
           echo "Verifying sidecar daemon is running..."
-          docker exec $CONTAINER_ID pgrep -f elspeth-sidecar-daemon || \
+          docker exec $CONTAINER_ID supervisorctl status sidecar-daemon | grep -q RUNNING || \
             (echo "✗ Sidecar daemon not running"; docker logs $CONTAINER_ID; exit 1)
           echo "✓ Sidecar daemon is running"
 
