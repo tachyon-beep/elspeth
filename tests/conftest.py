@@ -58,8 +58,10 @@ def _reset_sidecar_cache(request):
     if os.environ.get("ELSPETH_RUN_INTEGRATION_TESTS") == "1":
         try:
             import elspeth.core.security.secure_data
-            # Reset cache to allow test-specific mode configuration
+            # Reset cache AND set env var to standalone for non-integration tests
+            # (otherwise cache reset is useless - code will re-read env var and get "sidecar")
             elspeth.core.security.secure_data._SIDECAR_MODE = None
+            os.environ["ELSPETH_SIDECAR_MODE"] = "standalone"
         except (ImportError, AttributeError):
             pass  # Module not loaded yet or _SIDECAR_MODE doesn't exist
     yield
