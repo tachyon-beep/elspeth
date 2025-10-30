@@ -157,11 +157,14 @@ jobs:
       # ============================================================
       - name: CI Summary
         if: always()
+        env:
+          RUST_TOOLCHAIN: ${{ inputs.rust-toolchain }}
+          WORKING_DIR: ${{ inputs.working-directory }}
         run: |
           echo "## Rust CI Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "- **Toolchain:** ${{ inputs.rust-toolchain }}" >> $GITHUB_STEP_SUMMARY
-          echo "- **Working Directory:** ${{ inputs.working-directory }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Toolchain:** $RUST_TOOLCHAIN" >> $GITHUB_STEP_SUMMARY
+          echo "- **Working Directory:** $WORKING_DIR" >> $GITHUB_STEP_SUMMARY
           echo "- **Type Check:** ✅ Passed" >> $GITHUB_STEP_SUMMARY
           echo "- **Formatting:** ✅ Passed" >> $GITHUB_STEP_SUMMARY
           echo "- **Linting:** ✅ Passed" >> $GITHUB_STEP_SUMMARY
