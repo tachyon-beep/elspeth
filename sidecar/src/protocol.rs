@@ -142,18 +142,26 @@ impl Request {
                 ..
             } => {
                 let mut buf = Vec::new();
-                ciborium::into_writer(&(
-                    serde_bytes::Bytes::new(frame_id),
-                    *level,
-                    serde_bytes::Bytes::new(data_digest),
-                ), &mut buf).unwrap();
+                ciborium::into_writer(
+                    &(
+                        serde_bytes::Bytes::new(frame_id),
+                        *level,
+                        serde_bytes::Bytes::new(data_digest),
+                    ),
+                    &mut buf,
+                )
+                .unwrap();
                 buf
             }
             Request::RedeemGrant { grant_id, .. } => {
-                { let mut buf = Vec::new(); ciborium::into_writer(&serde_bytes::Bytes::new(grant_id), &mut buf).unwrap(); buf }
+                let mut buf = Vec::new();
+                ciborium::into_writer(&serde_bytes::Bytes::new(grant_id), &mut buf).unwrap();
+                buf
             }
             Request::ConsumeConstructionTicket { ticket, .. } => {
-                { let mut buf = Vec::new(); ciborium::into_writer(&serde_bytes::Bytes::new(ticket), &mut buf).unwrap(); buf }
+                let mut buf = Vec::new();
+                ciborium::into_writer(&serde_bytes::Bytes::new(ticket), &mut buf).unwrap();
+                buf
             }
             Request::ComputeSeal {
                 frame_id,
@@ -162,11 +170,15 @@ impl Request {
                 ..
             } => {
                 let mut buf = Vec::new();
-                ciborium::into_writer(&(
-                    serde_bytes::Bytes::new(frame_id),
-                    *level,
-                    serde_bytes::Bytes::new(data_digest),
-                ), &mut buf).unwrap();
+                ciborium::into_writer(
+                    &(
+                        serde_bytes::Bytes::new(frame_id),
+                        *level,
+                        serde_bytes::Bytes::new(data_digest),
+                    ),
+                    &mut buf,
+                )
+                .unwrap();
                 buf
             }
             Request::VerifySeal {
@@ -177,12 +189,16 @@ impl Request {
                 ..
             } => {
                 let mut buf = Vec::new();
-                ciborium::into_writer(&(
-                    serde_bytes::Bytes::new(frame_id),
-                    *level,
-                    serde_bytes::Bytes::new(data_digest),
-                    serde_bytes::Bytes::new(seal),
-                ), &mut buf).unwrap();
+                ciborium::into_writer(
+                    &(
+                        serde_bytes::Bytes::new(frame_id),
+                        *level,
+                        serde_bytes::Bytes::new(data_digest),
+                        serde_bytes::Bytes::new(seal),
+                    ),
+                    &mut buf,
+                )
+                .unwrap();
                 buf
             }
             Request::HealthCheck => vec![], // Health check has no canonical bytes
