@@ -96,7 +96,8 @@ db-urls = ["https://github.com/rustsec/advisory-db"]
 vulnerability = "deny"
 
 # Unmaintained crates are security risks (no patches)
-unmaintained = "warn"  # Warn first, then investigate
+# Scope: Check all dependencies (not just workspace)
+unmaintained = "all"
 
 # Crates with unsound APIs (memory safety violations)
 unsound = "deny"
@@ -105,7 +106,8 @@ unsound = "deny"
 yanked = "deny"
 
 # Notice-level advisories (informational)
-notice = "warn"
+# Scope: Check all dependencies
+notice = "all"
 
 # Ignore specific advisories (use ONLY for false positives)
 ignore = [
