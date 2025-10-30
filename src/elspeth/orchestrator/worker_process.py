@@ -52,7 +52,7 @@ import sys
 import traceback
 from typing import Any
 
-import msgpack
+import msgpack  # type: ignore[import-untyped]
 
 # CRITICAL: Do NOT import elspeth.core.security.sidecar_client
 # Worker must never have access to sidecar communication
@@ -194,7 +194,7 @@ def worker_main() -> None:
     """
     # Use msgpack unpacker for streaming input
     # Access the raw unbuffered stream to avoid Python's buffering layers
-    unpacker = msgpack.Unpacker(sys.stdin.buffer.raw, raw=False)
+    unpacker = msgpack.Unpacker(sys.stdin.buffer.raw, raw=False)  # type: ignore[union-attr]
     packer = msgpack.Packer(use_bin_type=True)
 
     try:

@@ -34,8 +34,8 @@ except ImportError as e:
     ) from e
 
 try:
-    import pyarrow as pa
-    import pyarrow.parquet as pq
+    import pyarrow as pa  # type: ignore[import-untyped]
+    import pyarrow.parquet as pq  # type: ignore[import-untyped]
 except ImportError as e:
     raise ImportError(
         "pyarrow is required for canonical Parquet serialization. "
@@ -130,27 +130,27 @@ def _encode_extension_series(series: pd.Series) -> pd.Series:
     dtype_name = str(series.dtype)
 
     # Categorical → string codes (deterministic ordering)
-    if pd.api.types.is_categorical_dtype(series):
+    if isinstance(series.dtype, pd.CategoricalDtype):
         return series.astype(str)
 
     # Datetime with timezone → normalize to UTC, then remove timezone
     if pd.api.types.is_datetime64_any_dtype(series):
         if hasattr(series.dtype, "tz") and series.dtype.tz is not None:
             # Convert to UTC and remove timezone info for Arrow compatibility
-            return series.dt.tz_convert("UTC").dt.tz_localize(None)
+            return series.dt.tz_convert("UTC").dt.tz_localize(None)  # type: ignore[no-any-return]
         return series
 
     # Period → ISO string representation
-    if pd.api.types.is_period_dtype(series):
+    if isinstance(series.dtype, pd.PeriodDtype):
         return series.astype(str)
 
     # Interval → string representation
-    if pd.api.types.is_interval_dtype(series):
+    if isinstance(series.dtype, pd.IntervalDtype):
         return series.astype(str)
 
     # Sparse → densify
-    if pd.api.types.is_sparse(series):
-        return series.sparse.to_dense()
+    if isinstance(series.dtype, pd.SparseDtype):
+        return series.sparse.to_dense()  # type: ignore[no-any-return, attr-defined]
 
     # Unsupported dtype - fail with clear message
     raise ValueError(

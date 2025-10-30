@@ -27,7 +27,7 @@ import sys
 from contextlib import contextmanager
 from typing import Any, Generator
 
-import msgpack
+import msgpack  # type: ignore[import-untyped]
 
 
 class WorkerRuntimeError(Exception):
@@ -270,7 +270,8 @@ class WorkerProcess:
                 error_type = response.get("error_type", "WorkerError")
                 raise RuntimeError(f"{error_type}: {error_msg}")
 
-            return response["result_proxy_id"]
+            result_proxy_id: str = response["result_proxy_id"]
+            return result_proxy_id
 
         except (OSError, EOFError) as e:
             # Worker died or pipe broken
