@@ -253,4 +253,11 @@ __all__ = [
     "validate_azure_blob_endpoint",
     "validate_azure_search_endpoint",
     "get_approved_patterns",
+    # Frame registry and proxy (sidecar mode)
+    "FrameRegistry",
+    "FrameRegistryEntry",
+    "OrchestratorRPCClient",
+    "SecureFrameProxy",
+    "ProxyEntry",
+    "ProxyTable",
 ]
