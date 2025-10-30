@@ -107,7 +107,7 @@ def _prepare_plugin_definition(definition: Mapping[str, Any], context: str) -> t
         raise ConfigurationError(
             f"{context}: security_level cannot be specified in configuration (ADR-002-B). "
             "Security level is plugin-author-owned and hard-coded in plugin constructors. "
-            "See docs/architecture/decisions/002-security-architecture.md"
+            "See docs/architecture/decisions/002-b-security-policy-metadata.md"
         )
 
     # Handle determinism_level (user-configurable)

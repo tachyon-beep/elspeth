@@ -260,7 +260,7 @@ def _prepare_plugin_definition(
         raise ConfigurationError(
             f"{context}: security_level cannot be specified in configuration (ADR-002-B). "
             "Security level is plugin-author-owned and hard-coded in plugin constructors. "
-            "See docs/architecture/decisions/002-security-architecture.md"
+            "See docs/architecture/decisions/002-b-security-policy-metadata.md"
         )
 
     # Handle determinism_level (user-configurable)
@@ -542,7 +542,7 @@ llm:
 ```
 ConfigurationError: datasource:local_csv: security_level cannot be specified in configuration (ADR-002-B).
 Security level is plugin-author-owned and hard-coded in plugin constructors.
-See docs/architecture/decisions/002-security-architecture.md
+See docs/architecture/decisions/002-b-security-policy-metadata.md
 ```
 
 **Rationale**: Security levels are now plugin-author-owned to prevent misconfiguration.
@@ -812,7 +812,7 @@ plugin security levels to exfiltrate classified data.
 ```
 ConfigurationError: {context}: security_level cannot be specified in configuration (ADR-002-B).
 Security level is plugin-author-owned and hard-coded in plugin constructors.
-See docs/architecture/decisions/002-security-architecture.md
+See docs/architecture/decisions/002-b-security-policy-metadata.md
 ```
 
 This is **intentional and correct** - ADR-002-B requires security levels to be immutable and plugin-author-owned.
