@@ -425,7 +425,8 @@ log_level = "debug"
     );
 
     // Parse CBOR response
-    let resp: elspeth_sidecar::protocol::Response = ciborium::de::from_reader(&response[..]).unwrap();
+    let resp: elspeth_sidecar::protocol::Response =
+        ciborium::de::from_reader(&response[..]).unwrap();
 
     // Should be Error variant
     match resp {

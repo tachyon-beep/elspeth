@@ -57,12 +57,22 @@ def main() -> int:
 
     failures: list[str] = []
 
+    # Build set of paths with file-specific thresholds (these override --all)
+    file_specific_paths = set()
+    for spec in ns.file:
+        if ":" in spec:
+            path, _ = spec.split(":", 1)
+            file_specific_paths.add(path)
+
     # Optional global per-file threshold across report entries
     if ns.all is not None:
         for path, observed in sorted(rates.items()):
             if ns.include_prefix:
                 if not any(path.startswith(prefix) for prefix in ns.include_prefix):
                     continue
+            # Skip files with specific thresholds (--file overrides --all)
+            if path in file_specific_paths:
+                continue
             if observed + 1e-9 < ns.all:
                 failures.append(f"{path}: observed {observed:.4f} < required {ns.all:.4f}")
             else:
