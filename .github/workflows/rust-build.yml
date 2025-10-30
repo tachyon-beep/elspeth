@@ -37,7 +37,7 @@ jobs:
   # Minimum Supported Rust Version (MSRV) Check
   # ============================================================
   msrv-check:
-    name: MSRV Check (Rust 1.80)
+    name: MSRV Check (Rust 1.82)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -47,10 +47,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
 
-      - name: Install Rust 1.80 (MSRV)
+      - name: Install Rust 1.82 (MSRV)
         uses: dtolnay/rust-toolchain@7b1c307e0dcbda6122208f10795a713336a9b35a
         with:
-          toolchain: "1.80"
+          toolchain: "1.82"
 
       - name: Check with MSRV
         run: cargo check --all-targets --all-features
@@ -59,9 +59,9 @@ jobs:
         run: |
           echo "## MSRV Verification" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "✅ Code compiles with Rust 1.80 (MSRV)" >> $GITHUB_STEP_SUMMARY
+          echo "✅ Code compiles with Rust 1.82 (MSRV)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Policy:** Sidecar daemon supports Rust 1.80+ for compatibility" >> $GITHUB_STEP_SUMMARY
+          echo "**Policy:** Sidecar daemon uses latest stable Rust for security patches" >> $GITHUB_STEP_SUMMARY
 
   # ============================================================
   # Advanced Security: Unsafe Code Detection
