@@ -5,6 +5,7 @@
 **Accepted** (2025-10-27)
 
 **Implementation Status**: Complete (Sprint 3, 2025-10-27)
+- Layer 0: Configuration-layer rejection of security_level in YAML (VULN-014 cleanup)
 - Layer 1: Schema enforcement with `additionalProperties: false` (commit e8c1c80)
 - Layer 2: Registry runtime rejection of security policy fields (commit e23aee3)
 - Layer 3: Post-creation verification of declared vs actual (commits 6a92546, 3d18f10)
@@ -200,7 +201,69 @@ We will adopt **Immutable Security Policy Metadata** enforced through a **three-
 
 **Analogy**: Operators cannot change a TLS library's cipher suite strength via configuration; they select the library version certified for their required security level. Similarly, operators select plugins certified for their required clearance level.
 
-### Implementation: Three-Layer Defence-in-Depth
+### Implementation: Four-Layer Defence-in-Depth
+
+#### Layer 0: Configuration-Layer Rejection (VULN-014 Cleanup)
+
+**Purpose**: Fail-fast rejection of `security_level` in YAML configuration at load time, before plugin instantiation.
+
+**Mechanism**: Configuration loader (`src/elspeth/config.py`) explicitly rejects any plugin definition containing `security_level` in either the definition or options dict.
+
+**Implementation**: Added during VULN-014 cleanup (removal of orphaned security-level extraction code).
+
+```python
+# src/elspeth/config.py:_prepare_plugin_definition()
+
+def _prepare_plugin_definition(definition: Mapping[str, Any], context: str):
+    """Extract options, determinism level, and provenance.
+    
+    ADR-002-B: security_level is plugin-author-owned (hard-coded in constructors).
+    Configuration MUST NOT specify security_level - it will be REJECTED.
+    """
+    
+    # ADR-002-B: REJECT security_level in configuration (plugin-author-owned)
+    entry_sec = definition.get("security_level")
+    opts_sec = options.get("security_level")
+    if entry_sec is not None or opts_sec is not None:
+        raise ConfigurationError(
+            f"{context}: security_level cannot be specified in configuration (ADR-002-B). "
+            "Security level is plugin-author-owned and hard-coded in plugin constructors. "
+            "See docs/architecture/decisions/002-security-architecture.md"
+        )
+```
+
+**Example – Invalid Configuration (Rejected)**:
+
+```yaml
+# config/settings.yaml
+datasource:
+  plugin: local_csv
+  security_level: SECRET  # ❌ REJECTED at config load time
+  options:
+    path: data.csv
+
+llm:
+  plugin: azure_openai
+  options:
+    security_level: PROTECTED  # ❌ REJECTED at config load time
+```
+
+**Error Message**:
+```
+ConfigurationError: datasource: security_level cannot be specified in configuration (ADR-002-B).
+Security level is plugin-author-owned and hard-coded in plugin constructors.
+See docs/architecture/decisions/002-security-architecture.md
+```
+
+**ISM Control**: ISM-1433 (Error Handling) – Fail-closed behaviour prevents misconfigured pipelines from executing
+
+**Benefits**:
+- ✅ Fastest possible failure (config load time, before plugin instantiation)
+- ✅ Clear error message guides users to ADR-002-B documentation
+- ✅ Prevents confusion from orphaned extraction code that silently ignored config
+- ✅ Regression tests ensure rejection cannot be bypassed
+
+**Test Coverage**: `tests/test_adr002b_config_enforcement.py` – 5 tests covering datasource/llm/sink rejection
 
 #### Layer 1: Schema Enforcement with `additionalProperties: false`
 
