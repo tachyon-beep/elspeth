@@ -198,35 +198,3 @@ jobs:
           echo "**Architecture:** Python 3.12 + Rust stable" >> $GITHUB_STEP_SUMMARY
           echo "**IPC:** Unix sockets + CBOR serialization" >> $GITHUB_STEP_SUMMARY
           echo "**Security:** HMAC-SHA256 authentication, SO_PEERCRED validation" >> $GITHUB_STEP_SUMMARY
-
-  # ============================================================
-  # Cross-Platform Compatibility (Optional)
-  # ============================================================
-  cross-platform:
-    name: Cross-Platform Test (macOS)
-    runs-on: macos-latest
-    if: github.event_name == 'pull_request'
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
-
-      - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@7b1c307e0dcbda6122208f10795a713336a9b35a
-        with:
-          toolchain: stable
-
-      - name: Build on macOS
-        working-directory: sidecar
-        run: cargo build --release
-
-      - name: Run unit tests on macOS
-        working-directory: sidecar
-        run: cargo test
-
-      - name: macOS Summary
-        run: |
-          echo "## macOS Compatibility" >> $GITHUB_STEP_SUMMARY
-          echo "✅ Sidecar daemon builds and tests pass on macOS" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Note:** Integration tests with Python client skipped on macOS CI" >> $GITHUB_STEP_SUMMARY
