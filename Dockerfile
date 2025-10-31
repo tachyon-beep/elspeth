@@ -57,6 +57,9 @@ RUN test -f /build/sidecar/target/release/elspeth-sidecar-daemon || \
 FROM base AS builder-dev
 WORKDIR /workspace
 
+# Install build dependencies (needed for --no-build-isolation)
+RUN python -m pip install setuptools wheel
+
 COPY requirements-dev.lock requirements-dev.lock
 COPY pyproject.toml pyproject.toml
 # Install dev/test dependencies strictly from the hash-locked file
@@ -107,6 +110,9 @@ CMD ["pytest", "-m", "not slow", "--maxfail=1", "--disable-warnings"]
 # ========================= RUNTIME BUILD =========================
 FROM base AS builder-runtime
 WORKDIR /workspace
+
+# Install build dependencies (needed for --no-build-isolation)
+RUN python -m pip install setuptools wheel
 
 COPY requirements.lock requirements.lock
 COPY pyproject.toml pyproject.toml
