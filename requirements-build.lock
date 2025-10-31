@@ -1,0 +1,22 @@
+# Build dependencies lockfile for --no-build-isolation
+#
+# This file contains minimal build system requirements (setuptools + wheel)
+# needed before installing from requirements*.lock files with --no-build-isolation.
+#
+# Why needed: pip's --no-build-isolation flag prevents pip from creating temporary
+# virtual environments during builds (required for hermetic, reproducible builds).
+# This requires build backends to be pre-installed in the target environment.
+#
+# To regenerate:
+#   python -m pip download setuptools wheel --dest /tmp/build-deps --no-deps
+#   python -m pip hash /tmp/build-deps/*.whl
+#
+# Security: All packages are hash-pinned for supply chain integrity (AIS compliance).
+
+setuptools==80.9.0 \
+    --hash=sha256:062d34222ad13e0cc312a4c02d73f059e86a4acbfbdea8f8f76b28c99f306922
+    # via build system requirement
+
+wheel==0.45.1 \
+    --hash=sha256:708e7481cc80179af0e556bbf0cc00b8444c7321e2700b8d8580231d13017248
+    # via build system requirement
