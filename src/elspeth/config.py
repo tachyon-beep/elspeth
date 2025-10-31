@@ -14,7 +14,7 @@ from elspeth.core.controls import create_cost_tracker, create_rate_limiter
 from elspeth.core.experiments.plugin_registry import normalize_early_stop_definitions
 from elspeth.core.orchestrator import OrchestratorConfig
 from elspeth.core.registry import central_registry
-from elspeth.core.security import coalesce_determinism_level, coalesce_security_level
+from elspeth.core.security import coalesce_determinism_level
 from elspeth.core.validation.base import ConfigurationError
 
 
@@ -91,51 +91,42 @@ def _resolve_early_stop_sections(profile_data: Mapping[str, Any]) -> tuple[dict[
     return early_stop_config, plugin_defs
 
 
-def _prepare_plugin_definition(definition: Mapping[str, Any], context: str) -> tuple[dict[str, Any], str, str, tuple[str, ...]]:
-    """Extract options, normalized security level, determinism level, and provenance.
+def _prepare_plugin_definition(definition: Mapping[str, Any], context: str) -> tuple[dict[str, Any], str, tuple[str, ...]]:
+    """Extract options, determinism level, and provenance.
 
-    ADR-002-B: security_level is now optional in configuration (plugin-author-owned).
-    If not provided, will be "UNCLASSIFIED" as default for legacy compatibility.
+    ADR-002-B: security_level is plugin-author-owned (hard-coded in constructors).
+    Configuration MUST NOT specify security_level - it will be REJECTED.
     """
 
     options = dict(definition.get("options", {}) or {})
 
-    # Handle security_level (ADR-002-B: optional, plugin-author-owned)
-    entry_sec_level = definition.get("security_level")
-    options_sec_level = options.get("security_level")
-    sources: list[str] = []
-    if entry_sec_level is not None:
-        sources.append(f"{context}.definition.security_level")
-    if options_sec_level is not None:
-        sources.append(f"{context}.options.security_level")
+    # ADR-002-B: REJECT security_level in configuration (plugin-author-owned)
+    entry_sec = definition.get("security_level")
+    opts_sec = options.get("security_level")
+    if entry_sec is not None or opts_sec is not None:
+        raise ConfigurationError(
+            f"{context}: security_level cannot be specified in configuration (ADR-002-B). "
+            "Security level is plugin-author-owned and hard-coded in plugin constructors. "
+            "See docs/architecture/decisions/002-b-security-policy-metadata.md"
+        )
 
-    # If no security_level provided, use UNOFFICIAL as default (legacy compatibility)
-    if entry_sec_level is None and options_sec_level is None:
-        sec_level = "UNOFFICIAL"
-        sources.append(f"{context}.default")
-    else:
-        try:
-            sec_level = coalesce_security_level(entry_sec_level, options_sec_level)
-        except ValueError as exc:
-            raise ConfigurationError(f"{context}: {exc}") from exc
-
-    # Handle determinism_level
+    # Handle determinism_level (user-configurable)
     entry_det_level = definition.get("determinism_level")
     options_det_level = options.get("determinism_level")
+    sources: list[str] = []
     if entry_det_level is not None:
         sources.append(f"{context}.definition.determinism_level")
     if options_det_level is not None:
         sources.append(f"{context}.options.determinism_level")
+
     try:
         det_level = coalesce_determinism_level(entry_det_level, options_det_level)
     except ValueError as exc:
         raise ConfigurationError(f"{context}: {exc}") from exc
 
-    # ADR-002-B: Do NOT pass security_level to plugin payload (plugin-author-owned)
-    # Only pass determinism_level (user-configurable)
     options["determinism_level"] = det_level
     provenance = tuple(sources or (f"{context}.resolved",))
-    return options, sec_level, det_level, provenance
+    return options, det_level, provenance
 
 
 def _merge_pack(base: dict[str, Any], pack: dict[str, Any]) -> dict[str, Any]:
@@ -163,10 +154,10 @@ def _instantiate_plugin(
     context: str,
     factory: Callable[..., Any],
 ) -> Any:
-    """Instantiate a plugin and apply the resolved security and determinism levels.
+    """Instantiate a plugin with determinism level validation.
 
-    ADR-002-B: security_level is NOT passed in payload (plugin-author-owned).
-    Only determinism_level is passed (user-configurable).
+    ADR-002-B: security_level is NOT extracted or passed (plugin-author-owned).
+    Only determinism_level is extracted and passed (user-configurable).
     """
 
     if not isinstance(definition, Mapping):
@@ -174,7 +165,7 @@ def _instantiate_plugin(
     plugin_name = definition.get("plugin")
     if not plugin_name:
         raise ConfigurationError(f"{context} configuration must define a plugin name.")
-    options, sec_level, det_level, provenance = _prepare_plugin_definition(definition, context)
+    options, det_level, provenance = _prepare_plugin_definition(definition, context)
     payload = dict(options)
     # ADR-002-B: Do NOT pass security_level (plugin-author-owned)
     # determinism_level already added to options in _prepare_plugin_definition
