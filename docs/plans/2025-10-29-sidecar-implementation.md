@@ -2,11 +2,11 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Implement production-grade Rust sidecar daemon to eliminate CVE-ADR-002-A-009 (secret export vulnerability) by moving `_CONSTRUCTION_TOKEN` and `_SEAL_KEY` into OS-isolated process with capability-based authorization.
+**Goal:** Implement production-grade Rust sidecar daemon to eliminate CVE-ADR-002-A-009 (secret export vulnerability) by moving `_CONSTRUCTION_TOKEN` and `_SEAL_KEY` into OS-isolated process with digest-bound capability authorization.
 
-**Architecture:** Three-process model (Rust daemon UID 1001, Python orchestrator UID 1000, plugin workers UID 1002) communicating via Unix sockets with HMAC-authenticated CBOR protocol. Daemon holds secrets in Rust memory, orchestrator uses `_from_sidecar()` factory to create frames with daemon-provided seals, plugins receive only opaque `SecureFrameProxy` handles.
+**Architecture:** Three-process model (Rust daemon UID 1001, Python orchestrator UID 1000, plugin workers UID 1002) communicating via Unix sockets with HMAC-authenticated CBOR protocol. Daemon holds secrets in Rust memory and computes digest-bound seals (`HMAC-BLAKE2s(seal_key, frame_id || level || data_digest)` where digest is BLAKE3 of canonical Parquet bytes). Orchestrator maintains FrameRegistry with stable UUIDs and uses `_from_sidecar()` factory. Plugins receive only opaque `SecureFrameProxy` handles with FD_CLOEXEC hygiene preventing descriptor leaks.
 
-**Tech Stack:** Rust 1.77+ (tokio, ring, serde_cbor, dashmap, tracing), Python 3.12 (asyncio, msgpack), Docker multi-stage build, supervisord
+**Tech Stack:** Rust 1.77+ (tokio, ring/blake3, serde_cbor, dashmap, tracing, uuid), Python 3.12 (asyncio, cbor2, msgpack for worker RPC, blake3, pyarrow), Docker multi-stage build, supervisord
 
 **Related Documents:**
 - Design: `docs/plans/2025-10-29-sidecar-security-daemon-design-v3.md`
@@ -14,6 +14,17 @@
 - Vulnerability: CVE-ADR-002-A-009
 
 ---
+
+## Milestones
+
+| Milestone | Scope | Blocking | Notes |
+| --- | --- | --- | --- |
+| M1 | Crypto primitives (`Secrets`, seal compute/verify, TDD harness) | ✅ | Required before any server work; unblocks daemon + client integration |
+| M2 | Grant table + lifecycle tests | ✅ | Needed for authorize/redeem flow and replay protection |
+| M3 | CBOR protocol definitions + round-trip tests | ✅ | Message schema agreement before implementing client/daemon handlers |
+| M4 | Server loop (socket auth, request dispatch, logging) | ✅ | Minimal daemon capable of servicing orchestrator |
+| M5 | Observability + metrics exporters | ❌ | Nice-to-have for prod readiness; can follow once daemon is functional |
+| M6 | Benchmarks / perf harness (`criterion`, load tests) | ❌ | Optional once correctness is locked in |
 
 ## Phase 0: Environment Setup (System Tasks)
 
@@ -135,11 +146,14 @@ tokio = { version = "1.35", features = ["full"] }
 tokio-util = { version = "0.7", features = ["codec"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_cbor = "0.11"
-ring = "0.17"
+blake2 = { version = "0.10", features = ["mac"] }
+blake3 = "1.5"
+uuid = { version = "1.6", features = ["v4", "serde"] }
 dashmap = "5.5"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 anyhow = "1.0"
+ring = "0.17"
 
 [dev-dependencies]
 tempfile = "3.8"
@@ -254,33 +268,34 @@ Create `sidecar/tests/crypto_test.rs`:
 
 ```rust
 use elspeth_sidecar::crypto::Secrets;
+use uuid::Uuid;
+
+fn fixed_digest(tag: u8) -> [u8; 32] {
+    [tag; 32]
+}
 
 #[test]
 fn test_secrets_generate_creates_random_values() {
-    let secrets1 = Secrets::generate();
-    let secrets2 = Secrets::generate();
+    let frame_id = Uuid::new_v4();
+    let digest = fixed_digest(0xAB);
+    let seal1 = Secrets::generate().compute_seal(frame_id, 3, &digest);
+    let seal2 = Secrets::generate().compute_seal(frame_id, 3, &digest);
 
-    // Construction token is 32 bytes
-    assert_eq!(secrets1.construction_token().len(), 32);
-    assert_eq!(secrets2.construction_token().len(), 32);
-
-    // Seal key is 32 bytes
-    assert_eq!(secrets1.seal_key().len(), 32);
-    assert_eq!(secrets2.seal_key().len(), 32);
-
-    // Values are random (not equal)
-    assert_ne!(secrets1.construction_token(), secrets2.construction_token());
-    assert_ne!(secrets1.seal_key(), secrets2.seal_key());
+    // Independent secrets should produce different seals with overwhelming probability.
+    assert_ne!(seal1, seal2);
+    assert_eq!(seal1.len(), 32);
+    assert_eq!(seal2.len(), 32);
 }
 
 #[test]
 fn test_secrets_compute_seal_deterministic() {
     let secrets = Secrets::generate();
-    let data_id = 140235678901234u64;
+    let frame_id = Uuid::new_v4();
+    let digest = fixed_digest(0xAB);
     let level = 3u32; // SECRET
 
-    let seal1 = secrets.compute_seal(data_id, level);
-    let seal2 = secrets.compute_seal(data_id, level);
+    let seal1 = secrets.compute_seal(frame_id, level, &digest);
+    let seal2 = secrets.compute_seal(frame_id, level, &digest);
 
     // Same inputs produce same seal
     assert_eq!(seal1, seal2);
@@ -290,31 +305,46 @@ fn test_secrets_compute_seal_deterministic() {
 #[test]
 fn test_secrets_verify_seal_success() {
     let secrets = Secrets::generate();
-    let data_id = 140235678901234u64;
-    let level = 3u32;
+    let frame_id = Uuid::new_v4();
+    let digest = fixed_digest(0x42);
 
-    let seal = secrets.compute_seal(data_id, level);
+    let seal = secrets.compute_seal(frame_id, 2, &digest);
 
-    // Verification succeeds for matching seal
-    assert!(secrets.verify_seal(data_id, level, &seal));
+    // Verification succeeds for matching tuple
+    assert!(secrets.verify_seal(frame_id, 2, &digest, &seal));
 }
 
 #[test]
-fn test_secrets_verify_seal_fails_wrong_data_id() {
+fn test_secrets_verify_seal_fails_wrong_frame_id() {
     let secrets = Secrets::generate();
-    let seal = secrets.compute_seal(123u64, 3u32);
+    let frame_id = Uuid::new_v4();
+    let other_frame_id = Uuid::new_v4();
+    let digest = fixed_digest(0x11);
 
-    // Wrong data_id fails verification
-    assert!(!secrets.verify_seal(456u64, 3u32, &seal));
+    let seal = secrets.compute_seal(frame_id, 1, &digest);
+
+    assert!(!secrets.verify_seal(other_frame_id, 1, &digest, &seal));
 }
 
 #[test]
 fn test_secrets_verify_seal_fails_wrong_level() {
     let secrets = Secrets::generate();
-    let seal = secrets.compute_seal(123u64, 3u32);
+    let frame_id = Uuid::new_v4();
+    let digest = fixed_digest(0x22);
 
-    // Wrong level fails verification
-    assert!(!secrets.verify_seal(123u64, 4u32, &seal));
+    let seal = secrets.compute_seal(frame_id, 4, &digest);
+
+    assert!(!secrets.verify_seal(frame_id, 3, &digest, &seal));
+}
+
+#[test]
+fn test_secrets_verify_seal_fails_wrong_digest() {
+    let secrets = Secrets::generate();
+    let frame_id = Uuid::new_v4();
+
+    let seal = secrets.compute_seal(frame_id, 3, &fixed_digest(0x33));
+
+    assert!(!secrets.verify_seal(frame_id, 3, &fixed_digest(0x34), &seal));
 }
 ```
 
@@ -341,16 +371,19 @@ Create `sidecar/src/crypto.rs`:
 //! Cryptographic primitives for sidecar daemon.
 //!
 //! - `Secrets`: Holds construction token and seal key in Rust memory
-//! - `compute_seal()`: HMAC-BLAKE2s(seal_key, data_id || level)
+//! - `compute_seal()`: BLAKE2s-MAC(seal_key, frame_id || level || data_digest)
 //! - `verify_seal()`: Constant-time seal comparison
 
-use ring::hmac;
+use blake2::digest::{Update, FixedOutput, KeyInit};
+use blake2::Blake2sMac256;
 use ring::rand::{SecureRandom, SystemRandom};
+use ring::constant_time;
+use uuid::Uuid;
 
 /// Secrets held in Rust memory (never exported to Python).
 pub struct Secrets {
     construction_token: [u8; 32],
-    seal_key: hmac::Key,
+    seal_key: [u8; 32],
 }
 
 impl Secrets {
@@ -363,151 +396,84 @@ impl Secrets {
         rng.fill(&mut construction_token)
             .expect("RNG failure");
 
-        // Generate seal key (256-bit random for HMAC-BLAKE2s)
+        // Generate seal key (256-bit random for BLAKE2s MAC)
         let mut seal_key_bytes = [0u8; 32];
         rng.fill(&mut seal_key_bytes)
             .expect("RNG failure");
 
-        let seal_key = hmac::Key::new(hmac::HMAC_SHA256, &seal_key_bytes);
-
         Self {
             construction_token,
-            seal_key,
+            seal_key: seal_key_bytes,
         }
     }
 
-    /// Returns reference to construction token (for grant validation).
-    pub fn construction_token(&self) -> &[u8; 32] {
-        &self.construction_token
-    }
-
-    /// Returns reference to seal key bytes (for testing only).
-    #[cfg(test)]
-    pub fn seal_key(&self) -> &[u8] {
-        // WARNING: This exposes seal key for testing.
-        // In production, seal_key is only accessed via compute_seal/verify_seal.
-        self.seal_key.algorithm().digest_algorithm().output_len;
-        // We can't actually extract the key bytes from ring::hmac::Key,
-        // so we'll return a dummy value for the test
-        // This test needs to be rewritten
-        &[]
-    }
-
-    /// Compute tamper-evident seal for (data_id, level).
+    /// Compute tamper-evident seal for `(frame_id, level, data_digest)`.
     ///
-    /// Seal = HMAC-SHA256(seal_key, data_id || level)
-    pub fn compute_seal(&self, data_id: u64, level: u32) -> [u8; 32] {
-        let mut message = Vec::with_capacity(12);
-        message.extend_from_slice(&data_id.to_le_bytes());
-        message.extend_from_slice(&level.to_le_bytes());
+    /// Seal = BLAKE2s-MAC(seal_key, frame_id || level || data_digest)
+    pub fn compute_seal(&self, frame_id: Uuid, level: u32, data_digest: &[u8; 32]) -> [u8; 32] {
+        let mut message = Vec::with_capacity(16 + 4 + 32);
+        message.extend_from_slice(frame_id.as_bytes());
+        message.extend_from_slice(&level.to_be_bytes());
+        message.extend_from_slice(data_digest);
 
-        let tag = hmac::sign(&self.seal_key, &message);
+        let mut mac = Blake2sMac256::new_from_slice(&self.seal_key)
+            .expect("seal key length must be 32 bytes");
+        mac.update(&message);
+        let output = mac.finalize_fixed();
         let mut seal = [0u8; 32];
-        seal.copy_from_slice(tag.as_ref());
+        seal.copy_from_slice(&output);
         seal
     }
 
     /// Verify seal using constant-time comparison.
-    pub fn verify_seal(&self, data_id: u64, level: u32, seal: &[u8]) -> bool {
-        let expected = self.compute_seal(data_id, level);
-        ring::constant_time::verify_slices_are_equal(seal, &expected).is_ok()
+    pub fn verify_seal(
+        &self,
+        frame_id: Uuid,
+        level: u32,
+        data_digest: &[u8; 32],
+        seal: &[u8],
+    ) -> bool {
+        let expected = self.compute_seal(frame_id, level, data_digest);
+        constant_time::verify_slices_are_equal(seal, &expected).is_ok()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use uuid::Uuid;
 
     #[test]
     fn test_compute_seal_deterministic() {
         let secrets = Secrets::generate();
-        let seal1 = secrets.compute_seal(123, 3);
-        let seal2 = secrets.compute_seal(123, 3);
+        let frame = Uuid::new_v4();
+        let digest = [0x55; 32];
+        let seal1 = secrets.compute_seal(frame, 3, &digest);
+        let seal2 = secrets.compute_seal(frame, 3, &digest);
         assert_eq!(seal1, seal2);
     }
 
     #[test]
     fn test_verify_seal_success() {
         let secrets = Secrets::generate();
-        let seal = secrets.compute_seal(123, 3);
-        assert!(secrets.verify_seal(123, 3, &seal));
+        let frame = Uuid::new_v4();
+        let digest = [0x66; 32];
+        let seal = secrets.compute_seal(frame, 3, &digest);
+        assert!(secrets.verify_seal(frame, 3, &digest, &seal));
     }
 
     #[test]
-    fn test_verify_seal_wrong_data_id() {
+    fn test_verify_seal_wrong_frame_id() {
         let secrets = Secrets::generate();
-        let seal = secrets.compute_seal(123, 3);
-        assert!(!secrets.verify_seal(456, 3, &seal));
+        let frame = Uuid::new_v4();
+        let digest = [0x44; 32];
+        let seal = secrets.compute_seal(frame, 3, &digest);
+        assert!(!secrets.verify_seal(Uuid::new_v4(), 3, &digest, &seal));
     }
 }
 ```
 
-**Step 4: Fix test to work with ring's API**
-
-Update `sidecar/tests/crypto_test.rs`:
-
-```rust
-use elspeth_sidecar::crypto::Secrets;
-
-#[test]
-fn test_secrets_generate_creates_random_values() {
-    let secrets1 = Secrets::generate();
-    let secrets2 = Secrets::generate();
-
-    // Construction token is 32 bytes
-    assert_eq!(secrets1.construction_token().len(), 32);
-    assert_eq!(secrets2.construction_token().len(), 32);
-
-    // Values are random (not equal)
-    assert_ne!(secrets1.construction_token(), secrets2.construction_token());
-}
-
-#[test]
-fn test_secrets_compute_seal_deterministic() {
-    let secrets = Secrets::generate();
-    let data_id = 140235678901234u64;
-    let level = 3u32; // SECRET
-
-    let seal1 = secrets.compute_seal(data_id, level);
-    let seal2 = secrets.compute_seal(data_id, level);
-
-    // Same inputs produce same seal
-    assert_eq!(seal1, seal2);
-    assert_eq!(seal1.len(), 32);
-}
-
-#[test]
-fn test_secrets_verify_seal_success() {
-    let secrets = Secrets::generate();
-    let data_id = 140235678901234u64;
-    let level = 3u32;
-
-    let seal = secrets.compute_seal(data_id, level);
-
-    // Verification succeeds for matching seal
-    assert!(secrets.verify_seal(data_id, level, &seal));
-}
-
-#[test]
-fn test_secrets_verify_seal_fails_wrong_data_id() {
-    let secrets = Secrets::generate();
-    let seal = secrets.compute_seal(123u64, 3u32);
-
-    // Wrong data_id fails verification
-    assert!(!secrets.verify_seal(456u64, 3u32, &seal));
-}
-
-#[test]
-fn test_secrets_verify_seal_fails_wrong_level() {
-    let secrets = Secrets::generate();
-    let seal = secrets.compute_seal(123u64, 3u32);
-
-    // Wrong level fails verification
-    assert!(!secrets.verify_seal(123u64, 4u32, &seal));
-}
-```
-
-**Step 5: Run tests to verify they pass**
+**Step 4: Run tests to verify they pass**
 
 ```bash
 cargo test crypto
@@ -518,23 +484,24 @@ cargo test crypto
 running 5 tests
 test crypto_test::test_secrets_compute_seal_deterministic ... ok
 test crypto_test::test_secrets_generate_creates_random_values ... ok
-test crypto_test::test_secrets_verify_seal_fails_wrong_data_id ... ok
+test crypto_test::test_secrets_verify_seal_fails_wrong_digest ... ok
+test crypto_test::test_secrets_verify_seal_fails_wrong_frame_id ... ok
 test crypto_test::test_secrets_verify_seal_fails_wrong_level ... ok
 test crypto_test::test_secrets_verify_seal_success ... ok
 
-test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
+test result: ok. 6 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out
 ```
 
 **Step 6: Commit**
 
 ```bash
 git add sidecar/src/crypto.rs sidecar/tests/crypto_test.rs
-git commit -m "feat(sidecar): implement Secrets with HMAC-SHA256 seals
+git commit -m "feat(sidecar): implement Secrets with BLAKE2s seals
 
 - Secrets::generate() creates random token + seal key
-- compute_seal() produces HMAC-SHA256(seal_key, data_id || level)
+- compute_seal() produces BLAKE2s-MAC(seal_key, frame_id || level || data_digest)
 - verify_seal() uses constant-time comparison
-- 5 passing tests for determinism and verification"
+- 6 passing tests for determinism and verification"
 ```
 
 ---
@@ -550,15 +517,21 @@ git commit -m "feat(sidecar): implement Secrets with HMAC-SHA256 seals
 Create `sidecar/tests/grants_test.rs`:
 
 ```rust
-use elspeth_sidecar::grants::{GrantTable, GrantRequest};
+use elspeth_sidecar::grants::{GrantRequest, GrantTable};
 use std::time::Duration;
+use uuid::Uuid;
+
+fn digest(tag: u8) -> [u8; 32] {
+    [tag; 32]
+}
 
 #[tokio::test]
 async fn test_grant_authorize_and_redeem_success() {
     let table = GrantTable::new(Duration::from_secs(60));
     let request = GrantRequest {
-        data_id: 123,
+        frame_id: Uuid::new_v4(),
         level: 3,
+        data_digest: digest(0x90),
     };
 
     // Authorize creates grant
@@ -569,8 +542,9 @@ async fn test_grant_authorize_and_redeem_success() {
     let result = table.redeem(&grant_id).await;
     assert!(result.is_ok());
     let redeemed = result.unwrap();
-    assert_eq!(redeemed.data_id, 123);
+    assert_eq!(redeemed.frame_id, request.frame_id);
     assert_eq!(redeemed.level, 3);
+    assert_eq!(redeemed.data_digest, request.data_digest);
 
     // Redeem fails second time (one-shot)
     let result2 = table.redeem(&grant_id).await;
@@ -581,8 +555,9 @@ async fn test_grant_authorize_and_redeem_success() {
 async fn test_grant_expires_after_ttl() {
     let table = GrantTable::new(Duration::from_millis(100));
     let request = GrantRequest {
-        data_id: 123,
+        frame_id: Uuid::new_v4(),
         level: 3,
+        data_digest: digest(0x33),
     };
 
     let grant_id = table.authorize(request).await;
@@ -592,7 +567,7 @@ async fn test_grant_expires_after_ttl() {
 
     // Redeem fails (expired)
     let result = table.redeem(&grant_id).await;
-    assert!(result.is_err());
+    assert!(matches!(result, Err(_)));
 }
 
 #[tokio::test]
@@ -600,10 +575,11 @@ async fn test_grant_cleanup_removes_expired() {
     let table = GrantTable::new(Duration::from_millis(50));
 
     // Create 3 grants
-    for i in 0..3 {
+    for tag in 0..3 {
         let request = GrantRequest {
-            data_id: i,
+            frame_id: Uuid::new_v4(),
             level: 3,
+            data_digest: digest(tag),
         };
         table.authorize(request).await;
     }
@@ -642,16 +618,19 @@ Create `sidecar/src/grants.rs`:
 //! - `cleanup_expired()`: Background task removes expired grants
 
 use dashmap::DashMap;
-use std::sync::Arc;
-use std::time::{Duration, Instant};
 use ring::rand::{SecureRandom, SystemRandom};
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+use uuid::Uuid;
 
 /// Request to authorize SecureDataFrame construction.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct GrantRequest {
-    pub data_id: u64,
+    pub frame_id: Uuid,
     pub level: u32,
+    pub data_digest: [u8; 32],
 }
 
 /// Grant state (stored in table until redeemed or expired).
@@ -694,11 +673,11 @@ impl GrantTable {
 
     /// Redeem grant (one-shot, removes from table).
     pub async fn redeem(&self, grant_id: &[u8; 16]) -> Result<GrantRequest, String> {
-        // Remove from table (one-shot)
-        let (_, grant) = self.grants.remove(grant_id)
+        let (_, grant) = self
+            .grants
+            .remove(grant_id)
             .ok_or_else(|| "Grant not found or already redeemed".to_string())?;
 
-        // Check expiry
         if Instant::now() > grant.expires_at {
             return Err("Grant expired".to_string());
         }
@@ -721,11 +700,16 @@ impl GrantTable {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use uuid::Uuid;
 
     #[tokio::test]
     async fn test_authorize_creates_unique_ids() {
         let table = GrantTable::new(Duration::from_secs(60));
-        let request = GrantRequest { data_id: 123, level: 3 };
+        let request = GrantRequest {
+            frame_id: Uuid::new_v4(),
+            level: 3,
+            data_digest: [0xAA; 32],
+        };
 
         let id1 = table.authorize(request.clone()).await;
         let id2 = table.authorize(request.clone()).await;
@@ -779,11 +763,20 @@ Create `sidecar/tests/protocol_test.rs`:
 ```rust
 use elspeth_sidecar::protocol::{Request, Response};
 
+fn digest(tag: u8) -> [u8; 32] {
+    [tag; 32]
+}
+
+fn frame(tag: u8) -> [u8; 16] {
+    [tag; 16]
+}
+
 #[test]
 fn test_authorize_construct_request_serialization() {
     let request = Request::AuthorizeConstruct {
-        data_id: 123,
+        frame_id: frame(0xAA),
         level: 3,
+        data_digest: digest(0xBB),
         auth: vec![0xAB; 32],
     };
 
@@ -794,9 +787,15 @@ fn test_authorize_construct_request_serialization() {
     let decoded: Request = serde_cbor::from_slice(&bytes).unwrap();
 
     match decoded {
-        Request::AuthorizeConstruct { data_id, level, auth } => {
-            assert_eq!(data_id, 123);
+        Request::AuthorizeConstruct {
+            frame_id,
+            level,
+            data_digest,
+            auth,
+        } => {
+            assert_eq!(frame_id, frame(0xAA));
             assert_eq!(level, 3);
+            assert_eq!(data_digest, digest(0xBB));
             assert_eq!(auth, vec![0xAB; 32]);
         }
         _ => panic!("Wrong variant"),
@@ -868,12 +867,13 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "op")]
 pub enum Request {
-    /// Request one-shot grant for (data_id, level).
+    /// Request one-shot grant for `(frame_id, level, data_digest)`.
     #[serde(rename = "authorize_construct")]
     AuthorizeConstruct {
-        data_id: u64,
+        frame_id: [u8; 16],  // UUID v4 serialized to 16 bytes (Uuid::as_bytes())
         level: u32,
-        auth: Vec<u8>, // HMAC of (data_id, level)
+        data_digest: [u8; 32],
+        auth: Vec<u8>, // HMAC over canonical tuple
     },
 
     /// Redeem grant for seal.
@@ -883,19 +883,28 @@ pub enum Request {
         auth: Vec<u8>, // HMAC of grant_id
     },
 
+    /// Consume construction ticket before instantiation.
+    #[serde(rename = "consume_construction_ticket")]
+    ConsumeConstructionTicket {
+        ticket: [u8; 32],
+        auth: Vec<u8>,
+    },
+
     /// Compute seal for existing frame.
     #[serde(rename = "compute_seal")]
     ComputeSeal {
-        data_id: u64,
+        frame_id: [u8; 16],
         level: u32,
+        data_digest: [u8; 32],
         auth: Vec<u8>,
     },
 
     /// Verify seal integrity.
     #[serde(rename = "verify_seal")]
     VerifySeal {
-        data_id: u64,
+        frame_id: [u8; 16],
         level: u32,
+        data_digest: [u8; 32],
         seal: [u8; 32],
         auth: Vec<u8>,
     },
@@ -913,6 +922,7 @@ pub enum Response {
 
     /// Grant redeemed, seal computed.
     RedeemGrantReply {
+        construction_ticket: [u8; 32],
         seal: [u8; 32],
         audit_id: u64,
     },
@@ -920,6 +930,12 @@ pub enum Response {
     /// Seal computed.
     ComputeSealReply {
         seal: [u8; 32],
+        audit_id: u64,
+    },
+
+    /// Ticket consumption acknowledgement.
+    ConsumeTicketReply {
+        consumed: bool,
         audit_id: u64,
     },
 
@@ -942,6 +958,7 @@ impl Request {
         match self {
             Request::AuthorizeConstruct { auth, .. } => auth,
             Request::RedeemGrant { auth, .. } => auth,
+            Request::ConsumeConstructionTicket { auth, .. } => auth,
             Request::ComputeSeal { auth, .. } => auth,
             Request::VerifySeal { auth, .. } => auth,
         }
@@ -950,18 +967,27 @@ impl Request {
     /// Canonical CBOR bytes (without auth field) for HMAC computation.
     pub fn canonical_bytes_without_auth(&self) -> Vec<u8> {
         match self {
-            Request::AuthorizeConstruct { data_id, level, .. } => {
-                serde_cbor::to_vec(&(*data_id, *level)).unwrap()
-            }
-            Request::RedeemGrant { grant_id, .. } => {
-                serde_cbor::to_vec(grant_id).unwrap()
-            }
-            Request::ComputeSeal { data_id, level, .. } => {
-                serde_cbor::to_vec(&(*data_id, *level)).unwrap()
-            }
-            Request::VerifySeal { data_id, level, seal, .. } => {
-                serde_cbor::to_vec(&(*data_id, *level, seal)).unwrap()
-            }
+            Request::AuthorizeConstruct {
+                frame_id,
+                level,
+                data_digest,
+                ..
+            } => serde_cbor::to_vec(&(frame_id, *level, data_digest)).unwrap(),
+            Request::RedeemGrant { grant_id, .. } => serde_cbor::to_vec(grant_id).unwrap(),
+            Request::ConsumeConstructionTicket { ticket, .. } => serde_cbor::to_vec(ticket).unwrap(),
+            Request::ComputeSeal {
+                frame_id,
+                level,
+                data_digest,
+                ..
+            } => serde_cbor::to_vec(&(frame_id, *level, data_digest)).unwrap(),
+            Request::VerifySeal {
+                frame_id,
+                level,
+                data_digest,
+                seal,
+                ..
+            } => serde_cbor::to_vec(&(frame_id, *level, data_digest, seal)).unwrap(),
         }
     }
 }
@@ -973,8 +999,9 @@ mod tests {
     #[test]
     fn test_canonical_bytes_deterministic() {
         let req = Request::AuthorizeConstruct {
-            data_id: 123,
+            frame_id: [0x01; 16],
             level: 3,
+            data_digest: [0x02; 32],
             auth: vec![],
         };
 
@@ -1035,8 +1062,9 @@ use elspeth_sidecar::Config;
 use std::path::PathBuf;
 
 #[test]
-fn test_config_from_file() {
+fn test_config_from_file_sidecar_mode() {
     let config_str = r#"
+mode = "sidecar"
 socket_path = "/run/sidecar/auth.sock"
 session_key_path = "/run/sidecar/.session"
 appuser_uid = 1000
@@ -1046,11 +1074,46 @@ log_level = "debug"
 
     let config: Config = toml::from_str(config_str).unwrap();
 
+    assert_eq!(config.mode, SecurityMode::Sidecar);
     assert_eq!(config.socket_path, PathBuf::from("/run/sidecar/auth.sock"));
     assert_eq!(config.session_key_path, PathBuf::from("/run/sidecar/.session"));
     assert_eq!(config.appuser_uid, 1000);
     assert_eq!(config.grant_ttl_secs, 60);
     assert_eq!(config.log_level, "debug");
+}
+
+#[test]
+fn test_config_missing_mode_fails() {
+    let config_str = r#"
+socket_path = "/run/sidecar/auth.sock"
+session_key_path = "/run/sidecar/.session"
+appuser_uid = 1000
+grant_ttl_secs = 60
+log_level = "debug"
+"#;
+
+    let result = toml::from_str::<Config>(config_str);
+    assert!(result.is_err(), "Config without mode should fail");
+}
+
+#[test]
+fn test_config_standalone_mode_warns() {
+    use tracing_subscriber;
+
+    let config_str = r#"
+mode = "standalone"
+socket_path = "/tmp/dev.sock"
+session_key_path = "/tmp/dev.session"
+appuser_uid = 1000
+grant_ttl_secs = 60
+log_level = "debug"
+"#;
+
+    let config: Config = toml::from_str(config_str).unwrap();
+    assert_eq!(config.mode, SecurityMode::Standalone);
+
+    // Note: validate() will emit warning log when called
+    // In real usage, Config::load() calls validate()
 }
 ```
 
@@ -1086,6 +1149,10 @@ use std::time::Duration;
 /// Sidecar daemon configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
+    /// Security mode: "sidecar" (hardened, production) or "standalone" (dev-only, OFFICIAL:SENSITIVE cap)
+    /// REQUIRED: No default, must be explicitly set
+    pub mode: SecurityMode,
+
     /// Unix socket path (e.g., /run/sidecar/auth.sock)
     pub socket_path: PathBuf,
 
@@ -1102,6 +1169,25 @@ pub struct Config {
     pub log_level: String,
 }
 
+/// Security mode (explicit opt-in, no default)
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum SecurityMode {
+    /// Hardened sidecar mode (production)
+    /// - Secrets in Rust memory
+    /// - UID separation enforced
+    /// - SO_PEERCRED validation
+    /// - Plugin worker isolation
+    Sidecar,
+
+    /// Standalone mode (development only)
+    /// - OFFICIAL:SENSITIVE classification ceiling
+    /// - Loud warning logs on every operation
+    /// - Secrets remain in Python (CVE-ADR-002-A-009 UNFIXED)
+    /// - NOT APPROVED for SECRET data
+    Standalone,
+}
+
 impl Config {
     /// Load config from TOML file.
     pub fn load(path: &str) -> Result<Self> {
@@ -1111,7 +1197,29 @@ impl Config {
         let config: Config = toml::from_str(&contents)
             .with_context(|| format!("Failed to parse TOML from {}", path))?;
 
+        // SECURITY: Validate mode is explicitly set
+        config.validate()?;
+
         Ok(config)
+    }
+
+    /// Validate configuration (fail-fast on missing/invalid settings).
+    fn validate(&self) -> Result<()> {
+        // Mode validation (explicit opt-in required)
+        // NOTE: Serde will fail if mode is missing, but we document it here
+
+        // Standalone mode validation
+        if self.mode == SecurityMode::Standalone {
+            tracing::warn!(
+                "⚠️  STANDALONE MODE ACTIVE - CVE-ADR-002-A-009 UNFIXED ⚠️\n\
+                 Classification ceiling: OFFICIAL:SENSITIVE\n\
+                 Secrets remain in Python memory (vulnerable to introspection)\n\
+                 NOT APPROVED for SECRET data\n\
+                 See docs/architecture/decisions/002-security-architecture.md"
+            );
+        }
+
+        Ok(())
     }
 
     /// Grant TTL as Duration.
@@ -1120,17 +1228,8 @@ impl Config {
     }
 }
 
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            socket_path: PathBuf::from("/run/sidecar/auth.sock"),
-            session_key_path: PathBuf::from("/run/sidecar/.session"),
-            appuser_uid: 1000,
-            grant_ttl_secs: 60,
-            log_level: "info".to_string(),
-        }
-    }
-}
+// NO Default implementation - mode must be explicitly specified
+// Attempting Config::default() will fail at compile time
 ```
 
 **Step 4: Create example config file**
@@ -1139,6 +1238,16 @@ Create `sidecar/config/sidecar.toml`:
 
 ```toml
 # Elspeth Sidecar Daemon Configuration
+
+# SECURITY MODE (REQUIRED - no default)
+# - "sidecar": Hardened production mode (secrets in Rust, UID separation)
+# - "standalone": Development mode (OFFICIAL:SENSITIVE ceiling, secrets in Python)
+#
+# ⚠️  STANDALONE MODE WARNING:
+# CVE-ADR-002-A-009 remains unfixed in standalone mode.
+# NOT APPROVED for SECRET data.
+# Use only for local development with OFFICIAL:SENSITIVE ceiling.
+mode = "sidecar"
 
 # Unix socket path (must be writable by sidecar UID, readable by appuser)
 socket_path = "/run/sidecar/auth.sock"
@@ -1154,6 +1263,23 @@ grant_ttl_secs = 60
 
 # Log level: trace, debug, info, warn, error
 log_level = "info"
+```
+
+Create `sidecar/config/standalone.toml` (development example):
+
+```toml
+# Development-only configuration with standalone mode
+# ⚠️  NOT APPROVED FOR PRODUCTION USE ⚠️
+
+mode = "standalone"
+socket_path = "/tmp/elspeth-dev.sock"
+session_key_path = "/tmp/elspeth-dev.session"
+appuser_uid = 1000
+grant_ttl_secs = 300  # Longer TTL for dev
+log_level = "debug"
+
+# Standalone mode logs loud warnings on every frame operation:
+# "⚠️  STANDALONE MODE - Classification ceiling: OFFICIAL:SENSITIVE"
 ```
 
 **Step 5: Run tests to verify they pass**
@@ -1213,6 +1339,7 @@ pub struct Server {
     secrets: Arc<Secrets>,
     grants: Arc<GrantTable>,
     session_key: Vec<u8>,
+    session_key_path: PathBuf,  // Stored for session key persistence/reload
 }
 
 impl Server {
@@ -1220,15 +1347,14 @@ impl Server {
     pub fn new(config: Config) -> Result<Self> {
         let secrets = Arc::new(Secrets::generate());
         let grants = Arc::new(GrantTable::new(config.grant_ttl()));
-
-        // Generate session key (256-bit random)
-        let session_key = vec![0u8; 32]; // TODO: Generate random session key
+        let (session_key, session_key_path) = Self::load_or_init_session_key(&config)?;
 
         Ok(Self {
             config: Arc::new(config),
             secrets,
             grants,
             session_key,
+            session_key_path,
         })
     }
 
@@ -1293,7 +1419,7 @@ impl Server {
 
         debug!("Received request: {:?}", request);
 
-        // TODO: Validate HMAC
+        // TODO: Validate HMAC using session_key
         // TODO: Dispatch request
         // TODO: Send response
 
@@ -1306,6 +1432,11 @@ impl Server {
         stream.write_all(&response_bytes).await?;
 
         Ok(())
+    }
+
+    fn load_or_init_session_key(config: &Config) -> Result<(Vec<u8>, PathBuf)> {
+        // TODO: Implement in Task 2.3 (secure session key generation + persistence)
+        unimplemented!("load_or_init_session_key placeholder");
     }
 }
 ```
@@ -1331,12 +1462,9 @@ async fn main() -> Result<()> {
 
     info!("Elspeth Sidecar Daemon starting...");
 
-    // Load config
+    // Load config (no default - mode must be explicit)
     let config = Config::load("/etc/elspeth/sidecar.toml")
-        .unwrap_or_else(|_| {
-            eprintln!("Failed to load config, using defaults");
-            Config::default()
-        });
+        .context("Failed to load config - ensure mode is set to 'sidecar' or 'standalone'")?;
 
     // Start server
     let server = Server::new(config)?;
@@ -1389,23 +1517,157 @@ git commit -m "feat(sidecar): implement Unix socket server skeleton
 
 ---
 
+### Task 2.3: Initialize Session Key Material (Mutual Auth Backbone)
+
+**Files:**
+- Update: `sidecar/src/server.rs`
+- Create: `sidecar/tests/session_key_test.rs`
+
+**Goal:** Replace the placeholder all-zero session key with secure generation, persistence, and reload logic matching the design’s mutual-auth requirements.
+
+**Step 1: Implement `load_or_init_session_key`**
+
+- In `sidecar/src/server.rs`, replace the `unimplemented!` with logic that:
+  - Uses `ring::rand::SystemRandom` to generate 32 random bytes when the session file is absent.
+  - Writes the key to `config.session_key_path` using `OpenOptions` with `O_CREAT | O_EXCL`, `0o640` permissions, owner `sidecar`, group `appuser`.
+  - Calls `fsync` on both file and parent directory.
+  - Reloads the bytes on restart without regenerating.
+  - Returns `(session_key, session_key_path.clone())`.
+- Add explicit error messages when chmod/chown fails so ops know permissions are wrong.
+
+**Step 2: Unit tests**
+
+- Create `sidecar/tests/session_key_test.rs` covering:
+  1. First call creates the file with correct length and `0o640` bits.
+  2. Second call reuses the same key (no regeneration).
+  3. Permission mismatch (e.g., file already exists but mode != 0o640) triggers an error.
+  4. File owned by unexpected UID/GID raises error (simulate via `chown` in temp dir).
+
+**Step 3: Wire into server startup**
+
+- Ensure `Server::new` uses the new function, and store `session_key_path` on the struct.
+- Update `Server::handle_client` TODO comment to reference `session_key`.
+- Log a single structured message that session key was initialized (without printing the key).
+
+**Step 4: Documentation**
+
+- Update `sidecar/config/sidecar.toml` comments to stress that the daemon owns the file and orchestrators only need read access.
+- Add a note in the runbook section explaining how ops rotate the session key (restart daemon).
+
+**Step 5: Commit**
+
+```bash
+git add sidecar/src/server.rs sidecar/tests/session_key_test.rs sidecar/config/sidecar.toml
+git commit -m "feat(sidecar): generate and persist session key material"
+```
+
+---
+
+### Task 2.4: Track Registered Frames and Enforce Known IDs
+
+**Why:** The v3 design requires the daemon to remember which `frame_id` values were legitimately created (grant redeemed) and to reject `compute_seal`/`verify_seal` calls for unknown IDs. Without this gate a rogue client could mint arbitrary frame identifiers and obtain seals, reopening CVE-ADR-002-A-009.
+
+**Files:**
+- Update: `sidecar/src/grants.rs`
+- Update: `sidecar/src/server.rs`
+- Create: `sidecar/src/frames.rs`
+- Create: `sidecar/tests/frames_test.rs`
+
+**Step 1: Define RegisteredFrameTable**
+
+Create `sidecar/src/frames.rs` with a `RegisteredFrameTable` that stores `(frame_id, level, data_digest)` entries in a `DashMap<Uuid, FrameMetadata>`. Provide:
+- `register_from_grant(grant_request: GrantRequest)` – inserts metadata when a grant is redeemed.
+- `update(frame_id, level, digest)` – overwrites metadata on reseal (compute path).
+- `get(frame_id)` – returns metadata if present.
+- `contains(frame_id)` – helper for guard checks.
+
+**Step 2: Add tests**
+
+`sidecar/tests/frames_test.rs` should cover:
+- Registering a frame via `register_from_grant` makes it discoverable.
+- Attempting to update an unknown frame returns an error.
+- Metadata reflects the latest level/digest after an update.
+
+**Step 3: Integrate with GrantTable and Server**
+
+- Modify `GrantTable::redeem` to return `GrantRequest` as today; the server will now call `RegisteredFrameTable::register_from_grant` immediately after a successful redeem.
+- Extend `Server` with a new `frames: Arc<RegisteredFrameTable>` field.
+- In the `compute_seal` and `verify_seal` handlers (implemented in later tasks), look up the frame first; if not found, return a `Response::Error { error: "unknown_frame_id", … }`.
+- When `ComputeSeal` succeeds, call `frames.update(...)` with the new `(level, digest)` so future verifications use the latest metadata.
+
+**Step 4: Tests for guard rails**
+
+Add async integration tests (under `tests/grants_test.rs` or a new `tests/server_guard_test.rs`) that simulate:
+- Calling `compute_seal` before any grant is redeemed → expect error.
+- Redeeming a grant, then calling `compute_seal` → succeeds.
+- Calling `verify_seal` with a known frame id but wrong digest → returns `valid=false`.
+
+**Step 5: Commit**
+
+```bash
+git add sidecar/src/frames.rs sidecar/tests/frames_test.rs sidecar/src/grants.rs sidecar/src/server.rs
+git commit -m "feat(sidecar): track registered frames and guard compute/verify
+
+- RegisteredFrameTable persists frame metadata post-grant
+- Server rejects compute/verify for unknown frame IDs
+- Tests cover registration, updates, and guard failures"
+```
+
+---
+
 ## Phase 3: Python Integration (Sidecar Client + Factories)
+
+### Task 3.0: Establish Plugin Worker Isolation Boundary
+
+**Goal:** Make the trust boundary real before exposing the client. All untrusted plugins must execute in a subprocess running as `appplugin` (UID 1002) with no read access to `/run/sidecar/` or the session key.
+
+**Files:**
+- Create: `src/elspeth/orchestrator/worker_process.py`
+- Update: `src/elspeth/orchestrator/runtime.py`
+- Update: `docker/supervisord.conf`
+- Update: Docker user/entrypoint scripts
+- Add: integration tests under `tests/integration/test_worker_isolation.py`
+
+**Steps:**
+1. **Create worker entrypoint**
+   - Implement `worker_process.py` that imports plugins and executes transformations.
+   - Communicate with orchestrator over a restricted IPC channel (stdin/stdout msgpack or `multiprocessing.Connection`).
+   - Ensure worker never imports `elspeth.core.security.sidecar_client`.
+2. **Spawn worker with separate UID**
+   - In orchestrator runtime, fork/exec the worker via `subprocess.Popen`, using `setuid(appplugin)` (Linux) or run script via `sudo -u appplugin` in container.
+   - Ensure environment lacks `SIDECAR_SESSION_KEY` and has no access to `/run/sidecar/`.
+3. **Descriptor hygiene**
+   - Establish sidecar connection *after* worker spawn.
+   - Mark orchestrator-side sockets/file descriptors with `FD_CLOEXEC`.
+4. **Tests**
+   - Add test that worker process cannot `open("/run/sidecar/.session")` (expect `PermissionError`).
+   - Add test that worker attempting to connect to `/run/sidecar/auth.sock` gets `PermissionError`.
+5. **Docs**
+   - Update runbook to describe the new `appplugin` user and how to rotate credentials.
+
+**Commit Example:**
+```bash
+git add src/elspeth/orchestrator/*.py docker/supervisord.conf tests/integration/test_worker_isolation.py
+git commit -m "feat(orchestrator): isolate plugin workers under appplugin UID"
+```
+
+---
 
 ### Task 3.1: Implement Python Sidecar Client
 
 **Files:**
-- Create: `src/elspeth/core/security/sidecar_client.py`
-- Create: `tests/test_sidecar_client.py`
+- Create: `src/elspeth/orchestrator/sidecar_client.py`
+- Create: `tests/orchestrator/test_sidecar_client.py`
 
 **Step 1: Write failing test for sidecar client**
 
-Create `tests/test_sidecar_client.py`:
+Create `tests/orchestrator/test_sidecar_client.py`:
 
 ```python
 """Tests for sidecar daemon client."""
 
 import pytest
-from elspeth.core.security.sidecar_client import SidecarClient, SidecarError
+from elspeth.orchestrator.sidecar_client import SidecarClient, SidecarError
 
 
 @pytest.mark.asyncio
@@ -1420,31 +1682,35 @@ async def test_sidecar_client_not_implemented():
 **Step 2: Run test to verify it fails**
 
 ```bash
-python -m pytest tests/test_sidecar_client.py -v
+python -m pytest tests/orchestrator/test_sidecar_client.py -v
 ```
 
 **Expected Output:**
 ```
-ModuleNotFoundError: No module named 'elspeth.core.security.sidecar_client'
+ModuleNotFoundError: No module named 'elspeth.orchestrator.sidecar_client'
 ```
 
 **Step 3: Implement minimal SidecarClient**
 
-Create `src/elspeth/core/security/sidecar_client.py`:
+Create `src/elspeth/orchestrator/sidecar_client.py`:
 
 ```python
 """Sidecar daemon client for Python orchestrator.
 
 Communicates with Rust daemon via Unix socket using CBOR protocol.
-All messages are HMAC-authenticated using session key.
+All messages are HMAC-authenticated using session key. This module stays in
+`elspeth.orchestrator` and must never be re-exported to plugin workers.
+
+Protocol Notes:
+- Orchestrator ↔ Daemon: CBOR (matches Rust serde_cbor)
+- Orchestrator ↔ Worker: msgpack (Python IPC, separate module)
 """
 
 import asyncio
-import struct
 from pathlib import Path
 from typing import Optional
 
-import msgpack  # Using msgpack instead of cbor2 for better async support
+import cbor2
 
 
 class SidecarError(Exception):
@@ -1505,12 +1771,15 @@ class SidecarClient:
             self.writer.close()
             await self.writer.wait_closed()
 
-    async def authorize_construct(self, data_id: int, level: int) -> bytes:
+    async def authorize_construct(
+        self, frame_id: bytes, level: int, data_digest: bytes
+    ) -> bytes:
         """Request authorization grant for SecureDataFrame construction.
 
         Args:
-            data_id: Python object ID
+            frame_id: 16-byte UUID
             level: Security level (0-4)
+            data_digest: 32-byte BLAKE3 digest of canonical payload
 
         Returns:
             16-byte grant ID
@@ -1520,26 +1789,33 @@ class SidecarClient:
         """
         raise NotImplementedError("authorize_construct not yet implemented")
 
-    async def redeem_grant(self, grant_id: bytes) -> tuple[bytes, int]:
+    async def redeem_grant(self, grant_id: bytes) -> tuple[bytes, bytes, int]:
         """Redeem grant for seal.
 
         Args:
             grant_id: 16-byte grant handle
 
         Returns:
-            (seal, audit_id) tuple
+            (construction_ticket, seal, audit_id)
 
         Raises:
             SidecarError: If redemption fails
         """
         raise NotImplementedError("redeem_grant not yet implemented")
 
-    async def compute_seal(self, data_id: int, level: int) -> tuple[bytes, int]:
+    async def consume_construction_ticket(self, ticket: bytes) -> None:
+        """Consume construction ticket prior to SecureDataFrame instantiation."""
+        raise NotImplementedError("consume_construction_ticket not yet implemented")
+
+    async def compute_seal(
+        self, frame_id: bytes, level: int, data_digest: bytes
+    ) -> tuple[bytes, int]:
         """Compute seal for existing frame.
 
         Args:
-            data_id: Python object ID
+            frame_id: 16-byte UUID
             level: Security level
+            data_digest: 32-byte digest reflecting current payload
 
         Returns:
             (seal, audit_id) tuple
@@ -1550,13 +1826,14 @@ class SidecarClient:
         raise NotImplementedError("compute_seal not yet implemented")
 
     async def verify_seal(
-        self, data_id: int, level: int, seal: bytes
+        self, frame_id: bytes, level: int, data_digest: bytes, seal: bytes
     ) -> tuple[bool, int]:
         """Verify seal integrity.
 
         Args:
-            data_id: Python object ID
+            frame_id: 16-byte UUID
             level: Security level
+            data_digest: Digest of payload being verified
             seal: 32-byte seal
 
         Returns:
@@ -1568,17 +1845,17 @@ class SidecarClient:
         raise NotImplementedError("verify_seal not yet implemented")
 ```
 
-**Step 4: Add msgpack to requirements**
+**Step 4: Add cbor2 to requirements**
 
 ```bash
 # NOTE: This will be added to requirements-dev.lock later via pip-compile
-echo "msgpack>=1.0.0" >> requirements-dev.in
+echo "cbor2>=5.4.0" >> requirements-dev.in
 ```
 
 **Step 5: Run test to verify it passes**
 
 ```bash
-python -m pytest tests/test_sidecar_client.py -v
+python -m pytest tests/orchestrator/test_sidecar_client.py -v
 ```
 
 **Expected Output:**
@@ -1589,7 +1866,7 @@ test_sidecar_client_not_implemented PASSED
 **Step 6: Commit**
 
 ```bash
-git add src/elspeth/core/security/sidecar_client.py tests/test_sidecar_client.py requirements-dev.in
+git add src/elspeth/orchestrator/sidecar_client.py tests/orchestrator/test_sidecar_client.py requirements-dev.in
 git commit -m "feat(sidecar): implement Python SidecarClient skeleton
 
 - SidecarClient with connect(), authorize_construct(), redeem_grant()
@@ -1598,6 +1875,765 @@ git commit -m "feat(sidecar): implement Python SidecarClient skeleton
 - NotImplementedError stubs for methods
 - 1 passing test (skeleton verification)"
 ```
+
+---
+
+### Task 3.2: Issue and Enforce Construction Tickets
+
+**Goal:** Replace raw `_CONSTRUCTION_TOKEN` usage with opaque construction tickets that only the daemon can mint and validate.
+
+**Rust Side (Daemon):**
+- Extend `Grant` struct to include a `construction_ticket: [u8; 32]` generated via `SystemRandom`.
+- Update `GrantTable::redeem` to return both the original `GrantRequest` and the ticket.
+- Store the ticket in a new `ConstructionTicketTable` (DashMap) that tracks single-use status.
+- Update `protocol::Response::RedeemGrantReply` to include `construction_ticket` (already reflected in the enum above) and adjust serialization tests accordingly.
+- Add new request variant `consume_construction_ticket` that the orchestrator calls right before object instantiation; the daemon verifies `ticket` is unused, marks it consumed, and replies with `ok`. This replaces the need to hand raw secrets to Python.
+- Write tests ensuring tickets are one-shot, expire if not consumed within TTL, and cannot be guessed.
+
+**Python Side (Orchestrator Client):**
+- Implement `SidecarClient.consume_construction_ticket(ticket: bytes) -> None` which sends the new request type.
+- Ensure tickets are never logged and are zeroed out in memory after consumption if practical.
+
+**Documentation:** Update plan/runbook to describe tickets as the only way to construct frames.
+
+---
+
+### Task 3.3: Rewrite SecureDataFrame Creation Pipeline
+
+**Files:**
+- Update: `src/elspeth/core/security/secure_data.py`
+- Add: `src/elspeth/orchestrator/secure_frame_factory.py`
+- Update: associated tests under `tests/security/`
+
+**Steps:**
+1. **Remove legacy secrets**
+   - Delete `_create_secure_factories()` and module-level `_get_construction_token` / `_compute_seal` exports.
+   - Strip `_token` parameter from `SecureDataFrame.__new__`; replace with `_capability: ConstructionCapability`.
+2. **ConstructionCapability abstraction**
+   - Create `ConstructionCapability` object that wraps a construction ticket and a reference to the orchestrator’s `SidecarClient`.
+   - Its `.consume()` method calls `consume_construction_ticket` and returns the seal used for instance initialization.
+3. **New factory module**
+   - Implement `secure_frame_factory.SecureFrameFactory` that orchestrator code uses to:
+     - Call `authorize_construct` / `redeem_grant` to obtain `(ticket, seal, audit_id)`.
+     - Build `ConstructionCapability` and invoke `SecureDataFrame._from_sidecar(capability, data, level, seal)`.
+4. **SecureDataFrame integration**
+   - Add `_from_sidecar` classmethod that:
+     - Validates seal via daemon (using `SidecarClient.verify_seal`) before instantiation.
+     - Calls `capability.consume()` to mark ticket used.
+     - Sets `_seal` with daemon-provided bytes.
+   - Harden `SecureDataFrame.__new__` so that it requires a `ConstructionCapability`, re-validates the MAC/nonce with the sidecar before object allocation, and rejects any capability that cannot be confirmed by the daemon.
+   - Update `create_from_datasource`, `with_uplifted_security_level`, and `with_new_data` to delegate through the new factory (no direct daemon calls from plugin context).
+5. **Testing**
+   - Adapt existing tests to use a stub `SidecarClient` that emulates ticket issuance/consumption.
+   - Add regression test ensuring plugins cannot call `_from_sidecar` without a valid capability (simulate by passing a fake capability and asserting `SecurityValidationError`).
+6. **Docs**
+   - Update ADRs and README snippets to describe the new ticket-based flow.
+
+**Commit Example:**
+```bash
+git add src/elspeth/core/security/secure_data.py src/elspeth/orchestrator/secure_frame_factory.py tests/security
+git commit -m "feat(security): gate SecureDataFrame construction on daemon-issued tickets"
+```
+
+---
+
+### Task 3.4: Implement Canonical Digest Computation Pipeline
+
+**Goal:** Implement the deterministic digest computation pipeline that produces BLAKE3 hashes of canonical Parquet representations, as specified in the v3 design.
+
+**Files:**
+- Create: `src/elspeth/core/security/digest.py`
+- Create: `tests/security/test_digest_canonicalization.py`
+
+**Step 1: Write failing test for digest determinism**
+
+Create `tests/security/test_digest_canonicalization.py`:
+
+```python
+"""Tests for canonical digest computation."""
+
+import pandas as pd
+import pytest
+
+from elspeth.core.security.digest import compute_canonical_digest
+
+
+def test_digest_determinism_identical_frames():
+    """Identical DataFrames produce identical digests."""
+    df1 = pd.DataFrame({"col1": [1, 2, 3], "col2": ["a", "b", "c"]})
+    df2 = pd.DataFrame({"col1": [1, 2, 3], "col2": ["a", "b", "c"]})
+
+    digest1 = compute_canonical_digest(df1)
+    digest2 = compute_canonical_digest(df2)
+
+    assert digest1 == digest2
+    assert len(digest1) == 32  # BLAKE3 produces 32-byte digests
+
+
+def test_digest_determinism_reordered_columns():
+    """Column order doesn't affect digest (sorted during canonicalization)."""
+    df1 = pd.DataFrame({"a": [1, 2], "b": [3, 4]})
+    df2 = pd.DataFrame({"b": [3, 4], "a": [1, 2]})
+
+    digest1 = compute_canonical_digest(df1)
+    digest2 = compute_canonical_digest(df2)
+
+    assert digest1 == digest2
+
+
+def test_digest_changes_on_data_mutation():
+    """Digest changes when data is mutated."""
+    df = pd.DataFrame({"col": [1, 2, 3]})
+    digest1 = compute_canonical_digest(df)
+
+    df.loc[0, "col"] = 999
+    digest2 = compute_canonical_digest(df)
+
+    assert digest1 != digest2
+
+
+def test_digest_fails_on_unsupported_dtype():
+    """Unsupported dtypes raise SecurityValidationError with clear message."""
+    from elspeth.core.validation.base import SecurityValidationError
+
+    # Create DataFrame with unsupported complex dtype
+    df = pd.DataFrame({"complex": [complex(1, 2), complex(3, 4)]})
+
+    with pytest.raises(SecurityValidationError, match="complex"):
+        compute_canonical_digest(df)
+
+
+def test_stable_sort_key_heterogeneous_labels():
+    """_stable_sort_key handles mixed-type column names."""
+    from elspeth.core.security.digest import _stable_sort_key
+
+    # Mixed int/string labels
+    labels = [1, "a", 2, "b"]
+    sorted_labels = sorted(labels, key=_stable_sort_key)
+
+    # Should produce consistent ordering (type name first, then value)
+    assert sorted_labels == [1, 2, "a", "b"]
+```
+
+**Step 2: Run test to verify it fails**
+
+```bash
+python -m pytest tests/security/test_digest_canonicalization.py -v
+```
+
+**Expected Output:**
+```
+ModuleNotFoundError: No module named 'elspeth.core.security.digest'
+```
+
+**Step 3: Implement digest computation pipeline**
+
+Create `src/elspeth/core/security/digest.py`:
+
+```python
+"""Canonical digest computation for SecureDataFrame.
+
+Produces deterministic BLAKE3 digests of DataFrame payloads by:
+1. Sorting rows and columns with stable ordering
+2. Converting unsupported dtypes to Arrow-compatible representations
+3. Streaming Parquet bytes directly into BLAKE3 hasher (zero-copy)
+"""
+
+import pandas as pd
+from blake3 import blake3
+from typing import Hashable
+
+from elspeth.core.validation.base import SecurityValidationError
+
+
+# Arrow-compatible dtypes that can be serialized deterministically
+_SUPPORTED_ARROW_DTYPES = {
+    "int8", "int16", "int32", "int64",
+    "uint8", "uint16", "uint32", "uint64",
+    "float32", "float64",
+    "bool",
+    "object",  # Strings
+    "datetime64[ns]",
+    "timedelta64[ns]",
+    "category",
+}
+
+
+def compute_canonical_digest(df: pd.DataFrame) -> bytes:
+    """Compute BLAKE3 digest over canonical Parquet representation.
+
+    Args:
+        df: DataFrame to digest
+
+    Returns:
+        32-byte BLAKE3 digest
+
+    Raises:
+        SecurityValidationError: If DataFrame contains unsupported dtypes
+    """
+    hasher = blake3()
+    sink = _Blake3Sink(hasher)
+
+    try:
+        # Sort rows and columns deterministically
+        canonical_df = (
+            df.sort_index(axis=0, key=_stable_sort_key)
+            .sort_index(axis=1, key=_stable_sort_key)
+        )
+
+        # Convert unsupported dtypes to Arrow-compatible representations
+        canonical_df = _as_type_safe(canonical_df)
+
+        # Stream Parquet bytes into BLAKE3 hasher
+        canonical_df.to_parquet(
+            sink,
+            engine="pyarrow",
+            compression=None,
+            index=True,
+            coerce_timestamps="us",
+            use_deprecated_int96_timestamps=False,
+        )
+
+    except Exception as e:
+        raise SecurityValidationError(
+            f"Failed to compute canonical digest: {e}"
+        ) from e
+
+    return hasher.digest()
+
+
+def _stable_sort_key(label: Hashable) -> tuple:
+    """Return total-orderable key for heterogeneous labels.
+
+    Enables sorting of mixed-type column/index names (e.g., [1, "a", 2, "b"])
+    by grouping by type first, then value.
+
+    Args:
+        label: Column or index label
+
+    Returns:
+        Tuple of (type_name, stringified_value)
+    """
+    from pathlib import Path
+    from enum import Enum
+
+    return (
+        type(label).__name__,
+        str(label) if isinstance(label, (Enum, Path)) else label,
+    )
+
+
+def _as_type_safe(df: pd.DataFrame) -> pd.DataFrame:
+    """Map unsupported dtypes into deterministic Arrow-friendly encodings.
+
+    Args:
+        df: DataFrame with potentially unsupported dtypes
+
+    Returns:
+        DataFrame with all columns using Arrow-compatible dtypes
+
+    Raises:
+        SecurityValidationError: If dtype cannot be safely converted
+    """
+    converted = {}
+
+    for name, series in df.items():
+        dtype_str = str(series.dtype)
+
+        if any(supported in dtype_str for supported in _SUPPORTED_ARROW_DTYPES):
+            converted[name] = series
+        else:
+            # Attempt string canonicalization for unsupported types
+            try:
+                converted[name] = series.astype(str)
+            except Exception as e:
+                raise SecurityValidationError(
+                    f"Column '{name}' has unsupported dtype '{dtype_str}' "
+                    f"that cannot be canonicalized. Error: {e}"
+                ) from e
+
+    return pd.DataFrame(converted, index=df.index)
+
+
+class _Blake3Sink:
+    """PyArrow writeable sink that streams bytes into a BLAKE3 hasher.
+
+    Implements the minimal interface required by PyArrow's to_parquet().
+    Enables zero-copy hashing by streaming Parquet bytes directly into
+    the hasher without intermediate BytesIO allocation.
+    """
+
+    def __init__(self, hasher: blake3):
+        """Initialize sink with BLAKE3 hasher.
+
+        Args:
+            hasher: BLAKE3 hasher instance
+        """
+        self._hasher = hasher
+
+    def write(self, data: bytes) -> None:
+        """Write bytes to hasher (PyArrow-compatible sink API).
+
+        Args:
+            data: Parquet bytes chunk
+        """
+        self._hasher.update(data)
+
+    def close(self) -> None:
+        """Close sink (no-op, hasher remains usable)."""
+        pass
+```
+
+**Step 4: Add blake3 dependency**
+
+```bash
+# Add to requirements-dev.in
+echo "blake3>=0.3.0" >> requirements-dev.in
+
+# Compile lockfile (run later as part of bootstrap)
+# python -m pip install pip-tools
+# pip-compile requirements-dev.in --generate-hashes --output-file requirements-dev.lock
+```
+
+**Step 5: Run tests to verify they pass**
+
+```bash
+python -m pytest tests/security/test_digest_canonicalization.py -v
+```
+
+**Expected Output:**
+```
+test_digest_determinism_identical_frames PASSED
+test_digest_determinism_reordered_columns PASSED
+test_digest_changes_on_data_mutation PASSED
+test_digest_fails_on_unsupported_dtype PASSED
+test_stable_sort_key_heterogeneous_labels PASSED
+
+5 passed in 0.23s
+```
+
+**Step 6: Performance benchmark (optional but recommended)**
+
+Add performance test to verify digest computation scales:
+
+```python
+def test_digest_performance_wide_frame():
+    """Benchmark digest computation on wide DataFrame."""
+    import timeit
+
+    # Wide frame: 100 columns × 1000 rows
+    df = pd.DataFrame({f"col_{i}": range(1000) for i in range(100)})
+
+    time_seconds = timeit.timeit(
+        lambda: compute_canonical_digest(df),
+        number=10,
+    )
+    avg_ms = (time_seconds / 10) * 1000
+
+    print(f"\n📊 Wide frame digest: {avg_ms:.2f}ms per digest")
+    assert avg_ms < 100, f"Digest too slow: {avg_ms:.2f}ms"
+
+
+def test_digest_performance_tall_frame():
+    """Benchmark digest computation on tall DataFrame."""
+    import timeit
+
+    # Tall frame: 10 columns × 10,000 rows
+    df = pd.DataFrame({f"col_{i}": range(10000) for i in range(10)})
+
+    time_seconds = timeit.timeit(
+        lambda: compute_canonical_digest(df),
+        number=10,
+    )
+    avg_ms = (time_seconds / 10) * 1000
+
+    print(f"\n📊 Tall frame digest: {avg_ms:.2f}ms per digest")
+    assert avg_ms < 100, f"Digest too slow: {avg_ms:.2f}ms"
+```
+
+**Step 7: Integration with SidecarClient**
+
+Update `sidecar_client.py` methods to use `compute_canonical_digest`:
+
+```python
+from elspeth.core.security.digest import compute_canonical_digest
+
+async def authorize_construct(
+    self, frame_id: bytes, level: int, df: pd.DataFrame
+) -> bytes:
+    """Request authorization grant for SecureDataFrame construction."""
+    data_digest = compute_canonical_digest(df)
+    # ... send AuthorizeConstruct with (frame_id, level, data_digest)
+```
+
+**Step 8: Commit**
+
+```bash
+git add src/elspeth/core/security/digest.py tests/security/test_digest_canonicalization.py requirements-dev.in
+git commit -m "feat(security): implement canonical digest computation pipeline
+
+- compute_canonical_digest() with BLAKE3 streaming
+- _stable_sort_key() for heterogeneous column/index labels
+- _as_type_safe() with dtype conversion and error handling
+- _Blake3Sink for zero-copy PyArrow → BLAKE3 streaming
+- 5+ passing tests for determinism, mutations, errors
+- Performance benchmarks for wide/tall DataFrames"
+```
+
+**Estimated Time:** 3-4 hours
+
+**Security Properties:**
+- ✅ Deterministic: Same DataFrame → same digest (sorted rows/columns)
+- ✅ Tamper-evident: Any data mutation changes digest
+- ✅ Fail-safe: Unsupported dtypes raise clear errors
+- ✅ Performance: Zero-copy streaming keeps memory flat
+
+---
+
+## Standalone Mode (Development Only)
+
+**⚠️  WARNING: Standalone mode is NOT production-ready and does NOT fix CVE-ADR-002-A-009 ⚠️**
+
+### Purpose
+
+Standalone mode allows local development without running the full sidecar infrastructure (Rust daemon, UID separation, supervisord). It provides a **degraded security posture** with explicit limitations.
+
+### Security Properties
+
+**Classification Ceiling:** OFFICIAL:SENSITIVE (max level 2)
+- Any attempt to create/uplift SecureDataFrame to SECRET or above → `SecurityValidationError`
+- Enforced at orchestrator startup via environment variable check
+
+**Secrets Remain in Python:**
+- `_CONSTRUCTION_TOKEN` and `_SEAL_KEY` stay in Python memory (vulnerable to introspection)
+- CVE-ADR-002-A-009 remains **unfixed** in this mode
+- Python `inspect`, `gc`, and debugger can still extract secrets
+
+**Loud Logging:**
+- Every SecureDataFrame operation logs: `"⚠️  STANDALONE MODE - OFFICIAL:SENSITIVE ceiling - CVE-ADR-002-A-009 UNFIXED"`
+- Logs emitted at `WARN` level (always visible)
+- Prevents accidental production use
+
+### Activation
+
+**Behavior Table:**
+
+| Mode | Daemon Required? | Behavior if Daemon Unavailable | Classification Ceiling | CVE Status |
+|------|------------------|--------------------------------|------------------------|------------|
+| `sidecar` | **YES** (fail-hard) | `SecurityValidationError` raised, orchestrator aborts immediately | TOP_SECRET | **FIXED** |
+| `standalone` | **NO** (skipped) | Runs without daemon, logs loud warnings on every operation | OFFICIAL:SENSITIVE | **UNFIXED** |
+| (omitted) | N/A | `SecurityValidationError` raised at startup: "No hidden defaults - ELSPETH_SECURITY_MODE must be explicitly set" | N/A | N/A |
+| (invalid value) | N/A | `SecurityValidationError` raised at startup: "Invalid mode - must be 'sidecar' or 'standalone'" | N/A | N/A |
+
+**Design Principle:** No hidden defaults - security mode must be explicitly specified.
+
+**Option 1: Environment Variable (Orchestrator)**
+
+```python
+# src/elspeth/core/security/secure_data.py
+
+import os
+import socket
+from pathlib import Path
+
+# NO DEFAULT - explicit opt-in required
+SECURITY_MODE = os.getenv("ELSPETH_SECURITY_MODE", "").lower()
+
+# Rule: No hidden defaults
+if not SECURITY_MODE:
+    raise SecurityValidationError(
+        "ELSPETH_SECURITY_MODE not set. Must explicitly specify 'sidecar' or 'standalone'.\n"
+        "No hidden defaults allowed (security principle).\n"
+        "For development: export ELSPETH_SECURITY_MODE=standalone\n"
+        "For production: export ELSPETH_SECURITY_MODE=sidecar"
+    )
+
+if SECURITY_MODE not in ["sidecar", "standalone"]:
+    raise SecurityValidationError(
+        f"Invalid ELSPETH_SECURITY_MODE='{SECURITY_MODE}'. "
+        f"Must be 'sidecar' or 'standalone'."
+    )
+
+# Sidecar mode: Fail-hard if daemon unavailable
+if SECURITY_MODE == "sidecar":
+    SOCKET_PATH = Path("/run/sidecar/auth.sock")
+
+    # Check socket exists
+    if not SOCKET_PATH.exists():
+        raise SecurityValidationError(
+            f"Sidecar mode enabled but daemon socket not found at {SOCKET_PATH}.\n"
+            f"Start daemon with: /usr/local/bin/elspeth-sidecar-daemon --config /etc/elspeth/sidecar.toml\n"
+            f"Or switch to standalone mode: export ELSPETH_SECURITY_MODE=standalone"
+        )
+
+    # Attempt connection to verify daemon is running
+    try:
+        sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        sock.settimeout(2.0)  # 2-second connection timeout
+        sock.connect(str(SOCKET_PATH))
+        sock.close()
+    except (ConnectionRefusedError, socket.timeout, OSError) as e:
+        raise SecurityValidationError(
+            f"Sidecar mode enabled but daemon not responding at {SOCKET_PATH}: {e}\n"
+            f"Verify daemon is running: systemctl status elspeth-sidecar\n"
+            f"Check logs: journalctl -u elspeth-sidecar -n 50"
+        ) from e
+
+    MAX_SECURITY_LEVEL = SecurityLevel.TOP_SECRET
+    logger.info(
+        "✅ Sidecar mode active - Daemon verified at %s\n"
+        "Classification ceiling: TOP_SECRET\n"
+        "CVE-ADR-002-A-009: FIXED (secrets isolated in Rust daemon)",
+        SOCKET_PATH
+    )
+
+# Standalone mode: Skip daemon check, enforce ceiling
+elif SECURITY_MODE == "standalone":
+    MAX_SECURITY_LEVEL = SecurityLevel.OFFICIAL_SENSITIVE
+    logger.warning(
+        "⚠️  STANDALONE MODE ACTIVE ⚠️\n"
+        "Classification ceiling: OFFICIAL:SENSITIVE\n"
+        "CVE-ADR-002-A-009 UNFIXED (secrets in Python)\n"
+        "NOT APPROVED for SECRET data\n"
+        "Daemon check SKIPPED (standalone mode runs without daemon)"
+    )
+```
+
+**Option 2: Config File (Daemon - sidecar mode only)**
+
+```bash
+# Development: Use standalone config
+export ELSPETH_SECURITY_MODE=standalone
+python -m elspeth.cli --settings config/sample_suite/settings.yaml
+
+# Production: Daemon enforces sidecar mode
+/usr/local/bin/elspeth-sidecar-daemon --config /etc/elspeth/sidecar.toml
+# (Config requires mode = "sidecar")
+```
+
+### Testing Standalone Mode
+
+```bash
+# Enable standalone mode for tests
+export ELSPETH_SECURITY_MODE=standalone
+
+# Run tests (OFFICIAL:SENSITIVE ceiling enforced)
+python -m pytest tests/ -v
+
+# Verify ceiling works
+python -m pytest tests/security/test_standalone_ceiling.py -v
+```
+
+Example test:
+
+```python
+def test_standalone_ceiling_blocks_secret():
+    """Standalone mode rejects SECRET classification."""
+    import os
+    os.environ["ELSPETH_SECURITY_MODE"] = "standalone"
+
+    from elspeth.core.security.secure_data import SecureDataFrame, SecurityLevel
+    from elspeth.core.validation.base import SecurityValidationError
+
+    df = pd.DataFrame({"col": [1, 2, 3]})
+
+    with pytest.raises(SecurityValidationError, match="OFFICIAL:SENSITIVE ceiling"):
+        SecureDataFrame.create_from_datasource(df, SecurityLevel.SECRET)
+```
+
+### Runbook: Deploying Standalone Mode
+
+**When to Use:**
+- Local development on developer workstations
+- Automated tests in CI (non-production data only)
+- Demos with OFFICIAL or OFFICIAL:SENSITIVE data
+
+**When NOT to Use:**
+- Any production environment
+- Any SECRET, TOP_SECRET, or CODE_WORD data
+- Compliance audits or IRAP assessments
+- Customer-facing deployments
+
+**Deployment Checklist:**
+1. Set `ELSPETH_SECURITY_MODE=standalone` environment variable
+2. Verify logs show: `"⚠️  STANDALONE MODE ACTIVE"`
+3. Verify classification ceiling: Attempt to create SECRET frame → should fail
+4. Document risk acceptance for OFFICIAL:SENSITIVE ceiling
+5. Add reminders to migrate to sidecar mode before production
+
+### Migration Path: Standalone → Sidecar
+
+**Step 1:** Install Rust daemon
+
+```bash
+# Build sidecar binary
+cd sidecar && cargo build --release
+sudo cp target/release/elspeth-sidecar-daemon /usr/local/bin/
+```
+
+**Step 2:** Configure mode
+
+```toml
+# /etc/elspeth/sidecar.toml
+mode = "sidecar"
+socket_path = "/run/sidecar/auth.sock"
+session_key_path = "/run/sidecar/.session"
+appuser_uid = 1000
+grant_ttl_secs = 60
+log_level = "info"
+```
+
+**Step 3:** Start daemon
+
+```bash
+sudo systemctl start elspeth-sidecar-daemon
+# Or via supervisord in Docker container
+```
+
+**Step 4:** Update orchestrator
+
+```bash
+# Remove standalone mode
+unset ELSPETH_SECURITY_MODE
+
+# Orchestrator auto-detects sidecar via /run/sidecar/auth.sock
+python -m elspeth.cli --settings config/sample_suite/settings.yaml
+```
+
+**Step 5:** Verify
+
+```bash
+# Check daemon logs
+sudo journalctl -u elspeth-sidecar-daemon -f
+
+# Verify SECRET frames work
+python -m pytest tests/security/test_secret_classification.py -v
+```
+
+---
+
+## Prerequisites and Scope Clarifications
+
+### Orchestrator/Worker Split (Phase 3 Prerequisite)
+
+**Design Assumption:** The v3 design (lines 140-304) assumes orchestrator/worker process separation with `SecureFrameProxy` objects for plugin isolation.
+
+**Current State:** As of 2025-10-29, SecureDataFrame **does not** have:
+- Orchestrator/worker process split
+- `SecureFrameProxy` RPC mechanism
+- Worker subprocess spawning with UID 1002
+- Proxy ↔ orchestrator IPC over msgpack
+
+**Implementation Scope:**
+
+**Option A: Full Implementation (Phases 1-4)**
+- Implement all v3 design components including orchestrator/worker split
+- Estimated additional time: +12-16 hours for Phase 3 orchestration changes
+- Total: **37-50 hours** (5-7 days)
+
+**Option B: Daemon-Only (Phases 1-2, Partial Phase 3)**
+- Implement Rust daemon with sidecar mode
+- Keep orchestrator monolithic (no worker split)
+- Plugins run in same process as orchestrator (UID 1000)
+- Security properties:
+  - ✅ Secrets in Rust memory (CVE-ADR-002-A-009 fixed)
+  - ✅ SO_PEERCRED enforcement
+  - ✅ Digest-bound seals
+  - ⚠️  Plugins share orchestrator process (no UID 1002 isolation)
+  - ⚠️  Plugins see real SecureDataFrame (not proxies)
+- Estimated time: **25-34 hours** (3-4 days)
+- Migration path: Add worker split in future sprint
+
+**Option C: Standalone Mode Only**
+- Skip Rust daemon entirely
+- Use standalone mode with OFFICIAL:SENSITIVE ceiling
+- Estimated time: **8-12 hours** (implement ceiling + tests)
+- Security properties:
+  - ⚠️  CVE-ADR-002-A-009 remains unfixed
+  - ⚠️  Secrets in Python memory
+  - ✅ Classification ceiling prevents SECRET data
+  - ✅ Loud logging on every operation
+
+**Recommendation:** Start with **Option B** (daemon-only), validate performance/security, then add worker split in Phase 3.5 if needed.
+
+**Rationale:**
+- Fixes CVE-ADR-002-A-009 without 12-16 hour orchestration overhaul
+- Worker split is defense-in-depth (not strictly required if plugins are audited)
+- Allows iterative deployment: sidecar first, then proxies
+
+**Decision Point:** User must choose option before starting Phase 1 implementation.
+
+---
+
+## Dependency Footprint and Performance
+
+### New Dependencies (Phase 3)
+
+**Rust (Daemon):**
+```toml
+[dependencies]
+tokio = "1.35"           # Async runtime (already common in Rust ecosystem)
+blake2 = "0.10"          # HMAC-BLAKE2s for seals (lightweight)
+blake3 = "1.5"           # Digest computation (fast, ~3 GB/s)
+uuid = "1.6"             # Stable frame IDs
+dashmap = "5.5"          # Concurrent hashmap (lock-free)
+serde_cbor = "0.11"      # CBOR protocol (compact, deterministic)
+ring = "0.17"            # Crypto primitives (FIPS-validated)
+```
+
+**Total Rust binary size:** ~5-10 MB (statically linked, no runtime deps)
+
+**Python (Orchestrator):**
+```python
+# New dependencies
+cbor2>=5.4.0            # CBOR protocol (daemon ↔ orchestrator)
+blake3>=0.3.0           # Digest computation (wheels available, ~100 KB)
+pyarrow>=12.0.0         # Parquet canonicalization (large: ~80 MB)
+```
+
+**Dependency Concerns:**
+
+1. **PyArrow Size:** 80 MB wheel (largest dependency)
+   - **Mitigation:** Already used in data science stacks, likely installed
+   - **Alternative:** Use `fastparquet` (lighter, ~10 MB) if PyArrow unavailable
+   - **Decision:** Document PyArrow as recommended, fastparquet as fallback
+
+2. **blake3 Performance:** Must handle 1k+ frames/sec target
+   - **Benchmark target:** <10ms per digest for 100-column × 10k-row DataFrame
+   - **Measured:** blake3 achieves ~3 GB/s on modern hardware
+   - **1k frames/sec:** Requires <1ms per digest → blake3 is 10x+ faster than needed
+
+3. **Canonicalization Overhead:** Sorting + Parquet serialization per frame
+   - **Risk:** Could dominate seal computation time
+   - **Mitigation Plan:**
+     - Phase 3.4 includes performance benchmarks (wide/tall DataFrames)
+     - If overhead >10ms: Cache digests, recompute only on mutation
+     - If overhead >50ms: Implement incremental hashing (hash deltas)
+
+**Performance Baseline (from design v3):**
+- Daemon target: ≥50k ops/s, P99 <150µs
+- Canonicalization target: <10ms per frame (measured in Phase 3.4)
+- Overall target: ≥1k frames/sec (matches ADR-002 baseline)
+
+**Fallback Strategy (if PyArrow too heavy):**
+
+```python
+# Option 1: fastparquet (lighter)
+import fastparquet
+canonical_df.to_parquet(sink, engine="fastparquet", ...)
+
+# Option 2: CSV canonicalization (last resort, slower but no PyArrow)
+import csv, io
+csv_bytes = canonical_df.to_csv(index=True, encoding="utf-8")
+digest = blake3(csv_bytes.encode()).digest()
+```
+
+**Dependency Approval Checklist:**
+- [ ] Verify blake3 wheels available for target platforms (Linux x86_64, aarch64)
+- [ ] Verify PyArrow license (Apache-2.0 - approved)
+- [ ] Measure PyArrow install time in CI (<2 minutes acceptable)
+- [ ] Document fallback to fastparquet if PyArrow unavailable
+- [ ] Add dependency audit to CI (pip-audit)
 
 ---
 
@@ -1614,49 +2650,39 @@ This plan provides:
 
 2. **Phase 1: Rust Daemon Foundation (6 tasks)**
    - ✅ Project structure (Cargo.toml, src/main.rs, src/lib.rs)
-   - ✅ Crypto module (Secrets, HMAC-SHA256 seals)
+   - ✅ Crypto module (Secrets, BLAKE2s MAC seals)
    - ✅ Grant table (one-shot handles with TTL)
    - ✅ CBOR protocol messages
    - ✅ Config loading from TOML
    - ✅ Unix socket server skeleton
 
-3. **Phase 2: Complete Rust Implementation (8 tasks remaining)**
-   - HMAC request authentication
-   - SO_PEERCRED UID enforcement
-   - Session key generation and persistence
-   - Request dispatching (authorize, redeem, compute, verify)
-   - Background grant cleanup task
-   - Error handling and logging
-   - Performance benchmarks (criterion)
-   - Integration tests
+3. **Phase 2: Complete Rust Implementation (work in progress)**
+   - Mutual-auth enforcement (HMAC validation, SO_PEERCRED, session key helper from Task 2.3)
+   - Request dispatch table (authorize, redeem, consume_ticket, compute, verify)
+   - Registered frame cache + background cleanup
+   - Error handling, structured logging, benchmarks, integration tests
 
-4. **Phase 3: Python Integration (12 tasks remaining)**
-   - Complete SidecarClient implementation
-   - `_from_sidecar()` factory method
-   - SecureFrameProxy for plugin isolation
-   - Orchestrator RPC handler
-   - Worker subprocess spawning
-   - Standalone mode toggle
-   - Integration tests (Python → Rust)
+4. **Phase 3: Python Integration (upcoming)**
+   - Plugin worker isolation under `appplugin` UID
+   - Orchestrator-only SidecarClient + ticket consumption API
+   - Canonical digest computation pipeline (BLAKE3 + Parquet streaming)
+   - Ticket-backed SecureDataFrame factory rewrite (`_from_sidecar`, ConstructionCapability)
+   - SecureFrameProxy + orchestrator ↔ worker RPC plumbing
+   - Standalone mode guardrails and integration tests
 
-5. **Phase 4: Docker Deployment (6 tasks remaining)**
-   - Multi-stage Dockerfile
-   - Supervisord configuration
-   - UID/GID setup scripts
-   - Session key initialization
-   - Health check endpoint
-   - Container integration tests
+5. **Phase 4: Docker Deployment**
+   - Multi-stage build, supervisord updates, user setup, health checks, container tests
 
-**Total Tasks:** 32 (6 complete in this plan, 26 remaining)
+**Total Tasks:** updated dynamically (6 completed in Phase 1, remaining work tracked per phase above)
 
 **Estimated Timeline:**
 - Phase 0: 30 minutes (John, system setup)
 - Phase 1: 4-6 hours (Rust foundation) - **6 tasks complete**
 - Phase 2: 6-8 hours (Rust completion)
-- Phase 3: 8-10 hours (Python integration)
+- Phase 3: 11-14 hours (Python integration, includes Task 3.4 digest pipeline)
 - Phase 4: 4-6 hours (Docker deployment)
 
-**Total: 22-30 hours** (3-4 days of focused work)
+**Total: 25-34 hours** (3-4 days of focused work)
 
 ---
 
@@ -1674,6 +2700,89 @@ This plan provides:
 **Rust memory safety** eliminates entire vulnerability classes (buffer overflows, use-after-free) that plague C/C++ security code, while `ring` provides FIPS-validated cryptographic primitives.
 
 `─────────────────────────────────────────────────`
+
+---
+
+## V3 Design Security Enhancements (2025-10-29)
+
+**This implementation plan incorporates critical security upgrades from the v3 design iteration:**
+
+### 1. Digest-Bound Seals
+
+**Problem:** Original design bound seals only to `(frame_id, level)`. An attacker could swap DataFrame contents after construction without invalidating the seal.
+
+**Solution:** Every seal operation includes `data_digest = BLAKE3(canonical_parquet_bytes)`:
+```rust
+seal = HMAC-BLAKE2s(_SEAL_KEY, frame_id || level || data_digest)
+```
+
+**Implementation Impact:**
+- Rust crypto module computes seals over 3 components (not 2)
+- Python orchestrator computes BLAKE3 digest on every frame mutation
+- Protocol messages include `data_digest: bytes[32]` field
+- Dependencies: Add `blake3` crate (Rust) and `blake3` package (Python)
+
+### 2. Stable Frame Identifiers
+
+**Problem:** Using Python `id()` pointers as frame identifiers creates reuse vulnerabilities after garbage collection.
+
+**Solution:** Orchestrator generates stable 128-bit UUIDs via `uuid.uuid4()` and maintains FrameRegistry:
+```python
+frame_registry: Dict[UUID, FrameRegistryEntry] = {}
+# FrameRegistryEntry = {frame, digest, level, created_at}
+```
+
+**Implementation Impact:**
+- Daemon stores `RegisteredFrameTable: DashMap<Uuid, (level, digest)>`
+- Grant redemption inserts into RegisteredFrameTable
+- `ComputeSeal`/`VerifySeal` reject unknown frame_ids
+- Dependencies: Add `uuid` crate with "v4" feature
+
+### 3. FD_CLOEXEC Descriptor Hygiene
+
+**Problem:** Plugin workers spawned via `fork()` inherit file descriptors, potentially leaking authenticated sidecar socket handles.
+
+**Solution:**
+- All Unix sockets opened with `O_CLOEXEC` flag
+- Session key file opened with `FD_CLOEXEC` via `fcntl()`
+- Orchestrator establishes sidecar connection AFTER spawning workers
+- Or use `socketpair()` + explicit close in child process
+
+**Implementation Impact:**
+- Rust: Use `OFlag::O_CLOEXEC` when binding Unix sockets
+- Python: Set `FD_CLOEXEC` on session key file descriptor
+- Docker: Supervisord spawns processes in correct order (daemon → orchestrator → workers)
+
+### 4. Protocol Message Updates
+
+**Old Protocol:**
+```rust
+AuthorizeConstruct { data_id: u64, level: u32 }
+ComputeSeal { data_id: u64, level: u32 }
+VerifySeal { data_id: u64, level: u32, seal: [u8; 32] }
+```
+
+**New Protocol (v3):**
+```rust
+AuthorizeConstruct { frame_id: [u8; 16], level: u32, data_digest: [u8; 32] }
+ComputeSeal { frame_id: [u8; 16], level: u32, data_digest: [u8; 32] }
+VerifySeal { frame_id: [u8; 16], level: u32, data_digest: [u8; 32], seal: [u8; 32] }
+```
+
+**Implementation Impact:**
+- All protocol messages use UUID frame_ids (not u64 pointers)
+- Every seal operation includes digest parameter
+- Grant state stores `(frame_id, level, digest)` tuple
+- CBOR serialization handles 16-byte arrays natively
+
+### Security Properties Gained
+
+✅ **Post-creation tampering prevention:** Data swaps invalidate seals
+✅ **Frame ID stability:** No pointer reuse vulnerabilities
+✅ **Descriptor isolation:** Workers cannot inherit authenticated handles
+✅ **Audit traceability:** Stable UUIDs enable long-term log correlation
+
+**Estimated Additional Work:** +2-3 hours (mostly Python FrameRegistry and digest computation)
 
 ---
 

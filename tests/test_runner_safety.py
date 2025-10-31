@@ -8,7 +8,7 @@ import pandas as pd
 import pytest
 
 from elspeth.core.experiments.runner import ExperimentRunner
-from tests.conftest import SimpleLLM
+from conftest import SimpleLLM
 
 
 def test_run_with_empty_dataframe() -> None:

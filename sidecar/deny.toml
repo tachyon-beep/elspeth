@@ -1,0 +1,220 @@
+# cargo-deny configuration for ELSPETH sidecar daemon
+# Documentation: https://embarkstudios.github.io/cargo-deny/
+
+# ============================================================
+# License Policy - CRITICAL: Must Match CLAUDE.md Requirements
+# ============================================================
+[licenses]
+# ONLY permissive licenses allowed (CLAUDE.md constraint)
+# Copyleft licenses (GPL, AGPL, LGPL, MPL) are strictly forbidden
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unlicense",
+    "0BSD",           # Zero-Clause BSD (even more permissive)
+    "Zlib",           # Zlib License (permissive, used by compression libs)
+    "Unicode-3.0",    # Unicode License v3 (OSI-approved, permissive)
+]
+
+# cargo-deny 0.16+ behavior:
+# - Only licenses in 'allow' list above are permitted
+# - All other licenses are automatically denied (no need for 'deny' array)
+# - Copyleft licenses (GPL, LGPL, MPL) are rejected via allowlist approach
+# - Unlicensed crates are automatically rejected
+# - Multiple licenses (e.g., "MIT OR Apache-2.0") choose the allowed option
+
+# License exceptions (use sparingly, document reason)
+exceptions = [
+    # Example (currently none needed):
+    # { allow = ["OpenSSL"], name = "ring", version = "*" },
+]
+
+# Confidence threshold for license detection (0.0-1.0)
+confidence-threshold = 0.8
+
+# ============================================================
+# Bans - Prevent Problematic Dependencies
+# ============================================================
+[bans]
+# Deny multiple versions of same crate (bloat + supply chain risk)
+# Exception: Build dependencies can have duplicates (lower risk)
+multiple-versions = "deny"
+multiple-versions-include-dev = false
+
+# Warn on wildcards in dependency specifications (unstable)
+wildcards = "deny"
+
+# Highlight crates that are unusually large
+# (Large dependencies = larger attack surface)
+highlight = "all"
+
+# Specific crates to deny (security/quality concerns)
+deny = [
+    # Example: Deny known-vulnerable or unmaintained crates
+    # { name = "openssl-sys", wrappers = ["openssl"] },
+]
+
+# Allow specific crates even if banned elsewhere
+allow = []
+
+# Skip checking certain crates (rare, use with caution)
+# Note: These duplicates are unavoidable due to transitive dependencies
+skip = [
+    # getrandom: ring@0.17 requires 0.2.x, uuid@1.18 requires 0.3.x
+    { name = "getrandom", version = "=0.2.16" },
+    { name = "getrandom", version = "=0.3.4" },
+
+    # hashbrown: dashmap@5.5 requires 0.14.x, indexmap@2.12 requires 0.16.x
+    { name = "hashbrown", version = "=0.14.5" },
+    { name = "hashbrown", version = "=0.16.0" },
+
+    # windows-sys: ring requires 0.52.x, tokio ecosystem requires 0.60.x+
+    { name = "windows-sys", version = "=0.52.0" },
+    { name = "windows-sys", version = "=0.60.2" },
+    { name = "windows-sys", version = "=0.61.2" },
+
+    # windows-targets: transitive from windows-sys
+    { name = "windows-targets", version = "=0.52.6" },
+    { name = "windows-targets", version = "=0.53.5" },
+
+    # windows_*: architecture-specific windows crates (transitive)
+    { name = "windows_aarch64_gnullvm", version = "=0.52.6" },
+    { name = "windows_aarch64_gnullvm", version = "=0.53.1" },
+    { name = "windows_aarch64_msvc", version = "=0.52.6" },
+    { name = "windows_aarch64_msvc", version = "=0.53.1" },
+    { name = "windows_i686_gnu", version = "=0.52.6" },
+    { name = "windows_i686_gnu", version = "=0.53.1" },
+    { name = "windows_i686_gnullvm", version = "=0.52.6" },
+    { name = "windows_i686_gnullvm", version = "=0.53.1" },
+    { name = "windows_i686_msvc", version = "=0.52.6" },
+    { name = "windows_i686_msvc", version = "=0.53.1" },
+    { name = "windows_x86_64_gnu", version = "=0.52.6" },
+    { name = "windows_x86_64_gnu", version = "=0.53.1" },
+    { name = "windows_x86_64_gnullvm", version = "=0.52.6" },
+    { name = "windows_x86_64_gnullvm", version = "=0.53.1" },
+    { name = "windows_x86_64_msvc", version = "=0.52.6" },
+    { name = "windows_x86_64_msvc", version = "=0.53.1" },
+]
+
+# Skip checking crates from a specific source
+skip-tree = []
+
+# ============================================================
+# Advisories - Security Vulnerability Detection
+# ============================================================
+[advisories]
+# Database of security advisories (RustSec)
+db-path = "~/.cargo/advisory-db"
+db-urls = ["https://github.com/rustsec/advisory-db"]
+
+# cargo-deny 0.16+ defaults:
+# - ALL vulnerability advisories are DENIED by default
+# - ALL unsound advisories are DENIED by default
+# - ALL notice advisories are DENIED by default
+# To allow specific advisories, add them to 'ignore' array below
+
+# Unmaintained crates are security risks (no patches)
+# "all" means check all dependencies (workspace + transitive)
+unmaintained = "all"
+
+# Yanked crates (removed from crates.io due to critical bugs)
+yanked = "deny"
+
+# Ignore specific advisories (use ONLY for false positives)
+ignore = [
+    # Example (currently none):
+    # "RUSTSEC-2020-0001",  # Reason: False positive, upstream notified
+]
+
+# Maximum severity to allow (deny anything above this)
+# Severity levels: none, low, medium, high, critical
+# For security-critical sidecar daemon: deny ALL vulnerabilities
+# severity-threshold = "low"
+
+# ============================================================
+# Sources - Supply Chain Security
+# ============================================================
+[sources]
+# ONLY allow crates from crates.io (official registry)
+unknown-registry = "deny"
+
+# Deny git dependencies (unpinned, mutable, supply chain risk)
+# Exception: Allow in dev dependencies for testing unreleased features
+unknown-git = "deny"
+
+# Allow crates.io
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]
+
+# Allow git dependencies from specific organizations (if needed)
+# allow-git = [
+#     "https://github.com/RustCrypto",
+# ]
+
+# Explicitly allowed git sources (none for production)
+allow-git = []
+
+# ============================================================
+# Configuration Notes for Maintainers
+# ============================================================
+#
+# This deny.toml enforces:
+# ✅ License compliance (permissive only, matches CLAUDE.md)
+# ✅ No multiple versions (binary bloat, supply chain risk)
+# ✅ No git dependencies (mutable, unpinned versions)
+# ✅ Security advisories from RustSec (CVE tracking)
+# ✅ No unmaintained/yanked/unsound crates
+#
+# Security Rationale:
+# -------------------
+# The sidecar daemon holds SECRET-level encryption keys in memory.
+# Any vulnerability in dependencies could lead to:
+# - Memory disclosure (key leakage)
+# - Process hijacking (arbitrary code execution)
+# - Timing attacks (cryptographic oracle)
+#
+# Therefore, we enforce STRICTER policies than typical Rust projects:
+# - Zero tolerance for known CVEs (vulnerability = "deny")
+# - No git dependencies (only stable, audited crates.io releases)
+# - No copyleft licenses (legal/compliance risk per CLAUDE.md)
+#
+# Integration with CI/CD:
+# -----------------------
+# This file is checked in .github/workflows/rust-security.yml:
+#
+#   cargo install cargo-deny
+#   cargo deny check
+#
+# Failing checks will:
+# ✅ Block PR merges
+# ✅ Fail nightly security scans
+# ✅ Trigger security team alerts
+#
+# Updating This Policy:
+# ---------------------
+# 1. Propose changes in separate PR with security justification
+# 2. Document exceptions with ADR (Architecture Decision Record)
+# 3. Get security team approval before merging
+# 4. Never weaken policies without CISO sign-off
+#
+# Troubleshooting:
+# ----------------
+# Q: "cargo deny check fails with license error"
+# A: Check dependency tree with `cargo tree -i <crate>` to find violator
+#    Either replace dependency or get license exception approval
+#
+# Q: "Multiple versions of same crate detected"
+# A: Run `cargo tree -d` to see duplicates, update Cargo.toml to unify
+#
+# Q: "Advisory RUSTSEC-YYYY-XXXX blocks build"
+# A: Update affected crate ASAP. If no fix exists, consider alternatives
+#    or add time-boxed ignore with ticket tracking remediation
+#
+# References:
+# -----------
+# - RustSec Advisory Database: https://rustsec.org/
+# - cargo-deny User Guide: https://embarkstudios.github.io/cargo-deny/
+# - ELSPETH Security Controls: ../docs/compliance/CONTROL_INVENTORY.md
+# - ADR-002: Multi-Level Security: ../docs/architecture/decisions/002-security-architecture.md

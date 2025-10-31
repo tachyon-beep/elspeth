@@ -1,0 +1,13 @@
+# Sudoers configuration for Elspeth orchestrator
+#
+# Allow appuser (UID 1000, orchestrator) to spawn plugin workers
+# as appplugin (UID 1002) without password prompt.
+#
+# Security: This is intentional privilege separation, not escalation.
+# Workers run with FEWER privileges than orchestrator (no sidecar access).
+#
+# Install to: /etc/sudoers.d/elspeth
+# Permissions: 0440 (read-only, owned by root)
+
+# Allow appuser to run Python worker process as appplugin
+appuser ALL=(appplugin) NOPASSWD: /opt/venv/bin/python -m elspeth.orchestrator.worker_process

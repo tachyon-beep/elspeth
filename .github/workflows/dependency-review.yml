@@ -53,7 +53,8 @@ jobs:
             ISC,
             CC0-1.0,
             PSF-2.0,
-            Unlicense
+            Unlicense,
+            Unicode-3.0
 
           # Exclude specific non-SPDX/unknown-license dependencies from license checks
           # (reusable workflow in this repo, and gitleaks-action pin)

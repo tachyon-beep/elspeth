@@ -20,7 +20,7 @@ import pytest
 
 from elspeth.core.experiments.config import ExperimentConfig, ExperimentSuite
 from elspeth.core.experiments.suite_runner import ExperimentSuiteRunner
-from tests.conftest import CollectingSink, SimpleLLM
+from conftest import CollectingSink, SimpleLLM
 
 
 class TestSinkResolutionPriority:

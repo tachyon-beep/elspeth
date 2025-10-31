@@ -1,0 +1,37 @@
+[package]
+name = "elspeth-sidecar-daemon"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.82"
+license = "MIT"
+
+[dependencies]
+tokio = { version = "1.35", features = ["full"] }
+tokio-util = { version = "0.7", features = ["codec"] }
+serde = { version = "1.0", features = ["derive"] }
+ciborium = "0.2"
+serde_bytes = "0.11"
+blake2 = "0.10"
+blake3 = "1.5"
+uuid = { version = "1.6", features = ["v4", "serde"] }
+dashmap = "5.5"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+anyhow = "1.0"
+ring = "0.17"
+subtle = "2.6"
+toml = "0.8"
+libc = "0.2"
+
+[dev-dependencies]
+tempfile = "3.8"
+criterion = "0.5"
+nix = { version = "0.29", features = ["fs"] }
+
+[[bin]]
+name = "elspeth-sidecar-daemon"
+path = "src/main.rs"
+
+[lib]
+name = "elspeth_sidecar"
+path = "src/lib.rs"
