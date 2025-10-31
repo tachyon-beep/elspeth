@@ -4,7 +4,7 @@
 #   --build-arg PYTHON_IMAGE=python:3.12.12-slim@sha256:<digest>
 ARG PYTHON_IMAGE=python:3.12.12-slim
 
-FROM python:3.12.12-slim@sha256:b03eed4944bc758029e0506ec41acb6a4be6d1b2b875d6e04ac4759db343a370 AS base
+FROM python:3.12.12-slim@sha256:408ad54fa40b7a4fff7cb21ce6e1b74eb5154bfc6c0fbd0af98560c1850db88f AS base
 ARG PYTHON_IMAGE
 # Enforce digest-pinned base image for reproducibility (CI passes a pinned digest)
 COPY scripts/validate-digest.sh /usr/local/bin/validate-digest.sh
