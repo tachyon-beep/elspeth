@@ -1,0 +1,43 @@
+# Elspeth Sidecar Daemon Configuration
+#
+# This file configures the Rust security daemon that manages seal keys
+# and enforces multi-level security (MLS) constraints.
+#
+# Copy to /etc/elspeth/sidecar.toml in production.
+
+[daemon]
+# Unix socket path for orchestrator communication
+socket_path = "/run/sidecar/auth.sock"
+
+# Session key file path (HMAC authentication)
+# Generated automatically by entrypoint.sh or set via environment
+session_key_path = "/run/sidecar/.session"
+
+# Logging configuration
+log_level = "info"  # trace, debug, info, warn, error
+log_format = "json"  # json or text
+
+[security]
+# Frame grant TTL (time-to-live in seconds)
+# Grants expire after this duration to prevent stale handles
+grant_ttl_seconds = 300
+
+# Registered frame cleanup interval (seconds)
+# Background task removes expired frames from cache
+cleanup_interval_seconds = 60
+
+# Maximum concurrent requests
+# Protects against resource exhaustion
+max_concurrent_requests = 1000
+
+[performance]
+# Tokio async runtime workers
+# Defaults to number of CPU cores if not specified
+# worker_threads = 4
+
+# Request buffer size
+request_buffer_size = 256
+
+# Enable performance metrics export (for observability)
+enable_metrics = false
+# metrics_port = 9090

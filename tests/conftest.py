@@ -1,4 +1,5 @@
 import csv
+import os
 import sys
 from pathlib import Path
 from typing import Any, Callable
@@ -11,6 +12,59 @@ from elspeth.plugins.nodes.sinks._sanitize import DANGEROUS_PREFIXES
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _configure_sidecar_mode_for_tests():
+    """Configure sidecar mode for test environments.
+
+    - If ELSPETH_RUN_INTEGRATION_TESTS=1: Preserve sidecar mode (daemon available in CI)
+    - Otherwise: Use standalone mode (no daemon required for unit tests)
+
+    Production containers default to sidecar mode (fail-closed security).
+    Test/dev environments can explicitly opt-in to standalone mode when the
+    sidecar daemon is not available.
+
+    This fixture runs once per test session before any tests execute.
+    """
+    # Only override to standalone if NOT running integration tests
+    if os.environ.get("ELSPETH_RUN_INTEGRATION_TESTS") != "1":
+        os.environ["ELSPETH_SIDECAR_MODE"] = "standalone"
+    # else: preserve existing ELSPETH_SIDECAR_MODE from environment (sidecar)
+    yield
+    # Cleanup not needed - environment persists for entire test session
+
+
+@pytest.fixture(autouse=True)
+def _reset_sidecar_cache(request):
+    """Reset sidecar mode cache for non-integration tests.
+
+    When ELSPETH_RUN_INTEGRATION_TESTS=1, the sidecar mode cache (_SIDECAR_MODE global)
+    gets initialized during session startup. Non-integration tests that create
+    SecureDataFrame objects with tmp_path need to force standalone mode, but the
+    cached value prevents monkeypatch from working.
+
+    This fixture resets the cache before each non-integration test to allow
+    monkeypatch.setenv("ELSPETH_SIDECAR_MODE", "standalone") to work correctly.
+
+    Integration tests (marked with @pytest.mark.integration) skip this reset.
+    """
+    # Skip cache reset for integration tests - they need sidecar mode
+    if "integration" in [mark.name for mark in request.node.iter_markers()]:
+        yield
+        return
+
+    # Only reset cache if running integration tests globally (cache would be set)
+    if os.environ.get("ELSPETH_RUN_INTEGRATION_TESTS") == "1":
+        try:
+            import elspeth.core.security.secure_data
+            # Reset cache AND set env var to standalone for non-integration tests
+            # (otherwise cache reset is useless - code will re-read env var and get "sidecar")
+            elspeth.core.security.secure_data._SIDECAR_MODE = None
+            os.environ["ELSPETH_SIDECAR_MODE"] = "standalone"
+        except (ImportError, AttributeError):
+            pass  # Module not loaded yet or _SIDECAR_MODE doesn't exist
+    yield
 
 
 _SANITIZATION_PREFIXES = tuple(prefix for prefix in DANGEROUS_PREFIXES if prefix != "'")

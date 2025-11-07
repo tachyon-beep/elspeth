@@ -1,0 +1,29 @@
+# Elspeth Sidecar Daemon Configuration
+
+# SECURITY MODE (REQUIRED - no default)
+# - "sidecar": Hardened production mode (secrets in Rust, UID separation)
+# - "standalone": Development mode (OFFICIAL:SENSITIVE ceiling, secrets in Python)
+#
+# ⚠️  STANDALONE MODE WARNING:
+# CVE-ADR-002-A-009 remains unfixed in standalone mode.
+# NOT APPROVED for SECRET data.
+# Use only for local development with OFFICIAL:SENSITIVE ceiling.
+mode = "sidecar"
+
+# Unix socket path (must be writable by sidecar UID, readable by appuser)
+socket_path = "/run/sidecar/auth.sock"
+
+# Session key file (must be readable by appuser, written by sidecar)
+session_key_path = "/run/sidecar/.session"
+
+# UID of orchestrator process (for SO_PEERCRED enforcement)
+appuser_uid = 1000
+
+# Grant TTL in seconds (default: 60s)
+grant_ttl_secs = 60
+
+# Maximum request size in bytes (default: 1MB)
+max_request_size_bytes = 1048576
+
+# Log level: trace, debug, info, warn, error
+log_level = "info"

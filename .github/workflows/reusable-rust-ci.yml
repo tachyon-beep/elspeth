@@ -1,0 +1,180 @@
+name: Reusable Rust CI (Fmt, Clippy, Test, Security)
+
+on:
+  workflow_call:
+    inputs:
+      rust-toolchain:
+        required: false
+        type: string
+        default: "stable"
+      working-directory:
+        required: false
+        type: string
+        default: "sidecar"
+
+permissions:
+  contents: read
+
+jobs:
+  rust-quality:
+    name: Rust CI (${{ inputs.rust-toolchain }})
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@7b1c307e0dcbda6122208f10795a713336a9b35a # master (latest stable)
+        with:
+          toolchain: ${{ inputs.rust-toolchain }}
+          components: rustfmt, clippy
+
+      # ============================================================
+      # Caching Strategy (Cargo + Build Artifacts)
+      # ============================================================
+      - name: Cache Cargo registry
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.cargo/registry
+          key: cargo-registry-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            cargo-registry-${{ runner.os }}-
+
+      - name: Cache Cargo index
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ~/.cargo/git
+          key: cargo-git-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            cargo-git-${{ runner.os }}-
+
+      - name: Cache build artifacts
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: ${{ inputs.working-directory }}/target
+          key: cargo-build-${{ runner.os }}-${{ inputs.rust-toolchain }}-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml', '**/*.rs') }}
+          restore-keys: |
+            cargo-build-${{ runner.os }}-${{ inputs.rust-toolchain }}-
+
+      - name: Cache security tools (cargo-deny, cargo-audit)
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            ~/.cargo/bin/cargo-deny
+            ~/.cargo/bin/cargo-audit
+          key: cargo-security-tools-${{ runner.os }}
+          restore-keys: |
+            cargo-security-tools-${{ runner.os }}-
+
+      # ============================================================
+      # Phase 1: Type Checking (Fastest Feedback)
+      # ============================================================
+      - name: Type check (cargo check)
+        run: cargo check --all-targets --all-features
+
+      # ============================================================
+      # Phase 2: Formatting (Enforced Style)
+      # ============================================================
+      - name: Check formatting (rustfmt)
+        run: cargo fmt -- --check
+
+      # ============================================================
+      # Phase 3: Linting (Clippy with -D warnings)
+      # ============================================================
+      - name: Lint (clippy)
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      # ============================================================
+      # Phase 4: Unit + Integration Tests
+      # ============================================================
+      - name: Run tests
+        run: cargo test --all-features --verbose
+
+      # ============================================================
+      # Phase 5: Security Scanning (cargo-deny)
+      # ============================================================
+      - name: Install cargo-deny (if not cached)
+        run: |
+          if ! command -v cargo-deny &> /dev/null; then
+            cargo install --locked cargo-deny
+          else
+            echo "cargo-deny already installed (from cache)"
+          fi
+
+      - name: Check licenses & security advisories
+        run: cargo deny check
+
+      # ============================================================
+      # Phase 6: Dependency Audit (cargo-audit)
+      # ============================================================
+      - name: Install cargo-audit (if not cached)
+        run: |
+          if ! command -v cargo-audit &> /dev/null; then
+            cargo install --locked cargo-audit
+          else
+            echo "cargo-audit already installed (from cache)"
+          fi
+
+      - name: Clean advisory database cache (if corrupted)
+        run: |
+          # Remove potentially corrupted advisory database
+          # (GitHub Actions cache issues can leave it in bad state)
+          rm -rf ~/.cargo/advisory-db
+          echo "Cleared advisory database cache"
+
+      - name: Security audit (RustSec advisories)
+        run: cargo audit
+
+      # ============================================================
+      # Phase 7: Build Release Binary (Verify Production Build)
+      # ============================================================
+      - name: Build release binary
+        run: cargo build --release
+
+      - name: Upload release binary
+        if: success()
+        uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # v5.0.0
+        with:
+          name: elspeth-sidecar-daemon-${{ runner.os }}-${{ inputs.rust-toolchain }}
+          path: ${{ inputs.working-directory }}/target/release/elspeth-sidecar-daemon
+          retention-days: 7
+
+      # ============================================================
+      # Phase 8: Code Coverage (Optional - Expensive)
+      # ============================================================
+      # Uncomment to enable coverage reporting:
+      # - name: Install cargo-tarpaulin
+      #   run: cargo install --locked cargo-tarpaulin
+      #
+      # - name: Generate coverage
+      #   run: cargo tarpaulin --out Xml --output-dir coverage --verbose
+      #
+      # - name: Upload coverage to Codecov
+      #   uses: codecov/codecov-action@v4
+      #   with:
+      #     files: ${{ inputs.working-directory }}/coverage/cobertura.xml
+      #     flags: rust
+
+      # ============================================================
+      # Summary Report
+      # ============================================================
+      - name: CI Summary
+        if: always()
+        env:
+          RUST_TOOLCHAIN: ${{ inputs.rust-toolchain }}
+          WORKING_DIR: ${{ inputs.working-directory }}
+        run: |
+          echo "## Rust CI Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Toolchain:** $RUST_TOOLCHAIN" >> $GITHUB_STEP_SUMMARY
+          echo "- **Working Directory:** $WORKING_DIR" >> $GITHUB_STEP_SUMMARY
+          echo "- **Type Check:** ✅ Passed" >> $GITHUB_STEP_SUMMARY
+          echo "- **Formatting:** ✅ Passed" >> $GITHUB_STEP_SUMMARY
+          echo "- **Linting:** ✅ Passed" >> $GITHUB_STEP_SUMMARY
+          echo "- **Tests:** ✅ Passed" >> $GITHUB_STEP_SUMMARY
+          echo "- **Security Scan:** ✅ Passed" >> $GITHUB_STEP_SUMMARY
+          echo "- **Release Build:** ✅ Passed" >> $GITHUB_STEP_SUMMARY

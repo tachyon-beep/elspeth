@@ -33,6 +33,9 @@ dependencies = [
   "matplotlib==3.10.7",      # Visual analytics sinks
   "seaborn==0.13.2",         # Enhanced visual analytics
   "statsmodels==0.14.5",     # Power analysis and planning
+  "cbor2==5.6.5",            # CBOR serialization for sidecar IPC
+  "blake3==0.4.1",           # Content-based digest for tamper detection
+  "pyarrow==19.0.0",         # Canonical Parquet serialization
 ]
 
 [project.optional-dependencies]
@@ -83,6 +86,8 @@ markers = [
   "integration: marks tests that require external services such as pgvector",
   "slow: marks tests that are slow to run and may be excluded from CI",
 ]
+# Note: ELSPETH_SIDECAR_MODE=standalone configured in tests/conftest.py
+# for compatibility without requiring pytest-env plugin
 
 [tool.ruff]
 line-length = 140

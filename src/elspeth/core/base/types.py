@@ -54,6 +54,26 @@ class SecurityLevel(str, Enum):
         """Support comparison for hierarchy enforcement."""
         return self == other or self > other
 
+    def to_level_int(self) -> int:
+        """Convert security level to integer for sidecar daemon protocol.
+
+        Returns:
+            Integer level (0-4):
+            - 0: UNOFFICIAL
+            - 1: OFFICIAL
+            - 2: OFFICIAL:SENSITIVE
+            - 3: PROTECTED
+            - 4: SECRET
+        """
+        order = [
+            SecurityLevel.UNOFFICIAL,
+            SecurityLevel.OFFICIAL,
+            SecurityLevel.OFFICIAL_SENSITIVE,
+            SecurityLevel.PROTECTED,
+            SecurityLevel.SECRET,
+        ]
+        return order.index(self)
+
     # Intentionally no from_string(): parsing is centralized in security.ensure_security_level
 
 

@@ -26,9 +26,10 @@ def test_direct_construction_blocked_without_token():
 
     Expected: SecurityValidationError with clear message referencing ADR-002-A
     """
+    # Match both standalone ("authorized factory methods") and sidecar ("construction ticket") mode messages
     with pytest.raises(
         SecurityValidationError,
-        match="SecureDataFrame can only be created via authorized factory methods",
+        match="(authorized factory methods|construction ticket)",
     ):
         # Attempt direct construction via __new__
         SecureDataFrame.__new__(SecureDataFrame)

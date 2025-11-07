@@ -159,7 +159,8 @@ def test_bypass_attempt_with_wrong_token_fails():
     forged_token = secrets.token_bytes(32)
 
     # Attempt to bypass factory with forged token
-    with pytest.raises(SecurityValidationError, match="authorized factory methods"):
+    # Match both standalone ("authorized factory methods") and sidecar ("construction ticket") mode messages
+    with pytest.raises(SecurityValidationError, match="(authorized factory methods|construction ticket)"):
         SecureDataFrame.__new__(SecureDataFrame, _token=forged_token)
 
 
@@ -172,7 +173,8 @@ def test_bypass_attempt_with_none_token_fails():
     """
     from elspeth.core.validation.base import SecurityValidationError
 
-    with pytest.raises(SecurityValidationError, match="authorized factory methods"):
+    # Match both standalone ("authorized factory methods") and sidecar ("construction ticket") mode messages
+    with pytest.raises(SecurityValidationError, match="(authorized factory methods|construction ticket)"):
         SecureDataFrame.__new__(SecureDataFrame, _token=None)
 
 
@@ -185,5 +187,6 @@ def test_bypass_attempt_without_token_fails():
     """
     from elspeth.core.validation.base import SecurityValidationError
 
-    with pytest.raises(SecurityValidationError, match="authorized factory methods"):
+    # Match both standalone ("authorized factory methods") and sidecar ("construction ticket") mode messages
+    with pytest.raises(SecurityValidationError, match="(authorized factory methods|construction ticket)"):
         SecureDataFrame.__new__(SecureDataFrame)

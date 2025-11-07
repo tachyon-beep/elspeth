@@ -58,7 +58,7 @@ class TestPropertyMinimumEnvelope:
         When: Computing minimum clearance envelope
         Then: Operating level = exact minimum of all plugin levels
         """
-        from tests.adr002_test_helpers import MockPlugin
+        from adr002_test_helpers import MockPlugin
 
         plugins = [MockPlugin(level) for level in plugin_levels]
         operating_level = compute_minimum_clearance_envelope(plugins)
@@ -89,7 +89,7 @@ class TestPropertyMinimumEnvelope:
         When: Computing minimum clearance envelope
         Then: Operating level ≤ every individual plugin level
         """
-        from tests.adr002_test_helpers import MockPlugin
+        from adr002_test_helpers import MockPlugin
 
         plugins = [MockPlugin(level) for level in plugin_levels]
         operating_level = compute_minimum_clearance_envelope(plugins)
@@ -167,7 +167,7 @@ class TestPropertyNoClassificationBreach:
         When: Computing envelope and validating plugins
         Then: Validation results match expected based on envelope and Bell-LaPadula rules
         """
-        from tests.adr002_test_helpers import MockPlugin
+        from adr002_test_helpers import MockPlugin
         from elspeth.core.validation.base import SecurityValidationError
 
         plugins = [MockPlugin(level) for level in plugin_levels]
@@ -393,7 +393,7 @@ class TestPropertyAdversarialEdgeCases:
         When: Computing minimum clearance envelope
         Then: Operating level = common level
         """
-        from tests.adr002_test_helpers import MockPlugin
+        from adr002_test_helpers import MockPlugin
 
         plugins = [MockPlugin(level) for _ in range(count)]
         operating_level = compute_minimum_clearance_envelope(plugins)
