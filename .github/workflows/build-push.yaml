@@ -89,9 +89,12 @@ jobs:
       # -----------------------------------------------------------------------
       - name: Determine registry targets
         id: registries
+        env:
+          ACR_REGISTRY: ${{ secrets.ACR_REGISTRY }}
+          INPUT_REGISTRY: ${{ github.event.inputs.registry }}
         run: |
           # Default to both for automatic triggers
-          REGISTRY="${{ github.event.inputs.registry || 'both' }}"
+          REGISTRY="${INPUT_REGISTRY:-both}"
 
           if [[ "$REGISTRY" == "ghcr" || "$REGISTRY" == "both" ]]; then
             echo "push_ghcr=true" >> $GITHUB_OUTPUT
@@ -101,7 +104,7 @@ jobs:
 
           if [[ "$REGISTRY" == "acr" || "$REGISTRY" == "both" ]]; then
             # Only push to ACR if credentials are configured
-            if [[ -n "${{ secrets.ACR_REGISTRY }}" ]]; then
+            if [[ -n "$ACR_REGISTRY" ]]; then
               echo "push_acr=true" >> $GITHUB_OUTPUT
             else
               echo "push_acr=false" >> $GITHUB_OUTPUT
@@ -193,20 +196,26 @@ jobs:
       # Summary
       # -----------------------------------------------------------------------
       - name: Print image summary
+        env:
+          ACR_REGISTRY: ${{ secrets.ACR_REGISTRY }}
+          PUSH_GHCR: ${{ steps.registries.outputs.push_ghcr }}
+          PUSH_ACR: ${{ steps.registries.outputs.push_acr }}
+          REPO_OWNER: ${{ github.repository_owner }}
+          GIT_SHA: ${{ github.sha }}
         run: |
           echo "## Docker Image Build Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Registry | Image | Status |" >> $GITHUB_STEP_SUMMARY
           echo "|----------|-------|--------|" >> $GITHUB_STEP_SUMMARY
 
-          if [[ "${{ steps.registries.outputs.push_ghcr }}" == "true" ]]; then
-            echo "| GHCR | \`ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}:sha-${{ github.sha }}\` | ✅ Pushed |" >> $GITHUB_STEP_SUMMARY
+          if [[ "$PUSH_GHCR" == "true" ]]; then
+            echo "| GHCR | \`ghcr.io/${REPO_OWNER}/${IMAGE_NAME}:sha-${GIT_SHA}\` | ✅ Pushed |" >> $GITHUB_STEP_SUMMARY
           else
             echo "| GHCR | - | ⏭️ Skipped |" >> $GITHUB_STEP_SUMMARY
           fi
 
-          if [[ "${{ steps.registries.outputs.push_acr }}" == "true" ]]; then
-            echo "| ACR | \`${{ secrets.ACR_REGISTRY }}/${{ env.IMAGE_NAME }}:sha-${{ github.sha }}\` | ✅ Pushed |" >> $GITHUB_STEP_SUMMARY
+          if [[ "$PUSH_ACR" == "true" ]]; then
+            echo "| ACR | \`${ACR_REGISTRY}/${IMAGE_NAME}:sha-${GIT_SHA}\` | ✅ Pushed |" >> $GITHUB_STEP_SUMMARY
           else
             echo "| ACR | - | ⏭️ Skipped |" >> $GITHUB_STEP_SUMMARY
           fi
