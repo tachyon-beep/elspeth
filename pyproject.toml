@@ -60,7 +60,7 @@ dependencies = [
     "structlog>=24.1",
 
     # Rate limiting
-    "pyrate-limiter>=3.1",
+    "pyrate-limiter>=3.7",  # Requires max_delay and raise_when_fail parameters
 
     # Diffing (for verify mode)
     "deepdiff>=7.0",
