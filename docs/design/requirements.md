@@ -1,9 +1,9 @@
 COMPLETE REQUIREMENTS LIST - ELSPETH Architecture
 =================================================
 
-**Last Updated:** 2026-01-21 (Comprehensive Multi-Agent Audit)
-**Audit Method:** 8 parallel explore agents verified each requirement against codebase
-**Previous Audit:** 2026-01-19
+**Last Updated:** 2026-01-22 (Comprehensive 10-Agent Post-P0-Fix Update)
+**Audit Method:** 10 parallel agents reviewed all sections after P0 payload storage fix
+**Previous Audit:** 2026-01-21
 
 Legend:
 - ✅ IMPLEMENTED - Code exists and matches requirement
@@ -66,8 +66,9 @@ Legend:
 | CFG-034 | 🆕 `landscape.export.sign` HMAC signing option | Phase 5 | ✅ IMPLEMENTED | `config.py:436-438` |
 | CFG-035 | 🆕 `CheckpointSettings` crash recovery config | Phase 5 | ✅ IMPLEMENTED | `config.py:529-549` - frequency modes |
 | CFG-036 | 🆕 `RetrySettings` backoff configuration | Phase 3 | ✅ IMPLEMENTED | `config.py:552-560` - max_attempts, delays |
-| CFG-037 | 🆕 `PayloadStoreSettings` storage config | Phase 4 | ✅ IMPLEMENTED | `config.py:563-573` - backend, path, retention |
+| CFG-037 | 🆕 `PayloadStoreSettings` storage config | Phase 4 | ✅ IMPLEMENTED | `config.py:563-573` - backend, path, retention; wired through engine (fix 3399faf) |
 | CFG-038 | 🆕 `RateLimitSettings` per-service limits | Phase 5 | ✅ IMPLEMENTED | `config.py:495-526` |
+| CFG-039 | 🆕 CLI payload store auto-instantiation | P0-fix-gap | ❌ NOT IMPLEMENTED | `cli.py:269-396` - run command missing PayloadStore wiring |
 
 ---
 
@@ -75,7 +76,7 @@ Legend:
 
 | Requirement ID | Requirement | Source | Status | Evidence |
 |----------------|-------------|--------|--------|----------|
-| CLI-001 | `elspeth --settings <file>` to run pipeline | README.md:116 | ✅ IMPLEMENTED | `cli.py:79-169` - `run -s/--settings --execute` |
+| CLI-001 | `elspeth --settings <file>` to run pipeline | README.md:116 | ⚠️ PARTIAL | `cli.py:79-169` - runs but missing payload_store wiring (see CFG-039) |
 | CLI-002 | `elspeth --profile <name>` for profile selection | README.md:208 | ❌ DEFERRED | Profile system not integrated |
 | CLI-003 | `elspeth explain --run <id> --row <id>` | README.md:122-136 | ✅ IMPLEMENTED | `cli.py:171-236` - with `--token` enhancement |
 | CLI-004 | `elspeth explain` with `--full` flag for auditor view | architecture.md:765-766 | 🔀 CHANGED | Has `--json` and `--no-tui` instead (format control) |
@@ -95,6 +96,7 @@ Legend:
 | CLI-013 | 🆕 `elspeth run --execute` safety gate | Safety | ✅ IMPLEMENTED | `cli.py:93-158` - required to actually run |
 | CLI-014 | 🆕 `elspeth explain --token` for DAG-precise lineage | Enhancement | ✅ IMPLEMENTED | `cli.py:184-189` |
 | CLI-015 | 🆕 `elspeth plugins list --type` filter | Enhancement | ✅ IMPLEMENTED | `cli.py:432-449` |
+| CLI-016 | 🆕 Payload store instantiation in run command | P0-fix-gap | ❌ NOT IMPLEMENTED | `cli.py:269-396` - _execute_pipeline() doesn't create payload_store |
 
 ---
 
@@ -158,6 +160,9 @@ Legend:
 | SDA-047 | 🆕 Batch replicate transform (N→M) | Phase 4 | ✅ IMPLEMENTED | `transforms/batch_replicate.py` |
 | SDA-048 | 🆕 Azure Content Safety transform | Phase 6 | ✅ IMPLEMENTED | `transforms/azure/content_safety.py` |
 | SDA-049 | 🆕 Azure Prompt Shield transform | Phase 6 | ✅ IMPLEMENTED | `transforms/azure/prompt_shield.py` |
+| SDA-051 | 🆕 Multi-query LLM transform (generic) | Phase 6 | ✅ IMPLEMENTED | `plugins/llm/multi_query.py` - cross-product evaluation |
+| SDA-052 | 🆕 Azure multi-query LLM transform | Phase 6 | ✅ IMPLEMENTED | `plugins/llm/azure_multi_query.py` - pooled multi-query |
+| SDA-053 | 🆕 Truncate transform | Phase 4 | ✅ IMPLEMENTED | `transforms/truncate.py` - field length enforcement |
 
 ### 3.3 Sinks
 
@@ -201,6 +206,14 @@ Legend:
 | RTE-003 | Fork creates child tokens with parent lineage | plugin-protocol.md:764-792 | ✅ IMPLEMENTED | `tokens.py:88-140`, `recorder.py:785-840` |
 | RTE-004 | Route resolution map for edge → destination | plugin-protocol.md:682-683 | ✅ IMPLEMENTED | `dag.py:get_route_resolution_map()` |
 | RTE-005 | Routing audit: condition, result, route, destination | plugin-protocol.md:724-726 | ✅ IMPLEMENTED | `recorder.py:1056-1162` |
+
+### 4.1 Gate Configuration Validation (🆕)
+
+| Requirement ID | Requirement | Source | Status | Evidence |
+|----------------|-------------|--------|--------|----------|
+| RTE-006 | 🆕 Boolean expression route label enforcement | Config validation | ✅ IMPLEMENTED | `config.py:265-296` - enforces {"true": X, "false": Y} for boolean conditions |
+| RTE-007 | 🆕 Reserved label protection for routes and forks | Config validation | ✅ IMPLEMENTED | `config.py:227-228, 250-251` - prevents collision with reserved labels |
+| RTE-008 | 🆕 Fork destination consistency validation | Config validation | ✅ IMPLEMENTED | `config.py:254-262` - requires fork_to when routes use 'fork' |
 
 ---
 
@@ -304,7 +317,7 @@ Legend:
 | LND-005 | `nodes.schema_hash` column | subsystems:113 | ✅ IMPLEMENTED | `schema.py:64` |
 | LND-006 | `edges` table for graph connections | subsystems:118-128 | ✅ IMPLEMENTED | `schema.py:74-85` |
 | LND-007 | `edges.default_mode` column (move/copy) | subsystems:126 | ✅ IMPLEMENTED | `schema.py:82` |
-| LND-008 | `rows` table for source rows | subsystems:130-140 | ✅ IMPLEMENTED | `schema.py:89-100` |
+| LND-008 | `rows` table for source rows | subsystems:130-140 | ✅ IMPLEMENTED | `schema.py:89-100` - Payload storage: `source_data_ref` populated via `tokens.py:create_initial_token()` (fix 3399faf) |
 | LND-009 | `tokens` table for row instances | subsystems:142-150 | ✅ IMPLEMENTED | `schema.py:104-116` |
 | LND-010 | `token_parents` table for joins | subsystems:152-159 | ✅ IMPLEMENTED | `schema.py:120-132` |
 | LND-011 | `node_states` table for processing | subsystems:161-179 | ✅ IMPLEMENTED | `schema.py:136-155` |
@@ -320,7 +333,7 @@ Legend:
 | Requirement ID | Requirement | Source | Status | Evidence |
 |----------------|-------------|--------|--------|----------|
 | LND-018 | Every run with resolved configuration | architecture.md:249-250 | ✅ IMPLEMENTED | `recorder.py:209-264` |
-| LND-019 | Every row loaded from source | architecture.md:252 | ✅ IMPLEMENTED | `recorder.py:670-721` |
+| LND-019 | Every row loaded from source | architecture.md:252 | ✅ IMPLEMENTED | `recorder.py:670-721` + `tokens.py:71-90` (payload storage - fix 3399faf) |
 | LND-020 | Every transform with before/after state | architecture.md:253 | ✅ IMPLEMENTED | `recorder.py:960-1086` |
 | LND-021 | Every external call recorded | architecture.md:254 | ✅ IMPLEMENTED | `recorder.py:1907-1997` |
 | LND-022 | Every routing decision with reason | architecture.md:255 | ✅ IMPLEMENTED | `recorder.py:1107-1227` |
@@ -357,6 +370,7 @@ Legend:
 | LND-043 | 🆕 Export status tracking (5 columns on runs) | Governance | ✅ IMPLEMENTED | `schema.py:40-44` |
 | LND-044 | 🆕 Export manifest with running hash chain | Governance | ✅ IMPLEMENTED | `exporter.py:131-143` |
 | LND-045 | 🆕 HMAC-SHA256 signing on export | Governance | ✅ IMPLEMENTED | `exporter.py:71-92` |
+| LND-046 | 🆕 Source row payload auto-persistence | P0-fix-3399faf | ✅ IMPLEMENTED | `tokens.py:76-80` stores payloads before row creation; integration test: `test_source_payload_storage.py` |
 
 ---
 
@@ -387,9 +401,29 @@ Legend:
 | PLD-003 | Filesystem backend | subsystems:670 | ✅ IMPLEMENTED | `payload_store.py:72-129` |
 | PLD-004 | S3/blob storage backend | subsystems:670 | ❌ NOT IMPLEMENTED | Phase 7 |
 | PLD-005 | Inline backend | subsystems:670 | ❌ NOT IMPLEMENTED | Not planned |
-| PLD-006 | Retention policies | architecture.md:539-549 | ⚠️ PARTIAL | Config exists; purge in separate module |
+| PLD-006 | Retention policies | architecture.md:539-549 | ⚠️ PARTIAL | Config exists; purge works; **CLI `run` command does not instantiate PayloadStore** |
 | PLD-007 | Hash retained after payload purge | architecture.md:546 | ✅ IMPLEMENTED | Schema separates hash from ref |
 | PLD-008 | Optional compression | subsystems:669 | ❌ NOT IMPLEMENTED | Not planned |
+
+### 9.1 Payload Store - Implementation Notes (🆕)
+
+**Engine Status:** ✅ COMPLETE
+- `Orchestrator.run()` and `resume()` accept `payload_store` parameter (orchestrator.py:406, 1136)
+- TokenManager stores payloads before creating row records (tokens.py:73-95)
+- Integration test passes when payload_store is provided (tests/integration/test_source_payload_storage.py)
+
+**CLI Integration Status:** ⚠️ PARTIAL
+- ✅ `resume` command: Creates FilesystemPayloadStore and passes to orchestrator (cli.py:925)
+- ✅ `purge` command: Creates FilesystemPayloadStore for retention cleanup (cli.py:632)
+- ❌ **`run` command: Does NOT create or pass PayloadStore** (cli.py:269-396)
+
+**Impact:**
+- Normal user-facing runs (`elspeth run -s settings.yaml --execute`) do NOT persist source row payloads
+- Engine infrastructure is complete but not wired through CLI entry point
+- `resume` works because it instantiates payload store; `run` does not
+- Violates CLAUDE.md non-negotiable audit requirement: "Source entry - Raw data stored before any processing"
+
+**Required Fix:** See CFG-039 and CLI-016
 
 ---
 
@@ -404,9 +438,9 @@ Legend:
 | FAI-005 | Token terminal states: COALESCED | architecture.md:579 | ✅ IMPLEMENTED | `enums.py:155` |
 | FAI-006 | Token terminal states: QUARANTINED | architecture.md:580 | ✅ IMPLEMENTED | `enums.py:153` |
 | FAI-007 | Token terminal states: FAILED | architecture.md:581 | ✅ IMPLEMENTED | `enums.py:152` |
-| FAI-008 | Terminal states DERIVED, not stored | architecture.md:571-572 | ✅ IMPLEMENTED | Comment at `enums.py:142-143` |
-| FAI-009 | Every token reaches exactly one terminal state | architecture.md:569 | ✅ IMPLEMENTED | Work queue ensures completion |
-| FAI-010 | `TransformResult` with status/row/reason/retryable | architecture.md:590-598 | ✅ IMPLEMENTED | `results.py:60-98` |
+| FAI-008 | Terminal states DERIVED, not stored | architecture.md:571-572 | ✅ IMPLEMENTED | `schema.py:344-354` - `token_outcomes` table; `recorder.py:1651-1713` - explicit recording |
+| FAI-009 | Every token reaches exactly one terminal state | architecture.md:569 | ⚠️ PARTIAL | 17 recording sites exist but orchestrator quarantine flow and coalesce parent tokens have gaps (P1 bugs) |
+| FAI-010 | `TransformResult` with status/row/reason/retryable | architecture.md:590-598 | ⚠️ PARTIAL | retryable flag exists but only exceptions trigger retries, not `TransformResult.error(retryable=True)` (P2 bug) |
 | FAI-011 | Retry key unique | architecture.md:603-605 | ✅ IMPLEMENTED | Uses (token_id, node_id, attempt) |
 | FAI-012 | Each retry attempt recorded separately | architecture.md:604 | ✅ IMPLEMENTED | `processor.py:131-190` |
 | FAI-013 | Backoff metadata captured | architecture.md:606 | ✅ IMPLEMENTED | `retry.py:47-58` |
@@ -416,8 +450,9 @@ Legend:
 
 | Requirement ID | Requirement | Source | Status | Evidence |
 |----------------|-------------|--------|--------|----------|
-| FAI-015 | 🆕 Token terminal states: EXPANDED | Deaggregation | ✅ IMPLEMENTED | `enums.py:170` |
-| FAI-016 | 🆕 Token non-terminal states: BUFFERED | Aggregation | ✅ IMPLEMENTED | `enums.py:173` |
+| FAI-015 | 🆕 Token terminal states: EXPANDED | Deaggregation | ✅ IMPLEMENTED | `enums.py:168` |
+| FAI-016 | 🆕 Token non-terminal states: BUFFERED | Aggregation | ✅ IMPLEMENTED | `enums.py:171` |
+| FAI-017 | 🆕 Token outcomes explicitly recorded to token_outcomes table | AUD-001 | ✅ IMPLEMENTED | `schema.py:344-354`, `recorder.py:1651-1713` |
 
 ---
 
@@ -426,12 +461,12 @@ Legend:
 | Requirement ID | Requirement | Source | Status | Evidence |
 |----------------|-------------|--------|--------|----------|
 | EXT-001 | Record: provider identifier | architecture.md:695 | ✅ IMPLEMENTED | CallType enum + provider metadata |
-| EXT-002 | Record: model/version | architecture.md:696 | ⚠️ PARTIAL | In call_metadata; not explicit column |
-| EXT-003 | Record: request hash + payload ref | architecture.md:697 | ✅ IMPLEMENTED | `schema.py:167-168` |
-| EXT-004 | Record: response hash + payload ref | architecture.md:698 | ✅ IMPLEMENTED | `schema.py:169-170` |
-| EXT-005 | Record: latency, status code, error details | architecture.md:699 | ✅ IMPLEMENTED | `schema.py:166,172-173` |
+| EXT-002 | Record: model/version | architecture.md:696 | ✅ IMPLEMENTED | provider in request_data, model in response_data, both hashed and stored via payload refs; `llm.py:148-156, 187-191`, `recorder.py:2005-2015` |
+| EXT-003 | Record: request hash + payload ref | architecture.md:697 | ✅ IMPLEMENTED | `schema.py:196-197` |
+| EXT-004 | Record: response hash + payload ref | architecture.md:698 | ✅ IMPLEMENTED | `schema.py:198-199` |
+| EXT-005 | Record: latency, status code, error details | architecture.md:699 | ✅ IMPLEMENTED | `schema.py:195,201-202` |
 | EXT-006 | Run modes: live, replay, verify | architecture.md:655-660 | ✅ IMPLEMENTED | `config.py:597-600` - RunMode enum |
-| EXT-007 | Verify mode uses DeepDiff | architecture.md:667-687 | ❌ NOT IMPLEMENTED | Phase 6 |
+| EXT-007 | Verify mode uses DeepDiff | architecture.md:667-687 | ✅ IMPLEMENTED | `verifier.py:1-95` - CallVerifier with DeepDiff comparison; `test_verifier.py` |
 | EXT-008 | Reproducibility grades: FULL_REPRODUCIBLE | architecture.md:644 | ✅ IMPLEMENTED | `reproducibility.py:28-36` |
 | EXT-009 | Reproducibility grades: REPLAY_REPRODUCIBLE | architecture.md:644 | ✅ IMPLEMENTED | `reproducibility.py:34` |
 | EXT-010 | Reproducibility grades: ATTRIBUTABLE_ONLY | architecture.md:644 | ✅ IMPLEMENTED | `reproducibility.py:36` |
@@ -444,12 +479,14 @@ Legend:
 |----------------|-------------|--------|--------|----------|
 | GOV-001 | Secrets NEVER stored - HMAC fingerprint only | CLAUDE.md | ✅ IMPLEMENTED | `config.py:904-1033` - two-phase fingerprinting |
 | GOV-002 | `secret_fingerprint()` function using HMAC | architecture.md:729-737 | ✅ IMPLEMENTED | `config.py:904-963` |
-| GOV-003 | Fingerprint key loaded from environment | architecture.md:746-749 | ✅ IMPLEMENTED | `ELSPETH_SECRET_FINGERPRINT_KEY` |
+| GOV-003 | Fingerprint key loaded from environment | architecture.md:746-749 | ✅ IMPLEMENTED | `ELSPETH_FINGERPRINT_KEY` |
 | GOV-004 | Configurable redaction profiles | architecture.md:708-711 | ❌ NOT IMPLEMENTED | Phase 5+ |
 | GOV-005 | Access levels: Operator (redacted) | architecture.md:753-755 | ❌ NOT IMPLEMENTED | No access control |
 | GOV-006 | Access levels: Auditor (full) | architecture.md:756 | ❌ NOT IMPLEMENTED | No access control |
 | GOV-007 | Access levels: Admin (retention/purge) | architecture.md:757 | ⚠️ PARTIAL | Purge exists; no auth |
 | GOV-008 | `elspeth explain --full` requires ELSPETH_AUDIT_ACCESS | architecture.md:760-766 | ❌ NOT IMPLEMENTED | No access control |
+| GOV-009 | 🆕 Azure Key Vault integration for fingerprint key | Security | ✅ IMPLEMENTED | `fingerprint.py:58-99` - `ELSPETH_KEYVAULT_URL`, `ELSPETH_KEYVAULT_SECRET_NAME` |
+| GOV-010 | 🆕 Recursive secret fingerprinting (nested structures) | Security | ✅ IMPLEMENTED | Config system handles nested secret structures |
 
 ---
 
@@ -517,7 +554,7 @@ Legend:
 | PRD-002 | Rate limiting using pyrate-limiter | architecture.md:970 | ✅ IMPLEMENTED | `rate_limit/limiter.py` |
 | PRD-003 | Retention and purge jobs | architecture.md:971 | ✅ IMPLEMENTED | `retention/purge.py` |
 | PRD-004 | Redaction profiles | architecture.md:972 | ❌ NOT IMPLEMENTED | Phase 5+ |
-| PRD-005 | Concurrent processing | README.md:183 | ⚠️ PARTIAL | Pool size configurable |
+| PRD-005 | Concurrent processing | README.md:183 | 🔀 DIVERGED | Config scaffolding exists (`max_workers`) but not integrated into orchestrator; LLM plugins use separate pooled execution |
 
 ---
 
@@ -542,7 +579,8 @@ Legend:
 | TSK-015 | Rate Limiting: pyrate-limiter | CLAUDE.md | ✅ IMPLEMENTED | `pyproject.toml:61` |
 | TSK-016 | Diffing: DeepDiff | CLAUDE.md | ✅ IMPLEMENTED | `pyproject.toml:64` |
 | TSK-017 | Property Testing: Hypothesis | CLAUDE.md | ✅ IMPLEMENTED | `pyproject.toml:72` |
-| TSK-018 | LLM: LiteLLM | CLAUDE.md | ✅ IMPLEMENTED | `pyproject.toml:83` (llm extra) |
+| TSK-018 | LLM: LiteLLM | CLAUDE.md | 🔀 DIVERGED | Declared in pyproject.toml:92 but not used; direct openai library used instead |
+| TSK-019 | 🆕 Template Engine: Jinja2 | Phase 6 | ✅ IMPLEMENTED | `pyproject.toml:89,100` - used for prompt templates and Azure path templating |
 
 ---
 
@@ -553,7 +591,7 @@ Legend:
 | EXP-001 | Export audit trail to configured sink | This plan | ✅ IMPLEMENTED | `exporter.py:94-143` |
 | EXP-002 | Optional HMAC signing per record | This plan | ✅ IMPLEMENTED | `exporter.py:71-92` |
 | EXP-003 | Manifest with final hash for tamper detection | This plan | ✅ IMPLEMENTED | `exporter.py:132-143` |
-| EXP-004 | CSV and JSON format options | This plan | ⚠️ PARTIAL | JSON preferred; CSV needs type-specific files |
+| EXP-004 | CSV and JSON format options | This plan | ✅ IMPLEMENTED | Both formats supported; CSV uses export_run_grouped() for type-specific files (exporter.py:352-382), JSON uses export_run() for JSONL stream (exporter.py:94-143) |
 | EXP-005 | Export happens post-run via config, not CLI | This plan | ✅ IMPLEMENTED | Settings YAML configures export |
 | EXP-006 | Include all record types (batches, token_parents) | Code review | ✅ IMPLEMENTED | All 12 record types exported |
 
@@ -578,13 +616,16 @@ Legend:
 | Requirement ID | Requirement | Source | Status | Evidence |
 |----------------|-------------|--------|--------|----------|
 | AUD-001 | 🆕 Every token reaches exactly one terminal state | Bug analysis | ✅ IMPLEMENTED | `token_outcomes` table with partial unique index; 17 recording sites in processor.py |
-| AUD-002 | 🆕 Explicit routing events (no inference from absence) | Bug analysis | ⚠️ PARTIAL | `continue` inferred; should be explicit |
-| AUD-003 | 🆕 Batch trigger type recorded | Bug analysis | ⚠️ PARTIAL | Column exists but unused |
-| AUD-004 | 🆕 Validation errors include node_id | Bug analysis | ⚠️ PARTIAL | node_id often NULL |
-| AUD-005 | 🆕 Payload store integrity verification on read | Bug analysis | ❌ MISSING | No hash verification |
-| AUD-006 | 🆕 Checkpoints created AFTER sink write | Bug analysis | ✅ FIXED | P0-fix-checkpoint-before-sink-write.md |
-| AUD-007 | 🆕 Aggregation flushes create node_state records | Bug analysis | ✅ FIXED | P0-fix-aggregation-batch-status-and-audit.md |
-| AUD-008 | 🆕 Transform on_error sinks validated at startup | Bug analysis | ✅ FIXED | P1-fix-transform-on-error-sink-validation.md |
+| AUD-002 | 🆕 Explicit routing events (no inference from absence) | Bug analysis | ✅ FIXED | Closed: P1-2026-01-19-gate-continue-routing-not-recorded.md |
+| AUD-003 | 🆕 Batch trigger type recorded | Bug analysis | ✅ FIXED | Closed: P1-2026-01-20-batch-trigger-type-not-recorded.md |
+| AUD-004 | 🆕 Validation errors include node_id | Bug analysis | ✅ FIXED | Closed: P1-2026-01-19-validation-errors-missing-node-id.md |
+| AUD-005 | 🆕 Payload store integrity verification on read | Bug analysis | ✅ FIXED | Closed: P1-2026-01-19-payload-store-integrity-and-hash-validation-missing.md |
+| AUD-006 | 🆕 Checkpoints created AFTER sink write | Bug analysis | ✅ FIXED | Closed: P0-2026-01-19-checkpoint-before-sink-write.md |
+| AUD-007 | 🆕 Aggregation flushes create node_state records | Bug analysis | ✅ FIXED | Closed: P0-2026-01-19-aggregation-batch-status-and-audit-missing.md |
+| AUD-008 | 🆕 Transform on_error sinks validated at startup | Bug analysis | ✅ FIXED | Closed: P1-2026-01-19-transform-on-error-sink-validation.md |
+| AUD-009 | 🆕 Source row payloads persisted before processing | Bug analysis | ✅ FIXED | Closed: P0-2026-01-22-source-row-payloads-never-persisted.md (commit 3399faf) |
+| AUD-010 | 🆕 Fork destinations validated at startup | Bug analysis | ✅ FIXED | Closed: P1-2026-01-20-fork-to-paths-empty-destinations-allowed.md |
+| AUD-011 | 🆕 Schema compatibility checks handle optional/Any types | Bug analysis | ✅ FIXED | Closed: P1-2026-01-20-schema-compatibility-check-fails-on-optional-and-any.md |
 
 ---
 
@@ -635,20 +676,41 @@ Legend:
 
 ## OPEN BUGS AFFECTING REQUIREMENTS
 
-The following P0/P1 bugs indicate requirements gaps that need attention:
+The following P1/P2 bugs indicate requirements gaps that need attention:
+
+### High Priority (P1) - 29 open bugs
+
+Critical bugs affecting core functionality:
 
 | Priority | Bug | Requirement Impact |
 |----------|-----|-------------------|
-| P1 | cli-explain-is-placeholder | CLI-003 at risk |
-| P1 | batch-trigger-type-not-recorded | AUD-003 partial |
-| P1 | fork-to-paths-empty-destinations-allowed | RTE-003 needs validation |
-| P1 | gate-continue-routing-not-recorded | AUD-002 partial |
-| P1 | validation-errors-missing-node-id | AUD-004 partial |
-| P1 | payload-store-integrity-missing | AUD-005 missing |
-| P1 | schema-compatibility-check-fails-on-optional | PLG-013 partial |
+| P1 | coalesce-timeouts-never-fired | SOP-015 (best_effort policy) broken |
+| P1 | coalesce-late-arrivals-duplicate-merge | SOP-012 (token merging) incomplete |
+| P1 | coalesce-parent-outcomes-missing | FAI-005 (COALESCED state) partial |
+| P1 | explain-returns-arbitrary-token | CLI-003, LND-025 (explain precision) broken |
+| P1 | artifact-descriptor-leaks-secrets | GOV-001 (secret handling) violated |
+| P1 | decimal-nan-infinity-bypass-rejection | CAN-004 (NaN rejection) bypassed |
+| P1 | csvsource-malformed-rows-crash | SDA-003 (CSV source) fragile |
+| P1 | jsonsource-array-parse-errors-crash | SDA-004 (JSON source) fragile |
+| P1 | csvsink-mode-unvalidated-truncation | SDA-023 (CSV sink) unsafe |
+| P1 | databasesink-noncanonical-hash | CAN-001 (canonical JSON) violated |
+| P1 | azure-batch-missing-audit-payloads | LND-021 (external calls) partial |
+| P1 | schema-validator-ignores-dag-routing | PLG-013 (schema validation) incomplete |
+| P1 | orchestrator-source-quarantine-outcome-missing | FAI-006 (QUARANTINED state) partial |
+| P1 | recovery-skips-rows-multi-sink | PRD-001 (checkpoint recovery) broken |
+| P1 | duplicate-gate-names-overwrite-mapping | RTE-002 (gate routing) unsafe |
+| P1 | duplicate-branch-names-break-coalesce | SOP-012 (coalesce) unsafe |
+
+### Medium Priority (P2) - 40 open bugs
+
+Affecting data integrity, performance, or edge cases. See `docs/bugs/open/P2-*.md` for full list.
+
+### Low Priority (P3) - 19 open bugs
+
+Minor issues, documentation, or tech debt. See `docs/bugs/open/P3-*.md` for full list.
 
 ---
 
-*Audit performed by 8 parallel explore agents on 2026-01-21*
-*Total requirements: 305 | Implemented: 268 (88%) | Partial: 25 (8%) | Not Implemented: 12 (4%)*
-*New requirements discovered: 60+*
+*Audit performed by 10 parallel agents on 2026-01-22 (comprehensive post-P0-fix update)*
+*Total requirements: 323 | Implemented: 281 (87%) | Partial: 28 (9%) | Not Implemented: 14 (4%)*
+*New requirements discovered: 77 (including P0 fix analysis, new transforms, and governance features)*

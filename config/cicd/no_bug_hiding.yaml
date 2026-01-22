@@ -251,10 +251,16 @@ allow_hits:
   # others use dynamic. The default value is well-defined.
   # ============================================================
 
-  - key: "engine/orchestrator.py:R1:Orchestrator:_execute_run:line=598"
+  - key: "engine/orchestrator.py:R1:Orchestrator:_execute_run:line=616"
     owner: "architecture"
     reason: "Optional schema config with explicit default - not all nodes define schemas"
     safety: "Default value is well-defined: dynamic fields"
+    expires: null  # Permanent - intentional design
+
+  - key: "engine/orchestrator.py:R2:Orchestrator:resume:line=1205"
+    owner: "architecture"
+    reason: "Optional protocol attribute: _schema_class only exists on sources with Pydantic schemas"
+    safety: "None default means source uses dynamic schema - type restoration skipped, backward compatible"
     expires: null  # Permanent - intentional design
 
 
@@ -546,13 +552,13 @@ allow_hits:
   # yet (forward-compatibility for incremental integration).
   # ============================================================
 
-  - key: "engine/processor.py:R1:RowProcessor:_process_single_token:line=706"
+  - key: "engine/processor.py:R1:RowProcessor:_process_single_token:line=708"
     owner: "architecture"
     reason: "Forward-compatibility: step map may not be fully populated during integration"
     safety: "None is valid - means coalesce step not yet computed, child skips coalesce"
     expires: null  # Permanent - intentional design
 
-  - key: "engine/processor.py:R1:RowProcessor:_process_single_token:line=926"
+  - key: "engine/processor.py:R1:RowProcessor:_process_single_token:line=928"
     owner: "architecture"
     reason: "Forward-compatibility: step map may not be fully populated during integration"
     safety: "None is valid - means coalesce step not yet computed, child skips coalesce"
@@ -857,31 +863,31 @@ allow_hits:
   # to report system state rather than crash.
   # ============================================================
 
-  - key: "cli.py:R1:health:line=1007"
+  - key: "cli.py:R1:health:line=1025"
     owner: "architecture"
     reason: "Trust boundary: environment variable GIT_COMMIT_SHA is optional external input"
     safety: "Empty string default is safe - commit SHA is informational only"
     expires: null  # Permanent - intentional design
 
-  - key: "cli.py:R4:health:line=1019"
+  - key: "cli.py:R4:health:line=1037"
     owner: "architecture"
     reason: "Trust boundary: git subprocess may fail for many reasons (not installed, not a repo, etc.)"
     safety: "Graceful fallback to 'unknown' - health check reports git as unavailable"
     expires: null  # Permanent - intentional design
 
-  - key: "cli.py:R1:health:line=1035"
+  - key: "cli.py:R1:health:line=1053"
     owner: "architecture"
     reason: "Trust boundary: environment variable DATABASE_URL is optional external input"
     safety: "Empty string default triggers skip logic - database check only runs if configured"
     expires: null  # Permanent - intentional design
 
-  - key: "cli.py:R4:health:line=1047"
+  - key: "cli.py:R4:health:line=1065"
     owner: "architecture"
     reason: "Trust boundary: database connection may fail for many reasons (network, auth, etc.)"
     safety: "Error recorded in checks dict with status='error' - health check reports DB as unhealthy"
     expires: null  # Permanent - intentional design
 
-  - key: "cli.py:R4:health:line=1111"
+  - key: "cli.py:R4:health:line=1129"
     owner: "architecture"
     reason: "Trust boundary: plugin manager initialization may fail due to misconfiguration"
     safety: "Error recorded in checks dict with status='error' - health check reports plugins as unhealthy"

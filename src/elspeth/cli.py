@@ -88,8 +88,26 @@ def main(
         "--no-dotenv",
         help="Skip loading .env file.",
     ),
+    verbose: bool = typer.Option(
+        False,
+        "--verbose",
+        "-v",
+        help="Enable verbose/debug logging.",
+    ),
+    json_logs: bool = typer.Option(
+        False,
+        "--json-logs",
+        help="Output structured JSON logs (for machine processing).",
+    ),
 ) -> None:
     """ELSPETH: Auditable Sense/Decide/Act pipelines."""
+    # Configure logging at entry point (before any subcommands run)
+    # CRITICAL: This must be called early so container logs appear in stdout
+    from elspeth.core.logging import configure_logging
+
+    log_level = "DEBUG" if verbose else "INFO"
+    configure_logging(json_output=json_logs, level=log_level)
+
     if not no_dotenv:
         _load_dotenv()
 

@@ -152,16 +152,32 @@ class RecoveryManager:
         self,
         run_id: str,
         payload_store: PayloadStore,
+        *,
+        source_schema_class: type[Any] | None = None,
     ) -> list[tuple[str, int, dict[str, Any]]]:
-        """Get row data for unprocessed rows.
+        """Get row data for unprocessed rows with type fidelity preservation.
 
         Retrieves actual row data (not just IDs) for rows that need
         processing during resume. Returns tuples of (row_id, row_index, row_data)
         ordered by row_index for deterministic processing.
 
+        IMPORTANT: Type Fidelity Preservation
+        ---------------------------------------
+        Payloads are stored via canonical_json(), which normalizes non-JSON types:
+        - datetime → ISO string ("2024-01-01T00:00:00+00:00")
+        - Decimal → string ("42.50")
+        - pandas/numpy scalars → primitives
+
+        On resume, json.loads() returns degraded types (all strings). To restore
+        type fidelity, pass source_schema_class to re-validate rows through the
+        source's Pydantic schema, which will re-coerce strings back to typed values.
+
         Args:
             run_id: The run to get unprocessed rows for
             payload_store: PayloadStore for retrieving row data
+            source_schema_class: Optional Pydantic schema class for type restoration.
+                If provided, degraded JSON data is re-validated through this schema
+                to restore datetime, Decimal, and other coerced types.
 
         Returns:
             List of (row_id, row_index, row_data) tuples, ordered by row_index.
@@ -195,9 +211,20 @@ class RecoveryManager:
                 # Retrieve from payload store
                 try:
                     payload_bytes = payload_store.retrieve(source_data_ref)
-                    row_data = json.loads(payload_bytes.decode("utf-8"))
+                    degraded_data = json.loads(payload_bytes.decode("utf-8"))
                 except KeyError:
                     raise ValueError(f"Row {row_id} payload has been purged - cannot resume") from None
+
+                # TYPE FIDELITY RESTORATION:
+                # If source schema is provided, re-validate to restore types.
+                # This is critical for datetime, Decimal, and other coerced types
+                # that canonical_json normalizes to strings.
+                if source_schema_class is not None:
+                    validated = source_schema_class.model_validate(degraded_data)
+                    row_data = validated.to_row()
+                else:
+                    # No schema provided - return degraded types (backward compatibility)
+                    row_data = degraded_data
 
                 result.append((row_id, row_index, row_data))
 

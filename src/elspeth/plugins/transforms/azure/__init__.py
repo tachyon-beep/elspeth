@@ -1,17 +1,9 @@
-"""Azure transform plugins."""
+"""Azure transform plugins.
 
-from elspeth.plugins.transforms.azure.content_safety import (
-    AzureContentSafety,
-    AzureContentSafetyConfig,
-)
-from elspeth.plugins.transforms.azure.prompt_shield import (
-    AzurePromptShield,
-    AzurePromptShieldConfig,
-)
+Provides Azure-specific transforms for content safety and prompt shielding.
 
-__all__ = [
-    "AzureContentSafety",
-    "AzureContentSafetyConfig",
-    "AzurePromptShield",
-    "AzurePromptShieldConfig",
-]
+Plugins are accessed via PluginManager, not direct imports:
+    manager = PluginManager()
+    manager.register_builtin_plugins()
+    transform = manager.get_transform_by_name("azure_content_safety")
+"""

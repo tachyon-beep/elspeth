@@ -61,7 +61,7 @@ nodes_table = Table(
     Column("sequence_in_pipeline", Integer),
     Column("registered_at", DateTime(timezone=True), nullable=False),
     # Schema configuration for audit trail (WP-11.99)
-    Column("schema_mode", String(16)),  # "dynamic", "strict", "free", or NULL
+    Column("schema_mode", String(16)),  # "dynamic", "strict", "free", "parse", or NULL
     Column("schema_fields_json", Text),  # JSON array of field definitions, or NULL
 )
 
@@ -309,7 +309,7 @@ validation_errors_table = Table(
     Column("row_hash", String(64), nullable=False),
     Column("row_data_json", Text),  # Store the row for debugging
     Column("error", Text, nullable=False),
-    Column("schema_mode", String(16), nullable=False),  # "strict", "free", "dynamic"
+    Column("schema_mode", String(16), nullable=False),  # "strict", "free", "dynamic", "parse"
     Column("destination", String(255), nullable=False),  # Sink name or "discard"
     Column("created_at", DateTime(timezone=True), nullable=False),
 )

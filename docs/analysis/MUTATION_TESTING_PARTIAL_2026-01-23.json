@@ -1,0 +1,1443 @@
+{
+  "timestamp": "2026-01-23T08:07:56.397530",
+  "progress": {
+    "tested": 1602,
+    "total": 2723,
+    "remaining": 1121
+  },
+  "stats": {
+    "bad_survived": 285,
+    "bad_timeout": 1,
+    "ok_killed": 1280,
+    "ok_suspicious": 36,
+    "untested": 1121
+  },
+  "kill_rate": 79.9,
+  "survivors": [
+    {
+      "file": "src/elspeth/core/canonical.py",
+      "line": 47,
+      "mutant_id": 2724
+    },
+    {
+      "file": "src/elspeth/core/checkpoint/manager.py",
+      "line": 53,
+      "mutant_id": 1361
+    },
+    {
+      "file": "src/elspeth/core/checkpoint/manager.py",
+      "line": 53,
+      "mutant_id": 1362
+    },
+    {
+      "file": "src/elspeth/core/checkpoint/manager.py",
+      "line": 96,
+      "mutant_id": 1368
+    },
+    {
+      "file": "src/elspeth/core/checkpoint/recovery.py",
+      "line": 31,
+      "mutant_id": 1377
+    },
+    {
+      "file": "src/elspeth/core/checkpoint/recovery.py",
+      "line": 35,
+      "mutant_id": 1381
+    },
+    {
+      "file": "src/elspeth/core/checkpoint/recovery.py",
+      "line": 37,
+      "mutant_id": 1385
+    },
+    {
+      "file": "src/elspeth/core/checkpoint/recovery.py",
+      "line": 100,
+      "mutant_id": 1392
+    },
+    {
+      "file": "src/elspeth/core/checkpoint/recovery.py",
+      "line": 103,
+      "mutant_id": 1395
+    },
+    {
+      "file": "src/elspeth/core/checkpoint/recovery.py",
+      "line": 106,
+      "mutant_id": 1398
+    },
+    {
+      "file": "src/elspeth/core/checkpoint/recovery.py",
+      "line": 110,
+      "mutant_id": 1402
+    },
+    {
+      "file": "src/elspeth/core/checkpoint/recovery.py",
+      "line": 138,
+      "mutant_id": 1408
+    },
+    {
+      "file": "src/elspeth/core/checkpoint/recovery.py",
+      "line": 186,
+      "mutant_id": 1416
+    },
+    {
+      "file": "src/elspeth/core/checkpoint/recovery.py",
+      "line": 192,
+      "mutant_id": 1420
+    },
+    {
+      "file": "src/elspeth/core/checkpoint/recovery.py",
+      "line": 199,
+      "mutant_id": 1424
+    },
+    {
+      "file": "src/elspeth/core/checkpoint/recovery.py",
+      "line": 243,
+      "mutant_id": 1432
+    },
+    {
+      "file": "src/elspeth/core/checkpoint/recovery.py",
+      "line": 244,
+      "mutant_id": 1433
+    },
+    {
+      "file": "src/elspeth/core/landscape/lineage.py",
+      "line": 58,
+      "mutant_id": 379
+    },
+    {
+      "file": "src/elspeth/core/landscape/models.py",
+      "line": 38,
+      "mutant_id": 284
+    },
+    {
+      "file": "src/elspeth/core/landscape/models.py",
+      "line": 39,
+      "mutant_id": 286
+    },
+    {
+      "file": "src/elspeth/core/landscape/models.py",
+      "line": 41,
+      "mutant_id": 288
+    },
+    {
+      "file": "src/elspeth/core/landscape/models.py",
+      "line": 42,
+      "mutant_id": 290
+    },
+    {
+      "file": "src/elspeth/core/landscape/models.py",
+      "line": 43,
+      "mutant_id": 292
+    },
+    {
+      "file": "src/elspeth/core/landscape/models.py",
+      "line": 44,
+      "mutant_id": 294
+    },
+    {
+      "file": "src/elspeth/core/landscape/models.py",
+      "line": 45,
+      "mutant_id": 296
+    },
+    {
+      "file": "src/elspeth/core/landscape/models.py",
+      "line": 61,
+      "mutant_id": 299
+    },
+    {
+      "file": "src/elspeth/core/landscape/models.py",
+      "line": 62,
+      "mutant_id": 301
+    },
+    {
+      "file": "src/elspeth/core/landscape/models.py",
+      "line": 88,
+      "mutant_id": 305
+    },
+    {
+      "file": "src/elspeth/core/landscape/models.py",
+      "line": 98,
+      "mutant_id": 308
+    },
+    {
+      "file": "src/elspeth/core/landscape/models.py",
+      "line": 99,
+      "mutant_id": 310
+    },
+    {
+      "file": "src/elspeth/core/landscape/models.py",
+      "line": 100,
+      "mutant_id": 312
+    },
+    {
+      "file": "src/elspeth/core/landscape/models.py",
+      "line": 101,
+      "mutant_id": 314
+    },
+    {
+      "file": "src/elspeth/core/landscape/models.py",
+      "line": 102,
+      "mutant_id": 316
+    },
+    {
+      "file": "src/elspeth/core/landscape/models.py",
+      "line": 137,
+      "mutant_id": 321
+    },
+    {
+      "file": "src/elspeth/core/landscape/models.py",
+      "line": 164,
+      "mutant_id": 325
+    },
+    {
+      "file": "src/elspeth/core/landscape/models.py",
+      "line": 165,
+      "mutant_id": 327
+    },
+    {
+      "file": "src/elspeth/core/landscape/models.py",
+      "line": 191,
+      "mutant_id": 331
+    },
+    {
+      "file": "src/elspeth/core/landscape/models.py",
+      "line": 192,
+      "mutant_id": 333
+    },
+    {
+      "file": "src/elspeth/core/landscape/models.py",
+      "line": 193,
+      "mutant_id": 335
+    },
+    {
+      "file": "src/elspeth/core/landscape/models.py",
+      "line": 194,
+      "mutant_id": 337
+    },
+    {
+      "file": "src/elspeth/core/landscape/models.py",
+      "line": 198,
+      "mutant_id": 339
+    },
+    {
+      "file": "src/elspeth/core/landscape/models.py",
+      "line": 198,
+      "mutant_id": 340
+    },
+    {
+      "file": "src/elspeth/core/landscape/models.py",
+      "line": 222,
+      "mutant_id": 343
+    },
+    {
+      "file": "src/elspeth/core/landscape/models.py",
+      "line": 223,
+      "mutant_id": 345
+    },
+    {
+      "file": "src/elspeth/core/landscape/models.py",
+      "line": 224,
+      "mutant_id": 347
+    },
+    {
+      "file": "src/elspeth/core/landscape/models.py",
+      "line": 225,
+      "mutant_id": 349
+    },
+    {
+      "file": "src/elspeth/core/landscape/models.py",
+      "line": 226,
+      "mutant_id": 351
+    },
+    {
+      "file": "src/elspeth/core/landscape/models.py",
+      "line": 242,
+      "mutant_id": 354
+    },
+    {
+      "file": "src/elspeth/core/landscape/models.py",
+      "line": 256,
+      "mutant_id": 357
+    },
+    {
+      "file": "src/elspeth/core/landscape/models.py",
+      "line": 257,
+      "mutant_id": 359
+    },
+    {
+      "file": "src/elspeth/core/landscape/models.py",
+      "line": 270,
+      "mutant_id": 362
+    },
+    {
+      "file": "src/elspeth/core/landscape/models.py",
+      "line": 271,
+      "mutant_id": 364
+    },
+    {
+      "file": "src/elspeth/core/landscape/models.py",
+      "line": 272,
+      "mutant_id": 366
+    },
+    {
+      "file": "src/elspeth/core/landscape/models.py",
+      "line": 273,
+      "mutant_id": 368
+    },
+    {
+      "file": "src/elspeth/core/landscape/models.py",
+      "line": 308,
+      "mutant_id": 373
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 22,
+      "mutant_id": 854
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 52,
+      "mutant_id": 891
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 65,
+      "mutant_id": 921
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 73,
+      "mutant_id": 926
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 74,
+      "mutant_id": 930
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 76,
+      "mutant_id": 938
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 79,
+      "mutant_id": 947
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 79,
+      "mutant_id": 948
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 79,
+      "mutant_id": 949
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 80,
+      "mutant_id": 950
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 88,
+      "mutant_id": 955
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 90,
+      "mutant_id": 963
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 94,
+      "mutant_id": 973
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 94,
+      "mutant_id": 974
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 95,
+      "mutant_id": 975
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 103,
+      "mutant_id": 980
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 110,
+      "mutant_id": 998
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 120,
+      "mutant_id": 1008
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 123,
+      "mutant_id": 1016
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 134,
+      "mutant_id": 1035
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 151,
+      "mutant_id": 1043
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 153,
+      "mutant_id": 1047
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 158,
+      "mutant_id": 1051
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 159,
+      "mutant_id": 1053
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 159,
+      "mutant_id": 1054
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 160,
+      "mutant_id": 1055
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 168,
+      "mutant_id": 1060
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 169,
+      "mutant_id": 1064
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 170,
+      "mutant_id": 1068
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 171,
+      "mutant_id": 1070
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 181,
+      "mutant_id": 1090
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 181,
+      "mutant_id": 1091
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 181,
+      "mutant_id": 1092
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 182,
+      "mutant_id": 1093
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 182,
+      "mutant_id": 1094
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 182,
+      "mutant_id": 1095
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 183,
+      "mutant_id": 1096
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 191,
+      "mutant_id": 1101
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 192,
+      "mutant_id": 1105
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 202,
+      "mutant_id": 1127
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 202,
+      "mutant_id": 1128
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 203,
+      "mutant_id": 1129
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 211,
+      "mutant_id": 1134
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 225,
+      "mutant_id": 1162
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 233,
+      "mutant_id": 1167
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 235,
+      "mutant_id": 1175
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 236,
+      "mutant_id": 1178
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 241,
+      "mutant_id": 1190
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 241,
+      "mutant_id": 1191
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 242,
+      "mutant_id": 1192
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 250,
+      "mutant_id": 1197
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 251,
+      "mutant_id": 1202
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 251,
+      "mutant_id": 1204
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 252,
+      "mutant_id": 1206
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 253,
+      "mutant_id": 1209
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 254,
+      "mutant_id": 1211
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 255,
+      "mutant_id": 1213
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 255,
+      "mutant_id": 1214
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 256,
+      "mutant_id": 1215
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 256,
+      "mutant_id": 1216
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 256,
+      "mutant_id": 1217
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 257,
+      "mutant_id": 1219
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 257,
+      "mutant_id": 1220
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 258,
+      "mutant_id": 1222
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 259,
+      "mutant_id": 1223
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 264,
+      "mutant_id": 1225
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 264,
+      "mutant_id": 1226
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 264,
+      "mutant_id": 1228
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 265,
+      "mutant_id": 1229
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 265,
+      "mutant_id": 1230
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 265,
+      "mutant_id": 1232
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 266,
+      "mutant_id": 1233
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 266,
+      "mutant_id": 1234
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 267,
+      "mutant_id": 1235
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 267,
+      "mutant_id": 1236
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 268,
+      "mutant_id": 1237
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 268,
+      "mutant_id": 1238
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 269,
+      "mutant_id": 1239
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 274,
+      "mutant_id": 1241
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 274,
+      "mutant_id": 1242
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 274,
+      "mutant_id": 1243
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 275,
+      "mutant_id": 1244
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 275,
+      "mutant_id": 1245
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 275,
+      "mutant_id": 1247
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 276,
+      "mutant_id": 1248
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 276,
+      "mutant_id": 1249
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 276,
+      "mutant_id": 1250
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 277,
+      "mutant_id": 1251
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 277,
+      "mutant_id": 1252
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 277,
+      "mutant_id": 1253
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 278,
+      "mutant_id": 1254
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 278,
+      "mutant_id": 1255
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 278,
+      "mutant_id": 1256
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 279,
+      "mutant_id": 1257
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 283,
+      "mutant_id": 1258
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 284,
+      "mutant_id": 1259
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 285,
+      "mutant_id": 1260
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 286,
+      "mutant_id": 1261
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 287,
+      "mutant_id": 1262
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 290,
+      "mutant_id": 1263
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 291,
+      "mutant_id": 1264
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 292,
+      "mutant_id": 1265
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 293,
+      "mutant_id": 1266
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 294,
+      "mutant_id": 1267
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 295,
+      "mutant_id": 1268
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 296,
+      "mutant_id": 1269
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 297,
+      "mutant_id": 1270
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 298,
+      "mutant_id": 1271
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 303,
+      "mutant_id": 1272
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 305,
+      "mutant_id": 1273
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 305,
+      "mutant_id": 1274
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 305,
+      "mutant_id": 1275
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 306,
+      "mutant_id": 1276
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 306,
+      "mutant_id": 1277
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 306,
+      "mutant_id": 1279
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 307,
+      "mutant_id": 1280
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 307,
+      "mutant_id": 1281
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 308,
+      "mutant_id": 1283
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 308,
+      "mutant_id": 1284
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 309,
+      "mutant_id": 1285
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 310,
+      "mutant_id": 1286
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 310,
+      "mutant_id": 1287
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 311,
+      "mutant_id": 1288
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 311,
+      "mutant_id": 1289
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 311,
+      "mutant_id": 1290
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 312,
+      "mutant_id": 1291
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 312,
+      "mutant_id": 1292
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 312,
+      "mutant_id": 1293
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 313,
+      "mutant_id": 1294
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 313,
+      "mutant_id": 1295
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 313,
+      "mutant_id": 1296
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 314,
+      "mutant_id": 1297
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 316,
+      "mutant_id": 1298
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 317,
+      "mutant_id": 1299
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 322,
+      "mutant_id": 1300
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 324,
+      "mutant_id": 1302
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 324,
+      "mutant_id": 1303
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 325,
+      "mutant_id": 1304
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 325,
+      "mutant_id": 1305
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 325,
+      "mutant_id": 1307
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 326,
+      "mutant_id": 1308
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 326,
+      "mutant_id": 1309
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 326,
+      "mutant_id": 1310
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 327,
+      "mutant_id": 1311
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 327,
+      "mutant_id": 1312
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 327,
+      "mutant_id": 1313
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 328,
+      "mutant_id": 1315
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 328,
+      "mutant_id": 1316
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 331,
+      "mutant_id": 1320
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 331,
+      "mutant_id": 1321
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 332,
+      "mutant_id": 1323
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 332,
+      "mutant_id": 1324
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 333,
+      "mutant_id": 1325
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 335,
+      "mutant_id": 1326
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 336,
+      "mutant_id": 1327
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 337,
+      "mutant_id": 1328
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 344,
+      "mutant_id": 1331
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 344,
+      "mutant_id": 1332
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 345,
+      "mutant_id": 1333
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 345,
+      "mutant_id": 1334
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 345,
+      "mutant_id": 1336
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 346,
+      "mutant_id": 1338
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 346,
+      "mutant_id": 1340
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 347,
+      "mutant_id": 1342
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 347,
+      "mutant_id": 1344
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 348,
+      "mutant_id": 1345
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 348,
+      "mutant_id": 1346
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 350,
+      "mutant_id": 1349
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 350,
+      "mutant_id": 1350
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 351,
+      "mutant_id": 1351
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 353,
+      "mutant_id": 1352
+    },
+    {
+      "file": "src/elspeth/core/landscape/schema.py",
+      "line": 355,
+      "mutant_id": 1353
+    },
+    {
+      "file": "src/elspeth/engine/orchestrator.py",
+      "line": 36,
+      "mutant_id": 1440
+    },
+    {
+      "file": "src/elspeth/engine/orchestrator.py",
+      "line": 36,
+      "mutant_id": 1441
+    },
+    {
+      "file": "src/elspeth/engine/orchestrator.py",
+      "line": 67,
+      "mutant_id": 1445
+    },
+    {
+      "file": "src/elspeth/engine/orchestrator.py",
+      "line": 68,
+      "mutant_id": 1446
+    },
+    {
+      "file": "src/elspeth/engine/orchestrator.py",
+      "line": 81,
+      "mutant_id": 1448
+    },
+    {
+      "file": "src/elspeth/engine/orchestrator.py",
+      "line": 81,
+      "mutant_id": 1449
+    },
+    {
+      "file": "src/elspeth/engine/orchestrator.py",
+      "line": 82,
+      "mutant_id": 1450
+    },
+    {
+      "file": "src/elspeth/engine/orchestrator.py",
+      "line": 82,
+      "mutant_id": 1451
+    },
+    {
+      "file": "src/elspeth/engine/orchestrator.py",
+      "line": 83,
+      "mutant_id": 1452
+    },
+    {
+      "file": "src/elspeth/engine/orchestrator.py",
+      "line": 83,
+      "mutant_id": 1453
+    },
+    {
+      "file": "src/elspeth/engine/orchestrator.py",
+      "line": 84,
+      "mutant_id": 1454
+    },
+    {
+      "file": "src/elspeth/engine/orchestrator.py",
+      "line": 84,
+      "mutant_id": 1455
+    },
+    {
+      "file": "src/elspeth/engine/orchestrator.py",
+      "line": 85,
+      "mutant_id": 1456
+    },
+    {
+      "file": "src/elspeth/engine/orchestrator.py",
+      "line": 85,
+      "mutant_id": 1457
+    },
+    {
+      "file": "src/elspeth/engine/orchestrator.py",
+      "line": 119,
+      "mutant_id": 1458
+    },
+    {
+      "file": "src/elspeth/engine/orchestrator.py",
+      "line": 151,
+      "mutant_id": 1471
+    },
+    {
+      "file": "src/elspeth/engine/orchestrator.py",
+      "line": 153,
+      "mutant_id": 1473
+    },
+    {
+      "file": "src/elspeth/engine/orchestrator.py",
+      "line": 153,
+      "mutant_id": 1474
+    },
+    {
+      "file": "src/elspeth/engine/orchestrator.py",
+      "line": 196,
+      "mutant_id": 1489
+    },
+    {
+      "file": "src/elspeth/engine/orchestrator.py",
+      "line": 230,
+      "mutant_id": 1491
+    },
+    {
+      "file": "src/elspeth/engine/orchestrator.py",
+      "line": 231,
+      "mutant_id": 1492
+    },
+    {
+      "file": "src/elspeth/engine/orchestrator.py",
+      "line": 232,
+      "mutant_id": 1493
+    },
+    {
+      "file": "src/elspeth/engine/orchestrator.py",
+      "line": 235,
+      "mutant_id": 1494
+    },
+    {
+      "file": "src/elspeth/engine/orchestrator.py",
+      "line": 237,
+      "mutant_id": 1495
+    },
+    {
+      "file": "src/elspeth/engine/orchestrator.py",
+      "line": 238,
+      "mutant_id": 1496
+    },
+    {
+      "file": "src/elspeth/engine/orchestrator.py",
+      "line": 245,
+      "mutant_id": 1500
+    },
+    {
+      "file": "src/elspeth/engine/orchestrator.py",
+      "line": 249,
+      "mutant_id": 1503
+    },
+    {
+      "file": "src/elspeth/engine/orchestrator.py",
+      "line": 255,
+      "mutant_id": 1506
+    },
+    {
+      "file": "src/elspeth/engine/orchestrator.py",
+      "line": 256,
+      "mutant_id": 1507
+    },
+    {
+      "file": "src/elspeth/engine/orchestrator.py",
+      "line": 257,
+      "mutant_id": 1508
+    },
+    {
+      "file": "src/elspeth/engine/orchestrator.py",
+      "line": 283,
+      "mutant_id": 1510
+    },
+    {
+      "file": "src/elspeth/engine/orchestrator.py",
+      "line": 290,
+      "mutant_id": 1513
+    },
+    {
+      "file": "src/elspeth/engine/orchestrator.py",
+      "line": 294,
+      "mutant_id": 1516
+    },
+    {
+      "file": "src/elspeth/engine/orchestrator.py",
+      "line": 299,
+      "mutant_id": 1518
+    },
+    {
+      "file": "src/elspeth/engine/orchestrator.py",
+      "line": 300,
+      "mutant_id": 1519
+    },
+    {
+      "file": "src/elspeth/engine/orchestrator.py",
+      "line": 301,
+      "mutant_id": 1520
+    },
+    {
+      "file": "src/elspeth/engine/orchestrator.py",
+      "line": 302,
+      "mutant_id": 1521
+    },
+    {
+      "file": "src/elspeth/engine/orchestrator.py",
+      "line": 337,
+      "mutant_id": 1527
+    },
+    {
+      "file": "src/elspeth/engine/orchestrator.py",
+      "line": 344,
+      "mutant_id": 1529
+    },
+    {
+      "file": "src/elspeth/engine/orchestrator.py",
+      "line": 345,
+      "mutant_id": 1530
+    },
+    {
+      "file": "src/elspeth/engine/orchestrator.py",
+      "line": 346,
+      "mutant_id": 1531
+    },
+    {
+      "file": "src/elspeth/engine/orchestrator.py",
+      "line": 347,
+      "mutant_id": 1532
+    },
+    {
+      "file": "src/elspeth/engine/orchestrator.py",
+      "line": 384,
+      "mutant_id": 1535
+    },
+    {
+      "file": "src/elspeth/engine/orchestrator.py",
+      "line": 387,
+      "mutant_id": 1537
+    },
+    {
+      "file": "src/elspeth/engine/orchestrator.py",
+      "line": 394,
+      "mutant_id": 1540
+    },
+    {
+      "file": "src/elspeth/engine/orchestrator.py",
+      "line": 427,
+      "mutant_id": 1543
+    },
+    {
+      "file": "src/elspeth/engine/orchestrator.py",
+      "line": 431,
+      "mutant_id": 1544
+    },
+    {
+      "file": "src/elspeth/engine/orchestrator.py",
+      "line": 443,
+      "mutant_id": 1549
+    },
+    {
+      "file": "src/elspeth/engine/orchestrator.py",
+      "line": 443,
+      "mutant_id": 1550
+    },
+    {
+      "file": "src/elspeth/engine/orchestrator.py",
+      "line": 453,
+      "mutant_id": 1554
+    },
+    {
+      "file": "src/elspeth/engine/orchestrator.py",
+      "line": 470,
+      "mutant_id": 1558
+    },
+    {
+      "file": "src/elspeth/engine/orchestrator.py",
+      "line": 470,
+      "mutant_id": 1559
+    },
+    {
+      "file": "src/elspeth/engine/orchestrator.py",
+      "line": 590,
+      "mutant_id": 1587
+    },
+    {
+      "file": "src/elspeth/engine/orchestrator.py",
+      "line": 595,
+      "mutant_id": 1591
+    },
+    {
+      "file": "src/elspeth/engine/orchestrator.py",
+      "line": 595,
+      "mutant_id": 1592
+    },
+    {
+      "file": "src/elspeth/engine/orchestrator.py",
+      "line": 596,
+      "mutant_id": 1593
+    },
+    {
+      "file": "src/elspeth/engine/orchestrator.py",
+      "line": 599,
+      "mutant_id": 1595
+    },
+    {
+      "file": "src/elspeth/engine/orchestrator.py",
+      "line": 614,
+      "mutant_id": 1601
+    }
+  ]
+}

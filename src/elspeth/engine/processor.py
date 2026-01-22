@@ -97,6 +97,7 @@ class RowProcessor:
         branch_to_coalesce: dict[str, str] | None = None,
         coalesce_step_map: dict[str, int] | None = None,
         restored_aggregation_state: dict[str, dict[str, Any]] | None = None,
+        payload_store: Any = None,
     ) -> None:
         """Initialize processor.
 
@@ -116,6 +117,7 @@ class RowProcessor:
             branch_to_coalesce: Map of branch_name -> coalesce_name for fork/join routing
             coalesce_step_map: Map of coalesce_name -> step position in pipeline
             restored_aggregation_state: Map of node_id -> state dict for crash recovery
+            payload_store: Optional PayloadStore for persisting source row payloads
         """
         self._recorder = recorder
         self._spans = span_factory
@@ -130,7 +132,7 @@ class RowProcessor:
         self._coalesce_step_map = coalesce_step_map or {}
         self._aggregation_settings = aggregation_settings or {}
 
-        self._token_manager = TokenManager(recorder)
+        self._token_manager = TokenManager(recorder, payload_store=payload_store)
         self._transform_executor = TransformExecutor(recorder, span_factory)
         self._gate_executor = GateExecutor(recorder, span_factory, edge_map, route_resolution_map)
         self._aggregation_executor = AggregationExecutor(recorder, span_factory, run_id, aggregation_settings=aggregation_settings)

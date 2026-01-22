@@ -435,11 +435,29 @@ class AzureBlobSource(BaseSource):
             if not line:  # Skip empty lines
                 continue
 
-            # THEIR DATA: JSON parsing per line - wrap operations
+            # Catch JSON parse errors at the trust boundary
             try:
                 row = json.loads(line)
             except json.JSONDecodeError as e:
-                raise ValueError(f"Invalid JSON on line {line_num}: {e}") from e
+                # External data parse failure - quarantine, don't crash
+                # Store raw line + metadata for audit traceability
+                raw_row = {"__raw_line__": line, "__line_number__": line_num}
+                error_msg = f"JSON parse error at line {line_num}: {e}"
+
+                ctx.record_validation_error(
+                    row=raw_row,
+                    error=error_msg,
+                    schema_mode="parse",  # Distinct from schema validation
+                    destination=self._on_validation_failure,
+                )
+
+                if self._on_validation_failure != "discard":
+                    yield SourceRow.quarantined(
+                        row=raw_row,
+                        error=error_msg,
+                        destination=self._on_validation_failure,
+                    )
+                continue
 
             yield from self._validate_and_yield(row, ctx)
 

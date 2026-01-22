@@ -402,6 +402,8 @@ class Orchestrator:
         settings: "ElspethSettings | None" = None,
         batch_checkpoints: dict[str, dict[str, Any]] | None = None,
         on_progress: Callable[[ProgressEvent], None] | None = None,
+        *,
+        payload_store: Any = None,
     ) -> RunResult:
         """Execute a pipeline run.
 
@@ -415,6 +417,9 @@ class Orchestrator:
                 BatchPendingError.
             on_progress: Optional callback for progress updates. Called every
                 100 rows with current progress metrics.
+            payload_store: Optional PayloadStore for persisting source row payloads.
+                Required for audit compliance (CLAUDE.md: "Source entry - Raw data
+                stored before any processing").
 
         Raises:
             ValueError: If graph is not provided
@@ -438,7 +443,8 @@ class Orchestrator:
         if schema_errors:
             raise ValueError(f"Pipeline schema incompatibility: {'; '.join(schema_errors)}")
 
-        recorder = LandscapeRecorder(self._db)
+        # Pass payload_store to recorder for external call payload persistence
+        recorder = LandscapeRecorder(self._db, payload_store=payload_store)
 
         # Begin run
         run = recorder.begin_run(
@@ -449,7 +455,16 @@ class Orchestrator:
         run_completed = False
         try:
             with self._span_factory.run_span(run.run_id):
-                result = self._execute_run(recorder, run.run_id, config, graph, settings, batch_checkpoints, on_progress)
+                result = self._execute_run(
+                    recorder,
+                    run.run_id,
+                    config,
+                    graph,
+                    settings,
+                    batch_checkpoints,
+                    on_progress,
+                    payload_store=payload_store,
+                )
 
             # Complete run
             recorder.complete_run(run.run_id, status="completed")
@@ -516,6 +531,8 @@ class Orchestrator:
         settings: "ElspethSettings | None" = None,
         batch_checkpoints: dict[str, dict[str, Any]] | None = None,
         on_progress: Callable[[ProgressEvent], None] | None = None,
+        *,
+        payload_store: Any = None,
     ) -> RunResult:
         """Execute the run using the execution graph.
 
@@ -532,6 +549,7 @@ class Orchestrator:
             settings: Full settings (optional)
             batch_checkpoints: Restored batch checkpoints (maps node_id -> checkpoint_data)
             on_progress: Optional callback for progress updates
+            payload_store: Optional PayloadStore for persisting source row payloads
         """
         # Get execution order from graph
         execution_order = graph.topological_order()
@@ -748,6 +766,7 @@ class Orchestrator:
             coalesce_node_ids=coalesce_id_map,
             branch_to_coalesce=branch_to_coalesce,
             coalesce_step_map=coalesce_step_map,
+            payload_store=payload_store,
         )
 
         # Process rows - Buffer TOKENS, not dicts, to preserve identity
@@ -1160,7 +1179,8 @@ class Orchestrator:
         run_id = resume_point.checkpoint.run_id
 
         # Create fresh recorder (stateless, like run())
-        recorder = LandscapeRecorder(self._db)
+        # Pass payload_store for external call payload persistence
+        recorder = LandscapeRecorder(self._db, payload_store=payload_store)
 
         # 1. Handle incomplete batches
         self._handle_incomplete_batches(recorder, run_id)
@@ -1179,7 +1199,11 @@ class Orchestrator:
         if self._checkpoint_manager is None:
             raise ValueError("CheckpointManager is required for resume - Orchestrator must be initialized with checkpoint_manager")
         recovery = RecoveryManager(self._db, self._checkpoint_manager)
-        unprocessed_rows = recovery.get_unprocessed_row_data(run_id, payload_store)
+
+        # TYPE FIDELITY: Pass source schema to restore coerced types (datetime, Decimal, etc.)
+        # The source's _schema_class attribute contains the Pydantic model with allow_coercion=True
+        source_schema_class = getattr(config.source, "_schema_class", None)
+        unprocessed_rows = recovery.get_unprocessed_row_data(run_id, payload_store, source_schema_class=source_schema_class)
 
         if not unprocessed_rows:
             # All rows were processed - complete the run
@@ -1202,6 +1226,7 @@ class Orchestrator:
             unprocessed_rows=unprocessed_rows,
             restored_aggregation_state=restored_state,
             settings=settings,
+            payload_store=payload_store,
         )
 
         # 6. Complete the run
@@ -1222,6 +1247,8 @@ class Orchestrator:
         unprocessed_rows: list[tuple[str, int, dict[str, Any]]],
         restored_aggregation_state: dict[str, dict[str, Any]],
         settings: "ElspethSettings | None" = None,
+        *,
+        payload_store: Any = None,
     ) -> RunResult:
         """Process unprocessed rows during resume.
 
@@ -1239,6 +1266,7 @@ class Orchestrator:
             unprocessed_rows: List of (row_id, row_index, row_data) tuples
             restored_aggregation_state: Map of node_id -> state dict
             settings: Full settings (optional)
+            payload_store: Optional PayloadStore for persisting source row payloads
 
         Returns:
             RunResult with processing counts
@@ -1366,6 +1394,7 @@ class Orchestrator:
             branch_to_coalesce=branch_to_coalesce,
             coalesce_step_map=coalesce_step_map,
             restored_aggregation_state=restored_aggregation_state,
+            payload_store=payload_store,
         )
 
         # Process rows - Buffer TOKENS

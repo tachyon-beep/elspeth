@@ -9,6 +9,7 @@ import copy
 from typing import Any
 
 from elspeth.contracts import TokenInfo
+from elspeth.core.canonical import canonical_json
 from elspeth.core.landscape import LandscapeRecorder
 
 
@@ -43,13 +44,15 @@ class TokenManager:
         )
     """
 
-    def __init__(self, recorder: LandscapeRecorder) -> None:
-        """Initialize with recorder.
+    def __init__(self, recorder: LandscapeRecorder, *, payload_store: Any = None) -> None:
+        """Initialize with recorder and optional payload store.
 
         Args:
             recorder: LandscapeRecorder for audit trail
+            payload_store: Optional PayloadStore for persisting source row payloads
         """
         self._recorder = recorder
+        self._payload_store = payload_store
 
     def create_initial_token(
         self,
@@ -69,12 +72,21 @@ class TokenManager:
         Returns:
             TokenInfo with row and token IDs
         """
-        # Create row record
+        # Store payload if payload_store is configured (audit requirement)
+        payload_ref = None
+        if self._payload_store is not None:
+            # Use canonical_json to handle pandas/numpy types, Decimal, datetime, etc.
+            # This prevents TypeError crashes when source data contains non-primitive types
+            payload_bytes = canonical_json(row_data).encode("utf-8")
+            payload_ref = self._payload_store.store(payload_bytes)
+
+        # Create row record with payload reference
         row = self._recorder.create_row(
             run_id=run_id,
             source_node_id=source_node_id,
             row_index=row_index,
             data=row_data,
+            payload_ref=payload_ref,
         )
 
         # Create initial token
