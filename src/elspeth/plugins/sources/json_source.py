@@ -146,7 +146,28 @@ class JSONSource(BaseSource):
     def _load_json_array(self, ctx: PluginContext) -> Iterator[SourceRow]:
         """Load from JSON array format."""
         with open(self._path, encoding=self._encoding) as f:
-            data = json.load(f)
+            try:
+                data = json.load(f)
+            except json.JSONDecodeError as e:
+                # File-level parse error - treat as Tier 3 boundary
+                # External data can be malformed; don't crash the pipeline
+                error_msg = f"JSON parse error at line {e.lineno} col {e.colno}: {e.msg}"
+                ctx.record_validation_error(
+                    row={"file_path": str(self._path), "error": error_msg},
+                    error=error_msg,
+                    schema_mode="parse",  # File-level parse, not schema validation
+                    destination=self._on_validation_failure,
+                )
+
+                # Yield quarantined row if not discarding
+                # This allows audit trail to show the file-level failure
+                if self._on_validation_failure != "discard":
+                    yield SourceRow.quarantined(
+                        row={"file_path": str(self._path), "parse_error": str(e)},
+                        error=error_msg,
+                        destination=self._on_validation_failure,
+                    )
+                return  # Stop processing this file
 
         # Extract from nested key if specified
         if self._data_key:

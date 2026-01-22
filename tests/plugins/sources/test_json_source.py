@@ -492,3 +492,51 @@ class TestJSONSourceParseErrors:
         assert quarantined.is_quarantined is True
         # Row data should include the raw line content
         assert "__raw_line__" in quarantined.row or malformed_line in str(quarantined.row)
+
+    def test_json_array_malformed_file_quarantined_not_crash(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """Malformed JSON array file should quarantine, not crash."""
+        from elspeth.plugins.sources.json_source import JSONSource
+
+        json_file = tmp_path / "data.json"
+        # Invalid JSON: missing closing bracket
+        json_file.write_text('[{"id": 1}, {"id": 2}')
+
+        source = JSONSource(
+            {
+                "path": str(json_file),
+                "format": "json",
+                "on_validation_failure": "quarantine",
+                "schema": {"fields": "dynamic"},
+            }
+        )
+
+        # Should not crash - should yield quarantined row
+        results = list(source.load(ctx))
+
+        # Should get exactly 1 quarantined row (file-level failure)
+        assert len(results) == 1
+        quarantined = results[0]
+        assert quarantined.is_quarantined is True
+        assert quarantined.quarantine_destination == "quarantine"
+        assert "JSON parse error" in quarantined.quarantine_error
+        assert "file_path" in quarantined.row
+
+    def test_json_array_malformed_file_with_discard_mode(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """Malformed JSON array file with discard mode should not yield any rows."""
+        from elspeth.plugins.sources.json_source import JSONSource
+
+        json_file = tmp_path / "data.json"
+        json_file.write_text('[{"id": 1}, {"id": 2}')  # Invalid JSON
+
+        source = JSONSource(
+            {
+                "path": str(json_file),
+                "format": "json",
+                "on_validation_failure": "discard",
+                "schema": {"fields": "dynamic"},
+            }
+        )
+
+        # Should not crash, should yield nothing
+        results = list(source.load(ctx))
+        assert len(results) == 0
