@@ -71,14 +71,12 @@ class TestCSVSourceContract(SourceContractPropertyTestBase):
                 assert "name" in row.row
 
     def test_csv_source_handles_empty_file(self, tmp_path: Path) -> None:
-        """CSVSource: Empty files raise EmptyDataError (pandas behavior).
+        """CSVSource: Empty files return no rows gracefully.
 
-        Note: Truly empty CSV files (no headers, no data) cannot be parsed
-        by pandas - this is expected behavior. Use header-only files for
-        "no data" scenarios.
+        Note: After the csv.reader refactor, empty files are handled
+        gracefully by detecting StopIteration on the first next() call
+        (no headers available). This is better than raising EmptyDataError.
         """
-        import pandas as pd
-
         from elspeth.plugins.context import PluginContext
 
         empty_file = tmp_path / "empty.csv"
@@ -93,9 +91,9 @@ class TestCSVSourceContract(SourceContractPropertyTestBase):
         )
         ctx = PluginContext(run_id="test", config={})
 
-        # Pandas cannot parse a truly empty file - this is expected
-        with pytest.raises(pd.errors.EmptyDataError):
-            list(source.load(ctx))
+        # Empty file returns no rows gracefully (no error)
+        rows = list(source.load(ctx))
+        assert len(rows) == 0
 
     def test_csv_source_handles_header_only(self, tmp_path: Path) -> None:
         """CSVSource MUST handle files with only headers."""
