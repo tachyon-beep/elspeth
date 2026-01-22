@@ -1,10 +1,9 @@
 """Built-in sink plugins for ELSPETH.
 
 Sinks output data to destinations. Multiple sinks per run.
+
+Plugins are accessed via PluginManager, not direct imports:
+    manager = PluginManager()
+    manager.register_builtin_plugins()
+    sink = manager.get_sink_by_name("csv_sink")
 """
-
-from elspeth.plugins.sinks.csv_sink import CSVSink
-from elspeth.plugins.sinks.database_sink import DatabaseSink
-from elspeth.plugins.sinks.json_sink import JSONSink
-
-__all__ = ["CSVSink", "DatabaseSink", "JSONSink"]
