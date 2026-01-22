@@ -65,8 +65,8 @@ WORKDIR /app
 
 # Create standard mount point directories
 # These will typically be mounted from host
-# /app/runs is for the default audit.db location (sqlite:///./runs/audit.db)
-RUN mkdir -p /app/config /app/input /app/output /app/state /app/secrets /app/runs && \
+# /app/state is for the default audit.db location (sqlite:///./state/audit.db)
+RUN mkdir -p /app/config /app/input /app/output /app/state /app/secrets && \
     chown -R elspeth:elspeth /app
 
 # Switch to non-root user

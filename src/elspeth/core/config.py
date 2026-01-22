@@ -457,7 +457,7 @@ class LandscapeSettings(BaseModel):
     # NOTE: Using str instead of Path - Path mangles PostgreSQL DSNs like
     # "postgresql://user:pass@host/db" (pathlib interprets // as UNC path)
     url: str = Field(
-        default="sqlite:///./runs/audit.db",
+        default="sqlite:///./state/audit.db",
         description="Full SQLAlchemy database URL",
     )
     export: LandscapeExportSettings = Field(

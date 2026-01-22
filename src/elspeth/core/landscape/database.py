@@ -36,7 +36,7 @@ class LandscapeDB:
 
         Args:
             connection_string: SQLAlchemy connection string
-                e.g., "sqlite:///./runs/landscape.db"
+                e.g., "sqlite:///./state/audit.db"
                       "postgresql://user:pass@host/dbname"
         """
         self.connection_string = connection_string

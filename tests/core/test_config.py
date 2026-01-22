@@ -312,10 +312,10 @@ class TestLandscapeSettings:
         """LandscapeSettings has enabled, backend, url."""
         from elspeth.core.config import LandscapeSettings
 
-        ls = LandscapeSettings(enabled=True, backend="sqlite", url="sqlite:///./runs/audit.db")
+        ls = LandscapeSettings(enabled=True, backend="sqlite", url="sqlite:///./state/audit.db")
         assert ls.enabled is True
         assert ls.backend == "sqlite"
-        assert ls.url == "sqlite:///./runs/audit.db"
+        assert ls.url == "sqlite:///./state/audit.db"
 
     def test_landscape_settings_defaults(self) -> None:
         """LandscapeSettings has sensible defaults."""
@@ -324,7 +324,7 @@ class TestLandscapeSettings:
         ls = LandscapeSettings()
         assert ls.enabled is True
         assert ls.backend == "sqlite"
-        assert ls.url == "sqlite:///./runs/audit.db"
+        assert ls.url == "sqlite:///./state/audit.db"
 
     def test_landscape_settings_postgresql_url(self) -> None:
         """LandscapeSettings accepts PostgreSQL DSNs without mangling."""
@@ -406,7 +406,7 @@ output_sink: results
 landscape:
   enabled: true
   backend: sqlite
-  url: sqlite:///./runs/audit.db
+  url: sqlite:///./state/audit.db
 """)
 
         settings = load_settings(config_file)
