@@ -17,7 +17,6 @@ import pytest
 
 from elspeth.contracts import Determinism, SourceRow
 from elspeth.engine.orchestrator import PipelineConfig, RouteValidationError, RunResult
-from elspeth.plugins.base import BaseTransform
 from tests.conftest import (
     _TestSchema,
     _TestSinkBase,
@@ -270,7 +269,12 @@ class TestRouteValidationEdgeCases:
 
 
 class TestTransformErrorSinkValidation:
-    """Test transform on_error destination validation."""
+    """Test transform on_error destination validation.
+
+    These tests MUST use actual BaseTransform subclasses (not _TestTransformBase)
+    because _validate_transform_error_sinks checks isinstance(transform, BaseTransform)
+    before accessing _on_error. _TestTransformBase is protocol-based and skipped.
+    """
 
     @pytest.fixture
     def orchestrator(self) -> Any:
@@ -283,6 +287,7 @@ class TestTransformErrorSinkValidation:
 
     def test_transform_with_none_on_error_is_valid(self, orchestrator: Any) -> None:
         """Line 290: Transform with on_error=None should pass validation."""
+        from elspeth.plugins.base import BaseTransform
 
         class TransformNoErrorRouting(BaseTransform):
             name = "no_error_routing"
@@ -295,7 +300,7 @@ class TestTransformErrorSinkValidation:
 
                 return TransformResult.success(row)
 
-        transforms = [TransformNoErrorRouting()]
+        transforms = [TransformNoErrorRouting(config={})]
         available_sinks = {"output"}
 
         # Should not raise
@@ -307,6 +312,7 @@ class TestTransformErrorSinkValidation:
 
     def test_transform_with_discard_on_error_is_valid(self, orchestrator: Any) -> None:
         """Line 294: Transform with on_error='discard' should pass validation."""
+        from elspeth.plugins.base import BaseTransform
 
         class TransformDiscardErrors(BaseTransform):
             name = "discard_errors"
@@ -319,7 +325,7 @@ class TestTransformErrorSinkValidation:
 
                 return TransformResult.success(row)
 
-        transforms = [TransformDiscardErrors()]
+        transforms = [TransformDiscardErrors(config={})]
         available_sinks = {"output"}  # 'discard' not in sinks, but shouldn't error
 
         # Should not raise
@@ -331,6 +337,7 @@ class TestTransformErrorSinkValidation:
 
     def test_transform_with_invalid_on_error_raises(self, orchestrator: Any) -> None:
         """Lines 299-302: Invalid on_error sink raises RouteValidationError."""
+        from elspeth.plugins.base import BaseTransform
 
         class TransformBadErrorSink(BaseTransform):
             name = "bad_error_sink"
@@ -343,7 +350,7 @@ class TestTransformErrorSinkValidation:
 
                 return TransformResult.success(row)
 
-        transforms = [TransformBadErrorSink()]
+        transforms = [TransformBadErrorSink(config={})]
         available_sinks = {"output", "errors"}
 
         with pytest.raises(RouteValidationError) as exc_info:
@@ -465,7 +472,12 @@ class TestCheckpointSequencing:
     """Test checkpoint sequence number is properly incremented."""
 
     def test_sequence_number_increments_on_checkpoint(self) -> None:
-        """Lines 151-153: sequence_number must increment for each checkpoint."""
+        """Lines 151-153: sequence_number must increment for each checkpoint.
+
+        Uses frequency="aggregation_only" so _maybe_checkpoint increments
+        the counter without attempting DB insert (avoids FK constraint on run_id).
+        The increment at line 152 happens unconditionally when checkpointing is enabled.
+        """
         from elspeth.core.checkpoint import CheckpointManager
         from elspeth.core.config import CheckpointSettings
         from elspeth.core.landscape import LandscapeDB
@@ -473,7 +485,8 @@ class TestCheckpointSequencing:
 
         db = LandscapeDB.in_memory()
         checkpoint_manager = CheckpointManager(db)
-        checkpoint_settings = CheckpointSettings(enabled=True, frequency="every_row")
+        # Use aggregation_only: increments counter but doesn't create checkpoint record
+        checkpoint_settings = CheckpointSettings(enabled=True, frequency="aggregation_only")
 
         orchestrator = Orchestrator(
             db,
@@ -485,7 +498,7 @@ class TestCheckpointSequencing:
         assert orchestrator._sequence_number == 0
 
         # Calling _maybe_checkpoint should increment sequence_number
-        # (even though it won't create a checkpoint without a valid run)
+        # With aggregation_only, it increments but doesn't hit the DB
         orchestrator._maybe_checkpoint(
             run_id="test-run",
             token_id="token-1",
@@ -503,3 +516,55 @@ class TestCheckpointSequencing:
         )
 
         assert orchestrator._sequence_number == 2
+
+    def test_sequence_number_not_incremented_when_disabled(self) -> None:
+        """Lines 147-148: sequence_number should NOT increment when disabled."""
+        from elspeth.core.config import CheckpointSettings
+        from elspeth.core.landscape import LandscapeDB
+        from elspeth.engine.orchestrator import Orchestrator
+
+        db = LandscapeDB.in_memory()
+        checkpoint_settings = CheckpointSettings(enabled=False)
+
+        orchestrator = Orchestrator(
+            db,
+            checkpoint_settings=checkpoint_settings,
+        )
+
+        assert orchestrator._sequence_number == 0
+
+        orchestrator._maybe_checkpoint(
+            run_id="test-run",
+            token_id="token-1",
+            node_id="sink-1",
+        )
+
+        # Should NOT have incremented when checkpointing is disabled
+        assert orchestrator._sequence_number == 0
+
+    def test_sequence_number_not_incremented_without_manager(self) -> None:
+        """Lines 149-150: sequence_number should NOT increment without manager."""
+        from elspeth.core.config import CheckpointSettings
+        from elspeth.core.landscape import LandscapeDB
+        from elspeth.engine.orchestrator import Orchestrator
+
+        db = LandscapeDB.in_memory()
+        # No checkpoint_manager provided
+        checkpoint_settings = CheckpointSettings(enabled=True, frequency="aggregation_only")
+
+        orchestrator = Orchestrator(
+            db,
+            checkpoint_settings=checkpoint_settings,
+            # checkpoint_manager deliberately omitted
+        )
+
+        assert orchestrator._sequence_number == 0
+
+        orchestrator._maybe_checkpoint(
+            run_id="test-run",
+            token_id="token-1",
+            node_id="sink-1",
+        )
+
+        # Should NOT have incremented without a checkpoint manager
+        assert orchestrator._sequence_number == 0
