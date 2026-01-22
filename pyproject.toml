@@ -19,85 +19,85 @@ classifiers = [
 
 dependencies = [
     # CLI and TUI
-    "typer>=0.12",
-    "textual>=0.52",
+    "typer>=0.21,<1",  # Stable CLI framework
+    "textual>=7.2,<8",  # TUI framework with breaking changes in major versions
 
     # Configuration
-    "dynaconf>=3.2",
-    "pydantic>=2.6",
-    "python-dotenv>=1.0",  # Load .env files for secrets
-    "pyyaml>=6.0",  # YAML parsing for configuration files
+    "dynaconf>=3.2,<4",  # Configuration management
+    "pydantic>=2.12,<3",  # Data validation with v2 API
+    "python-dotenv>=1.2,<2",  # .env file loading
+    "pyyaml>=6.0,<7",  # YAML parsing
 
     # Plugin system
-    "pluggy>=1.4",
+    "pluggy>=1.6,<2",  # Plugin architecture (pytest uses this)
 
     # Data handling
-    "pandas>=2.2",
+    "pandas>=2.2,<3",  # DataFrame operations
 
     # HTTP client
-    "httpx>=0.27",
+    "httpx>=0.27,<1",  # Async HTTP client
 
     # Database
-    "sqlalchemy>=2.0",
-    "alembic>=1.13",
+    "sqlalchemy>=2.0,<3",  # SQL toolkit and ORM
+    "alembic>=1.18,<2",  # Database migrations
 
     # Retries
-    "tenacity>=8.2",
+    "tenacity>=9.0,<10",  # Retry logic with backoff
 
     # === Acceleration Stack ===
     # Canonical JSON (RFC 8785/JCS)
-    "rfc8785>=0.1",
+    "rfc8785>=0.1.4,<0.2",  # Deterministic JSON serialization
 
     # DAG validation
-    "networkx>=3.2",
+    "networkx>=3.6,<4",  # Graph algorithms
 
     # Observability
-    "opentelemetry-api>=1.23",
-    "opentelemetry-sdk>=1.23",
-    "opentelemetry-exporter-otlp>=1.23",
+    "opentelemetry-api>=1.39,<2",  # OpenTelemetry tracing API
+    "opentelemetry-sdk>=1.39,<2",  # OpenTelemetry SDK
+    "opentelemetry-exporter-otlp>=1.39,<2",  # OTLP exporter
 
     # Structured logging
-    "structlog>=24.1",
+    "structlog>=25.0,<26",  # Structured logging
 
     # Rate limiting
-    "pyrate-limiter>=3.7",  # Requires max_delay and raise_when_fail parameters
+    "pyrate-limiter>=3.9,<4",  # Rate limiting (requires max_delay parameter)
 
     # Diffing (for verify mode)
-    "deepdiff>=7.0",
+    "deepdiff>=8.6,<9",  # Deep comparison for data structures
 ]
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=8.0",
-    "pytest-cov>=4.1",
-    "pytest-asyncio>=0.23",
-    "pytest-dotenv>=0.5",  # Load .env for integration tests
-    "hypothesis>=6.98",
-    "mypy>=1.8",
-    "ruff>=0.3",
-    "pre-commit>=3.6",
+    "pytest>=9.0,<10",  # Testing framework
+    "pytest-cov>=4.1,<6",  # Coverage plugin
+    "pytest-asyncio>=1.0,<2",  # Async test support
+    "pytest-dotenv>=0.5,<1",  # Load .env for integration tests
+    "hypothesis>=6.98,<7",  # Property-based testing
+    "mypy>=1.19,<2",  # Static type checking
+    "ruff>=0.14,<1",  # Linting and formatting
+    "pre-commit>=3.6,<4",  # Git hooks
     # Type stubs
-    "pandas-stubs>=2.2",
-    "types-networkx>=3.2",
-    "types-PyYAML>=6.0",
+    "pandas-stubs>=2.2,<3",  # Pandas type hints
+    "types-networkx>=3.2,<4",  # NetworkX type hints
+    "types-PyYAML>=6.0,<7",  # PyYAML type hints
     # Mutation testing (Phase 3)
-    "mutmut>=2.4",
+    "mutmut>=2.4,<3",  # Mutation testing
 ]
 
 llm = [
     # Phase 6: LLM plugin pack
-    "jinja2>=3.1",
-    "httpx>=0.27",
-    "openai>=1.0",
-    "litellm>=1.30",
+    "jinja2>=3.1,<4",  # Template engine for prompts
+    "httpx>=0.27,<1",  # HTTP client (inherited from main deps)
+    "openai>=2.15,<3",  # OpenAI SDK
+    "litellm>=1.81,<2",  # Multi-provider LLM interface
 ]
 
 azure = [
     # Phase 7: Azure plugin pack
-    "azure-storage-blob>=12.19",
-    "azure-identity>=1.15",
-    "azure-keyvault-secrets>=4.7",  # Key Vault support for fingerprint key
-    "jinja2>=3.1",  # Used by AzureBlobSink for path templating
+    "azure-storage-blob>=12.28,<13",  # Azure Blob Storage
+    "azure-identity>=1.25,<2",  # Azure authentication
+    "azure-keyvault-secrets>=4.10,<5",  # Key Vault for fingerprint key
+    "jinja2>=3.1,<4",  # Template engine for path templating
 ]
 
 all = [
