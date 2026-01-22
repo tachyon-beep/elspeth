@@ -279,3 +279,63 @@ class TestCSVSourceQuarantineYielding:
         assert len(results) == 2
         assert all(isinstance(r, SourceRow) and not r.is_quarantined for r in results)
         assert {r.row["name"] for r in results} == {"alice", "carol"}
+
+    def test_malformed_csv_row_quarantined_not_crash(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """Malformed CSV row (extra columns) should quarantine, not crash pipeline."""
+        from elspeth.plugins.sources.csv_source import CSVSource
+
+        csv_file = tmp_path / "data.csv"
+        # Row 2 has extra column - pandas ParserError
+        csv_file.write_text("id,name\n1,alice\n2,bob,extra\n3,carol\n")
+
+        source = CSVSource(
+            {
+                "path": str(csv_file),
+                "on_validation_failure": "quarantine",
+                "schema": DYNAMIC_SCHEMA,
+            }
+        )
+
+        # Should not crash - should yield 2 valid + 1 quarantined
+        results = list(source.load(ctx))
+
+        # Verify we got 3 total rows
+        assert len(results) == 3
+
+        # First row valid
+        assert not results[0].is_quarantined
+        assert results[0].row == {"id": "1", "name": "alice"}
+
+        # Second row quarantined (parse error)
+        assert results[1].is_quarantined is True
+        assert results[1].quarantine_destination == "quarantine"
+        assert "parse error" in results[1].quarantine_error.lower()
+        assert "__raw_line__" in results[1].row
+        assert "__line_number__" in results[1].row
+
+        # Third row valid
+        assert not results[2].is_quarantined
+        assert results[2].row == {"id": "3", "name": "carol"}
+
+    def test_malformed_csv_row_with_discard_mode(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """Malformed CSV row with discard mode should not yield quarantined row."""
+        from elspeth.plugins.sources.csv_source import CSVSource
+
+        csv_file = tmp_path / "data.csv"
+        csv_file.write_text("id,name\n1,alice\n2,bob,extra\n3,carol\n")
+
+        source = CSVSource(
+            {
+                "path": str(csv_file),
+                "on_validation_failure": "discard",
+                "schema": DYNAMIC_SCHEMA,
+            }
+        )
+
+        # Should not crash, should yield only valid rows
+        results = list(source.load(ctx))
+
+        # Only 2 valid rows, malformed row discarded
+        assert len(results) == 2
+        assert results[0].row == {"id": "1", "name": "alice"}
+        assert results[1].row == {"id": "3", "name": "carol"}

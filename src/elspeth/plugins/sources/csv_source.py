@@ -1,16 +1,16 @@
 # src/elspeth/plugins/sources/csv_source.py
 """CSV source plugin for ELSPETH.
 
-Loads rows from CSV files using pandas for robust parsing.
+Loads rows from CSV files using line-by-line parsing for graceful malformed row handling.
 
 IMPORTANT: Sources use allow_coercion=True to normalize external data.
 This is the ONLY place in the pipeline where coercion is allowed.
 """
 
+import csv
 from collections.abc import Iterator
 from typing import Any
 
-import pandas as pd
 from pydantic import ValidationError
 
 from elspeth.contracts import PluginSchema, SourceRow
@@ -57,7 +57,6 @@ class CSVSource(BaseSource):
         self._delimiter = cfg.delimiter
         self._encoding = cfg.encoding
         self._skip_rows = cfg.skip_rows
-        self._dataframe: pd.DataFrame | None = None
 
         # Store schema config for audit trail
         # SourceDataConfig (via DataPluginConfig) ensures schema_config is not None
@@ -94,42 +93,100 @@ class CSVSource(BaseSource):
         if not self._path.exists():
             raise FileNotFoundError(f"CSV file not found: {self._path}")
 
-        self._dataframe = pd.read_csv(
-            self._path,
-            delimiter=self._delimiter,
-            encoding=self._encoding,
-            skiprows=self._skip_rows,
-            dtype=str,  # Keep all values as strings for consistent handling
-            keep_default_na=False,  # Don't convert empty strings to NaN
-        )
+        with open(self._path, encoding=self._encoding) as f:
+            # Skip header rows as configured
+            for _ in range(self._skip_rows):
+                next(f, None)
 
-        # DataFrame columns are strings from CSV headers
-        for record in self._dataframe.to_dict(orient="records"):
-            row = {str(k): v for k, v in record.items()}
+            # Read header line
+            header_line = f.readline()
+            if not header_line:
+                return  # Empty file after skip_rows
 
-            try:
-                # Validate and potentially coerce row data
-                validated = self._schema_class.model_validate(row)
-                yield SourceRow.valid(validated.to_row())
-            except ValidationError as e:
-                # Record validation failure in audit trail
-                # This is a trust boundary: external data may be invalid
-                ctx.record_validation_error(
-                    row=row,
-                    error=str(e),
-                    schema_mode=self._schema_config.mode or "dynamic",
-                    destination=self._on_validation_failure,
-                )
+            # Parse header using csv module
+            reader = csv.reader([header_line], delimiter=self._delimiter)
+            headers = next(reader)
 
-                # Yield quarantined row for routing to configured sink
-                # If "discard", don't yield - row is intentionally dropped
-                if self._on_validation_failure != "discard":
-                    yield SourceRow.quarantined(
-                        row=row,
-                        error=str(e),
+            # Process each data line
+            line_num = self._skip_rows + 2  # +1 for header, +1 for first data line
+            for line in f:
+                line = line.rstrip("\n\r")
+                if not line:
+                    line_num += 1
+                    continue
+
+                # Parse CSV line - catch malformed rows
+                try:
+                    reader = csv.reader([line], delimiter=self._delimiter)
+                    values = next(reader)
+
+                    # Check field count matches header
+                    if len(values) != len(headers):
+                        # Malformed row - field count mismatch
+                        raw_row = {"__raw_line__": line, "__line_number__": line_num}
+                        error_msg = f"CSV parse error at line {line_num}: expected {len(headers)} fields, got {len(values)}"
+
+                        ctx.record_validation_error(
+                            row=raw_row,
+                            error=error_msg,
+                            schema_mode="parse",
+                            destination=self._on_validation_failure,
+                        )
+
+                        if self._on_validation_failure != "discard":
+                            yield SourceRow.quarantined(
+                                row=raw_row,
+                                error=error_msg,
+                                destination=self._on_validation_failure,
+                            )
+                        line_num += 1
+                        continue
+
+                    # Build row dict
+                    row = dict(zip(headers, values, strict=False))
+
+                except csv.Error as e:
+                    # Catch CSV parsing errors (e.g., bad quoting, delimiter issues)
+                    raw_row = {"__raw_line__": line, "__line_number__": line_num}
+                    error_msg = f"CSV parse error at line {line_num}: {e}"
+
+                    ctx.record_validation_error(
+                        row=raw_row,
+                        error=error_msg,
+                        schema_mode="parse",
                         destination=self._on_validation_failure,
                     )
 
+                    if self._on_validation_failure != "discard":
+                        yield SourceRow.quarantined(
+                            row=raw_row,
+                            error=error_msg,
+                            destination=self._on_validation_failure,
+                        )
+                    line_num += 1
+                    continue
+
+                # Validate row against schema
+                try:
+                    validated = self._schema_class.model_validate(row)
+                    yield SourceRow.valid(validated.to_row())
+                except ValidationError as e:
+                    ctx.record_validation_error(
+                        row=row,
+                        error=str(e),
+                        schema_mode=self._schema_config.mode or "dynamic",
+                        destination=self._on_validation_failure,
+                    )
+
+                    if self._on_validation_failure != "discard":
+                        yield SourceRow.quarantined(
+                            row=row,
+                            error=str(e),
+                            destination=self._on_validation_failure,
+                        )
+
+                line_num += 1
+
     def close(self) -> None:
-        """Release resources."""
-        self._dataframe = None
+        """Release resources (no-op for CSV source)."""
+        pass
