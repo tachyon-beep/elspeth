@@ -1,0 +1,2584 @@
+# src/elspeth/core/landscape/recorder.py
+"""LandscapeRecorder: High-level API for audit recording.
+
+This is the main interface for recording audit trail entries during
+pipeline execution. It wraps the low-level database operations.
+"""
+
+import json
+import uuid
+from datetime import UTC, datetime
+from enum import Enum
+from typing import TYPE_CHECKING, Any, TypeVar
+
+if TYPE_CHECKING:
+    from elspeth.contracts.schema import SchemaConfig
+    from elspeth.core.landscape.reproducibility import ReproducibilityGrade
+
+from sqlalchemy import select
+
+from elspeth.contracts import (
+    Artifact,
+    Batch,
+    BatchMember,
+    BatchStatus,
+    Call,
+    CallStatus,
+    CallType,
+    Determinism,
+    Edge,
+    ExecutionError,
+    ExportStatus,
+    Node,
+    NodeState,
+    NodeStateCompleted,
+    NodeStateFailed,
+    NodeStateOpen,
+    NodeStateStatus,
+    NodeType,
+    RoutingEvent,
+    RoutingMode,
+    RoutingSpec,
+    Row,
+    RowLineage,
+    RowOutcome,
+    Run,
+    RunStatus,
+    Token,
+    TokenOutcome,
+    TokenParent,
+    TransformErrorRecord,
+    ValidationErrorRecord,
+)
+from elspeth.core.canonical import canonical_json, stable_hash
+from elspeth.core.landscape.database import LandscapeDB
+from elspeth.core.landscape.row_data import RowDataResult, RowDataState
+from elspeth.core.landscape.schema import (
+    artifacts_table,
+    batch_members_table,
+    batches_table,
+    calls_table,
+    edges_table,
+    node_states_table,
+    nodes_table,
+    routing_events_table,
+    rows_table,
+    runs_table,
+    token_outcomes_table,
+    token_parents_table,
+    tokens_table,
+    transform_errors_table,
+    validation_errors_table,
+)
+
+E = TypeVar("E", bound=Enum)
+
+
+def _now() -> datetime:
+    """Get current UTC timestamp."""
+    return datetime.now(UTC)
+
+
+def _generate_id() -> str:
+    """Generate a unique ID."""
+    return uuid.uuid4().hex
+
+
+def _coerce_enum(value: str | E, enum_type: type[E]) -> E:
+    """Coerce a string or enum value to the target enum type.
+
+    Args:
+        value: String value or enum instance
+        enum_type: Target enum class
+
+    Returns:
+        Enum instance
+
+    Raises:
+        ValueError: If string doesn't match any enum value
+
+    Example:
+        >>> _coerce_enum("transform", NodeType)
+        <NodeType.TRANSFORM: 'transform'>
+        >>> _coerce_enum(NodeType.TRANSFORM, NodeType)
+        <NodeType.TRANSFORM: 'transform'>
+    """
+    if isinstance(value, enum_type):
+        return value
+    # str-based enums use value lookup
+    return enum_type(value)
+
+
+def _row_to_node_state(row: Any) -> NodeState:
+    """Convert a database row to the appropriate NodeState type.
+
+    Uses discriminated union pattern - status field determines the concrete type.
+
+    Args:
+        row: Database row from node_states table
+
+    Returns:
+        NodeStateOpen, NodeStateCompleted, or NodeStateFailed depending on status
+    """
+    status = NodeStateStatus(row.status)
+
+    if status == NodeStateStatus.OPEN:
+        return NodeStateOpen(
+            state_id=row.state_id,
+            token_id=row.token_id,
+            node_id=row.node_id,
+            step_index=row.step_index,
+            attempt=row.attempt,
+            status=NodeStateStatus.OPEN,
+            input_hash=row.input_hash,
+            started_at=row.started_at,
+            context_before_json=row.context_before_json,
+        )
+    elif status == NodeStateStatus.COMPLETED:
+        # Completed states must have output_hash, completed_at, duration_ms
+        # Validate required fields - None indicates audit integrity violation
+        if row.output_hash is None:
+            raise ValueError(f"COMPLETED state {row.state_id} has NULL output_hash - audit integrity violation")
+        if row.duration_ms is None:
+            raise ValueError(f"COMPLETED state {row.state_id} has NULL duration_ms - audit integrity violation")
+        if row.completed_at is None:
+            raise ValueError(f"COMPLETED state {row.state_id} has NULL completed_at - audit integrity violation")
+        return NodeStateCompleted(
+            state_id=row.state_id,
+            token_id=row.token_id,
+            node_id=row.node_id,
+            step_index=row.step_index,
+            attempt=row.attempt,
+            status=NodeStateStatus.COMPLETED,
+            input_hash=row.input_hash,
+            started_at=row.started_at,
+            output_hash=row.output_hash,
+            completed_at=row.completed_at,
+            duration_ms=row.duration_ms,
+            context_before_json=row.context_before_json,
+            context_after_json=row.context_after_json,
+        )
+    else:  # FAILED
+        # Failed states must have completed_at, duration_ms (error_json and output_hash are optional)
+        # Validate required fields - None indicates audit integrity violation
+        if row.duration_ms is None:
+            raise ValueError(f"FAILED state {row.state_id} has NULL duration_ms - audit integrity violation")
+        if row.completed_at is None:
+            raise ValueError(f"FAILED state {row.state_id} has NULL completed_at - audit integrity violation")
+        return NodeStateFailed(
+            state_id=row.state_id,
+            token_id=row.token_id,
+            node_id=row.node_id,
+            step_index=row.step_index,
+            attempt=row.attempt,
+            status=NodeStateStatus.FAILED,
+            input_hash=row.input_hash,
+            started_at=row.started_at,
+            completed_at=row.completed_at,
+            duration_ms=row.duration_ms,
+            error_json=row.error_json,
+            output_hash=row.output_hash,
+            context_before_json=row.context_before_json,
+            context_after_json=row.context_after_json,
+        )
+
+
+class LandscapeRecorder:
+    """High-level API for recording audit trail entries.
+
+    This class provides methods to record:
+    - Runs and their configuration
+    - Nodes (plugin instances) and edges
+    - Rows and tokens (data flow)
+    - Node states (processing records)
+    - Routing events, batches, artifacts
+
+    Example:
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+
+        run = recorder.begin_run(config={"source": "data.csv"})
+        # ... execute pipeline ...
+        recorder.complete_run(run.run_id, status="completed")
+    """
+
+    def __init__(self, db: LandscapeDB, *, payload_store: Any | None = None) -> None:
+        """Initialize recorder with database connection.
+
+        Args:
+            db: LandscapeDB instance for audit storage
+            payload_store: Optional payload store for retrieving row data
+        """
+        self._db = db
+        self._payload_store = payload_store
+
+    # === Run Management ===
+
+    def begin_run(
+        self,
+        config: dict[str, Any],
+        canonical_version: str,
+        *,
+        run_id: str | None = None,
+        reproducibility_grade: str | None = None,
+        status: RunStatus | str = RunStatus.RUNNING,
+    ) -> Run:
+        """Begin a new pipeline run.
+
+        Args:
+            config: Resolved configuration dictionary
+            canonical_version: Version of canonical hash algorithm
+            run_id: Optional run ID (generated if not provided)
+            reproducibility_grade: Optional grade (FULL_REPRODUCIBLE, etc.)
+            status: Initial run status (defaults to RUNNING)
+
+        Returns:
+            Run model with generated run_id
+
+        Raises:
+            ValueError: If status string is not a valid RunStatus value
+        """
+        # Validate and coerce status enum early - fail fast on typos
+        status_enum = _coerce_enum(status, RunStatus)
+
+        run_id = run_id or _generate_id()
+        settings_json = canonical_json(config)
+        config_hash = stable_hash(config)
+        now = _now()
+
+        run = Run(
+            run_id=run_id,
+            started_at=now,
+            config_hash=config_hash,
+            settings_json=settings_json,
+            canonical_version=canonical_version,
+            status=status_enum,  # Store enum; str subclass works with DB
+            reproducibility_grade=reproducibility_grade,
+        )
+
+        with self._db.connection() as conn:
+            conn.execute(
+                runs_table.insert().values(
+                    run_id=run.run_id,
+                    started_at=run.started_at,
+                    config_hash=run.config_hash,
+                    settings_json=run.settings_json,
+                    canonical_version=run.canonical_version,
+                    status=run.status,
+                    reproducibility_grade=run.reproducibility_grade,
+                )
+            )
+
+        return run
+
+    def complete_run(
+        self,
+        run_id: str,
+        status: RunStatus | str,
+        *,
+        reproducibility_grade: str | None = None,
+    ) -> Run:
+        """Complete a pipeline run.
+
+        Args:
+            run_id: Run to complete
+            status: Final status (completed, failed) - must be valid RunStatus
+            reproducibility_grade: Optional final grade
+
+        Returns:
+            Updated Run model
+
+        Raises:
+            ValueError: If status string is not a valid RunStatus value
+        """
+        # Validate and coerce status enum early - fail fast on typos
+        status_enum = _coerce_enum(status, RunStatus)
+        now = _now()
+
+        with self._db.connection() as conn:
+            conn.execute(
+                runs_table.update()
+                .where(runs_table.c.run_id == run_id)
+                .values(
+                    status=status_enum.value,  # Store string in DB
+                    completed_at=now,
+                    reproducibility_grade=reproducibility_grade,
+                )
+            )
+
+        result = self.get_run(run_id)
+        assert result is not None, f"Run {run_id} not found after update"
+        return result
+
+    def get_run(self, run_id: str) -> Run | None:
+        """Get a run by ID.
+
+        Args:
+            run_id: Run ID to retrieve
+
+        Returns:
+            Run model or None if not found
+        """
+        with self._db.connection() as conn:
+            result = conn.execute(select(runs_table).where(runs_table.c.run_id == run_id))
+            row = result.fetchone()
+
+        if row is None:
+            return None
+
+        return Run(
+            run_id=row.run_id,
+            started_at=row.started_at,
+            completed_at=row.completed_at,
+            config_hash=row.config_hash,
+            settings_json=row.settings_json,
+            canonical_version=row.canonical_version,
+            status=RunStatus(row.status),  # Coerce DB string to enum
+            reproducibility_grade=row.reproducibility_grade,
+            # Use explicit is not None check - empty string should raise, not become None (Tier 1)
+            export_status=ExportStatus(row.export_status) if row.export_status is not None else None,
+            export_error=row.export_error,
+            exported_at=row.exported_at,
+            export_format=row.export_format,
+            export_sink=row.export_sink,
+        )
+
+    def list_runs(self, *, status: RunStatus | str | None = None) -> list[Run]:
+        """List all runs in the database.
+
+        Args:
+            status: Optional filter by status (running, completed, failed)
+
+        Returns:
+            List of Run models, ordered by started_at (newest first)
+
+        Raises:
+            ValueError: If status string is not a valid RunStatus value
+        """
+        query = select(runs_table).order_by(runs_table.c.started_at.desc())
+
+        if status is not None:
+            # Validate and coerce status enum - fail fast on typos
+            status_enum = _coerce_enum(status, RunStatus)
+            query = query.where(runs_table.c.status == status_enum.value)
+
+        with self._db.connection() as conn:
+            result = conn.execute(query)
+            rows = result.fetchall()
+
+        return [
+            Run(
+                run_id=row.run_id,
+                started_at=row.started_at,
+                completed_at=row.completed_at,
+                config_hash=row.config_hash,
+                settings_json=row.settings_json,
+                canonical_version=row.canonical_version,
+                status=RunStatus(row.status),  # Coerce DB string to enum
+                reproducibility_grade=row.reproducibility_grade,
+                # Use explicit is not None check - empty string should raise, not become None (Tier 1)
+                export_status=ExportStatus(row.export_status) if row.export_status is not None else None,
+                export_error=row.export_error,
+                exported_at=row.exported_at,
+                export_format=row.export_format,
+                export_sink=row.export_sink,
+            )
+            for row in rows
+        ]
+
+    def set_export_status(
+        self,
+        run_id: str,
+        status: ExportStatus | str,
+        *,
+        error: str | None = None,
+        export_format: str | None = None,
+        export_sink: str | None = None,
+    ) -> None:
+        """Set export status for a run.
+
+        This is separate from run status so export failures don't mask
+        successful pipeline completion.
+
+        Args:
+            run_id: Run to update
+            status: Export status (ExportStatus enum or string: pending, completed, failed)
+            error: Error message if status is 'failed'
+            export_format: Format used (csv, json)
+            export_sink: Sink name used for export
+
+        Raises:
+            ValueError: If status is not a valid ExportStatus value
+        """
+        # Validate and coerce status - crash on invalid values per Data Manifesto
+        status_enum = _coerce_enum(status, ExportStatus)
+
+        updates: dict[str, Any] = {"export_status": status_enum.value}
+
+        if status_enum == ExportStatus.COMPLETED:
+            updates["exported_at"] = _now()
+            # Clear stale error when transitioning to completed
+            updates["export_error"] = None
+        elif status_enum == ExportStatus.PENDING:
+            # Clear stale error when transitioning to pending
+            updates["export_error"] = None
+
+        # Only set error if explicitly provided (for FAILED status)
+        if error is not None:
+            updates["export_error"] = error
+
+        if export_format is not None:
+            updates["export_format"] = export_format
+        if export_sink is not None:
+            updates["export_sink"] = export_sink
+
+        with self._db.connection() as conn:
+            conn.execute(runs_table.update().where(runs_table.c.run_id == run_id).values(**updates))
+
+    # === Node and Edge Registration ===
+
+    def register_node(
+        self,
+        run_id: str,
+        plugin_name: str,
+        node_type: NodeType | str,
+        plugin_version: str,
+        config: dict[str, Any],
+        *,
+        node_id: str | None = None,
+        sequence: int | None = None,
+        schema_hash: str | None = None,
+        determinism: Determinism | str = Determinism.DETERMINISTIC,
+        schema_config: "SchemaConfig",
+    ) -> Node:
+        """Register a plugin instance (node) in the execution graph.
+
+        Args:
+            run_id: Run this node belongs to
+            plugin_name: Name of the plugin
+            node_type: Type (source, transform, gate, aggregation, coalesce, sink)
+                       Accepts NodeType enum or string (will be validated)
+            plugin_version: Version of the plugin
+            config: Plugin configuration
+            node_id: Optional node ID (generated if not provided)
+            sequence: Position in pipeline
+            schema_hash: Optional input/output schema hash
+            determinism: Reproducibility grade (Determinism enum or string)
+            schema_config: Schema configuration for audit trail (WP-11.99)
+
+        Returns:
+            Node model
+
+        Raises:
+            ValueError: If node_type or determinism string is not a valid enum value
+        """
+        # Validate and coerce enums early - fail fast on typos
+        node_type_enum = _coerce_enum(node_type, NodeType)
+        determinism_enum = _coerce_enum(determinism, Determinism)
+
+        node_id = node_id or _generate_id()
+        config_json = canonical_json(config)
+        config_hash = stable_hash(config)
+        now = _now()
+
+        # Extract schema info for audit (WP-11.99)
+        schema_fields_json: str | None = None
+        schema_fields_list: list[dict[str, object]] | None = None
+
+        if schema_config.is_dynamic:
+            schema_mode = "dynamic"
+        else:
+            # mode is non-None when is_dynamic is False
+            schema_mode = schema_config.mode or "free"  # Fallback shouldn't happen
+            if schema_config.fields:
+                # FieldDefinition.to_dict() returns dict[str, str | bool]
+                # Cast each dict to wider type for storage
+                field_dicts = [f.to_dict() for f in schema_config.fields]
+                schema_fields_list = [dict(d) for d in field_dicts]
+                schema_fields_json = canonical_json(field_dicts)
+
+        node = Node(
+            node_id=node_id,
+            run_id=run_id,
+            plugin_name=plugin_name,
+            node_type=node_type_enum,  # Strict: enum type
+            plugin_version=plugin_version,
+            determinism=determinism_enum,  # Strict: enum type
+            config_hash=config_hash,
+            config_json=config_json,
+            schema_hash=schema_hash,
+            sequence_in_pipeline=sequence,
+            registered_at=now,
+            schema_mode=schema_mode,
+            schema_fields=schema_fields_list,
+        )
+
+        with self._db.connection() as conn:
+            conn.execute(
+                nodes_table.insert().values(
+                    node_id=node.node_id,
+                    run_id=node.run_id,
+                    plugin_name=node.plugin_name,
+                    node_type=node.node_type.value,  # Store string in DB
+                    plugin_version=node.plugin_version,
+                    determinism=node.determinism.value,  # Store string in DB
+                    config_hash=node.config_hash,
+                    config_json=node.config_json,
+                    schema_hash=node.schema_hash,
+                    sequence_in_pipeline=node.sequence_in_pipeline,
+                    registered_at=node.registered_at,
+                    schema_mode=node.schema_mode,
+                    schema_fields_json=schema_fields_json,
+                )
+            )
+
+        return node
+
+    def register_edge(
+        self,
+        run_id: str,
+        from_node_id: str,
+        to_node_id: str,
+        label: str,
+        mode: RoutingMode | str,
+        *,
+        edge_id: str | None = None,
+    ) -> Edge:
+        """Register an edge in the execution graph.
+
+        Args:
+            run_id: Run this edge belongs to
+            from_node_id: Source node
+            to_node_id: Destination node
+            label: Edge label ("continue", route name, etc.)
+            mode: Default routing mode (RoutingMode enum or "move"/"copy" string)
+            edge_id: Optional edge ID (generated if not provided)
+
+        Returns:
+            Edge model
+
+        Raises:
+            ValueError: If mode string is not a valid RoutingMode value
+        """
+        # Validate and coerce mode enum early - fail fast on typos
+        mode_enum = _coerce_enum(mode, RoutingMode)
+
+        edge_id = edge_id or _generate_id()
+        now = _now()
+
+        edge = Edge(
+            edge_id=edge_id,
+            run_id=run_id,
+            from_node_id=from_node_id,
+            to_node_id=to_node_id,
+            label=label,
+            default_mode=mode_enum,  # Strict: enum type
+            created_at=now,
+        )
+
+        with self._db.connection() as conn:
+            conn.execute(
+                edges_table.insert().values(
+                    edge_id=edge.edge_id,
+                    run_id=edge.run_id,
+                    from_node_id=edge.from_node_id,
+                    to_node_id=edge.to_node_id,
+                    label=edge.label,
+                    default_mode=edge.default_mode.value,  # Store string in DB
+                    created_at=edge.created_at,
+                )
+            )
+
+        return edge
+
+    def _row_to_node(self, row: Any) -> Node:
+        """Convert a database row to a Node model.
+
+        Args:
+            row: Database row from nodes table
+
+        Returns:
+            Node model with all fields including schema info
+        """
+        # Parse schema_fields_json back to list
+        schema_fields: list[dict[str, object]] | None = None
+        if row.schema_fields_json is not None:
+            schema_fields = json.loads(row.schema_fields_json)
+
+        return Node(
+            node_id=row.node_id,
+            run_id=row.run_id,
+            plugin_name=row.plugin_name,
+            node_type=NodeType(row.node_type),  # Coerce DB string to enum
+            plugin_version=row.plugin_version,
+            determinism=Determinism(row.determinism),  # Coerce DB string to enum
+            config_hash=row.config_hash,
+            config_json=row.config_json,
+            schema_hash=row.schema_hash,
+            sequence_in_pipeline=row.sequence_in_pipeline,
+            registered_at=row.registered_at,
+            schema_mode=row.schema_mode,
+            schema_fields=schema_fields,
+        )
+
+    def get_node(self, node_id: str) -> Node | None:
+        """Get a node by ID.
+
+        Args:
+            node_id: Node ID to retrieve
+
+        Returns:
+            Node model or None if not found
+        """
+        with self._db.connection() as conn:
+            result = conn.execute(select(nodes_table).where(nodes_table.c.node_id == node_id))
+            row = result.fetchone()
+
+        if row is None:
+            return None
+
+        return self._row_to_node(row)
+
+    def get_nodes(self, run_id: str) -> list[Node]:
+        """Get all nodes for a run.
+
+        Args:
+            run_id: Run ID
+
+        Returns:
+            List of Node models, ordered by sequence (NULL sequences last)
+        """
+        with self._db.connection() as conn:
+            result = conn.execute(
+                select(nodes_table)
+                .where(nodes_table.c.run_id == run_id)
+                # Use nullslast() for consistent NULL handling across databases
+                # Nodes without sequence (e.g., dynamically added) sort last
+                .order_by(nodes_table.c.sequence_in_pipeline.nullslast())
+            )
+            rows = result.fetchall()
+
+        return [self._row_to_node(row) for row in rows]
+
+    def get_edges(self, run_id: str) -> list[Edge]:
+        """Get all edges for a run.
+
+        Args:
+            run_id: Run ID
+
+        Returns:
+            List of Edge models for this run, ordered by created_at then edge_id
+            for deterministic export signatures.
+        """
+        query = select(edges_table).where(edges_table.c.run_id == run_id).order_by(edges_table.c.created_at, edges_table.c.edge_id)
+
+        with self._db.connection() as conn:
+            result = conn.execute(query)
+            rows = result.fetchall()
+
+        return [
+            Edge(
+                edge_id=r.edge_id,
+                run_id=r.run_id,
+                from_node_id=r.from_node_id,
+                to_node_id=r.to_node_id,
+                label=r.label,
+                default_mode=RoutingMode(r.default_mode),  # Coerce DB string to enum
+                created_at=r.created_at,
+            )
+            for r in rows
+        ]
+
+    # === Row and Token Management ===
+
+    def create_row(
+        self,
+        run_id: str,
+        source_node_id: str,
+        row_index: int,
+        data: dict[str, Any],
+        *,
+        row_id: str | None = None,
+        payload_ref: str | None = None,
+    ) -> Row:
+        """Create a source row record.
+
+        Args:
+            run_id: Run this row belongs to
+            source_node_id: Source node that loaded this row
+            row_index: Position in source (0-indexed)
+            data: Row data for hashing
+            row_id: Optional row ID (generated if not provided)
+            payload_ref: Optional reference to payload store
+
+        Returns:
+            Row model
+        """
+        row_id = row_id or _generate_id()
+        data_hash = stable_hash(data)
+        now = _now()
+
+        row = Row(
+            row_id=row_id,
+            run_id=run_id,
+            source_node_id=source_node_id,
+            row_index=row_index,
+            source_data_hash=data_hash,
+            source_data_ref=payload_ref,
+            created_at=now,
+        )
+
+        with self._db.connection() as conn:
+            conn.execute(
+                rows_table.insert().values(
+                    row_id=row.row_id,
+                    run_id=row.run_id,
+                    source_node_id=row.source_node_id,
+                    row_index=row.row_index,
+                    source_data_hash=row.source_data_hash,
+                    source_data_ref=row.source_data_ref,
+                    created_at=row.created_at,
+                )
+            )
+
+        return row
+
+    def create_token(
+        self,
+        row_id: str,
+        *,
+        token_id: str | None = None,
+        branch_name: str | None = None,
+        fork_group_id: str | None = None,
+        join_group_id: str | None = None,
+    ) -> Token:
+        """Create a token (row instance in DAG path).
+
+        Args:
+            row_id: Source row this token represents
+            token_id: Optional token ID (generated if not provided)
+            branch_name: Optional branch name (for forked tokens)
+            fork_group_id: Optional fork group (links siblings)
+            join_group_id: Optional join group (links merged tokens)
+
+        Returns:
+            Token model
+        """
+        token_id = token_id or _generate_id()
+        now = _now()
+
+        token = Token(
+            token_id=token_id,
+            row_id=row_id,
+            fork_group_id=fork_group_id,
+            join_group_id=join_group_id,
+            branch_name=branch_name,
+            created_at=now,
+        )
+
+        with self._db.connection() as conn:
+            conn.execute(
+                tokens_table.insert().values(
+                    token_id=token.token_id,
+                    row_id=token.row_id,
+                    fork_group_id=token.fork_group_id,
+                    join_group_id=token.join_group_id,
+                    branch_name=token.branch_name,
+                    created_at=token.created_at,
+                )
+            )
+
+        return token
+
+    def fork_token(
+        self,
+        parent_token_id: str,
+        row_id: str,
+        branches: list[str],
+        *,
+        step_in_pipeline: int | None = None,
+    ) -> list[Token]:
+        """Fork a token to multiple branches.
+
+        Creates child tokens for each branch, all sharing a fork_group_id.
+        Records parent relationships.
+
+        Args:
+            parent_token_id: Token being forked
+            row_id: Row ID (same for all children)
+            branches: List of branch names (must have at least one)
+            step_in_pipeline: Step in the DAG where the fork occurs
+
+        Returns:
+            List of child Token models
+
+        Raises:
+            ValueError: If branches is empty (defense-in-depth for audit integrity)
+        """
+        # Defense-in-depth: validate even though RoutingAction.fork_to_paths()
+        # already validates. Per CLAUDE.md "no silent drops" - empty forks
+        # would cause tokens to disappear without audit trail.
+        if not branches:
+            raise ValueError("fork_token requires at least one branch")
+
+        fork_group_id = _generate_id()
+        children = []
+
+        with self._db.connection() as conn:
+            for ordinal, branch_name in enumerate(branches):
+                child_id = _generate_id()
+                now = _now()
+
+                # Create child token
+                conn.execute(
+                    tokens_table.insert().values(
+                        token_id=child_id,
+                        row_id=row_id,
+                        fork_group_id=fork_group_id,
+                        branch_name=branch_name,
+                        step_in_pipeline=step_in_pipeline,
+                        created_at=now,
+                    )
+                )
+
+                # Record parent relationship
+                conn.execute(
+                    token_parents_table.insert().values(
+                        token_id=child_id,
+                        parent_token_id=parent_token_id,
+                        ordinal=ordinal,
+                    )
+                )
+
+                children.append(
+                    Token(
+                        token_id=child_id,
+                        row_id=row_id,
+                        fork_group_id=fork_group_id,
+                        branch_name=branch_name,
+                        step_in_pipeline=step_in_pipeline,
+                        created_at=now,
+                    )
+                )
+
+        return children
+
+    def coalesce_tokens(
+        self,
+        parent_token_ids: list[str],
+        row_id: str,
+        *,
+        step_in_pipeline: int | None = None,
+    ) -> Token:
+        """Coalesce multiple tokens into one (join operation).
+
+        Creates a new token representing the merged result.
+        Records all parent relationships.
+
+        Args:
+            parent_token_ids: Tokens being merged
+            row_id: Row ID for the merged token
+            step_in_pipeline: Step in the DAG where the coalesce occurs
+
+        Returns:
+            Merged Token model
+        """
+        join_group_id = _generate_id()
+        token_id = _generate_id()
+        now = _now()
+
+        with self._db.connection() as conn:
+            # Create merged token
+            conn.execute(
+                tokens_table.insert().values(
+                    token_id=token_id,
+                    row_id=row_id,
+                    join_group_id=join_group_id,
+                    step_in_pipeline=step_in_pipeline,
+                    created_at=now,
+                )
+            )
+
+            # Record all parent relationships
+            for ordinal, parent_id in enumerate(parent_token_ids):
+                conn.execute(
+                    token_parents_table.insert().values(
+                        token_id=token_id,
+                        parent_token_id=parent_id,
+                        ordinal=ordinal,
+                    )
+                )
+
+        return Token(
+            token_id=token_id,
+            row_id=row_id,
+            join_group_id=join_group_id,
+            step_in_pipeline=step_in_pipeline,
+            created_at=now,
+        )
+
+    def expand_token(
+        self,
+        parent_token_id: str,
+        row_id: str,
+        count: int,
+        step_in_pipeline: int,
+    ) -> list[Token]:
+        """Expand a token into multiple child tokens (deaggregation).
+
+        Creates N child tokens from a single parent for 1->N expansion.
+        All children share the same row_id (same source row) and are
+        linked to the parent via token_parents table.
+
+        Unlike fork_token (parallel DAG paths with branch names), expand_token
+        creates sequential children for deaggregation transforms.
+
+        Args:
+            parent_token_id: Token being expanded
+            row_id: Row ID (same for all children)
+            count: Number of child tokens to create (must be >= 1)
+            step_in_pipeline: Step where expansion occurs
+
+        Returns:
+            List of child Token models
+
+        Raises:
+            ValueError: If count < 1
+        """
+        if count < 1:
+            raise ValueError("expand_token requires at least 1 child")
+
+        expand_group_id = _generate_id()
+        children = []
+
+        with self._db.connection() as conn:
+            for ordinal in range(count):
+                child_id = _generate_id()
+                now = _now()
+
+                # Create child token with expand_group_id
+                conn.execute(
+                    tokens_table.insert().values(
+                        token_id=child_id,
+                        row_id=row_id,
+                        expand_group_id=expand_group_id,
+                        step_in_pipeline=step_in_pipeline,
+                        created_at=now,
+                    )
+                )
+
+                # Record parent relationship
+                conn.execute(
+                    token_parents_table.insert().values(
+                        token_id=child_id,
+                        parent_token_id=parent_token_id,
+                        ordinal=ordinal,
+                    )
+                )
+
+                children.append(
+                    Token(
+                        token_id=child_id,
+                        row_id=row_id,
+                        expand_group_id=expand_group_id,
+                        step_in_pipeline=step_in_pipeline,
+                        created_at=now,
+                    )
+                )
+
+        return children
+
+    # === Node State Recording ===
+
+    def begin_node_state(
+        self,
+        token_id: str,
+        node_id: str,
+        step_index: int,
+        input_data: dict[str, Any],
+        *,
+        state_id: str | None = None,
+        attempt: int = 0,
+        context_before: dict[str, Any] | None = None,
+    ) -> NodeStateOpen:
+        """Begin recording a node state (token visiting a node).
+
+        Args:
+            token_id: Token being processed
+            node_id: Node processing the token
+            step_index: Position in token's execution path
+            input_data: Input data for hashing
+            state_id: Optional state ID (generated if not provided)
+            attempt: Attempt number (0 for first attempt)
+            context_before: Optional context snapshot before processing
+
+        Returns:
+            NodeStateOpen model with status=OPEN
+        """
+        state_id = state_id or _generate_id()
+        input_hash = stable_hash(input_data)
+        now = _now()
+
+        context_json = canonical_json(context_before) if context_before is not None else None
+
+        state = NodeStateOpen(
+            state_id=state_id,
+            token_id=token_id,
+            node_id=node_id,
+            step_index=step_index,
+            attempt=attempt,
+            status=NodeStateStatus.OPEN,
+            input_hash=input_hash,
+            context_before_json=context_json,
+            started_at=now,
+        )
+
+        with self._db.connection() as conn:
+            conn.execute(
+                node_states_table.insert().values(
+                    state_id=state.state_id,
+                    token_id=state.token_id,
+                    node_id=state.node_id,
+                    step_index=state.step_index,
+                    attempt=state.attempt,
+                    status=state.status.value,
+                    input_hash=state.input_hash,
+                    context_before_json=state.context_before_json,
+                    started_at=state.started_at,
+                )
+            )
+
+        return state
+
+    def complete_node_state(
+        self,
+        state_id: str,
+        status: NodeStateStatus | str,
+        *,
+        output_data: dict[str, Any] | list[dict[str, Any]] | None = None,
+        duration_ms: float | None = None,
+        error: ExecutionError | dict[str, Any] | None = None,
+        context_after: dict[str, Any] | None = None,
+    ) -> NodeStateCompleted | NodeStateFailed:
+        """Complete a node state.
+
+        Args:
+            state_id: State to complete
+            status: Final status (completed, failed, or "rejected" which maps to failed)
+            output_data: Output data for hashing (if success)
+            duration_ms: Processing duration (required)
+            error: Error details (if failed)
+            context_after: Optional context snapshot after processing
+
+        Returns:
+            NodeStateCompleted if status is completed, NodeStateFailed otherwise
+
+        Raises:
+            ValueError: If status is not a valid terminal status
+            ValueError: If duration_ms is not provided
+        """
+        # Coerce string status to enum (handle "rejected" as failed)
+        # Check for enum first since NodeStateStatus is a str subclass
+        if isinstance(status, NodeStateStatus):
+            status_enum = status
+        elif status == "rejected":
+            status_enum = NodeStateStatus.FAILED
+        else:
+            status_enum = NodeStateStatus(status)
+
+        if status_enum == NodeStateStatus.OPEN:
+            raise ValueError("Cannot complete a node state with status OPEN")
+
+        if duration_ms is None:
+            raise ValueError("duration_ms is required when completing a node state")
+
+        now = _now()
+        output_hash = stable_hash(output_data) if output_data is not None else None
+        error_json = canonical_json(error) if error is not None else None
+        context_json = canonical_json(context_after) if context_after is not None else None
+
+        with self._db.connection() as conn:
+            conn.execute(
+                node_states_table.update()
+                .where(node_states_table.c.state_id == state_id)
+                .values(
+                    status=status_enum.value,
+                    output_hash=output_hash,
+                    duration_ms=duration_ms,
+                    error_json=error_json,
+                    context_after_json=context_json,
+                    completed_at=now,
+                )
+            )
+
+        result = self.get_node_state(state_id)
+        assert result is not None, f"NodeState {state_id} not found after update"
+        # Type narrowing: result is guaranteed to be Completed or Failed
+        assert not isinstance(result, NodeStateOpen), "State should be terminal after completion"
+        return result
+
+    def get_node_state(self, state_id: str) -> NodeState | None:
+        """Get a node state by ID.
+
+        Args:
+            state_id: State ID to retrieve
+
+        Returns:
+            NodeState (union of Open, Completed, or Failed) or None
+        """
+        with self._db.connection() as conn:
+            result = conn.execute(select(node_states_table).where(node_states_table.c.state_id == state_id))
+            row = result.fetchone()
+
+        if row is None:
+            return None
+
+        return _row_to_node_state(row)
+
+    # === Routing Event Recording ===
+
+    def record_routing_event(
+        self,
+        state_id: str,
+        edge_id: str,
+        mode: RoutingMode | str,
+        reason: dict[str, Any] | None = None,
+        *,
+        event_id: str | None = None,
+        routing_group_id: str | None = None,
+        ordinal: int = 0,
+        reason_ref: str | None = None,
+    ) -> RoutingEvent:
+        """Record a single routing event.
+
+        Args:
+            state_id: Node state that made the routing decision
+            edge_id: Edge that was taken
+            mode: Routing mode (RoutingMode enum or "move"/"copy" string)
+            reason: Reason for this routing decision
+            event_id: Optional event ID
+            routing_group_id: Group ID (for multi-destination routing)
+            ordinal: Position in routing group
+            reason_ref: Optional payload store reference
+
+        Returns:
+            RoutingEvent model
+
+        Raises:
+            ValueError: If mode string is not a valid RoutingMode value
+        """
+        # Validate and coerce mode enum early - fail fast on typos
+        mode_enum = _coerce_enum(mode, RoutingMode)
+
+        event_id = event_id or _generate_id()
+        routing_group_id = routing_group_id or _generate_id()
+        reason_hash = stable_hash(reason) if reason else None
+        now = _now()
+
+        event = RoutingEvent(
+            event_id=event_id,
+            state_id=state_id,
+            edge_id=edge_id,
+            routing_group_id=routing_group_id,
+            ordinal=ordinal,
+            mode=mode_enum,  # Strict: enum type
+            reason_hash=reason_hash,
+            reason_ref=reason_ref,
+            created_at=now,
+        )
+
+        with self._db.connection() as conn:
+            conn.execute(
+                routing_events_table.insert().values(
+                    event_id=event.event_id,
+                    state_id=event.state_id,
+                    edge_id=event.edge_id,
+                    routing_group_id=event.routing_group_id,
+                    ordinal=event.ordinal,
+                    mode=event.mode.value,  # Store string in DB
+                    reason_hash=event.reason_hash,
+                    reason_ref=event.reason_ref,
+                    created_at=event.created_at,
+                )
+            )
+
+        return event
+
+    def record_routing_events(
+        self,
+        state_id: str,
+        routes: list[RoutingSpec],
+        reason: dict[str, Any] | None = None,
+    ) -> list[RoutingEvent]:
+        """Record multiple routing events (fork/multi-destination).
+
+        All events share the same routing_group_id.
+
+        Args:
+            state_id: Node state that made the routing decision
+            routes: List of RoutingSpec objects specifying edge_id and mode
+            reason: Shared reason for all routes
+
+        Returns:
+            List of RoutingEvent models
+        """
+        routing_group_id = _generate_id()
+        reason_hash = stable_hash(reason) if reason else None
+        now = _now()
+        events = []
+
+        with self._db.connection() as conn:
+            for ordinal, route in enumerate(routes):
+                event_id = _generate_id()
+                event = RoutingEvent(
+                    event_id=event_id,
+                    state_id=state_id,
+                    edge_id=route.edge_id,
+                    routing_group_id=routing_group_id,
+                    ordinal=ordinal,
+                    mode=route.mode,  # Already RoutingMode enum from RoutingSpec
+                    reason_hash=reason_hash,
+                    reason_ref=None,
+                    created_at=now,
+                )
+
+                conn.execute(
+                    routing_events_table.insert().values(
+                        event_id=event.event_id,
+                        state_id=event.state_id,
+                        edge_id=event.edge_id,
+                        routing_group_id=event.routing_group_id,
+                        ordinal=event.ordinal,
+                        mode=event.mode.value,  # Store string in DB
+                        reason_hash=event.reason_hash,
+                        created_at=event.created_at,
+                    )
+                )
+
+                events.append(event)
+
+        return events
+
+    # === Batch Management ===
+
+    def create_batch(
+        self,
+        run_id: str,
+        aggregation_node_id: str,
+        *,
+        batch_id: str | None = None,
+        attempt: int = 0,
+    ) -> Batch:
+        """Create a new batch for aggregation.
+
+        Args:
+            run_id: Run this batch belongs to
+            aggregation_node_id: Aggregation node collecting tokens
+            batch_id: Optional batch ID (generated if not provided)
+            attempt: Attempt number (0 for first attempt)
+
+        Returns:
+            Batch model with status="draft"
+        """
+        batch_id = batch_id or _generate_id()
+        now = _now()
+
+        batch = Batch(
+            batch_id=batch_id,
+            run_id=run_id,
+            aggregation_node_id=aggregation_node_id,
+            attempt=attempt,
+            status=BatchStatus.DRAFT,  # Strict: enum type
+            created_at=now,
+        )
+
+        with self._db.connection() as conn:
+            conn.execute(
+                batches_table.insert().values(
+                    batch_id=batch.batch_id,
+                    run_id=batch.run_id,
+                    aggregation_node_id=batch.aggregation_node_id,
+                    attempt=batch.attempt,
+                    status=batch.status.value,  # Store string in DB
+                    created_at=batch.created_at,
+                )
+            )
+
+        return batch
+
+    def add_batch_member(
+        self,
+        batch_id: str,
+        token_id: str,
+        ordinal: int,
+    ) -> BatchMember:
+        """Add a token to a batch.
+
+        Args:
+            batch_id: Batch to add to
+            token_id: Token to add
+            ordinal: Order in batch
+
+        Returns:
+            BatchMember model
+        """
+        member = BatchMember(
+            batch_id=batch_id,
+            token_id=token_id,
+            ordinal=ordinal,
+        )
+
+        with self._db.connection() as conn:
+            conn.execute(
+                batch_members_table.insert().values(
+                    batch_id=member.batch_id,
+                    token_id=member.token_id,
+                    ordinal=member.ordinal,
+                )
+            )
+
+        return member
+
+    def update_batch_status(
+        self,
+        batch_id: str,
+        status: str,
+        *,
+        trigger_type: str | None = None,
+        trigger_reason: str | None = None,
+        state_id: str | None = None,
+    ) -> None:
+        """Update batch status.
+
+        Args:
+            batch_id: Batch to update
+            status: New status (executing, completed, failed)
+            trigger_type: TriggerType enum value (count, time, end_of_source, manual)
+            trigger_reason: Human-readable reason for the trigger
+            state_id: Node state for the flush operation
+        """
+        updates: dict[str, Any] = {"status": status}
+
+        if trigger_type:
+            updates["trigger_type"] = trigger_type
+        if trigger_reason:
+            updates["trigger_reason"] = trigger_reason
+        if state_id:
+            updates["aggregation_state_id"] = state_id
+        if status in ("completed", "failed"):
+            updates["completed_at"] = _now()
+
+        with self._db.connection() as conn:
+            conn.execute(batches_table.update().where(batches_table.c.batch_id == batch_id).values(**updates))
+
+    def complete_batch(
+        self,
+        batch_id: str,
+        status: str,
+        *,
+        trigger_type: str | None = None,
+        trigger_reason: str | None = None,
+        state_id: str | None = None,
+    ) -> Batch:
+        """Complete a batch.
+
+        Args:
+            batch_id: Batch to complete
+            status: Final status (completed, failed)
+            trigger_type: TriggerType enum value (count, time, end_of_source, manual)
+            trigger_reason: Human-readable reason for the trigger
+            state_id: Optional node state for the aggregation
+
+        Returns:
+            Updated Batch model
+        """
+        now = _now()
+
+        with self._db.connection() as conn:
+            conn.execute(
+                batches_table.update()
+                .where(batches_table.c.batch_id == batch_id)
+                .values(
+                    status=status,
+                    trigger_type=trigger_type,
+                    trigger_reason=trigger_reason,
+                    aggregation_state_id=state_id,
+                    completed_at=now,
+                )
+            )
+
+        result = self.get_batch(batch_id)
+        assert result is not None, f"Batch {batch_id} not found after update"
+        return result
+
+    def get_batch(self, batch_id: str) -> Batch | None:
+        """Get a batch by ID.
+
+        Args:
+            batch_id: Batch ID to retrieve
+
+        Returns:
+            Batch model or None
+        """
+        with self._db.connection() as conn:
+            result = conn.execute(select(batches_table).where(batches_table.c.batch_id == batch_id))
+            row = result.fetchone()
+
+        if row is None:
+            return None
+
+        return Batch(
+            batch_id=row.batch_id,
+            run_id=row.run_id,
+            aggregation_node_id=row.aggregation_node_id,
+            aggregation_state_id=row.aggregation_state_id,
+            trigger_type=row.trigger_type,
+            trigger_reason=row.trigger_reason,
+            attempt=row.attempt,
+            status=BatchStatus(row.status),  # Coerce DB string to enum
+            created_at=row.created_at,
+            completed_at=row.completed_at,
+        )
+
+    def get_batches(
+        self,
+        run_id: str,
+        *,
+        status: str | None = None,
+        node_id: str | None = None,
+    ) -> list[Batch]:
+        """Get batches for a run.
+
+        Args:
+            run_id: Run ID
+            status: Optional status filter
+            node_id: Optional aggregation node filter
+
+        Returns:
+            List of Batch models, ordered by created_at then batch_id
+            for deterministic export signatures.
+        """
+        query = select(batches_table).where(batches_table.c.run_id == run_id)
+
+        if status:
+            query = query.where(batches_table.c.status == status)
+        if node_id:
+            query = query.where(batches_table.c.aggregation_node_id == node_id)
+
+        # Order for deterministic export signatures
+        query = query.order_by(batches_table.c.created_at, batches_table.c.batch_id)
+
+        with self._db.connection() as conn:
+            result = conn.execute(query)
+            rows = result.fetchall()
+
+        return [
+            Batch(
+                batch_id=row.batch_id,
+                run_id=row.run_id,
+                aggregation_node_id=row.aggregation_node_id,
+                aggregation_state_id=row.aggregation_state_id,
+                trigger_type=row.trigger_type,
+                trigger_reason=row.trigger_reason,
+                attempt=row.attempt,
+                status=BatchStatus(row.status),  # Coerce DB string to enum
+                created_at=row.created_at,
+                completed_at=row.completed_at,
+            )
+            for row in rows
+        ]
+
+    def get_incomplete_batches(self, run_id: str) -> list[Batch]:
+        """Get batches that need recovery (draft, executing, or failed).
+
+        Used during crash recovery to find batches that were:
+        - draft: Still collecting rows when crash occurred
+        - executing: Mid-flush when crash occurred
+        - failed: Flush failed and needs retry
+
+        Args:
+            run_id: The run to query
+
+        Returns:
+            List of Batch objects with status in (draft, executing, failed),
+            ordered by created_at ascending (oldest first for deterministic recovery)
+        """
+        with self._db.connection() as conn:
+            result = conn.execute(
+                select(batches_table)
+                .where(batches_table.c.run_id == run_id)
+                .where(batches_table.c.status.in_(["draft", "executing", "failed"]))
+                .order_by(batches_table.c.created_at.asc())
+            ).fetchall()
+
+        return [
+            Batch(
+                batch_id=row.batch_id,
+                run_id=row.run_id,
+                aggregation_node_id=row.aggregation_node_id,
+                attempt=row.attempt,
+                status=BatchStatus(row.status),
+                created_at=row.created_at,
+                aggregation_state_id=row.aggregation_state_id,
+                trigger_type=row.trigger_type,
+                trigger_reason=row.trigger_reason,
+                completed_at=row.completed_at,
+            )
+            for row in result
+        ]
+
+    def get_batch_members(self, batch_id: str) -> list[BatchMember]:
+        """Get all members of a batch.
+
+        Args:
+            batch_id: Batch ID
+
+        Returns:
+            List of BatchMember models (ordered by ordinal)
+        """
+        with self._db.connection() as conn:
+            result = conn.execute(
+                select(batch_members_table).where(batch_members_table.c.batch_id == batch_id).order_by(batch_members_table.c.ordinal)
+            )
+            rows = result.fetchall()
+
+        return [
+            BatchMember(
+                batch_id=row.batch_id,
+                token_id=row.token_id,
+                ordinal=row.ordinal,
+            )
+            for row in rows
+        ]
+
+    def retry_batch(self, batch_id: str) -> Batch:
+        """Create a new batch attempt from a failed batch.
+
+        Copies batch metadata and members to a new batch with
+        incremented attempt counter and draft status.
+
+        Args:
+            batch_id: The failed batch to retry
+
+        Returns:
+            New Batch with attempt = original.attempt + 1
+
+        Raises:
+            ValueError: If original batch not found or not in failed status
+        """
+        original = self.get_batch(batch_id)
+        if original is None:
+            raise ValueError(f"Batch not found: {batch_id}")
+        if original.status != BatchStatus.FAILED:
+            raise ValueError(f"Can only retry failed batches, got status: {original.status}")
+
+        # Create new batch with incremented attempt
+        new_batch = self.create_batch(
+            run_id=original.run_id,
+            aggregation_node_id=original.aggregation_node_id,
+            attempt=original.attempt + 1,
+        )
+
+        # Copy members to new batch
+        original_members = self.get_batch_members(batch_id)
+        for member in original_members:
+            self.add_batch_member(
+                batch_id=new_batch.batch_id,
+                token_id=member.token_id,
+                ordinal=member.ordinal,
+            )
+
+        return new_batch
+
+    # === Artifact Registration ===
+
+    def register_artifact(
+        self,
+        run_id: str,
+        state_id: str,
+        sink_node_id: str,
+        artifact_type: str,
+        path: str,
+        content_hash: str,
+        size_bytes: int,
+        *,
+        artifact_id: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> Artifact:
+        """Register an artifact produced by a sink.
+
+        Args:
+            run_id: Run that produced this artifact
+            state_id: Node state that produced this artifact
+            sink_node_id: Sink node that wrote the artifact
+            artifact_type: Type of artifact (csv, json, etc.)
+            path: File path or URI
+            content_hash: Hash of artifact content
+            size_bytes: Size of artifact in bytes
+            artifact_id: Optional artifact ID
+            idempotency_key: Optional key for retry deduplication
+
+        Returns:
+            Artifact model
+        """
+        artifact_id = artifact_id or _generate_id()
+        now = _now()
+
+        artifact = Artifact(
+            artifact_id=artifact_id,
+            run_id=run_id,
+            produced_by_state_id=state_id,
+            sink_node_id=sink_node_id,
+            artifact_type=artifact_type,
+            path_or_uri=path,
+            content_hash=content_hash,
+            size_bytes=size_bytes,
+            created_at=now,
+            idempotency_key=idempotency_key,
+        )
+
+        with self._db.connection() as conn:
+            conn.execute(
+                artifacts_table.insert().values(
+                    artifact_id=artifact.artifact_id,
+                    run_id=artifact.run_id,
+                    produced_by_state_id=artifact.produced_by_state_id,
+                    sink_node_id=artifact.sink_node_id,
+                    artifact_type=artifact.artifact_type,
+                    path_or_uri=artifact.path_or_uri,
+                    content_hash=artifact.content_hash,
+                    size_bytes=artifact.size_bytes,
+                    idempotency_key=artifact.idempotency_key,
+                    created_at=artifact.created_at,
+                )
+            )
+
+        return artifact
+
+    def get_artifacts(
+        self,
+        run_id: str,
+        *,
+        sink_node_id: str | None = None,
+    ) -> list[Artifact]:
+        """Get artifacts for a run.
+
+        Args:
+            run_id: Run ID
+            sink_node_id: Optional filter by sink
+
+        Returns:
+            List of Artifact models
+        """
+        query = select(artifacts_table).where(artifacts_table.c.run_id == run_id)
+
+        if sink_node_id:
+            query = query.where(artifacts_table.c.sink_node_id == sink_node_id)
+
+        with self._db.connection() as conn:
+            result = conn.execute(query)
+            rows = result.fetchall()
+
+        return [
+            Artifact(
+                artifact_id=row.artifact_id,
+                run_id=row.run_id,
+                produced_by_state_id=row.produced_by_state_id,
+                sink_node_id=row.sink_node_id,
+                artifact_type=row.artifact_type,
+                path_or_uri=row.path_or_uri,
+                content_hash=row.content_hash,
+                size_bytes=row.size_bytes,
+                created_at=row.created_at,
+                idempotency_key=row.idempotency_key,
+            )
+            for row in rows
+        ]
+
+    # === Row and Token Query Methods ===
+
+    def get_rows(self, run_id: str) -> list[Row]:
+        """Get all rows for a run.
+
+        Args:
+            run_id: Run ID
+
+        Returns:
+            List of Row models, ordered by row_index
+        """
+        query = select(rows_table).where(rows_table.c.run_id == run_id).order_by(rows_table.c.row_index)
+
+        with self._db.connection() as conn:
+            result = conn.execute(query)
+            db_rows = result.fetchall()
+
+        return [
+            Row(
+                row_id=r.row_id,
+                run_id=r.run_id,
+                source_node_id=r.source_node_id,
+                row_index=r.row_index,
+                source_data_hash=r.source_data_hash,
+                source_data_ref=r.source_data_ref,
+                created_at=r.created_at,
+            )
+            for r in db_rows
+        ]
+
+    def get_tokens(self, row_id: str) -> list[Token]:
+        """Get all tokens for a row.
+
+        Args:
+            row_id: Row ID
+
+        Returns:
+            List of Token models, ordered by created_at then token_id
+            for deterministic export signatures.
+        """
+        query = select(tokens_table).where(tokens_table.c.row_id == row_id).order_by(tokens_table.c.created_at, tokens_table.c.token_id)
+
+        with self._db.connection() as conn:
+            result = conn.execute(query)
+            db_rows = result.fetchall()
+
+        return [
+            Token(
+                token_id=r.token_id,
+                row_id=r.row_id,
+                fork_group_id=r.fork_group_id,
+                join_group_id=r.join_group_id,
+                expand_group_id=r.expand_group_id,
+                branch_name=r.branch_name,
+                step_in_pipeline=r.step_in_pipeline,
+                created_at=r.created_at,
+            )
+            for r in db_rows
+        ]
+
+    def get_node_states_for_token(self, token_id: str) -> list[NodeState]:
+        """Get all node states for a token.
+
+        Args:
+            token_id: Token ID
+
+        Returns:
+            List of NodeState models (discriminated union), ordered by (step_index, attempt)
+        """
+        # Order by (step_index, attempt) for deterministic ordering across retries
+        # Bug fix: P2-2026-01-19-node-state-ordering-missing-attempt
+        query = (
+            select(node_states_table)
+            .where(node_states_table.c.token_id == token_id)
+            .order_by(node_states_table.c.step_index, node_states_table.c.attempt)
+        )
+
+        with self._db.connection() as conn:
+            result = conn.execute(query)
+            db_rows = result.fetchall()
+
+        return [_row_to_node_state(r) for r in db_rows]
+
+    def get_row(self, row_id: str) -> Row | None:
+        """Get a row by ID.
+
+        Args:
+            row_id: Row ID
+
+        Returns:
+            Row model or None if not found
+        """
+        query = select(rows_table).where(rows_table.c.row_id == row_id)
+
+        with self._db.connection() as conn:
+            result = conn.execute(query)
+            r = result.fetchone()
+
+        if r is None:
+            return None
+
+        return Row(
+            row_id=r.row_id,
+            run_id=r.run_id,
+            source_node_id=r.source_node_id,
+            row_index=r.row_index,
+            source_data_hash=r.source_data_hash,
+            source_data_ref=r.source_data_ref,
+            created_at=r.created_at,
+        )
+
+    def get_row_data(self, row_id: str) -> RowDataResult:
+        """Get the payload data for a row with explicit state.
+
+        Returns a RowDataResult with explicit state indicating why data
+        may be unavailable. This replaces the previous ambiguous None return.
+
+        Args:
+            row_id: Row ID
+
+        Returns:
+            RowDataResult with state and data (if available)
+        """
+        row = self.get_row(row_id)
+        if row is None:
+            return RowDataResult(state=RowDataState.ROW_NOT_FOUND, data=None)
+
+        if row.source_data_ref is None:
+            return RowDataResult(state=RowDataState.NEVER_STORED, data=None)
+
+        if self._payload_store is None:
+            return RowDataResult(state=RowDataState.STORE_NOT_CONFIGURED, data=None)
+
+        try:
+            import json
+
+            payload_bytes = self._payload_store.retrieve(row.source_data_ref)
+            data = json.loads(payload_bytes.decode("utf-8"))
+            return RowDataResult(state=RowDataState.AVAILABLE, data=data)
+        except KeyError:
+            return RowDataResult(state=RowDataState.PURGED, data=None)
+
+    def get_token(self, token_id: str) -> Token | None:
+        """Get a token by ID.
+
+        Args:
+            token_id: Token ID
+
+        Returns:
+            Token model or None if not found
+        """
+        query = select(tokens_table).where(tokens_table.c.token_id == token_id)
+
+        with self._db.connection() as conn:
+            result = conn.execute(query)
+            r = result.fetchone()
+
+        if r is None:
+            return None
+
+        return Token(
+            token_id=r.token_id,
+            row_id=r.row_id,
+            fork_group_id=r.fork_group_id,
+            join_group_id=r.join_group_id,
+            expand_group_id=r.expand_group_id,
+            branch_name=r.branch_name,
+            step_in_pipeline=r.step_in_pipeline,
+            created_at=r.created_at,
+        )
+
+    def get_token_parents(self, token_id: str) -> list[TokenParent]:
+        """Get parent relationships for a token.
+
+        Args:
+            token_id: Token ID
+
+        Returns:
+            List of TokenParent models (ordered by ordinal)
+        """
+        query = select(token_parents_table).where(token_parents_table.c.token_id == token_id).order_by(token_parents_table.c.ordinal)
+
+        with self._db.connection() as conn:
+            result = conn.execute(query)
+            db_rows = result.fetchall()
+
+        return [
+            TokenParent(
+                token_id=r.token_id,
+                parent_token_id=r.parent_token_id,
+                ordinal=r.ordinal,
+            )
+            for r in db_rows
+        ]
+
+    def get_routing_events(self, state_id: str) -> list[RoutingEvent]:
+        """Get routing events for a node state.
+
+        Args:
+            state_id: State ID
+
+        Returns:
+            List of RoutingEvent models, ordered by ordinal then event_id
+            for deterministic export signatures.
+        """
+        query = (
+            select(routing_events_table)
+            .where(routing_events_table.c.state_id == state_id)
+            .order_by(routing_events_table.c.ordinal, routing_events_table.c.event_id)
+        )
+
+        with self._db.connection() as conn:
+            result = conn.execute(query)
+            db_rows = result.fetchall()
+
+        return [
+            RoutingEvent(
+                event_id=r.event_id,
+                state_id=r.state_id,
+                edge_id=r.edge_id,
+                routing_group_id=r.routing_group_id,
+                ordinal=r.ordinal,
+                mode=RoutingMode(r.mode),  # Coerce DB string to enum
+                reason_hash=r.reason_hash,
+                reason_ref=r.reason_ref,
+                created_at=r.created_at,
+            )
+            for r in db_rows
+        ]
+
+    def get_calls(self, state_id: str) -> list[Call]:
+        """Get external calls for a node state.
+
+        Args:
+            state_id: State ID
+
+        Returns:
+            List of Call models, ordered by call_index
+        """
+        query = select(calls_table).where(calls_table.c.state_id == state_id).order_by(calls_table.c.call_index)
+
+        with self._db.connection() as conn:
+            result = conn.execute(query)
+            db_rows = result.fetchall()
+
+        return [
+            Call(
+                call_id=r.call_id,
+                state_id=r.state_id,
+                call_index=r.call_index,
+                call_type=r.call_type,
+                status=r.status,
+                request_hash=r.request_hash,
+                request_ref=r.request_ref,
+                response_hash=r.response_hash,
+                response_ref=r.response_ref,
+                error_json=r.error_json,
+                latency_ms=r.latency_ms,
+                created_at=r.created_at,
+            )
+            for r in db_rows
+        ]
+
+    def record_call(
+        self,
+        state_id: str,
+        call_index: int,
+        call_type: CallType,
+        status: CallStatus,
+        request_data: dict[str, Any],
+        response_data: dict[str, Any] | None = None,
+        error: dict[str, Any] | None = None,
+        latency_ms: float | None = None,
+        *,
+        request_ref: str | None = None,
+        response_ref: str | None = None,
+    ) -> Call:
+        """Record an external call for a node state.
+
+        Args:
+            state_id: The node_state this call belongs to
+            call_index: 0-based index of this call within the state
+            call_type: Type of external call (LLM, HTTP, SQL, FILESYSTEM)
+            status: Outcome of the call (SUCCESS, ERROR)
+            request_data: Request payload (will be hashed)
+            response_data: Response payload (will be hashed, optional for errors)
+            error: Error details if status is ERROR (stored as JSON)
+            latency_ms: Call duration in milliseconds
+            request_ref: Optional payload store reference for request
+            response_ref: Optional payload store reference for response
+
+        Returns:
+            The recorded Call model
+
+        Note:
+            Duplicate (state_id, call_index) will raise IntegrityError from SQLAlchemy.
+            Invalid state_id will raise IntegrityError due to foreign key constraint.
+        """
+        call_id = _generate_id()
+        now = _now()
+
+        # Hash request (always required)
+        request_hash = stable_hash(request_data)
+
+        # Hash response (optional - None for errors without response)
+        response_hash = stable_hash(response_data) if response_data is not None else None
+
+        # Auto-persist request to payload store if available and ref not provided
+        # This enables replay/verify modes to retrieve the original request
+        if request_ref is None and self._payload_store is not None:
+            request_bytes = canonical_json(request_data).encode("utf-8")
+            request_ref = self._payload_store.store(request_bytes)
+
+        # Auto-persist response to payload store if available and ref not provided
+        # This enables replay/verify modes to retrieve the original response
+        if response_data is not None and response_ref is None and self._payload_store is not None:
+            response_bytes = canonical_json(response_data).encode("utf-8")
+            response_ref = self._payload_store.store(response_bytes)
+
+        # Serialize error if present
+        error_json = canonical_json(error) if error is not None else None
+
+        values = {
+            "call_id": call_id,
+            "state_id": state_id,
+            "call_index": call_index,
+            "call_type": call_type.value,  # Store enum value
+            "status": status.value,  # Store enum value
+            "request_hash": request_hash,
+            "request_ref": request_ref,
+            "response_hash": response_hash,
+            "response_ref": response_ref,
+            "error_json": error_json,
+            "latency_ms": latency_ms,
+            "created_at": now,
+        }
+
+        with self._db.connection() as conn:
+            conn.execute(calls_table.insert().values(**values))
+
+        return Call(
+            call_id=call_id,
+            state_id=state_id,
+            call_index=call_index,
+            call_type=call_type,  # Pass enum directly per Call contract
+            status=status,  # Pass enum directly per Call contract
+            request_hash=request_hash,
+            request_ref=request_ref,
+            response_hash=response_hash,
+            response_ref=response_ref,
+            error_json=error_json,
+            latency_ms=latency_ms,
+            created_at=now,
+        )
+
+    # === Explain Methods (Graceful Degradation) ===
+
+    def explain_row(self, run_id: str, row_id: str) -> RowLineage | None:
+        """Get lineage for a row, gracefully handling purged payloads.
+
+        This method returns row lineage information even when the actual
+        payload data has been purged by retention policies. The hash is
+        always preserved, ensuring audit integrity can be verified.
+
+        Args:
+            run_id: Run this row belongs to
+            row_id: Row ID to explain
+
+        Returns:
+            RowLineage with hash and optionally source data, or None if row not found
+            or if row doesn't belong to the specified run
+        """
+        import json
+
+        row = self.get_row(row_id)
+        if row is None:
+            return None
+
+        # Validate row belongs to the specified run - audit systems must be strict
+        if row.run_id != run_id:
+            return None
+
+        # Try to load payload
+        source_data: dict[str, Any] | None = None
+        payload_available = False
+
+        if row.source_data_ref and self._payload_store:
+            try:
+                payload_bytes = self._payload_store.retrieve(row.source_data_ref)
+                source_data = json.loads(payload_bytes.decode("utf-8"))
+                payload_available = True
+            except (KeyError, json.JSONDecodeError, OSError):
+                # Payload has been purged or is corrupted
+                # KeyError: raised by PayloadStore when content not found
+                # JSONDecodeError: content corrupted
+                # OSError: filesystem issues
+                pass
+
+        return RowLineage(
+            row_id=row.row_id,
+            run_id=row.run_id,
+            source_node_id=row.source_node_id,
+            row_index=row.row_index,
+            source_data_hash=row.source_data_hash,
+            created_at=row.created_at,
+            source_data=source_data,
+            payload_available=payload_available,
+        )
+
+    # === Reproducibility Grade Management ===
+
+    def compute_reproducibility_grade(self, run_id: str) -> "ReproducibilityGrade":
+        """Compute reproducibility grade for a run based on node determinism.
+
+        Logic:
+        - If any node has determinism='nondeterministic', returns REPLAY_REPRODUCIBLE
+        - Otherwise returns FULL_REPRODUCIBLE
+        - 'seeded' counts as reproducible
+
+        Args:
+            run_id: Run ID to compute grade for
+
+        Returns:
+            ReproducibilityGrade enum value
+        """
+        from elspeth.core.landscape.reproducibility import compute_grade
+
+        return compute_grade(self._db, run_id)
+
+    def finalize_run(self, run_id: str, status: str) -> Run:
+        """Finalize a run by computing grade and completing it.
+
+        Convenience method that:
+        1. Computes the reproducibility grade based on node determinism
+        2. Completes the run with the specified status and computed grade
+
+        Args:
+            run_id: Run to finalize
+            status: Final status (completed, failed)
+
+        Returns:
+            Updated Run model
+        """
+        grade = self.compute_reproducibility_grade(run_id)
+        return self.complete_run(run_id, status, reproducibility_grade=grade.value)
+
+    # === Token Outcome Recording (AUD-001) ===
+
+    def record_token_outcome(
+        self,
+        run_id: str,
+        token_id: str,
+        outcome: RowOutcome,
+        *,
+        sink_name: str | None = None,
+        batch_id: str | None = None,
+        fork_group_id: str | None = None,
+        join_group_id: str | None = None,
+        expand_group_id: str | None = None,
+        error_hash: str | None = None,
+        context: dict[str, Any] | None = None,
+    ) -> str:
+        """Record a token's outcome in the audit trail.
+
+        Called at the moment the outcome is determined in processor.py.
+        For BUFFERED tokens, a second call records the terminal outcome
+        when the batch flushes.
+
+        Args:
+            run_id: Current run ID
+            token_id: Token that reached this outcome
+            outcome: The RowOutcome enum value
+            sink_name: For ROUTED/COMPLETED - which sink
+            batch_id: For CONSUMED_IN_BATCH/BUFFERED - which batch
+            fork_group_id: For FORKED - the fork group
+            join_group_id: For COALESCED - the join group
+            expand_group_id: For EXPANDED - the expand group
+            error_hash: For FAILED/QUARANTINED - hash of error details
+            context: Optional additional context (stored as JSON)
+
+        Returns:
+            outcome_id for tracking
+
+        Raises:
+            IntegrityError: If terminal outcome already exists for token
+        """
+        outcome_id = f"out_{_generate_id()[:12]}"
+        is_terminal = outcome.is_terminal
+        context_json = json.dumps(context) if context is not None else None
+
+        with self._db.connection() as conn:
+            conn.execute(
+                token_outcomes_table.insert().values(
+                    outcome_id=outcome_id,
+                    run_id=run_id,
+                    token_id=token_id,
+                    outcome=outcome.value,
+                    is_terminal=1 if is_terminal else 0,
+                    recorded_at=_now(),
+                    sink_name=sink_name,
+                    batch_id=batch_id,
+                    fork_group_id=fork_group_id,
+                    join_group_id=join_group_id,
+                    expand_group_id=expand_group_id,
+                    error_hash=error_hash,
+                    context_json=context_json,
+                )
+            )
+
+        return outcome_id
+
+    def get_token_outcome(self, token_id: str) -> TokenOutcome | None:
+        """Get the terminal outcome for a token.
+
+        Returns the terminal outcome if one exists, otherwise the most
+        recent non-terminal outcome (BUFFERED).
+
+        Args:
+            token_id: Token to look up
+
+        Returns:
+            TokenOutcome dataclass or None if no outcome recorded
+        """
+        with self._db.connection() as conn:
+            # Get most recent outcome (terminal preferred)
+            result = conn.execute(
+                select(token_outcomes_table)
+                .where(token_outcomes_table.c.token_id == token_id)
+                .order_by(
+                    token_outcomes_table.c.is_terminal.desc(),  # Terminal first
+                    token_outcomes_table.c.recorded_at.desc(),  # Then by time
+                )
+                .limit(1)
+            ).fetchone()
+
+            if result is None:
+                return None
+
+            # Tier 1 Trust Model: This is OUR data. Trust DB values directly.
+            # If is_terminal is not 0 or 1, that's an audit integrity violation.
+            return TokenOutcome(
+                outcome_id=result.outcome_id,
+                run_id=result.run_id,
+                token_id=result.token_id,
+                outcome=RowOutcome(result.outcome),
+                is_terminal=result.is_terminal == 1,  # DB stores as Integer
+                recorded_at=result.recorded_at,
+                sink_name=result.sink_name,
+                batch_id=result.batch_id,
+                fork_group_id=result.fork_group_id,
+                join_group_id=result.join_group_id,
+                expand_group_id=result.expand_group_id,
+                error_hash=result.error_hash,
+                context_json=result.context_json,
+            )
+
+    # === Validation Error Recording (WP-11.99) ===
+
+    def record_validation_error(
+        self,
+        run_id: str,
+        node_id: str | None,
+        row_data: dict[str, Any],
+        error: str,
+        schema_mode: str,
+        destination: str,
+    ) -> str:
+        """Record a validation error in the audit trail.
+
+        Called when a source row fails schema validation. The row is
+        quarantined (not processed further) but we record what we saw
+        for complete audit coverage.
+
+        Args:
+            run_id: Current run ID
+            node_id: Node where validation failed
+            row_data: The row that failed validation
+            error: Error description
+            schema_mode: Schema mode that caught the error ("strict", "free", "dynamic")
+            destination: Where row was routed ("discard" or sink name)
+
+        Returns:
+            error_id for tracking
+        """
+        error_id = f"verr_{_generate_id()[:12]}"
+
+        with self._db.connection() as conn:
+            conn.execute(
+                validation_errors_table.insert().values(
+                    error_id=error_id,
+                    run_id=run_id,
+                    node_id=node_id,
+                    row_hash=stable_hash(row_data),
+                    row_data_json=canonical_json(row_data),
+                    error=error,
+                    schema_mode=schema_mode,
+                    destination=destination,
+                    created_at=_now(),
+                )
+            )
+
+        return error_id
+
+    # === Transform Error Recording (WP-11.99b) ===
+
+    def record_transform_error(
+        self,
+        run_id: str,
+        token_id: str,
+        transform_id: str,
+        row_data: dict[str, Any],
+        error_details: dict[str, Any],
+        destination: str,
+    ) -> str:
+        """Record a transform processing error in the audit trail.
+
+        Called when a transform returns TransformResult.error().
+        This is for legitimate errors, NOT transform bugs.
+
+        Args:
+            run_id: Current run ID
+            token_id: Token ID for the row
+            transform_id: Transform that returned the error
+            row_data: The row that could not be processed
+            error_details: Error details from TransformResult
+            destination: Where row was routed ("discard" or sink name)
+
+        Returns:
+            error_id for tracking
+        """
+        error_id = f"terr_{_generate_id()[:12]}"
+
+        with self._db.connection() as conn:
+            conn.execute(
+                transform_errors_table.insert().values(
+                    error_id=error_id,
+                    run_id=run_id,
+                    token_id=token_id,
+                    transform_id=transform_id,
+                    row_hash=stable_hash(row_data),
+                    row_data_json=canonical_json(row_data),
+                    error_details_json=canonical_json(error_details),
+                    destination=destination,
+                    created_at=_now(),
+                )
+            )
+
+        return error_id
+
+    # === Error Query Methods ===
+
+    def get_validation_errors_for_row(self, run_id: str, row_hash: str) -> list[ValidationErrorRecord]:
+        """Get validation errors for a row by its hash.
+
+        Validation errors are keyed by row_hash since quarantined rows
+        never get row_ids (they're rejected before entering the pipeline).
+
+        Args:
+            run_id: Run ID to query
+            row_hash: Hash of the row data
+
+        Returns:
+            List of ValidationErrorRecord models
+        """
+        query = select(validation_errors_table).where(
+            validation_errors_table.c.run_id == run_id,
+            validation_errors_table.c.row_hash == row_hash,
+        )
+
+        with self._db.connection() as conn:
+            result = conn.execute(query)
+            rows = result.fetchall()
+
+        return [
+            ValidationErrorRecord(
+                error_id=r.error_id,
+                run_id=r.run_id,
+                node_id=r.node_id,
+                row_hash=r.row_hash,
+                error=r.error,
+                schema_mode=r.schema_mode,
+                destination=r.destination,
+                created_at=r.created_at,
+                row_data_json=r.row_data_json,
+            )
+            for r in rows
+        ]
+
+    def get_validation_errors_for_run(self, run_id: str) -> list[ValidationErrorRecord]:
+        """Get all validation errors for a run.
+
+        Args:
+            run_id: Run ID to query
+
+        Returns:
+            List of ValidationErrorRecord models, ordered by created_at
+        """
+        query = (
+            select(validation_errors_table).where(validation_errors_table.c.run_id == run_id).order_by(validation_errors_table.c.created_at)
+        )
+
+        with self._db.connection() as conn:
+            result = conn.execute(query)
+            rows = result.fetchall()
+
+        return [
+            ValidationErrorRecord(
+                error_id=r.error_id,
+                run_id=r.run_id,
+                node_id=r.node_id,
+                row_hash=r.row_hash,
+                error=r.error,
+                schema_mode=r.schema_mode,
+                destination=r.destination,
+                created_at=r.created_at,
+                row_data_json=r.row_data_json,
+            )
+            for r in rows
+        ]
+
+    def get_transform_errors_for_token(self, token_id: str) -> list[TransformErrorRecord]:
+        """Get transform errors for a specific token.
+
+        Args:
+            token_id: Token ID to query
+
+        Returns:
+            List of TransformErrorRecord models
+        """
+        query = select(transform_errors_table).where(
+            transform_errors_table.c.token_id == token_id,
+        )
+
+        with self._db.connection() as conn:
+            result = conn.execute(query)
+            rows = result.fetchall()
+
+        return [
+            TransformErrorRecord(
+                error_id=r.error_id,
+                run_id=r.run_id,
+                token_id=r.token_id,
+                transform_id=r.transform_id,
+                row_hash=r.row_hash,
+                destination=r.destination,
+                created_at=r.created_at,
+                row_data_json=r.row_data_json,
+                error_details_json=r.error_details_json,
+            )
+            for r in rows
+        ]
+
+    def get_transform_errors_for_run(self, run_id: str) -> list[TransformErrorRecord]:
+        """Get all transform errors for a run.
+
+        Args:
+            run_id: Run ID to query
+
+        Returns:
+            List of TransformErrorRecord models, ordered by created_at
+        """
+        query = (
+            select(transform_errors_table).where(transform_errors_table.c.run_id == run_id).order_by(transform_errors_table.c.created_at)
+        )
+
+        with self._db.connection() as conn:
+            result = conn.execute(query)
+            rows = result.fetchall()
+
+        return [
+            TransformErrorRecord(
+                error_id=r.error_id,
+                run_id=r.run_id,
+                token_id=r.token_id,
+                transform_id=r.transform_id,
+                row_hash=r.row_hash,
+                destination=r.destination,
+                created_at=r.created_at,
+                row_data_json=r.row_data_json,
+                error_details_json=r.error_details_json,
+            )
+            for r in rows
+        ]
+
+    # === Call Lookup Methods (for Replay Mode) ===
+
+    def find_call_by_request_hash(
+        self,
+        run_id: str,
+        call_type: str,
+        request_hash: str,
+    ) -> Call | None:
+        """Find a call by its request hash within a run.
+
+        Used for replay mode to look up previously recorded calls by
+        the hash of their request data.
+
+        Args:
+            run_id: Run ID to search within
+            call_type: Type of call (llm, http, etc.)
+            request_hash: SHA-256 hash of the canonical request data
+
+        Returns:
+            Call model if found, None otherwise
+
+        Note:
+            If multiple calls match (same request made twice), returns
+            the first one chronologically (ordered by created_at).
+        """
+        # Need to join through node_states to get to run_id
+        query = (
+            select(calls_table)
+            .join(
+                node_states_table,
+                calls_table.c.state_id == node_states_table.c.state_id,
+            )
+            .join(nodes_table, node_states_table.c.node_id == nodes_table.c.node_id)
+            .where(nodes_table.c.run_id == run_id)
+            .where(calls_table.c.call_type == call_type)
+            .where(calls_table.c.request_hash == request_hash)
+            .order_by(calls_table.c.created_at)
+            .limit(1)
+        )
+
+        with self._db.connection() as conn:
+            result = conn.execute(query)
+            row = result.fetchone()
+
+        if row is None:
+            return None
+
+        return Call(
+            call_id=row.call_id,
+            state_id=row.state_id,
+            call_index=row.call_index,
+            call_type=CallType(row.call_type),
+            status=CallStatus(row.status),
+            request_hash=row.request_hash,
+            request_ref=row.request_ref,
+            response_hash=row.response_hash,
+            response_ref=row.response_ref,
+            error_json=row.error_json,
+            latency_ms=row.latency_ms,
+            created_at=row.created_at,
+        )
+
+    def get_call_response_data(self, call_id: str) -> dict[str, Any] | None:
+        """Retrieve the response data for a call.
+
+        Fetches response data from the payload store if response_ref is set,
+        otherwise returns None.
+
+        Args:
+            call_id: The call ID to get response data for
+
+        Returns:
+            Response data dict if available, None if no response was recorded
+            or if payload store is not configured
+
+        Note:
+            Returns None if:
+            - Call not found
+            - No response_ref set on the call (error calls may not have response)
+            - Payload store not configured
+            - Response data has been purged from payload store
+        """
+        # Get the call record first
+        with self._db.connection() as conn:
+            result = conn.execute(select(calls_table).where(calls_table.c.call_id == call_id))
+            row = result.fetchone()
+
+        if row is None:
+            return None
+
+        if row.response_ref is None:
+            return None
+
+        if self._payload_store is None:
+            return None
+
+        try:
+            payload_bytes = self._payload_store.retrieve(row.response_ref)
+            data: dict[str, Any] = json.loads(payload_bytes.decode("utf-8"))
+            return data
+        except KeyError:
+            # Payload has been purged
+            return None
