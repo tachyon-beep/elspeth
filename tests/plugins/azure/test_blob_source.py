@@ -355,16 +355,63 @@ class TestAzureBlobSourceJSONL:
 
         assert len(rows) == 2
 
-    def test_jsonl_invalid_line_raises_error(self, mock_blob_client: MagicMock, ctx: PluginContext) -> None:
-        """Invalid JSON line in JSONL raises ValueError with line number."""
+    def test_jsonl_malformed_line_quarantined_not_crash(self, mock_blob_client: MagicMock, ctx: PluginContext) -> None:
+        """Malformed JSONL line should quarantine, not crash pipeline."""
+        jsonl_data = b'{"id": 1, "name": "alice"}\n{invalid json}\n{"id": 3, "name": "carol"}\n'
+        mock_client = MagicMock()
+        mock_client.download_blob.return_value.readall.return_value = jsonl_data
+        mock_blob_client.return_value = mock_client
+
+        source = AzureBlobSource(
+            make_config(
+                format="jsonl",
+                on_validation_failure="quarantine",
+            )
+        )
+
+        # Should not crash - should yield 2 valid + 1 quarantined
+        results = list(source.load(ctx))
+
+        # Verify we got 3 total rows
+        assert len(results) == 3
+
+        # First row valid
+        assert not results[0].is_quarantined
+        assert results[0].row == {"id": 1, "name": "alice"}
+
+        # Second row quarantined (line 2)
+        assert results[1].is_quarantined is True
+        assert results[1].quarantine_destination == "quarantine"
+        assert "JSON parse error" in results[1].quarantine_error
+        assert "line 2" in results[1].quarantine_error
+        assert "__raw_line__" in results[1].row
+        assert "__line_number__" in results[1].row
+
+        # Third row valid
+        assert not results[2].is_quarantined
+        assert results[2].row == {"id": 3, "name": "carol"}
+
+    def test_jsonl_malformed_line_with_discard_mode(self, mock_blob_client: MagicMock, ctx: PluginContext) -> None:
+        """Malformed JSONL line with discard mode should not yield quarantined row."""
         jsonl_data = b'{"id": 1}\n{invalid}\n{"id": 3}\n'
         mock_client = MagicMock()
         mock_client.download_blob.return_value.readall.return_value = jsonl_data
         mock_blob_client.return_value = mock_client
 
-        source = AzureBlobSource(make_config(format="jsonl"))
-        with pytest.raises(ValueError, match="line 2"):
-            list(source.load(ctx))
+        source = AzureBlobSource(
+            make_config(
+                format="jsonl",
+                on_validation_failure="discard",
+            )
+        )
+
+        # Should not crash, should yield only valid rows
+        results = list(source.load(ctx))
+
+        # Only 2 valid rows, malformed line silently discarded
+        assert len(results) == 2
+        assert results[0].row == {"id": 1}
+        assert results[1].row == {"id": 3}
 
 
 class TestAzureBlobSourceValidation:
