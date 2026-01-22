@@ -32,13 +32,13 @@ Auditable Sense/Decide/Act pipelines for high-stakes data processing. Every deci
 
 ## Features
 
-- **Complete Audit Trail** - Every transform, every routing decision, every external call recorded
+- **Complete Audit Trail** - Every transform, every routing decision, every external call recorded with payload storage
 - **Explain Any Decision** - `elspeth explain --row 42` shows exactly why any row reached its destination
-- **Plugin Architecture** - Extensible sources, transforms, gates, and sinks via pluggy
-- **Conditional Routing** - Gates route rows to different sinks based on classification
-- **Production Ready** - Checkpointing, retry logic, rate limiting, concurrent processing
-- **Signed Exports** - HMAC-signed audit exports for legal-grade integrity verification
-- **LLM Integration** - Built-in support for 100+ LLM providers via LiteLLM (Phase 6)
+- **Plugin Architecture** - Extensible sources, transforms, gates, and sinks via pluggy with dynamic discovery
+- **Conditional Routing** - Gates route rows to different sinks based on config-driven expressions (AST-parsed, no eval)
+- **Production Ready** - Checkpointing, retry logic with backoff, rate limiting, payload retention policies
+- **Signed Exports** - HMAC-signed audit exports for legal-grade integrity verification with manifest hash chains
+- **LLM Integration** - Azure OpenAI and OpenRouter support with pooled execution, batch processing, and multi-query
 
 ---
 
@@ -214,7 +214,13 @@ landscape:
 # Required for production (secret fingerprinting)
 export ELSPETH_FINGERPRINT_KEY="your-stable-key"
 
+# Azure Key Vault (alternative to direct key)
+export ELSPETH_KEYVAULT_URL="https://your-vault.vault.azure.net/"
+export ELSPETH_KEYVAULT_SECRET_NAME="elspeth-fingerprint-key"
+
 # LLM API keys
+export AZURE_OPENAI_API_KEY="..."
+export AZURE_OPENAI_ENDPOINT="https://your-resource.openai.azure.com/"
 export OPENROUTER_API_KEY="sk-or-..."
 
 # Signed exports
@@ -263,9 +269,22 @@ Large blobs are stored separately from the audit database:
 ```yaml
 payload_store:
   base_path: ./state/payloads
-  retention:
-    max_age_days: 90
+  retention_days: 90
 ```
+
+### Concurrency Model
+
+ELSPETH uses **plugin-level concurrency** rather than orchestrator-level parallelism:
+
+- **Orchestrator**: Single-threaded, sequential token processing (deterministic audit trail)
+- **Plugins**: Internally parallelize I/O-bound operations (LLM batching, DB bulk writes)
+
+```yaml
+concurrency:
+  max_workers: 4  # Available for plugin use (e.g., LLM thread pools)
+```
+
+This design ensures audit trail integrity while optimizing performance where it matters. See [ADR-001](docs/design/adr/001-plugin-level-concurrency.md) for rationale.
 
 </details>
 
@@ -316,11 +335,14 @@ elspeth-rapid/
 
 | Component | Technology | Purpose |
 |-----------|------------|---------|
-| CLI | Typer | Commands: run, explain, validate, resume |
-| Config | Dynaconf + Pydantic | Multi-source with validation |
-| Plugins | pluggy | Extensible pipeline components |
+| CLI | Typer | Commands: run, explain, validate, resume, purge |
+| TUI | Textual | Interactive lineage explorer |
+| Config | Dynaconf + Pydantic | Multi-source with env var expansion |
+| Plugins | pluggy | Dynamic discovery, extensible components |
 | Audit | SQLAlchemy Core | SQLite (dev) / PostgreSQL (prod) |
-| LLM | LiteLLM | 100+ providers unified |
+| Canonical | RFC 8785 (JCS) | Deterministic JSON hashing |
+| LLM | Azure OpenAI + OpenRouter | Direct integration with pooled execution |
+| Templates | Jinja2 | Prompt templating and path generation |
 
 See [Architecture Documentation](ARCHITECTURE.md) for C4 diagrams and detailed design.
 
@@ -332,7 +354,8 @@ See [Architecture Documentation](ARCHITECTURE.md) for C4 diagrams and detailed d
 |----------|----------|---------|
 | [ARCHITECTURE.md](ARCHITECTURE.md) | Developers | C4 diagrams, data flows, component details |
 | [PLUGIN.md](PLUGIN.md) | Plugin Authors | How to create sources, transforms, sinks |
-| [REQUIREMENTS.md](REQUIREMENTS.md) | All | System requirements and dependencies |
+| [docs/design/requirements.md](docs/design/requirements.md) | All | 323 verified requirements with implementation status |
+| [docs/design/adr/](docs/design/adr/) | Architects | Architecture Decision Records (why we built it this way) |
 | [CLAUDE.md](CLAUDE.md) | AI Assistants | Project context, trust model, patterns |
 | [docs/guides/](docs/guides/) | All | Tutorials and how-to guides |
 | [docs/reference/](docs/reference/) | Developers | Configuration reference |
