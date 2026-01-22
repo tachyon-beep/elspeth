@@ -443,7 +443,8 @@ class Orchestrator:
         if schema_errors:
             raise ValueError(f"Pipeline schema incompatibility: {'; '.join(schema_errors)}")
 
-        recorder = LandscapeRecorder(self._db)
+        # Pass payload_store to recorder for external call payload persistence
+        recorder = LandscapeRecorder(self._db, payload_store=payload_store)
 
         # Begin run
         run = recorder.begin_run(
@@ -1178,7 +1179,8 @@ class Orchestrator:
         run_id = resume_point.checkpoint.run_id
 
         # Create fresh recorder (stateless, like run())
-        recorder = LandscapeRecorder(self._db)
+        # Pass payload_store for external call payload persistence
+        recorder = LandscapeRecorder(self._db, payload_store=payload_store)
 
         # 1. Handle incomplete batches
         self._handle_incomplete_batches(recorder, run_id)
@@ -1197,7 +1199,11 @@ class Orchestrator:
         if self._checkpoint_manager is None:
             raise ValueError("CheckpointManager is required for resume - Orchestrator must be initialized with checkpoint_manager")
         recovery = RecoveryManager(self._db, self._checkpoint_manager)
-        unprocessed_rows = recovery.get_unprocessed_row_data(run_id, payload_store)
+
+        # TYPE FIDELITY: Pass source schema to restore coerced types (datetime, Decimal, etc.)
+        # The source's _schema_class attribute contains the Pydantic model with allow_coercion=True
+        source_schema_class = getattr(config.source, "_schema_class", None)
+        unprocessed_rows = recovery.get_unprocessed_row_data(run_id, payload_store, source_schema_class=source_schema_class)
 
         if not unprocessed_rows:
             # All rows were processed - complete the run

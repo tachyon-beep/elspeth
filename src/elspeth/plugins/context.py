@@ -254,7 +254,7 @@ class PluginContext:
             row: The row data that failed validation (may be non-dict for
                  malformed external data like JSON arrays containing primitives)
             error: Description of the validation failure
-            schema_mode: "strict", "free", or "dynamic"
+            schema_mode: "strict", "free", "dynamic", or "parse" (parse = file-level parse error)
             destination: Sink name where row is routed, or "discard"
 
         Returns:

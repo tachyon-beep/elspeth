@@ -9,6 +9,7 @@ import copy
 from typing import Any
 
 from elspeth.contracts import TokenInfo
+from elspeth.core.canonical import canonical_json
 from elspeth.core.landscape import LandscapeRecorder
 
 
@@ -74,9 +75,9 @@ class TokenManager:
         # Store payload if payload_store is configured (audit requirement)
         payload_ref = None
         if self._payload_store is not None:
-            import json
-
-            payload_bytes = json.dumps(row_data, sort_keys=True).encode("utf-8")
+            # Use canonical_json to handle pandas/numpy types, Decimal, datetime, etc.
+            # This prevents TypeError crashes when source data contains non-primitive types
+            payload_bytes = canonical_json(row_data).encode("utf-8")
             payload_ref = self._payload_store.store(payload_bytes)
 
         # Create row record with payload reference

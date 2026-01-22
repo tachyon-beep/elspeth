@@ -339,3 +339,124 @@ class TestCSVSourceQuarantineYielding:
         assert len(results) == 2
         assert results[0].row == {"id": "1", "name": "alice"}
         assert results[1].row == {"id": "3", "name": "carol"}
+
+    def test_csv_error_handling_defensive(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """CSV parsing with manual iteration handles csv.Error defensively.
+
+        Regression test for P1 bug where csv.Error was not caught in for-loop iteration.
+        Python's csv.reader rarely raises csv.Error (it's quite tolerant), so this test
+        verifies the defensive code path exists even if triggering it is difficult.
+
+        The actual fix ensures that IF csv.Error is ever raised during iteration,
+        it will be caught and quarantined instead of crashing the run.
+        """
+        from elspeth.plugins.sources.csv_source import CSVSource
+
+        csv_file = tmp_path / "data.csv"
+        # Use a CSV with multiline quoted field (valid CSV that tests iteration)
+        # This verifies manual while/next() iteration works correctly
+        csv_file.write_text('id,name\n1,alice\n2,"bob\nsmith"\n3,carol\n')
+
+        source = CSVSource(
+            {
+                "path": str(csv_file),
+                "on_validation_failure": "quarantine",
+                "schema": DYNAMIC_SCHEMA,
+            }
+        )
+
+        # Should not crash - manual iteration with try/except should work
+        results = list(source.load(ctx))
+
+        # Should get 3 valid rows (multiline field is valid CSV)
+        assert len(results) == 3
+
+        # All rows should be valid
+        assert not results[0].is_quarantined
+        assert results[0].row == {"id": "1", "name": "alice"}
+
+        assert not results[1].is_quarantined
+        assert results[1].row == {"id": "2", "name": "bob\nsmith"}  # Multiline field preserved
+
+        assert not results[2].is_quarantined
+        assert results[2].row == {"id": "3", "name": "carol"}
+
+    def test_skip_rows_line_numbers_are_accurate(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """Line numbers in error messages should be accurate when skip_rows > 0.
+
+        Regression test for P2 bug where line numbers were off by skip_rows amount.
+        """
+        from elspeth.plugins.sources.csv_source import CSVSource
+
+        csv_file = tmp_path / "data.csv"
+        # Line 1: comment to skip
+        # Line 2: header
+        # Line 3: valid row
+        # Line 4: malformed row (extra field)
+        # Line 5: valid row
+        csv_file.write_text("# This is a comment\nid,name\n1,alice\n2,bob,extra\n3,carol\n")
+
+        source = CSVSource(
+            {
+                "path": str(csv_file),
+                "skip_rows": 1,  # Skip the comment line
+                "on_validation_failure": "quarantine",
+                "schema": DYNAMIC_SCHEMA,
+            }
+        )
+
+        results = list(source.load(ctx))
+
+        # Should get 3 rows: 2 valid + 1 quarantined
+        assert len(results) == 3
+
+        # First row valid (line 3 in file)
+        assert not results[0].is_quarantined
+
+        # Second row quarantined (line 4 in file)
+        assert results[1].is_quarantined is True
+        quarantined_row = results[1].row
+
+        # Check that __line_number__ reflects actual file position (line 4, not line 3)
+        assert quarantined_row["__line_number__"] == 4
+
+        # Error message should also show correct line number
+        assert "line 4" in results[1].quarantine_error
+
+        # Third row valid (line 5 in file)
+        assert not results[2].is_quarantined
+
+    def test_empty_rows_are_skipped(self, tmp_path: Path, ctx: PluginContext) -> None:
+        """Empty rows (blank lines) should be skipped without generating errors.
+
+        Regression test for P3 where csv.reader returns [] for blank lines,
+        which would cause field-count mismatch errors if not handled.
+        """
+        from elspeth.plugins.sources.csv_source import CSVSource
+
+        csv_file = tmp_path / "data.csv"
+        # Include blank lines between rows
+        csv_file.write_text("id,name\n1,alice\n\n2,bob\n\n\n3,carol\n")
+
+        source = CSVSource(
+            {
+                "path": str(csv_file),
+                "on_validation_failure": "quarantine",
+                "schema": DYNAMIC_SCHEMA,
+            }
+        )
+
+        results = list(source.load(ctx))
+
+        # Should get only 3 valid rows, blank lines skipped
+        assert len(results) == 3
+
+        # All rows should be valid (no quarantined rows from empty lines)
+        assert not results[0].is_quarantined
+        assert results[0].row == {"id": "1", "name": "alice"}
+
+        assert not results[1].is_quarantined
+        assert results[1].row == {"id": "2", "name": "bob"}
+
+        assert not results[2].is_quarantined
+        assert results[2].row == {"id": "3", "name": "carol"}

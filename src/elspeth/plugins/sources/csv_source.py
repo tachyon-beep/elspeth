@@ -1,7 +1,7 @@
 # src/elspeth/plugins/sources/csv_source.py
 """CSV source plugin for ELSPETH.
 
-Loads rows from CSV files using line-by-line parsing for graceful malformed row handling.
+Loads rows from CSV files using csv.reader for proper multiline quoted field support.
 
 IMPORTANT: Sources use allow_coercion=True to normalize external data.
 This is the ONLY place in the pipeline where coercion is allowed.
@@ -80,6 +80,9 @@ class CSVSource(BaseSource):
     def load(self, ctx: PluginContext) -> Iterator[SourceRow]:
         """Load rows from CSV file.
 
+        Uses csv.reader directly on file handle to properly support
+        multiline quoted fields (e.g., "field with\nembedded newline").
+
         Each row is validated against the configured schema:
         - Valid rows are yielded as SourceRow.valid()
         - Invalid rows are yielded as SourceRow.quarantined()
@@ -93,62 +96,41 @@ class CSVSource(BaseSource):
         if not self._path.exists():
             raise FileNotFoundError(f"CSV file not found: {self._path}")
 
-        with open(self._path, encoding=self._encoding) as f:
+        # CRITICAL: newline='' required for proper embedded newline handling
+        # See: https://docs.python.org/3/library/csv.html
+        with open(self._path, encoding=self._encoding, newline="") as f:
             # Skip header rows as configured
             for _ in range(self._skip_rows):
                 next(f, None)
 
-            # Read header line
-            header_line = f.readline()
-            if not header_line:
+            # Create csv.reader on file handle for multiline field support
+            reader = csv.reader(f, delimiter=self._delimiter)
+
+            # Read header row
+            try:
+                headers = next(reader)
+            except StopIteration:
                 return  # Empty file after skip_rows
 
-            # Parse header using csv module
-            reader = csv.reader([header_line], delimiter=self._delimiter)
-            headers = next(reader)
-
-            # Process each data line
-            line_num = self._skip_rows + 2  # +1 for header, +1 for first data line
-            for line in f:
-                line = line.rstrip("\n\r")
-                if not line:
-                    line_num += 1
-                    continue
-
-                # Parse CSV line - catch malformed rows
+            # Process data rows with manual iteration to catch csv.Error per row
+            row_num = 0  # Logical row number (data rows only)
+            while True:
                 try:
-                    reader = csv.reader([line], delimiter=self._delimiter)
+                    # Try to read next row - csv.Error raised here for malformed rows
                     values = next(reader)
-
-                    # Check field count matches header
-                    if len(values) != len(headers):
-                        # Malformed row - field count mismatch
-                        raw_row = {"__raw_line__": line, "__line_number__": line_num}
-                        error_msg = f"CSV parse error at line {line_num}: expected {len(headers)} fields, got {len(values)}"
-
-                        ctx.record_validation_error(
-                            row=raw_row,
-                            error=error_msg,
-                            schema_mode="parse",
-                            destination=self._on_validation_failure,
-                        )
-
-                        if self._on_validation_failure != "discard":
-                            yield SourceRow.quarantined(
-                                row=raw_row,
-                                error=error_msg,
-                                destination=self._on_validation_failure,
-                            )
-                        line_num += 1
-                        continue
-
-                    # Build row dict
-                    row = dict(zip(headers, values, strict=False))
-
+                except StopIteration:
+                    break  # End of file
                 except csv.Error as e:
-                    # Catch CSV parsing errors (e.g., bad quoting, delimiter issues)
-                    raw_row = {"__raw_line__": line, "__line_number__": line_num}
-                    error_msg = f"CSV parse error at line {line_num}: {e}"
+                    # CSV parsing error (bad quoting, unmatched quotes, etc.)
+                    # Quarantine this row instead of crashing the run
+                    row_num += 1
+                    physical_line = reader.line_num + self._skip_rows
+                    raw_row = {
+                        "__raw_line__": "(unparseable due to csv.Error)",
+                        "__line_number__": physical_line,
+                        "__row_number__": row_num,
+                    }
+                    error_msg = f"CSV parse error at line {physical_line}: {e}"
 
                     ctx.record_validation_error(
                         row=raw_row,
@@ -163,8 +145,46 @@ class CSVSource(BaseSource):
                             error=error_msg,
                             destination=self._on_validation_failure,
                         )
-                    line_num += 1
+                    continue  # Skip to next row
+
+                # Skip empty rows (blank lines in CSV)
+                # csv.reader returns [] for blank lines, which would cause field count mismatch
+                if not values:
                     continue
+
+                row_num += 1
+                # reader.line_num tracks physical line position (including multiline fields)
+                # Add skip_rows to get true file position (reader counts from 1 after skipped lines)
+                physical_line = reader.line_num + self._skip_rows
+
+                # Check field count matches header
+                if len(values) != len(headers):
+                    # Malformed row - field count mismatch
+                    # Use physical line number for audit trail
+                    raw_row = {
+                        "__raw_line__": self._delimiter.join(values),
+                        "__line_number__": physical_line,
+                        "__row_number__": row_num,
+                    }
+                    error_msg = f"CSV parse error at line {physical_line}: expected {len(headers)} fields, got {len(values)}"
+
+                    ctx.record_validation_error(
+                        row=raw_row,
+                        error=error_msg,
+                        schema_mode="parse",
+                        destination=self._on_validation_failure,
+                    )
+
+                    if self._on_validation_failure != "discard":
+                        yield SourceRow.quarantined(
+                            row=raw_row,
+                            error=error_msg,
+                            destination=self._on_validation_failure,
+                        )
+                    continue
+
+                # Build row dict
+                row = dict(zip(headers, values, strict=False))
 
                 # Validate row against schema
                 try:
@@ -184,8 +204,6 @@ class CSVSource(BaseSource):
                             error=str(e),
                             destination=self._on_validation_failure,
                         )
-
-                line_num += 1
 
     def close(self) -> None:
         """Release resources (no-op for CSV source)."""
