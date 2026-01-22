@@ -226,10 +226,26 @@ exclude_lines = [
 
 # === Mutation Testing Configuration (mutmut 2.x) ===
 [tool.mutmut]
-# Paths to mutate (start with critical audit paths)
-paths_to_mutate = "src/elspeth/core/"
-# Test runner command - run property tests and core tests with fast-fail
-runner = "python -m pytest tests/property/ tests/core/ -x --tb=no -q"
+# Paths to mutate - audit-critical code that MUST have effective tests
+# Target mutation scores:
+#   - canonical.py: 95%+ (hash integrity is critical)
+#   - landscape/: 90%+ (audit trail must be bulletproof)
+#   - engine/: 85%+ (orchestration must be reliable)
+paths_to_mutate = [
+    # Core audit infrastructure
+    "src/elspeth/core/canonical.py",
+    "src/elspeth/core/payload_store.py",
+    "src/elspeth/core/landscape/",
+    "src/elspeth/core/checkpoint/",
+    # Engine - row processing and orchestration
+    "src/elspeth/engine/orchestrator.py",
+    "src/elspeth/engine/processor.py",
+    "src/elspeth/engine/executors.py",
+    "src/elspeth/engine/coalesce_executor.py",
+    "src/elspeth/engine/tokens.py",
+]
+# Test runner - include engine tests, use short traceback for debugging
+runner = "python -m pytest tests/core/ tests/engine/ tests/property/ --tb=short"
 # Tests directory
 tests_dir = "tests/"
 # Disable backup files - we use git
