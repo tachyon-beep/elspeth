@@ -1,6 +1,21 @@
 # Implementation Plan: AUD-002 Explicit Continue Routing (Revised)
 
-## Problem Statement
+**Status:** ✅ IMPLEMENTED (2026-01-22)
+
+## Implementation Summary
+
+**✅ COMPLETE** - Continue routing decisions now explicitly recorded:
+- ✅ Bug P1-2026-01-19-gate-continue-routing-not-recorded.md **CLOSED**
+- ✅ `executors.py:414-415` records continue routing with explicit `# AUD-002` comment
+- ✅ `executors.py:577-581` records config gate continue with `# AUD-002` comment
+- ✅ Continue edges exist in DAG for all gates
+- ✅ Route resolution map includes "continue" destinations
+
+**Evidence:** 25 files reference continue routing infrastructure
+
+---
+
+## Problem Statement (Historical)
 
 Gate "continue" decisions are not recorded in the audit trail. When a gate evaluates to "continue" (proceed to next transform), no `RoutingEvent` is created. This means continue decisions are **inferred from absence** rather than explicitly recorded.
 

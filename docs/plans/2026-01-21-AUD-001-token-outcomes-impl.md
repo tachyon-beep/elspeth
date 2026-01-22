@@ -1,12 +1,26 @@
 # AUD-001: Token Outcomes Implementation Plan
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
+**Status:** ✅ IMPLEMENTED (2026-01-22)
+
+> **Historical Note:** This plan was created on 2026-01-21 but implementation was completed before plan status was updated. This document remains as architectural reference.
 
 **Goal:** Add explicit terminal state recording so every token has an auditable outcome record.
 
 **Architecture:** New `token_outcomes` table with `record_token_outcome()` API called from 17 locations in `processor.py`. Partial unique index enforces "exactly one terminal outcome per token."
 
 **Tech Stack:** SQLAlchemy Core, Alembic migrations, pytest
+
+## Implementation Summary
+
+All 16 tasks completed:
+- ✅ Task 0: RowOutcome changed to (str, Enum)
+- ✅ Tasks 1-4: TokenOutcome dataclass, schema, migration, recorder API
+- ✅ Tasks 5-13: 17 recording sites in processor
+- ✅ Task 14: explain() integration
+- ✅ Task 15: requirements.md updated
+- ✅ Task 16: Integration tests passing
+
+**Remaining:** 1 bug (group ID mismatch) - not blocking
 
 ---
 

@@ -1,6 +1,28 @@
 # Phase 7: Advanced Features (Tasks 1-14)
 
-> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
+**Status:** 🔄 PARTIALLY IMPLEMENTED (40% complete as of 2026-01-22)
+
+## Implementation Status
+
+**✅ IMPLEMENTED (Fork Infrastructure - 40% of plan):**
+- ✅ `fork_to_paths` routing action (routing.py:101-116)
+- ✅ `fork_group_id` in schema, tokens table, contracts (schema.py:105,129)
+- ✅ COPY mode vs MOVE mode in routing (routing.py:44,58-59)
+- ✅ Fork group recording in recorder (recorder.py:803-837)
+- ✅ 14 files reference fork infrastructure
+
+**❌ NOT IMPLEMENTED (A/B Testing - 60% of plan):**
+- ❌ ExperimentConfig / VariantConfig dataclasses (Tasks 1-2)
+- ❌ Deterministic variant assignment algorithm
+- ❌ Statistical significance testing (Tasks 8-10)
+- ❌ Experiment CLI commands (Tasks 11-12)
+- ❌ Variant metrics aggregation
+
+**Remaining Work:** A/B testing framework (Tasks 1-2, 8-14 from original plan)
+
+---
+
+> **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement remaining tasks.
 
 **Goal:** Add advanced capabilities: A/B testing infrastructure for comparing transform variants, multi-destination routing with copy semantics, and Azure cloud integration.
 
@@ -9,10 +31,10 @@
 **Tech Stack:** Python 3.11+, azure-storage-blob, azure-identity, NetworkX (variant path validation)
 
 **Dependencies:**
-- Phase 3A: `elspeth.core.landscape` (schema, tokens, routing_events)
-- Phase 3B: `elspeth.engine` (Orchestrator, RowProcessor)
-- Phase 4: `elspeth.cli`
-- Phase 6: `elspeth.core.calls` (for external call recording in Azure)
+- Phase 3A: `elspeth.core.landscape` (schema, tokens, routing_events) ✅
+- Phase 3B: `elspeth.engine` (Orchestrator, RowProcessor) ✅
+- Phase 4: `elspeth.cli` ✅
+- Phase 6: `elspeth.core.calls` (for external call recording in Azure) ✅
 
 ---
 

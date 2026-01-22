@@ -1,8 +1,21 @@
 # AUD-001: Explicit Token Outcome Recording
 
 **Date:** 2026-01-21
-**Status:** Approved
+**Status:** ✅ IMPLEMENTED (2026-01-22)
 **Author:** Claude (with architecture review)
+
+## Implementation Status
+
+**✅ COMPLETE** - All planned components implemented and tested:
+- ✅ `token_outcomes` table added to schema (schema.py:115-145)
+- ✅ `record_token_outcome()` API in recorder (recorder.py:2146+)
+- ✅ `TokenOutcome` dataclass in contracts
+- ✅ Partial unique index enforces "one terminal outcome per token"
+- ✅ Integration tests pass (test_token_outcomes.py, test_processor_outcomes.py)
+- ✅ 17 recording sites in processor.py
+- ⚠️ 1 remaining bug: P1-2026-01-21-token-outcome-group-ids-mismatch.md
+
+**Evidence:** 9 files reference token_outcomes infrastructure
 
 ## Problem Statement
 
