@@ -373,6 +373,67 @@ class TestSensitiveParams:
         assert param not in result.sanitized_url.split("?")[-1]
         assert "keep=me" in result.sanitized_url
 
+    def test_empty_token_value_still_strips_param_name(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Empty token value still removes param name from URL.
+
+        Regression test for: URLs like ?token= should strip the 'token' key
+        even though the value is empty, to prevent leaking parameter names.
+        """
+        monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY", raising=False)
+        monkeypatch.delenv("ELSPETH_KEYVAULT_URL", raising=False)
+        url = "https://api.example.com/hook?token="
+
+        result = SanitizedWebhookUrl.from_raw_url(url, fail_if_no_key=False)
+
+        # SECURITY: Parameter name 'token' must not appear in sanitized URL
+        assert "token" not in result.sanitized_url
+        assert result.sanitized_url == "https://api.example.com/hook"
+        assert result.fingerprint is None  # No non-empty values to fingerprint
+
+    def test_empty_api_key_value_still_strips_param_name(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Empty api_key value still removes param name from URL."""
+        monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY", raising=False)
+        monkeypatch.delenv("ELSPETH_KEYVAULT_URL", raising=False)
+        url = "https://api.example.com/hook?api_key=&format=json"
+
+        result = SanitizedWebhookUrl.from_raw_url(url, fail_if_no_key=False)
+
+        # SECURITY: Parameter name 'api_key' must not appear
+        assert "api_key" not in result.sanitized_url
+        assert "format=json" in result.sanitized_url
+        assert result.fingerprint is None
+
+    def test_empty_token_does_not_trigger_fingerprint_error(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Empty token value should not trigger SecretFingerprintError.
+
+        No non-empty secrets = no fingerprint needed = no error in production mode.
+        """
+        monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY", raising=False)
+        monkeypatch.delenv("ELSPETH_KEYVAULT_URL", raising=False)
+        url = "https://api.example.com?token="
+
+        # Should NOT raise - no actual secret values to fingerprint
+        result = SanitizedWebhookUrl.from_raw_url(url, fail_if_no_key=True)
+
+        assert "token" not in result.sanitized_url
+        assert result.fingerprint is None
+
+    def test_mixed_empty_and_nonempty_sensitive_params(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Mix of empty and non-empty sensitive params strips all keys, fingerprints non-empty."""
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-key")
+        url = "https://api.example.com?token=&api_key=real-secret&format=json"
+
+        result = SanitizedWebhookUrl.from_raw_url(url)
+
+        # Both keys stripped
+        assert "token" not in result.sanitized_url
+        assert "api_key" not in result.sanitized_url
+        assert "real-secret" not in result.sanitized_url
+        # Non-sensitive param preserved
+        assert "format=json" in result.sanitized_url
+        # Fingerprint computed from non-empty value only
+        assert result.fingerprint is not None
+
 
 class TestIntegrationWithArtifactDescriptor:
     """Integration tests with ArtifactDescriptor."""

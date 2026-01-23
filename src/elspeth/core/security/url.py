@@ -150,12 +150,16 @@ class SanitizedWebhookUrl:
         parsed = urlparse(url)
         query_params = parse_qs(parsed.query, keep_blank_values=True)
 
-        # Collect all sensitive values for fingerprinting
+        # Track which sensitive keys are present (even if empty)
+        has_sensitive_keys = any(k.lower() in SENSITIVE_PARAMS for k in query_params)
+
+        # Collect only non-empty sensitive values for fingerprinting
         sensitive_values: list[str] = []
 
         # Check query params for sensitive keys
         for key, values in query_params.items():
             if key.lower() in SENSITIVE_PARAMS:
+                # Only add non-empty values to fingerprint
                 sensitive_values.extend(v for v in values if v)
 
         # Check for Basic Auth credentials (user:pass@host OR user@host)
@@ -167,31 +171,33 @@ class SanitizedWebhookUrl:
         if parsed.password:
             sensitive_values.append(parsed.password)
 
-        # If no secrets found, return URL unchanged
-        if not sensitive_values:
+        # If no sensitive keys or Basic Auth found, return URL unchanged
+        if not has_sensitive_keys and not has_basic_auth:
             return cls(sanitized_url=url, fingerprint=None)
 
-        # Check fingerprint key availability
-        try:
-            get_fingerprint_key()
-            have_key = True
-        except ValueError:
-            have_key = False
-
-        # Compute fingerprint of ONLY the secret values (not full URL)
+        # Compute fingerprint only if there are non-empty values
         fingerprint: str | None = None
-        if have_key:
-            # Sort for deterministic fingerprint regardless of param order
-            combined = "|".join(sorted(sensitive_values))
-            fingerprint = secret_fingerprint(combined)
-        elif fail_if_no_key:
-            raise SecretFingerprintError(
-                "Webhook URL contains tokens but ELSPETH_FINGERPRINT_KEY "
-                "is not set. Either set the environment variable or use "
-                "ELSPETH_ALLOW_RAW_SECRETS=true for development "
-                "(not recommended for production)."
-            )
-        # else: dev mode - sanitize without fingerprint
+        if sensitive_values:
+            # We have non-empty secrets - need to fingerprint them
+            try:
+                get_fingerprint_key()
+                have_key = True
+            except ValueError:
+                have_key = False
+
+            if have_key:
+                # Sort for deterministic fingerprint regardless of param order
+                combined = "|".join(sorted(sensitive_values))
+                fingerprint = secret_fingerprint(combined)
+            elif fail_if_no_key:
+                raise SecretFingerprintError(
+                    "Webhook URL contains tokens but ELSPETH_FINGERPRINT_KEY "
+                    "is not set. Either set the environment variable or use "
+                    "ELSPETH_ALLOW_RAW_SECRETS=true for development "
+                    "(not recommended for production)."
+                )
+            # else: dev mode - sanitize without fingerprint
+        # else: only empty values (e.g., ?token=) - no fingerprint needed
 
         # Remove sensitive query params
         sanitized_params = {k: v for k, v in query_params.items() if k.lower() not in SENSITIVE_PARAMS}
