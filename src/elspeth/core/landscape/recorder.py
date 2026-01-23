@@ -2317,7 +2317,7 @@ class LandscapeRecorder:
         self,
         run_id: str,
         node_id: str | None,
-        row_data: dict[str, Any],
+        row_data: Any,
         error: str,
         schema_mode: str,
         destination: str,
@@ -2331,7 +2331,7 @@ class LandscapeRecorder:
         Args:
             run_id: Current run ID
             node_id: Node where validation failed
-            row_data: The row that failed validation
+            row_data: The row that failed validation (may be non-dict or contain non-finite values)
             error: Error description
             schema_mode: Schema mode that caught the error ("strict", "free", "dynamic")
             destination: Where row was routed ("discard" or sink name)
@@ -2339,7 +2339,33 @@ class LandscapeRecorder:
         Returns:
             error_id for tracking
         """
+        import hashlib
+        import logging
+
+        logger = logging.getLogger(__name__)
         error_id = f"verr_{_generate_id()[:12]}"
+
+        # Tier-3 (external data) trust boundary: row_data may be non-canonical
+        # Try canonical hash/JSON first, fall back to safe representations
+        try:
+            row_hash = stable_hash(row_data)
+            row_data_json = canonical_json(row_data)
+        except (ValueError, TypeError) as e:
+            # Non-canonical data (NaN, Infinity, non-dict, etc.)
+            # Use repr() fallback to preserve audit trail
+            logger.warning(
+                "Validation error row not canonically serializable (using repr fallback): %s",
+                str(e),
+            )
+            row_hash = hashlib.sha256(repr(row_data).encode("utf-8")).hexdigest()
+            # Store non-canonical representation with type metadata
+            row_data_json = json.dumps(
+                {
+                    "__repr__": repr(row_data),
+                    "__type__": type(row_data).__name__,
+                    "__canonical_error__": str(e),
+                }
+            )
 
         with self._db.connection() as conn:
             conn.execute(
@@ -2347,8 +2373,8 @@ class LandscapeRecorder:
                     error_id=error_id,
                     run_id=run_id,
                     node_id=node_id,
-                    row_hash=stable_hash(row_data),
-                    row_data_json=canonical_json(row_data),
+                    row_hash=row_hash,
+                    row_data_json=row_data_json,
                     error=error,
                     schema_mode=schema_mode,
                     destination=destination,
