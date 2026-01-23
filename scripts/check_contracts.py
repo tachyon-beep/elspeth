@@ -103,6 +103,7 @@ def find_type_definitions(file_path: Path) -> list[tuple[str, int, str]]:
         source = file_path.read_text()
         tree = ast.parse(source)
     except (SyntaxError, UnicodeDecodeError):
+        # Skip files that cannot be parsed (syntax errors or invalid encoding)
         return []
 
     definitions = []
@@ -207,6 +208,7 @@ def find_dict_patterns_in_file(file_path: Path) -> list[str]:
         source = file_path.read_text()
         tree = ast.parse(source)
     except (SyntaxError, UnicodeDecodeError):
+        # Skip files that cannot be parsed (syntax errors or invalid encoding)
         return []
 
     patterns = []
@@ -253,6 +255,7 @@ def find_dict_violations(file_path: Path, whitelist: set[str], matched_entries: 
         source = file_path.read_text()
         tree = ast.parse(source)
     except (SyntaxError, UnicodeDecodeError):
+        # Skip files that cannot be parsed (syntax errors or invalid encoding)
         return []
 
     violations = []
@@ -423,6 +426,7 @@ def validate_type_entry(entry: str, src_dir: Path) -> str | None:
             if isinstance(node, ast.ClassDef):
                 type_names.add(node.name)
     except (SyntaxError, UnicodeDecodeError):
+        # Skip files that cannot be parsed; rely on definitions from find_type_definitions
         pass
 
     if type_name not in type_names:

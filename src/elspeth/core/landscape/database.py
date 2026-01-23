@@ -129,11 +129,13 @@ class LandscapeDB:
                 # Table will be created by create_all, skip
                 continue
 
-            # Check if FK exists
+            # Check if FK exists AND targets the correct referenced table
             fks = inspector.get_foreign_keys(table_name)
-            fk_columns = {col for fk in fks for col in fk.get("constrained_columns", [])}
+            has_correct_fk = any(
+                column_name in fk.get("constrained_columns", []) and fk.get("referred_table") == referenced_table for fk in fks
+            )
 
-            if column_name not in fk_columns:
+            if not has_correct_fk:
                 missing_fks.append((table_name, column_name, referenced_table))
 
         # Raise errors for missing columns or FKs

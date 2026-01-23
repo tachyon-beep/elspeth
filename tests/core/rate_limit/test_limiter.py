@@ -627,6 +627,9 @@ class TestAcquireThreadSafety:
             thread.start()
             thread.join(timeout=1.0)
 
+            # Thread should have exited (not still running)
+            assert not thread.is_alive(), "Thread should have terminated but is still running"
+
             # Thread should have timed out (not acquired)
             assert not acquired.is_set(), "Should not have acquired (minute limit exhausted)"
             assert not error_occurred.is_set(), "Should not have raised unexpected error"

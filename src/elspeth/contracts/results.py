@@ -235,6 +235,12 @@ class ArtifactDescriptor:
         URL must be pre-sanitized using SanitizedDatabaseUrl.from_raw_url().
         This ensures credentials are never stored in the audit trail.
         """
+        # Type safety: enforce SanitizedDatabaseUrl, not plain str
+        if not hasattr(url, "sanitized_url") or not hasattr(url, "fingerprint"):
+            raise TypeError(
+                "url must be a SanitizedDatabaseUrl instance. Use SanitizedDatabaseUrl.from_raw_url(url) to sanitize raw database URLs."
+            )
+
         metadata: dict[str, object] = {"table": table, "row_count": row_count}
         if url.fingerprint:
             metadata["url_fingerprint"] = url.fingerprint
@@ -260,6 +266,12 @@ class ArtifactDescriptor:
         URL must be pre-sanitized using SanitizedWebhookUrl.from_raw_url().
         This ensures tokens are never stored in the audit trail.
         """
+        # Type safety: enforce SanitizedWebhookUrl, not plain str
+        if not hasattr(url, "sanitized_url") or not hasattr(url, "fingerprint"):
+            raise TypeError(
+                "url must be a SanitizedWebhookUrl instance. Use SanitizedWebhookUrl.from_raw_url(url) to sanitize raw webhook URLs."
+            )
+
         metadata: dict[str, object] = {"response_code": response_code}
         if url.fingerprint:
             metadata["url_fingerprint"] = url.fingerprint

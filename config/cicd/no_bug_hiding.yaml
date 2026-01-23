@@ -953,8 +953,29 @@ allow_hits:
   # The structure is from SQLAlchemy's reflection API (external library).
   # ============================================================
 
-  - key: "core/landscape/database.py:R1:LandscapeDB:_validate_schema:line=134"
+  - key: "core/landscape/database.py:R1:LandscapeDB:_validate_schema:line=135"
     owner: "architecture"
     reason: "Trust boundary: SQLAlchemy inspector FK dict structure from external library"
     safety: "Empty list default is safe - missing constrained_columns means no FK to validate"
+    expires: null  # Permanent - intentional design
+
+  # ============================================================
+  # ARTIFACT DESCRIPTOR TYPE SAFETY (Permanent)
+  # ============================================================
+  # ArtifactDescriptor factory methods enforce sanitized URL types to prevent
+  # secrets in the audit trail. These hasattr() checks fail-fast with
+  # helpful TypeError messages guiding developers to the correct API.
+  # This is defense-in-depth for security-critical code paths.
+  # ============================================================
+
+  - key: "contracts/results.py:R3:ArtifactDescriptor:for_database:line=239"
+    owner: "architecture"
+    reason: "Security boundary: enforce SanitizedDatabaseUrl to prevent credentials in audit trail"
+    safety: "Raises TypeError with guidance to use SanitizedDatabaseUrl.from_raw_url()"
+    expires: null  # Permanent - intentional design
+
+  - key: "contracts/results.py:R3:ArtifactDescriptor:for_webhook:line=270"
+    owner: "architecture"
+    reason: "Security boundary: enforce SanitizedWebhookUrl to prevent tokens in audit trail"
+    safety: "Raises TypeError with guidance to use SanitizedWebhookUrl.from_raw_url()"
     expires: null  # Permanent - intentional design
