@@ -158,9 +158,13 @@ class SanitizedWebhookUrl:
             if key.lower() in SENSITIVE_PARAMS:
                 sensitive_values.extend(v for v in values if v)
 
-        # Check for Basic Auth password (user:pass@host)
-        has_basic_auth_password = parsed.password is not None
-        if has_basic_auth_password and parsed.password:
+        # Check for Basic Auth credentials (user:pass@host OR user@host)
+        # SECURITY: Treat BOTH username and password as sensitive.
+        # Many services use username for bearer tokens (e.g., https://token@github.com)
+        has_basic_auth = parsed.username is not None or parsed.password is not None
+        if parsed.username:
+            sensitive_values.append(parsed.username)
+        if parsed.password:
             sensitive_values.append(parsed.password)
 
         # If no secrets found, return URL unchanged
@@ -192,14 +196,12 @@ class SanitizedWebhookUrl:
         # Remove sensitive query params
         sanitized_params = {k: v for k, v in query_params.items() if k.lower() not in SENSITIVE_PARAMS}
 
-        # Reconstruct netloc without password but keeping username if present
-        if has_basic_auth_password:
-            # Remove password, keep username if it exists
+        # Reconstruct netloc without ANY Basic Auth credentials
+        # SECURITY: Strip entire userinfo section when credentials present
+        if has_basic_auth:
+            # Remove both username and password - rebuild netloc without userinfo
             port_str = f":{parsed.port}" if parsed.port else ""
-            if parsed.username:
-                netloc = f"{parsed.username}@{parsed.hostname}{port_str}"
-            else:
-                netloc = f"{parsed.hostname}{port_str}"
+            netloc = f"{parsed.hostname}{port_str}"
         else:
             netloc = parsed.netloc
 

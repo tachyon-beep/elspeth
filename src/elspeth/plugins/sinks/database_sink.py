@@ -9,6 +9,7 @@ output correct types. Wrong types = upstream bug = crash.
 
 import hashlib
 import json
+import os
 from typing import Any, Literal
 
 from sqlalchemy import Boolean, Column, Float, Integer, MetaData, String, Table, create_engine, insert
@@ -77,8 +78,12 @@ class DatabaseSink(BaseSink):
         super().__init__(config)
         cfg = DatabaseSinkConfig.from_dict(config)
 
+        # Honor ELSPETH_ALLOW_RAW_SECRETS for dev environments (consistent with config.py)
+        allow_raw = os.environ.get("ELSPETH_ALLOW_RAW_SECRETS", "").lower() == "true"
+        fail_if_no_key = not allow_raw
+
         self._url = cfg.url  # Raw URL for database connection
-        self._sanitized_url = SanitizedDatabaseUrl.from_raw_url(cfg.url)  # For audit trail
+        self._sanitized_url = SanitizedDatabaseUrl.from_raw_url(cfg.url, fail_if_no_key=fail_if_no_key)  # For audit trail
         self._table_name = cfg.table
         self._if_exists = cfg.if_exists
         self._validate_input = cfg.validate_input

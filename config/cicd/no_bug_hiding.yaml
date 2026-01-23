@@ -583,6 +583,12 @@ allow_hits:
     safety: "Missing env var = empty string = False = production mode (fail-closed)"
     expires: null  # Permanent - intentional design
 
+  - key: "plugins/sinks/database_sink.py:R1:DatabaseSink:__init__:line=82"
+    owner: "architecture"
+    reason: "Trust boundary: ELSPETH_ALLOW_RAW_SECRETS is optional env var (not required in production)"
+    safety: "Missing env var = empty string = False = production mode (fail-closed), consistent with config.py:992"
+    expires: null  # Permanent - intentional design
+
   # ============================================================
   # AUDITED LLM CLIENT TRUST BOUNDARY (Permanent)
   # ============================================================

@@ -159,7 +159,46 @@ class TestSanitizedWebhookUrl:
         result = SanitizedWebhookUrl.from_raw_url(url)
 
         assert "password" not in result.sanitized_url
-        assert "user@" in result.sanitized_url or "user" not in result.sanitized_url
+        assert "user" not in result.sanitized_url
+        assert "@" not in result.sanitized_url.split("//")[1].split("/")[0]  # No @ in netloc
+
+    def test_basic_auth_username_only_removed(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Basic Auth username without password is removed (token in username field)."""
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-key")
+        url = "https://token@api.example.com/webhook"
+
+        result = SanitizedWebhookUrl.from_raw_url(url)
+
+        # SECURITY: Username can contain bearer tokens - must be stripped
+        assert "token" not in result.sanitized_url
+        assert "@" not in result.sanitized_url.split("//")[1].split("/")[0]  # No @ in netloc
+        assert result.sanitized_url == "https://api.example.com/webhook"
+        assert result.fingerprint is not None
+
+    def test_basic_auth_username_empty_password_removed(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Basic Auth with username and empty password removed (token:@host pattern)."""
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-key")
+        url = "https://token:@api.example.com/webhook"
+
+        result = SanitizedWebhookUrl.from_raw_url(url)
+
+        # SECURITY: Username can contain bearer tokens - must be stripped
+        assert "token" not in result.sanitized_url
+        assert "@" not in result.sanitized_url.split("//")[1].split("/")[0]  # No @ in netloc
+        assert result.sanitized_url == "https://api.example.com/webhook"
+        assert result.fingerprint is not None
+
+    def test_basic_auth_username_and_password_both_fingerprinted(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Both username and password are included in fingerprint."""
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-key")
+        url_userpass = "https://user:pass@api.example.com/webhook"
+        url_user_only = "https://user@api.example.com/webhook"
+
+        result_userpass = SanitizedWebhookUrl.from_raw_url(url_userpass)
+        result_user_only = SanitizedWebhookUrl.from_raw_url(url_user_only)
+
+        # Different fingerprints because one has password, one doesn't
+        assert result_userpass.fingerprint != result_user_only.fingerprint
 
     def test_fingerprint_computed_for_tokens(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Fingerprint is computed from token values only."""
