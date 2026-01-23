@@ -1,0 +1,319 @@
+# tests/core/security/test_url.py
+"""Tests for URL sanitization types.
+
+Tests for:
+- SanitizedDatabaseUrl sanitizes credentials from database URLs
+- SanitizedWebhookUrl sanitizes tokens from webhook URLs
+- Fingerprints are computed when key is available
+- SecretFingerprintError is raised when key is missing in production mode
+"""
+
+import pytest
+
+from elspeth.core.config import SecretFingerprintError
+from elspeth.core.security.url import (
+    SENSITIVE_PARAMS,
+    SanitizedDatabaseUrl,
+    SanitizedWebhookUrl,
+)
+
+
+class TestSanitizedDatabaseUrl:
+    """Tests for SanitizedDatabaseUrl."""
+
+    def test_url_without_password_unchanged(self) -> None:
+        """URL without password is returned unchanged."""
+        url = "postgresql://user@host/db"
+        result = SanitizedDatabaseUrl.from_raw_url(url, fail_if_no_key=False)
+
+        assert result.sanitized_url == url
+        assert result.fingerprint is None
+
+    def test_password_removed_from_url(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Password is removed from sanitized URL."""
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-key")
+        url = "postgresql://user:secret@host/db"
+
+        result = SanitizedDatabaseUrl.from_raw_url(url)
+
+        assert "secret" not in result.sanitized_url
+        assert "user@host/db" in result.sanitized_url
+
+    def test_fingerprint_computed_when_password_present(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Fingerprint is computed for the password."""
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-key")
+        url = "postgresql://user:secret@host/db"
+
+        result = SanitizedDatabaseUrl.from_raw_url(url)
+
+        assert result.fingerprint is not None
+        assert len(result.fingerprint) == 64  # SHA256 hex
+
+    def test_same_password_same_fingerprint(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Same password produces same fingerprint."""
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-key")
+        url1 = "postgresql://user:secret@host1/db"
+        url2 = "postgresql://user:secret@host2/db"
+
+        result1 = SanitizedDatabaseUrl.from_raw_url(url1)
+        result2 = SanitizedDatabaseUrl.from_raw_url(url2)
+
+        assert result1.fingerprint == result2.fingerprint
+
+    def test_different_passwords_different_fingerprints(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Different passwords produce different fingerprints."""
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-key")
+        url1 = "postgresql://user:secret1@host/db"
+        url2 = "postgresql://user:secret2@host/db"
+
+        result1 = SanitizedDatabaseUrl.from_raw_url(url1)
+        result2 = SanitizedDatabaseUrl.from_raw_url(url2)
+
+        assert result1.fingerprint != result2.fingerprint
+
+    def test_raises_when_password_present_no_key_production_mode(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Raises SecretFingerprintError when password present but no key in production mode."""
+        monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY", raising=False)
+        monkeypatch.delenv("ELSPETH_KEYVAULT_URL", raising=False)
+        url = "postgresql://user:secret@host/db"
+
+        with pytest.raises(SecretFingerprintError, match="ELSPETH_FINGERPRINT_KEY"):
+            SanitizedDatabaseUrl.from_raw_url(url, fail_if_no_key=True)
+
+    def test_dev_mode_sanitizes_without_fingerprint(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Dev mode (fail_if_no_key=False) sanitizes but returns None fingerprint."""
+        monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY", raising=False)
+        monkeypatch.delenv("ELSPETH_KEYVAULT_URL", raising=False)
+        url = "postgresql://user:secret@host/db"
+
+        result = SanitizedDatabaseUrl.from_raw_url(url, fail_if_no_key=False)
+
+        assert "secret" not in result.sanitized_url
+        assert result.fingerprint is None
+
+    def test_sqlite_url_unchanged(self) -> None:
+        """SQLite URLs without credentials are unchanged."""
+        url = "sqlite:///./audit.db"
+        result = SanitizedDatabaseUrl.from_raw_url(url, fail_if_no_key=False)
+
+        assert result.sanitized_url == url
+        assert result.fingerprint is None
+
+    def test_is_frozen(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """SanitizedDatabaseUrl is frozen (immutable)."""
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-key")
+        result = SanitizedDatabaseUrl.from_raw_url("postgresql://user:pass@host/db")
+
+        with pytest.raises(AttributeError):
+            result.sanitized_url = "hacked"  # type: ignore[misc]
+
+
+class TestSanitizedWebhookUrl:
+    """Tests for SanitizedWebhookUrl."""
+
+    def test_url_without_tokens_unchanged(self) -> None:
+        """URL without sensitive params is returned unchanged."""
+        url = "https://api.example.com/webhook?format=json"
+        result = SanitizedWebhookUrl.from_raw_url(url, fail_if_no_key=False)
+
+        assert result.sanitized_url == url
+        assert result.fingerprint is None
+
+    def test_token_param_removed(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Token query parameter is removed."""
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-key")
+        url = "https://api.example.com/webhook?token=sk-abc123"
+
+        result = SanitizedWebhookUrl.from_raw_url(url)
+
+        assert "sk-abc123" not in result.sanitized_url
+        assert "token" not in result.sanitized_url
+
+    def test_api_key_param_removed(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """api_key query parameter is removed."""
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-key")
+        url = "https://api.example.com/hook?api_key=secret123&format=json"
+
+        result = SanitizedWebhookUrl.from_raw_url(url)
+
+        assert "secret123" not in result.sanitized_url
+        assert "api_key" not in result.sanitized_url
+        assert "format=json" in result.sanitized_url
+
+    def test_multiple_sensitive_params_removed(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Multiple sensitive params are all removed."""
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-key")
+        url = "https://api.example.com?token=abc&secret=xyz&keep=me"
+
+        result = SanitizedWebhookUrl.from_raw_url(url)
+
+        assert "abc" not in result.sanitized_url
+        assert "xyz" not in result.sanitized_url
+        assert "keep=me" in result.sanitized_url
+
+    def test_basic_auth_password_removed(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Basic Auth password in URL is removed."""
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-key")
+        url = "https://user:password@api.example.com/webhook"
+
+        result = SanitizedWebhookUrl.from_raw_url(url)
+
+        assert "password" not in result.sanitized_url
+        assert "user@" in result.sanitized_url or "user" not in result.sanitized_url
+
+    def test_fingerprint_computed_for_tokens(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Fingerprint is computed from token values only."""
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-key")
+        url = "https://api.example.com?token=secret123"
+
+        result = SanitizedWebhookUrl.from_raw_url(url)
+
+        assert result.fingerprint is not None
+        assert len(result.fingerprint) == 64
+
+    def test_fingerprint_of_tokens_only_not_full_url(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Fingerprint is computed from tokens only, not full URL.
+
+        Same token in different URLs should have same fingerprint.
+        """
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-key")
+        url1 = "https://api1.example.com/path1?token=same-token"
+        url2 = "https://api2.example.com/path2?token=same-token"
+
+        result1 = SanitizedWebhookUrl.from_raw_url(url1)
+        result2 = SanitizedWebhookUrl.from_raw_url(url2)
+
+        # Same token = same fingerprint (despite different URLs)
+        assert result1.fingerprint == result2.fingerprint
+
+    def test_raises_when_token_present_no_key_production_mode(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Raises SecretFingerprintError when token present but no key in production mode."""
+        monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY", raising=False)
+        monkeypatch.delenv("ELSPETH_KEYVAULT_URL", raising=False)
+        url = "https://api.example.com?token=secret"
+
+        with pytest.raises(SecretFingerprintError, match="ELSPETH_FINGERPRINT_KEY"):
+            SanitizedWebhookUrl.from_raw_url(url, fail_if_no_key=True)
+
+    def test_dev_mode_sanitizes_without_fingerprint(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Dev mode (fail_if_no_key=False) sanitizes but returns None fingerprint."""
+        monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY", raising=False)
+        monkeypatch.delenv("ELSPETH_KEYVAULT_URL", raising=False)
+        url = "https://api.example.com?token=secret"
+
+        result = SanitizedWebhookUrl.from_raw_url(url, fail_if_no_key=False)
+
+        assert "secret" not in result.sanitized_url
+        assert result.fingerprint is None
+
+    def test_case_insensitive_param_matching(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Sensitive param matching is case-insensitive."""
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-key")
+        url = "https://api.example.com?TOKEN=secret&API_KEY=key123"
+
+        result = SanitizedWebhookUrl.from_raw_url(url)
+
+        assert "secret" not in result.sanitized_url
+        assert "key123" not in result.sanitized_url
+
+    def test_is_frozen(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """SanitizedWebhookUrl is frozen (immutable)."""
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-key")
+        result = SanitizedWebhookUrl.from_raw_url("https://api.example.com?token=x")
+
+        with pytest.raises(AttributeError):
+            result.sanitized_url = "hacked"  # type: ignore[misc]
+
+
+class TestSensitiveParams:
+    """Tests for SENSITIVE_PARAMS coverage."""
+
+    @pytest.mark.parametrize(
+        "param",
+        [
+            "token",
+            "api_key",
+            "apikey",
+            "secret",
+            "key",
+            "password",
+            "auth",
+            "access_token",
+            "client_secret",
+            "api_secret",
+            "bearer",
+            "signature",
+            "sig",
+            "authorization",
+            "x-api-key",
+            "credential",
+            "credentials",
+        ],
+    )
+    def test_sensitive_param_in_set(self, param: str) -> None:
+        """All expected sensitive params are in the set."""
+        assert param in SENSITIVE_PARAMS
+
+    @pytest.mark.parametrize(
+        "param",
+        [
+            "token",
+            "api_key",
+            "secret",
+            "access_token",
+            "signature",
+        ],
+    )
+    def test_sensitive_param_removed_from_url(self, param: str, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Each sensitive param type is removed from URLs."""
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-key")
+        url = f"https://api.example.com?{param}=secret_value&keep=me"
+
+        result = SanitizedWebhookUrl.from_raw_url(url)
+
+        assert "secret_value" not in result.sanitized_url
+        assert param not in result.sanitized_url.split("?")[-1]
+        assert "keep=me" in result.sanitized_url
+
+
+class TestIntegrationWithArtifactDescriptor:
+    """Integration tests with ArtifactDescriptor."""
+
+    def test_database_artifact_uses_sanitized_url(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """ArtifactDescriptor.for_database accepts SanitizedDatabaseUrl."""
+        from elspeth.contracts.results import ArtifactDescriptor
+
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-key")
+        sanitized = SanitizedDatabaseUrl.from_raw_url("postgresql://user:secret@host/db")
+
+        descriptor = ArtifactDescriptor.for_database(
+            url=sanitized,
+            table="results",
+            content_hash="abc123",
+            payload_size=100,
+            row_count=10,
+        )
+
+        # URL should not contain secret
+        assert "secret" not in descriptor.path_or_uri
+        assert descriptor.metadata is not None
+        assert "url_fingerprint" in descriptor.metadata
+
+    def test_webhook_artifact_uses_sanitized_url(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """ArtifactDescriptor.for_webhook accepts SanitizedWebhookUrl."""
+        from elspeth.contracts.results import ArtifactDescriptor
+
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-key")
+        sanitized = SanitizedWebhookUrl.from_raw_url("https://api.example.com?token=secret")
+
+        descriptor = ArtifactDescriptor.for_webhook(
+            url=sanitized,
+            content_hash="def456",
+            request_size=50,
+            response_code=200,
+        )
+
+        # URL should not contain secret
+        assert "secret" not in descriptor.path_or_uri
+        assert descriptor.metadata is not None
+        assert "url_fingerprint" in descriptor.metadata
