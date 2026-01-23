@@ -224,15 +224,13 @@ class TestJSONExplodeTypeViolations:
         with pytest.raises(TypeError):
             transform.process(row, ctx)
 
-    def test_string_value_iterates_over_characters(self, ctx: PluginContext) -> None:
-        """String value produces one row per character - likely a source bug.
+    def test_string_value_crashes_with_type_error(self, ctx: PluginContext) -> None:
+        """String value is upstream bug - should crash with TypeError.
 
-        This test documents behavior, not crashes. Strings are iterable in Python,
-        so they don't crash. However, iterating over a string character-by-character
-        is almost certainly NOT what the user intended - this indicates a source
-        validation bug that let a string through where an array was expected.
-
-        The transform trusts the source, so it "works" - but produces garbage.
+        Strings are iterable in Python, but JSONExplode requires lists.
+        A string where a list was expected indicates a source validation bug
+        or misconfigured pipeline. The transform crashes explicitly to surface
+        this bug rather than producing garbage output (one row per character).
         """
         from elspeth.plugins.transforms.json_explode import JSONExplode
 
@@ -245,16 +243,50 @@ class TestJSONExplodeTypeViolations:
 
         row = {"id": 1, "items": "abc"}  # String, not array!
 
-        result = transform.process(row, ctx)
+        # Should crash with clear error message
+        with pytest.raises(TypeError, match=r"Field 'items' must be a list"):
+            transform.process(row, ctx)
 
-        # This "works" but produces one row per character - almost certainly wrong
-        assert result.status == "success"
-        assert result.is_multi_row
-        assert result.rows is not None
-        assert len(result.rows) == 3  # One row per character
-        assert result.rows[0]["item"] == "a"
-        assert result.rows[1]["item"] == "b"
-        assert result.rows[2]["item"] == "c"
+    def test_dict_value_crashes_with_type_error(self, ctx: PluginContext) -> None:
+        """Dict value is upstream bug - should crash with TypeError.
+
+        Dicts are iterable (over keys) in Python, but JSONExplode requires lists.
+        A dict where a list was expected indicates an upstream validation bug.
+        """
+        from elspeth.plugins.transforms.json_explode import JSONExplode
+
+        transform = JSONExplode(
+            {
+                "schema": DYNAMIC_SCHEMA,
+                "array_field": "items",
+            }
+        )
+
+        row = {"id": 1, "items": {"x": 1, "y": 2}}  # Dict, not list!
+
+        with pytest.raises(TypeError, match=r"Field 'items' must be a list"):
+            transform.process(row, ctx)
+
+    def test_tuple_value_crashes_with_type_error(self, ctx: PluginContext) -> None:
+        """Tuple value is upstream bug - should crash with TypeError.
+
+        Tuples are iterable in Python, but JSONExplode requires lists.
+        JSON has no tuple type - if data came from JSON it would be a list.
+        A tuple indicates the data came from Python code that should be fixed.
+        """
+        from elspeth.plugins.transforms.json_explode import JSONExplode
+
+        transform = JSONExplode(
+            {
+                "schema": DYNAMIC_SCHEMA,
+                "array_field": "items",
+            }
+        )
+
+        row = {"id": 1, "items": ("a", "b", "c")}  # Tuple, not list!
+
+        with pytest.raises(TypeError, match=r"Field 'items' must be a list"):
+            transform.process(row, ctx)
 
     def test_non_iterable_value_crashes(self, ctx: PluginContext) -> None:
         """Non-iterable value is upstream bug - should crash (TypeError)."""

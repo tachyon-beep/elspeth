@@ -127,17 +127,24 @@ class JSONExplode(BaseTransform):
 
         Raises:
             KeyError: If array_field is missing (upstream bug)
-            TypeError: If array_field is not iterable (upstream bug)
+            TypeError: If array_field is not a list (upstream bug)
         """
-        # Direct access - TRUST that source validated
+        # Direct access - TRUST that source validated field exists
         # KeyError here = upstream bug (source didn't validate field exists)
         array_value = row[self._array_field]
+
+        # Contract enforcement: array_field must be list
+        # Strings/dicts are iterable but would produce garbage - fail explicitly
+        if not isinstance(array_value, list):
+            raise TypeError(
+                f"Field '{self._array_field}' must be a list, got {type(array_value).__name__}. "
+                f"This indicates an upstream validation bug - check source schema or prior transforms."
+            )
 
         # Build base output (all fields except the array field)
         base = {k: v for k, v in row.items() if k != self._array_field}
 
         # Handle empty array - return single row, not multi
-        # len() on non-list types will raise TypeError = upstream bug
         if len(array_value) == 0:
             output = dict(base)
             output[self._output_field] = None
@@ -146,7 +153,6 @@ class JSONExplode(BaseTransform):
             return TransformResult.success(output)
 
         # Explode array into multiple rows
-        # enumerate() on non-iterable will raise TypeError = upstream bug
         output_rows = []
         for i, item in enumerate(array_value):
             output = dict(base)
