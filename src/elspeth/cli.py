@@ -387,8 +387,13 @@ def _execute_pipeline(config: ElspethSettings, verbose: bool = False) -> Executi
         if verbose:
             typer.echo("Starting pipeline execution...")
 
-        # Progress callback for live updates
-        def _print_progress(event: ProgressEvent) -> None:
+        # Create event bus and subscribe progress formatter
+        from elspeth.core import EventBus
+
+        event_bus = EventBus()
+
+        # Progress formatter for live updates
+        def _format_progress(event: ProgressEvent) -> None:
             rate = event.rows_processed / event.elapsed_seconds if event.elapsed_seconds > 0 else 0
             typer.echo(
                 f"Processing: {event.rows_processed:,} rows | "
@@ -396,13 +401,14 @@ def _execute_pipeline(config: ElspethSettings, verbose: bool = False) -> Executi
                 f"✓{event.rows_succeeded:,} ✗{event.rows_failed} ⚠{event.rows_quarantined}"
             )
 
+        event_bus.subscribe(ProgressEvent, _format_progress)
+
         # Execute via Orchestrator (creates full audit trail)
-        orchestrator = Orchestrator(db)
+        orchestrator = Orchestrator(db, event_bus=event_bus)
         result = orchestrator.run(
             pipeline_config,
             graph=graph,
             settings=config,
-            on_progress=_print_progress,
         )
 
         return {

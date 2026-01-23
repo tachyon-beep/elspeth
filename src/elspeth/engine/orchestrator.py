@@ -17,6 +17,9 @@ from contextlib import suppress
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+if TYPE_CHECKING:
+    from elspeth.core.events import EventBusProtocol
+
 from elspeth.contracts import NodeType, RowOutcome, RunStatus, TokenInfo
 from elspeth.contracts.cli import ProgressEvent
 from elspeth.core.config import AggregationSettings, CoalesceSettings, GateSettings
@@ -117,11 +120,15 @@ class Orchestrator:
         self,
         db: LandscapeDB,
         *,
+        event_bus: "EventBusProtocol" = None,  # type: ignore[assignment]
         canonical_version: str = "sha256-rfc8785-v1",
         checkpoint_manager: "CheckpointManager | None" = None,
         checkpoint_settings: "CheckpointSettings | None" = None,
     ) -> None:
+        from elspeth.core.events import NullEventBus
+
         self._db = db
+        self._events = event_bus if event_bus is not None else NullEventBus()
         self._canonical_version = canonical_version
         self._span_factory = SpanFactory()
         self._checkpoint_manager = checkpoint_manager
@@ -401,7 +408,6 @@ class Orchestrator:
         graph: ExecutionGraph | None = None,
         settings: "ElspethSettings | None" = None,
         batch_checkpoints: dict[str, dict[str, Any]] | None = None,
-        on_progress: Callable[[ProgressEvent], None] | None = None,
         *,
         payload_store: Any = None,
     ) -> RunResult:
@@ -415,8 +421,6 @@ class Orchestrator:
                 previous BatchPendingError). Maps node_id -> checkpoint_data.
                 Used when retrying a run after a batch transform raised
                 BatchPendingError.
-            on_progress: Optional callback for progress updates. Called every
-                100 rows with current progress metrics.
             payload_store: Optional PayloadStore for persisting source row payloads.
                 Required for audit compliance (CLAUDE.md: "Source entry - Raw data
                 stored before any processing").
@@ -462,7 +466,6 @@ class Orchestrator:
                     graph,
                     settings,
                     batch_checkpoints,
-                    on_progress,
                     payload_store=payload_store,
                 )
 
@@ -530,7 +533,6 @@ class Orchestrator:
         graph: ExecutionGraph,
         settings: "ElspethSettings | None" = None,
         batch_checkpoints: dict[str, dict[str, Any]] | None = None,
-        on_progress: Callable[[ProgressEvent], None] | None = None,
         *,
         payload_store: Any = None,
     ) -> RunResult:
@@ -548,7 +550,6 @@ class Orchestrator:
             graph: Execution graph
             settings: Full settings (optional)
             batch_checkpoints: Restored batch checkpoints (maps node_id -> checkpoint_data)
-            on_progress: Optional callback for progress updates
             payload_store: Optional PayloadStore for persisting source row payloads
         """
         # Get execution order from graph
@@ -822,9 +823,9 @@ class Orchestrator:
                             )
                             pending_tokens[quarantine_sink].append(quarantine_token)
                         # Emit progress before continue (ensures quarantined rows trigger updates)
-                        if on_progress and rows_processed % progress_interval == 0:
+                        if rows_processed % progress_interval == 0:
                             elapsed = time.perf_counter() - start_time
-                            on_progress(
+                            self._events.emit(
                                 ProgressEvent(
                                     rows_processed=rows_processed,
                                     # Include routed rows in success count - they reached their destination
@@ -890,9 +891,9 @@ class Orchestrator:
                             rows_buffered += 1
 
                     # Emit progress every N rows (after outcome counters are updated)
-                    if on_progress and rows_processed % progress_interval == 0:
+                    if rows_processed % progress_interval == 0:
                         elapsed = time.perf_counter() - start_time
-                        on_progress(
+                        self._events.emit(
                             ProgressEvent(
                                 rows_processed=rows_processed,
                                 # Include routed rows in success count - they reached their destination
@@ -969,9 +970,9 @@ class Orchestrator:
                     )
 
             # Emit final progress for runs not divisible by progress_interval
-            if on_progress and rows_processed % progress_interval != 0:
+            if rows_processed % progress_interval != 0:
                 elapsed = time.perf_counter() - start_time
-                on_progress(
+                self._events.emit(
                     ProgressEvent(
                         rows_processed=rows_processed,
                         # Include routed rows in success count - they reached their destination

@@ -4512,17 +4512,21 @@ class TestOrchestratorProgress:
             sinks={"default": as_sink(sink)},
         )
 
-        # Track progress events
+        # Track progress events using EventBus
+        from elspeth.core import EventBus
+
         progress_events: list[ProgressEvent] = []
 
         def track_progress(event: ProgressEvent) -> None:
             progress_events.append(event)
 
-        orchestrator = Orchestrator(db)
+        event_bus = EventBus()
+        event_bus.subscribe(ProgressEvent, track_progress)
+
+        orchestrator = Orchestrator(db, event_bus=event_bus)
         orchestrator.run(
             config,
             graph=_build_test_graph(config),
-            on_progress=track_progress,
         )
 
         # Should be called at 100, 200, and 250 (final)
@@ -4638,16 +4642,21 @@ class TestOrchestratorProgress:
             sinks={"default": as_sink(default_sink), "quarantine": as_sink(quarantine_sink)},
         )
 
+        # Track progress events using EventBus
+        from elspeth.core import EventBus
+
         progress_events: list[ProgressEvent] = []
 
         def track_progress(event: ProgressEvent) -> None:
             progress_events.append(event)
 
-        orchestrator = Orchestrator(db)
+        event_bus = EventBus()
+        event_bus.subscribe(ProgressEvent, track_progress)
+
+        orchestrator = Orchestrator(db, event_bus=event_bus)
         orchestrator.run(
             config,
             graph=_build_test_graph(config),
-            on_progress=track_progress,
         )
 
         # Progress should fire at row 100 even though it was quarantined
@@ -4710,17 +4719,21 @@ class TestOrchestratorProgress:
             gates=[routing_gate],
         )
 
-        # Track progress events
+        # Track progress events using EventBus
+        from elspeth.core import EventBus
+
         progress_events: list[ProgressEvent] = []
 
         def track_progress(event: ProgressEvent) -> None:
             progress_events.append(event)
 
-        orchestrator = Orchestrator(db)
+        event_bus = EventBus()
+        event_bus.subscribe(ProgressEvent, track_progress)
+
+        orchestrator = Orchestrator(db, event_bus=event_bus)
         orchestrator.run(
             config,
             graph=_build_test_graph(config),
-            on_progress=track_progress,
         )
 
         # Should have progress at 100 and final 150
