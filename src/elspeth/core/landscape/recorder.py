@@ -2313,6 +2313,69 @@ class LandscapeRecorder:
                 context_json=result.context_json,
             )
 
+    def get_token_outcomes_for_row(self, run_id: str, row_id: str) -> list[TokenOutcome]:
+        """Get all token outcomes for a row in a single query.
+
+        Uses JOIN to avoid N+1 query pattern when resolving row_id to tokens.
+        Critical for explain() disambiguation with forks/expands.
+
+        Args:
+            run_id: Run ID to filter by (prevents cross-run contamination)
+            row_id: Row ID
+
+        Returns:
+            List of TokenOutcome objects, empty if no outcomes recorded.
+            Ordered by recorded_at for deterministic behavior.
+        """
+        with self._db.connection() as conn:
+            # Single JOIN query: tokens + outcomes
+            query = (
+                select(
+                    token_outcomes_table.c.outcome_id,
+                    token_outcomes_table.c.run_id,
+                    token_outcomes_table.c.token_id,
+                    token_outcomes_table.c.outcome,
+                    token_outcomes_table.c.is_terminal,
+                    token_outcomes_table.c.recorded_at,
+                    token_outcomes_table.c.sink_name,
+                    token_outcomes_table.c.batch_id,
+                    token_outcomes_table.c.fork_group_id,
+                    token_outcomes_table.c.join_group_id,
+                    token_outcomes_table.c.expand_group_id,
+                    token_outcomes_table.c.error_hash,
+                    token_outcomes_table.c.context_json,
+                )
+                .join(
+                    tokens_table,
+                    token_outcomes_table.c.token_id == tokens_table.c.token_id,
+                )
+                .where(tokens_table.c.row_id == row_id)
+                .where(token_outcomes_table.c.run_id == run_id)
+                .order_by(token_outcomes_table.c.recorded_at)
+            )
+
+            rows = conn.execute(query).fetchall()
+
+            # Tier 1 Trust Model: This is OUR data. Trust DB values directly.
+            return [
+                TokenOutcome(
+                    outcome_id=r.outcome_id,
+                    run_id=r.run_id,
+                    token_id=r.token_id,
+                    outcome=RowOutcome(r.outcome),
+                    is_terminal=r.is_terminal == 1,
+                    recorded_at=r.recorded_at,
+                    sink_name=r.sink_name,
+                    batch_id=r.batch_id,
+                    fork_group_id=r.fork_group_id,
+                    join_group_id=r.join_group_id,
+                    expand_group_id=r.expand_group_id,
+                    error_hash=r.error_hash,
+                    context_json=r.context_json,
+                )
+                for r in rows
+            ]
+
     # === Validation Error Recording (WP-11.99) ===
 
     def record_validation_error(
