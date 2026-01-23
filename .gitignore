@@ -129,3 +129,4 @@ examples/*/runs/*
 
 # Real/production data - never commit
 real/
+examples/large_scale_test/input.csv
