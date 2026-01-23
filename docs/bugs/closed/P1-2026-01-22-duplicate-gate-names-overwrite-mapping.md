@@ -99,8 +99,19 @@ Missing uniqueness validation for `gates[*].name` in `ElspethSettings`.
 
 ## Verification Status
 
-- [ ] Bug confirmed via reproduction
-- [ ] Root cause verified
-- [ ] Fix implemented
-- [ ] Tests added
-- [ ] Fix verified
+- [x] Bug confirmed via reproduction
+- [x] Root cause verified
+- [x] Fix implemented
+- [x] Tests added
+- [x] Fix verified
+
+## Resolution
+
+**Fixed in commit:** (this commit)
+
+**Changes:**
+- Added `validate_unique_gate_names` validator to `src/elspeth/core/config.py`
+- Added `validate_unique_coalesce_names` validator (parallel vulnerability identified during fix)
+- Added 4 tests covering duplicate name rejection for both gates and coalesce
+
+**Date closed:** 2026-01-23

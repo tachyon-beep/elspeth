@@ -571,13 +571,13 @@ allow_hits:
   # ELSPETH_ALLOW_RAW_SECRETS is not required - absence means "production mode".
   # ============================================================
 
-  - key: "core/config.py:R1:_expand_env_vars:_expand_string:replacer:line=730"
+  - key: "core/config.py:R1:_expand_env_vars:_expand_string:replacer:line=748"
     owner: "architecture"
     reason: "Trust boundary: environment variables are external input that may not exist"
     safety: "Explicit None check follows; falls back to default or keeps original for later error"
     expires: null  # Permanent - intentional design
 
-  - key: "core/config.py:R1:_fingerprint_config_for_audit:line=992"
+  - key: "core/config.py:R1:_fingerprint_config_for_audit:line=1010"
     owner: "architecture"
     reason: "Optional env var: ELSPETH_ALLOW_RAW_SECRETS is not required in production"
     safety: "Missing env var = empty string = False = production mode (fail-closed)"
