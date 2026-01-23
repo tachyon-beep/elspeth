@@ -36,7 +36,7 @@ def _normalize_value(obj: Any) -> Any:
     Handles pandas and numpy types that appear in real pipeline data.
 
     NaN Policy: STRICT REJECTION
-    - NaN and Infinity are invalid input states, not "missing"
+    - NaN and Infinity are invalid input states for float AND Decimal
     - Use None/pd.NA/NaT for intentional missing values
     - This prevents silent data corruption in audit records
 
@@ -90,6 +90,8 @@ def _normalize_value(obj: Any) -> Any:
         return {"__bytes__": base64.b64encode(obj).decode("ascii")}
 
     if isinstance(obj, Decimal):
+        if not obj.is_finite():  # Rejects NaN, sNaN, Infinity, -Infinity
+            raise ValueError(f"Cannot canonicalize non-finite Decimal: {obj}. Use None for missing values, not NaN/Infinity.")
         return str(obj)
 
     return obj

@@ -96,8 +96,21 @@
 
 ## Verification Status
 
-- [ ] Bug confirmed via reproduction
-- [ ] Root cause verified
-- [ ] Fix implemented
-- [ ] Tests added
-- [ ] Fix verified
+- [x] Bug confirmed via reproduction
+- [x] Root cause verified
+- [x] Fix implemented
+- [x] Tests added
+- [x] Fix verified
+
+## Resolution
+
+**Fixed by:** Claude Opus 4.5 (2026-01-23)
+
+**Changes:**
+- `src/elspeth/core/canonical.py`: Added `is_finite()` check for `Decimal` in `_normalize_value()`, updated docstring
+- `tests/core/test_canonical.py`: Added `TestDecimalNonFiniteRejection` class with parameterized tests for NaN, sNaN, Infinity, -Infinity
+
+**Verification:**
+- All 5 new tests pass
+- Full test suite (3,160 tests) passes with no regressions
+- Golden hash stability test confirms existing hashes unchanged
