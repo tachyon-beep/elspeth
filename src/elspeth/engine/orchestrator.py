@@ -17,8 +17,20 @@ from contextlib import suppress
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+if TYPE_CHECKING:
+    from elspeth.core.events import EventBusProtocol
+
 from elspeth.contracts import NodeType, RowOutcome, RunStatus, TokenInfo
 from elspeth.contracts.cli import ProgressEvent
+from elspeth.contracts.events import (
+    PhaseAction,
+    PhaseCompleted,
+    PhaseError,
+    PhaseStarted,
+    PipelinePhase,
+    RunCompleted,
+    RunCompletionStatus,
+)
 from elspeth.core.config import AggregationSettings, CoalesceSettings, GateSettings
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
@@ -117,11 +129,15 @@ class Orchestrator:
         self,
         db: LandscapeDB,
         *,
+        event_bus: "EventBusProtocol" = None,  # type: ignore[assignment]
         canonical_version: str = "sha256-rfc8785-v1",
         checkpoint_manager: "CheckpointManager | None" = None,
         checkpoint_settings: "CheckpointSettings | None" = None,
     ) -> None:
+        from elspeth.core.events import NullEventBus
+
         self._db = db
+        self._events = event_bus if event_bus is not None else NullEventBus()
         self._canonical_version = canonical_version
         self._span_factory = SpanFactory()
         self._checkpoint_manager = checkpoint_manager
@@ -401,7 +417,6 @@ class Orchestrator:
         graph: ExecutionGraph | None = None,
         settings: "ElspethSettings | None" = None,
         batch_checkpoints: dict[str, dict[str, Any]] | None = None,
-        on_progress: Callable[[ProgressEvent], None] | None = None,
         *,
         payload_store: Any = None,
     ) -> RunResult:
@@ -415,8 +430,6 @@ class Orchestrator:
                 previous BatchPendingError). Maps node_id -> checkpoint_data.
                 Used when retrying a run after a batch transform raised
                 BatchPendingError.
-            on_progress: Optional callback for progress updates. Called every
-                100 rows with current progress metrics.
             payload_store: Optional PayloadStore for persisting source row payloads.
                 Required for audit compliance (CLAUDE.md: "Source entry - Raw data
                 stored before any processing").
@@ -427,32 +440,49 @@ class Orchestrator:
         if graph is None:
             raise ValueError("ExecutionGraph is required. Build with ExecutionGraph.from_config(settings)")
 
-        # Validate schema compatibility
-        # Schemas are required by plugin protocols - access directly
-        source_output = config.source.output_schema
-        transform_inputs = [t.input_schema for t in config.transforms]
-        transform_outputs = [t.output_schema for t in config.transforms]
-        sink_inputs = [s.input_schema for s in config.sinks.values()]
+        # SCHEMA_VALIDATION phase - validate pipeline schemas
+        phase_start = time.perf_counter()
+        try:
+            self._events.emit(PhaseStarted(phase=PipelinePhase.SCHEMA_VALIDATION, action=PhaseAction.VALIDATING))
 
-        schema_errors = validate_pipeline_schemas(
-            source_output=source_output,
-            transform_inputs=transform_inputs,  # type: ignore[arg-type]
-            transform_outputs=transform_outputs,  # type: ignore[arg-type]
-            sink_inputs=sink_inputs,  # type: ignore[arg-type]
-        )
-        if schema_errors:
-            raise ValueError(f"Pipeline schema incompatibility: {'; '.join(schema_errors)}")
+            # Schemas are required by plugin protocols - access directly
+            source_output = config.source.output_schema
+            transform_inputs = [t.input_schema for t in config.transforms]
+            transform_outputs = [t.output_schema for t in config.transforms]
+            sink_inputs = [s.input_schema for s in config.sinks.values()]
 
-        # Pass payload_store to recorder for external call payload persistence
-        recorder = LandscapeRecorder(self._db, payload_store=payload_store)
+            schema_errors = validate_pipeline_schemas(
+                source_output=source_output,
+                transform_inputs=transform_inputs,  # type: ignore[arg-type]
+                transform_outputs=transform_outputs,  # type: ignore[arg-type]
+                sink_inputs=sink_inputs,  # type: ignore[arg-type]
+            )
+            if schema_errors:
+                raise ValueError(f"Pipeline schema incompatibility: {'; '.join(schema_errors)}")
 
-        # Begin run
-        run = recorder.begin_run(
-            config=config.config,
-            canonical_version=self._canonical_version,
-        )
+            self._events.emit(PhaseCompleted(phase=PipelinePhase.SCHEMA_VALIDATION, duration_seconds=time.perf_counter() - phase_start))
+        except Exception as e:
+            self._events.emit(PhaseError(phase=PipelinePhase.SCHEMA_VALIDATION, error=e))
+            raise  # CRITICAL: Always re-raise - this is our code, must crash
+
+        # DATABASE phase - create recorder and begin run
+        phase_start = time.perf_counter()
+        try:
+            self._events.emit(PhaseStarted(phase=PipelinePhase.DATABASE, action=PhaseAction.CONNECTING))
+
+            recorder = LandscapeRecorder(self._db, payload_store=payload_store)
+            run = recorder.begin_run(
+                config=config.config,
+                canonical_version=self._canonical_version,
+            )
+
+            self._events.emit(PhaseCompleted(phase=PipelinePhase.DATABASE, duration_seconds=time.perf_counter() - phase_start))
+        except Exception as e:
+            self._events.emit(PhaseError(phase=PipelinePhase.DATABASE, error=e))
+            raise  # CRITICAL: Always re-raise - database connection failure is fatal
 
         run_completed = False
+        run_start_time = time.perf_counter()
         try:
             with self._span_factory.run_span(run.run_id):
                 result = self._execute_run(
@@ -462,7 +492,6 @@ class Orchestrator:
                     graph,
                     settings,
                     batch_checkpoints,
-                    on_progress,
                     payload_store=payload_store,
                 )
 
@@ -475,8 +504,7 @@ class Orchestrator:
             # (checkpoints are for recovery, not needed after success)
             self._delete_checkpoints(run.run_id)
 
-            # Post-run export (separate from run status - export failures
-            # don't change run status)
+            # EXPORT phase - post-run landscape export (if enabled)
             if settings is not None and settings.landscape.export.enabled:
                 export_config = settings.landscape.export
                 recorder.set_export_status(
@@ -485,14 +513,21 @@ class Orchestrator:
                     export_format=export_config.format,
                     export_sink=export_config.sink,
                 )
+
+                phase_start = time.perf_counter()
                 try:
+                    self._events.emit(PhaseStarted(phase=PipelinePhase.EXPORT, action=PhaseAction.EXPORTING, target=export_config.sink))
+
                     self._export_landscape(
                         run_id=run.run_id,
                         settings=settings,
                         sinks=config.sinks,
                     )
+
                     recorder.set_export_status(run.run_id, status="completed")
+                    self._events.emit(PhaseCompleted(phase=PipelinePhase.EXPORT, duration_seconds=time.perf_counter() - phase_start))
                 except Exception as export_error:
+                    self._events.emit(PhaseError(phase=PipelinePhase.EXPORT, error=export_error, target=export_config.sink))
                     recorder.set_export_status(
                         run.run_id,
                         status="failed",
@@ -502,22 +537,64 @@ class Orchestrator:
                     # (run is still "completed" in Landscape)
                     raise
 
+            # Emit RunCompleted event with final metrics
+            total_duration = time.perf_counter() - run_start_time
+            self._events.emit(
+                RunCompleted(
+                    run_id=run.run_id,
+                    status=RunCompletionStatus.COMPLETED,
+                    total_rows=result.rows_processed,
+                    succeeded=result.rows_succeeded,
+                    failed=result.rows_failed,
+                    quarantined=result.rows_quarantined,
+                    duration_seconds=total_duration,
+                    exit_code=0,
+                )
+            )
+
             return result
 
         except BatchPendingError:
             # BatchPendingError is a CONTROL-FLOW SIGNAL, not an error.
             # A batch transform has submitted work that isn't complete yet.
             # DO NOT mark run as failed - it's pending, not failed.
+            # DO NOT emit RunCompleted - run isn't done yet.
             # Re-raise for caller to schedule retry based on check_after_seconds.
-            # The run remains in its current state (the caller should manage
-            # run status transitions for pending/retry scenarios).
             raise
         except Exception:
-            # Only mark run as failed if it didn't complete successfully
-            # (export failures are tracked separately)
-            if not run_completed:
+            # Emit RunCompleted with failure status
+            total_duration = time.perf_counter() - run_start_time
+
+            if run_completed:
+                # Export failed after successful run - emit PARTIAL status
+                self._events.emit(
+                    RunCompleted(
+                        run_id=run.run_id,
+                        status=RunCompletionStatus.PARTIAL,
+                        total_rows=result.rows_processed,
+                        succeeded=result.rows_succeeded,
+                        failed=result.rows_failed,
+                        quarantined=result.rows_quarantined,
+                        duration_seconds=total_duration,
+                        exit_code=1,
+                    )
+                )
+            else:
+                # Run failed before completion - emit FAILED status with zero metrics
                 recorder.complete_run(run.run_id, status="failed")
-            raise
+                self._events.emit(
+                    RunCompleted(
+                        run_id=run.run_id,
+                        status=RunCompletionStatus.FAILED,
+                        total_rows=0,
+                        succeeded=0,
+                        failed=0,
+                        quarantined=0,
+                        duration_seconds=total_duration,
+                        exit_code=2,  # exit_code: 0=success, 1=partial, 2=total failure
+                    )
+                )
+            raise  # CRITICAL: Always re-raise - observability doesn't suppress errors
         finally:
             # Always clean up transforms, even on failure
             self._cleanup_transforms(config)
@@ -530,7 +607,6 @@ class Orchestrator:
         graph: ExecutionGraph,
         settings: "ElspethSettings | None" = None,
         batch_checkpoints: dict[str, dict[str, Any]] | None = None,
-        on_progress: Callable[[ProgressEvent], None] | None = None,
         *,
         payload_store: Any = None,
     ) -> RunResult:
@@ -548,7 +624,6 @@ class Orchestrator:
             graph: Execution graph
             settings: Full settings (optional)
             batch_checkpoints: Restored batch checkpoints (maps node_id -> checkpoint_data)
-            on_progress: Optional callback for progress updates
             payload_store: Optional PayloadStore for persisting source row payloads
         """
         # Get execution order from graph
@@ -579,96 +654,106 @@ class Orchestrator:
         coalesce_id_map = graph.get_coalesce_id_map()
         coalesce_node_ids = set(coalesce_id_map.values())
 
-        # Register nodes with Landscape using graph's node IDs and actual plugin metadata
-        from elspeth.contracts import Determinism
-        from elspeth.contracts.schema import SchemaConfig
+        # GRAPH phase - register nodes and edges in Landscape
+        phase_start = time.perf_counter()
+        try:
+            self._events.emit(PhaseStarted(phase=PipelinePhase.GRAPH, action=PhaseAction.BUILDING))
 
-        for node_id in execution_order:
-            node_info = graph.get_node_info(node_id)
+            # Register nodes with Landscape using graph's node IDs and actual plugin metadata
+            from elspeth.contracts import Determinism
+            from elspeth.contracts.schema import SchemaConfig
 
-            # Config gates, aggregations, and coalesce nodes have metadata in graph node, not plugin instances
-            if node_id in config_gate_node_ids:
-                # Config gates are deterministic (expression evaluation is deterministic)
-                plugin_version = "1.0.0"
-                determinism = Determinism.DETERMINISTIC
-            elif node_id in aggregation_node_ids:
-                # Aggregations use batch-aware transforms - determinism depends on the transform
-                # Default to deterministic (statistical operations are typically deterministic)
-                plugin_version = "1.0.0"
-                determinism = Determinism.DETERMINISTIC
-            elif node_id in coalesce_node_ids:
-                # Coalesce nodes merge tokens from parallel paths - deterministic operation
-                plugin_version = "1.0.0"
-                determinism = Determinism.DETERMINISTIC
-            else:
-                # Direct access - if node_id is in execution_order (from graph.topological_order()),
-                # it MUST be in node_to_plugin (built from the same graph's source, transforms, sinks).
-                # A KeyError here indicates a bug in graph construction or node_to_plugin building.
-                plugin = node_to_plugin[node_id]
+            for node_id in execution_order:
+                node_info = graph.get_node_info(node_id)
 
-                # Extract plugin metadata - all protocols define these attributes,
-                # all base classes provide defaults. Direct access is safe.
-                plugin_version = plugin.plugin_version
-                determinism = plugin.determinism
+                # Config gates, aggregations, and coalesce nodes have metadata in graph node, not plugin instances
+                if node_id in config_gate_node_ids:
+                    # Config gates are deterministic (expression evaluation is deterministic)
+                    plugin_version = "1.0.0"
+                    determinism = Determinism.DETERMINISTIC
+                elif node_id in aggregation_node_ids:
+                    # Aggregations use batch-aware transforms - determinism depends on the transform
+                    # Default to deterministic (statistical operations are typically deterministic)
+                    plugin_version = "1.0.0"
+                    determinism = Determinism.DETERMINISTIC
+                elif node_id in coalesce_node_ids:
+                    # Coalesce nodes merge tokens from parallel paths - deterministic operation
+                    plugin_version = "1.0.0"
+                    determinism = Determinism.DETERMINISTIC
+                else:
+                    # Direct access - if node_id is in execution_order (from graph.topological_order()),
+                    # it MUST be in node_to_plugin (built from the same graph's source, transforms, sinks).
+                    # A KeyError here indicates a bug in graph construction or node_to_plugin building.
+                    plugin = node_to_plugin[node_id]
 
-            # Get schema_config from node_info config or default to dynamic
-            # Schema is specified in pipeline config, not plugin attributes
-            schema_dict = node_info.config.get("schema", {"fields": "dynamic"})
-            schema_config = SchemaConfig.from_dict(schema_dict)
+                    # Extract plugin metadata - all protocols define these attributes,
+                    # all base classes provide defaults. Direct access is safe.
+                    plugin_version = plugin.plugin_version
+                    determinism = plugin.determinism
 
-            recorder.register_node(
-                run_id=run_id,
-                node_id=node_id,  # Use graph's ID
-                plugin_name=node_info.plugin_name,
-                node_type=NodeType(node_info.node_type),  # Already lowercase
-                plugin_version=plugin_version,
-                config=node_info.config,
-                determinism=determinism,
-                schema_config=schema_config,
+                # Get schema_config from node_info config or default to dynamic
+                # Schema is specified in pipeline config, not plugin attributes
+                schema_dict = node_info.config.get("schema", {"fields": "dynamic"})
+                schema_config = SchemaConfig.from_dict(schema_dict)
+
+                recorder.register_node(
+                    run_id=run_id,
+                    node_id=node_id,  # Use graph's ID
+                    plugin_name=node_info.plugin_name,
+                    node_type=NodeType(node_info.node_type),  # Already lowercase
+                    plugin_version=plugin_version,
+                    config=node_info.config,
+                    determinism=determinism,
+                    schema_config=schema_config,
+                )
+
+            # Register edges from graph - key by (from_node, label) for lookup
+            # Gates return route labels, so edge_map is keyed by label
+            edge_map: dict[tuple[str, str], str] = {}
+
+            for edge_info in graph.get_edges():
+                edge = recorder.register_edge(
+                    run_id=run_id,
+                    from_node_id=edge_info.from_node,
+                    to_node_id=edge_info.to_node,
+                    label=edge_info.label,
+                    mode=edge_info.mode,
+                )
+                # Key by edge label - gates return route labels, transforms use "continue"
+                edge_map[(edge_info.from_node, edge_info.label)] = edge.edge_id
+
+            # Get route resolution map - maps (gate_node, label) -> "continue" | sink_name
+            route_resolution_map = graph.get_route_resolution_map()
+
+            # Validate all route destinations BEFORE processing any rows
+            # This catches config errors early instead of after partial processing
+            # Note: config gates also add to route_resolution_map, validated the same way
+            self._validate_route_destinations(
+                route_resolution_map=route_resolution_map,
+                available_sinks=set(config.sinks.keys()),
+                transform_id_map=transform_id_map,
+                transforms=config.transforms,
+                config_gate_id_map=config_gate_id_map,
+                config_gates=config.gates,
             )
 
-        # Register edges from graph - key by (from_node, label) for lookup
-        # Gates return route labels, so edge_map is keyed by label
-        edge_map: dict[tuple[str, str], str] = {}
-
-        for edge_info in graph.get_edges():
-            edge = recorder.register_edge(
-                run_id=run_id,
-                from_node_id=edge_info.from_node,
-                to_node_id=edge_info.to_node,
-                label=edge_info.label,
-                mode=edge_info.mode,
+            # Validate transform error sink destinations
+            self._validate_transform_error_sinks(
+                transforms=config.transforms,
+                available_sinks=set(config.sinks.keys()),
+                _transform_id_map=transform_id_map,
             )
-            # Key by edge label - gates return route labels, transforms use "continue"
-            edge_map[(edge_info.from_node, edge_info.label)] = edge.edge_id
 
-        # Get route resolution map - maps (gate_node, label) -> "continue" | sink_name
-        route_resolution_map = graph.get_route_resolution_map()
+            # Validate source quarantine destination
+            self._validate_source_quarantine_destination(
+                source=config.source,
+                available_sinks=set(config.sinks.keys()),
+            )
 
-        # Validate all route destinations BEFORE processing any rows
-        # This catches config errors early instead of after partial processing
-        # Note: config gates also add to route_resolution_map, validated the same way
-        self._validate_route_destinations(
-            route_resolution_map=route_resolution_map,
-            available_sinks=set(config.sinks.keys()),
-            transform_id_map=transform_id_map,
-            transforms=config.transforms,
-            config_gate_id_map=config_gate_id_map,
-            config_gates=config.gates,
-        )
-
-        # Validate transform error sink destinations
-        self._validate_transform_error_sinks(
-            transforms=config.transforms,
-            available_sinks=set(config.sinks.keys()),
-            _transform_id_map=transform_id_map,
-        )
-
-        # Validate source quarantine destination
-        self._validate_source_quarantine_destination(
-            source=config.source,
-            available_sinks=set(config.sinks.keys()),
-        )
+            self._events.emit(PhaseCompleted(phase=PipelinePhase.GRAPH, duration_seconds=time.perf_counter() - phase_start))
+        except Exception as e:
+            self._events.emit(PhaseError(phase=PipelinePhase.GRAPH, error=e))
+            raise  # CRITICAL: Always re-raise - graph validation failure is fatal
 
         # Get explicit node ID mappings from graph
         source_id = graph.get_source()
@@ -784,9 +869,11 @@ class Orchestrator:
         rows_buffered = 0
         pending_tokens: dict[str, list[TokenInfo]] = {name: [] for name in config.sinks}
 
-        # Progress tracking
+        # Progress tracking - hybrid timing: emit on 100 rows OR 5 seconds
         progress_interval = 100
+        progress_time_interval = 5.0  # seconds
         start_time = time.perf_counter()
+        last_progress_time = start_time
 
         # Compute default last_node_id for end-of-source checkpointing
         # (e.g., flush_pending when no rows were processed in the main loop)
@@ -802,9 +889,30 @@ class Orchestrator:
         else:
             default_last_node_id = source_id
 
+        # SOURCE phase - initialize source and begin loading
+        phase_start = time.perf_counter()
+        self._events.emit(PhaseStarted(phase=PipelinePhase.SOURCE, action=PhaseAction.INITIALIZING, target=config.source.name))
+
         try:
-            with self._span_factory.source_span(config.source.name):
-                for row_index, source_item in enumerate(config.source.load(ctx)):
+            # Nested try for SOURCE phase to catch load() failures separately from PROCESS errors
+            try:
+                with self._span_factory.source_span(config.source.name):
+                    # Invoke load() to get iterator - any immediate failures (file not found) happen here
+                    source_iterator = config.source.load(ctx)
+            except Exception as e:
+                # SOURCE phase error (file not found, auth failure, etc.)
+                self._events.emit(PhaseError(phase=PipelinePhase.SOURCE, error=e, target=config.source.name))
+                raise  # Re-raise to propagate SOURCE failures (cleanup will still run via outer finally)
+
+            self._events.emit(PhaseCompleted(phase=PipelinePhase.SOURCE, duration_seconds=time.perf_counter() - phase_start))
+
+            # PROCESS phase - iterate through rows
+            phase_start = time.perf_counter()
+            self._events.emit(PhaseStarted(phase=PipelinePhase.PROCESS, action=PhaseAction.PROCESSING))
+
+            # Nested try for PROCESS phase to catch iteration/processing failures
+            try:
+                for row_index, source_item in enumerate(source_iterator):
                     rows_processed += 1
 
                     # Handle quarantined source rows - route directly to sink
@@ -822,9 +930,17 @@ class Orchestrator:
                             )
                             pending_tokens[quarantine_sink].append(quarantine_token)
                         # Emit progress before continue (ensures quarantined rows trigger updates)
-                        if on_progress and rows_processed % progress_interval == 0:
-                            elapsed = time.perf_counter() - start_time
-                            on_progress(
+                        # Hybrid timing: emit on first row, every 100 rows, or every 5 seconds
+                        current_time = time.perf_counter()
+                        time_since_last_progress = current_time - last_progress_time
+                        should_emit = (
+                            rows_processed == 1  # First row - immediate feedback
+                            or rows_processed % progress_interval == 0  # Every 100 rows
+                            or time_since_last_progress >= progress_time_interval  # Every 5 seconds
+                        )
+                        if should_emit:
+                            elapsed = current_time - start_time
+                            self._events.emit(
                                 ProgressEvent(
                                     rows_processed=rows_processed,
                                     # Include routed rows in success count - they reached their destination
@@ -834,6 +950,7 @@ class Orchestrator:
                                     elapsed_seconds=elapsed,
                                 )
                             )
+                            last_progress_time = current_time
                         # Skip normal processing - row is already handled
                         continue
 
@@ -889,10 +1006,18 @@ class Orchestrator:
                             # Passthrough mode buffered token
                             rows_buffered += 1
 
-                    # Emit progress every N rows (after outcome counters are updated)
-                    if on_progress and rows_processed % progress_interval == 0:
-                        elapsed = time.perf_counter() - start_time
-                        on_progress(
+                    # Emit progress every N rows or every M seconds (after outcome counters are updated)
+                    # Hybrid timing: emit on first row, every 100 rows, or every 5 seconds
+                    current_time = time.perf_counter()
+                    time_since_last_progress = current_time - last_progress_time
+                    should_emit = (
+                        rows_processed == 1  # First row - immediate feedback
+                        or rows_processed % progress_interval == 0  # Every 100 rows
+                        or time_since_last_progress >= progress_time_interval  # Every 5 seconds
+                    )
+                    if should_emit:
+                        elapsed = current_time - start_time
+                        self._events.emit(
                             ProgressEvent(
                                 rows_processed=rows_processed,
                                 # Include routed rows in success count - they reached their destination
@@ -902,85 +1027,102 @@ class Orchestrator:
                                 elapsed_seconds=elapsed,
                             )
                         )
+                        last_progress_time = current_time
 
-            # ─────────────────────────────────────────────────────────────────
-            # CRITICAL: Flush remaining aggregation buffers at end-of-source
-            # ─────────────────────────────────────────────────────────────────
-            if config.aggregation_settings:
-                agg_succeeded, agg_failed = self._flush_remaining_aggregation_buffers(
-                    config=config,
-                    processor=processor,
-                    ctx=ctx,
-                    pending_tokens=pending_tokens,
-                    output_sink_name=output_sink_name,
-                    run_id=run_id,
-                    checkpoint=False,  # Checkpointing now happens after sink write
-                    last_node_id=default_last_node_id,
-                )
-                rows_succeeded += agg_succeeded
-                rows_failed += agg_failed
-
-            # Flush pending coalesce operations at end-of-source
-            if coalesce_executor is not None:
-                # Step for coalesce flush = after all transforms and gates
-                flush_step = len(config.transforms) + len(config.gates)
-                pending_outcomes = coalesce_executor.flush_pending(flush_step)
-
-                # Handle any merged tokens from flush
-                for outcome in pending_outcomes:
-                    if outcome.merged_token is not None:
-                        # Successful merge - route to output sink
-                        rows_coalesced += 1
-                        pending_tokens[output_sink_name].append(outcome.merged_token)
-                    elif outcome.failure_reason:
-                        # Coalesce failed (timeout, missing branches, etc.)
-                        # Failure is recorded in audit trail by executor.
-                        # Not counted as rows_failed since the individual fork children
-                        # were already counted when they reached their terminal states.
-                        pass
-
-            # Write to sinks using SinkExecutor
-            sink_executor = SinkExecutor(recorder, self._span_factory, run_id)
-            # Step = transforms + config gates + 1 (for sink)
-            step = len(config.transforms) + len(config.gates) + 1
-
-            # Create checkpoint callback for post-sink checkpointing
-            def checkpoint_after_sink(sink_node_id: str) -> Callable[[TokenInfo], None]:
-                def callback(token: TokenInfo) -> None:
-                    self._maybe_checkpoint(
-                        run_id=run_id,
-                        token_id=token.token_id,
-                        node_id=sink_node_id,
-                    )
-
-                return callback
-
-            for sink_name, tokens in pending_tokens.items():
-                if tokens and sink_name in config.sinks:
-                    sink = config.sinks[sink_name]
-                    sink_node_id = sink_id_map[sink_name]
-
-                    sink_executor.write(
-                        sink=sink,
-                        tokens=tokens,
+                # ─────────────────────────────────────────────────────────────────
+                # CRITICAL: Flush remaining aggregation buffers at end-of-source
+                # ─────────────────────────────────────────────────────────────────
+                if config.aggregation_settings:
+                    agg_succeeded, agg_failed = self._flush_remaining_aggregation_buffers(
+                        config=config,
+                        processor=processor,
                         ctx=ctx,
-                        step_in_pipeline=step,
-                        on_token_written=checkpoint_after_sink(sink_node_id),
+                        pending_tokens=pending_tokens,
+                        output_sink_name=output_sink_name,
+                        run_id=run_id,
+                        checkpoint=False,  # Checkpointing now happens after sink write
+                        last_node_id=default_last_node_id,
+                    )
+                    rows_succeeded += agg_succeeded
+                    rows_failed += agg_failed
+
+                # Flush pending coalesce operations at end-of-source
+                if coalesce_executor is not None:
+                    # Step for coalesce flush = after all transforms and gates
+                    flush_step = len(config.transforms) + len(config.gates)
+                    pending_outcomes = coalesce_executor.flush_pending(flush_step)
+
+                    # Handle any merged tokens from flush
+                    for outcome in pending_outcomes:
+                        if outcome.merged_token is not None:
+                            # Successful merge - route to output sink
+                            rows_coalesced += 1
+                            pending_tokens[output_sink_name].append(outcome.merged_token)
+                        elif outcome.failure_reason:
+                            # Coalesce failed (timeout, missing branches, etc.)
+                            # Failure is recorded in audit trail by executor.
+                            # Not counted as rows_failed since the individual fork children
+                            # were already counted when they reached their terminal states.
+                            pass
+
+                # Write to sinks using SinkExecutor
+                sink_executor = SinkExecutor(recorder, self._span_factory, run_id)
+                # Step = transforms + config gates + 1 (for sink)
+                step = len(config.transforms) + len(config.gates) + 1
+
+                # Create checkpoint callback for post-sink checkpointing
+                def checkpoint_after_sink(sink_node_id: str) -> Callable[[TokenInfo], None]:
+                    def callback(token: TokenInfo) -> None:
+                        self._maybe_checkpoint(
+                            run_id=run_id,
+                            token_id=token.token_id,
+                            node_id=sink_node_id,
+                        )
+
+                    return callback
+
+                for sink_name, tokens in pending_tokens.items():
+                    if tokens and sink_name in config.sinks:
+                        sink = config.sinks[sink_name]
+                        sink_node_id = sink_id_map[sink_name]
+
+                        sink_executor.write(
+                            sink=sink,
+                            tokens=tokens,
+                            ctx=ctx,
+                            step_in_pipeline=step,
+                            on_token_written=checkpoint_after_sink(sink_node_id),
+                        )
+
+                # Emit final progress if we haven't emitted recently or row count not on interval
+                # (RunCompleted will show final summary regardless, but progress shows intermediate state)
+                current_time = time.perf_counter()
+                time_since_last_progress = current_time - last_progress_time
+                # Emit if: not on progress_interval boundary OR >1s since last emission
+                if rows_processed % progress_interval != 0 or time_since_last_progress >= 1.0:
+                    elapsed = current_time - start_time
+                    self._events.emit(
+                        ProgressEvent(
+                            rows_processed=rows_processed,
+                            # Include routed rows in success count - they reached their destination
+                            rows_succeeded=rows_succeeded + rows_routed,
+                            rows_failed=rows_failed,
+                            rows_quarantined=rows_quarantined,
+                            elapsed_seconds=elapsed,
+                        )
                     )
 
-            # Emit final progress for runs not divisible by progress_interval
-            if on_progress and rows_processed % progress_interval != 0:
-                elapsed = time.perf_counter() - start_time
-                on_progress(
-                    ProgressEvent(
-                        rows_processed=rows_processed,
-                        # Include routed rows in success count - they reached their destination
-                        rows_succeeded=rows_succeeded + rows_routed,
-                        rows_failed=rows_failed,
-                        rows_quarantined=rows_quarantined,
-                        elapsed_seconds=elapsed,
-                    )
-                )
+                # PROCESS phase completed successfully
+                self._events.emit(PhaseCompleted(phase=PipelinePhase.PROCESS, duration_seconds=time.perf_counter() - phase_start))
+
+            except BatchPendingError:
+                # BatchPendingError is a control-flow signal, not an error.
+                # Don't emit PhaseError - the run isn't failing, it's just waiting.
+                raise  # Re-raise immediately for caller to handle retry
+            except Exception as e:
+                # PROCESS phase error (iteration or processing failures)
+                self._events.emit(PhaseError(phase=PipelinePhase.PROCESS, error=e, target=config.source.name))
+                raise  # CRITICAL: Always re-raise - exceptions in PROCESS phase must propagate
 
         finally:
             # Call on_complete for all plugins (even on error)

@@ -4512,32 +4512,38 @@ class TestOrchestratorProgress:
             sinks={"default": as_sink(sink)},
         )
 
-        # Track progress events
+        # Track progress events using EventBus
+        from elspeth.core import EventBus
+
         progress_events: list[ProgressEvent] = []
 
         def track_progress(event: ProgressEvent) -> None:
             progress_events.append(event)
 
-        orchestrator = Orchestrator(db)
+        event_bus = EventBus()
+        event_bus.subscribe(ProgressEvent, track_progress)
+
+        orchestrator = Orchestrator(db, event_bus=event_bus)
         orchestrator.run(
             config,
             graph=_build_test_graph(config),
-            on_progress=track_progress,
         )
 
-        # Should be called at 100, 200, and 250 (final)
-        assert len(progress_events) == 3
+        # Should be called at 1 (first row), 100, 200, and 250 (final)
+        assert len(progress_events) == 4
 
         # Verify row counts at each emission
-        assert progress_events[0].rows_processed == 100
-        assert progress_events[1].rows_processed == 200
-        assert progress_events[2].rows_processed == 250  # Final emission
+        assert progress_events[0].rows_processed == 1  # First row - immediate feedback
+        assert progress_events[1].rows_processed == 100
+        assert progress_events[2].rows_processed == 200
+        assert progress_events[3].rows_processed == 250  # Final emission
 
         # Verify timing is recorded
-        assert all(e.elapsed_seconds > 0 for e in progress_events)
+        assert all(e.elapsed_seconds >= 0 for e in progress_events)  # First row might be very fast
         # Elapsed should be monotonically increasing
         assert progress_events[0].elapsed_seconds <= progress_events[1].elapsed_seconds
         assert progress_events[1].elapsed_seconds <= progress_events[2].elapsed_seconds
+        assert progress_events[2].elapsed_seconds <= progress_events[3].elapsed_seconds
 
     def test_progress_callback_not_called_when_none(self) -> None:
         """Verify no crash when on_progress is None."""
@@ -4638,27 +4644,36 @@ class TestOrchestratorProgress:
             sinks={"default": as_sink(default_sink), "quarantine": as_sink(quarantine_sink)},
         )
 
+        # Track progress events using EventBus
+        from elspeth.core import EventBus
+
         progress_events: list[ProgressEvent] = []
 
         def track_progress(event: ProgressEvent) -> None:
             progress_events.append(event)
 
-        orchestrator = Orchestrator(db)
+        event_bus = EventBus()
+        event_bus.subscribe(ProgressEvent, track_progress)
+
+        orchestrator = Orchestrator(db, event_bus=event_bus)
         orchestrator.run(
             config,
             graph=_build_test_graph(config),
-            on_progress=track_progress,
         )
 
-        # Progress should fire at row 100 even though it was quarantined
-        assert len(progress_events) == 2  # At 100 and final 150
+        # Progress should fire at row 1 (first), 100, and final 150
+        assert len(progress_events) == 3  # At 1 (first row), 100, and final 150
 
-        # First progress at row 100 - quarantined count should be 1
-        assert progress_events[0].rows_processed == 100
-        assert progress_events[0].rows_quarantined == 1
+        # First progress at row 1 - immediate feedback
+        assert progress_events[0].rows_processed == 1
+        assert progress_events[0].rows_quarantined == 0  # First row not quarantined yet
+
+        # Second progress at row 100 - quarantined count should be 1
+        assert progress_events[1].rows_processed == 100
+        assert progress_events[1].rows_quarantined == 1
 
         # Final progress at row 150
-        assert progress_events[1].rows_processed == 150
+        assert progress_events[2].rows_processed == 150
 
     def test_progress_callback_includes_routed_rows_in_success(self) -> None:
         """Verify routed rows are counted as successes in progress events.
@@ -4710,26 +4725,31 @@ class TestOrchestratorProgress:
             gates=[routing_gate],
         )
 
-        # Track progress events
+        # Track progress events using EventBus
+        from elspeth.core import EventBus
+
         progress_events: list[ProgressEvent] = []
 
         def track_progress(event: ProgressEvent) -> None:
             progress_events.append(event)
 
-        orchestrator = Orchestrator(db)
+        event_bus = EventBus()
+        event_bus.subscribe(ProgressEvent, track_progress)
+
+        orchestrator = Orchestrator(db, event_bus=event_bus)
         orchestrator.run(
             config,
             graph=_build_test_graph(config),
-            on_progress=track_progress,
         )
 
-        # Should have progress at 100 and final 150
-        assert len(progress_events) == 2
+        # Should have progress at 1 (first row), 100, and final 150
+        assert len(progress_events) == 3
 
         # All rows were routed - they should count as succeeded, not zero
         # Bug: without fix, this shows rows_succeeded=0 because routed rows weren't counted
-        assert progress_events[0].rows_succeeded == 100
-        assert progress_events[1].rows_succeeded == 150
+        assert progress_events[0].rows_succeeded == 1  # First row
+        assert progress_events[1].rows_succeeded == 100
+        assert progress_events[2].rows_succeeded == 150
 
         # Verify routed sink received rows, default did not
         assert mock_routed.write.called

@@ -34,6 +34,11 @@ from elspeth.core.dag import (
     GraphValidationError,
     NodeInfo,
 )
+from elspeth.core.events import (
+    EventBus,
+    EventBusProtocol,
+    NullEventBus,
+)
 from elspeth.core.logging import (
     configure_logging,
     get_logger,
@@ -52,6 +57,8 @@ __all__ = [
     "DatabaseSettings",
     "DatasourceSettings",
     "ElspethSettings",
+    "EventBus",
+    "EventBusProtocol",
     "ExecutionGraph",
     "FilesystemPayloadStore",
     "GraphValidationError",
@@ -59,6 +66,7 @@ __all__ = [
     "LandscapeExportSettings",
     "LandscapeSettings",
     "NodeInfo",
+    "NullEventBus",
     "PayloadStore",
     "PayloadStoreSettings",
     "RateLimitSettings",

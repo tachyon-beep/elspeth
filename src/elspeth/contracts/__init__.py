@@ -88,6 +88,15 @@ from elspeth.contracts.config import (
     RowPluginSettings,
     SinkSettings,
 )
+from elspeth.contracts.events import (
+    PhaseAction,
+    PhaseCompleted,
+    PhaseError,
+    PhaseStarted,
+    PipelinePhase,
+    RunCompleted,
+    RunCompletionStatus,
+)
 from elspeth.contracts.engine import RetryPolicy
 from elspeth.contracts.cli import ExecutionResult, ProgressEvent
 
@@ -168,6 +177,14 @@ __all__ = [  # Grouped by category for readability
     "validate_row",
     # engine
     "RetryPolicy",
+    # events
+    "PhaseAction",
+    "PhaseCompleted",
+    "PhaseError",
+    "PhaseStarted",
+    "PipelinePhase",
+    "RunCompleted",
+    "RunCompletionStatus",
     # cli
     "ExecutionResult",
     "ProgressEvent",
