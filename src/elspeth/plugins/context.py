@@ -10,6 +10,7 @@ Phase 3 Integration Points:
 - payload_store: PayloadStore for large blob storage
 """
 
+import hashlib
 import logging
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
@@ -260,8 +261,6 @@ class PluginContext:
         Returns:
             ValidationErrorToken for tracking the quarantined row
         """
-        import hashlib
-
         from elspeth.core.canonical import stable_hash
 
         # Generate row_id from content hash if not present

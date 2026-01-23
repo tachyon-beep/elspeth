@@ -5,7 +5,9 @@ This is the main interface for recording audit trail entries during
 pipeline execution. It wraps the low-level database operations.
 """
 
+import hashlib
 import json
+import logging
 import uuid
 from datetime import UTC, datetime
 from enum import Enum
@@ -2339,9 +2341,6 @@ class LandscapeRecorder:
         Returns:
             error_id for tracking
         """
-        import hashlib
-        import logging
-
         logger = logging.getLogger(__name__)
         error_id = f"verr_{_generate_id()[:12]}"
 
