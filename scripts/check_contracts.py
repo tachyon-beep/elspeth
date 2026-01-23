@@ -5,19 +5,23 @@ Scans the codebase for:
 1. dataclasses, TypedDicts, NamedTuples, and Enums used across module boundaries
 2. dict[str, Any] type hints that should be typed contracts
 
+Also validates that all whitelist entries are still valid (not stale).
+
 Usage:
     python scripts/check_contracts.py
+    python scripts/check_contracts.py --no-fail-on-stale  # Skip stale check
 
 Exit codes:
     0: All contracts properly centralized
-    1: Violations found
+    1: Violations found or stale whitelist entries
 """
 
 from __future__ import annotations
 
+import argparse
 import ast
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml  # type: ignore[import-untyped]
@@ -44,16 +48,50 @@ class DictViolation:
     param_name: str  # parameter name or "return"
 
 
-def load_whitelist(path: Path) -> dict[str, set[str]]:
-    """Load whitelisted type definitions and dict patterns."""
+@dataclass
+class StaleEntry:
+    """A whitelist entry that doesn't match any code."""
+
+    entry: str
+    category: str  # "type" or "dict_pattern"
+    reason: str
+
+
+@dataclass
+class WhitelistEntry:
+    """Tracked whitelist entry with match status."""
+
+    value: str
+    category: str
+    matched: bool = field(default=False)
+
+
+def load_whitelist(path: Path) -> tuple[dict[str, set[str]], list[WhitelistEntry]]:
+    """Load whitelisted type definitions and dict patterns.
+
+    Returns:
+        Tuple of (whitelist dict for matching, list of entries for stale tracking)
+    """
     if not path.exists():
-        return {"types": set(), "dicts": set()}
+        return {"types": set(), "dicts": set()}, []
+
     with open(path) as f:
         data = yaml.safe_load(f) or {}
+
+    entries: list[WhitelistEntry] = []
+
+    type_entries = data.get("allowed_external_types", [])
+    dict_entries = data.get("allowed_dict_patterns", [])
+
+    for t in type_entries:
+        entries.append(WhitelistEntry(value=t, category="type"))
+    for d in dict_entries:
+        entries.append(WhitelistEntry(value=d, category="dict_pattern"))
+
     return {
-        "types": set(data.get("allowed_external_types", [])),
-        "dicts": set(data.get("allowed_dict_patterns", [])),
-    }
+        "types": set(type_entries),
+        "dicts": set(dict_entries),
+    }, entries
 
 
 def find_type_definitions(file_path: Path) -> list[tuple[str, int, str]]:
@@ -144,7 +182,72 @@ def _is_optional_dict(annotation: ast.expr | None) -> bool:
     return False
 
 
-def find_dict_violations(file_path: Path, whitelist: set[str]) -> list[DictViolation]:
+def _is_union_with_dict(annotation: ast.expr | None) -> bool:
+    """Check if annotation contains dict[str, Any] in a union."""
+    if annotation is None:
+        return False
+
+    # Check direct dict
+    if _is_dict_str_any(annotation):
+        return True
+
+    # Check union types (X | Y | Z)
+    if isinstance(annotation, ast.BinOp) and isinstance(annotation.op, ast.BitOr):
+        return _is_union_with_dict(annotation.left) or _is_union_with_dict(annotation.right)
+
+    return False
+
+
+def find_dict_patterns_in_file(file_path: Path) -> list[str]:
+    """Find all dict[str, Any] patterns in a file.
+
+    Returns list of qualified names like "path:Class.method:param"
+    """
+    try:
+        source = file_path.read_text()
+        tree = ast.parse(source)
+    except (SyntaxError, UnicodeDecodeError):
+        return []
+
+    patterns = []
+    relative_path = str(file_path)
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
+            func_name = node.name
+            class_name = None
+
+            # Try to find enclosing class
+            for parent in ast.walk(tree):
+                if isinstance(parent, ast.ClassDef):
+                    for child in ast.walk(parent):
+                        if child is node:
+                            class_name = parent.name
+                            break
+
+            context = f"{class_name}.{func_name}" if class_name else func_name
+
+            # Check parameters
+            for arg in node.args.args + node.args.kwonlyargs:
+                param_name = arg.arg
+                annotation = arg.annotation
+
+                if _is_dict_str_any(annotation) or _is_optional_dict(annotation) or _is_union_with_dict(annotation):
+                    patterns.append(f"{relative_path}:{context}:{param_name}")
+                elif _is_list_of_dict_str_any(annotation):
+                    patterns.append(f"{relative_path}:{context}:{param_name} (list)")
+
+            # Check return type
+            if node.returns:
+                if _is_dict_str_any(node.returns) or _is_optional_dict(node.returns) or _is_union_with_dict(node.returns):
+                    patterns.append(f"{relative_path}:{context}:return")
+                elif _is_list_of_dict_str_any(node.returns):
+                    patterns.append(f"{relative_path}:{context}:return (list)")
+
+    return patterns
+
+
+def find_dict_violations(file_path: Path, whitelist: set[str], matched_entries: dict[str, bool]) -> list[DictViolation]:
     """Find dict[str, Any] type hints that should be typed contracts."""
     try:
         source = file_path.read_text()
@@ -175,10 +278,12 @@ def find_dict_violations(file_path: Path, whitelist: set[str]) -> list[DictViola
                 param_name = arg.arg
                 annotation = arg.annotation
 
-                if _is_dict_str_any(annotation) or _is_optional_dict(annotation):
+                if _is_dict_str_any(annotation) or _is_optional_dict(annotation) or _is_union_with_dict(annotation):
                     # Build qualified name for whitelist check
                     qualified = f"{relative_path}:{context}:{param_name}"
-                    if qualified not in whitelist:
+                    if qualified in whitelist:
+                        matched_entries[qualified] = True
+                    else:
                         violations.append(
                             DictViolation(
                                 file=relative_path,
@@ -190,7 +295,9 @@ def find_dict_violations(file_path: Path, whitelist: set[str]) -> list[DictViola
                 elif _is_list_of_dict_str_any(annotation):
                     # List types have "(list)" suffix in whitelist
                     qualified = f"{relative_path}:{context}:{param_name} (list)"
-                    if qualified not in whitelist:
+                    if qualified in whitelist:
+                        matched_entries[qualified] = True
+                    else:
                         violations.append(
                             DictViolation(
                                 file=relative_path,
@@ -202,9 +309,11 @@ def find_dict_violations(file_path: Path, whitelist: set[str]) -> list[DictViola
 
             # Check return type
             if node.returns:
-                if _is_dict_str_any(node.returns) or _is_optional_dict(node.returns):
+                if _is_dict_str_any(node.returns) or _is_optional_dict(node.returns) or _is_union_with_dict(node.returns):
                     qualified = f"{relative_path}:{context}:return"
-                    if qualified not in whitelist:
+                    if qualified in whitelist:
+                        matched_entries[qualified] = True
+                    else:
                         violations.append(
                             DictViolation(
                                 file=relative_path,
@@ -216,7 +325,9 @@ def find_dict_violations(file_path: Path, whitelist: set[str]) -> list[DictViola
                 elif _is_list_of_dict_str_any(node.returns):
                     # List types have "(list)" suffix in whitelist
                     qualified = f"{relative_path}:{context}:return (list)"
-                    if qualified not in whitelist:
+                    if qualified in whitelist:
+                        matched_entries[qualified] = True
+                    else:
                         violations.append(
                             DictViolation(
                                 file=relative_path,
@@ -282,15 +393,136 @@ def find_cross_boundary_usages(src_dir: Path, type_name: str, defining_file: Pat
     return usages
 
 
+def validate_type_entry(entry: str, src_dir: Path) -> str | None:
+    """Validate that an allowed_external_types entry exists.
+
+    Entry format: "module/path:TypeName"
+
+    Returns None if valid, or an error message if stale.
+    """
+    try:
+        module_path, type_name = entry.rsplit(":", 1)
+    except ValueError:
+        return "Invalid format (expected 'path:TypeName')"
+
+    # Convert module path to file path
+    file_path = src_dir / f"{module_path}.py"
+
+    if not file_path.exists():
+        return f"File not found: {file_path}"
+
+    # Check if type exists in file
+    definitions = find_type_definitions(file_path)
+    type_names = {name for name, _, _ in definitions}
+
+    # Also check for regular class definitions (not just dataclass/TypedDict/etc)
+    try:
+        source = file_path.read_text()
+        tree = ast.parse(source)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ClassDef):
+                type_names.add(node.name)
+    except (SyntaxError, UnicodeDecodeError):
+        pass
+
+    if type_name not in type_names:
+        return f"Type '{type_name}' not found in {file_path}"
+
+    return None
+
+
+def validate_dict_pattern_entry(entry: str, src_dir: Path) -> str | None:
+    """Validate that an allowed_dict_patterns entry exists.
+
+    Entry format: "src/elspeth/path/file.py:Class.method:param"
+
+    Returns None if valid, or an error message if stale.
+    """
+    try:
+        parts = entry.split(":")
+        if len(parts) != 3:
+            return f"Invalid format (expected 'file:context:param', got {len(parts)} parts)"
+
+        file_path_str, context, param = parts
+    except ValueError:
+        return "Invalid format (expected 'file:context:param')"
+
+    file_path = Path(file_path_str)
+
+    if not file_path.exists():
+        return f"File not found: {file_path}"
+
+    # Find all dict patterns in the file
+    patterns = find_dict_patterns_in_file(file_path)
+
+    # Check if this entry matches any pattern
+    if entry in patterns:
+        return None
+
+    # Check for partial matches to give better error messages
+    matching_file_patterns = [p for p in patterns if p.startswith(file_path_str)]
+    if not matching_file_patterns:
+        return f"No dict[str, Any] patterns found in {file_path}"
+
+    # Check if context exists
+    matching_context_patterns = [p for p in matching_file_patterns if f":{context}:" in p]
+    if not matching_context_patterns:
+        return f"Context '{context}' not found in {file_path}"
+
+    # Parameter doesn't match
+    available_params = [p.split(":")[-1] for p in matching_context_patterns]
+    return f"Parameter '{param}' not found in {context}. Available: {available_params}"
+
+
+def find_stale_entries(
+    entries: list[WhitelistEntry],
+    matched_dict_patterns: dict[str, bool],
+    matched_type_patterns: set[str],
+    src_dir: Path,
+) -> list[StaleEntry]:
+    """Find whitelist entries that don't match any code."""
+    stale = []
+
+    for entry in entries:
+        if entry.category == "type":
+            # Check if this type entry is valid
+            if entry.value in matched_type_patterns:
+                continue
+            error = validate_type_entry(entry.value, src_dir)
+            if error:
+                stale.append(StaleEntry(entry=entry.value, category="type", reason=error))
+
+        elif entry.category == "dict_pattern":
+            # Check if this pattern was matched during scanning
+            if matched_dict_patterns.get(entry.value, False):
+                continue
+            # Validate the entry
+            error = validate_dict_pattern_entry(entry.value, src_dir)
+            if error:
+                stale.append(StaleEntry(entry=entry.value, category="dict_pattern", reason=error))
+
+    return stale
+
+
 def main() -> int:
     """Run the contracts enforcement check."""
+    parser = argparse.ArgumentParser(description="Check that cross-boundary types are in contracts/ and whitelist entries are valid")
+    parser.add_argument(
+        "--no-fail-on-stale",
+        action="store_true",
+        help="Don't fail on stale whitelist entries (just warn)",
+    )
+    args = parser.parse_args()
+
     src_dir = Path("src/elspeth")
     contracts_dir = src_dir / "contracts"
-    whitelist_path = Path(".contracts-whitelist.yaml")
+    whitelist_path = Path("config/cicd/contracts-whitelist.yaml")
 
-    whitelist = load_whitelist(whitelist_path)
+    whitelist, all_entries = load_whitelist(whitelist_path)
     violations: list[Violation] = []
     dict_violations: list[DictViolation] = []
+    matched_dict_patterns: dict[str, bool] = dict.fromkeys(whitelist["dicts"], False)
+    matched_type_patterns: set[str] = set()
 
     # Scan all Python files outside contracts/
     for py_file in src_dir.rglob("*.py"):
@@ -303,6 +535,7 @@ def main() -> int:
             qualified_name = f"{py_file.relative_to(src_dir).with_suffix('')}:{type_name}"
 
             if qualified_name in whitelist["types"]:
+                matched_type_patterns.add(qualified_name)
                 continue
 
             # Check if used across module boundaries
@@ -319,9 +552,13 @@ def main() -> int:
                 )
 
         # Check for dict[str, Any] patterns
-        dict_violations.extend(find_dict_violations(py_file, whitelist["dicts"]))
+        dict_violations.extend(find_dict_violations(py_file, whitelist["dicts"], matched_dict_patterns))
+
+    # Find stale whitelist entries
+    stale_entries = find_stale_entries(all_entries, matched_dict_patterns, matched_type_patterns, src_dir)
 
     has_violations = False
+    has_stale = False
 
     if violations:
         has_violations = True
@@ -329,7 +566,7 @@ def main() -> int:
         for v in violations:
             print(f"  {v.file}:{v.line}: {v.kind} '{v.type_name}'")
             print(f"    Used in: {', '.join(v.used_in)}")
-            fix_msg = "    Fix: Move to src/elspeth/contracts/ or add to .contracts-whitelist.yaml\n"
+            fix_msg = "    Fix: Move to src/elspeth/contracts/ or add to config/cicd/contracts-whitelist.yaml\n"
             print(fix_msg)
 
     if dict_violations:
@@ -339,10 +576,28 @@ def main() -> int:
             print(f"  {dv.file}:{dv.line}: {dv.context} - {dv.param_name}")
             print("    Fix: Use TypedDict/dataclass or add to allowed_dict_patterns\n")
 
+    if stale_entries:
+        has_stale = True
+        print("❌ Stale whitelist entries found:\n")
+        print("  (These entries don't match any code - remove them from the whitelist)\n")
+        for se in stale_entries:
+            print(f"  [{se.category}] {se.entry}")
+            print(f"    Reason: {se.reason}\n")
+
     if has_violations:
         return 1
 
+    if has_stale:
+        if args.no_fail_on_stale:
+            print("⚠️  Stale entries found but --no-fail-on-stale was specified")
+        else:
+            print("❌ Stale whitelist entries cause check failure")
+            print("   Use --no-fail-on-stale to warn instead of fail")
+            return 1
+
     print("✅ All cross-boundary types are properly centralized in contracts/")
+    if not stale_entries:
+        print("✅ All whitelist entries are valid")
     return 0
 
 

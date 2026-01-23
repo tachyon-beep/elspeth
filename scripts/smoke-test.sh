@@ -161,7 +161,7 @@ fi
 
 log_header "4. Smoke Pipeline"
 
-if [[ -f "$CONFIG_DIR/smoke-test.yaml" ]]; then
+if [[ -f "$CONFIG_DIR/cicd/smoke-test.yaml" ]]; then
     # Create temp directories for output
     TEMP_OUTPUT=$(mktemp -d)
     TEMP_STATE=$(mktemp -d)
@@ -171,12 +171,12 @@ if [[ -f "$CONFIG_DIR/smoke-test.yaml" ]]; then
             -v \"$CONFIG_DIR:/app/config:ro\" \
             -v \"$TEMP_OUTPUT:/app/output\" \
             -v \"$TEMP_STATE:/app/state\" \
-            $IMAGE run --settings /app/config/smoke-test.yaml --execute" || true
+            $IMAGE run --settings /app/config/cicd/smoke-test.yaml --execute" || true
 
     # Cleanup
     rm -rf "$TEMP_OUTPUT" "$TEMP_STATE"
 else
-    log_skip "Smoke test config not found: $CONFIG_DIR/smoke-test.yaml"
+    log_skip "Smoke test config not found: $CONFIG_DIR/cicd/smoke-test.yaml"
 fi
 
 # =============================================================================
