@@ -71,6 +71,41 @@ class TestNanInfinityRejection:
         assert _normalize_value(1e308) == 1e308
 
 
+class TestDecimalNonFiniteRejection:
+    """Decimal NaN and Infinity must be rejected like float NaN/Infinity.
+
+    Per CLAUDE.md: "NaN and Infinity are strictly rejected, not silently converted."
+    This applies to Decimal as well as float - both are numeric types that can
+    represent non-finite values which would corrupt audit hash integrity.
+    """
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            Decimal("NaN"),
+            Decimal("sNaN"),  # Signaling NaN - also non-finite
+            Decimal("Infinity"),
+            Decimal("-Infinity"),
+        ],
+    )
+    def test_decimal_non_finite_raises_value_error(self, value: Decimal) -> None:
+        from elspeth.core.canonical import _normalize_value
+
+        with pytest.raises(ValueError, match="non-finite"):
+            _normalize_value(value)
+
+    def test_decimal_normal_values_allowed(self) -> None:
+        from elspeth.core.canonical import _normalize_value
+
+        # These should NOT raise - all are finite Decimal values
+        assert _normalize_value(Decimal("0")) == "0"
+        assert _normalize_value(Decimal("-0")) == "-0"  # Decimal preserves signed zero
+        assert _normalize_value(Decimal("-123.456")) == "-123.456"
+        assert _normalize_value(Decimal("1E+100")) == "1E+100"
+        assert _normalize_value(Decimal("1E-100")) == "1E-100"
+        assert _normalize_value(Decimal("123.456789012345678901234567890")) == "123.456789012345678901234567890"
+
+
 class TestNumpyTypeConversion:
     """NumPy types must be converted to Python primitives."""
 

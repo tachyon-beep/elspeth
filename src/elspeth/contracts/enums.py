@@ -26,6 +26,7 @@ class NodeStateStatus(str, Enum):
     """
 
     OPEN = "open"
+    PENDING = "pending"
     COMPLETED = "completed"
     FAILED = "failed"
 

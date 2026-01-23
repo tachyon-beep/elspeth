@@ -9,7 +9,7 @@ garbage from it, something catastrophic happened - crash immediately.
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Literal, TypedDict
+from typing import Any, Literal, TypedDict
 
 from elspeth.contracts.enums import (
     BatchStatus,
@@ -144,6 +144,33 @@ class NodeStateOpen:
 
 
 @dataclass(frozen=True)
+class NodeStatePending:
+    """A node state where processing completed but output is pending.
+
+    Used for async operations like batch submission where the operation
+    completed successfully but the result won't be available until later.
+
+    Invariants:
+    - No output_hash (result not available yet)
+    - Has completed_at (operation finished)
+    - Has duration_ms (timing complete)
+    """
+
+    state_id: str
+    token_id: str
+    node_id: str
+    step_index: int
+    attempt: int
+    status: Literal[NodeStateStatus.PENDING]
+    input_hash: str
+    started_at: datetime
+    completed_at: datetime
+    duration_ms: float
+    context_before_json: str | None = None
+    context_after_json: str | None = None
+
+
+@dataclass(frozen=True)
 class NodeStateCompleted:
     """A node state that completed successfully.
 
@@ -195,7 +222,7 @@ class NodeStateFailed:
 
 
 # Discriminated union type
-NodeState = NodeStateOpen | NodeStateCompleted | NodeStateFailed
+NodeState = NodeStateOpen | NodeStatePending | NodeStateCompleted | NodeStateFailed
 
 
 @dataclass
@@ -374,6 +401,74 @@ class ValidationErrorRecord:
     destination: str
     created_at: datetime
     row_data_json: str | None = None
+
+
+@dataclass(frozen=True)
+class NonCanonicalMetadata:
+    """Metadata for non-canonical data stored in the audit trail.
+
+    When data cannot be canonically serialized (contains NaN, Infinity,
+    non-dict types, etc.), this metadata captures what we saw for forensic
+    analysis.
+
+    This is part of the Tier-3 (external data) trust boundary handling.
+    Non-canonical data is quarantined and recorded with this metadata
+    instead of crashing the pipeline.
+
+    Invariants:
+    - repr_value is never empty (captures what we saw)
+    - type_name must be a valid Python type name
+    - canonical_error explains why canonical serialization failed
+
+    Fields:
+        repr_value: Result of repr(data)
+        type_name: type(data).__name__
+        canonical_error: Why canonicalization failed
+    """
+
+    repr_value: str
+    type_name: str
+    canonical_error: str
+
+    def to_dict(self) -> dict[str, str]:
+        """Convert to dict for JSON serialization.
+
+        Returns dict with keys matching current inline dict structure
+        for backwards compatibility with existing audit data.
+
+        Returns:
+            Dict with __repr__, __type__, __canonical_error__ keys
+        """
+        return {
+            "__repr__": self.repr_value,
+            "__type__": self.type_name,
+            "__canonical_error__": self.canonical_error,
+        }
+
+    @classmethod
+    def from_error(cls, data: Any, error: Exception) -> "NonCanonicalMetadata":
+        """Create metadata from data that failed canonicalization.
+
+        Factory method for convenient creation from exception context.
+
+        Args:
+            data: The non-canonical data
+            error: The canonicalization exception (ValueError or TypeError)
+
+        Returns:
+            NonCanonicalMetadata instance
+
+        Example:
+            >>> try:
+            ...     canonical_json({"value": float("nan")})
+            ... except ValueError as e:
+            ...     meta = NonCanonicalMetadata.from_error({"value": float("nan")}, e)
+        """
+        return cls(
+            repr_value=repr(data),
+            type_name=type(data).__name__,
+            canonical_error=str(error),
+        )
 
 
 @dataclass

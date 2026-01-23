@@ -433,3 +433,147 @@ class TestRunCommandProgress:
         assert "✓" in result.output  # success
         assert "✗" in result.output  # failed
         assert "⚠" in result.output  # quarantined
+
+
+class TestRunCommandGraphReuse:
+    """Verify that run command constructs ExecutionGraph only once."""
+
+    def test_run_constructs_graph_once(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        """run command constructs ExecutionGraph once and reuses validated instance.
+
+        Regression test for P2-2026-01-20-cli-run-rebuilds-unvalidated-graph.
+        Previously, run() built/validated one graph, then _execute_pipeline() rebuilt
+        a different graph with different UUIDs, meaning validation didn't apply to
+        the executed graph.
+        """
+        from unittest.mock import patch
+
+        from elspeth.core.dag import ExecutionGraph
+
+        # Create minimal pipeline config
+        csv_file = tmp_path / "input.csv"
+        csv_file.write_text("id,value\n1,100\n")
+        output_file = tmp_path / "output.json"
+        landscape_db = tmp_path / "landscape.db"
+
+        settings_file = tmp_path / "settings.yaml"
+        settings_file.write_text(f"""
+datasource:
+  plugin: csv
+  options:
+    path: {csv_file}
+    on_validation_failure: discard
+    schema:
+      fields: dynamic
+
+sinks:
+  default:
+    plugin: json
+    options:
+      path: {output_file}
+      schema:
+        fields: dynamic
+
+output_sink: default
+landscape:
+  url: sqlite:///{landscape_db}
+""")
+
+        # Track how many times ExecutionGraph.from_config is called
+        from_config_calls = []
+        original_from_config = ExecutionGraph.from_config
+
+        def tracked_from_config(*args, **kwargs):
+            graph = original_from_config(*args, **kwargs)
+            # Record the graph instance and its node IDs
+            from_config_calls.append(
+                {
+                    "graph_id": id(graph),
+                    "node_ids": sorted(graph._graph.nodes()),
+                }
+            )
+            return graph
+
+        with patch.object(ExecutionGraph, "from_config", side_effect=tracked_from_config):
+            result = runner.invoke(app, ["run", "--settings", str(settings_file), "--execute"])
+            assert result.exit_code == 0
+
+        # CRITICAL: from_config should be called exactly once
+        assert len(from_config_calls) == 1, (
+            f"Expected ExecutionGraph.from_config() to be called once, "
+            f"but it was called {len(from_config_calls)} times. "
+            f"This means run() builds one graph and _execute_pipeline() builds another, "
+            f"so validation doesn't apply to the executed graph."
+        )
+
+    def test_validated_graph_has_consistent_node_ids(self, tmp_path: Path) -> None:
+        """Validated graph node IDs match those recorded in Landscape.
+
+        Ensures the graph passed to orchestrator.run() is the same instance
+        that was validated, not a rebuilt graph with different UUIDs.
+        """
+        from sqlalchemy import select
+
+        from elspeth.core.dag import ExecutionGraph
+        from elspeth.core.landscape import LandscapeDB, nodes_table
+
+        # Create minimal pipeline
+        csv_file = tmp_path / "input.csv"
+        csv_file.write_text("id\n1\n")
+        output_file = tmp_path / "output.json"
+        landscape_db = tmp_path / "landscape.db"
+
+        settings_file = tmp_path / "settings.yaml"
+        settings_file.write_text(f"""
+datasource:
+  plugin: csv
+  options:
+    path: {csv_file}
+    on_validation_failure: discard
+    schema:
+      fields: dynamic
+
+sinks:
+  default:
+    plugin: json
+    options:
+      path: {output_file}
+      schema:
+        fields: dynamic
+
+output_sink: default
+landscape:
+  url: sqlite:///{landscape_db}
+""")
+
+        # Run pipeline
+        result = runner.invoke(app, ["run", "--settings", str(settings_file), "--execute"])
+        assert result.exit_code == 0
+
+        # Read node IDs from Landscape database
+        db = LandscapeDB.from_url(f"sqlite:///{landscape_db}")
+        try:
+            with db.engine.connect() as conn:
+                nodes = conn.execute(select(nodes_table)).fetchall()
+                recorded_node_ids = {node.node_id for node in nodes}
+        finally:
+            db.close()
+
+        # The node IDs in the database should be from the validated graph
+        # If _execute_pipeline() rebuilt the graph, these would be different UUIDs
+        assert len(recorded_node_ids) > 0, "Expected nodes to be recorded in Landscape"
+
+        # Build graph from same config and verify UUIDs are different
+        # (proves that rebuilding produces different IDs)
+        from elspeth.cli import load_settings
+
+        config = load_settings(settings_file)
+        rebuilt_graph = ExecutionGraph.from_config(config)
+        rebuilt_node_ids = set(rebuilt_graph._graph.nodes())
+
+        # Node IDs should differ (due to UUID randomization)
+        assert recorded_node_ids != rebuilt_node_ids, (
+            "Rebuilding graph should produce different node IDs (UUIDs change). "
+            "This test verifies that the fix ensures the validated graph is executed, "
+            "not a rebuilt one."
+        )

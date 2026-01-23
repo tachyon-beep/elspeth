@@ -139,6 +139,35 @@ class NodeStateOpen:
 
 
 @dataclass(frozen=True)
+class NodeStatePending:
+    """A node state where processing is complete but output is pending.
+
+    Created when complete_node_state() is called with status="pending".
+    Used for async operations like batch submission where the operation
+    completed successfully but the result won't be available until later.
+
+    Invariants:
+    - No output_hash (result not available yet)
+    - Has completed_at (operation finished)
+    - Has duration_ms (timing complete)
+    - No error_json (no error occurred)
+    """
+
+    state_id: str
+    token_id: str
+    node_id: str
+    step_index: int
+    attempt: int
+    status: Literal[NodeStateStatus.PENDING]
+    input_hash: str
+    started_at: datetime
+    completed_at: datetime
+    duration_ms: float
+    context_before_json: str | None = None
+    context_after_json: str | None = None
+
+
+@dataclass(frozen=True)
 class NodeStateCompleted:
     """A node state that completed successfully.
 
@@ -196,12 +225,14 @@ class NodeStateFailed:
 
 
 # Discriminated union type - use status field to discriminate
-NodeState = NodeStateOpen | NodeStateCompleted | NodeStateFailed
+NodeState = NodeStateOpen | NodeStatePending | NodeStateCompleted | NodeStateFailed
 """Union type for all node states.
 
 Use isinstance() or check the status field to discriminate:
     if state.status == NodeStateStatus.OPEN:
         # state is NodeStateOpen
+    elif state.status == NodeStateStatus.PENDING:
+        # state is NodeStatePending
     elif state.status == NodeStateStatus.COMPLETED:
         # state is NodeStateCompleted
     elif state.status == NodeStateStatus.FAILED:

@@ -431,3 +431,80 @@ class TestDatabaseSinkIfExistsReplace:
         sink.close()
 
         assert self._get_row_count(db_url, "new_table") == 1
+
+
+class TestDatabaseSinkSecretHandling:
+    """Tests for DatabaseSink secret sanitization behavior.
+
+    These tests verify that DatabaseSink honors the ELSPETH_ALLOW_RAW_SECRETS
+    environment variable consistently with other parts of the codebase.
+    """
+
+    def test_url_with_password_honors_dev_mode_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """DatabaseSink honors ELSPETH_ALLOW_RAW_SECRETS in dev environments.
+
+        When ELSPETH_ALLOW_RAW_SECRETS=true is set but ELSPETH_FINGERPRINT_KEY
+        is not set, the sink should initialize successfully by sanitizing the
+        URL without requiring a fingerprint.
+        """
+        from elspeth.plugins.sinks.database_sink import DatabaseSink
+
+        # Simulate dev environment: no fingerprint key, but allow raw secrets
+        monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY", raising=False)
+        monkeypatch.delenv("ELSPETH_KEYVAULT_URL", raising=False)
+        monkeypatch.setenv("ELSPETH_ALLOW_RAW_SECRETS", "true")
+
+        # Should not raise - dev mode allows sanitization without fingerprint
+        sink = DatabaseSink(
+            {
+                "url": "postgresql://user:secret@localhost/db",
+                "table": "test",
+                "schema": DYNAMIC_SCHEMA,
+            }
+        )
+
+        # Verify URL was sanitized (password removed)
+        assert "secret" not in sink._sanitized_url.sanitized_url
+        # No fingerprint in dev mode
+        assert sink._sanitized_url.fingerprint is None
+
+    def test_url_with_password_fails_without_key_in_production_mode(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """DatabaseSink raises error when password present but no key in production.
+
+        When ELSPETH_ALLOW_RAW_SECRETS is not set (production mode) and no
+        fingerprint key is available, initialization should fail.
+        """
+        from elspeth.core.config import SecretFingerprintError
+        from elspeth.plugins.sinks.database_sink import DatabaseSink
+
+        monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY", raising=False)
+        monkeypatch.delenv("ELSPETH_KEYVAULT_URL", raising=False)
+        monkeypatch.delenv("ELSPETH_ALLOW_RAW_SECRETS", raising=False)
+
+        # Should raise in production mode
+        with pytest.raises(SecretFingerprintError, match="ELSPETH_FINGERPRINT_KEY"):
+            DatabaseSink(
+                {
+                    "url": "postgresql://user:secret@localhost/db",
+                    "table": "test",
+                    "schema": DYNAMIC_SCHEMA,
+                }
+            )
+
+    def test_url_without_password_works_without_key(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """DatabaseSink works without key when URL has no password."""
+        from elspeth.plugins.sinks.database_sink import DatabaseSink
+
+        monkeypatch.delenv("ELSPETH_FINGERPRINT_KEY", raising=False)
+        monkeypatch.delenv("ELSPETH_KEYVAULT_URL", raising=False)
+
+        # Should work - no password, no key needed
+        sink = DatabaseSink(
+            {
+                "url": "postgresql://user@localhost/db",
+                "table": "test",
+                "schema": DYNAMIC_SCHEMA,
+            }
+        )
+
+        assert sink._sanitized_url.fingerprint is None

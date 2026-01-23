@@ -6,10 +6,11 @@ pipeline execution. It wraps the low-level database operations.
 """
 
 import json
+import logging
 import uuid
 from datetime import UTC, datetime
 from enum import Enum
-from typing import TYPE_CHECKING, Any, TypeVar
+from typing import TYPE_CHECKING, Any, Literal, TypeVar, overload
 
 if TYPE_CHECKING:
     from elspeth.contracts.schema import SchemaConfig
@@ -34,8 +35,10 @@ from elspeth.contracts import (
     NodeStateCompleted,
     NodeStateFailed,
     NodeStateOpen,
+    NodeStatePending,
     NodeStateStatus,
     NodeType,
+    NonCanonicalMetadata,
     RoutingEvent,
     RoutingMode,
     RoutingSpec,
@@ -50,7 +53,7 @@ from elspeth.contracts import (
     TransformErrorRecord,
     ValidationErrorRecord,
 )
-from elspeth.core.canonical import canonical_json, stable_hash
+from elspeth.core.canonical import canonical_json, repr_hash, stable_hash
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.row_data import RowDataResult, RowDataState
 from elspeth.core.landscape.schema import (
@@ -118,7 +121,7 @@ def _row_to_node_state(row: Any) -> NodeState:
         row: Database row from node_states table
 
     Returns:
-        NodeStateOpen, NodeStateCompleted, or NodeStateFailed depending on status
+        NodeStateOpen, NodeStatePending, NodeStateCompleted, or NodeStateFailed depending on status
     """
     status = NodeStateStatus(row.status)
 
@@ -133,6 +136,27 @@ def _row_to_node_state(row: Any) -> NodeState:
             input_hash=row.input_hash,
             started_at=row.started_at,
             context_before_json=row.context_before_json,
+        )
+    elif status == NodeStateStatus.PENDING:
+        # Pending states must have completed_at, duration_ms (but no output_hash yet)
+        # Validate required fields - None indicates audit integrity violation
+        if row.duration_ms is None:
+            raise ValueError(f"PENDING state {row.state_id} has NULL duration_ms - audit integrity violation")
+        if row.completed_at is None:
+            raise ValueError(f"PENDING state {row.state_id} has NULL completed_at - audit integrity violation")
+        return NodeStatePending(
+            state_id=row.state_id,
+            token_id=row.token_id,
+            node_id=row.node_id,
+            step_index=row.step_index,
+            attempt=row.attempt,
+            status=NodeStateStatus.PENDING,
+            input_hash=row.input_hash,
+            started_at=row.started_at,
+            completed_at=row.completed_at,
+            duration_ms=row.duration_ms,
+            context_before_json=row.context_before_json,
+            context_after_json=row.context_after_json,
         )
     elif status == NodeStateStatus.COMPLETED:
         # Completed states must have output_hash, completed_at, duration_ms
@@ -158,7 +182,7 @@ def _row_to_node_state(row: Any) -> NodeState:
             context_before_json=row.context_before_json,
             context_after_json=row.context_after_json,
         )
-    else:  # FAILED
+    elif status == NodeStateStatus.FAILED:
         # Failed states must have completed_at, duration_ms (error_json and output_hash are optional)
         # Validate required fields - None indicates audit integrity violation
         if row.duration_ms is None:
@@ -181,6 +205,8 @@ def _row_to_node_state(row: Any) -> NodeState:
             context_before_json=row.context_before_json,
             context_after_json=row.context_after_json,
         )
+    else:
+        raise ValueError(f"Unknown status {row.status} for state {row.state_id}")
 
 
 class LandscapeRecorder:
@@ -1050,6 +1076,42 @@ class LandscapeRecorder:
 
         return state
 
+    @overload
+    def complete_node_state(
+        self,
+        state_id: str,
+        status: Literal[NodeStateStatus.PENDING, "pending"],
+        *,
+        output_data: dict[str, Any] | list[dict[str, Any]] | None = None,
+        duration_ms: float | None = None,
+        error: ExecutionError | dict[str, Any] | None = None,
+        context_after: dict[str, Any] | None = None,
+    ) -> NodeStatePending: ...
+
+    @overload
+    def complete_node_state(
+        self,
+        state_id: str,
+        status: Literal[NodeStateStatus.COMPLETED, "completed"],
+        *,
+        output_data: dict[str, Any] | list[dict[str, Any]] | None = None,
+        duration_ms: float | None = None,
+        error: ExecutionError | dict[str, Any] | None = None,
+        context_after: dict[str, Any] | None = None,
+    ) -> NodeStateCompleted: ...
+
+    @overload
+    def complete_node_state(
+        self,
+        state_id: str,
+        status: Literal[NodeStateStatus.FAILED, "failed", "rejected"],
+        *,
+        output_data: dict[str, Any] | list[dict[str, Any]] | None = None,
+        duration_ms: float | None = None,
+        error: ExecutionError | dict[str, Any] | None = None,
+        context_after: dict[str, Any] | None = None,
+    ) -> NodeStateFailed: ...
+
     def complete_node_state(
         self,
         state_id: str,
@@ -1059,19 +1121,19 @@ class LandscapeRecorder:
         duration_ms: float | None = None,
         error: ExecutionError | dict[str, Any] | None = None,
         context_after: dict[str, Any] | None = None,
-    ) -> NodeStateCompleted | NodeStateFailed:
+    ) -> NodeStatePending | NodeStateCompleted | NodeStateFailed:
         """Complete a node state.
 
         Args:
             state_id: State to complete
-            status: Final status (completed, failed, or "rejected" which maps to failed)
+            status: Final status (pending, completed, failed, or "rejected" which maps to failed)
             output_data: Output data for hashing (if success)
             duration_ms: Processing duration (required)
             error: Error details (if failed)
             context_after: Optional context snapshot after processing
 
         Returns:
-            NodeStateCompleted if status is completed, NodeStateFailed otherwise
+            NodeStatePending if status is pending, NodeStateCompleted if completed, NodeStateFailed if failed
 
         Raises:
             ValueError: If status is not a valid terminal status
@@ -1113,8 +1175,8 @@ class LandscapeRecorder:
 
         result = self.get_node_state(state_id)
         assert result is not None, f"NodeState {state_id} not found after update"
-        # Type narrowing: result is guaranteed to be Completed or Failed
-        assert not isinstance(result, NodeStateOpen), "State should be terminal after completion"
+        # Type narrowing: result is guaranteed to be terminal (PENDING/COMPLETED/FAILED)
+        assert not isinstance(result, NodeStateOpen), "State should be terminal (PENDING/COMPLETED/FAILED) after completion"
         return result
 
     def get_node_state(self, state_id: str) -> NodeState | None:
@@ -2257,7 +2319,7 @@ class LandscapeRecorder:
         self,
         run_id: str,
         node_id: str | None,
-        row_data: dict[str, Any],
+        row_data: Any,
         error: str,
         schema_mode: str,
         destination: str,
@@ -2271,7 +2333,7 @@ class LandscapeRecorder:
         Args:
             run_id: Current run ID
             node_id: Node where validation failed
-            row_data: The row that failed validation
+            row_data: The row that failed validation (may be non-dict or contain non-finite values)
             error: Error description
             schema_mode: Schema mode that caught the error ("strict", "free", "dynamic")
             destination: Where row was routed ("discard" or sink name)
@@ -2279,7 +2341,27 @@ class LandscapeRecorder:
         Returns:
             error_id for tracking
         """
+        logger = logging.getLogger(__name__)
         error_id = f"verr_{_generate_id()[:12]}"
+
+        # Tier-3 (external data) trust boundary: row_data may be non-canonical
+        # Try canonical hash/JSON first, fall back to safe representations
+        try:
+            row_hash = stable_hash(row_data)
+            row_data_json = canonical_json(row_data)
+        except (ValueError, TypeError) as e:
+            # Non-canonical data (NaN, Infinity, non-dict, etc.)
+            # Use repr() fallback to preserve audit trail
+            row_preview = repr(row_data)[:200] + "..." if len(repr(row_data)) > 200 else repr(row_data)
+            logger.warning(
+                "Validation error row not canonically serializable (using repr fallback): %s | Row preview: %s",
+                str(e),
+                row_preview,
+            )
+            row_hash = repr_hash(row_data)
+            # Store non-canonical representation with type metadata
+            metadata = NonCanonicalMetadata.from_error(row_data, e)
+            row_data_json = json.dumps(metadata.to_dict())
 
         with self._db.connection() as conn:
             conn.execute(
@@ -2287,8 +2369,8 @@ class LandscapeRecorder:
                     error_id=error_id,
                     run_id=run_id,
                     node_id=node_id,
-                    row_hash=stable_hash(row_data),
-                    row_data_json=canonical_json(row_data),
+                    row_hash=row_hash,
+                    row_data_json=row_data_json,
                     error=error,
                     schema_mode=schema_mode,
                     destination=destination,

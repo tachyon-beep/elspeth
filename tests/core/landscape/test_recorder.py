@@ -1,10 +1,17 @@
 # tests/core/landscape/test_recorder.py
 """Tests for LandscapeRecorder."""
 
+from __future__ import annotations
+
+from datetime import UTC
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from elspeth.contracts import RoutingMode
 from elspeth.contracts.schema import SchemaConfig
+
+if TYPE_CHECKING:
+    from elspeth.core.landscape.recorder import LandscapeRecorder
 
 # Dynamic schema for tests that don't care about specific fields
 DYNAMIC_SCHEMA = SchemaConfig.from_dict({"fields": "dynamic"})
@@ -2719,6 +2726,60 @@ class TestSchemaRecording:
 class TestTransformErrorRecording:
     """Tests for transform error recording in landscape."""
 
+    @staticmethod
+    def _create_token_with_dependencies(recorder: LandscapeRecorder, run_id: str, token_id: str, transform_id: str) -> None:
+        """Helper to create token with dependencies for FK constraints.
+
+        Bug fix: P2-2026-01-19-error-tables-missing-foreign-keys
+        FK constraints require token and node to exist before error recording.
+        """
+        from elspeth.contracts.schema import SchemaConfig
+
+        # Create source node
+        recorder.register_node(
+            run_id=run_id,
+            plugin_name="test_source",
+            node_type="source",
+            plugin_version="1.0",
+            config={},
+            schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
+            node_id="source_test",
+            sequence=0,
+        )
+        # Create row
+        row = recorder.create_row(
+            run_id=run_id,
+            source_node_id="source_test",
+            row_index=1,
+            data={"id": "test"},
+        )
+        # Create token with specified ID
+        from datetime import datetime
+
+        from elspeth.core.landscape.schema import tokens_table
+
+        with recorder._db.connection() as conn:
+            conn.execute(
+                tokens_table.insert().values(
+                    token_id=token_id,
+                    row_id=row.row_id,
+                    step_in_pipeline=0,
+                    created_at=datetime.now(UTC),
+                )
+            )
+            conn.commit()
+        # Create transform node for transform_id FK
+        recorder.register_node(
+            run_id=run_id,
+            plugin_name="test_transform",
+            node_type="transform",
+            plugin_version="1.0",
+            config={},
+            schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
+            node_id=transform_id,
+            sequence=1,
+        )
+
     def test_record_transform_error_returns_error_id(self) -> None:
         """record_transform_error returns an error_id."""
         from elspeth.core.landscape.database import LandscapeDB
@@ -2728,6 +2789,9 @@ class TestTransformErrorRecording:
         recorder = LandscapeRecorder(db)
 
         run = recorder.begin_run(config={}, canonical_version="v1")
+
+        # Create token and node for FK constraints
+        self._create_token_with_dependencies(recorder, run.run_id, "tok_123", "field_mapper")
 
         error_id = recorder.record_transform_error(
             run_id=run.run_id,
@@ -2753,6 +2817,9 @@ class TestTransformErrorRecording:
         recorder = LandscapeRecorder(db)
 
         run = recorder.begin_run(config={}, canonical_version="v1")
+
+        # Create token and node for FK constraints
+        self._create_token_with_dependencies(recorder, run.run_id, "tok_456", "field_mapper")
 
         error_id = recorder.record_transform_error(
             run_id=run.run_id,
@@ -2792,6 +2859,9 @@ class TestTransformErrorRecording:
 
         run = recorder.begin_run(config={}, canonical_version="v1")
 
+        # Create token and node for FK constraints
+        self._create_token_with_dependencies(recorder, run.run_id, "tok_789", "processor")
+
         row_data = {"id": 42, "value": "bad"}
         expected_hash = stable_hash(row_data)
 
@@ -2823,6 +2893,9 @@ class TestTransformErrorRecording:
         recorder = LandscapeRecorder(db)
 
         run = recorder.begin_run(config={}, canonical_version="v1")
+
+        # Create token and node for FK constraints
+        self._create_token_with_dependencies(recorder, run.run_id, "tok_999", "gate")
 
         error_id = recorder.record_transform_error(
             run_id=run.run_id,

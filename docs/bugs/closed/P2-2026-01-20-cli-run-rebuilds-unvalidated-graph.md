@@ -108,3 +108,41 @@
 ## Notes / Links
 
 - Related issues/PRs: N/A
+
+---
+
+## Resolution
+
+**Status:** RESOLVED
+**Resolved Date:** 2026-01-23
+**Resolution Method:** Systematic debugging following superpowers:systematic-debugging skill
+
+### Implementation
+
+Changed `_execute_pipeline()` to accept the validated `graph` parameter instead of rebuilding it:
+
+1. **src/elspeth/cli.py:222** - Pass `graph=graph` from `run()` to `_execute_pipeline()`
+2. **src/elspeth/cli.py:320-336** - Updated `_execute_pipeline()` signature to require `graph: ExecutionGraph`
+3. **src/elspeth/cli.py:383-385** - Removed redundant `ExecutionGraph.from_config()` call
+
+### Tests Added
+
+**tests/cli/test_run_command.py** - Added `TestRunCommandGraphReuse` class with 2 regression tests:
+
+1. `test_run_constructs_graph_once` - Verifies `from_config()` called exactly once via mock
+2. `test_validated_graph_has_consistent_node_ids` - Verifies DB node IDs match validated graph
+
+### Verification
+
+- ✅ All 17 CLI tests pass (15 existing + 2 new)
+- ✅ Ruff linter passes with no issues
+- ✅ Architectural review: 5/5 score from axiom-system-architect:architecture-critic
+- ✅ Code review: Approved by pr-review-toolkit:code-reviewer
+
+### Root Cause
+
+`ExecutionGraph.from_config()` uses `uuid.uuid4().hex[:8]` for node IDs (dag.py:249), so each call produces different random IDs. The CLI was building graph twice: once for validation, once for execution.
+
+### Pattern Alignment
+
+This fix aligns with the existing `resume` command pattern (cli.py:1104) which reconstructs graph from database to preserve node IDs.

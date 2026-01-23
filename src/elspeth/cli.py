@@ -216,10 +216,10 @@ def run(
         if not execute:
             raise typer.Exit(1)  # Silently exit if --execute not provided
 
-    # Execute pipeline with validated config
+    # Execute pipeline with validated config and graph
     # RunCompleted event provides summary in both console and JSON modes
     try:
-        _execute_pipeline(config, verbose=verbose, output_format=output_format)
+        _execute_pipeline(config, graph=graph, verbose=verbose, output_format=output_format)
     except Exception as e:
         # Emit structured error for JSON mode, human-readable for console
         if output_format == "json":
@@ -318,12 +318,16 @@ def explain(
 
 
 def _execute_pipeline(
-    config: ElspethSettings, verbose: bool = False, output_format: Literal["console", "json"] = "console"
+    config: ElspethSettings,
+    graph: ExecutionGraph,
+    verbose: bool = False,
+    output_format: Literal["console", "json"] = "console",
 ) -> ExecutionResult:
     """Execute a pipeline from configuration.
 
     Args:
         config: Validated ElspethSettings instance.
+        graph: Validated ExecutionGraph instance (must be pre-validated).
         verbose: Show detailed output.
         output_format: Output format ('console' or 'json').
 
@@ -376,9 +380,8 @@ def _execute_pipeline(
                 raise typer.BadParameter(f"Unknown transform plugin: {plugin_name}. Available: {available}")
             transforms.append(transform_cls(plugin_options))  # type: ignore[arg-type]
 
-        # Build execution graph from config (needed before PipelineConfig for aggregation node IDs)
-        graph = ExecutionGraph.from_config(config)
-
+        # Use the validated graph passed from run() command
+        # NOTE: Graph is already validated - do not rebuild it here
         # Build aggregation_settings dict (node_id -> AggregationSettings)
         # Also instantiate aggregation transforms and add to transforms list
         from elspeth.core.config import AggregationSettings

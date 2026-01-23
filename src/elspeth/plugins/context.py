@@ -260,7 +260,7 @@ class PluginContext:
         Returns:
             ValidationErrorToken for tracking the quarantined row
         """
-        from elspeth.core.canonical import stable_hash
+        from elspeth.core.canonical import repr_hash, stable_hash
 
         # Generate row_id from content hash if not present
         # External data may be non-dict (e.g., JSON array containing primitives),
@@ -268,7 +268,20 @@ class PluginContext:
         if isinstance(row, dict) and "id" in row:
             row_id = str(row["id"])
         else:
-            row_id = stable_hash(row)[:16]
+            # Try canonical hash first, fall back to repr() hash for non-serializable data
+            # This is Tier-3 (external data) - we must record what we saw, even if malformed
+            try:
+                row_id = stable_hash(row)[:16]
+            except (ValueError, TypeError) as e:
+                # Non-canonical data (NaN, Infinity, or other non-serializable types)
+                # Hash the repr() instead - not canonical, but preserves audit trail
+                row_preview = repr(row)[:200] + "..." if len(repr(row)) > 200 else repr(row)
+                logger.warning(
+                    "Row data not canonically serializable, using repr() hash: %s | Row preview: %s",
+                    str(e),
+                    row_preview,
+                )
+                row_id = repr_hash(row)[:16]
 
         if self.landscape is None:
             logger.warning(

@@ -687,6 +687,24 @@ class ElspethSettings(BaseModel):
         return self
 
     @model_validator(mode="after")
+    def validate_unique_gate_names(self) -> "ElspethSettings":
+        """Ensure gate names are unique."""
+        names = [gate.name for gate in self.gates]
+        duplicates = [name for name in names if names.count(name) > 1]
+        if duplicates:
+            raise ValueError(f"Duplicate gate name(s): {set(duplicates)}")
+        return self
+
+    @model_validator(mode="after")
+    def validate_unique_coalesce_names(self) -> "ElspethSettings":
+        """Ensure coalesce names are unique."""
+        names = [coal.name for coal in self.coalesce]
+        duplicates = [name for name in names if names.count(name) > 1]
+        if duplicates:
+            raise ValueError(f"Duplicate coalesce name(s): {set(duplicates)}")
+        return self
+
+    @model_validator(mode="after")
     def validate_replay_source_run_id(self) -> "ElspethSettings":
         """Ensure replay_source_run_id is set when mode requires it.
 

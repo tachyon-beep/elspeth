@@ -27,6 +27,15 @@ _REQUIRED_COLUMNS: list[tuple[str, str]] = [
     ("tokens", "expand_group_id"),
 ]
 
+# Required foreign keys for audit integrity (Tier 1 trust).
+# Format: (table_name, column_name, referenced_table)
+# Bug fix: P2-2026-01-19-error-tables-missing-foreign-keys
+_REQUIRED_FOREIGN_KEYS: list[tuple[str, str, str]] = [
+    ("validation_errors", "node_id", "nodes"),
+    ("transform_errors", "token_id", "tokens"),
+    ("transform_errors", "transform_id", "nodes"),
+]
+
 
 class LandscapeDB:
     """Landscape database connection manager."""
@@ -82,14 +91,14 @@ class LandscapeDB:
         metadata.create_all(self.engine)
 
     def _validate_schema(self) -> None:
-        """Validate that existing database has all required columns.
+        """Validate that existing database has all required columns and foreign keys.
 
         Only validates SQLite databases. PostgreSQL deployments are expected
         to use Alembic migrations which handle schema evolution properly.
         This check catches developers using stale local audit.db files.
 
         Raises:
-            SchemaCompatibilityError: If database is missing required columns
+            SchemaCompatibilityError: If database is missing required columns or FKs
         """
         if not self.connection_string.startswith("sqlite"):
             return
@@ -111,11 +120,38 @@ class LandscapeDB:
             if column_name not in columns:
                 missing_columns.append((table_name, column_name))
 
-        if missing_columns:
-            missing_str = ", ".join(f"{t}.{c}" for t, c in missing_columns)
+        # Check for required foreign keys (Tier 1 audit integrity)
+        missing_fks: list[tuple[str, str, str]] = []
+
+        for table_name, column_name, referenced_table in _REQUIRED_FOREIGN_KEYS:
+            # Check if table exists
+            if table_name not in inspector.get_table_names():
+                # Table will be created by create_all, skip
+                continue
+
+            # Check if FK exists AND targets the correct referenced table
+            fks = inspector.get_foreign_keys(table_name)
+            has_correct_fk = any(
+                column_name in fk.get("constrained_columns", []) and fk.get("referred_table") == referenced_table for fk in fks
+            )
+
+            if not has_correct_fk:
+                missing_fks.append((table_name, column_name, referenced_table))
+
+        # Raise errors for missing columns or FKs
+        if missing_columns or missing_fks:
+            error_parts = []
+
+            if missing_columns:
+                missing_str = ", ".join(f"{t}.{c}" for t, c in missing_columns)
+                error_parts.append(f"Missing columns: {missing_str}")
+
+            if missing_fks:
+                missing_fk_str = ", ".join(f"{t}.{c} → {ref}" for t, c, ref in missing_fks)
+                error_parts.append(f"Missing foreign keys: {missing_fk_str}")
+
             raise SchemaCompatibilityError(
-                f"Landscape database schema is outdated. "
-                f"Missing columns: {missing_str}\n\n"
+                "Landscape database schema is outdated.\n\n" + "\n".join(error_parts) + "\n\n"
                 f"To fix this, either:\n"
                 f"  1. Delete the database file and let ELSPETH recreate it, or\n"
                 f"  2. Run: elspeth landscape migrate (when available)\n\n"

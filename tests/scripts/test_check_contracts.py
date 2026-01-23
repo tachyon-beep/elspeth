@@ -150,8 +150,11 @@ allowed_external_types:
   - "foo/bar:MyType"
 """)
 
-    whitelist = load_whitelist(whitelist_file)
+    whitelist, entries = load_whitelist(whitelist_file)
     assert "foo/bar:MyType" in whitelist["types"]
+    assert len(entries) == 1
+    assert entries[0].value == "foo/bar:MyType"
+    assert entries[0].category == "type"
 
 
 def test_whitelist_loading_empty_file(tmp_path: Path) -> None:
@@ -159,16 +162,18 @@ def test_whitelist_loading_empty_file(tmp_path: Path) -> None:
     whitelist_file = tmp_path / ".contracts-whitelist.yaml"
     whitelist_file.write_text("")
 
-    whitelist = load_whitelist(whitelist_file)
+    whitelist, entries = load_whitelist(whitelist_file)
     assert whitelist == {"types": set(), "dicts": set()}
+    assert entries == []
 
 
 def test_whitelist_loading_nonexistent_file(tmp_path: Path) -> None:
     """Handles missing whitelist file."""
     whitelist_file = tmp_path / "nonexistent.yaml"
 
-    whitelist = load_whitelist(whitelist_file)
+    whitelist, entries = load_whitelist(whitelist_file)
     assert whitelist == {"types": set(), "dicts": set()}
+    assert entries == []
 
 
 def test_whitelist_loading_multiple_entries(tmp_path: Path) -> None:
@@ -181,11 +186,13 @@ allowed_external_types:
   - "module/c:TypeC"
 """)
 
-    whitelist = load_whitelist(whitelist_file)
+    whitelist, entries = load_whitelist(whitelist_file)
     assert len(whitelist["types"]) == 3
     assert "module/a:TypeA" in whitelist["types"]
     assert "module/b:TypeB" in whitelist["types"]
     assert "module/c:TypeC" in whitelist["types"]
+    assert len(entries) == 3
+    assert all(e.category == "type" for e in entries)
 
 
 def test_handles_syntax_errors(tmp_path: Path) -> None:

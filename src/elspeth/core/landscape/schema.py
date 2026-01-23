@@ -305,7 +305,7 @@ validation_errors_table = Table(
     metadata,
     Column("error_id", String(32), primary_key=True),
     Column("run_id", String(64), ForeignKey("runs.run_id"), nullable=False),
-    Column("node_id", String(64)),  # Source node where validation failed
+    Column("node_id", String(64), ForeignKey("nodes.node_id", ondelete="RESTRICT")),  # Source node where validation failed
     Column("row_hash", String(64), nullable=False),
     Column("row_data_json", Text),  # Store the row for debugging
     Column("error", Text, nullable=False),
@@ -324,8 +324,8 @@ transform_errors_table = Table(
     metadata,
     Column("error_id", String(32), primary_key=True),
     Column("run_id", String(64), ForeignKey("runs.run_id"), nullable=False),
-    Column("token_id", String(64), nullable=False),
-    Column("transform_id", String(64), nullable=False),
+    Column("token_id", String(64), ForeignKey("tokens.token_id", ondelete="RESTRICT"), nullable=False),
+    Column("transform_id", String(64), ForeignKey("nodes.node_id", ondelete="RESTRICT"), nullable=False),
     Column("row_hash", String(64), nullable=False),
     Column("row_data_json", Text),
     Column("error_details_json", Text),  # From TransformResult.error()

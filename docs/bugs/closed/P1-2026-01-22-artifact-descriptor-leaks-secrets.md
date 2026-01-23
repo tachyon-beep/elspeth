@@ -98,8 +98,42 @@
 
 ## Verification Status
 
-- [ ] Bug confirmed via reproduction
-- [ ] Root cause verified
-- [ ] Fix implemented
-- [ ] Tests added
-- [ ] Fix verified
+- [x] Bug confirmed via reproduction
+- [x] Root cause verified
+- [x] Fix implemented
+- [x] Tests added
+- [x] Fix verified
+
+## Resolution
+
+**Fixed in commit:** (this commit)
+**Fixed by:** Claude Opus 4.5
+**Date:** 2026-01-23
+
+### Solution Implemented
+
+Used **type-level enforcement (Option C)** per architecture critic recommendation:
+
+1. Created `SanitizedDatabaseUrl` and `SanitizedWebhookUrl` frozen dataclass types in `src/elspeth/core/security/url.py`
+2. Modified `ArtifactDescriptor.for_database()` and `for_webhook()` to require sanitized URL types
+3. Updated `DatabaseSink` to sanitize URL at construction time
+4. Added 44 new tests for URL sanitization
+
+### Files Changed
+
+| File | Change |
+|------|--------|
+| `src/elspeth/core/security/url.py` | NEW - Sanitized URL types |
+| `src/elspeth/core/security/__init__.py` | Export new types |
+| `src/elspeth/contracts/results.py` | Factory methods require sanitized types |
+| `src/elspeth/plugins/sinks/database_sink.py` | Use sanitized URL for artifacts |
+| `tests/core/security/test_url.py` | NEW - 44 tests |
+| `tests/contracts/test_results.py` | Updated for new types |
+
+### Key Design Decisions
+
+- **Type enforcement** makes it impossible to accidentally pass raw URLs (mypy catches errors)
+- **Reuses existing** `_sanitize_dsn()` infrastructure
+- **Fingerprints only secrets**, not full URLs (for traceability across different endpoints)
+- **Handles Basic Auth** in webhook URLs (`user:pass@host`)
+- **Expanded sensitive params** list (OAuth, signed URLs, API keys)

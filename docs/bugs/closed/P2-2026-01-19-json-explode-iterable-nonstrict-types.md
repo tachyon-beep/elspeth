@@ -94,4 +94,26 @@
 
 ## Notes / Links
 
-- Related docs: `CLAUDE.md` (“plugin bugs crash immediately”, “no silent wrong result”)
+- Related docs: `CLAUDE.md` ("plugin bugs crash immediately", "no silent wrong result")
+
+---
+
+## CLOSED: 2026-01-23
+
+**Resolution:** Fixed via explicit type check in `JSONExplode.process()`.
+
+**Implementation:**
+- Added `isinstance(array_value, list)` check immediately after extracting array_field from row (line 138-142)
+- Raises TypeError with clear message when array_field is not a list
+- Updated test `test_string_value_iterates_over_characters` → `test_string_value_crashes_with_type_error`
+- Added tests: `test_dict_value_crashes_with_type_error`, `test_tuple_value_crashes_with_type_error`
+
+**Files Changed:**
+- `src/elspeth/plugins/transforms/json_explode.py` - Added type enforcement
+- `tests/plugins/transforms/test_json_explode.py` - Updated and added tests
+
+**Test Results:** All 18 tests in `test_json_explode.py` pass.
+
+**Architecture Review:** Confirmed by axiom-system-architect:architecture-critic as correct approach. The isinstance check is contract enforcement (not defensive programming). Prevents audit trail fraud where garbage output is marked as "successfully processed."
+
+**Follow-Up Work:** File ticket to add container type support (`list`, `dict`) to SchemaConfig to enable declarative validation at source boundary. Transform-level check remains as defense-in-depth.

@@ -26,6 +26,7 @@ from elspeth.contracts.results import (
     RowResult,
     TransformResult,
 )
+from elspeth.core.security.url import SanitizedDatabaseUrl, SanitizedWebhookUrl
 from elspeth.engine.retry import MaxRetriesExceeded
 
 
@@ -373,8 +374,10 @@ class TestArtifactDescriptorFactories:
 
     def test_for_database(self) -> None:
         """for_database creates database artifact with db:// URI scheme."""
+        # Use SanitizedDatabaseUrl - URL without password so no fingerprint key needed
+        sanitized_url = SanitizedDatabaseUrl.from_raw_url("postgresql://localhost/mydb", fail_if_no_key=False)
         descriptor = ArtifactDescriptor.for_database(
-            url="postgresql://localhost/mydb",
+            url=sanitized_url,
             table="results",
             content_hash="def456",
             payload_size=1024,
@@ -385,12 +388,17 @@ class TestArtifactDescriptorFactories:
         assert descriptor.path_or_uri == "db://results@postgresql://localhost/mydb"
         assert descriptor.content_hash == "def456"
         assert descriptor.size_bytes == 1024
-        assert descriptor.metadata == {"table": "results", "row_count": 100}
+        # metadata includes table and row_count (no fingerprint since no password)
+        assert descriptor.metadata is not None
+        assert descriptor.metadata["table"] == "results"
+        assert descriptor.metadata["row_count"] == 100
 
     def test_for_webhook(self) -> None:
         """for_webhook creates webhook artifact with webhook:// URI scheme."""
+        # Use SanitizedWebhookUrl - URL without tokens so no fingerprint key needed
+        sanitized_url = SanitizedWebhookUrl.from_raw_url("https://api.example.com/webhook", fail_if_no_key=False)
         descriptor = ArtifactDescriptor.for_webhook(
-            url="https://api.example.com/webhook",
+            url=sanitized_url,
             content_hash="ghi789",
             request_size=512,
             response_code=200,
@@ -404,8 +412,9 @@ class TestArtifactDescriptorFactories:
 
     def test_for_webhook_with_error_response(self) -> None:
         """for_webhook captures error response codes."""
+        sanitized_url = SanitizedWebhookUrl.from_raw_url("https://api.example.com/webhook", fail_if_no_key=False)
         descriptor = ArtifactDescriptor.for_webhook(
-            url="https://api.example.com/webhook",
+            url=sanitized_url,
             content_hash="xyz",
             request_size=256,
             response_code=500,
@@ -428,8 +437,9 @@ class TestArtifactDescriptorTypes:
 
     def test_database_type(self) -> None:
         """Database artifact type."""
+        sanitized_url = SanitizedDatabaseUrl.from_raw_url("sqlite:///:memory:", fail_if_no_key=False)
         descriptor = ArtifactDescriptor.for_database(
-            url="sqlite:///:memory:",
+            url=sanitized_url,
             table="t",
             content_hash="h",
             payload_size=1,
@@ -439,8 +449,9 @@ class TestArtifactDescriptorTypes:
 
     def test_webhook_type(self) -> None:
         """Webhook artifact type."""
+        sanitized_url = SanitizedWebhookUrl.from_raw_url("http://localhost", fail_if_no_key=False)
         descriptor = ArtifactDescriptor.for_webhook(
-            url="http://localhost",
+            url=sanitized_url,
             content_hash="h",
             request_size=1,
             response_code=200,

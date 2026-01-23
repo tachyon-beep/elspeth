@@ -8,6 +8,11 @@ Two-phase approach:
 
 IMPORTANT: NaN and Infinity are strictly REJECTED, not silently converted.
 This is defense-in-depth for audit integrity.
+
+NOTE: For non-canonical data that cannot be serialized (malformed external
+data at Tier-3 trust boundary), use repr_hash() as a fallback. This is NOT
+deterministic across Python versions but is appropriate for quarantined data
+where the content is already flagged as problematic.
 """
 
 import base64
@@ -31,7 +36,7 @@ def _normalize_value(obj: Any) -> Any:
     Handles pandas and numpy types that appear in real pipeline data.
 
     NaN Policy: STRICT REJECTION
-    - NaN and Infinity are invalid input states, not "missing"
+    - NaN and Infinity are invalid input states for float AND Decimal
     - Use None/pd.NA/NaT for intentional missing values
     - This prevents silent data corruption in audit records
 
@@ -85,6 +90,8 @@ def _normalize_value(obj: Any) -> Any:
         return {"__bytes__": base64.b64encode(obj).decode("ascii")}
 
     if isinstance(obj, Decimal):
+        if not obj.is_finite():  # Rejects NaN, sNaN, Infinity, -Infinity
+            raise ValueError(f"Cannot canonicalize non-finite Decimal: {obj}. Use None for missing values, not NaN/Infinity.")
         return str(obj)
 
     return obj
@@ -145,3 +152,29 @@ def stable_hash(obj: Any, version: str = CANONICAL_VERSION) -> str:
     """
     canonical = canonical_json(obj)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def repr_hash(obj: Any) -> str:
+    """Generate SHA-256 hash of repr() for non-canonical data.
+
+    Used as fallback when canonical_json fails (NaN, Infinity, or other
+    non-serializable types). This provides deterministic hashing within
+    the same Python version, but is NOT guaranteed to be stable across
+    different Python versions due to repr() implementation differences.
+
+    This is appropriate for Tier-3 (external data) trust boundary where
+    data is already malformed and being quarantined.
+
+    Args:
+        obj: Any Python object
+
+    Returns:
+        SHA-256 hex digest of repr(obj)
+
+    Example:
+        >>> repr_hash(42)
+        '73475cb40a568e8da8a045ced110137e159f890ac4da883b6b17dc651b3a8049'
+        >>> repr_hash({"value": float("nan")})  # Non-canonical data
+        '49ce040dd7d56208...'
+    """
+    return hashlib.sha256(repr(obj).encode("utf-8")).hexdigest()

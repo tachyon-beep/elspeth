@@ -11,8 +11,8 @@
 #   - Pipeline execution flow
 #
 # Usage:
-#   elspeth validate --settings config/smoke-test.yaml
-#   elspeth run --settings config/smoke-test.yaml --execute
+#   elspeth validate --settings config/cicd/smoke-test.yaml
+#   elspeth run --settings config/cicd/smoke-test.yaml --execute
 
 # Source: null source yields no rows (instant completion)
 datasource:

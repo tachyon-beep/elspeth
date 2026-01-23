@@ -100,3 +100,30 @@ Alternative repro (non-finite values):
 
 - Related issues/PRs: N/A
 - Related design docs: `CLAUDE.md`
+
+---
+
+## Resolution
+
+**Status:** FIXED
+**Resolved By:** Claude Sonnet 4.5 (systematic debugging)
+**Resolution Date:** 2026-01-23
+**Commit:** ac1832d
+
+**Solution Implemented:**
+1. Added try/except around `stable_hash(row)` in `PluginContext.record_validation_error()` with fallback to `sha256(repr(row))`
+2. Added try/except around `stable_hash()` and `canonical_json()` in `LandscapeRecorder.record_validation_error()` with repr() fallback
+3. Changed `LandscapeRecorder.record_validation_error()` parameter type from `dict[str, Any]` to `Any`
+4. Store non-canonical data with metadata: `{"__repr__": repr(row), "__type__": type(row).__name__, "__canonical_error__": str(e)}`
+
+**Tests Added:**
+- `tests/core/landscape/test_validation_error_noncanonical.py` (8 tests)
+- Covers primitives (int, str, list), NaN, Infinity, -Infinity
+- Verifies repr() fallback metadata storage
+- All 216 tests pass (8 new + 208 existing)
+
+**Verification:**
+- Non-dict rows: PASS ✓ (recorded with repr fallback)
+- NaN/Infinity rows: PASS ✓ (recorded with repr fallback)
+- Audit trail integrity: PASS ✓ (metadata preserved)
+- Three-Tier Trust Model: PASS ✓ (Tier-3 quarantine works)

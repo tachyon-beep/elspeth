@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
+    from elspeth.core.security.url import SanitizedDatabaseUrl, SanitizedWebhookUrl
     from elspeth.engine.retry import MaxRetriesExceeded
 
 from elspeth.contracts.enums import RowOutcome
@@ -223,36 +224,64 @@ class ArtifactDescriptor:
     @classmethod
     def for_database(
         cls,
-        url: str,
+        url: "SanitizedDatabaseUrl",
         table: str,
         content_hash: str,
         payload_size: int,
         row_count: int,
     ) -> "ArtifactDescriptor":
-        """Create descriptor for database artifacts."""
+        """Create descriptor for database artifacts.
+
+        URL must be pre-sanitized using SanitizedDatabaseUrl.from_raw_url().
+        This ensures credentials are never stored in the audit trail.
+        """
+        # Type safety: enforce SanitizedDatabaseUrl, not plain str
+        if not hasattr(url, "sanitized_url") or not hasattr(url, "fingerprint"):
+            raise TypeError(
+                "url must be a SanitizedDatabaseUrl instance. Use SanitizedDatabaseUrl.from_raw_url(url) to sanitize raw database URLs."
+            )
+
+        metadata: dict[str, object] = {"table": table, "row_count": row_count}
+        if url.fingerprint:
+            metadata["url_fingerprint"] = url.fingerprint
+
         return cls(
             artifact_type="database",
-            path_or_uri=f"db://{table}@{url}",
+            path_or_uri=f"db://{table}@{url.sanitized_url}",
             content_hash=content_hash,
             size_bytes=payload_size,
-            metadata={"table": table, "row_count": row_count},
+            metadata=metadata,
         )
 
     @classmethod
     def for_webhook(
         cls,
-        url: str,
+        url: "SanitizedWebhookUrl",
         content_hash: str,
         request_size: int,
         response_code: int,
     ) -> "ArtifactDescriptor":
-        """Create descriptor for webhook artifacts."""
+        """Create descriptor for webhook artifacts.
+
+        URL must be pre-sanitized using SanitizedWebhookUrl.from_raw_url().
+        This ensures tokens are never stored in the audit trail.
+        """
+        # Type safety: enforce SanitizedWebhookUrl, not plain str
+        if not hasattr(url, "sanitized_url") or not hasattr(url, "fingerprint"):
+            raise TypeError(
+                "url must be a SanitizedWebhookUrl instance. Use SanitizedWebhookUrl.from_raw_url(url) to sanitize raw webhook URLs."
+            )
+
+        metadata: dict[str, object] = {"response_code": response_code}
+        if url.fingerprint:
+            metadata["url_fingerprint"] = url.fingerprint
+
         return cls(
             artifact_type="webhook",
-            path_or_uri=f"webhook://{url}",
+            path_or_uri=f"webhook://{url.sanitized_url}",
             content_hash=content_hash,
             size_bytes=request_size,
-            metadata={"response_code": response_code},
+            metadata=metadata,
         )
 
 

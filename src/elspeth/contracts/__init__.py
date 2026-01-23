@@ -2,7 +2,7 @@
 
 All dataclasses, enums, TypedDicts, and NamedTuples that cross subsystem
 boundaries MUST be defined here. Internal types are whitelisted in
-.contracts-whitelist.yaml.
+config/cicd/contracts-whitelist.yaml.
 
 Import pattern:
     from elspeth.contracts import NodeType, TransformResult, Run
@@ -47,6 +47,8 @@ from elspeth.contracts.audit import (
     NodeStateCompleted,
     NodeStateFailed,
     NodeStateOpen,
+    NodeStatePending,
+    NonCanonicalMetadata,
     RoutingEvent,
     Row,
     RowLineage,
@@ -120,6 +122,8 @@ __all__ = [  # Grouped by category for readability
     "NodeStateCompleted",
     "NodeStateFailed",
     "NodeStateOpen",
+    "NodeStatePending",
+    "NonCanonicalMetadata",
     "RoutingEvent",
     "Row",
     "RowLineage",

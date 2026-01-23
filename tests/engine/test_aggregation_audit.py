@@ -13,13 +13,14 @@ from typing import Any
 import pytest
 
 from elspeth.contracts import TokenInfo
-from elspeth.contracts.enums import BatchStatus, TriggerType
+from elspeth.contracts.enums import BatchStatus, NodeStateStatus, TriggerType
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.core.config import AggregationSettings, TriggerConfig
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
 from elspeth.engine.executors import AggregationExecutor
 from elspeth.engine.spans import SpanFactory
 from elspeth.plugins.context import PluginContext
+from elspeth.plugins.llm.batch_errors import BatchPendingError
 from elspeth.plugins.results import TransformResult
 from tests.conftest import _TestTransformBase, as_transform
 
@@ -77,6 +78,26 @@ class ErrorResultTransform(_TestTransformBase):
     ) -> TransformResult:
         """Returns an error result instead of raising."""
         return TransformResult.error({"message": "batch processing failed", "code": "BATCH_ERROR"})
+
+
+class BatchPendingTransform(_TestTransformBase):
+    """Mock batch-aware transform that raises BatchPendingError (async batch submission)."""
+
+    name = "batch_pending_transform"
+
+    def process(
+        self,
+        row: dict[str, Any] | list[dict[str, Any]],
+        ctx: PluginContext,
+    ) -> TransformResult:
+        """Raises BatchPendingError to simulate async batch submission."""
+        raise BatchPendingError(
+            batch_id="test-batch-123",
+            status="submitted",
+            check_after_seconds=300,
+            checkpoint={"batch_id": "test-batch-123", "rows": len(row) if isinstance(row, list) else 1},
+            node_id=self.node_id,
+        )
 
 
 # === Fixtures ===
@@ -486,3 +507,233 @@ class TestAggregationFlushAuditTrail:
         assert {"x": 10} in row_data_list
         assert {"x": 20} in row_data_list
         assert {"x": 30} in row_data_list
+
+    def test_batch_pending_error_closes_node_state_and_links_batch(
+        self,
+        recorder: LandscapeRecorder,
+        run_id: str,
+        source_node_id: str,
+        ctx: PluginContext,
+    ) -> None:
+        """BatchPendingError must close node_state and link batch to prevent orphaned states.
+
+        This test verifies the fix for P1-2026-01-21-aggregation-batch-pending-open-node-state.md:
+        - BatchPendingError should complete the node_state (not leave it OPEN)
+        - Batch must have aggregation_state_id set to link to the flush attempt
+        - No orphaned OPEN states should remain in audit trail
+        """
+        # Setup aggregation executor with batch-pending transform
+        transform = as_transform(BatchPendingTransform())
+        transform.node_id = "batch_pending_node"
+
+        aggregation_settings = AggregationSettings(
+            name="batch_pending_aggregation",
+            plugin="batch_pending_transform",
+            trigger=TriggerConfig(count=2),
+            output_mode="single",
+        )
+
+        # Register node in landscape first to get node_id
+        node = recorder.register_node(
+            run_id=run_id,
+            plugin_name="batch_pending_transform",
+            plugin_version="1.0.0",
+            node_type="aggregation",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+        node_id = node.node_id
+        transform.node_id = node_id
+
+        executor = AggregationExecutor(
+            recorder=recorder,
+            span_factory=SpanFactory(),
+            run_id=run_id,
+            aggregation_settings={node_id: aggregation_settings},
+        )
+
+        # Create tokens in landscape using helper
+        token1 = create_token(
+            recorder=recorder,
+            run_id=run_id,
+            source_node_id=source_node_id,
+            row_index=0,
+            row_data={"x": 10},
+        )
+        token2 = create_token(
+            recorder=recorder,
+            run_id=run_id,
+            source_node_id=source_node_id,
+            row_index=1,
+            row_data={"x": 20},
+        )
+
+        executor.buffer_row(node_id, token1)
+        executor.buffer_row(node_id, token2)
+
+        # Execute flush - should raise BatchPendingError
+        with pytest.raises(BatchPendingError) as exc_info:
+            executor.execute_flush(
+                node_id=node_id,
+                transform=transform,
+                ctx=ctx,
+                step_in_pipeline=1,
+                trigger_type=TriggerType.COUNT,
+            )
+
+        # Verify BatchPendingError was raised with correct attributes
+        assert exc_info.value.batch_id == "test-batch-123"
+        assert exc_info.value.status == "submitted"
+
+        # === CRITICAL ASSERTIONS (Bug Fix Verification) ===
+
+        # 1. No OPEN node_states should remain
+        with recorder._db.connection() as conn:
+            from sqlalchemy import select
+
+            from elspeth.core.landscape.schema import node_states_table
+
+            open_states = conn.execute(select(node_states_table).where(node_states_table.c.status == NodeStateStatus.OPEN.value)).fetchall()
+
+            assert len(open_states) == 0, (
+                f"Found {len(open_states)} OPEN node_states after BatchPendingError. "
+                "BatchPendingError must complete node_state before re-raising."
+            )
+
+        # 2. Node_state must exist and be completed
+        with recorder._db.connection() as conn:
+            all_states = conn.execute(select(node_states_table).where(node_states_table.c.node_id == node_id)).fetchall()
+
+            assert len(all_states) == 1, f"Expected exactly 1 node_state, found {len(all_states)}"
+            state = all_states[0]
+
+            # State must be PENDING (batch submitted, result not available)
+            assert state.status == NodeStateStatus.PENDING.value, (
+                f"Node state has status '{state.status}' but should be 'pending' "
+                f"(batch submitted successfully but result not available yet)"
+            )
+
+            # State must have completed_at timestamp (submission completed)
+            assert state.completed_at is not None, "Node state must have completed_at timestamp set"
+
+            # State must NOT have output_hash (batch result not available yet)
+            assert state.output_hash is None, "PENDING state should not have output_hash (result not available)"
+
+        # 3. Batch must be linked to the node_state
+        with recorder._db.connection() as conn:
+            from elspeth.core.landscape.schema import batches_table
+
+            batches = conn.execute(select(batches_table).where(batches_table.c.aggregation_node_id == node_id)).fetchall()
+
+            assert len(batches) == 1, f"Expected exactly 1 batch, found {len(batches)}"
+            batch = batches[0]
+
+            # Batch must have aggregation_state_id set
+            assert batch.aggregation_state_id is not None, (
+                "Batch must have aggregation_state_id linking it to the flush node_state. "
+                "This enables tracing batch execution in the audit trail."
+            )
+
+            # aggregation_state_id must match the node_state we created
+            assert batch.aggregation_state_id == state.state_id, (
+                f"Batch aggregation_state_id ({batch.aggregation_state_id}) does not match node_state state_id ({state.state_id})"
+            )
+
+            # Batch status should still be "executing" (not completed/failed)
+            # because BatchPendingError indicates work is in progress
+            assert batch.status == "executing", (
+                f"Batch status is '{batch.status}' but should be 'executing' after BatchPendingError (work is pending, not complete)"
+            )
+
+    def test_pending_to_completed_transition(
+        self,
+        recorder: LandscapeRecorder,
+        run_id: str,
+        source_node_id: str,
+        ctx: PluginContext,
+    ) -> None:
+        """Test that a PENDING node_state can be transitioned to COMPLETED when batch completes.
+
+        This verifies the full lifecycle:
+        1. Batch submission → PENDING state (no output_hash)
+        2. Batch completion → COMPLETED state (with output_hash)
+
+        The audit trail should show both states for the same state_id.
+        """
+        # Register a transform node for testing
+        node = recorder.register_node(
+            run_id=run_id,
+            plugin_name="test_transform",
+            plugin_version="1.0.0",
+            node_type="transform",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+
+        # Create a token
+        token = create_token(
+            recorder=recorder,
+            run_id=run_id,
+            source_node_id=source_node_id,
+            row_index=0,
+            row_data={"x": 42},
+        )
+
+        # Phase 1: Create PENDING state (batch submitted, no result yet)
+        state_open = recorder.begin_node_state(
+            token_id=token.token_id,
+            node_id=node.node_id,
+            step_index=1,
+            attempt=1,
+            input_data={"x": 42},
+        )
+
+        state_pending = recorder.complete_node_state(
+            state_id=state_open.state_id,
+            status="pending",
+            duration_ms=100.0,
+        )
+
+        # Verify PENDING state invariants
+        assert state_pending.status == NodeStateStatus.PENDING
+        assert state_pending.completed_at is not None
+        assert state_pending.duration_ms == 100.0
+        # No output_hash yet - result not available
+        with pytest.raises(AttributeError):
+            _ = state_pending.output_hash  # type: ignore[attr-defined]
+
+        # Phase 2: Batch completes, update to COMPLETED with result
+        # In a real scenario, this would happen on retry after polling batch status
+        state_completed = recorder.complete_node_state(
+            state_id=state_open.state_id,
+            status="completed",
+            output_data={"result": 84},
+            duration_ms=150.0,  # Updated duration including batch wait time
+        )
+
+        # Verify COMPLETED state invariants
+        assert state_completed.status == NodeStateStatus.COMPLETED
+        assert state_completed.completed_at is not None
+        assert state_completed.duration_ms == 150.0
+        assert state_completed.output_hash is not None
+
+        # Verify audit trail shows the transition
+        with recorder._db.connection() as conn:
+            from sqlalchemy import select
+
+            from elspeth.core.landscape.schema import node_states_table
+
+            states = conn.execute(
+                select(node_states_table)
+                .where(node_states_table.c.state_id == state_open.state_id)
+                .order_by(node_states_table.c.completed_at)
+            ).fetchall()
+
+            # Should have exactly one record (updates overwrite, no history)
+            assert len(states) == 1
+            final_state = states[0]
+
+            # Final state should be COMPLETED
+            assert final_state.status == NodeStateStatus.COMPLETED.value
+            assert final_state.output_hash is not None
+            assert final_state.duration_ms == 150.0

@@ -9,6 +9,7 @@ output correct types. Wrong types = upstream bug = crash.
 
 import hashlib
 import json
+import os
 from typing import Any, Literal
 
 from sqlalchemy import Boolean, Column, Float, Integer, MetaData, String, Table, create_engine, insert
@@ -16,6 +17,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.types import TypeEngine
 
 from elspeth.contracts import ArtifactDescriptor, PluginSchema
+from elspeth.core.security.url import SanitizedDatabaseUrl
 from elspeth.plugins.base import BaseSink
 from elspeth.plugins.config_base import DataPluginConfig
 from elspeth.plugins.context import PluginContext
@@ -76,7 +78,12 @@ class DatabaseSink(BaseSink):
         super().__init__(config)
         cfg = DatabaseSinkConfig.from_dict(config)
 
-        self._url = cfg.url
+        # Honor ELSPETH_ALLOW_RAW_SECRETS for dev environments (consistent with config.py)
+        allow_raw = os.environ.get("ELSPETH_ALLOW_RAW_SECRETS", "").lower() == "true"
+        fail_if_no_key = not allow_raw
+
+        self._url = cfg.url  # Raw URL for database connection
+        self._sanitized_url = SanitizedDatabaseUrl.from_raw_url(cfg.url, fail_if_no_key=fail_if_no_key)  # For audit trail
         self._table_name = cfg.table
         self._if_exists = cfg.if_exists
         self._validate_input = cfg.validate_input
@@ -203,7 +210,7 @@ class DatabaseSink(BaseSink):
         if not rows:
             # Empty batch - return descriptor without DB operations
             return ArtifactDescriptor.for_database(
-                url=self._url,
+                url=self._sanitized_url,
                 table=self._table_name,
                 content_hash=content_hash,
                 payload_size=0,
@@ -225,7 +232,7 @@ class DatabaseSink(BaseSink):
                 conn.execute(insert(self._table), rows)
 
         return ArtifactDescriptor.for_database(
-            url=self._url,
+            url=self._sanitized_url,
             table=self._table_name,
             content_hash=content_hash,
             payload_size=payload_size,
