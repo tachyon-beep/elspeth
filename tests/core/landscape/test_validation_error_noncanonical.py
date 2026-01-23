@@ -10,6 +10,7 @@ must be quarantined and recorded even when malformed.
 
 import pytest
 
+from elspeth.contracts.schema import SchemaConfig
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.plugins.context import PluginContext
@@ -26,6 +27,18 @@ def recorder():
         config={},
         canonical_version="v1",
         run_id="test-run",
+    )
+
+    # Register source_node to satisfy FK constraint on validation_errors
+    rec.register_node(
+        run_id="test-run",
+        plugin_name="test_source",
+        node_type="source",
+        plugin_version="1.0",
+        config={},
+        schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
+        node_id="source_node",
+        sequence=0,
     )
 
     return rec

@@ -939,3 +939,16 @@ allow_hits:
     reason: "Trust boundary: ELSPETH_KEYVAULT_SECRET_NAME is optional with sensible default"
     safety: "Default 'elspeth-fingerprint-key' used when not set - documented behavior"
     expires: null  # Permanent - intentional design
+
+  # ============================================================
+  # SCHEMA VALIDATION TRUST BOUNDARY (Permanent)
+  # ============================================================
+  # SQLAlchemy inspector returns foreign key metadata as dictionaries.
+  # The structure is from SQLAlchemy's reflection API (external library).
+  # ============================================================
+
+  - key: "core/landscape/database.py:R1:LandscapeDB:_validate_schema:line=134"
+    owner: "architecture"
+    reason: "Trust boundary: SQLAlchemy inspector FK dict structure from external library"
+    safety: "Empty list default is safe - missing constrained_columns means no FK to validate"
+    expires: null  # Permanent - intentional design

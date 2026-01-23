@@ -6,6 +6,8 @@ persisted to the landscape database and queryable. This confirms the
 SDA-029 implementation for validation error audit trail.
 """
 
+from datetime import UTC
+
 from sqlalchemy import select
 
 from elspeth.contracts.schema import SchemaConfig
@@ -33,6 +35,18 @@ class TestValidationErrorPersistence:
             canonical_version="1.0",
         )
         run_id = run.run_id
+
+        # Register source node to satisfy FK constraint
+        recorder.register_node(
+            run_id=run_id,
+            plugin_name="csv_source",
+            node_type="source",
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+            node_id="source_node",
+            sequence=0,
+        )
 
         # Create context with landscape
         ctx = PluginContext(
@@ -72,6 +86,18 @@ class TestValidationErrorPersistence:
         )
         run_id = run.run_id
 
+        # Register source node to satisfy FK constraint
+        recorder.register_node(
+            run_id=run_id,
+            plugin_name="csv_source",
+            node_type="source",
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+            node_id="source_node",
+            sequence=0,
+        )
+
         ctx = PluginContext(
             run_id=run_id,
             config={},
@@ -108,6 +134,51 @@ class TestTransformErrorPersistence:
             canonical_version="1.0",
         )
         run_id = run.run_id
+
+        # Create source node and row/token to satisfy FK constraints
+        recorder.register_node(
+            run_id=run_id,
+            plugin_name="csv_source",
+            node_type="source",
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+            node_id="source_test",
+            sequence=0,
+        )
+        row = recorder.create_row(
+            run_id=run_id,
+            source_node_id="source_test",
+            row_index=1,
+            data={"id": "test"},
+        )
+        # Manually create token with specified ID to match test expectations
+        from datetime import datetime
+
+        from elspeth.core.landscape.schema import tokens_table
+
+        with landscape_db.connection() as conn:
+            conn.execute(
+                tokens_table.insert().values(
+                    token_id="token-123",
+                    row_id=row.row_id,
+                    step_in_pipeline=0,
+                    created_at=datetime.now(UTC),
+                )
+            )
+            conn.commit()
+
+        # Register transform node to satisfy FK constraint
+        recorder.register_node(
+            run_id=run_id,
+            plugin_name="price_calculator",
+            node_type="transform",
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+            node_id="price_calculator",
+            sequence=1,
+        )
 
         # Create context with landscape
         ctx = PluginContext(
@@ -147,6 +218,51 @@ class TestTransformErrorPersistence:
             canonical_version="1.0",
         )
         run_id = run.run_id
+
+        # Create source node and row/token to satisfy FK constraints
+        recorder.register_node(
+            run_id=run_id,
+            plugin_name="csv_source",
+            node_type="source",
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+            node_id="source_test",
+            sequence=0,
+        )
+        row = recorder.create_row(
+            run_id=run_id,
+            source_node_id="source_test",
+            row_index=1,
+            data={"id": "test"},
+        )
+        # Manually create token with specified ID to match test expectations
+        from datetime import datetime
+
+        from elspeth.core.landscape.schema import tokens_table
+
+        with landscape_db.connection() as conn:
+            conn.execute(
+                tokens_table.insert().values(
+                    token_id="token-456",
+                    row_id=row.row_id,
+                    step_in_pipeline=0,
+                    created_at=datetime.now(UTC),
+                )
+            )
+            conn.commit()
+
+        # Register transform node to satisfy FK constraint
+        recorder.register_node(
+            run_id=run_id,
+            plugin_name="validator",
+            node_type="transform",
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+            node_id="validator",
+            sequence=1,
+        )
 
         ctx = PluginContext(
             run_id=run_id,

@@ -105,3 +105,47 @@
 - Related issues/PRs:
   - `docs/bugs/open/2026-01-19-transform-errors-ambiguous-transform-id.md`
   - `docs/bugs/open/2026-01-19-validation-errors-missing-node-id.md`
+
+## Resolution
+
+**Status**: CLOSED
+**Resolved Date**: 2026-01-23
+**Resolved By**: Claude Code (systematic debugging workflow)
+
+### Implementation Summary
+
+Added 3 foreign key constraints with `ondelete="RESTRICT"`:
+1. `validation_errors.node_id` → `nodes.node_id` (nullable FK)
+2. `transform_errors.token_id` → `tokens.token_id` (required FK)
+3. `transform_errors.transform_id` → `nodes.node_id` (required FK)
+
+### Changes Made
+
+**Schema (src/elspeth/core/landscape/schema.py)**:
+- Lines 308, 327-328: Added FK constraints with RESTRICT cascade behavior
+
+**Validation (src/elspeth/core/landscape/database.py)**:
+- Lines 30-37: Added `_REQUIRED_FOREIGN_KEYS` constant
+- Lines 93-163: Enhanced `_validate_schema()` to detect missing FKs in existing databases
+
+**Test Coverage (tests/core/landscape/test_error_table_foreign_keys.py)**:
+- NEW FILE: 481 lines, 9 comprehensive FK enforcement tests
+- Tests verify rejection of orphan records, RESTRICT behavior, and NULL handling
+
+**Test Fixes**:
+- `test_recorder.py`: Fixed 4 tests in TestTransformErrorRecording
+- `test_validation_error_noncanonical.py`: Fixed fixture (10 tests)
+- `test_error_event_persistence.py`: Fixed setup in 4 tests
+
+### Verification
+
+- All 3,215 tests pass
+- FK constraints enforced at database level
+- Schema validation detects missing FKs at startup
+- Tier 1 trust integrity restored
+
+### Architectural Notes
+
+- **CASCADE Behavior**: Used `ondelete="RESTRICT"` instead of CASCADE to preserve audit evidence - deleting a token/node with error references is now prevented
+- **Nullable FK**: `validation_errors.node_id` remains nullable to support early validation failures before node association
+- **Defense-in-Depth**: Both database-level FKs and Python-level schema validation provide redundant integrity checks
