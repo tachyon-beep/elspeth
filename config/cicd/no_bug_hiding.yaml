@@ -199,7 +199,7 @@ allow_hits:
   # whole cleanup process.
   # ============================================================
 
-  - key: "engine/orchestrator.py:R4:Orchestrator:_cleanup_transforms:line=201"
+  - key: "engine/orchestrator.py:R4:Orchestrator:_cleanup_transforms:line=210"
     owner: "architecture"
     reason: "Best-effort cleanup: one plugin failure shouldn't prevent others from cleanup"
     safety: "Logged with warning, other plugins still get close() called"
@@ -212,19 +212,19 @@ allow_hits:
   # messages. These lookups are for UI/diagnostic purposes only.
   # ============================================================
 
-  - key: "engine/orchestrator.py:R1:Orchestrator:_validate_route_destinations:line=238"
+  - key: "engine/orchestrator.py:R1:Orchestrator:_validate_route_destinations:line=247"
     owner: "architecture"
     reason: "Building lookup for gate names - only gates (not transforms) are in map"
     safety: "None means 'not a gate at this sequence' - correctly skipped"
     expires: null  # Permanent - intentional design
 
-  - key: "engine/orchestrator.py:R1:Orchestrator:_validate_route_destinations:line=245"
+  - key: "engine/orchestrator.py:R1:Orchestrator:_validate_route_destinations:line=254"
     owner: "architecture"
     reason: "Building lookup for gate names - only gates (not transforms) are in map"
     safety: "None means 'not a gate at this sequence' - correctly skipped"
     expires: null  # Permanent - intentional design
 
-  - key: "engine/orchestrator.py:R1:Orchestrator:_validate_route_destinations:line=261"
+  - key: "engine/orchestrator.py:R1:Orchestrator:_validate_route_destinations:line=270"
     owner: "architecture"
     reason: "Fallback for error message - use node_id if gate name not found"
     safety: "Error message still produced with node_id as fallback"
@@ -238,7 +238,7 @@ allow_hits:
   # that inherit from SourceDataConfig (CSV, JSON, etc.).
   # ============================================================
 
-  - key: "engine/orchestrator.py:R2:Orchestrator:_validate_source_quarantine_destination:line=334"
+  - key: "engine/orchestrator.py:R2:Orchestrator:_validate_source_quarantine_destination:line=343"
     owner: "architecture"
     reason: "Optional protocol extension - _on_validation_failure only on sources with SourceDataConfig"
     safety: "None default means source doesn't support quarantine routing - validation skipped"
@@ -251,13 +251,13 @@ allow_hits:
   # others use dynamic. The default value is well-defined.
   # ============================================================
 
-  - key: "engine/orchestrator.py:R1:Orchestrator:_execute_run:line=617"
+  - key: "engine/orchestrator.py:R1:Orchestrator:_execute_run:line=696"
     owner: "architecture"
     reason: "Optional schema config with explicit default - not all nodes define schemas"
     safety: "Default value is well-defined: dynamic fields"
     expires: null  # Permanent - intentional design
 
-  - key: "engine/orchestrator.py:R2:Orchestrator:resume:line=1206"
+  - key: "engine/orchestrator.py:R2:Orchestrator:resume:line=1307"
     owner: "architecture"
     reason: "Optional protocol attribute: _schema_class only exists on sources with Pydantic schemas"
     safety: "None default means source uses dynamic schema - type restoration skipped, backward compatible"
