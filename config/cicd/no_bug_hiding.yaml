@@ -863,37 +863,37 @@ allow_hits:
   # to report system state rather than crash.
   # ============================================================
 
-  - key: "cli.py:R1:_execute_pipeline:_format_run_completed:line=532"
+  - key: "cli.py:R1:_execute_pipeline:_format_run_completed:line=535"
     owner: "architecture"
     reason: "Intentional Optional API: status_symbols lookup with default for unknown statuses"
     safety: "Default '?' symbol for unrecognized statuses - output still produced"
     expires: null  # Permanent - intentional design
 
-  - key: "cli.py:R1:health:line=1182"
+  - key: "cli.py:R1:health:line=1185"
     owner: "architecture"
     reason: "Trust boundary: environment variable GIT_COMMIT_SHA is optional external input"
     safety: "Empty string default is safe - commit SHA is informational only"
     expires: null  # Permanent - intentional design
 
-  - key: "cli.py:R4:health:line=1194"
+  - key: "cli.py:R4:health:line=1197"
     owner: "architecture"
     reason: "Trust boundary: git subprocess may fail for many reasons (not installed, not a repo, etc.)"
     safety: "Graceful fallback to 'unknown' - health check reports git as unavailable"
     expires: null  # Permanent - intentional design
 
-  - key: "cli.py:R1:health:line=1210"
+  - key: "cli.py:R1:health:line=1213"
     owner: "architecture"
     reason: "Trust boundary: environment variable DATABASE_URL is optional external input"
     safety: "Empty string default triggers skip logic - database check only runs if configured"
     expires: null  # Permanent - intentional design
 
-  - key: "cli.py:R4:health:line=1222"
+  - key: "cli.py:R4:health:line=1225"
     owner: "architecture"
     reason: "Trust boundary: database connection may fail for many reasons (network, auth, etc.)"
     safety: "Error recorded in checks dict with status='error' - health check reports DB as unhealthy"
     expires: null  # Permanent - intentional design
 
-  - key: "cli.py:R4:health:line=1286"
+  - key: "cli.py:R4:health:line=1289"
     owner: "architecture"
     reason: "Trust boundary: plugin manager initialization may fail due to misconfiguration"
     safety: "Error recorded in checks dict with status='error' - health check reports plugins as unhealthy"
