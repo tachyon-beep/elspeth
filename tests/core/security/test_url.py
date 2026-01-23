@@ -263,6 +263,65 @@ class TestSanitizedWebhookUrl:
         with pytest.raises(AttributeError):
             result.sanitized_url = "hacked"  # type: ignore[misc]
 
+    def test_ipv6_url_without_auth_unchanged(self) -> None:
+        """IPv6 URL without auth preserves bracket notation."""
+        url = "https://[::1]:8443/webhook"
+        result = SanitizedWebhookUrl.from_raw_url(url, fail_if_no_key=False)
+
+        assert result.sanitized_url == url
+        assert "[::1]" in result.sanitized_url
+        assert result.fingerprint is None
+
+    def test_ipv6_with_username_only_preserves_brackets(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """IPv6 URL with username-only auth preserves bracket notation after stripping."""
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-key")
+        url = "https://token@[::1]:8443/webhook"
+
+        result = SanitizedWebhookUrl.from_raw_url(url)
+
+        # Regression test for bug: must preserve IPv6 brackets when rebuilding netloc
+        assert result.sanitized_url == "https://[::1]:8443/webhook"
+        assert "token" not in result.sanitized_url
+        assert "[::1]" in result.sanitized_url
+        assert result.fingerprint is not None
+
+    def test_ipv6_with_username_and_password_preserves_brackets(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """IPv6 URL with username:password preserves bracket notation after stripping."""
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-key")
+        url = "https://user:pass@[::1]:8443/webhook"
+
+        result = SanitizedWebhookUrl.from_raw_url(url)
+
+        assert result.sanitized_url == "https://[::1]:8443/webhook"
+        assert "user" not in result.sanitized_url
+        assert "pass" not in result.sanitized_url
+        assert "[::1]" in result.sanitized_url
+        assert result.fingerprint is not None
+
+    def test_ipv6_full_address_with_auth(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """IPv6 full address with auth preserves bracket notation."""
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-key")
+        url = "https://token@[2001:db8::1]:443/webhook"
+
+        result = SanitizedWebhookUrl.from_raw_url(url)
+
+        assert result.sanitized_url == "https://[2001:db8::1]:443/webhook"
+        assert "token" not in result.sanitized_url
+        assert "[2001:db8::1]" in result.sanitized_url
+        assert result.fingerprint is not None
+
+    def test_ipv6_no_port_with_auth(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """IPv6 without port preserves bracket notation when stripping auth."""
+        monkeypatch.setenv("ELSPETH_FINGERPRINT_KEY", "test-key")
+        url = "https://token@[::1]/webhook"
+
+        result = SanitizedWebhookUrl.from_raw_url(url)
+
+        assert result.sanitized_url == "https://[::1]/webhook"
+        assert "token" not in result.sanitized_url
+        assert "[::1]" in result.sanitized_url
+        assert result.fingerprint is not None
+
 
 class TestSensitiveParams:
     """Tests for SENSITIVE_PARAMS coverage."""

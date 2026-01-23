@@ -201,7 +201,11 @@ class SanitizedWebhookUrl:
         if has_basic_auth:
             # Remove both username and password - rebuild netloc without userinfo
             port_str = f":{parsed.port}" if parsed.port else ""
-            netloc = f"{parsed.hostname}{port_str}"
+            # IPv6 addresses need brackets (hostname strips them, netloc preserves them)
+            if parsed.hostname and ":" in parsed.hostname:
+                netloc = f"[{parsed.hostname}]{port_str}"
+            else:
+                netloc = f"{parsed.hostname}{port_str}"
         else:
             netloc = parsed.netloc
 
