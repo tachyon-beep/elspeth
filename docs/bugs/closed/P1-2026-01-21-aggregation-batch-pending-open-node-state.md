@@ -102,3 +102,113 @@
 
 - Related issues/PRs: N/A
 - Related design docs: N/A
+
+---
+
+## Resolution
+
+### Status
+**FIXED** - Resolved on 2026-01-23
+
+### Fixed By
+- **Primary fix**: commit `0f21ecb` - Added PENDING status to NodeStateStatus enum
+- **Type safety improvements**: commit `fde9835` - Added type overloads and transition test
+
+### Implementation Approach
+
+The fix introduced a new **PENDING** status to the `NodeStateStatus` enum to properly model the semantic difference between:
+- **OPEN**: Work in progress (transform executing)
+- **PENDING**: Work completed, result not available yet (async operation submitted)
+- **COMPLETED**: Work completed with result available
+
+This follows the existing pattern in the codebase:
+- `BatchStatus`: DRAFT → **EXECUTING** → COMPLETED/FAILED
+- `ExportStatus`: **PENDING** → COMPLETED/FAILED
+- `NodeStateStatus`: OPEN → **PENDING** → COMPLETED/FAILED *(new)*
+
+#### Key Changes
+
+1. **Contract extension** (`src/elspeth/contracts/enums.py`, `src/elspeth/contracts/audit.py`):
+   - Added `PENDING = "pending"` to `NodeStateStatus` enum
+   - Created `NodeStatePending` dataclass with invariants:
+     - Has `completed_at` and `duration_ms` (operation finished)
+     - No `output_hash` (result not available yet)
+     - Has `context_before_json` and `context_after_json`
+
+2. **Recorder updates** (`src/elspeth/core/landscape/recorder.py`):
+   - Added PENDING case to `_row_to_node_state()` with validation
+   - Added type overloads to `complete_node_state()` for precise return types
+   - Validates PENDING states have `completed_at` and `duration_ms`
+
+3. **Executor fix** (`src/elspeth/engine/executors.py:929-953`):
+   ```python
+   except BatchPendingError:
+       duration_ms = (time.perf_counter() - start) * 1000
+
+       # Close node_state with "pending" status
+       self._recorder.complete_node_state(
+           state_id=state.state_id,
+           status="pending",
+           duration_ms=duration_ms,
+       )
+
+       # Link batch to the aggregation state
+       self._recorder.update_batch_status(
+           batch_id=batch_id,
+           status="executing",
+           state_id=state.state_id,
+       )
+
+       raise  # Re-raise for orchestrator retry
+   ```
+
+4. **Exporter support** (`src/elspeth/core/landscape/exporter.py`):
+   - Added PENDING case to discriminated union serialization
+   - Exports PENDING states with `output_hash: None`
+
+#### Alternative Approaches Considered
+
+1. ❌ **Leave node_state OPEN** - Original bug, violates audit trail integrity
+2. ❌ **Use marker output with COMPLETED** - Semantic corruption (recording fake completion)
+3. ❌ **Separate pending_batches table** - Unnecessary complexity
+4. ✅ **Add PENDING status** - Proper state machine extension (chosen)
+
+The architecture-critic agent review explicitly rejected approach #2, noting: "The marker output approach is a bug masquerading as a fix. Recording fake completion is evidence tampering in a high-stakes system."
+
+### Test Coverage
+
+**Primary test**: `tests/engine/test_aggregation_audit.py::test_batch_pending_error_closes_node_state_and_links_batch`
+- Verifies BatchPendingError is raised correctly
+- Asserts no OPEN node_states remain after exception
+- Validates PENDING state has correct invariants (completed_at, no output_hash)
+- Verifies batch has `aggregation_state_id` linking to node_state
+- Confirms batch status remains "executing"
+
+**Transition test**: `tests/engine/test_aggregation_audit.py::test_pending_to_completed_transition`
+- Verifies PENDING → COMPLETED state transition
+- Tests update path when async batch operations complete
+- Confirms audit trail shows final COMPLETED state with output_hash
+
+**Test results**: All 500 engine tests pass, mypy clean
+
+### Verification
+
+✅ Acceptance Criteria Met:
+1. BatchPendingError does not leave OPEN node_states - **VERIFIED**
+2. Executing batches have aggregation_state_id linked to flush attempt - **VERIFIED**
+
+✅ Additional validations:
+- No orphaned OPEN states in audit trail
+- Batch traceability maintained through aggregation_state_id
+- Type safety improved with overload signatures
+- Full lifecycle tested (PENDING → COMPLETED transition)
+
+### Architectural Impact
+
+The PENDING status addition maintains ELSPETH's core principles:
+- **Auditability**: Every batch submission traceable to node_state
+- **Three-Tier Trust Model**: Crashes on NULL fields in audit trail (Tier 1)
+- **No Bug Hiding**: Direct field access, crashes on violations
+- **Type Safety**: Discriminated unions with Literal types enforce invariants
+
+The state machine now correctly models async operations with a proper transitional state, avoiding the architectural anti-pattern of abusing terminal states with fake data.
