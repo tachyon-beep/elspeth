@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 import sqlite3
 import threading
+import time
 from typing import TYPE_CHECKING
 
 from pyrate_limiter import (  # type: ignore[attr-defined]
@@ -188,15 +189,36 @@ class RateLimiter:
             self._buckets.append(minute_bucket)
             self._limiters.append(Limiter(minute_bucket, max_delay=Duration.MINUTE, raise_when_fail=True))
 
-    def acquire(self, weight: int = 1) -> None:
+    def acquire(self, weight: int = 1, timeout: float | None = None) -> None:
         """Acquire rate limit tokens, blocking if necessary.
+
+        Thread-safe and atomic across all rate limiters (per-second and per-minute).
+        Blocks by polling try_acquire() until successful or timeout expires.
 
         Args:
             weight: Number of tokens to acquire (default 1)
+            timeout: Maximum time to wait in seconds (None = wait forever)
+
+        Raises:
+            TimeoutError: If timeout expires before tokens are acquired
         """
-        # Acquire from all limiters (blocks on each if needed)
-        for limiter in self._limiters:
-            limiter.try_acquire(self.name, weight=weight)
+        deadline = None if timeout is None else (time.monotonic() + timeout)
+
+        while True:
+            # try_acquire() is already thread-safe and atomic across all limiters
+            if self.try_acquire(weight):
+                return
+
+            # Check timeout
+            if deadline is not None:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError(f"Failed to acquire {weight} tokens within {timeout}s timeout")
+                # Sleep for shorter of: 10ms or remaining time
+                time.sleep(min(0.01, remaining))
+            else:
+                # No timeout - sleep 10ms and retry
+                time.sleep(0.01)
 
     def _would_all_buckets_accept(self, weight: int) -> bool:
         """Check if all buckets would accept without consuming tokens.

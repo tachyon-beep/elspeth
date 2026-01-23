@@ -540,3 +540,134 @@ class TestExcepthookSuppression:
             # Cleanup just in case
             with _suppressed_lock:
                 _suppressed_thread_idents.discard(77777)
+
+
+class TestAcquireThreadSafety:
+    """Tests for acquire() thread safety and atomicity.
+
+    These tests verify the fix for the thread safety bug where acquire()
+    was not locked and could cause race conditions with concurrent calls.
+    """
+
+    def test_acquire_concurrency_no_interleaving(self) -> None:
+        """Multiple threads calling acquire() should not interleave incorrectly.
+
+        Verifies that concurrent acquire() calls are thread-safe and that
+        tokens are consumed correctly without race conditions.
+        """
+        import threading
+
+        from elspeth.core.rate_limit import RateLimiter
+
+        # Allow 10 requests total
+        with RateLimiter(name="concurrent_test", requests_per_second=10) as limiter:
+            results: list[bool] = []
+            errors: list[Exception] = []
+
+            def worker() -> None:
+                try:
+                    # Each thread tries to acquire 1 token
+                    limiter.acquire(weight=1)
+                    results.append(True)
+                except Exception as e:
+                    errors.append(e)
+
+            # Launch 10 threads (exactly at limit)
+            threads = [threading.Thread(target=worker) for _ in range(10)]
+            for t in threads:
+                t.start()
+            for t in threads:
+                t.join()
+
+            # All 10 should succeed (no errors)
+            assert len(errors) == 0, f"Unexpected errors: {errors}"
+            assert len(results) == 10
+
+            # The 11th acquire should fail (quota exhausted)
+            assert limiter.try_acquire() is False
+
+    def test_acquire_atomicity_across_multiple_rate_limits(self) -> None:
+        """acquire() should be atomic across per-second and per-minute limits.
+
+        This test verifies that if per-minute limit blocks, per-second tokens
+        are not consumed. Tests the same atomicity guarantee as try_acquire().
+        """
+        import threading
+
+        from elspeth.core.rate_limit import RateLimiter
+
+        # Allow 100/second but only 2/minute
+        with RateLimiter(
+            name="atomic_acquire_test",
+            requests_per_second=100,
+            requests_per_minute=2,
+        ) as limiter:
+            # Use up the minute quota
+            limiter.acquire(weight=1)
+            limiter.acquire(weight=1)
+
+            # Now attempt a 3rd acquisition in a background thread
+            # This should block waiting for minute quota
+            acquired = threading.Event()
+            error_occurred = threading.Event()
+
+            def blocking_worker() -> None:
+                try:
+                    # This should block because minute limit is exhausted
+                    # Set timeout to prevent infinite wait in test
+                    limiter.acquire(weight=1, timeout=0.5)
+                    acquired.set()
+                except TimeoutError:
+                    # Expected - minute limit exhausted
+                    pass
+                except Exception:
+                    error_occurred.set()
+
+            thread = threading.Thread(target=blocking_worker)
+            thread.start()
+            thread.join(timeout=1.0)
+
+            # Thread should have timed out (not acquired)
+            assert not acquired.is_set(), "Should not have acquired (minute limit exhausted)"
+            assert not error_occurred.is_set(), "Should not have raised unexpected error"
+
+            # The per-second bucket should NOT have been consumed by the failed attempt
+            # We should have exactly 2 items in each bucket
+            assert limiter._buckets[0].count() == 2  # per-second bucket
+            assert limiter._buckets[1].count() == 2  # per-minute bucket
+
+    def test_acquire_timeout_parameter(self) -> None:
+        """acquire() should respect timeout parameter and raise TimeoutError.
+
+        Verifies that acquire() doesn't block forever when rate limited.
+        Critical for high-stakes audit systems that require bounded behavior.
+        """
+        import pytest
+
+        from elspeth.core.rate_limit import RateLimiter
+
+        # Very restrictive: 1 request per second
+        with RateLimiter(name="timeout_test", requests_per_second=1) as limiter:
+            # First request: succeeds
+            limiter.acquire()
+
+            # Second request with short timeout: should raise TimeoutError
+            with pytest.raises(TimeoutError, match=r"Failed to acquire.*timeout"):
+                limiter.acquire(weight=1, timeout=0.1)
+
+    def test_acquire_with_timeout_none_accepts_parameter(self) -> None:
+        """acquire() accepts timeout=None parameter (API compatibility test).
+
+        This test verifies that timeout=None doesn't raise an exception.
+        We don't test actual indefinite blocking behavior as that would
+        make the test suite hang - the other tests verify timeout behavior.
+        """
+        from elspeth.core.rate_limit import RateLimiter
+
+        # Create limiter with capacity
+        with RateLimiter(name="timeout_none_test", requests_per_second=10) as limiter:
+            # Should not raise - verifies timeout=None is accepted
+            limiter.acquire(weight=1, timeout=None)
+
+            # Should also work without explicit timeout parameter
+            limiter.acquire(weight=1)
