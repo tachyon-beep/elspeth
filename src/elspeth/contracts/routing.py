@@ -35,14 +35,20 @@ class RoutingAction:
     CRITICAL: The `mode` field determines move vs copy semantics:
     - MOVE: Token exits current path, goes to destination only
     - COPY: Token clones to destination AND continues on current path
+             (ONLY valid for FORK_TO_PATHS - creates child tokens)
 
     This field is REQUIRED per architecture. Without it, executors cannot
     correctly record routing events or determine token flow.
+
+    NOTE: COPY mode with ROUTE kind is not supported due to architectural
+    constraints (single terminal state per token). Use FORK_TO_PATHS to
+    achieve "route to sink and continue" semantics.
 
     Invariants (enforced by __post_init__):
     - CONTINUE must have empty destinations
     - FORK_TO_PATHS must use COPY mode
     - ROUTE must have exactly one destination
+    - ROUTE cannot use COPY mode (use FORK_TO_PATHS instead)
     """
 
     kind: RoutingKind
@@ -60,6 +66,14 @@ class RoutingAction:
 
         if self.kind == RoutingKind.ROUTE and len(self.destinations) != 1:
             raise ValueError("ROUTE must have exactly one destination")
+
+        if self.kind == RoutingKind.ROUTE and self.mode == RoutingMode.COPY:
+            raise ValueError(
+                "COPY mode not supported for ROUTE kind. "
+                "Use FORK_TO_PATHS to route to sink and continue processing. "
+                "Reason: ELSPETH's audit model enforces single terminal state per token; "
+                "COPY would require dual terminal states (ROUTED + COMPLETED)."
+            )
 
     @classmethod
     def continue_(cls, *, reason: dict[str, Any] | None = None) -> "RoutingAction":
@@ -87,8 +101,11 @@ class RoutingAction:
 
         Args:
             label: Route label that will be resolved via routes config
-            mode: MOVE (default) or COPY
+            mode: MOVE (default). COPY mode not supported - use fork_to_paths() instead.
             reason: Audit trail information about why this route was chosen
+
+        Raises:
+            ValueError: If mode is COPY (architectural limitation)
         """
         return cls(
             kind=RoutingKind.ROUTE,

@@ -177,10 +177,10 @@ class TestRoutingActionEnums:
         from elspeth.contracts import RoutingKind, RoutingMode
         from elspeth.plugins.results import RoutingAction
 
-        action = RoutingAction.route("suspicious", mode=RoutingMode.COPY)
+        action = RoutingAction.route("suspicious", mode=RoutingMode.MOVE)
 
         assert action.kind == RoutingKind.ROUTE
-        assert action.mode == RoutingMode.COPY
+        assert action.mode == RoutingMode.MOVE
         assert isinstance(action.kind, RoutingKind)
         assert isinstance(action.mode, RoutingMode)
 

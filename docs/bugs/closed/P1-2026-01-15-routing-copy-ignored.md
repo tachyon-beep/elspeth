@@ -106,3 +106,103 @@
 1. Trace `RoutingMode.COPY` through gate execution to see if dual outputs are produced
 2. Check if processor handles COPY differently from MOVE
 3. Write test that verifies COPY results in output to both routed sink AND downstream processing
+
+---
+
+## Resolution (2026-01-24)
+
+**Status:** RESOLVED - Working as designed (architectural limitation)
+
+### Root Cause Analysis
+
+Systematic debugging revealed a three-layer architectural gap:
+
+1. **Contract layer** (`routing.py`): Correctly defines COPY mode for all routing kinds
+2. **Executor layer** (`executors.py:627`): Hardcodes `RoutingMode.MOVE` when routing to sinks
+3. **Processor layer** (`processor.py:681-696`): Treats all sink routing as terminal (immediate return)
+
+### Critical Finding: Single Terminal State Invariant
+
+ELSPETH's audit model enforces: **"Every row reaches exactly one terminal state"** (CLAUDE.md)
+
+COPY mode for ROUTE would violate this invariant by requiring dual terminal states:
+1. `ROUTED` when sent to mid-pipeline sink
+2. `COMPLETED` when reaching final output sink
+
+This breaks the audit trail's single-terminal-state model.
+
+### How FORK Correctly Handles COPY
+
+FORK_TO_PATHS achieves "copy and continue" semantics by creating **child tokens**, each with their own terminal state:
+- Parent token: `FORKED` (terminal)
+- Child tokens: Each eventually reaches `COMPLETED`, `ROUTED`, etc.
+
+Each token has exactly ONE terminal state. The audit trail remains consistent.
+
+### Decision: Explicit Rejection
+
+**COPY mode is only valid for FORK_TO_PATHS. ROUTE kind must use MOVE mode.**
+
+**Rationale:**
+1. Preserves audit integrity (single terminal state per token)
+2. Working pattern exists (FORK_TO_PATHS provides "route and continue" correctly)
+3. No semantic value (COPY for ROUTE would just be "fork to one sink" - use fork instead)
+4. Avoids complexity (no orchestrator buffering, no dual terminal states, no checkpoint redesign)
+
+### Implementation
+
+**Changes made:**
+
+1. **Contract validation** (`src/elspeth/contracts/routing.py:70-76`):
+   ```python
+   if self.kind == RoutingKind.ROUTE and self.mode == RoutingMode.COPY:
+       raise ValueError(
+           "COPY mode not supported for ROUTE kind. "
+           "Use FORK_TO_PATHS to route to sink and continue processing. "
+           "Reason: ELSPETH's audit model enforces single terminal state per token; "
+           "COPY would require dual terminal states (ROUTED + COMPLETED)."
+       )
+   ```
+
+2. **Updated documentation** (`routing.py:35-51`):
+   - Clarified COPY is only valid for FORK_TO_PATHS
+   - Added note about architectural constraint
+   - Updated `route()` method docstring
+
+3. **Test coverage** (`tests/contracts/test_routing.py:48-64`):
+   ```python
+   def test_route_with_copy_raises(self) -> None:
+       """route with COPY mode raises ValueError (architectural limitation)."""
+       with pytest.raises(ValueError, match="COPY mode not supported for ROUTE"):
+           RoutingAction.route("above", mode=RoutingMode.COPY)
+   ```
+
+4. **Architecture Decision Record**: `docs/design/adr/002-routing-copy-mode-limitation.md`
+
+### User Guidance
+
+To achieve "route to sink and continue" semantics, users should use `fork_to_paths()`:
+
+```python
+# Instead of (not supported):
+gate_config = GateSettings(
+    routes={"high_risk": RouteConfig(destination="flagged", mode=RoutingMode.COPY)}
+)
+
+# Use this (fork to sink):
+gate_config = GateSettings(
+    routes={"high_risk": "fork"},
+    fork_to=["flagged"]  # Creates child token that continues processing
+)
+```
+
+### Reviews
+
+- **Architecture Critic** (Agent a2a1113): Identified dual-terminal-state violation (CRITICAL severity)
+- **Code Reviewer** (Agent af71460): Identified silent data loss risk in proposed implementation
+
+Both reviewers recommended Option B (explicit rejection) over Option A (implement COPY).
+
+### Follow-up
+
+**Task created:** Evaluate whether `RoutingMode.COPY` is needed at all in the enum (separate analysis)
