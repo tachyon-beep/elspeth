@@ -10,7 +10,6 @@ Phase 3 Integration Points:
 - payload_store: PayloadStore for large blob storage
 """
 
-import hashlib
 import logging
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
@@ -261,7 +260,7 @@ class PluginContext:
         Returns:
             ValidationErrorToken for tracking the quarantined row
         """
-        from elspeth.core.canonical import stable_hash
+        from elspeth.core.canonical import repr_hash, stable_hash
 
         # Generate row_id from content hash if not present
         # External data may be non-dict (e.g., JSON array containing primitives),
@@ -276,11 +275,13 @@ class PluginContext:
             except (ValueError, TypeError) as e:
                 # Non-canonical data (NaN, Infinity, or other non-serializable types)
                 # Hash the repr() instead - not canonical, but preserves audit trail
+                row_preview = repr(row)[:200] + "..." if len(repr(row)) > 200 else repr(row)
                 logger.warning(
-                    "Row data not canonically serializable, using repr() hash: %s",
+                    "Row data not canonically serializable, using repr() hash: %s | Row preview: %s",
                     str(e),
+                    row_preview,
                 )
-                row_id = hashlib.sha256(repr(row).encode("utf-8")).hexdigest()[:16]
+                row_id = repr_hash(row)[:16]
 
         if self.landscape is None:
             logger.warning(

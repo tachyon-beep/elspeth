@@ -217,3 +217,55 @@ class TestValidationErrorNonCanonical:
         # All should have unique error_ids
         error_ids = [t.error_id for t in tokens]
         assert len(error_ids) == len(set(error_ids))
+
+
+def test_repr_hash_helper():
+    """Verify repr_hash() helper produces consistent hashes."""
+    from elspeth.core.canonical import repr_hash
+
+    # Same object should produce same hash
+    hash1 = repr_hash(42)
+    hash2 = repr_hash(42)
+    assert hash1 == hash2
+
+    # Different objects should produce different hashes
+    hash_int = repr_hash(42)
+    hash_str = repr_hash("42")
+    assert hash_int != hash_str
+
+    # Non-canonical data should hash successfully
+    hash_nan = repr_hash({"value": float("nan")})
+    assert len(hash_nan) == 64  # SHA-256 hex digest length
+
+
+def test_noncanonical_metadata_structure():
+    """Verify NonCanonicalMetadata dataclass works correctly."""
+    from elspeth.contracts.audit import NonCanonicalMetadata
+
+    # Test direct creation
+    metadata = NonCanonicalMetadata(
+        repr_value="{'value': nan}",
+        type_name="dict",
+        canonical_error="Cannot canonicalize non-finite float",
+    )
+
+    # Test to_dict() produces correct structure
+    meta_dict = metadata.to_dict()
+    assert meta_dict["__repr__"] == "{'value': nan}"
+    assert meta_dict["__type__"] == "dict"
+    assert meta_dict["__canonical_error__"] == "Cannot canonicalize non-finite float"
+
+    # Test from_error() factory
+    try:
+        from elspeth.core.canonical import canonical_json
+
+        canonical_json({"value": float("nan")})
+    except ValueError as e:
+        metadata2 = NonCanonicalMetadata.from_error({"value": float("nan")}, e)
+        assert "nan" in metadata2.repr_value.lower()
+        assert metadata2.type_name == "dict"
+        assert "non-finite" in metadata2.canonical_error.lower()
+
+    # Test immutability (frozen=True)
+    with pytest.raises(AttributeError):
+        metadata.repr_value = "changed"  # Should fail - frozen dataclass

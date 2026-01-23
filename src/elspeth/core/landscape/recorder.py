@@ -5,7 +5,6 @@ This is the main interface for recording audit trail entries during
 pipeline execution. It wraps the low-level database operations.
 """
 
-import hashlib
 import json
 import logging
 import uuid
@@ -39,6 +38,7 @@ from elspeth.contracts import (
     NodeStatePending,
     NodeStateStatus,
     NodeType,
+    NonCanonicalMetadata,
     RoutingEvent,
     RoutingMode,
     RoutingSpec,
@@ -53,7 +53,7 @@ from elspeth.contracts import (
     TransformErrorRecord,
     ValidationErrorRecord,
 )
-from elspeth.core.canonical import canonical_json, stable_hash
+from elspeth.core.canonical import canonical_json, repr_hash, stable_hash
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.row_data import RowDataResult, RowDataState
 from elspeth.core.landscape.schema import (
@@ -2352,19 +2352,16 @@ class LandscapeRecorder:
         except (ValueError, TypeError) as e:
             # Non-canonical data (NaN, Infinity, non-dict, etc.)
             # Use repr() fallback to preserve audit trail
+            row_preview = repr(row_data)[:200] + "..." if len(repr(row_data)) > 200 else repr(row_data)
             logger.warning(
-                "Validation error row not canonically serializable (using repr fallback): %s",
+                "Validation error row not canonically serializable (using repr fallback): %s | Row preview: %s",
                 str(e),
+                row_preview,
             )
-            row_hash = hashlib.sha256(repr(row_data).encode("utf-8")).hexdigest()
+            row_hash = repr_hash(row_data)
             # Store non-canonical representation with type metadata
-            row_data_json = json.dumps(
-                {
-                    "__repr__": repr(row_data),
-                    "__type__": type(row_data).__name__,
-                    "__canonical_error__": str(e),
-                }
-            )
+            metadata = NonCanonicalMetadata.from_error(row_data, e)
+            row_data_json = json.dumps(metadata.to_dict())
 
         with self._db.connection() as conn:
             conn.execute(
