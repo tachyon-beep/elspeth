@@ -9,7 +9,7 @@ import json
 import uuid
 from datetime import UTC, datetime
 from enum import Enum
-from typing import TYPE_CHECKING, Any, TypeVar
+from typing import TYPE_CHECKING, Any, Literal, TypeVar, overload
 
 if TYPE_CHECKING:
     from elspeth.contracts.schema import SchemaConfig
@@ -1074,6 +1074,42 @@ class LandscapeRecorder:
 
         return state
 
+    @overload
+    def complete_node_state(
+        self,
+        state_id: str,
+        status: Literal[NodeStateStatus.PENDING, "pending"],
+        *,
+        output_data: dict[str, Any] | list[dict[str, Any]] | None = None,
+        duration_ms: float | None = None,
+        error: ExecutionError | dict[str, Any] | None = None,
+        context_after: dict[str, Any] | None = None,
+    ) -> NodeStatePending: ...
+
+    @overload
+    def complete_node_state(
+        self,
+        state_id: str,
+        status: Literal[NodeStateStatus.COMPLETED, "completed"],
+        *,
+        output_data: dict[str, Any] | list[dict[str, Any]] | None = None,
+        duration_ms: float | None = None,
+        error: ExecutionError | dict[str, Any] | None = None,
+        context_after: dict[str, Any] | None = None,
+    ) -> NodeStateCompleted: ...
+
+    @overload
+    def complete_node_state(
+        self,
+        state_id: str,
+        status: Literal[NodeStateStatus.FAILED, "failed", "rejected"],
+        *,
+        output_data: dict[str, Any] | list[dict[str, Any]] | None = None,
+        duration_ms: float | None = None,
+        error: ExecutionError | dict[str, Any] | None = None,
+        context_after: dict[str, Any] | None = None,
+    ) -> NodeStateFailed: ...
+
     def complete_node_state(
         self,
         state_id: str,
@@ -1137,8 +1173,8 @@ class LandscapeRecorder:
 
         result = self.get_node_state(state_id)
         assert result is not None, f"NodeState {state_id} not found after update"
-        # Type narrowing: result is guaranteed to be Completed or Failed
-        assert not isinstance(result, NodeStateOpen), "State should be terminal after completion"
+        # Type narrowing: result is guaranteed to be terminal (PENDING/COMPLETED/FAILED)
+        assert not isinstance(result, NodeStateOpen), "State should be terminal (PENDING/COMPLETED/FAILED) after completion"
         return result
 
     def get_node_state(self, state_id: str) -> NodeState | None:
