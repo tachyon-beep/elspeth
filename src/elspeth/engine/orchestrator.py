@@ -869,9 +869,11 @@ class Orchestrator:
         rows_buffered = 0
         pending_tokens: dict[str, list[TokenInfo]] = {name: [] for name in config.sinks}
 
-        # Progress tracking
+        # Progress tracking - hybrid timing: emit on 100 rows OR 5 seconds
         progress_interval = 100
+        progress_time_interval = 5.0  # seconds
         start_time = time.perf_counter()
+        last_progress_time = start_time
 
         # Compute default last_node_id for end-of-source checkpointing
         # (e.g., flush_pending when no rows were processed in the main loop)
@@ -892,16 +894,24 @@ class Orchestrator:
         self._events.emit(PhaseStarted(phase=PipelinePhase.SOURCE, action=PhaseAction.INITIALIZING, target=config.source.name))
 
         try:
-            with self._span_factory.source_span(config.source.name):
-                # Invoke load() to get iterator - any immediate failures (file not found) happen here
-                source_iterator = config.source.load(ctx)
+            # Nested try for SOURCE phase to catch load() failures separately from PROCESS errors
+            try:
+                with self._span_factory.source_span(config.source.name):
+                    # Invoke load() to get iterator - any immediate failures (file not found) happen here
+                    source_iterator = config.source.load(ctx)
+            except Exception as e:
+                # SOURCE phase error (file not found, auth failure, etc.)
+                self._events.emit(PhaseError(phase=PipelinePhase.SOURCE, error=e, target=config.source.name))
+                raise  # Re-raise to propagate SOURCE failures (cleanup will still run via outer finally)
 
-                self._events.emit(PhaseCompleted(phase=PipelinePhase.SOURCE, duration_seconds=time.perf_counter() - phase_start))
+            self._events.emit(PhaseCompleted(phase=PipelinePhase.SOURCE, duration_seconds=time.perf_counter() - phase_start))
 
-                # PROCESS phase - iterate through rows
-                phase_start = time.perf_counter()
-                self._events.emit(PhaseStarted(phase=PipelinePhase.PROCESS, action=PhaseAction.PROCESSING))
+            # PROCESS phase - iterate through rows
+            phase_start = time.perf_counter()
+            self._events.emit(PhaseStarted(phase=PipelinePhase.PROCESS, action=PhaseAction.PROCESSING))
 
+            # Nested try for PROCESS phase to catch iteration/processing failures
+            try:
                 for row_index, source_item in enumerate(source_iterator):
                     rows_processed += 1
 
@@ -920,8 +930,16 @@ class Orchestrator:
                             )
                             pending_tokens[quarantine_sink].append(quarantine_token)
                         # Emit progress before continue (ensures quarantined rows trigger updates)
-                        if rows_processed % progress_interval == 0:
-                            elapsed = time.perf_counter() - start_time
+                        # Hybrid timing: emit on first row, every 100 rows, or every 5 seconds
+                        current_time = time.perf_counter()
+                        time_since_last_progress = current_time - last_progress_time
+                        should_emit = (
+                            rows_processed == 1  # First row - immediate feedback
+                            or rows_processed % progress_interval == 0  # Every 100 rows
+                            or time_since_last_progress >= progress_time_interval  # Every 5 seconds
+                        )
+                        if should_emit:
+                            elapsed = current_time - start_time
                             self._events.emit(
                                 ProgressEvent(
                                     rows_processed=rows_processed,
@@ -932,6 +950,7 @@ class Orchestrator:
                                     elapsed_seconds=elapsed,
                                 )
                             )
+                            last_progress_time = current_time
                         # Skip normal processing - row is already handled
                         continue
 
@@ -987,9 +1006,17 @@ class Orchestrator:
                             # Passthrough mode buffered token
                             rows_buffered += 1
 
-                    # Emit progress every N rows (after outcome counters are updated)
-                    if rows_processed % progress_interval == 0:
-                        elapsed = time.perf_counter() - start_time
+                    # Emit progress every N rows or every M seconds (after outcome counters are updated)
+                    # Hybrid timing: emit on first row, every 100 rows, or every 5 seconds
+                    current_time = time.perf_counter()
+                    time_since_last_progress = current_time - last_progress_time
+                    should_emit = (
+                        rows_processed == 1  # First row - immediate feedback
+                        or rows_processed % progress_interval == 0  # Every 100 rows
+                        or time_since_last_progress >= progress_time_interval  # Every 5 seconds
+                    )
+                    if should_emit:
+                        elapsed = current_time - start_time
                         self._events.emit(
                             ProgressEvent(
                                 rows_processed=rows_processed,
@@ -1000,97 +1027,103 @@ class Orchestrator:
                                 elapsed_seconds=elapsed,
                             )
                         )
+                        last_progress_time = current_time
 
-            # ─────────────────────────────────────────────────────────────────
-            # CRITICAL: Flush remaining aggregation buffers at end-of-source
-            # ─────────────────────────────────────────────────────────────────
-            if config.aggregation_settings:
-                agg_succeeded, agg_failed = self._flush_remaining_aggregation_buffers(
-                    config=config,
-                    processor=processor,
-                    ctx=ctx,
-                    pending_tokens=pending_tokens,
-                    output_sink_name=output_sink_name,
-                    run_id=run_id,
-                    checkpoint=False,  # Checkpointing now happens after sink write
-                    last_node_id=default_last_node_id,
-                )
-                rows_succeeded += agg_succeeded
-                rows_failed += agg_failed
-
-            # Flush pending coalesce operations at end-of-source
-            if coalesce_executor is not None:
-                # Step for coalesce flush = after all transforms and gates
-                flush_step = len(config.transforms) + len(config.gates)
-                pending_outcomes = coalesce_executor.flush_pending(flush_step)
-
-                # Handle any merged tokens from flush
-                for outcome in pending_outcomes:
-                    if outcome.merged_token is not None:
-                        # Successful merge - route to output sink
-                        rows_coalesced += 1
-                        pending_tokens[output_sink_name].append(outcome.merged_token)
-                    elif outcome.failure_reason:
-                        # Coalesce failed (timeout, missing branches, etc.)
-                        # Failure is recorded in audit trail by executor.
-                        # Not counted as rows_failed since the individual fork children
-                        # were already counted when they reached their terminal states.
-                        pass
-
-            # Write to sinks using SinkExecutor
-            sink_executor = SinkExecutor(recorder, self._span_factory, run_id)
-            # Step = transforms + config gates + 1 (for sink)
-            step = len(config.transforms) + len(config.gates) + 1
-
-            # Create checkpoint callback for post-sink checkpointing
-            def checkpoint_after_sink(sink_node_id: str) -> Callable[[TokenInfo], None]:
-                def callback(token: TokenInfo) -> None:
-                    self._maybe_checkpoint(
-                        run_id=run_id,
-                        token_id=token.token_id,
-                        node_id=sink_node_id,
-                    )
-
-                return callback
-
-            for sink_name, tokens in pending_tokens.items():
-                if tokens and sink_name in config.sinks:
-                    sink = config.sinks[sink_name]
-                    sink_node_id = sink_id_map[sink_name]
-
-                    sink_executor.write(
-                        sink=sink,
-                        tokens=tokens,
+                # ─────────────────────────────────────────────────────────────────
+                # CRITICAL: Flush remaining aggregation buffers at end-of-source
+                # ─────────────────────────────────────────────────────────────────
+                if config.aggregation_settings:
+                    agg_succeeded, agg_failed = self._flush_remaining_aggregation_buffers(
+                        config=config,
+                        processor=processor,
                         ctx=ctx,
-                        step_in_pipeline=step,
-                        on_token_written=checkpoint_after_sink(sink_node_id),
+                        pending_tokens=pending_tokens,
+                        output_sink_name=output_sink_name,
+                        run_id=run_id,
+                        checkpoint=False,  # Checkpointing now happens after sink write
+                        last_node_id=default_last_node_id,
+                    )
+                    rows_succeeded += agg_succeeded
+                    rows_failed += agg_failed
+
+                # Flush pending coalesce operations at end-of-source
+                if coalesce_executor is not None:
+                    # Step for coalesce flush = after all transforms and gates
+                    flush_step = len(config.transforms) + len(config.gates)
+                    pending_outcomes = coalesce_executor.flush_pending(flush_step)
+
+                    # Handle any merged tokens from flush
+                    for outcome in pending_outcomes:
+                        if outcome.merged_token is not None:
+                            # Successful merge - route to output sink
+                            rows_coalesced += 1
+                            pending_tokens[output_sink_name].append(outcome.merged_token)
+                        elif outcome.failure_reason:
+                            # Coalesce failed (timeout, missing branches, etc.)
+                            # Failure is recorded in audit trail by executor.
+                            # Not counted as rows_failed since the individual fork children
+                            # were already counted when they reached their terminal states.
+                            pass
+
+                # Write to sinks using SinkExecutor
+                sink_executor = SinkExecutor(recorder, self._span_factory, run_id)
+                # Step = transforms + config gates + 1 (for sink)
+                step = len(config.transforms) + len(config.gates) + 1
+
+                # Create checkpoint callback for post-sink checkpointing
+                def checkpoint_after_sink(sink_node_id: str) -> Callable[[TokenInfo], None]:
+                    def callback(token: TokenInfo) -> None:
+                        self._maybe_checkpoint(
+                            run_id=run_id,
+                            token_id=token.token_id,
+                            node_id=sink_node_id,
+                        )
+
+                    return callback
+
+                for sink_name, tokens in pending_tokens.items():
+                    if tokens and sink_name in config.sinks:
+                        sink = config.sinks[sink_name]
+                        sink_node_id = sink_id_map[sink_name]
+
+                        sink_executor.write(
+                            sink=sink,
+                            tokens=tokens,
+                            ctx=ctx,
+                            step_in_pipeline=step,
+                            on_token_written=checkpoint_after_sink(sink_node_id),
+                        )
+
+                # Emit final progress if we haven't emitted recently or row count not on interval
+                # (RunCompleted will show final summary regardless, but progress shows intermediate state)
+                current_time = time.perf_counter()
+                time_since_last_progress = current_time - last_progress_time
+                # Emit if: not on progress_interval boundary OR >1s since last emission
+                if rows_processed % progress_interval != 0 or time_since_last_progress >= 1.0:
+                    elapsed = current_time - start_time
+                    self._events.emit(
+                        ProgressEvent(
+                            rows_processed=rows_processed,
+                            # Include routed rows in success count - they reached their destination
+                            rows_succeeded=rows_succeeded + rows_routed,
+                            rows_failed=rows_failed,
+                            rows_quarantined=rows_quarantined,
+                            elapsed_seconds=elapsed,
+                        )
                     )
 
-            # Emit final progress for runs not divisible by progress_interval
-            if rows_processed % progress_interval != 0:
-                elapsed = time.perf_counter() - start_time
-                self._events.emit(
-                    ProgressEvent(
-                        rows_processed=rows_processed,
-                        # Include routed rows in success count - they reached their destination
-                        rows_succeeded=rows_succeeded + rows_routed,
-                        rows_failed=rows_failed,
-                        rows_quarantined=rows_quarantined,
-                        elapsed_seconds=elapsed,
-                    )
-                )
+                # PROCESS phase completed successfully
+                self._events.emit(PhaseCompleted(phase=PipelinePhase.PROCESS, duration_seconds=time.perf_counter() - phase_start))
 
-            # PROCESS phase completed successfully
-            self._events.emit(PhaseCompleted(phase=PipelinePhase.PROCESS, duration_seconds=time.perf_counter() - phase_start))
+            except BatchPendingError:
+                # BatchPendingError is a control-flow signal, not an error.
+                # Don't emit PhaseError - the run isn't failing, it's just waiting.
+                raise  # Re-raise immediately for caller to handle retry
+            except Exception as e:
+                # PROCESS phase error (iteration or processing failures)
+                self._events.emit(PhaseError(phase=PipelinePhase.PROCESS, error=e, target=config.source.name))
+                raise  # CRITICAL: Always re-raise - exceptions in PROCESS phase must propagate
 
-        except BatchPendingError:
-            # BatchPendingError is a control-flow signal, not an error.
-            # Don't emit PhaseError - the run isn't failing, it's just waiting.
-            raise  # Re-raise immediately for caller to handle retry
-        except Exception as e:
-            # Emit phase error for observability, then re-raise
-            self._events.emit(PhaseError(phase=PipelinePhase.PROCESS, error=e, target=config.source.name))
-            raise  # CRITICAL: Always re-raise - exceptions in PROCESS phase must propagate
         finally:
             # Call on_complete for all plugins (even on error)
             # Base classes provide no-op implementations, so no hasattr needed
