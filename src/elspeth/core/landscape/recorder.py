@@ -34,6 +34,7 @@ from elspeth.contracts import (
     NodeStateCompleted,
     NodeStateFailed,
     NodeStateOpen,
+    NodeStatePending,
     NodeStateStatus,
     NodeType,
     RoutingEvent,
@@ -118,7 +119,7 @@ def _row_to_node_state(row: Any) -> NodeState:
         row: Database row from node_states table
 
     Returns:
-        NodeStateOpen, NodeStateCompleted, or NodeStateFailed depending on status
+        NodeStateOpen, NodeStatePending, NodeStateCompleted, or NodeStateFailed depending on status
     """
     status = NodeStateStatus(row.status)
 
@@ -133,6 +134,27 @@ def _row_to_node_state(row: Any) -> NodeState:
             input_hash=row.input_hash,
             started_at=row.started_at,
             context_before_json=row.context_before_json,
+        )
+    elif status == NodeStateStatus.PENDING:
+        # Pending states must have completed_at, duration_ms (but no output_hash yet)
+        # Validate required fields - None indicates audit integrity violation
+        if row.duration_ms is None:
+            raise ValueError(f"PENDING state {row.state_id} has NULL duration_ms - audit integrity violation")
+        if row.completed_at is None:
+            raise ValueError(f"PENDING state {row.state_id} has NULL completed_at - audit integrity violation")
+        return NodeStatePending(
+            state_id=row.state_id,
+            token_id=row.token_id,
+            node_id=row.node_id,
+            step_index=row.step_index,
+            attempt=row.attempt,
+            status=NodeStateStatus.PENDING,
+            input_hash=row.input_hash,
+            started_at=row.started_at,
+            completed_at=row.completed_at,
+            duration_ms=row.duration_ms,
+            context_before_json=row.context_before_json,
+            context_after_json=row.context_after_json,
         )
     elif status == NodeStateStatus.COMPLETED:
         # Completed states must have output_hash, completed_at, duration_ms
@@ -158,7 +180,7 @@ def _row_to_node_state(row: Any) -> NodeState:
             context_before_json=row.context_before_json,
             context_after_json=row.context_after_json,
         )
-    else:  # FAILED
+    elif status == NodeStateStatus.FAILED:
         # Failed states must have completed_at, duration_ms (error_json and output_hash are optional)
         # Validate required fields - None indicates audit integrity violation
         if row.duration_ms is None:
@@ -181,6 +203,8 @@ def _row_to_node_state(row: Any) -> NodeState:
             context_before_json=row.context_before_json,
             context_after_json=row.context_after_json,
         )
+    else:
+        raise ValueError(f"Unknown status {row.status} for state {row.state_id}")
 
 
 class LandscapeRecorder:
@@ -1059,19 +1083,19 @@ class LandscapeRecorder:
         duration_ms: float | None = None,
         error: ExecutionError | dict[str, Any] | None = None,
         context_after: dict[str, Any] | None = None,
-    ) -> NodeStateCompleted | NodeStateFailed:
+    ) -> NodeStatePending | NodeStateCompleted | NodeStateFailed:
         """Complete a node state.
 
         Args:
             state_id: State to complete
-            status: Final status (completed, failed, or "rejected" which maps to failed)
+            status: Final status (pending, completed, failed, or "rejected" which maps to failed)
             output_data: Output data for hashing (if success)
             duration_ms: Processing duration (required)
             error: Error details (if failed)
             context_after: Optional context snapshot after processing
 
         Returns:
-            NodeStateCompleted if status is completed, NodeStateFailed otherwise
+            NodeStatePending if status is pending, NodeStateCompleted if completed, NodeStateFailed if failed
 
         Raises:
             ValueError: If status is not a valid terminal status

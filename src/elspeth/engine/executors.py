@@ -929,7 +929,25 @@ class AggregationExecutor:
             except BatchPendingError:
                 # BatchPendingError is a CONTROL-FLOW SIGNAL, not an error.
                 # The batch has been submitted but isn't complete yet.
-                # DO NOT mark as failed, DO NOT reset batch state.
+                # Complete node_state with PENDING status and link batch for audit trail, then re-raise.
+                duration_ms = (time.perf_counter() - start) * 1000
+
+                # Close node_state with "pending" status - the submission succeeded
+                # but the result isn't available yet. This prevents orphaned OPEN states.
+                self._recorder.complete_node_state(
+                    state_id=state.state_id,
+                    status="pending",
+                    duration_ms=duration_ms,
+                )
+
+                # Link batch to the aggregation state for traceability.
+                # Keep status as "executing" but set aggregation_state_id.
+                self._recorder.update_batch_status(
+                    batch_id=batch_id,
+                    status="executing",
+                    state_id=state.state_id,
+                )
+
                 # Re-raise for orchestrator to schedule retry.
                 # The batch remains in "executing" status, checkpoint is preserved.
                 raise

@@ -11,7 +11,7 @@ from collections.abc import Iterator
 from datetime import UTC, datetime
 from typing import Any
 
-from elspeth.contracts import NodeStateCompleted, NodeStateOpen
+from elspeth.contracts import NodeStateCompleted, NodeStateOpen, NodeStatePending
 from elspeth.core.canonical import canonical_json
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
@@ -248,6 +248,22 @@ class LandscapeExporter:
                             "duration_ms": None,
                             "started_at": state.started_at.isoformat(),
                             "completed_at": None,
+                        }
+                    elif isinstance(state, NodeStatePending):
+                        yield {
+                            "record_type": "node_state",
+                            "run_id": run_id,
+                            "state_id": state.state_id,
+                            "token_id": state.token_id,
+                            "node_id": state.node_id,
+                            "step_index": state.step_index,
+                            "attempt": state.attempt,
+                            "status": state.status.value,
+                            "input_hash": state.input_hash,
+                            "output_hash": None,
+                            "duration_ms": state.duration_ms,
+                            "started_at": state.started_at.isoformat(),
+                            "completed_at": state.completed_at.isoformat(),
                         }
                     elif isinstance(state, NodeStateCompleted):
                         yield {
