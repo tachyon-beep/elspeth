@@ -192,6 +192,38 @@ allow_hits:
     expires: null  # Permanent - intentional design
 
   # ============================================================
+  # DAG SCHEMA CONFIGURATION (Permanent)
+  # ============================================================
+  # Schema fields are optional on config objects - not all pipelines
+  # use explicit schemas. ExecutionGraph.from_config() extracts schemas
+  # from config when present to enable edge-by-edge validation.
+  # ============================================================
+
+  - key: "core/dag.py:R2:ExecutionGraph:from_config:line=340"
+    owner: "architecture"
+    reason: "Trust boundary: config objects may not have schema attributes (optional fields)"
+    safety: "None default is safe - missing schema means dynamic schema"
+    expires: null  # Permanent - intentional design
+
+  - key: "core/dag.py:R2:ExecutionGraph:from_config:line=353"
+    owner: "architecture"
+    reason: "Trust boundary: config objects may not have schema attributes (optional fields)"
+    safety: "None default is safe - missing schema means dynamic schema"
+    expires: null  # Permanent - intentional design
+
+  - key: "core/dag.py:R2:ExecutionGraph:from_config:line=375"
+    owner: "architecture"
+    reason: "Trust boundary: config objects may not have schema attributes (optional fields)"
+    safety: "None default is safe - missing schema means dynamic schema"
+    expires: null  # Permanent - intentional design
+
+  - key: "core/dag.py:R2:ExecutionGraph:from_config:line=376"
+    owner: "architecture"
+    reason: "Trust boundary: config objects may not have schema attributes (optional fields)"
+    safety: "None default is safe - missing schema means dynamic schema"
+    expires: null  # Permanent - intentional design
+
+  # ============================================================
   # TRANSFORM/GATE CLEANUP (Permanent)
   # ============================================================
   # The orchestrator calls close() on transforms/gates in a finally block.
@@ -199,7 +231,7 @@ allow_hits:
   # whole cleanup process.
   # ============================================================
 
-  - key: "engine/orchestrator.py:R4:Orchestrator:_cleanup_transforms:line=210"
+  - key: "engine/orchestrator.py:R4:Orchestrator:_cleanup_transforms:line=209"
     owner: "architecture"
     reason: "Best-effort cleanup: one plugin failure shouldn't prevent others from cleanup"
     safety: "Logged with warning, other plugins still get close() called"
@@ -212,19 +244,19 @@ allow_hits:
   # messages. These lookups are for UI/diagnostic purposes only.
   # ============================================================
 
-  - key: "engine/orchestrator.py:R1:Orchestrator:_validate_route_destinations:line=247"
+  - key: "engine/orchestrator.py:R1:Orchestrator:_validate_route_destinations:line=246"
     owner: "architecture"
     reason: "Building lookup for gate names - only gates (not transforms) are in map"
     safety: "None means 'not a gate at this sequence' - correctly skipped"
     expires: null  # Permanent - intentional design
 
-  - key: "engine/orchestrator.py:R1:Orchestrator:_validate_route_destinations:line=254"
+  - key: "engine/orchestrator.py:R1:Orchestrator:_validate_route_destinations:line=253"
     owner: "architecture"
     reason: "Building lookup for gate names - only gates (not transforms) are in map"
     safety: "None means 'not a gate at this sequence' - correctly skipped"
     expires: null  # Permanent - intentional design
 
-  - key: "engine/orchestrator.py:R1:Orchestrator:_validate_route_destinations:line=270"
+  - key: "engine/orchestrator.py:R1:Orchestrator:_validate_route_destinations:line=269"
     owner: "architecture"
     reason: "Fallback for error message - use node_id if gate name not found"
     safety: "Error message still produced with node_id as fallback"
@@ -238,7 +270,7 @@ allow_hits:
   # that inherit from SourceDataConfig (CSV, JSON, etc.).
   # ============================================================
 
-  - key: "engine/orchestrator.py:R2:Orchestrator:_validate_source_quarantine_destination:line=343"
+  - key: "engine/orchestrator.py:R2:Orchestrator:_validate_source_quarantine_destination:line=342"
     owner: "architecture"
     reason: "Optional protocol extension - _on_validation_failure only on sources with SourceDataConfig"
     safety: "None default means source doesn't support quarantine routing - validation skipped"
@@ -251,13 +283,13 @@ allow_hits:
   # others use dynamic. The default value is well-defined.
   # ============================================================
 
-  - key: "engine/orchestrator.py:R1:Orchestrator:_execute_run:line=696"
+  - key: "engine/orchestrator.py:R1:Orchestrator:_execute_run:line=672"
     owner: "architecture"
     reason: "Optional schema config with explicit default - not all nodes define schemas"
     safety: "Default value is well-defined: dynamic fields"
     expires: null  # Permanent - intentional design
 
-  - key: "engine/orchestrator.py:R2:Orchestrator:resume:line=1347"
+  - key: "engine/orchestrator.py:R2:Orchestrator:resume:line=1323"
     owner: "architecture"
     reason: "Optional protocol attribute: _schema_class only exists on sources with Pydantic schemas"
     safety: "None default means source uses dynamic schema - type restoration skipped, backward compatible"

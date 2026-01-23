@@ -18,6 +18,7 @@ from networkx import MultiDiGraph
 from elspeth.contracts import EdgeInfo, RoutingMode
 
 if TYPE_CHECKING:
+    from elspeth.contracts import PluginSchema
     from elspeth.core.config import ElspethSettings, GateSettings
 
 
@@ -29,12 +30,37 @@ class GraphValidationError(Exception):
 
 @dataclass
 class NodeInfo:
-    """Information about a node in the execution graph."""
+    """Information about a node in the execution graph.
+
+    Schemas are immutable after graph construction. Even dynamic schemas
+    (determined by data inspection) are locked at launch and never change
+    during the run. This guarantees audit trail consistency.
+    """
 
     node_id: str
     node_type: str  # source, transform, gate, aggregation, coalesce, sink
     plugin_name: str
     config: dict[str, Any] = field(default_factory=dict)
+    input_schema: type[PluginSchema] | None = None  # Immutable after graph construction
+    output_schema: type[PluginSchema] | None = None  # Immutable after graph construction
+
+
+def _get_missing_required_fields(
+    producer: type[PluginSchema],
+    consumer: type[PluginSchema],
+) -> set[str]:
+    """Get required fields in consumer that are missing from producer.
+
+    Args:
+        producer: Schema that produces data
+        consumer: Schema that consumes data
+
+    Returns:
+        Set of field names that are required by consumer but not in producer
+    """
+    producer_fields = set(producer.model_fields.keys())
+    required_fields = {name for name, field in consumer.model_fields.items() if field.is_required()}
+    return required_fields - producer_fields
 
 
 class ExecutionGraph:
@@ -78,13 +104,26 @@ class ExecutionGraph:
         node_type: str,
         plugin_name: str,
         config: dict[str, Any] | None = None,
+        input_schema: type[PluginSchema] | None = None,
+        output_schema: type[PluginSchema] | None = None,
     ) -> None:
-        """Add a node to the execution graph."""
+        """Add a node to the execution graph.
+
+        Args:
+            node_id: Unique node identifier
+            node_type: One of: source, transform, gate, aggregation, coalesce, sink
+            plugin_name: Plugin identifier
+            config: Node configuration
+            input_schema: Input schema (None for dynamic or N/A like sources)
+            output_schema: Output schema (None for dynamic or N/A like sinks)
+        """
         info = NodeInfo(
             node_id=node_id,
             node_type=node_type,
             plugin_name=plugin_name,
             config=config or {},
+            input_schema=input_schema,
+            output_schema=output_schema,
         )
         self._graph.add_node(node_id, info=info)
 
@@ -118,6 +157,8 @@ class ExecutionGraph:
         1. Graph is acyclic (no cycles)
         2. Exactly one source node exists
         3. At least one sink node exists
+        4. Edge labels are unique per source node
+        5. Schema compatibility across all edges
 
         Raises:
             GraphValidationError: If validation fails
@@ -158,6 +199,47 @@ class ExecutionGraph:
                         "routing event recording."
                     )
                 labels_seen.add(edge_key)
+
+        # Check schema compatibility across all edges
+        schema_errors = self._validate_edge_schemas()
+        if schema_errors:
+            raise GraphValidationError("Schema incompatibilities:\n" + "\n".join(f"  - {e}" for e in schema_errors))
+
+    def _validate_edge_schemas(self) -> list[str]:
+        """Validate schema compatibility along all edges.
+
+        For each edge (producer -> consumer):
+        - Get producer's output_schema
+        - Get consumer's input_schema
+        - Check producer provides all required fields
+
+        Skips validation if either side is None (dynamic schema).
+        Dynamic schemas are immutable after evaluation at launch.
+
+        Returns:
+            List of validation error messages (empty if valid)
+        """
+        errors = []
+
+        for edge in self.get_edges():
+            from_info = self.get_node_info(edge.from_node)
+            to_info = self.get_node_info(edge.to_node)
+
+            # Skip if either side has dynamic schema
+            if from_info.output_schema is None or to_info.input_schema is None:
+                continue
+
+            missing = _get_missing_required_fields(
+                producer=from_info.output_schema,
+                consumer=to_info.input_schema,
+            )
+
+            if missing:
+                errors.append(
+                    f"{from_info.plugin_name} -> {to_info.plugin_name} (route: {edge.label}): producer missing required fields {missing}"
+                )
+
+        return errors
 
     def topological_order(self) -> list[str]:
         """Return nodes in topological order.
@@ -255,6 +337,7 @@ class ExecutionGraph:
             node_type="source",
             plugin_name=config.datasource.plugin,
             config=config.datasource.options,
+            output_schema=getattr(config.datasource, "output_schema", None),
         )
 
         # Add sink nodes
@@ -267,6 +350,7 @@ class ExecutionGraph:
                 node_type="sink",
                 plugin_name=sink_config.plugin,
                 config=sink_config.options,
+                input_schema=getattr(sink_config, "input_schema", None),
             )
 
         # Store explicit mapping for get_sink_id_map() - NO substring matching
@@ -288,6 +372,8 @@ class ExecutionGraph:
                 node_type="transform",
                 plugin_name=plugin_config.plugin,
                 config=plugin_config.options,
+                input_schema=getattr(plugin_config, "input_schema", None),
+                output_schema=getattr(plugin_config, "output_schema", None),
             )
 
             # Edge from previous node

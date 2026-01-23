@@ -36,7 +36,6 @@ from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
 from elspeth.engine.processor import RowProcessor
 from elspeth.engine.retry import RetryConfig, RetryManager
-from elspeth.engine.schema_validator import validate_pipeline_schemas
 from elspeth.engine.spans import SpanFactory
 from elspeth.plugins.base import BaseGate, BaseTransform
 from elspeth.plugins.context import PluginContext
@@ -440,30 +439,7 @@ class Orchestrator:
         if graph is None:
             raise ValueError("ExecutionGraph is required. Build with ExecutionGraph.from_config(settings)")
 
-        # SCHEMA_VALIDATION phase - validate pipeline schemas
-        phase_start = time.perf_counter()
-        try:
-            self._events.emit(PhaseStarted(phase=PipelinePhase.SCHEMA_VALIDATION, action=PhaseAction.VALIDATING))
-
-            # Schemas are required by plugin protocols - access directly
-            source_output = config.source.output_schema
-            transform_inputs = [t.input_schema for t in config.transforms]
-            transform_outputs = [t.output_schema for t in config.transforms]
-            sink_inputs = [s.input_schema for s in config.sinks.values()]
-
-            schema_errors = validate_pipeline_schemas(
-                source_output=source_output,
-                transform_inputs=transform_inputs,  # type: ignore[arg-type]
-                transform_outputs=transform_outputs,  # type: ignore[arg-type]
-                sink_inputs=sink_inputs,  # type: ignore[arg-type]
-            )
-            if schema_errors:
-                raise ValueError(f"Pipeline schema incompatibility: {'; '.join(schema_errors)}")
-
-            self._events.emit(PhaseCompleted(phase=PipelinePhase.SCHEMA_VALIDATION, duration_seconds=time.perf_counter() - phase_start))
-        except Exception as e:
-            self._events.emit(PhaseError(phase=PipelinePhase.SCHEMA_VALIDATION, error=e))
-            raise  # CRITICAL: Always re-raise - this is our code, must crash
+        # Schema validation now happens in ExecutionGraph.validate() during graph construction
 
         # DATABASE phase - create recorder and begin run
         phase_start = time.perf_counter()

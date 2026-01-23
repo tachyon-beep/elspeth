@@ -1128,3 +1128,87 @@ class TestCoalesceNodes:
         assert node_info.config["merge"] == "nested"
         assert node_info.config["timeout_seconds"] == 30.0
         assert node_info.config["quorum_count"] == 1
+
+
+class TestSchemaValidation:
+    """Tests for graph-based schema compatibility validation."""
+
+    def test_schema_validation_catches_gate_routing_to_incompatible_sink(self) -> None:
+        """Gate routes to sink before required field is added - should fail validation.
+
+        This is the bug scenario: A gate routes rows directly to a sink from an
+        intermediate point in the pipeline, but the sink requires a field that
+        hasn't been added yet. The old linear validator checked all sinks against
+        the "final transform output", missing this incompatibility.
+        """
+        from elspeth.contracts import PluginSchema
+        from elspeth.core.dag import ExecutionGraph, GraphValidationError
+
+        class SourceSchema(PluginSchema):
+            """Source provides: name, quality."""
+
+            name: str
+            quality: str
+
+        class AddScoreSchema(PluginSchema):
+            """After add_score transform: name, quality, score."""
+
+            name: str
+            quality: str
+            score: int
+
+        class RawSinkSchema(PluginSchema):
+            """Raw sink requires: name, quality, score."""
+
+            name: str
+            quality: str
+            score: int  # NOT PROVIDED by source or gate!
+
+        graph = ExecutionGraph()
+
+        # Build pipeline: Source -> Gate -> [routes to raw_sink OR continues to add_score]
+        graph.add_node(
+            "src",
+            node_type="source",
+            plugin_name="csv",
+            output_schema=SourceSchema,
+        )
+        graph.add_node(
+            "gate",
+            node_type="gate",
+            plugin_name="quality_gate",
+            input_schema=SourceSchema,
+            output_schema=SourceSchema,  # Gate doesn't modify data
+        )
+        graph.add_node(
+            "add_score",
+            node_type="transform",
+            plugin_name="add_score_transform",
+            input_schema=SourceSchema,
+            output_schema=AddScoreSchema,  # Adds 'score' field
+        )
+        graph.add_node(
+            "raw_sink",
+            node_type="sink",
+            plugin_name="csv",
+            input_schema=RawSinkSchema,  # Requires 'score' field!
+        )
+        graph.add_node(
+            "processed_sink",
+            node_type="sink",
+            plugin_name="csv",
+            input_schema=AddScoreSchema,
+        )
+
+        # Edges
+        graph.add_edge("src", "gate", label="continue")
+        graph.add_edge("gate", "raw_sink", label="raw")  # BUG: Routes BEFORE add_score!
+        graph.add_edge("gate", "add_score", label="continue")
+        graph.add_edge("add_score", "processed_sink", label="continue")
+
+        # BUG: Current implementation doesn't validate edge-by-edge
+        # The gate routes to raw_sink with SourceSchema (no 'score' field),
+        # but raw_sink requires RawSinkSchema (with 'score' field).
+        # This should raise GraphValidationError.
+        with pytest.raises(GraphValidationError, match="score"):
+            graph.validate()
