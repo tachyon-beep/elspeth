@@ -257,7 +257,7 @@ allow_hits:
     safety: "Default value is well-defined: dynamic fields"
     expires: null  # Permanent - intentional design
 
-  - key: "engine/orchestrator.py:R2:Orchestrator:resume:line=1307"
+  - key: "engine/orchestrator.py:R2:Orchestrator:resume:line=1314"
     owner: "architecture"
     reason: "Optional protocol attribute: _schema_class only exists on sources with Pydantic schemas"
     safety: "None default means source uses dynamic schema - type restoration skipped, backward compatible"

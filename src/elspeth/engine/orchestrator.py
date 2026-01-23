@@ -591,7 +591,7 @@ class Orchestrator:
                         failed=0,
                         quarantined=0,
                         duration_seconds=total_duration,
-                        exit_code=1,
+                        exit_code=2,  # exit_code: 0=success, 1=partial, 2=total failure
                     )
                 )
             raise  # CRITICAL: Always re-raise - observability doesn't suppress errors
@@ -893,13 +893,16 @@ class Orchestrator:
 
         try:
             with self._span_factory.source_span(config.source.name):
-                # PROCESS phase - iterate through rows
+                # Invoke load() to get iterator - any immediate failures (file not found) happen here
+                source_iterator = config.source.load(ctx)
+
                 self._events.emit(PhaseCompleted(phase=PipelinePhase.SOURCE, duration_seconds=time.perf_counter() - phase_start))
 
+                # PROCESS phase - iterate through rows
                 phase_start = time.perf_counter()
                 self._events.emit(PhaseStarted(phase=PipelinePhase.PROCESS, action=PhaseAction.PROCESSING))
 
-                for row_index, source_item in enumerate(config.source.load(ctx)):
+                for row_index, source_item in enumerate(source_iterator):
                     rows_processed += 1
 
                     # Handle quarantined source rows - route directly to sink
@@ -1080,6 +1083,10 @@ class Orchestrator:
             # PROCESS phase completed successfully
             self._events.emit(PhaseCompleted(phase=PipelinePhase.PROCESS, duration_seconds=time.perf_counter() - phase_start))
 
+        except BatchPendingError:
+            # BatchPendingError is a control-flow signal, not an error.
+            # Don't emit PhaseError - the run isn't failing, it's just waiting.
+            raise  # Re-raise immediately for caller to handle retry
         except Exception as e:
             # Emit phase error for observability, then re-raise
             self._events.emit(PhaseError(phase=PipelinePhase.PROCESS, error=e, target=config.source.name))
