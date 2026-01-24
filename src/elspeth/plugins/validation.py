@@ -97,6 +97,10 @@ class PluginConfigValidator:
             from elspeth.plugins.sources.json_source import JSONSourceConfig
 
             return JSONSourceConfig
+        elif source_type == "azure_blob":
+            from elspeth.plugins.azure.blob_source import AzureBlobSourceConfig
+
+            return AzureBlobSourceConfig
         elif source_type == "null_source":
             # NullSource has no config class (resume-only source)
             # Return None to signal "no validation needed"
@@ -194,6 +198,44 @@ class PluginConfigValidator:
                 return self._extract_errors(e.__cause__)
             raise  # Re-raise if not a wrapped validation error
 
+    def validate_schema_config(
+        self,
+        schema_config: dict[str, Any],
+    ) -> list[ValidationError]:
+        """Validate schema configuration independently of plugin.
+
+        Args:
+            schema_config: Schema configuration dict (contents of 'schema' key)
+
+        Returns:
+            List of validation errors (empty if valid)
+        """
+        # Import here to avoid circular dependencies
+        from elspeth.contracts.schema import SchemaConfig
+
+        try:
+            SchemaConfig.from_dict(schema_config)
+            return []  # Valid
+        except ValueError as e:
+            # SchemaConfig.from_dict raises ValueError for invalid configs
+            # Convert to structured error
+            return [
+                ValidationError(
+                    field="schema",
+                    message=str(e),
+                    value=schema_config,
+                )
+            ]
+        except Exception as e:
+            # Catch any other unexpected exceptions
+            return [
+                ValidationError(
+                    field="schema",
+                    message=f"Unexpected error validating schema: {e}",
+                    value=schema_config,
+                )
+            ]
+
     def _get_transform_config_model(self, transform_type: str) -> type["PluginConfig"]:
         """Get Pydantic config model for transform type.
 
@@ -229,6 +271,30 @@ class PluginConfigValidator:
             from elspeth.plugins.transforms.batch_stats import BatchStatsConfig
 
             return BatchStatsConfig
+        elif transform_type == "azure_content_safety":
+            from elspeth.plugins.transforms.azure.content_safety import AzureContentSafetyConfig
+
+            return AzureContentSafetyConfig
+        elif transform_type == "azure_prompt_shield":
+            from elspeth.plugins.transforms.azure.prompt_shield import AzurePromptShieldConfig
+
+            return AzurePromptShieldConfig
+        elif transform_type == "azure_llm":
+            from elspeth.plugins.llm.azure import AzureOpenAIConfig
+
+            return AzureOpenAIConfig
+        elif transform_type == "azure_batch_llm":
+            from elspeth.plugins.llm.azure_batch import AzureBatchConfig
+
+            return AzureBatchConfig
+        elif transform_type == "azure_multi_query_llm":
+            from elspeth.plugins.llm.multi_query import MultiQueryConfig
+
+            return MultiQueryConfig
+        elif transform_type == "openrouter_llm":
+            from elspeth.plugins.llm.openrouter import OpenRouterConfig
+
+            return OpenRouterConfig
         else:
             raise ValueError(f"Unknown transform type: {transform_type}")
 
@@ -256,6 +322,14 @@ class PluginConfigValidator:
             from elspeth.plugins.sinks.json_sink import JSONSinkConfig
 
             return JSONSinkConfig
+        elif sink_type == "database":
+            from elspeth.plugins.sinks.database_sink import DatabaseSinkConfig
+
+            return DatabaseSinkConfig
+        elif sink_type == "azure_blob":
+            from elspeth.plugins.azure.blob_sink import AzureBlobSinkConfig
+
+            return AzureBlobSinkConfig
         else:
             raise ValueError(f"Unknown sink type: {sink_type}")
 

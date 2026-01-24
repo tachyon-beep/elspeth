@@ -1097,7 +1097,13 @@ allow_hits:
   # (external library) and the 'input' field is optional.
   # ============================================================
 
-  - key: "plugins/validation.py:R1:PluginConfigValidator:_extract_errors:line=275"
+  - key: "plugins/validation.py:R4:PluginConfigValidator:validate_schema_config:line=229"
+    owner: "architecture"
+    reason: "Trust boundary: SchemaConfig.from_dict may raise ValueError or other exceptions from field parsing"
+    safety: "Converts to structured ValidationError - unexpected errors still reported to caller"
+    expires: null  # Permanent - intentional design
+
+  - key: "plugins/validation.py:R1:PluginConfigValidator:_extract_errors:line=349"
     owner: "architecture"
     reason: "Trust boundary: Pydantic error dict structure from external library - 'input' field is optional"
     safety: "Graceful default to '<unknown>' - error message still produced with field and message"
