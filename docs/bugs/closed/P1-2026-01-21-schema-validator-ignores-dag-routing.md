@@ -128,5 +128,5 @@ Added schema inheritance for gate nodes:
 - Coalesce nodes still lack schemas (lower priority)
 
 **Follow-up Bugs:**
-- [ ] TODO: Create bug for aggregation schema support
-- [ ] TODO: Create bug for coalesce schema support
+- [x] P2-2026-01-24-aggregation-nodes-lack-schema-validation.md (created 2026-01-24, commit aada20a)
+- [x] P3-2026-01-24-coalesce-nodes-lack-schema-validation.md (created 2026-01-24, commit aada20a)
