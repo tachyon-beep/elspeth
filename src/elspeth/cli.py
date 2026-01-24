@@ -176,7 +176,8 @@ def run(
 
     # Build and validate execution graph
     try:
-        graph = ExecutionGraph.from_config(config)
+        manager = _get_plugin_manager()
+        graph = ExecutionGraph.from_config(config, manager)
         graph.validate()
     except GraphValidationError as e:
         typer.echo(f"Pipeline graph error: {e}", err=True)
@@ -601,7 +602,8 @@ def validate(
 
     # Build and validate execution graph
     try:
-        graph = ExecutionGraph.from_config(config)
+        manager = _get_plugin_manager()
+        graph = ExecutionGraph.from_config(config, manager)
         graph.validate()
     except GraphValidationError as e:
         typer.echo(f"Pipeline graph error: {e}", err=True)
@@ -886,7 +888,7 @@ def _build_resume_pipeline_config(
 
     # Build aggregation transforms via PluginManager
     # Need the graph to get aggregation node IDs
-    graph = ExecutionGraph.from_config(settings)
+    graph = ExecutionGraph.from_config(settings, manager)
     agg_id_map = graph.get_aggregation_id_map()
 
     from elspeth.core.config import AggregationSettings

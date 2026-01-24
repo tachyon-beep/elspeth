@@ -192,32 +192,34 @@ allow_hits:
     expires: null  # Permanent - intentional design
 
   # ============================================================
-  # DAG SCHEMA CONFIGURATION (Permanent)
+  # DAG SCHEMA EXTRACTION (Permanent)
   # ============================================================
-  # Schema fields are optional on config objects - not all pipelines
-  # use explicit schemas. ExecutionGraph.from_config() extracts schemas
-  # from config when present to enable edge-by-edge validation.
+  # Plugin classes may define schemas as class attributes (static schemas)
+  # or set them as instance attributes in __init__ (dynamic schemas).
+  # ExecutionGraph.from_config() extracts schemas from plugin class attributes
+  # via PluginManager lookup. Class-level None means "dynamic schema, validate
+  # post-instantiation".
   # ============================================================
 
-  - key: "core/dag.py:R2:ExecutionGraph:from_config:line=430"
+  - key: "core/dag.py:R2:ExecutionGraph:from_config:line=433"
+    owner: "architecture"
+    reason: "Trust boundary: plugin classes may not have class-level output_schema (dynamic schemas)"
+    safety: "None default is safe - missing schema means dynamic schema set in __init__"
+    expires: null  # Permanent - intentional design
+
+  - key: "core/dag.py:R2:ExecutionGraph:from_config:line=453"
     owner: "architecture"
     reason: "Trust boundary: config objects may not have schema attributes (optional fields)"
     safety: "None default is safe - missing schema means dynamic schema"
     expires: null  # Permanent - intentional design
 
-  - key: "core/dag.py:R2:ExecutionGraph:from_config:line=443"
+  - key: "core/dag.py:R2:ExecutionGraph:from_config:line=475"
     owner: "architecture"
     reason: "Trust boundary: config objects may not have schema attributes (optional fields)"
     safety: "None default is safe - missing schema means dynamic schema"
     expires: null  # Permanent - intentional design
 
-  - key: "core/dag.py:R2:ExecutionGraph:from_config:line=465"
-    owner: "architecture"
-    reason: "Trust boundary: config objects may not have schema attributes (optional fields)"
-    safety: "None default is safe - missing schema means dynamic schema"
-    expires: null  # Permanent - intentional design
-
-  - key: "core/dag.py:R2:ExecutionGraph:from_config:line=466"
+  - key: "core/dag.py:R2:ExecutionGraph:from_config:line=476"
     owner: "architecture"
     reason: "Trust boundary: config objects may not have schema attributes (optional fields)"
     safety: "None default is safe - missing schema means dynamic schema"
@@ -901,37 +903,37 @@ allow_hits:
   # to report system state rather than crash.
   # ============================================================
 
-  - key: "cli.py:R1:_execute_pipeline:_format_run_completed:line=535"
+  - key: "cli.py:R1:_execute_pipeline:_format_run_completed:line=536"
     owner: "architecture"
     reason: "Intentional Optional API: status_symbols lookup with default for unknown statuses"
     safety: "Default '?' symbol for unrecognized statuses - output still produced"
     expires: null  # Permanent - intentional design
 
-  - key: "cli.py:R1:health:line=1185"
+  - key: "cli.py:R1:health:line=1187"
     owner: "architecture"
     reason: "Trust boundary: environment variable GIT_COMMIT_SHA is optional external input"
     safety: "Empty string default is safe - commit SHA is informational only"
     expires: null  # Permanent - intentional design
 
-  - key: "cli.py:R4:health:line=1197"
+  - key: "cli.py:R4:health:line=1199"
     owner: "architecture"
     reason: "Trust boundary: git subprocess may fail for many reasons (not installed, not a repo, etc.)"
     safety: "Graceful fallback to 'unknown' - health check reports git as unavailable"
     expires: null  # Permanent - intentional design
 
-  - key: "cli.py:R1:health:line=1213"
+  - key: "cli.py:R1:health:line=1215"
     owner: "architecture"
     reason: "Trust boundary: environment variable DATABASE_URL is optional external input"
     safety: "Empty string default triggers skip logic - database check only runs if configured"
     expires: null  # Permanent - intentional design
 
-  - key: "cli.py:R4:health:line=1225"
+  - key: "cli.py:R4:health:line=1227"
     owner: "architecture"
     reason: "Trust boundary: database connection may fail for many reasons (network, auth, etc.)"
     safety: "Error recorded in checks dict with status='error' - health check reports DB as unhealthy"
     expires: null  # Permanent - intentional design
 
-  - key: "cli.py:R4:health:line=1289"
+  - key: "cli.py:R4:health:line=1291"
     owner: "architecture"
     reason: "Trust boundary: plugin manager initialization may fail due to misconfiguration"
     safety: "Error recorded in checks dict with status='error' - health check reports plugins as unhealthy"

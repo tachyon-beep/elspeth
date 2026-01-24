@@ -422,12 +422,22 @@ class ExecutionGraph:
 
         # Add source node
         source_id = node_id("source", config.datasource.plugin)
+
+        # Look up source plugin class to get schema
+        source_cls = manager.get_source_by_name(config.datasource.plugin)
+        if source_cls is None:
+            available = [s.name for s in manager.get_sources()]
+            raise ValueError(f"Unknown source plugin: {config.datasource.plugin}. Available: {sorted(available)}")
+
+        # Get schema from class attribute (may be None for dynamic schemas)
+        output_schema = getattr(source_cls, "output_schema", None)
+
         graph.add_node(
             source_id,
             node_type="source",
             plugin_name=config.datasource.plugin,
             config=config.datasource.options,
-            output_schema=getattr(config.datasource, "output_schema", None),
+            output_schema=output_schema,  # None for dynamic schemas is OK
         )
 
         # Add sink nodes

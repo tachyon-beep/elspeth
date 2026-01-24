@@ -1,6 +1,20 @@
 # Bug Report: Aggregation nodes lack schema validation
 
-## Summary
+## ⚠️ SUPERSEDED BY P0-2026-01-24-schema-validation-non-functional
+
+**This bug is a SYMPTOM of a broader architectural issue.**
+
+Systematic debugging revealed that schema validation is completely non-functional for ALL node types (transforms, aggregations, gates, sources, sinks). The root cause is that the graph is built from config objects BEFORE plugins are instantiated, so schemas are never available.
+
+**See:** `docs/bugs/P0-2026-01-24-schema-validation-non-functional.md` for the complete analysis and fix proposal.
+
+**Implementation plan:** `docs/plans/2026-01-24-fix-schema-validation-architecture.md`
+
+This bug report is retained for historical reference but should NOT be implemented in isolation. The fix must address the broader architectural issue.
+
+---
+
+## Summary (Original Report)
 
 - Aggregation nodes are added to `ExecutionGraph` without `input_schema` or `output_schema` in `from_config()`
 - Similar to gates, this causes edge validation to skip aggregation edges
@@ -78,9 +92,23 @@ graph.add_node(
 - Aggregations **transform** data (input ≠ output)
 - Need to handle both schemas separately in validation
 
-## Root Cause
+## Root Cause (UPDATED - See P0 Bug)
 
-Aggregation nodes were added after schema validation was implemented. The `from_config()` method doesn't extract schemas from aggregation config objects.
+**Original hypothesis:** Aggregation nodes were added after schema validation was implemented. The `from_config()` method doesn't extract schemas from aggregation config objects.
+
+**Actual root cause (discovered via systematic debugging):**
+
+Schema validation is non-functional for ALL node types. The architectural flaw:
+
+1. Graph is built from `ElspethSettings` (config objects) via `ExecutionGraph.from_config(config)`
+2. Schemas are attached to plugin INSTANCES in `__init__()` (e.g., `self.input_schema = ...`)
+3. Plugins are instantiated AFTER graph construction in `_execute_pipeline()`
+4. Therefore `getattr(plugin_config, "input_schema", None)` always returns `None`
+5. Validation sees `None` and silently skips all edges
+
+**Evidence:** `src/elspeth/cli.py` line 179 builds graph, line 373 instantiates plugins.
+
+**Why this bug report only noticed aggregations:** The code reviewer saw missing `getattr()` calls for aggregations but didn't realize transforms have the same issue (just hidden by the `getattr()` returning `None`).
 
 ## Proposed Fix
 
@@ -132,9 +160,13 @@ Aggregation nodes were added after schema validation was implemented. The `from_
 
 ## Notes / Links
 
+- **SUPERSEDED BY:** P0-2026-01-24-schema-validation-non-functional.md (broader architectural issue)
+- **Implementation plan:** docs/plans/2026-01-24-fix-schema-validation-architecture.md
 - Related issues/PRs: P1-2026-01-21-schema-validator-ignores-dag-routing (gate fix)
+- Related issues/PRs: P3-2026-01-24-coalesce-nodes-lack-schema-validation (same root cause)
 - Related design docs: `docs/contracts/plugin-protocol.md`
 - Architecture review: `docs/bugs/arch-review-schema-validator-fix.md` (identified this issue)
+- Investigation: Systematic debugging session (2026-01-24) + architecture-critic + python-code-reviewer agents
 
 ## Implementation Complexity
 
