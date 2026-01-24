@@ -11,18 +11,15 @@ import pytest
 from elspeth.plugins.manager import PluginManager
 
 
-@pytest.mark.xfail(reason="Validation subsystem not yet implemented")
 def test_plugin_manager_has_validator():
     """PluginManager has PluginConfigValidator instance."""
     manager = PluginManager()
     manager.register_builtin_plugins()
 
-    # Will fail until Task 1 complete:
     assert hasattr(manager, "_validator")
     assert manager._validator is not None
 
 
-@pytest.mark.xfail(reason="Validation subsystem not yet implemented")
 def test_manager_validates_source_config_before_creation():
     """PluginManager validates source config before instantiation."""
     manager = PluginManager()
@@ -34,7 +31,6 @@ def test_manager_validates_source_config_before_creation():
         "on_validation_failure": "quarantine",
     }
 
-    # Will fail until Task 4 complete:
     with pytest.raises(ValueError) as exc_info:
         manager.create_source("csv", invalid_config)
 
@@ -42,7 +38,6 @@ def test_manager_validates_source_config_before_creation():
     assert "required" in str(exc_info.value).lower()
 
 
-@pytest.mark.xfail(reason="Validation subsystem not yet implemented")
 def test_valid_config_creates_working_plugin():
     """Valid config passes validation and creates functional plugin."""
     manager = PluginManager()
@@ -54,7 +49,6 @@ def test_valid_config_creates_working_plugin():
         "on_validation_failure": "quarantine",
     }
 
-    # Will fail until Task 4 complete:
     source = manager.create_source("csv", valid_config)
 
     # Verify plugin is functional
@@ -63,7 +57,6 @@ def test_valid_config_creates_working_plugin():
     assert hasattr(source, "load")
 
 
-@pytest.mark.xfail(reason="Validation subsystem not yet implemented")
 def test_validator_handles_all_builtin_sources():
     """Validator can validate configs for all builtin source types."""
     manager = PluginManager()
@@ -73,7 +66,6 @@ def test_validator_handles_all_builtin_sources():
     source_types = ["csv", "json", "null_source", "azure_blob_source"]
 
     for source_type in source_types:
-        # This will fail until Task 2 complete (validator has all types):
         # Just verify no ImportError or ValueError for unknown type
         try:
             manager.create_source(source_type, {})
@@ -83,7 +75,6 @@ def test_validator_handles_all_builtin_sources():
             pytest.fail(f"Unexpected error for {source_type}: {e}")
 
 
-@pytest.mark.xfail(reason="Validation subsystem not yet implemented")
 def test_validator_provides_field_level_errors():
     """Validation errors include field name and human-readable message."""
     manager = PluginManager()
@@ -97,7 +88,6 @@ def test_validator_provides_field_level_errors():
         "on_validation_failure": "quarantine",
     }
 
-    # Will fail until Task 1 complete:
     with pytest.raises(ValueError) as exc_info:
         manager.create_source("csv", invalid_config)
 

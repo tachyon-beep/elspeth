@@ -337,3 +337,48 @@ class TestDiscoveryBasedRegistration:
 
         assert "csv" in names
         assert "json" in names
+
+
+class TestManagerValidation:
+    """PluginManager validates configs before instantiation."""
+
+    def test_manager_validates_before_instantiation(self) -> None:
+        """Invalid config raises ValueError with field name."""
+        import pytest
+
+        from elspeth.plugins.manager import PluginManager
+
+        manager = PluginManager()
+        manager.register_builtin_plugins()
+
+        # Invalid config - missing required 'path'
+        invalid_config = {
+            "schema": {"fields": "dynamic"},
+            "on_validation_failure": "quarantine",
+        }
+
+        with pytest.raises(ValueError) as exc_info:
+            manager.create_source("csv", invalid_config)
+
+        # Error message should mention the field name
+        assert "path" in str(exc_info.value)
+
+    def test_manager_creates_plugin_with_valid_config(self) -> None:
+        """Valid config creates working plugin."""
+        from elspeth.plugins.manager import PluginManager
+
+        manager = PluginManager()
+        manager.register_builtin_plugins()
+
+        valid_config = {
+            "path": "/tmp/test.csv",
+            "schema": {"fields": "dynamic"},
+            "on_validation_failure": "quarantine",
+        }
+
+        source = manager.create_source("csv", valid_config)
+
+        # Verify plugin is functional
+        assert source.name == "csv"
+        assert source.output_schema is not None
+        assert hasattr(source, "load")

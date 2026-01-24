@@ -423,7 +423,7 @@ allow_hits:
   # fail loudly if missing (Task 9).
   # ============================================================
 
-  - key: "plugins/manager.py:R3:_schema_hash:line=49"
+  - key: "plugins/manager.py:R3:_schema_hash:line=50"
     owner: "architecture"
     reason: "Trust boundary: checking if plugin class has Pydantic model_fields"
     safety: "Raises TypeError if not Pydantic - fails fast on protocol violation"
@@ -431,13 +431,13 @@ allow_hits:
 
   # PluginSpec.from_plugin - schemas vary by plugin type (not all have both)
   # Sources only have output_schema, sinks only have input_schema
-  - key: "plugins/manager.py:R2:PluginSpec:from_plugin:line=93"
+  - key: "plugins/manager.py:R2:PluginSpec:from_plugin:line=94"
     owner: "architecture"
     reason: "Polymorphic: sources don't have input_schema, sinks don't have output_schema"
     safety: "Legitimate Optional return - None means 'accepts any schema'"
     expires: null  # Permanent - intentional design
 
-  - key: "plugins/manager.py:R2:PluginSpec:from_plugin:line=94"
+  - key: "plugins/manager.py:R2:PluginSpec:from_plugin:line=95"
     owner: "architecture"
     reason: "Polymorphic: sources don't have input_schema, sinks don't have output_schema"
     safety: "Legitimate Optional return - None means 'accepts any schema'"
