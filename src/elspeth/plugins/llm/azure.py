@@ -147,6 +147,17 @@ class AzureLLMTransform(BaseTransform):
         # Cache underlying Azure clients to avoid recreating them
         self._underlying_client: AzureOpenAI | None = None
 
+        # PHASE 1: Validate self-consistency
+        self._validate_self_consistency()
+
+    def _validate_self_consistency(self) -> None:
+        """Validate plugin's own schemas are self-consistent (PHASE 1).
+
+        No self-consistency constraints for Azure LLM transform.
+        Input/output schemas are identical (in-place enrichment pattern).
+        """
+        self._validation_called = True  # MANDATORY - marks validation as complete
+
     def on_start(self, ctx: PluginContext) -> None:
         """Capture recorder reference for pooled execution.
 
