@@ -225,18 +225,74 @@ class PluginManager:
 
     # === Lookup by name ===
 
-    def get_source_by_name(self, name: str) -> type[SourceProtocol] | None:
-        """Get source plugin by name."""
-        return self._sources.get(name)
+    def get_source_by_name(self, name: str) -> type[SourceProtocol]:
+        """Get source plugin class by name.
 
-    def get_transform_by_name(self, name: str) -> type[TransformProtocol] | None:
-        """Get transform plugin by name."""
-        return self._transforms.get(name)
+        Args:
+            name: Plugin name to look up
 
-    def get_gate_by_name(self, name: str) -> type[GateProtocol] | None:
-        """Get gate plugin by name."""
-        return self._gates.get(name)
+        Returns:
+            Source plugin class
 
-    def get_sink_by_name(self, name: str) -> type[SinkProtocol] | None:
-        """Get sink plugin by name."""
-        return self._sinks.get(name)
+        Raises:
+            ValueError: If plugin not found (configuration bug, should crash)
+        """
+        if name in self._sources:
+            return self._sources[name]
+
+        available = sorted(self._sources.keys())
+        raise ValueError(f"Unknown source plugin: {name}. Available source plugins: {available}")
+
+    def get_transform_by_name(self, name: str) -> type[TransformProtocol]:
+        """Get transform plugin class by name.
+
+        Args:
+            name: Plugin name to look up
+
+        Returns:
+            Transform plugin class
+
+        Raises:
+            ValueError: If plugin not found (configuration bug, should crash)
+        """
+        if name in self._transforms:
+            return self._transforms[name]
+
+        available = sorted(self._transforms.keys())
+        raise ValueError(f"Unknown transform plugin: {name}. Available transform plugins: {available}")
+
+    def get_gate_by_name(self, name: str) -> type[GateProtocol]:
+        """Get gate plugin class by name.
+
+        Args:
+            name: Plugin name to look up
+
+        Returns:
+            Gate plugin class
+
+        Raises:
+            ValueError: If plugin not found (configuration bug, should crash)
+        """
+        if name in self._gates:
+            return self._gates[name]
+
+        available = sorted(self._gates.keys())
+        raise ValueError(f"Unknown gate plugin: {name}. Available gate plugins: {available}")
+
+    def get_sink_by_name(self, name: str) -> type[SinkProtocol]:
+        """Get sink plugin class by name.
+
+        Args:
+            name: Plugin name to look up
+
+        Returns:
+            Sink plugin class
+
+        Raises:
+            ValueError: If plugin not found (configuration bug, should crash)
+        """
+        if name in self._sinks:
+            return self._sinks[name]
+
+        available = sorted(self._sinks.keys())
+        raise ValueError(f"Unknown sink plugin: {name}. Available sink plugins: {available}")

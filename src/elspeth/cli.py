@@ -347,9 +347,6 @@ def _execute_pipeline(
     source_options = dict(config.datasource.options)
 
     source_cls = manager.get_source_by_name(source_plugin)
-    if source_cls is None:
-        available = [s.name for s in manager.get_sources()]
-        raise ValueError(f"Unknown source plugin: {source_plugin}. Available: {available}")
     source = source_cls(source_options)
 
     # Instantiate sinks via PluginManager
@@ -359,9 +356,6 @@ def _execute_pipeline(
         sink_options = dict(sink_settings.options)
 
         sink_cls = manager.get_sink_by_name(sink_plugin)
-        if sink_cls is None:
-            available = [s.name for s in manager.get_sinks()]
-            raise ValueError(f"Unknown sink plugin: {sink_plugin}. Available: {available}")
         sinks[sink_name] = sink_cls(sink_options)  # type: ignore[assignment]
 
     # Get database URL from settings
@@ -376,9 +370,6 @@ def _execute_pipeline(
             plugin_options = dict(plugin_config.options)
 
             transform_cls = manager.get_transform_by_name(plugin_name)
-            if transform_cls is None:
-                available = [t.name for t in manager.get_transforms()]
-                raise typer.BadParameter(f"Unknown transform plugin: {plugin_name}. Available: {available}")
             transforms.append(transform_cls(plugin_options))  # type: ignore[arg-type]
 
         # Use the validated graph passed from run() command
@@ -396,9 +387,6 @@ def _execute_pipeline(
             # Instantiate the aggregation transform plugin via PluginManager
             plugin_name = agg_config.plugin
             transform_cls = manager.get_transform_by_name(plugin_name)
-            if transform_cls is None:
-                available = [t.name for t in manager.get_transforms()]
-                raise typer.BadParameter(f"Unknown aggregation plugin: {plugin_name}. Available: {available}")
 
             # Merge aggregation options with schema from config
             agg_options = dict(agg_config.options)
@@ -881,9 +869,6 @@ def _build_resume_pipeline_config(
         plugin_options = dict(plugin_config.options)
 
         transform_cls = manager.get_transform_by_name(plugin_name)
-        if transform_cls is None:
-            available = [t.name for t in manager.get_transforms()]
-            raise ValueError(f"Unknown transform plugin: {plugin_name}. Available: {available}")
         transforms.append(transform_cls(plugin_options))  # type: ignore[arg-type]
 
     # Build aggregation transforms via PluginManager
@@ -900,9 +885,6 @@ def _build_resume_pipeline_config(
 
         plugin_name = agg_config.plugin
         transform_cls = manager.get_transform_by_name(plugin_name)
-        if transform_cls is None:
-            available = [t.name for t in manager.get_transforms()]
-            raise ValueError(f"Unknown aggregation plugin: {plugin_name}. Available: {available}")
 
         agg_options = dict(agg_config.options)
         transform = transform_cls(agg_options)
@@ -918,9 +900,6 @@ def _build_resume_pipeline_config(
         sink_options["mode"] = "append"  # Resume appends to existing files
 
         sink_cls = manager.get_sink_by_name(sink_plugin)
-        if sink_cls is None:
-            available = [s.name for s in manager.get_sinks()]
-            raise ValueError(f"Unknown sink plugin: {sink_plugin}. Available: {available}")
         sinks[sink_name] = sink_cls(sink_options)  # type: ignore[assignment]
 
     return PipelineConfig(

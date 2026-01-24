@@ -433,9 +433,6 @@ class ExecutionGraph:
 
         # Look up source plugin class to get schema
         source_cls = manager.get_source_by_name(config.datasource.plugin)
-        if source_cls is None:
-            available = [s.name for s in manager.get_sources()]
-            raise ValueError(f"Unknown source plugin: {config.datasource.plugin}. Available: {sorted(available)}")
 
         # Get schema from class attribute (may be None for dynamic schemas)
         output_schema = getattr(source_cls, "output_schema", None)
@@ -456,9 +453,6 @@ class ExecutionGraph:
 
             # Look up sink plugin class to get schema
             sink_cls = manager.get_sink_by_name(sink_config.plugin)
-            if sink_cls is None:
-                available = [s.name for s in manager.get_sinks()]
-                raise ValueError(f"Unknown sink plugin: {sink_config.plugin}. Available: {sorted(available)}")
 
             # Get schema from class attribute (may be None for dynamic schemas)
             input_schema = getattr(sink_cls, "input_schema", None)
@@ -487,9 +481,6 @@ class ExecutionGraph:
 
             # Look up transform plugin class to get schemas
             transform_cls = manager.get_transform_by_name(plugin_config.plugin)
-            if transform_cls is None:
-                available = [t.name for t in manager.get_transforms()]
-                raise ValueError(f"Unknown transform plugin: {plugin_config.plugin}. Available: {sorted(available)}")
 
             # Get schemas from class attributes (may be None for dynamic schemas)
             input_schema = getattr(transform_cls, "input_schema", None)

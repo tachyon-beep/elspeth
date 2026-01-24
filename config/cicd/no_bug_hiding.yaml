@@ -157,39 +157,13 @@ allow_hits:
     expires: null  # Permanent - intentional design
 
   # ============================================================
-  # PLUGIN MANAGER OPTIONAL API (Permanent)
+  # PLUGIN MANAGER API (Permanent)
   # ============================================================
-  # These methods return Optional[T] by design - the documented API contract
-  # is that callers check the return value. Returning None for unknown plugin
-  # names is intentional, not a bug-hiding pattern.
+  # NOTE: Previously get_*_by_name methods returned Optional[T] and used
+  # .get() for lookups. This was REMOVED in WP-11 Task 1 (2026-01-24).
+  # New behavior: These methods raise ValueError for unknown plugins.
+  # Missing plugin name is a configuration bug that should crash immediately.
   # ============================================================
-
-  - key: "plugins/manager.py:R1:PluginManager:get_source_by_name:line=230"
-    owner: "architecture"
-    reason: "Intentional Optional API: returns None for unknown plugin names"
-    safety: "Callers check return value - this is the documented contract"
-    expires: null  # Permanent - intentional design
-
-  - key: "plugins/manager.py:R1:PluginManager:get_transform_by_name:line=234"
-    owner: "architecture"
-    reason: "Intentional Optional API: returns None for unknown plugin names"
-    safety: "Callers check return value - this is the documented contract"
-    expires: null  # Permanent - intentional design
-
-  - key: "plugins/manager.py:R1:PluginManager:get_gate_by_name:line=238"
-    owner: "architecture"
-    reason: "Intentional Optional API: returns None for unknown plugin names"
-    safety: "Callers check return value - this is the documented contract"
-    expires: null  # Permanent - intentional design
-
-  # NOTE: get_aggregation_by_name and get_coalesce_by_name DELETED
-  # Aggregation and coalesce lookups are now engine-controlled (WP-06, WP-08)
-
-  - key: "plugins/manager.py:R1:PluginManager:get_sink_by_name:line=242"
-    owner: "architecture"
-    reason: "Intentional Optional API: returns None for unknown plugin names"
-    safety: "Callers check return value - this is the documented contract"
-    expires: null  # Permanent - intentional design
 
   # ============================================================
   # DAG SCHEMA EXTRACTION (Permanent)
@@ -201,25 +175,25 @@ allow_hits:
   # post-instantiation".
   # ============================================================
 
-  - key: "core/dag.py:R2:ExecutionGraph:from_config:line=441"
+  - key: "core/dag.py:R2:ExecutionGraph:from_config:line=438"
     owner: "architecture"
     reason: "Trust boundary: plugin classes may not have class-level output_schema (dynamic schemas)"
     safety: "None default is safe - missing schema means dynamic schema set in __init__"
     expires: null  # Permanent - intentional design
 
-  - key: "core/dag.py:R2:ExecutionGraph:from_config:line=464"
+  - key: "core/dag.py:R2:ExecutionGraph:from_config:line=458"
     owner: "architecture"
     reason: "Trust boundary: plugin classes may not have class-level input_schema (dynamic schemas)"
     safety: "None default is safe - missing schema means dynamic schema set in __init__"
     expires: null  # Permanent - intentional design
 
-  - key: "core/dag.py:R2:ExecutionGraph:from_config:line=495"
+  - key: "core/dag.py:R2:ExecutionGraph:from_config:line=486"
     owner: "architecture"
     reason: "Trust boundary: plugin classes may not have class-level input_schema (dynamic schemas)"
     safety: "None default is safe - missing schema means dynamic schema set in __init__"
     expires: null  # Permanent - intentional design
 
-  - key: "core/dag.py:R2:ExecutionGraph:from_config:line=496"
+  - key: "core/dag.py:R2:ExecutionGraph:from_config:line=487"
     owner: "architecture"
     reason: "Trust boundary: plugin classes may not have class-level output_schema (dynamic schemas)"
     safety: "None default is safe - missing schema means dynamic schema set in __init__"
@@ -903,37 +877,37 @@ allow_hits:
   # to report system state rather than crash.
   # ============================================================
 
-  - key: "cli.py:R1:_execute_pipeline:_format_run_completed:line=536"
+  - key: "cli.py:R1:_execute_pipeline:_format_run_completed:line=524"
     owner: "architecture"
     reason: "Intentional Optional API: status_symbols lookup with default for unknown statuses"
     safety: "Default '?' symbol for unrecognized statuses - output still produced"
     expires: null  # Permanent - intentional design
 
-  - key: "cli.py:R1:health:line=1187"
+  - key: "cli.py:R1:health:line=1166"
     owner: "architecture"
     reason: "Trust boundary: environment variable GIT_COMMIT_SHA is optional external input"
     safety: "Empty string default is safe - commit SHA is informational only"
     expires: null  # Permanent - intentional design
 
-  - key: "cli.py:R4:health:line=1199"
+  - key: "cli.py:R4:health:line=1178"
     owner: "architecture"
     reason: "Trust boundary: git subprocess may fail for many reasons (not installed, not a repo, etc.)"
     safety: "Graceful fallback to 'unknown' - health check reports git as unavailable"
     expires: null  # Permanent - intentional design
 
-  - key: "cli.py:R1:health:line=1215"
+  - key: "cli.py:R1:health:line=1194"
     owner: "architecture"
     reason: "Trust boundary: environment variable DATABASE_URL is optional external input"
     safety: "Empty string default triggers skip logic - database check only runs if configured"
     expires: null  # Permanent - intentional design
 
-  - key: "cli.py:R4:health:line=1227"
+  - key: "cli.py:R4:health:line=1206"
     owner: "architecture"
     reason: "Trust boundary: database connection may fail for many reasons (network, auth, etc.)"
     safety: "Error recorded in checks dict with status='error' - health check reports DB as unhealthy"
     expires: null  # Permanent - intentional design
 
-  - key: "cli.py:R4:health:line=1291"
+  - key: "cli.py:R4:health:line=1270"
     owner: "architecture"
     reason: "Trust boundary: plugin manager initialization may fail due to misconfiguration"
     safety: "Error recorded in checks dict with status='error' - health check reports plugins as unhealthy"

@@ -1,4 +1,4 @@
-# Aggregation Checkpoint Restore Fix Implementation Plan (v2)
+# Aggregation Checkpoint Restore Fix Implementation Plan (v3)
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
@@ -7,6 +7,12 @@
 **Architecture:** Store complete TokenInfo metadata in checkpoint state (token_id, row_id, branch_name, row_data) instead of just token_ids. This eliminates database queries during restoration, makes checkpoints self-contained and portable, and aligns with CoalesceExecutor's pattern of storing full token state.
 
 **Design Decision:** Rejected database-query approach (N+1 queries, database coupling) in favor of self-contained checkpoints following architectural review.
+
+**Version History:**
+- v1: Initial plan with database-query approach
+- v2: Updated to full TokenInfo storage approach per architecture review
+- v3: Incorporated 4-perspective quality gate review findings (8 blocking issues resolved)
+- v3.1: Addressed 4 minor conditions from second review (import docs, field validation, error clarity, test mocking)
 
 **Tech Stack:** Python 3.13, pytest, TokenInfo dataclass
 
@@ -184,7 +190,10 @@ def get_checkpoint_state(self) -> dict[str, Any]:
         raise RuntimeError(
             f"Checkpoint size {size_mb:.1f}MB exceeds 10MB limit. "
             f"Buffer contains {total_rows} total rows across {len(state)} nodes. "
-            f"Consider reducing aggregation count trigger or implementing checkpoint cleanup."
+            f"Solutions: (1) Reduce aggregation count trigger to <5000 rows, "
+            f"(2) Reduce row_data payload size, or (3) Implement checkpoint retention "
+            f"policy (see P3-2026-01-21). See capacity planning in "
+            f"docs/plans/2026-01-24-fix-aggregation-checkpoint-restore.md"
         )
 
     if size_mb > 1:
@@ -364,15 +373,27 @@ def restore_from_checkpoint(self, state: dict[str, Any]) -> None:
         batch_id = node_state.get("batch_id")
 
         # Reconstruct TokenInfo objects directly from checkpoint
-        reconstructed_tokens = [
-            TokenInfo(
-                row_id=t["row_id"],
-                token_id=t["token_id"],
-                row_data=t["row_data"],
-                branch_name=t.get("branch_name"),  # May be None
+        reconstructed_tokens = []
+        for t in tokens_data:
+            # Validate required fields (crash on missing - per CLAUDE.md)
+            required_fields = {"token_id", "row_id", "row_data"}
+            missing = required_fields - set(t.keys())
+            if missing:
+                raise ValueError(
+                    f"Checkpoint token missing required fields: {missing}. "
+                    f"Required: {required_fields}. Found: {set(t.keys())}"
+                )
+
+            # Reconstruct with explicit handling of optional field
+            # branch_name is OPTIONAL per TokenInfo contract (default=None)
+            reconstructed_tokens.append(
+                TokenInfo(
+                    row_id=t["row_id"],
+                    token_id=t["token_id"],
+                    row_data=t["row_data"],
+                    branch_name=t.get("branch_name"),  # Optional field, None if missing
+                )
             )
-            for t in tokens_data
-        ]
 
         # Set buffers and tokens
         self._buffer_tokens[node_id] = reconstructed_tokens
@@ -444,7 +465,7 @@ def test_execute_flush_detects_incomplete_restoration(self) -> None:
     from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
     from elspeth.engine.executors import AggregationExecutor
     from elspeth.engine.spans import SpanFactory
-    from elspeth.plugins.context import PluginContext  # FIXED: Correct import path
+    from elspeth.plugins.context import PluginContext  # NOT from elspeth.contracts (common mistake)
     from elspeth.plugins.transforms.batch_stats import BatchStats
 
     db = LandscapeDB.in_memory()
@@ -514,7 +535,7 @@ def test_checkpoint_roundtrip(self) -> None:
     from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
     from elspeth.engine.executors import AggregationExecutor
     from elspeth.engine.spans import SpanFactory
-    from elspeth.plugins.context import PluginContext  # FIXED: Correct import path
+    from elspeth.plugins.context import PluginContext  # NOT from elspeth.contracts (common mistake)
     from elspeth.plugins.transforms.batch_stats import BatchStats
 
     db = LandscapeDB.in_memory()
@@ -1090,14 +1111,18 @@ def test_restore_makes_zero_database_calls(self) -> None:
         }
     }
 
-    # Mock database connection to detect queries
-    with patch.object(db, 'execute', side_effect=AssertionError("No DB queries allowed!")):
+    # Mock all database query methods to ensure zero queries
+    # This comprehensively blocks any database access during restoration
+    with patch.object(db, 'execute', side_effect=AssertionError("DB query via execute()!")), \
+         patch.object(db._engine, 'execute', side_effect=AssertionError("DB query via engine.execute()!")), \
+         patch('sqlalchemy.select', side_effect=AssertionError("DB query via select()!")):
         # Should complete without database access
         executor.restore_from_checkpoint(checkpoint_state)
 
-    # Verify restoration succeeded
+    # Verify restoration succeeded without any database calls
     assert len(executor._buffer_tokens[agg_node.node_id]) == 2
     assert executor._buffer_tokens[agg_node.node_id][0].token_id == "tok-1"
+    assert executor._buffer_tokens[agg_node.node_id][1].token_id == "tok-2"
 ```
 
 **Step 5: Write end-to-end crash recovery test**
@@ -1288,14 +1313,21 @@ Expected: All PASS
 
 Expected: All tests pass
 
-**Step 5: Commit edge case tests**
+**Step 8: Commit comprehensive validation tests**
 
 ```bash
 git add tests/engine/test_executors.py
-git commit -m "test(engine): add edge case tests for aggregation checkpoint restore
+git commit -m "test(engine): add comprehensive validation and integration tests for checkpoint restore
 
-Test malformed checkpoint detection and empty buffer handling.
-Verifies clear errors for missing required fields."
+Tests added:
+- Malformed checkpoint detection (missing required fields)
+- Empty buffer handling (valid edge case)
+- Old format rejection (hard error per CLAUDE.md)
+- Database query elimination (zero queries with mock)
+- End-to-end crash recovery with flush (original bug path)
+- Large batch handling (1000 rows within size limits)
+
+Verifies fix completeness and performance characteristics."
 ```
 
 ---
@@ -1338,17 +1370,19 @@ Rejected database-query approach (N+1 pattern) in favor of self-contained checkp
 2. **O(1) restoration** - no database queries required
 3. **Portable checkpoints** - no database dependency
 4. **Consistent pattern** - aligns with CoalesceExecutor's token storage
+5. **Size validation** - 10MB hard limit, 1MB warning threshold
 
 **Fix Implemented:**
 
-1. **Checkpoint Format Update** (src/elspeth/engine/executors.py:1070-1105)
+1. **Checkpoint Format Update** (src/elspeth/engine/executors.py:1070-1195)
    - Changed from: `{"rows": [...], "token_ids": [...]}`
    - Changed to: `{"tokens": [{"token_id", "row_id", "branch_name", "row_data"}, ...]}`
    - Eliminates database coupling and N+1 queries
+   - Added size validation (10MB hard limit, 1MB warning)
 
 2. **Simplified Restoration** (src/elspeth/engine/executors.py:1107-1164)
    - Direct TokenInfo reconstruction from checkpoint
-   - Graceful handling of old format with deprecation warning
+   - Hard error on old format (per CLAUDE.md - no backwards compatibility)
    - No database queries during recovery
 
 3. **Defensive Guard** (src/elspeth/engine/executors.py:889-896)
@@ -1362,22 +1396,46 @@ Rejected database-query approach (N+1 pattern) in favor of self-contained checkp
 - `test_execute_flush_detects_incomplete_restoration` - Guard behavior
 - `test_restore_from_checkpoint_detects_missing_required_fields` - Validation
 - `test_restore_from_checkpoint_handles_empty_tokens` - Edge case
+- `test_checkpoint_size_limit_enforced` - 10MB hard limit
+- `test_checkpoint_size_warning_logged` - 1MB warning threshold
+- `test_restore_old_format_checkpoint_raises_error` - Old format rejection
+- `test_restore_makes_zero_database_calls` - Query elimination verification
+- `test_aggregation_crash_recovery_with_flush` - End-to-end crash recovery
+- `test_checkpoint_with_1000_row_buffer` - Large batch handling
 
 **Architecture Review:**
-- Code Review (axiom-python-engineering:python-code-reviewer): Approved with import path fixes
-- Architecture Critic (axiom-system-architect:architecture-critic): Recommended full TokenInfo approach (2/5 → 4/5)
+- Code Review (axiom-python-engineering:python-code-reviewer): Approved
+- Architecture Critic (axiom-system-architect:architecture-critic): Approved with Conditions
+- QA Review (ordis-quality-engineering:test-suite-reviewer): Approved after test additions
+- Systems Review (yzmir-systems-thinking:pattern-recognizer): Approved after size validation
 
 **Benefits:**
 - 250x faster restoration for 1000-row batches (500ms → 2ms)
 - Checkpoints work without database availability
 - Supports future distributed aggregation
-- No backwards compatibility code (old format handled with warning)
+- No backwards compatibility code (hard error on old format per CLAUDE.md)
+- Storage growth protected by 10MB limit
+
+**Storage Impact:**
+- Checkpoint size increases 4-10x (50KB → 200-500KB for 1000 rows)
+- ~200 bytes per buffered row overhead
+- 10MB hard limit prevents unbounded growth
+- See capacity planning table in Architecture Notes
 
 **Verification:**
 ```bash
 .venv/bin/python -m pytest tests/engine/test_executors.py::TestAggregationExecutorCheckpoint -v
 ```
 All tests pass.
+
+**v3.1 Refinements:**
+After second review, 4 minor conditions addressed:
+1. Import path documented (common mistake: PluginContext from contracts instead of plugins)
+2. Required field validation made explicit (token_id, row_id, row_data are required; branch_name is optional)
+3. Size error message improved with specific thresholds and actionable solutions
+4. Test mocking strengthened to block all database access paths
+
+These refinements improve code clarity and test robustness without changing the core fix.
 ```
 
 **Step 3: Commit bug closure**
@@ -1568,11 +1626,18 @@ If everything passes, no additional commit needed. Implementation complete!
 
 ## Completion Checklist
 
-- [ ] Task 1: Checkpoint format updated to store full TokenInfo
-- [ ] Task 2: Restoration simplified (no database queries)
+- [ ] Task 1: Checkpoint format updated to store full TokenInfo with size validation
+- [ ] Task 2: Restoration simplified (no database queries, hard error on old format)
 - [ ] Task 3: Defensive guard and comprehensive roundtrip test
-- [ ] Task 4: Edge case validation tests
-- [ ] Task 5: Bug report closed with architecture notes
+- [ ] Task 3.5: Checkpoint size validation tests (10MB limit, 1MB warning)
+- [ ] Task 4: Comprehensive validation and integration tests
+  - [ ] Old format rejection test
+  - [ ] Database query elimination test (zero queries)
+  - [ ] End-to-end crash recovery test
+  - [ ] Large batch test (1000 rows)
+  - [ ] Malformed checkpoint detection
+  - [ ] Empty buffer handling
+- [ ] Task 5: Bug report closed with architecture notes and storage impact
 - [ ] Task 6: All verification checks pass
 - [ ] Type checking passes
 - [ ] Linting passes
@@ -1602,9 +1667,58 @@ If everything passes, no additional commit needed. Implementation complete!
 
 **Migration Strategy:**
 
-Old format checkpoints handled gracefully with deprecation warning.
-No backwards compatibility code retained (per CLAUDE.md).
-On next checkpoint, format automatically upgrades.
+Old format checkpoints CANNOT be restored (hard error per CLAUDE.md).
+No backwards compatibility code. Pipelines with old checkpoints must restart.
+
+**Storage Impact and Capacity Planning:**
+
+Understanding checkpoint storage growth is critical for production deployment:
+
+**Size Estimates:**
+- **Per-row overhead:** ~200 bytes (token_id, row_id, branch_name, row_data metadata)
+- **1000-row batch:** ~200KB checkpoint (depends on row_data size)
+- **10MB hard limit:** ~50,000 rows (with small row_data), triggers RuntimeError
+
+**Capacity Planning Formula:**
+```
+checkpoint_size = num_buffered_rows × (200 + avg_row_data_size_bytes)
+```
+
+**Example Scenarios:**
+
+| Scenario | Buffer Size | Row Data Size | Checkpoint Size | Notes |
+|----------|-------------|---------------|-----------------|-------|
+| Small batch (count=100) | 100 rows | 50 bytes | ~25KB | Typical use case |
+| Medium batch (count=1000) | 1000 rows | 200 bytes | ~400KB | Large batch processing |
+| Large batch (count=5000) | 5000 rows | 100 bytes | ~1.5MB | Triggers warning |
+| Very large (count=10000) | 10,000 rows | 500 bytes | ~7MB | Near limit |
+| Extreme (count=20000) | 20,000 rows | 200 bytes | ~8MB | Approaching limit |
+
+**Production Recommendations:**
+
+1. **Set reasonable count triggers:** Keep batches under 5000 rows to avoid warnings
+2. **Monitor row_data size:** Large payloads (LLM responses, documents) increase checkpoint size
+3. **Implement checkpoint cleanup:** Address P3-2026-01-21 (checkpoint retention policy)
+4. **Disk space planning:** Budget 10MB per aggregation node for checkpoint storage
+5. **Alert on warnings:** Log monitoring should alert when checkpoints exceed 1MB
+
+**Storage Growth Risk:**
+
+Combined with existing P3 bug (checkpoints never cleaned), this creates unbounded growth:
+- **Before fix:** 50KB per checkpoint (token_ids only)
+- **After fix:** 200-500KB per checkpoint (full TokenInfo)
+- **Growth rate:** 4-10x increase in checkpoint size
+- **Mitigation:** Implement checkpoint retention policy (see P3-2026-01-21)
+
+**Long-term Solution:**
+
+The checkpoint system needs formal specification and lifecycle management:
+1. Schema versioning (detect format changes)
+2. Retention policy (TTL or max checkpoint count)
+3. Size budgets per aggregation node
+4. Compression for large checkpoints
+
+This fix addresses the immediate bug but highlights need for checkpoint architecture review.
 
 ---
 
@@ -1612,6 +1726,40 @@ On next checkpoint, format automatically upgrades.
 
 After completing all tasks, the fix will be ready for approval.
 
-**Code review confirmed:** Import paths fixed, all assertions present, follows CLAUDE.md
-**Architecture review confirmed:** Eliminates N+1 queries, improves from 2/5 to 4/5 rating
-**Testing:** Comprehensive coverage including edge cases and end-to-end verification
+**Quality Gate Reviews Completed (4-Perspective):**
+
+1. **Architecture Review (axiom-system-architect:architecture-critic):**
+   - Verdict: Approve with Conditions
+   - Rating: Improved from 2/5 to 4/5
+   - Required: Remove backwards compatibility (DONE), add size validation (DONE)
+
+2. **Code Review (axiom-python-engineering:python-code-reviewer):**
+   - Verdict: Approve
+   - Required: Fix import paths (DONE), add branch_name assertions (DONE)
+
+3. **QA Review (ordis-quality-engineering:test-suite-reviewer):**
+   - Verdict: Approve after test additions
+   - Required: Old format test (DONE), DB query verification (DONE), E2E crash recovery (DONE)
+
+4. **Systems Review (yzmir-systems-thinking:pattern-recognizer):**
+   - Verdict: Approve after size validation
+   - Required: Size validation (DONE), large batch test (DONE), storage documentation (DONE)
+   - Identified pattern: "Shifting the Burden" archetype (documented in Architecture Notes)
+
+**All 8 Blocking Issues Resolved:**
+- ✅ Backwards compatibility removed (hard error per CLAUDE.md)
+- ✅ Import paths corrected (warnings, PluginContext)
+- ✅ Checkpoint size validation added (10MB limit, 1MB warning)
+- ✅ Old format rejection test added
+- ✅ Database query elimination test added
+- ✅ End-to-end crash recovery test added
+- ✅ Large batch test (1000 rows) added
+- ✅ Storage impact documentation added to Architecture Notes
+
+**4 Minor Conditions Resolved (v3.1):**
+- ✅ Import path documentation (PluginContext NOT from contracts)
+- ✅ Field validation explicit (required vs optional fields documented)
+- ✅ Error message clarity (specific solutions with thresholds)
+- ✅ Test mocking strength (comprehensive database access blocking)
+
+**Testing:** Comprehensive coverage (12 tests) including edge cases, performance verification, and end-to-end crash recovery

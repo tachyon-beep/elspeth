@@ -111,11 +111,7 @@ class TestPluginManager:
         manager.register(MyPlugin())
 
         transform = manager.get_transform_by_name("transform_b")
-        assert transform is not None
         assert transform.name == "transform_b"
-
-        missing = manager.get_transform_by_name("nonexistent")
-        assert missing is None
 
 
 class TestPluginSpec:
@@ -262,6 +258,44 @@ class TestPluginSpecSchemaHashes:
         # Same schema = same hash (regardless of plugin)
         assert spec1.input_schema_hash is not None  # Ensure populated
         assert spec1.input_schema_hash == spec2.input_schema_hash
+
+
+class TestMissingPluginRaises:
+    """Verify PluginManager raises on unknown plugins."""
+
+    def test_get_source_by_name_raises_on_unknown_plugin(self) -> None:
+        """Verify PluginManager raises ValueError for unknown source plugins."""
+        import pytest
+
+        from elspeth.plugins.manager import PluginManager
+
+        manager = PluginManager()
+
+        # Try to get plugin that doesn't exist
+        with pytest.raises(ValueError, match="Unknown source plugin: nonexistent"):
+            manager.get_source_by_name("nonexistent")
+
+    def test_get_transform_by_name_raises_on_unknown_plugin(self) -> None:
+        """Verify PluginManager raises ValueError for unknown transform plugins."""
+        import pytest
+
+        from elspeth.plugins.manager import PluginManager
+
+        manager = PluginManager()
+
+        with pytest.raises(ValueError, match="Unknown transform plugin: nonexistent"):
+            manager.get_transform_by_name("nonexistent")
+
+    def test_get_sink_by_name_raises_on_unknown_plugin(self) -> None:
+        """Verify PluginManager raises ValueError for unknown sink plugins."""
+        import pytest
+
+        from elspeth.plugins.manager import PluginManager
+
+        manager = PluginManager()
+
+        with pytest.raises(ValueError, match="Unknown sink plugin: nonexistent"):
+            manager.get_sink_by_name("nonexistent")
 
 
 class TestDiscoveryBasedRegistration:
