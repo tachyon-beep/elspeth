@@ -213,6 +213,79 @@ coalesce_config.branches = ["branch_a", "branch_b"]
 # coalesce --continue--> sink
 ```
 
+**Fork without coalesce:**
+Branches not in a coalesce route directly to output sink:
+```python
+# Fork to separate destinations (no merge)
+gate_config.fork_to = ["branch_a", "branch_b"]
+# No coalesce defined
+
+# Graph construction creates:
+# gate --branch_a--> output_sink (fallback)
+# gate --branch_b--> output_sink (fallback)
+```
+
+### Validation Semantics
+
+**Dynamic Schema Behavior:**
+
+Schema validation follows these rules:
+
+1. **Dynamic schemas skip validation** - If either producer or consumer schema is `None` (dynamic), validation is skipped for that edge
+2. **Mixed dynamic/specific pipelines are valid** - Dynamic schemas act as pass-through in validation
+3. **Specific → Dynamic → Specific is valid** - Validation only checks specific → specific edges
+
+**Examples:**
+
+```python
+# VALID: Dynamic source → Specific sink (validation skipped)
+datasource:
+  schema: dynamic
+sinks:
+  output:
+    schema: {fields: {x: {type: int}}}
+
+# VALID: Specific → Dynamic → Specific (dynamic in middle skipped)
+datasource:
+  schema: {fields: {x: {type: int}}}
+transforms:
+  - schema: dynamic  # Skipped in validation
+sinks:
+  output:
+    schema: {fields: {x: {type: int}}}
+
+# INVALID: Specific → Specific with incompatibility
+datasource:
+  schema: {fields: {x: {type: int}}}
+sinks:
+  output:
+    schema: {fields: {y: {type: str}}}  # Missing field 'y'
+```
+
+**Gate Continue Routes:**
+
+Gates support multiple routes resolving to "continue":
+```python
+gates:
+  - name: filter
+    routes:
+      true: continue    # Routes to next gate or output
+      false: rejected   # Routes to specific sink
+```
+
+**ALL routes resolving to "continue"** are handled, not just `"true"`.
+
+**Fork/Join Validation:**
+
+1. **Fork branches** inherit schema from upstream gate
+2. **Coalesce merge** validates that all incoming branch schemas are compatible
+3. **Fork without coalesce** validates each branch against its destination independently
+
+**Critical invariants:**
+- Every fork branch must have a destination (coalesce or sink)
+- Coalesce validates incoming branch schema compatibility
+- Gates with continue routes must have a next node in sequence
+
 ## Notes
 
 **Fixes:**
