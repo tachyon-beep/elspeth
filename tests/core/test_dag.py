@@ -1849,3 +1849,100 @@ def test_validate_aggregation_detects_incompatibility():
     errors = graph._validate_edge_schemas()
     assert len(errors) > 0
     assert "sum" in errors[0]
+
+
+class TestDynamicSchemaDetection:
+    """Tests for detecting and handling dynamic schemas."""
+
+    def test_dynamic_source_to_specific_sink_should_skip_validation(self) -> None:
+        """Dynamic source → specific sink should PASS (validation skipped).
+
+        Manually constructed graph with dynamic output_schema and specific input_schema.
+        Validation should be skipped for dynamic schemas.
+        """
+        from elspeth.contracts.schema import SchemaConfig
+        from elspeth.core.dag import ExecutionGraph
+        from elspeth.plugins.schema_factory import create_schema_from_config
+
+        # Create dynamic schema (no fields, extra='allow')
+        DynamicSchema = create_schema_from_config(
+            SchemaConfig.from_dict({"fields": "dynamic"}),
+            "DynamicSchema",
+            allow_coercion=False,
+        )
+
+        # Create specific schema (has fields, extra='forbid')
+        SpecificSchema = create_schema_from_config(
+            SchemaConfig.from_dict({"mode": "strict", "fields": ["value: float", "name: str"]}),
+            "SpecificSchema",
+            allow_coercion=False,
+        )
+
+        graph = ExecutionGraph()
+        graph.add_node("source", node_type="source", plugin_name="csv", output_schema=DynamicSchema)
+        graph.add_node("sink", node_type="sink", plugin_name="csv", input_schema=SpecificSchema)
+        graph.add_edge("source", "sink", label="continue")
+
+        # Should NOT raise - validation is skipped for dynamic schemas
+        graph.validate()
+
+    def test_specific_source_to_dynamic_sink_should_skip_validation(self) -> None:
+        """Specific source → dynamic sink should PASS (validation skipped).
+
+        Manually constructed graph with specific output_schema and dynamic input_schema.
+        Validation should be skipped for dynamic schemas.
+        """
+        from elspeth.contracts.schema import SchemaConfig
+        from elspeth.core.dag import ExecutionGraph
+        from elspeth.plugins.schema_factory import create_schema_from_config
+
+        # Create specific schema
+        SpecificSchema = create_schema_from_config(
+            SchemaConfig.from_dict({"mode": "strict", "fields": ["value: float"]}),
+            "SpecificSchema",
+            allow_coercion=False,
+        )
+
+        # Create dynamic schema
+        DynamicSchema = create_schema_from_config(
+            SchemaConfig.from_dict({"fields": "dynamic"}),
+            "DynamicSchema",
+            allow_coercion=False,
+        )
+
+        graph = ExecutionGraph()
+        graph.add_node("source", node_type="source", plugin_name="csv", output_schema=SpecificSchema)
+        graph.add_node("sink", node_type="sink", plugin_name="csv", input_schema=DynamicSchema)
+        graph.add_edge("source", "sink", label="continue")
+
+        # Should NOT raise - validation is skipped for dynamic schemas
+        graph.validate()
+
+    def test_is_dynamic_schema_helper_detects_dynamic_schemas(self) -> None:
+        """_is_dynamic_schema() helper correctly identifies dynamic vs explicit schemas."""
+        from elspeth.contracts.schema import SchemaConfig
+        from elspeth.core.dag import _is_dynamic_schema
+        from elspeth.plugins.schema_factory import create_schema_from_config
+
+        # Create dynamic schema
+        DynamicSchema = create_schema_from_config(
+            SchemaConfig.from_dict({"fields": "dynamic"}),
+            "DynamicSchema",
+            allow_coercion=False,
+        )
+
+        # Create explicit schema
+        ExplicitSchema = create_schema_from_config(
+            SchemaConfig.from_dict({"mode": "strict", "fields": ["value: float"]}),
+            "ExplicitSchema",
+            allow_coercion=False,
+        )
+
+        # Test dynamic schema detection
+        assert _is_dynamic_schema(DynamicSchema) is True
+
+        # Test explicit schema detection
+        assert _is_dynamic_schema(ExplicitSchema) is False
+
+        # Test backwards compat (None = dynamic)
+        assert _is_dynamic_schema(None) is True

@@ -65,6 +65,26 @@ def _get_missing_required_fields(
     return required_fields - producer_fields
 
 
+def _is_dynamic_schema(schema: type[PluginSchema] | None) -> bool:
+    """Check if a schema is dynamic (accepts any fields).
+
+    Dynamic schemas have no defined fields and accept any extra fields.
+
+    Args:
+        schema: Schema class to check (None is treated as dynamic for backwards compat)
+
+    Returns:
+        True if schema is dynamic or None, False if explicit schema
+    """
+    if schema is None:
+        return True  # Legacy: None = dynamic
+
+    return (
+        len(schema.model_fields) == 0  # No defined fields
+        and schema.model_config.get("extra") == "allow"  # Accepts extra fields
+    )
+
+
 def _schemas_compatible(schema1: type[PluginSchema], schema2: type[PluginSchema]) -> bool:
     """Check if two schemas are compatible (same type).
 
@@ -239,11 +259,13 @@ class ExecutionGraph:
         if len(incoming_edges) < 2:
             return errors  # Degenerate but valid
 
-        # Collect non-None schemas
+        # Collect non-dynamic schemas
         incoming_schemas: list[tuple[str, type[PluginSchema]]] = []
         for from_node, _, _, _ in incoming_edges:
             schema = self._get_effective_producer_schema(from_node)
-            if schema is not None:
+            if not _is_dynamic_schema(schema):
+                # Type narrowing: if not dynamic, schema is not None
+                assert schema is not None
                 incoming_schemas.append((from_node, schema))
 
         # Compare pairwise
@@ -290,9 +312,13 @@ class ExecutionGraph:
             # Get consumer input schema directly
             consumer_schema = to_info.input_schema
 
-            # Skip validation if either schema is None (dynamic)
-            if producer_schema is None or consumer_schema is None:
+            # Skip validation if either schema is dynamic
+            if _is_dynamic_schema(producer_schema) or _is_dynamic_schema(consumer_schema):
                 continue
+
+            # Type narrowing: if not dynamic, schemas are not None
+            assert producer_schema is not None
+            assert consumer_schema is not None
 
             # Validate compatibility
             missing = _get_missing_required_fields(

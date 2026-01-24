@@ -361,11 +361,6 @@ output_sink: output
         config_file.unlink()
 
 
-@pytest.mark.skip(
-    reason="Dynamic schema detection broken after from_plugin_instances() refactor. "
-    "Schemas are now instances (not None), need to detect dynamic via empty model_fields. "
-    "Bug tracked separately."
-)
 def test_dynamic_schema_to_specific_schema_validation():
     """Test validation behavior when dynamic schema feeds specific schema.
 
