@@ -378,6 +378,26 @@ class TestExecutionGraphAccessors:
 
         assert effective_schema == SourceOutput
 
+    def test_get_effective_producer_schema_returns_direct_schema_for_transform(self):
+        """_get_effective_producer_schema() returns output_schema directly for transform nodes."""
+        from elspeth.contracts import PluginSchema
+        from elspeth.core.dag import ExecutionGraph
+
+        class TransformOutput(PluginSchema):
+            result: str
+
+        graph = ExecutionGraph()
+        graph.add_node(
+            "transform",
+            node_type="transform",
+            plugin_name="field_mapper",
+            output_schema=TransformOutput,
+        )
+
+        effective_schema = graph._get_effective_producer_schema("transform")
+
+        assert effective_schema == TransformOutput
+
 
 class TestExecutionGraphFromConfig:
     """Build ExecutionGraph from ElspethSettings."""
