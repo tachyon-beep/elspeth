@@ -4,6 +4,50 @@
 
 This file contains CLI command refactoring to use the new graph construction flow.
 
+## Spec Corrections (Post-Implementation)
+
+**NOTE:** The following corrections were made during implementation after verifying actual codebase APIs:
+
+### Task 7: Orchestrator API Correction
+
+**Original spec** described a simplified Orchestrator API that does not exist:
+```python
+# SPEC (fictional API - does not exist)
+orchestrator = Orchestrator(
+    pipeline_config=pipeline_config,
+    landscape_db=db,
+    event_bus=event_bus,
+    graph=graph,
+    resume_run_id=run_id,
+)
+result = orchestrator.resume(run_id)
+```
+
+**Actual implementation** uses the correct Orchestrator API from `src/elspeth/engine/orchestrator.py`:
+```python
+# ACTUAL (correct API)
+checkpoint_manager = CheckpointManager(db)
+orchestrator = Orchestrator(db, event_bus=event_bus, checkpoint_manager=checkpoint_manager)
+result = orchestrator.resume(
+    resume_point=resume_point,
+    config=pipeline_config,
+    graph=graph,
+    payload_store=payload_store,
+    settings=config,
+)
+```
+
+**Key differences:**
+1. `Orchestrator.__init__` signature: `(db, *, event_bus=None, checkpoint_manager=None, ...)` not `(pipeline_config, landscape_db, event_bus, graph, resume_run_id)`
+2. `orchestrator.resume()` signature: `(resume_point, config, graph, *, payload_store=None, settings=None)` not `(run_id)`
+3. EventBus and CheckpointManager are **not mutually exclusive** - both can be passed to constructor
+
+**EventBus Addition (Post-Review):**
+Architecture review identified missing EventBus in resume command as High severity UX bug. Added in commit bea9bba:
+- Resume now creates EventBus with console formatters (matching run command)
+- Users get real-time progress feedback during resume operations
+- EventBus coexists with CheckpointManager (both passed to Orchestrator)
+
 ---
 
 ## Task 5: Refactor CLI `run()` Command + Add `_execute_pipeline_with_instances()`
