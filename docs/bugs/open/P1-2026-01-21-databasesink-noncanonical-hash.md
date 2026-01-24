@@ -94,3 +94,33 @@
 
 - Related issues/PRs: N/A
 - Related design docs: `docs/design/architecture.md` (canonical JSON)
+
+## Verification Status (2026-01-24)
+
+**Status**: STILL VALID
+
+**Verified by**: Automated verification agent
+
+**Current code state**: The bug is confirmed to still exist in the current codebase. At lines 205-207 of `/home/john/elspeth-rapid/src/elspeth/plugins/sinks/database_sink.py`, the `write()` method uses:
+
+```python
+payload_json = json.dumps(rows, sort_keys=True, separators=(",", ":"))
+payload_bytes = payload_json.encode("utf-8")
+content_hash = hashlib.sha256(payload_bytes).hexdigest()
+```
+
+This is non-canonical JSON serialization. The codebase provides proper canonical JSON functions in `src/elspeth/core/canonical.py`:
+- `canonical_json(obj)` - Two-phase normalization (pandas/numpy types) + RFC 8785 serialization
+- `stable_hash(obj)` - Returns SHA-256 hash of canonical JSON
+
+Recent git history shows the file has received security fixes (dd3bed7, e3c72a8) and refactoring (533ed86, 58685dd) but the canonical hashing issue has not been addressed.
+
+**Architectural Impact**: The code comment at line 189 states "CRITICAL: Hashes the canonical JSON payload BEFORE insert" and line 57 states "Returns ArtifactDescriptor with SHA-256 hash of canonical JSON payload BEFORE insert" - but the implementation does not match this documented contract.
+
+**Risks if unfixed**:
+1. Hash divergence for semantically identical data (unicode escaping, field ordering)
+2. NaN/Infinity values can pass through hashing (violates canonical JSON's strict rejection policy)
+3. Pandas/numpy types will cause `TypeError` instead of being normalized (e.g., `pd.Timestamp`, `numpy.int64`)
+4. Audit trail integrity compromised - hashes won't match `stable_hash()` computations elsewhere in the system
+
+**Recommendation**: Keep open - this is a P1 audit integrity bug that needs fixing before production use.

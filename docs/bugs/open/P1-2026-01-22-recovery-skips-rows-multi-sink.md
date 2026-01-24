@@ -107,3 +107,42 @@ Recovery assumes a single monotonic row_index boundary derived from the latest c
 - [ ] Fix implemented
 - [ ] Tests added
 - [ ] Fix verified
+
+## Verification Status (2026-01-24)
+
+**Status**: STILL VALID
+
+**Verified by**: Automated verification agent
+
+**Current code state**:
+The bug remains unfixed in the current codebase. Analysis confirms:
+
+1. **Recovery logic unchanged**: `RecoveryManager.get_unprocessed_rows()` (lines 233-285 in `/home/john/elspeth-rapid/src/elspeth/core/checkpoint/recovery.py`) still uses the single row_index boundary approach:
+   - Line 250: Gets latest checkpoint
+   - Lines 257-275: Derives row_index from checkpoint token
+   - Lines 277-283: Returns only rows with `row_index > checkpointed_row_index`
+
+2. **No sink-state awareness**: The method does NOT query `node_states_table` or check which tokens have completed sink writes. It purely relies on row_index ordering.
+
+3. **Prior verification confirms bug**: A comprehensive verification report from 2026-01-22 (`docs/bugs/generated/VERIFICATION_P1_recovery_skips_rows.md`) analyzed this bug in detail and concluded:
+   - **VERIFIED** - Bug is real and manifests in interleaved sink routing scenarios
+   - Example: Row 0 → sink_a, Row 1 → sink_b, Row 2 → sink_a
+   - If sink_a writes first (rows 0, 2) and sink_b fails (row 1), recovery skips row 1
+   - Latest checkpoint would be row_index=2, so `get_unprocessed_rows` returns empty list
+   - Row 1's output is permanently lost
+
+4. **Related fix did NOT address this bug**: Commit b2a3518 (2026-01-23) modified `recovery.py` but only added type fidelity preservation for resume (source schema validation). It did not change the row boundary computation logic.
+
+5. **Related but distinct bug**: Bug P0-2026-01-19-checkpoint-before-sink-write (now closed) addressed checkpoint timing (creating checkpoints AFTER sink writes), which is a prerequisite for this fix but does not solve the multi-sink interleaving problem.
+
+**Trigger conditions**:
+- Pipeline with 2+ sinks
+- Rows routed to different sinks in non-contiguous order (interleaved)
+- One sink fails after another succeeds
+- Checkpoint frequency enabled
+
+**Impact**: Critical data loss - rows routed to failed sinks are silently skipped on resume, violating audit integrity guarantees. The audit trail may show row processing succeeded, but sink artifacts are missing.
+
+**Recommendation**: KEEP OPEN
+
+This is a valid P1 bug requiring implementation of the proposed fix: query for tokens lacking completed sink node_states rather than using row_index boundary. A test case for interleaved multi-sink recovery should be added before implementing the fix.

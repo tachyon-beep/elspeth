@@ -101,3 +101,85 @@
 
 - Related issues/PRs: P1-2026-01-21-aggregation-input-hash-mismatch
 - Related design docs: CLAUDE.md auditability standard
+
+---
+
+## Verification (2026-01-24)
+
+**Status: STILL VALID**
+
+### Findings
+
+1. **Code Location Confirmed** (lines 1721-1862 in current orchestrator.py):
+   - `_flush_remaining_aggregation_buffers()` exists at lines 1721-1862
+   - Method signature matches bug report description
+
+2. **Bug Confirmed - Output Mode is Ignored**:
+
+   Lines 1804-1857 show the flush logic branches ONLY on result shape:
+
+   ```python
+   if flush_result.row is not None and buffered_tokens:
+       # Single row output - uses buffered_tokens[0]
+       output_token = TokenInfo(
+           token_id=buffered_tokens[0].token_id,
+           row_id=buffered_tokens[0].row_id,
+           row_data=flush_result.row,
+           branch_name=buffered_tokens[0].branch_name,
+       )
+   elif flush_result.rows is not None and buffered_tokens:
+       # Multiple row output - uses expand_token
+       expanded = processor.token_manager.expand_token(
+           parent_token=buffered_tokens[0],
+           expanded_rows=flush_result.rows,
+           step_in_pipeline=agg_step,
+       )
+   ```
+
+   **Critical Problem**: No reference to `agg_settings.output_mode` in this logic.
+
+3. **Contrast with RowProcessor Proper Handling**:
+
+   In `src/elspeth/engine/processor.py:180-373`, the normal flush path DOES consult output_mode:
+
+   ```python
+   settings = self._aggregation_settings[node_id]
+   output_mode = settings.output_mode  # Line 183
+
+   if output_mode == "single":
+       # Lines 227-244: Single output handling
+   elif output_mode == "passthrough":
+       # Lines 246-304: Passthrough preserves token identity
+       for token, enriched_data in zip(buffered_tokens, result.rows, strict=True):
+           updated_token = TokenInfo(
+               row_id=token.row_id,  # PRESERVES original row_id
+               token_id=token.token_id,  # PRESERVES original token_id
+               row_data=enriched_data,
+               branch_name=token.branch_name,
+           )
+   elif output_mode == "transform":
+       # Lines 306-370: Transform creates new tokens
+       expanded_tokens = self._token_manager.expand_token(...)
+   ```
+
+4. **Impact Confirmed**:
+   - Passthrough mode: End-of-source flush will use `buffered_tokens[0]` (single row) or `expand_token` (multi-row), both creating wrong token identity
+   - Original buffered tokens with outcomes BUFFERED (lines 378-389 in processor.py) never get terminal outcomes
+   - All output rows inherit first buffered row's row_id instead of preserving individual row identities
+
+5. **Git History**:
+   - Commit 1c8300a introduced `_flush_remaining_aggregation_buffers()`
+   - Initial implementation had same bug - never consulted output_mode
+   - Bug existed since inception of end-of-source flush feature
+
+6. **Test Coverage**:
+   - No existing tests found for end-of-source flush with `output_mode=passthrough`
+   - Searches in tests/engine/ confirm gap in coverage (bug report accurate)
+
+### Root Cause
+
+The `_flush_remaining_aggregation_buffers()` method was implemented as a simplified version of `RowProcessor._process_batch_aggregation_node()`, but the simplification omitted the critical `output_mode` branching logic. This created semantic drift between normal flush (during processing) and end-of-source flush.
+
+### Verification Verdict
+
+**BUG IS STILL VALID** - No fixes applied since original report. The flush logic at end-of-source continues to ignore `output_mode`, causing audit trail corruption for passthrough aggregations that don't flush before source exhaustion.

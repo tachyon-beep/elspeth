@@ -92,3 +92,81 @@
 
 - Related issues/PRs: N/A
 - Related design docs: `docs/contracts/plugin-protocol.md`
+
+---
+
+## Verification (2026-01-24)
+
+**Status:** ✅ **OBE (Overtaken By Events) - Root Cause Fixed**
+
+**Verifier:** Claude Sonnet 4.5 (verification task)
+
+### Evidence of Resolution
+
+**1. Target code deleted:**
+- `src/elspeth/engine/schema_validator.py` was deleted in commit `f4dd59d` (2026-01-24)
+- The `validate_pipeline_schemas()` function referenced in this bug report no longer exists
+- Test files `tests/engine/test_schema_validator.py` and `tests/engine/test_orchestrator_schema_validation.py` were also deleted
+
+**2. Architecture completely refactored (2x):**
+
+**First refactor (commit f4dd59d, 2026-01-24):**
+- Moved schema validation from standalone module into `ExecutionGraph` class
+- Validation became edge-based (DAG-aware) instead of linear list-based
+- Fixed P1-2026-01-21-schema-validator-ignores-dag-routing bug
+
+**Second refactor (commit df43269, 2026-01-24):**
+- Removed ALL schema validation from DAG layer entirely
+- Moved validation to two-phase model:
+  - **Phase 1:** Plugins self-validate during `__init__()` (plugin construction)
+  - **Phase 2:** Cross-plugin compatibility checked during graph construction
+- DAG validation now only checks structure (cycles, connectivity)
+- Ref: `docs/plans/2026-01-24-fix-schema-validation-properly.md`
+
+**3. Current architecture prevents this bug:**
+
+The bug described early-exit behavior in `validate_pipeline_schemas()`:
+```python
+# OLD CODE (deleted):
+if source_output is None:
+    return errors  # ← Bug: skips all downstream validation
+```
+
+**Current architecture:**
+- No standalone `validate_pipeline_schemas()` function exists
+- No linear list-based validation exists
+- Schema validation happens at graph construction time, edge-by-edge
+- Dynamic schemas (None) handled per-edge, not globally:
+  ```python
+  # Current approach (from removed code in commit df43269):
+  # For each edge:
+  #   if producer_schema is None or consumer_schema is None:
+  #     continue  # Skip THIS edge only, not all validation
+  ```
+
+**4. Related bugs also closed:**
+- P1-2026-01-21-schema-validator-ignores-dag-routing: Closed (commit f4dd59d)
+- P0-2026-01-24-eliminate-parallel-dynamic-schema-detection: Resolved via architecture refactor
+- P0-2026-01-24-dynamic-schema-detection-regression: Superseded by root cause fix
+
+### Why This is OBE (Not Just "Fixed")
+
+This bug reported a defect in `validate_pipeline_schemas()` function. That function was:
+1. First moved to `ExecutionGraph._validate_edge_schemas()` (f4dd59d)
+2. Then deleted entirely when schema validation was moved to plugin construction (df43269)
+
+The architecture changed so fundamentally that:
+- The code path described in this bug no longer exists
+- The validation model changed from linear to edge-based to plugin-based
+- The problem cannot recur because the function is gone
+
+**Status rationale:** OBE rather than FIXED because the fix wasn't a patch to the buggy code - the entire subsystem was replaced with a different architecture.
+
+### Recommendation
+
+**Move to:** `docs/bugs/closed/` (overtaken by events)
+
+**Cross-references:**
+- Implementation plan: `docs/plans/2026-01-24-fix-schema-validation-properly.md`
+- Architecture review: `docs/bugs/arch-review-schema-validator-fix.md`
+- Related closed bugs: P1-2026-01-21-schema-validator-ignores-dag-routing

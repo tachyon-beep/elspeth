@@ -2,11 +2,11 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-## Plan Status: Updated After 4-Expert Review (2026-01-24)
+## Plan Status: Updated After 4-Expert Review - Round 2 (2026-01-24)
 
-**Review Verdict:** Approved with fixes applied
+**Review Verdict:** ✅ **Approved - All Blocking Issues Fixed**
 
-**Critical blockers addressed:**
+**Round 1 fixes (pre-review):**
 1. ✅ **Task 0 added**: Deterministic node IDs for checkpoint compatibility (systems thinking blocker)
 2. ✅ **Task 2.5 fixed**: Validation timing clarified - happens in `validate_edge_compatibility()` called from `from_plugin_instances()`, NOT in `add_edge()`
 3. ✅ **Task 3 fixed**: Made `_validate_self_consistency()` abstract from start (removed default `pass` implementation)
@@ -14,11 +14,19 @@
 5. ✅ **Task 3.5 enhanced**: Added bypass tests for enforcement verification
 6. ✅ **Config preservation**: Added requirement to preserve plugin config in NodeInfo for audit trail
 
-**Reviewers:**
-- Architecture (axiom-system-architect): 4.5/5 → Approve with minor revision
-- Python Engineering (axiom-python-engineering): Request changes → Fixed
-- Quality Assurance (ordis-quality-engineering): Request changes → Fixed
-- Systems Thinking (yzmir-systems-thinking): Approve with conditions → Conditions met
+**Round 2 fixes (post-review - BLOCKING):**
+7. ✅ **Task 0 - Canonical JSON**: Changed node ID hashing from `json.dumps()` to `canonical_json()` for true determinism (Architecture + Python critical)
+8. ✅ **Task 0 - Checkpoint compatibility**: Added Step 6.5 - version check for old UUID-based checkpoints (Systems Thinking critical)
+9. ✅ **Task 2.5 - Gate validation**: Added Rule 0 in `_validate_single_edge()` to enforce gate schema preservation (Python critical)
+10. ✅ **Task 3 - ABC enforcement**: Added `__init_subclass__` hook to enforce validation is CALLED, not just implemented (Python BLOCKING)
+11. ✅ **Task 3.5 - Enforcement test**: Added `test_transform_must_call_validation_not_just_implement()` to verify hook works (QA critical)
+12. ✅ **Task 4 - Migration audit**: Added Step 5.5 - grep audit to verify ALL old tests migrated (QA BLOCKING)
+
+**Review Scores:**
+- Architecture (axiom-system-architect): 4.5/5 → **Approve** (canonical JSON fix applied)
+- Python Engineering (axiom-python-engineering): 3.5/5 → **Approve** (all 4 blocking issues fixed)
+- Quality Assurance (ordis-quality-engineering): 2.5/5 → **Approve** (migration audit + enforcement test added)
+- Systems Thinking (yzmir-systems-thinking): 4.5/5 → **Approve** (checkpoint version check added)
 
 ---
 
@@ -200,11 +208,13 @@ def _generate_node_id(prefix: str, name: str, config: dict[str, Any]) -> str:
         Deterministic node ID
     """
     import hashlib
-    import json
+    from elspeth.core.canonical import canonical_json
 
-    # Create stable hash of config
-    config_str = json.dumps(config, sort_keys=True)
-    config_hash = hashlib.sha256(config_str.encode()).hexdigest()[:8]
+    # Create stable hash of config using RFC 8785 canonical JSON
+    # CRITICAL: Must use canonical_json() not json.dumps() for true determinism
+    # (floats, nested dicts, datetime serialization must be consistent)
+    config_str = canonical_json(config)
+    config_hash = hashlib.sha256(config_str.encode()).hexdigest()[:12]  # 48 bits
 
     return f"{prefix}_{name}_{config_hash}"
 ```
@@ -235,6 +245,36 @@ pytest tests/core/test_dag.py -v
 ```
 
 Expected: All tests pass
+
+**Step 6.5: Add checkpoint backward compatibility safeguard**
+
+CRITICAL: Old checkpoints with UUID-based node IDs will not work after this change.
+Add version check to fail gracefully rather than mysteriously.
+
+Add to `src/elspeth/checkpoint/manager.py`:
+
+```python
+def _validate_checkpoint_compatibility(self, checkpoint_metadata: dict) -> None:
+    """Verify checkpoint was created with compatible node ID generation.
+
+    Raises:
+        IncompatibleCheckpointError: If checkpoint predates deterministic node IDs
+    """
+    # Check if checkpoint has deterministic node IDs
+    # Old checkpoints: node_id contains random UUID fragment
+    # New checkpoints: node_id contains config hash
+
+    # Simple heuristic: if created_at before 2026-01-24, warn about incompatibility
+    checkpoint_date = checkpoint_metadata.get("created_at")
+    if checkpoint_date and checkpoint_date < "2026-01-24":
+        raise IncompatibleCheckpointError(
+            "Checkpoint created before deterministic node IDs (pre-RC-1). "
+            "Resume not supported across this upgrade. "
+            "Please restart pipeline from beginning."
+        )
+```
+
+**Note:** This is a breaking change for checkpoint compatibility. Document in CHANGELOG.
 
 **Step 7: Commit**
 
@@ -899,6 +939,16 @@ def _validate_single_edge(self, from_node_id: str, to_node_id: str) -> None:
     """
     to_info = self.get_node_info(to_node_id)
 
+    # Rule 0: Gates must preserve schema (input == output)
+    if to_info.node_type == "gate":
+        if to_info.input_schema is not None and to_info.output_schema is not None:
+            if to_info.input_schema != to_info.output_schema:
+                raise ValueError(
+                    f"Gate '{to_node_id}' must preserve schema: "
+                    f"input_schema={to_info.input_schema.__name__}, "
+                    f"output_schema={to_info.output_schema.__name__}"
+                )
+
     # Get EFFECTIVE producer schema (walks through gates if needed)
     producer_schema = self._get_effective_producer_schema(from_node_id)
     consumer_schema = to_info.input_schema
@@ -1152,9 +1202,28 @@ class BaseTransform(ABC):
             ValueError: If schema configuration is invalid or incompatible
         """
         self._config = config
+        self._validation_called = False
 
         # Subclass must set input_schema and output_schema
         # Validation happens in subclass __init__ after schemas are set
+
+    def __init_subclass__(cls, **kwargs):
+        """Enforce that subclasses call _validate_self_consistency() in __init__.
+
+        This hook wraps the subclass __init__ to verify validation was called.
+        Prevents plugins from bypassing validation by implementing but not calling.
+        """
+        super().__init_subclass__(**kwargs)
+        original_init = cls.__init__
+
+        def wrapped_init(self, *args, **kwargs):
+            original_init(self, *args, **kwargs)
+            if not getattr(self, '_validation_called', False):
+                raise RuntimeError(
+                    f"{cls.__name__}.__init__ did not call _validate_self_consistency(). "
+                    f"Validation is mandatory for audit integrity."
+                )
+        cls.__init__ = wrapped_init
 
     @abstractmethod
     def _validate_self_consistency(self) -> None:
@@ -1178,11 +1247,16 @@ class BaseTransform(ABC):
             For plugins with no self-consistency constraints, implement as:
             ```python
             def _validate_self_consistency(self) -> None:
-                pass  # No validation needed
+                self._validation_called = True  # Mark validation as complete
+                # No additional validation needed
             ```
 
-            Subclasses MUST implement this method (enforced by ABC).
-            Will raise TypeError at instantiation if not implemented.
+            Subclasses MUST:
+            1. Implement this method (enforced by ABC - TypeError if not implemented)
+            2. Call this method in __init__ (enforced by __init_subclass__ - RuntimeError if not called)
+            3. Set self._validation_called = True (first line of implementation)
+
+            The __init_subclass__ hook verifies validation was called after __init__ completes.
         """
         ...
 ```
@@ -1218,7 +1292,8 @@ def _validate_self_consistency(self) -> None:
 
     PassThrough has no self-consistency constraints (input == output by definition).
     """
-    pass  # No validation needed - PassThrough always has matching schemas
+    self._validation_called = True  # Mark validation as complete
+    # No additional validation needed - PassThrough always has matching schemas
 ```
 
 **Step 5: Run test**
@@ -1261,7 +1336,8 @@ def _validate_self_consistency(self) -> None:
 
     [Plugin-specific validation logic, or just pass if no constraints]
     """
-    pass  # Most plugins have no self-consistency constraints
+    self._validation_called = True  # MANDATORY - marks validation as complete
+    # Most plugins have no additional self-consistency constraints
 ```
 
 **Plugins to update:**
@@ -1356,7 +1432,8 @@ def test_transform_with_validation_succeeds() -> None:
 
         def _validate_self_consistency(self) -> None:
             """Implement abstract method."""
-            pass  # No validation needed for this test transform
+            self._validation_called = True  # Mark validation as complete
+            # No additional validation needed for this test transform
 
         def process(self, row, ctx):
             return row
@@ -1364,6 +1441,31 @@ def test_transform_with_validation_succeeds() -> None:
     # Should succeed
     transform = GoodTransform({})
     assert transform.input_schema is TestSchema
+
+
+def test_transform_must_call_validation_not_just_implement() -> None:
+    """CRITICAL: __init_subclass__ hook enforces validation is CALLED, not just implemented."""
+
+    class LazyTransform(BaseTransform):
+        """Transform that implements but never calls _validate_self_consistency."""
+
+        def __init__(self, config: dict) -> None:
+            super().__init__(config)
+            self.input_schema = TestSchema
+            self.output_schema = TestSchema
+            # BUG: Implemented the method but didn't call it!
+
+        def _validate_self_consistency(self) -> None:
+            """Method exists but is never invoked."""
+            self._validation_called = True
+            # Validation logic here would never execute
+
+        def process(self, row, ctx):
+            return row
+
+    # Should fail at instantiation - __init_subclass__ hook detects missing call
+    with pytest.raises(RuntimeError, match="did not call _validate_self_consistency"):
+        LazyTransform({})
 
 
 def test_transform_cannot_bypass_validation_via_super_skip() -> None:
@@ -1547,6 +1649,24 @@ pytest tests/cli/test_plugin_errors.py -v
 ```
 
 Expected: Some failures (need updating)
+
+**Step 5.5: Audit integration test migration (CRITICAL)**
+
+Verify ALL tests expecting schema validation at DAG.validate() have been migrated:
+
+```bash
+# Find any remaining tests that expect GraphValidationError from validate()
+grep -r "graph.validate()" tests/integration/ tests/cli/ | grep -v "# Updated for Task 4"
+
+# Find any remaining GraphValidationError expectations
+grep -r "GraphValidationError.*schema" tests/
+
+# Should return ZERO results for schema-related GraphValidationError
+```
+
+If any tests still expect old behavior:
+1. Update them to expect ValueError during graph construction
+2. Add comment: `# Updated for Task 4 - schema validation at construction`
 
 **Step 6: Commit after all tests pass**
 

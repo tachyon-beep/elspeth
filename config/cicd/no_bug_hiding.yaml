@@ -1033,3 +1033,24 @@ allow_hits:
     reason: "Trust boundary: plugin instances may not have output_schema attribute (dynamic schemas)"
     safety: "None default is safe - missing schema means dynamic schema"
     expires: null  # Permanent - intentional design
+
+  # ============================================================
+  # DYNAMIC SCHEMA DETECTION (Permanent)
+  # ============================================================
+  # _get_missing_required_fields checks if schemas are dynamic by inspecting
+  # Pydantic model_config. The "extra" key may not be set in all Pydantic models
+  # (default is "forbid" if not specified). Using .get() with default is
+  # the correct way to check for dynamic schemas.
+  # ============================================================
+
+  - key: "core/dag.py:R1:ExecutionGraph:_get_missing_required_fields:line=813"
+    owner: "architecture"
+    reason: "Trust boundary: Pydantic model_config may not have 'extra' key (defaults to 'forbid')"
+    safety: "Checking for dynamic schema marker - missing 'extra' key means not dynamic"
+    expires: null  # Permanent - intentional design
+
+  - key: "core/dag.py:R1:ExecutionGraph:_get_missing_required_fields:line=814"
+    owner: "architecture"
+    reason: "Trust boundary: Pydantic model_config may not have 'extra' key (defaults to 'forbid')"
+    safety: "Checking for dynamic schema marker - missing 'extra' key means not dynamic"
+    expires: null  # Permanent - intentional design

@@ -96,3 +96,112 @@
 
 - Related issues/PRs: N/A
 - Related design docs: `docs/contracts/plugin-protocol.md`
+
+---
+
+## Verification (2026-01-24)
+
+**Status: STILL VALID**
+
+### Code Inspection
+
+Examined `/home/john/elspeth-rapid/src/elspeth/engine/coalesce_executor.py`:
+
+1. **No closed-set tracking exists** (lines 91-96):
+   - Only tracks pending coalesces: `self._pending: dict[tuple[str, str], _PendingCoalesce] = {}`
+   - No data structure for completed merges
+
+2. **Late arrivals create new pending entries** (lines 163-168):
+   ```python
+   if key not in self._pending:
+       self._pending[key] = _PendingCoalesce(
+           arrived={},
+           arrival_times={},
+           first_arrival=now,
+       )
+   ```
+   After merge completion, pending state is deleted (line 268), so the key is no longer present. A late arrival for the same `(coalesce_name, row_id)` will pass the `if key not in self._pending` check and create a fresh pending entry.
+
+3. **First policy merges on single arrival** (lines 201-202):
+   ```python
+   elif settings.policy == "first":
+       return arrived_count >= 1
+   ```
+   Any arrival triggers merge, so both the first arrival AND any late arrival will each trigger a separate merge.
+
+4. **Pending state deleted after merge** (line 268):
+   ```python
+   del self._pending[key]
+   ```
+   No completed-merge tracking replaces it.
+
+### Test Evidence
+
+Found existing test documenting this behavior in `/home/john/elspeth-rapid/tests/engine/test_processor.py` (commit `7bd254a`, 2026-01-18):
+
+```python
+# === Late arrival behavior ===
+# The slow branch arrives after merge is complete.
+# Since pending state was deleted, this creates a NEW pending entry.
+# This is by design - the row processing would have already continued
+# with the merged token, so this late arrival is effectively orphaned.
+slow_token = TokenInfo(...)
+outcome3 = coalesce_executor.accept(slow_token, "merger", step_in_pipeline=3)
+
+# Late arrival creates new pending state (waiting for more branches)
+# This is the expected behavior - in real pipelines, the orchestrator
+# would track that this row already coalesced and not submit the late token.
+assert outcome3.held is True
+assert outcome3.merged_token is None
+```
+
+**Problem:** The test comment claims "the orchestrator would track that this row already coalesced" but:
+- No such tracking exists in the orchestrator or processor
+- The comment says late arrival is "held" (waiting for more branches), which means if another late arrival comes, it could trigger a second merge
+- For `first` policy specifically, the first late arrival would trigger an immediate second merge
+
+### Contract Violation
+
+`/home/john/elspeth-rapid/docs/contracts/plugin-protocol.md:1097`:
+```
+| first | Take first arrival, discard others |
+```
+
+**Violation:** "discard others" is not implemented. Later arrivals create new pending entries and can trigger additional merges.
+
+### Git History
+
+No fixes found since bug report date (2026-01-22):
+- `git log --all --since="2026-01-22" -- src/elspeth/engine/coalesce_executor.py` returned no commits
+- No commits mention "late arrival" suppression or closed-set tracking
+- Most recent coalesce_executor commit: `c786410` (Release Candidate 1)
+
+### Impact Confirmation
+
+**Data corruption scenarios:**
+
+1. **First policy:**
+   - First branch arrives → merge 1 created → sent to sink
+   - Second branch arrives late → merge 2 created → sent to sink
+   - Result: Same source row produces two outputs
+
+2. **Quorum policy:**
+   - Branches A, B arrive → quorum met → merge 1 created
+   - Branch C arrives late → creates new pending entry (held)
+   - If pipeline restarts and branches A, B arrive again → merge 2 created
+   - Result: Duplicate outputs
+
+3. **Best-effort with timeout:**
+   - Branch A arrives → timeout expires → merge 1 created
+   - Branch B arrives late → creates new pending entry (held)
+   - At flush_pending: merge 2 created (line 400-408)
+   - Result: Duplicate outputs
+
+### Conclusion
+
+Bug is **STILL VALID** and **HIGH SEVERITY**:
+- Code structure unchanged since bug report
+- No closed-set tracking implemented
+- Contract explicitly requires "discard others" for first policy
+- Test acknowledges behavior but incorrectly claims orchestrator handles it
+- Multiple merge scenarios can produce duplicate outputs for single source row

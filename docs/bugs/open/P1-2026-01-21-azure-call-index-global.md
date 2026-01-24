@@ -90,3 +90,121 @@
 
 - Related issues/PRs: N/A
 - Related design docs: docs/design/architecture.md
+
+## Verification (2026-01-24)
+
+**Status: STILL VALID**
+
+### Current Code Analysis
+
+Both `AzureContentSafety` and `AzurePromptShield` still use global instance-wide `call_index` counters:
+
+**AzureContentSafety** (`src/elspeth/plugins/transforms/azure/content_safety.py`):
+- Lines 177-180: Instance-wide counter initialization
+  ```python
+  self._call_index = 0
+  self._call_index_lock = Lock()
+  ```
+- Lines 456-461: Global counter increment in `_next_call_index()`
+- Line 488: Uses global counter when recording calls
+
+**AzurePromptShield** (`src/elspeth/plugins/transforms/azure/prompt_shield.py`):
+- Lines 148-150: Instance-wide counter initialization
+  ```python
+  self._call_index = 0
+  self._call_index_lock = Lock()
+  ```
+- Lines 425-430: Global counter increment in `_next_call_index()`
+- Line 460: Uses global counter when recording calls
+
+### Comparison with Fixed LLM Plugins
+
+The LLM plugins (`AzureLLMTransform`, `OpenRouterLLMTransform`) were fixed in commit `91c04a1` (2026-01-20) to use **per-state_id client caching** that ensures call_index uniqueness:
+
+**Fixed pattern in `src/elspeth/plugins/llm/azure.py`**:
+- Lines 143-148: Per-state_id client cache with lock
+  ```python
+  self._llm_clients: dict[str, AuditedLLMClient] = {}
+  self._llm_clients_lock = Lock()
+  ```
+- Lines 277-296: `_get_llm_client(state_id)` creates/retrieves cached client per state
+- Each `AuditedLLMClient` instance has its own call_index counter that is scoped to a specific state_id
+
+The Azure transform plugins follow the same architectural pattern but were **NOT included in the fix**.
+
+### Evidence from Git History
+
+- Commit `91c04a1` (2026-01-20): "fix(llm): integrate pooled execution and fix call_index collision"
+  - Fixed `src/elspeth/plugins/llm/azure.py` and `src/elspeth/plugins/llm/openrouter.py`
+  - Added per-state_id client caching to preserve call_index across retries
+  - Did NOT fix `src/elspeth/plugins/transforms/azure/content_safety.py` or `prompt_shield.py`
+
+- Last modification to Azure transform plugins: Commit `c786410` "ELSPETH - Release Candidate 1"
+  - Predates the call_index fix for LLM plugins
+
+### Specification Violation
+
+**Spec requirement** (docs/plans/completed/2026-01-12-phase6-external-calls.md:965):
+> call_index: Index of call within state
+
+**Architecture invariant** (docs/design/architecture.md:273):
+> Strict Ordering: Transforms ordered by (sequence, attempt); calls ordered by (state_id, call_index)
+
+**Database constraint** (docs/plans/completed/2026-01-12-phase6-external-calls.md:49):
+> UNIQUE(state_id, call_index)
+
+The current implementation violates the semantic contract that call_index is "within state" - it is actually a global monotonic counter shared across all states.
+
+### Impact Scenarios
+
+**Scenario 1: Sequential processing of 2 rows**
+- Row 1 (state_id="state-001") makes 1 call → call_index=0
+- Row 2 (state_id="state-002") makes 1 call → call_index=1 (WRONG - should be 0)
+- Replay by `(state_id="state-002", call_index=0)` returns nothing
+
+**Scenario 2: Pooled execution with retries**
+- Row 1 fails with 429, retries, makes 3 total calls → call_index=0,1,2
+- Row 2 processes successfully → call_index=3 (WRONG - should be 0)
+
+**Scenario 3: Batch aggregation (is_batch_aware=True)**
+- Comment on line 310 of content_safety.py explicitly states:
+  > "All rows share the same state_id; call_index provides audit uniqueness"
+- This is WRONG - call_index should be per-state, not a global disambiguator
+
+### Missing Test Coverage
+
+No tests exist that verify per-state call_index scoping for Azure transforms:
+- `tests/plugins/transforms/azure/test_content_safety.py` - no call_index checks
+- `tests/plugins/transforms/azure/test_prompt_shield.py` - no call_index checks
+- No integration tests for multi-row scenarios with audit verification
+
+Compare with landscape recorder tests (`tests/core/landscape/test_recorder_calls.py`):
+- Line 96-122: `test_multiple_calls_same_state` verifies call_index increments within a state
+- Line 140-161: `test_duplicate_call_index_raises_integrity_error` verifies uniqueness constraint
+- But no tests exist for **different states should each start at call_index=0**
+
+### Recommended Next Steps
+
+1. **Immediate**: Apply the same fix pattern from commit `91c04a1` to Azure transforms
+   - Replace global `_call_index` counter with per-state_id HTTP client caching
+   - Follow the `_get_llm_client(state_id)` pattern from LLM plugins
+
+2. **Test coverage**: Add integration test verifying:
+   ```python
+   def test_call_index_resets_per_state():
+       # Process row 1
+       result1 = transform.process(row1, ctx1)  # ctx1.state_id = "state-001"
+       calls1 = recorder.get_calls("state-001")
+       assert calls1[0].call_index == 0
+
+       # Process row 2
+       result2 = transform.process(row2, ctx2)  # ctx2.state_id = "state-002"
+       calls2 = recorder.get_calls("state-002")
+       assert calls2[0].call_index == 0  # Should reset, not continue from row1
+   ```
+
+3. **Documentation**: Update batch aggregation comments (line 310) to reflect correct semantics
+
+### Verdict
+
+**STILL VALID** - The bug persists in RC-1. The fix applied to LLM plugins was not propagated to Azure transform plugins.

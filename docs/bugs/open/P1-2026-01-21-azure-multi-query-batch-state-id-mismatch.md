@@ -90,3 +90,130 @@
 
 - Related issues/PRs: N/A
 - Related design docs: CLAUDE.md auditability standard
+
+---
+
+## Verification (2026-01-24)
+
+### Status: **STILL VALID**
+
+### Verification Method
+
+1. **Code inspection** of `/home/john/elspeth-rapid/src/elspeth/plugins/llm/azure_multi_query.py`
+2. **Schema verification** of FK constraints in `/home/john/elspeth-rapid/src/elspeth/core/landscape/schema.py`
+3. **Git history analysis** of state_id handling changes
+4. **Test coverage review** to check if FK violations are exercised
+
+### Findings
+
+#### 1. Bug Still Present in Code (Lines 462-510)
+
+The `_process_batch()` method at line 462 creates synthetic state_ids:
+
+```python
+# Line 493 in azure_multi_query.py
+row_state_id = f"{ctx.state_id}_row{i}"
+```
+
+This synthetic ID is then passed to `_process_single_row_internal()` (line 496), which:
+- Creates an `AuditedLLMClient` with the synthetic state_id (via `_get_llm_client()` line 146-158)
+- Records external LLM calls under this synthetic state_id (line 210 in `chat_completion()`)
+
+**However**, only `ctx.state_id` exists in the `node_states` table. The synthetic `_row{i}` variants are never recorded as node_states.
+
+#### 2. FK Constraint Exists and is Enforced
+
+Schema verification confirms:
+- FK constraint exists: `/home/john/elspeth-rapid/src/elspeth/core/landscape/schema.py:192`
+  ```python
+  Column("state_id", String(64), ForeignKey("node_states.state_id"), nullable=False),
+  ```
+- SQLite FK enforcement is enabled: `/home/john/elspeth-rapid/src/elspeth/core/landscape/database.py:86`
+  ```python
+  cursor.execute("PRAGMA foreign_keys=ON")
+  ```
+- Recent FK enforcement commit: `1f057c0` (2026-01-23) added comprehensive FK validation
+
+This means **FK violations WILL crash** when landscape recording is active.
+
+#### 3. Git History Confirms Bug Introduction
+
+- Bug introduced in commit `bf22a43` (2026-01-21): "feat(llm): implement batch processing for azure_multi_query"
+- Original implementation included synthetic state_id pattern from the start
+- No subsequent fixes found in git history
+
+#### 4. Test Coverage Does Not Exercise FK Constraint
+
+Review of `/home/john/elspeth-rapid/tests/plugins/llm/test_azure_multi_query.py`:
+- `test_process_batch_uses_per_row_state_ids` (line 505) verifies synthetic IDs are created
+- **BUT** all tests use mocked landscape recorder, so FK constraints are never validated
+- No integration tests exist that combine azure_multi_query batch mode with real landscape database
+
+### Why This Hasn't Crashed Yet
+
+**Critical insight**: The bug is **latent** because:
+
+1. Unit tests mock the landscape recorder (no real database)
+2. Integration tests don't cover azure_multi_query in batch mode with landscape enabled
+3. No production usage has triggered aggregation -> azure_multi_query batch path with landscape recording
+
+### Reproduction Scenario
+
+To trigger the bug, you would need:
+
+```yaml
+# pipeline.yaml
+aggregations:
+  - plugin: collect_batch
+    flush_to: llm_eval
+
+transforms:
+  - id: llm_eval
+    plugin: azure_multi_query_llm
+    # ... config ...
+```
+
+With landscape enabled, when the aggregation flushes a batch to `azure_multi_query_llm`:
+1. Engine creates ONE node_state with `state_id = "state-abc123"`
+2. `azure_multi_query._process_batch()` creates synthetic IDs: `"state-abc123_row0"`, `"state-abc123_row1"`, etc.
+3. `AuditedLLMClient.chat_completion()` tries to record calls with synthetic state_id
+4. **CRASH**: FK constraint violation `(sqlite3.IntegrityError) FOREIGN KEY constraint failed`
+
+### Evidence Line References
+
+- Synthetic state_id creation: `/home/john/elspeth-rapid/src/elspeth/plugins/llm/azure_multi_query.py:493`
+- LLM client creation with synthetic ID: `/home/john/elspeth-rapid/src/elspeth/plugins/llm/azure_multi_query.py:206`
+- FK constraint definition: `/home/john/elspeth-rapid/src/elspeth/core/landscape/schema.py:192`
+- FK enforcement enabled: `/home/john/elspeth-rapid/src/elspeth/core/landscape/database.py:86`
+- Recorder expects valid state_id: `/home/john/elspeth-rapid/src/elspeth/core/landscape/recorder.py:2056`
+  > "Invalid state_id will raise IntegrityError due to foreign key constraint."
+
+### Severity Assessment
+
+**Severity: P1 (Critical)** - Confirmed valid
+- **Impact**: Complete pipeline crash when batch mode + landscape are combined
+- **Data loss risk**: Partial batch results lost on crash
+- **Audit integrity**: Zero audit trail for failed batch runs
+- **Workaround**: None (avoid batch mode or disable landscape)
+
+### Recommended Next Steps
+
+1. **Fix implementation** using one of these approaches:
+   - **Option A**: Use shared `ctx.state_id` for all batch rows (simpler, but loses per-row call isolation)
+   - **Option B**: Record per-row node_states before LLM calls (maintains isolation, more complex)
+
+2. **Add integration test** that exercises:
+   - Aggregation flush to azure_multi_query_llm
+   - Real landscape database (not mocked)
+   - Verify calls are recorded without FK violations
+
+3. **Update existing test** `test_process_batch_uses_per_row_state_ids`:
+   - Replace mock with real landscape database
+   - Assert FK constraint is satisfied after batch processing
+
+### Verification Confidence: **HIGH**
+
+- Code inspection confirms synthetic state_id pattern
+- FK constraints verified in schema and enforced at runtime
+- No test coverage for this failure path
+- Git history shows no fixes since introduction

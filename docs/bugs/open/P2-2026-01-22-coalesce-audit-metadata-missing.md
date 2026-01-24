@@ -94,3 +94,75 @@
 
 - Related issues/PRs: N/A
 - Related design docs: `docs/contracts/plugin-protocol.md`, `docs/design/subsystems/00-overview.md`
+
+---
+
+## Verification (2026-01-24)
+
+**Status: STILL VALID**
+
+### Investigation Summary
+
+Verified the bug still exists on commit `36e17f2` (fix/rc1-bug-burndown-session-4):
+
+1. **Metadata is computed but not persisted** - CONFIRMED
+   - `CoalesceExecutor._execute_merge()` builds rich `coalesce_metadata` dict (lines 252-265)
+   - Metadata includes: policy, merge_strategy, expected_branches, branches_arrived, arrival_order, wait_duration_ms
+   - Metadata is returned in `CoalesceOutcome` object but never persisted to database
+
+2. **Two persistence mechanisms available but unused:**
+
+   a. **Node state `context_after` parameter** (exists but not used)
+      - `LandscapeRecorder.complete_node_state()` accepts `context_after: dict[str, Any] | None` parameter (recorder.py:1123)
+      - Original design doc showed metadata should be stored via `context_after` parameter
+      - Current implementation at coalesce_executor.py:244-249 does NOT pass `context_after`
+      - Only stores `{"merged_into": merged_token.token_id}` in output_data
+
+   b. **Token outcome `context` parameter** (exists but not used)
+      - `LandscapeRecorder.record_token_outcome()` accepts `context: dict[str, Any] | None` parameter (recorder.py:2220)
+      - Processor calls `record_token_outcome()` for COALESCED outcome at processor.py:973-978
+      - Does NOT pass `coalesce_metadata` from `CoalesceOutcome.coalesce_metadata`
+
+3. **Original design intent was to persist metadata:**
+   - Design doc `docs/plans/completed/plugin-refactor/2026-01-18-wp08-coalesce-executor.md:1435` shows:
+     ```python
+     context_after=coalesce_metadata,  # Store metadata in context_after
+     ```
+   - This line was in the plan but never implemented in the actual code
+
+4. **Current test coverage:**
+   - Tests verify metadata exists in `CoalesceOutcome` object (test_coalesce_executor.py:686-695)
+   - Tests verify node_states exist for consumed tokens (test_coalesce_integration.py:609-614)
+   - NO tests verify metadata is persisted to `node_states.context_after_json` or `token_outcomes.context_json`
+
+5. **Git history check:**
+   - No commits since RC-1 (2026-01-22) have addressed this bug
+   - No branches reference this bug ticket ID
+   - Bug report date matches RC-1 commit (c786410)
+
+### Impact Verification
+
+- **Audit trail gap confirmed:** Cannot reconstruct coalesce merge decisions from database
+- **explain() feature limitation:** Cannot show which policy triggered merge or timing details
+- **Data loss:** Rich metadata (policy, branches_arrived, arrival_order, wait_duration_ms) is computed then discarded
+
+### Fix Locations Identified
+
+**Option 1: Store in node_states (recommended)**
+- File: `src/elspeth/engine/coalesce_executor.py`
+- Line: 244-249 (complete_node_state call)
+- Change: Add `context_after=coalesce_metadata` parameter
+
+**Option 2: Store in token_outcomes**
+- File: `src/elspeth/engine/processor.py`
+- Line: 973-978 (record_token_outcome call)
+- Change: Add `context=coalesce_outcome.coalesce_metadata` parameter
+
+**Option 3: Both** (belt and suspenders for auditability)
+- Implement both Option 1 and Option 2
+- Node states capture per-token consumption details
+- Token outcome captures merge event metadata
+
+### Verification Conclusion
+
+Bug is **STILL VALID** and straightforward to fix. The infrastructure exists (both parameters are already defined), implementation simply needs to pass the metadata that's already being computed.

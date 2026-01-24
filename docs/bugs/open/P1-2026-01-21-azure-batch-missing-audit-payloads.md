@@ -89,3 +89,106 @@
 
 - Related issues/PRs: N/A
 - Related design docs: CLAUDE.md auditability standard
+
+---
+
+## Verification (2026-01-24)
+
+**Status: STILL VALID**
+
+### Verification Method
+
+1. Read bug report and examined azure_batch.py implementation
+2. Analyzed audit recording infrastructure (LandscapeRecorder.record_call, PluginContext.record_call)
+3. Checked git history for changes since bug report (2026-01-21)
+4. Examined test coverage for payload recording
+
+### Findings
+
+**Bug is confirmed and still present in current codebase:**
+
+1. **Root Cause Identified:**
+   - The infrastructure SUPPORTS payload recording via `request_ref`/`response_ref` parameters in `LandscapeRecorder.record_call()` (lines 2034-2035 in recorder.py)
+   - The recorder has AUTO-PERSIST logic that stores payloads to PayloadStore when refs are not provided (lines 2067-2077)
+   - **HOWEVER**, `PluginContext.record_call()` does NOT accept or pass through `request_ref`/`response_ref` parameters
+   - This means plugins calling `ctx.record_call()` cannot manually provide payload references
+
+2. **What's Actually Recorded:**
+
+   **Upload (lines 392-411 of azure_batch.py):**
+   - Request: `{"operation": "files.create", "filename": "batch_input.jsonl", "purpose": "batch", "content_size": len(jsonl_content)}`
+   - Response: `{"file_id": batch_file.id, "status": batch_file.status}`
+   - **Missing**: The actual `jsonl_content` string (contains all rendered prompts)
+
+   **Download (lines 584-601 of azure_batch.py):**
+   - Request: `{"operation": "files.content", "file_id": output_file_id}`
+   - Response: `{"file_id": output_file_id, "content_length": len(output_content.text)}`
+   - **Missing**: The actual `output_content.text` (contains all LLM responses)
+
+3. **Current Behavior:**
+   - The recorder auto-persists the **metadata dictionaries** above to the payload store
+   - The metadata gets hashed and stored with refs
+   - But the actual JSONL content (prompts and responses) is never captured
+   - This violates the auditability standard: "External calls - Full request AND response recorded"
+
+4. **Git History:**
+   - No changes to azure_batch.py since RC-1 (commit c786410, 2026-01-22)
+   - Audit recording was added in commit d647d4b (2026-01-20) but only recorded metadata
+   - No related fixes in PluginContext or recorder since bug report
+
+5. **Test Coverage:**
+   - `tests/plugins/llm/test_azure_batch.py` exists but does NOT verify payload recording
+   - No assertions for `request_ref`, `response_ref`, or actual JSONL content in audit trail
+
+### Impact Assessment
+
+**Audit Trail Gaps:**
+- Cannot reconstruct what prompts were sent to Azure (only metadata: filename, purpose, size)
+- Cannot retrieve LLM responses from audit trail (only metadata: file_id, content_length)
+- `explain()` cannot show actual input/output for batch operations
+- Replay/verify modes cannot reproduce batch API calls
+
+**Violates Auditability Requirements:**
+- CLAUDE.md: "External calls - Full request AND response recorded"
+- CLAUDE.md: "Every decision must be traceable to source data"
+
+### Recommended Fix Strategy
+
+**Option 1: Include JSONL in request_data/response_data (Simple)**
+- Change lines 394-399 to include actual JSONL:
+  ```python
+  upload_request = {
+      "operation": "files.create",
+      "filename": "batch_input.jsonl",
+      "purpose": "batch",
+      "content": jsonl_content,  # ADD THIS
+      "content_size": len(jsonl_content),
+  }
+  ```
+- Recorder will auto-persist via existing logic
+- **Risk**: Large JSONL files increase payload store size
+
+**Option 2: Extend PluginContext.record_call to accept refs (Better)**
+- Add `request_ref`/`response_ref` parameters to `PluginContext.record_call()`
+- Azure batch manually persists to payload store, passes refs
+- More control over what gets stored
+- **Requires**: API changes to PluginContext
+
+**Option 3: Specialized batch recording method (Best for large payloads)**
+- Add `ctx.record_batch_operation()` that handles large JSONL efficiently
+- Could implement chunking, compression, or size thresholds
+- **Requires**: New API design
+
+### Verification Evidence
+
+**Code References:**
+- `/home/john/elspeth-rapid/src/elspeth/plugins/llm/azure_batch.py:394-411` - Upload recording (metadata only)
+- `/home/john/elspeth-rapid/src/elspeth/plugins/llm/azure_batch.py:586-601` - Download recording (metadata only)
+- `/home/john/elspeth-rapid/src/elspeth/core/landscape/recorder.py:2023-2077` - record_call with auto-persist
+- `/home/john/elspeth-rapid/src/elspeth/plugins/context.py:191-238` - PluginContext.record_call (no ref params)
+- `/home/john/elspeth-rapid/src/elspeth/contracts/audit.py:229-247` - Call dataclass with request_ref/response_ref fields
+
+**Git Evidence:**
+- No changes to azure_batch.py since RC-1
+- Audit recording added in d647d4b but incomplete
+- No fixes in subsequent commits

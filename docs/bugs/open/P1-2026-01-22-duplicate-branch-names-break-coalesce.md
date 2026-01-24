@@ -100,8 +100,106 @@ Missing uniqueness checks for branch lists (`fork_to`, `coalesce.branches`) and 
 
 ## Verification Status
 
-- [ ] Bug confirmed via reproduction
-- [ ] Root cause verified
+**Status: STILL VALID** (verified 2026-01-24)
+
+- [x] Bug confirmed via reproduction
+- [x] Root cause verified
 - [ ] Fix implemented
 - [ ] Tests added
 - [ ] Fix verified
+
+### Verification Details
+
+**Verifier:** Claude Sonnet 4.5 (code verification agent)
+**Date:** 2026-01-24
+**Branch:** fix/rc1-bug-burndown-session-4 (commit 36e17f2)
+
+#### Reproduction Confirmed
+
+Tested with live code on current branch:
+
+```python
+# Test 1: GateSettings accepts duplicate fork_to branches
+from elspeth.core.config import GateSettings
+gate = GateSettings(
+    name='test_gate',
+    condition='row["x"] > 5',
+    routes={'true': 'fork', 'false': 'continue'},
+    fork_to=['path_a', 'path_a']  # duplicates accepted ✗
+)
+# RESULT: No error raised - bug confirmed
+
+# Test 2: CoalesceSettings accepts duplicate branches
+from elspeth.core.config import CoalesceSettings
+coalesce = CoalesceSettings(
+    name='test_coalesce',
+    branches=['path_a', 'path_a'],  # duplicates accepted ✗
+    policy='require_all',
+    merge='union'
+)
+# RESULT: No error raised - bug confirmed
+```
+
+#### Root Cause Analysis
+
+**Validated all locations mentioned in bug report:**
+
+1. **Config validation gaps (as reported):**
+   - `src/elspeth/core/config.py:238-252` - `GateSettings.validate_fork_to_labels()` only checks for reserved labels, NOT uniqueness
+   - `src/elspeth/core/config.py:327-331` - `CoalesceSettings.branches` field has NO uniqueness validator
+   - No field-level or model-level validator exists for either case
+
+2. **Runtime manifestation (as reported):**
+   - `src/elspeth/core/dag.py:485-486` - Branch-to-coalesce mapping uses dict, duplicates silently overwrite:
+     ```python
+     for branch_name in coalesce_config.branches:
+         branch_to_coalesce[branch_name] = cid  # Last duplicate wins
+     ```
+   - `src/elspeth/engine/coalesce_executor.py:173` - Token arrivals keyed by branch_name, overwrites on duplicate
+   - `src/elspeth/engine/coalesce_executor.py:195-196` - Merge policy compares `len(pending.arrived)` to `len(settings.branches)`, math breaks with duplicates
+
+3. **Partial fix found:**
+   - Commit `2bb7617` (2026-01-23) added `validate_unique_gate_names()` and `validate_unique_coalesce_names()`
+   - This validates GATE/COALESCE names are unique, but NOT branch names within fork_to/branches lists
+   - The bug remains unfixed
+
+4. **Runtime defense exists (partial mitigation):**
+   - `src/elspeth/contracts/routing.py:131-133` - `RoutingAction.fork_to_paths()` DOES validate uniqueness at runtime
+   - This prevents duplicate branches if gates return dynamic fork paths
+   - Does NOT protect against config-time duplicates in `fork_to` lists (different code path)
+
+#### Impact Validation
+
+**Confirmed critical failure modes:**
+
+1. **Stalled pipelines:**
+   - Config: `fork_to: ["A", "A"]`, `coalesce.branches: ["A", "A"]`, `policy: require_all`
+   - Only 1 unique branch can arrive, merge requires 2 arrivals (len of branches list)
+   - Coalesce waits forever or until timeout
+
+2. **Silent data loss:**
+   - If two coalesces declare the same branch name, `branch_to_coalesce` map overwrites
+   - Tokens route to wrong coalesce or get lost
+
+3. **Audit integrity violation:**
+   - Duplicate arrivals overwrite `pending.arrived[branch_name]` without recording loss
+   - First token's data silently discarded, audit trail incomplete
+
+#### Git History Search
+
+No commits since 2026-01-20 address branch name uniqueness validation:
+- `git log --all --since=2026-01-20 --grep="duplicate\|branch\|uniqueness" -i`
+- Found `2bb7617` which validates gate/coalesce NAMES but not BRANCH names
+- Found `0c225ee` which fixed invalid fork/coalesce test configs but added no validation
+
+#### Related Bugs
+
+- **P2-2026-01-22-coalesce-duplicate-branch-overwrite.md** - Runtime manifestation of same root cause (duplicate arrivals overwrite tokens)
+- Both bugs stem from missing config validation; fixing this bug prevents runtime manifestation
+
+#### Conclusion
+
+**Bug is STILL VALID.** No fix has been implemented. The issue exists exactly as described:
+- Config validation missing for `fork_to` and `coalesce.branches` uniqueness
+- Runtime code assumes unique branch names, fails silently when assumption violated
+- Can cause pipeline stalls, data loss, and audit integrity violations

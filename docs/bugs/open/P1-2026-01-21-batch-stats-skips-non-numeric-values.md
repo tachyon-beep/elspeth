@@ -88,3 +88,67 @@
 
 - Related issues/PRs: N/A
 - Related design docs: docs/contracts/plugin-protocol.md
+
+---
+
+## Verification (2026-01-24)
+
+**Status: STILL VALID**
+
+### Current Code Analysis
+
+Examined `/home/john/elspeth-rapid/src/elspeth/plugins/transforms/batch_stats.py`:
+
+- Lines 100-106: `_try_convert_to_float()` method converts values to float, returns None on failure
+- Lines 124-132: `process()` method silently skips non-convertible values with comment: "Their data can have non-numeric values - this is expected, not a bug"
+- Line 134: `count = len(values)` only counts successfully converted values, not total rows
+
+### Test Evidence
+
+Test file `/home/john/elspeth-rapid/tests/plugins/transforms/test_batch_stats.py`:
+
+- Lines 116-141: `test_skips_non_numeric_values()` explicitly tests and **expects** the silent skipping behavior
+- Test provides `amount: "not_a_number"` and verifies it's skipped (count=2 instead of 3)
+- Test confirms `batch_size=3` (total rows) vs `count=2` (numeric values only)
+
+### Architectural Conflict
+
+From `/home/john/elspeth-rapid/docs/contracts/plugin-protocol.md` lines 151-176:
+
+| Zone | On Error | Plugin Action | ELSPETH Action |
+|------|----------|---------------|----------------|
+| **Their Data Types** | Wrong type at Transform/Sink | — | This is an upstream bug, should crash |
+
+The contract explicitly states: "Transforms/Sinks MUST NOT coerce types" and "Wrong type at Transform/Sink... This is an upstream bug, should crash"
+
+### Git History
+
+- Original code added in commit c786410 (RC1, 2026-01-22)
+- Comment justifying behavior was added in the initial commit
+- No subsequent changes to the type conversion logic
+- Commit cc0d364 (2026-01-21) only changed schema setup, not type handling
+
+### Root Cause Confirmed
+
+BatchStats treats aggregation as a special case where "missing or non-numeric values are expected" (per inline comment line 125). This conflicts with the Three-Tier Trust Model in CLAUDE.md which states:
+
+> **Tier 2: Pipeline Data (Post-Source) - ELEVATED TRUST**
+> - Transforms/sinks **expect conformance** - if types are wrong, that's an upstream plugin bug
+> - **No coercion** at transform/sink level
+
+The current behavior masks upstream schema violations. If a source or upstream transform outputs non-numeric values in a field expected to be numeric, BatchStats silently hides this bug instead of surfacing it.
+
+### Impact Assessment
+
+1. **Audit Integrity**: Statistics recorded in audit trail (`count`, `sum`, `mean`) are computed only from valid values, potentially misrepresenting the data
+2. **Bug Masking**: If an upstream plugin has a type conversion bug, BatchStats will silently skip affected rows rather than failing fast
+3. **Silent Data Loss**: Rows with conversion failures are excluded from aggregates without being quarantined or logged as errors
+
+### Recommendation
+
+Bug is **STILL VALID** and should be prioritized for fix:
+
+1. Remove `_try_convert_to_float()` coercion helper
+2. Expect numeric types directly (let ValueError/TypeError crash)
+3. Update test `test_skips_non_numeric_values()` to verify crash behavior instead
+4. If "partial aggregation despite bad rows" is desired, implement via explicit error handling with `TransformResult.error()` and quarantine routing, not silent skipping

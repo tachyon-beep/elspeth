@@ -98,3 +98,142 @@
 
 - Related issues/PRs: N/A
 - Related design docs: `docs/design/subsystems/00-overview.md`
+
+---
+
+## Verification (2026-01-24)
+
+### Status: **STILL VALID**
+
+### Verification Method
+
+Code inspection of the complete flow from recorder → token manager → processor:
+
+1. **LandscapeRecorder generates and stores group IDs** (`src/elspeth/core/landscape/recorder.py`):
+   - `fork_token()` line 850: `fork_group_id = _generate_id()` - stored in tokens table (line 863)
+   - `coalesce_tokens()` line 912: `join_group_id = _generate_id()` - stored in tokens table (line 922)
+   - `expand_token()` line 977: `expand_group_id = _generate_id()` - stored in tokens table (line 990)
+
+2. **TokenManager drops group IDs from TokenInfo** (`src/elspeth/engine/tokens.py`):
+   - `fork_token()` lines 160-168: Creates `TokenInfo` with only `row_id`, `token_id`, `row_data`, `branch_name` - **no group IDs**
+   - `coalesce_tokens()` lines 198-202: Creates `TokenInfo` without group IDs
+   - `expand_token()` lines 254-262: Creates `TokenInfo` without group IDs
+
+3. **RowProcessor generates synthetic group IDs** (`src/elspeth/engine/processor.py`):
+   - Line 708: `fork_group_id = uuid.uuid4().hex[:16]` - **NEW ID, unrelated to recorder's ID**
+   - Line 842: `expand_group_id = uuid.uuid4().hex[:16]` - **NEW ID, unrelated to recorder's ID**
+   - Line 972: `join_group_id = f"{coalesce_name}_{uuid.uuid4().hex[:8]}"` - **NEW ID, unrelated to recorder's ID**
+
+### Contract Analysis
+
+**TokenInfo contract** (`src/elspeth/contracts/identity.py` lines 10-27):
+```python
+@dataclass
+class TokenInfo:
+    row_id: str
+    token_id: str
+    row_data: dict[str, Any]
+    branch_name: str | None = None
+```
+**Missing fields**: `fork_group_id`, `join_group_id`, `expand_group_id`
+
+**Token model** (`src/elspeth/core/landscape/models.py` lines 93-104):
+```python
+@dataclass
+class Token:
+    token_id: str
+    row_id: str
+    created_at: datetime
+    fork_group_id: str | None = None
+    join_group_id: str | None = None
+    expand_group_id: str | None = None
+    branch_name: str | None = None
+    step_in_pipeline: int | None = None
+```
+**Has all group ID fields** - these are populated by recorder but not propagated to TokenInfo
+
+### Evidence Flow
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│ 1. LandscapeRecorder.fork_token()                                   │
+│    - Generates: fork_group_id = "abc123" (example)                  │
+│    - Stores in tokens table: fork_group_id = "abc123"               │
+│    - Returns: Token(fork_group_id="abc123")                         │
+└────────────────────────┬────────────────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│ 2. TokenManager.fork_token()                                        │
+│    - Receives: Token(fork_group_id="abc123")                        │
+│    - Returns: TokenInfo(fork_group_id=<NOT SET>)  ← DROPS GROUP ID  │
+└────────────────────────┬────────────────────────────────────────────┘
+                         │
+                         ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│ 3. RowProcessor._process_single_token()                             │
+│    - Receives: TokenInfo (no group ID)                              │
+│    - Generates: fork_group_id = "xyz789" (NEW, UNRELATED)           │
+│    - Records outcome: fork_group_id = "xyz789"                      │
+└─────────────────────────────────────────────────────────────────────┘
+
+RESULT:
+  tokens.fork_group_id = "abc123"          ← Recorder's ID
+  token_outcomes.fork_group_id = "xyz789"  ← Processor's synthetic ID
+
+  ❌ MISMATCH: Cannot correlate outcomes with token lineage
+```
+
+### Git History Check
+
+Searched for fixes related to group IDs:
+- `git log --all --grep="group.id"` - Found commits adding group ID features (e93e56c, d941c25)
+- `git log --all -S "fork_group_id"` - Found 20+ commits implementing group IDs
+- **No commits found that fix the propagation gap**
+
+Most recent relevant commit: **e93e56c** (2026-01-21) "feat(processor): record all outcome types for AUD-001"
+- This commit ADDED the outcome recording with group IDs
+- It generated NEW synthetic IDs instead of using recorder's IDs
+- **This commit introduced/preserved the bug**
+
+### Test Coverage Gap
+
+Searched for tests validating group ID consistency:
+- `tests/core/landscape/test_recorder.py` line 464: Tests that child tokens share same `fork_group_id` ✓
+- **NO TESTS** verify `token_outcomes.fork_group_id` matches `tokens.fork_group_id`
+- **NO TESTS** verify `token_outcomes.join_group_id` matches `tokens.join_group_id`
+- **NO TESTS** verify `token_outcomes.expand_group_id` matches `tokens.expand_group_id`
+
+### Root Cause Confirmed
+
+The bug is a **contract propagation gap**:
+
+1. `Token` (recorder model) has group IDs ✓
+2. `TokenInfo` (engine contract) lacks group IDs ✗ ← **MISSING FIELDS**
+3. Processor has no way to access recorder's group IDs
+4. Processor generates synthetic IDs to satisfy outcome recording requirements
+
+### Impact Assessment
+
+**Audit Trail Integrity**: BROKEN
+- Cannot query "show me all token outcomes for fork group X"
+- Cannot correlate child tokens with parent fork outcome
+- Lineage reconstruction requires manual token parent table queries
+- Violates ELSPETH's "complete traceability" principle
+
+**Workaround Exists**: YES
+- Query `token_parents` table to reconstruct fork/expand/coalesce relationships
+- Query `tokens` table for canonical group IDs
+- **BUT**: Requires complex multi-table joins that should be unnecessary
+
+### Conclusion
+
+**Bug Status**: STILL VALID as of commit 2c06ad5 (2026-01-24)
+
+**Priority Justification**: P1 maintained
+- Breaks audit trail consistency (core ELSPETH principle)
+- Affects ALL pipelines with forks/expands/coalesces
+- No data loss, but requires schema/code fix before RC2
+- Has workaround via token_parents table
+
+**Recommendation**: Fix before RC2 release to prevent schema migration burden

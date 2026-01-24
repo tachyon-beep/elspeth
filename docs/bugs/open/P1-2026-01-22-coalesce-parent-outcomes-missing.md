@@ -96,3 +96,109 @@
 
 - Related issues/PRs: N/A
 - Related design docs: `docs/contracts/plugin-protocol.md`
+
+---
+
+## Verification (2026-01-24)
+
+**Verified by:** Claude Sonnet 4.5
+**Current commit:** `36e17f2` (fix/rc1-bug-burndown-session-4)
+**Status:** **STILL VALID**
+
+### Verification Process
+
+1. **Code Review** - Examined current state of outcome recording in coalesce flow:
+   - `/home/john/elspeth-rapid/src/elspeth/engine/coalesce_executor.py` (lines 236-249)
+   - `/home/john/elspeth-rapid/src/elspeth/engine/processor.py` (lines 973-978)
+
+2. **Git History** - Searched for fixes since bug report date (2026-01-22):
+   - Checked commits mentioning "coalesce", "outcome", "COALESCED", "parent", "consumed"
+   - Found outcome recording improvements in commit `e93e56c` (2026-01-21, before bug report)
+   - Found sink_name fix in commit `0a9cf2a` (2026-01-24) - does NOT address this bug
+
+3. **Test Coverage** - Examined test suite:
+   - `/home/john/elspeth-rapid/tests/engine/test_coalesce_integration.py` - verifies node states, NOT token outcomes
+   - No tests found that verify consumed/parent tokens receive COALESCED outcomes
+
+### Current Behavior Confirmed
+
+**In `CoalesceExecutor._execute_merge()` (lines 236-249):**
+```python
+# Record node states for consumed tokens
+for token in consumed_tokens:
+    state = self._recorder.begin_node_state(
+        token_id=token.token_id,
+        node_id=node_id,
+        step_index=step_in_pipeline,
+        input_data=token.row_data,
+    )
+    self._recorder.complete_node_state(
+        state_id=state.state_id,
+        status="completed",
+        output_data={"merged_into": merged_token.token_id},
+        duration_ms=0,
+    )
+```
+
+**Observation:** Node states are recorded, but NO call to `record_token_outcome()` for consumed tokens.
+
+**In `RowProcessor.process()` (lines 973-978):**
+```python
+join_group_id = f"{coalesce_name}_{uuid.uuid4().hex[:8]}"
+self._recorder.record_token_outcome(
+    run_id=self._run_id,
+    token_id=coalesce_outcome.merged_token.token_id,  # ONLY merged token
+    outcome=RowOutcome.COALESCED,
+    join_group_id=join_group_id,
+)
+```
+
+**Observation:** Only the merged token receives a COALESCED outcome, not the consumed parent/branch tokens.
+
+### Contract Violation Confirmed
+
+From `/home/john/elspeth-rapid/docs/contracts/plugin-protocol.md` (line 1113):
+
+> 3. **Child tokens marked with terminal state `COALESCED`**
+
+From `/home/john/elspeth-rapid/src/elspeth/contracts/enums.py` (line 154):
+
+> - COALESCED: Merged in join from parallel paths
+
+**Interpretation Issue Identified:** The contract and enum documentation are ambiguous about WHO gets marked COALESCED:
+- Bug report interprets: consumed branch tokens (children) should be marked COALESCED
+- Current code implements: merged token (parent) is marked COALESCED
+
+### Additional Evidence
+
+**`CoalesceOutcome` dataclass includes consumed tokens:**
+```python
+consumed_tokens: list[TokenInfo] = field(default_factory=list)  # Line 34
+```
+
+This field is populated (line 227) but **never consumed** by the processor. No code path accesses `coalesce_outcome.consumed_tokens`.
+
+### Conclusion
+
+**BUG STATUS: STILL VALID**
+
+The bug remains unfixed. Consumed branch tokens receive:
+- ✅ Node state records (lines 236-249 in coalesce_executor.py)
+- ❌ No token outcome records
+
+This violates the AUD-001 requirement that every token reaches exactly one terminal state. Branch tokens disappear from the audit trail without terminal outcomes.
+
+### Recommended Action
+
+1. **Add outcome recording in `CoalesceExecutor._execute_merge()`:**
+   - Loop through `consumed_tokens`
+   - Call `self._recorder.record_token_outcome()` with `RowOutcome.COALESCED` for each
+   - Use same `join_group_id` as merged token for lineage
+
+2. **Clarify contract documentation:**
+   - Update plugin-protocol.md line 1113 to explicitly state which tokens receive COALESCED outcome
+   - Consider: should BOTH consumed and merged tokens be marked COALESCED, or only consumed?
+
+3. **Add integration test:**
+   - Extend `test_coalesce_integration.py` to verify token_outcomes table
+   - Assert all consumed tokens have COALESCED outcome with join_group_id

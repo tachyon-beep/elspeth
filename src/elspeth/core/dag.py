@@ -554,6 +554,9 @@ class ExecutionGraph:
                 if output_sink in sink_ids:
                     graph.add_edge(coalesce_id, sink_ids[output_sink], label="continue", mode=RoutingMode.MOVE)
 
+        # PHASE 2 VALIDATION: Validate schema compatibility AFTER graph is built
+        graph.validate_edge_compatibility()
+
         return graph
 
     def get_sink_id_map(self) -> dict[str, str]:
@@ -636,3 +639,184 @@ class ExecutionGraph:
             Used by the executor to resolve route labels from gates.
         """
         return dict(self._route_resolution_map)
+
+    def validate_edge_compatibility(self) -> None:
+        """Validate schema compatibility for all edges in the graph.
+
+        Called AFTER graph construction is complete. Validates that each edge
+        connects compatible schemas.
+
+        Raises:
+            ValueError: If any edge has incompatible schemas
+
+        Note:
+            This is PHASE 2 validation (cross-plugin compatibility). Plugin
+            SELF-validation happens in PHASE 1 during plugin construction.
+        """
+        # Validate each edge
+        for from_id, to_id, _edge_data in self._graph.edges(data=True):
+            self._validate_single_edge(from_id, to_id)
+
+        # Validate all coalesce nodes (must have compatible schemas from all branches)
+        coalesce_nodes = [node_id for node_id, data in self._graph.nodes(data=True) if data["info"].node_type == "coalesce"]
+        for coalesce_id in coalesce_nodes:
+            self._validate_coalesce_compatibility(coalesce_id)
+
+    def _validate_single_edge(self, from_node_id: str, to_node_id: str) -> None:
+        """Validate schema compatibility for a single edge.
+
+        Args:
+            from_node_id: Source node ID
+            to_node_id: Destination node ID
+
+        Raises:
+            ValueError: If schemas are incompatible
+        """
+        to_info = self.get_node_info(to_node_id)
+
+        # Skip edge validation for coalesce nodes - they have special validation
+        # that checks all incoming branches together
+        if to_info.node_type == "coalesce":
+            return
+
+        # Rule 0: Gates must preserve schema (input == output)
+        if (
+            to_info.node_type == "gate"
+            and to_info.input_schema is not None
+            and to_info.output_schema is not None
+            and to_info.input_schema != to_info.output_schema
+        ):
+            raise ValueError(
+                f"Gate '{to_node_id}' must preserve schema: "
+                f"input_schema={to_info.input_schema.__name__}, "
+                f"output_schema={to_info.output_schema.__name__}"
+            )
+
+        # Get EFFECTIVE producer schema (walks through gates if needed)
+        producer_schema = self._get_effective_producer_schema(from_node_id)
+        consumer_schema = to_info.input_schema
+
+        # Rule 1: Dynamic schemas (None) bypass validation
+        if producer_schema is None or consumer_schema is None:
+            return  # Dynamic schema - compatible with anything
+
+        # Rule 2: Check field compatibility
+        missing_fields = self._get_missing_required_fields(producer_schema, consumer_schema)
+        if missing_fields:
+            raise ValueError(
+                f"Edge from '{from_node_id}' to '{to_node_id}' invalid: "
+                f"producer schema '{producer_schema.__name__}' missing required fields "
+                f"for consumer schema '{consumer_schema.__name__}': {missing_fields}"
+            )
+
+    def _get_effective_producer_schema(self, node_id: str) -> type[PluginSchema] | None:
+        """Get effective output schema, walking through pass-through nodes (gates).
+
+        Gates and other pass-through nodes don't transform data - they inherit
+        schema from their upstream producers. This method walks backwards through
+        the graph to find the nearest schema-carrying producer.
+
+        Args:
+            node_id: Node to get effective schema for
+
+        Returns:
+            Output schema type, or None if dynamic
+
+        Raises:
+            ValueError: If gate has no incoming edges (graph construction bug)
+        """
+        node_info = self.get_node_info(node_id)
+
+        # If node has output_schema, return it directly
+        if node_info.output_schema is not None:
+            return node_info.output_schema
+
+        # Node has no schema - check if it's a pass-through type (gate)
+        if node_info.node_type == "gate":
+            # Gate passes data unchanged - inherit from upstream producer
+            incoming = list(self._graph.in_edges(node_id, data=True))
+
+            if not incoming:
+                # Gate with no inputs is a graph construction bug - CRASH
+                raise ValueError(f"Gate node '{node_id}' has no incoming edges - this indicates a bug in graph construction")
+
+            # Get effective schema from first input (recursive for chained gates)
+            first_edge_source = incoming[0][0]
+            first_schema = self._get_effective_producer_schema(first_edge_source)
+
+            # For multi-input gates, verify all inputs have same schema
+            if len(incoming) > 1:
+                for from_id, _, _ in incoming[1:]:
+                    other_schema = self._get_effective_producer_schema(from_id)
+                    if first_schema != other_schema:
+                        # Multi-input gates with incompatible schemas - CRASH
+                        raise ValueError(
+                            f"Gate '{node_id}' receives incompatible schemas from "
+                            f"multiple inputs - this is a graph construction bug. "
+                            f"First input schema: {first_schema}, "
+                            f"Other input schema: {other_schema}"
+                        )
+
+            return first_schema
+
+        # Not a gate and no schema - return None (dynamic)
+        return None
+
+    def _validate_coalesce_compatibility(self, coalesce_id: str) -> None:
+        """Validate all inputs to coalesce node have compatible schemas.
+
+        Args:
+            coalesce_id: Coalesce node ID
+
+        Raises:
+            ValueError: If branches have incompatible schemas
+        """
+        incoming = list(self._graph.in_edges(coalesce_id, data=True))
+
+        if len(incoming) < 2:
+            return  # Degenerate case (1 branch) - always compatible
+
+        # Get effective schema from first branch
+        first_edge_source = incoming[0][0]
+        first_schema = self._get_effective_producer_schema(first_edge_source)
+
+        # Verify all other branches have same schema
+        for from_id, _, _ in incoming[1:]:
+            other_schema = self._get_effective_producer_schema(from_id)
+            if first_schema != other_schema:
+                raise ValueError(
+                    f"Coalesce '{coalesce_id}' receives incompatible schemas from "
+                    f"multiple branches: "
+                    f"first branch has {first_schema.__name__ if first_schema else 'dynamic'}, "
+                    f"branch from '{from_id}' has {other_schema.__name__ if other_schema else 'dynamic'}"
+                )
+
+    def _get_missing_required_fields(
+        self,
+        producer_schema: type[PluginSchema] | None,
+        consumer_schema: type[PluginSchema] | None,
+    ) -> list[str]:
+        """Get required fields that producer doesn't provide.
+
+        Args:
+            producer_schema: Schema of data producer
+            consumer_schema: Schema of data consumer
+
+        Returns:
+            List of field names missing from producer
+        """
+        if producer_schema is None or consumer_schema is None:
+            return []  # Dynamic schema
+
+        # Check if either schema is dynamic (no fields + extra='allow')
+        # Dynamic schemas created by _create_dynamic_schema have no fields and extra='allow'
+        producer_is_dynamic = len(producer_schema.model_fields) == 0 and producer_schema.model_config.get("extra") == "allow"
+        consumer_is_dynamic = len(consumer_schema.model_fields) == 0 and consumer_schema.model_config.get("extra") == "allow"
+
+        if producer_is_dynamic or consumer_is_dynamic:
+            return []  # Dynamic schema - compatible with anything
+
+        producer_fields = set(producer_schema.model_fields.keys())
+        consumer_required = {name for name, field in consumer_schema.model_fields.items() if field.is_required()}
+
+        return sorted(consumer_required - producer_fields)
