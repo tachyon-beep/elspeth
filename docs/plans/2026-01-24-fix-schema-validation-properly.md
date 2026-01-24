@@ -285,14 +285,27 @@ def validate(self, raise_on_error: bool = False) -> list[str]:
     return errors
 ```
 
-**Step 4: Delete schema validation methods**
+**Step 4: Remove schema validation call from validate() method**
+
+In `src/elspeth/core/dag.py`, update `validate()` to remove the schema validation call (around line 238):
+
+```python
+# REMOVE THIS BLOCK:
+# Check schema compatibility across all edges
+schema_errors = self._validate_edge_schemas()
+if schema_errors:
+    raise GraphValidationError("Schema incompatibilities:\n" + ...)
+```
+
+**Step 4.5: Delete schema validation helper methods**
 
 Delete these methods from `src/elspeth/core/dag.py`:
 - `_is_dynamic_schema()` (lines 67-84)
-- `_get_missing_required_fields()` (lines 49-64)
+- `_get_missing_required_fields()` (lines 49-64) - NOTE: Will be re-added in Task 2.5
 - `_schemas_compatible()` (lines 87-97)
 - `_validate_edge_schemas()` (lines 288-338)
 - `_validate_coalesce_schema_compatibility()` (lines 240-286)
+- `_get_effective_producer_schema()` (lines 340-394) - NOTE: Will be re-added in Task 2.5
 
 **Step 5: Run test to verify it passes**
 
@@ -347,11 +360,13 @@ git commit -m "refactor: remove schema validation from DAG layer
 
 ## Task 2.5: Add Edge Compatibility Validation to ExecutionGraph
 
-**Goal:** ExecutionGraph validates schema compatibility when wiring plugins together.
+**Goal:** ExecutionGraph validates schema compatibility during graph construction (not in primitive add_edge).
 
 **Files:**
-- Modify: `src/elspeth/core/dag.py` (add _validate_edge_compatibility method)
+- Modify: `src/elspeth/core/dag.py` (add validation to from_plugin_instances, preserve gate walk-through)
 - Create: `tests/core/test_edge_validation.py` (new test file)
+
+**Architecture Decision:** Validation happens in `from_plugin_instances()` AFTER graph is built, not in primitive `add_edge()`. This keeps `add_edge()` as a dumb graph operation and validates when we have full context.
 
 **Step 1: Write failing test for edge compatibility validation**
 
@@ -459,10 +474,72 @@ def test_coalesce_branch_compatibility() -> None:
     graph.add_edge("source", "transform1", label="fork_path_1")
     graph.add_edge("source", "transform2", label="fork_path_2")
     graph.add_edge("transform1", "coalesce", label="continue")  # OK
+    graph.add_edge("transform2", "coalesce", label="continue")  # Add second edge
 
-    # This should fail - transform2 outputs SchemaB, coalesce expects SchemaA
+    # This should fail during graph validation (AFTER edges added)
     with pytest.raises(ValueError, match="Coalesce.*incompatible schemas"):
-        graph.add_edge("transform2", "coalesce", label="continue")
+        graph.validate_edge_compatibility()  # Explicit validation call
+
+
+def test_gate_walk_through_for_effective_schema() -> None:
+    """Edge validation must walk through gates to find effective producer schema."""
+    graph = ExecutionGraph()
+
+    # Source produces ProducerSchema
+    graph.add_node("source", node_type="source", plugin_name="csv", output_schema=ProducerSchema)
+
+    # Gate has NO schema (config-driven gate)
+    graph.add_node("gate", node_type="gate", plugin_name="config_gate",
+                   input_schema=None, output_schema=None)  # Inherits from upstream!
+
+    # Sink requires ConsumerSchema
+    graph.add_node("sink", node_type="sink", plugin_name="csv", input_schema=ConsumerSchema)
+
+    # Wire: source → gate → sink
+    graph.add_edge("source", "gate", label="continue")
+    graph.add_edge("gate", "sink", label="continue")
+
+    # Should walk through gate to find ProducerSchema
+    # Then check if ProducerSchema has fields required by ConsumerSchema
+    with pytest.raises(ValueError, match="missing required fields.*email"):
+        graph.validate_edge_compatibility()
+
+
+def test_chained_gates() -> None:
+    """Validation must handle multiple chained gates."""
+    graph = ExecutionGraph()
+
+    # Source → Gate1 → Gate2 → Sink
+    graph.add_node("source", node_type="source", plugin_name="csv", output_schema=ProducerSchema)
+    graph.add_node("gate1", node_type="gate", plugin_name="config_gate",
+                   input_schema=None, output_schema=None)
+    graph.add_node("gate2", node_type="gate", plugin_name="config_gate",
+                   input_schema=None, output_schema=None)
+    graph.add_node("sink", node_type="sink", plugin_name="csv", input_schema=ConsumerSchema)
+
+    graph.add_edge("source", "gate1", label="continue")
+    graph.add_edge("gate1", "gate2", label="continue")
+    graph.add_edge("gate2", "sink", label="continue")
+
+    # Should walk gate1 → gate2 → source, find ProducerSchema missing 'email'
+    with pytest.raises(ValueError, match="missing required fields.*email"):
+        graph.validate_edge_compatibility()
+
+
+def test_none_schema_handling() -> None:
+    """None schemas (dynamic by convention) should be compatible with anything."""
+    graph = ExecutionGraph()
+
+    # Source with None schema (dynamic)
+    graph.add_node("source", node_type="source", plugin_name="csv", output_schema=None)
+
+    # Sink with strict schema
+    graph.add_node("sink", node_type="sink", plugin_name="csv", input_schema=ConsumerSchema)
+
+    graph.add_edge("source", "sink", label="continue")
+
+    # Should pass - None is compatible with anything
+    graph.validate_edge_compatibility()  # No exception
 ```
 
 **Step 2: Run test to verify it fails**
@@ -473,17 +550,39 @@ pytest tests/core/test_edge_validation.py -xvs
 
 Expected: FAIL (edge validation not implemented yet)
 
-**Step 3: Add _validate_edge_compatibility method to ExecutionGraph**
+**Step 3: Add edge compatibility validation methods**
 
-In `src/elspeth/core/dag.py`, add method:
+In `src/elspeth/core/dag.py`, add methods:
 
 ```python
-def _validate_edge_compatibility(
-    self,
-    from_node_id: str,
-    to_node_id: str
-) -> None:
-    """Validate schema compatibility between two connected nodes.
+def validate_edge_compatibility(self) -> None:
+    """Validate schema compatibility for all edges in the graph.
+
+    Called AFTER graph construction is complete. Validates that each edge
+    connects compatible schemas.
+
+    Raises:
+        ValueError: If any edge has incompatible schemas
+
+    Note:
+        This is PHASE 2 validation (cross-plugin compatibility). Plugin
+        SELF-validation happens in PHASE 1 during plugin construction.
+    """
+    # Validate each edge
+    for from_id, to_id, edge_data in self._graph.edges(data=True):
+        self._validate_single_edge(from_id, to_id)
+
+    # Validate all coalesce nodes (must have compatible schemas from all branches)
+    coalesce_nodes = [
+        node_id for node_id, data in self._graph.nodes(data=True)
+        if data["info"].node_type == "coalesce"
+    ]
+    for coalesce_id in coalesce_nodes:
+        self._validate_coalesce_compatibility(coalesce_id)
+
+
+def _validate_single_edge(self, from_node_id: str, to_node_id: str) -> None:
+    """Validate schema compatibility for a single edge.
 
     Args:
         from_node_id: Source node ID
@@ -491,33 +590,18 @@ def _validate_edge_compatibility(
 
     Raises:
         ValueError: If schemas are incompatible
-
-    Validation rules:
-    1. Producer output must have all fields required by consumer input
-    2. Dynamic schemas are compatible with anything
-    3. Gates must preserve schema (input == output)
-    4. Coalesce nodes must receive compatible schemas from all inputs
     """
-    from_info = self.get_node_info(from_node_id)
     to_info = self.get_node_info(to_node_id)
 
-    producer_schema = from_info.output_schema
+    # Get EFFECTIVE producer schema (walks through gates if needed)
+    producer_schema = self._get_effective_producer_schema(from_node_id)
     consumer_schema = to_info.input_schema
 
-    # Rule 1: Dynamic schemas bypass validation
+    # Rule 1: Dynamic schemas (None) bypass validation
     if producer_schema is None or consumer_schema is None:
         return  # Dynamic schema - compatible with anything
 
-    # Rule 2: Gates must preserve schema
-    if to_info.node_type == "gate":
-        if to_info.input_schema is not to_info.output_schema:
-            raise ValueError(
-                f"Gate '{to_node_id}' must preserve schema "
-                f"(input == output), but input is {to_info.input_schema.__name__} "
-                f"and output is {to_info.output_schema.__name__}"
-            )
-
-    # Rule 3: Check field compatibility
+    # Rule 2: Check field compatibility
     missing_fields = self._get_missing_required_fields(
         producer_schema, consumer_schema
     )
@@ -528,23 +612,92 @@ def _validate_edge_compatibility(
             f"for consumer schema '{consumer_schema.__name__}': {missing_fields}"
         )
 
-    # Rule 4: Coalesce compatibility checked when second+ edge added
-    if to_info.node_type == "coalesce":
-        # Check if this is second+ incoming edge
-        existing_edges = list(self._graph.in_edges(to_node_id, data=True))
-        if len(existing_edges) > 0:
-            # Get schema from first incoming edge
-            first_edge_source = existing_edges[0][0]
-            first_producer = self.get_node_info(first_edge_source)
-            first_schema = first_producer.output_schema
 
-            # New edge must have same schema
-            if producer_schema is not first_schema:
-                raise ValueError(
-                    f"Coalesce '{to_node_id}' receives incompatible schemas: "
-                    f"first input has {first_schema.__name__ if first_schema else 'dynamic'}, "
-                    f"'{from_node_id}' has {producer_schema.__name__ if producer_schema else 'dynamic'}"
-                )
+def _get_effective_producer_schema(self, node_id: str) -> type[PluginSchema] | None:
+    """Get effective output schema, walking through pass-through nodes (gates).
+
+    Gates and other pass-through nodes don't transform data - they inherit
+    schema from their upstream producers. This method walks backwards through
+    the graph to find the nearest schema-carrying producer.
+
+    Args:
+        node_id: Node to get effective schema for
+
+    Returns:
+        Output schema type, or None if dynamic
+
+    Raises:
+        ValueError: If gate has no incoming edges (graph construction bug)
+    """
+    node_info = self.get_node_info(node_id)
+
+    # If node has output_schema, return it directly
+    if node_info.output_schema is not None:
+        return node_info.output_schema
+
+    # Node has no schema - check if it's a pass-through type (gate)
+    if node_info.node_type == "gate":
+        # Gate passes data unchanged - inherit from upstream producer
+        incoming = list(self._graph.in_edges(node_id, data=True))
+
+        if not incoming:
+            # Gate with no inputs is a graph construction bug - CRASH
+            raise ValueError(
+                f"Gate node '{node_id}' has no incoming edges - "
+                f"this indicates a bug in graph construction"
+            )
+
+        # Get effective schema from first input (recursive for chained gates)
+        first_edge_source = incoming[0][0]
+        first_schema = self._get_effective_producer_schema(first_edge_source)
+
+        # For multi-input gates, verify all inputs have same schema
+        if len(incoming) > 1:
+            for from_id, _, _ in incoming[1:]:
+                other_schema = self._get_effective_producer_schema(from_id)
+                if first_schema != other_schema:
+                    # Multi-input gates with incompatible schemas - CRASH
+                    raise ValueError(
+                        f"Gate '{node_id}' receives incompatible schemas from "
+                        f"multiple inputs - this is a graph construction bug. "
+                        f"First input schema: {first_schema}, "
+                        f"Other input schema: {other_schema}"
+                    )
+
+        return first_schema
+
+    # Not a gate and no schema - return None (dynamic)
+    return None
+
+
+def _validate_coalesce_compatibility(self, coalesce_id: str) -> None:
+    """Validate all inputs to coalesce node have compatible schemas.
+
+    Args:
+        coalesce_id: Coalesce node ID
+
+    Raises:
+        ValueError: If branches have incompatible schemas
+    """
+    incoming = list(self._graph.in_edges(coalesce_id, data=True))
+
+    if len(incoming) < 2:
+        return  # Degenerate case (1 branch) - always compatible
+
+    # Get effective schema from first branch
+    first_edge_source = incoming[0][0]
+    first_schema = self._get_effective_producer_schema(first_edge_source)
+
+    # Verify all other branches have same schema
+    for from_id, _, _ in incoming[1:]:
+        other_schema = self._get_effective_producer_schema(from_id)
+        if first_schema != other_schema:
+            raise ValueError(
+                f"Coalesce '{coalesce_id}' receives incompatible schemas from "
+                f"multiple branches: "
+                f"first branch has {first_schema.__name__ if first_schema else 'dynamic'}, "
+                f"branch from '{from_id}' has {other_schema.__name__ if other_schema else 'dynamic'}"
+            )
 
 
 def _get_missing_required_fields(
@@ -573,28 +726,32 @@ def _get_missing_required_fields(
     return sorted(consumer_required - producer_fields)
 ```
 
-**Step 4: Update add_edge() to call validation**
+**Step 4: Integrate validation into from_plugin_instances()**
 
-In `src/elspeth/core/dag.py`, update `add_edge()` method:
+In `src/elspeth/core/dag.py`, update `from_plugin_instances()` to call validation AFTER graph is built:
 
 ```python
-def add_edge(self, from_node_id: str, to_node_id: str, label: str) -> None:
-    """Add edge between nodes with schema compatibility validation.
+@classmethod
+def from_plugin_instances(cls, ...) -> "ExecutionGraph":
+    """Create execution graph from plugin instances.
 
-    Args:
-        from_node_id: Source node ID
-        to_node_id: Destination node ID
-        label: Edge label (e.g., "continue", "route_to_sink")
-
-    Raises:
-        ValueError: If schemas are incompatible
+    ... (existing construction logic) ...
     """
-    # Validate schema compatibility BEFORE adding edge
-    self._validate_edge_compatibility(from_node_id, to_node_id)
+    graph = cls()
 
-    # Add edge to graph
-    self._graph.add_edge(from_node_id, to_node_id, label=label)
+    # Add all nodes
+    # ... (existing node addition code) ...
+
+    # Add all edges
+    # ... (existing edge addition code) ...
+
+    # PHASE 2 VALIDATION: Validate schema compatibility AFTER graph is built
+    graph.validate_edge_compatibility()
+
+    return graph
 ```
+
+**Note:** Keep `add_edge()` as a dumb primitive - no validation there. Validation happens once at the end of graph construction when we have full context.
 
 **Step 5: Run tests to verify they pass**
 
@@ -610,20 +767,28 @@ Expected: PASS
 git add src/elspeth/core/dag.py tests/core/test_edge_validation.py
 git commit -m "feat: add edge compatibility validation to ExecutionGraph
 
-- Validate schema compatibility during add_edge()
-- Phase 2 validation: plugins connected with compatible schemas
-- Checks missing fields, dynamic schemas, gate pass-through, coalesce
+- Validate schema compatibility during from_plugin_instances()
+- PHASE 2 validation: cross-plugin compatibility (after PHASE 1 self-validation)
+- Preserves gate walk-through logic (_get_effective_producer_schema)
+- Checks missing fields, dynamic schemas (None), gate inheritance, coalesce branches
+- Handles config gates (no schemas) correctly
+- Validation at graph construction, not in primitive add_edge()
 - Ref: Fix schema validation architecture properly"
 ```
 
 ---
 
-## Task 3: Add Self-Validation to Plugin Base Classes
+## Task 3: Add Self-Validation to All Plugins
 
-**Goal:** Plugin base classes validate their own schemas are well-formed (self-validation, not compatibility).
+**Goal:** Add self-validation method to BaseTransform and update ALL builtin plugins to call it.
 
 **Files:**
-- Modify: `src/elspeth/plugins/base.py` (add validation to BaseTransform)
+- Modify: `src/elspeth/plugins/base.py` (add _validate_self_consistency method)
+- Modify: ALL transform plugins (PassThrough, FieldMapper, etc.)
+- Modify: ALL source plugins (CSVSource, etc.)
+- Modify: ALL sink plugins (CSVSink, etc.)
+
+**IMPORTANT:** This task must complete BEFORE Task 3.5 (enforcement). We add the optional method first, update all plugins to call it, THEN make it mandatory.
 
 **Step 1: Write failing test for transform validation**
 
@@ -735,16 +900,58 @@ pytest tests/plugins/transforms/test_passthrough.py::test_passthrough_validates_
 
 Expected: PASS
 
-**Step 6: Commit**
+**Step 6: Update ALL builtin plugins to call validation**
+
+Update all transform, source, and sink plugins to call `_validate_self_consistency()`:
 
 ```bash
-git add src/elspeth/plugins/base.py src/elspeth/plugins/transforms/passthrough.py tests/plugins/transforms/test_passthrough.py
-git commit -m "feat: add self-validation to transform construction
+# Find all plugin __init__ methods
+grep -r "def __init__" src/elspeth/plugins/transforms/
+grep -r "def __init__" src/elspeth/plugins/sources/
+grep -r "def __init__" src/elspeth/plugins/sinks/
+```
 
-- BaseTransform._validate_self_consistency() method
-- PHASE 1: Plugin validates its own schema is well-formed
-- PassThrough ensures input_schema == output_schema
+For each plugin, add call to `_validate_self_consistency()` at the end of `__init__`:
+
+```python
+# Example for each plugin:
+def __init__(self, config: dict[str, Any]) -> None:
+    super().__init__(config)
+    # ... existing initialization ...
+    self.input_schema = ...
+    self.output_schema = ...
+
+    # NEW: Validate self-consistency
+    self._validate_self_consistency()
+```
+
+**Plugins to update:**
+- `PassThrough` ✓ (already done in Step 4)
+- `FieldMapper`
+- All sources (CSVSource, etc.)
+- All sinks (CSVSink, etc.)
+- All gates (if they have schemas)
+
+**Step 7: Run all plugin tests**
+
+```bash
+pytest tests/plugins/ -v
+```
+
+Expected: ALL PASS (plugins now validate during construction)
+
+**Step 8: Commit**
+
+```bash
+git add src/elspeth/plugins/
+git commit -m "feat: add self-validation to all builtin plugins
+
+- BaseTransform._validate_self_consistency() method (optional, not enforced yet)
+- PHASE 1: Plugins validate their own schemas are well-formed
+- Updated ALL builtin plugins to call validation
+- PassThrough, FieldMapper, sources, sinks all validate
 - Does NOT validate compatibility with other plugins (that's PHASE 2)
+- Enforcement added in next task (Task 3.5)
 - Ref: Fix schema validation architecture properly"
 ```
 
@@ -775,23 +982,23 @@ class TestSchema(PluginSchema):
     value: int
 
 
-def test_transform_must_call_validation() -> None:
-    """Transforms that forget to call _validate_self_consistency should fail."""
+def test_transform_must_implement_validation() -> None:
+    """Transforms that don't implement _validate_self_consistency should fail."""
 
     class BadTransform(BaseTransform):
-        """Transform that forgets to call validation."""
+        """Transform that doesn't implement _validate_self_consistency."""
 
         def __init__(self, config: dict) -> None:
             super().__init__(config)
             self.input_schema = TestSchema
             self.output_schema = TestSchema
-            # BUG: Forgot to call self._validate_self_consistency()
+            # BUG: Didn't implement abstract method _validate_self_consistency()
 
         def process(self, row, ctx):
             return row
 
-    # This should raise an error at construction time
-    with pytest.raises(RuntimeError, match="must call.*_validate_self_consistency"):
+    # This should raise TypeError at instantiation (abstract method not implemented)
+    with pytest.raises(TypeError, match="Can't instantiate abstract class.*_validate_self_consistency"):
         BadTransform({})
 
 
@@ -823,15 +1030,15 @@ pytest tests/contracts/test_validation_enforcement.py::test_transform_must_call_
 
 Expected: FAIL (enforcement not implemented yet)
 
-**Step 3: Add enforcement via __init_subclass__**
+**Step 3: Make _validate_self_consistency abstract**
 
-In `src/elspeth/plugins/base.py`, add enforcement to `BaseTransform`:
+In `src/elspeth/plugins/base.py`, change `_validate_self_consistency()` to abstract method:
 
 ```python
+from abc import ABC, abstractmethod
+
 class BaseTransform(ABC):
     """Base class for transform plugins."""
-
-    _validation_called: bool = False
 
     def __init__(self, config: dict[str, Any]) -> None:
         """Initialize transform.
@@ -841,14 +1048,13 @@ class BaseTransform(ABC):
 
         Raises:
             ValueError: If schema configuration is invalid or incompatible
-            RuntimeError: If subclass forgets to call _validate_self_consistency()
         """
         self._config = config
-        self._validation_called = False
 
         # Subclass must set input_schema and output_schema
         # Validation happens in subclass __init__ after schemas are set
 
+    @abstractmethod
     def _validate_self_consistency(self) -> None:
         """Validate plugin's own schemas are self-consistent (PHASE 1).
 
@@ -867,52 +1073,22 @@ class BaseTransform(ABC):
             - FieldMapper: output fields must be subset of input fields (if mode=strict)
             - Gate: input_schema must equal output_schema (pass-through)
 
-            This is a no-op for transforms with no self-consistency constraints.
-            Subclasses override for custom validation logic.
+            For plugins with no self-consistency constraints, implement as:
+            ```python
+            def _validate_self_consistency(self) -> None:
+                pass  # No validation needed
+            ```
+
+            Subclasses MUST implement this method (enforced by ABC).
         """
-        # Mark that validation was called
-        self._validation_called = True
-
-        # Default: No validation (subclasses override if needed)
-        pass
-
-    def __post_init__(self) -> None:
-        """Verify validation was called.
-
-        This runs AFTER subclass __init__ completes.
-
-        Raises:
-            RuntimeError: If subclass forgot to call _validate_self_consistency()
-        """
-        if not self._validation_called:
-            raise RuntimeError(
-                f"{self.__class__.__name__} must call self._validate_self_consistency() "
-                f"in __init__ after setting input_schema and output_schema"
-            )
+        ...
 ```
 
-**Step 4: Hook __post_init__ via __init_subclass__**
-
-Add to `BaseTransform`:
-
-```python
-def __init_subclass__(cls, **kwargs):
-    """Hook to wrap __init__ with validation check."""
-    super().__init_subclass__(**kwargs)
-
-    original_init = cls.__init__
-
-    def wrapped_init(self, *args, **kwargs):
-        original_init(self, *args, **kwargs)
-        # After __init__ completes, verify validation was called
-        if not self._validation_called:
-            raise RuntimeError(
-                f"{self.__class__.__name__} must call self._validate_self_consistency() "
-                f"in __init__ after setting input_schema and output_schema"
-            )
-
-    cls.__init__ = wrapped_init
-```
+**Why ABC over __init_subclass__:**
+- Cleaner: Uses standard Python ABC pattern
+- Safer: No super() chain issues with multiple inheritance
+- Clearer: TypeError at instantiation if not implemented
+- Better errors: "Can't instantiate abstract class" vs runtime check
 
 **Step 5: Run tests to verify they pass**
 
@@ -930,16 +1106,17 @@ pytest tests/plugins/transforms/ -v
 
 Expected: PASS (all transforms already call validation after Task 3)
 
-**Step 7: Commit**
+**Step 4: Commit**
 
 ```bash
 git add src/elspeth/plugins/base.py tests/contracts/test_validation_enforcement.py
-git commit -m "feat: enforce validation calls via __init_subclass__
+git commit -m "feat: enforce validation via ABC abstract method
 
-- BaseTransform automatically checks validation was called
-- Raises RuntimeError if plugin forgets _validate_self_consistency()
-- Compile-time enforcement (fails during construction, not runtime)
-- Cannot skip validation accidentally
+- _validate_self_consistency() now abstract method (enforced by ABC)
+- TypeError at instantiation if not implemented
+- Cleaner than __init_subclass__ (no super() chain issues)
+- All plugins already implement it (Task 3)
+- Cannot skip validation (Python ABC enforcement)
 - Ref: Fix schema validation architecture properly"
 ```
 
@@ -960,7 +1137,64 @@ grep -r "graph.validate()" tests/integration/ tests/cli/
 grep -r "GraphValidationError" tests/integration/ tests/cli/
 ```
 
-**Step 2: Update tests to expect ValueError from plugin construction**
+**Step 2: Add P0 two-phase validation integration test**
+
+Add to `tests/integration/test_schema_validation_end_to_end.py`:
+
+```python
+def test_two_phase_validation_separates_self_and_compatibility_errors() -> None:
+    """Verify PHASE 1 (self) and PHASE 2 (compatibility) validation both work."""
+    from elspeth.plugins.manager import PluginManager
+
+    manager = PluginManager()
+
+    # PHASE 1 should fail: Malformed schema in plugin config
+    bad_self_config = {
+        "datasource": {
+            "plugin": "csv",
+            "options": {
+                "path": "test.csv",
+                "schema": {"mode": "strict", "fields": ["invalid syntax!!!"]},
+            }
+        }
+    }
+
+    with pytest.raises(ValueError, match="Invalid field spec"):
+        # Fails during plugin construction (PHASE 1)
+        manager.get_source("csv", bad_self_config["datasource"]["options"])
+
+    # PHASE 2 should fail: Well-formed schemas, incompatible connection
+    good_self_bad_compat_config = {
+        "datasource": {
+            "plugin": "csv",
+            "options": {
+                "path": "test.csv",
+                "schema": {"fields": ["id: int"]},  # Only has 'id'
+            },
+        },
+        "row_plugins": [
+            {
+                "plugin": "passthrough",
+                "options": {
+                    "schema": {"fields": ["id: int", "email: str"]},  # Requires 'email'!
+                },
+            }
+        ],
+        "sinks": {
+            "out": {
+                "plugin": "csv",
+                "options": {"path": "out.csv"},
+            }
+        },
+        "output_sink": "out",
+    }
+
+    with pytest.raises(ValueError, match="missing required fields.*email"):
+        # Fails during graph construction (PHASE 2)
+        graph = ExecutionGraph.from_config(good_self_bad_compat_config, manager)
+```
+
+**Step 3: Update tests to expect ValueError from graph construction**
 
 For each test that expects `GraphValidationError` from `graph.validate()`:
 
@@ -973,10 +1207,10 @@ with pytest.raises(GraphValidationError):
 # NEW pattern:
 with pytest.raises(ValueError, match="Schema compatibility"):
     graph = ExecutionGraph.from_plugin_instances(...)
-    # Plugin construction fails if schemas incompatible
+    # Graph construction fails if schemas incompatible (PHASE 2)
 ```
 
-**Step 3: Run integration tests**
+**Step 4: Run integration tests**
 
 ```bash
 pytest tests/integration/test_schema_validation_end_to_end.py -v

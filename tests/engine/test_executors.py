@@ -3267,7 +3267,7 @@ class TestAggregationExecutorCheckpoint:
         assert consumed_tokens[0].token_id == "token-101"
         assert consumed_tokens[1].token_id == "token-102"
 
-    def test_execute_flush_crashes_on_buffer_token_mismatch(self) -> None:
+    def test_execute_flush_detects_incomplete_restoration(self) -> None:
         """Defensive guard catches buffer/token length mismatch with clear error."""
 
         from elspeth.core.config import AggregationSettings, TriggerConfig
