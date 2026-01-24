@@ -1,4 +1,25 @@
-# Bug Report: <short title>
+# Bug Tracking
+
+## Closed Bugs
+
+### P0-2026-01-24-schema-validation-non-functional ✅
+- **Status:** Resolved in RC-2
+- **Fix:** Architectural refactor - plugin instantiation before graph construction
+- **Resolution Date:** 2026-01-24
+
+### P2-2026-01-24-aggregation-nodes-lack-schema-validation ✅
+- **Status:** Resolved (symptom of P0 bug)
+- **Fix:** Included in P0 architectural refactor
+- **Resolution Date:** 2026-01-24
+
+### P3-2026-01-24-coalesce-nodes-lack-schema-validation ✅
+- **Status:** Resolved (symptom of P0 bug)
+- **Fix:** Included in P0 architectural refactor
+- **Resolution Date:** 2026-01-24
+
+---
+
+# Bug Report Template
 
 ## Summary
 

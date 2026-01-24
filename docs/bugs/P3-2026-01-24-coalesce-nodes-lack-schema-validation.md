@@ -1,5 +1,15 @@
 # Bug Report: Coalesce nodes lack schema validation
 
+## ✅ RESOLVED
+
+**Status:** Fixed in RC-2 as part of P0-2026-01-24-schema-validation-non-functional
+**Resolution:** Architectural refactor enables schema extraction from plugin instances
+**Implementation:** See docs/plans/2026-01-24-schema-refactor-* files
+
+This bug was a symptom of the broader P0 issue. The fix addresses all node types.
+
+---
+
 ## Summary
 
 - Coalesce nodes are added to `ExecutionGraph` without `input_schema` or `output_schema` in `from_config()`
