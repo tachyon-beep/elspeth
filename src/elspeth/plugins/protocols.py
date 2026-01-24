@@ -111,16 +111,20 @@ class SourceProtocol(Protocol):
         with other plugins.
 
         Raises:
-            ValueError: If schema configuration is invalid
+            ValueError or PluginConfigError: If schema configuration is invalid
 
         Note:
             This is SELF-validation only. Plugin checks its own schema is valid.
             COMPATIBILITY validation (does plugin A's output match plugin B's input?)
             happens in PHASE 2 during ExecutionGraph.from_plugin_instances().
 
+            Implementation uses fail-fast pattern: crashes immediately on invalid
+            schema rather than collecting errors. This is correct for system-owned
+            plugin code where invalid schemas indicate bugs, not user error.
+
         Example:
             - Valid: Schema has no syntax errors, types are well-formed
-            - Invalid: Schema has malformed field specs, unknown types
+            - Invalid: Schema has malformed field specs, unknown types (raises)
         """
         ...
 
