@@ -220,6 +220,50 @@ class ExecutionGraph:
         if schema_errors:
             raise GraphValidationError("Schema incompatibilities:\n" + "\n".join(f"  - {e}" for e in schema_errors))
 
+    def _validate_coalesce_schema_compatibility(self, coalesce_id: str, raise_on_error: bool = False) -> list[str]:
+        """Validate coalesce node has compatible incoming schemas.
+
+        Args:
+            coalesce_id: Node ID to validate
+            raise_on_error: If True, raise GraphValidationError on first error
+
+        Returns:
+            List of error messages (empty if valid)
+
+        Raises:
+            GraphValidationError: If raise_on_error=True and validation fails
+        """
+        errors: list[str] = []
+        incoming_edges = list(self._graph.in_edges(coalesce_id, data=True, keys=True))
+
+        if len(incoming_edges) < 2:
+            return errors  # Degenerate but valid
+
+        # Collect non-None schemas
+        incoming_schemas: list[tuple[str, type[PluginSchema]]] = []
+        for from_node, _, _, _ in incoming_edges:
+            schema = self._get_effective_producer_schema(from_node)
+            if schema is not None:
+                incoming_schemas.append((from_node, schema))
+
+        # Compare pairwise
+        if len(incoming_schemas) >= 2:
+            base_node_id, base_schema = incoming_schemas[0]
+
+            for other_node_id, other_schema in incoming_schemas[1:]:
+                if not _schemas_compatible(base_schema, other_schema):
+                    error_msg = (
+                        f"Coalesce node '{coalesce_id}' receives incompatible schemas. "
+                        f"Branch from '{base_node_id}' has schema {base_schema.__name__}, "
+                        f"but branch from '{other_node_id}' has schema {other_schema.__name__}. "
+                        f"All branches merging at a coalesce must have compatible schemas."
+                    )
+                    if raise_on_error:
+                        raise GraphValidationError(error_msg)
+                    errors.append(error_msg)
+
+        return errors
+
     def _validate_edge_schemas(self) -> list[str]:
         """Validate schema compatibility along all edges.
 
@@ -263,34 +307,8 @@ class ExecutionGraph:
 
         # Validate coalesce nodes have compatible incoming schemas
         coalesce_nodes = [node_id for node_id, data in self._graph.nodes(data=True) if data["info"].node_type == "coalesce"]
-
         for coalesce_id in coalesce_nodes:
-            # Get all incoming edges
-            incoming_edges = list(self._graph.in_edges(coalesce_id, data=True, keys=True))
-
-            if len(incoming_edges) < 2:
-                # Coalesce with < 2 inputs is degenerate but valid (pass-through)
-                continue
-
-            # Collect schemas from incoming branches
-            incoming_schemas: list[tuple[str, type[PluginSchema]]] = []
-            for from_node, _, _, _ in incoming_edges:
-                schema = self._get_effective_producer_schema(from_node)
-                if schema is not None:
-                    incoming_schemas.append((from_node, schema))
-
-            # Check all non-None schemas are compatible
-            if len(incoming_schemas) >= 2:
-                base_node_id, base_schema = incoming_schemas[0]
-
-                for other_node_id, other_schema in incoming_schemas[1:]:
-                    if not _schemas_compatible(base_schema, other_schema):
-                        errors.append(
-                            f"Coalesce node '{coalesce_id}' receives incompatible schemas. "
-                            f"Branch from '{base_node_id}' has schema {base_schema.__name__}, "
-                            f"but branch from '{other_node_id}' has schema {other_schema.__name__}. "
-                            f"All branches merging at a coalesce must have compatible schemas."
-                        )
+            errors.extend(self._validate_coalesce_schema_compatibility(coalesce_id))
 
         return errors
 
@@ -994,35 +1012,7 @@ class ExecutionGraph:
         # Addresses P0 blocker from Round 3 QA review
         if coalesce_settings:
             for coalesce_id in coalesce_ids.values():
-                # Get all incoming edges to this coalesce
-                incoming_edges = list(graph._graph.in_edges(coalesce_id, data=True, keys=True))
-
-                if len(incoming_edges) < 2:
-                    # Coalesce with < 2 inputs is degenerate but valid (pass-through)
-                    continue
-
-                # Extract schemas from all producers
-                incoming_schemas = []
-                for pred_id, _, _, _edge_data in incoming_edges:
-                    producer_schema = graph._get_effective_producer_schema(pred_id)
-                    incoming_schemas.append((pred_id, producer_schema))
-
-                # Filter to only specific schemas (dynamic schemas are None)
-                specific_schemas = [(nid, schema) for nid, schema in incoming_schemas if schema is not None]
-
-                # If we have 2+ specific schemas, they must be compatible
-                if len(specific_schemas) >= 2:
-                    base_node_id, base_schema = specific_schemas[0]
-
-                    for other_node_id, other_schema in specific_schemas[1:]:
-                        # Check schema compatibility
-                        if not _schemas_compatible(base_schema, other_schema):
-                            raise GraphValidationError(
-                                f"Coalesce node '{coalesce_id}' receives incompatible schemas. "
-                                f"Branch from '{base_node_id}' has schema {base_schema.__name__}, "
-                                f"but branch from '{other_node_id}' has schema {other_schema.__name__}. "
-                                f"All branches merging at a coalesce must have compatible schemas."
-                            )
+                graph._validate_coalesce_schema_compatibility(coalesce_id, raise_on_error=True)
 
         return graph
 
