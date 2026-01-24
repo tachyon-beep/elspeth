@@ -2154,3 +2154,128 @@ class TestDynamicSchemaDetection:
 
         # Test backwards compat (None = dynamic)
         assert _is_dynamic_schema(None) is True
+
+
+class TestDeterministicNodeIDs:
+    """Tests for deterministic node ID generation."""
+
+    def test_node_ids_are_deterministic_for_same_config(self) -> None:
+        """Node IDs must be deterministic for checkpoint/resume compatibility."""
+        from elspeth.cli_helpers import instantiate_plugins_from_config
+        from elspeth.core.config import (
+            DatasourceSettings,
+            ElspethSettings,
+            RowPluginSettings,
+            SinkSettings,
+        )
+        from elspeth.core.dag import ExecutionGraph
+
+        config = ElspethSettings(
+            datasource=DatasourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"fields": "dynamic"},
+                },
+            ),
+            row_plugins=[
+                RowPluginSettings(
+                    plugin="passthrough",
+                    options={"schema": {"fields": "dynamic"}},
+                )
+            ],
+            sinks={"out": SinkSettings(plugin="csv", options={"path": "out.csv", "schema": {"fields": "dynamic"}})},
+            output_sink="out",
+        )
+
+        # Build graph twice with same config
+        plugins1 = instantiate_plugins_from_config(config)
+        graph1 = ExecutionGraph.from_plugin_instances(
+            source=plugins1["source"],
+            transforms=plugins1["transforms"],
+            sinks=plugins1["sinks"],
+            aggregations=plugins1["aggregations"],
+            gates=list(config.gates),
+            output_sink=config.output_sink,
+        )
+
+        plugins2 = instantiate_plugins_from_config(config)
+        graph2 = ExecutionGraph.from_plugin_instances(
+            source=plugins2["source"],
+            transforms=plugins2["transforms"],
+            sinks=plugins2["sinks"],
+            aggregations=plugins2["aggregations"],
+            gates=list(config.gates),
+            output_sink=config.output_sink,
+        )
+
+        # Node IDs must be identical
+        nodes1 = sorted(graph1._graph.nodes())
+        nodes2 = sorted(graph2._graph.nodes())
+
+        assert nodes1 == nodes2, "Node IDs must be deterministic for checkpoint compatibility"
+
+    def test_node_ids_change_when_config_changes(self) -> None:
+        """Node IDs should change if plugin config changes."""
+        from elspeth.cli_helpers import instantiate_plugins_from_config
+        from elspeth.core.config import (
+            DatasourceSettings,
+            ElspethSettings,
+            SinkSettings,
+        )
+        from elspeth.core.dag import ExecutionGraph
+
+        config1 = ElspethSettings(
+            datasource=DatasourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"fields": "dynamic"},
+                },
+            ),
+            row_plugins=[],
+            sinks={"out": SinkSettings(plugin="csv", options={"path": "out.csv", "schema": {"fields": "dynamic"}})},
+            output_sink="out",
+        )
+
+        config2 = ElspethSettings(
+            datasource=DatasourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"mode": "strict", "fields": ["id: int"]},  # Different!
+                },
+            ),
+            row_plugins=[],
+            sinks={"out": SinkSettings(plugin="csv", options={"path": "out.csv", "schema": {"fields": "dynamic"}})},
+            output_sink="out",
+        )
+
+        plugins1 = instantiate_plugins_from_config(config1)
+        graph1 = ExecutionGraph.from_plugin_instances(
+            source=plugins1["source"],
+            transforms=plugins1["transforms"],
+            sinks=plugins1["sinks"],
+            aggregations=plugins1["aggregations"],
+            gates=list(config1.gates),
+            output_sink=config1.output_sink,
+        )
+
+        plugins2 = instantiate_plugins_from_config(config2)
+        graph2 = ExecutionGraph.from_plugin_instances(
+            source=plugins2["source"],
+            transforms=plugins2["transforms"],
+            sinks=plugins2["sinks"],
+            aggregations=plugins2["aggregations"],
+            gates=list(config2.gates),
+            output_sink=config2.output_sink,
+        )
+
+        # Source node IDs should differ (different config)
+        source_id_1 = next(n for n in graph1._graph.nodes() if n.startswith("source_"))
+        source_id_2 = next(n for n in graph2._graph.nodes() if n.startswith("source_"))
+
+        assert source_id_1 != source_id_2

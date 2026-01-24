@@ -12,6 +12,12 @@ from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.schema import checkpoints_table
 
 
+class IncompatibleCheckpointError(Exception):
+    """Raised when attempting to load a checkpoint from an incompatible version."""
+
+    pass
+
+
 class CheckpointManager:
     """Manages checkpoint creation and retrieval.
 
@@ -152,3 +158,30 @@ class CheckpointManager:
             result = conn.execute(delete(checkpoints_table).where(checkpoints_table.c.run_id == run_id))
             conn.commit()
             return result.rowcount
+
+    def _validate_checkpoint_compatibility(self, checkpoint: Checkpoint) -> None:
+        """Verify checkpoint was created with compatible node ID generation.
+
+        CRITICAL: Node IDs changed from random UUID to deterministic hash-based
+        in 2026-01-24. Old checkpoints cannot be resumed because node IDs will
+        not match between checkpoint and current graph.
+
+        Args:
+            checkpoint: Checkpoint to validate
+
+        Raises:
+            IncompatibleCheckpointError: If checkpoint predates deterministic node IDs
+        """
+        # Check if checkpoint has deterministic node IDs
+        # Old checkpoints: created_at before 2026-01-24
+        # New checkpoints: created_at on or after 2026-01-24
+
+        # Simple heuristic: if created_at before 2026-01-24, warn about incompatibility
+        cutoff_date = datetime(2026, 1, 24, tzinfo=UTC)
+        if checkpoint.created_at < cutoff_date:
+            raise IncompatibleCheckpointError(
+                f"Checkpoint '{checkpoint.checkpoint_id}' created before deterministic node IDs "
+                f"(created: {checkpoint.created_at.isoformat()}, cutoff: {cutoff_date.isoformat()}). "
+                "Resume not supported across this upgrade. "
+                "Please restart pipeline from beginning."
+            )

@@ -518,33 +518,57 @@ class ExecutionGraph:
         Raises:
             GraphValidationError: If gate routes reference unknown sinks
         """
-        import uuid
+        import hashlib
+
+        from elspeth.core.canonical import canonical_json
 
         graph = cls()
 
-        def node_id(prefix: str, name: str) -> str:
-            return f"{prefix}_{name}_{uuid.uuid4().hex[:8]}"
+        def node_id(prefix: str, name: str, config: dict[str, Any]) -> str:
+            """Generate deterministic node ID based on plugin type and config.
+
+            Node IDs must be deterministic for checkpoint/resume compatibility.
+            If a pipeline is checkpointed and later resumed, the node IDs must
+            be identical so checkpoint state can be restored correctly.
+
+            Args:
+                prefix: Node type prefix (source_, transform_, sink_, etc.)
+                name: Plugin name
+                config: Plugin configuration dict
+
+            Returns:
+                Deterministic node ID
+            """
+            # Create stable hash of config using RFC 8785 canonical JSON
+            # CRITICAL: Must use canonical_json() not json.dumps() for true determinism
+            # (floats, nested dicts, datetime serialization must be consistent)
+            config_str = canonical_json(config)
+            config_hash = hashlib.sha256(config_str.encode()).hexdigest()[:12]  # 48 bits
+
+            return f"{prefix}_{name}_{config_hash}"
 
         # Add source - extract schema from instance
-        source_id = node_id("source", source.name)
+        source_config = getattr(source, "config", {})
+        source_id = node_id("source", source.name, source_config)
         graph.add_node(
             source_id,
             node_type="source",
             plugin_name=source.name,
-            config={},
+            config=source_config,
             output_schema=getattr(source, "output_schema", None),
         )
 
         # Add sinks
         sink_ids: dict[str, str] = {}
         for sink_name, sink in sinks.items():
-            sid = node_id("sink", sink_name)
+            sink_config = getattr(sink, "config", {})
+            sid = node_id("sink", sink_name, sink_config)
             sink_ids[sink_name] = sid
             graph.add_node(
                 sid,
                 node_type="sink",
                 plugin_name=sink.name,
-                config={},
+                config=sink_config,
                 input_schema=getattr(sink, "input_schema", None),
             )
 
@@ -556,14 +580,15 @@ class ExecutionGraph:
         prev_node_id = source_id
 
         for i, transform in enumerate(transforms):
-            tid = node_id("transform", transform.name)
+            transform_config = getattr(transform, "config", {})
+            tid = node_id("transform", transform.name, transform_config)
             transform_ids[i] = tid
 
             graph.add_node(
                 tid,
                 node_type="transform",
                 plugin_name=transform.name,
-                config={},
+                config=transform_config,
                 input_schema=getattr(transform, "input_schema", None),
                 output_schema=getattr(transform, "output_schema", None),
             )
@@ -576,14 +601,13 @@ class ExecutionGraph:
         # Build aggregations - dual schemas
         aggregation_ids: dict[str, str] = {}
         for agg_name, (transform, agg_config) in aggregations.items():
-            aid = node_id("aggregation", agg_name)
-            aggregation_ids[agg_name] = aid
-
             agg_node_config = {
                 "trigger": agg_config.trigger.model_dump(),
                 "output_mode": agg_config.output_mode,
                 "options": dict(agg_config.options),
             }
+            aid = node_id("aggregation", agg_name, agg_node_config)
+            aggregation_ids[agg_name] = aid
 
             graph.add_node(
                 aid,
@@ -604,15 +628,15 @@ class ExecutionGraph:
         gate_sequence: list[tuple[str, GateSettings]] = []
 
         for gate_config in gates:
-            gid = node_id("config_gate", gate_config.name)
-            config_gate_ids[gate_config.name] = gid
-
             gate_node_config = {
                 "condition": gate_config.condition,
                 "routes": dict(gate_config.routes),
             }
             if gate_config.fork_to:
                 gate_node_config["fork_to"] = list(gate_config.fork_to)
+
+            gid = node_id("config_gate", gate_config.name, gate_node_config)
+            config_gate_ids[gate_config.name] = gid
 
             graph.add_node(
                 gid,
@@ -649,13 +673,6 @@ class ExecutionGraph:
             branch_to_coalesce: dict[str, str] = {}
 
             for coalesce_config in coalesce_settings:
-                cid = node_id("coalesce", coalesce_config.name)
-                coalesce_ids[coalesce_config.name] = cid
-
-                # Map branches to this coalesce
-                for branch_name in coalesce_config.branches:
-                    branch_to_coalesce[branch_name] = cid
-
                 # Coalesce merges - no schema transformation
                 config_dict: dict[str, Any] = {
                     "branches": list(coalesce_config.branches),
@@ -668,6 +685,13 @@ class ExecutionGraph:
                     config_dict["quorum_count"] = coalesce_config.quorum_count
                 if coalesce_config.select_branch is not None:
                     config_dict["select_branch"] = coalesce_config.select_branch
+
+                cid = node_id("coalesce", coalesce_config.name, config_dict)
+                coalesce_ids[coalesce_config.name] = cid
+
+                # Map branches to this coalesce
+                for branch_name in coalesce_config.branches:
+                    branch_to_coalesce[branch_name] = cid
 
                 graph.add_node(
                     cid,
