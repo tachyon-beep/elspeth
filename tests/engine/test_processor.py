@@ -2950,8 +2950,20 @@ class TestProcessorBatchTransforms:
         # Simulate restored checkpoint with 2 rows already buffered
         restored_buffer_state = {
             sum_node.node_id: {
-                "rows": [{"value": 1}, {"value": 2}],
-                "token_ids": [token0.token_id, token1.token_id],
+                "tokens": [
+                    {
+                        "token_id": token0.token_id,
+                        "row_id": row0.row_id,
+                        "row_data": {"value": 1},
+                        "branch_name": None,
+                    },
+                    {
+                        "token_id": token1.token_id,
+                        "row_id": row1.row_id,
+                        "row_data": {"value": 2},
+                        "branch_name": None,
+                    },
+                ],
                 "batch_id": old_batch.batch_id,
             }
         }
