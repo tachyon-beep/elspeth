@@ -88,20 +88,9 @@ class CSVSink(BaseSink):
         # Set input_schema for protocol compliance
         self.input_schema = self._schema_class
 
-        # Validate self-consistency (PHASE 1)
-        self._validate_self_consistency()
-
         self._file: IO[str] | None = None
         self._writer: csv.DictWriter[str] | None = None
         self._fieldnames: Sequence[str] | None = None
-
-    def _validate_self_consistency(self) -> None:
-        """Validate CSVSink schemas are self-consistent.
-
-        CSVSink has no self-consistency constraints - only input_schema.
-        """
-        self._validation_called = True  # Mark validation as complete
-        # No additional validation needed - CSVSink has only input schema
 
     def write(self, rows: list[dict[str, Any]], ctx: PluginContext) -> ArtifactDescriptor:
         """Write a batch of rows to the CSV file.

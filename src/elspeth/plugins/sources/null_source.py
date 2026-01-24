@@ -49,17 +49,6 @@ class NullSource(BaseSource):
         """
         super().__init__(config)
 
-        # Validate self-consistency (PHASE 1)
-        self._validate_self_consistency()
-
-    def _validate_self_consistency(self) -> None:
-        """Validate NullSource schemas are self-consistent.
-
-        NullSource has no self-consistency constraints - schema is static.
-        """
-        self._validation_called = True  # Mark validation as complete
-        # No additional validation needed - NullSource has static output schema
-
     def load(self, ctx: PluginContext) -> Iterator[SourceRow]:
         """Yield no rows.
 

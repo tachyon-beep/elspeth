@@ -282,15 +282,6 @@ class AzureBlobSource(BaseSource):
         self._blob_client: BlobClient | None = None
 
         # PHASE 1: Validate self-consistency
-        self._validate_self_consistency()
-
-    def _validate_self_consistency(self) -> None:
-        """Validate plugin's own schemas are self-consistent (PHASE 1).
-
-        No self-consistency constraints for Azure Blob source.
-        Source plugins have no input schema, only output schema.
-        """
-        self._validation_called = True  # MANDATORY - marks validation as complete
 
     def _get_blob_client(self) -> BlobClient:
         """Get or create the Azure Blob client.

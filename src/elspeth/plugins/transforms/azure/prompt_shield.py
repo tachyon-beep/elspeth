@@ -132,9 +132,6 @@ class AzurePromptShield(BaseTransform):
         self.input_schema = schema
         self.output_schema = schema
 
-        # Validate self-consistency (PHASE 1)
-        self._validate_self_consistency()
-
         # Create own HTTP client (following OpenRouter pattern)
         # Single shared client since httpx.Client is stateless
         self._http_client: httpx.Client | None = None
@@ -155,14 +152,6 @@ class AzurePromptShield(BaseTransform):
         # Dynamic is_batch_aware based on pool_size
         # Set as instance attribute to override class attribute
         self.is_batch_aware = self._pool_size > 1
-
-    def _validate_self_consistency(self) -> None:
-        """Validate AzurePromptShield schemas are self-consistent.
-
-        AzurePromptShield has no self-consistency constraints (input == output by definition).
-        """
-        self._validation_called = True  # Mark validation as complete
-        # No additional validation needed - AzurePromptShield has matching input/output schemas
 
     def on_start(self, ctx: PluginContext) -> None:
         """Capture recorder reference for pooled execution.

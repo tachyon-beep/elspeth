@@ -84,19 +84,8 @@ class JSONSink(BaseSink):
         # Set input_schema for protocol compliance
         self.input_schema = self._schema_class
 
-        # Validate self-consistency (PHASE 1)
-        self._validate_self_consistency()
-
         self._file: IO[str] | None = None
         self._rows: list[dict[str, Any]] = []  # Buffer for json array format
-
-    def _validate_self_consistency(self) -> None:
-        """Validate JSONSink schemas are self-consistent.
-
-        JSONSink has no self-consistency constraints - only input_schema.
-        """
-        self._validation_called = True  # Mark validation as complete
-        # No additional validation needed - JSONSink has only input schema
 
     def write(self, rows: list[dict[str, Any]], ctx: PluginContext) -> ArtifactDescriptor:
         """Write a batch of rows to the JSON file.

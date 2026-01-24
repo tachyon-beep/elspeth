@@ -103,31 +103,6 @@ class SourceProtocol(Protocol):
         """Called after load() completes. Override for cleanup before close()."""
         ...
 
-    def _validate_self_consistency(self) -> None:
-        """Validate plugin's own schemas are self-consistent (PHASE 1).
-
-        Called during plugin construction to verify schema definition is valid.
-        This is PHASE 1 validation - checking the schema itself, not compatibility
-        with other plugins.
-
-        Raises:
-            ValueError or PluginConfigError: If schema configuration is invalid
-
-        Note:
-            This is SELF-validation only. Plugin checks its own schema is valid.
-            COMPATIBILITY validation (does plugin A's output match plugin B's input?)
-            happens in PHASE 2 during ExecutionGraph.from_plugin_instances().
-
-            Implementation uses fail-fast pattern: crashes immediately on invalid
-            schema rather than collecting errors. This is correct for system-owned
-            plugin code where invalid schemas indicate bugs, not user error.
-
-        Example:
-            - Valid: Schema has no syntax errors, types are well-formed
-            - Invalid: Schema has malformed field specs, unknown types (raises)
-        """
-        ...
-
 
 @runtime_checkable
 class TransformProtocol(Protocol):
@@ -229,14 +204,6 @@ class TransformProtocol(Protocol):
         """Called at end of run."""
         ...
 
-    def _validate_self_consistency(self) -> None:
-        """Validate plugin's own schemas are self-consistent (PHASE 1).
-
-        Must be called during __init__ before any data processing.
-        Raises ValueError if schema is malformed.
-        """
-        ...
-
 
 @runtime_checkable
 class GateProtocol(Protocol):
@@ -313,14 +280,6 @@ class GateProtocol(Protocol):
 
     def on_complete(self, ctx: "PluginContext") -> None:
         """Called at end of run."""
-        ...
-
-    def _validate_self_consistency(self) -> None:
-        """Validate plugin's own schemas are self-consistent (PHASE 1).
-
-        Must be called during __init__ before any data processing.
-        Raises ValueError if schema is malformed.
-        """
         ...
 
 
@@ -494,12 +453,4 @@ class SinkProtocol(Protocol):
 
     def on_complete(self, ctx: "PluginContext") -> None:
         """Called at end of run (before close)."""
-        ...
-
-    def _validate_self_consistency(self) -> None:
-        """Validate plugin's own schemas are self-consistent (PHASE 1).
-
-        Must be called during __init__ before any data processing.
-        Raises ValueError if schema is malformed.
-        """
         ...
