@@ -544,6 +544,7 @@ landscape:
         """
         from sqlalchemy import select
 
+        from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.core.dag import ExecutionGraph
         from elspeth.core.landscape import LandscapeDB, nodes_table
 
@@ -598,7 +599,15 @@ landscape:
         from elspeth.cli import load_settings
 
         config = load_settings(settings_file)
-        rebuilt_graph = ExecutionGraph.from_config(config, plugin_manager)
+        plugins = instantiate_plugins_from_config(config)
+        rebuilt_graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(config.gates),
+            output_sink=config.output_sink,
+        )
         rebuilt_node_ids = set(rebuilt_graph._graph.nodes())
 
         # Node IDs should differ (due to UUID randomization)

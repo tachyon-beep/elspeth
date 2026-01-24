@@ -6,6 +6,7 @@ from unittest.mock import Mock
 
 import pytest
 
+from elspeth.cli_helpers import instantiate_plugins_from_config
 from elspeth.contracts import Determinism, NodeType
 from elspeth.contracts.enums import BatchStatus
 from elspeth.contracts.schema import SchemaConfig
@@ -201,7 +202,15 @@ class TestOrchestratorResume:
             sinks={"default": SinkSettings(plugin="csv")},
             output_sink="default",
         )
-        return ExecutionGraph.from_config(settings, plugin_manager)
+        plugins = instantiate_plugins_from_config(settings)
+        return ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(settings.gates),
+            output_sink=settings.output_sink,
+        )
 
 
 def _make_dynamic_schema() -> SchemaConfig:

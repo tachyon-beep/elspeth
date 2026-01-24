@@ -225,7 +225,17 @@ class TestDeaggregationAuditTrail:
         db = LandscapeDB.from_url(settings.landscape.url)
 
         # Build graph
-        graph = ExecutionGraph.from_config(settings, plugin_manager)
+        from elspeth.cli_helpers import instantiate_plugins_from_config
+
+        plugins = instantiate_plugins_from_config(settings)
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(settings.gates),
+            output_sink=settings.output_sink,
+        )
 
         # Instantiate plugins
         source = JSONSource(dict(settings.datasource.options))

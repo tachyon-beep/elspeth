@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 import pytest
 
+from elspeth.cli_helpers import instantiate_plugins_from_config
 from elspeth.contracts import PluginSchema, RoutingMode, SourceRow
 from elspeth.core.config import GateSettings
 from tests.conftest import _TestSinkBase, _TestSourceBase, as_source
@@ -449,7 +450,16 @@ class TestRouteLabelResolution:
             ],
         )
 
-        graph = ExecutionGraph.from_config(settings, plugin_manager)
+        plugins = instantiate_plugins_from_config(settings)
+
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(settings.gates),
+            output_sink=settings.output_sink,
+        )
 
         # Verify route resolution map
         route_map = graph.get_route_resolution_map()
@@ -530,7 +540,16 @@ class TestRouteLabelResolution:
             ],
         )
 
-        graph = ExecutionGraph.from_config(settings, plugin_manager)
+        plugins = instantiate_plugins_from_config(settings)
+
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(settings.gates),
+            output_sink=settings.output_sink,
+        )
 
         source = ListSource(
             [
@@ -632,7 +651,16 @@ class TestForkCreatesChildTokens:
             ],
         )
 
-        graph = ExecutionGraph.from_config(settings, plugin_manager)
+        plugins = instantiate_plugins_from_config(settings)
+
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(settings.gates),
+            output_sink=settings.output_sink,
+        )
 
         # Verify gate node exists with fork config
         config_gate_map = graph.get_config_gate_id_map()
@@ -718,7 +746,16 @@ class TestForkCreatesChildTokens:
             output_sink="path_a",  # Default, but fork should override for path_b
         )
 
-        graph = ExecutionGraph.from_config(settings, plugin_manager)
+        plugins = instantiate_plugins_from_config(settings)
+
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(settings.gates),
+            output_sink=settings.output_sink,
+        )
 
         config = PipelineConfig(
             source=as_source(source),
@@ -816,7 +853,16 @@ class TestForkCreatesChildTokens:
             output_sink="default",
         )
 
-        graph = ExecutionGraph.from_config(settings, plugin_manager)
+        plugins = instantiate_plugins_from_config(settings)
+
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(settings.gates),
+            output_sink=settings.output_sink,
+        )
 
         config = PipelineConfig(
             source=as_source(source),
@@ -916,7 +962,16 @@ class TestForkCreatesChildTokens:
             output_sink="analysis",
         )
 
-        graph = ExecutionGraph.from_config(settings, plugin_manager)
+        plugins = instantiate_plugins_from_config(settings)
+
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(settings.gates),
+            output_sink=settings.output_sink,
+        )
 
         config = PipelineConfig(
             source=as_source(source),
@@ -1756,6 +1811,7 @@ class TestErrorHandling:
 
     def test_route_to_nonexistent_sink_caught_at_graph_construction(self, plugin_manager) -> None:
         """Route to non-existent sink caught when building graph."""
+        from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.core.config import (
             DatasourceSettings,
             ElspethSettings,
@@ -1780,4 +1836,12 @@ class TestErrorHandling:
         )
 
         with pytest.raises(GraphValidationError, match="nonexistent_sink"):
-            ExecutionGraph.from_config(settings, plugin_manager)
+            plugins = instantiate_plugins_from_config(settings)
+            ExecutionGraph.from_plugin_instances(
+                source=plugins["source"],
+                transforms=plugins["transforms"],
+                sinks=plugins["sinks"],
+                aggregations=plugins["aggregations"],
+                gates=list(settings.gates),
+                output_sink=settings.output_sink,
+            )

@@ -53,7 +53,23 @@ def plugin_manager() -> PluginManager:
     Example:
         def test_graph_building(plugin_manager):
             config = ElspethSettings(...)
-            graph = ExecutionGraph.from_config(config, plugin_manager)
+            plugins = instantiate_plugins_from_config(config)
+
+            graph = ExecutionGraph.from_plugin_instances(
+
+                source=plugins["source"],
+
+                transforms=plugins["transforms"],
+
+                sinks=plugins["sinks"],
+
+                aggregations=plugins["aggregations"],
+
+                gates=list(config.gates),
+
+                output_sink=config.output_sink,
+
+            )
     """
     manager = PluginManager()
     manager.register_builtin_plugins()

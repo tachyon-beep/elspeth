@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 import pytest
 
+from elspeth.cli_helpers import instantiate_plugins_from_config
 from elspeth.contracts import Determinism, RoutingMode, SourceRow
 from elspeth.plugins.base import BaseGate, BaseTransform
 from tests.conftest import (
@@ -900,7 +901,16 @@ class TestOrchestratorAcceptsGraph:
             sinks={"output": SinkSettings(plugin="csv")},
             output_sink="output",
         )
-        graph = ExecutionGraph.from_config(settings, plugin_manager)
+        plugins = instantiate_plugins_from_config(settings)
+
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(settings.gates),
+            output_sink=settings.output_sink,
+        )
 
         # Create mock source and sink
         mock_source = MagicMock()
@@ -1030,7 +1040,16 @@ class TestOrchestratorOutputSinkRouting:
             },
             output_sink="results",
         )
-        graph = ExecutionGraph.from_config(settings, plugin_manager)
+        plugins = instantiate_plugins_from_config(settings)
+
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(settings.gates),
+            output_sink=settings.output_sink,
+        )
 
         # Mock source that yields one row
         mock_source = MagicMock()
@@ -1455,7 +1474,16 @@ class TestOrchestratorLandscapeExport:
         )
 
         # Build graph from config
-        graph = ExecutionGraph.from_config(settings, plugin_manager)
+        plugins = instantiate_plugins_from_config(settings)
+
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(settings.gates),
+            output_sink=settings.output_sink,
+        )
 
         # Run with settings
         orchestrator = Orchestrator(db)
@@ -1568,7 +1596,16 @@ class TestOrchestratorLandscapeExport:
             },
         )
 
-        graph = ExecutionGraph.from_config(settings, plugin_manager)
+        plugins = instantiate_plugins_from_config(settings)
+
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(settings.gates),
+            output_sink=settings.output_sink,
+        )
         orchestrator = Orchestrator(db)
 
         # Set signing key environment variable
@@ -1679,7 +1716,16 @@ class TestOrchestratorLandscapeExport:
             },
         )
 
-        graph = ExecutionGraph.from_config(settings, plugin_manager)
+        plugins = instantiate_plugins_from_config(settings)
+
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(settings.gates),
+            output_sink=settings.output_sink,
+        )
         orchestrator = Orchestrator(db)
 
         # Ensure ELSPETH_SIGNING_KEY is not set
@@ -1775,7 +1821,16 @@ class TestOrchestratorLandscapeExport:
             },
         )
 
-        graph = ExecutionGraph.from_config(settings, plugin_manager)
+        plugins = instantiate_plugins_from_config(settings)
+
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(settings.gates),
+            output_sink=settings.output_sink,
+        )
         orchestrator = Orchestrator(db)
         result = orchestrator.run(pipeline, graph=graph, settings=settings)
 
@@ -3985,7 +4040,16 @@ class TestCoalesceWiring:
         orchestrator = Orchestrator(db=db)
 
         # Build the graph from settings (which includes coalesce)
-        graph = ExecutionGraph.from_config(settings, plugin_manager)
+        plugins = instantiate_plugins_from_config(settings)
+
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(settings.gates),
+            output_sink=settings.output_sink,
+        )
 
         # Patch RowProcessor to capture its args
         with patch("elspeth.engine.orchestrator.RowProcessor") as mock_processor:
@@ -4067,7 +4131,16 @@ class TestCoalesceWiring:
             gates=settings.gates,
         )
 
-        graph = ExecutionGraph.from_config(settings, plugin_manager)
+        plugins = instantiate_plugins_from_config(settings)
+
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(settings.gates),
+            output_sink=settings.output_sink,
+        )
 
         orchestrator = Orchestrator(db=db)
 
@@ -4169,7 +4242,16 @@ class TestCoalesceWiring:
 
         db = LandscapeDB.in_memory()
         orchestrator = Orchestrator(db=db)
-        graph = ExecutionGraph.from_config(settings, plugin_manager)
+        plugins = instantiate_plugins_from_config(settings)
+
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(settings.gates),
+            output_sink=settings.output_sink,
+        )
 
         with patch("elspeth.engine.coalesce_executor.CoalesceExecutor") as mock_executor_cls:
             mock_executor = MagicMock()
@@ -4245,7 +4327,16 @@ class TestCoalesceWiring:
 
         db = LandscapeDB.in_memory()
         orchestrator = Orchestrator(db=db)
-        graph = ExecutionGraph.from_config(settings, plugin_manager)
+        plugins = instantiate_plugins_from_config(settings)
+
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(settings.gates),
+            output_sink=settings.output_sink,
+        )
 
         # Create a merged token that flush_pending will return
         merged_token = TokenInfo(
@@ -4349,7 +4440,16 @@ class TestCoalesceWiring:
 
         db = LandscapeDB.in_memory()
         orchestrator = Orchestrator(db=db)
-        graph = ExecutionGraph.from_config(settings, plugin_manager)
+        plugins = instantiate_plugins_from_config(settings)
+
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(settings.gates),
+            output_sink=settings.output_sink,
+        )
 
         with patch("elspeth.engine.coalesce_executor.CoalesceExecutor") as mock_executor_cls:
             mock_executor = MagicMock()
@@ -4449,7 +4549,16 @@ class TestCoalesceWiring:
         orchestrator = Orchestrator(db=db)
 
         # Build the graph from settings (which includes coalesce)
-        graph = ExecutionGraph.from_config(settings, plugin_manager)
+        plugins = instantiate_plugins_from_config(settings)
+
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(settings.gates),
+            output_sink=settings.output_sink,
+        )
 
         with patch("elspeth.engine.orchestrator.RowProcessor") as mock_processor_cls:
             mock_processor = MagicMock()

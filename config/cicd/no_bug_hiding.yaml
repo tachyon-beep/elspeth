@@ -172,45 +172,12 @@ allow_hits:
   # _is_dynamic_schema() checks model_config to detect dynamic vs explicit schemas.
   # ============================================================
 
-  - key: "core/dag.py:R1:_is_dynamic_schema:line=84"
+  - key: "core/dag.py:R1:_is_dynamic_schema:line=83"
     owner: "architecture"
     reason: "Trust boundary: checking Pydantic model_config dict that may not have 'extra' key"
     safety: "Default None is safe - missing 'extra' means not dynamic schema"
     expires: null  # Permanent - intentional design
 
-  # ============================================================
-  # DAG SCHEMA EXTRACTION (Permanent)
-  # ============================================================
-  # Plugin classes may define schemas as class attributes (static schemas)
-  # or set them as instance attributes in __init__ (dynamic schemas).
-  # ExecutionGraph.from_config() extracts schemas from plugin class attributes
-  # via PluginManager lookup. Class-level None means "dynamic schema, validate
-  # post-instantiation".
-  # ============================================================
-
-  - key: "core/dag.py:R2:ExecutionGraph:from_config:line=530"
-    owner: "architecture"
-    reason: "Trust boundary: plugin classes may not have class-level output_schema (dynamic schemas)"
-    safety: "None default is safe - missing schema means dynamic schema set in __init__"
-    expires: null  # Permanent - intentional design
-
-  - key: "core/dag.py:R2:ExecutionGraph:from_config:line=550"
-    owner: "architecture"
-    reason: "Trust boundary: plugin classes may not have class-level input_schema (dynamic schemas)"
-    safety: "None default is safe - missing schema means dynamic schema set in __init__"
-    expires: null  # Permanent - intentional design
-
-  - key: "core/dag.py:R2:ExecutionGraph:from_config:line=578"
-    owner: "architecture"
-    reason: "Trust boundary: plugin classes may not have class-level input_schema (dynamic schemas)"
-    safety: "None default is safe - missing schema means dynamic schema set in __init__"
-    expires: null  # Permanent - intentional design
-
-  - key: "core/dag.py:R2:ExecutionGraph:from_config:line=579"
-    owner: "architecture"
-    reason: "Trust boundary: plugin classes may not have class-level output_schema (dynamic schemas)"
-    safety: "None default is safe - missing schema means dynamic schema set in __init__"
-    expires: null  # Permanent - intentional design
 
   # ============================================================
   # TRANSFORM/GATE CLEANUP (Permanent)
@@ -1022,37 +989,37 @@ allow_hits:
   # to None, meaning "dynamic schema, validate at runtime".
   # ============================================================
 
-  - key: "core/dag.py:R2:ExecutionGraph:from_plugin_instances:line=841"
+  - key: "core/dag.py:R2:ExecutionGraph:from_plugin_instances:line=535"
     owner: "architecture"
     reason: "Trust boundary: plugin instances may not have output_schema attribute (dynamic schemas)"
     safety: "None default is safe - missing schema means dynamic schema"
     expires: null  # Permanent - intentional design
 
-  - key: "core/dag.py:R2:ExecutionGraph:from_plugin_instances:line=854"
+  - key: "core/dag.py:R2:ExecutionGraph:from_plugin_instances:line=548"
     owner: "architecture"
     reason: "Trust boundary: plugin instances may not have input_schema attribute (dynamic schemas)"
     safety: "None default is safe - missing schema means dynamic schema"
     expires: null  # Permanent - intentional design
 
-  - key: "core/dag.py:R2:ExecutionGraph:from_plugin_instances:line=899"
+  - key: "core/dag.py:R2:ExecutionGraph:from_plugin_instances:line=567"
     owner: "architecture"
     reason: "Trust boundary: plugin instances may not have input_schema attribute (dynamic schemas)"
     safety: "None default is safe - missing schema means dynamic schema"
     expires: null  # Permanent - intentional design
 
-  - key: "core/dag.py:R2:ExecutionGraph:from_plugin_instances:line=873"
-    owner: "architecture"
-    reason: "Trust boundary: plugin instances may not have input_schema attribute (dynamic schemas)"
-    safety: "None default is safe - missing schema means dynamic schema"
-    expires: null  # Permanent - intentional design
-
-  - key: "core/dag.py:R2:ExecutionGraph:from_plugin_instances:line=874"
+  - key: "core/dag.py:R2:ExecutionGraph:from_plugin_instances:line=568"
     owner: "architecture"
     reason: "Trust boundary: plugin instances may not have output_schema attribute (dynamic schemas)"
     safety: "None default is safe - missing schema means dynamic schema"
     expires: null  # Permanent - intentional design
 
-  - key: "core/dag.py:R2:ExecutionGraph:from_plugin_instances:line=900"
+  - key: "core/dag.py:R2:ExecutionGraph:from_plugin_instances:line=593"
+    owner: "architecture"
+    reason: "Trust boundary: plugin instances may not have input_schema attribute (dynamic schemas)"
+    safety: "None default is safe - missing schema means dynamic schema"
+    expires: null  # Permanent - intentional design
+
+  - key: "core/dag.py:R2:ExecutionGraph:from_plugin_instances:line=594"
     owner: "architecture"
     reason: "Trust boundary: plugin instances may not have output_schema attribute (dynamic schemas)"
     safety: "None default is safe - missing schema means dynamic schema"

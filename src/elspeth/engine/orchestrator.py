@@ -437,7 +437,7 @@ class Orchestrator:
             ValueError: If graph is not provided
         """
         if graph is None:
-            raise ValueError("ExecutionGraph is required. Build with ExecutionGraph.from_config(settings)")
+            raise ValueError("ExecutionGraph is required. Build with ExecutionGraph.from_plugin_instances()")
 
         # Schema validation now happens in ExecutionGraph.validate() during graph construction
 

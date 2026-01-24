@@ -23,6 +23,7 @@ def test_schema_validation_end_to_end(tmp_path, plugin_manager):
 
     Relates-To: P1-2026-01-21-schema-validator-ignores-dag-routing
     """
+    from elspeth.cli_helpers import instantiate_plugins_from_config
     from elspeth.core.config import (
         DatasourceSettings,
         ElspethSettings,
@@ -67,7 +68,16 @@ def test_schema_validation_end_to_end(tmp_path, plugin_manager):
     # This is where the fix is exercised:
     # 1. Task 2: manager parameter is required (not None)
     # 2. Tasks 3-5: schemas extracted from plugin instances via manager
-    graph = ExecutionGraph.from_config(config, plugin_manager)
+    plugins = instantiate_plugins_from_config(config)
+
+    graph = ExecutionGraph.from_plugin_instances(
+        source=plugins["source"],
+        transforms=plugins["transforms"],
+        sinks=plugins["sinks"],
+        aggregations=plugins["aggregations"],
+        gates=list(config.gates),
+        output_sink=config.output_sink,
+    )
 
     # Validation should pass (schemas are compatible)
     # This verifies the fix works without crashes
