@@ -2,6 +2,26 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
+## Plan Status: Updated After 4-Expert Review (2026-01-24)
+
+**Review Verdict:** Approved with fixes applied
+
+**Critical blockers addressed:**
+1. ✅ **Task 0 added**: Deterministic node IDs for checkpoint compatibility (systems thinking blocker)
+2. ✅ **Task 2.5 fixed**: Validation timing clarified - happens in `validate_edge_compatibility()` called from `from_plugin_instances()`, NOT in `add_edge()`
+3. ✅ **Task 3 fixed**: Made `_validate_self_consistency()` abstract from start (removed default `pass` implementation)
+4. ✅ **Task 2.5 enhanced**: Added 5 critical tests for timing, aggregation, config gates, error messages
+5. ✅ **Task 3.5 enhanced**: Added bypass tests for enforcement verification
+6. ✅ **Config preservation**: Added requirement to preserve plugin config in NodeInfo for audit trail
+
+**Reviewers:**
+- Architecture (axiom-system-architect): 4.5/5 → Approve with minor revision
+- Python Engineering (axiom-python-engineering): Request changes → Fixed
+- Quality Assurance (ordis-quality-engineering): Request changes → Fixed
+- Systems Thinking (yzmir-systems-thinking): Approve with conditions → Conditions met
+
+---
+
 **Goal:** Move schema validation to plugin construction time, eliminating the need for DAG layer to access SchemaConfig.
 
 **Architecture:** Two-phase validation model:
@@ -69,6 +89,164 @@ DAG.validate()
 - ❌ Need for `_extract_schema_config()` helper (doesn't exist)
 - ❌ Risk of from_config() vs from_plugin_instances() divergence (same path)
 - ❌ Schema validation logic in DAG layer (moved to plugins)
+
+---
+
+## Task 0: Make Node IDs Deterministic for Checkpoint Compatibility
+
+**Goal:** Ensure node IDs are deterministic for resume/checkpoint functionality.
+
+**CRITICAL:** Current implementation uses `uuid.uuid4()` which breaks resume functionality after upgrade.
+
+**Files:**
+- Modify: `src/elspeth/core/dag.py` (update node_id generation)
+- Modify: `tests/core/test_dag.py` (add determinism tests)
+
+**Step 1: Write failing test for deterministic node IDs**
+
+Add to `tests/core/test_dag.py`:
+
+```python
+def test_node_ids_are_deterministic_for_same_config() -> None:
+    """Node IDs must be deterministic for checkpoint/resume compatibility."""
+    from elspeth.core.dag import ExecutionGraph
+
+    config = {
+        "datasource": {
+            "plugin": "csv",
+            "options": {"path": "test.csv", "schema": {"fields": "dynamic"}},
+        },
+        "row_plugins": [
+            {
+                "plugin": "passthrough",
+                "options": {"schema": {"fields": "dynamic"}},
+            }
+        ],
+        "sinks": {"out": {"plugin": "csv", "options": {"path": "out.csv"}}},
+        "output_sink": "out",
+    }
+
+    # Build graph twice with same config
+    graph1 = ExecutionGraph.from_config(config, manager)
+    graph2 = ExecutionGraph.from_config(config, manager)
+
+    # Node IDs must be identical
+    nodes1 = sorted(graph1._graph.nodes())
+    nodes2 = sorted(graph2._graph.nodes())
+
+    assert nodes1 == nodes2, "Node IDs must be deterministic for checkpoint compatibility"
+
+
+def test_node_ids_change_when_config_changes() -> None:
+    """Node IDs should change if plugin config changes."""
+    config1 = {
+        "datasource": {
+            "plugin": "csv",
+            "options": {"path": "test.csv", "schema": {"fields": "dynamic"}},
+        },
+        # ... rest of config
+    }
+
+    config2 = {
+        "datasource": {
+            "plugin": "csv",
+            "options": {"path": "test.csv", "schema": {"mode": "strict", "fields": ["id: int"]}},  # Different!
+        },
+        # ... rest of config
+    }
+
+    graph1 = ExecutionGraph.from_config(config1, manager)
+    graph2 = ExecutionGraph.from_config(config2, manager)
+
+    # Source node IDs should differ (different config)
+    source_id_1 = [n for n in graph1._graph.nodes() if n.startswith("source_")][0]
+    source_id_2 = [n for n in graph2._graph.nodes() if n.startswith("source_")][0]
+
+    assert source_id_1 != source_id_2
+```
+
+**Step 2: Run tests to verify they fail**
+
+```bash
+pytest tests/core/test_dag.py::test_node_ids_are_deterministic_for_same_config -xvs
+pytest tests/core/test_dag.py::test_node_ids_change_when_config_changes -xvs
+```
+
+Expected: FAIL (current implementation uses random UUIDs)
+
+**Step 3: Update node_id generation to be deterministic**
+
+In `src/elspeth/core/dag.py`, find the `node_id()` function (or where node IDs are generated) and replace:
+
+```python
+# OLD (BROKEN for resume):
+def _generate_node_id(prefix: str, name: str) -> str:
+    return f"{prefix}_{name}_{uuid.uuid4().hex[:8]}"  # Random!
+
+# NEW (deterministic):
+def _generate_node_id(prefix: str, name: str, config: dict[str, Any]) -> str:
+    """Generate deterministic node ID based on plugin type and config.
+
+    Node IDs must be deterministic for checkpoint/resume compatibility.
+    If a pipeline is checkpointed and later resumed, the node IDs must
+    be identical so checkpoint state can be restored correctly.
+
+    Args:
+        prefix: Node type prefix (source_, transform_, sink_, etc.)
+        name: Plugin name
+        config: Plugin configuration dict
+
+    Returns:
+        Deterministic node ID
+    """
+    import hashlib
+    import json
+
+    # Create stable hash of config
+    config_str = json.dumps(config, sort_keys=True)
+    config_hash = hashlib.sha256(config_str.encode()).hexdigest()[:8]
+
+    return f"{prefix}_{name}_{config_hash}"
+```
+
+**Step 4: Update all node_id() call sites**
+
+Find all locations that generate node IDs and pass the config:
+
+```bash
+grep -n "uuid.uuid4()" src/elspeth/core/dag.py
+```
+
+Update each to use deterministic generation.
+
+**Step 5: Run tests to verify they pass**
+
+```bash
+pytest tests/core/test_dag.py::test_node_ids_are_deterministic_for_same_config -xvs
+pytest tests/core/test_dag.py::test_node_ids_change_when_config_changes -xvs
+```
+
+Expected: PASS
+
+**Step 6: Run all DAG tests to ensure no breakage**
+
+```bash
+pytest tests/core/test_dag.py -v
+```
+
+Expected: All tests pass
+
+**Step 7: Commit**
+
+```bash
+git add src/elspeth/core/dag.py tests/core/test_dag.py
+git commit -m "fix: make node IDs deterministic for checkpoint compatibility
+
+- Replace uuid.uuid4() with deterministic hash of plugin config
+- Node IDs now stable across runs with same config
+- Critical for checkpoint/resume functionality
+- Ref: Fix schema validation architecture properly"
+```
 
 ---
 
@@ -394,7 +572,11 @@ class ConsumerSchema(PluginSchema):
 
 
 def test_edge_validation_detects_missing_fields() -> None:
-    """Edges should fail if producer missing required fields."""
+    """Edges should fail if producer missing required fields.
+
+    Validation happens in validate_edge_compatibility() called from
+    from_plugin_instances(), NOT during add_edge() (which is a dumb primitive).
+    """
     graph = ExecutionGraph()
 
     # Add source with ProducerSchema
@@ -403,10 +585,12 @@ def test_edge_validation_detects_missing_fields() -> None:
     # Add sink requiring ConsumerSchema (has 'email' field)
     graph.add_node("sink", node_type="sink", plugin_name="csv", input_schema=ConsumerSchema)
 
-    # Try to wire them together - should fail
+    # Wire them together (add_edge does NOT validate)
+    graph.add_edge("source", "sink", label="continue")
+
+    # Validation happens when we explicitly call it
     with pytest.raises(ValueError, match="missing required fields.*email"):
-        graph.add_edge("source", "sink", label="continue")
-        # Edge validation happens during add_edge()
+        graph.validate_edge_compatibility()
 
 
 def test_edge_validation_allows_dynamic_schemas() -> None:
@@ -440,9 +624,12 @@ def test_gate_passthrough_validation() -> None:
     graph.add_node("gate", node_type="gate", plugin_name="threshold",
                    input_schema=ProducerSchema, output_schema=ConsumerSchema)
 
-    # Should fail - gates must have input == output
+    # Wire them (add_edge does NOT validate)
+    graph.add_edge("source", "gate", label="continue")
+
+    # Validation happens when we explicitly call it
     with pytest.raises(ValueError, match="Gate.*must preserve schema"):
-        graph.add_edge("source", "gate", label="continue")
+        graph.validate_edge_compatibility()
 
 
 def test_coalesce_branch_compatibility() -> None:
@@ -540,6 +727,125 @@ def test_none_schema_handling() -> None:
 
     # Should pass - None is compatible with anything
     graph.validate_edge_compatibility()  # No exception
+
+
+def test_edge_validation_timing_from_plugin_instances() -> None:
+    """CRITICAL: Validation must happen during from_plugin_instances(), not in validate().
+
+    This test verifies the core architectural change - that schema validation
+    has been moved from DAG.validate() to graph construction time.
+    """
+    from elspeth.plugins.manager import PluginManager
+
+    manager = PluginManager()
+
+    config = {
+        "datasource": {
+            "plugin": "csv",
+            "options": {
+                "path": "test.csv",
+                "schema": {"fields": ["id: int"]},  # Only has 'id'
+            },
+        },
+        "row_plugins": [],
+        "sinks": {
+            "out": {
+                "plugin": "csv",
+                "options": {
+                    "path": "out.csv",
+                    "schema": {"mode": "strict", "fields": ["id: int", "email: str"]},  # Requires 'email'!
+                },
+            }
+        },
+        "output_sink": "out",
+    }
+
+    # Should fail DURING from_plugin_instances (PHASE 2 validation)
+    with pytest.raises(ValueError, match="missing required fields.*email"):
+        graph = ExecutionGraph.from_plugin_instances(
+            source=manager.get_source("csv", config["datasource"]["options"]),
+            transforms=[],
+            sinks={"out": manager.get_sink("csv", config["sinks"]["out"]["options"])},
+            aggregations=[],
+            gates=[],
+            output_sink="out"
+        )
+
+
+def test_aggregation_dual_schema_both_edges_validated() -> None:
+    """Aggregations have both input_schema and output_schema - validate both edges."""
+
+    class SourceOutput(PluginSchema):
+        value: float
+
+    class AggInput(PluginSchema):
+        value: float
+        label: str  # Required, not in source!
+
+    class AggOutput(PluginSchema):
+        count: int
+        sum: float
+
+    class SinkInput(PluginSchema):
+        count: int
+        sum: float
+        average: float  # Required, not in agg output!
+
+    graph = ExecutionGraph()
+    graph.add_node("source", node_type="source", plugin_name="csv",
+                   output_schema=SourceOutput)
+    graph.add_node("agg", node_type="aggregation", plugin_name="stats",
+                   input_schema=AggInput,
+                   output_schema=AggOutput)
+    graph.add_node("sink", node_type="sink", plugin_name="csv",
+                   input_schema=SinkInput)
+
+    graph.add_edge("source", "agg", label="continue")
+    graph.add_edge("agg", "sink", label="continue")
+
+    # Should detect BOTH mismatches (source→agg has 'label' missing, agg→sink has 'average' missing)
+    with pytest.raises(ValueError, match="label|average"):
+        graph.validate_edge_compatibility()
+
+
+def test_orphaned_config_gate_crashes_with_diagnostic() -> None:
+    """Config gate with no incoming edges is a graph construction bug - should crash with clear error."""
+
+    graph = ExecutionGraph()
+    graph.add_node("gate", node_type="gate", plugin_name="config_gate",
+                   input_schema=None, output_schema=None)  # Config gate
+    graph.add_node("sink", node_type="sink", plugin_name="csv",
+                   input_schema=ConsumerSchema)
+
+    # Accidentally wired gate→sink without source→gate
+    graph.add_edge("gate", "sink", label="continue")
+
+    # Should crash with diagnostic error (not silent failure)
+    with pytest.raises(ValueError, match="no incoming edges"):
+        graph.validate_edge_compatibility()
+
+
+def test_schema_mismatch_error_includes_field_name_and_nodes() -> None:
+    """Error messages must be actionable - include field names and node IDs."""
+
+    graph = ExecutionGraph()
+    graph.add_node("csv_reader", node_type="source", plugin_name="csv",
+                   output_schema=ProducerSchema)  # Has: id, name
+    graph.add_node("db_writer", node_type="sink", plugin_name="database",
+                   input_schema=ConsumerSchema)  # Needs: id, name, email
+
+    graph.add_edge("csv_reader", "db_writer", label="continue")
+
+    try:
+        graph.validate_edge_compatibility()
+        pytest.fail("Should have raised ValueError")
+    except ValueError as e:
+        error = str(e)
+        # Must include both node names
+        assert "csv_reader" in error, "Error must name producer node"
+        assert "db_writer" in error, "Error must name consumer node"
+        # Must include missing field name
+        assert "email" in error.lower(), "Error must name missing field"
 ```
 
 **Step 2: Run test to verify it fails**
@@ -740,7 +1046,16 @@ def from_plugin_instances(cls, ...) -> "ExecutionGraph":
     graph = cls()
 
     # Add all nodes
-    # ... (existing node addition code) ...
+    # CRITICAL: Preserve plugin config in NodeInfo for audit trail
+    # DO NOT use config={} - must preserve original config for auditability
+    # Example:
+    #   graph.add_node(
+    #       node_id,
+    #       config=dict(plugin_config.options),  # Preserve config!
+    #       input_schema=plugin.input_schema,
+    #       output_schema=plugin.output_schema,
+    #       ...
+    #   )
 
     # Add all edges
     # ... (existing edge addition code) ...
@@ -751,7 +1066,7 @@ def from_plugin_instances(cls, ...) -> "ExecutionGraph":
     return graph
 ```
 
-**Note:** Keep `add_edge()` as a dumb primitive - no validation there. Validation happens once at the end of graph construction when we have full context.
+**CRITICAL for Audit Trail:** NodeInfo must preserve the original plugin config dict. Per CLAUDE.md: "Every decision must be traceable to configuration". Do NOT set `config={}` even though "config already used during instantiation". The audit trail requires the original configuration to be preserved.
 
 **Step 5: Run tests to verify they pass**
 
@@ -780,15 +1095,15 @@ git commit -m "feat: add edge compatibility validation to ExecutionGraph
 
 ## Task 3: Add Self-Validation to All Plugins
 
-**Goal:** Add self-validation method to BaseTransform and update ALL builtin plugins to call it.
+**Goal:** Add abstract self-validation method to BaseTransform and update ALL builtin plugins to implement it.
 
 **Files:**
-- Modify: `src/elspeth/plugins/base.py` (add _validate_self_consistency method)
+- Modify: `src/elspeth/plugins/base.py` (add @abstractmethod _validate_self_consistency)
 - Modify: ALL transform plugins (PassThrough, FieldMapper, etc.)
 - Modify: ALL source plugins (CSVSource, etc.)
 - Modify: ALL sink plugins (CSVSink, etc.)
 
-**IMPORTANT:** This task must complete BEFORE Task 3.5 (enforcement). We add the optional method first, update all plugins to call it, THEN make it mandatory.
+**IMPORTANT:** The method is abstract from the start (enforced by ABC). All plugins MUST implement it, even if implementation is just `pass`.
 
 **Step 1: Write failing test for transform validation**
 
@@ -841,6 +1156,7 @@ class BaseTransform(ABC):
         # Subclass must set input_schema and output_schema
         # Validation happens in subclass __init__ after schemas are set
 
+    @abstractmethod
     def _validate_self_consistency(self) -> None:
         """Validate plugin's own schemas are self-consistent (PHASE 1).
 
@@ -859,16 +1175,21 @@ class BaseTransform(ABC):
             - FieldMapper: output fields must be subset of input fields (if mode=strict)
             - Gate: input_schema must equal output_schema (pass-through)
 
-            This is a no-op for transforms with no self-consistency constraints.
-            Subclasses override for custom validation logic.
+            For plugins with no self-consistency constraints, implement as:
+            ```python
+            def _validate_self_consistency(self) -> None:
+                pass  # No validation needed
+            ```
+
+            Subclasses MUST implement this method (enforced by ABC).
+            Will raise TypeError at instantiation if not implemented.
         """
-        # Default: No validation (subclasses override if needed)
-        pass
+        ...
 ```
 
-**Step 4: Update PassThrough to call validation**
+**Step 4: Update PassThrough to implement and call validation**
 
-In `src/elspeth/plugins/transforms/passthrough.py`, add to `__init__`:
+In `src/elspeth/plugins/transforms/passthrough.py`, add to `__init__` and implement the abstract method:
 
 ```python
 def __init__(self, config: dict[str, Any]) -> None:
@@ -890,6 +1211,14 @@ def __init__(self, config: dict[str, Any]) -> None:
 
     # NEW: Validate self-consistency (PHASE 1)
     self._validate_self_consistency()
+
+
+def _validate_self_consistency(self) -> None:
+    """Validate PassThrough schemas are self-consistent.
+
+    PassThrough has no self-consistency constraints (input == output by definition).
+    """
+    pass  # No validation needed - PassThrough always has matching schemas
 ```
 
 **Step 5: Run test**
@@ -900,9 +1229,9 @@ pytest tests/plugins/transforms/test_passthrough.py::test_passthrough_validates_
 
 Expected: PASS
 
-**Step 6: Update ALL builtin plugins to call validation**
+**Step 6: Update ALL builtin plugins to implement and call validation**
 
-Update all transform, source, and sink plugins to call `_validate_self_consistency()`:
+Update all transform, source, and sink plugins to implement `_validate_self_consistency()` and call it:
 
 ```bash
 # Find all plugin __init__ methods
@@ -911,7 +1240,9 @@ grep -r "def __init__" src/elspeth/plugins/sources/
 grep -r "def __init__" src/elspeth/plugins/sinks/
 ```
 
-For each plugin, add call to `_validate_self_consistency()` at the end of `__init__`:
+For each plugin, add:
+1. Implementation of `_validate_self_consistency()` method
+2. Call to `_validate_self_consistency()` at the end of `__init__`
 
 ```python
 # Example for each plugin:
@@ -921,8 +1252,16 @@ def __init__(self, config: dict[str, Any]) -> None:
     self.input_schema = ...
     self.output_schema = ...
 
-    # NEW: Validate self-consistency
+    # NEW: Validate self-consistency (PHASE 1)
     self._validate_self_consistency()
+
+
+def _validate_self_consistency(self) -> None:
+    """Validate plugin's own schemas are self-consistent.
+
+    [Plugin-specific validation logic, or just pass if no constraints]
+    """
+    pass  # Most plugins have no self-consistency constraints
 ```
 
 **Plugins to update:**
@@ -946,24 +1285,25 @@ Expected: ALL PASS (plugins now validate during construction)
 git add src/elspeth/plugins/
 git commit -m "feat: add self-validation to all builtin plugins
 
-- BaseTransform._validate_self_consistency() method (optional, not enforced yet)
+- BaseTransform._validate_self_consistency() abstract method (enforced by ABC)
 - PHASE 1: Plugins validate their own schemas are well-formed
-- Updated ALL builtin plugins to call validation
+- Updated ALL builtin plugins to implement and call validation
 - PassThrough, FieldMapper, sources, sinks all validate
 - Does NOT validate compatibility with other plugins (that's PHASE 2)
-- Enforcement added in next task (Task 3.5)
+- TypeError at instantiation if plugin doesn't implement method
 - Ref: Fix schema validation architecture properly"
 ```
 
 ---
 
-## Task 3.5: Add Enforcement Mechanism for Validation
+## Task 3.5: Verify Validation Enforcement and Add Bypass Tests
 
-**Goal:** Ensure plugins CANNOT skip validation (compile-time enforcement).
+**Goal:** Verify ABC enforcement works and test that plugins cannot bypass validation.
 
 **Files:**
-- Modify: `src/elspeth/plugins/base.py` (add validation enforcement)
-- Create: `tests/contracts/test_validation_enforcement.py` (enforcement tests)
+- Create: `tests/contracts/test_validation_enforcement.py` (enforcement verification tests)
+
+**Note:** Enforcement is already in place via `@abstractmethod` from Task 3. This task adds comprehensive tests to verify enforcement cannot be bypassed.
 
 **Step 1: Write test for enforcement**
 
@@ -1003,10 +1343,10 @@ def test_transform_must_implement_validation() -> None:
 
 
 def test_transform_with_validation_succeeds() -> None:
-    """Transforms that call validation should succeed."""
+    """Transforms that implement validation should succeed."""
 
     class GoodTransform(BaseTransform):
-        """Transform that correctly calls validation."""
+        """Transform that correctly implements validation."""
 
         def __init__(self, config: dict) -> None:
             super().__init__(config)
@@ -1014,109 +1354,87 @@ def test_transform_with_validation_succeeds() -> None:
             self.output_schema = TestSchema
             self._validate_self_consistency()  # Correct!
 
+        def _validate_self_consistency(self) -> None:
+            """Implement abstract method."""
+            pass  # No validation needed for this test transform
+
         def process(self, row, ctx):
             return row
 
     # Should succeed
     transform = GoodTransform({})
     assert transform.input_schema is TestSchema
+
+
+def test_transform_cannot_bypass_validation_via_super_skip() -> None:
+    """CRITICAL: Plugins cannot bypass validation by skipping super().__init__().
+
+    This test verifies that ABC enforcement works even if a plugin tries
+    to bypass the base class __init__.
+    """
+
+    class MaliciousTransform(BaseTransform):
+        """Transform that tries to bypass validation."""
+
+        def __init__(self, config: dict) -> None:
+            # BUG: Doesn't call super().__init__(), tries to bypass validation
+            self._config = config
+            self.input_schema = TestSchema
+            self.output_schema = TestSchema
+            # No _validate_self_consistency() call!
+            # And didn't implement the abstract method!
+
+        def process(self, row, ctx):
+            return row
+
+    # Should still fail - ABC catches this during class instantiation
+    with pytest.raises(TypeError, match="Can't instantiate abstract class"):
+        MaliciousTransform({})
+
+
+def test_transform_validation_survives_multiple_inheritance() -> None:
+    """Validation enforcement survives multiple inheritance."""
+
+    class Mixin:
+        """Test mixin class."""
+        def extra_method(self):
+            pass
+
+    class TransformWithMixin(Mixin, BaseTransform):
+        """Transform with multiple inheritance."""
+
+        def __init__(self, config: dict) -> None:
+            super().__init__(config)
+            self.input_schema = TestSchema
+            self.output_schema = TestSchema
+            # Forgot to implement _validate_self_consistency()!
+
+        def process(self, row, ctx):
+            return row
+
+    # Should fail - ABC enforcement transcends multiple inheritance
+    with pytest.raises(TypeError, match="Can't instantiate abstract class"):
+        TransformWithMixin({})
 ```
 
-**Step 2: Run test to verify it fails**
-
-```bash
-pytest tests/contracts/test_validation_enforcement.py::test_transform_must_call_validation -xvs
-```
-
-Expected: FAIL (enforcement not implemented yet)
-
-**Step 3: Make _validate_self_consistency abstract**
-
-In `src/elspeth/plugins/base.py`, change `_validate_self_consistency()` to abstract method:
-
-```python
-from abc import ABC, abstractmethod
-
-class BaseTransform(ABC):
-    """Base class for transform plugins."""
-
-    def __init__(self, config: dict[str, Any]) -> None:
-        """Initialize transform.
-
-        Args:
-            config: Plugin configuration
-
-        Raises:
-            ValueError: If schema configuration is invalid or incompatible
-        """
-        self._config = config
-
-        # Subclass must set input_schema and output_schema
-        # Validation happens in subclass __init__ after schemas are set
-
-    @abstractmethod
-    def _validate_self_consistency(self) -> None:
-        """Validate plugin's own schemas are self-consistent (PHASE 1).
-
-        Called by subclass __init__ after setting schemas. This is SELF-validation
-        only - checking that the plugin's own configuration makes sense.
-
-        Raises:
-            ValueError: If schemas are internally inconsistent
-
-        Note:
-            This is NOT about compatibility with OTHER plugins. That happens in
-            PHASE 2 during ExecutionGraph.from_plugin_instances().
-
-            Examples of self-consistency checks:
-            - PassThrough: input_schema must equal output_schema
-            - FieldMapper: output fields must be subset of input fields (if mode=strict)
-            - Gate: input_schema must equal output_schema (pass-through)
-
-            For plugins with no self-consistency constraints, implement as:
-            ```python
-            def _validate_self_consistency(self) -> None:
-                pass  # No validation needed
-            ```
-
-            Subclasses MUST implement this method (enforced by ABC).
-        """
-        ...
-```
-
-**Why ABC over __init_subclass__:**
-- Cleaner: Uses standard Python ABC pattern
-- Safer: No super() chain issues with multiple inheritance
-- Clearer: TypeError at instantiation if not implemented
-- Better errors: "Can't instantiate abstract class" vs runtime check
-
-**Step 5: Run tests to verify they pass**
+**Step 2: Run tests to verify ABC enforcement works**
 
 ```bash
 pytest tests/contracts/test_validation_enforcement.py -xvs
 ```
 
-Expected: PASS
+Expected: ALL PASS (enforcement already in place from Task 3)
 
-**Step 6: Run all transform tests to ensure no breakage**
-
-```bash
-pytest tests/plugins/transforms/ -v
-```
-
-Expected: PASS (all transforms already call validation after Task 3)
-
-**Step 4: Commit**
+**Step 3: Commit**
 
 ```bash
-git add src/elspeth/plugins/base.py tests/contracts/test_validation_enforcement.py
-git commit -m "feat: enforce validation via ABC abstract method
+git add tests/contracts/test_validation_enforcement.py
+git commit -m "test: add validation enforcement bypass tests
 
-- _validate_self_consistency() now abstract method (enforced by ABC)
-- TypeError at instantiation if not implemented
-- Cleaner than __init_subclass__ (no super() chain issues)
-- All plugins already implement it (Task 3)
-- Cannot skip validation (Python ABC enforcement)
+- Test that ABC enforcement prevents plugins from skipping validation
+- Test bypassing super().__init__() still caught by ABC
+- Test multiple inheritance doesn't break enforcement
+- All tests pass (enforcement already in place from Task 3)
 - Ref: Fix schema validation architecture properly"
 ```
 

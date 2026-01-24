@@ -3516,3 +3516,144 @@ class TestAggregationExecutorCheckpoint:
         assert "Solutions:" in error_message or "Reduce" in error_message
         assert "rows" in error_message  # Mentions row count
         assert "nodes" in error_message  # Mentions node count
+
+    def test_checkpoint_size_no_warning_under_1mb(self) -> None:
+        """Checkpoint size validation is silent when under 1MB threshold."""
+        from unittest.mock import patch
+
+        from elspeth.core.config import AggregationSettings, TriggerConfig
+        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.engine.executors import AggregationExecutor, TokenInfo
+        from elspeth.engine.spans import SpanFactory
+
+        # Setup
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        run = recorder.begin_run(config={}, canonical_version="v1")
+        agg_node = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="under_1mb_test",
+            node_type="aggregation",
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+
+        settings = AggregationSettings(
+            name="test_agg",
+            plugin="test",
+            trigger=TriggerConfig(count=5000),  # High trigger to prevent flush
+        )
+
+        executor = AggregationExecutor(
+            recorder=recorder,
+            span_factory=SpanFactory(),
+            run_id=run.run_id,
+            aggregation_settings={agg_node.node_id: settings},
+        )
+
+        # Create checkpoint just under 1MB
+        # Target: ~900KB (safely under 1MB to account for JSON overhead)
+        # 900 rows x 1KB data each = ~900KB
+        medium_row_data = {"data": "x" * 1000, "index": 0}
+
+        tokens = []
+        for i in range(900):
+            row_data = medium_row_data.copy()
+            row_data["index"] = i
+            tokens.append(
+                TokenInfo(
+                    row_id=f"row-{i}",
+                    token_id=f"token-{i}",
+                    row_data=row_data,
+                    branch_name=None,
+                )
+            )
+
+        executor._buffer_tokens[agg_node.node_id] = tokens
+
+        # Capture log output
+        import logging
+
+        with patch.object(logging, "getLogger") as mock_get_logger:
+            mock_logger = mock_get_logger.return_value
+
+            # Get checkpoint (should NOT trigger warning)
+            checkpoint = executor.get_checkpoint_state()
+
+            # VERIFY: No warning was logged
+            assert not mock_logger.warning.called, "Should NOT log warning for checkpoint under 1MB"
+
+            # VERIFY: Checkpoint was created successfully
+            assert checkpoint is not None
+            assert agg_node.node_id in checkpoint
+
+    def test_checkpoint_size_warning_but_no_error_between_thresholds(self) -> None:
+        """Checkpoint between 1MB and 10MB logs warning but does not raise error."""
+        from unittest.mock import patch
+
+        from elspeth.core.config import AggregationSettings, TriggerConfig
+        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.engine.executors import AggregationExecutor, TokenInfo
+        from elspeth.engine.spans import SpanFactory
+
+        # Setup
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        run = recorder.begin_run(config={}, canonical_version="v1")
+        agg_node = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="between_thresholds_test",
+            node_type="aggregation",
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+
+        settings = AggregationSettings(
+            name="test_agg",
+            plugin="test",
+            trigger=TriggerConfig(count=10000),  # High trigger to prevent flush
+        )
+
+        executor = AggregationExecutor(
+            recorder=recorder,
+            span_factory=SpanFactory(),
+            run_id=run.run_id,
+            aggregation_settings={agg_node.node_id: settings},
+        )
+
+        # Create checkpoint ~5MB (between 1MB and 10MB thresholds)
+        # 2500 rows x 2KB data each = ~5MB
+        large_row_data = {"data": "x" * 2000, "index": 0}
+
+        tokens = []
+        for i in range(2500):
+            row_data = large_row_data.copy()
+            row_data["index"] = i
+            tokens.append(
+                TokenInfo(
+                    row_id=f"row-{i}",
+                    token_id=f"token-{i}",
+                    row_data=row_data,
+                    branch_name=None,
+                )
+            )
+
+        executor._buffer_tokens[agg_node.node_id] = tokens
+
+        # Capture log output
+        import logging
+
+        with patch.object(logging, "getLogger") as mock_get_logger:
+            mock_logger = mock_get_logger.return_value
+
+            # Get checkpoint (should trigger warning but NOT error)
+            checkpoint = executor.get_checkpoint_state()
+
+            # VERIFY: Warning was logged
+            assert mock_logger.warning.called, "Should log warning for 5MB checkpoint"
+
+            # VERIFY: No exception raised (checkpoint created successfully)
+            assert checkpoint is not None
+            assert agg_node.node_id in checkpoint
