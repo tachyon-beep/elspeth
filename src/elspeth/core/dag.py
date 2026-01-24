@@ -209,15 +209,12 @@ class ExecutionGraph:
         """Validate schema compatibility along all edges.
 
         For each edge (producer -> consumer):
-        - Get producer's output_schema
-        - Get consumer's input_schema
+        - Get producer's effective output schema (walks through gates)
+        - Get consumer's input schema
         - Check producer provides all required fields
 
-        Skips validation if either side is None (dynamic schema).
-        Dynamic schemas are immutable after evaluation at launch.
-
         Returns:
-            List of validation error messages (empty if valid)
+            List of error messages (empty if valid)
         """
         errors = []
 
@@ -225,13 +222,20 @@ class ExecutionGraph:
             from_info = self.get_node_info(edge.from_node)
             to_info = self.get_node_info(edge.to_node)
 
-            # Skip if either side has dynamic schema
-            if from_info.output_schema is None or to_info.input_schema is None:
+            # Get effective producer schema (handles gates as pass-through)
+            producer_schema = self._get_effective_producer_schema(edge.from_node)
+
+            # Get consumer input schema directly
+            consumer_schema = to_info.input_schema
+
+            # Skip validation if either schema is None (dynamic)
+            if producer_schema is None or consumer_schema is None:
                 continue
 
+            # Validate compatibility
             missing = _get_missing_required_fields(
-                producer=from_info.output_schema,
-                consumer=to_info.input_schema,
+                producer=producer_schema,
+                consumer=consumer_schema,
             )
 
             if missing:

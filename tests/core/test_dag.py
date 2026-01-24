@@ -398,6 +398,41 @@ class TestExecutionGraphAccessors:
 
         assert effective_schema == TransformOutput
 
+    def test_validate_edge_schemas_uses_effective_schema_for_gates(self):
+        """_validate_edge_schemas() uses effective producer schema for gate edges."""
+        from elspeth.contracts import PluginSchema, RoutingMode
+        from elspeth.core.dag import ExecutionGraph, GraphValidationError
+
+        class SourceOutput(PluginSchema):
+            id: int
+            name: str
+            # Note: does NOT have 'score' field
+
+        class SinkInput(PluginSchema):
+            id: int
+            score: float  # Required field not in source output
+
+        graph = ExecutionGraph()
+
+        # Pipeline: source -> gate -> sink
+        # Gate has NO schemas (simulates config-driven gate from from_config())
+        graph.add_node("source", node_type="source", plugin_name="csv", output_schema=SourceOutput)
+        graph.add_node("gate", node_type="gate", plugin_name="config_gate:check")  # NO SCHEMA
+        graph.add_node("sink", node_type="sink", plugin_name="csv", input_schema=SinkInput)
+
+        graph.add_edge("source", "gate", label="continue", mode=RoutingMode.MOVE)
+        graph.add_edge("gate", "sink", label="flagged", mode=RoutingMode.MOVE)
+
+        # Should detect schema incompatibility on gate -> sink edge
+        with pytest.raises(GraphValidationError) as exc_info:
+            graph.validate()
+
+        # Verify error mentions the missing field
+        assert "score" in str(exc_info.value).lower()
+        # Verify error includes plugin names (config_gate:check -> csv)
+        assert "config_gate:check" in str(exc_info.value)
+        assert "csv" in str(exc_info.value)
+
 
 class TestExecutionGraphFromConfig:
     """Build ExecutionGraph from ElspethSettings."""
