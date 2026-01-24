@@ -22,17 +22,21 @@ open/
 
 ## Bug Counts by Subsystem
 
-| Subsystem | P1 Bugs | P2 Bugs | Total | Focus Area |
-|-----------|---------|---------|-------|------------|
-| **engine-coalesce** | 3 | 1 | 4 | Fork/join semantics, timeouts |
-| **core-landscape** | 2 | 1 | 3 | Recovery, audit integrity |
-| **plugins-sinks** | 3 | 0 | 3 | Schema validation, mode handling |
-| **llm-azure** | 3 | 0 | 3 | Call tracking, audit recording |
-| **engine-orchestrator** | 2 | 0 | 2 | Quarantine outcomes, flush modes |
-| **plugins-transforms** | 2 | 0 | 2 | Type coercion violations |
-| **cross-cutting** | 1 | 1 | 2 | Schema architecture |
-| **core-dag** | 1 | 0 | 1 | Branch name validation |
-| **engine-processor** | 1 | 0 | 1 | Group ID propagation |
+| Subsystem | P1 Bugs | P2 Bugs | P3 Bugs | Total | Focus Area |
+|-----------|---------|---------|---------|-------|------------|
+| **llm-azure** | 3 | 9 | 1 | 13 | Azure integration, error handling ⚠️ LARGEST |
+| **engine-coalesce** | 3 | 4 | 0 | 7 | Fork/join semantics, timeouts ⚠️ HOTSPOT |
+| **core-landscape** | 3 | 2 | 2 | 7 | Recovery, audit integrity |
+| **engine-orchestrator** | 2 | 4 | 2 | 8 | Aggregation, quarantine, resume |
+| **plugins-sinks** | 3 | 2 | 1 | 6 | Schema validation, mode handling |
+| **plugins-transforms** | 2 | 2 | 0 | 4 | Type coercion, batch operations |
+| **cross-cutting** | 1 | 3 | 0 | 4 | Schema architecture |
+| **engine-processor** | 1 | 3 | 0 | 4 | Token management, spans |
+| **plugins-sources** | 0 | 2 | 1 | 3 | JSON parsing, validation |
+| **core-config** | 0 | 2 | 1 | 3 | Config contracts, metadata |
+| **engine-retry** | 0 | 2 | 2 | 4 | Retry logic, backoff |
+| **engine-spans** | 0 | 2 | 1 | 3 | Observability, tracing |
+| **core-dag** | 1 | 0 | 0 | 1 | Branch name validation |
 
 ## Recommended Fix Order
 
