@@ -98,6 +98,10 @@ runs/
 *.sqlite
 *.sqlite3
 
+# Test outputs and analysis artifacts
+test-results.txt
+instantiation-*.txt
+
 # Secrets - NEVER commit these
 .env.local
 .env.*.local
