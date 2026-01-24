@@ -2811,10 +2811,8 @@ class TestAggregationExecutorBuffering:
 class TestAggregationExecutorCheckpoint:
     """Tests for buffer serialization/deserialization for crash recovery."""
 
-    def test_get_checkpoint_state_returns_buffer_contents(self) -> None:
-        """get_checkpoint_state() returns serializable buffer state."""
-        import json
-
+    def test_get_checkpoint_state_stores_full_token_info(self) -> None:
+        """Checkpoint stores complete TokenInfo (not just token_ids) for restoration."""
         from elspeth.contracts import TokenInfo
         from elspeth.core.config import AggregationSettings, TriggerConfig
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
@@ -2846,13 +2844,22 @@ class TestAggregationExecutorCheckpoint:
             aggregation_settings={agg_node.node_id: settings},
         )
 
-        # Buffer some rows
-        for i in range(3):
-            token = TokenInfo(
-                row_id=f"row-{i}",
-                token_id=f"token-{i}",
-                row_data={"value": i},
-            )
+        # Add tokens with all metadata
+        token1 = TokenInfo(
+            row_id="row-1",
+            token_id="token-101",
+            row_data={"name": "Alice", "score": 95},
+            branch_name="high_score",
+        )
+        token2 = TokenInfo(
+            row_id="row-2",
+            token_id="token-102",
+            row_data={"name": "Bob", "score": 42},
+            branch_name=None,  # Optional field
+        )
+
+        # Create rows in landscape
+        for i, token in enumerate([token1, token2]):
             row = recorder.create_row(
                 run_id=run.run_id,
                 source_node_id=agg_node.node_id,
@@ -2863,26 +2870,30 @@ class TestAggregationExecutorCheckpoint:
             recorder.create_token(row_id=row.row_id, token_id=token.token_id)
             executor.buffer_row(agg_node.node_id, token)
 
-        # Get checkpoint state
-        state = executor.get_checkpoint_state()
+        # Get checkpoint
+        checkpoint = executor.get_checkpoint_state()
 
-        assert agg_node.node_id in state
-        assert state[agg_node.node_id]["rows"] == [
-            {"value": 0},
-            {"value": 1},
-            {"value": 2},
-        ]
-        assert state[agg_node.node_id]["token_ids"] == [
-            "token-0",
-            "token-1",
-            "token-2",
-        ]
-        assert state[agg_node.node_id]["batch_id"] is not None
+        # VERIFY: Full TokenInfo stored, not just IDs
+        assert "tokens" in checkpoint[agg_node.node_id], "Should have 'tokens' key, not 'token_ids'"
+        assert "token_ids" not in checkpoint[agg_node.node_id], "Old 'token_ids' format should be gone"
 
-        # Must be JSON serializable
-        json_str = json.dumps(state)
-        restored = json.loads(json_str)
-        assert restored == state
+        tokens_data = checkpoint[agg_node.node_id]["tokens"]
+        assert len(tokens_data) == 2
+
+        # Verify first token has ALL fields
+        assert tokens_data[0]["token_id"] == "token-101"
+        assert tokens_data[0]["row_id"] == "row-1"
+        assert tokens_data[0]["row_data"] == {"name": "Alice", "score": 95}
+        assert tokens_data[0]["branch_name"] == "high_score"
+
+        # Verify second token (with None branch_name)
+        assert tokens_data[1]["token_id"] == "token-102"
+        assert tokens_data[1]["row_id"] == "row-2"
+        assert tokens_data[1]["row_data"] == {"name": "Bob", "score": 42}
+        assert tokens_data[1]["branch_name"] is None
+
+        # Verify batch_id present in checkpoint
+        assert "batch_id" in checkpoint[agg_node.node_id]
 
     def test_get_checkpoint_state_excludes_empty_buffers(self) -> None:
         """get_checkpoint_state() only includes non-empty buffers."""

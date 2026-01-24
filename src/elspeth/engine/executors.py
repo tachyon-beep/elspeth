@@ -1068,23 +1068,74 @@ class AggregationExecutor:
         return len(self._buffers.get(node_id, []))
 
     def get_checkpoint_state(self) -> dict[str, Any]:
-        """Get serializable state for checkpointing.
+        """Return checkpoint state for persistence.
 
-        Returns a dict that can be JSON-serialized and stored in
-        checkpoint.aggregation_state_json. On recovery, pass this
-        to restore_from_checkpoint().
+        Stores complete TokenInfo objects (not just IDs) to enable restoration
+        without database queries. Validates size to prevent pathological growth.
 
         Returns:
-            Dict mapping node_id -> buffer state (only non-empty buffers)
-        """
-        state: dict[str, Any] = {}
-        for node_id in self._buffers:
-            if self._buffers[node_id]:  # Only include non-empty buffers
-                state[node_id] = {
-                    "rows": list(self._buffers[node_id]),
-                    "token_ids": [t.token_id for t in self._buffer_tokens[node_id]],
-                    "batch_id": self._batch_ids.get(node_id),
+            dict[str, Any]: Checkpoint state with format:
+                {
+                    "node_id_1": {
+                        "tokens": [
+                            {
+                                "token_id": str,
+                                "row_id": str,
+                                "branch_name": str | None,
+                                "row_data": dict[str, Any]
+                            },
+                            ...
+                        ]
+                    },
+                    ...
                 }
+
+        Raises:
+            RuntimeError: If checkpoint exceeds 10MB size limit
+        """
+        import json
+        import logging
+
+        logger = logging.getLogger(__name__)
+
+        # Build checkpoint state from all buffers
+        state: dict[str, Any] = {}
+        for node_id, tokens in self._buffer_tokens.items():
+            if not tokens:  # Only include non-empty buffers
+                continue
+            # Store full TokenInfo as dicts (not just IDs)
+            state[node_id] = {
+                "tokens": [
+                    {
+                        "token_id": t.token_id,
+                        "row_id": t.row_id,
+                        "branch_name": t.branch_name,
+                        "row_data": t.row_data,
+                    }
+                    for t in tokens
+                ],
+                "batch_id": self._batch_ids.get(node_id),
+            }
+
+        # Size validation (on serialized checkpoint)
+        serialized = json.dumps(state)
+        size_mb = len(serialized) / 1_000_000
+
+        if size_mb > 1:
+            total_rows = sum(len(b) for b in self._buffer_tokens.values())
+            logger.warning(f"Large checkpoint: {size_mb:.1f}MB for {total_rows} buffered rows across {len(state)} nodes")
+
+        if size_mb > 10:
+            total_rows = sum(len(b) for b in self._buffer_tokens.values())
+            raise RuntimeError(
+                f"Checkpoint size {size_mb:.1f}MB exceeds 10MB limit. "
+                f"Buffer contains {total_rows} total rows across {len(state)} nodes. "
+                f"Solutions: (1) Reduce aggregation count trigger to <5000 rows, "
+                f"(2) Reduce row_data payload size, or (3) Implement checkpoint retention "
+                f"policy (see P3-2026-01-21). See capacity planning in "
+                f"docs/plans/2026-01-24-fix-aggregation-checkpoint-restore.md"
+            )
+
         return state
 
     def restore_from_checkpoint(self, state: dict[str, Any]) -> None:
