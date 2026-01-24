@@ -20,12 +20,19 @@ class TestValidateCommand:
         config = {
             "datasource": {
                 "plugin": "csv",
-                "options": {"path": "/data/input.csv"},
+                "options": {
+                    "path": "/data/input.csv",
+                    "on_validation_failure": "quarantine",
+                    "schema": {"fields": "dynamic"},
+                },
             },
             "sinks": {
                 "output": {
                     "plugin": "json",
-                    "options": {"path": "/data/output.json"},
+                    "options": {
+                        "path": "/data/output.json",
+                        "schema": {"fields": "dynamic"},
+                    },
                 },
             },
             "output_sink": "output",
@@ -48,7 +55,10 @@ class TestValidateCommand:
             "sinks": {
                 "output": {
                     "plugin": "json",
-                    "options": {"path": "/data/output.json"},
+                    "options": {
+                        "path": "/data/output.json",
+                        "schema": {"fields": "dynamic"},
+                    },
                 },
             },
             "output_sink": "output",
@@ -63,12 +73,19 @@ class TestValidateCommand:
         config = {
             "datasource": {
                 "plugin": "csv",
-                "options": {"path": "/data/input.csv"},
+                "options": {
+                    "path": "/data/input.csv",
+                    "on_validation_failure": "quarantine",
+                    "schema": {"fields": "dynamic"},
+                },
             },
             "sinks": {
                 "output": {
                     "plugin": "json",
-                    "options": {"path": "/data/output.json"},
+                    "options": {
+                        "path": "/data/output.json",
+                        "schema": {"fields": "dynamic"},
+                    },
                 },
             },
             "output_sink": "nonexistent",  # References non-existent sink
@@ -120,10 +137,19 @@ class TestValidateCommandGraphValidation:
         config_file.write_text("""
 datasource:
   plugin: csv
+  options:
+    path: /data/input.csv
+    on_validation_failure: quarantine
+    schema:
+      fields: dynamic
 
 sinks:
   output:
     plugin: csv
+    options:
+      path: /data/output.csv
+      schema:
+        fields: dynamic
 
 gates:
   - name: my_gate
@@ -147,12 +173,25 @@ output_sink: output
         config_file.write_text("""
 datasource:
   plugin: csv
+  options:
+    path: /data/input.csv
+    on_validation_failure: quarantine
+    schema:
+      fields: dynamic
 
 sinks:
   results:
     plugin: csv
+    options:
+      path: /data/results.csv
+      schema:
+        fields: dynamic
   flagged:
     plugin: csv
+    options:
+      path: /data/flagged.csv
+      schema:
+        fields: dynamic
 
 gates:
   - name: classifier

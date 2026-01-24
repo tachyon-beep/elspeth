@@ -55,3 +55,52 @@ output_sink: output
 
     finally:
         config_file.unlink()
+
+
+def test_cli_validate_detects_schema_incompatibility():
+    """Verify CLI validate command detects schema incompatibility."""
+    runner = CliRunner()
+
+    config_yaml = """
+datasource:
+  plugin: csv
+  options:
+    path: test_input.csv
+    schema:
+      mode: strict
+      fields:
+        field_a: {type: str}
+
+row_plugins:
+  - plugin: passthrough
+    options:
+      schema:
+        fields:
+          field_a: {type: str}
+
+sinks:
+  output:
+    plugin: csv
+    options:
+      path: test_output.csv
+      schema:
+        mode: strict
+        fields:
+          field_b: {type: int}  # INCOMPATIBLE
+
+output_sink: output
+"""
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+        f.write(config_yaml)
+        config_file = Path(f.name)
+
+    try:
+        result = runner.invoke(app, ["validate", "--settings", str(config_file)])
+
+        # Should fail with schema error
+        assert result.exit_code != 0
+        assert "schema" in result.output.lower() or "field_b" in result.output.lower()
+
+    finally:
+        config_file.unlink()

@@ -797,6 +797,8 @@ def validate(
     ),
 ) -> None:
     """Validate pipeline configuration without running."""
+    from elspeth.cli_helpers import instantiate_plugins_from_config
+
     settings_path = Path(settings).expanduser()
 
     # Load and validate config via Pydantic
@@ -812,20 +814,34 @@ def validate(
             typer.echo(f"  - {loc}: {error['msg']}", err=True)
         raise typer.Exit(1) from None
 
-    # Build and validate execution graph
+    # NEW: Instantiate plugins BEFORE graph construction
     try:
-        manager = _get_plugin_manager()
-        graph = ExecutionGraph.from_config(config, manager)
+        plugins = instantiate_plugins_from_config(config)
+    except Exception as e:
+        typer.echo(f"Error instantiating plugins: {e}", err=True)
+        raise typer.Exit(1) from None
+
+    # NEW: Build and validate graph from plugin instances
+    try:
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(config.gates),
+            output_sink=config.output_sink,
+            coalesce_settings=list(config.coalesce) if config.coalesce else None,
+        )
         graph.validate()
     except GraphValidationError as e:
         typer.echo(f"Pipeline graph error: {e}", err=True)
         raise typer.Exit(1) from None
 
-    typer.echo(f"Configuration valid: {settings_path.name}")
+    typer.echo("✅ Pipeline configuration valid!")
     typer.echo(f"  Source: {config.datasource.plugin}")
     typer.echo(f"  Transforms: {len(config.row_plugins)}")
+    typer.echo(f"  Aggregations: {len(config.aggregations)}")
     typer.echo(f"  Sinks: {', '.join(config.sinks.keys())}")
-    typer.echo(f"  Output: {config.output_sink}")
     typer.echo(f"  Graph: {graph.node_count} nodes, {graph.edge_count} edges")
 
 
