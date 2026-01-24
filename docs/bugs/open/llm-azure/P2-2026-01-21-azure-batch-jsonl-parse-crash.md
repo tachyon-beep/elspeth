@@ -88,3 +88,65 @@
 
 - Related issues/PRs: N/A
 - Related design docs: CLAUDE.md auditability standard
+
+---
+
+## VERIFICATION: 2026-01-25
+
+**Status:** STILL VALID
+
+**Verified By:** Claude Code P2 verification wave 4a
+
+**Current Code Analysis:**
+
+The vulnerable code remains unchanged at lines 618-619 in `/home/john/elspeth-rapid/src/elspeth/plugins/llm/azure_batch.py`:
+
+```python
+# Parse JSONL results
+results_by_id: dict[str, dict[str, Any]] = {}
+for line in output_content.text.strip().split("\n"):
+    if line:
+        result = json.loads(line)  # Line 618 - unprotected, can raise JSONDecodeError
+        results_by_id[result["custom_id"]] = result  # Line 619 - unprotected, can raise KeyError
+```
+
+**Two crash vectors confirmed:**
+
+1. **JSONDecodeError**: If Azure returns a malformed JSONL line (truncated JSON, invalid syntax, non-JSON content), `json.loads(line)` will raise `json.JSONDecodeError` and crash the entire transform.
+
+2. **KeyError**: If Azure returns valid JSON but without a `custom_id` field (e.g., `{"error": "internal error"}`), the indexing `result["custom_id"]` will raise `KeyError` and crash the transform.
+
+**Architectural violation confirmed:**
+
+This code violates CLAUDE.md Three-Tier Trust Model (Tier 3: External Data):
+- Azure Batch output is external system data (zero trust tier)
+- External data should be validated/wrapped at the boundary
+- Current code treats it as trusted (no error handling)
+
+**Git History:**
+
+- Searched all commits since 2026-01-21 for JSONL parsing fixes - none found
+- Code last modified in commit `c786410` (RC-1, 2026-01-22) - before verification
+- Commit `0e2f6da` (2026-01-25) added `_validate_self_consistency()` but did not address this bug
+- No test coverage exists for malformed JSONL scenarios (`grep -n "malformed\|JSONDecodeError"` returned no results in `tests/plugins/llm/test_azure_batch.py`)
+
+**Root Cause Confirmed:**
+
+Yes. The method `_download_results()` at lines 573-720 has comprehensive error handling for missing results (lines 647-657) and API errors (lines 661-670), but completely lacks error handling for the JSONL parsing phase itself (lines 614-619). This is an oversight in external data boundary validation.
+
+**Impact Assessment:**
+
+This bug could manifest in production when:
+- Network interruption causes truncated file download
+- Azure service degrades and returns error messages instead of JSONL
+- File corruption during download
+- Azure API changes output format unexpectedly
+
+When triggered, the entire batch (potentially hundreds of rows) fails during result retrieval, even though the Azure batch processing succeeded. The audit trail would show batch completion but no output rows, making diagnosis difficult.
+
+**Recommendation:**
+
+**Keep open** - This is a legitimate P2 bug that should be fixed before production use. The fix is straightforward (wrap lines 618-619 in try/except, skip malformed lines or fail gracefully), and test coverage should be added for:
+1. Malformed JSON in output line
+2. Valid JSON missing `custom_id` field
+3. Mixed valid/invalid lines (partial success semantics)

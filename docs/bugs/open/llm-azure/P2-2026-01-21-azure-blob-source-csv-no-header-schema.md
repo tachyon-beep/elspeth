@@ -94,3 +94,83 @@
 
 - Related issues/PRs: N/A
 - Related design docs: N/A
+
+---
+
+## VERIFICATION: 2026-01-25
+
+**Status:** STILL VALID
+
+**Verified By:** Claude Code P2 verification wave 4b
+
+**Current Code Analysis:**
+
+The bug is **confirmed to still exist** in the current codebase. Examination of `/home/john/elspeth-rapid/src/elspeth/plugins/azure/blob_source.py` (lines 372-380) shows:
+
+```python
+# Use pandas for robust CSV parsing (consistent with CSVSource)
+header_arg = 0 if has_header else None
+df = pd.read_csv(
+    io.StringIO(text_data),
+    delimiter=delimiter,
+    header=header_arg,
+    dtype=str,  # Keep all values as strings for consistent handling
+    keep_default_na=False,  # Don't convert empty strings to NaN
+)
+```
+
+When `has_header=False`, pandas `header=None` creates numeric column names (`0`, `1`, `2`, ...), which are then passed through as-is to schema validation. No mapping to schema field names occurs.
+
+**Existing Test Evidence:**
+
+The test at `/home/john/elspeth-rapid/tests/plugins/azure/test_blob_source.py:245-250` demonstrates the problematic behavior:
+
+```python
+source = AzureBlobSource(make_config(csv_options={"has_header": False}))
+rows = list(source.load(ctx))
+
+assert len(rows) == 2
+# Without header, columns are 0, 1, 2
+assert rows[0].row == {"0": "1", "1": "alice", "2": "100"}
+```
+
+This test uses `DYNAMIC_SCHEMA` (line 16: `{"fields": "dynamic"}`), which accepts any field names, so numeric column names pass validation. However, **with an explicit schema** defining named fields (e.g., `id`, `name`, `score`), these rows would fail validation because the schema expects field names, not numeric strings.
+
+**Git History:**
+
+No commits since `ae2c0e6` (the original bug report commit) have addressed this issue. Recent commits to `blob_source.py`:
+- `0e2f6da` - "fix: add validation to remaining 5 plugins" (unrelated to header mapping)
+- `c774dfe` - "fix(azure): quarantine malformed JSONL lines instead of crashing" (JSONL only)
+- `1b62b23` - "feat(azure): add SAS token auth and Azure pipeline examples" (auth only)
+
+The CSV parsing logic remains unchanged.
+
+**Root Cause Confirmed:**
+
+Yes. The implementation does not provide column name mapping when `has_header=False`. The bug report's root cause hypothesis is accurate:
+
+> "The implementation does not translate column positions to schema field names when `has_header` is disabled."
+
+**Comparison with CSVSource:**
+
+The local file-based `CSVSource` (`src/elspeth/plugins/sources/csv_source.py`) **also does not handle headerless CSV**. It always reads a header row (line 122: `headers = next(reader)`). This suggests **headerless CSV support is incomplete across the entire framework**, not just in AzureBlobSource.
+
+**Impact Severity:**
+
+The bug has **low real-world impact** because:
+1. The existing test uses dynamic schema, which works fine with numeric column names
+2. Most CSV files in production have headers
+3. Users attempting headerless CSV with explicit schemas would encounter immediate validation failures and likely switch to headers or dynamic schema
+
+However, the issue is a **legitimate design gap**: the `has_header=False` option exists but cannot work with explicit named schemas.
+
+**Recommendation:**
+
+**Keep open** as a valid P2 bug. The fix is straightforward (extract field names from schema config and pass as `names` parameter to `pd.read_csv`), but requires:
+
+1. Schema introspection to extract field names
+2. Decision on behavior when schema is dynamic (reject config? allow numeric names? require explicit column mapping?)
+3. Updated test with explicit schema to verify the fix
+4. Consideration of whether to add similar support to `CSVSource` for consistency
+
+This is a genuine feature gap, not OBE or LOST.

@@ -9,34 +9,45 @@ This directory contains all open bugs organized by the subsystem they affect. Th
 
 ```
 open/
-├── core-landscape/       # Audit trail, recovery, run repository (3 bugs)
-├── core-dag/             # DAG validation, graph construction (1 bug)
-├── engine-coalesce/      # Fork/join/merge logic (4 bugs: 3 P1, 1 P2)
-├── engine-orchestrator/  # Pipeline execution, routing (2 bugs)
-├── engine-processor/     # Token management, outcomes (1 bug)
-├── plugins-transforms/   # Transform implementations (2 bugs)
-├── plugins-sinks/        # Sink implementations (3 bugs)
-├── llm-azure/            # Azure LLM integration (3 bugs)
-└── cross-cutting/        # Schema validation, multi-subsystem (2 bugs)
+├── cli/                  # Command-line interface (2 P3)
+├── core-config/          # Configuration system (2 P2, 3 P3)
+├── core-dag/             # DAG validation, graph construction (1 P1)
+├── core-landscape/       # Audit trail, recovery, run repository (3 P1, 2 P2, 2 P3)
+├── cross-cutting/        # Schema validation, multi-subsystem (1 P1, 2 P2, 1 P3)
+├── engine-coalesce/      # Fork/join/merge logic (4 P1, 4 P2)
+├── engine-orchestrator/  # Pipeline execution, routing (2 P1, 4 P2, 3 P3)
+├── engine-processor/     # Token management, outcomes (1 P1, 3 P2)
+├── engine-retry/         # Retry logic (2 P2, 2 P3)
+├── engine-spans/         # Observability, tracing (2 P2, 1 P3)
+├── llm-azure/            # Azure LLM integration (3 P1, 8 P2, 1 P3)
+├── plugins-llm/          # Base LLM transforms (1 P3)
+├── plugins-sinks/        # Sink implementations (3 P1, 2 P2, 1 P3)
+├── plugins-sources/      # Source implementations (2 P2, 1 P3)
+└── plugins-transforms/   # Transform implementations (2 P1, 2 P2)
 ```
 
 ## Bug Counts by Subsystem
 
 | Subsystem | P1 Bugs | P2 Bugs | P3 Bugs | Total | Focus Area |
 |-----------|---------|---------|---------|-------|------------|
-| **llm-azure** | 3 | 9 | 1 | 13 | Azure integration, error handling ⚠️ LARGEST |
-| **engine-coalesce** | 3 | 4 | 0 | 7 | Fork/join semantics, timeouts ⚠️ HOTSPOT |
+| **llm-azure** | 3 | 8 | 1 | 12 | Azure integration, error handling ⚠️ LARGEST |
+| **engine-coalesce** | 4 | 4 | 0 | 8 | Fork/join semantics, timeouts ⚠️ HOTSPOT |
+| **engine-orchestrator** | 2 | 4 | 3 | 9 | Aggregation, quarantine, resume |
 | **core-landscape** | 3 | 2 | 2 | 7 | Recovery, audit integrity |
-| **engine-orchestrator** | 2 | 4 | 2 | 8 | Aggregation, quarantine, resume |
 | **plugins-sinks** | 3 | 2 | 1 | 6 | Schema validation, mode handling |
-| **plugins-transforms** | 2 | 2 | 0 | 4 | Type coercion, batch operations |
-| **cross-cutting** | 1 | 3 | 0 | 4 | Schema architecture |
+| **core-config** | 0 | 2 | 3 | 5 | Config contracts, metadata, legacy code |
+| **engine-retry** | 0 | 2 | 2 | 4 | Retry logic, backoff, audit |
+| **cross-cutting** | 1 | 2 | 1 | 4 | Schema architecture, code quality |
 | **engine-processor** | 1 | 3 | 0 | 4 | Token management, spans |
+| **plugins-transforms** | 2 | 2 | 0 | 4 | Type coercion, batch operations |
 | **plugins-sources** | 0 | 2 | 1 | 3 | JSON parsing, validation |
-| **core-config** | 0 | 2 | 1 | 3 | Config contracts, metadata |
-| **engine-retry** | 0 | 2 | 2 | 4 | Retry logic, backoff |
 | **engine-spans** | 0 | 2 | 1 | 3 | Observability, tracing |
+| **cli** | 0 | 0 | 2 | 2 | Command-line UX |
+| **plugins-llm** | 0 | 0 | 1 | 1 | Base LLM transforms |
 | **core-dag** | 1 | 0 | 0 | 1 | Branch name validation |
+| **TOTAL** | **19** | **36** | **18** | **73** | All bugs organized |
+
+**Note:** Total includes 1 NEW P1 bug created during triage (config-dependent required fields).
 
 ## Recommended Fix Order
 
@@ -97,9 +108,16 @@ open/
 
 ## Verification Status
 
-**All 18 P1 bugs have been verified against current codebase (2026-01-25):**
-- ✅ **100% STILL VALID** - All bugs are real, none are OBE or lost
+**All bugs (19 P1, 36 P2, 18 P3) verified and organized by subsystem (2026-01-25):**
+- ✅ **94% STILL VALID** (66/70 bugs) - Real technical debt, accurate triage
+- 🔄 **4 OBE** - Fixed by refactors or documentation-only
+- ❌ **0 LOST** - No bugs invalidated by code changes
 - ✅ **Detailed verification reports** - Each bug has comprehensive code analysis
 - ✅ **Fix guidance** - Each bug has recommended fix with examples
 
-See `docs/bugs/BUG-TRIAGE-REPORT-2026-01-24.md` for full triage analysis.
+**Results by Priority:**
+- **P1:** 18/18 STILL VALID (100%) - All critical bugs remain unfixed
+- **P2:** 33/34 STILL VALID (97%) - 1 OBE (schema validator refactor)
+- **P3:** 15/18 STILL VALID (83%) - 3 OBE (refactors, fixes, docs)
+
+See `docs/bugs/VERIFICATION-REPORT-2026-01-25.md` for complete audit results.

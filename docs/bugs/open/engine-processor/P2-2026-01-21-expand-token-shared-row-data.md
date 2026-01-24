@@ -93,3 +93,107 @@
 
 - Related issues/PRs: N/A
 - Related design docs: `CLAUDE.md`
+
+---
+
+## VERIFICATION: 2026-01-25
+
+**Status:** STILL VALID
+
+**Verified By:** Claude Code P2 verification wave 5
+
+**Current Code Analysis:**
+
+Examined `/home/john/elspeth-rapid/src/elspeth/engine/tokens.py` at current HEAD (commit 7540e57).
+
+**Confirmed asymmetry between fork_token and expand_token:**
+
+1. **fork_token (lines 127-168):** Uses `copy.deepcopy(data)` at line 164 with explicit comment:
+   ```python
+   # CRITICAL: Use deepcopy to prevent nested mutable objects from being
+   # shared across forked children. Shallow copy would cause mutations in
+   # one branch to leak to siblings, breaking audit trail integrity.
+   return [
+       TokenInfo(
+           row_id=parent_token.row_id,
+           token_id=child.token_id,
+           row_data=copy.deepcopy(data),  # Deep copy here
+           branch_name=child.branch_name,
+       )
+       for child in children
+   ]
+   ```
+
+2. **expand_token (lines 225-262):** Returns row_data directly without deep copy at line 258:
+   ```python
+   return [
+       TokenInfo(
+           row_id=parent_token.row_id,
+           token_id=db_child.token_id,
+           row_data=row_data,  # NO deep copy
+           branch_name=parent_token.branch_name,
+       )
+       for db_child, row_data in zip(db_children, expanded_rows, strict=True)
+   ]
+   ```
+
+**Test Coverage Gap:**
+
+- `tests/engine/test_tokens.py` has comprehensive data isolation tests for `fork_token`:
+  - `test_fork_nested_data_isolation` (line 172)
+  - `test_fork_with_custom_nested_data_isolation` (line 222)
+- NO equivalent tests exist for `expand_token` data isolation
+- Existing expand_token tests (lines 465, 525, 569) only verify token creation, not mutation isolation
+
+**Real-World Risk Confirmed:**
+
+Found TWO plugins in production that create shallow copies when using success_multi:
+
+1. **batch_replicate.py (line 145):**
+   ```python
+   output = dict(row)  # Shallow copy preserves original data
+   output_rows.append(output)
+   ```
+
+2. **json_explode.py (line 169):**
+   ```python
+   output = dict(base)
+   output_rows.append(output)
+   ```
+
+Both use `dict(row)` which creates shallow copies. If the input row contains nested structures (e.g., `{"payload": {"x": 1}}`), all expanded tokens will share the nested dict. A downstream transform mutating `row_data["payload"]["x"]` would affect ALL sibling tokens.
+
+**Git History:**
+
+```
+b2a3518 fix(sources,resume): comprehensive data handling bug fixes
+3399faf fix(engine): store source row payloads for audit compliance
+8c96aff feat(engine): implement resume row processing in Orchestrator
+0023108 feat(engine): add TokenManager.expand_token for deaggregation
+```
+
+- Commit `0023108` introduced `expand_token` without deep copy
+- No subsequent commits addressed this issue
+- Most recent commit `b2a3518` modified tokens.py but only touched payload storage (canonical_json), not expand_token
+
+**Root Cause Confirmed:**
+
+The bug is **100% present** in current code. When `expand_token` was implemented in commit 0023108, it did not include the deep copy protection that exists in `fork_token`. This creates an audit integrity vulnerability where:
+
+1. Plugin returns `success_multi([row1, row2, row3])`
+2. If those rows share nested mutable objects, expand_token passes them through as-is
+3. Downstream transforms can mutate one token's nested data and corrupt siblings
+4. Audit trail becomes unreliable - cannot determine which transform output actually produced which result
+
+**Recommendation:**
+
+**Keep open - HIGH PRIORITY for RC-2**
+
+This is a **critical audit integrity bug** that violates ELSPETH's core principle: "The audit trail must withstand formal inquiry." The fix is straightforward (add `copy.deepcopy()` in expand_token like fork_token), but requires:
+
+1. Adding deep copy to expand_token (mirror fork_token implementation)
+2. Adding test coverage for expand_token data isolation
+3. Potentially fixing batch_replicate.py and json_explode.py if they intentionally relied on shallow copy behavior (unlikely, but verify)
+4. Performance testing to ensure deep copy overhead is acceptable for multi-row expansion scenarios
+
+The bug is low-probability (requires nested data + downstream mutation) but **high-impact** (complete audit trail corruption). Should be fixed before production deployment.

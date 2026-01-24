@@ -103,3 +103,85 @@ Minimal enum repro:
 ## Notes / Links
 
 - Related issues/PRs: N/A
+
+---
+
+## VERIFICATION: 2026-01-25
+
+**Status:** OBE (Overtaken By Events)
+
+**Verified By:** Claude Code P3 verification wave 2
+
+**Current Code Analysis:**
+
+The bug has been fixed. Current code in `/home/john/elspeth-rapid/src/elspeth/cli.py` shows:
+
+- Line 575 in `_execute_pipeline()`:
+  ```python
+  return {
+      "run_id": result.run_id,
+      "status": result.status.value,  # Convert enum to string for TypedDict
+      "rows_processed": result.rows_processed,
+  }
+  ```
+
+- Line 787 in `_execute_pipeline_with_instances()`:
+  ```python
+  return {
+      "run_id": result.run_id,
+      "status": result.status.value,  # Convert enum to string for TypedDict
+      "rows_processed": result.rows_processed,
+  }
+  ```
+
+- Line 1401 in `resume()` command:
+  ```python
+  typer.echo(f"  Status: {result.status.value}")
+  ```
+
+All locations now explicitly call `.value` on the `RunStatus` enum to convert it to its string value.
+
+Additionally, all event formatters use `.value` for status display:
+- Line 486 (JSON formatter): `"status": event.status.value`
+- Line 540, 752 (console formatters): `event.status.value`
+- Line 698 (JSON formatter): `"status": event.status.value`
+
+**Git History:**
+
+The bug was fixed in commit `80c9ae1` on 2026-01-21:
+
+```
+commit 80c9ae198fdb8ca5020ca3ffe3a6f82d0f00e8e7
+Author: John Morrissey <544926+tachyon-beep@users.noreply.github.com>
+Date:   Wed Jan 21 08:02:27 2026 +1100
+
+    fix(contracts): resolve 8 bugs found in contract code review
+
+    CLI:
+    - Convert RunStatus enum to string in ExecutionResult (cli.py:367)
+    - Use NotRequired for optional TypedDict fields instead of total=False
+```
+
+The diff shows:
+```diff
+-        "status": result.status,
++        "status": result.status.value,  # Convert enum to string for TypedDict
+```
+
+This was part of a broader contract code review that fixed 8 bugs.
+
+**Root Cause Confirmed:**
+
+The original bug was exactly as described: `RunStatus(str, Enum)` inherits from both `str` and `Enum`. While this makes it work correctly with database storage and equality checks (the `str` part), the `Enum.__str__()` method formats it as `RunStatus.COMPLETED` when converted to string or used in f-strings.
+
+The fix correctly calls `.value` to extract the string value (`"completed"`) from the enum.
+
+**Test Coverage:**
+
+The fix is indirectly validated by:
+- `tests/cli/test_execution_result.py`: Tests that `ExecutionResult` accepts `"completed"` as a string (lines 13-14, 23-24)
+- All event formatters consistently use `.value` throughout the codebase
+
+**Recommendation:**
+
+Close as OBE (Overtaken By Events). Bug was fixed on 2026-01-21, one day after it was reported, as part of commit 80c9ae1. The fix is complete, correct, and includes an explanatory comment.

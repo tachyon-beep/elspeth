@@ -88,3 +88,113 @@
 
 - Related issues/PRs: N/A
 - Related design docs: docs/contracts/plugin-protocol.md
+
+---
+
+## VERIFICATION: 2026-01-25
+
+**Status:** STILL VALID
+
+**Verified By:** Claude Code P2 verification wave 6b
+
+**Current Code Analysis:**
+
+Examined `/home/john/elspeth-rapid/src/elspeth/plugins/transforms/batch_replicate.py` at current HEAD:
+
+**Bug is CONFIRMED present:**
+
+1. **Lines 98-99:** Output schema is set identically to input schema
+   ```python
+   self.input_schema = schema
+   self.output_schema = schema
+   ```
+
+2. **Lines 146-147:** `copy_index` field is conditionally added to output rows
+   ```python
+   if self._include_copy_index:
+       output["copy_index"] = copy_idx
+   ```
+
+3. **Line 39-42:** Config allows `include_copy_index: bool` with default `True`
+   ```python
+   include_copy_index: bool = Field(
+       default=True,
+       description="Whether to add a 'copy_index' field (0-based) to each output row",
+   )
+   ```
+
+**Contract Violation:**
+
+Per plugin protocol docs, `output_schema` must accurately describe the shape of output rows. When `include_copy_index=True` (the default), BatchReplicate emits rows containing a `copy_index` field that is NOT declared in `output_schema`.
+
+This creates a schema mismatch between declared contract (`output_schema`) and actual behavior (adds `copy_index` field).
+
+**Impact:**
+
+- **Downstream validation failures:** If a downstream transform or sink has strict schema validation expecting only the declared fields, it will reject rows containing the undeclared `copy_index` field
+- **Schema compatibility checks:** Edge validation (added in recent schema validation refactor) may incorrectly validate the pipeline because it checks `output_schema`, not the actual output shape
+- **Audit integrity:** The schema recorded in NodeInfo doesn't match the actual data flow
+
+**Git History:**
+
+```
+7ee7c51 feat: add self-validation to all builtin plugins
+c786410 ELSPETH - Release Candidate 1
+a43f20a feat(plugins): add batch_replicate transform for deaggregation
+```
+
+No commits address this schema mismatch. The recent self-validation work (commit 7ee7c51) added `_validate_self_consistency()` to BatchReplicate but with a trivial implementation:
+
+```python
+def _validate_self_consistency(self) -> None:
+    """Validate BatchReplicate schemas are self-consistent.
+
+    BatchReplicate has no self-consistency constraints (input == output by definition).
+    """
+    self._validation_called = True  # Mark validation as complete
+    # No additional validation needed - BatchReplicate has matching input/output schemas
+```
+
+The comment "input == output by definition" is incorrect when `include_copy_index=True`.
+
+**Root Cause Confirmed:**
+
+BatchReplicate was designed as a simple pass-through aggregation that replicates rows. When `include_copy_index` was added as a feature, the schema contract was not updated to reflect that output rows now have an additional field.
+
+**Recommended Fix:**
+
+Two valid approaches:
+
+1. **Dynamic schema when copy_index added (simpler):**
+   ```python
+   if self._include_copy_index:
+       from elspeth.contracts.schema import create_dynamic_schema
+       self.output_schema = create_dynamic_schema("BatchReplicateOutputSchema")
+   else:
+       self.output_schema = schema
+   ```
+
+2. **Extend schema with optional copy_index field (more precise):**
+   ```python
+   if self._include_copy_index:
+       # Create new schema class with copy_index field added as optional int
+       fields = {**schema.model_fields}
+       fields['copy_index'] = (int | None, None)
+       self.output_schema = create_model('BatchReplicateWithIndex', **fields)
+   else:
+       self.output_schema = schema
+   ```
+
+**Testing Gap:**
+
+No test file exists for batch_replicate (`tests/plugins/transforms/test_batch_replicate.py` does not exist). The output schema behavior has never been tested.
+
+**Related Context:**
+
+The recent schema validation refactor (docs/plans/2026-01-24-fix-schema-validation-properly.md) moved validation to construction time and added edge compatibility checks. This makes the schema mismatch MORE important because edge validation now checks `output_schema` compatibility before the pipeline runs.
+
+**Recommendation:**
+
+**Keep open - HIGH priority for fixing before RC-2**
+
+This bug undermines the recent schema validation work. If BatchReplicate declares `output_schema` that doesn't match its actual output, edge validation will give false confidence that pipelines are valid when they may fail at runtime.

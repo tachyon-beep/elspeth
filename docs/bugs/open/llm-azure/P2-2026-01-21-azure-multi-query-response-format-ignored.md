@@ -88,3 +88,50 @@
 
 - Related issues/PRs: N/A
 - Related design docs: examples/multi_query_assessment/suite.yaml
+
+---
+
+## VERIFICATION: 2026-01-25
+
+**Status:** STILL VALID
+
+**Verified By:** Claude Code P2 verification wave 4c
+
+**Current Code Analysis:**
+
+The bug remains present in the current codebase (commit 0a339fd). Examination of `/home/john/elspeth-rapid/src/elspeth/plugins/llm/azure_multi_query.py` confirms:
+
+1. **Line 103**: `self._response_format = cfg.response_format` - The config value is stored in the instance variable
+2. **Lines 221-226**: The `llm_client.chat_completion()` call only passes `model`, `messages`, `temperature`, and `max_tokens` - `response_format` is NOT included
+3. The stored `_response_format` variable is never referenced anywhere else in the file
+
+Additionally verified:
+- The `AuditedLLMClient.chat_completion()` method (in `/home/john/elspeth-rapid/src/elspeth/plugins/clients/llm.py:119-226`) accepts `**kwargs` that are passed through to the underlying OpenAI client, so it COULD support `response_format` if passed
+- The example config at `/home/john/elspeth-rapid/examples/multi_query_assessment/suite.yaml:113` explicitly sets `response_format: json`, expecting this feature to work
+- The `MultiQueryConfig` dataclass includes `response_format` as a documented field with default value "json"
+
+**Git History:**
+
+No commits since the bug was reported (2026-01-21, commit ae2c0e6) have addressed this issue. The relevant commits to these files were:
+- `0e2f6da` - Added validation to plugins (no response_format fix)
+- `c786410` - RC-1 release (no response_format fix)
+- Original implementation commits created the bug by storing but not using the field
+
+**Root Cause Confirmed:**
+
+YES - The bug is still present. The `response_format` configuration field is:
+1. Accepted in config via `MultiQueryConfig.response_format`
+2. Stored in `self._response_format` during `__init__`
+3. Never passed to the LLM API call
+4. Therefore has zero effect on LLM behavior
+
+This means users configuring `response_format: json` to request JSON-mode responses from Azure OpenAI are not getting that enforcement, leading to higher parsing failure rates as the bug report correctly identified.
+
+**Recommendation:**
+
+**Keep open** - This is a valid P2 bug that should be fixed. The fix requires:
+
+1. Passing `response_format` to `llm_client.chat_completion()` as a kwarg when it's configured
+2. The OpenAI SDK expects `response_format={"type": "json_object"}` for JSON mode (not just the string "json"), so the code may need to transform the config value
+3. Alternatively, if Azure OpenAI doesn't support this parameter in all API versions, the code should validate at init time or document the limitation
+4. The example configuration in `examples/multi_query_assessment/suite.yaml` explicitly uses this feature, so users are expecting it to work

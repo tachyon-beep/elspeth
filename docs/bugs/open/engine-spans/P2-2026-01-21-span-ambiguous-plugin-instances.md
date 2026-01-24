@@ -88,3 +88,71 @@
 
 - Related issues/PRs: N/A
 - Related design docs: docs/design/subsystems/00-overview.md
+
+---
+
+## VERIFICATION: 2026-01-25
+
+**Status:** STILL VALID
+
+**Verified By:** Claude Code P2 verification wave 5
+
+**Current Code Analysis:**
+
+Examined the current implementation in both `spans.py` and `executors.py`:
+
+1. **SpanFactory API (src/elspeth/engine/spans.py:139-240)**:
+   - `transform_span()` accepts only `transform_name: str` (line 141)
+   - `gate_span()` accepts only `gate_name: str` (line 169)
+   - `sink_span()` accepts only `sink_name: str` (line 223)
+   - All span names use the pattern `f"{type}:{name}"` (e.g., `"transform:field_mapper"`)
+   - Attributes set: `plugin.name` and `plugin.type` only
+
+2. **Executor calls (src/elspeth/engine/executors.py)**:
+   - Line 174: `self._spans.transform_span(transform.name, input_hash=input_hash)`
+   - Line 365: `self._spans.gate_span(gate.name, input_hash=input_hash)`
+   - Line 1408: `self._spans.sink_span(sink.name)`
+   - All calls pass `plugin.name` which is the plugin type, NOT the node_id
+
+3. **node_id is available but unused**:
+   - Transform executor: `transform.node_id` is available (line 155, 161, 170)
+   - Gate executor: `gate.node_id` is available (line 353, 359, 400)
+   - Sink executor: `sink.node_id` is available (line 1392, 1395)
+   - The node_id is recorded in Landscape (`begin_node_state()`) but NOT passed to spans
+
+4. **Node ID structure (src/elspeth/core/dag.py:334-340)**:
+   - Node IDs are deterministic: `f"{prefix}_{name}_{config_hash}"` (line 340)
+   - Example: `transform_field_mapper_a1b2c3d4e5f6` for a FieldMapper with specific config
+   - Two FieldMapper instances with different configs get different node_ids
+   - Two FieldMapper instances with identical configs would get the SAME node_id (deterministic)
+
+**Git History:**
+
+No commits since the original SpanFactory implementation (commit 5099cf1) have modified the span naming behavior or added node_id tracking to spans. The code is identical to the original implementation.
+
+**Root Cause Confirmed:**
+
+YES - The bug is still present. The root cause is exactly as described:
+
+1. SpanFactory methods accept only plugin name (type), not node_id
+2. Executors pass `plugin.name` to span creation, even though `plugin.node_id` is available
+3. When multiple instances of the same plugin type exist (e.g., two FieldMapper transforms), their spans are indistinguishable if they have the same config (same node_id) or confusing if they have different configs (different node_ids but span still shows generic "field_mapper")
+
+**Specific scenario that demonstrates the bug:**
+
+Pipeline with two FieldMapper transforms:
+- Transform 0: FieldMapper with config `{"mapping": {"a": "b"}}` → node_id = `transform_field_mapper_abc123`
+- Transform 1: FieldMapper with config `{"mapping": {"x": "y"}}` → node_id = `transform_field_mapper_def456`
+
+Both produce spans named `"transform:field_mapper"` with attribute `plugin.name = "field_mapper"`. There is NO way to correlate these spans back to specific node_states or determine which FieldMapper instance created which span.
+
+**Recommendation:**
+
+Keep open. This is a valid P2 bug that degrades observability for pipelines with repeated plugin types. The fix is straightforward:
+
+1. Add optional `node_id` parameter to span methods in SpanFactory
+2. Update executors to pass `plugin.node_id`
+3. Include node_id in span name (e.g., `"transform:transform_field_mapper_abc123"`) or as attribute (`node.id`)
+4. Add test case with duplicate plugin types to verify span distinguishability
+
+This change is low-risk (observability only, no audit impact) and high-value (enables proper trace correlation).

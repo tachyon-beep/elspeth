@@ -91,3 +91,89 @@
 
 - Related issues/PRs: N/A
 - Related design docs: examples/multi_query_assessment/suite.yaml
+
+---
+
+## VERIFICATION: 2026-01-25
+
+**Status:** STILL VALID
+
+**Verified By:** Claude Code P2 verification wave 4c
+
+**Current Code Analysis:**
+
+Bug is confirmed STILL VALID as of commit 7540e57 on branch `fix/rc1-bug-burndown-session-4`.
+
+1. **PromptTemplate context** (`src/elspeth/plugins/llm/templates.py:148-152`):
+   - Only provides `row` and `lookup` in render context
+   - Templates must use `{{ row.field }}` syntax to access data
+
+2. **Multi-query template building** (`src/elspeth/plugins/llm/multi_query.py:47-65`):
+   - Builds synthetic_row with top-level keys: `input_1`, `input_2`, `criterion`, `case_study`, `row`
+   - Passes this to `PromptTemplate.render_with_metadata(synthetic_row)`
+   - The synthetic_row becomes the `row` parameter, so fields are accessible as `{{ row.input_1 }}`
+
+3. **Documentation mismatch**:
+   - Comment in `azure_multi_query.py:191` says: "Templates use {{ row.input_1 }}, {{ row.criterion }}, {{ row.original }}, {{ lookup }}"
+   - Example in `examples/multi_query_assessment/suite.yaml:52-56` uses: `{{ input_1 }}`, `{{ input_2 }}`, `{{ input_3 }}`, `{{ criterion.name }}`
+
+4. **Test coverage discrepancy**:
+   - Unit tests (`test_azure_multi_query.py:28`) use `{{ row.input_1 }}` and `{{ row.criterion.name }}` ✓ (correct syntax)
+   - Integration tests (`test_multi_query_integration.py:23,27`) use `{{ row.input_1 }}` and `{{ row.criterion.name }}` ✓ (correct syntax)
+   - Contract tests (`test_azure_multi_query_contract.py:70,108,145,163`) use `{{ input_1 }}` and `{{ criterion.name }}` ✗ (wrong syntax, but tests pass because they only check `isinstance(result, TransformResult)`)
+   - Example suite uses `{{ input_1 }}` ✗ (wrong syntax, would fail in actual use)
+
+**Empirical Verification:**
+
+Tested template rendering directly:
+```python
+from elspeth.plugins.llm.templates import PromptTemplate
+
+# Fails with "Undefined variable: 'input_1' is undefined"
+template = PromptTemplate('{{ input_1 }}', lookup_data={})
+template.render({'input_1': 'value'})
+
+# Works correctly
+template = PromptTemplate('{{ row.input_1 }}', lookup_data={})
+template.render({'input_1': 'value'})
+```
+
+Also ran contract test with template `{{ input_1 }} {{ criterion.name }}` which produces:
+```python
+TransformResult(
+    status='error',
+    reason={'reason': 'template_rendering_failed',
+            'error': "Undefined variable: 'input_1' is undefined"}
+)
+```
+
+**Git History:**
+
+No commits since bug report (2026-01-21) have addressed this issue. The template syntax mismatch has existed since the feature was first implemented:
+- `65905f3` (docs: add multi-query assessment example) - Example created with `{{ input_1 }}` syntax
+- `52e3cf6` (feat(llm): implement single query processing) - Code created with comment saying `{{ row.input_1 }}`
+- These commits are from the same feature branch, indicating the mismatch was present from day one
+
+**Root Cause Confirmed:**
+
+Yes. The bug is a documentation/example mismatch with the implementation:
+- **Implementation expects**: `{{ row.input_1 }}`, `{{ row.criterion.name }}`
+- **Example shows**: `{{ input_1 }}`, `{{ criterion.name }}`
+
+The example in `examples/multi_query_assessment/suite.yaml` WILL FAIL if executed because the template uses undefined variables.
+
+**Recommendation:**
+
+**Keep open.** This is a real bug that will cause user frustration. The fix options are:
+
+**Option A (simpler)**: Fix the example to match implementation
+- Change `examples/multi_query_assessment/suite.yaml` to use `{{ row.input_1 }}` syntax
+- Update contract tests to use correct syntax
+- Add test that verifies template actually renders (not just returns a TransformResult)
+
+**Option B (more work)**: Change implementation to match examples
+- Modify `PromptTemplate.render()` to accept optional top-level context variables
+- Update multi-query to pass `input_1`, `criterion` etc. as top-level variables
+- Maintain backward compatibility with `row.*` syntax
+
+**Recommendation: Option A** - Fix the example to match implementation. The `row.*` namespace is clearer and more consistent with the rest of ELSPETH's template usage.

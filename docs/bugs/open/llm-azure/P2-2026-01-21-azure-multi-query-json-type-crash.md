@@ -88,3 +88,114 @@
 
 - Related issues/PRs: N/A
 - Related design docs: CLAUDE.md trust model
+
+---
+
+## VERIFICATION: 2026-01-25
+
+**Status:** STILL VALID
+
+**Verified By:** Claude Code P2 verification wave 4b
+
+**Current Code Analysis:**
+
+The vulnerable code remains unchanged at lines 262-274 in `/home/john/elspeth-rapid/src/elspeth/plugins/llm/azure_multi_query.py`:
+
+```python
+# 7. Map output fields
+output: dict[str, Any] = {}
+for json_field, suffix in self._output_mapping.items():
+    output_key = f"{spec.output_prefix}_{suffix}"
+    if json_field not in parsed:  # Line 266 - assumes parsed is dict-like
+        return TransformResult.error(
+            {
+                "reason": "missing_output_field",
+                "field": json_field,
+                "query": spec.output_prefix,
+            }
+        )
+    output[output_key] = parsed[json_field]  # Line 274 - assumes parsed is dict-like
+```
+
+**Crash vectors confirmed:**
+
+After successful `json.loads(content)` at line 251, the code assumes `parsed` is always a dict without type validation. If the LLM returns non-object JSON, different failures occur:
+
+1. **JSON array `[]` or `[1,2,3]`**:
+   - Line 266: `"score" in [...]` returns `False` (no crash)
+   - Line 274: `parsed["score"]` raises `TypeError: list indices must be integers or slices, not str`
+
+2. **JSON string `"ok"` or `"success"`**:
+   - Line 266: `"score" in "ok"` returns `False` (no crash)
+   - Line 274: `parsed["score"]` raises `TypeError: string indices must be integers, not 'str'`
+
+3. **JSON number `42`, boolean `true`, or `null`**:
+   - Line 266: `"score" in 42` raises `TypeError: argument of type 'int' is not iterable`
+   - Line 274: Never reached due to line 266 crash
+
+**Architectural violation confirmed:**
+
+This code violates CLAUDE.md Three-Tier Trust Model (Tier 3: External Data):
+- LLM responses are external system data (zero trust tier)
+- External data should be validated/wrapped at the boundary
+- Current code successfully wraps `json.loads()` (line 250-260) but fails to validate JSON structure type
+- The `response_format: json` config hint to the LLM is advisory, not enforced - LLMs can ignore it
+
+**Git History:**
+
+- Searched all commits since 2026-01-21 for JSON type validation fixes - none found
+- Commit `3f79425` (2026-01-20) added markdown code block stripping before JSON parsing, but no type validation
+- Commit `0e2f6da` (2026-01-25) added `_validate_self_consistency()` but did not address this bug
+- No test coverage exists for non-object JSON responses:
+  - `grep -n "array\|scalar\|\[\]" tests/plugins/llm/test_azure_multi_query.py` finds no relevant tests
+  - `test_process_single_query_handles_invalid_json` (line 186) only tests malformed JSON string, not valid non-object JSON
+
+**Root Cause Confirmed:**
+
+Yes. The method `_process_single_query()` has comprehensive error handling for:
+- Template rendering failures (lines 198-208)
+- LLM API failures (lines 227-236)
+- JSON parse failures (lines 250-260)
+- Missing output fields (lines 266-273)
+
+But it completely lacks type validation after successful JSON parsing. An LLM returning `{"status": "success"}` as a top-level object works fine, but the same LLM returning `"success"` as a plain string causes a crash.
+
+**Real-world likelihood:**
+
+This can occur when:
+- LLM misinterprets the `response_format: json` instruction (common with smaller models)
+- LLM returns error messages as plain strings: `"I cannot process this request"`
+- LLM returns boolean responses: `true` / `false` for yes/no questions
+- LLM returns numeric responses: `85` instead of `{"score": 85}`
+- Prompt injection causes LLM to ignore format instructions
+
+The `response_format` parameter is a hint, not a guarantee. Azure OpenAI and other providers cannot enforce JSON object structure (only that valid JSON is returned).
+
+**Impact Assessment:**
+
+When triggered, the entire row fails with an unhandled TypeError exception instead of a structured TransformResult.error. The audit trail would show transform failure but without clear indication that the issue was non-object JSON response type. Multi-query processing uses all-or-nothing semantics, so one malformed response type crashes all queries for that row.
+
+**Recommendation:**
+
+**Keep open** - This is a legitimate P2 bug that should be fixed before production use with LLMs. The fix is straightforward:
+
+1. After line 260 (successful JSON parse), add type validation:
+   ```python
+   if not isinstance(parsed, dict):
+       return TransformResult.error({
+           "reason": "invalid_json_type",
+           "expected": "object",
+           "actual": type(parsed).__name__,
+           "query": spec.output_prefix,
+           "raw_response": response.content[:500],
+       })
+   ```
+
+2. Add test coverage for:
+   - JSON array response `[]` and `[1,2,3]`
+   - JSON string response `"ok"`
+   - JSON number response `42`
+   - JSON boolean response `true`
+   - JSON null response `null`
+
+All tests should verify TransformResult.error with `reason: "invalid_json_type"` rather than unhandled TypeError.

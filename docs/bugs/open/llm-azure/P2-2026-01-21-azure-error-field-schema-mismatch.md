@@ -89,3 +89,84 @@
 
 - Related issues/PRs: N/A
 - Related design docs: docs/contracts/plugin-protocol.md
+
+---
+
+## VERIFICATION: 2026-01-25
+
+**Status:** STILL VALID
+
+**Verified By:** Claude Code P2 verification wave 4b
+
+**Current Code Analysis:**
+
+The bug is **confirmed valid** in the current codebase (commit 0a339fd). Both AzureContentSafety and AzurePromptShield exhibit the reported behavior:
+
+1. **Schema Declaration (Still Present):**
+   - `/home/john/elspeth-rapid/src/elspeth/plugins/transforms/azure/content_safety.py:162` sets `self.output_schema = schema` (identical to input)
+   - `/home/john/elspeth-rapid/src/elspeth/plugins/transforms/azure/prompt_shield.py:133` sets `self.output_schema = schema` (identical to input)
+
+2. **Error Field Injection (Still Present):**
+   - `/home/john/elspeth-rapid/src/elspeth/plugins/transforms/azure/content_safety.py:435` adds `output_row["_content_safety_error"]` in batch mode
+   - `/home/john/elspeth-rapid/src/elspeth/plugins/transforms/azure/prompt_shield.py:404` adds `output_row["_prompt_shield_error"]` in batch mode
+
+3. **Self-Validation Added (But Insufficient):**
+   - Commit 7ee7c51 (2026-01-25) added `_validate_self_consistency()` methods to both transforms
+   - However, validation only confirms "input == output by definition" with no additional checks
+   - This validation does NOT address the schema mismatch when error fields are added
+
+**Git History:**
+
+No commits have addressed this issue. Relevant commits examined:
+
+- `7ee7c51` (2026-01-25): "feat: add self-validation to all builtin plugins" - Added validation scaffolding but did NOT fix the schema mismatch
+- `430307d` (2026-01-24): "feat: add schema validation to plugin protocols" - Infrastructure change, no fix for this issue
+- `df43269` (2026-01-24): "refactor: remove schema validation from DAG layer" - Moved validation location, no fix
+- `615ef21` (2026-01-21): "feat(prompt-shield): implement pooled execution with audit trail" - Original implementation with the bug
+- `fec943c` (2026-01-21): "feat(content-safety): implement pooled execution with audit trail" - Original implementation with the bug
+
+The pooled execution plans (`docs/plans/completed/2026-01-21-pooled-content-safety.md`) explicitly show error field embedding (line 658: "Embed errors per-row via _content_safety_error field") but do NOT discuss schema handling.
+
+**Root Cause Confirmed:**
+
+YES. The bug is present and unaddressed. The architecture issue is:
+
+- **Current behavior:** `output_schema = input_schema`, but batch mode conditionally adds error fields
+- **Why it's wrong:** Violates plugin protocol contract - `output_schema` must describe actual output shape
+- **Downstream impact:** Schema compatibility validation in `ExecutionGraph._validate_single_edge()` will incorrectly pass edges where the consumer expects only input fields, then fail at runtime when error fields appear
+
+**Systemic Pattern:**
+
+This is NOT isolated to ContentSafety/PromptShield. The same pattern exists in:
+- `/home/john/elspeth-rapid/src/elspeth/plugins/llm/azure_batch.py:162` - Sets `output_schema = schema` but adds `{response_field}_error` fields in batch mode
+- `/home/john/elspeth-rapid/src/elspeth/plugins/llm/azure_multi_query.py` - Adds `_error` field in batch assembly
+
+**Correct Pattern (Reference):**
+
+BatchStats transform demonstrates the correct approach (`/home/john/elspeth-rapid/src/elspeth/plugins/transforms/batch_stats.py:89-97`):
+
+```python
+# Output schema MUST be dynamic because BatchStats outputs a completely
+# different shape: {count, sum, mean, batch_size, group_by?}
+self.output_schema = create_schema_from_config(
+    SchemaConfig.from_dict({"fields": "dynamic"}),
+    "BatchStatsOutputSchema",
+    allow_coercion=False,
+)
+```
+
+Dynamic schemas (`output_schema = None` after processing) bypass edge validation per `ExecutionGraph._validate_single_edge()` Rule 1, which is appropriate when output shape varies.
+
+**Recommendation:**
+
+**Keep open - Fix Required**
+
+This is a valid architectural deviation from plugin protocol contracts. The fix should apply the BatchStats pattern:
+
+1. **When `pool_size > 1` (batch mode):** Set `output_schema` to dynamic to reflect that error fields may be added
+2. **When `pool_size == 1` (single mode):** Keep `output_schema = input_schema` since no error fields are added
+3. **Alternative:** Explicitly extend the output schema with optional error field definitions
+
+The fix is straightforward but affects multiple Azure transforms (ContentSafety, PromptShield, AzureBatch, AzureMultiQuery). All should be fixed together for consistency.
+
+Priority remains **P2** - this causes schema validation to incorrectly pass incompatible edges, but only manifests when strict downstream consumers reject the unexpected error fields. Impact is contained to Azure batch mode pipelines with strict schema validation.

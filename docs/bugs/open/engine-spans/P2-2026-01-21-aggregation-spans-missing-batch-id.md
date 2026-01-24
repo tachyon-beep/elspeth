@@ -88,3 +88,59 @@
 
 - Related issues/PRs: N/A
 - Related design docs: src/elspeth/engine/spans.py
+
+---
+
+## VERIFICATION: 2026-01-25
+
+**Status:** STILL VALID
+
+**Verified By:** Claude Code P2 verification wave 5
+
+**Current Code Analysis:**
+
+The bug is confirmed in the current codebase at `/home/john/elspeth-rapid/src/elspeth/engine/executors.py:935`:
+
+```python
+# Step 3: Execute with timing and span
+with self._spans.transform_span(transform.name, input_hash=input_hash):
+    start = time.perf_counter()
+    try:
+        result = transform.process(buffered_rows, ctx)  # type: ignore[arg-type]
+```
+
+The code should be using `aggregation_span` instead of `transform_span`. Evidence:
+
+1. **batch_id is available**: Retrieved at line 882 of `execute_flush()` method
+2. **aggregation_span exists**: Defined at `src/elspeth/engine/spans.py:193-218` with explicit support for `batch_id` parameter
+3. **Documentation specifies it**: Span hierarchy doc at `spans.py:7-16` explicitly shows `aggregation:{agg_name}` → `flush` pattern
+4. **Never used in engine**: Grep shows `aggregation_span` is only defined in `spans.py`, tested in `test_spans.py`, but never invoked in actual execution code
+
+**Git History:**
+
+Examined commits from initial implementation to present:
+- `b0c3174` (2026-01-?): Initial `execute_flush` implementation - used `transform_span` from the start
+- `54edba7` (2026-01-23): Recent defensive guard addition - did not fix span usage
+- `0f21ecb` (2026-01-23): Added PENDING status for async batches - did not fix span usage
+
+No commits have addressed this issue. The bug has existed since the original implementation of aggregation flushing.
+
+**Root Cause Confirmed:**
+
+Yes. `AggregationExecutor.execute_flush()` incorrectly uses `self._spans.transform_span()` when it should use `self._spans.aggregation_span()`. This results in:
+- Aggregation flush operations appearing as generic transforms in traces
+- Loss of `batch.id` attribute that would enable correlation with batch audit records
+- Inability to distinguish normal transform operations from aggregation flushes in OpenTelemetry traces
+
+The fix is straightforward - change line 935 from:
+```python
+with self._spans.transform_span(transform.name, input_hash=input_hash):
+```
+to:
+```python
+with self._spans.aggregation_span(transform.name, batch_id=batch_id):
+```
+
+**Recommendation:**
+
+**Keep open** - bug is valid and should be fixed. The impact is observability degradation (P2 severity is appropriate) but does not affect data integrity. The fix is a simple one-line change with the `batch_id` variable already in scope.

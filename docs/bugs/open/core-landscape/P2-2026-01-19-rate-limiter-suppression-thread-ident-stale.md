@@ -98,3 +98,72 @@ This is easiest to observe via inspection/debugging rather than a deterministic 
 ## Notes / Links
 
 - Related issues/PRs: `docs/bugs/closed/2026-01-19-rate-limiter-global-excepthook-suppression.md` (previously fixed broader issue)
+
+---
+
+## VERIFICATION: 2026-01-25
+
+**Status:** STILL VALID
+
+**Verified By:** Claude Code P2 verification wave 6c (final)
+
+**Current Code Analysis:**
+
+Examined `/home/john/elspeth-rapid/src/elspeth/core/rate_limit/limiter.py` at current HEAD (branch: fix/rc1-bug-burndown-session-4).
+
+The bug is **confirmed to still exist**:
+
+1. **Thread ident registration** (lines 277-288): When `close()` is called, it collects alive leaker threads and adds their idents to `_suppressed_thread_idents`:
+   ```python
+   for limiter in self._limiters:
+       leaker = limiter.bucket_factory._leaker
+       if leaker is not None and leaker.is_alive() and leaker.ident is not None:
+           leakers.append(leaker)
+           with _suppressed_lock:
+               _suppressed_thread_idents.add(leaker.ident)
+   ```
+
+2. **Removal only via exception path** (lines 58-61 in `_custom_excepthook`): Thread idents are removed from the suppression set ONLY when the excepthook fires:
+   ```python
+   if thread_ident is not None and thread_ident in _suppressed_thread_idents and args.exc_type is AssertionError:
+       _suppressed_thread_idents.discard(thread_ident)
+   ```
+
+3. **No cleanup after join** (lines 299-301): After `close()` joins the leaker threads, there is NO cleanup of thread idents from the suppression set:
+   ```python
+   for leaker in leakers:
+       leaker.join(timeout=0.05)
+   # Missing: cleanup of _suppressed_thread_idents here
+   ```
+
+**Git History:**
+
+Examined commits since 2026-01-19:
+- `f819d19`: "fix(rate-limiter): make acquire() thread-safe and atomic across rate windows" - addressed different issue (thread safety of acquire, not cleanup)
+- `c786410`: "ELSPETH - Release Candidate 1" - code was already in this state at RC-1
+- No commits have addressed the stale thread ident cleanup issue
+
+The related closed bug `docs/bugs/closed/2026-01-19-rate-limiter-global-excepthook-suppression.md` fixed the broader issue of using thread *names* (which could collide) and suppressing *all exception types*. The fix changed to using thread *idents* and only suppressing *AssertionError*. However, this left the cleanup issue unaddressed.
+
+**Root Cause Confirmed:**
+
+YES. The suppression mechanism has two paths:
+1. **Happy path**: Leaker thread raises AssertionError → `_custom_excepthook` suppresses it and removes ident from set
+2. **Clean exit path**: Leaker thread exits without exception → ident stays in set indefinitely
+
+Because thread IDs can be reused by the OS (especially on systems with limited thread ID pools), a stale ident could accidentally suppress a legitimate AssertionError from a different thread that reuses the same ID.
+
+**Test Coverage:**
+
+Current tests in `tests/core/rate_limit/test_limiter.py` verify:
+- Suppression works for registered threads with AssertionError (test_suppression_works_for_registered_assertion_error)
+- Suppression is scoped to AssertionError only (test_suppression_only_for_assertion_error)
+- Unregistered threads are not suppressed (test_suppression_only_for_registered_threads)
+
+However, **no test verifies that thread idents are cleaned up after close() when threads exit cleanly**.
+
+**Recommendation:**
+
+**Keep open** - This is a valid P2 bug that should be fixed. While the risk is low (thread ID reuse is uncommon and would only suppress AssertionErrors), it violates the principle of deterministic cleanup and could cause hard-to-debug issues in long-running processes.
+
+The proposed fix in the bug report is sound: after `leaker.join()` completes, unconditionally remove the leaker's ident from `_suppressed_thread_idents`. This ensures cleanup happens regardless of whether the thread raised an exception.

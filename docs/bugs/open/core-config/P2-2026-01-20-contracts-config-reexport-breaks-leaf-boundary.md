@@ -80,3 +80,91 @@
 
 - Suggested tests to run: `.venv/bin/python -m pytest tests/ -k import`
 - New tests required: yes
+
+---
+
+## VERIFICATION: 2026-01-25
+
+**Status:** STILL VALID - WORSE THAN REPORTED
+
+**Verified By:** Claude Code P2 verification wave 6c
+
+**Current Code Analysis:**
+
+The bug is confirmed and the impact is actually more severe than originally reported:
+
+1. **Dependency Chain Confirmed:**
+   - `/home/john/elspeth-rapid/src/elspeth/contracts/config.py:10-23` still imports from `elspeth.core.config`
+   - `/home/john/elspeth-rapid/src/elspeth/contracts/__init__.py:79-92` still re-exports all config models
+   - The "load-bearing import order" comment remains at lines 11-13 with `# isort: skip_file`
+
+2. **Measured Impact (Worse Than Expected):**
+   - Importing `import elspeth.contracts` loads **1,217 total modules**
+   - This includes: 295 pandas modules, 100 numpy modules, 108 sqlalchemy modules, 285 networkx modules
+   - All of `elspeth.core` gets loaded: config, landscape, checkpoint, dag, canonical, events, logging, payload_store
+   - Even importing just `elspeth.contracts.enums` triggers the full import chain because Python runs `contracts/__init__.py`
+
+3. **Direct Test Results:**
+   ```python
+   # Importing contracts pulls in core
+   import elspeth.contracts
+   # Result: elspeth.core.config is loaded ✗
+
+   # Even importing just enums triggers everything via __init__.py
+   import elspeth.contracts.enums
+   # Result: 1,217 modules loaded including all of core ✗
+
+   # Loading enums.py file directly (bypassing __init__.py)
+   # Result: Only 11 modules loaded ✓
+   ```
+
+4. **The Import Cycle:**
+   - Any import of `elspeth.contracts.*` runs `contracts/__init__.py`
+   - `__init__.py` imports `contracts.config`
+   - `contracts.config` imports `core.config`
+   - `core.config` is clean but importing it triggers package initialization which loads landscape, checkpoint, etc.
+   - Total cascade: trying to use a simple enum pulls in the entire database layer, DAG engine, and all heavy dependencies
+
+**Git History:**
+
+- Created in commit `74e6bb6` (2026-01-16): "feat(contracts): add config.py with Pydantic re-exports"
+- Commit message explicitly acknowledges the circular import risk
+- Uses "load-bearing import order" and `isort: skip_file` as a workaround
+- No subsequent commits have attempted to fix this issue
+- The workaround has prevented a hard circular import crash but creates massive startup overhead
+
+**Root Cause Confirmed:**
+
+Yes, root cause is exactly as hypothesized:
+
+1. Config models (Pydantic BaseModel subclasses) defined in `core.config`
+2. Re-exported through `contracts.config` for "import consistency"
+3. This creates an upward dependency: Contracts → Core
+4. Violates the leaf module principle where Contracts should have zero outbound dependencies
+5. The "load-bearing import order" is a code smell indicating architectural fragility
+
+**Performance Impact Quantified:**
+
+The 1,217 module import overhead means:
+- Any CLI command that imports contracts pays ~500ms+ startup cost
+- Tests that import contracts pay this cost per test process
+- Cannot use lightweight contracts (enums, results) without pulling in the entire framework
+- Violates Python best practice of lazy imports and minimal dependencies
+
+**Recommendation:**
+
+**KEEP OPEN - HIGH PRIORITY**
+
+This should be elevated in priority because:
+
+1. **Architectural violation:** Contracts is explicitly documented as a leaf module with "Outbound: None"
+2. **Performance impact:** 1,200+ module startup overhead for simple enum access
+3. **Maintenance burden:** Load-bearing import order is fragile and prevents refactoring
+4. **User experience:** CLI feels slow, test suite slower than necessary
+
+**Proposed fix remains valid (Option B preferred for minimal risk):**
+- Remove config re-exports from `contracts/__init__.py`
+- Require callers to import config from `elspeth.core.config` directly
+- Add regression test: `assert 'elspeth.core' not in sys.modules after 'import elspeth.contracts.enums'`
+
+This preserves current architecture (config stays in core) while restoring the Contracts leaf boundary.

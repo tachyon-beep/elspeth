@@ -90,3 +90,61 @@
 
 - Related issues/PRs: N/A
 - Related design docs: N/A
+
+---
+
+## VERIFICATION: 2026-01-25
+
+**Status:** STILL VALID (but latent/not currently exploited)
+
+**Verified By:** Claude Code P3 verification wave 5
+
+**Current Code Analysis:**
+
+Examined `/home/john/elspeth-rapid/src/elspeth/engine/retry.py` at lines 164-171:
+- Line 164: `attempt = attempt_state.retry_state.attempt_number` (tenacity's 1-based number)
+- Line 171: `on_retry(attempt, e)` (passes 1-based number directly)
+
+Examined `/home/john/elspeth-rapid/src/elspeth/core/landscape/recorder.py`:
+- Documentation at line 1038: "attempt: Attempt number (0 for first attempt)"
+- Documentation at line 1340: "attempt: Attempt number (0 for first attempt)"
+- Landscape audit system expects 0-based attempt numbering
+
+Examined `/home/john/elspeth-rapid/src/elspeth/engine/processor.py` at lines 448-470:
+- RowProcessor does NOT use the `on_retry` callback parameter
+- Instead implements its own 0-based `attempt_tracker` workaround (lines 449-453)
+- Passes 0-based attempt to `execute_transform()` at line 459
+- This workaround avoids the bug but leaves the API contract broken
+
+Examined `/home/john/elspeth-rapid/tests/engine/test_retry.py` at lines 62-86:
+- Test `test_records_attempts` documents the WRONG behavior
+- Line 85 asserts `attempts[0][0] == 1`, expecting 1-based numbering from first retry
+- This test validates the bug rather than the correct behavior
+
+**Git History:**
+
+- Bug filed 2026-01-21 at commit ae2c0e6
+- Checked commits since 2026-01-21: no fixes applied to retry.py for this issue
+- The `attempt_tracker` workaround existed from RC1 (commit c786410, 2026-01-22)
+- No commits mention "1-based", "0-based", or attempt indexing normalization
+
+**Root Cause Confirmed:**
+
+YES - the bug is still present in the code:
+
+1. **API Contract Violation:** `RetryManager.execute_with_retry()` accepts an `on_retry` callback but passes 1-based attempt numbers from tenacity, violating the system-wide 0-based convention
+2. **Latent Bug:** Currently not exploited because RowProcessor doesn't use `on_retry` - it implements a workaround
+3. **Test Documents Wrong Behavior:** The test validates that `on_retry` receives 1-based numbers, which is the bug
+4. **Future Risk:** If any code starts using the `on_retry` callback parameter, it will receive misaligned attempt numbers
+
+**Recommendation:**
+
+**Keep open** - this is a valid API contract violation that should be fixed:
+
+**Fix Strategy:**
+1. Normalize attempt number in retry.py line 171: `on_retry(attempt - 1, e)`
+2. Update test at line 85 to expect 0-based: `assert attempts[0][0] == 0`
+3. Update docstring for `on_retry` parameter to document 0-based convention
+4. Consider adding a test that verifies `on_retry` attempt numbers match what would be passed to `recorder.record_node_state()`
+
+**Rationale:** While not currently causing failures, this violates the principle of least surprise and creates a landmine for future developers who might use `on_retry` expecting system-standard 0-based numbering.

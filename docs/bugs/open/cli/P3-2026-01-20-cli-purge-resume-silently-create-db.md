@@ -104,3 +104,68 @@ Similar repro:
 ## Notes / Links
 
 - Related issues/PRs: N/A
+
+---
+
+## VERIFICATION: 2026-01-25
+
+**Status:** STILL VALID
+
+**Verified By:** Claude Code P3 verification wave 2
+
+**Current Code Analysis:**
+
+The bug is confirmed to still exist in the current codebase. Both `purge` and `resume` commands call `LandscapeDB.from_url(db_url)` without checking if the database file exists first.
+
+**Current code locations:**
+- `purge` command: `/home/john/elspeth-rapid/src/elspeth/cli.py:932-1088` (line 1043 calls `LandscapeDB.from_url(db_url)`)
+- `resume` command: `/home/john/elspeth-rapid/src/elspeth/cli.py:1219-1405` (line 1291 calls `LandscapeDB.from_url(db_url)`)
+
+**Reproduction confirmed:**
+
+```bash
+# Purge command creates empty database
+$ rm -f /tmp/typo-landscape.db
+$ elspeth purge --dry-run --database /tmp/typo-landscape.db
+No payloads older than 90 days found.
+$ ls -la /tmp/typo-landscape.db
+-rw-r--r-- 1 john john 299008 Jan 25 02:02 /tmp/typo-landscape.db
+
+# Resume command creates empty database
+$ rm -f /tmp/typo-resume.db
+$ elspeth resume some-fake-run --database /tmp/typo-resume.db
+Cannot resume run some-fake-run: Run some-fake-run not found
+$ ls -la /tmp/typo-resume.db
+-rw-r--r-- 1 john john 299008 Jan 25 02:02 /tmp/typo-resume.db
+```
+
+Both commands silently create a 299KB SQLite database file with empty tables when the specified path doesn't exist.
+
+**Git History:**
+
+No commits since 2026-01-20 have addressed this issue. The commands have been refactored (line numbers changed from the original bug report), but the underlying behavior remains the same. Related commits focused on other aspects:
+- `bea9bba` - Added EventBus progress reporting to resume
+- `879d8ac` - Updated resume to use from_plugin_instances
+- Various other resume/checkpoint fixes, but none addressed the silent DB creation issue
+
+**Root Cause Confirmed:**
+
+`LandscapeDB.from_url()` defaults to `create_tables=True` and always creates the database file if it doesn't exist. Neither `purge` nor `resume` pass `create_tables=False` or check for file existence before calling `from_url()`.
+
+The current code at line 1043 (purge) and line 1291 (resume):
+```python
+db = LandscapeDB.from_url(db_url)
+```
+
+This calls `from_url()` with default `create_tables=True`, which creates both the file and schema via `metadata.create_all(engine)` at line 229 of `/home/john/elspeth-rapid/src/elspeth/core/landscape/database.py`.
+
+**Recommendation:**
+
+Keep open. This is a valid UX bug that can confuse operators:
+
+1. A typo in `--database` path creates a new empty DB instead of failing
+2. The command appears to succeed but operates on the wrong database
+3. Operators may miss needed purges/resumes on the actual database
+4. Filesystem pollution with 299KB files in unexpected locations
+
+The fix should check `Path(database).exists()` before calling `from_url()` for maintenance commands, or pass `create_tables=False` and handle the resulting error with a clear message about the missing database.

@@ -89,3 +89,76 @@
 
 - Related issues/PRs: N/A
 - Related design docs: N/A
+
+---
+
+## VERIFICATION: 2026-01-25
+
+**Status:** STILL VALID
+
+**Verified By:** Claude Code P2 verification wave 5
+
+**Current Code Analysis:**
+
+The bug is **confirmed present** in the current codebase. The issue exists at lines 79-84 of `/home/john/elspeth-rapid/src/elspeth/engine/retry.py`:
+
+```python
+@classmethod
+def from_policy(cls, policy: RetryPolicy | None) -> "RetryConfig":
+    """Factory from plugin policy dict with safe defaults.
+
+    Handles missing/malformed policy gracefully.
+    This is a trust boundary - external config may have invalid values.
+    """
+    if policy is None:
+        return cls.no_retry()
+
+    return cls(
+        max_attempts=max(1, policy.get("max_attempts", 3)),
+        base_delay=max(0.01, policy.get("base_delay", 1.0)),
+        max_delay=max(0.1, policy.get("max_delay", 60.0)),
+        jitter=max(0.0, policy.get("jitter", 1.0)),
+    )
+```
+
+The docstring claims the method "handles missing/malformed policy gracefully" and notes "This is a trust boundary - external config may have invalid values." However, the implementation does NOT handle non-numeric types.
+
+**Test Results:**
+
+Empirical testing confirms the bug:
+- String values: `{'max_attempts': '3'}` → `TypeError: '>' not supported between instances of 'str' and 'int'`
+- None values: `{'max_attempts': None}` → `TypeError: '>' not supported between instances of 'NoneType' and 'int'`
+- Negative numeric values: `{'max_attempts': -5}` → Works correctly (clamped to 1)
+
+The existing test in `tests/engine/test_retry.py::test_from_policy_handles_malformed()` only covers negative numeric values, not non-numeric types.
+
+**Git History:**
+
+The code has been stable since initial implementation:
+- `f2f3e2b` - feat(engine): implement RetryManager with tenacity integration (original)
+- `db0d187` - feat(contracts): add RetryPolicy TypedDict
+- `443114a` - feat(retry): add RetryConfig.from_settings() factory
+- `c786410` - ELSPETH - Release Candidate 1
+
+No commits have addressed this type validation issue.
+
+**Root Cause Confirmed:**
+
+YES. The `from_policy()` method uses `max()` directly on `policy.get()` results without type validation or coercion. When plugin configuration contains non-numeric values (strings, None, etc.), the comparison in `max()` raises `TypeError`.
+
+This violates the Three-Tier Trust Model stated in CLAUDE.md:
+- Plugin configuration is a **trust boundary** (similar to external data)
+- The method's docstring explicitly claims graceful handling
+- The crash on malformed types contradicts both the docstring contract and the trust boundary principle
+
+**Recommendation:**
+
+**Keep open** - This is a valid P2 bug that should be fixed. The fix should:
+
+1. Add type validation/coercion in `from_policy()` before calling `max()`
+2. Handle string-numeric coercion (e.g., `"3"` → `3`)
+3. Treat non-coercible values as missing (use defaults)
+4. Add test cases for: string values, None values, non-numeric strings, mixed types
+5. Consider whether to raise `PluginConfigError` with clear message vs. silent fallback to defaults
+
+The bug has moderate impact (crashes on misconfigured plugins) but is unlikely to occur in production with validated configuration. However, it represents a gap between contract (docstring) and implementation.

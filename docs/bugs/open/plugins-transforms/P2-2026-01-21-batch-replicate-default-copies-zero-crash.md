@@ -89,3 +89,97 @@
 
 - Related issues/PRs: N/A
 - Related design docs: docs/contracts/plugin-protocol.md
+
+---
+
+## VERIFICATION: 2026-01-25
+
+**Status:** STILL VALID
+
+**Verified By:** Claude Code P2 verification wave 6a
+
+**Current Code Analysis:**
+
+Examined `/home/john/elspeth-rapid/src/elspeth/plugins/transforms/batch_replicate.py` (current HEAD):
+
+1. **Configuration validation (lines 25-38):** `default_copies` field has NO minimum constraint:
+   ```python
+   default_copies: int = Field(
+       default=1,
+       description="Default number of copies if copies_field is missing or invalid",
+   )
+   ```
+   - Missing `ge=1` constraint that would reject default_copies <= 0 at config load time
+   - Tested with Pydantic: values of 0 and -5 are accepted without error
+
+2. **Runtime protection INCOMPLETE (lines 133-141):**
+   ```python
+   copies = self._default_copies  # Line 133: If default_copies=0, copies=0
+   if self._copies_field in row:
+       raw_copies = row[self._copies_field]
+       try:
+           copies = int(raw_copies)
+           if copies < 1:  # Line 138
+               copies = self._default_copies  # Line 139: Falls back to 0!
+       except (TypeError, ValueError):
+           copies = self._default_copies  # Also falls back to 0!
+   ```
+   - The check `if copies < 1: copies = self._default_copies` creates a circular fallback
+   - When `self._default_copies = 0`, the fallback doesn't help
+   - This protects against row data having copies<1 ONLY when default_copies is valid (>=1)
+
+3. **Empty output_rows scenario (line 144-151):**
+   ```python
+   for copy_idx in range(copies):  # range(0) = zero iterations
+       output = dict(row)
+       if self._include_copy_index:
+           output["copy_index"] = copy_idx
+       output_rows.append(output)
+
+   return TransformResult.success_multi(output_rows)  # ValueError if empty
+   ```
+   - If ALL rows in batch have missing/invalid `copies_field` AND `default_copies=0`, then `output_rows` remains empty
+   - `TransformResult.success_multi([])` raises ValueError per line 116-117 of `/home/john/elspeth-rapid/src/elspeth/contracts/results.py`
+
+**Git History:**
+
+- Original implementation: commit `a43f20a` (feat(plugins): add batch_replicate transform for deaggregation)
+- Only change since creation: commit `7ee7c51` (feat: add self-validation to all builtin plugins) - added `_validate_self_consistency()` method but did NOT add validation for default_copies
+- The runtime check at lines 138-139 was present from the original commit
+- NO commits have addressed the default_copies validation issue
+
+**Root Cause Confirmed:**
+
+YES, bug is still present. The root cause remains:
+
+1. **Primary issue:** `BatchReplicateConfig.default_copies` has no Pydantic constraint (missing `ge=1`)
+2. **Secondary issue:** Runtime fallback logic at line 138-139 is circular - falls back to the invalid default_copies value itself
+3. **Crash trigger:** When `default_copies=0` and a batch has rows without valid `copies_field` values, `output_rows` becomes empty, causing `success_multi([])` to raise ValueError
+
+**Reproduction scenario:**
+```yaml
+aggregations:
+  - name: replicate_batch
+    plugin: batch_replicate
+    trigger:
+      count: 5
+    output_mode: transform
+    options:
+      schema:
+        fields: dynamic
+      copies_field: quantity
+      default_copies: 0  # ← Config validation accepts this
+```
+
+With input batch where `quantity` field is missing → crash with "success_multi requires at least one row"
+
+**Recommendation:**
+
+Keep open - bug confirmed valid and unfixed. Two-part fix needed:
+
+1. **Config validation:** Add `ge=1` constraint to `default_copies` field in `BatchReplicateConfig`
+2. **Runtime safety:** Either:
+   - Fix circular fallback at lines 138-139 to use hardcoded minimum (e.g., `max(copies, 1)`)
+   - OR guard before `success_multi()` call to handle edge case if config validation somehow fails
+
+Priority should remain P2 - this is a configuration error that would be caught quickly in testing, but represents a crash-on-invalid-config scenario that violates principle of graceful degradation.

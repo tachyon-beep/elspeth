@@ -96,3 +96,92 @@
 
 - Related issues/PRs: `docs/bugs/closed/P2-2026-01-19-non-finite-floats-pass-source-validation.md`
 - Related design docs: `CLAUDE.md`
+
+---
+
+## VERIFICATION: 2026-01-25
+
+**Status:** STILL VALID
+
+**Verified By:** Claude Code P2 verification wave 6a
+
+**Current Code Analysis:**
+
+The bug remains valid despite the fix for the related bug P2-2026-01-19. Here's why:
+
+1. **P2-2026-01-19 (CLOSED)**: Fixed NaN/Infinity for **explicitly typed float fields** by introducing `FiniteFloat = Annotated[float, Field(allow_inf_nan=False)]` in schema_factory.py (commit 5063fc0)
+
+2. **P2-2026-01-21 (THIS BUG)**: Addresses a different attack vector - NaN/Infinity in **dynamic schemas or `any` fields**
+
+**The Gap:**
+
+The `FiniteFloat` fix only applies when a field is explicitly typed as `float`. However:
+- Dynamic schemas (`{"fields": "dynamic"}`) accept any fields with any types - no validation
+- Fields typed as `any` accept any value without type checking
+- Both cases allow `json.loads()` to parse NaN/Infinity tokens into actual `float('nan')`/`float('inf')` values
+
+**Verification Test Results:**
+
+```python
+# Test 1: json.loads accepts NaN tokens (confirmed)
+>>> json.loads('{"score": NaN}')
+{'score': nan}
+
+# Test 2: Dynamic schemas accept the resulting float('nan') (confirmed)
+>>> DynamicModel(value=float('nan'))  # With value: Any
+DynamicModel(value=nan)  # Accepted!
+
+# Test 3: Downstream canonical.py correctly rejects it (confirmed)
+>>> canonical_json({'score': float('nan')})
+ValueError: Cannot canonicalize non-finite float: nan. Use None for missing values, not NaN.
+```
+
+**Current Code State:**
+
+- `src/elspeth/plugins/sources/json_source.py:133` - Uses `json.loads(line)` without `parse_constant` parameter
+- `src/elspeth/plugins/sources/json_source.py:161` - Uses `json.load(f)` without `parse_constant` parameter
+- Dynamic schema creation in schema_factory.py:83-91 uses `extra="allow"` with no field validation
+
+**Git History:**
+
+- Commit 5063fc0 (2026-01-21): Fixed typed float fields with `FiniteFloat`
+- Commit 970a42c: Extended fix to Decimal values in canonicalization
+- Commit ac1832d: Fixed landscape to handle non-canonical data in validation errors
+- No commits address the JSON parsing layer or dynamic schema gap
+
+**Root Cause Confirmed:**
+
+Yes. Python's `json.load()`/`json.loads()` accept non-standard JSON constants (NaN, Infinity, -Infinity) by default. When JSONSource uses these functions without the `parse_constant` parameter, these values become actual Python floats that:
+1. Pass through dynamic schemas (no type validation)
+2. Pass through `any` typed fields (no type constraints)
+3. Later crash in `canonical_json()` when computing hashes
+
+This is a **Tier 3 trust boundary violation** - invalid external data should be quarantined at ingestion, not crash downstream.
+
+**Recommendation:**
+
+**Keep open.** This is a distinct bug from P2-2026-01-19 and requires a different fix:
+
+**Proposed Solution:**
+Add `parse_constant` parameter to `json.load()`/`json.loads()` calls in JSONSource to reject non-standard constants at parse time:
+
+```python
+def _reject_nonfinite(value: str) -> float:
+    """Reject NaN/Infinity tokens per canonical JSON policy."""
+    raise ValueError(f"Non-standard JSON constant '{value}' not allowed. Use null for missing values.")
+
+# In _load_jsonl and _load_json_array:
+row = json.loads(line, parse_constant=_reject_nonfinite)
+data = json.load(f, parse_constant=_reject_nonfinite)
+```
+
+This would:
+- Catch NaN/Infinity at parse time (before Pydantic validation)
+- Be caught by existing JSONDecodeError handlers (lines 132-153, 160-181)
+- Route to quarantine via `on_validation_failure` policy
+- Align with Three-Tier Trust Model (reject invalid external data at boundary)
+
+**Tests needed:**
+- JSONL with `{"score": NaN}` + dynamic schema → expect quarantine
+- JSON array with `[{"value": Infinity}]` + any field → expect quarantine
+- Verify error message includes line number and helpful guidance

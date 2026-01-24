@@ -94,3 +94,76 @@
 
 - Related issues/PRs: N/A
 - Related design docs: N/A
+
+---
+
+## VERIFICATION: 2026-01-25
+
+**Status:** STILL VALID
+
+**Verified By:** Claude Code P2 verification wave 4a
+
+**Current Code Analysis:**
+
+The bug is **confirmed present** in the current code. Examining `/home/john/elspeth-rapid/src/elspeth/plugins/azure/blob_sink.py`:
+
+**Line 349-350 (in `_serialize_csv`):**
+```python
+# Determine fieldnames from first row
+fieldnames = list(rows[0].keys())
+```
+
+This code naively extracts fieldnames from the first row's keys with zero schema awareness. The sink has access to `self._schema_config` (stored at line 254) but completely ignores it during CSV serialization.
+
+**Comparison with CSVSink:**
+
+CSVSink has the correct implementation at `/home/john/elspeth-rapid/src/elspeth/plugins/sinks/csv_sink.py:212-225`:
+
+```python
+def _get_fieldnames_from_schema_or_row(self, row: dict[str, Any]) -> list[str]:
+    """Get fieldnames from schema or row keys.
+
+    When schema is explicit, returns field names from schema definition.
+    This ensures optional fields are present in the header.
+
+    When schema is dynamic, falls back to inferring from row keys.
+    """
+    if not self._schema_config.is_dynamic and self._schema_config.fields:
+        # Explicit schema: use field names from schema definition
+        return [field_def.name for field_def in self._schema_config.fields]
+    else:
+        # Dynamic schema: infer from row keys
+        return list(row.keys())
+```
+
+CSVSink properly handles both explicit schemas (using schema field definitions) and dynamic schemas (falling back to row keys). This was introduced in the RC-1 release (commit c786410).
+
+**Git History:**
+
+No commits have addressed this issue. Recent commits to `blob_sink.py`:
+- `7ee7c51` - Added self-validation (unrelated)
+- `80717aa` - Fixed empty batch path rendering bug (unrelated)
+- `c786410` - RC-1 release (when CSVSink got schema-aware headers)
+
+AzureBlobSink was implemented before the schema-aware header pattern was established in CSVSink, and was never updated to match.
+
+**Root Cause Confirmed:**
+
+Yes, the bug is present exactly as described. The `_serialize_csv` method:
+1. Ignores `self._schema_config` completely
+2. Uses only `rows[0].keys()` for fieldnames (line 350)
+3. Will fail if later rows have additional fields (csv.DictWriter default behavior)
+4. Will silently omit optional schema fields not present in the first row
+
+**Test Coverage Gap:**
+
+Examined `/home/john/elspeth-rapid/tests/plugins/azure/test_blob_sink.py`. While there are basic CSV tests (`test_write_csv_to_blob`, `test_csv_with_custom_delimiter`, `test_csv_without_header`), none test:
+- Explicit schema with optional fields
+- First row missing fields that later rows contain
+- Schema-driven header selection
+
+All tests use `DYNAMIC_SCHEMA = {"fields": "dynamic"}`, which masks the bug.
+
+**Recommendation:**
+
+**Keep open.** This is a legitimate bug with clear architectural deviation from CSVSink's established pattern. The fix is straightforward (extract and reuse the `_get_fieldnames_from_schema_or_row` logic), and the impact is real (data loss for optional fields, crashes for variant row structures).

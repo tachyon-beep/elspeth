@@ -97,3 +97,66 @@ Alternate repro:
 
 - Related issues/PRs: N/A
 - Related design docs: `CLAUDE.md`
+
+---
+
+## VERIFICATION: 2026-01-25
+
+**Status:** STILL VALID
+
+**Verified By:** Claude Code P2 verification wave 6a
+
+**Current Code Analysis:**
+
+The bug is **confirmed present** in the current codebase. Examining `/home/john/elspeth-rapid/src/elspeth/plugins/sources/json_source.py` lines 184-188:
+
+```python
+# Extract from nested key if specified
+if self._data_key:
+    data = data[self._data_key]  # Line 185 - UNGUARDED ACCESS
+
+if not isinstance(data, list):
+    raise ValueError(f"Expected JSON array, got {type(data).__name__}")
+```
+
+**Problems identified:**
+
+1. **Missing dict check**: If `data` is a list and `data_key` is set, line 185 will raise `TypeError: list indices must be integers or slices, not str` instead of quarantining
+2. **Missing key check**: If `data` is a dict but `data_key` doesn't exist, line 185 will raise `KeyError` instead of quarantining
+
+Both scenarios violate the Three-Tier Trust Model (CLAUDE.md) - external data structure errors should be quarantined, not crash the pipeline.
+
+**Test coverage gap:**
+
+The test suite has one test for `data_key` (line 118: `test_json_object_with_data_key`) but it only tests the happy path where the key exists and the root is a dict. No tests exist for:
+- Missing `data_key` in JSON object
+- `data_key` configured when root is a list
+- `data_key` configured when root is neither dict nor list
+
+**Git History:**
+
+Related commits examined:
+- `cec7dbb` (2026-01-23): Fixed `JSONDecodeError` handling in array files - different issue
+- `ff2fcea` (earlier): Fixed JSONL parse errors - different issue
+
+No commits address the `data_key` validation issue. The similar bug P1-2026-01-21-jsonsource-array-parse-errors-crash was closed as fixed (commit `cec7dbb`), but that only handled JSON parse errors, not structural mismatches with `data_key`.
+
+**Root Cause Confirmed:**
+
+YES. The unguarded dictionary access on line 185 will crash when:
+1. User configures `data_key: "results"` but JSON file is `[{"id": 1}]` (list root) → `TypeError`
+2. User configures `data_key: "results"` but JSON file is `{"items": [...]}` (key missing) → `KeyError`
+3. External data changes structure (API returns list instead of object) → crash instead of graceful handling
+
+This is a Tier 3 trust boundary violation - external data shape should not crash the pipeline.
+
+**Recommendation:**
+
+**Keep open** - bug is valid and needs fixing. The fix should:
+
+1. Validate `data` is a dict before accessing `data_key`
+2. Validate `data_key` exists in the dict
+3. If either check fails, record validation error with `schema_mode="structure"` and quarantine/discard per config
+4. Add tests for both failure scenarios (missing key, wrong root type)
+
+Pattern should match existing `JSONDecodeError` handling (lines 160-181) which correctly treats parse errors as Tier 3 quarantine events.

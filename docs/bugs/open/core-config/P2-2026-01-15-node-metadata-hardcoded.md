@@ -98,3 +98,94 @@
 - This may be acceptable since config gates are engine-internal expression evaluators, not user-facing plugins
 
 **Recommendation:** Consider closing as "by design" - config gates don't have plugin instances and their behavior is deterministic by nature. Alternatively, define a version scheme for the config gate "pseudo-plugin".
+
+---
+
+## VERIFICATION: 2026-01-25
+
+**Status:** STILL VALID
+
+**Verified By:** Claude Code P2 verification wave 6c
+
+**Current Code Analysis:**
+
+The bug is confirmed present in `/home/john/elspeth-rapid/src/elspeth/engine/orchestrator.py` at lines 646-649:
+
+```python
+if node_id in config_gate_node_ids:
+    # Config gates are deterministic (expression evaluation is deterministic)
+    plugin_version = "1.0.0"
+    determinism = Determinism.DETERMINISTIC
+```
+
+Similarly, aggregation nodes (lines 650-654) and coalesce nodes (lines 655-658) also use hardcoded `plugin_version="1.0.0"` and `determinism=Determinism.DETERMINISTIC`.
+
+**Context and Scope:**
+
+1. **Plugin nodes (source, transforms, sinks):** These were successfully fixed in commit 7144be3 (2026-01-15) and now correctly extract metadata from plugin instances (lines 663-668).
+
+2. **Config gates:** These are engine-internal nodes created from `GateSettings` configuration objects. They:
+   - Use `ExpressionParser` (in `src/elspeth/engine/expression_parser.py`) for condition evaluation
+   - Have no plugin instances - they're created directly in the DAG from config
+   - Are executed by `GateExecutor.execute_config_gate()` (in `src/elspeth/engine/executors.py:475`)
+   - Are named with pattern `config_gate:{name}` in the DAG
+
+3. **Aggregations and Coalesce nodes:** These are covered by separate bug P2-2026-01-21-orchestrator-aggregation-metadata-hardcoded.md (verified as STILL VALID). Aggregations DO have plugin instances but aren't included in the `node_to_plugin` mapping.
+
+**Git History:**
+
+- Commit a7d2099 (2026-01-18): When config gates were first integrated, they were intentionally given hardcoded metadata with this design note: "Determinism: Config gates marked DETERMINISTIC (expression eval is pure)"
+- Commit 7144be3 (2026-01-15): Fixed plugin node metadata but explicitly excluded config gates
+- No subsequent commits have addressed config gate versioning
+
+**Root Cause Confirmed:**
+
+Yes. Config gates are fundamentally different from plugin-based nodes:
+
+- They have no plugin class or instance to extract metadata from
+- They're pure configuration artifacts evaluated by the engine's `ExpressionParser`
+- Their behavior is controlled by the expression parser implementation, not a plugin
+
+However, the current `plugin_version="1.0.0"` is a placeholder that doesn't reflect:
+- The ELSPETH engine version (currently "0.1.0" in `src/elspeth/__init__.py`)
+- The `ExpressionParser` version or capabilities
+- Changes to gate evaluation semantics over time
+
+**Design Question:**
+
+The core question is whether config gates SHOULD have version tracking:
+
+**Arguments for "by design" (close as not a bug):**
+- Config gates are configuration, not plugins
+- Expression evaluation is deterministic and simple (just Python AST parsing)
+- Changes to expression parser would likely be breaking changes requiring migration anyway
+- The audit trail already distinguishes them with `plugin_name=config_gate:{name}`
+
+**Arguments for fixing:**
+- ELSPETH's auditability standard: "Every decision must be traceable to source data, configuration, **and code version**"
+- If expression parser semantics change (e.g., adding new operators, changing type coercion), old audit records won't show which version was used
+- Reproducibility: To replay a run, you need to know which expression evaluator version was used
+- Consistency: All other nodes use real versions, only config gates use placeholders
+
+**Recommendation:**
+
+**Keep open as valid P2 issue.** While config gates don't have plugin instances, they still represent code execution (via `ExpressionParser`) that could change over time. The audit trail should reflect which version of the engine/expression parser was used.
+
+**Suggested Fix:**
+
+Use the ELSPETH engine version from `elspeth.__version__` for all engine-internal nodes (config gates, coalesce):
+
+```python
+from elspeth import __version__ as ENGINE_VERSION
+
+if node_id in config_gate_node_ids:
+    plugin_version = f"engine:{ENGINE_VERSION}"
+    determinism = Determinism.DETERMINISTIC
+elif node_id in coalesce_node_ids:
+    plugin_version = f"engine:{ENGINE_VERSION}"
+    determinism = Determinism.DETERMINISTIC
+```
+
+This clearly indicates these are engine operations (not plugins) while still providing version traceability for audit purposes.
+
+**Note:** Aggregations should be handled separately per P2-2026-01-21-orchestrator-aggregation-metadata-hardcoded.md as they DO have plugin instances.

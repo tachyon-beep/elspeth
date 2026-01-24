@@ -89,3 +89,78 @@
 
 - Related issues/PRs: N/A
 - Related design docs: `docs/contracts/plugin-protocol.md`
+
+---
+
+## VERIFICATION: 2026-01-25
+
+**Status:** STILL VALID
+
+**Verified By:** Claude Code P3 verification wave 3
+
+**Current Code Analysis:**
+
+The bug is still present in the current codebase at `/home/john/elspeth-rapid/src/elspeth/plugins/sinks/database_sink.py`.
+
+Lines 215-229 show the exact issue:
+
+```python
+# Lines 215-219: Compute canonical JSON payload BEFORE any database operation
+payload_json = json.dumps(rows, sort_keys=True, separators=(",", ":"))
+payload_bytes = payload_json.encode("utf-8")
+content_hash = hashlib.sha256(payload_bytes).hexdigest()
+payload_size = len(payload_bytes)  # This is 2 for "[]"
+
+# Lines 221-229: Empty batch handling
+if not rows:
+    # Empty batch - return descriptor without DB operations
+    return ArtifactDescriptor.for_database(
+        url=self._sanitized_url,
+        table=self._table_name,
+        content_hash=content_hash,
+        payload_size=0,  # BUG: Hardcoded to 0, should be payload_size (which is 2)
+        row_count=0,
+    )
+```
+
+The code correctly computes `payload_size = len(payload_bytes)` which evaluates to `2` for the JSON string `"[]"`. However, when returning the ArtifactDescriptor for empty batches, it hardcodes `payload_size=0` instead of using the computed variable.
+
+**Git History:**
+
+Searched commits since 2026-01-21:
+- `7ee7c51` - feat: add self-validation to all builtin plugins (not related)
+- `dd3bed7` - fix(security): honor dev-mode override in DatabaseSink (not related)
+- `57c57f5` - fix: resolve 8 RC1 bugs (fixed different DatabaseSink bug about if_exists="replace")
+
+None of these commits addressed the payload_size inconsistency.
+
+**Root Cause Confirmed:**
+
+Yes, the bug is still present. The inconsistency is:
+
+1. `content_hash = hashlib.sha256(payload_bytes).hexdigest()` hashes the full JSON payload `"[]"` (2 bytes)
+2. `payload_size=0` is hardcoded in the return statement instead of using the computed `payload_size` variable
+
+This creates an internal inconsistency where the hash represents 2 bytes of content but the size field claims 0 bytes.
+
+**Test Evidence:**
+
+The bug is codified in the test at `/home/john/elspeth-rapid/tests/plugins/sinks/test_database_sink.py:153-168`:
+
+```python
+def test_batch_write_empty_list(self, db_url: str, ctx: PluginContext) -> None:
+    """Batch write with empty list returns descriptor with zero size."""
+    # ...
+    artifact = sink.write([], ctx)
+
+    assert artifact.size_bytes == 0  # Test expects buggy behavior
+    # Empty payload hash
+    empty_json = json.dumps([], sort_keys=True, separators=(",", ":"))
+    assert artifact.content_hash == hashlib.sha256(empty_json.encode()).hexdigest()
+```
+
+The test explicitly asserts `size_bytes == 0` while also verifying the hash matches `"[]"`, proving the inconsistency exists and is tested for.
+
+**Recommendation:**
+
+Keep open. This is a valid P3 bug that violates the internal consistency contract between `content_hash` and `size_bytes`. The fix is trivial: change line 227 from `payload_size=0` to `payload_size=payload_size` (or just `payload_size` for brevity). The corresponding test assertion at line 164 should be updated to `assert artifact.size_bytes == 2` to verify the fix.

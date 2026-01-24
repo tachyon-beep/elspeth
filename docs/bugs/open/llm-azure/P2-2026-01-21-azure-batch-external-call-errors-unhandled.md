@@ -91,3 +91,108 @@
 
 - Related issues/PRs: N/A
 - Related design docs: CLAUDE.md auditability standard
+
+---
+
+## VERIFICATION: 2026-01-25
+
+**Status:** STILL VALID
+
+**Verified By:** Claude Code P2 verification wave 4a
+
+**Current Code Analysis:**
+
+Examined `/home/john/elspeth-rapid/src/elspeth/plugins/llm/azure_batch.py` (current HEAD on `fix/rc1-bug-burndown-session-4` branch).
+
+**The bug is CONFIRMED - all four Azure OpenAI API calls lack error handling:**
+
+1. **Line 412-415**: `client.files.create()` - No try/except wrapper
+2. **Line 432-436**: `client.batches.create()` - No try/except wrapper
+3. **Line 494**: `client.batches.retrieve()` - No try/except wrapper
+4. **Line 602**: `client.files.content()` - No try/except wrapper
+
+Each call has `ctx.record_call()` with `status=CallStatus.SUCCESS` hardcoded, meaning:
+- If the API call raises an exception (network error, auth failure, HTTP 500, rate limit, etc.), it propagates unhandled
+- No audit record is created for the failed call
+- Pipeline crashes instead of returning `TransformResult.error()`
+- No error routing to `on_error` sink is possible
+
+**Comparison with Standard Azure LLM Transform:**
+
+In `src/elspeth/plugins/llm/azure.py`, external LLM calls ARE properly wrapped:
+
+```python
+# Line 261-277 in azure.py
+try:
+    response = llm_client.chat_completion(
+        model=self._model,
+        messages=messages,
+        temperature=self._temperature,
+        max_tokens=self._max_tokens,
+    )
+except RateLimitError as e:
+    return TransformResult.error(
+        {"reason": "rate_limited", "error": str(e)},
+        retryable=True,
+    )
+except LLMClientError as e:
+    return TransformResult.error(
+        {"reason": "llm_call_failed", "error": str(e)},
+        retryable=e.retryable,
+    )
+```
+
+**This pattern is NOT applied to Azure Batch transform external calls.**
+
+**Git History:**
+
+Relevant commits since bug report (2026-01-21):
+- `d647d4b` (2026-01-20): Added `ctx.record_call()` audit recording around API calls - BUT did NOT add error handling
+- `2a9015c` (2026-01-20): Fixed quality issues (O(n²) loop, checkpoint API) - did NOT address error handling
+- `0e2f6da` (recent): Added validation to remaining plugins - did NOT add error handling for external calls
+
+**No commits have addressed the missing error handling around Azure API calls.**
+
+**Test Coverage Gap:**
+
+`tests/plugins/llm/test_azure_batch.py` contains:
+- Tests for batch-level failures (cancelled, expired, failed status)
+- Tests for template rendering errors
+- Tests for per-row API errors in results
+
+**Missing tests:**
+- Network failures during `files.create()` upload
+- Auth failures during `batches.create()`
+- HTTP errors during `batches.retrieve()` polling
+- Download failures during `files.content()`
+
+**Root Cause Confirmed:**
+
+The Azure Batch transform was implemented with audit recording (`ctx.record_call()`) but WITHOUT defensive error handling at external system boundaries. This violates CLAUDE.md guidance:
+
+> "External API calls should be wrapped - External system, anything can happen"
+
+The standard Azure LLM transform correctly wraps external calls and returns `TransformResult.error()`. Azure Batch does not follow this pattern.
+
+**Architectural Impact:**
+
+This is a **P2 data integrity issue** because:
+1. Failed external calls don't generate audit records (violates auditability standard)
+2. Pipeline crashes prevent error routing to quarantine/on_error sinks
+3. No retry classification (all errors are non-retryable crashes)
+4. Debugging requires log archaeology instead of structured error data
+
+**Recommendation:**
+
+**Keep open** - Bug is valid and unfixed. Implementation required:
+
+1. Wrap all four Azure OpenAI client calls with try/except blocks
+2. Catch appropriate exception types (likely from `openai` library: `APIError`, `RateLimitError`, `APIConnectionError`, etc.)
+3. Return `TransformResult.error()` with structured reason and retryable classification
+4. Record failed calls with `ctx.record_call(status=CallStatus.ERROR, ...)`
+5. Add test coverage for network/auth/HTTP failures during each API operation
+
+Priority should remain **P2** (not P0/P1) because:
+- Workaround exists (retry the run manually)
+- Only affects batch transforms (not standard transforms)
+- Requires specific failure conditions (bad credentials, network issues, Azure outages)

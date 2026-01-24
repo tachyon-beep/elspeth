@@ -97,3 +97,97 @@
 
 - Related issues/PRs: N/A
 - Related design docs: `CLAUDE.md`
+
+---
+
+## VERIFICATION: 2026-01-25
+
+**Status:** STILL VALID
+
+**Verified By:** Claude Code P2 verification wave 5
+
+**Current Code Analysis:**
+
+Examined the current state of `src/elspeth/engine/executors.py` and confirmed:
+
+1. **TransformExecutor.execute_transform()** (line 169):
+   - Sets `ctx.state_id = state.state_id`
+   - Sets `ctx.node_id = transform.node_id`
+   - Resets `ctx._call_index = 0`
+   - This was added to enable transforms to call `ctx.record_call()`
+
+2. **AggregationExecutor.execute_flush()** (line 930):
+   - Sets `ctx.state_id = state.state_id`
+   - Sets `ctx.node_id = node_id`
+   - Resets `ctx._call_index = 0`
+   - This enables batch transforms to record external calls
+
+3. **GateExecutor.execute_gate()** (lines 356-368):
+   - Creates `state` via `begin_node_state()` at line 357
+   - **DOES NOT set `ctx.state_id`**
+   - **DOES NOT set `ctx.node_id`**
+   - **DOES NOT reset `ctx._call_index`**
+   - Immediately calls `gate.evaluate(token.row_data, ctx)` at line 368
+
+4. **GateExecutor.execute_config_gate()** (lines 515-527):
+   - Creates `state` via `begin_node_state()` at line 515
+   - **DOES NOT set `ctx.state_id`**
+   - **DOES NOT set `ctx.node_id`**
+   - **DOES NOT reset `ctx._call_index`**
+   - Evaluates the gate condition without setting context state
+
+5. **SinkExecutor.write()** (lines 1398-1411):
+   - Creates multiple `state` objects (one per token) at lines 1399-1405
+   - **DOES NOT set `ctx.state_id`**
+   - **DOES NOT set `ctx.node_id`**
+   - **DOES NOT reset `ctx._call_index`**
+   - Immediately calls `sink.write(rows, ctx)` at line 1411
+
+**Pattern Verified:**
+
+The pattern is clear and consistent:
+- Transform executors (TransformExecutor, AggregationExecutor) set `ctx.state_id`, `ctx.node_id`, and `ctx._call_index`
+- Gate executors (both methods) and SinkExecutor do NOT set these fields
+- `PluginContext.record_call()` (line 223 in `src/elspeth/plugins/context.py`) raises `RuntimeError` when `state_id` is None
+
+**Git History:**
+
+Searched git history for relevant commits:
+- Found commits adding `ctx.state_id` setup for transforms (commit shows state_id was intentionally added to transforms)
+- Found commits adding `ctx.state_id` setup for aggregations
+- No commits found adding `ctx.state_id` setup for gates or sinks
+- The bug was reported on 2026-01-21 and no subsequent fixes have been applied
+
+**Current Plugin Usage:**
+
+Searched for gates and sinks that call `ctx.record_call()`:
+- No current gate plugins call `ctx.record_call()`
+- No current sink plugins call `ctx.record_call()`
+- The only plugin using `ctx.record_call()` is `src/elspeth/plugins/llm/azure_batch.py` (a Transform)
+
+This means the bug exists but is **latent** - it hasn't been triggered because no gates/sinks currently attempt to record external calls.
+
+**Root Cause Confirmed:**
+
+Yes. The root cause is exactly as described in the original report:
+- `ctx.state_id` initialization was added for transform execution paths
+- Gates and sinks were never updated with the same pattern
+- Any future gate or sink that needs to record external calls (e.g., a gate that calls an LLM for routing decisions, or a sink that writes to a remote API) will crash with `RuntimeError: Cannot record call: state_id not set`
+
+**Special Consideration for SinkExecutor:**
+
+The sink case is more complex than gates because `SinkExecutor.write()` creates **multiple** node_states (one per token, lines 1398-1405). The proposed fix needs to decide:
+1. Set `ctx.state_id` to the first token's state (as suggested in the original report)
+2. Add a loop to set `ctx.state_id` for each token individually (would require API changes to sink.write())
+3. Add sink-specific call recording that accepts explicit `state_id` parameter
+
+Option 1 (first token's state) is simplest and matches the pattern used by aggregations, where a representative state is chosen.
+
+**Recommendation:**
+
+**Keep open** - Bug is valid and should be fixed before implementing any gates or sinks that make external API calls. The fix is straightforward for gates (mirror the transform pattern), but requires architectural decision for sinks regarding which node_state should own the call records when writing multiple tokens.
+
+Suggested priority remains P2 since:
+- No current plugins are affected (latent bug)
+- Future gates/sinks with external calls will need this
+- Violates auditability standard when triggered

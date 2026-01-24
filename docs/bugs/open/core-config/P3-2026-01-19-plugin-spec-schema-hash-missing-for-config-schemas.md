@@ -95,3 +95,84 @@
 ## Notes / Links
 
 - Related ticket: `docs/bugs/open/2026-01-19-plugin-registries-drift-and-unused-plugin-manager.md`
+
+---
+
+## VERIFICATION: 2026-01-25
+
+**Status:** STILL VALID
+
+**Verified By:** Claude Code P3 verification wave 2
+
+**Current Code Analysis:**
+
+The bug is **100% reproducible** and remains unresolved. Testing confirms:
+
+```python
+# FieldMapper (Transform)
+getattr(FieldMapper, "input_schema", None)  # → None
+getattr(FieldMapper, "output_schema", None)  # → None
+PluginSpec.from_plugin(FieldMapper, NodeType.TRANSFORM)
+  # → input_schema_hash: None, output_schema_hash: None
+
+# CSVSource (Source)
+getattr(CSVSource, "output_schema", None)  # → None
+PluginSpec.from_plugin(CSVSource, NodeType.SOURCE)
+  # → output_schema_hash: None
+```
+
+**Code inspection confirms the architectural mismatch:**
+
+1. **PluginSpec.from_plugin() (manager.py:76-103)** uses `getattr(plugin_cls, "input_schema", None)` and `getattr(plugin_cls, "output_schema", None)` to extract schemas from the **class**.
+
+2. **All built-in plugins** set schemas as **instance attributes** during `__init__`:
+   - `CSVSource.__init__` (csv_source.py:71-78): `self.output_schema = self._schema_class`
+   - `FieldMapper.__init__` (field_mapper.py:67-78): `self.input_schema = ...` and `self.output_schema = ...`
+   - `CSVSink.__init__` (csv_sink.py:82-89): `self.input_schema = self._schema_class`
+
+3. **Schema generation is config-driven**: All plugins call `create_schema_from_config()` with the `schema_config` from their configuration, meaning schemas are dynamically created per-instance, not statically defined on the class.
+
+**Git History:**
+
+No commits have addressed this issue since the bug was reported on 2026-01-19. Recent schema-related work focused on:
+- Schema validation at construction time (commits 0a339fd, 0e2f6da, 7ee7c51)
+- Schema validation protocol changes (commits 430307d, df43269)
+- Node ID determinism for checkpoints (commit 04d5605)
+
+None of these touched `PluginSpec` or the schema hashing mechanism.
+
+**Usage Analysis:**
+
+`PluginSpec` is currently **NOT used in production code**:
+- Exported in `src/elspeth/plugins/__init__.py` (line 58, 113)
+- Only referenced in tests: `test_manager.py`, `test_manager_validation.py`
+- **Not imported by engine, landscape, or any runtime code**
+
+The existing tests use **mock plugins with class-level schemas** (test_manager.py:217-227), which do not exercise the config-driven schema path and therefore pass despite the bug.
+
+**Root Cause Confirmed:**
+
+Yes, 100% confirmed. The bug report's hypothesis is accurate:
+
+> "PluginSpec was designed around static class-level schemas, but the system has moved to config-driven schema generation at instance construction time."
+
+This is a **design-level incompatibility** between `PluginSpec`'s API (class-based) and the plugin system's implementation (instance-based config-driven schemas).
+
+**Recommendation:**
+
+**Keep open** with the following qualifications:
+
+1. **Impact is currently zero** since `PluginSpec` is unused in production code. The bug manifests only if/when the engine or landscape start using `PluginSpec.from_plugin()` for audit metadata.
+
+2. **The bug report's proposed fixes are sound:**
+   - Option A: Add `PluginSpec.from_instance(plugin_instance)` method that reads `instance.input_schema` and `instance.output_schema`
+   - Option B: Hash the `schema_config` dict instead of the generated Pydantic class (more stable for audit trail)
+
+3. **Priority remains P3** - this is a latent bug that will become critical if the planned "Phase 3 Landscape node metadata" feature (mentioned in the architectural docs) starts using `PluginSpec`.
+
+4. **Test coverage gap:** The existing `test_manager.py::TestPluginSpecSchemaHashes` tests use mock plugins with class-level schemas and thus don't catch this bug. A test using an actual config-driven plugin (e.g., `CSVSource`, `FieldMapper`) would immediately fail and document the issue.
+
+**Suggested next steps (when prioritized):**
+- Add failing test case using real config-driven plugin
+- Implement `PluginSpec.from_instance()` or switch to hashing `schema_config`
+- Update engine/landscape to use the new API if schema hashing is needed

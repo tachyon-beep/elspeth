@@ -112,3 +112,57 @@
 ## Notes / Links
 
 - Related issues/PRs: `docs/bugs/open/2026-01-19-export-fails-old-landscape-schema-expand-group-id.md` (schema drift already impacts export)
+
+---
+
+## VERIFICATION: 2026-01-25
+
+**Status:** STILL VALID
+
+**Verified By:** Claude Code P2 verification wave 6c
+
+**Current Code Analysis:**
+
+The bug is still present in the current codebase. Examination of `/home/john/elspeth-rapid/src/elspeth/core/landscape/exporter.py` lines 210-221 confirms that the token export logic only includes:
+
+```python
+yield {
+    "record_type": "token",
+    "run_id": run_id,
+    "token_id": token.token_id,
+    "row_id": token.row_id,
+    "step_in_pipeline": token.step_in_pipeline,
+    "branch_name": token.branch_name,
+    "fork_group_id": token.fork_group_id,
+    "join_group_id": token.join_group_id,
+}
+```
+
+The `expand_group_id` field is missing from this export record, despite being:
+
+1. **Present in the database schema:** `src/elspeth/core/landscape/schema.py` line 107 defines `Column("expand_group_id", String(32), nullable=True, index=True)`
+2. **Present in the Token contract:** `src/elspeth/contracts/audit.py` line 111 includes `expand_group_id: str | None = None`
+3. **Returned by the recorder:** `src/elspeth/core/landscape/recorder.py` line 1812 in `get_tokens()` includes `expand_group_id=r.expand_group_id`
+
+**Git History:**
+
+- Commit `90a0677` (2026-01-19) added `expand_token()` functionality and the `expand_group_id` field to the schema, models, and contracts
+- Commit `0f21ecb` (2026-01-23) modified the exporter to add `NodeStatePending` handling but did not add `expand_group_id`
+- No commits have addressed this omission in the exporter
+
+The exporter received the token expansion infrastructure but was not updated to include the new field in its output schema.
+
+**Root Cause Confirmed:**
+
+Yes. The root cause is exactly as stated in the original bug report: when `expand_group_id` was added to the Landscape schema and Token dataclass in commit `90a0677`, the `LandscapeExporter._iter_records()` method was not updated to include this field in the token record dictionary.
+
+This is a simple oversight in the token export mapping at lines 212-221 of `exporter.py`. The Token object returned by `recorder.get_tokens()` has the field, but the exporter doesn't copy it into the exported record dictionary.
+
+**Recommendation:**
+
+**Keep open.** This is a valid P2 bug that needs fixing. The fix is straightforward:
+
+1. Add `"expand_group_id": token.expand_group_id` to the token record dictionary in `exporter.py` lines 210-221
+2. Add test coverage in `tests/core/landscape/test_exporter.py` to verify expanded tokens export with `expand_group_id`
+
+This is a data integrity issue for audit trail exports - deaggregation lineage cannot be reconstructed from exports without this field, violating the auditability standard that "the audit trail must withstand formal inquiry."

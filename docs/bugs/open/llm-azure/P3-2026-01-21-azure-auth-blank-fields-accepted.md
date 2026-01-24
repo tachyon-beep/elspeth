@@ -95,3 +95,63 @@
 
 - Related issues/PRs: N/A
 - Related design docs: N/A
+
+---
+
+## VERIFICATION: 2026-01-25
+
+**Status:** PARTIALLY FIXED
+
+**Verified By:** Claude Code P3 verification wave 3
+
+**Current Code Analysis:**
+
+The bug report is **partially accurate** - the validation behavior has been improved for some fields but not all:
+
+**FIXED FIELDS (connection_string and sas_token):**
+- Line 85: `has_conn_string = self.connection_string is not None and bool(self.connection_string.strip())`
+- Line 86: `has_sas_token = self.sas_token is not None and bool(self.sas_token.strip()) and self.account_url is not None`
+
+These two fields now properly reject empty/whitespace-only strings using `.strip()` checks.
+
+**STILL VULNERABLE FIELDS (account_url, tenant_id, client_id, client_secret):**
+- Line 87: `has_managed_identity = self.use_managed_identity and self.account_url is not None`
+- Lines 88-95: Service principal validation only checks `is not None` for all four fields:
+  ```python
+  has_service_principal = all([
+      self.tenant_id is not None,
+      self.client_id is not None,
+      self.client_secret is not None,
+      self.account_url is not None,
+  ])
+  ```
+
+**Bug Still Present:** The following configurations would pass validation but fail at runtime:
+1. `use_managed_identity: true` with `account_url: ""` (empty string)
+2. `use_managed_identity: true` with `account_url: "   "` (whitespace only)
+3. Service Principal with any of `tenant_id`, `client_id`, `client_secret`, or `account_url` as empty/whitespace strings
+
+**Test Coverage:**
+- Tests exist for empty/whitespace `connection_string` (lines 72-82 of test_auth.py)
+- Tests exist for empty/whitespace `sas_token` (it would be caught by the `.strip()` check)
+- NO tests exist for empty/whitespace `account_url`, `tenant_id`, `client_id`, or `client_secret`
+
+**Git History:**
+- No commits have specifically addressed this issue
+- The `.strip()` checks for `connection_string` and `sas_token` were present in the original implementation (commit b8a1540)
+- The inconsistency appears to be an oversight - some fields got the proper validation, others did not
+
+**Root Cause Confirmed:**
+YES - The root cause is exactly as described in the bug report. The validation is inconsistent:
+- `connection_string` and `sas_token`: properly validated with `.strip()` checks
+- `account_url`, `tenant_id`, `client_id`, `client_secret`: only checked for `None`, not for empty/whitespace
+
+**Recommendation:**
+**Keep open** - This bug is still valid for the majority of fields. The fix should:
+1. Add `.strip()` validation for `account_url` in all contexts (managed identity, service principal, SAS token)
+2. Add `.strip()` validation for `tenant_id`, `client_id`, and `client_secret` in service principal context
+3. Add test cases for blank/whitespace validation of these fields
+4. Consider using Pydantic field validators with `min_length=1` after stripping, or custom validators that check `field.strip()` for all string credential fields
+
+**Severity Justification:**
+P3 is appropriate - this is a usability issue (delayed failure, unclear errors) but does not affect data integrity or security. The failure will be caught at runtime during client creation rather than silently producing incorrect results.
