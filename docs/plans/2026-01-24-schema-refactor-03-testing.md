@@ -1,0 +1,787 @@
+# Schema Validation Refactor - Testing Tasks (8-10)
+
+> **Previous:** `02-cli-refactor.md` | **Next:** `04-cleanup.md`
+
+This file contains comprehensive testing tasks addressing gaps identified in multi-agent review.
+
+---
+
+## Task 8: Comprehensive Integration Tests + Error Handling
+
+**Files:**
+- Create: `tests/integration/test_schema_validation_end_to_end.py`
+- Create: `tests/cli/test_plugin_errors.py`
+
+**Purpose:** Add comprehensive test coverage including error handling tests identified as missing in review.
+
+### Step 1: Write end-to-end integration tests
+
+**File:** `tests/integration/test_schema_validation_end_to_end.py`
+
+```python
+"""End-to-end integration tests for schema validation."""
+
+import tempfile
+from pathlib import Path
+import pytest
+from typer.testing import CliRunner
+from elspeth.cli import app
+
+
+def test_compatible_pipeline_passes_validation():
+    """Verify compatible pipeline passes validation."""
+    runner = CliRunner()
+
+    config_yaml = """
+datasource:
+  plugin: csv
+  options:
+    path: test_input.csv
+    schema:
+      fields:
+        value: {type: float}
+
+row_plugins:
+  - plugin: passthrough
+    options:
+      schema:
+        fields:
+          value: {type: float}
+
+sinks:
+  output:
+    plugin: csv
+    options:
+      path: test_output.csv
+      schema:
+        fields:
+          value: {type: float}
+
+output_sink: output
+"""
+
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+        f.write(config_yaml)
+        config_file = Path(f.name)
+
+    try:
+        result = runner.invoke(app, ["validate", "--settings", str(config_file)])
+        assert result.exit_code == 0
+        assert "valid" in result.output.lower()
+
+    finally:
+        config_file.unlink()
+
+
+def test_transform_chain_incompatibility_detected():
+    """Verify schema validation detects incompatible transform chain."""
+    runner = CliRunner()
+
+    config_yaml = """
+datasource:
+  plugin: csv
+  options:
+    path: test_input.csv
+    schema:
+      fields:
+        field_a: {type: str}
+
+row_plugins:
+  - plugin: passthrough
+    options:
+      schema:
+        fields:
+          field_a: {type: str}
+  - plugin: passthrough
+    options:
+      schema:
+        fields:
+          field_b: {type: int}  # INCOMPATIBLE: requires field_b, gets field_a
+
+sinks:
+  output:
+    plugin: csv
+    options:
+      path: test_output.csv
+
+output_sink: output
+"""
+
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+        f.write(config_yaml)
+        config_file = Path(f.name)
+
+    try:
+        result = runner.invoke(app, ["validate", "--settings", str(config_file)])
+        assert result.exit_code != 0
+        assert "field_b" in result.output.lower()
+
+    finally:
+        config_file.unlink()
+
+
+def test_aggregation_output_incompatibility_detected():
+    """Verify validation detects aggregation output incompatible with sink."""
+    runner = CliRunner()
+
+    config_yaml = """
+datasource:
+  plugin: csv
+  options:
+    path: test_input.csv
+    schema:
+      fields:
+        value: {type: float}
+
+aggregations:
+  - name: stats
+    plugin: batch_stats
+    trigger:
+      count: 10
+    options:
+      schema:
+        fields:
+          value: {type: float}
+      value_field: value
+
+sinks:
+  output:
+    plugin: csv
+    options:
+      path: test_output.csv
+      schema:
+        fields:
+          total_records: {type: int}  # INCOMPATIBLE: agg outputs count/sum/mean
+
+output_sink: output
+"""
+
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+        f.write(config_yaml)
+        config_file = Path(f.name)
+
+    try:
+        result = runner.invoke(app, ["validate", "--settings", str(config_file)])
+        assert result.exit_code != 0
+        assert "total_records" in result.output.lower() or "schema" in result.output.lower()
+
+    finally:
+        config_file.unlink()
+
+
+def test_dynamic_schemas_skip_validation():
+    """Verify dynamic schemas (None) skip validation without error."""
+    runner = CliRunner()
+
+    config_yaml = """
+datasource:
+  plugin: csv
+  options:
+    path: test_input.csv
+    schema:
+      fields: dynamic  # Dynamic schema
+
+row_plugins:
+  - plugin: passthrough
+    options:
+      schema:
+        fields: dynamic
+
+sinks:
+  output:
+    plugin: csv
+    options:
+      path: test_output.csv
+
+output_sink: output
+"""
+
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+        f.write(config_yaml)
+        config_file = Path(f.name)
+
+    try:
+        result = runner.invoke(app, ["validate", "--settings", str(config_file)])
+        assert result.exit_code == 0
+        assert "valid" in result.output.lower()
+
+    finally:
+        config_file.unlink()
+
+
+def test_aggregation_incoming_edge_uses_input_schema():
+    """Test that incoming edge to aggregation validates against input_schema."""
+    runner = CliRunner()
+
+    config_yaml = """
+datasource:
+  plugin: csv
+  options:
+    path: test.csv
+    schema:
+      fields:
+        wrong_field: {type: str}  # Aggregation expects 'value', not 'wrong_field'
+
+aggregations:
+  - name: stats
+    plugin: batch_stats
+    trigger:
+      count: 10
+    options:
+      schema:
+        fields:
+          value: {type: float}  # Requires 'value' field
+      value_field: value
+
+sinks:
+  output:
+    plugin: csv
+    options:
+      path: out.csv
+
+output_sink: output
+"""
+
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+        f.write(config_yaml)
+        config_file = Path(f.name)
+
+    try:
+        result = runner.invoke(app, ["validate", "--settings", str(config_file)])
+        assert result.exit_code != 0
+        # Should complain about missing 'value' field
+        assert "value" in result.output.lower()
+
+    finally:
+        config_file.unlink()
+
+
+def test_aggregation_outgoing_edge_uses_output_schema():
+    """Test that outgoing edge from aggregation validates against output_schema."""
+    runner = CliRunner()
+
+    config_yaml = """
+datasource:
+  plugin: csv
+  options:
+    path: test.csv
+    schema:
+      fields:
+        value: {type: float}
+
+aggregations:
+  - name: stats
+    plugin: batch_stats
+    trigger:
+      count: 10
+    options:
+      schema:
+        fields:
+          value: {type: float}
+      value_field: value
+    # Outputs: count, sum, mean, etc.
+
+sinks:
+  output:
+    plugin: csv
+    options:
+      path: out.csv
+      schema:
+        fields:
+          nonexistent_field: {type: str}  # INCOMPATIBLE with aggregation output
+
+output_sink: output
+"""
+
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+        f.write(config_yaml)
+        config_file = Path(f.name)
+
+    try:
+        result = runner.invoke(app, ["validate", "--settings", str(config_file)])
+        assert result.exit_code != 0
+        # Should complain about missing field from aggregation output
+        assert "nonexistent_field" in result.output.lower() or "schema" in result.output.lower()
+
+    finally:
+        config_file.unlink()
+```
+
+### Step 2: Write plugin error handling tests
+
+**File:** `tests/cli/test_plugin_errors.py`
+
+```python
+"""Tests for plugin instantiation error handling."""
+
+import tempfile
+from pathlib import Path
+import pytest
+from typer.testing import CliRunner
+from elspeth.cli import app
+from elspeth.cli_helpers import instantiate_plugins_from_config
+from elspeth.core.config import ElspethSettings
+from pydantic import TypeAdapter
+
+
+def test_unknown_source_plugin_error():
+    """Verify clear error for unknown source plugin."""
+    runner = CliRunner()
+
+    config_yaml = """
+datasource:
+  plugin: nonexistent_source  # Unknown plugin
+  options:
+    path: test.csv
+
+sinks:
+  output:
+    plugin: csv
+    options:
+      path: out.csv
+
+output_sink: output
+"""
+
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+        f.write(config_yaml)
+        config_file = Path(f.name)
+
+    try:
+        result = runner.invoke(app, ["validate", "--settings", str(config_file)])
+        assert result.exit_code != 0
+        # Should show plugin name and available plugins
+        assert "nonexistent_source" in result.output.lower()
+        assert "available" in result.output.lower()
+
+    finally:
+        config_file.unlink()
+
+
+def test_unknown_transform_plugin_error():
+    """Verify clear error for unknown transform plugin."""
+    config_dict = {
+        "datasource": {"plugin": "csv", "options": {"path": "test.csv"}},
+        "row_plugins": [{"plugin": "nonexistent_transform", "options": {}}],
+        "sinks": {"out": {"plugin": "csv", "options": {"path": "out.csv"}}},
+        "output_sink": "out"
+    }
+
+    adapter = TypeAdapter(ElspethSettings)
+    config = adapter.validate_python(config_dict)
+
+    with pytest.raises(ValueError, match="nonexistent_transform"):
+        with pytest.raises(ValueError, match="Available"):
+            instantiate_plugins_from_config(config)
+
+
+def test_plugin_initialization_error():
+    """Verify plugin __init__() errors are surfaced clearly."""
+    # This test requires a plugin that can fail during __init__()
+    # For example, if a plugin expects a required option that's missing
+    runner = CliRunner()  # FIX: Add missing runner initialization
+
+    config_yaml = """
+datasource:
+  plugin: csv
+  options:
+    # Missing required 'path' option
+    schema:
+      fields: dynamic
+
+sinks:
+  output:
+    plugin: csv
+    options:
+      path: out.csv
+
+output_sink: output
+"""
+
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+        f.write(config_yaml)
+        config_file = Path(f.name)
+
+    try:
+        result = runner.invoke(app, ["validate", "--settings", str(config_file)])
+        assert result.exit_code != 0
+        # Should show clear error from plugin instantiation
+        assert "error" in result.output.lower()
+
+    finally:
+        config_file.unlink()
+
+
+def test_schema_extraction_from_instance():
+    """Verify schemas are NOT None after instantiation."""
+    config_dict = {
+        "datasource": {
+            "plugin": "csv",
+            "options": {
+                "path": "test.csv",
+                "schema": {"fields": {"value": {"type": "float"}}}
+            }
+        },
+        "sinks": {
+            "out": {
+                "plugin": "csv",
+                "options": {
+                    "path": "out.csv",
+                    "schema": {"fields": {"value": {"type": "float"}}}
+                }
+            }
+        },
+        "output_sink": "out"
+    }
+
+    adapter = TypeAdapter(ElspethSettings)
+    config = adapter.validate_python(config_dict)
+
+    plugins = instantiate_plugins_from_config(config)
+
+    # CRITICAL: Schemas must NOT be None
+    assert plugins["source"].output_schema is not None, "Source schema should be populated"
+    assert plugins["sinks"]["out"].input_schema is not None, "Sink schema should be populated"
+
+
+def test_fork_join_validation():
+    """Test schema validation across fork/join patterns with coalesce.
+
+    CRITICAL GAP from review: Missing fork/join topology tests.
+    """
+    runner = CliRunner()
+
+    config_yaml = """
+datasource:
+  plugin: csv
+  options:
+    path: test.csv
+    schema:
+      fields:
+        value: {type: float}
+
+gates:
+  - name: split
+    condition: "row['value'] > 50"
+    routes:
+      true: continue
+      false: low_values
+    fork_to:
+      - branch_high
+      - branch_low
+
+row_plugins:
+  - plugin: passthrough
+    options:
+      schema:
+        fields:
+          value: {type: float}
+
+coalesce:
+  - name: merge
+    branches:
+      - branch_high
+      - branch_low
+    strategy: first_complete
+
+sinks:
+  output:
+    plugin: csv
+    options:
+      path: output.csv
+      schema:
+        fields:
+          value: {type: float}
+  low_values:
+    plugin: csv
+    options:
+      path: low.csv
+
+output_sink: output
+"""
+
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+        f.write(config_yaml)
+        config_file = Path(f.name)
+
+    try:
+        result = runner.invoke(app, ["validate", "--settings", str(config_file)])
+        # Should pass validation - fork/join pattern with compatible schemas
+        assert result.exit_code == 0
+        assert "valid" in result.output.lower()
+
+    finally:
+        config_file.unlink()
+```
+
+### Step 3: Run all tests
+
+Run: `pytest tests/integration/test_schema_validation_end_to_end.py -v`
+Run: `pytest tests/cli/test_plugin_errors.py -v`
+
+Expected: All PASS
+
+### Step 4: Commit
+
+```bash
+git add tests/integration/test_schema_validation_end_to_end.py tests/cli/test_plugin_errors.py
+git commit -m "test: add comprehensive schema validation tests
+
+- Compatible pipeline passes validation
+- Transform chain incompatibility detected
+- Aggregation output incompatibility detected
+- Dynamic schemas skip validation correctly
+- Aggregation incoming edge uses input_schema
+- Aggregation outgoing edge uses output_schema
+- Plugin error handling tests (unknown plugins, init errors)
+- Schema extraction verification
+
+Addresses test coverage gaps from multi-agent review
+
+Part of: P0-2026-01-24-schema-validation-non-functional"
+```
+
+---
+
+## Task 9: Regression Prevention Test
+
+**Files:**
+- Create: `tests/integration/test_schema_validation_regression.py`
+
+**Purpose:** Explicitly test that the old bug is fixed - prove validation now detects errors it previously missed.
+
+### Step 1: Write regression test
+
+**File:** `tests/integration/test_schema_validation_regression.py`
+
+```python
+"""Regression test proving P0 bug is fixed.
+
+This test explicitly verifies that schema validation now works
+when it was previously non-functional.
+"""
+
+import tempfile
+from pathlib import Path
+from typer.testing import CliRunner
+from elspeth.cli import app
+
+
+def test_schema_validation_actually_works():
+    """REGRESSION TEST: Prove schema validation detects incompatibilities.
+
+    Before fix: Validation passed even with incompatible schemas
+    After fix: Validation fails correctly
+
+    This is the canonical test proving P0-2026-01-24 is resolved.
+    """
+    runner = CliRunner()
+
+    # This exact config would PASS validation before fix (bug)
+    # Should FAIL validation after fix (correct)
+    config_yaml = """
+datasource:
+  plugin: csv
+  options:
+    path: input.csv
+    schema:
+      fields:
+        field_a: {type: str}
+        field_b: {type: int}
+
+row_plugins:
+  - plugin: passthrough
+    options:
+      schema:
+        fields:
+          field_a: {type: str}
+          field_b: {type: int}
+
+sinks:
+  output:
+    plugin: csv
+    options:
+      path: output.csv
+      schema:
+        fields:
+          field_c: {type: float}  # INCOMPATIBLE: requires field_c, gets field_a/field_b
+
+output_sink: output
+"""
+
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+        f.write(config_yaml)
+        config_file = Path(f.name)
+
+    try:
+        result = runner.invoke(app, ["validate", "--settings", str(config_file)])
+
+        # CRITICAL ASSERTION: Must fail validation
+        assert result.exit_code != 0, "Validation should detect incompatibility"
+
+        # CRITICAL ASSERTION: Must mention the missing field
+        assert "field_c" in result.output.lower(), "Error should mention missing field"
+
+        # OPTIONAL: Could also check for "schema" keyword
+        assert "schema" in result.output.lower() or "missing" in result.output.lower()
+
+    finally:
+        config_file.unlink()
+
+
+def test_compatible_schemas_still_pass():
+    """REGRESSION TEST: Ensure compatible pipelines still work.
+
+    Verify fix doesn't over-restrict - compatible schemas should still pass.
+    """
+    runner = CliRunner()
+
+    config_yaml = """
+datasource:
+  plugin: csv
+  options:
+    path: input.csv
+    schema:
+      fields:
+        field_a: {type: str}
+        field_b: {type: int}
+
+row_plugins:
+  - plugin: passthrough
+    options:
+      schema:
+        fields:
+          field_a: {type: str}
+          field_b: {type: int}
+
+sinks:
+  output:
+    plugin: csv
+    options:
+      path: output.csv
+      schema:
+        fields:
+          field_a: {type: str}  # Compatible: subset of producer schema
+
+output_sink: output
+"""
+
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml', delete=False) as f:
+        f.write(config_yaml)
+        config_file = Path(f.name)
+
+    try:
+        result = runner.invoke(app, ["validate", "--settings", str(config_file)])
+
+        # Should pass validation
+        assert result.exit_code == 0
+        assert "valid" in result.output.lower()
+
+    finally:
+        config_file.unlink()
+
+
+def test_from_config_no_longer_exists():
+    """REGRESSION TEST: Verify deprecated from_config() is deleted.
+
+    After fix, from_config() should not exist (per CLAUDE.md no-legacy policy).
+    """
+    from elspeth.core.dag import ExecutionGraph
+
+    # from_config should not exist as attribute
+    assert not hasattr(ExecutionGraph, "from_config"), \
+        "from_config() should be deleted per no-legacy policy"
+
+    # from_plugin_instances should exist
+    assert hasattr(ExecutionGraph, "from_plugin_instances"), \
+        "from_plugin_instances() is the new API"
+```
+
+### Step 2: Run test to verify it passes
+
+Run: `pytest tests/integration/test_schema_validation_regression.py::test_schema_validation_actually_works -v`
+
+Expected: PASS (proving validation now works)
+
+### Step 3: Commit
+
+```bash
+git add tests/integration/test_schema_validation_regression.py
+git commit -m "test: add regression test proving P0 bug is fixed
+
+- Verify validation detects incompatibilities (previously missed)
+- Verify compatible schemas still pass
+- Verify from_config() deleted (no legacy code)
+- Canonical test proving P0-2026-01-24 resolved
+
+Part of: P0-2026-01-24-schema-validation-non-functional"
+```
+
+---
+
+## Task 10: Run Full Test Suite and Fix Regressions
+
+**Files:**
+- Various (fix any test failures)
+
+**Purpose:** Ensure all existing tests still pass with new architecture.
+
+### Step 1: Run full test suite
+
+Run: `pytest tests/ -v`
+
+Expected: Some failures possible (tests using old from_config() API)
+
+### Step 2: Fix any test regressions
+
+For each failing test:
+1. Identify if it uses `from_config()`
+2. Update to use `from_plugin_instances()` via helper
+3. Ensure schemas are available from plugin instances
+
+**Example fix pattern:**
+
+```python
+# OLD (broken):
+graph = ExecutionGraph.from_config(config, manager)
+
+# NEW (fixed):
+plugins = instantiate_plugins_from_config(config)
+graph = ExecutionGraph.from_plugin_instances(
+    source=plugins["source"],
+    transforms=plugins["transforms"],
+    sinks=plugins["sinks"],
+    aggregations=plugins["aggregations"],
+    gates=list(config.gates),
+    output_sink=config.output_sink,
+)
+```
+
+### Step 3: Run type checking
+
+Run: `mypy src/elspeth`
+
+Expected: No new type errors
+
+### Step 4: Run linting
+
+Run: `ruff check src/elspeth`
+
+Expected: No new lint errors
+
+### Step 5: Commit fixes
+
+```bash
+git add tests/
+git commit -m "fix: update tests to use from_plugin_instances API
+
+- Migrate tests from from_config() to from_plugin_instances()
+- Fix type errors and lint issues
+- Ensure full test suite passes
+
+Part of: P0-2026-01-24-schema-validation-non-functional"
+```
+
+---
+
+**Testing Complete! Next:** `04-cleanup.md` for documentation and final cleanup
