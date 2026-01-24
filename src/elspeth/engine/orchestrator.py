@@ -954,6 +954,16 @@ class Orchestrator:
                             sink_name = output_sink_name
                             if result.token.branch_name is not None and result.token.branch_name in config.sinks:
                                 sink_name = result.token.branch_name
+
+                            # Record COMPLETED outcome with sink_name (AUD-001 fix)
+                            # MUST be here (not processor) because only orchestrator knows branch→sink mapping
+                            recorder.record_token_outcome(
+                                run_id=run_id,
+                                token_id=result.token.token_id,
+                                outcome=RowOutcome.COMPLETED,
+                                sink_name=sink_name,
+                            )
+
                             pending_tokens[sink_name].append(result.token)
                         elif result.outcome == RowOutcome.ROUTED:
                             rows_routed += 1
@@ -1016,6 +1026,7 @@ class Orchestrator:
                         pending_tokens=pending_tokens,
                         output_sink_name=output_sink_name,
                         run_id=run_id,
+                        recorder=recorder,
                         checkpoint=False,  # Checkpointing now happens after sink write
                         last_node_id=default_last_node_id,
                     )
@@ -1559,6 +1570,16 @@ class Orchestrator:
                         sink_name = output_sink_name
                         if result.token.branch_name is not None and result.token.branch_name in config.sinks:
                             sink_name = result.token.branch_name
+
+                        # Record COMPLETED outcome with sink_name (AUD-001 fix)
+                        # Same pattern as main execution path
+                        recorder.record_token_outcome(
+                            run_id=run_id,
+                            token_id=result.token.token_id,
+                            outcome=RowOutcome.COMPLETED,
+                            sink_name=sink_name,
+                        )
+
                         pending_tokens[sink_name].append(result.token)
                     elif result.outcome == RowOutcome.ROUTED:
                         rows_routed += 1
@@ -1591,6 +1612,7 @@ class Orchestrator:
                     pending_tokens=pending_tokens,
                     output_sink_name=output_sink_name,
                     run_id=run_id,
+                    recorder=recorder,
                     checkpoint=False,  # No checkpointing during resume
                 )
                 rows_succeeded += agg_succeeded
@@ -1704,6 +1726,7 @@ class Orchestrator:
         pending_tokens: dict[str, list[TokenInfo]],
         output_sink_name: str,
         run_id: str,
+        recorder: LandscapeRecorder,
         checkpoint: bool = True,
         last_node_id: str | None = None,
     ) -> tuple[int, int]:
@@ -1719,6 +1742,7 @@ class Orchestrator:
             pending_tokens: Dict of sink_name -> tokens to append results to
             output_sink_name: Default sink for aggregation output
             run_id: Current run ID (for checkpointing)
+            recorder: LandscapeRecorder for recording outcomes
             checkpoint: Whether to create checkpoints for flushed tokens
                        (True for _execute_run, False for _process_resumed_rows)
             last_node_id: Node ID to use for checkpointing (required if checkpoint=True)
@@ -1786,6 +1810,15 @@ class Orchestrator:
                         row_data=flush_result.row,
                         branch_name=buffered_tokens[0].branch_name,
                     )
+
+                    # Record COMPLETED outcome with sink_name (AUD-001 fix)
+                    recorder.record_token_outcome(
+                        run_id=run_id,
+                        token_id=output_token.token_id,
+                        outcome=RowOutcome.COMPLETED,
+                        sink_name=output_sink_name,
+                    )
+
                     pending_tokens[output_sink_name].append(output_token)
                     rows_succeeded += 1
 
@@ -1804,6 +1837,14 @@ class Orchestrator:
                         step_in_pipeline=agg_step,
                     )
                     for exp_token in expanded:
+                        # Record COMPLETED outcome for each expanded token (AUD-001 fix)
+                        recorder.record_token_outcome(
+                            run_id=run_id,
+                            token_id=exp_token.token_id,
+                            outcome=RowOutcome.COMPLETED,
+                            sink_name=output_sink_name,
+                        )
+
                         pending_tokens[output_sink_name].append(exp_token)
                         rows_succeeded += 1
 
