@@ -281,39 +281,80 @@ gates:
 2. **Coalesce merge** validates that all incoming branch schemas are compatible
 3. **Fork without coalesce** validates each branch against its destination independently
 
-**Fork Branch Destination Fallback:**
+**Fork Branch Explicit Destination Requirement:**
 
-When a gate creates fork branches (via `fork_to` configuration), each branch must have a destination. The resolution order is:
+When a gate creates fork branches (via `fork_to` configuration), **every branch must have an explicit destination**. No fallback behavior is provided.
 
-1. **Explicit coalesce mapping** - If the branch name is listed in a coalesce's `branches` list, it routes to that coalesce
-2. **Fallback to output_sink** - If the branch is NOT in any coalesce, it automatically routes to the configured `output_sink`
-3. **Validation error** - If neither exists (no coalesce, no output_sink), graph construction crashes with `GraphValidationError`
+**Resolution order:**
 
-**Example:**
+1. **Explicit coalesce mapping** - If the branch name is listed in a coalesce's `branches` list → routes to that coalesce
+2. **Explicit sink matching** - If the branch name exactly matches a sink name → routes to that sink
+3. **Validation error** - If neither exists → graph construction crashes with `GraphValidationError`
+
+**Valid Configuration:**
 ```python
 gates:
   - name: categorize
     fork_to: [high_priority, low_priority]
 
 coalesce:
-  branches: [high_priority]  # Only high_priority joins coalesce
+  branches: [high_priority]  # high_priority joins coalesce
+
+sinks:
+  low_priority:  # Sink name matches branch name
+    plugin: csv
+    options: {path: low.csv}
 
 # Result:
 # - high_priority → coalesce (explicit)
-# - low_priority → output_sink (fallback)
+# - low_priority → low_priority sink (explicit match)
 ```
 
-**Design Rationale:** This fallback ensures all fork branches have a destination without requiring verbose configuration. Operators who expect fork branches to route ONLY to explicitly-named sinks should:
-- Use gate `routes` with explicit sink names instead of `fork_to`
-- Configure all fork branches in coalesce `branches` lists
+**Invalid Configuration (will crash):**
+```python
+gates:
+  - name: categorize
+    fork_to: [high_priority, low_priority, medium_priority]
 
-The validation error (case 3) prevents silent data loss from orphaned fork branches.
+coalesce:
+  branches: [high_priority]
+
+sinks:
+  low_priority: {plugin: csv}
+  # medium_priority sink NOT defined
+
+# Crashes with:
+# "Gate 'categorize' has fork branch 'medium_priority' with no destination.
+#  Fork branches must either:
+#    1. Be listed in a coalesce 'branches' list, or
+#    2. Match a sink name exactly
+#  Available coalesce branches: ['high_priority']
+#  Available sinks: ['low_priority']"
+```
+
+**Design Rationale:** Explicit-only destinations prevent silent configuration bugs:
+- **Catches typos:** `categorry` (typo) instead of `category` crashes immediately
+- **No hidden behavior:** Audit trail clearly shows intended routing
+- **Fail-fast:** Missing destinations are caught at graph construction, not runtime
+- **Aligns with CLAUDE.md:** No silent recovery, crash on configuration errors
+
+**Alternative for implicit routing:** If you want fork branches to share a common destination, use gate `routes` instead:
+```python
+gates:
+  - name: categorize
+    condition: "row['priority'] in ['high', 'medium']"
+    routes:
+      true: prioritized_sink
+      false: default_sink
+```
+
+This makes the routing explicit in the configuration.
 
 **Critical invariants:**
-- Every fork branch must have a destination (coalesce or sink)
+- Every fork branch must have an explicit destination (coalesce or matching sink name)
+- Fork branches without explicit destination crash during graph construction
 - Coalesce validates incoming branch schema compatibility
 - Gates with continue routes must have a next node in sequence
-- Fork branches not in coalesce require configured output_sink (crashes if missing)
 
 ## Notes
 

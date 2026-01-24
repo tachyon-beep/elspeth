@@ -609,13 +609,14 @@ def from_plugin_instances(
     else:
         branch_to_coalesce = {}
 
-    # ===== CONNECT FORK GATES TO COALESCE OR FALLBACK =====
-    # CRITICAL FIX: Handle both coalesce branches AND non-coalesce branches
+    # ===== CONNECT FORK GATES - EXPLICIT DESTINATIONS ONLY =====
+    # CRITICAL: No fallback behavior. All fork branches must have explicit destinations.
+    # This prevents silent configuration bugs (typos, missing destinations).
     for gate_id, gate_config in gate_sequence:
         if gate_config.fork_to:
             for branch_name in gate_config.fork_to:
                 if branch_name in branch_to_coalesce:
-                    # Branch goes to coalesce
+                    # Explicit coalesce destination
                     coalesce_id = branch_to_coalesce[branch_name]
                     graph.add_edge(
                         gate_id,
@@ -623,19 +624,24 @@ def from_plugin_instances(
                         label=branch_name,
                         mode=RoutingMode.FORK
                     )
-                else:
-                    # CRITICAL FIX: Branch NOT in coalesce - fallback to output sink
-                    if not graph._output_sink:
-                        raise GraphValidationError(
-                            f"Gate '{gate_config.name}' has fork branch '{branch_name}' "
-                            "that is not in any coalesce and no output_sink is configured. "
-                            "Fork branches must either join a coalesce or have an output sink."
-                        )
+                elif branch_name in sink_ids:
+                    # Explicit sink destination (branch name matches sink name)
                     graph.add_edge(
                         gate_id,
-                        graph._output_sink,
+                        sink_ids[branch_name],
                         label=branch_name,
                         mode=RoutingMode.COPY
+                    )
+                else:
+                    # NO FALLBACK - this is a configuration error
+                    raise GraphValidationError(
+                        f"Gate '{gate_config.name}' has fork branch '{branch_name}' with no destination.\n"
+                        f"Fork branches must either:\n"
+                        f"  1. Be listed in a coalesce 'branches' list, or\n"
+                        f"  2. Match a sink name exactly\n"
+                        f"\n"
+                        f"Available coalesce branches: {sorted(branch_to_coalesce.keys())}\n"
+                        f"Available sinks: {sorted(sink_ids.keys())}"
                     )
 
     # ===== CONNECT GATE CONTINUE ROUTES =====
