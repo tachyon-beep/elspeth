@@ -1134,9 +1134,64 @@ def _execute_resume_with_instances(
         aggregation_settings=aggregation_settings,
     )
 
+    # Create event bus for progress reporting
+    from elspeth.contracts.events import (
+        PhaseCompleted,
+        PhaseError,
+        PhaseStarted,
+        RunCompleted,
+    )
+    from elspeth.core import EventBus
+
+    event_bus = EventBus()
+
+    # Console formatters for human-readable output
+    def _format_phase_started(event: PhaseStarted) -> None:
+        target_info = f" → {event.target}" if event.target else ""
+        typer.echo(f"[{event.phase.value.upper()}] {event.action.value.capitalize()}{target_info}...")
+
+    def _format_phase_completed(event: PhaseCompleted) -> None:
+        duration_str = f"{event.duration_seconds:.2f}s" if event.duration_seconds < 60 else f"{event.duration_seconds / 60:.1f}m"
+        typer.echo(f"[{event.phase.value.upper()}] ✓ Completed in {duration_str}")
+
+    def _format_phase_error(event: PhaseError) -> None:
+        target_info = f" ({event.target})" if event.target else ""
+        typer.echo(f"[{event.phase.value.upper()}] ✗ Error{target_info}: {event.error_message}", err=True)
+
+    def _format_run_completed(event: RunCompleted) -> None:
+        status_symbols = {
+            "completed": "✓",
+            "partial": "⚠",
+            "failed": "✗",
+        }
+        symbol = status_symbols.get(event.status.value, "?")
+        typer.echo(
+            f"\n{symbol} Resume {event.status.value.upper()}: "
+            f"{event.total_rows:,} rows processed | "
+            f"✓{event.succeeded:,} succeeded | "
+            f"✗{event.failed:,} failed | "
+            f"⚠{event.quarantined:,} quarantined | "
+            f"{event.duration_seconds:.2f}s total"
+        )
+
+    def _format_progress(event: ProgressEvent) -> None:
+        rate = event.rows_processed / event.elapsed_seconds if event.elapsed_seconds > 0 else 0
+        typer.echo(
+            f"  Processing: {event.rows_processed:,} rows | "
+            f"{rate:.0f} rows/sec | "
+            f"✓{event.rows_succeeded:,} ✗{event.rows_failed} ⚠{event.rows_quarantined}"
+        )
+
+    # Subscribe console formatters
+    event_bus.subscribe(PhaseStarted, _format_phase_started)
+    event_bus.subscribe(PhaseCompleted, _format_phase_completed)
+    event_bus.subscribe(PhaseError, _format_phase_error)
+    event_bus.subscribe(RunCompleted, _format_run_completed)
+    event_bus.subscribe(ProgressEvent, _format_progress)
+
     # Create checkpoint manager and orchestrator for resume
     checkpoint_manager = CheckpointManager(db)
-    orchestrator = Orchestrator(db, checkpoint_manager=checkpoint_manager)
+    orchestrator = Orchestrator(db, event_bus=event_bus, checkpoint_manager=checkpoint_manager)
 
     # Execute resume
     result = orchestrator.resume(
