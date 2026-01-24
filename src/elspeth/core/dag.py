@@ -307,6 +307,26 @@ class ExecutionGraph:
             for u, v, _key, data in self._graph.edges(data=True, keys=True)
         ]
 
+    def get_incoming_edges(self, node_id: str) -> list[EdgeInfo]:
+        """Get all edges pointing TO this node.
+
+        Args:
+            node_id: The target node ID
+
+        Returns:
+            List of EdgeInfo for edges where to_node == node_id
+        """
+        # NetworkX in_edges returns (from, to, key) tuples for MultiDiGraph
+        return [
+            EdgeInfo(
+                from_node=u,
+                to_node=v,
+                label=data["label"],
+                mode=data["mode"],
+            )
+            for u, v, _key, data in self._graph.in_edges(node_id, data=True, keys=True)
+        ]
+
     @classmethod
     def from_config(cls, config: ElspethSettings) -> ExecutionGraph:
         """Build an ExecutionGraph from validated settings.

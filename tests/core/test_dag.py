@@ -282,6 +282,27 @@ class TestExecutionGraphAccessors:
 
         assert edges == []
 
+    def test_get_incoming_edges_returns_edges_pointing_to_node(self):
+        """get_incoming_edges() returns all edges with to_node matching the given node_id."""
+        from elspeth.contracts import RoutingMode
+        from elspeth.core.dag import ExecutionGraph
+
+        graph = ExecutionGraph()
+        graph.add_node("A", node_type="source", plugin_name="csv")
+        graph.add_node("B", node_type="transform", plugin_name="mapper")
+        graph.add_node("C", node_type="sink", plugin_name="csv")
+
+        graph.add_edge("A", "B", label="continue", mode=RoutingMode.MOVE)
+        graph.add_edge("B", "C", label="continue", mode=RoutingMode.MOVE)
+
+        incoming = graph.get_incoming_edges("B")
+
+        assert len(incoming) == 1
+        assert incoming[0].from_node == "A"
+        assert incoming[0].to_node == "B"
+        assert incoming[0].label == "continue"
+        assert incoming[0].mode == RoutingMode.MOVE
+
 
 class TestExecutionGraphFromConfig:
     """Build ExecutionGraph from ElspethSettings."""
