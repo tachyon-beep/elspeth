@@ -890,6 +890,17 @@ class AggregationExecutor:
         if not buffered_rows:
             raise RuntimeError(f"Cannot flush empty buffer for node {node_id}")
 
+        # Defensive validation: buffer and tokens must be same length
+        # This should never happen (checkpoint restore ensures they stay in sync)
+        # but crashes explicitly if internal state is corrupted
+        if len(buffered_rows) != len(buffered_tokens):
+            raise RuntimeError(
+                f"Internal state corruption in AggregationExecutor node '{node_id}': "
+                f"buffer has {len(buffered_rows)} rows but tokens has {len(buffered_tokens)} entries. "
+                f"These must always match. This indicates a bug in checkpoint "
+                f"restore or buffer management."
+            )
+
         # Compute input hash for batch (hash of all input rows)
         input_hash = stable_hash(buffered_rows)
 

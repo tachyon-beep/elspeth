@@ -3152,3 +3152,178 @@ class TestAggregationExecutorCheckpoint:
         # Verify trigger count restored
         evaluator = executor2._trigger_evaluators[agg_node.node_id]
         assert evaluator.batch_count == 3
+
+    def test_checkpoint_restore_then_flush_succeeds(self) -> None:
+        """After restoring from checkpoint, aggregation can flush successfully.
+
+        This is the critical test for P1-2026-01-21: the original bug was that
+        restored aggregations would crash on flush with IndexError because
+        _buffer_tokens was empty while _buffers had rows.
+        """
+
+        from elspeth.core.config import AggregationSettings, TriggerConfig
+        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.engine.executors import AggregationExecutor, TriggerType
+        from elspeth.engine.spans import SpanFactory
+        from elspeth.plugins.context import PluginContext
+        from elspeth.plugins.results import TransformResult
+
+        # Setup
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        run = recorder.begin_run(config={}, canonical_version="v1")
+        agg_node = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="flush_test",
+            node_type="aggregation",
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+
+        settings = AggregationSettings(
+            name="test_agg",
+            plugin="test",
+            trigger=TriggerConfig(count=2),  # Trigger at 2 rows
+        )
+
+        executor = AggregationExecutor(
+            recorder=recorder,
+            span_factory=SpanFactory(),
+            run_id=run.run_id,
+            aggregation_settings={agg_node.node_id: settings},
+        )
+
+        # Create batch in landscape (must exist before flush)
+        batch = recorder.create_batch(run_id=run.run_id, aggregation_node_id=agg_node.node_id)
+
+        # Simulate checkpoint with 2 buffered tokens (ready to flush)
+        checkpoint_state = {
+            agg_node.node_id: {
+                "tokens": [
+                    {
+                        "token_id": "token-101",
+                        "row_id": "row-1",
+                        "row_data": {"value": 10},
+                        "branch_name": None,
+                    },
+                    {
+                        "token_id": "token-102",
+                        "row_id": "row-2",
+                        "row_data": {"value": 20},
+                        "branch_name": None,
+                    },
+                ],
+                "batch_id": batch.batch_id,
+            }
+        }
+
+        # Create rows and tokens in landscape for the checkpoint
+        for i, token_data in enumerate(checkpoint_state[agg_node.node_id]["tokens"]):
+            row = recorder.create_row(
+                run_id=run.run_id,
+                source_node_id=agg_node.node_id,
+                row_index=i,
+                data=token_data["row_data"],
+                row_id=token_data["row_id"],
+            )
+            recorder.create_token(row_id=row.row_id, token_id=token_data["token_id"])
+
+        # Restore from checkpoint
+        executor.restore_from_checkpoint(checkpoint_state)
+
+        # CRITICAL: Flush should succeed (this is what failed in the original bug)
+        # The bug was: _buffers had 2 rows, but _buffer_tokens was empty
+        # So flush tried to access tokens[0] and tokens[1] but list was empty = IndexError
+
+        # Mock the batch-aware transform
+        class MockBatchTransform:
+            name = "batch_sum"
+            node_id = agg_node.node_id
+
+            def process(self, rows: list[dict[str, Any]], ctx: PluginContext) -> TransformResult:
+                total = sum(r["value"] for r in rows)
+                return TransformResult.success({"sum": total})
+
+        transform = MockBatchTransform()
+        ctx = PluginContext(run_id=run.run_id, config={})
+
+        # Execute flush - should NOT crash with IndexError
+        result, consumed_tokens = executor.execute_flush(
+            node_id=agg_node.node_id,
+            transform=transform,
+            ctx=ctx,
+            step_in_pipeline=1,
+            trigger_type=TriggerType.COUNT,
+        )
+
+        # VERIFY: Flush succeeded
+        assert result is not None, "Flush should return a result"
+        assert result.status == "success", "Flush should succeed"
+        assert result.row == {"sum": 30}, "Transform should have computed sum"
+
+        # VERIFY: Consumed tokens match the buffered tokens
+        assert len(consumed_tokens) == 2
+        assert consumed_tokens[0].token_id == "token-101"
+        assert consumed_tokens[1].token_id == "token-102"
+
+    def test_execute_flush_crashes_on_buffer_token_mismatch(self) -> None:
+        """Defensive guard catches buffer/token length mismatch with clear error."""
+
+        from elspeth.core.config import AggregationSettings, TriggerConfig
+        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.engine.executors import AggregationExecutor, TriggerType
+        from elspeth.engine.spans import SpanFactory
+        from elspeth.plugins.context import PluginContext
+
+        # Setup
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        run = recorder.begin_run(config={}, canonical_version="v1")
+        agg_node = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="mismatch_test",
+            node_type="aggregation",
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+
+        settings = AggregationSettings(
+            name="test_agg",
+            plugin="test",
+            trigger=TriggerConfig(count=2),
+        )
+
+        executor = AggregationExecutor(
+            recorder=recorder,
+            span_factory=SpanFactory(),
+            run_id=run.run_id,
+            aggregation_settings={agg_node.node_id: settings},
+        )
+
+        # Initialize batch_id (required for flush)
+        executor._batch_ids[agg_node.node_id] = "batch-123"
+
+        # SIMULATE THE ORIGINAL BUG: buffer has rows but tokens is empty
+        # (This should never happen after Tasks 1 & 2, but the guard should catch it)
+        executor._buffers[agg_node.node_id] = [{"value": 10}, {"value": 20}]
+        executor._buffer_tokens[agg_node.node_id] = []  # EMPTY - the bug state!
+
+        # Mock transform
+        class MockTransform:
+            name = "test"
+            node_id = agg_node.node_id
+
+        transform = MockTransform()
+        ctx = PluginContext(run_id=run.run_id, config={})
+
+        # VERIFY: Flush crashes with clear RuntimeError (not IndexError)
+        with pytest.raises(RuntimeError, match="Internal state corruption"):
+            executor.execute_flush(
+                node_id=agg_node.node_id,
+                transform=transform,
+                ctx=ctx,
+                step_in_pipeline=1,
+                trigger_type=TriggerType.COUNT,
+            )
