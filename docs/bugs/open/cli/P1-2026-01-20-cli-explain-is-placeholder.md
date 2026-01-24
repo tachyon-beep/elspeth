@@ -110,3 +110,77 @@
 ## Notes / Links
 
 - Related issues/PRs: N/A
+
+## Verification (2026-01-25)
+
+### Status: STILL VALID
+
+The bug remains valid. While error messaging has been improved since the original report, the core functionality is still not implemented.
+
+### Current Code Analysis
+
+**src/elspeth/cli.py (lines 260-335):**
+- The `explain` command implementation now explicitly acknowledges it is not implemented
+- JSON mode returns `{"status": "not_implemented", ...}` with exit code 2 (changed from exit code 1)
+- Text mode (`--no-tui`) prints clear "not yet implemented" message with exit code 2
+- TUI mode launches `ExplainApp` with a note that it's a "preview" for "Phase 4"
+- Code includes a comment explicitly referencing this bug report: `# See: docs/bugs/open/P1-2026-01-20-cli-explain-is-placeholder.md`
+
+**src/elspeth/tui/explain_app.py (lines 60-74):**
+- Still shows placeholder Static widgets: "Lineage Tree (placeholder)" and "Detail Panel (placeholder)"
+- No database connection or data loading logic implemented
+- Action handlers (refresh, help) only show notifications, no actual functionality
+
+### Git History Evidence
+
+**Commit timeline:**
+- Bug filed: 2026-01-20 against commit `8cfebea` (main branch)
+- RC1 release: 2026-01-22 (commit `c786410`) - improved error messages but functionality still unimplemented
+- Current HEAD: 2026-01-25 - no changes to explain command implementation
+
+**Changes since bug report:**
+1. Error messages improved to be more honest ("not yet implemented" vs "No runs found")
+2. Exit code changed from 1 (error) to 2 (not implemented) for clarity
+3. Docstring added noting the command is not yet implemented
+4. Comment added explicitly referencing this bug report
+
+**Files unchanged since RC1:**
+- `src/elspeth/tui/explain_app.py` - last modified in RC1, still contains placeholders
+- `src/elspeth/cli.py` explain command - messaging improved in RC1, but no functional implementation added
+
+### Backend Support Analysis
+
+**The infrastructure EXISTS to implement this:**
+- `src/elspeth/core/landscape/lineage.py` provides `explain()` function (lines 63-83)
+- Function signature: `explain(recorder: LandscapeRecorder, run_id, token_id=None, row_id=None, sink=None) -> LineageResult | None`
+- Multiple tests use this function successfully (e.g., `tests/core/landscape/test_lineage.py`)
+- Pattern: Create `LandscapeRecorder(db)` and pass to `explain()`
+
+**What's missing:**
+1. CLI does not instantiate `LandscapeDB` or `LandscapeRecorder`
+2. CLI does not call the `explain()` function
+3. CLI does not format/output the `LineageResult` in JSON or text format
+4. TUI does not load data from the database
+5. No `--database` or `--settings` option to locate the Landscape DB
+
+### Recommendation
+
+**Status:** Keep as P1, STILL VALID
+
+**Rationale:**
+1. The bug description remains accurate - explain command is a placeholder
+2. Error messaging improvements are cosmetic, not functional
+3. Backend infrastructure exists and is tested, so implementation is straightforward
+4. This directly impacts the auditability promise in CLAUDE.md
+
+**Implementation path is clear:**
+1. Add `--database` option to explain command (similar to `purge` and `resume` commands)
+2. Instantiate `LandscapeDB` and `LandscapeRecorder`
+3. Call `explain()` function with appropriate parameters
+4. Format and output the `LineageResult` for JSON/text modes
+5. Wire TUI to load and display actual lineage data
+
+**Estimated effort:** Medium (2-3 hours)
+- Backend logic exists and is tested
+- Similar patterns exist in `purge` and `resume` commands for DB access
+- Main work is formatting output and wiring TUI widgets to data

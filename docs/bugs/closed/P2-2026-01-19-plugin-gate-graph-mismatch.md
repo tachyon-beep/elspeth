@@ -93,3 +93,74 @@
 
 - Related issues/PRs: N/A
 - Related design docs: `docs/design/architecture.md`
+
+## Verification (2026-01-25)
+
+**Status: OBE (Overtaken By Events)**
+
+This bug report is **obsolete**. The architectural concern it identified was valid at report time (2026-01-19) but was resolved through a deliberate refactoring that occurred around the same time period.
+
+### What Changed
+
+Between Jan 18-19, 2026, the codebase underwent a planned migration from plugin-based gates to config-driven gates:
+
+1. **Plugin gate implementations deleted** (commit c9924af, 2026-01-18):
+   - Removed FilterGate, FieldMatchGate, ThresholdGate plugin classes
+   - Deleted `src/elspeth/plugins/gates/` directory entirely
+
+2. **Plugin gate registration removed** (commit 01f0a96, 2026-01-18):
+   - Removed `builtin_gates` registration from plugin manager
+   - Gates became engine-level config operations
+
+3. **Test suite migrated** (commits 0143ee5, c708db9, 06bbfad, 2e0ab07, 949f29f, 2026-01-19):
+   - Converted all test BaseGate subclasses to GateSettings
+   - One test verifying plugin+config gate interaction was added then immediately reverted (commits 9bc67a6, e9e95c0)
+
+4. **Documentation updated** (commit in config.py):
+   - Added comment: "Plugin-based gates were removed - use the gates: section instead"
+
+### Current Architectural State
+
+**BaseGate class is preserved but only for structural purposes:**
+
+- **Defined**: `src/elspeth/plugins/base.py:185` - Defines the abstract base class with `evaluate()` method and node_id protocol
+- **Engine support**: `src/elspeth/engine/processor.py:657` - Runtime still checks `isinstance(transform, BaseGate)`
+- **Type alias**: `src/elspeth/engine/orchestrator.py:48` - `RowPlugin = BaseTransform | BaseGate`
+- **Graph builder**: `src/elspeth/core/dag.py:374-390` - Treats all transforms uniformly (no special BaseGate handling)
+- **Node ID assignment**: `src/elspeth/engine/orchestrator.py:397-405` - Plugin gates would get node_id if present in transforms list
+
+**No plugin gate implementations exist:**
+
+- No builtin plugins inherit from BaseGate
+- No plugin gate discovery or registration
+- All test gates migrated to GateSettings (config-driven)
+
+**Config gates are the only gate implementation:**
+
+- `src/elspeth/core/config.py:GateSettings` - Defines config-driven gate behavior
+- `src/elspeth/core/dag.py:418-457` - Graph builder creates gate nodes from GateSettings only
+- Route resolution map populated only for config gates (line 445, 448, 455)
+
+### Why The Mismatch Was Tolerable
+
+The "mismatch" identified in this bug report (engine supports BaseGate, graph doesn't build routes) is **by design**:
+
+1. **BaseGate is infrastructure** - Kept for protocol definition, not for actual plugins
+2. **No plugin gates to process** - All concrete gates were deleted, so the engine code path never executes
+3. **DAG builder is correct** - Only builds routes for config gates because those are the only gates that exist
+4. **Orchestrator would work** - If a BaseGate instance appeared in transforms, it would get a node_id and execute (though route resolution would fail at runtime since no routes exist for it in the graph)
+
+### Is There Still A Problem?
+
+**No runtime issue** - Since no plugin gates exist, the incomplete support cannot cause failures.
+
+**Minor technical debt** - The BaseGate infrastructure remains in place with no concrete implementations. This could be cleaned up by either:
+- Deleting BaseGate entirely (breaking change for anyone writing custom gates)
+- Adding validation to reject BaseGate instances at config/graph build time
+- Documenting BaseGate as "reserved for future use"
+
+However, keeping the infrastructure has minimal cost and provides extension points if plugin gates are needed in the future.
+
+### Recommendation
+
+**Close as OBE.** The architectural concern was valid during the transition period but is no longer a bug given the current architecture. If the project wants to fully remove plugin gate support, that should be tracked as a separate technical debt cleanup item, not a bug fix.

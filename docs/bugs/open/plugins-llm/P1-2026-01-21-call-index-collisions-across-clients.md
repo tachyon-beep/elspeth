@@ -90,3 +90,76 @@
 
 - Related issues/PRs: N/A
 - Related design docs: N/A
+
+## Verification (2026-01-25)
+
+**Status: STILL VALID**
+
+### Code Inspection
+
+The bug remains unfixed in the current codebase:
+
+1. **AuditedClientBase still uses per-instance counters** (`src/elspeth/plugins/clients/base.py:43-58`):
+   - Each client instance initializes `self._call_index = 0` in `__init__`
+   - `_next_call_index()` increments its own counter
+   - No changes to this file since bug was reported (commit ae2c0e6)
+
+2. **Database constraint unchanged** (`src/elspeth/core/landscape/schema.py:203`):
+   - `UniqueConstraint("state_id", "call_index")` still enforces uniqueness per state
+   - No mechanism to coordinate indices across multiple client instances
+
+3. **PluginContext has alternative mechanism** (`src/elspeth/plugins/context.py:93, 191-238`):
+   - Has its own `_call_index` field and `record_call()` method
+   - This provides a shared counter per context, but AuditedClientBase doesn't use it
+   - The two mechanisms exist in parallel without coordination
+
+### Current Patterns in Codebase
+
+**Pattern 1: AuditedClientBase with per-instance counters**
+- Used by `AuditedHTTPClient` and `AuditedLLMClient`
+- Each client creates its own counter starting at 0
+- Bug: Two clients with same `state_id` will generate duplicate indices
+
+**Pattern 2: Transform-owned counters**
+- `AzurePromptShield` has its own `_call_index` counter (lines 152-153)
+- Calls `recorder.record_call()` directly with its own index
+- Avoids AuditedClientBase entirely
+
+**Pattern 3: PluginContext.record_call()**
+- Context-scoped counter that increments on each call
+- Transforms could use this instead of audited clients
+- Not currently used by any audited client implementations
+
+### Risk Assessment
+
+**Current risk: LOW** - No production scenarios trigger this bug yet:
+
+1. **No transforms use both client types simultaneously**
+   - LLM transforms use `AuditedLLMClient` only
+   - HTTP transforms (Azure) use their own counters, not `AuditedHTTPClient`
+   - No hybrid transforms exist in the codebase
+
+2. **PluginContext provides both `llm_client` and `http_client` fields** (lines 97-98):
+   - Architecture supports multiple clients per state
+   - But no current usage actually instantiates both
+
+3. **Future risk is HIGH if:**
+   - A transform needs both LLM and HTTP calls (e.g., retrieve docs via HTTP, then query LLM)
+   - Multiple LLM providers in same transform (fallback pattern)
+   - Hybrid orchestration patterns emerge
+
+### Test Coverage
+
+Examined test files that reference `call_index`:
+- `tests/plugins/clients/test_audited_client_base.py`: Tests thread safety within single client, NOT collision across clients
+- No tests exist for the scenario: two different client instances sharing same `state_id`
+
+### Recommendation
+
+**Priority: P1 maintained** - While not currently triggered, this is a correctness bug that violates audit integrity guarantees:
+
+1. **Immediate fix**: Centralize call index allocation in `LandscapeRecorder` or have `AuditedClientBase` delegate to `PluginContext._call_index`
+2. **Add regression test**: Create two different client types with same `state_id`, verify both record successfully with unique indices
+3. **Architectural alignment**: Eliminate Pattern 2 (transform-owned counters) in favor of consistent PluginContext mechanism
+
+The bug report's proposed fix remains valid and should be implemented before any transform attempts to use multiple client types.

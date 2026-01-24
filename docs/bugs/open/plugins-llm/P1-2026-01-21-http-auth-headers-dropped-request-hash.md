@@ -91,3 +91,69 @@
 
 - Related issues/PRs: N/A
 - Related design docs: N/A
+
+## Verification (2026-01-25)
+
+**Status: STILL VALID**
+
+### Current Implementation
+
+Examined `/home/john/elspeth-rapid/src/elspeth/plugins/clients/http.py`:
+
+1. **Header Filtering (lines 67-86)**: The `_filter_request_headers()` method completely removes sensitive headers from `request_data`:
+   - Filters out headers in `_SENSITIVE_REQUEST_HEADERS` frozenset: `authorization`, `x-api-key`, `api-key`, `x-auth-token`, `proxy-authorization`
+   - Also filters any header containing: `auth`, `key`, `secret`, or `token` (case-insensitive)
+
+2. **Request Hash Calculation**:
+   - Line 138-144: Filtered headers (without auth) are included in `request_data`
+   - Line 2062 in `recorder.py`: `request_hash = stable_hash(request_data)`
+   - The hash is computed from canonical JSON of the filtered data
+
+3. **Impact Confirmed**: Two HTTP requests to the same URL with identical JSON bodies but different `Authorization` headers will:
+   - Generate identical `request_hash` values
+   - Be indistinguishable in the audit trail
+   - Cause replay/verify to potentially return the wrong cached response
+
+### Existing Infrastructure
+
+**Good news**: The solution already exists but is not being used:
+
+- `/home/john/elspeth-rapid/src/elspeth/core/security/fingerprint.py` implements `secret_fingerprint()` using HMAC-SHA256
+- Function signature: `secret_fingerprint(secret: str, *, key: bytes | None = None) -> str`
+- Returns 64-character hex digest that can be stored safely in audit trail
+- Supports both environment variable (`ELSPETH_FINGERPRINT_KEY`) and Azure Key Vault for key management
+
+**The fingerprinting module is NOT imported or used anywhere in `/src/elspeth/plugins/`**.
+
+### Test Coverage
+
+Reviewed `/home/john/elspeth-rapid/tests/plugins/clients/test_audited_http_client.py`:
+
+- **Test exists** (line 126): `test_auth_headers_filtered_from_recorded_request()` validates that auth headers are filtered out
+- **Missing test**: No test verifies that two requests with different auth headers produce different `request_hash` values
+- The existing test confirms the bug behavior but doesn't test for the desired outcome
+
+### Git History
+
+Searched git history since 2026-01-21:
+- No commits addressing auth header fingerprinting
+- No commits modifying `http.py` since RC-1 release
+- No references to this bug report ID in commit messages
+
+### Root Cause Confirmed
+
+The bug description is accurate:
+1. Auth headers are completely dropped (not fingerprinted)
+2. Request hashes are calculated from filtered data
+3. This violates the architectural principle in `CLAUDE.md`: "Secret Handling: Never store secrets - use HMAC fingerprints"
+
+### Recommendation
+
+**Priority: P1 - Should be fixed before production use**
+
+The fix requires:
+1. Import `secret_fingerprint` from `elspeth.core.security` in `http.py`
+2. Modify `_filter_request_headers()` to replace sensitive header values with fingerprints instead of removing them
+3. Store as `"Authorization": f"<fingerprint:{fp}>"`  or similar redacted format that preserves uniqueness
+4. Add test verifying different auth headers produce different request hashes
+5. Verify fingerprints work correctly in replay mode (same auth = same fingerprint = cache hit)
