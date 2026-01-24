@@ -20,6 +20,7 @@ from elspeth.contracts import EdgeInfo, RoutingMode
 if TYPE_CHECKING:
     from elspeth.contracts import PluginSchema
     from elspeth.core.config import ElspethSettings, GateSettings
+    from elspeth.plugins.manager import PluginManager
 
 
 class GraphValidationError(Exception):
@@ -388,7 +389,7 @@ class ExecutionGraph:
         ]
 
     @classmethod
-    def from_config(cls, config: ElspethSettings) -> ExecutionGraph:
+    def from_config(cls, config: ElspethSettings, manager: PluginManager) -> ExecutionGraph:
         """Build an ExecutionGraph from validated settings.
 
         Creates nodes for:
@@ -400,8 +401,17 @@ class ExecutionGraph:
         - Linear flow: source -> transforms -> output_sink
         - Gate routes: gate -> routed_sink
 
+        Args:
+            config: Pipeline configuration (Tier 3 - validated at boundary)
+            manager: PluginManager for schema lookup (Tier 1 - trusted system code)
+
         Raises:
+            ValueError: If config references unknown plugin names
             GraphValidationError: If gate routes reference unknown sinks
+
+        Note:
+            Schemas are extracted from plugin class attributes (as required by
+            protocols). Class-level None means "dynamic schema, validate post-instantiation".
         """
         import uuid
 

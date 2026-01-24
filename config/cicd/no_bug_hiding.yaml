@@ -199,25 +199,25 @@ allow_hits:
   # from config when present to enable edge-by-edge validation.
   # ============================================================
 
-  - key: "core/dag.py:R2:ExecutionGraph:from_config:line=420"
+  - key: "core/dag.py:R2:ExecutionGraph:from_config:line=430"
     owner: "architecture"
     reason: "Trust boundary: config objects may not have schema attributes (optional fields)"
     safety: "None default is safe - missing schema means dynamic schema"
     expires: null  # Permanent - intentional design
 
-  - key: "core/dag.py:R2:ExecutionGraph:from_config:line=433"
+  - key: "core/dag.py:R2:ExecutionGraph:from_config:line=443"
     owner: "architecture"
     reason: "Trust boundary: config objects may not have schema attributes (optional fields)"
     safety: "None default is safe - missing schema means dynamic schema"
     expires: null  # Permanent - intentional design
 
-  - key: "core/dag.py:R2:ExecutionGraph:from_config:line=455"
+  - key: "core/dag.py:R2:ExecutionGraph:from_config:line=465"
     owner: "architecture"
     reason: "Trust boundary: config objects may not have schema attributes (optional fields)"
     safety: "None default is safe - missing schema means dynamic schema"
     expires: null  # Permanent - intentional design
 
-  - key: "core/dag.py:R2:ExecutionGraph:from_config:line=456"
+  - key: "core/dag.py:R2:ExecutionGraph:from_config:line=466"
     owner: "architecture"
     reason: "Trust boundary: config objects may not have schema attributes (optional fields)"
     safety: "None default is safe - missing schema means dynamic schema"
