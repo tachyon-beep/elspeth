@@ -758,8 +758,35 @@ def _is_dynamic_schema(schema: type[PluginSchema] | None) -> bool:
 
 ---
 
-**Ticket Status:** OPEN
+## Resolution
+
+**Status:** ✅ **RESOLVED** (commit: 0a339fd)
+
+**Implementation:** ROOT CAUSE FIX - Moved validation to plugin construction
+
+**What Changed:**
+1. Schema validation moved from DAG layer to plugin construction
+2. DAG.validate() only checks structural issues (cycles, connectivity)
+3. Plugins validate their own schemas during __init__()
+4. Deleted _is_dynamic_schema(), _validate_edge_schemas(), etc.
+5. No SchemaConfig propagation to NodeInfo (not needed)
+
+**Architecture Improvement:**
+- Before: 2/5 (parallel mechanisms, Pydantic coupling)
+- After: 5/5 (single source of truth, validation at right layer)
+
+**Eliminated:**
+- Parallel detection mechanisms (2 → 0, validation happens once)
+- Pydantic introspection (minimal, only for dynamic schema detection)
+- NodeInfo bloat (avoided, no new fields)
+- Information loss pattern (fixed, config stays with plugin)
+
+**Implemented:** 2026-01-25
+**Implementation Plan:** docs/plans/2026-01-24-fix-schema-validation-properly.md
+
+---
+
+**Ticket Status:** RESOLVED
 **Priority:** P0 (high-impact architectural debt)
-**Target:** Post-RC-1 implementation
-**Estimated Effort:** 1.5-5 hours (depending on option chosen)
-**Recommended Approach:** Option A (SchemaConfig propagation)
+**Resolution Date:** 2026-01-25
+**Resolution Approach:** Root cause fix (better than Options A or B)

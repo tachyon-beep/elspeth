@@ -605,13 +605,29 @@ def _is_dynamic_schema(schema: type[PluginSchema] | None) -> bool:
 - [ ] POST-RC1: Rename tests with inverted expectations
 - [ ] POST-RC1: Add property-based testing for schema compatibility
 
+## Resolution Update
+
+**Status:** ✅ **SUPERSEDED BY ROOT CAUSE FIX**
+
+**Original Fix:** Phase 3 introspection (P0-2026-01-24-dynamic-schema-detection-regression)
+**Root Cause Fix:** Moved validation to plugin construction (this plan)
+
+**Why Superseded:**
+The introspection fix (Phase 3) was correct but created technical debt.
+Instead of fixing the debt (Phase 4 propagation plan), we fixed the
+root cause (validation placement).
+
+**See:** docs/plans/2026-01-24-fix-schema-validation-properly.md
+
+---
+
 ## References
 
 ### Code Locations
 
-- Helper function: `src/elspeth/core/dag.py:68-85`
-- Fix location 1: `src/elspeth/core/dag.py:316`
-- Fix location 2: `src/elspeth/core/dag.py:266`
+- Helper function: `src/elspeth/core/dag.py:68-85` (REMOVED in root cause fix)
+- Fix location 1: `src/elspeth/core/dag.py:316` (REMOVED in root cause fix)
+- Fix location 2: `src/elspeth/core/dag.py:266` (REMOVED in root cause fix)
 - Unit tests: `tests/core/test_dag.py:1852-1948`
 - Integration test: `tests/cli/test_plugin_errors.py:369-415`
 
@@ -620,6 +636,7 @@ def _is_dynamic_schema(schema: type[PluginSchema] | None) -> bool:
 - CLAUDE.md: "No Bug-Hiding Patterns" policy
 - CLAUDE.md: "Three-Tier Trust Model" (validates `.get()` usage)
 - Plan 3: docs/plans/2026-01-24-schema-refactor-03-testing.md
+- Root cause fix plan: docs/plans/2026-01-24-fix-schema-validation-properly.md
 
 ### Review Sessions
 
@@ -629,7 +646,8 @@ def _is_dynamic_schema(schema: type[PluginSchema] | None) -> bool:
 
 ---
 
-**Ticket Status:** RESOLVED
-**Resolution:** Fixed via `_is_dynamic_schema()` helper + validation logic updates
+**Ticket Status:** RESOLVED (SUPERSEDED)
+**Original Resolution:** Fixed via `_is_dynamic_schema()` helper + validation logic updates
+**Final Resolution:** Superseded by root cause fix (validation moved to plugin construction)
 **Verification:** All tests pass, reviews approved
-**Next Steps:** Monitor in RC-1 testing, create post-RC-1 architectural improvement ticket
+**Next Steps:** Original fix removed, root cause fix deployed
