@@ -100,3 +100,54 @@
 
 - Related issues/PRs: N/A
 - Related design docs: N/A
+
+---
+
+## Resolution
+
+**Status**: FIXED
+**Fixed in**: 260b9a7 through 91c95cd
+**Release**: RC-2 (planned)
+
+### Fix Summary
+
+The root cause was that `get_checkpoint_state()` only stored `token_ids` (list of strings) instead of complete `TokenInfo` objects. On restoration, `restore_from_checkpoint()` attempted to query the database to reconstruct tokens, but:
+1. The N+1 query pattern was slow
+2. For checkpoints from previous runs, the database no longer had those token entries
+3. This left `_buffer_tokens` empty while `_buffers` had rows, causing IndexError on flush
+
+**Solution implemented:**
+1. **Task 1** (260b9a7): Modified `get_checkpoint_state()` to store complete `TokenInfo` objects (token_id, row_id, branch_name, row_data) with 10MB size validation
+2. **Task 2** (3e25073): Modified `restore_from_checkpoint()` to reconstruct `TokenInfo` from checkpoint data, eliminating database queries
+3. **Task 3** (59bb35f, 54edba7): Added defensive guard in `execute_flush()` to crash explicitly if buffer/token length mismatch occurs
+4. **Tasks 3.5-4** (30de5e6, 91c95cd): Added comprehensive tests for size validation and edge cases
+
+**Benefits:**
+- O(1) restoration (no database queries)
+- Portable checkpoints (no database dependency)
+- Clear error messages if corruption occurs
+- Consistent with CoalesceExecutor pattern
+
+### Testing
+
+16 checkpoint tests added covering format migration, size validation, edge cases:
+- `test_get_checkpoint_state_returns_buffer_contents` - Verifies full TokenInfo storage
+- `test_restore_from_checkpoint_restores_buffers` - Verifies all fields restored
+- `test_checkpoint_roundtrip` - Extended to test flush after restore with branch_name
+- `test_execute_flush_detects_incomplete_restoration` - Guard behavior
+- `test_checkpoint_size_limit_enforced` - 10MB hard limit
+- `test_checkpoint_size_warning_logged` - 1MB warning threshold
+- `test_restore_from_checkpoint_detects_missing_required_fields` - Validation
+- `test_restore_from_checkpoint_handles_empty_tokens` - Edge case
+- `test_restore_old_format_checkpoint_raises_error` - Old format rejection
+- `test_restore_makes_zero_database_calls` - Query elimination verification
+- `test_aggregation_crash_recovery_with_flush` - End-to-end crash recovery
+- `test_checkpoint_with_1000_row_buffer` - Large batch handling
+
+All tests pass including critical `test_checkpoint_roundtrip`.
+
+### Breaking Changes
+
+**Checkpoint format change:** Old checkpoints using `{"rows": [...], "token_ids": [...]}` format are no longer compatible. Restoration from old checkpoints will raise `ValueError` with clear migration instructions.
+
+**Migration:** Existing checkpoints must be discarded and regenerated. This is acceptable for RC-1 to RC-2 as checkpoints are ephemeral state, not persistent artifacts.
