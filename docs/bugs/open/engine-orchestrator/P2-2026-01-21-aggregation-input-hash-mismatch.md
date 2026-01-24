@@ -95,3 +95,69 @@
 
 - Related issues/PRs: N/A
 - Related design docs: N/A
+
+---
+
+## VERIFICATION: 2026-01-25
+
+**Status:** STILL VALID
+
+**Verified By:** Claude Code P2 verification wave 3
+
+**Current Code Analysis:**
+
+Examined current code in `/home/john/elspeth-rapid/src/elspeth/engine/executors.py` on branch `fix/rc1-bug-burndown-session-4`:
+
+**Line 905:** `input_hash = stable_hash(buffered_rows)`
+- Computes hash from the raw list of buffered rows
+
+**Lines 919-926:**
+```python
+batch_input: dict[str, Any] = {"batch_rows": buffered_rows}
+state = self._recorder.begin_node_state(
+    ...
+    input_data=batch_input,
+    ...
+)
+```
+- Wraps `buffered_rows` in a dict with key `"batch_rows"`
+- Passes this wrapped dict to `begin_node_state()`
+
+**Line 993:** `result.input_hash = input_hash`
+- Assigns the hash of the unwrapped list to the result
+
+In `recorder.py` line 1045, `begin_node_state()` computes: `input_hash = stable_hash(input_data)`
+
+This creates a hash mismatch:
+- `result.input_hash` = `stable_hash(buffered_rows)` (list)
+- `state.input_hash` (in DB) = `stable_hash({"batch_rows": buffered_rows})` (wrapped dict)
+
+These will be different hash values for the same logical input.
+
+**Git History:**
+
+Checked commits since 2026-01-21:
+- `54edba7` (2026-01-24): Added defensive guard for buffer/token length mismatch - unrelated
+- `57c57f5` (2026-01-21): Fixed 8 RC1 bugs - did not address this hash mismatch issue
+- No commits found that modify the aggregation input hash computation logic
+
+Searched for related commits with:
+- `git log --all --oneline --grep="aggregation.*hash|input.*hash.*aggregation|batch.*input.*hash"` - no results
+
+**Root Cause Confirmed:**
+
+YES - The bug is still present. The code still exhibits the exact behavior described in the original report:
+
+1. `execute_flush()` computes `input_hash` from `buffered_rows` (line 905)
+2. `begin_node_state()` receives `{"batch_rows": buffered_rows}` and computes hash from the wrapped dict (line 924)
+3. Result and node_state have different input hashes for the same logical input
+
+**Impact Assessment:**
+
+- **Audit integrity violation**: The audit trail records one hash in `node_states.input_hash` while `TransformResult` carries a different hash for the same input data
+- **Traceability broken**: Cannot reliably verify aggregation inputs by comparing hashes
+- **No test coverage**: Examined `tests/engine/test_executors.py` - aggregation flush tests (`test_checkpoint_restore_then_flush_succeeds`, `test_execute_flush_detects_incomplete_restoration`) verify flush succeeds but do NOT assert `result.input_hash == state.input_hash`
+
+**Recommendation:**
+
+**Keep open** - This is a valid P2 audit integrity bug that violates ELSPETH's auditability standard. The fix is straightforward (align the hash input representation), low-risk, and should include a regression test to verify `result.input_hash == node_state.input_hash` after aggregation flush.

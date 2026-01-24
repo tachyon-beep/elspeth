@@ -96,3 +96,132 @@
 
 - Related issues/PRs: N/A
 - Related design docs: `docs/design/subsystems/00-overview.md`
+
+---
+
+## VERIFICATION: 2026-01-25
+
+**Status:** STILL VALID
+
+**Verified By:** Claude Code P2 verification wave 2
+
+**Current Code Analysis:**
+
+Examined the current implementation in commit `a2698bd` (HEAD of fix/rc1-bug-burndown-session-4 branch):
+
+### 1. Failure Outcomes Are Created But Never Recorded
+
+**Location:** `src/elspeth/engine/coalesce_executor.py:421-434` (quorum_not_met) and lines 436-449 (incomplete_branches)
+
+When `flush_pending()` is called and coalesce policies fail:
+- `quorum` policy: If quorum not met, creates `CoalesceOutcome` with `failure_reason="quorum_not_met"`
+- `require_all` policy: Creates `CoalesceOutcome` with `failure_reason="incomplete_branches"`
+
+**Critical Gap:** These failure outcomes:
+1. Do NOT populate `consumed_tokens` field (left as empty list)
+2. Do NOT call `recorder.begin_node_state()` or `recorder.complete_node_state()` for any arrived tokens
+3. Only populate `coalesce_metadata` dict with policy info and branches_arrived list
+
+**Contrast with successful merge (lines 236-249):**
+```python
+# Record node states for consumed tokens
+for token in consumed_tokens:
+    state = self._recorder.begin_node_state(
+        token_id=token.token_id,
+        node_id=node_id,
+        step_index=step_in_pipeline,
+        input_data=token.row_data,
+    )
+    self._recorder.complete_node_state(
+        state_id=state.state_id,
+        status="completed",
+        output_data={"merged_into": merged_token.token_id},
+        duration_ms=0,
+    )
+```
+
+This recording is completely absent from failure paths.
+
+### 2. Orchestrator False Comment
+
+**Location:** `src/elspeth/engine/orchestrator.py:1048-1053`
+
+```python
+elif outcome.failure_reason:
+    # Coalesce failed (timeout, missing branches, etc.)
+    # Failure is recorded in audit trail by executor.  <-- FALSE
+    # Not counted as rows_failed since the individual fork children
+    # were already counted when they reached their terminal states.
+    pass
+```
+
+The comment claims "Failure is recorded in audit trail by executor" but this is demonstrably false. The executor only returns the outcome object; it never calls any `recorder` methods on the failure path.
+
+### 3. check_timeouts() Has Same Gap
+
+**Location:** `src/elspeth/engine/coalesce_executor.py:357-369`
+
+The `check_timeouts()` method only calls `_execute_merge()` if quorum is met (line 360-368). If timeout occurs but quorum is NOT met:
+- The pending entry remains in `self._pending` (not cleaned up)
+- No failure outcome is created
+- No audit record is made
+
+**Related Bug:** Per the already-verified bug P1-2026-01-22-coalesce-timeouts-never-fired.md, `check_timeouts()` is never called by the orchestrator anyway, so this is currently a theoretical issue but would become real once timeouts are wired up.
+
+### 4. Tokens in pending.arrived Are Lost
+
+When a coalesce fails, the tokens that DID arrive are in `pending.arrived` dict (lines 431, 446). These tokens:
+- Successfully reached the coalesce point
+- Were held waiting for missing branches
+- Are deleted when `del self._pending[key]` executes (lines 423, 438)
+- Have NO node state recorded
+- Have NO terminal outcome recorded
+
+This violates the "no silent drops" principle - these tokens disappear from the audit trail.
+
+**Git History:**
+
+Searched for relevant fixes since bug report date (2026-01-22):
+```bash
+git log --all --oneline --since="2026-01-22" -- src/elspeth/engine/coalesce_executor.py
+git log --all --oneline --grep="coalesce.*failure\|coalesce.*timeout\|coalesce.*record" -i
+```
+
+**Result:** No commits addressed failure outcome recording. Recent commits to these files were:
+- `935ee6b` - cleanup: delete ExecutionGraph.from_config() method
+- `0a9cf2a` - fix(audit): record COMPLETED outcomes with sink_name for disambiguation
+- Various observability and phase event additions
+
+None addressed the missing audit recording for coalesce failures.
+
+**Root Cause Confirmed:**
+
+The bug is exactly as described in the original report:
+
+1. Failure outcomes are created with metadata but never persisted to Landscape
+2. Tokens that arrived at a failed coalesce have no node states recorded
+3. The orchestrator incorrectly assumes failures are recorded (line 1050 comment)
+4. Tests verify that failure outcomes are RETURNED but do not verify audit trail recording
+
+**Tests verified this gap:**
+- `tests/engine/test_coalesce_executor.py:975` - asserts `failure_reason == "quorum_not_met"` but does NOT query recorder
+- `tests/engine/test_coalesce_executor.py:1054` - asserts `failure_reason == "incomplete_branches"` but does NOT query recorder
+- No test calls `recorder.get_node_states()` after a failure outcome
+
+**Recommendation:**
+
+Keep open - STILL VALID
+
+**Fix Required:**
+1. In `flush_pending()` failure paths (lines 421-434, 436-449), add recording similar to successful merge:
+   - Loop through `pending.arrived.values()` tokens
+   - Call `recorder.begin_node_state()` and `recorder.complete_node_state()` with status indicating failure
+   - Populate `consumed_tokens` field in the returned outcome
+2. Update orchestrator.py line 1050 comment to reflect actual behavior
+3. Add test that queries audit trail after coalesce failure to verify node states exist
+
+**Audit Impact:**
+Without this fix, the audit trail cannot answer:
+- "Which tokens arrived at coalesce X before it failed?"
+- "What data did those tokens contain?"
+- "Why did row Y never reach the output sink?" (if it was stuck in failed coalesce)

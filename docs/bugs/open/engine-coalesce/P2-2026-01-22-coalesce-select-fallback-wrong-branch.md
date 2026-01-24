@@ -94,3 +94,62 @@
 
 - Related issues/PRs: N/A
 - Related design docs: `docs/contracts/plugin-protocol.md`
+
+---
+
+## VERIFICATION: 2026-01-25
+
+**Status:** STILL VALID
+
+**Verified By:** Claude Code P2 verification wave 2
+
+**Current Code Analysis:**
+
+The bug is **still present** in the current codebase. The problematic code is at `/home/john/elspeth-rapid/src/elspeth/engine/coalesce_executor.py:295-301`:
+
+```python
+# settings.merge == "select":
+# Take specific branch output
+assert settings.select_branch is not None
+if settings.select_branch in arrived:
+    return arrived[settings.select_branch].row_data.copy()
+# Fallback to first arrived if select branch not present
+return next(iter(arrived.values())).row_data.copy()
+```
+
+The fallback on line 301 violates the contract for `merge: select`, which per `docs/contracts/plugin-protocol.md:1105` is defined as "Take output from specific branch only". When the selected branch has not arrived (even though the configuration validator confirms `select_branch` is one of the expected branches), the code silently substitutes the first-arrived branch.
+
+**Git History:**
+
+- Examined all commits to `coalesce_executor.py` since the bug report date (2026-01-22)
+- The file has not been modified since RC1 commit `c786410` (2026-01-22)
+- The fallback logic was present in the original implementation and has never been changed
+- No commits addressed this issue
+
+**Root Cause Confirmed:**
+
+Yes, the root cause is exactly as described:
+1. The `_merge_data()` method implements a "convenience fallback" when `select_branch` is not in the `arrived` dict
+2. This can occur when:
+   - Policy is `best_effort` with timeout - selected branch never arrives, timeout fires, merge happens with whatever did arrive
+   - Policy is `quorum` - selected branch is missing but quorum is met with other branches
+   - Policy is `first` - a non-selected branch arrives first and triggers immediate merge
+3. The existing test at `tests/engine/test_coalesce_executor.py:273-314` actually **relies on this bug**:
+   - Configured with `merge="select"` and `select_branch="fast"`
+   - Uses `policy="first"`
+   - Test sends the "slow" branch first
+   - Expects to get data from "slow" branch (line 314: `assert outcome.merged_token.row_data == {"result": "from_slow"}`)
+   - This test documents that the fallback behavior is intentional, but it violates the contract
+
+**Recommendation:**
+
+**Keep open** - This is a valid bug with contract-violating behavior. The fix requires:
+
+1. **Code change:** Remove the fallback in `_merge_data()` - raise an error or return a failure outcome when `select_branch not in arrived`
+2. **Policy interaction decision:** Determine how to handle missing select branch for each policy:
+   - `require_all`: Natural - if select branch missing, not all branches arrived, so merge doesn't happen
+   - `quorum`: Should fail if select branch missing, even if quorum met
+   - `best_effort`: Should record failure if select branch never arrived
+   - `first`: Contradictory semantics - "first" suggests any branch, "select" suggests specific branch
+3. **Test updates:** The test at line 273 needs to be updated or removed - it validates broken behavior
+4. **Audit trail:** When merge fails due to missing select branch, record appropriate failure reason in coalesce metadata

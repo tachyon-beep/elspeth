@@ -92,3 +92,62 @@
 
 - Related issues/PRs: N/A
 - Related design docs: `docs/contracts/plugin-protocol.md`
+
+---
+
+## VERIFICATION: 2026-01-25
+
+**Status:** STILL VALID
+
+**Verified By:** Claude Code P2 verification wave 2
+
+**Current Code Analysis:**
+
+Examined `/home/john/elspeth-rapid/src/elspeth/engine/coalesce_executor.py` at the reported location (lines 172-174):
+
+```python
+# Record arrival
+pending.arrived[token.branch_name] = token
+pending.arrival_times[token.branch_name] = now
+```
+
+The bug is confirmed. The code performs a simple dictionary assignment with no validation:
+
+1. **No duplicate detection**: The code uses `pending.arrived[token.branch_name] = token` which silently overwrites any existing token for that branch
+2. **No error raised**: There is no check like `if token.branch_name in pending.arrived: raise ValueError(...)`
+3. **Silent data loss**: If two tokens arrive for the same `(row_id, branch_name)` pair, the first token is completely lost from the pending state
+4. **Audit trail gap**: The overwritten token's arrival is not recorded anywhere - it disappears without trace
+
+**Test Coverage:**
+
+Examined `/home/john/elspeth-rapid/tests/engine/test_coalesce_executor.py` - confirmed there are NO tests for duplicate branch arrival scenarios. The test file contains 1182 lines but no test with "duplicate" in the name or testing this edge case.
+
+**Git History:**
+
+- File was created in commit `c786410` (ELSPETH - Release Candidate 1) on 2026-01-22
+- No subsequent changes to the `accept()` method or duplicate handling logic since bug was reported
+- The code structure remains identical to the reported commit `ae2c0e6`
+
+**Root Cause Confirmed:**
+
+YES. The `_PendingCoalesce.arrived` dictionary (line 43) is a simple `dict[str, TokenInfo]` with no safeguards. When the same branch_name is used as a key twice, Python's dict semantics silently overwrite the previous value.
+
+This is particularly problematic because:
+- Upstream retries could send the same branch token twice
+- Engine bugs could route tokens incorrectly
+- The silent overwrite masks these bugs instead of surfacing them
+- Per ELSPETH's audit integrity principles, "silent wrong result is worse than a crash"
+
+**Related Issues:**
+
+This bug is architecturally related to P1-2026-01-22-coalesce-late-arrivals-duplicate-merge.md, which handles the case where tokens arrive AFTER a merge completes. This bug handles the case where duplicate tokens arrive for the same branch BEFORE the merge completes. Both stem from insufficient state tracking in the coalesce executor.
+
+**Recommendation:**
+
+**Keep open** - This is a valid P2 bug that violates ELSPETH's audit integrity principles. The fix should:
+
+1. Add validation: `if token.branch_name in pending.arrived: raise ValueError(f"Duplicate arrival for branch {token.branch_name} on row {token.row_id}")`
+2. Add test coverage for the duplicate branch arrival scenario
+3. Document whether duplicates are considered an engine bug (crash) or an expected failure mode (quarantine)
+
+Per CLAUDE.md "Plugin Ownership" section, this should crash immediately since duplicates indicate a bug in the engine's token routing logic, not a problem with user data.

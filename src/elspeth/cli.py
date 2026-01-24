@@ -194,6 +194,11 @@ def run(
             coalesce_settings=list(config.coalesce) if config.coalesce else None,
         )
         graph.validate()
+    except ValueError as e:
+        # Schema compatibility errors raised during graph construction (PHASE 2)
+        # Updated for Task 4: Schema validation moved to construction time
+        typer.echo(f"Schema validation error: {e}", err=True)
+        raise typer.Exit(1) from None
     except GraphValidationError as e:
         typer.echo(f"Pipeline graph error: {e}", err=True)
         raise typer.Exit(1) from None
@@ -832,6 +837,11 @@ def validate(
             coalesce_settings=list(config.coalesce) if config.coalesce else None,
         )
         graph.validate()
+    except ValueError as e:
+        # Schema compatibility errors raised during graph construction (PHASE 2)
+        # Updated for Task 4: Schema validation moved to construction time
+        typer.echo(f"Schema validation error: {e}", err=True)
+        raise typer.Exit(1) from None
     except GraphValidationError as e:
         typer.echo(f"Pipeline graph error: {e}", err=True)
         raise typer.Exit(1) from None

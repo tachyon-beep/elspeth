@@ -166,3 +166,69 @@ Verified the bug still exists on commit `36e17f2` (fix/rc1-bug-burndown-session-
 ### Verification Conclusion
 
 Bug is **STILL VALID** and straightforward to fix. The infrastructure exists (both parameters are already defined), implementation simply needs to pass the metadata that's already being computed.
+
+---
+
+## VERIFICATION: 2026-01-25
+
+**Status:** STILL VALID
+
+**Verified By:** Claude Code P2 verification wave 2
+
+**Current Code Analysis:**
+
+Verified on commit `0e2f6da` (fix/rc1-bug-burndown-session-4):
+
+1. **Bug still present in coalesce_executor.py (lines 244-265):**
+   - `complete_node_state()` called on line 244-249 WITHOUT `context_after` parameter
+   - `coalesce_metadata` built on lines 252-265 (AFTER node state completion)
+   - Metadata includes: policy, merge_strategy, expected_branches, branches_arrived, arrival_order, wait_duration_ms
+   - Metadata is returned in `CoalesceOutcome` but never persisted
+
+2. **Bug still present in processor.py (lines 973-978):**
+   - `record_token_outcome()` called on line 973-978 WITHOUT `context` parameter
+   - `coalesce_outcome.coalesce_metadata` is available but not passed to recorder
+   - Only stores `join_group_id`, missing all merge details
+
+3. **Infrastructure verified (recorder.py):**
+   - `complete_node_state()` accepts `context_after: dict[str, Any] | None` parameter (line 1088, 1100, 1112, 1123)
+   - `record_token_outcome()` accepts `context: dict[str, Any] | None` parameter (line 2220)
+   - Both parameters exist and are ready to receive metadata
+
+**Git History:**
+
+- Commit `26f8eb1` (2026-01-18): "feat(coalesce): record audit metadata for coalesce events"
+  - This commit CREATED the metadata computation but did NOT persist it
+  - Added `coalesce_metadata` dict to `CoalesceOutcome` object
+  - Metadata is built and returned but never written to database
+  - This is the ROOT CAUSE: partial implementation that stopped before persistence
+
+- Commit `0a9cf2a` (2026-01-24): "fix(audit): record COMPLETED outcomes with sink_name"
+  - Fixed different bug (COMPLETED outcomes missing sink_name)
+  - Modified processor.py and orchestrator.py but did NOT address coalesce metadata
+  - Not related to this bug
+
+- Commit `935ee6b` (2026-01-24): "cleanup: delete ExecutionGraph.from_config()"
+  - Test cleanup, no impact on coalesce metadata bug
+
+- No commits since 2026-01-24 have addressed coalesce metadata persistence
+
+**Root Cause Confirmed:**
+
+YES - bug is still present exactly as described in original report and 2026-01-24 verification:
+
+1. Metadata computation exists (lines 252-265 in coalesce_executor.py)
+2. Infrastructure exists (context_after and context parameters in recorder)
+3. Implementation gap: metadata is computed but not passed to persistence layer
+4. Architectural flaw: metadata is built AFTER `complete_node_state()` call, making it impossible to pass via `context_after` without reordering code
+
+**Recommendation:**
+
+**Keep open** - bug remains valid and unfixed.
+
+**Fix complexity:** LOW - requires two simple changes:
+1. Move `coalesce_metadata` computation BEFORE `complete_node_state()` call in coalesce_executor.py
+2. Add `context_after=coalesce_metadata` parameter to `complete_node_state()` call (line 244)
+3. Add `context=coalesce_outcome.coalesce_metadata` parameter to `record_token_outcome()` call in processor.py (line 973)
+
+**Priority justification:** P2 is appropriate - this is an audit trail gap but not a functional failure. The system works correctly, but explain() cannot show merge details.

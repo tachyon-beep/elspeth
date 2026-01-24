@@ -1,11 +1,22 @@
-"""End-to-end integration tests for schema validation."""
+"""End-to-end integration tests for schema validation.
+
+Updated for Task 4: Tests now expect schema errors during graph construction,
+not during graph.validate(). Schema validation happens in two phases:
+- PHASE 1: Self-validation during plugin construction (malformed schemas)
+- PHASE 2: Compatibility validation during ExecutionGraph.from_plugin_instances()
+"""
 
 import tempfile
 from pathlib import Path
 
+import pytest
+from pydantic import TypeAdapter
 from typer.testing import CliRunner
 
 from elspeth.cli import app
+from elspeth.cli_helpers import instantiate_plugins_from_config
+from elspeth.core.config import ElspethSettings
+from elspeth.core.dag import ExecutionGraph
 
 
 def test_compatible_pipeline_passes_validation():
@@ -321,3 +332,69 @@ output_sink: output
 
     finally:
         config_file.unlink()
+
+
+def test_two_phase_validation_separates_self_and_compatibility_errors(plugin_manager) -> None:
+    """Verify PHASE 1 (self) and PHASE 2 (compatibility) validation both work.
+
+    This test demonstrates the two-phase validation architecture:
+    - PHASE 1: Self-validation during plugin construction (malformed schemas)
+    - PHASE 2: Compatibility validation during graph construction (incompatible connections)
+    """
+    from elspeth.plugins.config_base import PluginConfigError
+
+    # PHASE 1 should fail: Malformed schema in plugin config
+    bad_self_config = {
+        "path": "test.csv",
+        "schema": {"mode": "strict", "fields": ["invalid syntax!!!"]},
+        "on_validation_failure": "discard",
+    }
+
+    with pytest.raises(PluginConfigError, match="Invalid field spec"):
+        # Fails during plugin construction (PHASE 1)
+        source_cls = plugin_manager.get_source_by_name("csv")
+        source_cls(bad_self_config)
+
+    # PHASE 2 should fail: Well-formed schemas, incompatible connection
+    good_self_bad_compat_config = {
+        "datasource": {
+            "plugin": "csv",
+            "options": {
+                "path": "test.csv",
+                "schema": {"mode": "strict", "fields": ["id: int"]},  # Only has 'id'
+                "on_validation_failure": "discard",
+            },
+        },
+        "row_plugins": [
+            {
+                "plugin": "passthrough",
+                "options": {
+                    "schema": {"mode": "strict", "fields": ["id: int", "email: str"]},  # Requires 'email'!
+                },
+            }
+        ],
+        "sinks": {
+            "out": {
+                "plugin": "csv",
+                "options": {"path": "out.csv", "schema": {"fields": "dynamic"}},
+            }
+        },
+        "output_sink": "out",
+    }
+
+    adapter = TypeAdapter(ElspethSettings)
+    config = adapter.validate_python(good_self_bad_compat_config)
+
+    # Instantiate plugins (PHASE 1 passes - schemas are well-formed)
+    plugins = instantiate_plugins_from_config(config)
+
+    # Graph construction should fail (PHASE 2 - schemas incompatible)
+    with pytest.raises(ValueError, match=r"missing required fields.*email"):
+        ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(config.gates),
+            output_sink=config.output_sink,
+        )

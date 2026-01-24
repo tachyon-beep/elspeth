@@ -89,3 +89,91 @@
 
 - Related issues/PRs: P2-2026-01-15-node-metadata-hardcoded (config gates only)
 - Related design docs: CLAUDE.md auditability standard
+
+---
+
+## VERIFICATION: 2026-01-25
+
+**Status:** STILL VALID
+
+**Verified By:** Claude Code P2 verification wave 3
+
+**Current Code Analysis:**
+
+The bug is confirmed present in `/home/john/elspeth-rapid/src/elspeth/engine/orchestrator.py` at lines 650-654:
+
+```python
+elif node_id in aggregation_node_ids:
+    # Aggregations use batch-aware transforms - determinism depends on the transform
+    # Default to deterministic (statistical operations are typically deterministic)
+    plugin_version = "1.0.0"
+    determinism = Determinism.DETERMINISTIC
+```
+
+The comment acknowledges that "determinism depends on the transform" but then hardcodes both `plugin_version="1.0.0"` and `determinism=Determinism.DETERMINISTIC`.
+
+**Root Cause Analysis:**
+
+The issue stems from how aggregation nodes are mapped in the DAG layer:
+
+1. **Aggregation transforms ARE instantiated** and have proper metadata (`determinism`, `plugin_version`)
+   - Example: `azure_batch.py` has `determinism = Determinism.NON_DETERMINISTIC` (line 122)
+   - All BaseTransform instances have these attributes with proper defaults
+
+2. **Aggregation transforms ARE added to config.transforms** (see `/home/john/elspeth-rapid/src/elspeth/cli.py` lines 615-621)
+   - They're appended to the transforms list after instantiation
+   - They have their `node_id` attribute set
+
+3. **But the graph treats aggregations separately:**
+   - In `/home/john/elspeth-rapid/src/elspeth/core/dag.py` lines 374-391: Regular transforms are mapped via `transform_id_map[sequence] = node_id`
+   - Lines 395-416: Aggregations get their own `aggregation_id_map[name] = node_id`
+   - Aggregation transforms are NOT included in `transform_id_map`
+
+4. **The orchestrator builds node_to_plugin mapping incorrectly:**
+   - Lines 617-625: Only uses `transform_id_map`, `sink_id_map`, and source
+   - Aggregation transforms are in `config.transforms` but their node_ids are NOT in `transform_id_map`
+   - So aggregation node_ids are NOT in `node_to_plugin`
+   - Falls back to hardcoded metadata at lines 650-654
+
+**Evidence:**
+
+- Aggregation transforms are accessible at runtime (line 1777 in orchestrator.py finds them by matching `node_id`)
+- The transform instances have the correct metadata (verified in `azure_batch.py`, `openrouter.py`, etc.)
+- The node_to_plugin mapping construction (lines 617-625) explicitly excludes aggregations per the comment at line 616
+- No tests exist to validate aggregation node metadata matches transform metadata
+
+**Git History:**
+
+Commit 7144be3 (2026-01-15) "fix(engine): use actual plugin metadata for node registration" attempted to fix hardcoded metadata, but only addressed regular transforms, sources, and sinks. The commit did not handle aggregations.
+
+No subsequent commits have addressed this issue.
+
+**Root Cause Confirmed:**
+
+Yes. The bug is present because:
+1. Aggregation transforms have metadata but are not included in `node_to_plugin` mapping
+2. The code falls back to hardcoded values for aggregation nodes
+3. This misrepresents non-deterministic aggregations (LLM batch transforms) in the audit trail
+
+**Recommendation:**
+
+Keep open. This is a valid P2 audit integrity issue.
+
+**Suggested Fix:**
+
+The orchestrator needs to also map aggregation transforms into `node_to_plugin`. Since aggregation transforms are in `config.transforms` and have their `node_id` attribute set, the fix is:
+
+```python
+# After line 625, add:
+for transform in config.transforms:
+    if hasattr(transform, 'node_id') and transform.node_id in aggregation_node_ids:
+        node_to_plugin[transform.node_id] = transform
+```
+
+Then remove the special case at lines 650-654 so aggregations use the normal metadata extraction path (lines 663-668).
+
+**Test Required:**
+
+A test verifying that when a non-deterministic aggregation transform (like azure_batch) is used, the registered node has:
+- `determinism = Determinism.NON_DETERMINISTIC` (not DETERMINISTIC)
+- `plugin_version` matching the transform's version (not "1.0.0")

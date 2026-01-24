@@ -89,3 +89,83 @@
 
 - Related issues/PRs: N/A
 - Related design docs: CLAUDE.md auditability standard
+
+---
+
+## VERIFICATION: 2026-01-25
+
+**Status:** STILL VALID
+
+**Verified By:** Claude Code P2 verification wave 3
+
+**Current Code Analysis:**
+
+The bug is confirmed to still exist in the current codebase. The issue is a structural mismatch between how aggregation nodes store their configuration vs. how the orchestrator extracts schema_config.
+
+**Evidence from current code:**
+
+1. **Aggregation node config structure** (src/elspeth/core/dag.py:396-400):
+   ```python
+   agg_node_config = {
+       "trigger": agg_config.trigger.model_dump(),
+       "output_mode": agg_config.output_mode,
+       "options": dict(agg_config.options),  # schema is nested here
+   }
+   ```
+   Schema is stored at `config["options"]["schema"]`
+
+2. **Orchestrator extraction** (src/elspeth/engine/orchestrator.py:672):
+   ```python
+   schema_dict = node_info.config.get("schema", {"fields": "dynamic"})
+   ```
+   Looking for schema at `config["schema"]` (top level)
+
+3. **Real-world example** (examples/batch_aggregation/settings.yaml:30-31):
+   ```yaml
+   aggregations:
+     - name: batch_totals
+       options:
+         schema:
+           fields: dynamic
+   ```
+
+**Result:** Aggregation nodes are always registered with `schema_config = {"fields": "dynamic"}` regardless of their actual configured schema, because the orchestrator looks at the wrong path.
+
+**Comparison with other node types:**
+
+- Transforms: Store config directly from plugin instance (`transform.config`), which already has schema at top level
+- Sources/Sinks: Similar pattern to transforms
+- Aggregations: Unique wrapper structure with `trigger`, `output_mode`, and `options`
+
+**Git History:**
+
+Searched commits since 2026-01-21 affecting orchestrator.py:
+- Commit f4dd59d (2026-01-24): "move schema validation into ExecutionGraph" - moved validation logic but did NOT fix this schema extraction bug
+- Commit 22d7f96 (2026-01-24): Closed P2-2026-01-24-aggregation-nodes-lack-schema-validation - this is a DIFFERENT bug about edge schema validation, not audit trail schema_config recording
+
+No commits have addressed this specific issue.
+
+**Root Cause Confirmed:**
+
+The orchestrator uses a generic schema extraction pattern that works for transforms, sources, and sinks (where config is the plugin's direct config object), but fails for aggregations where the config is a wrapper containing `trigger`, `output_mode`, and `options`.
+
+**Impact Assessment:**
+
+- **Audit trail integrity**: The nodes table records incorrect schema metadata for aggregations
+- **Explain queries**: Users cannot see what schema contract was actually used for aggregation
+- **Compliance risk**: Cannot prove to auditors what schema validation was applied to aggregated data
+- **Severity**: Correctly categorized as P2 - this is metadata corruption in audit trail, not a functional failure
+
+**Recommendation:**
+
+Keep open. This is a valid P2 bug that should be fixed to maintain audit trail integrity. The fix requires special-casing aggregation nodes in the orchestrator's schema extraction logic (lines 670-673):
+
+```python
+# Aggregations wrap their options, other nodes have config directly
+if node_info.node_type == "aggregation":
+    schema_dict = node_info.config.get("options", {}).get("schema", {"fields": "dynamic"})
+else:
+    schema_dict = node_info.config.get("schema", {"fields": "dynamic"})
+```
+
+This is a straightforward fix with no architectural implications.

@@ -170,3 +170,72 @@ The architecture changed so fundamentally that:
 - Implementation plan: `docs/plans/2026-01-24-fix-schema-validation-properly.md`
 - Architecture review: `docs/bugs/arch-review-schema-validator-fix.md`
 - Related closed bugs: P1-2026-01-21-schema-validator-ignores-dag-routing
+
+---
+
+## VERIFICATION: 2026-01-25
+
+**Status:** OBE (CONFIRMED - Still Valid)
+
+**Verified By:** Claude Code P2 verification wave 1
+
+**Current Code Analysis:**
+
+The previous verification from 2026-01-24 remains accurate. I have confirmed:
+
+1. **Original buggy code deleted:** The `src/elspeth/engine/schema_validator.py` file with the `validate_pipeline_schemas()` function was deleted in commit `f4dd59d` (2026-01-24).
+
+2. **Current architecture eliminates the bug pattern:**
+   - Schema validation is now in `src/elspeth/core/dag.py` via `validate_edge_compatibility()` method
+   - Validation is per-edge, not global, so dynamic schemas only bypass validation for THAT edge
+   - Code at lines 699-701 shows the correct pattern:
+     ```python
+     # Rule 1: Dynamic schemas (None) bypass validation
+     if producer_schema is None or consumer_schema is None:
+         return  # Dynamic schema - compatible with anything
+     ```
+   - This returns from `_validate_single_edge()`, NOT from the entire validation loop
+   - Other edges with explicit schemas continue to be validated
+
+3. **Plugin-level validation added:**
+   - All plugins now implement `validate_output_schema()` (Phase 1 self-validation)
+   - Called during plugin `__init__()` before any graph construction
+   - Verified in `src/elspeth/plugins/protocols.py` lines 106-116
+
+**Git History:**
+
+Recent relevant commits confirm the architecture change:
+- `df43269` - refactor: remove schema validation from DAG layer
+- `430307d` - feat: add schema validation to plugin protocols
+- `7540e57` - fix: clarify validate_output_schema uses raise pattern, not list return
+- `8809bd1` - feat: add edge compatibility validation to ExecutionGraph
+- `7ee7c51` - feat: add self-validation to all builtin plugins
+
+**Root Cause Confirmed:**
+
+The root cause NO LONGER EXISTS. The original bug was:
+```python
+# OLD CODE (deleted in f4dd59d):
+if source_output is None:
+    return errors  # ← Bug: early exit from entire validation
+```
+
+Current code validates each edge independently:
+```python
+# CURRENT CODE (dag.py lines 657-658):
+for from_id, to_id, _edge_data in self._graph.edges(data=True):
+    self._validate_single_edge(from_id, to_id)
+```
+
+If an edge has dynamic schema, only THAT edge validation is skipped (line 701 returns from `_validate_single_edge()`, not from the loop).
+
+**Recommendation:**
+
+**CONFIRMED: Move to `docs/bugs/closed/` as OBE**
+
+The bug is overtaken by events. The architecture changed from:
+- Linear pipeline validation with global early-exit → Edge-based DAG validation with per-edge skipping
+- Single-phase validation → Two-phase (plugin self-validation + edge compatibility)
+- Centralized validator module → Distributed (plugins validate themselves, DAG validates edges)
+
+This is a textbook OBE case: the problem cannot recur because the problematic code pattern no longer exists in the codebase.

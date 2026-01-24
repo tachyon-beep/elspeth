@@ -90,3 +90,82 @@
 
 - Related issues/PRs: N/A
 - Related design docs: CLAUDE.md auditability standard
+
+---
+
+## VERIFICATION: 2026-01-25
+
+**Status:** STILL VALID
+
+**Verified By:** Claude Code P2 verification wave 3
+
+**Current Code Analysis:**
+
+The bug is confirmed to still exist in the current codebase. The synthetic edge ID pattern is present at `/home/john/elspeth-rapid/src/elspeth/engine/orchestrator.py:1413-1418`:
+
+```python
+# Build edge_map from graph edges
+edge_map: dict[tuple[str, str], str] = {}
+for i, edge_info in enumerate(graph.get_edges()):
+    # Generate synthetic edge_id for resume (edges were registered in original run)
+    edge_id = f"resume_edge_{i}"
+    edge_map[(edge_info.from_node, edge_info.label)] = edge_id
+```
+
+In contrast, the normal run path at lines 686-699 properly registers edges and stores real edge IDs:
+
+```python
+for edge_info in graph.get_edges():
+    edge = recorder.register_edge(
+        run_id=run_id,
+        from_node_id=edge_info.from_node,
+        to_node_id=edge_info.to_node,
+        label=edge_info.label,
+        mode=edge_info.mode,
+    )
+    edge_map[(edge_info.from_node, edge_info.label)] = edge.edge_id
+```
+
+**Triggering Conditions Confirmed:**
+
+1. Config gates ARE executed during resume (orchestrator.py:1517, processor.py:872-885)
+2. Config gates DO record routing events via `GateExecutor._record_routing()` (executors.py:581, 610, 630)
+3. `_record_routing()` uses `self._edge_map` to look up edge IDs (executors.py:682, 696)
+4. Routing events insert edge_id with FK constraint to edges.edge_id (schema.py:235)
+
+**FK Constraint Verification:**
+
+```python
+# From schema.py:230-236
+routing_events_table = Table(
+    "routing_events",
+    metadata,
+    Column("event_id", String(64), primary_key=True),
+    Column("state_id", String(64), ForeignKey("node_states.state_id"), nullable=False),
+    Column("edge_id", String(64), ForeignKey("edges.edge_id"), nullable=False),  # <-- FK CONSTRAINT
+    ...
+)
+```
+
+**Git History:**
+
+The synthetic edge_id pattern was introduced in commit `b2a3518` ("fix(sources,resume): comprehensive data handling bug fixes") and has not been modified since. No subsequent commits have addressed this issue.
+
+**Fix Infrastructure Available:**
+
+The LandscapeRecorder already has a method to load edges by run_id:
+- `recorder.get_edges(run_id)` at recorder.py:689-713
+- Returns list of Edge models with edge_id, from_node_id, to_node_id, label
+
+The resume path could call this method and rebuild edge_map using real edge IDs instead of synthetic ones.
+
+**Root Cause Confirmed:**
+
+YES. The resume path creates synthetic edge IDs that do not exist in the `edges` table. When config gates execute during resume and attempt to record routing events, the FK constraint `routing_events.edge_id -> edges.edge_id` will fail with an integrity error.
+
+**Recommendation:**
+
+**Keep open.** This is a valid P2 bug that will cause resume to fail for any pipeline using config gates. The fix is straightforward:
+1. Call `recorder.get_edges(run_id)` in `_process_resumed_rows()`
+2. Build `edge_map` from returned edges using `(from_node_id, label) -> edge_id`
+3. This mirrors the normal run path but reads from DB instead of registering new edges
