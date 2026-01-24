@@ -1574,3 +1574,84 @@ output_sink: output
 
     finally:
         config_file.unlink()
+
+
+def test_validate_aggregation_dual_schema():
+    """Verify aggregation edges validate against correct schemas."""
+    from elspeth.contracts.schema import SchemaConfig
+    from elspeth.core.dag import ExecutionGraph
+    from elspeth.plugins.schema_factory import create_schema_from_config
+
+    InputSchema = create_schema_from_config(
+        SchemaConfig.from_dict({"mode": "strict", "fields": ["value: float"]}),
+        "InputSchema",
+        allow_coercion=False,
+    )
+
+    OutputSchema = create_schema_from_config(
+        SchemaConfig.from_dict({"mode": "strict", "fields": ["count: int", "sum: float"]}),
+        "OutputSchema",
+        allow_coercion=False,
+    )
+
+    graph = ExecutionGraph()
+    graph.add_node("source", node_type="source", plugin_name="csv", output_schema=InputSchema)
+    graph.add_node(
+        "agg",
+        node_type="aggregation",
+        plugin_name="batch_stats",
+        input_schema=InputSchema,
+        output_schema=OutputSchema,
+        config={},
+    )
+    graph.add_node("sink", node_type="sink", plugin_name="csv", input_schema=OutputSchema)
+
+    graph.add_edge("source", "agg", label="continue")
+    graph.add_edge("agg", "sink", label="continue")
+
+    errors = graph._validate_edge_schemas()
+    assert len(errors) == 0  # Should pass
+
+
+def test_validate_aggregation_detects_incompatibility():
+    """Verify validation detects aggregation output mismatch."""
+    from elspeth.contracts.schema import SchemaConfig
+    from elspeth.core.dag import ExecutionGraph
+    from elspeth.plugins.schema_factory import create_schema_from_config
+
+    InputSchema = create_schema_from_config(
+        SchemaConfig.from_dict({"mode": "strict", "fields": ["value: float"]}),
+        "InputSchema",
+        allow_coercion=False,
+    )
+
+    OutputSchema = create_schema_from_config(
+        SchemaConfig.from_dict({"mode": "strict", "fields": ["count: int"]}),  # Missing 'sum'
+        "OutputSchema",
+        allow_coercion=False,
+    )
+
+    SinkSchema = create_schema_from_config(
+        SchemaConfig.from_dict({"mode": "strict", "fields": ["count: int", "sum: float"]}),
+        "SinkSchema",
+        allow_coercion=False,
+    )
+
+    graph = ExecutionGraph()
+    graph.add_node("source", node_type="source", plugin_name="csv", output_schema=InputSchema)
+    graph.add_node(
+        "agg",
+        node_type="aggregation",
+        plugin_name="batch_stats",
+        input_schema=InputSchema,
+        output_schema=OutputSchema,
+        config={},
+    )
+    graph.add_node("sink", node_type="sink", plugin_name="csv", input_schema=SinkSchema)
+
+    graph.add_edge("source", "agg", label="continue")
+    graph.add_edge("agg", "sink", label="continue")
+
+    errors = graph._validate_edge_schemas()
+    assert len(errors) > 0
+    assert "sum" in errors[0]
