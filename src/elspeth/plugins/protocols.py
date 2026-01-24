@@ -103,6 +103,27 @@ class SourceProtocol(Protocol):
         """Called after load() completes. Override for cleanup before close()."""
         ...
 
+    def validate_output_schema(self) -> None:
+        """Validate output schema is well-formed (self-validation).
+
+        Called during plugin construction to verify schema definition is valid.
+        This is PHASE 1 validation - checking the schema itself, not compatibility
+        with other plugins.
+
+        Raises:
+            ValueError: If schema configuration is invalid
+
+        Note:
+            This is SELF-validation only. Plugin checks its own schema is valid.
+            COMPATIBILITY validation (does plugin A's output match plugin B's input?)
+            happens in PHASE 2 during ExecutionGraph.from_plugin_instances().
+
+        Example:
+            - Valid: Schema has no syntax errors, types are well-formed
+            - Invalid: Schema has malformed field specs, unknown types
+        """
+        ...
+
 
 @runtime_checkable
 class TransformProtocol(Protocol):
