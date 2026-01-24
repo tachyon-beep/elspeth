@@ -338,6 +338,20 @@ class TestExecutionGraphAccessors:
 
         assert effective_schema == OutputSchema
 
+    def test_get_effective_producer_schema_crashes_on_gate_without_inputs(self):
+        """_get_effective_producer_schema() crashes if gate has no incoming edges."""
+        from elspeth.core.dag import ExecutionGraph, GraphValidationError
+
+        graph = ExecutionGraph()
+        graph.add_node("gate", node_type="gate", plugin_name="config_gate:orphan")
+
+        # Gate with no inputs is a bug in our code - should crash
+        with pytest.raises(GraphValidationError) as exc_info:
+            graph._get_effective_producer_schema("gate")
+
+        assert "no incoming edges" in str(exc_info.value).lower()
+        assert "bug in graph construction" in str(exc_info.value).lower()
+
 
 class TestExecutionGraphFromConfig:
     """Build ExecutionGraph from ElspethSettings."""
