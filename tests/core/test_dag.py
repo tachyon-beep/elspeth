@@ -303,6 +303,18 @@ class TestExecutionGraphAccessors:
         assert incoming[0].label == "continue"
         assert incoming[0].mode == RoutingMode.MOVE
 
+    def test_get_incoming_edges_returns_empty_for_source_node(self):
+        """get_incoming_edges() returns empty list for nodes with no predecessors."""
+        from elspeth.core.dag import ExecutionGraph
+
+        graph = ExecutionGraph()
+        graph.add_node("A", node_type="source", plugin_name="csv")
+        graph.add_node("B", node_type="sink", plugin_name="csv")
+
+        incoming = graph.get_incoming_edges("A")
+
+        assert incoming == []
+
 
 class TestExecutionGraphFromConfig:
     """Build ExecutionGraph from ElspethSettings."""
