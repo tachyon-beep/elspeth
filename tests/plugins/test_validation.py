@@ -1,5 +1,7 @@
 """Tests for plugin configuration validation subsystem."""
 
+import pytest
+
 from elspeth.plugins.validation import PluginConfigValidator
 
 
@@ -70,3 +72,45 @@ def test_validator_accepts_null_source_with_arbitrary_config():
 
     errors = validator.validate_source_config("null_source", config)
     assert errors == []
+
+
+def test_validator_accepts_valid_transform_config():
+    """Valid transform config passes validation."""
+    validator = PluginConfigValidator()
+
+    config = {
+        "schema": {"fields": "dynamic"},
+    }
+
+    errors = validator.validate_transform_config("passthrough", config)
+    assert errors == []
+
+
+def test_validator_accepts_valid_sink_config():
+    """Valid sink config passes validation."""
+    validator = PluginConfigValidator()
+
+    config = {
+        "path": "/tmp/output.csv",
+        "schema": {"fields": "dynamic"},
+    }
+
+    errors = validator.validate_sink_config("csv", config)
+    assert errors == []
+
+
+def test_validator_rejects_unknown_gate_type():
+    """Gate validation raises error since no gate plugins exist yet."""
+    validator = PluginConfigValidator()
+
+    config = {
+        "field": "score",
+        "threshold": 0.5,
+        "schema": {"fields": "dynamic"},
+    }
+
+    # No gate plugins exist in codebase yet, so this should raise
+    with pytest.raises(ValueError) as exc_info:
+        validator.validate_gate_config("threshold", config)
+
+    assert "Unknown gate type" in str(exc_info.value)

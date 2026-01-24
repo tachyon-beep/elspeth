@@ -104,6 +104,161 @@ class PluginConfigValidator:
         else:
             raise ValueError(f"Unknown source type: {source_type}")
 
+    def validate_transform_config(
+        self,
+        transform_type: str,
+        config: dict[str, Any],
+    ) -> list[ValidationError]:
+        """Validate transform plugin configuration.
+
+        Args:
+            transform_type: Plugin type name (e.g., "passthrough", "field_mapper")
+            config: Plugin configuration dict
+
+        Returns:
+            List of validation errors (empty if valid)
+        """
+        # Get config model for transform type
+        config_model = self._get_transform_config_model(transform_type)
+
+        # Validate using Pydantic
+        try:
+            config_model.from_dict(config)
+            return []  # Valid
+        except PydanticValidationError as e:
+            return self._extract_errors(e)
+        except Exception as e:
+            # from_dict wraps ValidationError in PluginConfigError
+            # Extract the original Pydantic error from the exception chain
+            if e.__cause__ and isinstance(e.__cause__, PydanticValidationError):
+                return self._extract_errors(e.__cause__)
+            raise  # Re-raise if not a wrapped validation error
+
+    def validate_gate_config(
+        self,
+        gate_type: str,
+        config: dict[str, Any],
+    ) -> list[ValidationError]:
+        """Validate gate plugin configuration.
+
+        Args:
+            gate_type: Plugin type name (e.g., "threshold")
+            config: Plugin configuration dict
+
+        Returns:
+            List of validation errors (empty if valid)
+        """
+        # Get config model for gate type
+        config_model = self._get_gate_config_model(gate_type)
+
+        # Validate using Pydantic
+        try:
+            config_model.from_dict(config)
+            return []  # Valid
+        except PydanticValidationError as e:
+            return self._extract_errors(e)
+        except Exception as e:
+            # from_dict wraps ValidationError in PluginConfigError
+            # Extract the original Pydantic error from the exception chain
+            if e.__cause__ and isinstance(e.__cause__, PydanticValidationError):
+                return self._extract_errors(e.__cause__)
+            raise  # Re-raise if not a wrapped validation error
+
+    def validate_sink_config(
+        self,
+        sink_type: str,
+        config: dict[str, Any],
+    ) -> list[ValidationError]:
+        """Validate sink plugin configuration.
+
+        Args:
+            sink_type: Plugin type name (e.g., "csv", "json")
+            config: Plugin configuration dict
+
+        Returns:
+            List of validation errors (empty if valid)
+        """
+        # Get config model for sink type
+        config_model = self._get_sink_config_model(sink_type)
+
+        # Validate using Pydantic
+        try:
+            config_model.from_dict(config)
+            return []  # Valid
+        except PydanticValidationError as e:
+            return self._extract_errors(e)
+        except Exception as e:
+            # from_dict wraps ValidationError in PluginConfigError
+            # Extract the original Pydantic error from the exception chain
+            if e.__cause__ and isinstance(e.__cause__, PydanticValidationError):
+                return self._extract_errors(e.__cause__)
+            raise  # Re-raise if not a wrapped validation error
+
+    def _get_transform_config_model(self, transform_type: str) -> type["PluginConfig"]:
+        """Get Pydantic config model for transform type.
+
+        Returns:
+            Config model class for the transform type
+        """
+        # Import here to avoid circular dependencies
+        if transform_type == "passthrough":
+            from elspeth.plugins.transforms.passthrough import PassThroughConfig
+
+            return PassThroughConfig
+        elif transform_type == "field_mapper":
+            from elspeth.plugins.transforms.field_mapper import FieldMapperConfig
+
+            return FieldMapperConfig
+        elif transform_type == "json_explode":
+            from elspeth.plugins.transforms.json_explode import JSONExplodeConfig
+
+            return JSONExplodeConfig
+        elif transform_type == "keyword_filter":
+            from elspeth.plugins.transforms.keyword_filter import KeywordFilterConfig
+
+            return KeywordFilterConfig
+        elif transform_type == "truncate":
+            from elspeth.plugins.transforms.truncate import TruncateConfig
+
+            return TruncateConfig
+        elif transform_type == "batch_replicate":
+            from elspeth.plugins.transforms.batch_replicate import BatchReplicateConfig
+
+            return BatchReplicateConfig
+        elif transform_type == "batch_stats":
+            from elspeth.plugins.transforms.batch_stats import BatchStatsConfig
+
+            return BatchStatsConfig
+        else:
+            raise ValueError(f"Unknown transform type: {transform_type}")
+
+    def _get_gate_config_model(self, gate_type: str) -> type["PluginConfig"]:
+        """Get Pydantic config model for gate type.
+
+        Returns:
+            Config model class for the gate type
+        """
+        # No gate plugins exist yet in codebase
+        raise ValueError(f"Unknown gate type: {gate_type}")
+
+    def _get_sink_config_model(self, sink_type: str) -> type["PluginConfig"]:
+        """Get Pydantic config model for sink type.
+
+        Returns:
+            Config model class for the sink type
+        """
+        # Import here to avoid circular dependencies
+        if sink_type == "csv":
+            from elspeth.plugins.sinks.csv_sink import CSVSinkConfig
+
+            return CSVSinkConfig
+        elif sink_type == "json":
+            from elspeth.plugins.sinks.json_sink import JSONSinkConfig
+
+            return JSONSinkConfig
+        else:
+            raise ValueError(f"Unknown sink type: {sink_type}")
+
     def _extract_errors(
         self,
         pydantic_error: PydanticValidationError,

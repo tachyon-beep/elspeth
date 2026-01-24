@@ -1097,7 +1097,7 @@ allow_hits:
   # (external library) and the 'input' field is optional.
   # ============================================================
 
-  - key: "plugins/validation.py:R1:PluginConfigValidator:_extract_errors:line=120"
+  - key: "plugins/validation.py:R1:PluginConfigValidator:_extract_errors:line=275"
     owner: "architecture"
     reason: "Trust boundary: Pydantic error dict structure from external library - 'input' field is optional"
     safety: "Graceful default to '<unknown>' - error message still produced with field and message"
