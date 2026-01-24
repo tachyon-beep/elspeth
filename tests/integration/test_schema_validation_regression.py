@@ -12,7 +12,7 @@ from typer.testing import CliRunner
 from elspeth.cli import app
 
 
-def test_schema_validation_actually_works():
+def test_schema_validation_actually_works() -> None:
     """REGRESSION TEST: Prove schema validation detects incompatibilities.
 
     Before fix: Validation passed even with incompatible schemas
@@ -78,7 +78,7 @@ output_sink: output
         config_file.unlink()
 
 
-def test_compatible_schemas_still_pass():
+def test_compatible_schemas_still_pass() -> None:
     """REGRESSION TEST: Ensure compatible pipelines still work.
 
     Verify fix doesn't over-restrict - compatible schemas should still pass.
@@ -134,7 +134,7 @@ output_sink: output
         config_file.unlink()
 
 
-def test_from_plugin_instances_exists():
+def test_from_plugin_instances_exists() -> None:
     """REGRESSION TEST: Verify new from_plugin_instances() API exists.
 
     After fix, from_plugin_instances() should be the primary API.
