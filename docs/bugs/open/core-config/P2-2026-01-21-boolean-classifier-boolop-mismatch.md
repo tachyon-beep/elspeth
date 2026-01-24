@@ -92,3 +92,86 @@
 
 - Related issues/PRs: N/A
 - Related design docs: N/A
+
+## Verification (2026-01-25)
+
+**Status: STILL VALID**
+
+### Code Review Findings
+
+The bug persists in the current codebase at commit `d984cb4` on branch `fix/rc1-bug-burndown-session-4`:
+
+1. **Boolean Classifier (lines 426-430 in expression_parser.py)**:
+   ```python
+   # Boolean operators (and, or) always return truthy/falsy value
+   # Note: In Python, `x and y` returns y if x is truthy, not necessarily bool
+   # But for gate routing purposes, we treat this as boolean-ish
+   if isinstance(node, ast.BoolOp):
+       return True
+   ```
+   The code contains a comment acknowledging that `and/or` don't necessarily return booleans, but dismisses this as "boolean-ish" for gate routing. This is the root cause.
+
+2. **Evaluator Returns Non-Boolean Values (lines 284-297)**:
+   The `visit_BoolOp` method correctly implements Python semantics - returning the last truthy/falsy value, which can be any type (string, number, etc.), not just bool.
+
+3. **Config Validation Enforces true/false (lines 276-294 in config.py)**:
+   When `is_boolean_expression()` returns True, validation requires route labels to be exactly `{"true": ..., "false": ...}`, rejecting valid configs with semantic labels.
+
+### Behavioral Verification
+
+Tested the exact scenario from the bug report:
+
+```python
+# Expression: row.get('label') or 'unknown'
+# is_boolean_expression(): True  ← WRONG, should be False
+# Evaluate with label="vip": 'vip' (type: str)  ← Returns string, not bool
+# Evaluate with missing label: 'unknown' (type: str)  ← Returns string, not bool
+
+# Expression: row['x'] and row['y']
+# is_boolean_expression(): True  ← WRONG, should be False
+# Evaluate with x="hello", y="world": 'world' (type: str)  ← Returns string, not bool
+```
+
+### Architecture Contract Confirmation
+
+`src/elspeth/contracts/routing.py:98` explicitly documents that gates can return semantic route labels:
+```python
+"""Route to a specific labeled destination.
+
+Gates return semantic route labels (e.g., "above", "below", "match").
+The executor resolves these labels via the plugin's `routes` config
+to determine the actual destination (sink name or "continue").
+```
+
+This confirms the architectural intent supports non-boolean route labels, making the boolean classifier's behavior incorrect.
+
+### Test Coverage Gap
+
+Existing tests in `tests/engine/test_expression_parser.py:959-968` incorrectly assert that boolean operators ARE boolean:
+```python
+def test_boolean_operators_are_boolean(self) -> None:
+    """Boolean operators (and, or) return boolean."""
+    expressions = [
+        "row['x'] > 0 and row['y'] > 0",  # This IS boolean (both operands boolean)
+        "row['x'] == 1 or row['y'] == 2",  # This IS boolean (both operands boolean)
+        ...
+    ]
+```
+
+The test only covers cases where operands are comparisons (which ARE boolean). Missing test cases for non-boolean operands like `row.get('label') or 'unknown'`.
+
+### Git History
+
+No fixes found since the bug was reported on 2026-01-21. The expression_parser.py file has only seen formatting changes:
+- `c786410`: RC-1 release
+- `07084c3`: delint and reformat
+
+### Impact Assessment
+
+This bug affects any gate configuration using `and/or` for non-boolean value selection:
+- **Config Rejection**: Valid configs like `{"condition": "row.get('status') or 'pending'", "routes": {"pending": "review", "approved": "continue"}}` are rejected
+- **Runtime Mismatch**: If users work around validation by using `{"true": ..., "false": ...}` routes, runtime will fail because expression returns strings, not "true"/"false"
+
+### Recommended Priority
+
+Maintain P2 - this blocks legitimate use cases for semantic routing with `and/or` operators, but workarounds exist (use ternary expressions or avoid `and/or` for non-boolean operands).

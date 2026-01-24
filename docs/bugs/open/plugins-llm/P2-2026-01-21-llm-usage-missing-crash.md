@@ -90,3 +90,59 @@
 
 - Related issues/PRs: N/A
 - Related design docs: N/A
+
+## Verification (2026-01-25)
+
+**Status: STILL VALID**
+
+### Verification Steps
+
+1. **Code inspection** of `/home/john/elspeth-rapid/src/elspeth/plugins/clients/llm.py:176-179`:
+   ```python
+   usage = {
+       "prompt_tokens": response.usage.prompt_tokens,
+       "completion_tokens": response.usage.completion_tokens,
+   }
+   ```
+   Direct attribute access on `response.usage` with no None check.
+
+2. **Git history analysis**:
+   - File introduced in commit `242ed66` (feat: add audited client infrastructure)
+   - Only subsequent change was `d7c5f10` (fix: avoid sending max_tokens=null)
+   - **No fixes for usage handling have been committed**
+
+3. **Test coverage gap**:
+   - Reviewed `/home/john/elspeth-rapid/tests/plugins/clients/test_audited_llm_client.py`
+   - Found test `test_total_tokens_with_missing_fields()` that handles empty usage dict in `LLMResponse`
+   - **No test exists for `response.usage = None` from provider**
+
+4. **Reproduction test**:
+   Created mock test with `response.usage = None`:
+   ```
+   Status: CallStatus.ERROR
+   Error: {'type': 'AttributeError', 'message': "'NoneType' object has no attribute 'prompt_tokens'", 'retryable': False}
+   Response data: NO RESPONSE DATA
+   ```
+   **Result: Successful LLM response with missing usage is recorded as ERROR**
+
+### Current Behavior
+
+When `response.usage` is `None`:
+1. AttributeError raised on line 177: `response.usage.prompt_tokens`
+2. Exception caught by outer try/except block (lines 203-225)
+3. Call recorded to audit trail with `status=CallStatus.ERROR`
+4. `LLMClientError` raised to caller, failing the transform
+
+### Impact Confirmation
+
+- **Data integrity impact**: Audit trail contains `ERROR` records for successful LLM calls
+- **Pipeline impact**: Transforms fail despite valid LLM responses with content
+- **Real-world trigger**: Any provider/mode that omits usage (streaming responses, certain Azure configurations, usage tracking disabled)
+
+### Recommendation
+
+Bug remains valid and unaddressed. Priority P2 is appropriate given:
+- Violates external boundary defensive handling principle (CLAUDE.md Three-Tier Trust Model)
+- Misclassifies audit records (destroys audit integrity)
+- Blocks usage of legitimate provider configurations
+- Simple fix: guard `response.usage` access with None check

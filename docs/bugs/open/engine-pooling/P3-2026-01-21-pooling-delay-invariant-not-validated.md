@@ -89,3 +89,70 @@
 
 - Related issues/PRs: N/A
 - Related design docs: N/A
+
+## Verification (2026-01-25)
+
+**Status: STILL VALID**
+
+### Verification Steps
+
+1. Examined current `/home/john/elspeth-rapid/src/elspeth/plugins/pooling/config.py` (lines 25-30)
+2. Checked git history for fixes since 2026-01-21 bug report date
+3. Tested invalid configuration acceptance
+4. Confirmed throttle behavior exceeds max delay with invalid config
+5. Verified no validation tests exist for min/max invariant
+
+### Findings
+
+**Bug is fully reproducible on current HEAD:**
+
+```python
+# Invalid config is accepted without error
+config = PoolConfig(
+    pool_size=10,
+    min_dispatch_delay_ms=1000,
+    max_dispatch_delay_ms=100
+)
+# Config created: min=1000, max=100 ✓ (no validation error)
+
+# Throttle behavior confirms the bug
+throttle = AIMDThrottle(config.to_throttle_config())
+throttle.on_capacity_error()  # Sets delay to 100 (capped at max)
+throttle.on_success()         # Floors delay to 1000 (min)
+# Result: delay (1000.0) exceeds configured max (100) ✓
+```
+
+**Code Analysis:**
+
+- `/home/john/elspeth-rapid/src/elspeth/plugins/pooling/config.py` has NO Pydantic model validators
+- No `@model_validator` or `@field_validator` decorators present
+- Individual field constraints exist (`ge=0`, `gt=1.0`) but no cross-field validation
+- PoolConfig is a Pydantic BaseModel with `extra="forbid"` but lacks invariant enforcement
+
+**Git History:**
+
+- Only 2 commits touched pooling files since 2026-01-21:
+  - `c786410` - ELSPETH - Release Candidate 1 (no validation changes)
+  - `a5196c1` - refactor: use PEP 695 type parameter syntax for generics (no validation changes)
+- Original code from `0b1cf47` (refactor: extract pooling infrastructure) had no validation
+- No validation was added in subsequent commits
+
+**Test Coverage:**
+
+- `/home/john/elspeth-rapid/tests/plugins/llm/test_pool_config.py` has validation tests for:
+  - `pool_size >= 1` ✓
+  - `backoff_multiplier > 1` ✓
+  - `max_capacity_retry_seconds > 0` ✓
+- **Missing:** No test for `min_dispatch_delay_ms <= max_dispatch_delay_ms` invariant
+
+**Impact Confirmed:**
+
+The bug allows configurations that violate the "ceiling" guarantee. When `min > max`:
+- `on_capacity_error()` caps delay at max (100ms in test)
+- `on_success()` floors delay at min (1000ms in test)
+- Delay oscillates between 100ms and 1000ms, never respecting the 100ms "ceiling"
+- This breaks expected throttling behavior and can cause performance issues
+
+**Recommendation:**
+
+Bug should remain **P3** (minor severity) as it requires misconfiguration to trigger, but should be fixed to prevent confusing production behavior. The fix is straightforward: add a Pydantic `@model_validator` to enforce the invariant and reject invalid configs at construction time.

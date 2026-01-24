@@ -87,3 +87,65 @@
 
 - Related issues/PRs: N/A
 - Related design docs: CLAUDE.md
+
+## Verification (2026-01-25)
+
+**Status: STILL VALID**
+
+### Current State
+
+The defensive patterns identified in the original bug report are still present in the codebase:
+
+1. **Line 229** (single mode): `final_data = result.row if result.row is not None else {}`
+2. **Line 319** (transform mode): `output_rows = [result.row] if result.row is not None else [{}]`
+
+### Evidence
+
+Both patterns were introduced in commit `c786410` (ELSPETH - Release Candidate 1, 2026-01-22) and have persisted through the current codebase state.
+
+**Git blame verification:**
+```
+c786410 (John Morrissey 2026-01-22 12:22:17 +1100 229) final_data = result.row if result.row is not None else {}
+c786410 (John Morrissey 2026-01-22 12:22:17 +1100 319) output_rows = [result.row] if result.row is not None else [{}]
+```
+
+### Policy Violation Analysis
+
+This pattern directly violates **CLAUDE.md § Plugin Ownership: System Code, Not User Code**:
+
+- **Line 166**: "Plugin returns wrong type → **CRASH** - bug in our code"
+- **Line 174**: "A defective plugin that silently produces wrong results is **worse than a crash**"
+
+And **CLAUDE.md § PROHIBITION ON "DEFENSIVE PROGRAMMING" PATTERNS**:
+
+- **Line 494**: "If code would fail without a defensive pattern, that failure is a bug to fix, not a symptom to suppress."
+
+### Impact Assessment
+
+If a batch-aware transform plugin returns `TransformResult.success(row=None)`:
+- **Current behavior**: Processor silently substitutes `{}` and continues, creating audit trail entries with empty row data
+- **Expected behavior**: Processor should crash immediately with a clear error message indicating plugin contract violation
+
+This is particularly problematic because:
+1. Plugins are system-owned code (CLAUDE.md §129-204), not user extensions
+2. Empty row fabrication violates audit integrity - the audit trail records something that never happened
+3. Silent failures hide plugin bugs that should be fixed in the codebase
+
+### Test Coverage Gap
+
+No tests exist that verify contract violations raise errors:
+- Search for test files containing "aggregation.*contract" or "contract.*violation": **No results**
+- Search for tests verifying empty row defensive behavior: **No results**
+
+The bug report correctly identified this gap in "Tests to add/update: Add tests that assert contract violations raise errors."
+
+### Recommendation
+
+This bug should remain **OPEN** and be prioritized for fixing:
+
+1. **Remove defensive patterns** at lines 229 and 319
+2. **Add explicit validation** that crashes when `result.row is None` in single/transform modes
+3. **Add test coverage** for plugin contract violations (as suggested in original report)
+4. **Error message** should clearly indicate this is a plugin bug, not a data issue
+
+The fix aligns with the codebase's core principle: "Plugin bugs are system bugs - they get fixed in the codebase" (CLAUDE.md §201).

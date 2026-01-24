@@ -90,3 +90,48 @@
 
 - Related issues/PRs: N/A
 - Related design docs: N/A
+
+## Verification (2026-01-25)
+
+**Status: STILL VALID**
+
+### Verification Steps
+
+1. **Code Review**: Examined current `src/elspeth/engine/expression_parser.py` (unchanged since RC1)
+   - Lines 85-88: `visit_Subscript()` accepts all subscript nodes with comment "the evaluator will enforce row access"
+   - Lines 253-257: `visit_Subscript()` in evaluator performs `value[key]` without checking if `value` is `row` or row-derived
+
+2. **Runtime Testing**: Confirmed all three examples from bug report are accepted and execute:
+   ```python
+   ExpressionParser("{'a': 1}['a'] == 1").evaluate({})  # ✓ ACCEPTED, evaluates to True
+   ExpressionParser("'abc'[0] == 'a'").evaluate({})     # ✓ ACCEPTED, evaluates to True
+   ExpressionParser("[1, 2, 3][0] == 1").evaluate({})   # ✓ ACCEPTED, evaluates to True
+   ```
+
+3. **Documentation Review**: Confirmed architectural deviation
+   - `docs/contracts/plugin-protocol.md` line 829 specifies: "Field access: `row['field']`, `row.get('field')`"
+   - Current implementation allows subscript on any expression, not just `row`
+
+4. **Git History**: No fixes attempted
+   - Expression parser unchanged since RC1 commit `c786410`
+   - No commits found addressing subscript restriction
+   - Related commits only addressed starred expressions and dict spread (`39e13b9`)
+
+### Impact Assessment
+
+**Security**: Low-Medium
+- Expressions can invoke `__getitem__` on arbitrary objects (literals, intermediate computation results)
+- While literals are safe, this violates the documented security boundary
+- Could enable unexpected behaviors if row data contains objects with side-effectful `__getitem__`
+
+**Correctness**: Medium
+- Documented expression language is `row['field']` access only
+- Current behavior is undocumented and overly permissive
+- Users may write expressions relying on this behavior, creating migration burden if fixed
+
+**Recommendation**:
+- Should fix to align with documented contract
+- Consider two-phase approach:
+  1. Add validator enforcement to reject literal subscripts at parse time
+  2. Ensure nested row access `row['data']['nested']` continues to work (test at line 354-356 confirms this is required)
+- Add test coverage for rejection cases (currently no tests verify literal subscripts are rejected)

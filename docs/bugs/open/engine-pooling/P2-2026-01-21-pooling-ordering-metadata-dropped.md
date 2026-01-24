@@ -88,3 +88,54 @@
 
 - Related issues/PRs: N/A
 - Related design docs: `docs/plans/completed/2026-01-20-pooled-llm-queries-design.md`
+
+## Verification (2026-01-25)
+
+**Status: STILL VALID**
+
+### Verification Findings
+
+1. **Code Review** - The issue persists exactly as described:
+   - `src/elspeth/plugins/pooling/executor.py:199-201` still extracts only `entry.result`
+   - `src/elspeth/plugins/pooling/executor.py:209-210` in the final drain also extracts only `entry.result`
+   - `BufferEntry` contains rich metadata: `submit_index`, `complete_index`, `submit_timestamp`, `complete_timestamp`, `buffer_wait_ms`
+   - All this metadata is computed by `ReorderBuffer.get_ready_results()` but immediately discarded
+
+2. **Git History** - No fixes found:
+   - Last change to `executor.py` was commit `0b1cf47` (2026-01-21) - a refactor that moved pooling infrastructure from `plugins/llm/` to `plugins/pooling/`
+   - That commit was explicitly "No functional changes - just reorganization"
+   - No commits since then have addressed ordering metadata
+
+3. **Design Document Verification**:
+   - `docs/plans/completed/2026-01-20-pooled-llm-queries-design.md:170-175` explicitly requires:
+     > "submit_index → order row was submitted to pool"
+     > "complete_index → order row's request completed"
+     > "These let auditors verify reordering worked correctly and identify any 'lost' rows"
+   - This requirement is NOT implemented in the current code
+
+4. **Usage Analysis**:
+   - Pooled execution is used by: `AzurePromptShield`, `AzureContentSafety`, and potentially LLM transforms
+   - Current usage: `results = executor.execute_batch(contexts, process_fn)` returns `list[TransformResult]`
+   - No consumer code attempts to capture ordering metadata (because it's not exposed)
+
+5. **Test Coverage**:
+   - `tests/plugins/llm/test_reorder_buffer.py` tests that `BufferEntry` contains timing metadata
+   - Test `test_entry_tracks_buffer_wait_time()` verifies `buffer_wait_ms` is computed correctly
+   - BUT no test verifies this metadata reaches the audit trail (because it doesn't)
+
+6. **Landscape Recorder**:
+   - Searched `src/elspeth/core/landscape/recorder.py` for `submit_index`, `complete_index` - no matches
+   - The audit trail has no fields to store this metadata even if it were propagated
+
+### Conclusion
+
+The bug is **confirmed valid**. The `ReorderBuffer` computes rich ordering metadata as designed, but `PooledExecutor.execute_batch()` discards it before returning results. There is no propagation path to the audit trail, and no storage schema in Landscape to record it.
+
+**Impact remains P2**: The audit trail cannot prove that pooled batches maintained correct ordering, making it harder to diagnose lost rows or out-of-order bugs in production.
+
+**Next Steps** (if fixing):
+1. Decide where to store ordering metadata (node_state context vs external_calls table)
+2. Modify `execute_batch()` to preserve and return `BufferEntry` objects (not just results)
+3. Update callers to extract metadata and pass to recorder
+4. Add Landscape schema fields for ordering metadata
+5. Add integration test verifying metadata reaches audit trail

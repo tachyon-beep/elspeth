@@ -91,3 +91,70 @@
 
 - Related issues/PRs: N/A
 - Related design docs: `docs/contracts/plugin-protocol.md`
+
+## Verification (2026-01-25)
+
+**Status: STILL VALID**
+
+The bug is confirmed to still exist in the current codebase on branch `fix/rc1-bug-burndown-session-4`.
+
+### Verification Test
+
+Executed the exact reproduction scenario:
+
+```python
+from elspeth.core.config import TriggerConfig
+from elspeth.engine.triggers import TriggerEvaluator
+
+config = TriggerConfig(count=100, timeout_seconds=1.0)
+evaluator = TriggerEvaluator(config)
+
+# Accept 99 rows quickly
+for _ in range(99):
+    evaluator.record_accept()
+
+# Wait for timeout to elapse (1.1 seconds)
+time.sleep(1.1)
+
+# Accept 100th row - now BOTH conditions are true
+evaluator.record_accept()
+
+# Result:
+# Triggered: True
+# Which: count  # <-- BUG: should be 'timeout'
+# Batch count: 100
+# Batch age: 1.10s
+```
+
+### Analysis
+
+1. **Code Location**: The issue is in `src/elspeth/engine/triggers.py:95-118` in the `should_trigger()` method.
+
+2. **Root Cause Confirmed**: The method uses short-circuit evaluation with a fixed priority order:
+   - First checks count (line 96)
+   - Then checks timeout (line 101)
+   - Finally checks condition (line 106)
+
+   When multiple triggers are simultaneously true at evaluation time, it always returns the first one in this priority order, regardless of which trigger became true first.
+
+3. **Contract Violation**: This violates the documented contract in `docs/contracts/plugin-protocol.md:1213`: "Multiple triggers can be combined (first one to fire wins)."
+
+4. **Git History**: No fixes found. The file was added in commit `c786410` (RC1) on 2026-01-22 and has not been modified since to address this issue.
+
+5. **Test Coverage**: The existing tests in `tests/engine/test_triggers.py` do test combined triggers but only verify scenarios where one trigger is clearly dominant:
+   - `test_combined_count_and_timeout_count_wins`: Count reaches threshold before timeout
+   - `test_combined_count_and_timeout_timeout_wins`: Timeout elapses before count threshold
+
+   However, there is NO test for the edge case where both conditions become true simultaneously (e.g., timeout elapsed, then count reached on the same evaluation).
+
+### Impact Confirmation
+
+- **Audit Trail Accuracy**: The trigger_type metadata in the batch audit trail will be incorrect when multiple triggers are true simultaneously.
+- **Behavioral Impact**: If timeout elapsed at 1.0s but count threshold reached at 1.1s, the audit trail would incorrectly attribute the batch flush to COUNT rather than TIMEOUT.
+- **Diagnostic Impact**: This makes it difficult to tune trigger configurations, as operators can't trust which trigger actually fired first.
+
+### Missing Test Case
+
+The bug report correctly identifies that a test is needed for: "timeout elapses before count threshold; assert trigger_type is TIMEOUT"
+
+This test does NOT currently exist in the test suite.
