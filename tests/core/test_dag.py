@@ -433,6 +433,39 @@ class TestExecutionGraphAccessors:
         assert "config_gate:check" in str(exc_info.value)
         assert "csv" in str(exc_info.value)
 
+    def test_validate_edge_schemas_validates_all_fork_destinations(self):
+        """Fork gates validate all destination edges against effective schema."""
+        from elspeth.contracts import PluginSchema, RoutingMode
+        from elspeth.core.dag import ExecutionGraph, GraphValidationError
+
+        class SourceOutput(PluginSchema):
+            id: int
+            name: str
+
+        class SinkA(PluginSchema):
+            id: int  # Compatible - only requires id
+
+        class SinkB(PluginSchema):
+            id: int
+            score: float  # Incompatible - requires field not in source
+
+        graph = ExecutionGraph()
+        graph.add_node("source", node_type="source", plugin_name="csv", output_schema=SourceOutput)
+        graph.add_node("gate", node_type="gate", plugin_name="config_gate:fork")  # NO SCHEMA
+        graph.add_node("sink_a", node_type="sink", plugin_name="csv_a", input_schema=SinkA)
+        graph.add_node("sink_b", node_type="sink", plugin_name="csv_b", input_schema=SinkB)
+
+        graph.add_edge("source", "gate", label="continue", mode=RoutingMode.MOVE)
+        graph.add_edge("gate", "sink_a", label="branch_a", mode=RoutingMode.COPY)  # Fork: COPY mode
+        graph.add_edge("gate", "sink_b", label="branch_b", mode=RoutingMode.COPY)  # Fork: COPY mode
+
+        # Should detect incompatibility on gate -> sink_b edge
+        with pytest.raises(GraphValidationError) as exc_info:
+            graph.validate()
+
+        assert "score" in str(exc_info.value).lower()
+        assert "config_gate:fork" in str(exc_info.value)
+
 
 class TestExecutionGraphFromConfig:
     """Build ExecutionGraph from ElspethSettings."""
