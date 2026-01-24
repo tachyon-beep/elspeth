@@ -897,8 +897,15 @@ class TestOrchestratorAcceptsGraph:
 
         # Build config and graph from settings
         settings = ElspethSettings(
-            datasource=DatasourceSettings(plugin="csv"),
-            sinks={"output": SinkSettings(plugin="csv")},
+            datasource=DatasourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"fields": "dynamic"},
+                },
+            ),
+            sinks={"output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}})},
             output_sink="output",
         )
         plugins = instantiate_plugins_from_config(settings)
@@ -1033,10 +1040,17 @@ class TestOrchestratorOutputSinkRouting:
 
         # Config with output_sink="results" (NOT "default")
         settings = ElspethSettings(
-            datasource=DatasourceSettings(plugin="csv"),
+            datasource=DatasourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"fields": "dynamic"},
+                },
+            ),
             sinks={
-                "results": SinkSettings(plugin="csv"),
-                "errors": SinkSettings(plugin="csv"),
+                "results": SinkSettings(plugin="csv", options={"path": "results.csv", "schema": {"fields": "dynamic"}}),
+                "errors": SinkSettings(plugin="csv", options={"path": "errors.csv", "schema": {"fields": "dynamic"}}),
             },
             output_sink="results",
         )
@@ -1446,10 +1460,17 @@ class TestOrchestratorLandscapeExport:
 
         # Build settings with export enabled
         settings = ElspethSettings(
-            datasource=DatasourceSettings(plugin="csv"),
+            datasource=DatasourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"fields": "dynamic"},
+                },
+            ),
             sinks={
-                "output": SinkSettings(plugin="csv"),
-                "audit_export": SinkSettings(plugin="csv"),
+                "output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}}),
+                "audit_export": SinkSettings(plugin="csv", options={"path": "audit_export.csv", "schema": {"fields": "dynamic"}}),
             },
             output_sink="output",
             landscape=LandscapeSettings(
@@ -1568,10 +1589,17 @@ class TestOrchestratorLandscapeExport:
         export_sink = CollectSink()
 
         settings = ElspethSettings(
-            datasource=DatasourceSettings(plugin="csv"),
+            datasource=DatasourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"fields": "dynamic"},
+                },
+            ),
             sinks={
-                "output": SinkSettings(plugin="csv"),
-                "audit_export": SinkSettings(plugin="csv"),
+                "output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}}),
+                "audit_export": SinkSettings(plugin="csv", options={"path": "audit_export.csv", "schema": {"fields": "dynamic"}}),
             },
             output_sink="output",
             landscape=LandscapeSettings(
@@ -1688,10 +1716,17 @@ class TestOrchestratorLandscapeExport:
         export_sink = CollectSink()
 
         settings = ElspethSettings(
-            datasource=DatasourceSettings(plugin="csv"),
+            datasource=DatasourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"fields": "dynamic"},
+                },
+            ),
             sinks={
-                "output": SinkSettings(plugin="csv"),
-                "audit_export": SinkSettings(plugin="csv"),
+                "output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}}),
+                "audit_export": SinkSettings(plugin="csv", options={"path": "audit_export.csv", "schema": {"fields": "dynamic"}}),
             },
             output_sink="output",
             landscape=LandscapeSettings(
@@ -1798,10 +1833,17 @@ class TestOrchestratorLandscapeExport:
 
         # Export disabled (the default)
         settings = ElspethSettings(
-            datasource=DatasourceSettings(plugin="csv"),
+            datasource=DatasourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"fields": "dynamic"},
+                },
+            ),
             sinks={
-                "output": SinkSettings(plugin="csv"),
-                "audit": SinkSettings(plugin="csv"),
+                "output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}}),
+                "audit": SinkSettings(plugin="csv", options={"path": "audit.csv", "schema": {"fields": "dynamic"}}),
             },
             output_sink="output",
             landscape=LandscapeSettings(
@@ -3837,8 +3879,15 @@ class TestOrchestratorRetry:
 
         # Settings with retry configuration
         settings = ElspethSettings(
-            datasource=DatasourceSettings(plugin="csv"),
-            sinks={"default": SinkSettings(plugin="csv")},
+            datasource=DatasourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"fields": "dynamic"},
+                },
+            ),
+            sinks={"default": SinkSettings(plugin="csv", options={"path": "default.csv", "schema": {"fields": "dynamic"}})},
             output_sink="default",
             retry=RetrySettings(
                 max_attempts=3,
@@ -3938,8 +3987,15 @@ class TestOrchestratorRetry:
                 pass
 
         settings = ElspethSettings(
-            datasource=DatasourceSettings(plugin="csv"),
-            sinks={"default": SinkSettings(plugin="csv")},
+            datasource=DatasourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"fields": "dynamic"},
+                },
+            ),
+            sinks={"default": SinkSettings(plugin="csv", options={"path": "default.csv", "schema": {"fields": "dynamic"}})},
             output_sink="default",
             retry=RetrySettings(
                 max_attempts=2,  # Will try twice then fail
@@ -3994,8 +4050,15 @@ class TestCoalesceWiring:
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
         settings = ElspethSettings(
-            datasource=DatasourceSettings(plugin="csv", options={"path": "test.csv"}),
-            sinks={"output": SinkSettings(plugin="csv", options={"path": "out.csv"})},
+            datasource=DatasourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"fields": "dynamic"},
+                },
+            ),
+            sinks={"output": SinkSettings(plugin="csv", options={"path": "out.csv", "schema": {"fields": "dynamic"}})},
             output_sink="output",
             gates=[
                 GateSettings(
@@ -4103,8 +4166,15 @@ class TestCoalesceWiring:
 
         # Settings with coalesce (needed to enable coalesce path in orchestrator)
         settings = ElspethSettings(
-            datasource=DatasourceSettings(plugin="csv", options={"path": "test.csv"}),
-            sinks={"output": SinkSettings(plugin="csv", options={"path": "out.csv"})},
+            datasource=DatasourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"fields": "dynamic"},
+                },
+            ),
+            sinks={"output": SinkSettings(plugin="csv", options={"path": "out.csv", "schema": {"fields": "dynamic"}})},
             output_sink="output",
             gates=[
                 GateSettings(
@@ -4199,8 +4269,15 @@ class TestCoalesceWiring:
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
         settings = ElspethSettings(
-            datasource=DatasourceSettings(plugin="csv", options={"path": "test.csv"}),
-            sinks={"output": SinkSettings(plugin="csv", options={"path": "out.csv"})},
+            datasource=DatasourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"fields": "dynamic"},
+                },
+            ),
+            sinks={"output": SinkSettings(plugin="csv", options={"path": "out.csv", "schema": {"fields": "dynamic"}})},
             output_sink="output",
             gates=[
                 GateSettings(
@@ -4282,8 +4359,15 @@ class TestCoalesceWiring:
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
         settings = ElspethSettings(
-            datasource=DatasourceSettings(plugin="csv", options={"path": "test.csv"}),
-            sinks={"output": SinkSettings(plugin="csv", options={"path": "out.csv"})},
+            datasource=DatasourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"fields": "dynamic"},
+                },
+            ),
+            sinks={"output": SinkSettings(plugin="csv", options={"path": "out.csv", "schema": {"fields": "dynamic"}})},
             output_sink="output",
             gates=[
                 GateSettings(
@@ -4397,8 +4481,15 @@ class TestCoalesceWiring:
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
         settings = ElspethSettings(
-            datasource=DatasourceSettings(plugin="csv", options={"path": "test.csv"}),
-            sinks={"output": SinkSettings(plugin="csv", options={"path": "out.csv"})},
+            datasource=DatasourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"fields": "dynamic"},
+                },
+            ),
+            sinks={"output": SinkSettings(plugin="csv", options={"path": "out.csv", "schema": {"fields": "dynamic"}})},
             output_sink="output",
             gates=[
                 GateSettings(
@@ -4494,8 +4585,15 @@ class TestCoalesceWiring:
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
         settings = ElspethSettings(
-            datasource=DatasourceSettings(plugin="csv", options={"path": "test.csv"}),
-            sinks={"output": SinkSettings(plugin="csv", options={"path": "out.csv"})},
+            datasource=DatasourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"fields": "dynamic"},
+                },
+            ),
+            sinks={"output": SinkSettings(plugin="csv", options={"path": "out.csv", "schema": {"fields": "dynamic"}})},
             output_sink="output",
             row_plugins=[
                 RowPluginSettings(plugin="passthrough"),  # Step 0

@@ -198,8 +198,11 @@ class TestOrchestratorResume:
         from elspeth.core.dag import ExecutionGraph
 
         settings = ElspethSettings(
-            datasource=DatasourceSettings(plugin="null"),
-            sinks={"default": SinkSettings(plugin="csv")},
+            datasource=DatasourceSettings(
+                plugin="null",
+                options={"schema": {"fields": "dynamic"}},
+            ),
+            sinks={"default": SinkSettings(plugin="csv", options={"path": "default.csv", "schema": {"fields": "dynamic"}})},
             output_sink="default",
         )
         plugins = instantiate_plugins_from_config(settings)

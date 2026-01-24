@@ -431,11 +431,18 @@ class TestRouteLabelResolution:
         from elspeth.core.dag import ExecutionGraph
 
         settings = ElspethSettings(
-            datasource=DatasourceSettings(plugin="csv"),
+            datasource=DatasourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"fields": "dynamic"},
+                },
+            ),
             sinks={
-                "main_output": SinkSettings(plugin="csv"),
-                "review_queue": SinkSettings(plugin="csv"),
-                "archive": SinkSettings(plugin="csv"),
+                "main_output": SinkSettings(plugin="csv", options={"path": "main_output.csv", "schema": {"fields": "dynamic"}}),
+                "review_queue": SinkSettings(plugin="csv", options={"path": "review_queue.csv", "schema": {"fields": "dynamic"}}),
+                "archive": SinkSettings(plugin="csv", options={"path": "archive.csv", "schema": {"fields": "dynamic"}}),
             },
             output_sink="main_output",
             gates=[
@@ -522,10 +529,17 @@ class TestRouteLabelResolution:
 
         # Build settings with ternary condition that returns category directly
         settings = ElspethSettings(
-            datasource=DatasourceSettings(plugin="csv"),
+            datasource=DatasourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"fields": "dynamic"},
+                },
+            ),
             sinks={
-                "premium_sink": SinkSettings(plugin="csv"),
-                "standard_sink": SinkSettings(plugin="csv"),
+                "premium_sink": SinkSettings(plugin="csv", options={"path": "premium.csv", "schema": {"fields": "dynamic"}}),
+                "standard_sink": SinkSettings(plugin="csv", options={"path": "standard.csv", "schema": {"fields": "dynamic"}}),
             },
             output_sink="standard_sink",
             gates=[
@@ -638,8 +652,15 @@ class TestForkCreatesChildTokens:
         from elspeth.core.dag import ExecutionGraph
 
         settings = ElspethSettings(
-            datasource=DatasourceSettings(plugin="csv"),
-            sinks={"output": SinkSettings(plugin="csv")},
+            datasource=DatasourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"fields": "dynamic"},
+                },
+            ),
+            sinks={"output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}})},
             output_sink="output",
             gates=[
                 GateSettingsConfig(
@@ -732,8 +753,8 @@ class TestForkCreatesChildTokens:
         settings = ElspethSettings(
             datasource=DatasourceSettings(plugin="null"),
             sinks={
-                "path_a": SinkSettings(plugin="csv"),
-                "path_b": SinkSettings(plugin="csv"),
+                "path_a": SinkSettings(plugin="csv", options={"path": "path_a.csv", "schema": {"fields": "dynamic"}}),
+                "path_b": SinkSettings(plugin="csv", options={"path": "path_b.csv", "schema": {"fields": "dynamic"}}),
             },
             gates=[
                 GateSettingsConfig(
@@ -839,8 +860,8 @@ class TestForkCreatesChildTokens:
         settings = ElspethSettings(
             datasource=DatasourceSettings(plugin="null"),
             sinks={
-                "default": SinkSettings(plugin="csv"),
-                "alerts": SinkSettings(plugin="csv"),
+                "default": SinkSettings(plugin="csv", options={"path": "default.csv", "schema": {"fields": "dynamic"}}),
+                "alerts": SinkSettings(plugin="csv", options={"path": "alerts.csv", "schema": {"fields": "dynamic"}}),
             },
             gates=[
                 GateSettingsConfig(
@@ -948,8 +969,8 @@ class TestForkCreatesChildTokens:
         settings = ElspethSettings(
             datasource=DatasourceSettings(plugin="null"),
             sinks={
-                "analysis": SinkSettings(plugin="csv"),
-                "archive": SinkSettings(plugin="csv"),
+                "analysis": SinkSettings(plugin="csv", options={"path": "analysis.csv", "schema": {"fields": "dynamic"}}),
+                "archive": SinkSettings(plugin="csv", options={"path": "archive.csv", "schema": {"fields": "dynamic"}}),
             },
             gates=[
                 GateSettingsConfig(
@@ -1823,8 +1844,15 @@ class TestErrorHandling:
         from elspeth.core.dag import ExecutionGraph, GraphValidationError
 
         settings = ElspethSettings(
-            datasource=DatasourceSettings(plugin="csv"),
-            sinks={"output": SinkSettings(plugin="csv")},
+            datasource=DatasourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"fields": "dynamic"},
+                },
+            ),
+            sinks={"output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}})},
             output_sink="output",
             gates=[
                 GateSettingsConfig(

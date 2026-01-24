@@ -481,8 +481,15 @@ class TestExecutionGraphFromConfig:
         from elspeth.core.dag import ExecutionGraph
 
         config = ElspethSettings(
-            datasource=DatasourceSettings(plugin="csv"),
-            sinks={"output": SinkSettings(plugin="csv")},
+            datasource=DatasourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"fields": "dynamic"},
+                },
+            ),
+            sinks={"output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}})},
             output_sink="output",
         )
 
@@ -513,8 +520,15 @@ class TestExecutionGraphFromConfig:
         from elspeth.core.dag import ExecutionGraph
 
         config = ElspethSettings(
-            datasource=DatasourceSettings(plugin="csv"),
-            sinks={"output": SinkSettings(plugin="csv")},
+            datasource=DatasourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"fields": "dynamic"},
+                },
+            ),
+            sinks={"output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}})},
             output_sink="output",
         )
 
@@ -544,11 +558,18 @@ class TestExecutionGraphFromConfig:
         from elspeth.core.dag import ExecutionGraph
 
         config = ElspethSettings(
-            datasource=DatasourceSettings(plugin="csv"),
-            sinks={"output": SinkSettings(plugin="csv")},
+            datasource=DatasourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"fields": "dynamic"},
+                },
+            ),
+            sinks={"output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}})},
             row_plugins=[
-                RowPluginSettings(plugin="passthrough"),
-                RowPluginSettings(plugin="field_mapper"),
+                RowPluginSettings(plugin="passthrough", options={"schema": {"fields": "dynamic"}}),
+                RowPluginSettings(plugin="field_mapper", options={"schema": {"fields": "dynamic"}}),
             ],
             output_sink="output",
         )
@@ -591,10 +612,17 @@ class TestExecutionGraphFromConfig:
         from elspeth.core.dag import ExecutionGraph
 
         config = ElspethSettings(
-            datasource=DatasourceSettings(plugin="csv"),
+            datasource=DatasourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"fields": "dynamic"},
+                },
+            ),
             sinks={
-                "results": SinkSettings(plugin="csv"),
-                "flagged": SinkSettings(plugin="csv"),
+                "results": SinkSettings(plugin="csv", options={"path": "results.csv", "schema": {"fields": "dynamic"}}),
+                "flagged": SinkSettings(plugin="csv", options={"path": "flagged.csv", "schema": {"fields": "dynamic"}}),
             },
             gates=[
                 GateSettings(
@@ -635,8 +663,15 @@ class TestExecutionGraphFromConfig:
         from elspeth.core.dag import ExecutionGraph, GraphValidationError
 
         config = ElspethSettings(
-            datasource=DatasourceSettings(plugin="csv"),
-            sinks={"output": SinkSettings(plugin="csv")},
+            datasource=DatasourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"fields": "dynamic"},
+                },
+            ),
+            sinks={"output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}})},
             gates=[
                 GateSettings(
                     name="bad_gate",
@@ -671,10 +706,17 @@ class TestExecutionGraphFromConfig:
         from elspeth.core.dag import ExecutionGraph
 
         config = ElspethSettings(
-            datasource=DatasourceSettings(plugin="csv"),
+            datasource=DatasourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"fields": "dynamic"},
+                },
+            ),
             sinks={
-                "results": SinkSettings(plugin="csv"),
-                "flagged": SinkSettings(plugin="csv"),
+                "results": SinkSettings(plugin="csv", options={"path": "results.csv", "schema": {"fields": "dynamic"}}),
+                "flagged": SinkSettings(plugin="csv", options={"path": "flagged.csv", "schema": {"fields": "dynamic"}}),
             },
             output_sink="results",
         )
@@ -707,11 +749,18 @@ class TestExecutionGraphFromConfig:
         from elspeth.core.dag import ExecutionGraph
 
         config = ElspethSettings(
-            datasource=DatasourceSettings(plugin="csv"),
-            sinks={"output": SinkSettings(plugin="csv")},
+            datasource=DatasourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"fields": "dynamic"},
+                },
+            ),
+            sinks={"output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}})},
             row_plugins=[
-                RowPluginSettings(plugin="passthrough"),
-                RowPluginSettings(plugin="field_mapper"),
+                RowPluginSettings(plugin="passthrough", options={"schema": {"fields": "dynamic"}}),
+                RowPluginSettings(plugin="field_mapper", options={"schema": {"fields": "dynamic"}}),
             ],
             output_sink="output",
         )
@@ -743,10 +792,17 @@ class TestExecutionGraphFromConfig:
         from elspeth.core.dag import ExecutionGraph
 
         config = ElspethSettings(
-            datasource=DatasourceSettings(plugin="csv"),
+            datasource=DatasourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"fields": "dynamic"},
+                },
+            ),
             sinks={
-                "results": SinkSettings(plugin="csv"),
-                "flagged": SinkSettings(plugin="csv"),
+                "results": SinkSettings(plugin="csv", options={"path": "results.csv", "schema": {"fields": "dynamic"}}),
+                "flagged": SinkSettings(plugin="csv", options={"path": "flagged.csv", "schema": {"fields": "dynamic"}}),
             },
             output_sink="results",
         )
@@ -779,10 +835,17 @@ class TestExecutionGraphRouteMapping:
         from elspeth.core.dag import ExecutionGraph
 
         config = ElspethSettings(
-            datasource=DatasourceSettings(plugin="csv"),
+            datasource=DatasourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"fields": "dynamic"},
+                },
+            ),
             sinks={
-                "results": SinkSettings(plugin="csv"),
-                "flagged": SinkSettings(plugin="csv"),
+                "results": SinkSettings(plugin="csv", options={"path": "results.csv", "schema": {"fields": "dynamic"}}),
+                "flagged": SinkSettings(plugin="csv", options={"path": "flagged.csv", "schema": {"fields": "dynamic"}}),
             },
             gates=[
                 GateSettings(
@@ -824,8 +887,15 @@ class TestExecutionGraphRouteMapping:
         from elspeth.core.dag import ExecutionGraph
 
         config = ElspethSettings(
-            datasource=DatasourceSettings(plugin="csv"),
-            sinks={"results": SinkSettings(plugin="csv")},
+            datasource=DatasourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"fields": "dynamic"},
+                },
+            ),
+            sinks={"results": SinkSettings(plugin="csv", options={"path": "results.csv", "schema": {"fields": "dynamic"}})},
             gates=[
                 GateSettings(
                     name="gate",
@@ -867,10 +937,17 @@ class TestExecutionGraphRouteMapping:
         from elspeth.core.dag import ExecutionGraph
 
         config = ElspethSettings(
-            datasource=DatasourceSettings(plugin="csv"),
+            datasource=DatasourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"fields": "dynamic"},
+                },
+            ),
             sinks={
-                "output-sink": SinkSettings(plugin="csv"),
-                "quarantine-bucket": SinkSettings(plugin="csv"),
+                "output-sink": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}}),
+                "quarantine-bucket": SinkSettings(plugin="csv", options={"path": "quarantine.csv", "schema": {"fields": "dynamic"}}),
             },
             gates=[
                 GateSettings(
@@ -1006,8 +1083,15 @@ class TestMultiEdgeScenarios:
         from elspeth.core.dag import ExecutionGraph
 
         config = ElspethSettings(
-            datasource=DatasourceSettings(plugin="csv"),
-            sinks={"output": SinkSettings(plugin="csv")},
+            datasource=DatasourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"fields": "dynamic"},
+                },
+            ),
+            sinks={"output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}})},
             gates=[
                 GateSettings(
                     name="fork_gate",
@@ -1084,9 +1168,16 @@ class TestCoalesceNodes:
         from elspeth.core.dag import ExecutionGraph
 
         settings = ElspethSettings(
-            datasource=DatasourceSettings(plugin="csv", options={"path": "test.csv"}),
+            datasource=DatasourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"fields": "dynamic"},
+                },
+            ),
             sinks={
-                "output": SinkSettings(plugin="csv", options={"path": "out.csv"}),
+                "output": SinkSettings(plugin="csv", options={"path": "out.csv", "schema": {"fields": "dynamic"}}),
             },
             output_sink="output",
             gates=[
@@ -1141,9 +1232,16 @@ class TestCoalesceNodes:
         from elspeth.core.dag import ExecutionGraph
 
         settings = ElspethSettings(
-            datasource=DatasourceSettings(plugin="csv"),
+            datasource=DatasourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"fields": "dynamic"},
+                },
+            ),
             sinks={
-                "output": SinkSettings(plugin="csv"),
+                "output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}}),
             },
             output_sink="output",
             gates=[
@@ -1204,9 +1302,16 @@ class TestCoalesceNodes:
         from elspeth.core.dag import ExecutionGraph
 
         settings = ElspethSettings(
-            datasource=DatasourceSettings(plugin="csv"),
+            datasource=DatasourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"fields": "dynamic"},
+                },
+            ),
             sinks={
-                "output": SinkSettings(plugin="csv"),
+                "output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}}),
             },
             output_sink="output",
             gates=[
@@ -1267,9 +1372,16 @@ class TestCoalesceNodes:
         from elspeth.core.dag import ExecutionGraph
 
         settings = ElspethSettings(
-            datasource=DatasourceSettings(plugin="csv"),
+            datasource=DatasourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"fields": "dynamic"},
+                },
+            ),
             sinks={
-                "output": SinkSettings(plugin="csv"),
+                "output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}}),
             },
             output_sink="output",
             gates=[
@@ -1331,9 +1443,16 @@ class TestCoalesceNodes:
         from elspeth.core.dag import ExecutionGraph
 
         settings = ElspethSettings(
-            datasource=DatasourceSettings(plugin="csv"),
+            datasource=DatasourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"fields": "dynamic"},
+                },
+            ),
             sinks={
-                "output": SinkSettings(plugin="csv"),
+                "output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}}),
             },
             output_sink="output",
             gates=[
@@ -1383,9 +1502,16 @@ class TestCoalesceNodes:
         from elspeth.core.dag import ExecutionGraph
 
         settings = ElspethSettings(
-            datasource=DatasourceSettings(plugin="csv"),
+            datasource=DatasourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"fields": "dynamic"},
+                },
+            ),
             sinks={
-                "output": SinkSettings(plugin="csv"),
+                "output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}}),
             },
             output_sink="output",
             gates=[
@@ -1440,9 +1566,16 @@ class TestCoalesceNodes:
         from elspeth.core.dag import ExecutionGraph
 
         settings = ElspethSettings(
-            datasource=DatasourceSettings(plugin="csv"),
+            datasource=DatasourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"fields": "dynamic"},
+                },
+            ),
             sinks={
-                "output": SinkSettings(plugin="csv"),
+                "output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}}),
             },
             output_sink="output",
             gates=[

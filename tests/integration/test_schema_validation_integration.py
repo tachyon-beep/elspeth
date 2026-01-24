@@ -43,6 +43,7 @@ def test_schema_validation_end_to_end(tmp_path, plugin_manager):
             plugin="csv",
             options={
                 "path": str(csv_path),
+                "on_validation_failure": "discard",
                 "schema": {"fields": "dynamic"},
             },
         ),

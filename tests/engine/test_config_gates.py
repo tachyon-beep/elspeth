@@ -299,10 +299,17 @@ class TestConfigGateIntegration:
 
         # Build settings for graph construction
         settings = ElspethSettings(
-            datasource=DatasourceSettings(plugin="csv"),
+            datasource=DatasourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"fields": "dynamic"},
+                },
+            ),
             sinks={
-                "a_sink": SinkSettings(plugin="csv"),
-                "b_sink": SinkSettings(plugin="csv"),
+                "a_sink": SinkSettings(plugin="csv", options={"path": "a.csv", "schema": {"fields": "dynamic"}}),
+                "b_sink": SinkSettings(plugin="csv", options={"path": "b.csv", "schema": {"fields": "dynamic"}}),
             },
             output_sink="a_sink",
             gates=[
@@ -413,10 +420,17 @@ class TestConfigGateIntegration:
         # NOTE: Route keys must be strings because the executor converts
         # non-bool/non-string results to strings via str()
         settings = ElspethSettings(
-            datasource=DatasourceSettings(plugin="csv"),
+            datasource=DatasourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"fields": "dynamic"},
+                },
+            ),
             sinks={
-                "priority_1": SinkSettings(plugin="csv"),
-                "priority_2": SinkSettings(plugin="csv"),
+                "priority_1": SinkSettings(plugin="csv", options={"path": "priority_1.csv", "schema": {"fields": "dynamic"}}),
+                "priority_2": SinkSettings(plugin="csv", options={"path": "priority_2.csv", "schema": {"fields": "dynamic"}}),
             },
             output_sink="priority_1",
             gates=[
@@ -559,10 +573,17 @@ class TestConfigGateFromSettings:
         from elspeth.core.dag import ExecutionGraph
 
         settings = ElspethSettings(
-            datasource=DatasourceSettings(plugin="csv"),
+            datasource=DatasourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"fields": "dynamic"},
+                },
+            ),
             sinks={
-                "output": SinkSettings(plugin="csv"),
-                "review": SinkSettings(plugin="csv"),
+                "output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}}),
+                "review": SinkSettings(plugin="csv", options={"path": "review.csv", "schema": {"fields": "dynamic"}}),
             },
             output_sink="output",
             gates=[
@@ -611,8 +632,15 @@ class TestConfigGateFromSettings:
         from elspeth.core.dag import ExecutionGraph, GraphValidationError
 
         settings = ElspethSettings(
-            datasource=DatasourceSettings(plugin="csv"),
-            sinks={"output": SinkSettings(plugin="csv")},
+            datasource=DatasourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"fields": "dynamic"},
+                },
+            ),
+            sinks={"output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}})},
             output_sink="output",
             gates=[
                 GateSettings(
@@ -649,11 +677,18 @@ class TestConfigGateFromSettings:
         from elspeth.core.dag import ExecutionGraph
 
         settings = ElspethSettings(
-            datasource=DatasourceSettings(plugin="csv"),
-            sinks={"output": SinkSettings(plugin="csv")},
+            datasource=DatasourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"fields": "dynamic"},
+                },
+            ),
+            sinks={"output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}})},
             output_sink="output",
             row_plugins=[
-                RowPluginSettings(plugin="passthrough"),
+                RowPluginSettings(plugin="passthrough", options={"schema": {"fields": "dynamic"}}),
             ],
             gates=[
                 GateSettings(
