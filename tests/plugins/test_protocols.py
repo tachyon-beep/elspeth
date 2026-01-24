@@ -47,7 +47,7 @@ class TestSourceProtocol:
             def on_complete(self, ctx: PluginContext) -> None:
                 pass
 
-            def validate_output_schema(self) -> None:
+            def _validate_self_consistency(self) -> None:
                 """Validate output schema."""
                 pass
 
@@ -116,7 +116,7 @@ class TestSourceProtocol:
             def on_complete(self, ctx: PluginContext) -> None:
                 pass
 
-            def validate_output_schema(self) -> None:
+            def _validate_self_consistency(self) -> None:
                 """Validate output schema."""
                 pass
 
@@ -171,6 +171,10 @@ class TestTransformProtocol:
                 pass
 
             def on_complete(self, ctx: PluginContext) -> None:
+                pass
+
+            def _validate_self_consistency(self) -> None:
+                """Validate schemas."""
                 pass
 
         transform = DoubleTransform({})
@@ -498,6 +502,10 @@ class TestSinkProtocol:
             def on_complete(self, ctx: PluginContext) -> None:
                 pass
 
+            def _validate_self_consistency(self) -> None:
+                """Validate schemas."""
+                pass
+
         sink = BatchMemorySink({})
         assert isinstance(sink, SinkProtocol)  # type: ignore[unreachable]
 
@@ -552,6 +560,10 @@ class TestSinkProtocol:
                 pass
 
             def on_complete(self, ctx: PluginContext) -> None:
+                pass
+
+            def _validate_self_consistency(self) -> None:
+                """Validate schemas."""
                 pass
 
         sink = MemorySink({})
