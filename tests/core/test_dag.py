@@ -1398,6 +1398,200 @@ class TestSchemaValidation:
         with pytest.raises(GraphValidationError, match="score"):
             graph.validate()
 
+    def test_coalesce_rejects_incompatible_branch_schemas(self) -> None:
+        """Coalesce with incompatible branch schemas should fail validation.
+
+        CRITICAL P0 BLOCKER: Coalesce incompatible schema behavior was UNDEFINED.
+        Manual graph construction bypasses config schema limitation that
+        doesn't support per-branch transforms.
+        """
+        from elspeth.contracts import PluginSchema, RoutingMode
+        from elspeth.core.dag import ExecutionGraph, GraphValidationError
+
+        class SourceOutput(PluginSchema):
+            id: int
+            name: str
+
+        class BranchAOutput(PluginSchema):
+            """Branch A adds score field."""
+
+            id: int
+            name: str
+            score: float
+
+        class BranchBOutput(PluginSchema):
+            """Branch B adds rank field (different from Branch A)."""
+
+            id: int
+            name: str
+            rank: int
+
+        graph = ExecutionGraph()
+
+        # Build fork/join DAG with INCOMPATIBLE branch schemas
+        graph.add_node("source", node_type="source", plugin_name="csv", output_schema=SourceOutput)
+        graph.add_node("fork_gate", node_type="gate", plugin_name="fork_gate")
+
+        # Branch A: adds score field
+        graph.add_node(
+            "transform_a",
+            node_type="transform",
+            plugin_name="add_score",
+            input_schema=SourceOutput,
+            output_schema=BranchAOutput,
+        )
+
+        # Branch B: adds rank field (incompatible with Branch A)
+        graph.add_node(
+            "transform_b",
+            node_type="transform",
+            plugin_name="add_rank",
+            input_schema=SourceOutput,
+            output_schema=BranchBOutput,
+        )
+
+        # Coalesce attempts to merge incompatible schemas
+        graph.add_node(
+            "coalesce",
+            node_type="coalesce",
+            plugin_name="coalesce:merge",
+            config={
+                "branches": ["branch_a", "branch_b"],
+                "policy": "require_all",
+                "merge": "union",
+            },
+        )
+
+        graph.add_node("sink", node_type="sink", plugin_name="csv")
+
+        # Build edges
+        graph.add_edge("source", "fork_gate", label="continue", mode=RoutingMode.MOVE)
+        graph.add_edge("fork_gate", "transform_a", label="branch_a", mode=RoutingMode.COPY)
+        graph.add_edge("fork_gate", "transform_b", label="branch_b", mode=RoutingMode.COPY)
+        graph.add_edge("transform_a", "coalesce", label="branch_a", mode=RoutingMode.MOVE)
+        graph.add_edge("transform_b", "coalesce", label="branch_b", mode=RoutingMode.MOVE)
+        graph.add_edge("coalesce", "sink", label="continue", mode=RoutingMode.MOVE)
+
+        # Should crash: coalesce can't merge BranchAOutput and BranchBOutput
+        with pytest.raises(GraphValidationError) as exc_info:
+            graph.validate()
+
+        # Error should mention incompatible fields
+        error_msg = str(exc_info.value).lower()
+        assert "schema" in error_msg or "incompatible" in error_msg
+
+    def test_aggregation_schema_transition_in_topology(self) -> None:
+        """Aggregation with input_schema and output_schema in single topology.
+
+        Verifies source→agg validates against input_schema,
+        and agg→sink validates against output_schema.
+        """
+        from elspeth.contracts import PluginSchema
+        from elspeth.core.dag import ExecutionGraph
+
+        class SourceOutput(PluginSchema):
+            value: float
+
+        class AggregationOutput(PluginSchema):
+            count: int
+            sum: float
+
+        graph = ExecutionGraph()
+
+        graph.add_node("source", node_type="source", plugin_name="csv", output_schema=SourceOutput)
+        graph.add_node(
+            "agg",
+            node_type="aggregation",
+            plugin_name="batch_stats",
+            input_schema=SourceOutput,  # Incoming edge validates against this
+            output_schema=AggregationOutput,  # Outgoing edge validates against this
+            config={},
+        )
+        graph.add_node("sink", node_type="sink", plugin_name="csv", input_schema=AggregationOutput)
+
+        graph.add_edge("source", "agg", label="continue")
+        graph.add_edge("agg", "sink", label="continue")
+
+        # Should pass - schemas compatible at both edges
+        graph.validate()
+
+    def test_aggregation_schema_transition_incompatible_output(self) -> None:
+        """Aggregation with incompatible output_schema should fail validation."""
+        from elspeth.contracts import PluginSchema
+        from elspeth.core.dag import ExecutionGraph, GraphValidationError
+
+        class SourceOutput(PluginSchema):
+            value: float
+
+        class AggregationOutput(PluginSchema):
+            count: int
+            sum: float
+
+        class SinkInput(PluginSchema):
+            """Sink requires 'average' field not in aggregation output."""
+
+            count: int
+            sum: float
+            average: float  # NOT in AggregationOutput!
+
+        graph = ExecutionGraph()
+
+        graph.add_node("source", node_type="source", plugin_name="csv", output_schema=SourceOutput)
+        graph.add_node(
+            "agg",
+            node_type="aggregation",
+            plugin_name="batch_stats",
+            input_schema=SourceOutput,
+            output_schema=AggregationOutput,
+            config={},
+        )
+        graph.add_node("sink", node_type="sink", plugin_name="csv", input_schema=SinkInput)
+
+        graph.add_edge("source", "agg", label="continue")
+        graph.add_edge("agg", "sink", label="continue")
+
+        # Should crash - sink requires 'average' field
+        with pytest.raises(GraphValidationError) as exc_info:
+            graph.validate()
+
+        assert "average" in str(exc_info.value).lower()
+
+    def test_schema_validation_error_includes_diagnostic_details(self) -> None:
+        """Schema validation errors include field name, producer node, consumer node."""
+        from elspeth.contracts import PluginSchema
+        from elspeth.core.dag import ExecutionGraph, GraphValidationError
+
+        class SourceOutput(PluginSchema):
+            id: int
+            name: str
+
+        class SinkInput(PluginSchema):
+            id: int
+            name: str
+            score: float  # Missing from source output
+
+        graph = ExecutionGraph()
+
+        graph.add_node("my_source", node_type="source", plugin_name="csv_reader", output_schema=SourceOutput)
+        graph.add_node("my_sink", node_type="sink", plugin_name="db_writer", input_schema=SinkInput)
+
+        graph.add_edge("my_source", "my_sink", label="continue")
+
+        # Capture error and verify diagnostic details
+        with pytest.raises(GraphValidationError) as exc_info:
+            graph.validate()
+
+        error_msg = str(exc_info.value)
+
+        # Should include field name
+        assert "score" in error_msg.lower()
+
+        # Should include producer node (or plugin name)
+        assert "my_source" in error_msg or "csv_reader" in error_msg
+
+        # Should include consumer node (or plugin name)
+        assert "my_sink" in error_msg or "db_writer" in error_msg
+
 
 class TestSchemaValidationWithPluginManager:
     """Test that schema validation uses real schemas from PluginManager."""

@@ -228,6 +228,9 @@ class ExecutionGraph:
         - Get consumer's input schema
         - Check producer provides all required fields
 
+        Additionally validates coalesce nodes:
+        - All incoming branches must have compatible schemas
+
         Returns:
             List of error messages (empty if valid)
         """
@@ -257,6 +260,37 @@ class ExecutionGraph:
                 errors.append(
                     f"{from_info.plugin_name} -> {to_info.plugin_name} (route: {edge.label}): producer missing required fields {missing}"
                 )
+
+        # Validate coalesce nodes have compatible incoming schemas
+        coalesce_nodes = [node_id for node_id, data in self._graph.nodes(data=True) if data["info"].node_type == "coalesce"]
+
+        for coalesce_id in coalesce_nodes:
+            # Get all incoming edges
+            incoming_edges = list(self._graph.in_edges(coalesce_id, data=True, keys=True))
+
+            if len(incoming_edges) < 2:
+                # Coalesce with < 2 inputs is degenerate but valid (pass-through)
+                continue
+
+            # Collect schemas from incoming branches
+            incoming_schemas: list[tuple[str, type[PluginSchema]]] = []
+            for from_node, _, _, _ in incoming_edges:
+                schema = self._get_effective_producer_schema(from_node)
+                if schema is not None:
+                    incoming_schemas.append((from_node, schema))
+
+            # Check all non-None schemas are compatible
+            if len(incoming_schemas) >= 2:
+                base_node_id, base_schema = incoming_schemas[0]
+
+                for other_node_id, other_schema in incoming_schemas[1:]:
+                    if not _schemas_compatible(base_schema, other_schema):
+                        errors.append(
+                            f"Coalesce node '{coalesce_id}' receives incompatible schemas. "
+                            f"Branch from '{base_node_id}' has schema {base_schema.__name__}, "
+                            f"but branch from '{other_node_id}' has schema {other_schema.__name__}. "
+                            f"All branches merging at a coalesce must have compatible schemas."
+                        )
 
         return errors
 
