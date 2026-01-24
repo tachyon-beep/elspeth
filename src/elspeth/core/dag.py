@@ -351,6 +351,14 @@ class ExecutionGraph:
             raise KeyError(f"Node not found: {node_id}")
         return cast(NodeInfo, self._graph.nodes[node_id]["info"])
 
+    def get_nodes(self) -> list[NodeInfo]:
+        """Get all nodes as NodeInfo objects.
+
+        Returns:
+            List of NodeInfo objects for all nodes in the graph.
+        """
+        return [cast(NodeInfo, attrs["info"]) for _node_id, attrs in self._graph.nodes(data=True)]
+
     def get_edges(self) -> list[EdgeInfo]:
         """Get all edges with their data as typed EdgeInfo.
 
@@ -445,12 +453,22 @@ class ExecutionGraph:
         for sink_name, sink_config in config.sinks.items():
             sid = node_id("sink", sink_name)
             sink_ids[sink_name] = sid
+
+            # Look up sink plugin class to get schema
+            sink_cls = manager.get_sink_by_name(sink_config.plugin)
+            if sink_cls is None:
+                available = [s.name for s in manager.get_sinks()]
+                raise ValueError(f"Unknown sink plugin: {sink_config.plugin}. Available: {sorted(available)}")
+
+            # Get schema from class attribute (may be None for dynamic schemas)
+            input_schema = getattr(sink_cls, "input_schema", None)
+
             graph.add_node(
                 sid,
                 node_type="sink",
                 plugin_name=sink_config.plugin,
                 config=sink_config.options,
-                input_schema=getattr(sink_config, "input_schema", None),
+                input_schema=input_schema,  # None for dynamic schemas is OK
             )
 
         # Store explicit mapping for get_sink_id_map() - NO substring matching
