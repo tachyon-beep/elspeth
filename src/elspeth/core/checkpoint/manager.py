@@ -94,6 +94,9 @@ class CheckpointManager:
 
         Returns:
             Latest Checkpoint or None if no checkpoints exist
+
+        Raises:
+            IncompatibleCheckpointError: If checkpoint predates deterministic node IDs
         """
         with self._db.engine.connect() as conn:
             result = conn.execute(
@@ -106,7 +109,7 @@ class CheckpointManager:
         if result is None:
             return None
 
-        return Checkpoint(
+        checkpoint = Checkpoint(
             checkpoint_id=result.checkpoint_id,
             run_id=result.run_id,
             token_id=result.token_id,
@@ -115,6 +118,11 @@ class CheckpointManager:
             aggregation_state_json=result.aggregation_state_json,
             created_at=result.created_at,
         )
+
+        # Validate checkpoint compatibility before returning
+        self._validate_checkpoint_compatibility(checkpoint)
+
+        return checkpoint
 
     def get_checkpoints(self, run_id: str) -> list[Checkpoint]:
         """Get all checkpoints for a run, ordered by sequence.
@@ -178,10 +186,16 @@ class CheckpointManager:
 
         # Simple heuristic: if created_at before 2026-01-24, warn about incompatibility
         cutoff_date = datetime(2026, 1, 24, tzinfo=UTC)
-        if checkpoint.created_at < cutoff_date:
+
+        # Handle timezone-naive datetimes from SQLite (assume UTC if naive)
+        checkpoint_created_at = checkpoint.created_at
+        if checkpoint_created_at.tzinfo is None:
+            checkpoint_created_at = checkpoint_created_at.replace(tzinfo=UTC)
+
+        if checkpoint_created_at < cutoff_date:
             raise IncompatibleCheckpointError(
                 f"Checkpoint '{checkpoint.checkpoint_id}' created before deterministic node IDs "
-                f"(created: {checkpoint.created_at.isoformat()}, cutoff: {cutoff_date.isoformat()}). "
+                f"(created: {checkpoint_created_at.isoformat()}, cutoff: {cutoff_date.isoformat()}). "
                 "Resume not supported across this upgrade. "
                 "Please restart pipeline from beginning."
             )

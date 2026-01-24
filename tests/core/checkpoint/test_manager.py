@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from elspeth.core.checkpoint.manager import CheckpointManager
+from elspeth.core.checkpoint.manager import CheckpointManager, IncompatibleCheckpointError
 
 
 class TestCheckpointManager:
@@ -195,3 +195,157 @@ class TestCheckpointManager:
         """Delete returns 0 when no checkpoints exist."""
         deleted = manager.delete_checkpoints("nonexistent-run")
         assert deleted == 0
+
+    def test_old_checkpoint_rejected(self, manager: CheckpointManager) -> None:
+        """Checkpoints created before 2026-01-24 should be rejected.
+
+        Old checkpoints use random UUID-based node IDs which are incompatible
+        with the new deterministic hash-based node IDs. Loading such checkpoints
+        would cause resume failures as node IDs won't match.
+        """
+        from elspeth.core.landscape.schema import (
+            checkpoints_table,
+            nodes_table,
+            rows_table,
+            runs_table,
+            tokens_table,
+        )
+
+        # Set up required foreign key references
+        run_id = "run-old"
+        old_date = datetime(2026, 1, 23, 23, 59, 59, tzinfo=UTC)  # One second before cutoff
+
+        with manager._db.engine.connect() as conn:
+            # Create run
+            conn.execute(
+                runs_table.insert().values(
+                    run_id=run_id,
+                    started_at=old_date,
+                    config_hash="abc123",
+                    settings_json="{}",
+                    canonical_version="sha256-rfc8785-v1",
+                    status="failed",
+                )
+            )
+            # Create node
+            conn.execute(
+                nodes_table.insert().values(
+                    node_id="node-old",
+                    run_id=run_id,
+                    plugin_name="test_transform",
+                    node_type="transform",
+                    plugin_version="1.0.0",
+                    determinism="deterministic",
+                    config_hash="xyz",
+                    config_json="{}",
+                    registered_at=old_date,
+                )
+            )
+            # Create row
+            conn.execute(
+                rows_table.insert().values(
+                    row_id="row-old",
+                    run_id=run_id,
+                    source_node_id="node-old",
+                    row_index=0,
+                    source_data_hash="hash1",
+                    created_at=old_date,
+                )
+            )
+            # Create token
+            conn.execute(
+                tokens_table.insert().values(
+                    token_id="tok-old",
+                    row_id="row-old",
+                    created_at=old_date,
+                )
+            )
+            # Create checkpoint with old date
+            checkpoint_id = "cp-old-checkpoint"
+            conn.execute(
+                checkpoints_table.insert().values(
+                    checkpoint_id=checkpoint_id,
+                    run_id=run_id,
+                    token_id="tok-old",
+                    node_id="node-old",
+                    sequence_number=1,
+                    aggregation_state_json=None,
+                    created_at=old_date,
+                )
+            )
+            conn.commit()
+
+        # Attempting to load should raise IncompatibleCheckpointError
+        with pytest.raises(IncompatibleCheckpointError) as exc_info:
+            manager.get_latest_checkpoint(run_id)
+
+        # Verify error message contains useful information
+        error_msg = str(exc_info.value)
+        assert checkpoint_id in error_msg
+        assert "deterministic node IDs" in error_msg
+        assert "Resume not supported" in error_msg
+
+    def test_new_checkpoint_accepted(self, manager: CheckpointManager, setup_run: str) -> None:
+        """Checkpoints created on or after 2026-01-24 should be accepted.
+
+        New checkpoints use deterministic hash-based node IDs which are
+        compatible with the current system.
+        """
+        # Create a checkpoint with new created_at date (on cutoff)
+        new_date = datetime(2026, 1, 24, 0, 0, 0, tzinfo=UTC)  # Exactly at cutoff
+
+        from elspeth.core.landscape.schema import checkpoints_table
+
+        checkpoint_id = "cp-new-checkpoint"
+
+        with manager._db.engine.connect() as conn:
+            conn.execute(
+                checkpoints_table.insert().values(
+                    checkpoint_id=checkpoint_id,
+                    run_id="run-001",
+                    token_id="tok-001",
+                    node_id="node-001",
+                    sequence_number=1,
+                    aggregation_state_json=None,
+                    created_at=new_date,
+                )
+            )
+            conn.commit()
+
+        # Should load successfully without exception
+        checkpoint = manager.get_latest_checkpoint("run-001")
+        assert checkpoint is not None
+        assert checkpoint.checkpoint_id == checkpoint_id
+        # SQLite may return timezone-naive datetime, so compare the datetime values
+        assert checkpoint.created_at.replace(tzinfo=None) == new_date.replace(tzinfo=None)
+
+    def test_checkpoint_after_cutoff_accepted(self, manager: CheckpointManager, setup_run: str) -> None:
+        """Checkpoints created after 2026-01-24 should be accepted.
+
+        Verifies that the cutoff is inclusive - any date >= 2026-01-24 00:00:00 is valid.
+        """
+        # Create a checkpoint well after cutoff
+        future_date = datetime(2026, 2, 1, 12, 30, 0, tzinfo=UTC)
+
+        from elspeth.core.landscape.schema import checkpoints_table
+
+        checkpoint_id = "cp-future-checkpoint"
+
+        with manager._db.engine.connect() as conn:
+            conn.execute(
+                checkpoints_table.insert().values(
+                    checkpoint_id=checkpoint_id,
+                    run_id="run-001",
+                    token_id="tok-001",
+                    node_id="node-001",
+                    sequence_number=1,
+                    aggregation_state_json=None,
+                    created_at=future_date,
+                )
+            )
+            conn.commit()
+
+        # Should load successfully
+        checkpoint = manager.get_latest_checkpoint("run-001")
+        assert checkpoint is not None
+        assert checkpoint.checkpoint_id == checkpoint_id
