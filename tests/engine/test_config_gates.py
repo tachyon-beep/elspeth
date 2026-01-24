@@ -612,7 +612,7 @@ class TestConfigGateFromSettings:
             sinks={"output": SinkSettings(plugin="csv")},
             output_sink="output",
             row_plugins=[
-                RowPluginSettings(plugin="transform_a"),
+                RowPluginSettings(plugin="passthrough"),
             ],
             gates=[
                 GateSettings(
@@ -627,7 +627,7 @@ class TestConfigGateFromSettings:
         order = graph.topological_order()
 
         # Find indices
-        transform_idx = next(i for i, n in enumerate(order) if "transform_a" in n)
+        transform_idx = next(i for i, n in enumerate(order) if "passthrough" in n)
         gate_idx = next(i for i, n in enumerate(order) if "config_gate" in n)
         sink_idx = next(i for i, n in enumerate(order) if "sink" in n)
 

@@ -702,10 +702,10 @@ class TestForkCreatesChildTokens:
 
         # Config with fork gate and branch-named sinks
         settings = ElspethSettings(
-            datasource=DatasourceSettings(plugin="list_source"),
+            datasource=DatasourceSettings(plugin="null"),
             sinks={
-                "path_a": SinkSettings(plugin="collect"),
-                "path_b": SinkSettings(plugin="collect"),
+                "path_a": SinkSettings(plugin="csv"),
+                "path_b": SinkSettings(plugin="csv"),
             },
             gates=[
                 GateSettingsConfig(
@@ -800,10 +800,10 @@ class TestForkCreatesChildTokens:
         # fork_to has "stats" and "alerts", but only "alerts" is a sink
         # "stats" child should fall back to default output_sink
         settings = ElspethSettings(
-            datasource=DatasourceSettings(plugin="list_source"),
+            datasource=DatasourceSettings(plugin="null"),
             sinks={
-                "default": SinkSettings(plugin="collect"),
-                "alerts": SinkSettings(plugin="collect"),
+                "default": SinkSettings(plugin="csv"),
+                "alerts": SinkSettings(plugin="csv"),
             },
             gates=[
                 GateSettingsConfig(
@@ -900,10 +900,10 @@ class TestForkCreatesChildTokens:
         archive_sink = CollectSink()
 
         settings = ElspethSettings(
-            datasource=DatasourceSettings(plugin="list_source"),
+            datasource=DatasourceSettings(plugin="null"),
             sinks={
-                "analysis": SinkSettings(plugin="collect"),
-                "archive": SinkSettings(plugin="collect"),
+                "analysis": SinkSettings(plugin="csv"),
+                "archive": SinkSettings(plugin="csv"),
             },
             gates=[
                 GateSettingsConfig(

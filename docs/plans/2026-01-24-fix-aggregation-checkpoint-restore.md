@@ -119,7 +119,7 @@ Replace the existing test entirely.
 
 Expected: FAIL - checkpoint state doesn't have "tokens" key
 
-**Step 3: Update get_checkpoint_state() to store full TokenInfo**
+**Step 3: Update get_checkpoint_state() to store full TokenInfo with size validation**
 
 In `src/elspeth/engine/executors.py`, replace `get_checkpoint_state()` at line 1070:
 
@@ -133,6 +133,9 @@ def get_checkpoint_state(self) -> dict[str, Any]:
 
     Returns:
         Dict mapping node_id -> buffer state (only non-empty buffers)
+
+    Raises:
+        RuntimeError: If checkpoint size exceeds 10MB limit
 
     Format:
         {
@@ -150,6 +153,11 @@ def get_checkpoint_state(self) -> dict[str, Any]:
             }
         }
     """
+    import json
+    import logging
+
+    logger = logging.getLogger(__name__)
+
     state: dict[str, Any] = {}
     for node_id in self._buffers:
         if self._buffers[node_id]:  # Only include non-empty buffers
@@ -166,6 +174,24 @@ def get_checkpoint_state(self) -> dict[str, Any]:
                 ],
                 "batch_id": self._batch_ids.get(node_id),
             }
+
+    # Size validation to prevent unbounded growth
+    serialized = json.dumps(state)
+    size_mb = len(serialized) / 1_000_000
+
+    if size_mb > 10:
+        total_rows = sum(len(b) for b in self._buffers.values())
+        raise RuntimeError(
+            f"Checkpoint size {size_mb:.1f}MB exceeds 10MB limit. "
+            f"Buffer contains {total_rows} total rows across {len(state)} nodes. "
+            f"Consider reducing aggregation count trigger or implementing checkpoint cleanup."
+        )
+
+    if size_mb > 1:
+        logger.warning(
+            f"Large checkpoint: {size_mb:.1f}MB for {sum(len(b) for b in self._buffers.values())} buffered rows"
+        )
+
     return state
 ```
 
@@ -306,7 +332,7 @@ def test_restore_from_checkpoint_restores_buffers(self) -> None:
 
 Expected: FAIL - restore still using old format (token_ids)
 
-**Step 3: Implement simplified restore_from_checkpoint()**
+**Step 3: Implement simplified restore_from_checkpoint() with hard error on old format**
 
 In `src/elspeth/engine/executors.py`, replace `restore_from_checkpoint()` at line 1090:
 
@@ -322,53 +348,37 @@ def restore_from_checkpoint(self, state: dict[str, Any]) -> None:
         state: Dict from get_checkpoint_state() of previous run
 
     Raises:
-        ValueError: If checkpoint format is invalid
+        ValueError: If checkpoint format is invalid (missing 'tokens' key)
     """
     for node_id, node_state in state.items():
-        # Handle both new format (tokens) and old format (rows + token_ids) for migration
-        if "tokens" in node_state:
-            # New format: full TokenInfo metadata in checkpoint
-            tokens_data = node_state["tokens"]
-            batch_id = node_state.get("batch_id")
+        # Validate checkpoint format - hard error on old format (per CLAUDE.md)
+        if "tokens" not in node_state:
+            raise ValueError(
+                f"Invalid checkpoint format for node {node_id}: missing 'tokens' key. "
+                f"This checkpoint was created by a version with bug P1-2026-01-21 "
+                f"and cannot be restored. You must re-run the pipeline from scratch."
+            )
 
-            # Reconstruct TokenInfo objects directly from checkpoint
-            reconstructed_tokens = [
-                TokenInfo(
-                    row_id=t["row_id"],
-                    token_id=t["token_id"],
-                    row_data=t["row_data"],
-                    branch_name=t.get("branch_name"),  # May be None
-                )
-                for t in tokens_data
-            ]
+        # New format: full TokenInfo metadata in checkpoint
+        tokens_data = node_state["tokens"]
+        batch_id = node_state.get("batch_id")
 
-            # Set buffers and tokens
-            self._buffer_tokens[node_id] = reconstructed_tokens
-            self._buffers[node_id] = [t.row_data for t in reconstructed_tokens]
+        # Reconstruct TokenInfo objects directly from checkpoint
+        reconstructed_tokens = [
+            TokenInfo(
+                row_id=t["row_id"],
+                token_id=t["token_id"],
+                row_data=t["row_data"],
+                branch_name=t.get("branch_name"),  # May be None
+            )
+            for t in tokens_data
+        ]
 
-        else:
-            # Old format: rows + token_ids (migration path)
-            # This should not happen after checkpoint format update,
-            # but we handle it gracefully for any in-flight checkpoints.
-            rows = node_state.get("rows", [])
-            batch_id = node_state.get("batch_id")
+        # Set buffers and tokens
+        self._buffer_tokens[node_id] = reconstructed_tokens
+        self._buffers[node_id] = [t.row_data for t in reconstructed_tokens]
 
-            # Restore rows only - tokens cannot be reconstructed without DB
-            self._buffers[node_id] = list(rows)
-            self._buffer_tokens[node_id] = []
-
-            # Log warning if rows exist but tokens don't
-            if rows:
-                import warnings
-                warnings.warn(
-                    f"Restoring checkpoint with old format for node {node_id}. "
-                    f"Buffer has {len(rows)} rows but no token metadata. "
-                    f"Flush operations will fail. Re-checkpoint to upgrade format.",
-                    DeprecationWarning,
-                    stacklevel=2,
-                )
-
-        # Restore batch ID and member count (same for both formats)
+        # Restore batch ID and member count
         if batch_id:
             self._batch_ids[node_id] = batch_id
             self._member_counts[batch_id] = len(self._buffers[node_id])
@@ -405,8 +415,8 @@ git commit -m "fix(engine): simplify checkpoint restore with direct TokenInfo re
 Reconstruct TokenInfo objects directly from checkpoint metadata.
 No database queries required - O(1) restoration.
 
-Includes graceful handling of old checkpoint format with deprecation
-warning for any in-flight checkpoints using token_ids format.
+Hard error on old checkpoint format per CLAUDE.md (no backwards
+compatibility code). Old format checkpoints cannot be restored.
 
 Related: P1-2026-01-21-aggregation-restore-missing-buffered-tokens"
 ```
@@ -719,9 +729,148 @@ Fixes: P1-2026-01-21-aggregation-restore-missing-buffered-tokens"
 
 ---
 
+## Task 3.5: Add checkpoint size validation tests
+
+**Rationale:** Prevent unbounded checkpoint growth that could cause storage exhaustion or performance issues.
+
+**Files:**
+- Test: `tests/engine/test_executors.py` (add size validation tests)
+
+**Step 1: Write test for size limit enforcement**
+
+```python
+def test_checkpoint_size_limit_enforced(self) -> None:
+    """get_checkpoint_state() raises error if checkpoint exceeds 10MB."""
+    from elspeth.contracts import TokenInfo
+    from elspeth.core.config import AggregationSettings, TriggerConfig
+    from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+    from elspeth.engine.executors import AggregationExecutor
+    from elspeth.engine.spans import SpanFactory
+
+    db = LandscapeDB.in_memory()
+    recorder = LandscapeRecorder(db)
+    run = recorder.begin_run(config={}, canonical_version="v1")
+    agg_node = recorder.register_node(
+        run_id=run.run_id,
+        plugin_name="size_limit_test",
+        node_type="aggregation",
+        plugin_version="1.0",
+        config={},
+        schema_config={"fields": "dynamic"},
+    )
+
+    settings = AggregationSettings(
+        name="test_agg",
+        plugin="test",
+        trigger=TriggerConfig(count=100000),  # Very high to prevent trigger
+    )
+
+    executor = AggregationExecutor(
+        recorder=recorder,
+        span_factory=SpanFactory(),
+        run_id=run.run_id,
+        aggregation_settings={agg_node.node_id: settings},
+    )
+
+    # Buffer rows with large payload to exceed 10MB
+    # Each row ~10KB -> 1100 rows = ~11MB
+    large_payload = "x" * 10000  # 10KB string
+    for i in range(1100):
+        token = TokenInfo(
+            row_id=f"large-row-{i}",
+            token_id=f"large-token-{i}",
+            row_data={"payload": large_payload, "index": i},
+            branch_name=None,
+        )
+        executor.buffer_row(agg_node.node_id, token)
+
+    # Should raise RuntimeError
+    import pytest
+    with pytest.raises(RuntimeError, match=r"Checkpoint size .* exceeds 10MB limit"):
+        executor.get_checkpoint_state()
+```
+
+**Step 2: Write test for size warning threshold**
+
+```python
+def test_checkpoint_size_warning_logged(self, caplog) -> None:
+    """get_checkpoint_state() logs warning if checkpoint exceeds 1MB."""
+    import logging
+    from elspeth.contracts import TokenInfo
+    from elspeth.core.config import AggregationSettings, TriggerConfig
+    from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+    from elspeth.engine.executors import AggregationExecutor
+    from elspeth.engine.spans import SpanFactory
+
+    db = LandscapeDB.in_memory()
+    recorder = LandscapeRecorder(db)
+    run = recorder.begin_run(config={}, canonical_version="v1")
+    agg_node = recorder.register_node(
+        run_id=run.run_id,
+        plugin_name="size_warning_test",
+        node_type="aggregation",
+        plugin_version="1.0",
+        config={},
+        schema_config={"fields": "dynamic"},
+    )
+
+    settings = AggregationSettings(
+        name="test_agg",
+        plugin="test",
+        trigger=TriggerConfig(count=100000),
+    )
+
+    executor = AggregationExecutor(
+        recorder=recorder,
+        span_factory=SpanFactory(),
+        run_id=run.run_id,
+        aggregation_settings={agg_node.node_id: settings},
+    )
+
+    # Buffer rows to exceed 1MB but stay under 10MB
+    # Each row ~2KB -> 600 rows = ~1.2MB
+    medium_payload = "y" * 2000  # 2KB string
+    for i in range(600):
+        token = TokenInfo(
+            row_id=f"med-row-{i}",
+            token_id=f"med-token-{i}",
+            row_data={"payload": medium_payload, "index": i},
+            branch_name=None,
+        )
+        executor.buffer_row(agg_node.node_id, token)
+
+    # Should log warning
+    with caplog.at_level(logging.WARNING):
+        state = executor.get_checkpoint_state()
+
+    assert "Large checkpoint" in caplog.text
+    assert state is not None  # Succeeds despite warning
+```
+
+**Step 3: Run size validation tests**
+
+```bash
+.venv/bin/python -m pytest tests/engine/test_executors.py::TestAggregationExecutorCheckpoint::test_checkpoint_size_limit_enforced -xvs
+.venv/bin/python -m pytest tests/engine/test_executors.py::TestAggregationExecutorCheckpoint::test_checkpoint_size_warning_logged -xvs
+```
+
+Expected: Both PASS
+
+**Step 4: Commit size validation**
+
+```bash
+git add tests/engine/test_executors.py
+git commit -m "test(engine): add checkpoint size validation tests
+
+Verify 10MB hard limit and 1MB warning threshold.
+Prevents unbounded checkpoint growth."
+```
+
+---
+
 ## Task 4: Test edge cases and validation
 
-**Rationale:** Ensure checkpoint format validation catches corruption and provides clear errors.
+**Rationale:** Ensure checkpoint format validation catches corruption and provides clear errors. Verify database query elimination and end-to-end crash recovery.
 
 **Files:**
 - Test: `tests/engine/test_executors.py` (add validation tests)
@@ -832,14 +981,304 @@ def test_restore_from_checkpoint_handles_empty_tokens(self) -> None:
     assert executor.get_batch_id(agg_node.node_id) is None
 ```
 
-**Step 3: Run edge case tests**
+**Step 3: Write test for old format rejection**
+
+```python
+def test_restore_old_format_checkpoint_raises_error(self) -> None:
+    """restore_from_checkpoint() raises clear error on old checkpoint format."""
+    from elspeth.core.config import AggregationSettings, TriggerConfig
+    from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+    from elspeth.engine.executors import AggregationExecutor
+    from elspeth.engine.spans import SpanFactory
+
+    db = LandscapeDB.in_memory()
+    recorder = LandscapeRecorder(db)
+    run = recorder.begin_run(config={}, canonical_version="v1")
+    agg_node = recorder.register_node(
+        run_id=run.run_id,
+        plugin_name="old_format_test",
+        node_type="aggregation",
+        plugin_version="1.0",
+        config={},
+        schema_config={"fields": "dynamic"},
+    )
+
+    settings = AggregationSettings(
+        name="test_agg",
+        plugin="test",
+        trigger=TriggerConfig(count=10),
+    )
+
+    executor = AggregationExecutor(
+        recorder=recorder,
+        span_factory=SpanFactory(),
+        run_id=run.run_id,
+        aggregation_settings={agg_node.node_id: settings},
+    )
+
+    # Old checkpoint format: rows + token_ids (buggy format)
+    old_format_state = {
+        agg_node.node_id: {
+            "rows": [{"value": 10}, {"value": 20}],
+            "token_ids": ["token-1", "token-2"],  # Missing full metadata!
+            "batch_id": "batch-123",
+        }
+    }
+
+    import pytest
+    with pytest.raises(
+        ValueError,
+        match=r"Invalid checkpoint format.*missing 'tokens' key.*P1-2026-01-21",
+    ):
+        executor.restore_from_checkpoint(old_format_state)
+```
+
+**Step 4: Write test for database query elimination**
+
+```python
+def test_restore_makes_zero_database_calls(self) -> None:
+    """restore_from_checkpoint() makes no database queries (self-contained)."""
+    from unittest.mock import Mock, patch
+    from elspeth.core.config import AggregationSettings, TriggerConfig
+    from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+    from elspeth.engine.executors import AggregationExecutor
+    from elspeth.engine.spans import SpanFactory
+
+    db = LandscapeDB.in_memory()
+    recorder = LandscapeRecorder(db)
+    run = recorder.begin_run(config={}, canonical_version="v1")
+    agg_node = recorder.register_node(
+        run_id=run.run_id,
+        plugin_name="zero_query_test",
+        node_type="aggregation",
+        plugin_version="1.0",
+        config={},
+        schema_config={"fields": "dynamic"},
+    )
+
+    settings = AggregationSettings(
+        name="test_agg",
+        plugin="test",
+        trigger=TriggerConfig(count=10),
+    )
+
+    executor = AggregationExecutor(
+        recorder=recorder,
+        span_factory=SpanFactory(),
+        run_id=run.run_id,
+        aggregation_settings={agg_node.node_id: settings},
+    )
+
+    # Valid checkpoint with full TokenInfo
+    checkpoint_state = {
+        agg_node.node_id: {
+            "tokens": [
+                {
+                    "token_id": "tok-1",
+                    "row_id": "row-1",
+                    "branch_name": None,
+                    "row_data": {"value": 10},
+                },
+                {
+                    "token_id": "tok-2",
+                    "row_id": "row-2",
+                    "branch_name": "branch-a",
+                    "row_data": {"value": 20},
+                },
+            ],
+            "batch_id": "batch-123",
+        }
+    }
+
+    # Mock database connection to detect queries
+    with patch.object(db, 'execute', side_effect=AssertionError("No DB queries allowed!")):
+        # Should complete without database access
+        executor.restore_from_checkpoint(checkpoint_state)
+
+    # Verify restoration succeeded
+    assert len(executor._buffer_tokens[agg_node.node_id]) == 2
+    assert executor._buffer_tokens[agg_node.node_id][0].token_id == "tok-1"
+```
+
+**Step 5: Write end-to-end crash recovery test**
+
+```python
+def test_aggregation_crash_recovery_with_flush(self) -> None:
+    """End-to-end: checkpoint -> restore -> flush works (simulates crash recovery)."""
+    import json
+    from elspeth.contracts import TokenInfo
+    from elspeth.contracts.enums import TriggerType
+    from elspeth.core.config import AggregationSettings, TriggerConfig
+    from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+    from elspeth.engine.executors import AggregationExecutor
+    from elspeth.engine.spans import SpanFactory
+    from elspeth.plugins.context import PluginContext
+    from elspeth.plugins.transforms.batch_stats import BatchStats
+
+    db = LandscapeDB.in_memory()
+    recorder = LandscapeRecorder(db)
+    run = recorder.begin_run(config={}, canonical_version="v1")
+    agg_node = recorder.register_node(
+        run_id=run.run_id,
+        plugin_name="crash_recovery_test",
+        node_type="aggregation",
+        plugin_version="1.0",
+        config={},
+        schema_config={"fields": "dynamic"},
+    )
+
+    settings = AggregationSettings(
+        name="recovery_agg",
+        plugin="batch_stats",
+        trigger=TriggerConfig(count=5),
+    )
+
+    # Executor 1: Buffer rows, checkpoint, "crash"
+    exec1 = AggregationExecutor(
+        recorder=recorder,
+        span_factory=SpanFactory(),
+        run_id=run.run_id,
+        aggregation_settings={agg_node.node_id: settings},
+    )
+
+    for i in range(3):
+        token = TokenInfo(
+            row_id=f"crash-row-{i}",
+            token_id=f"crash-token-{i}",
+            row_data={"value": i * 10},
+            branch_name=f"path-{i}" if i > 0 else None,
+        )
+        row = recorder.create_row(run.run_id, agg_node.node_id, i, token.row_data, token.row_id)
+        recorder.create_token(token.row_id, token.token_id)
+        exec1.buffer_row(agg_node.node_id, token)
+
+    # Checkpoint and simulate crash
+    checkpoint = exec1.get_checkpoint_state()
+    checkpoint_json = json.dumps(checkpoint)
+    del exec1  # Simulate crash - executor destroyed
+
+    # Executor 2: Restore from checkpoint and flush
+    exec2 = AggregationExecutor(
+        recorder=recorder,
+        span_factory=SpanFactory(),
+        run_id=run.run_id,
+        aggregation_settings={agg_node.node_id: settings},
+    )
+
+    exec2.restore_from_checkpoint(json.loads(checkpoint_json))
+
+    # Verify buffer restored
+    assert len(exec2.get_buffered_rows(agg_node.node_id)) == 3
+
+    # THIS IS THE CRITICAL TEST: Can we flush after restore?
+    transform = BatchStats()
+    transform.setup(recorder, settings.plugin)
+    ctx = PluginContext(run_id=run.run_id, config={"fields": ["value"]})
+
+    result, consumed_tokens = exec2.execute_flush(
+        node_id=agg_node.node_id,
+        transform=transform,
+        ctx=ctx,
+        step_in_pipeline=0,
+        trigger_type=TriggerType.COUNT,
+    )
+
+    # Verify flush succeeded
+    assert result.success is True
+    assert len(consumed_tokens) == 3
+    assert consumed_tokens[0].token_id == "crash-token-0"
+    assert consumed_tokens[1].branch_name == "path-1"
+    assert consumed_tokens[2].branch_name == "path-2"
+
+    # Verify batch statistics computed
+    assert "average" in result.data or "mean" in result.data
+```
+
+**Step 6: Write large batch test**
+
+```python
+def test_checkpoint_with_1000_row_buffer(self) -> None:
+    """Checkpoint handles large batches (1000 rows) within size limits."""
+    import json
+    from elspeth.contracts import TokenInfo
+    from elspeth.core.config import AggregationSettings, TriggerConfig
+    from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+    from elspeth.engine.executors import AggregationExecutor
+    from elspeth.engine.spans import SpanFactory
+
+    db = LandscapeDB.in_memory()
+    recorder = LandscapeRecorder(db)
+    run = recorder.begin_run(config={}, canonical_version="v1")
+    agg_node = recorder.register_node(
+        run_id=run.run_id,
+        plugin_name="large_batch_test",
+        node_type="aggregation",
+        plugin_version="1.0",
+        config={},
+        schema_config={"fields": "dynamic"},
+    )
+
+    settings = AggregationSettings(
+        name="large_agg",
+        plugin="test",
+        trigger=TriggerConfig(count=10000),  # High to prevent trigger
+    )
+
+    executor = AggregationExecutor(
+        recorder=recorder,
+        span_factory=SpanFactory(),
+        run_id=run.run_id,
+        aggregation_settings={agg_node.node_id: settings},
+    )
+
+    # Buffer 1000 rows with realistic data
+    for i in range(1000):
+        token = TokenInfo(
+            row_id=f"large-row-{i}",
+            token_id=f"large-token-{i}",
+            row_data={"index": i, "value": i * 2.5, "category": f"cat-{i % 10}"},
+            branch_name=f"branch-{i % 5}" if i % 5 > 0 else None,
+        )
+        executor.buffer_row(agg_node.node_id, token)
+
+    # Get checkpoint
+    state = executor.get_checkpoint_state()
+
+    # Verify checkpoint created successfully
+    assert agg_node.node_id in state
+    assert len(state[agg_node.node_id]["tokens"]) == 1000
+
+    # Verify size is reasonable (< 500KB for 1000 rows)
+    checkpoint_json = json.dumps(state)
+    size_kb = len(checkpoint_json) / 1000
+    assert size_kb < 500, f"Checkpoint too large: {size_kb:.1f}KB for 1000 rows"
+
+    # Verify roundtrip
+    executor2 = AggregationExecutor(
+        recorder=recorder,
+        span_factory=SpanFactory(),
+        run_id=run.run_id,
+        aggregation_settings={agg_node.node_id: settings},
+    )
+
+    executor2.restore_from_checkpoint(json.loads(checkpoint_json))
+    assert len(executor2.get_buffered_rows(agg_node.node_id)) == 1000
+    assert executor2._buffer_tokens[agg_node.node_id][0].token_id == "large-token-0"
+    assert executor2._buffer_tokens[agg_node.node_id][999].token_id == "large-token-999"
+```
+
+**Step 7: Run all edge case and validation tests**
 
 ```bash
 .venv/bin/python -m pytest tests/engine/test_executors.py::TestAggregationExecutorCheckpoint::test_restore_from_checkpoint_detects_missing_required_fields -xvs
 .venv/bin/python -m pytest tests/engine/test_executors.py::TestAggregationExecutorCheckpoint::test_restore_from_checkpoint_handles_empty_tokens -xvs
+.venv/bin/python -m pytest tests/engine/test_executors.py::TestAggregationExecutorCheckpoint::test_restore_old_format_checkpoint_raises_error -xvs
+.venv/bin/python -m pytest tests/engine/test_executors.py::TestAggregationExecutorCheckpoint::test_restore_makes_zero_database_calls -xvs
+.venv/bin/python -m pytest tests/engine/test_executors.py::TestAggregationExecutorCheckpoint::test_aggregation_crash_recovery_with_flush -xvs
+.venv/bin/python -m pytest tests/engine/test_executors.py::TestAggregationExecutorCheckpoint::test_checkpoint_with_1000_row_buffer -xvs
 ```
 
-Expected: Both PASS
+Expected: All PASS
 
 **Step 4: Run entire executor test suite**
 

@@ -60,7 +60,7 @@ class TestOrchestratorResume:
         recorder.register_node(
             run_id=run.run_id,
             node_id="source",
-            plugin_name="test_source",
+            plugin_name="null",
             node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
@@ -168,14 +168,14 @@ class TestOrchestratorResume:
         """Create minimal config for resume testing."""
         # Mock source and sink
         source = Mock()
-        source.name = "test_source"
+        source.name = "null"
         source.plugin_version = "1.0"
         source.determinism = Determinism.DETERMINISTIC
         source.output_schema = {"fields": "dynamic"}
         source.load = Mock(return_value=[])
 
         sink = Mock()
-        sink.name = "default"
+        sink.name = "csv"
         sink.plugin_version = "1.0"
         sink.determinism = Determinism.DETERMINISTIC
         sink.input_schema = {"fields": "dynamic"}
@@ -197,8 +197,8 @@ class TestOrchestratorResume:
         from elspeth.core.dag import ExecutionGraph
 
         settings = ElspethSettings(
-            datasource=DatasourceSettings(plugin="test_source"),
-            sinks={"default": SinkSettings(plugin="test_sink")},
+            datasource=DatasourceSettings(plugin="null"),
+            sinks={"default": SinkSettings(plugin="csv")},
             output_sink="default",
         )
         return ExecutionGraph.from_config(settings, plugin_manager)

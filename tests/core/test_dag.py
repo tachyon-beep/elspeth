@@ -528,15 +528,15 @@ class TestExecutionGraphFromConfig:
             datasource=DatasourceSettings(plugin="csv"),
             sinks={"output": SinkSettings(plugin="csv")},
             row_plugins=[
-                RowPluginSettings(plugin="transform_a"),
-                RowPluginSettings(plugin="transform_b"),
+                RowPluginSettings(plugin="passthrough"),
+                RowPluginSettings(plugin="field_mapper"),
             ],
             output_sink="output",
         )
 
         graph = ExecutionGraph.from_config(config, plugin_manager)
 
-        # Should have: source -> transform_a -> transform_b -> output_sink
+        # Should have: source -> passthrough -> field_mapper -> output_sink
         assert graph.node_count == 4
         assert graph.edge_count == 3
 
@@ -547,10 +547,10 @@ class TestExecutionGraphFromConfig:
         assert "source" in order[0]
         # Sink should be last (has "sink" in node_id)
         assert "sink" in order[-1]
-        # Verify transform ordering (transform_a before transform_b)
-        transform_a_idx = next(i for i, n in enumerate(order) if "transform_a" in n)
-        transform_b_idx = next(i for i, n in enumerate(order) if "transform_b" in n)
-        assert transform_a_idx < transform_b_idx
+        # Verify transform ordering (passthrough before field_mapper)
+        passthrough_idx = next(i for i, n in enumerate(order) if "passthrough" in n)
+        field_mapper_idx = next(i for i, n in enumerate(order) if "field_mapper" in n)
+        assert passthrough_idx < field_mapper_idx
 
     def test_from_config_with_gate_routes(self, plugin_manager) -> None:
         """Build graph with config-driven gate routing to multiple sinks."""
@@ -655,8 +655,8 @@ class TestExecutionGraphFromConfig:
             datasource=DatasourceSettings(plugin="csv"),
             sinks={"output": SinkSettings(plugin="csv")},
             row_plugins=[
-                RowPluginSettings(plugin="transform_a"),
-                RowPluginSettings(plugin="transform_b"),
+                RowPluginSettings(plugin="passthrough"),
+                RowPluginSettings(plugin="field_mapper"),
             ],
             output_sink="output",
         )
@@ -665,8 +665,8 @@ class TestExecutionGraphFromConfig:
         transform_map = graph.get_transform_id_map()
 
         # Explicit mapping by sequence position
-        assert 0 in transform_map  # transform_a
-        assert 1 in transform_map  # transform_b
+        assert 0 in transform_map  # passthrough
+        assert 1 in transform_map  # field_mapper
         assert transform_map[0] != transform_map[1]
 
     def test_get_output_sink(self, plugin_manager) -> None:
