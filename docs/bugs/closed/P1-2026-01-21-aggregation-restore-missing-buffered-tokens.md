@@ -130,19 +130,31 @@ The root cause was that `get_checkpoint_state()` only stored `token_ids` (list o
 
 ### Testing
 
-16 checkpoint tests added covering format migration, size validation, edge cases:
-- `test_get_checkpoint_state_returns_buffer_contents` - Verifies full TokenInfo storage
-- `test_restore_from_checkpoint_restores_buffers` - Verifies all fields restored
-- `test_checkpoint_roundtrip` - Extended to test flush after restore with branch_name
-- `test_execute_flush_detects_incomplete_restoration` - Guard behavior
-- `test_checkpoint_size_limit_enforced` - 10MB hard limit
-- `test_checkpoint_size_warning_logged` - 1MB warning threshold
-- `test_restore_from_checkpoint_detects_missing_required_fields` - Validation
-- `test_restore_from_checkpoint_handles_empty_tokens` - Edge case
-- `test_restore_old_format_checkpoint_raises_error` - Old format rejection
-- `test_restore_makes_zero_database_calls` - Query elimination verification
-- `test_aggregation_crash_recovery_with_flush` - End-to-end crash recovery
-- `test_checkpoint_with_1000_row_buffer` - Large batch handling
+Added 16 comprehensive tests covering format migration, size validation, and edge cases:
+
+**Checkpoint format tests:**
+1. `test_get_checkpoint_state_stores_full_token_info` - Verifies checkpoint stores complete TokenInfo with all fields
+2. `test_get_checkpoint_state_excludes_empty_buffers` - Empty buffers not included in checkpoint
+3. `test_restore_from_checkpoint_reconstructs_full_token_info` - Full TokenInfo reconstruction from checkpoint data
+4. `test_restore_from_checkpoint_restores_trigger_count` - Trigger evaluator count correctly advanced
+5. `test_checkpoint_roundtrip` - Save/restore cycle preserves all state without data loss
+6. `test_checkpoint_restore_then_flush_succeeds` - Flush works correctly after checkpoint restoration
+
+**Defensive guard tests:**
+7. `test_execute_flush_detects_incomplete_restoration` - Defensive guard catches buffer/token mismatch
+
+**Size validation tests:**
+8. `test_checkpoint_size_warning_at_1mb_threshold` - 1MB threshold logs warning with size info
+9. `test_checkpoint_size_no_warning_under_1mb` - No warning logged for checkpoints under 1MB
+10. `test_checkpoint_size_warning_but_no_error_between_thresholds` - 1-10MB range warns but doesn't error
+11. `test_checkpoint_size_error_at_10mb_limit` - 10MB hard limit raises RuntimeError
+12. `test_checkpoint_size_error_message_includes_solutions` - Error message includes actionable guidance
+
+**Edge case and validation tests:**
+13. `test_restore_from_checkpoint_handles_empty_state` - Empty checkpoint handled gracefully
+14. `test_restore_from_checkpoint_crashes_on_missing_tokens_key` - Old format detected with clear error
+15. `test_restore_from_checkpoint_crashes_on_invalid_tokens_type` - Invalid tokens type crashes with clear error
+16. `test_restore_from_checkpoint_crashes_on_missing_token_fields` - Missing required fields crash with clear error
 
 All tests pass including critical `test_checkpoint_roundtrip`.
 

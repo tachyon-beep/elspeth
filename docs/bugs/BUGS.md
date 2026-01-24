@@ -2,6 +2,12 @@
 
 ## Closed Bugs
 
+### P1-2026-01-21-aggregation-restore-missing-buffered-tokens ✅
+- **Status:** Resolved in RC-2
+- **Fix:** Checkpoint format migration - store full TokenInfo instead of token IDs
+- **Resolution Date:** 2026-01-24
+- **Commits:** 260b9a7 through 91c95cd
+
 ### P0-2026-01-24-schema-validation-non-functional ✅
 - **Status:** Resolved in RC-2
 - **Fix:** Architectural refactor - plugin instantiation before graph construction
