@@ -625,13 +625,18 @@ def from_plugin_instances(
                     )
                 else:
                     # CRITICAL FIX: Branch NOT in coalesce - fallback to output sink
-                    if graph._output_sink:
-                        graph.add_edge(
-                            gate_id,
-                            graph._output_sink,
-                            label=branch_name,
-                            mode=RoutingMode.COPY
+                    if not graph._output_sink:
+                        raise GraphValidationError(
+                            f"Gate '{gate_config.name}' has fork branch '{branch_name}' "
+                            "that is not in any coalesce and no output_sink is configured. "
+                            "Fork branches must either join a coalesce or have an output sink."
                         )
+                    graph.add_edge(
+                        gate_id,
+                        graph._output_sink,
+                        label=branch_name,
+                        mode=RoutingMode.COPY
+                    )
 
     # ===== CONNECT GATE CONTINUE ROUTES =====
     # CRITICAL FIX: Handle ALL continue routes, not just "true"
@@ -647,7 +652,13 @@ def from_plugin_instances(
                 next_node_id = graph._output_sink
 
             # Add continue edge if not already present
-            if next_node_id and not graph._graph.has_edge(gid, next_node_id, key="continue"):
+            if not next_node_id:
+                raise GraphValidationError(
+                    f"Gate '{gate_config.name}' has 'continue' route but is the last gate "
+                    "and no output_sink is configured. Continue routes must have a target."
+                )
+
+            if not graph._graph.has_edge(gid, next_node_id, key="continue"):
                 graph.add_edge(gid, next_node_id, label="continue", mode=RoutingMode.MOVE)
 
     # ===== CONNECT FINAL NODE TO OUTPUT (NO GATES CASE) =====

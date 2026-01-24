@@ -573,14 +573,29 @@ output_sink: output
         assert result.exit_code == 0
         assert "valid" in result.output.lower()
 
+        # NOTE: This test validates that the configuration is accepted.
+        # Verifying the actual DAG structure (edge existence) would require
+        # exposing the ExecutionGraph from the CLI, which is not currently
+        # available. The validation logic itself is tested at the unit level.
+
     finally:
         config_file.unlink()
 
 
-def test_coalesce_incompatible_branch_schemas():
-    """Test schema validation detects incompatible schemas at coalesce merge point.
+def test_coalesce_compatible_branch_schemas():
+    """Test coalesce validation allows compatible schemas from multiple branches.
 
-    CRITICAL GAP from review: Missing test for coalesce schema mismatch.
+    LIMITATION: This test uses identical transforms on both branches, so schemas
+    are always compatible. True incompatibility testing requires per-branch
+    transform configuration (not yet supported in the pipeline config schema).
+
+    This test validates:
+    - Fork → coalesce topology is recognized by validation
+    - Coalesce nodes are created correctly
+    - Compatible schemas pass validation at merge points
+
+    TODO: Add true incompatibility test when per-branch transforms are implemented.
+    See Issue: Per-branch transform configuration support
     """
     runner = CliRunner()
 
