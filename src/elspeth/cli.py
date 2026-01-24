@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import typer
 from pydantic import ValidationError
@@ -159,6 +159,8 @@ def run(
     Requires --execute flag to actually run (safety feature).
     Use --dry-run to validate configuration without executing.
     """
+    from elspeth.cli_helpers import instantiate_plugins_from_config
+
     settings_path = Path(settings).expanduser()
 
     # Load and validate config via Pydantic
@@ -174,10 +176,24 @@ def run(
             typer.echo(f"  - {loc}: {error['msg']}", err=True)
         raise typer.Exit(1) from None
 
-    # Build and validate execution graph
+    # NEW: Instantiate plugins BEFORE graph construction
     try:
-        manager = _get_plugin_manager()
-        graph = ExecutionGraph.from_config(config, manager)
+        plugins = instantiate_plugins_from_config(config)
+    except Exception as e:
+        typer.echo(f"Error instantiating plugins: {e}", err=True)
+        raise typer.Exit(1) from None
+
+    # NEW: Build and validate graph from plugin instances
+    try:
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(config.gates),
+            output_sink=config.output_sink,
+            coalesce_settings=list(config.coalesce) if config.coalesce else None,
+        )
         graph.validate()
     except GraphValidationError as e:
         typer.echo(f"Pipeline graph error: {e}", err=True)
@@ -193,34 +209,30 @@ def run(
             typer.echo(f"  Source: {config.datasource.plugin}")
             typer.echo(f"  Transforms: {len(config.row_plugins)}")
             typer.echo(f"  Sinks: {', '.join(config.sinks.keys())}")
-            typer.echo(f"  Output sink: {config.output_sink}")
-            if verbose:
-                typer.echo(f"  Graph: {graph.node_count} nodes, {graph.edge_count} edges")
-                typer.echo(f"  Execution order: {len(graph.topological_order())} steps")
-                typer.echo(f"  Concurrency: {config.concurrency.max_workers} workers")
-                typer.echo(f"  Landscape: {config.landscape.url}")
             return
 
         # Safety check: require explicit --execute flag
         if not execute:
             typer.echo("Pipeline configuration valid.")
             typer.echo(f"  Source: {config.datasource.plugin}")
-            typer.echo(f"  Sinks: {', '.join(config.sinks.keys())}")
             typer.echo("")
             typer.echo("To execute, add --execute (or -x) flag:", err=True)
             typer.echo(f"  elspeth run -s {settings} --execute", err=True)
             raise typer.Exit(1)
     else:
         # JSON mode: early exits without console output
-        if dry_run:
-            return  # Silently skip execution in dry-run + JSON mode
-        if not execute:
-            raise typer.Exit(1)  # Silently exit if --execute not provided
+        if dry_run or not execute:
+            raise typer.Exit(1)
 
-    # Execute pipeline with validated config and graph
-    # RunCompleted event provides summary in both console and JSON modes
+    # Execute pipeline with pre-instantiated plugins
     try:
-        _execute_pipeline(config, graph=graph, verbose=verbose, output_format=output_format)
+        _execute_pipeline_with_instances(
+            config,
+            graph,
+            plugins,
+            verbose=verbose,
+            output_format=output_format,
+        )
     except Exception as e:
         # Emit structured error for JSON mode, human-readable for console
         if output_format == "json":
@@ -410,6 +422,218 @@ def _execute_pipeline(
             config=resolve_config(config),
             gates=list(config.gates),  # Config-driven gates
             aggregation_settings=aggregation_settings,  # Aggregation configurations
+        )
+
+        if verbose:
+            typer.echo("Starting pipeline execution...")
+
+        # Create event bus and subscribe progress formatter
+        from elspeth.core import EventBus
+
+        event_bus = EventBus()
+
+        # Choose formatters based on output format
+        if output_format == "json":
+            import json
+
+            # JSON formatters - output structured JSON for each event
+            def _format_phase_started_json(event: PhaseStarted) -> None:
+                typer.echo(
+                    json.dumps(
+                        {
+                            "event": "phase_started",
+                            "phase": event.phase.value,
+                            "action": event.action.value,
+                            "target": event.target,
+                        }
+                    )
+                )
+
+            def _format_phase_completed_json(event: PhaseCompleted) -> None:
+                typer.echo(
+                    json.dumps(
+                        {
+                            "event": "phase_completed",
+                            "phase": event.phase.value,
+                            "duration_seconds": event.duration_seconds,
+                        }
+                    )
+                )
+
+            def _format_phase_error_json(event: PhaseError) -> None:
+                typer.echo(
+                    json.dumps(
+                        {
+                            "event": "phase_error",
+                            "phase": event.phase.value,
+                            "error": event.error_message,
+                            "target": event.target,
+                        }
+                    ),
+                    err=True,
+                )
+
+            def _format_run_completed_json(event: RunCompleted) -> None:
+                typer.echo(
+                    json.dumps(
+                        {
+                            "event": "run_completed",
+                            "run_id": event.run_id,
+                            "status": event.status.value,
+                            "total_rows": event.total_rows,
+                            "succeeded": event.succeeded,
+                            "failed": event.failed,
+                            "quarantined": event.quarantined,
+                            "duration_seconds": event.duration_seconds,
+                            "exit_code": event.exit_code,
+                        }
+                    )
+                )
+
+            def _format_progress_json(event: ProgressEvent) -> None:
+                rate = event.rows_processed / event.elapsed_seconds if event.elapsed_seconds > 0 else 0
+                typer.echo(
+                    json.dumps(
+                        {
+                            "event": "progress",
+                            "rows_processed": event.rows_processed,
+                            "rows_succeeded": event.rows_succeeded,
+                            "rows_failed": event.rows_failed,
+                            "rows_quarantined": event.rows_quarantined,
+                            "elapsed_seconds": event.elapsed_seconds,
+                            "rows_per_second": rate,
+                        }
+                    )
+                )
+
+            # Subscribe JSON formatters
+            event_bus.subscribe(PhaseStarted, _format_phase_started_json)
+            event_bus.subscribe(PhaseCompleted, _format_phase_completed_json)
+            event_bus.subscribe(PhaseError, _format_phase_error_json)
+            event_bus.subscribe(RunCompleted, _format_run_completed_json)
+            event_bus.subscribe(ProgressEvent, _format_progress_json)
+
+        else:  # console format (default)
+            # Console formatters for human-readable output
+            def _format_phase_started(event: PhaseStarted) -> None:
+                target_info = f" → {event.target}" if event.target else ""
+                typer.echo(f"[{event.phase.value.upper()}] {event.action.value.capitalize()}{target_info}...")
+
+            def _format_phase_completed(event: PhaseCompleted) -> None:
+                duration_str = f"{event.duration_seconds:.2f}s" if event.duration_seconds < 60 else f"{event.duration_seconds / 60:.1f}m"
+                typer.echo(f"[{event.phase.value.upper()}] ✓ Completed in {duration_str}")
+
+            def _format_phase_error(event: PhaseError) -> None:
+                target_info = f" ({event.target})" if event.target else ""
+                typer.echo(f"[{event.phase.value.upper()}] ✗ Error{target_info}: {event.error_message}", err=True)
+
+            def _format_run_completed(event: RunCompleted) -> None:
+                status_symbols = {
+                    "completed": "✓",
+                    "partial": "⚠",
+                    "failed": "✗",
+                }
+                symbol = status_symbols.get(event.status.value, "?")
+                typer.echo(
+                    f"\n{symbol} Run {event.status.value.upper()}: "
+                    f"{event.total_rows:,} rows processed | "
+                    f"✓{event.succeeded:,} succeeded | "
+                    f"✗{event.failed:,} failed | "
+                    f"⚠{event.quarantined:,} quarantined | "
+                    f"{event.duration_seconds:.2f}s total"
+                )
+
+            def _format_progress(event: ProgressEvent) -> None:
+                rate = event.rows_processed / event.elapsed_seconds if event.elapsed_seconds > 0 else 0
+                typer.echo(
+                    f"  Processing: {event.rows_processed:,} rows | "
+                    f"{rate:.0f} rows/sec | "
+                    f"✓{event.rows_succeeded:,} ✗{event.rows_failed} ⚠{event.rows_quarantined}"
+                )
+
+            # Subscribe console formatters
+            event_bus.subscribe(PhaseStarted, _format_phase_started)
+            event_bus.subscribe(PhaseCompleted, _format_phase_completed)
+            event_bus.subscribe(PhaseError, _format_phase_error)
+            event_bus.subscribe(RunCompleted, _format_run_completed)
+            event_bus.subscribe(ProgressEvent, _format_progress)
+
+        # Execute via Orchestrator (creates full audit trail)
+        orchestrator = Orchestrator(db, event_bus=event_bus)
+        result = orchestrator.run(
+            pipeline_config,
+            graph=graph,
+            settings=config,
+        )
+
+        return {
+            "run_id": result.run_id,
+            "status": result.status.value,  # Convert enum to string for TypedDict
+            "rows_processed": result.rows_processed,
+        }
+    finally:
+        db.close()
+
+
+def _execute_pipeline_with_instances(
+    config: ElspethSettings,
+    graph: ExecutionGraph,
+    plugins: dict[str, Any],
+    verbose: bool = False,
+    output_format: Literal["console", "json"] = "console",
+) -> ExecutionResult:
+    """Execute pipeline using pre-instantiated plugin instances.
+
+    NEW execution path that reuses plugins instantiated during graph construction.
+    Eliminates double instantiation.
+
+    Args:
+        config: Validated ElspethSettings
+        graph: Validated ExecutionGraph (schemas populated)
+        plugins: Pre-instantiated plugins from instantiate_plugins_from_config()
+        verbose: Show detailed output
+        output_format: 'console' or 'json'
+
+    Returns:
+        ExecutionResult with run_id, status, rows_processed
+    """
+    from elspeth.core.config import AggregationSettings
+    from elspeth.core.landscape import LandscapeDB
+    from elspeth.engine import Orchestrator, PipelineConfig
+    from elspeth.plugins.base import BaseTransform
+
+    # Use pre-instantiated plugins
+    source = plugins["source"]
+    sinks = plugins["sinks"]
+
+    # Build transforms list: row_plugins + aggregations (with node_id)
+    transforms: list[BaseTransform] = list(plugins["transforms"])
+
+    # Add aggregation transforms with node_id attached
+    agg_id_map = graph.get_aggregation_id_map()
+    aggregation_settings: dict[str, AggregationSettings] = {}
+
+    for agg_name, (transform, agg_config) in plugins["aggregations"].items():
+        node_id = agg_id_map[agg_name]
+        aggregation_settings[node_id] = agg_config
+
+        # Set node_id so processor can identify as aggregation
+        transform.node_id = node_id
+        transforms.append(transform)  # type: ignore[arg-type]
+
+    # Get database
+    db_url = config.landscape.url
+    db = LandscapeDB.from_url(db_url)
+
+    try:
+        # Build PipelineConfig with pre-instantiated plugins
+        pipeline_config = PipelineConfig(
+            source=source,  # type: ignore[arg-type]
+            transforms=transforms,  # type: ignore[arg-type]
+            sinks=sinks,  # type: ignore[arg-type]
+            config=resolve_config(config),
+            gates=list(config.gates),
+            aggregation_settings=aggregation_settings,
         )
 
         if verbose:
