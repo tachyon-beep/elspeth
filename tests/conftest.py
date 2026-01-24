@@ -17,6 +17,56 @@ Hypothesis Configuration:
 
 Set profile via environment variable:
     HYPOTHESIS_PROFILE=nightly pytest tests/property/
+
+Test Fixture Philosophy: Validation Bypass Pattern
+===================================================
+
+ELSPETH has two distinct plugin instantiation paths:
+
+1. PRODUCTION PATH (PluginManager):
+   - Configuration loaded from YAML
+   - PluginManager validates config against plugin's validation_schema()
+   - ONLY THEN does PluginManager call plugin.__init__() with validated config
+   - Plugins can assume __init__ receives valid data
+
+2. TEST PATH (Direct Instantiation):
+   - Tests call MyPlugin.__init__() directly
+   - NO validation occurs - bypasses PluginManager entirely
+   - Tests pass whatever arguments they need for the test scenario
+
+Why Tests Bypass Validation (This is CORRECT):
+-----------------------------------------------
+
+Interface tests verify that plugins implement their Protocols correctly:
+- Do they have all required attributes? (name, schema, version)
+- Do their methods return the right types? (TransformResult, ArtifactDescriptor)
+- Do lifecycle hooks work? (on_start, on_complete, close)
+
+Interface tests do NOT verify:
+- Configuration validation logic (that's tested separately in config tests)
+- Production instantiation flow (that's tested in integration tests)
+
+Benefits of Direct Instantiation in Tests:
+-------------------------------------------
+1. FASTER: No config parsing, no validation overhead
+2. SIMPLER: Test code is just `MySource(data=[...])`, not YAML + manager
+3. FOCUSED: Each test controls exact plugin state without config indirection
+
+Example Comparison:
+-------------------
+
+# Production path (used by elspeth CLI):
+config = ElspethSettings.from_yaml("pipeline.yaml")
+manager = PluginManager()
+source = manager.instantiate_source(config.source)  # Validates FIRST
+# source.__init__ called ONLY if config is valid
+
+# Test path (used by interface tests):
+source = ListSource(data=[{"x": 1}])  # Direct instantiation, no validation
+# Useful for testing that ListSource.load() works correctly
+
+Both paths are correct for their context. The test base classes in this module
+support the direct instantiation pattern by providing Protocol-compliant defaults.
 """
 
 import os
@@ -135,6 +185,18 @@ class _TestSourceBase:
     - output_schema: type[PluginSchema]
     - load(ctx) -> Iterator[SourceRow]
 
+    NOTE: Validation Bypass Pattern
+    --------------------------------
+    Test sources instantiated from this base class bypass PluginManager validation.
+    This is CORRECT for interface tests:
+
+    - Interface tests verify Protocol compliance (attributes, method signatures)
+    - Config validation is tested separately in config-specific tests
+    - Direct instantiation is faster and simpler than YAML + PluginManager
+
+    Production path: PluginManager validates config BEFORE calling __init__
+    Test path: Tests call __init__ directly with whatever data they need
+
     Usage:
         class MyTestSource(_TestSourceBase):
             name = "my_source"
@@ -181,6 +243,18 @@ class _TestSinkBase:
     Child classes must provide:
     - name: str
     - write(rows, ctx) -> ArtifactDescriptor
+
+    NOTE: Validation Bypass Pattern
+    --------------------------------
+    Test sinks instantiated from this base class bypass PluginManager validation.
+    This is CORRECT for interface tests:
+
+    - Interface tests verify Protocol compliance (attributes, method signatures)
+    - Config validation is tested separately in config-specific tests
+    - Direct instantiation is faster and simpler than YAML + PluginManager
+
+    Production path: PluginManager validates config BEFORE calling __init__
+    Test path: Tests call __init__ directly with whatever data they need
 
     Usage:
         class MyTestSink(_TestSinkBase):
@@ -230,6 +304,18 @@ class _TestTransformBase:
     Child classes must provide:
     - name: str
     - process(row, ctx) -> TransformResult
+
+    NOTE: Validation Bypass Pattern
+    --------------------------------
+    Test transforms instantiated from this base class bypass PluginManager validation.
+    This is CORRECT for interface tests:
+
+    - Interface tests verify Protocol compliance (attributes, method signatures)
+    - Config validation is tested separately in config-specific tests
+    - Direct instantiation is faster and simpler than YAML + PluginManager
+
+    Production path: PluginManager validates config BEFORE calling __init__
+    Test path: Tests call __init__ directly with whatever data they need
 
     Usage:
         class MyTestTransform(_TestTransformBase):
