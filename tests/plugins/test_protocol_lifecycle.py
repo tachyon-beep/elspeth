@@ -51,10 +51,6 @@ class TestTransformProtocolLifecycle:
             def on_complete(self, ctx: PluginContext) -> None:
                 pass
 
-            def _validate_self_consistency(self) -> None:
-                """Validate schemas."""
-                pass
-
         # Create instance and verify protocol conformance
         transform = MyTransform({})
         assert isinstance(transform, TransformProtocol)  # type: ignore[unreachable]
@@ -101,10 +97,6 @@ class TestGateProtocolLifecycle:
                 pass
 
             def on_complete(self, ctx: PluginContext) -> None:
-                pass
-
-            def _validate_self_consistency(self) -> None:
-                """Validate schemas."""
                 pass
 
         # Create instance and verify protocol conformance

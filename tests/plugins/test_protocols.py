@@ -47,10 +47,6 @@ class TestSourceProtocol:
             def on_complete(self, ctx: PluginContext) -> None:
                 pass
 
-            def _validate_self_consistency(self) -> None:
-                """Validate output schema."""
-                pass
-
         source = MySource({"path": "test.csv"})
 
         # IMPORTANT: Verify protocol conformance at runtime
@@ -116,10 +112,6 @@ class TestSourceProtocol:
             def on_complete(self, ctx: PluginContext) -> None:
                 pass
 
-            def _validate_self_consistency(self) -> None:
-                """Validate output schema."""
-                pass
-
         source = MetadataSource({})
         assert isinstance(source, SourceProtocol)  # type: ignore[unreachable]
         assert source.determinism == Determinism.IO_READ  # type: ignore[unreachable]
@@ -171,10 +163,6 @@ class TestTransformProtocol:
                 pass
 
             def on_complete(self, ctx: PluginContext) -> None:
-                pass
-
-            def _validate_self_consistency(self) -> None:
-                """Validate schemas."""
                 pass
 
         transform = DoubleTransform({})
@@ -502,10 +490,6 @@ class TestSinkProtocol:
             def on_complete(self, ctx: PluginContext) -> None:
                 pass
 
-            def _validate_self_consistency(self) -> None:
-                """Validate schemas."""
-                pass
-
         sink = BatchMemorySink({})
         assert isinstance(sink, SinkProtocol)  # type: ignore[unreachable]
 
@@ -560,10 +544,6 @@ class TestSinkProtocol:
                 pass
 
             def on_complete(self, ctx: PluginContext) -> None:
-                pass
-
-            def _validate_self_consistency(self) -> None:
-                """Validate schemas."""
                 pass
 
         sink = MemorySink({})
