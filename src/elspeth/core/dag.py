@@ -19,8 +19,9 @@ from elspeth.contracts import EdgeInfo, RoutingMode
 
 if TYPE_CHECKING:
     from elspeth.contracts import PluginSchema
-    from elspeth.core.config import ElspethSettings, GateSettings
+    from elspeth.core.config import AggregationSettings, CoalesceSettings, ElspethSettings, GateSettings
     from elspeth.plugins.manager import PluginManager
+    from elspeth.plugins.protocols import SinkProtocol, SourceProtocol, TransformProtocol
 
 
 class GraphValidationError(Exception):
@@ -62,6 +63,19 @@ def _get_missing_required_fields(
     producer_fields = set(producer.model_fields.keys())
     required_fields = {name for name, field in consumer.model_fields.items() if field.is_required()}
     return required_fields - producer_fields
+
+
+def _schemas_compatible(schema1: type[PluginSchema], schema2: type[PluginSchema]) -> bool:
+    """Check if two schemas are compatible (same type).
+
+    Args:
+        schema1: First schema to compare
+        schema2: Second schema to compare
+
+    Returns:
+        True if schemas are the same type, False otherwise
+    """
+    return schema1 == schema2
 
 
 class ExecutionGraph:
@@ -698,6 +712,283 @@ class ExecutionGraph:
                 label="continue",
                 mode=RoutingMode.MOVE,
             )
+
+        return graph
+
+    @classmethod
+    def from_plugin_instances(
+        cls,
+        source: SourceProtocol,
+        transforms: list[TransformProtocol],
+        sinks: dict[str, SinkProtocol],
+        aggregations: dict[str, tuple[TransformProtocol, AggregationSettings]],
+        gates: list[GateSettings],
+        output_sink: str,
+        coalesce_settings: list[CoalesceSettings] | None = None,
+    ) -> ExecutionGraph:
+        """Build ExecutionGraph from plugin instances.
+
+        CORRECT method for graph construction - enables schema validation.
+        Schemas extracted directly from instance attributes.
+
+        Args:
+            source: Instantiated source plugin
+            transforms: Instantiated transforms (row_plugins only, NOT aggregations)
+            sinks: Dict of sink_name -> instantiated sink
+            aggregations: Dict of agg_name -> (transform_instance, AggregationSettings)
+            gates: Config-driven gate settings
+            output_sink: Default output sink name
+            coalesce_settings: Coalesce configs for fork/join patterns
+
+        Returns:
+            ExecutionGraph with schemas populated
+
+        Raises:
+            GraphValidationError: If gate routes reference unknown sinks
+        """
+        import uuid
+
+        graph = cls()
+
+        def node_id(prefix: str, name: str) -> str:
+            return f"{prefix}_{name}_{uuid.uuid4().hex[:8]}"
+
+        # Add source - extract schema from instance
+        source_id = node_id("source", source.name)
+        graph.add_node(
+            source_id,
+            node_type="source",
+            plugin_name=source.name,
+            config={},
+            output_schema=getattr(source, "output_schema", None),
+        )
+
+        # Add sinks
+        sink_ids: dict[str, str] = {}
+        for sink_name, sink in sinks.items():
+            sid = node_id("sink", sink_name)
+            sink_ids[sink_name] = sid
+            graph.add_node(
+                sid,
+                node_type="sink",
+                plugin_name=sink.name,
+                config={},
+                input_schema=getattr(sink, "input_schema", None),
+            )
+
+        graph._sink_id_map = dict(sink_ids)
+        graph._output_sink = output_sink
+
+        # Build transform chain
+        transform_ids: dict[int, str] = {}
+        prev_node_id = source_id
+
+        for i, transform in enumerate(transforms):
+            tid = node_id("transform", transform.name)
+            transform_ids[i] = tid
+
+            graph.add_node(
+                tid,
+                node_type="transform",
+                plugin_name=transform.name,
+                config={},
+                input_schema=getattr(transform, "input_schema", None),
+                output_schema=getattr(transform, "output_schema", None),
+            )
+
+            graph.add_edge(prev_node_id, tid, label="continue", mode=RoutingMode.MOVE)
+            prev_node_id = tid
+
+        graph._transform_id_map = transform_ids
+
+        # Build aggregations - dual schemas
+        aggregation_ids: dict[str, str] = {}
+        for agg_name, (transform, agg_config) in aggregations.items():
+            aid = node_id("aggregation", agg_name)
+            aggregation_ids[agg_name] = aid
+
+            agg_node_config = {
+                "trigger": agg_config.trigger.model_dump(),
+                "output_mode": agg_config.output_mode,
+                "options": dict(agg_config.options),
+            }
+
+            graph.add_node(
+                aid,
+                node_type="aggregation",
+                plugin_name=agg_config.plugin,
+                config=agg_node_config,
+                input_schema=getattr(transform, "input_schema", None),
+                output_schema=getattr(transform, "output_schema", None),
+            )
+
+            graph.add_edge(prev_node_id, aid, label="continue", mode=RoutingMode.MOVE)
+            prev_node_id = aid
+
+        graph._aggregation_id_map = aggregation_ids
+
+        # Build gates (config-driven, no instances)
+        config_gate_ids: dict[str, str] = {}
+        gate_sequence: list[tuple[str, GateSettings]] = []
+
+        for gate_config in gates:
+            gid = node_id("config_gate", gate_config.name)
+            config_gate_ids[gate_config.name] = gid
+
+            gate_node_config = {
+                "condition": gate_config.condition,
+                "routes": dict(gate_config.routes),
+            }
+            if gate_config.fork_to:
+                gate_node_config["fork_to"] = list(gate_config.fork_to)
+
+            graph.add_node(
+                gid,
+                node_type="gate",
+                plugin_name=f"config_gate:{gate_config.name}",
+                config=gate_node_config,
+            )
+
+            graph.add_edge(prev_node_id, gid, label="continue", mode=RoutingMode.MOVE)
+
+            # Gate routes to sinks
+            for route_label, target in gate_config.routes.items():
+                if target == "continue":
+                    graph._route_resolution_map[(gid, route_label)] = "continue"
+                else:
+                    if target not in sink_ids:
+                        raise GraphValidationError(f"Gate '{gate_config.name}' route '{route_label}' references unknown sink '{target}'")
+                    target_sink_id = sink_ids[target]
+                    graph.add_edge(gid, target_sink_id, label=route_label, mode=RoutingMode.MOVE)
+                    graph._route_label_map[(gid, target)] = route_label
+                    graph._route_resolution_map[(gid, route_label)] = target
+
+            gate_sequence.append((gid, gate_config))
+
+        graph._config_gate_id_map = config_gate_ids
+
+        # ===== COALESCE IMPLEMENTATION (BUILD NODES AND MAPPINGS FIRST) =====
+        # Build coalesce nodes BEFORE connecting gates (needed for branch routing)
+        if coalesce_settings:
+            coalesce_ids: dict[str, str] = {}
+            branch_to_coalesce: dict[str, str] = {}
+
+            for coalesce_config in coalesce_settings:
+                cid = node_id("coalesce", coalesce_config.name)
+                coalesce_ids[coalesce_config.name] = cid
+
+                # Map branches to this coalesce
+                for branch_name in coalesce_config.branches:
+                    branch_to_coalesce[branch_name] = cid
+
+                # Coalesce merges - no schema transformation
+                graph.add_node(
+                    cid,
+                    node_type="coalesce",
+                    plugin_name=f"coalesce:{coalesce_config.name}",
+                    config={
+                        "branches": list(coalesce_config.branches),
+                        "policy": coalesce_config.policy,
+                        "merge": coalesce_config.merge,
+                    },
+                )
+
+            graph._coalesce_id_map = coalesce_ids
+            graph._branch_to_coalesce = branch_to_coalesce
+        else:
+            branch_to_coalesce = {}
+
+        # ===== CONNECT FORK GATES - EXPLICIT DESTINATIONS ONLY =====
+        # CRITICAL: No fallback behavior. All fork branches must have explicit destinations.
+        # This prevents silent configuration bugs (typos, missing destinations).
+        for gate_id, gate_config in gate_sequence:
+            if gate_config.fork_to:
+                for branch_name in gate_config.fork_to:
+                    if branch_name in branch_to_coalesce:
+                        # Explicit coalesce destination
+                        coalesce_id = branch_to_coalesce[branch_name]
+                        graph.add_edge(gate_id, coalesce_id, label=branch_name, mode=RoutingMode.COPY)
+                    elif branch_name in sink_ids:
+                        # Explicit sink destination (branch name matches sink name)
+                        graph.add_edge(gate_id, sink_ids[branch_name], label=branch_name, mode=RoutingMode.COPY)
+                    else:
+                        # NO FALLBACK - this is a configuration error
+                        raise GraphValidationError(
+                            f"Gate '{gate_config.name}' has fork branch '{branch_name}' with no destination.\n"
+                            f"Fork branches must either:\n"
+                            f"  1. Be listed in a coalesce 'branches' list, or\n"
+                            f"  2. Match a sink name exactly\n"
+                            f"\n"
+                            f"Available coalesce branches: {sorted(branch_to_coalesce.keys())}\n"
+                            f"Available sinks: {sorted(sink_ids.keys())}"
+                        )
+
+        # ===== CONNECT GATE CONTINUE ROUTES =====
+        # CRITICAL FIX: Handle ALL continue routes, not just "true"
+        for i, (gid, gate_config) in enumerate(gate_sequence):
+            # Check if ANY route resolves to "continue"
+            has_continue_route = any(target == "continue" for target in gate_config.routes.values())
+
+            if has_continue_route:
+                # Determine next node in chain
+                if i + 1 < len(gate_sequence):
+                    next_node_id = gate_sequence[i + 1][0]
+                else:
+                    if output_sink not in sink_ids:
+                        raise GraphValidationError(
+                            f"Gate '{gate_config.name}' has 'continue' route but is the last gate "
+                            f"and output_sink '{output_sink}' is not in configured sinks. "
+                            f"Available sinks: {sorted(sink_ids.keys())}"
+                        )
+                    next_node_id = sink_ids[output_sink]
+
+                if not graph._graph.has_edge(gid, next_node_id, key="continue"):
+                    graph.add_edge(gid, next_node_id, label="continue", mode=RoutingMode.MOVE)
+
+        # ===== CONNECT FINAL NODE TO OUTPUT (NO GATES CASE) =====
+        if not gates and output_sink in sink_ids:
+            graph.add_edge(prev_node_id, sink_ids[output_sink], label="continue", mode=RoutingMode.MOVE)
+
+        # ===== CONNECT COALESCE TO OUTPUT =====
+        if coalesce_settings:
+            for coalesce_id in coalesce_ids.values():
+                if output_sink in sink_ids:
+                    graph.add_edge(coalesce_id, sink_ids[output_sink], label="continue", mode=RoutingMode.MOVE)
+
+        # ===== VALIDATE COALESCE SCHEMA COMPATIBILITY =====
+        # CRITICAL: Coalesce merges multiple fork branches - schemas must be compatible
+        # Addresses P0 blocker from Round 3 QA review
+        if coalesce_settings:
+            for coalesce_id in coalesce_ids.values():
+                # Get all incoming edges to this coalesce
+                incoming_edges = list(graph._graph.in_edges(coalesce_id, data=True, keys=True))
+
+                if len(incoming_edges) < 2:
+                    # Coalesce with < 2 inputs is degenerate but valid (pass-through)
+                    continue
+
+                # Extract schemas from all producers
+                incoming_schemas = []
+                for pred_id, _, _, _edge_data in incoming_edges:
+                    producer_schema = graph._get_effective_producer_schema(pred_id)
+                    incoming_schemas.append((pred_id, producer_schema))
+
+                # Filter to only specific schemas (dynamic schemas are None)
+                specific_schemas = [(nid, schema) for nid, schema in incoming_schemas if schema is not None]
+
+                # If we have 2+ specific schemas, they must be compatible
+                if len(specific_schemas) >= 2:
+                    base_node_id, base_schema = specific_schemas[0]
+
+                    for other_node_id, other_schema in specific_schemas[1:]:
+                        # Check schema compatibility
+                        if not _schemas_compatible(base_schema, other_schema):
+                            raise GraphValidationError(
+                                f"Coalesce node '{coalesce_id}' receives incompatible schemas. "
+                                f"Branch from '{base_node_id}' has schema {base_schema.__name__}, "
+                                f"but branch from '{other_node_id}' has schema {other_schema.__name__}. "
+                                f"All branches merging at a coalesce must have compatible schemas."
+                            )
 
         return graph
 

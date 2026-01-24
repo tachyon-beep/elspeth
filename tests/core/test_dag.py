@@ -1506,3 +1506,71 @@ class TestSchemaValidationWithPluginManager:
         # Building graph should raise ValueError for unknown plugin
         with pytest.raises(ValueError, match="Unknown source plugin: nonexistent_source"):
             ExecutionGraph.from_config(config, manager)
+
+
+def test_from_plugin_instances_extracts_schemas():
+    """Verify from_plugin_instances extracts schemas from instances."""
+    import tempfile
+    from pathlib import Path
+
+    from elspeth.cli_helpers import instantiate_plugins_from_config
+    from elspeth.core.config import load_settings
+    from elspeth.core.dag import ExecutionGraph
+
+    config_yaml = """
+datasource:
+  plugin: csv
+  options:
+    path: test.csv
+    schema:
+      mode: strict
+      fields:
+        - "value: float"
+    on_validation_failure: discard
+
+row_plugins:
+  - plugin: passthrough
+    options:
+      schema:
+        mode: strict
+        fields:
+          - "value: float"
+
+sinks:
+  output:
+    plugin: csv
+    options:
+      path: output.csv
+      schema:
+        mode: strict
+        fields:
+          - "value: float"
+
+output_sink: output
+"""
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+        f.write(config_yaml)
+        config_file = Path(f.name)
+
+    try:
+        config = load_settings(config_file)
+        plugins = instantiate_plugins_from_config(config)
+
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(config.gates),
+            output_sink=config.output_sink,
+            coalesce_settings=list(config.coalesce) if config.coalesce else None,
+        )
+
+        # Verify schemas extracted
+        source_nodes = [n for n, d in graph._graph.nodes(data=True) if d["info"].node_type == "source"]
+        source_info = graph.get_node_info(source_nodes[0])
+        assert source_info.output_schema is not None
+
+    finally:
+        config_file.unlink()
