@@ -657,15 +657,23 @@ class ExecutionGraph:
                     branch_to_coalesce[branch_name] = cid
 
                 # Coalesce merges - no schema transformation
+                config_dict: dict[str, Any] = {
+                    "branches": list(coalesce_config.branches),
+                    "policy": coalesce_config.policy,
+                    "merge": coalesce_config.merge,
+                }
+                if coalesce_config.timeout_seconds is not None:
+                    config_dict["timeout_seconds"] = coalesce_config.timeout_seconds
+                if coalesce_config.quorum_count is not None:
+                    config_dict["quorum_count"] = coalesce_config.quorum_count
+                if coalesce_config.select_branch is not None:
+                    config_dict["select_branch"] = coalesce_config.select_branch
+
                 graph.add_node(
                     cid,
                     node_type="coalesce",
                     plugin_name=f"coalesce:{coalesce_config.name}",
-                    config={
-                        "branches": list(coalesce_config.branches),
-                        "policy": coalesce_config.policy,
-                        "merge": coalesce_config.merge,
-                    },
+                    config=config_dict,
                 )
 
             graph._coalesce_id_map = coalesce_ids

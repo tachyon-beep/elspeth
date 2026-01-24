@@ -660,7 +660,11 @@ class TestForkCreatesChildTokens:
                     "schema": {"fields": "dynamic"},
                 },
             ),
-            sinks={"output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}})},
+            sinks={
+                "output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}}),
+                "analysis_a": SinkSettings(plugin="csv", options={"path": "analysis_a.csv", "schema": {"fields": "dynamic"}}),
+                "analysis_b": SinkSettings(plugin="csv", options={"path": "analysis_b.csv", "schema": {"fields": "dynamic"}}),
+            },
             output_sink="output",
             gates=[
                 GateSettingsConfig(
@@ -798,115 +802,6 @@ class TestForkCreatesChildTokens:
         # Both should have the same value (forked from same parent)
         assert path_a_sink.results[0]["value"] == 42
         assert path_b_sink.results[0]["value"] == 42
-
-    def test_fork_unmatched_branch_falls_back_to_output_sink(self, plugin_manager) -> None:
-        """Fork child with branch_name not matching any sink goes to output_sink.
-
-        Edge case: fork_to=["stats", "alerts"] but only "alerts" is a sink.
-        Child with branch_name="stats" should fall back to output_sink.
-        """
-        from elspeth.core.config import (
-            DatasourceSettings,
-            ElspethSettings,
-            SinkSettings,
-        )
-        from elspeth.core.config import (
-            GateSettings as GateSettingsConfig,
-        )
-        from elspeth.core.dag import ExecutionGraph
-        from elspeth.core.landscape import LandscapeDB
-        from elspeth.engine.artifacts import ArtifactDescriptor
-        from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
-
-        db = LandscapeDB.in_memory()
-
-        class RowSchema(PluginSchema):
-            value: int
-
-        class ListSource(_TestSourceBase):
-            name = "list_source"
-            output_schema = RowSchema
-
-            def __init__(self, data: list[dict[str, Any]]) -> None:
-                self._data = data
-
-            def load(self, ctx: Any) -> Any:
-                for _row in self._data:
-                    yield SourceRow.valid(_row)
-
-            def close(self) -> None:
-                pass
-
-        class CollectSink(_TestSinkBase):
-            name = "collect"
-            config: ClassVar[dict[str, Any]] = {}
-
-            def __init__(self) -> None:
-                self.results: list[dict[str, Any]] = []
-
-            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-                self.results.extend(rows)
-                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
-
-            def close(self) -> None:
-                pass
-
-        source = ListSource([{"value": 99}])
-        default_sink = CollectSink()  # output_sink
-        alerts_sink = CollectSink()  # only one fork branch has matching sink
-
-        # fork_to has "stats" and "alerts", but only "alerts" is a sink
-        # "stats" child should fall back to default output_sink
-        settings = ElspethSettings(
-            datasource=DatasourceSettings(plugin="null"),
-            sinks={
-                "default": SinkSettings(plugin="csv", options={"path": "default.csv", "schema": {"fields": "dynamic"}}),
-                "alerts": SinkSettings(plugin="csv", options={"path": "alerts.csv", "schema": {"fields": "dynamic"}}),
-            },
-            gates=[
-                GateSettingsConfig(
-                    name="forking_gate",
-                    condition="True",
-                    routes={"true": "fork", "false": "continue"},
-                    fork_to=["stats", "alerts"],  # "stats" is NOT a sink
-                ),
-            ],
-            output_sink="default",
-        )
-
-        plugins = instantiate_plugins_from_config(settings)
-
-        graph = ExecutionGraph.from_plugin_instances(
-            source=plugins["source"],
-            transforms=plugins["transforms"],
-            sinks=plugins["sinks"],
-            aggregations=plugins["aggregations"],
-            gates=list(settings.gates),
-            output_sink=settings.output_sink,
-        )
-
-        config = PipelineConfig(
-            source=as_source(source),
-            transforms=[],
-            sinks={"default": default_sink, "alerts": alerts_sink},
-            gates=settings.gates,
-        )
-
-        orchestrator = Orchestrator(db)
-        result = orchestrator.run(config, graph=graph)
-
-        assert result.status == "completed"
-        assert result.rows_forked == 1
-
-        # "alerts" child -> alerts_sink (branch matches sink)
-        assert len(alerts_sink.results) == 1, f"alerts sink should get 1 row, got {len(alerts_sink.results)}"
-
-        # "stats" child -> default_sink (no matching sink, falls back)
-        assert len(default_sink.results) == 1, f"default sink should get 1 row (stats fallback), got {len(default_sink.results)}"
-
-        # Both should have the same value (forked from same parent)
-        assert alerts_sink.results[0]["value"] == 99
-        assert default_sink.results[0]["value"] == 99
 
     def test_fork_multiple_source_rows_counts_correctly(self, plugin_manager) -> None:
         """Multiple source rows fork correctly with proper counting.

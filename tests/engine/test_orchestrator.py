@@ -917,6 +917,7 @@ class TestOrchestratorAcceptsGraph:
             aggregations=plugins["aggregations"],
             gates=list(settings.gates),
             output_sink=settings.output_sink,
+            coalesce_settings=settings.coalesce,
         )
 
         # Create mock source and sink
@@ -1063,6 +1064,7 @@ class TestOrchestratorOutputSinkRouting:
             aggregations=plugins["aggregations"],
             gates=list(settings.gates),
             output_sink=settings.output_sink,
+            coalesce_settings=settings.coalesce,
         )
 
         # Mock source that yields one row
@@ -1504,6 +1506,7 @@ class TestOrchestratorLandscapeExport:
             aggregations=plugins["aggregations"],
             gates=list(settings.gates),
             output_sink=settings.output_sink,
+            coalesce_settings=settings.coalesce,
         )
 
         # Run with settings
@@ -1633,6 +1636,7 @@ class TestOrchestratorLandscapeExport:
             aggregations=plugins["aggregations"],
             gates=list(settings.gates),
             output_sink=settings.output_sink,
+            coalesce_settings=settings.coalesce,
         )
         orchestrator = Orchestrator(db)
 
@@ -1760,6 +1764,7 @@ class TestOrchestratorLandscapeExport:
             aggregations=plugins["aggregations"],
             gates=list(settings.gates),
             output_sink=settings.output_sink,
+            coalesce_settings=settings.coalesce,
         )
         orchestrator = Orchestrator(db)
 
@@ -1872,6 +1877,7 @@ class TestOrchestratorLandscapeExport:
             aggregations=plugins["aggregations"],
             gates=list(settings.gates),
             output_sink=settings.output_sink,
+            coalesce_settings=settings.coalesce,
         )
         orchestrator = Orchestrator(db)
         result = orchestrator.run(pipeline, graph=graph, settings=settings)
@@ -4112,6 +4118,7 @@ class TestCoalesceWiring:
             aggregations=plugins["aggregations"],
             gates=list(settings.gates),
             output_sink=settings.output_sink,
+            coalesce_settings=settings.coalesce,
         )
 
         # Patch RowProcessor to capture its args
@@ -4210,6 +4217,7 @@ class TestCoalesceWiring:
             aggregations=plugins["aggregations"],
             gates=list(settings.gates),
             output_sink=settings.output_sink,
+            coalesce_settings=settings.coalesce,
         )
 
         orchestrator = Orchestrator(db=db)
@@ -4328,6 +4336,7 @@ class TestCoalesceWiring:
             aggregations=plugins["aggregations"],
             gates=list(settings.gates),
             output_sink=settings.output_sink,
+            coalesce_settings=settings.coalesce,
         )
 
         with patch("elspeth.engine.coalesce_executor.CoalesceExecutor") as mock_executor_cls:
@@ -4420,6 +4429,7 @@ class TestCoalesceWiring:
             aggregations=plugins["aggregations"],
             gates=list(settings.gates),
             output_sink=settings.output_sink,
+            coalesce_settings=settings.coalesce,
         )
 
         # Create a merged token that flush_pending will return
@@ -4540,6 +4550,7 @@ class TestCoalesceWiring:
             aggregations=plugins["aggregations"],
             gates=list(settings.gates),
             output_sink=settings.output_sink,
+            coalesce_settings=settings.coalesce,
         )
 
         with patch("elspeth.engine.coalesce_executor.CoalesceExecutor") as mock_executor_cls:
@@ -4596,8 +4607,8 @@ class TestCoalesceWiring:
             sinks={"output": SinkSettings(plugin="csv", options={"path": "out.csv", "schema": {"fields": "dynamic"}})},
             output_sink="output",
             row_plugins=[
-                RowPluginSettings(plugin="passthrough"),  # Step 0
-                RowPluginSettings(plugin="passthrough"),  # Step 1
+                RowPluginSettings(plugin="passthrough", options={"schema": {"fields": "dynamic"}}),  # Step 0
+                RowPluginSettings(plugin="passthrough", options={"schema": {"fields": "dynamic"}}),  # Step 1
             ],
             gates=[
                 GateSettings(
@@ -4656,6 +4667,7 @@ class TestCoalesceWiring:
             aggregations=plugins["aggregations"],
             gates=list(settings.gates),
             output_sink=settings.output_sink,
+            coalesce_settings=settings.coalesce,
         )
 
         with patch("elspeth.engine.orchestrator.RowProcessor") as mock_processor_cls:

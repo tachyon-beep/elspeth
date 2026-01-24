@@ -1091,7 +1091,11 @@ class TestMultiEdgeScenarios:
                     "schema": {"fields": "dynamic"},
                 },
             ),
-            sinks={"output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}})},
+            sinks={
+                "output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}}),
+                "path_a": SinkSettings(plugin="csv", options={"path": "path_a.csv", "schema": {"fields": "dynamic"}}),
+                "path_b": SinkSettings(plugin="csv", options={"path": "path_b.csv", "schema": {"fields": "dynamic"}}),
+            },
             gates=[
                 GateSettings(
                     name="fork_gate",
@@ -1206,6 +1210,7 @@ class TestCoalesceNodes:
             aggregations=plugins["aggregations"],
             gates=list(settings.gates),
             output_sink=settings.output_sink,
+            coalesce_settings=settings.coalesce,
         )
 
         # Use proper accessor, not string matching
@@ -1270,6 +1275,7 @@ class TestCoalesceNodes:
             aggregations=plugins["aggregations"],
             gates=list(settings.gates),
             output_sink=settings.output_sink,
+            coalesce_settings=settings.coalesce,
         )
 
         # Get node IDs
@@ -1312,6 +1318,7 @@ class TestCoalesceNodes:
             ),
             sinks={
                 "output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}}),
+                "path_c": SinkSettings(plugin="csv", options={"path": "path_c.csv", "schema": {"fields": "dynamic"}}),
             },
             output_sink="output",
             gates=[
@@ -1340,19 +1347,20 @@ class TestCoalesceNodes:
             aggregations=plugins["aggregations"],
             gates=list(settings.gates),
             output_sink=settings.output_sink,
+            coalesce_settings=settings.coalesce,
         )
 
         # Get node IDs
         gate_id = graph.get_config_gate_id_map()["forker"]
         coalesce_id = graph.get_coalesce_id_map()["merge_results"]
-        output_sink_id = graph.get_sink_id_map()["output"]
+        path_c_sink_id = graph.get_sink_id_map()["path_c"]
 
-        # Verify path_c goes to output sink, not coalesce
+        # Verify path_c goes to path_c sink, not coalesce
         edges = graph.get_edges()
         path_c_edges = [e for e in edges if e.from_node == gate_id and e.label == "path_c"]
 
         assert len(path_c_edges) == 1
-        assert path_c_edges[0].to_node == output_sink_id
+        assert path_c_edges[0].to_node == path_c_sink_id
 
         # Verify path_a and path_b go to coalesce
         coalesce_edges = [e for e in edges if e.from_node == gate_id and e.to_node == coalesce_id]
@@ -1416,6 +1424,7 @@ class TestCoalesceNodes:
             aggregations=plugins["aggregations"],
             gates=list(settings.gates),
             output_sink=settings.output_sink,
+            coalesce_settings=settings.coalesce,
         )
         coalesce_map = graph.get_coalesce_id_map()
 
@@ -1481,12 +1490,14 @@ class TestCoalesceNodes:
             aggregations=plugins["aggregations"],
             gates=list(settings.gates),
             output_sink=settings.output_sink,
+            coalesce_settings=settings.coalesce,
         )
         branch_map = graph.get_branch_to_coalesce_map()
+        coalesce_id = graph.get_coalesce_id_map()["merge_results"]
 
-        # Should map branches to coalesce name
-        assert branch_map["path_a"] == "merge_results"
-        assert branch_map["path_b"] == "merge_results"
+        # Should map branches to coalesce node ID
+        assert branch_map["path_a"] == coalesce_id
+        assert branch_map["path_b"] == coalesce_id
 
     def test_coalesce_node_has_edge_to_output_sink(self, plugin_manager) -> None:
         """Coalesce node should have an edge to the output sink."""
@@ -1540,6 +1551,7 @@ class TestCoalesceNodes:
             aggregations=plugins["aggregations"],
             gates=list(settings.gates),
             output_sink=settings.output_sink,
+            coalesce_settings=settings.coalesce,
         )
 
         coalesce_id = graph.get_coalesce_id_map()["merge_results"]
@@ -1606,6 +1618,7 @@ class TestCoalesceNodes:
             aggregations=plugins["aggregations"],
             gates=list(settings.gates),
             output_sink=settings.output_sink,
+            coalesce_settings=settings.coalesce,
         )
 
         coalesce_id = graph.get_coalesce_id_map()["merge_results"]
