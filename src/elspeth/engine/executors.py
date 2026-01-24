@@ -1120,13 +1120,12 @@ class AggregationExecutor:
         # Size validation (on serialized checkpoint)
         serialized = json.dumps(state)
         size_mb = len(serialized) / 1_000_000
+        total_rows = sum(len(b) for b in self._buffer_tokens.values())
 
         if size_mb > 1:
-            total_rows = sum(len(b) for b in self._buffer_tokens.values())
             logger.warning(f"Large checkpoint: {size_mb:.1f}MB for {total_rows} buffered rows across {len(state)} nodes")
 
         if size_mb > 10:
-            total_rows = sum(len(b) for b in self._buffer_tokens.values())
             raise RuntimeError(
                 f"Checkpoint size {size_mb:.1f}MB exceeds 10MB limit. "
                 f"Buffer contains {total_rows} total rows across {len(state)} nodes. "

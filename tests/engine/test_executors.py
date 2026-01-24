@@ -2895,6 +2895,13 @@ class TestAggregationExecutorCheckpoint:
         # Verify batch_id present in checkpoint
         assert "batch_id" in checkpoint[agg_node.node_id]
 
+        # Verify checkpoint is JSON serializable (required for persistence)
+        import json
+
+        serialized = json.dumps(checkpoint)
+        deserialized = json.loads(serialized)
+        assert deserialized == checkpoint, "Checkpoint must round-trip through JSON"
+
     def test_get_checkpoint_state_excludes_empty_buffers(self) -> None:
         """get_checkpoint_state() only includes non-empty buffers."""
         from elspeth.core.config import AggregationSettings, TriggerConfig
