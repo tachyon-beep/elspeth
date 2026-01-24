@@ -135,6 +135,7 @@ class TestOrchestratorResume:
         failed_run_with_batch: dict[str, Any],
         recovery_manager: RecoveryManager,
         payload_store: FilesystemPayloadStore,
+        plugin_manager,
     ) -> None:
         """resume() retries batches that were executing when crash occurred."""
         run_id = failed_run_with_batch["run_id"]
@@ -146,7 +147,7 @@ class TestOrchestratorResume:
 
         # Create minimal config for resume
         config = self._create_minimal_config()
-        graph = self._create_minimal_graph()
+        graph = self._create_minimal_graph(plugin_manager)
 
         # Act
         orchestrator.resume(resume_point, config, graph, payload_store=payload_store)
@@ -186,7 +187,7 @@ class TestOrchestratorResume:
             sinks={"default": sink},
         )
 
-    def _create_minimal_graph(self) -> ExecutionGraph:
+    def _create_minimal_graph(self, plugin_manager) -> ExecutionGraph:
         """Create minimal execution graph for resume testing."""
         from elspeth.core.config import (
             DatasourceSettings,
@@ -200,7 +201,7 @@ class TestOrchestratorResume:
             sinks={"default": SinkSettings(plugin="test_sink")},
             output_sink="default",
         )
-        return ExecutionGraph.from_config(settings)
+        return ExecutionGraph.from_config(settings, plugin_manager)
 
 
 def _make_dynamic_schema() -> SchemaConfig:

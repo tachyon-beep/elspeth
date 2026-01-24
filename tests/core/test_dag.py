@@ -470,7 +470,7 @@ class TestExecutionGraphAccessors:
 class TestExecutionGraphFromConfig:
     """Build ExecutionGraph from ElspethSettings."""
 
-    def test_from_config_minimal(self) -> None:
+    def test_from_config_minimal(self, plugin_manager) -> None:
         """Build graph from minimal config (source -> sink only)."""
         from elspeth.core.config import (
             DatasourceSettings,
@@ -485,7 +485,7 @@ class TestExecutionGraphFromConfig:
             output_sink="output",
         )
 
-        graph = ExecutionGraph.from_config(config)
+        graph = ExecutionGraph.from_config(config, plugin_manager)
 
         # Should have: source -> output_sink
         assert graph.node_count == 2
@@ -493,7 +493,7 @@ class TestExecutionGraphFromConfig:
         assert graph.get_source() is not None
         assert len(graph.get_sinks()) == 1
 
-    def test_from_config_is_valid(self) -> None:
+    def test_from_config_is_valid(self, plugin_manager) -> None:
         """Graph from valid config passes validation."""
         from elspeth.core.config import (
             DatasourceSettings,
@@ -508,13 +508,13 @@ class TestExecutionGraphFromConfig:
             output_sink="output",
         )
 
-        graph = ExecutionGraph.from_config(config)
+        graph = ExecutionGraph.from_config(config, plugin_manager)
 
         # Should not raise
         graph.validate()
         assert graph.is_acyclic()
 
-    def test_from_config_with_transforms(self) -> None:
+    def test_from_config_with_transforms(self, plugin_manager) -> None:
         """Build graph with transform chain."""
         from elspeth.core.config import (
             DatasourceSettings,
@@ -534,7 +534,7 @@ class TestExecutionGraphFromConfig:
             output_sink="output",
         )
 
-        graph = ExecutionGraph.from_config(config)
+        graph = ExecutionGraph.from_config(config, plugin_manager)
 
         # Should have: source -> transform_a -> transform_b -> output_sink
         assert graph.node_count == 4
@@ -552,7 +552,7 @@ class TestExecutionGraphFromConfig:
         transform_b_idx = next(i for i, n in enumerate(order) if "transform_b" in n)
         assert transform_a_idx < transform_b_idx
 
-    def test_from_config_with_gate_routes(self) -> None:
+    def test_from_config_with_gate_routes(self, plugin_manager) -> None:
         """Build graph with config-driven gate routing to multiple sinks."""
         from elspeth.core.config import (
             DatasourceSettings,
@@ -578,7 +578,7 @@ class TestExecutionGraphFromConfig:
             output_sink="results",
         )
 
-        graph = ExecutionGraph.from_config(config)
+        graph = ExecutionGraph.from_config(config, plugin_manager)
 
         # Should have:
         #   source -> safety_gate -> results (via "continue")
@@ -587,7 +587,7 @@ class TestExecutionGraphFromConfig:
         # Edges: source->gate, gate->results (continue), gate->flagged (route)
         assert graph.edge_count == 3
 
-    def test_from_config_validates_route_targets(self) -> None:
+    def test_from_config_validates_route_targets(self, plugin_manager) -> None:
         """Config gate routes must reference existing sinks."""
         from elspeth.core.config import (
             DatasourceSettings,
@@ -611,11 +611,11 @@ class TestExecutionGraphFromConfig:
         )
 
         with pytest.raises(GraphValidationError) as exc_info:
-            ExecutionGraph.from_config(config)
+            ExecutionGraph.from_config(config, plugin_manager)
 
         assert "nonexistent_sink" in str(exc_info.value)
 
-    def test_get_sink_id_map(self) -> None:
+    def test_get_sink_id_map(self, plugin_manager) -> None:
         """Get explicit sink_name -> node_id mapping."""
         from elspeth.core.config import (
             DatasourceSettings,
@@ -633,7 +633,7 @@ class TestExecutionGraphFromConfig:
             output_sink="results",
         )
 
-        graph = ExecutionGraph.from_config(config)
+        graph = ExecutionGraph.from_config(config, plugin_manager)
         sink_map = graph.get_sink_id_map()
 
         # Explicit mapping - no substring matching
@@ -641,7 +641,7 @@ class TestExecutionGraphFromConfig:
         assert "flagged" in sink_map
         assert sink_map["results"] != sink_map["flagged"]
 
-    def test_get_transform_id_map(self) -> None:
+    def test_get_transform_id_map(self, plugin_manager) -> None:
         """Get explicit sequence -> node_id mapping for transforms."""
         from elspeth.core.config import (
             DatasourceSettings,
@@ -661,7 +661,7 @@ class TestExecutionGraphFromConfig:
             output_sink="output",
         )
 
-        graph = ExecutionGraph.from_config(config)
+        graph = ExecutionGraph.from_config(config, plugin_manager)
         transform_map = graph.get_transform_id_map()
 
         # Explicit mapping by sequence position
@@ -669,7 +669,7 @@ class TestExecutionGraphFromConfig:
         assert 1 in transform_map  # transform_b
         assert transform_map[0] != transform_map[1]
 
-    def test_get_output_sink(self) -> None:
+    def test_get_output_sink(self, plugin_manager) -> None:
         """Get the output sink name."""
         from elspeth.core.config import (
             DatasourceSettings,
@@ -687,7 +687,7 @@ class TestExecutionGraphFromConfig:
             output_sink="results",
         )
 
-        graph = ExecutionGraph.from_config(config)
+        graph = ExecutionGraph.from_config(config, plugin_manager)
 
         assert graph.get_output_sink() == "results"
 
@@ -695,7 +695,7 @@ class TestExecutionGraphFromConfig:
 class TestExecutionGraphRouteMapping:
     """Test route label <-> sink name mapping for edge lookup."""
 
-    def test_get_route_label_for_sink(self) -> None:
+    def test_get_route_label_for_sink(self, plugin_manager) -> None:
         """Get route label that leads to a sink from a config gate."""
         from elspeth.core.config import (
             DatasourceSettings,
@@ -721,7 +721,7 @@ class TestExecutionGraphRouteMapping:
             output_sink="results",
         )
 
-        graph = ExecutionGraph.from_config(config)
+        graph = ExecutionGraph.from_config(config, plugin_manager)
 
         # Get the config gate's node_id
         gate_node_id = graph.get_config_gate_id_map()["classifier"]
@@ -731,7 +731,7 @@ class TestExecutionGraphRouteMapping:
 
         assert route_label == "true"
 
-    def test_get_route_label_for_continue(self) -> None:
+    def test_get_route_label_for_continue(self, plugin_manager) -> None:
         """Continue routes return 'continue' as label."""
         from elspeth.core.config import (
             DatasourceSettings,
@@ -754,14 +754,14 @@ class TestExecutionGraphRouteMapping:
             output_sink="results",
         )
 
-        graph = ExecutionGraph.from_config(config)
+        graph = ExecutionGraph.from_config(config, plugin_manager)
         gate_node_id = graph.get_config_gate_id_map()["gate"]
 
         # The edge to output sink uses "continue" label (both routes resolve to continue)
         route_label = graph.get_route_label(gate_node_id, "results")
         assert route_label == "continue"
 
-    def test_hyphenated_sink_names_work_in_dag(self) -> None:
+    def test_hyphenated_sink_names_work_in_dag(self, plugin_manager) -> None:
         """Gate routing to hyphenated sink names works correctly.
 
         Regression test for gate-route-destination-name-validation-mismatch bug.
@@ -792,7 +792,7 @@ class TestExecutionGraphRouteMapping:
         )
 
         # DAG compilation should succeed with hyphenated sink names
-        graph = ExecutionGraph.from_config(config)
+        graph = ExecutionGraph.from_config(config, plugin_manager)
 
         # Verify both hyphenated sinks exist
         sink_ids = graph.get_sink_id_map()
@@ -890,7 +890,7 @@ class TestEdgeInfoIntegration:
 class TestMultiEdgeScenarios:
     """Tests for scenarios requiring multiple edges between same nodes."""
 
-    def test_fork_gate_config_parses_into_valid_graph(self) -> None:
+    def test_fork_gate_config_parses_into_valid_graph(self, plugin_manager) -> None:
         """Fork gate configuration parses into valid graph structure.
 
         Note: This tests config parsing, not the multi-edge bug. Fork routes
@@ -919,7 +919,7 @@ class TestMultiEdgeScenarios:
             output_sink="output",
         )
 
-        graph = ExecutionGraph.from_config(config)
+        graph = ExecutionGraph.from_config(config, plugin_manager)
 
         # Validate graph is still valid (DAG, has source and sink)
         graph.validate()
@@ -963,7 +963,7 @@ class TestMultiEdgeScenarios:
 class TestCoalesceNodes:
     """Test coalesce node creation in DAG."""
 
-    def test_from_config_creates_coalesce_node(self) -> None:
+    def test_from_config_creates_coalesce_node(self, plugin_manager) -> None:
         """Coalesce config should create a coalesce node in the graph."""
         from elspeth.core.config import (
             CoalesceSettings,
@@ -998,7 +998,7 @@ class TestCoalesceNodes:
             ],
         )
 
-        graph = ExecutionGraph.from_config(settings)
+        graph = ExecutionGraph.from_config(settings, plugin_manager)
 
         # Use proper accessor, not string matching
         coalesce_map = graph.get_coalesce_id_map()
@@ -1010,7 +1010,7 @@ class TestCoalesceNodes:
         assert node_info.node_type == "coalesce"
         assert node_info.plugin_name == "coalesce:merge_results"
 
-    def test_from_config_coalesce_edges_from_fork_branches(self) -> None:
+    def test_from_config_coalesce_edges_from_fork_branches(self, plugin_manager) -> None:
         """Coalesce node should have edges from fork gate (via branches)."""
         from elspeth.contracts import RoutingMode
         from elspeth.core.config import (
@@ -1046,7 +1046,7 @@ class TestCoalesceNodes:
             ],
         )
 
-        graph = ExecutionGraph.from_config(settings)
+        graph = ExecutionGraph.from_config(settings, plugin_manager)
 
         # Get node IDs
         gate_id = graph.get_config_gate_id_map()["forker"]
@@ -1064,6 +1064,7 @@ class TestCoalesceNodes:
 
     def test_partial_branch_coverage_branches_not_in_coalesce_route_to_sink(
         self,
+        plugin_manager,
     ) -> None:
         """Fork branches not in any coalesce should still route to output sink."""
         from elspeth.core.config import (
@@ -1099,7 +1100,7 @@ class TestCoalesceNodes:
             ],
         )
 
-        graph = ExecutionGraph.from_config(settings)
+        graph = ExecutionGraph.from_config(settings, plugin_manager)
 
         # Get node IDs
         gate_id = graph.get_config_gate_id_map()["forker"]
@@ -1118,7 +1119,7 @@ class TestCoalesceNodes:
         coalesce_labels = {e.label for e in coalesce_edges}
         assert coalesce_labels == {"path_a", "path_b"}
 
-    def test_get_coalesce_id_map_returns_mapping(self) -> None:
+    def test_get_coalesce_id_map_returns_mapping(self, plugin_manager) -> None:
         """get_coalesce_id_map should return coalesce_name -> node_id."""
         from elspeth.core.config import (
             CoalesceSettings,
@@ -1159,7 +1160,7 @@ class TestCoalesceNodes:
             ],
         )
 
-        graph = ExecutionGraph.from_config(settings)
+        graph = ExecutionGraph.from_config(settings, plugin_manager)
         coalesce_map = graph.get_coalesce_id_map()
 
         # Should have both coalesce nodes
@@ -1173,7 +1174,7 @@ class TestCoalesceNodes:
         assert graph.has_node(coalesce_map["merge_ab"])
         assert graph.has_node(coalesce_map["merge_cd"])
 
-    def test_get_branch_to_coalesce_map_returns_mapping(self) -> None:
+    def test_get_branch_to_coalesce_map_returns_mapping(self, plugin_manager) -> None:
         """get_branch_to_coalesce_map should return branch_name -> coalesce_name."""
         from elspeth.core.config import (
             CoalesceSettings,
@@ -1208,14 +1209,14 @@ class TestCoalesceNodes:
             ],
         )
 
-        graph = ExecutionGraph.from_config(settings)
+        graph = ExecutionGraph.from_config(settings, plugin_manager)
         branch_map = graph.get_branch_to_coalesce_map()
 
         # Should map branches to coalesce name
         assert branch_map["path_a"] == "merge_results"
         assert branch_map["path_b"] == "merge_results"
 
-    def test_coalesce_node_has_edge_to_output_sink(self) -> None:
+    def test_coalesce_node_has_edge_to_output_sink(self, plugin_manager) -> None:
         """Coalesce node should have an edge to the output sink."""
         from elspeth.contracts import RoutingMode
         from elspeth.core.config import (
@@ -1251,7 +1252,7 @@ class TestCoalesceNodes:
             ],
         )
 
-        graph = ExecutionGraph.from_config(settings)
+        graph = ExecutionGraph.from_config(settings, plugin_manager)
 
         coalesce_id = graph.get_coalesce_id_map()["merge_results"]
         output_sink_id = graph.get_sink_id_map()["output"]
@@ -1264,7 +1265,7 @@ class TestCoalesceNodes:
         assert coalesce_to_sink_edges[0].label == "continue"
         assert coalesce_to_sink_edges[0].mode == RoutingMode.MOVE
 
-    def test_coalesce_node_stores_config(self) -> None:
+    def test_coalesce_node_stores_config(self, plugin_manager) -> None:
         """Coalesce node should store configuration for audit trail."""
         from elspeth.core.config import (
             CoalesceSettings,
@@ -1301,7 +1302,7 @@ class TestCoalesceNodes:
             ],
         )
 
-        graph = ExecutionGraph.from_config(settings)
+        graph = ExecutionGraph.from_config(settings, plugin_manager)
 
         coalesce_id = graph.get_coalesce_id_map()["merge_results"]
         node_info = graph.get_node_info(coalesce_id)

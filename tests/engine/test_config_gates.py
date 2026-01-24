@@ -241,7 +241,7 @@ class TestConfigGateIntegration:
         assert len(high_sink.results) == 1
         assert high_sink.results[0]["value"] == 100
 
-    def test_config_gate_with_string_result(self) -> None:
+    def test_config_gate_with_string_result(self, plugin_manager) -> None:
         """Config gate condition can return a string route label.
 
         This test uses ExecutionGraph.from_config() for proper edge building.
@@ -317,7 +317,7 @@ class TestConfigGateIntegration:
         )
 
         # Build graph from settings (proper edge construction)
-        graph = ExecutionGraph.from_config(settings)
+        graph = ExecutionGraph.from_config(settings, plugin_manager)
 
         # Build PipelineConfig with actual plugin instances
         config = PipelineConfig(
@@ -337,7 +337,7 @@ class TestConfigGateIntegration:
         assert len(a_sink.results) == 2
         assert len(b_sink.results) == 1
 
-    def test_config_gate_integer_route_label(self) -> None:
+    def test_config_gate_integer_route_label(self, plugin_manager) -> None:
         """Config gate condition can return an integer that maps to route labels.
 
         When an expression returns an integer (e.g., row['priority'] returns 1, 2, 3),
@@ -420,7 +420,7 @@ class TestConfigGateIntegration:
         )
 
         # Build graph from settings (proper edge construction)
-        graph = ExecutionGraph.from_config(settings)
+        graph = ExecutionGraph.from_config(settings, plugin_manager)
 
         # Build PipelineConfig with actual plugin instances
         config = PipelineConfig(
@@ -525,7 +525,7 @@ class TestConfigGateIntegration:
 class TestConfigGateFromSettings:
     """Tests for config gates built via ExecutionGraph.from_config()."""
 
-    def test_from_config_builds_config_gates(self) -> None:
+    def test_from_config_builds_config_gates(self, plugin_manager) -> None:
         """ExecutionGraph.from_config() includes config gates."""
         from elspeth.core.config import (
             DatasourceSettings,
@@ -551,7 +551,7 @@ class TestConfigGateFromSettings:
             ],
         )
 
-        graph = ExecutionGraph.from_config(settings)
+        graph = ExecutionGraph.from_config(settings, plugin_manager)
 
         # Should have: source, config_gate, output_sink, review_sink
         assert graph.node_count == 4
@@ -568,7 +568,7 @@ class TestConfigGateFromSettings:
         assert (gate_id, "false") in route_map
         assert route_map[(gate_id, "false")] == "review"
 
-    def test_from_config_validates_gate_sink_targets(self) -> None:
+    def test_from_config_validates_gate_sink_targets(self, plugin_manager) -> None:
         """ExecutionGraph.from_config() validates gate route targets."""
         from elspeth.core.config import (
             DatasourceSettings,
@@ -592,11 +592,11 @@ class TestConfigGateFromSettings:
         )
 
         with pytest.raises(GraphValidationError) as exc_info:
-            ExecutionGraph.from_config(settings)
+            ExecutionGraph.from_config(settings, plugin_manager)
 
         assert "nonexistent_sink" in str(exc_info.value)
 
-    def test_config_gates_ordered_after_transforms(self) -> None:
+    def test_config_gates_ordered_after_transforms(self, plugin_manager) -> None:
         """Config gates come after plugin transforms in topological order."""
         from elspeth.core.config import (
             DatasourceSettings,
@@ -623,7 +623,7 @@ class TestConfigGateFromSettings:
             ],
         )
 
-        graph = ExecutionGraph.from_config(settings)
+        graph = ExecutionGraph.from_config(settings, plugin_manager)
         order = graph.topological_order()
 
         # Find indices

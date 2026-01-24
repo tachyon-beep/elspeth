@@ -417,7 +417,7 @@ class TestCompositeConditions:
 class TestRouteLabelResolution:
     """WP-09 Verification: Route labels resolve correctly."""
 
-    def test_route_labels_resolve_to_sinks(self) -> None:
+    def test_route_labels_resolve_to_sinks(self, plugin_manager) -> None:
         """Verify route labels map to correct sinks."""
         from elspeth.core.config import (
             DatasourceSettings,
@@ -449,7 +449,7 @@ class TestRouteLabelResolution:
             ],
         )
 
-        graph = ExecutionGraph.from_config(settings)
+        graph = ExecutionGraph.from_config(settings, plugin_manager)
 
         # Verify route resolution map
         route_map = graph.get_route_resolution_map()
@@ -462,7 +462,7 @@ class TestRouteLabelResolution:
         assert (gate_id, "false") in route_map
         assert route_map[(gate_id, "false")] == "review_queue"
 
-    def test_ternary_expression_returns_string_routes(self) -> None:
+    def test_ternary_expression_returns_string_routes(self, plugin_manager) -> None:
         """Verify ternary expressions can return different route labels."""
         from elspeth.core.config import (
             DatasourceSettings,
@@ -530,7 +530,7 @@ class TestRouteLabelResolution:
             ],
         )
 
-        graph = ExecutionGraph.from_config(settings)
+        graph = ExecutionGraph.from_config(settings, plugin_manager)
 
         source = ListSource(
             [
@@ -606,7 +606,7 @@ class TestForkCreatesChildTokens:
                 fork_to=["path_a", "path_b"],  # Invalid - no fork route
             )
 
-    def test_fork_gate_in_graph(self) -> None:
+    def test_fork_gate_in_graph(self, plugin_manager) -> None:
         """Verify fork gate is correctly represented in graph."""
         from elspeth.core.config import (
             DatasourceSettings,
@@ -632,7 +632,7 @@ class TestForkCreatesChildTokens:
             ],
         )
 
-        graph = ExecutionGraph.from_config(settings)
+        graph = ExecutionGraph.from_config(settings, plugin_manager)
 
         # Verify gate node exists with fork config
         config_gate_map = graph.get_config_gate_id_map()
@@ -642,7 +642,7 @@ class TestForkCreatesChildTokens:
         assert node_info.config["fork_to"] == ["analysis_a", "analysis_b"]
         assert node_info.config["routes"]["true"] == "fork"
 
-    def test_fork_children_route_to_branch_named_sinks(self) -> None:
+    def test_fork_children_route_to_branch_named_sinks(self, plugin_manager) -> None:
         """Fork children with branch_name route to matching sinks.
 
         This is the core fork use case:
@@ -718,7 +718,7 @@ class TestForkCreatesChildTokens:
             output_sink="path_a",  # Default, but fork should override for path_b
         )
 
-        graph = ExecutionGraph.from_config(settings)
+        graph = ExecutionGraph.from_config(settings, plugin_manager)
 
         config = PipelineConfig(
             source=as_source(source),
@@ -741,7 +741,7 @@ class TestForkCreatesChildTokens:
         assert path_a_sink.results[0]["value"] == 42
         assert path_b_sink.results[0]["value"] == 42
 
-    def test_fork_unmatched_branch_falls_back_to_output_sink(self) -> None:
+    def test_fork_unmatched_branch_falls_back_to_output_sink(self, plugin_manager) -> None:
         """Fork child with branch_name not matching any sink goes to output_sink.
 
         Edge case: fork_to=["stats", "alerts"] but only "alerts" is a sink.
@@ -816,7 +816,7 @@ class TestForkCreatesChildTokens:
             output_sink="default",
         )
 
-        graph = ExecutionGraph.from_config(settings)
+        graph = ExecutionGraph.from_config(settings, plugin_manager)
 
         config = PipelineConfig(
             source=as_source(source),
@@ -841,7 +841,7 @@ class TestForkCreatesChildTokens:
         assert alerts_sink.results[0]["value"] == 99
         assert default_sink.results[0]["value"] == 99
 
-    def test_fork_multiple_source_rows_counts_correctly(self) -> None:
+    def test_fork_multiple_source_rows_counts_correctly(self, plugin_manager) -> None:
         """Multiple source rows fork correctly with proper counting.
 
         When processing multiple source rows through a fork gate:
@@ -916,7 +916,7 @@ class TestForkCreatesChildTokens:
             output_sink="analysis",
         )
 
-        graph = ExecutionGraph.from_config(settings)
+        graph = ExecutionGraph.from_config(settings, plugin_manager)
 
         config = PipelineConfig(
             source=as_source(source),
@@ -1754,7 +1754,7 @@ class TestErrorHandling:
                 routes={"true": "continue", "false": "review"},
             )
 
-    def test_route_to_nonexistent_sink_caught_at_graph_construction(self) -> None:
+    def test_route_to_nonexistent_sink_caught_at_graph_construction(self, plugin_manager) -> None:
         """Route to non-existent sink caught when building graph."""
         from elspeth.core.config import (
             DatasourceSettings,
@@ -1780,4 +1780,4 @@ class TestErrorHandling:
         )
 
         with pytest.raises(GraphValidationError, match="nonexistent_sink"):
-            ExecutionGraph.from_config(settings)
+            ExecutionGraph.from_config(settings, plugin_manager)

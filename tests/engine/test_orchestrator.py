@@ -879,7 +879,7 @@ class TestOrchestratorInvalidRouting:
 class TestOrchestratorAcceptsGraph:
     """Orchestrator accepts ExecutionGraph parameter."""
 
-    def test_orchestrator_uses_graph_node_ids(self) -> None:
+    def test_orchestrator_uses_graph_node_ids(self, plugin_manager) -> None:
         """Orchestrator uses node IDs from graph, not generated IDs."""
         from unittest.mock import MagicMock
 
@@ -900,7 +900,7 @@ class TestOrchestratorAcceptsGraph:
             sinks={"output": SinkSettings(plugin="csv")},
             output_sink="output",
         )
-        graph = ExecutionGraph.from_config(settings)
+        graph = ExecutionGraph.from_config(settings, plugin_manager)
 
         # Create mock source and sink
         mock_source = MagicMock()
@@ -1005,7 +1005,7 @@ class TestOrchestratorAcceptsGraph:
 class TestOrchestratorOutputSinkRouting:
     """Verify completed rows go to the configured output_sink, not hardcoded 'default'."""
 
-    def test_completed_rows_go_to_output_sink(self) -> None:
+    def test_completed_rows_go_to_output_sink(self, plugin_manager) -> None:
         """Rows that complete the pipeline go to the output_sink from config."""
         from unittest.mock import MagicMock
 
@@ -1030,7 +1030,7 @@ class TestOrchestratorOutputSinkRouting:
             },
             output_sink="results",
         )
-        graph = ExecutionGraph.from_config(settings)
+        graph = ExecutionGraph.from_config(settings, plugin_manager)
 
         # Mock source that yields one row
         mock_source = MagicMock()
@@ -1355,7 +1355,7 @@ class TestLifecycleHooks:
 class TestOrchestratorLandscapeExport:
     """Test landscape export integration."""
 
-    def test_orchestrator_exports_landscape_when_configured(self) -> None:
+    def test_orchestrator_exports_landscape_when_configured(self, plugin_manager) -> None:
         """Orchestrator should export audit trail after run completes."""
         from elspeth.contracts import PluginSchema, SourceRow
         from elspeth.core.config import (
@@ -1455,7 +1455,7 @@ class TestOrchestratorLandscapeExport:
         )
 
         # Build graph from config
-        graph = ExecutionGraph.from_config(settings)
+        graph = ExecutionGraph.from_config(settings, plugin_manager)
 
         # Run with settings
         orchestrator = Orchestrator(db)
@@ -1471,7 +1471,7 @@ class TestOrchestratorLandscapeExport:
         record_types = [r.get("record_type") for r in export_sink.captured_rows]
         assert "run" in record_types, f"Expected 'run' record type, got: {record_types}"
 
-    def test_orchestrator_export_with_signing(self) -> None:
+    def test_orchestrator_export_with_signing(self, plugin_manager) -> None:
         """Orchestrator should sign records when export.sign is True."""
         import os
         from unittest.mock import patch
@@ -1568,7 +1568,7 @@ class TestOrchestratorLandscapeExport:
             },
         )
 
-        graph = ExecutionGraph.from_config(settings)
+        graph = ExecutionGraph.from_config(settings, plugin_manager)
         orchestrator = Orchestrator(db)
 
         # Set signing key environment variable
@@ -1586,7 +1586,7 @@ class TestOrchestratorLandscapeExport:
         record_types = [r.get("record_type") for r in export_sink.captured_rows]
         assert "manifest" in record_types
 
-    def test_orchestrator_export_requires_signing_key_when_sign_enabled(self) -> None:
+    def test_orchestrator_export_requires_signing_key_when_sign_enabled(self, plugin_manager) -> None:
         """Should raise error when sign=True but ELSPETH_SIGNING_KEY not set."""
         import os
         from unittest.mock import patch
@@ -1679,7 +1679,7 @@ class TestOrchestratorLandscapeExport:
             },
         )
 
-        graph = ExecutionGraph.from_config(settings)
+        graph = ExecutionGraph.from_config(settings, plugin_manager)
         orchestrator = Orchestrator(db)
 
         # Ensure ELSPETH_SIGNING_KEY is not set
@@ -1690,7 +1690,7 @@ class TestOrchestratorLandscapeExport:
         ):
             orchestrator.run(pipeline, graph=graph, settings=settings)
 
-    def test_orchestrator_no_export_when_disabled(self) -> None:
+    def test_orchestrator_no_export_when_disabled(self, plugin_manager) -> None:
         """Should not export when export.enabled is False."""
         from elspeth.contracts import PluginSchema, SourceRow
         from elspeth.core.config import (
@@ -1775,7 +1775,7 @@ class TestOrchestratorLandscapeExport:
             },
         )
 
-        graph = ExecutionGraph.from_config(settings)
+        graph = ExecutionGraph.from_config(settings, plugin_manager)
         orchestrator = Orchestrator(db)
         result = orchestrator.run(pipeline, graph=graph, settings=settings)
 
@@ -3922,6 +3922,7 @@ class TestCoalesceWiring:
 
     def test_orchestrator_creates_coalesce_executor_when_config_present(
         self,
+        plugin_manager,
     ) -> None:
         """When settings.coalesce is non-empty, CoalesceExecutor should be created."""
         from unittest.mock import MagicMock, patch
@@ -3984,7 +3985,7 @@ class TestCoalesceWiring:
         orchestrator = Orchestrator(db=db)
 
         # Build the graph from settings (which includes coalesce)
-        graph = ExecutionGraph.from_config(settings)
+        graph = ExecutionGraph.from_config(settings, plugin_manager)
 
         # Patch RowProcessor to capture its args
         with patch("elspeth.engine.orchestrator.RowProcessor") as mock_processor:
@@ -4002,7 +4003,7 @@ class TestCoalesceWiring:
             # Verify the coalesce_node_ids contains our registered coalesce
             assert "merge_results" in call_kwargs["coalesce_node_ids"]
 
-    def test_orchestrator_handles_coalesced_outcome(self) -> None:
+    def test_orchestrator_handles_coalesced_outcome(self, plugin_manager) -> None:
         """COALESCED outcome should route merged token to output sink."""
         from unittest.mock import MagicMock, patch
 
@@ -4066,7 +4067,7 @@ class TestCoalesceWiring:
             gates=settings.gates,
         )
 
-        graph = ExecutionGraph.from_config(settings)
+        graph = ExecutionGraph.from_config(settings, plugin_manager)
 
         orchestrator = Orchestrator(db=db)
 
@@ -4109,7 +4110,7 @@ class TestCoalesceWiring:
             assert len(tokens_written) == 1
             assert tokens_written[0].token_id == "merged_token_1"
 
-    def test_orchestrator_calls_flush_pending_at_end(self) -> None:
+    def test_orchestrator_calls_flush_pending_at_end(self, plugin_manager) -> None:
         """flush_pending should be called on coalesce executor at end of source."""
         from unittest.mock import MagicMock, patch
 
@@ -4168,7 +4169,7 @@ class TestCoalesceWiring:
 
         db = LandscapeDB.in_memory()
         orchestrator = Orchestrator(db=db)
-        graph = ExecutionGraph.from_config(settings)
+        graph = ExecutionGraph.from_config(settings, plugin_manager)
 
         with patch("elspeth.engine.coalesce_executor.CoalesceExecutor") as mock_executor_cls:
             mock_executor = MagicMock()
@@ -4180,7 +4181,7 @@ class TestCoalesceWiring:
             # flush_pending should have been called
             mock_executor.flush_pending.assert_called_once()
 
-    def test_orchestrator_flush_pending_routes_merged_tokens_to_sink(self) -> None:
+    def test_orchestrator_flush_pending_routes_merged_tokens_to_sink(self, plugin_manager) -> None:
         """Merged tokens from flush_pending should be routed to output sink."""
         from unittest.mock import MagicMock, patch
 
@@ -4244,7 +4245,7 @@ class TestCoalesceWiring:
 
         db = LandscapeDB.in_memory()
         orchestrator = Orchestrator(db=db)
-        graph = ExecutionGraph.from_config(settings)
+        graph = ExecutionGraph.from_config(settings, plugin_manager)
 
         # Create a merged token that flush_pending will return
         merged_token = TokenInfo(
@@ -4288,7 +4289,7 @@ class TestCoalesceWiring:
             assert len(tokens_written) == 1
             assert tokens_written[0].token_id == "flushed_merged_token"
 
-    def test_orchestrator_flush_pending_handles_failures(self) -> None:
+    def test_orchestrator_flush_pending_handles_failures(self, plugin_manager) -> None:
         """Failed coalesce outcomes from flush_pending should not crash."""
         from unittest.mock import MagicMock, patch
 
@@ -4348,7 +4349,7 @@ class TestCoalesceWiring:
 
         db = LandscapeDB.in_memory()
         orchestrator = Orchestrator(db=db)
-        graph = ExecutionGraph.from_config(settings)
+        graph = ExecutionGraph.from_config(settings, plugin_manager)
 
         with patch("elspeth.engine.coalesce_executor.CoalesceExecutor") as mock_executor_cls:
             mock_executor = MagicMock()
@@ -4376,7 +4377,7 @@ class TestCoalesceWiring:
             # No merged tokens means no rows_coalesced increment
             assert result.rows_coalesced == 0
 
-    def test_orchestrator_computes_coalesce_step_map(self) -> None:
+    def test_orchestrator_computes_coalesce_step_map(self, plugin_manager) -> None:
         """Orchestrator should compute step positions for each coalesce point."""
         from unittest.mock import MagicMock, patch
 
@@ -4448,7 +4449,7 @@ class TestCoalesceWiring:
         orchestrator = Orchestrator(db=db)
 
         # Build the graph from settings (which includes coalesce)
-        graph = ExecutionGraph.from_config(settings)
+        graph = ExecutionGraph.from_config(settings, plugin_manager)
 
         with patch("elspeth.engine.orchestrator.RowProcessor") as mock_processor_cls:
             mock_processor = MagicMock()

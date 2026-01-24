@@ -23,9 +23,11 @@ import os
 from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any, cast
 
+import pytest
 from hypothesis import Phase, Verbosity, settings
 
 from elspeth.contracts import Determinism, PluginSchema, SourceRow
+from elspeth.plugins.manager import PluginManager
 
 if TYPE_CHECKING:
     from elspeth.plugins.protocols import (
@@ -34,6 +36,29 @@ if TYPE_CHECKING:
         SourceProtocol,
         TransformProtocol,
     )
+
+
+# =============================================================================
+# Pytest Fixtures
+# =============================================================================
+
+
+@pytest.fixture
+def plugin_manager() -> PluginManager:
+    """Standard plugin manager with builtin plugins registered.
+
+    Use this fixture in tests that need to build ExecutionGraph from config.
+    Ensures all tests use consistent plugin registration.
+
+    Example:
+        def test_graph_building(plugin_manager):
+            config = ElspethSettings(...)
+            graph = ExecutionGraph.from_config(config, plugin_manager)
+    """
+    manager = PluginManager()
+    manager.register_builtin_plugins()
+    return manager
+
 
 # =============================================================================
 # Hypothesis Configuration
@@ -268,4 +293,5 @@ __all__ = [
     "as_sink",
     "as_source",
     "as_transform",
+    "plugin_manager",
 ]

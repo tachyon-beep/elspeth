@@ -438,7 +438,7 @@ class TestRunCommandProgress:
 class TestRunCommandGraphReuse:
     """Verify that run command constructs ExecutionGraph only once."""
 
-    def test_run_constructs_graph_once(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_run_constructs_graph_once(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, plugin_manager) -> None:
         """run command constructs ExecutionGraph once and reuses validated instance.
 
         Regression test for P2-2026-01-20-cli-run-rebuilds-unvalidated-graph.
@@ -506,7 +506,7 @@ landscape:
             f"so validation doesn't apply to the executed graph."
         )
 
-    def test_validated_graph_has_consistent_node_ids(self, tmp_path: Path) -> None:
+    def test_validated_graph_has_consistent_node_ids(self, tmp_path: Path, plugin_manager) -> None:
         """Validated graph node IDs match those recorded in Landscape.
 
         Ensures the graph passed to orchestrator.run() is the same instance
@@ -568,7 +568,7 @@ landscape:
         from elspeth.cli import load_settings
 
         config = load_settings(settings_file)
-        rebuilt_graph = ExecutionGraph.from_config(config)
+        rebuilt_graph = ExecutionGraph.from_config(config, plugin_manager)
         rebuilt_node_ids = set(rebuilt_graph._graph.nodes())
 
         # Node IDs should differ (due to UUID randomization)
