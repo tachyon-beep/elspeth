@@ -26,7 +26,6 @@ from elspeth.core.dag import ExecutionGraph, GraphValidationError
 
 if TYPE_CHECKING:
     from elspeth.core.landscape import LandscapeDB
-    from elspeth.engine import PipelineConfig
     from elspeth.plugins.manager import PluginManager
 
 # Module-level singleton for plugin manager
@@ -1078,118 +1077,77 @@ def purge(
         db.close()
 
 
-def _build_resume_pipeline_config(
-    settings: ElspethSettings,
-) -> PipelineConfig:
-    """Build PipelineConfig for resume from settings.
+def _execute_resume_with_instances(
+    config: ElspethSettings,
+    graph: ExecutionGraph,
+    plugins: dict[str, Any],
+    resume_point: Any,
+    payload_store: Any,
+    db: LandscapeDB,
+) -> Any:  # Returns RunResult from orchestrator.resume()
+    """Execute resume using pre-instantiated plugins.
 
-    For resume, source is NullSource (data comes from payloads).
-    Transforms and sinks are rebuilt from settings.
+    Similar to _execute_pipeline_with_instances but for resume operations.
 
     Args:
-        settings: Full ElspethSettings configuration.
+        config: Validated ElspethSettings
+        graph: Validated ExecutionGraph
+        plugins: Pre-instantiated plugins (with NullSource)
+        resume_point: Resume point information
+        payload_store: Payload store for retrieving row data
+        db: LandscapeDB connection
 
     Returns:
-        PipelineConfig ready for resume.
+        RunResult from orchestrator.resume()
     """
-    from elspeth.engine import PipelineConfig
-    from elspeth.plugins.base import BaseSink, BaseTransform
-    from elspeth.plugins.sources.null_source import NullSource
-
-    # Get plugin manager for dynamic plugin lookup
-    manager = _get_plugin_manager()
-
-    # Source is NullSource for resume - data comes from payloads
-    source = NullSource({})
-
-    # Build transforms from settings via PluginManager
-    transforms: list[BaseTransform] = []
-    for plugin_config in settings.row_plugins:
-        plugin_name = plugin_config.plugin
-        plugin_options = dict(plugin_config.options)
-
-        transform_cls = manager.get_transform_by_name(plugin_name)
-        transforms.append(transform_cls(plugin_options))  # type: ignore[arg-type]
-
-    # Build aggregation transforms via PluginManager
-    # Need the graph to get aggregation node IDs
-    graph = ExecutionGraph.from_config(settings, manager)
-    agg_id_map = graph.get_aggregation_id_map()
-
+    from elspeth.core.checkpoint import CheckpointManager
     from elspeth.core.config import AggregationSettings
+    from elspeth.engine import Orchestrator, PipelineConfig
+    from elspeth.plugins.base import BaseTransform
 
+    # Use pre-instantiated plugins
+    source = plugins["source"]
+    sinks = plugins["sinks"]
+
+    # Build transforms list: row_plugins + aggregations (with node_id)
+    transforms: list[BaseTransform] = list(plugins["transforms"])
+
+    # Add aggregation transforms with node_id attached
+    agg_id_map = graph.get_aggregation_id_map()
     aggregation_settings: dict[str, AggregationSettings] = {}
-    for agg_config in settings.aggregations:
-        node_id = agg_id_map[agg_config.name]
+
+    for agg_name, (transform, agg_config) in plugins["aggregations"].items():
+        node_id = agg_id_map[agg_name]
         aggregation_settings[node_id] = agg_config
 
-        plugin_name = agg_config.plugin
-        transform_cls = manager.get_transform_by_name(plugin_name)
-
-        agg_options = dict(agg_config.options)
-        transform = transform_cls(agg_options)
+        # Set node_id so processor can identify as aggregation
         transform.node_id = node_id
         transforms.append(transform)  # type: ignore[arg-type]
 
-    # Build sinks from settings via PluginManager
-    # CRITICAL: Resume must append to existing output, not overwrite
-    sinks: dict[str, BaseSink] = {}
-    for sink_name, sink_settings in settings.sinks.items():
-        sink_plugin = sink_settings.plugin
-        sink_options = dict(sink_settings.options)
-        sink_options["mode"] = "append"  # Resume appends to existing files
-
-        sink_cls = manager.get_sink_by_name(sink_plugin)
-        sinks[sink_name] = sink_cls(sink_options)  # type: ignore[assignment]
-
-    return PipelineConfig(
+    # Build PipelineConfig with pre-instantiated plugins
+    pipeline_config = PipelineConfig(
         source=source,  # type: ignore[arg-type]
         transforms=transforms,  # type: ignore[arg-type]
         sinks=sinks,  # type: ignore[arg-type]
-        config=resolve_config(settings),
-        gates=list(settings.gates),
+        config=resolve_config(config),
+        gates=list(config.gates),
         aggregation_settings=aggregation_settings,
     )
 
+    # Create checkpoint manager and orchestrator for resume
+    checkpoint_manager = CheckpointManager(db)
+    orchestrator = Orchestrator(db, checkpoint_manager=checkpoint_manager)
 
-def _build_resume_graph_from_db(
-    db: LandscapeDB,
-    run_id: str,
-) -> ExecutionGraph:
-    """Reconstruct ExecutionGraph from nodes/edges registered in database.
+    # Execute resume
+    result = orchestrator.resume(
+        resume_point=resume_point,
+        config=pipeline_config,
+        graph=graph,
+        payload_store=payload_store,
+        settings=config,
+    )
 
-    Args:
-        db: LandscapeDB connection.
-        run_id: Run ID to reconstruct graph for.
-
-    Returns:
-        ExecutionGraph reconstructed from database.
-    """
-    import json
-
-    from sqlalchemy import select
-
-    from elspeth.core.landscape import edges_table, nodes_table
-
-    graph = ExecutionGraph()
-
-    with db.engine.connect() as conn:
-        nodes = conn.execute(select(nodes_table).where(nodes_table.c.run_id == run_id)).fetchall()
-
-        edges = conn.execute(select(edges_table).where(edges_table.c.run_id == run_id)).fetchall()
-
-    for node in nodes:
-        graph.add_node(
-            node.node_id,
-            node_type=node.node_type,
-            plugin_name=node.plugin_name,
-            config=json.loads(node.config_json) if node.config_json else {},
-        )
-
-    for edge in edges:
-        graph.add_edge(edge.from_node_id, edge.to_node_id, label=edge.label)
-
-    return graph
+    return result
 
 
 @app.command()
@@ -1323,22 +1281,49 @@ def resume(
 
         payload_store = FilesystemPayloadStore(payload_path)
 
-        # Build pipeline config and graph for resume
-        pipeline_config = _build_resume_pipeline_config(settings_config)
-        graph = _build_resume_graph_from_db(db, run_id)
-
-        # Create orchestrator with checkpoint manager and resume
-        from elspeth.engine import Orchestrator
-
-        orchestrator = Orchestrator(db, checkpoint_manager=checkpoint_manager)
+        # NEW: Instantiate plugins BEFORE graph construction
+        from elspeth.cli_helpers import instantiate_plugins_from_config
 
         try:
-            result = orchestrator.resume(
-                resume_point=resume_point,
-                config=pipeline_config,
+            plugins = instantiate_plugins_from_config(settings_config)
+        except Exception as e:
+            typer.echo(f"Error instantiating plugins: {e}", err=True)
+            raise typer.Exit(1) from None
+
+        # CRITICAL: Override source with NullSource for resume (data comes from payloads)
+        from elspeth.plugins.sources.null_source import NullSource
+
+        null_source = NullSource({})
+        resume_plugins = {
+            **plugins,
+            "source": null_source,  # Override with NullSource for resume
+        }
+
+        # NEW: Build graph from plugin instances
+        try:
+            graph = ExecutionGraph.from_plugin_instances(
+                source=resume_plugins["source"],
+                transforms=resume_plugins["transforms"],
+                sinks=resume_plugins["sinks"],
+                aggregations=resume_plugins["aggregations"],
+                gates=list(settings_config.gates),
+                output_sink=settings_config.output_sink,
+                coalesce_settings=list(settings_config.coalesce) if settings_config.coalesce else None,
+            )
+            graph.validate()
+        except GraphValidationError as e:
+            typer.echo(f"Pipeline graph error: {e}", err=True)
+            raise typer.Exit(1) from None
+
+        # Execute resume with pre-instantiated plugins
+        try:
+            result = _execute_resume_with_instances(
+                config=settings_config,
                 graph=graph,
+                plugins=resume_plugins,
+                resume_point=resume_point,
                 payload_store=payload_store,
-                settings=settings_config,
+                db=db,
             )
         except Exception as e:
             typer.echo(f"Error during resume: {e}", err=True)

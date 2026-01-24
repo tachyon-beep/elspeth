@@ -877,43 +877,43 @@ allow_hits:
   # to report system state rather than crash.
   # ============================================================
 
-  - key: "cli.py:R1:_execute_pipeline:_format_run_completed:line=536"
+  - key: "cli.py:R1:_execute_pipeline:_format_run_completed:line=535"
     owner: "architecture"
     reason: "Intentional Optional API: status_symbols lookup with default for unknown statuses"
     safety: "Default '?' symbol for unrecognized statuses - output still produced"
     expires: null  # Permanent - intentional design
 
-  - key: "cli.py:R1:_execute_pipeline_with_instances:_format_run_completed:line=748"
+  - key: "cli.py:R1:_execute_pipeline_with_instances:_format_run_completed:line=747"
     owner: "architecture"
     reason: "Intentional Optional API: status_symbols lookup with default for unknown statuses"
     safety: "Default '?' symbol for unrecognized statuses - output still produced"
     expires: null  # Permanent - intentional design
 
-  - key: "cli.py:R1:health:line=1406"
+  - key: "cli.py:R1:health:line=1391"
     owner: "architecture"
     reason: "Trust boundary: environment variable GIT_COMMIT_SHA is optional external input"
     safety: "Empty string default is safe - commit SHA is informational only"
     expires: null  # Permanent - intentional design
 
-  - key: "cli.py:R4:health:line=1418"
+  - key: "cli.py:R4:health:line=1403"
     owner: "architecture"
     reason: "Trust boundary: git subprocess may fail for many reasons (not installed, not a repo, etc.)"
     safety: "Graceful fallback to 'unknown' - health check reports git as unavailable"
     expires: null  # Permanent - intentional design
 
-  - key: "cli.py:R1:health:line=1434"
+  - key: "cli.py:R1:health:line=1419"
     owner: "architecture"
     reason: "Trust boundary: environment variable DATABASE_URL is optional external input"
     safety: "Empty string default triggers skip logic - database check only runs if configured"
     expires: null  # Permanent - intentional design
 
-  - key: "cli.py:R4:health:line=1446"
+  - key: "cli.py:R4:health:line=1431"
     owner: "architecture"
     reason: "Trust boundary: database connection may fail for many reasons (network, auth, etc.)"
     safety: "Error recorded in checks dict with status='error' - health check reports DB as unhealthy"
     expires: null  # Permanent - intentional design
 
-  - key: "cli.py:R4:health:line=1510"
+  - key: "cli.py:R4:health:line=1495"
     owner: "architecture"
     reason: "Trust boundary: plugin manager initialization may fail due to misconfiguration"
     safety: "Error recorded in checks dict with status='error' - health check reports plugins as unhealthy"
