@@ -352,6 +352,32 @@ class TestExecutionGraphAccessors:
         assert "no incoming edges" in str(exc_info.value).lower()
         assert "bug in graph construction" in str(exc_info.value).lower()
 
+    def test_get_effective_producer_schema_handles_chained_gates(self):
+        """_get_effective_producer_schema() recursively walks through multiple gates."""
+        from elspeth.contracts import PluginSchema, RoutingMode
+        from elspeth.core.dag import ExecutionGraph
+
+        class SourceOutput(PluginSchema):
+            id: int
+            name: str
+
+        graph = ExecutionGraph()
+
+        # Build chain: source -> gate1 -> gate2 -> sink
+        graph.add_node("source", node_type="source", plugin_name="csv", output_schema=SourceOutput)
+        graph.add_node("gate1", node_type="gate", plugin_name="config_gate:first")
+        graph.add_node("gate2", node_type="gate", plugin_name="config_gate:second")
+        graph.add_node("sink", node_type="sink", plugin_name="csv")
+
+        graph.add_edge("source", "gate1", label="continue", mode=RoutingMode.MOVE)
+        graph.add_edge("gate1", "gate2", label="continue", mode=RoutingMode.MOVE)
+        graph.add_edge("gate2", "sink", label="approved", mode=RoutingMode.MOVE)
+
+        # gate2's effective schema should trace back to source
+        effective_schema = graph._get_effective_producer_schema("gate2")
+
+        assert effective_schema == SourceOutput
+
 
 class TestExecutionGraphFromConfig:
     """Build ExecutionGraph from ElspethSettings."""
