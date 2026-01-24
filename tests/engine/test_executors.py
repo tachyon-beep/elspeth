@@ -3327,3 +3327,192 @@ class TestAggregationExecutorCheckpoint:
                 step_in_pipeline=1,
                 trigger_type=TriggerType.COUNT,
             )
+
+    def test_checkpoint_size_warning_at_1mb_threshold(self) -> None:
+        """Checkpoint size validation logs warning when exceeding 1MB."""
+        from unittest.mock import patch
+
+        from elspeth.core.config import AggregationSettings, TriggerConfig
+        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.engine.executors import AggregationExecutor
+        from elspeth.engine.spans import SpanFactory
+
+        # Setup
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        run = recorder.begin_run(config={}, canonical_version="v1")
+        agg_node = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="size_test",
+            node_type="aggregation",
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+
+        settings = AggregationSettings(
+            name="test_agg",
+            plugin="test",
+            trigger=TriggerConfig(count=10000),  # High trigger to prevent flush
+        )
+
+        executor = AggregationExecutor(
+            recorder=recorder,
+            span_factory=SpanFactory(),
+            run_id=run.run_id,
+            aggregation_settings={agg_node.node_id: settings},
+        )
+
+        # Create large row_data to exceed 1MB when serialized
+        # A single row with ~1KB of data, repeated 1500 times = ~1.5MB checkpoint
+        large_row_data = {"data": "x" * 1000, "index": 0}
+
+        # Add 1500 tokens with large row_data
+        from elspeth.engine.executors import TokenInfo
+
+        tokens = []
+        for i in range(1500):
+            row_data = large_row_data.copy()
+            row_data["index"] = i
+            tokens.append(
+                TokenInfo(
+                    row_id=f"row-{i}",
+                    token_id=f"token-{i}",
+                    row_data=row_data,
+                    branch_name=None,
+                )
+            )
+
+        executor._buffer_tokens[agg_node.node_id] = tokens
+
+        # Capture log output
+        import logging
+
+        with patch.object(logging, "getLogger") as mock_get_logger:
+            mock_logger = mock_get_logger.return_value
+
+            # Get checkpoint (should trigger warning)
+            _ = executor.get_checkpoint_state()
+
+            # VERIFY: Warning was logged
+            assert mock_logger.warning.called, "Should log warning for large checkpoint"
+
+            # VERIFY: Warning message contains size info
+            warning_call = mock_logger.warning.call_args[0][0]
+            assert "Large checkpoint" in warning_call
+            assert "MB" in warning_call
+            assert "buffered rows" in warning_call
+
+    def test_checkpoint_size_error_at_10mb_limit(self) -> None:
+        """Checkpoint size validation raises RuntimeError when exceeding 10MB."""
+        from elspeth.core.config import AggregationSettings, TriggerConfig
+        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.engine.executors import AggregationExecutor, TokenInfo
+        from elspeth.engine.spans import SpanFactory
+
+        # Setup
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        run = recorder.begin_run(config={}, canonical_version="v1")
+        agg_node = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="limit_test",
+            node_type="aggregation",
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+
+        settings = AggregationSettings(
+            name="test_agg",
+            plugin="test",
+            trigger=TriggerConfig(count=20000),  # High trigger to prevent flush
+        )
+
+        executor = AggregationExecutor(
+            recorder=recorder,
+            span_factory=SpanFactory(),
+            run_id=run.run_id,
+            aggregation_settings={agg_node.node_id: settings},
+        )
+
+        # Create very large row_data to exceed 10MB when serialized
+        # A single row with ~2KB of data, repeated 6000 times = ~12MB checkpoint
+        very_large_row_data = {"data": "x" * 2000, "index": 0}
+
+        # Add 6000 tokens with very large row_data
+        tokens = []
+        for i in range(6000):
+            row_data = very_large_row_data.copy()
+            row_data["index"] = i
+            tokens.append(
+                TokenInfo(
+                    row_id=f"row-{i}",
+                    token_id=f"token-{i}",
+                    row_data=row_data,
+                    branch_name=None,
+                )
+            )
+
+        executor._buffer_tokens[agg_node.node_id] = tokens
+
+        # VERIFY: Getting checkpoint raises RuntimeError
+        with pytest.raises(RuntimeError, match=r"Checkpoint size.*exceeds 10MB limit"):
+            executor.get_checkpoint_state()
+
+    def test_checkpoint_size_error_message_includes_solutions(self) -> None:
+        """Checkpoint size error message includes actionable solutions."""
+        from elspeth.core.config import AggregationSettings, TriggerConfig
+        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.engine.executors import AggregationExecutor, TokenInfo
+        from elspeth.engine.spans import SpanFactory
+
+        # Setup
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        run = recorder.begin_run(config={}, canonical_version="v1")
+        agg_node = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="solution_test",
+            node_type="aggregation",
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+
+        settings = AggregationSettings(
+            name="test_agg",
+            plugin="test",
+            trigger=TriggerConfig(count=20000),
+        )
+
+        executor = AggregationExecutor(
+            recorder=recorder,
+            span_factory=SpanFactory(),
+            run_id=run.run_id,
+            aggregation_settings={agg_node.node_id: settings},
+        )
+
+        # Create checkpoint > 10MB
+        very_large_row_data = {"data": "x" * 2000}
+        tokens = [
+            TokenInfo(
+                row_id=f"row-{i}",
+                token_id=f"token-{i}",
+                row_data=very_large_row_data,
+                branch_name=None,
+            )
+            for i in range(6000)
+        ]
+        executor._buffer_tokens[agg_node.node_id] = tokens
+
+        # Capture error message
+        with pytest.raises(RuntimeError) as exc_info:
+            executor.get_checkpoint_state()
+
+        error_message = str(exc_info.value)
+
+        # VERIFY: Error message includes solutions
+        assert "Solutions:" in error_message or "Reduce" in error_message
+        assert "rows" in error_message  # Mentions row count
+        assert "nodes" in error_message  # Mentions node count
