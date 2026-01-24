@@ -467,13 +467,23 @@ class ExecutionGraph:
             # Track sequence -> node_id
             transform_ids[i] = tid
 
+            # Look up transform plugin class to get schemas
+            transform_cls = manager.get_transform_by_name(plugin_config.plugin)
+            if transform_cls is None:
+                available = [t.name for t in manager.get_transforms()]
+                raise ValueError(f"Unknown transform plugin: {plugin_config.plugin}. Available: {sorted(available)}")
+
+            # Get schemas from class attributes (may be None for dynamic schemas)
+            input_schema = getattr(transform_cls, "input_schema", None)
+            output_schema = getattr(transform_cls, "output_schema", None)
+
             graph.add_node(
                 tid,
                 node_type="transform",
                 plugin_name=plugin_config.plugin,
                 config=plugin_config.options,
-                input_schema=getattr(plugin_config, "input_schema", None),
-                output_schema=getattr(plugin_config, "output_schema", None),
+                input_schema=input_schema,
+                output_schema=output_schema,
             )
 
             # Edge from previous node

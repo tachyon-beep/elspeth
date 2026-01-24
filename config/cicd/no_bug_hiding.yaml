@@ -213,16 +213,16 @@ allow_hits:
     safety: "None default is safe - missing schema means dynamic schema"
     expires: null  # Permanent - intentional design
 
-  - key: "core/dag.py:R2:ExecutionGraph:from_config:line=475"
+  - key: "core/dag.py:R2:ExecutionGraph:from_config:line=477"
     owner: "architecture"
-    reason: "Trust boundary: config objects may not have schema attributes (optional fields)"
-    safety: "None default is safe - missing schema means dynamic schema"
+    reason: "Trust boundary: plugin classes may not have class-level input_schema (dynamic schemas)"
+    safety: "None default is safe - missing schema means dynamic schema set in __init__"
     expires: null  # Permanent - intentional design
 
-  - key: "core/dag.py:R2:ExecutionGraph:from_config:line=476"
+  - key: "core/dag.py:R2:ExecutionGraph:from_config:line=478"
     owner: "architecture"
-    reason: "Trust boundary: config objects may not have schema attributes (optional fields)"
-    safety: "None default is safe - missing schema means dynamic schema"
+    reason: "Trust boundary: plugin classes may not have class-level output_schema (dynamic schemas)"
+    safety: "None default is safe - missing schema means dynamic schema set in __init__"
     expires: null  # Permanent - intentional design
 
   # ============================================================
