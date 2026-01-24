@@ -378,6 +378,28 @@ class TestExecutionGraphAccessors:
 
         assert effective_schema == SourceOutput
 
+    def test_dag_validation_only_checks_structure(self) -> None:
+        """DAG validation should only check cycles and connectivity, not schemas."""
+        from elspeth.contracts import PluginSchema
+        from elspeth.core.dag import ExecutionGraph
+
+        class OutputSchema(PluginSchema):
+            value: int
+
+        class DifferentSchema(PluginSchema):
+            different: str  # Incompatible!
+
+        graph = ExecutionGraph()
+
+        # Add incompatible schemas
+        graph.add_node("source", node_type="source", plugin_name="csv", output_schema=OutputSchema)
+        graph.add_node("sink", node_type="sink", plugin_name="csv", input_schema=DifferentSchema)
+        graph.add_edge("source", "sink", label="continue")
+
+        # OLD behavior: Would raise GraphValidationError for schema mismatch
+        # NEW behavior: Only checks structural validity (no cycles)
+        graph.validate()  # Should NOT raise - no structural problems
+
     def test_get_effective_producer_schema_returns_direct_schema_for_transform(self):
         """_get_effective_producer_schema() returns output_schema directly for transform nodes."""
         from elspeth.contracts import PluginSchema
