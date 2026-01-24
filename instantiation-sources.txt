@@ -1,0 +1,25 @@
+src/elspeth/engine/orchestrator.py:1467:        # 2. The source used during resume is NullSource, which has no resources to manage
+src/elspeth/plugins/discovery.py:173:            "sources": [CSVSource, JSONSource, ...],
+src/elspeth/plugins/sources/null_source.py:2:"""NullSource - a source that yields nothing.
+src/elspeth/plugins/sources/null_source.py:18:    """Dynamic schema for NullSource - accepts any row structure.
+src/elspeth/plugins/sources/null_source.py:20:    Since NullSource yields no rows, the schema never validates anything.
+src/elspeth/plugins/sources/null_source.py:42:    output_schema: type[PluginSchema] = NullSourceSchema
+src/elspeth/plugins/sources/null_source.py:45:        """Initialize NullSource.
+src/elspeth/plugins/sources/null_source.py:48:            config: Configuration dict (ignored - NullSource needs no config).
+src/elspeth/plugins/sources/null_source.py:56:        """Validate NullSource schemas are self-consistent.
+src/elspeth/plugins/sources/null_source.py:58:        NullSource has no self-consistency constraints - schema is static.
+src/elspeth/plugins/sources/null_source.py:61:        # No additional validation needed - NullSource has static output schema
+src/elspeth/plugins/sources/json_source.py:54:        cfg = JSONSourceConfig.from_dict(config)
+src/elspeth/plugins/sources/json_source.py:89:        """Validate JSONSource schemas are self-consistent.
+src/elspeth/plugins/sources/json_source.py:91:        JSONSource has no self-consistency constraints - only output_schema.
+src/elspeth/plugins/sources/json_source.py:94:        # No additional validation needed - JSONSource has only output schema
+src/elspeth/plugins/sources/csv_source.py:54:        cfg = CSVSourceConfig.from_dict(config)
+src/elspeth/plugins/sources/csv_source.py:84:        """Validate CSVSource schemas are self-consistent.
+src/elspeth/plugins/sources/csv_source.py:86:        CSVSource has no self-consistency constraints - only output_schema.
+src/elspeth/plugins/sources/csv_source.py:89:        # No additional validation needed - CSVSource has only output schema
+src/elspeth/plugins/config_base.py:14:    cfg = CSVSourceConfig.from_dict(config)
+src/elspeth/plugins/azure/blob_source.py:372:        # Use pandas for robust CSV parsing (consistent with CSVSource)
+src/elspeth/cli.py:1105:        plugins: Pre-instantiated plugins (with NullSource)
+src/elspeth/cli.py:1358:        # CRITICAL: Override source with NullSource for resume (data comes from payloads)
+src/elspeth/cli.py:1361:        null_source = NullSource({})
+src/elspeth/cli.py:1364:            "source": null_source,  # Override with NullSource for resume

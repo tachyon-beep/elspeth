@@ -1,0 +1,15 @@
+src/elspeth/plugins/discovery.py:175:            "sinks": [CSVSink, JSONSink, ...],
+src/elspeth/plugins/sinks/database_sink.py:79:        cfg = DatabaseSinkConfig.from_dict(config)
+src/elspeth/plugins/sinks/database_sink.py:116:        """Validate DatabaseSink schemas are self-consistent.
+src/elspeth/plugins/sinks/database_sink.py:118:        DatabaseSink has no self-consistency constraints - only input_schema.
+src/elspeth/plugins/sinks/database_sink.py:121:        # No additional validation needed - DatabaseSink has only input schema
+src/elspeth/plugins/sinks/database_sink.py:256:        No-op for DatabaseSink - writes are immediate.
+src/elspeth/plugins/sinks/csv_sink.py:67:        cfg = CSVSinkConfig.from_dict(config)
+src/elspeth/plugins/sinks/csv_sink.py:99:        """Validate CSVSink schemas are self-consistent.
+src/elspeth/plugins/sinks/csv_sink.py:101:        CSVSink has no self-consistency constraints - only input_schema.
+src/elspeth/plugins/sinks/csv_sink.py:104:        # No additional validation needed - CSVSink has only input schema
+src/elspeth/plugins/sinks/csv_sink.py:143:            raise RuntimeError("CSVSink writer not initialized - this is a bug")
+src/elspeth/plugins/sinks/json_sink.py:58:        cfg = JSONSinkConfig.from_dict(config)
+src/elspeth/plugins/sinks/json_sink.py:94:        """Validate JSONSink schemas are self-consistent.
+src/elspeth/plugins/sinks/json_sink.py:96:        JSONSink has no self-consistency constraints - only input_schema.
+src/elspeth/plugins/sinks/json_sink.py:99:        # No additional validation needed - JSONSink has only input schema

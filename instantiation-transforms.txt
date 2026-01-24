@@ -1,0 +1,56 @@
+src/elspeth/engine/orchestrator.py:97:    rows_buffered: int = 0  # Passthrough mode buffered tokens
+src/elspeth/engine/orchestrator.py:992:                            # Passthrough mode buffered token
+src/elspeth/engine/processor.py:247:                # Passthrough: original tokens continue with enriched data
+src/elspeth/engine/processor.py:251:                        f"Passthrough mode requires multi-row result, "
+src/elspeth/engine/processor.py:260:                        f"Passthrough mode requires same number of output rows "
+src/elspeth/plugins/discovery.py:174:            "transforms": [PassThrough, FieldMapper, ...],
+src/elspeth/plugins/llm/azure_multi_query.py:258:                    "raw_response": response.content[:500],  # Truncate for audit
+src/elspeth/plugins/llm/azure_batch.py:269:            # Empty batch - return success with metadata (matches BatchReplicate pattern)
+src/elspeth/plugins/base.py:123:            - FieldMapper: output fields must be subset of input fields (if mode=strict)
+src/elspeth/plugins/transforms/batch_replicate.py:82:        cfg = BatchReplicateConfig.from_dict(config)
+src/elspeth/plugins/transforms/batch_replicate.py:95:            "BatchReplicateSchema",
+src/elspeth/plugins/transforms/batch_replicate.py:105:        """Validate BatchReplicate schemas are self-consistent.
+src/elspeth/plugins/transforms/batch_replicate.py:107:        BatchReplicate has no self-consistency constraints (input == output by definition).
+src/elspeth/plugins/transforms/batch_replicate.py:110:        # No additional validation needed - BatchReplicate has matching input/output schemas
+src/elspeth/plugins/transforms/batch_stats.py:73:        cfg = BatchStatsConfig.from_dict(config)
+src/elspeth/plugins/transforms/batch_stats.py:86:            "BatchStatsInputSchema",
+src/elspeth/plugins/transforms/batch_stats.py:90:        # Output schema MUST be dynamic because BatchStats outputs a completely
+src/elspeth/plugins/transforms/batch_stats.py:96:            "BatchStatsOutputSchema",
+src/elspeth/plugins/transforms/batch_stats.py:104:        """Validate BatchStats schemas are self-consistent.
+src/elspeth/plugins/transforms/batch_stats.py:106:        BatchStats has no self-consistency constraints - output is always dynamic.
+src/elspeth/plugins/transforms/batch_stats.py:109:        # No additional validation needed - BatchStats always has dynamic output
+src/elspeth/plugins/transforms/keyword_filter.py:77:        cfg = KeywordFilterConfig.from_dict(config)
+src/elspeth/plugins/transforms/keyword_filter.py:88:            "KeywordFilterSchema",
+src/elspeth/plugins/transforms/keyword_filter.py:98:        """Validate KeywordFilter schemas are self-consistent.
+src/elspeth/plugins/transforms/keyword_filter.py:100:        KeywordFilter has no self-consistency constraints (input == output by definition).
+src/elspeth/plugins/transforms/keyword_filter.py:103:        # No additional validation needed - KeywordFilter has matching input/output schemas
+src/elspeth/plugins/transforms/truncate.py:1:"""Truncate transform plugin.
+src/elspeth/plugins/transforms/truncate.py:3:Truncates specified string fields to maximum lengths.
+src/elspeth/plugins/transforms/truncate.py:43:    """Truncate string fields to specified maximum lengths.
+src/elspeth/plugins/transforms/truncate.py:73:        cfg = TruncateConfig.from_dict(config)
+src/elspeth/plugins/transforms/truncate.py:93:            "TruncateSchema",
+src/elspeth/plugins/transforms/truncate.py:103:        """Validate Truncate schemas are self-consistent.
+src/elspeth/plugins/transforms/truncate.py:105:        Truncate has no self-consistency constraints (input == output by definition).
+src/elspeth/plugins/transforms/truncate.py:108:        # No additional validation needed - Truncate has matching input/output schemas
+src/elspeth/plugins/transforms/truncate.py:111:        """Truncate specified fields in row.
+src/elspeth/plugins/transforms/truncate.py:141:            # Truncate if needed
+src/elspeth/plugins/transforms/truncate.py:144:                    # Truncate leaving room for suffix
+src/elspeth/plugins/transforms/json_explode.py:1:"""JSONExplode deaggregation transform.
+src/elspeth/plugins/transforms/json_explode.py:13:JSONExplode does NOT return TransformResult.error() for type violations because:
+src/elspeth/plugins/transforms/json_explode.py:18:Therefore, JSONExplode inherits from DataPluginConfig (NOT TransformDataConfig)
+src/elspeth/plugins/transforms/json_explode.py:85:        """Initialize the JSONExplode transform.
+src/elspeth/plugins/transforms/json_explode.py:94:        cfg = JSONExplodeConfig.from_dict(config)
+src/elspeth/plugins/transforms/json_explode.py:103:        self.input_schema = create_schema_from_config(cfg.schema_config, "JSONExplodeInputSchema", allow_coercion=False)
+src/elspeth/plugins/transforms/json_explode.py:105:        # Output schema MUST be dynamic because JSONExplode changes row shape:
+src/elspeth/plugins/transforms/json_explode.py:113:            "JSONExplodeOutputSchema",
+src/elspeth/plugins/transforms/json_explode.py:121:        """Validate JSONExplode schemas are self-consistent.
+src/elspeth/plugins/transforms/json_explode.py:123:        JSONExplode has no self-consistency constraints - output is always dynamic.
+src/elspeth/plugins/transforms/json_explode.py:126:        # No additional validation needed - JSONExplode always has dynamic output
+src/elspeth/plugins/transforms/field_mapper.py:1:"""FieldMapper transform plugin.
+src/elspeth/plugins/transforms/field_mapper.py:54:        cfg = FieldMapperConfig.from_dict(config)
+src/elspeth/plugins/transforms/field_mapper.py:69:            "FieldMapperInputSchema",
+src/elspeth/plugins/transforms/field_mapper.py:73:        # Output schema MUST be dynamic because FieldMapper changes row shape:
+src/elspeth/plugins/transforms/field_mapper.py:80:            "FieldMapperOutputSchema",
+src/elspeth/plugins/transforms/field_mapper.py:88:        """Validate FieldMapper schemas are self-consistent.
+src/elspeth/plugins/transforms/field_mapper.py:90:        FieldMapper has no self-consistency constraints - output is always dynamic.
+src/elspeth/plugins/transforms/field_mapper.py:93:        # No additional validation needed - FieldMapper always has dynamic output

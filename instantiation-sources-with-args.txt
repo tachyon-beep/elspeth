@@ -1,0 +1,1 @@
+src/elspeth/cli.py:1361:        null_source = NullSource({})
