@@ -2938,8 +2938,9 @@ class TestAggregationExecutorCheckpoint:
         state = executor.get_checkpoint_state()
         assert state == {}  # Empty buffers not included
 
-    def test_restore_from_checkpoint_restores_buffers(self) -> None:
-        """restore_from_checkpoint() restores buffer state."""
+    def test_restore_from_checkpoint_reconstructs_full_token_info(self) -> None:
+        """Restore reconstructs complete TokenInfo objects from checkpoint data."""
+        from elspeth.contracts import TokenInfo
         from elspeth.core.config import AggregationSettings, TriggerConfig
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.engine.executors import AggregationExecutor
@@ -2970,23 +2971,53 @@ class TestAggregationExecutorCheckpoint:
             aggregation_settings={agg_node.node_id: settings},
         )
 
-        # Simulate checkpoint state from previous run
+        # Checkpoint state with new format (full TokenInfo data)
         checkpoint_state = {
             agg_node.node_id: {
-                "rows": [{"value": 0}, {"value": 1}, {"value": 2}],
-                "token_ids": ["token-0", "token-1", "token-2"],
+                "tokens": [
+                    {
+                        "token_id": "token-101",
+                        "row_id": "row-1",
+                        "row_data": {"name": "Alice", "score": 95},
+                        "branch_name": "high_score",
+                    },
+                    {
+                        "token_id": "token-102",
+                        "row_id": "row-2",
+                        "row_data": {"name": "Bob", "score": 42},
+                        "branch_name": None,  # Optional field
+                    },
+                ],
                 "batch_id": "batch-123",
             }
         }
 
+        # Restore from checkpoint
         executor.restore_from_checkpoint(checkpoint_state)
 
-        # Buffer should be restored
-        buffered = executor.get_buffered_rows(agg_node.node_id)
-        assert len(buffered) == 3
-        assert buffered == [{"value": 0}, {"value": 1}, {"value": 2}]
+        # VERIFY: Full TokenInfo objects reconstructed
+        assert len(executor._buffer_tokens[agg_node.node_id]) == 2
 
-        # Batch ID should be restored
+        token1 = executor._buffer_tokens[agg_node.node_id][0]
+        assert isinstance(token1, TokenInfo)
+        assert token1.token_id == "token-101"
+        assert token1.row_id == "row-1"
+        assert token1.row_data == {"name": "Alice", "score": 95}
+        assert token1.branch_name == "high_score"
+
+        token2 = executor._buffer_tokens[agg_node.node_id][1]
+        assert isinstance(token2, TokenInfo)
+        assert token2.token_id == "token-102"
+        assert token2.row_id == "row-2"
+        assert token2.row_data == {"name": "Bob", "score": 42}
+        assert token2.branch_name is None
+
+        # VERIFY: _buffers also populated with row_data
+        assert len(executor._buffers[agg_node.node_id]) == 2
+        assert executor._buffers[agg_node.node_id][0] == {"name": "Alice", "score": 95}
+        assert executor._buffers[agg_node.node_id][1] == {"name": "Bob", "score": 42}
+
+        # VERIFY: batch_id restored
         assert executor.get_batch_id(agg_node.node_id) == "batch-123"
 
     def test_restore_from_checkpoint_restores_trigger_count(self) -> None:
@@ -3021,11 +3052,18 @@ class TestAggregationExecutorCheckpoint:
             aggregation_settings={agg_node.node_id: settings},
         )
 
-        # Simulate checkpoint state with 4 rows buffered
+        # Simulate checkpoint state with 4 rows buffered (new format)
         checkpoint_state = {
             agg_node.node_id: {
-                "rows": [{"value": i} for i in range(4)],
-                "token_ids": [f"token-{i}" for i in range(4)],
+                "tokens": [
+                    {
+                        "token_id": f"token-{i}",
+                        "row_id": f"row-{i}",
+                        "row_data": {"value": i},
+                        "branch_name": None,
+                    }
+                    for i in range(4)
+                ],
                 "batch_id": "batch-123",
             }
         }

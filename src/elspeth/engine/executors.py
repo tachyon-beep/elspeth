@@ -1138,36 +1138,77 @@ class AggregationExecutor:
         return state
 
     def restore_from_checkpoint(self, state: dict[str, Any]) -> None:
-        """Restore buffer state from checkpoint.
+        """Restore executor state from checkpoint.
 
-        Called during recovery to restore buffers from a previous
-        run's checkpoint. Also restores trigger evaluator counts.
+        Reconstructs full TokenInfo objects from checkpoint data, eliminating
+        database queries during restoration. Expects format from get_checkpoint_state().
 
         Args:
-            state: Dict from get_checkpoint_state() of previous run
+            state: Checkpoint state with format:
+                {
+                    "node_id": {
+                        "tokens": [{"token_id", "row_id", "branch_name", "row_data"}],
+                        "batch_id": str | None
+                    }
+                }
+
+        Raises:
+            ValueError: If checkpoint format is invalid (per CLAUDE.md - our data, full trust)
         """
         for node_id, node_state in state.items():
-            rows = node_state.get("rows", [])
+            # Validate checkpoint format (OUR DATA - crash on mismatch, don't hide with .get())
+            if "tokens" not in node_state:
+                raise ValueError(
+                    f"Invalid checkpoint format for node {node_id}: missing 'tokens' key. "
+                    f"Found keys: {list(node_state.keys())}. "
+                    f"Expected format: {{'tokens': [...], 'batch_id': str|None}}. "
+                    f"This checkpoint may be from an incompatible ELSPETH version."
+                )
+
+            tokens_data = node_state["tokens"]
+
+            # Validate tokens is a list
+            if not isinstance(tokens_data, list):
+                raise ValueError(f"Invalid checkpoint format for node {node_id}: 'tokens' must be a list, got {type(tokens_data).__name__}")
+
+            # Reconstruct TokenInfo objects directly from checkpoint
+            reconstructed_tokens = []
+            for t in tokens_data:
+                # Validate required fields (crash on missing - per CLAUDE.md)
+                required_fields = {"token_id", "row_id", "row_data"}
+                missing = required_fields - set(t.keys())
+                if missing:
+                    raise ValueError(
+                        f"Checkpoint token missing required fields: {missing}. Required: {required_fields}. Found: {set(t.keys())}"
+                    )
+
+                # Reconstruct with explicit handling of optional field
+                # branch_name is OPTIONAL per TokenInfo contract (default=None)
+                reconstructed_tokens.append(
+                    TokenInfo(
+                        row_id=t["row_id"],
+                        token_id=t["token_id"],
+                        row_data=t["row_data"],
+                        branch_name=t.get("branch_name"),  # Optional field, None if missing
+                    )
+                )
+
+            # Restore buffer state
+            self._buffer_tokens[node_id] = reconstructed_tokens
+            self._buffers[node_id] = [t.row_data for t in reconstructed_tokens]
+
+            # Restore batch tracking (batch_id is optional)
             batch_id = node_state.get("batch_id")
-
-            # Restore buffer (we don't store full TokenInfo, just rows)
-            self._buffers[node_id] = list(rows)
-
-            # Restore batch ID and member count
-            if batch_id:
+            if batch_id is not None:
                 self._batch_ids[node_id] = batch_id
-                self._member_counts[batch_id] = len(rows)
+                self._member_counts[batch_id] = len(reconstructed_tokens)
 
-            # Restore trigger evaluator count
+            # Restore trigger evaluator count (so next row triggers at correct count)
             evaluator = self._trigger_evaluators.get(node_id)
-            if evaluator:
-                for _ in range(len(rows)):
+            if evaluator is not None:
+                # Record each restored row as "accepted" to advance the count
+                for _ in reconstructed_tokens:
                     evaluator.record_accept()
-
-            # Note: We don't restore full TokenInfo objects - only token_ids
-            # are stored. The actual TokenInfo will be reconstructed if needed
-            # from the tokens table. Clear the list for now.
-            self._buffer_tokens[node_id] = []
 
     def get_batch_id(self, node_id: str) -> str | None:
         """Get current batch ID for an aggregation node.
