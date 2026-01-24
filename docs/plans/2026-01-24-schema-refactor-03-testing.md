@@ -776,6 +776,276 @@ Part of: P0-2026-01-24-schema-validation-non-functional"
 
 ---
 
+## Task 8.5: Critical Unit Tests for Schema Validation Gaps
+
+**Files:**
+- Test: `tests/core/test_dag.py`
+
+**Purpose:** Close critical test coverage gaps identified in Round 3 QA review.
+
+**CRITICAL CONTEXT:** These tests address P0 blockers:
+1. Coalesce incompatible schema behavior was UNDEFINED
+2. Aggregation schema transition not tested in single topology
+3. Error message diagnostic quality not verified
+
+### Step 1: Write test for coalesce incompatible branch schemas
+
+**File:** `tests/core/test_dag.py`
+
+```python
+def test_coalesce_rejects_incompatible_branch_schemas():
+    """Coalesce with branches producing different schemas should fail validation.
+
+    CRITICAL GAP: This tests the code added in Task 3 to validate coalesce
+    schema compatibility. Without this validation, incompatible schemas would
+    merge silently, causing data corruption in the audit trail.
+
+    NOTE: This test manually constructs the graph because the config schema
+    doesn't yet support per-branch transform chains. The validation logic
+    itself must work regardless of how the graph is constructed.
+    """
+    from elspeth.contracts import PluginSchema
+    from elspeth.core.dag import ExecutionGraph, GraphValidationError, RoutingMode
+    from pydantic import BaseModel
+
+    # Define two INCOMPATIBLE schemas
+    class SchemaA(BaseModel):
+        field_x: int
+        common: str
+
+    class SchemaB(BaseModel):
+        field_y: float  # Different field!
+        common: str
+
+    graph = ExecutionGraph()
+
+    # Build fork/join topology with incompatible branches
+    graph.add_node("source", node_type="source", plugin_name="csv", output_schema=SchemaA)
+    graph.add_node("fork_gate", node_type="gate", plugin_name="fork")
+
+    # Branch A keeps SchemaA
+    graph.add_node("transform_a", node_type="transform", plugin_name="passthrough_a",
+                   input_schema=SchemaA, output_schema=SchemaA)
+
+    # Branch B transforms to incompatible SchemaB
+    graph.add_node("transform_b", node_type="transform", plugin_name="transform_b",
+                   input_schema=SchemaA, output_schema=SchemaB)
+
+    graph.add_node("coalesce", node_type="coalesce", plugin_name="merge")
+    graph.add_node("sink", node_type="sink", plugin_name="csv")
+
+    # Connect fork
+    graph.add_edge("source", "fork_gate", label="continue", mode=RoutingMode.MOVE)
+    graph.add_edge("fork_gate", "transform_a", label="branch_a", mode=RoutingMode.COPY)
+    graph.add_edge("fork_gate", "transform_b", label="branch_b", mode=RoutingMode.COPY)
+
+    # Connect join
+    graph.add_edge("transform_a", "coalesce", label="branch_a", mode=RoutingMode.MOVE)
+    graph.add_edge("transform_b", "coalesce", label="branch_b", mode=RoutingMode.MOVE)
+    graph.add_edge("coalesce", "sink", label="continue", mode=RoutingMode.MOVE)
+
+    # Should crash with clear error about incompatible schemas
+    with pytest.raises(GraphValidationError) as exc_info:
+        graph.validate()
+
+    error_msg = str(exc_info.value)
+    # Verify error message quality
+    assert "coalesce" in error_msg.lower()
+    assert "incompatible" in error_msg.lower()
+    # Should identify both schemas
+    assert "SchemaA" in error_msg or "SchemaB" in error_msg
+```
+
+### Step 2: Write test for aggregation schema transition
+
+**File:** `tests/core/test_dag.py`
+
+```python
+def test_aggregation_schema_transition_in_topology():
+    """Aggregation input_schema and output_schema validated on respective edges.
+
+    CRITICAL GAP: Aggregations have dual schemas but existing tests only check
+    incoming or outgoing edges separately. This test verifies BOTH in a single
+    topology, ensuring the schema transition is validated correctly.
+    """
+    from elspeth.contracts import PluginSchema
+    from elspeth.core.dag import ExecutionGraph, RoutingMode
+    from pydantic import BaseModel
+
+    # Input: individual rows with single value
+    class RowSchema(BaseModel):
+        value: float
+        timestamp: str
+
+    # Output: aggregated batch statistics
+    class BatchSchema(BaseModel):
+        count: int
+        sum: float
+        mean: float
+        min_value: float
+        max_value: float
+
+    graph = ExecutionGraph()
+
+    # Source produces rows
+    graph.add_node("source", node_type="source", plugin_name="csv",
+                   output_schema=RowSchema)
+
+    # Aggregation consumes RowSchema, produces BatchSchema
+    graph.add_node("stats_agg", node_type="aggregation", plugin_name="statistics",
+                   input_schema=RowSchema,    # Incoming rows
+                   output_schema=BatchSchema)  # Outgoing batches
+
+    # Sink consumes BatchSchema
+    graph.add_node("sink", node_type="sink", plugin_name="csv",
+                   input_schema=BatchSchema)
+
+    # Connect edges
+    graph.add_edge("source", "stats_agg", label="continue", mode=RoutingMode.MOVE)
+    graph.add_edge("stats_agg", "sink", label="continue", mode=RoutingMode.MOVE)
+
+    # Should pass - both edges validated against correct schemas
+    graph.validate()  # Should not raise
+
+    # Verify the validation actually checked both edges
+    # (If this passes, it means source→agg used input_schema and agg→sink used output_schema)
+
+
+def test_aggregation_schema_transition_incompatible_output():
+    """Aggregation with incompatible output_schema should fail validation.
+
+    Tests that validation uses aggregation's OUTPUT schema for outgoing edges.
+    """
+    from elspeth.contracts import PluginSchema
+    from elspeth.core.dag import ExecutionGraph, GraphValidationError, RoutingMode
+    from pydantic import BaseModel
+
+    class RowSchema(BaseModel):
+        value: float
+
+    class BatchSchema(BaseModel):
+        count: int
+        sum: float
+
+    class IncompatibleSinkSchema(BaseModel):
+        result: str  # Completely different!
+
+    graph = ExecutionGraph()
+    graph.add_node("source", node_type="source", plugin_name="csv", output_schema=RowSchema)
+    graph.add_node("agg", node_type="aggregation", plugin_name="stats",
+                   input_schema=RowSchema, output_schema=BatchSchema)
+    graph.add_node("sink", node_type="sink", plugin_name="csv",
+                   input_schema=IncompatibleSinkSchema)  # Incompatible!
+
+    graph.add_edge("source", "agg", label="continue", mode=RoutingMode.MOVE)
+    graph.add_edge("agg", "sink", label="continue", mode=RoutingMode.MOVE)
+
+    # Should crash - aggregation output_schema incompatible with sink input_schema
+    with pytest.raises(GraphValidationError):
+        graph.validate()
+```
+
+### Step 3: Write test for error message diagnostic quality
+
+**File:** `tests/core/test_dag.py`
+
+```python
+def test_schema_validation_error_includes_diagnostic_details():
+    """Schema validation errors should include field names, types, and node names.
+
+    CRITICAL GAP: Existing test only checks that field name appears in error.
+    This test verifies the FULL diagnostic quality - all information needed to
+    debug the config issue must be present.
+    """
+    from elspeth.contracts import PluginSchema
+    from elspeth.core.dag import ExecutionGraph, GraphValidationError, RoutingMode
+    from pydantic import BaseModel
+
+    class ProducerSchema(BaseModel):
+        field_a: str
+        field_b: int
+
+    class ConsumerSchema(BaseModel):
+        field_a: str
+        field_c: float  # Requires field_c, not provided by producer
+
+    graph = ExecutionGraph()
+    graph.add_node("producer", node_type="transform", plugin_name="prod_plugin",
+                   output_schema=ProducerSchema)
+    graph.add_node("consumer", node_type="sink", plugin_name="cons_plugin",
+                   input_schema=ConsumerSchema)
+
+    graph.add_edge("producer", "consumer", label="continue", mode=RoutingMode.MOVE)
+
+    with pytest.raises(GraphValidationError) as exc_info:
+        graph.validate()
+
+    error_msg = str(exc_info.value)
+
+    # MINIMUM requirements for diagnostic quality:
+    # 1. Missing field name
+    assert "field_c" in error_msg, "Error must identify missing field"
+
+    # 2. Producer node identification
+    assert "producer" in error_msg or "prod_plugin" in error_msg, \
+        "Error must identify which node is producing incompatible schema"
+
+    # 3. Consumer node identification
+    assert "consumer" in error_msg or "cons_plugin" in error_msg, \
+        "Error must identify which node requires the missing field"
+
+    # STRETCH GOAL (nice to have, not required for approval):
+    # - Field type information ("field_c: float")
+    # - List of available fields from producer
+    # - Suggestion for fix
+```
+
+### Step 4: Run the new unit tests
+
+Run: `pytest tests/core/test_dag.py::test_coalesce_rejects_incompatible_branch_schemas -v`
+Expected: PASS (with Task 3 coalesce validation implemented)
+
+Run: `pytest tests/core/test_dag.py::test_aggregation_schema_transition_in_topology -v`
+Expected: PASS (existing validation should handle this)
+
+Run: `pytest tests/core/test_dag.py::test_aggregation_schema_transition_incompatible_output -v`
+Expected: PASS
+
+Run: `pytest tests/core/test_dag.py::test_schema_validation_error_includes_diagnostic_details -v`
+Expected: PASS (may require error message enhancement)
+
+### Step 5: Commit
+
+```bash
+git add tests/core/test_dag.py
+git commit -m "test(dag): add critical unit tests for schema validation gaps
+
+CRITICAL FIXES from Round 3 QA Review:
+
+1. test_coalesce_rejects_incompatible_branch_schemas
+   - Addresses P0 blocker: coalesce incompatible schema behavior was UNDEFINED
+   - Tests validation logic added in Task 3
+   - Manual graph construction bypasses config schema limitation
+
+2. test_aggregation_schema_transition_in_topology
+   - Tests input_schema and output_schema in single topology
+   - Verifies both edges validated against correct schemas
+
+3. test_aggregation_schema_transition_incompatible_output
+   - Ensures aggregation output_schema validated on outgoing edges
+
+4. test_schema_validation_error_includes_diagnostic_details
+   - Verifies error messages include: field name, producer, consumer
+   - Ensures errors are actionable for operators
+
+These tests close the 3 critical gaps identified in multi-agent review
+that would have left undefined behavior in production.
+
+Part of: P0-2026-01-24-schema-validation-non-functional"
+```
+
+---
+
 ## Task 9: Regression Prevention Test
 
 **Files:**

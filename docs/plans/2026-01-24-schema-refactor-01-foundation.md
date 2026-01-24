@@ -676,6 +676,45 @@ def from_plugin_instances(
                     mode=RoutingMode.MOVE
                 )
 
+    # ===== VALIDATE COALESCE SCHEMA COMPATIBILITY =====
+    # CRITICAL: Coalesce merges multiple fork branches - schemas must be compatible
+    # Addresses P0 blocker from Round 3 QA review
+    if coalesce_settings:
+        for coalesce_id in coalesce_ids.values():
+            # Get all incoming edges to this coalesce
+            incoming_edges = list(graph._graph.in_edges(coalesce_id, data=True, keys=True))
+
+            if len(incoming_edges) < 2:
+                # Coalesce with < 2 inputs is degenerate but valid (pass-through)
+                continue
+
+            # Extract schemas from all producers
+            incoming_schemas = []
+            for pred_id, _, _, edge_data in incoming_edges:
+                producer_schema = graph._get_effective_producer_schema(pred_id)
+                incoming_schemas.append((pred_id, producer_schema))
+
+            # Filter to only specific schemas (dynamic schemas are None)
+            specific_schemas = [
+                (node_id, schema)
+                for node_id, schema in incoming_schemas
+                if schema is not None
+            ]
+
+            # If we have 2+ specific schemas, they must be compatible
+            if len(specific_schemas) >= 2:
+                base_node_id, base_schema = specific_schemas[0]
+
+                for node_id, schema in specific_schemas[1:]:
+                    # Check schema compatibility
+                    if not _schemas_compatible(base_schema, schema):
+                        raise GraphValidationError(
+                            f"Coalesce node '{coalesce_id}' receives incompatible schemas. "
+                            f"Branch from '{base_node_id}' has schema {base_schema.__name__}, "
+                            f"but branch from '{node_id}' has schema {schema.__name__}. "
+                            f"All branches merging at a coalesce must have compatible schemas."
+                        )
+
     return graph
 ```
 

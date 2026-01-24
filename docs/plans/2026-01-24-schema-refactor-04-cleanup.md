@@ -281,10 +281,39 @@ gates:
 2. **Coalesce merge** validates that all incoming branch schemas are compatible
 3. **Fork without coalesce** validates each branch against its destination independently
 
+**Fork Branch Destination Fallback:**
+
+When a gate creates fork branches (via `fork_to` configuration), each branch must have a destination. The resolution order is:
+
+1. **Explicit coalesce mapping** - If the branch name is listed in a coalesce's `branches` list, it routes to that coalesce
+2. **Fallback to output_sink** - If the branch is NOT in any coalesce, it automatically routes to the configured `output_sink`
+3. **Validation error** - If neither exists (no coalesce, no output_sink), graph construction crashes with `GraphValidationError`
+
+**Example:**
+```python
+gates:
+  - name: categorize
+    fork_to: [high_priority, low_priority]
+
+coalesce:
+  branches: [high_priority]  # Only high_priority joins coalesce
+
+# Result:
+# - high_priority → coalesce (explicit)
+# - low_priority → output_sink (fallback)
+```
+
+**Design Rationale:** This fallback ensures all fork branches have a destination without requiring verbose configuration. Operators who expect fork branches to route ONLY to explicitly-named sinks should:
+- Use gate `routes` with explicit sink names instead of `fork_to`
+- Configure all fork branches in coalesce `branches` lists
+
+The validation error (case 3) prevents silent data loss from orphaned fork branches.
+
 **Critical invariants:**
 - Every fork branch must have a destination (coalesce or sink)
 - Coalesce validates incoming branch schema compatibility
 - Gates with continue routes must have a next node in sequence
+- Fork branches not in coalesce require configured output_sink (crashes if missing)
 
 ## Notes
 
