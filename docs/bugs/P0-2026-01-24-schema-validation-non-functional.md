@@ -1,3 +1,12 @@
+## ✅ RESOLVED
+
+**Status:** Fixed in RC-2
+**Resolution:** Architectural refactor - plugin instantiation moved before graph construction
+**Implementation:** See docs/plans/2026-01-24-schema-refactor-* (5 files)
+**ADR:** See docs/design/adr/003-schema-validation-lifecycle.md
+
+---
+
 # Bug Report: Schema validation is non-functional (architectural issue)
 
 ## Summary
