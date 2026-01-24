@@ -907,6 +907,9 @@ class ExecutionGraph:
             for route_label, target in gate_config.routes.items():
                 if target == "continue":
                     graph._route_resolution_map[(gid, route_label)] = "continue"
+                elif target == "fork":
+                    # Fork is a special routing mode - handled by fork_to branches
+                    graph._route_resolution_map[(gid, route_label)] = "fork"
                 else:
                     if target not in sink_ids:
                         raise GraphValidationError(f"Gate '{gate_config.name}' route '{route_label}' references unknown sink '{target}'")

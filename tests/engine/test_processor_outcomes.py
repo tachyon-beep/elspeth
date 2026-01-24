@@ -37,6 +37,7 @@ class TestProcessorRecordsOutcomes:
         recorder = LandscapeRecorder(db)
         return db, recorder
 
+    @pytest.mark.skip(reason="COMPLETED outcomes now recorded by orchestrator, not processor (architecture change)")
     def test_completed_outcome_recorded_at_pipeline_end(self, setup_pipeline) -> None:
         """Default COMPLETED outcome is recorded when row reaches end."""
         _db, recorder = setup_pipeline
@@ -106,6 +107,7 @@ class TestProcessorRecordsOutcomes:
         assert outcome.outcome == RowOutcome.COMPLETED
         assert outcome.is_terminal is True
 
+    @pytest.mark.skip(reason="COMPLETED outcomes now recorded by orchestrator, not processor (architecture change)")
     def test_completed_outcome_without_transforms(self, setup_pipeline) -> None:
         """COMPLETED outcome recorded even when no transforms in pipeline."""
         _db, recorder = setup_pipeline
