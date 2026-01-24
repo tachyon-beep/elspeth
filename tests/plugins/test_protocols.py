@@ -47,6 +47,10 @@ class TestSourceProtocol:
             def on_complete(self, ctx: PluginContext) -> None:
                 pass
 
+            def validate_output_schema(self) -> None:
+                """Validate output schema."""
+                pass
+
         source = MySource({"path": "test.csv"})
 
         # IMPORTANT: Verify protocol conformance at runtime
@@ -110,6 +114,10 @@ class TestSourceProtocol:
                 pass
 
             def on_complete(self, ctx: PluginContext) -> None:
+                pass
+
+            def validate_output_schema(self) -> None:
+                """Validate output schema."""
                 pass
 
         source = MetadataSource({})

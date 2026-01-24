@@ -1040,25 +1040,25 @@ allow_hits:
   # This is enforcement infrastructure for audit integrity.
   # ============================================================
 
-  - key: "plugins/base.py:R2:BaseTransform:__init_subclass__:wrapped_init:line=93"
+  - key: "plugins/base.py:R2:BaseTransform:__init_subclass__:wrapped_init:line=101"
     owner: "architecture"
     reason: "__init_subclass__ hook: verify validation was called during construction"
     safety: "Raises RuntimeError if validation wasn't called - fails fast, mandatory for audit integrity"
     expires: null  # Permanent - validation enforcement
 
-  - key: "plugins/base.py:R2:BaseGate:__init_subclass__:wrapped_init:line=231"
+  - key: "plugins/base.py:R2:BaseGate:__init_subclass__:wrapped_init:line=246"
     owner: "architecture"
     reason: "__init_subclass__ hook: verify validation was called during construction"
     safety: "Raises RuntimeError if validation wasn't called - fails fast, mandatory for audit integrity"
     expires: null  # Permanent - validation enforcement
 
-  - key: "plugins/base.py:R2:BaseSink:__init_subclass__:wrapped_init:line=370"
+  - key: "plugins/base.py:R2:BaseSink:__init_subclass__:wrapped_init:line=392"
     owner: "architecture"
     reason: "__init_subclass__ hook: verify validation was called during construction"
     safety: "Raises RuntimeError if validation wasn't called - fails fast, mandatory for audit integrity"
     expires: null  # Permanent - validation enforcement
 
-  - key: "plugins/base.py:R2:BaseSource:__init_subclass__:wrapped_init:line=494"
+  - key: "plugins/base.py:R2:BaseSource:__init_subclass__:wrapped_init:line=523"
     owner: "architecture"
     reason: "__init_subclass__ hook: verify validation was called during construction"
     safety: "Raises RuntimeError if validation wasn't called - fails fast, mandatory for audit integrity"

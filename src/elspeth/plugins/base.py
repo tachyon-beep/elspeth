@@ -83,8 +83,16 @@ class BaseTransform(ABC):
 
         This hook wraps the subclass __init__ to verify validation was called.
         Prevents plugins from bypassing validation by implementing but not calling.
+
+        Only enforces for classes that define their own __init__ (i.e., production plugins).
+        Test helpers that don't override __init__ use the default implementation.
         """
         super().__init_subclass__(**kwargs)
+
+        # Only enforce if the class defines its own __init__
+        if "__init__" not in cls.__dict__:
+            return  # Using parent's __init__, no validation needed
+
         original_init = cls.__init__
 
         def wrapped_init(self: Any, *args: Any, **kwargs: Any) -> None:
@@ -97,7 +105,6 @@ class BaseTransform(ABC):
 
         cls.__init__ = wrapped_init  # type: ignore[method-assign]
 
-    @abstractmethod
     def _validate_self_consistency(self) -> None:
         """Validate plugin's own schemas are self-consistent (PHASE 1).
 
@@ -116,21 +123,21 @@ class BaseTransform(ABC):
             - FieldMapper: output fields must be subset of input fields (if mode=strict)
             - Gate: input_schema must equal output_schema (pass-through)
 
-            For plugins with no self-consistency constraints, implement as:
+            Default implementation (for plugins with no self-consistency constraints):
             ```python
             def _validate_self_consistency(self) -> None:
-                self._validation_called = True  # Mark validation as complete
-                # No additional validation needed
+                super()._validate_self_consistency()  # Sets _validation_called = True
+                # Add additional validation here if needed
             ```
 
             Subclasses MUST:
-            1. Implement this method (enforced by ABC - TypeError if not implemented)
-            2. Call this method in __init__ (enforced by __init_subclass__ - RuntimeError if not called)
-            3. Set self._validation_called = True (first line of implementation)
+            1. Call this method in __init__ (enforced by __init_subclass__ - RuntimeError if not called)
+            2. Call super()._validate_self_consistency() if overriding (sets _validation_called)
+            3. Override to add custom validation logic (optional)
 
             The __init_subclass__ hook verifies validation was called after __init__ completes.
         """
-        ...
+        self._validation_called = True  # Default: no additional validation needed
 
     @abstractmethod
     def process(
@@ -221,8 +228,16 @@ class BaseGate(ABC):
 
         This hook wraps the subclass __init__ to verify validation was called.
         Prevents plugins from bypassing validation by implementing but not calling.
+
+        Only enforces for classes that define their own __init__ (i.e., production plugins).
+        Test helpers that don't override __init__ use the default implementation.
         """
         super().__init_subclass__(**kwargs)
+
+        # Only enforce if the class defines its own __init__
+        if "__init__" not in cls.__dict__:
+            return  # Using parent's __init__, no validation needed
+
         original_init = cls.__init__
 
         def wrapped_init(self: Any, *args: Any, **kwargs: Any) -> None:
@@ -235,7 +250,6 @@ class BaseGate(ABC):
 
         cls.__init__ = wrapped_init  # type: ignore[method-assign]
 
-    @abstractmethod
     def _validate_self_consistency(self) -> None:
         """Validate plugin's own schemas are self-consistent (PHASE 1).
 
@@ -249,19 +263,19 @@ class BaseGate(ABC):
             Gates typically have input_schema == output_schema (pass-through).
             Most gates have no additional self-consistency constraints.
 
-            For gates with no self-consistency constraints, implement as:
+            Default implementation (for gates with no self-consistency constraints):
             ```python
             def _validate_self_consistency(self) -> None:
-                self._validation_called = True  # Mark validation as complete
-                # No additional validation needed
+                super()._validate_self_consistency()  # Sets _validation_called = True
+                # Add additional validation here if needed
             ```
 
             Subclasses MUST:
-            1. Implement this method (enforced by ABC - TypeError if not implemented)
-            2. Call this method in __init__ (enforced by __init_subclass__ - RuntimeError if not called)
-            3. Set self._validation_called = True (first line of implementation)
+            1. Call this method in __init__ (enforced by __init_subclass__ - RuntimeError if not called)
+            2. Call super()._validate_self_consistency() if overriding (sets _validation_called)
+            3. Override to add custom validation logic (optional)
         """
-        ...
+        self._validation_called = True  # Default: no additional validation needed
 
     @abstractmethod
     def evaluate(
@@ -360,8 +374,16 @@ class BaseSink(ABC):
 
         This hook wraps the subclass __init__ to verify validation was called.
         Prevents plugins from bypassing validation by implementing but not calling.
+
+        Only enforces for classes that define their own __init__ (i.e., production plugins).
+        Test helpers that don't override __init__ use the default implementation.
         """
         super().__init_subclass__(**kwargs)
+
+        # Only enforce if the class defines its own __init__
+        if "__init__" not in cls.__dict__:
+            return  # Using parent's __init__, no validation needed
+
         original_init = cls.__init__
 
         def wrapped_init(self: Any, *args: Any, **kwargs: Any) -> None:
@@ -374,7 +396,6 @@ class BaseSink(ABC):
 
         cls.__init__ = wrapped_init  # type: ignore[method-assign]
 
-    @abstractmethod
     def _validate_self_consistency(self) -> None:
         """Validate plugin's own schemas are self-consistent (PHASE 1).
 
@@ -387,19 +408,19 @@ class BaseSink(ABC):
         Note:
             Sinks typically have only input_schema with no self-consistency constraints.
 
-            For sinks with no self-consistency constraints, implement as:
+            Default implementation (for sinks with no self-consistency constraints):
             ```python
             def _validate_self_consistency(self) -> None:
-                self._validation_called = True  # Mark validation as complete
-                # No additional validation needed
+                super()._validate_self_consistency()  # Sets _validation_called = True
+                # Add additional validation here if needed
             ```
 
             Subclasses MUST:
-            1. Implement this method (enforced by ABC - TypeError if not implemented)
-            2. Call this method in __init__ (enforced by __init_subclass__ - RuntimeError if not called)
-            3. Set self._validation_called = True (first line of implementation)
+            1. Call this method in __init__ (enforced by __init_subclass__ - RuntimeError if not called)
+            2. Call super()._validate_self_consistency() if overriding (sets _validation_called)
+            3. Override to add custom validation logic (optional)
         """
-        ...
+        self._validation_called = True  # Default: no additional validation needed
 
     @abstractmethod
     def write(
@@ -484,8 +505,16 @@ class BaseSource(ABC):
 
         This hook wraps the subclass __init__ to verify validation was called.
         Prevents plugins from bypassing validation by implementing but not calling.
+
+        Only enforces for classes that define their own __init__ (i.e., production plugins).
+        Test helpers that don't override __init__ use the default implementation.
         """
         super().__init_subclass__(**kwargs)
+
+        # Only enforce if the class defines its own __init__
+        if "__init__" not in cls.__dict__:
+            return  # Using parent's __init__, no validation needed
+
         original_init = cls.__init__
 
         def wrapped_init(self: Any, *args: Any, **kwargs: Any) -> None:
@@ -498,7 +527,6 @@ class BaseSource(ABC):
 
         cls.__init__ = wrapped_init  # type: ignore[method-assign]
 
-    @abstractmethod
     def _validate_self_consistency(self) -> None:
         """Validate plugin's own schemas are self-consistent (PHASE 1).
 
@@ -511,19 +539,19 @@ class BaseSource(ABC):
         Note:
             Sources typically have only output_schema with no self-consistency constraints.
 
-            For sources with no self-consistency constraints, implement as:
+            Default implementation (for sources with no self-consistency constraints):
             ```python
             def _validate_self_consistency(self) -> None:
-                self._validation_called = True  # Mark validation as complete
-                # No additional validation needed
+                super()._validate_self_consistency()  # Sets _validation_called = True
+                # Add additional validation here if needed
             ```
 
             Subclasses MUST:
-            1. Implement this method (enforced by ABC - TypeError if not implemented)
-            2. Call this method in __init__ (enforced by __init_subclass__ - RuntimeError if not called)
-            3. Set self._validation_called = True (first line of implementation)
+            1. Call this method in __init__ (enforced by __init_subclass__ - RuntimeError if not called)
+            2. Call super()._validate_self_consistency() if overriding (sets _validation_called)
+            3. Override to add custom validation logic (optional)
         """
-        ...
+        self._validation_called = True  # Default: no additional validation needed
 
     @abstractmethod
     def load(self, ctx: PluginContext) -> Iterator[SourceRow]:

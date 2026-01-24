@@ -13,22 +13,22 @@ class TestSchema(PluginSchema):
 
 
 def test_transform_must_implement_validation() -> None:
-    """Transforms that don't implement _validate_self_consistency should fail."""
+    """Transforms that don't call _validate_self_consistency should fail."""
 
     class BadTransform(BaseTransform):
-        """Transform that doesn't implement _validate_self_consistency."""
+        """Transform that doesn't call _validate_self_consistency."""
 
         def __init__(self, config: dict) -> None:
             super().__init__(config)
             self.input_schema = TestSchema
             self.output_schema = TestSchema
-            # BUG: Didn't implement abstract method _validate_self_consistency()
+            # BUG: Didn't call _validate_self_consistency()
 
         def process(self, row, ctx):
             return row
 
-    # This should raise TypeError at instantiation (abstract method not implemented)
-    with pytest.raises(TypeError, match=r"Can't instantiate abstract class.*_validate_self_consistency"):
+    # This should raise RuntimeError at instantiation (validation not called)
+    with pytest.raises(RuntimeError, match="did not call _validate_self_consistency"):
         BadTransform({})
 
 
@@ -85,7 +85,7 @@ def test_transform_must_call_validation_not_just_implement() -> None:
 def test_transform_cannot_bypass_validation_via_super_skip() -> None:
     """CRITICAL: Plugins cannot bypass validation by skipping super().__init__().
 
-    This test verifies that ABC enforcement works even if a plugin tries
+    This test verifies that enforcement works even if a plugin tries
     to bypass the base class __init__.
     """
 
@@ -98,13 +98,12 @@ def test_transform_cannot_bypass_validation_via_super_skip() -> None:
             self.input_schema = TestSchema
             self.output_schema = TestSchema
             # No _validate_self_consistency() call!
-            # And didn't implement the abstract method!
 
         def process(self, row, ctx):
             return row
 
-    # Should still fail - ABC catches this during class instantiation
-    with pytest.raises(TypeError, match="Can't instantiate abstract class"):
+    # Should still fail - __init_subclass__ hook catches this
+    with pytest.raises(RuntimeError, match="did not call _validate_self_consistency"):
         MaliciousTransform({})
 
 
@@ -124,11 +123,11 @@ def test_transform_validation_survives_multiple_inheritance() -> None:
             super().__init__(config)
             self.input_schema = TestSchema
             self.output_schema = TestSchema
-            # Forgot to implement _validate_self_consistency()!
+            # Forgot to call _validate_self_consistency()!
 
         def process(self, row, ctx):
             return row
 
-    # Should fail - ABC enforcement transcends multiple inheritance
-    with pytest.raises(TypeError, match="Can't instantiate abstract class"):
+    # Should fail - __init_subclass__ hook enforcement transcends multiple inheritance
+    with pytest.raises(RuntimeError, match="did not call _validate_self_consistency"):
         TransformWithMixin({})

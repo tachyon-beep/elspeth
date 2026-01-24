@@ -120,6 +120,7 @@ class TestBaseSink:
             def __init__(self, config: dict[str, Any]) -> None:
                 super().__init__(config)
                 self.rows: list[dict[str, Any]] = []
+                self._validate_self_consistency()
 
             def write(self, rows: list[dict[str, Any]], ctx: PluginContext) -> ArtifactDescriptor:
                 self.rows.extend(rows)
@@ -173,6 +174,7 @@ class TestBaseSink:
             def __init__(self, config: dict[str, Any]) -> None:
                 super().__init__(config)
                 self.rows: list[dict[str, Any]] = []
+                self._validate_self_consistency()
 
             def write(self, rows: list[dict[str, Any]], ctx: PluginContext) -> ArtifactDescriptor:
                 self.rows.extend(rows)
@@ -225,6 +227,7 @@ class TestBaseSource:
             def __init__(self, config: dict[str, Any]) -> None:
                 super().__init__(config)
                 self._data = config["data"]
+                self._validate_self_consistency()
 
             def load(self, ctx: PluginContext) -> Iterator[SourceRow]:
                 for _row in self._data:

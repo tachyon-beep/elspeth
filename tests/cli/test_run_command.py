@@ -537,10 +537,11 @@ landscape:
         )
 
     def test_validated_graph_has_consistent_node_ids(self, tmp_path: Path, plugin_manager) -> None:
-        """Validated graph node IDs match those recorded in Landscape.
+        """Node IDs are deterministic across graph rebuilds.
 
-        Ensures the graph passed to orchestrator.run() is the same instance
-        that was validated, not a rebuilt graph with different UUIDs.
+        Verifies that building a graph from the same config produces identical
+        node IDs. This is critical for checkpoint compatibility - resuming a
+        run requires matching node IDs between the checkpoint and rebuilt graph.
         """
         from sqlalchemy import select
 
@@ -594,8 +595,8 @@ landscape:
         # If _execute_pipeline() rebuilt the graph, these would be different UUIDs
         assert len(recorded_node_ids) > 0, "Expected nodes to be recorded in Landscape"
 
-        # Build graph from same config and verify UUIDs are different
-        # (proves that rebuilding produces different IDs)
+        # Build graph from same config and verify node IDs are identical
+        # (proves deterministic node ID generation)
         from elspeth.cli import load_settings
 
         config = load_settings(settings_file)
@@ -610,9 +611,8 @@ landscape:
         )
         rebuilt_node_ids = set(rebuilt_graph._graph.nodes())
 
-        # Node IDs should differ (due to UUID randomization)
-        assert recorded_node_ids != rebuilt_node_ids, (
-            "Rebuilding graph should produce different node IDs (UUIDs change). "
-            "This test verifies that the fix ensures the validated graph is executed, "
-            "not a rebuilt one."
+        # Node IDs should be identical (due to deterministic generation)
+        assert recorded_node_ids == rebuilt_node_ids, (
+            "Rebuilding graph should produce identical node IDs (deterministic generation). "
+            "This ensures checkpoint compatibility - same config = same node IDs."
         )
