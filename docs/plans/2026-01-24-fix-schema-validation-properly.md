@@ -576,7 +576,7 @@ git commit -m "refactor: remove schema validation from DAG layer
 
 ---
 
-## Task 2.5: Add Edge Compatibility Validation to ExecutionGraph
+## Task 2.5: Add Edge Compatibility Validation to ExecutionGraph ✅ COMPLETE
 
 **Goal:** ExecutionGraph validates schema compatibility during graph construction (not in primitive add_edge).
 
