@@ -95,3 +95,38 @@
 
 - Related issues/PRs: N/A
 - Related design docs: `docs/contracts/plugin-protocol.md`
+
+---
+
+## Resolution
+
+**Status:** RESOLVED (partially - gate routing fixed, aggregations pending)
+**Fixed in:** 2026-01-24
+**Commit:** 05fff54
+
+**Root Cause:**
+The edge-based validation was already implemented in `ExecutionGraph._validate_edge_schemas()`, but config-driven gates were added to the graph without `input_schema`/`output_schema` (via `from_config()` method). This caused validation to skip all edges involving gates (check: `if schema is None: continue`).
+
+**Fix Applied:**
+Added schema inheritance for gate nodes:
+1. Added `get_incoming_edges()` helper to walk backwards through graph
+2. Added `_get_effective_producer_schema()` to recursively resolve schema through gate chains
+   - Validates multi-input gates have compatible schemas (crashes if not)
+   - Crashes if gate has no incoming edges (graph construction bug per CLAUDE.md)
+3. Updated `_validate_edge_schemas()` to use effective schema instead of direct attribute access
+
+**Test Coverage:**
+- `test_get_incoming_edges_returns_edges_pointing_to_node` - helper method
+- `test_get_effective_producer_schema_walks_through_gates` - schema inheritance
+- `test_get_effective_producer_schema_crashes_on_gate_without_inputs` - crashes on our bugs
+- `test_get_effective_producer_schema_handles_chained_gates` - recursive resolution
+- `test_validate_edge_schemas_uses_effective_schema_for_gates` - end-to-end validation
+- `test_validate_edge_schemas_validates_all_fork_destinations` - fork gate coverage
+
+**Remaining Work:**
+- Aggregation nodes still lack schemas (separate bug needed)
+- Coalesce nodes still lack schemas (lower priority)
+
+**Follow-up Bugs:**
+- [ ] TODO: Create bug for aggregation schema support
+- [ ] TODO: Create bug for coalesce schema support
