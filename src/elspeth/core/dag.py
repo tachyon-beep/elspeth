@@ -241,6 +241,62 @@ class ExecutionGraph:
 
         return errors
 
+    def _get_effective_producer_schema(self, node_id: str) -> type[PluginSchema] | None:
+        """Get effective output schema for a node, walking through pass-through nodes.
+
+        Gates and other pass-through nodes don't transform data - they inherit
+        schema from their upstream producers. This method walks backwards through
+        the graph to find the nearest schema-carrying producer.
+
+        For gates with multiple incoming edges, all inputs must have compatible
+        schemas (crashes if not - this is a graph construction bug).
+
+        Args:
+            node_id: Node to get effective schema for
+
+        Returns:
+            Output schema type, or None if node has no schema and no upstream producers
+
+        Raises:
+            GraphValidationError: If gate has no incoming edges or multiple inputs
+                with incompatible schemas (graph construction bug)
+        """
+        node_info = self.get_node_info(node_id)
+
+        # If node has output_schema, return it directly
+        if node_info.output_schema is not None:
+            return node_info.output_schema
+
+        # Node has no schema - check if it's a pass-through type
+        if node_info.node_type == "gate":
+            # Gate passes data unchanged - inherit from upstream producer
+            incoming = self.get_incoming_edges(node_id)
+
+            if not incoming:
+                # Gate with no inputs is a graph construction bug - CRASH
+                raise GraphValidationError(f"Gate node '{node_id}' has no incoming edges - this indicates a bug in graph construction")
+
+            # Get effective schema from first input
+            first_schema = self._get_effective_producer_schema(incoming[0].from_node)
+
+            # For multi-input gates, verify all inputs have same schema
+            if len(incoming) > 1:
+                for edge in incoming[1:]:
+                    other_schema = self._get_effective_producer_schema(edge.from_node)
+                    if first_schema != other_schema:
+                        # Multi-input gates with incompatible schemas - CRASH
+                        raise GraphValidationError(
+                            f"Gate '{node_id}' receives incompatible schemas from "
+                            f"multiple inputs - this is a graph construction bug. "
+                            f"First input schema: {first_schema}, "
+                            f"Other input schema: {other_schema}"
+                        )
+
+            return first_schema
+
+        # Not a pass-through type and no schema - return None
+        return None
+
     def topological_order(self) -> list[str]:
         """Return nodes in topological order.
 

@@ -315,6 +315,29 @@ class TestExecutionGraphAccessors:
 
         assert incoming == []
 
+    def test_get_effective_producer_schema_walks_through_gates(self):
+        """_get_effective_producer_schema() recursively finds schema through gate chain."""
+        from elspeth.contracts import PluginSchema, RoutingMode
+        from elspeth.core.dag import ExecutionGraph
+
+        class OutputSchema(PluginSchema):
+            value: int
+
+        graph = ExecutionGraph()
+
+        # Build chain: source -> gate -> sink
+        graph.add_node("source", node_type="source", plugin_name="csv", output_schema=OutputSchema)
+        graph.add_node("gate", node_type="gate", plugin_name="config_gate:check")  # No schema
+        graph.add_node("sink", node_type="sink", plugin_name="csv")
+
+        graph.add_edge("source", "gate", label="continue", mode=RoutingMode.MOVE)
+        graph.add_edge("gate", "sink", label="flagged", mode=RoutingMode.MOVE)
+
+        # Gate's effective producer schema should be source's output schema
+        effective_schema = graph._get_effective_producer_schema("gate")
+
+        assert effective_schema == OutputSchema
+
 
 class TestExecutionGraphFromConfig:
     """Build ExecutionGraph from ElspethSettings."""
