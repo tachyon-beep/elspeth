@@ -1088,3 +1088,17 @@ allow_hits:
     reason: "Trust boundary: Azure API may not return all content categories (self_harm)"
     safety: "Graceful default to 0 (safe) - missing category is treated as 'not detected'"
     expires: null  # Permanent - intentional design
+
+  # ============================================================
+  # PLUGIN CONFIG VALIDATION SUBSYSTEM (Permanent)
+  # ============================================================
+  # PluginConfigValidator validates configs BEFORE instantiation by parsing
+  # Pydantic validation errors. The error dict structure comes from Pydantic
+  # (external library) and the 'input' field is optional.
+  # ============================================================
+
+  - key: "plugins/validation.py:R1:PluginConfigValidator:_extract_errors:line=120"
+    owner: "architecture"
+    reason: "Trust boundary: Pydantic error dict structure from external library - 'input' field is optional"
+    safety: "Graceful default to '<unknown>' - error message still produced with field and message"
+    expires: null  # Permanent - intentional design
