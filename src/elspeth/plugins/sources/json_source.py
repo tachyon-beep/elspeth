@@ -82,6 +82,17 @@ class JSONSource(BaseSource):
         # Set output_schema for protocol compliance
         self.output_schema = self._schema_class
 
+        # Validate self-consistency (PHASE 1)
+        self._validate_self_consistency()
+
+    def _validate_self_consistency(self) -> None:
+        """Validate JSONSource schemas are self-consistent.
+
+        JSONSource has no self-consistency constraints - only output_schema.
+        """
+        self._validation_called = True  # Mark validation as complete
+        # No additional validation needed - JSONSource has only output schema
+
     def load(self, ctx: PluginContext) -> Iterator[SourceRow]:
         """Load rows from JSON file.
 

@@ -175,6 +175,17 @@ class BaseLLMTransform(BaseTransform):
         self.input_schema = schema
         self.output_schema = schema
 
+        # Validate self-consistency (PHASE 1)
+        self._validate_self_consistency()
+
+    def _validate_self_consistency(self) -> None:
+        """Validate BaseLLMTransform schemas are self-consistent.
+
+        BaseLLMTransform has no self-consistency constraints (input == output by definition).
+        """
+        self._validation_called = True  # Mark validation as complete
+        # No additional validation needed - BaseLLMTransform has matching input/output schemas
+
     # name must be set by subclasses - this is enforced by BaseTransform
     # Example: name = "my_llm_transform"
 

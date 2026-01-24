@@ -81,6 +81,17 @@ class FieldMapper(BaseTransform):
             allow_coercion=False,
         )
 
+        # Validate self-consistency (PHASE 1)
+        self._validate_self_consistency()
+
+    def _validate_self_consistency(self) -> None:
+        """Validate FieldMapper schemas are self-consistent.
+
+        FieldMapper has no self-consistency constraints - output is always dynamic.
+        """
+        self._validation_called = True  # Mark validation as complete
+        # No additional validation needed - FieldMapper always has dynamic output
+
     def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
         """Apply field mapping to row.
 

@@ -781,30 +781,6 @@ allow_hits:
   # severity 0 (safe) to avoid false positives.
   # ============================================================
 
-  - key: "plugins/transforms/azure/content_safety.py:R1:AzureContentSafety:_check_thresholds:line=586"
-    owner: "architecture"
-    reason: "Trust boundary: Azure API may not return all content categories (hate)"
-    safety: "Graceful default to 0 (safe) - missing category is treated as 'not detected'"
-    expires: null  # Permanent - intentional design
-
-  - key: "plugins/transforms/azure/content_safety.py:R1:AzureContentSafety:_check_thresholds:line=590"
-    owner: "architecture"
-    reason: "Trust boundary: Azure API may not return all content categories (violence)"
-    safety: "Graceful default to 0 (safe) - missing category is treated as 'not detected'"
-    expires: null  # Permanent - intentional design
-
-  - key: "plugins/transforms/azure/content_safety.py:R1:AzureContentSafety:_check_thresholds:line=594"
-    owner: "architecture"
-    reason: "Trust boundary: Azure API may not return all content categories (sexual)"
-    safety: "Graceful default to 0 (safe) - missing category is treated as 'not detected'"
-    expires: null  # Permanent - intentional design
-
-  - key: "plugins/transforms/azure/content_safety.py:R1:AzureContentSafety:_check_thresholds:line=598"
-    owner: "architecture"
-    reason: "Trust boundary: Azure API may not return all content categories (self_harm)"
-    safety: "Graceful default to 0 (safe) - missing category is treated as 'not detected'"
-    expires: null  # Permanent - intentional design
-
 
   # ============================================================
   # AZURE PROMPT SHIELD TRANSFORM
@@ -1053,4 +1029,62 @@ allow_hits:
     owner: "architecture"
     reason: "Trust boundary: Pydantic model_config may not have 'extra' key (defaults to 'forbid')"
     safety: "Checking for dynamic schema marker - missing 'extra' key means not dynamic"
+    expires: null  # Permanent - intentional design
+
+  # ============================================================
+  # PLUGIN VALIDATION ENFORCEMENT (Permanent)
+  # ============================================================
+  # BaseTransform/BaseGate/BaseSink/BaseSource use __init_subclass__ hooks
+  # to verify subclasses call _validate_self_consistency(). The getattr()
+  # checks if _validation_called exists on the instance (set by validation method).
+  # This is enforcement infrastructure for audit integrity.
+  # ============================================================
+
+  - key: "plugins/base.py:R2:BaseTransform:__init_subclass__:wrapped_init:line=93"
+    owner: "architecture"
+    reason: "__init_subclass__ hook: verify validation was called during construction"
+    safety: "Raises RuntimeError if validation wasn't called - fails fast, mandatory for audit integrity"
+    expires: null  # Permanent - validation enforcement
+
+  - key: "plugins/base.py:R2:BaseGate:__init_subclass__:wrapped_init:line=231"
+    owner: "architecture"
+    reason: "__init_subclass__ hook: verify validation was called during construction"
+    safety: "Raises RuntimeError if validation wasn't called - fails fast, mandatory for audit integrity"
+    expires: null  # Permanent - validation enforcement
+
+  - key: "plugins/base.py:R2:BaseSink:__init_subclass__:wrapped_init:line=370"
+    owner: "architecture"
+    reason: "__init_subclass__ hook: verify validation was called during construction"
+    safety: "Raises RuntimeError if validation wasn't called - fails fast, mandatory for audit integrity"
+    expires: null  # Permanent - validation enforcement
+
+  - key: "plugins/base.py:R2:BaseSource:__init_subclass__:wrapped_init:line=494"
+    owner: "architecture"
+    reason: "__init_subclass__ hook: verify validation was called during construction"
+    safety: "Raises RuntimeError if validation wasn't called - fails fast, mandatory for audit integrity"
+    expires: null  # Permanent - validation enforcement
+
+  # Update line numbers for content_safety (lines shifted after ruff format)
+  - key: "plugins/transforms/azure/content_safety.py:R1:AzureContentSafety:_check_thresholds:line=597"
+    owner: "architecture"
+    reason: "Trust boundary: Azure API may not return all content categories (hate)"
+    safety: "Graceful default to 0 (safe) - missing category is treated as 'not detected'"
+    expires: null  # Permanent - intentional design
+
+  - key: "plugins/transforms/azure/content_safety.py:R1:AzureContentSafety:_check_thresholds:line=601"
+    owner: "architecture"
+    reason: "Trust boundary: Azure API may not return all content categories (violence)"
+    safety: "Graceful default to 0 (safe) - missing category is treated as 'not detected'"
+    expires: null  # Permanent - intentional design
+
+  - key: "plugins/transforms/azure/content_safety.py:R1:AzureContentSafety:_check_thresholds:line=605"
+    owner: "architecture"
+    reason: "Trust boundary: Azure API may not return all content categories (sexual)"
+    safety: "Graceful default to 0 (safe) - missing category is treated as 'not detected'"
+    expires: null  # Permanent - intentional design
+
+  - key: "plugins/transforms/azure/content_safety.py:R1:AzureContentSafety:_check_thresholds:line=609"
+    owner: "architecture"
+    reason: "Trust boundary: Azure API may not return all content categories (self_harm)"
+    safety: "Graceful default to 0 (safe) - missing category is treated as 'not detected'"
     expires: null  # Permanent - intentional design

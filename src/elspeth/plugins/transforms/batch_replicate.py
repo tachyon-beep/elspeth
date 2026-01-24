@@ -98,6 +98,17 @@ class BatchReplicate(BaseTransform):
         self.input_schema = schema
         self.output_schema = schema
 
+        # Validate self-consistency (PHASE 1)
+        self._validate_self_consistency()
+
+    def _validate_self_consistency(self) -> None:
+        """Validate BatchReplicate schemas are self-consistent.
+
+        BatchReplicate has no self-consistency constraints (input == output by definition).
+        """
+        self._validation_called = True  # Mark validation as complete
+        # No additional validation needed - BatchReplicate has matching input/output schemas
+
     def process(  # type: ignore[override]
         self, rows: list[dict[str, Any]], ctx: PluginContext
     ) -> TransformResult:

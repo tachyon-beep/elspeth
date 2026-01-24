@@ -97,6 +97,17 @@ class BatchStats(BaseTransform):
             allow_coercion=False,
         )
 
+        # Validate self-consistency (PHASE 1)
+        self._validate_self_consistency()
+
+    def _validate_self_consistency(self) -> None:
+        """Validate BatchStats schemas are self-consistent.
+
+        BatchStats has no self-consistency constraints - output is always dynamic.
+        """
+        self._validation_called = True  # Mark validation as complete
+        # No additional validation needed - BatchStats always has dynamic output
+
     @staticmethod
     def _try_convert_to_float(value: Any) -> float | None:
         """Try to convert a value to float, returning None if not possible."""

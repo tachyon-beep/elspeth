@@ -66,6 +66,17 @@ class PassThrough(BaseTransform):
         self.input_schema = schema
         self.output_schema = schema
 
+        # Validate self-consistency (PHASE 1)
+        self._validate_self_consistency()
+
+    def _validate_self_consistency(self) -> None:
+        """Validate PassThrough schemas are self-consistent.
+
+        PassThrough has no self-consistency constraints (input == output by definition).
+        """
+        self._validation_called = True  # Mark validation as complete
+        # No additional validation needed - PassThrough always has matching schemas
+
     def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
         """Return row unchanged (deep copy to prevent mutation).
 

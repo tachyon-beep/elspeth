@@ -104,10 +104,21 @@ class DatabaseSink(BaseSink):
         # Set input_schema for protocol compliance
         self.input_schema = self._schema_class
 
+        # Validate self-consistency (PHASE 1)
+        self._validate_self_consistency()
+
         self._engine: Engine | None = None
         self._table: Table | None = None
         self._metadata: MetaData | None = None
         self._table_replaced: bool = False  # Track if we've done the replace for this instance
+
+    def _validate_self_consistency(self) -> None:
+        """Validate DatabaseSink schemas are self-consistent.
+
+        DatabaseSink has no self-consistency constraints - only input_schema.
+        """
+        self._validation_called = True  # Mark validation as complete
+        # No additional validation needed - DatabaseSink has only input schema
 
     def _ensure_table(self, row: dict[str, Any]) -> None:
         """Create table, handling if_exists behavior.

@@ -114,6 +114,17 @@ class JSONExplode(BaseTransform):
             allow_coercion=False,
         )
 
+        # Validate self-consistency (PHASE 1)
+        self._validate_self_consistency()
+
+    def _validate_self_consistency(self) -> None:
+        """Validate JSONExplode schemas are self-consistent.
+
+        JSONExplode has no self-consistency constraints - output is always dynamic.
+        """
+        self._validation_called = True  # Mark validation as complete
+        # No additional validation needed - JSONExplode always has dynamic output
+
     def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
         """Explode array field into multiple rows.
 

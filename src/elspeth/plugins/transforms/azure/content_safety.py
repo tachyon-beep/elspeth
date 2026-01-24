@@ -161,6 +161,9 @@ class AzureContentSafety(BaseTransform):
         self.input_schema = schema
         self.output_schema = schema
 
+        # Validate self-consistency (PHASE 1)
+        self._validate_self_consistency()
+
         # Create own HTTP client (following OpenRouter pattern)
         # Single shared client since httpx.Client is stateless
         self._http_client: httpx.Client | None = None
@@ -181,6 +184,14 @@ class AzureContentSafety(BaseTransform):
         # Dynamic is_batch_aware based on pool_size
         # Set as instance attribute to override class attribute
         self.is_batch_aware = self._pool_size > 1
+
+    def _validate_self_consistency(self) -> None:
+        """Validate AzureContentSafety schemas are self-consistent.
+
+        AzureContentSafety has no self-consistency constraints (input == output by definition).
+        """
+        self._validation_called = True  # Mark validation as complete
+        # No additional validation needed - AzureContentSafety has matching input/output schemas
 
     def on_start(self, ctx: PluginContext) -> None:
         """Capture recorder reference for pooled execution.

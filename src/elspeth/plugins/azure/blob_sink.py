@@ -264,8 +264,19 @@ class AzureBlobSink(BaseSink):
         # Set input_schema for protocol compliance
         self.input_schema = self._schema_class
 
+        # Validate self-consistency (PHASE 1)
+        self._validate_self_consistency()
+
         # Lazy-loaded clients
         self._container_client: ContainerClient | None = None
+
+    def _validate_self_consistency(self) -> None:
+        """Validate AzureBlobSink schemas are self-consistent.
+
+        AzureBlobSink has no self-consistency constraints - only input_schema.
+        """
+        self._validation_called = True  # Mark validation as complete
+        # No additional validation needed - AzureBlobSink has only input schema
 
     def _get_container_client(self) -> ContainerClient:
         """Get or create the Azure container client.

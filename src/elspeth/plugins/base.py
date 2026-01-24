@@ -67,8 +67,70 @@ class BaseTransform(ABC):
     _on_error: str | None = None
 
     def __init__(self, config: dict[str, Any]) -> None:
-        """Initialize with configuration."""
+        """Initialize with configuration.
+
+        Args:
+            config: Plugin configuration
+
+        Raises:
+            ValueError: If schema configuration is invalid or incompatible
+        """
         self.config = config
+        self._validation_called = False
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        """Enforce that subclasses call _validate_self_consistency() in __init__.
+
+        This hook wraps the subclass __init__ to verify validation was called.
+        Prevents plugins from bypassing validation by implementing but not calling.
+        """
+        super().__init_subclass__(**kwargs)
+        original_init = cls.__init__
+
+        def wrapped_init(self: Any, *args: Any, **kwargs: Any) -> None:
+            original_init(self, *args, **kwargs)
+            # __init_subclass__ hook: Verify validation was called (R2 allowlisted)
+            if not getattr(self, "_validation_called", False):
+                raise RuntimeError(
+                    f"{cls.__name__}.__init__ did not call _validate_self_consistency(). Validation is mandatory for audit integrity."
+                )
+
+        cls.__init__ = wrapped_init  # type: ignore[method-assign]
+
+    @abstractmethod
+    def _validate_self_consistency(self) -> None:
+        """Validate plugin's own schemas are self-consistent (PHASE 1).
+
+        Called by subclass __init__ after setting schemas. This is SELF-validation
+        only - checking that the plugin's own configuration makes sense.
+
+        Raises:
+            ValueError: If schemas are internally inconsistent
+
+        Note:
+            This is NOT about compatibility with OTHER plugins. That happens in
+            PHASE 2 during ExecutionGraph.from_plugin_instances().
+
+            Examples of self-consistency checks:
+            - PassThrough: input_schema must equal output_schema
+            - FieldMapper: output fields must be subset of input fields (if mode=strict)
+            - Gate: input_schema must equal output_schema (pass-through)
+
+            For plugins with no self-consistency constraints, implement as:
+            ```python
+            def _validate_self_consistency(self) -> None:
+                self._validation_called = True  # Mark validation as complete
+                # No additional validation needed
+            ```
+
+            Subclasses MUST:
+            1. Implement this method (enforced by ABC - TypeError if not implemented)
+            2. Call this method in __init__ (enforced by __init_subclass__ - RuntimeError if not called)
+            3. Set self._validation_called = True (first line of implementation)
+
+            The __init_subclass__ hook verifies validation was called after __init__ completes.
+        """
+        ...
 
     @abstractmethod
     def process(
@@ -143,8 +205,63 @@ class BaseGate(ABC):
     plugin_version: str = "0.0.0"
 
     def __init__(self, config: dict[str, Any]) -> None:
-        """Initialize with configuration."""
+        """Initialize with configuration.
+
+        Args:
+            config: Plugin configuration
+
+        Raises:
+            ValueError: If schema configuration is invalid or incompatible
+        """
         self.config = config
+        self._validation_called = False
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        """Enforce that subclasses call _validate_self_consistency() in __init__.
+
+        This hook wraps the subclass __init__ to verify validation was called.
+        Prevents plugins from bypassing validation by implementing but not calling.
+        """
+        super().__init_subclass__(**kwargs)
+        original_init = cls.__init__
+
+        def wrapped_init(self: Any, *args: Any, **kwargs: Any) -> None:
+            original_init(self, *args, **kwargs)
+            # __init_subclass__ hook: Verify validation was called (R2 allowlisted)
+            if not getattr(self, "_validation_called", False):
+                raise RuntimeError(
+                    f"{cls.__name__}.__init__ did not call _validate_self_consistency(). Validation is mandatory for audit integrity."
+                )
+
+        cls.__init__ = wrapped_init  # type: ignore[method-assign]
+
+    @abstractmethod
+    def _validate_self_consistency(self) -> None:
+        """Validate plugin's own schemas are self-consistent (PHASE 1).
+
+        Called by subclass __init__ after setting schemas. This is SELF-validation
+        only - checking that the plugin's own configuration makes sense.
+
+        Raises:
+            ValueError: If schemas are internally inconsistent
+
+        Note:
+            Gates typically have input_schema == output_schema (pass-through).
+            Most gates have no additional self-consistency constraints.
+
+            For gates with no self-consistency constraints, implement as:
+            ```python
+            def _validate_self_consistency(self) -> None:
+                self._validation_called = True  # Mark validation as complete
+                # No additional validation needed
+            ```
+
+            Subclasses MUST:
+            1. Implement this method (enforced by ABC - TypeError if not implemented)
+            2. Call this method in __init__ (enforced by __init_subclass__ - RuntimeError if not called)
+            3. Set self._validation_called = True (first line of implementation)
+        """
+        ...
 
     @abstractmethod
     def evaluate(
@@ -227,8 +344,62 @@ class BaseSink(ABC):
     plugin_version: str = "0.0.0"
 
     def __init__(self, config: dict[str, Any]) -> None:
-        """Initialize with configuration."""
+        """Initialize with configuration.
+
+        Args:
+            config: Plugin configuration
+
+        Raises:
+            ValueError: If schema configuration is invalid or incompatible
+        """
         self.config = config
+        self._validation_called = False
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        """Enforce that subclasses call _validate_self_consistency() in __init__.
+
+        This hook wraps the subclass __init__ to verify validation was called.
+        Prevents plugins from bypassing validation by implementing but not calling.
+        """
+        super().__init_subclass__(**kwargs)
+        original_init = cls.__init__
+
+        def wrapped_init(self: Any, *args: Any, **kwargs: Any) -> None:
+            original_init(self, *args, **kwargs)
+            # __init_subclass__ hook: Verify validation was called (R2 allowlisted)
+            if not getattr(self, "_validation_called", False):
+                raise RuntimeError(
+                    f"{cls.__name__}.__init__ did not call _validate_self_consistency(). Validation is mandatory for audit integrity."
+                )
+
+        cls.__init__ = wrapped_init  # type: ignore[method-assign]
+
+    @abstractmethod
+    def _validate_self_consistency(self) -> None:
+        """Validate plugin's own schemas are self-consistent (PHASE 1).
+
+        Called by subclass __init__ after setting schemas. This is SELF-validation
+        only - checking that the plugin's own configuration makes sense.
+
+        Raises:
+            ValueError: If schemas are internally inconsistent
+
+        Note:
+            Sinks typically have only input_schema with no self-consistency constraints.
+
+            For sinks with no self-consistency constraints, implement as:
+            ```python
+            def _validate_self_consistency(self) -> None:
+                self._validation_called = True  # Mark validation as complete
+                # No additional validation needed
+            ```
+
+            Subclasses MUST:
+            1. Implement this method (enforced by ABC - TypeError if not implemented)
+            2. Call this method in __init__ (enforced by __init_subclass__ - RuntimeError if not called)
+            3. Set self._validation_called = True (first line of implementation)
+        """
+        ...
 
     @abstractmethod
     def write(
@@ -297,8 +468,62 @@ class BaseSource(ABC):
     plugin_version: str = "0.0.0"
 
     def __init__(self, config: dict[str, Any]) -> None:
-        """Initialize with configuration."""
+        """Initialize with configuration.
+
+        Args:
+            config: Plugin configuration
+
+        Raises:
+            ValueError: If schema configuration is invalid or incompatible
+        """
         self.config = config
+        self._validation_called = False
+
+    def __init_subclass__(cls, **kwargs: Any) -> None:
+        """Enforce that subclasses call _validate_self_consistency() in __init__.
+
+        This hook wraps the subclass __init__ to verify validation was called.
+        Prevents plugins from bypassing validation by implementing but not calling.
+        """
+        super().__init_subclass__(**kwargs)
+        original_init = cls.__init__
+
+        def wrapped_init(self: Any, *args: Any, **kwargs: Any) -> None:
+            original_init(self, *args, **kwargs)
+            # __init_subclass__ hook: Verify validation was called (R2 allowlisted)
+            if not getattr(self, "_validation_called", False):
+                raise RuntimeError(
+                    f"{cls.__name__}.__init__ did not call _validate_self_consistency(). Validation is mandatory for audit integrity."
+                )
+
+        cls.__init__ = wrapped_init  # type: ignore[method-assign]
+
+    @abstractmethod
+    def _validate_self_consistency(self) -> None:
+        """Validate plugin's own schemas are self-consistent (PHASE 1).
+
+        Called by subclass __init__ after setting schemas. This is SELF-validation
+        only - checking that the plugin's own configuration makes sense.
+
+        Raises:
+            ValueError: If schemas are internally inconsistent
+
+        Note:
+            Sources typically have only output_schema with no self-consistency constraints.
+
+            For sources with no self-consistency constraints, implement as:
+            ```python
+            def _validate_self_consistency(self) -> None:
+                self._validation_called = True  # Mark validation as complete
+                # No additional validation needed
+            ```
+
+            Subclasses MUST:
+            1. Implement this method (enforced by ABC - TypeError if not implemented)
+            2. Call this method in __init__ (enforced by __init_subclass__ - RuntimeError if not called)
+            3. Set self._validation_called = True (first line of implementation)
+        """
+        ...
 
     @abstractmethod
     def load(self, ctx: PluginContext) -> Iterator[SourceRow]:
