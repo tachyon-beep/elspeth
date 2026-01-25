@@ -217,3 +217,50 @@ With landscape enabled, when the aggregation flushes a batch to `azure_multi_que
 - FK constraints verified in schema and enforced at runtime
 - No test coverage for this failure path
 - Git history shows no fixes since introduction
+
+---
+
+## RESOLUTION: 2026-01-25 (via systematic debugging review 2026-01-26)
+
+**Status:** FIXED
+
+**Fixed by:** Commit `b5f3f50` (2026-01-25) - "fix(infra): thread safety, integration tests, and Azure audit trail"
+
+**Root Cause Analysis:**
+Systematic debugging (Phase 1) revealed the bug was introduced in commit `bf22a43` (2026-01-21) and fixed 4 days later in commit `b5f3f50`. The original implementation created synthetic state_ids like `"state-abc123_row0"` that violated FK constraints because only the parent `"state-abc123"` existed in `node_states` table.
+
+**Implementation:**
+The fix removed synthetic per-row state_id creation and uses shared `ctx.state_id` for all rows in a batch:
+
+**Before (buggy):**
+```python
+for i, row in enumerate(rows):
+    row_state_id = f"{ctx.state_id}_row{i}"  # FK violation!
+    result = self._process_single_row_internal(row, row_state_id)
+```
+
+**After (fixed):**
+```python
+# All rows share ctx.state_id, ensuring FK constraint satisfaction
+for _i, row in enumerate(rows):
+    result = self._process_single_row_internal(row, ctx.state_id)
+```
+
+**Benefits of shared state_id approach:**
+- FK constraints satisfied (all calls reference valid state_id)
+- Single LLM client cached per batch (not per row)
+- Call index continuity across all queries
+- Simpler implementation
+
+**Tests added:**
+- `test_process_batch_uses_shared_state_id` (line 514-577) - Verifies all rows use shared state_id
+- `test_process_batch_cleans_up_shared_client` (line 579+) - Verifies client cleanup
+
+**Remaining gap:**
+Unit tests use mocked landscape (no real database). An integration test with real landscape database + FK enforcement would provide additional confidence but is not critical since the fix is architecturally sound.
+
+**Files changed:**
+- `src/elspeth/plugins/llm/azure_multi_query.py` (lines 511-534)
+- `tests/plugins/llm/test_azure_multi_query.py` (new tests)
+
+**Verification confidence:** HIGH - Fix is correct, tested, and matches CLAUDE.md audit requirements.

@@ -103,12 +103,96 @@ EXTERNAL DATA              PIPELINE DATA              AUDIT TRAIL
     is allowed                 (values can still fail)
 ```
 
+### External Call Boundaries in Transforms
+
+**CRITICAL:** Trust tiers are about **data flows**, not plugin types. **Any data crossing from an external system is Tier 3**, regardless of which plugin makes the call.
+
+Transforms that make external calls (LLM APIs, HTTP requests, database queries) create **mini Tier 3 boundaries** within their implementation:
+
+```python
+def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+    # row enters as Tier 2 (pipeline data - trust the schema)
+
+    # External call creates Tier 3 boundary
+    try:
+        llm_response = self._llm_client.query(prompt)  # EXTERNAL DATA - zero trust
+    except Exception as e:
+        return TransformResult.error({"reason": "llm_call_failed", "error": str(e)})
+
+    # IMMEDIATELY validate at the boundary - don't let "their data" travel
+    try:
+        parsed = json.loads(llm_response.content)
+    except json.JSONDecodeError:
+        return TransformResult.error({"reason": "invalid_json", "raw": llm_response.content[:200]})
+
+    # Validate structure type IMMEDIATELY
+    if not isinstance(parsed, dict):
+        return TransformResult.error({
+            "reason": "invalid_json_type",
+            "expected": "object",
+            "actual": type(parsed).__name__
+        })
+
+    # NOW it's our data (Tier 2) - add to row and continue
+    row["llm_classification"] = parsed["category"]  # Safe - validated above
+    return TransformResult.success(row)
+```
+
+**The rule: Minimize the distance external data travels before you validate it.**
+
+- ✅ **Validate immediately** - right after the external call returns
+- ✅ **Coerce once** - normalize types at the boundary
+- ✅ **Trust thereafter** - once validated, it's Tier 2 pipeline data
+- ❌ **Don't carry raw external data** - passing `llm_response` to helper methods without validation
+- ❌ **Don't defer validation** - "I'll check it later when I use it"
+- ❌ **Don't validate multiple times** - if it's validated once, trust it
+
+**Common external boundaries in transforms:**
+
+| External Call Type | Tier 3 Boundary | Validation Pattern |
+|-------------------|-----------------|-------------------|
+| LLM API response | Response content | Wrap JSON parse, validate type is dict, check required fields |
+| HTTP API response | Response body | Wrap request, validate status code, parse and validate schema |
+| Database query results | Result rows | Validate row structure, handle missing fields, coerce types |
+| File reads (in transform) | File contents | Same validation as source plugins |
+| Message queue consume | Message payload | Parse format, validate schema, quarantine malformed messages |
+
+**Example from azure_multi_query_llm.py** (the correct pattern):
+
+```python
+# Line 227-236: External call (Tier 3 boundary created)
+try:
+    response = await self._llm_executor.execute_llm_call(...)
+except Exception as e:
+    return TransformResult.error(...)  # Wrapped immediately
+
+# Line 241-251: IMMEDIATE validation at boundary
+try:
+    parsed = json.loads(response.content)
+except json.JSONDecodeError:
+    return TransformResult.error(...)  # Can't parse - reject immediately
+
+# Line 253-263: Structure type validation (defense against non-dict JSON)
+if not isinstance(parsed, dict):
+    return TransformResult.error({
+        "reason": "invalid_json_type",
+        "expected": "object",
+        "actual": type(parsed).__name__
+    })
+
+# Line 266-274: NOW safe to use - it's validated Tier 2 data
+output[output_key] = parsed[json_field]  # No defensive .get() needed
+```
+
+From this point forward, `parsed` is treated as Tier 2 pipeline data. No more validation. No `.get()` calls. We trust it because we validated it at the boundary.
+
 ### Coercion Rules by Plugin Type
 
 | Plugin Type | Coercion Allowed? | Rationale |
 |-------------|-------------------|-----------|
 | **Source** | ✅ Yes | Normalizes external data at ingestion boundary |
-| **Transform** | ❌ No | Receives validated data; wrong types = upstream bug |
+| **Transform (on row)** | ❌ No | Receives validated data; wrong types = upstream bug |
+| **Transform (on external call)** | ✅ Yes | External response is Tier 3 - validate/coerce immediately |
 | **Sink** | ❌ No | Receives validated data; wrong types = upstream bug |
 
 ### Operation Wrapping Rules
@@ -117,14 +201,19 @@ EXTERNAL DATA              PIPELINE DATA              AUDIT TRAIL
 |----------------------|---------------------|-----|
 | `self._config.field` | ❌ No | Our code, our config - crash on bug |
 | `self._internal_state` | ❌ No | Our code - crash on bug |
+| `landscape.get_row_state(token_id)` | ❌ No | Our data - crash on corruption |
 | `row["field"]` arithmetic/parsing | ✅ Yes | Their data values can fail operations |
 | `external_api.call(row["id"])` | ✅ Yes | External system, anything can happen |
+| `json.loads(external_response)` | ✅ Yes | External data - validate immediately |
+| `validated_dict["field"]` | ❌ No | Already validated at boundary - trust it |
 
 **Rule of thumb:**
 
-- Reading from Landscape tables? Crash on any anomaly.
-- Operating on row field values? Wrap, return error result, quarantine row.
-- Accessing internal state? Let it crash - that's a bug to fix.
+- **Reading from Landscape tables?** Crash on any anomaly - it's our data.
+- **Operating on row field values?** Wrap operations, return error result, quarantine row.
+- **Calling external systems?** Wrap call AND validate response immediately at boundary.
+- **Using already-validated external data?** Trust it - no defensive `.get()` needed.
+- **Accessing internal state?** Let it crash - that's a bug to fix.
 
 ## Plugin Ownership: System Code, Not User Code
 
