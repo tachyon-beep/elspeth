@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import base64
 import time
 from typing import TYPE_CHECKING, Any
 
@@ -156,9 +157,10 @@ class AuditedHTTPClient(AuditedClientBase):
             latency_ms = (time.perf_counter() - start) * 1000
 
             # Build response data with full body for audit trail
-            # Try to decode as JSON for structured storage, fall back to text
+            # Try JSON first, then text, then binary (no truncation - payload store handles size)
             response_body: Any = None
             content_type = response.headers.get("content-type", "")
+
             if "application/json" in content_type:
                 try:
                     response_body = response.json()
@@ -166,8 +168,17 @@ class AuditedHTTPClient(AuditedClientBase):
                     # If JSON decode fails, store as text
                     response_body = response.text
             else:
-                # For non-JSON, store text (truncated for very large responses)
-                response_body = response.text[:100_000] if len(response.text) > 100_000 else response.text
+                # For non-JSON, detect text vs binary content
+                # Text content types: text/*, application/xml, application/x-www-form-urlencoded
+                is_text_content = content_type.startswith("text/") or "xml" in content_type or "form-urlencoded" in content_type
+
+                if is_text_content:
+                    # Store full text (payload store auto-persist handles large responses)
+                    response_body = response.text
+                else:
+                    # Store binary content as base64 for JSON serialization
+                    # This handles images, PDFs, and other binary formats
+                    response_body = {"_binary": base64.b64encode(response.content).decode("ascii")}
 
             # Determine status based on HTTP response code
             # 2xx = SUCCESS, 4xx/5xx = ERROR (audit must reflect what application sees)

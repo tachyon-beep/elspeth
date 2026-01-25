@@ -142,3 +142,57 @@ The fix needs to:
 ### Architectural Notes
 
 The payload store pattern is correctly implemented in `LandscapeRecorder` - the HTTP client just needs to trust it and pass full responses instead of pre-truncating them. The truncation defeats the entire purpose of the payload store architecture.
+
+## Resolution (2026-01-26)
+
+**Status: FIXED**
+
+### Root Cause
+
+HTTP client truncated non-JSON responses to 100,000 characters before passing them to `record_call()`, which defeated the payload store auto-persist mechanism already implemented in `LandscapeRecorder` (lines 2216-2226 in `recorder.py`).
+
+The commit message for `b9a7bfa` claimed "The payload store (via record_call auto-persist) handles large bodies" but the implementation truncated responses before the payload store could see them - indicating incomplete understanding of the payload store architecture during implementation.
+
+**Secondary issue**: Binary responses (images, PDFs) would fail because code called `response.text` which attempts UTF-8 decoding on binary data.
+
+### Fix Applied
+
+**Removed truncation completely** - let payload store auto-persist handle large responses as designed.
+
+**Added content-type detection** to distinguish:
+- JSON responses: parsed as `dict` (unchanged)
+- Text responses: stored as full `str` (no truncation)
+- Binary responses: base64-encoded as `{"_binary": "<base64>"}` for JSON serialization
+
+**Pattern alignment**: LLM client already used this pattern (no truncation, trust payload store). HTTP client now follows the same approach.
+
+### Changes
+
+**Modified files:**
+- `src/elspeth/plugins/clients/http.py` (lines 159-185)
+  - Added `import base64`
+  - Removed truncation at 100KB limit
+  - Added content-type detection (text vs binary)
+  - Binary responses encoded as base64 for canonical JSON
+
+- `tests/plugins/clients/test_audited_http_client.py` (added 3 tests)
+  - `test_large_text_response_not_truncated` - 150KB text response
+  - `test_large_json_response_not_truncated` - >100KB JSON response
+  - `test_binary_response_recorded_as_base64` - PNG image response
+
+### Test Results
+
+**Before fix:**
+- ❌ Large text test FAILED - truncated to 100,000 chars
+- ✅ Large JSON test PASSED - bug only affected non-JSON
+- ❌ Binary test FAILED - called `.text` on binary data
+
+**After fix:**
+- ✅ All 3 new tests PASS
+- ✅ All 23 HTTP client tests PASS (no regressions)
+- ✅ Full test suite: 3,563 passed, 0 failures
+
+### Commit
+
+- Hash: (pending)
+- Message: "fix(http): remove response truncation, add binary support"
