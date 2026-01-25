@@ -163,3 +163,127 @@ Examined test files that reference `call_index`:
 3. **Architectural alignment**: Eliminate Pattern 2 (transform-owned counters) in favor of consistent PluginContext mechanism
 
 The bug report's proposed fix remains valid and should be implemented before any transform attempts to use multiple client types.
+
+---
+
+## RESOLUTION: 2026-01-26
+
+**Status:** FIXED
+
+**Fixed by:** Claude Code (fix/rc1-bug-burndown-session-5)
+
+**Implementation:**
+
+Centralized call_index allocation in `LandscapeRecorder` to ensure UNIQUE(state_id, call_index) across all client types and retry attempts.
+
+### Files Changed
+
+1. **`src/elspeth/core/landscape/recorder.py`**
+   - Added `_call_indices: dict[str, int]` and `_call_index_lock` to `__init__`
+   - Added `allocate_call_index(state_id)` method for centralized allocation
+
+2. **`src/elspeth/plugins/clients/base.py`**
+   - Removed per-instance `_call_index` and `_call_index_lock` fields
+   - Refactored `_next_call_index()` to delegate to `recorder.allocate_call_index()`
+
+### Code Evidence
+
+**Before (per-client counters - BUGGY):**
+```python
+class AuditedClientBase:
+    def __init__(self, recorder, state_id):
+        self._recorder = recorder
+        self._state_id = state_id
+        self._call_index = 0  # ❌ Per-client counter
+        self._call_index_lock = Lock()
+
+    def _next_call_index(self) -> int:
+        with self._call_index_lock:
+            idx = self._call_index
+            self._call_index += 1
+            return idx  # ❌ Independent counters collide
+```
+
+**After (centralized allocation - FIXED):**
+```python
+# In LandscapeRecorder
+class LandscapeRecorder:
+    def __init__(self, db, *, payload_store=None):
+        self._db = db
+        self._payload_store = payload_store
+        self._call_indices: dict[str, int] = {}  # ✅ Per-state_id counter
+        self._call_index_lock = Lock()
+
+    def allocate_call_index(self, state_id: str) -> int:
+        """Centralized allocation - single source of truth."""
+        with self._call_index_lock:
+            if state_id not in self._call_indices:
+                self._call_indices[state_id] = 0
+            idx = self._call_indices[state_id]
+            self._call_indices[state_id] += 1
+            return idx  # ✅ Coordinated across all clients
+
+# In AuditedClientBase
+class AuditedClientBase:
+    def __init__(self, recorder, state_id):
+        self._recorder = recorder
+        self._state_id = state_id
+        # ✅ NO per-instance counter
+
+    def _next_call_index(self) -> int:
+        """Delegate to recorder - ensures coordination."""
+        return self._recorder.allocate_call_index(self._state_id)
+```
+
+### Why This Fix Works
+
+**Scope Alignment:**
+- Database constraint: `UNIQUE(state_id, call_index)` - persistent per state_id
+- LandscapeRecorder: Per-state_id counter - matches database scope ✅
+- Lifecycle: Recorder persists across retries within same run ✅
+
+**Cross-client coordination:**
+```python
+# Scenario: Transform uses both HTTP and LLM clients
+http_client = AuditedHTTPClient(recorder, state_id="state-001")
+llm_client = AuditedLLMClient(recorder, state_id="state-001")
+
+http_client.post(...)  # recorder.allocate_call_index("state-001") → 0
+llm_client.query(...)   # recorder.allocate_call_index("state-001") → 1 ✅
+
+# Both share the same recorder's counter for state-001
+# No collision on (state-001, call_index) ✅
+```
+
+**Retry preservation:**
+```python
+# Attempt 1: state_id="state-001"
+client.post(...)  # allocate → 0, fails with 429
+
+# Retry (same state_id, same recorder)
+client.post(...)  # allocate → 1 ✅ (counter persisted in recorder)
+```
+
+### Benefits
+
+1. **Eliminates per-state_id caching boilerplate** - No more `_get_http_client(state_id)` methods in every plugin
+2. **Architectural clarity** - Recorder owns audit state, including call indices
+3. **Thread-safe** - Single lock protects centralized state
+4. **Future-proof** - Automatically coordinates any new client types (SQL, FileSystem, etc.)
+
+### Impact on Previous Fix
+
+This fix **supersedes and simplifies** the per-state_id client caching pattern we implemented in commit `d93a315` (ContentSafety/PromptShield):
+
+**Old pattern (commit d93a315):**
+- Each plugin maintains `_http_clients: dict[str, AuditedHTTPClient]`
+- Cache one client per state_id
+- Client has per-instance counter
+- **Works but requires boilerplate in every plugin**
+
+**New pattern (this commit):**
+- Plugins create clients normally (no caching needed)
+- All clients delegate to centralized recorder
+- **Zero boilerplate, works automatically**
+
+The per-state_id caching can be removed in a future cleanup commit, but it still works correctly with this fix (just unnecessary now).

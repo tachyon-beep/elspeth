@@ -10,6 +10,7 @@ import logging
 import uuid
 from datetime import UTC, datetime
 from enum import Enum
+from threading import Lock
 from typing import TYPE_CHECKING, Any, Literal, TypeVar, overload
 
 if TYPE_CHECKING:
@@ -237,6 +238,11 @@ class LandscapeRecorder:
         """
         self._db = db
         self._payload_store = payload_store
+
+        # Per-state_id call index allocation
+        # Ensures UNIQUE(state_id, call_index) across all client types and retries
+        self._call_indices: dict[str, int] = {}  # state_id → next_index
+        self._call_index_lock: Lock = Lock()
 
     # === Run Management ===
 
@@ -2123,6 +2129,45 @@ class LandscapeRecorder:
             for r in db_rows
         ]
 
+    def allocate_call_index(self, state_id: str) -> int:
+        """Allocate next call index for a state_id (thread-safe).
+
+        Provides centralized call index allocation ensuring UNIQUE(state_id, call_index)
+        across all client types (HTTP, LLM) and retry attempts.
+
+        This is the single source of truth for call numbering. All AuditedClient
+        instances MUST delegate to this method rather than maintaining their own counters.
+
+        Thread Safety:
+            Uses a lock to prevent race conditions when multiple threads allocate
+            indices concurrently. Safe for pooled execution scenarios.
+
+        Persistence:
+            Counter persists across retries within the same run. The LandscapeRecorder
+            lifecycle matches the run lifecycle, not the execution attempt.
+
+        Args:
+            state_id: Node state ID to allocate index for
+
+        Returns:
+            Sequential call index (0-based), unique within this state_id
+
+        Example:
+            # Two different client types, same state_id
+            http_client = AuditedHTTPClient(recorder, state_id="state-001")
+            llm_client = AuditedLLMClient(recorder, state_id="state-001")
+
+            # Both delegate to same recorder - indices coordinate correctly
+            http_client.post(...)  # allocates index 0
+            llm_client.query(...)   # allocates index 1 (not 0!)
+        """
+        with self._call_index_lock:
+            if state_id not in self._call_indices:
+                self._call_indices[state_id] = 0
+            idx = self._call_indices[state_id]
+            self._call_indices[state_id] += 1
+            return idx
+
     def record_call(
         self,
         state_id: str,
@@ -2157,6 +2202,7 @@ class LandscapeRecorder:
         Note:
             Duplicate (state_id, call_index) will raise IntegrityError from SQLAlchemy.
             Invalid state_id will raise IntegrityError due to foreign key constraint.
+            Call indices should be allocated via allocate_call_index() for coordination.
         """
         call_id = _generate_id()
         now = _now()
