@@ -176,6 +176,7 @@ def test_static_schema_validation(plugin_manager):
         output_schema = StaticSchema  # Class-level static schema
 
         def __init__(self) -> None:
+            super().__init__()
             self._data = [{"id": 1, "value": "test"}]
 
         def load(self, ctx: Any) -> Iterator[SourceRow]:
@@ -198,6 +199,7 @@ def test_static_schema_validation(plugin_manager):
         input_schema = StaticSchema  # Class-level static schema
 
         def __init__(self) -> None:
+            super().__init__()
             self.written: list[dict[str, Any]] = []
 
         def write(self, rows: list[dict[str, Any]], ctx: Any) -> ArtifactDescriptor:

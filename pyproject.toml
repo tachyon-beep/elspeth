@@ -226,6 +226,7 @@ markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "integration: marks tests requiring external services",
     "asyncio: marks tests as async (handled by pytest-asyncio)",
+    "performance: marks tests as performance benchmarks",
 ]
 # Load .env file for integration tests (API keys)
 env_files = [".env"]
