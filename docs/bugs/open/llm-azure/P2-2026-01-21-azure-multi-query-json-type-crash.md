@@ -216,3 +216,21 @@ Re-ran static analysis on 2026-01-25. Key findings:
 
 **Root Cause:**
 - The code does not validate that `json.loads` returns a dict before using string-key access, violating external-data handling rules.
+
+---
+
+## Re-verification (2026-01-25)
+
+**Status: RE-ANALYZED**
+
+### New Analysis
+
+Re-ran static analysis on 2026-01-25. Key findings:
+
+**Evidence:**
+- JSON parsing without type validation: `src/elspeth/plugins/llm/azure_multi_query.py:241-243`
+- Dict-only access assumed in output mapping: `src/elspeth/plugins/llm/azure_multi_query.py:253-265`
+- External data should be validated and wrapped: `CLAUDE.md:70-76`
+
+**Root Cause:**
+- Missing `isinstance(parsed, dict)` check before using string-keyed access.

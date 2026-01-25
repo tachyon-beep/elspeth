@@ -669,6 +669,8 @@ class TestCheckpointDataclass:
             node_id="node-001",
             sequence_number=1,
             created_at=datetime.now(UTC),
+            upstream_topology_hash="a" * 64,
+            checkpoint_node_config_hash="b" * 64,
         )
 
     def test_aggregation_state_json_defaults_to_none(self, minimal_checkpoint: Checkpoint) -> None:
@@ -684,6 +686,8 @@ class TestCheckpointDataclass:
             node_id="node-001",
             sequence_number=2,
             created_at=datetime.now(UTC),
+            upstream_topology_hash="a" * 64,
+            checkpoint_node_config_hash="b" * 64,
             aggregation_state_json='{"count": 42}',
         )
         assert cp.aggregation_state_json == '{"count": 42}'

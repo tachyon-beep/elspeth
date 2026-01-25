@@ -1,4 +1,5 @@
 # Checkpoint & Resume Bugs - Expert Review Consensus
+
 **Date:** 2026-01-25
 **Reviewers:** Python Code Reviewer (axiom-python-engineering), Architecture Critic (axiom-system-architect)
 **Status:** APPROVED WITH AMENDMENTS
@@ -12,17 +13,20 @@ Both expert reviewers **confirm all 9 bugs are real and correctly diagnosed**. H
 ## Consensus: Critical Gaps in Original Report
 
 ### GAP #1: Missing `os.fsync()` in CSVSink (CRITICAL)
+
 **Identified by:** Code Reviewer
 **Severity:** P0 - Makes Bug #2 unfixable without this
 
 The original Bug #2 analysis correctly identifies checkpoints before sink writes, but **misses the root cause**: CSVSink doesn't call `os.fsync()`.
 
 **Current Code (csv_sink.py:137):**
+
 ```python
 file.flush()  # Flushes to OS buffer, NOT to disk
 ```
 
 **What's missing:**
+
 ```python
 file.flush()           # Write to OS buffer
 os.fsync(file.fileno())  # ← MISSING: Force to disk
@@ -31,6 +35,7 @@ os.fsync(file.fileno())  # ← MISSING: Force to disk
 **Impact:** Even if checkpoint callback is delayed until after `flush()`, data is only in OS buffer. Crash before OS flushes → silent data loss.
 
 **Required Fix:**
+
 ```python
 # In CSVSink.write(), after line 137
 self._file.flush()
@@ -42,15 +47,18 @@ os.fsync(self._file.fileno())  # ← ADD THIS
 ---
 
 ### GAP #2: Missing Sink Durability Contract (ARCHITECTURAL)
+
 **Identified by:** Architecture Critic
 **Severity:** P0 - Bug #2 cannot be fully fixed without this
 
 The `SinkProtocol` has no durability contract. The protocol interface has:
+
 - `write(rows, ctx) -> ArtifactInfo` - But no guarantee when data persists
 - No `flush()` method
 - No documentation of durability semantics
 
 **Impact:** Different sinks have different durability guarantees:
+
 - CSVSink: Buffered, needs `fsync()`
 - DatabaseSink: Connection pooled, needs `commit()`
 - Future Kafka/S3 sinks: Async, needs `await flush()`
@@ -58,6 +66,7 @@ The `SinkProtocol` has no durability contract. The protocol interface has:
 **Required Architecture Change:**
 
 Add to `SinkProtocol` (contracts.py):
+
 ```python
 @abstractmethod
 def flush(self) -> None:
@@ -91,10 +100,12 @@ if checkpoint_callback:
 ---
 
 ### GAP #3: Checkpoint Callback Error Handling Missing
+
 **Identified by:** Code Reviewer (Additional Bug #10)
 **Severity:** P0 - Can cause audit trail inconsistency
 
 **Current Code (executors.py:1457-1460):**
+
 ```python
 if on_token_written is not None:
     for token in tokens:
@@ -102,6 +113,7 @@ if on_token_written is not None:
 ```
 
 **Problem:** If checkpoint creation fails AFTER sink write:
+
 1. Sink write is durable (can't roll back)
 2. Checkpoint fails (exception thrown)
 3. Node states marked complete
@@ -109,6 +121,7 @@ if on_token_written is not None:
 5. Resume cannot find checkpoint → processes rows again → **duplicate data**
 
 **Required Fix:**
+
 ```python
 if on_token_written is not None:
     for token in tokens:
@@ -132,10 +145,12 @@ if on_token_written is not None:
 ## Consensus: Additional Bugs Found
 
 ### ADDITIONAL BUG #10: Partial Batch Failure Creates Duplicates
+
 **Identified by:** Code Reviewer
 **Severity:** P1 - Data integrity
 
 **Scenario:**
+
 ```python
 # Sink writing batch of 100 rows
 for i, row in enumerate(rows):
@@ -145,6 +160,7 @@ for i, row in enumerate(rows):
 ```
 
 **Result:**
+
 - 50 rows written to sink
 - Batch marked failed
 - On resume: All 100 rows reprocessed
@@ -155,6 +171,7 @@ for i, row in enumerate(rows):
 **Fix Options:**
 
 **Option A: Temp file + rename (atomic)**
+
 ```python
 def write(self, rows, ctx):
     temp_file = f"{self._output_path}.tmp"
@@ -169,6 +186,7 @@ def write(self, rows, ctx):
 ```
 
 **Option B: Document non-atomic behavior**
+
 ```
 KNOWN LIMITATION (RC-1):
 Sinks are not atomic at batch boundaries. If crash occurs mid-batch,
@@ -181,15 +199,18 @@ Post-RC: Add transaction support to sink protocol.
 ---
 
 ### ADDITIONAL BUG #11: Type Annotations Too Broad
+
 **Identified by:** Code Reviewer
 **Severity:** P3 - Type safety
 
 **Current:**
+
 ```python
 source_schema_class: type[Any] | None = None  # Too broad
 ```
 
 **Should be:**
+
 ```python
 from elspeth.contracts import PluginSchema
 source_schema_class: type[PluginSchema] | None = None
@@ -200,12 +221,14 @@ source_schema_class: type[PluginSchema] | None = None
 ---
 
 ### ADDITIONAL BUG #12: No Checkpoint State Version Validation
+
 **Identified by:** Code Reviewer
 **Severity:** P2 - Migration support
 
 **Problem:** If checkpoint format changes, old checkpoints fail with cryptic errors.
 
 **Fix:**
+
 ```python
 # In checkpoint state
 state = {
@@ -234,6 +257,7 @@ if state.get("_version") != "1.0":
 Both reviewers agree this is the correct fix. Architecture Critic notes the race condition is more about crash consistency than multi-threading, but the fix is the same.
 
 **Implementation:**
+
 ```python
 def create_checkpoint(...) -> Checkpoint:
     checkpoint_id = generate_checkpoint_id()
@@ -262,6 +286,7 @@ def create_checkpoint(...) -> Checkpoint:
 ```
 
 **Additional fixes from reviews:**
+
 1. Also move `created_at` inside transaction (Code Reviewer)
 2. Validate graph parameter at function start (Code Reviewer - Bug #9)
 
@@ -274,6 +299,7 @@ def create_checkpoint(...) -> Checkpoint:
 Both reviewers agree the report's "Option A + C" is incomplete. The consensus fix requires:
 
 **Part 1: Add SinkProtocol.flush() (ARCHITECTURAL)**
+
 ```python
 # In contracts.py SinkProtocol
 @abstractmethod
@@ -283,6 +309,7 @@ def flush(self) -> None:
 ```
 
 **Part 2: Implement flush() in all sinks**
+
 ```python
 # CSVSink
 def flush(self) -> None:
@@ -295,6 +322,7 @@ def flush(self) -> None:
 ```
 
 **Part 3: Call flush before checkpoint**
+
 ```python
 # In orchestrator, after sink writes
 sink_executor.write(batch_tokens, ctx)
@@ -321,6 +349,7 @@ if checkpoint_callback:
 Both reviewers agree this is correct. Architecture Critic notes this reveals a larger problem: resume duplicates orchestration logic instead of reusing it.
 
 **Implementation:**
+
 ```python
 # In orchestrator.py resume()
 edge_map: dict[tuple[str, str], str] = {}
@@ -344,6 +373,7 @@ with self._db.engine.connect() as conn:
 Both reviewers **strongly agree** schema must be required. Code Reviewer: "This is mandatory." Architecture Critic: "The optional parameter was a design mistake."
 
 **Implementation:**
+
 ```python
 def get_unprocessed_row_data(
     self,
@@ -367,6 +397,7 @@ def get_unprocessed_row_data(
 ```
 
 **Breaking change handling:**
+
 ```python
 # In orchestrator.py resume()
 source_schema_class = getattr(config.source, "_schema_class", None)
@@ -399,6 +430,7 @@ Both reviewers agree this is automatically fixed by switching to `begin()` in Bu
 Code Reviewer identified critical issue: `time.monotonic()` is relative to process start, so restored value is meaningless across processes.
 
 **Correct Implementation:**
+
 ```python
 # In get_checkpoint_state()
 state[node_id] = {
@@ -450,6 +482,7 @@ Code Reviewer recommends validating both graph and node_id at function start.
 | **P3** | #9 | Week 4 | Parameter validation |
 
 **Key changes from original:**
+
 - Added Bug #10 (checkpoint callback errors) to P0
 - Added Bug #12 (version validation) to P2
 - Moved Bug #5 to P0 (merged with #1)
@@ -462,6 +495,7 @@ Code Reviewer recommends validating both graph and node_id at function start.
 ### Critical Tests (P0)
 
 1. **Crash simulation for Bug #2**
+
    ```python
    def test_checkpoint_after_sink_crash():
        """Verify checkpoint not created if sink flush fails."""
@@ -471,6 +505,7 @@ Code Reviewer recommends validating both graph and node_id at function start.
    ```
 
 2. **Concurrent checkpoint creation for Bug #1**
+
    ```python
    def test_concurrent_checkpoint_race():
        """Verify topology hash matches graph at checkpoint time."""
@@ -480,6 +515,7 @@ Code Reviewer recommends validating both graph and node_id at function start.
    ```
 
 3. **Checkpoint callback error for Bug #10**
+
    ```python
    def test_checkpoint_callback_failure_after_flush():
        """Verify sink write is not lost if checkpoint fails."""
@@ -520,17 +556,20 @@ def test_resume_processes_exact_remaining_rows(num_rows, checkpoint_at):
 ### Week 1: P0 Fixes (Data Loss Prevention)
 
 **Day 1-2: Bug #1 + #5 (Transaction atomicity)**
+
 - Move hash computation inside `begin()` transaction
 - Add graph/node validation
 - Fix `delete_checkpoints()` to use `begin()`
 
 **Day 3-4: Bug #2 (Sink durability)**
+
 - Add `SinkProtocol.flush()` method
 - Implement `flush()` in CSVSink (with `fsync`)
 - Implement `flush()` in DatabaseSink (with `commit`)
 - Call `flush()` before checkpoint callback
 
 **Day 5: Bug #10 (Checkpoint callback errors)**
+
 - Add try/except around checkpoint callback
 - Log errors without raising
 - Write integration test
@@ -538,10 +577,12 @@ def test_resume_processes_exact_remaining_rows(num_rows, checkpoint_at):
 ### Week 2: P1 Fixes (Resume Correctness)
 
 **Day 1: Bug #3 (Edge IDs)**
+
 - Load real edge IDs from database in resume path
 - Remove synthetic ID generation
 
 **Day 2-3: Bug #4 + #11 (Type fidelity)**
+
 - Make `source_schema_class` required (breaking change)
 - Update type annotations to `type[PluginSchema]`
 - Update all resume callers to provide schema
@@ -550,23 +591,28 @@ def test_resume_processes_exact_remaining_rows(num_rows, checkpoint_at):
 ### Week 3: P2 Fixes (Robustness)
 
 **Day 1: Bug #6 (Timeout restoration)**
+
 - Store `elapsed_age_seconds` in checkpoint
 - Restore with adjusted `first_accept_time`
 
 **Day 2: Bug #7 (Schema constraints)**
+
 - Alembic migration for `nullable=False`
 - Test migration on existing DBs
 
 **Day 3: Bug #8 (Cleanup)**
+
 - Add `_delete_checkpoints()` to early-exit path
 
 **Day 4: Bug #12 (Version validation)**
+
 - Add `_version` field to checkpoint state
 - Validate version on restore
 
 ### Week 4: P3 Fixes (Polish)
 
 **Day 1: Bug #9 (Validation)**
+
 - Add parameter validation to `create_checkpoint()`
 
 ---
@@ -595,11 +641,13 @@ Both reviewers agree these are acceptable to defer post-RC:
 ## Consensus: Sign-off
 
 ✅ **Code Reviewer (axiom-python-engineering):**
+
 - "The report is excellent work. Fix the durability gap (`fsync`) and error handling, and this will be production-ready."
 - **Grade:** A- (Excellent with minor gaps)
 - **Confidence:** HIGH (90%)
 
 ✅ **Architecture Critic (axiom-system-architect):**
+
 - "The bug report is technically accurate and the recommended fixes are mostly correct. The significant gap is that Bug #2 requires a protocol-level change (sink durability contract)."
 - **Assessment:** APPROVED WITH AMENDMENTS
 - **Confidence:** HIGH (80%)
@@ -620,6 +668,7 @@ Both reviewers agree these are acceptable to defer post-RC:
 ## Appendix: Expert Review Summaries
 
 ### Code Reviewer Key Findings
+
 - Found 3 additional bugs (#10, #11, #12)
 - Identified critical `os.fsync()` gap
 - Recommended property-based testing with Hypothesis
@@ -627,6 +676,7 @@ Both reviewers agree these are acceptable to defer post-RC:
 - Confirmed all fix options are technically sound
 
 ### Architecture Critic Key Findings
+
 - Identified missing sink durability contract (architectural)
 - Noted resume path code duplication (systemic)
 - Clarified Bug #1 is about crash consistency, not concurrency
@@ -634,6 +684,7 @@ Both reviewers agree these are acceptable to defer post-RC:
 - Confirmed alignment with CLAUDE.md principles
 
 ### Areas of Agreement
+
 - All 9 bugs are real and correctly diagnosed
 - Priority ordering is accurate
 - Option A fixes are generally correct
@@ -641,6 +692,7 @@ Both reviewers agree these are acceptable to defer post-RC:
 - Breaking changes acceptable for RC-1
 
 ### Areas of Refinement
+
 - Bug #2 needs protocol change, not just implementation fix
 - Bug #6 needs elapsed time storage, not monotonic timestamp
 - Batch-level checkpointing trade-off needs verification

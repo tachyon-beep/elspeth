@@ -282,6 +282,7 @@ class TestCheckpointManager:
                 )
             )
             # Create checkpoint with old date
+            # Include topology hashes (added in Bug #12) to satisfy NOT NULL constraints
             checkpoint_id = "cp-old-checkpoint"
             conn.execute(
                 checkpoints_table.insert().values(
@@ -291,6 +292,8 @@ class TestCheckpointManager:
                     node_id="node-old",
                     sequence_number=1,
                     aggregation_state_json=None,
+                    upstream_topology_hash="old-upstream-hash",  # Bug #12: required field
+                    checkpoint_node_config_hash="old-node-config-hash",  # Bug #12: required field
                     created_at=old_date,
                 )
             )
@@ -328,6 +331,8 @@ class TestCheckpointManager:
                     node_id="node-001",
                     sequence_number=1,
                     aggregation_state_json=None,
+                    upstream_topology_hash="new-upstream-hash",  # Bug #12: required field
+                    checkpoint_node_config_hash="new-node-config-hash",  # Bug #12: required field
                     created_at=new_date,
                 )
             )
@@ -361,6 +366,8 @@ class TestCheckpointManager:
                     node_id="node-001",
                     sequence_number=1,
                     aggregation_state_json=None,
+                    upstream_topology_hash="future-upstream-hash",  # Bug #12: required field
+                    checkpoint_node_config_hash="future-node-config-hash",  # Bug #12: required field
                     created_at=future_date,
                 )
             )
@@ -370,3 +377,54 @@ class TestCheckpointManager:
         checkpoint = manager.get_latest_checkpoint("run-001")
         assert checkpoint is not None
         assert checkpoint.checkpoint_id == checkpoint_id
+
+    def test_create_checkpoint_requires_graph(self, manager: CheckpointManager, setup_run: str) -> None:
+        """Bug #9: Verify checkpoint creation fails if graph parameter is None.
+
+        Parameter validation must catch missing graph at function entry,
+        not later during hash computation.
+        """
+        with pytest.raises(ValueError, match="graph parameter is required"):
+            manager.create_checkpoint(
+                run_id=setup_run,
+                token_id="t1",
+                node_id="node1",
+                sequence_number=0,
+                graph=None,  # type: ignore  # Intentionally passing None to test validation
+            )
+
+    def test_create_checkpoint_validates_node_exists_in_graph(
+        self, manager: CheckpointManager, setup_run: str, mock_graph: "ExecutionGraph"
+    ) -> None:
+        """Bug #9: Verify checkpoint creation fails if node_id not in graph.
+
+        Must validate that node_id exists in graph before attempting
+        to compute topology hashes.
+        """
+        # mock_graph has nodes: "source", "transform", "sink"
+        with pytest.raises(ValueError, match="does not exist in graph"):
+            manager.create_checkpoint(
+                run_id=setup_run,
+                token_id="t1",
+                node_id="nonexistent_node",  # Not in graph
+                sequence_number=0,
+                graph=mock_graph,
+            )
+
+    def test_create_checkpoint_with_empty_graph_fails(self, manager: CheckpointManager, setup_run: str) -> None:
+        """Bug #9: Verify checkpoint creation fails with empty graph.
+
+        Even if graph exists, if it has no nodes, node validation should fail.
+        """
+        from elspeth.core.dag import ExecutionGraph
+
+        empty_graph = ExecutionGraph()
+
+        with pytest.raises(ValueError, match="does not exist in graph"):
+            manager.create_checkpoint(
+                run_id=setup_run,
+                token_id="t1",
+                node_id="any_node",  # No nodes exist in empty graph
+                sequence_number=0,
+                graph=empty_graph,
+            )

@@ -658,6 +658,8 @@ class TestCheckpoint:
             node_id="node-1",
             sequence_number=42,
             created_at=now,
+            upstream_topology_hash="a" * 64,
+            checkpoint_node_config_hash="b" * 64,
         )
 
         assert checkpoint.checkpoint_id == "cp-123"
@@ -679,6 +681,8 @@ class TestCheckpoint:
             node_id="node-1",
             sequence_number=42,
             created_at=datetime.now(UTC),
+            upstream_topology_hash="a" * 64,
+            checkpoint_node_config_hash="b" * 64,
             aggregation_state_json='{"count": 10, "sum": 500}',
         )
 
@@ -695,6 +699,8 @@ class TestCheckpoint:
             node_id="node-1",
             sequence_number=0,
             created_at=None,
+            upstream_topology_hash="a" * 64,
+            checkpoint_node_config_hash="b" * 64,
         )
 
         assert checkpoint.created_at is None

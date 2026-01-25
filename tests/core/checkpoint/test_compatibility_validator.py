@@ -309,30 +309,6 @@ class TestParallelEdgeValidation:
         assert not result.can_resume
 
 
-class TestLegacyCheckpointHandling:
-    """Tests for handling checkpoints created before topology validation."""
-
-    def test_legacy_checkpoint_always_rejected(self) -> None:
-        """Legacy checkpoints are always rejected (No Legacy Code Policy)."""
-        checkpoint = Checkpoint(
-            checkpoint_id="ckpt-legacy",
-            run_id="run-legacy",
-            token_id="tok-legacy",
-            node_id="some_node",
-            sequence_number=10,
-            created_at=datetime.now(UTC),
-            upstream_topology_hash=None,  # Legacy checkpoint - no topology data
-            checkpoint_node_config_hash=None,
-        )
-
-        graph = ExecutionGraph()
-        graph.add_node("source", node_type="source", plugin_name="csv")
-        graph.add_node("some_node", node_type="transform", plugin_name="llm", config={"prompt": "test"})
-        graph.add_edge("source", "some_node", label="continue", mode=RoutingMode.MOVE)
-
-        validator = CheckpointCompatibilityValidator()
-        result = validator.validate(checkpoint, graph)
-
-        # Should FAIL - legacy checkpoints always rejected
-        assert not result.can_resume
-        assert "legacy" in result.reason.lower() or "topology" in result.reason.lower()
+# Bug #7 fix: Legacy checkpoint test class removed
+# With nullable=False on topology hash fields, legacy checkpoints cannot exist in the system.
+# This enforces the "No Legacy Code Policy" - old checkpoints are incompatible by design.

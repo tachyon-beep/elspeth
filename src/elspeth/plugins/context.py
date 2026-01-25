@@ -13,6 +13,7 @@ Phase 3 Integration Points:
 import logging
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
+from threading import Lock
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -91,6 +92,7 @@ class PluginContext:
     # Set by executor to enable transforms to record external calls
     state_id: str | None = field(default=None)
     _call_index: int = field(default=0)
+    _call_index_lock: "Lock" = field(init=False)  # Initialized in __post_init__
 
     # === Phase 6: Audited Clients ===
     # Set by executor when processing LLM transforms
@@ -109,6 +111,16 @@ class PluginContext:
     # Batch checkpoints restored from previous BatchPendingError
     # Maps node_id -> checkpoint_data for each batch transform
     _batch_checkpoints: dict[str, dict[str, Any]] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        """Initialize non-serializable fields after dataclass creation.
+
+        Thread-safety objects like Lock cannot be dataclass fields directly
+        (not serializable), so we initialize them here.
+        """
+        # Thread safety for call_index increment (INFRA-01 fix)
+        # Prevents race conditions when multiple threads call record_call()
+        object.__setattr__(self, "_call_index_lock", Lock())
 
     def get_checkpoint(self) -> dict[str, Any] | None:
         """Get checkpoint state for batch transforms.
@@ -223,8 +235,11 @@ class PluginContext:
         if self.state_id is None:
             raise RuntimeError("Cannot record call: state_id not set. Ensure transform is being executed through the engine.")
 
-        call_index = self._call_index
-        self._call_index += 1
+        # Thread-safe call_index increment (INFRA-01 fix)
+        # Prevents race conditions when parallel threads record calls
+        with self._call_index_lock:
+            call_index = self._call_index
+            self._call_index += 1
 
         return self.landscape.record_call(
             state_id=self.state_id,

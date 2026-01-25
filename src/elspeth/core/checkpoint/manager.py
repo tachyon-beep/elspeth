@@ -108,10 +108,10 @@ class CheckpointManager:
             token_id=token_id,
             node_id=node_id,
             sequence_number=sequence_number,
-            aggregation_state_json=agg_json,
             created_at=created_at,
             upstream_topology_hash=upstream_topology_hash,
             checkpoint_node_config_hash=checkpoint_node_config_hash,
+            aggregation_state_json=agg_json,
         )
 
     def get_latest_checkpoint(self, run_id: str) -> Checkpoint | None:
@@ -143,10 +143,10 @@ class CheckpointManager:
             token_id=result.token_id,
             node_id=result.node_id,
             sequence_number=result.sequence_number,
-            aggregation_state_json=result.aggregation_state_json,
             created_at=result.created_at,
             upstream_topology_hash=result.upstream_topology_hash,
             checkpoint_node_config_hash=result.checkpoint_node_config_hash,
+            aggregation_state_json=result.aggregation_state_json,
         )
 
         # Validate checkpoint compatibility before returning
@@ -175,10 +175,10 @@ class CheckpointManager:
                 token_id=r.token_id,
                 node_id=r.node_id,
                 sequence_number=r.sequence_number,
-                aggregation_state_json=r.aggregation_state_json,
                 created_at=r.created_at,
                 upstream_topology_hash=r.upstream_topology_hash,
                 checkpoint_node_config_hash=r.checkpoint_node_config_hash,
+                aggregation_state_json=r.aggregation_state_json,
             )
             for r in results
         ]

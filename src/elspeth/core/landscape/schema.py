@@ -34,6 +34,10 @@ runs_table = Table(
     Column("settings_json", Text, nullable=False),
     Column("reproducibility_grade", String(32)),
     Column("canonical_version", String(64), nullable=False),
+    # Source schema for resume type restoration
+    # Stores serialized PluginSchema class info to enable proper type coercion
+    # when resuming from payloads (datetime/Decimal string -> typed values)
+    Column("source_schema_json", Text),  # Nullable for backward compatibility
     Column("status", String(32), nullable=False),
     # Export tracking - separate from run status so export failures
     # don't mask successful pipeline completion
@@ -350,8 +354,8 @@ checkpoints_table = Table(
     Column("aggregation_state_json", Text),  # Serialized aggregation buffers (if any)
     Column("created_at", DateTime(timezone=True), nullable=False),
     # Topology validation (topological checkpoint compatibility)
-    Column("upstream_topology_hash", String(64)),  # Hash of nodes + edges upstream of checkpoint
-    Column("checkpoint_node_config_hash", String(64)),  # Hash of checkpoint node config only
+    Column("upstream_topology_hash", String(64), nullable=False),  # Hash of nodes + edges upstream of checkpoint
+    Column("checkpoint_node_config_hash", String(64), nullable=False),  # Hash of checkpoint node config only
 )
 
 Index("ix_checkpoints_run", checkpoints_table.c.run_id)

@@ -337,6 +337,10 @@ class Checkpoint:
     node_id: str
     sequence_number: int
     created_at: datetime | None
+    # Topology validation fields (Bug #7 fix - required for checkpoint validation)
+    upstream_topology_hash: str  # Hash of nodes + edges upstream of checkpoint
+    checkpoint_node_config_hash: str  # Hash of checkpoint node config only
+    # Optional fields (with defaults) MUST come after required fields in dataclass
     aggregation_state_json: str | None = None
 
 

@@ -188,3 +188,21 @@ if route_label not in gate_config.routes:
 ```
 
 This same pattern should be applied to both error cases in execute_gate().
+
+---
+
+## Re-verification (2026-01-25)
+
+**Status: RE-ANALYZED**
+
+### New Analysis
+
+Re-ran static analysis on 2026-01-25. Key findings:
+
+**Evidence:**
+- node_state opened before routing: `src/elspeth/engine/executors.py:360`.
+- MissingEdgeError raised without completion: `src/elspeth/engine/executors.py:412`, `src/elspeth/engine/executors.py:414`.
+- fork without TokenManager raised without completion: `src/elspeth/engine/executors.py:435`, `src/elspeth/engine/executors.py:436`.
+
+**Root Cause:**
+- Error paths after routing resolution bypass `complete_node_state(...)`.

@@ -72,6 +72,19 @@ def _normalize_value(obj: Any) -> Any:
     if isinstance(obj, np.bool_):
         return bool(obj)
     if isinstance(obj, np.ndarray):
+        # BUG-CANON-01 fix: Reject NaN/Infinity in arrays
+        # Multi-dimensional arrays need element-wise validation
+        if obj.size > 0:  # Only check non-empty arrays
+            try:
+                # np.any() works on all dtypes, returns False for non-numeric
+                if np.any(np.isnan(obj)) or np.any(np.isinf(obj)):
+                    raise ValueError(
+                        "NaN/Infinity found in NumPy array. Audit trail requires finite values only. Use None for missing values, not NaN."
+                    )
+            except TypeError:
+                # np.isnan/isinf raise TypeError for non-numeric dtypes (e.g., strings)
+                # This is expected and safe - non-numeric arrays can't contain NaN/Inf
+                pass
         return [_normalize_value(x) for x in obj.tolist()]
 
     # Pandas types
@@ -191,7 +204,7 @@ def compute_upstream_topology_hash(
     # Include checkpoint node to capture incoming edges
     # (outgoing edges are automatically excluded since descendants aren't in ancestors)
     upstream_nodes = [*list(ancestors), node_id]
-    upstream_subgraph: "nx.MultiDiGraph[Any]" = nx_graph.subgraph(upstream_nodes)  # type: ignore[assignment]
+    upstream_subgraph: nx.MultiDiGraph[Any] = nx_graph.subgraph(upstream_nodes)  # type: ignore[assignment]
 
     # Create canonical representation of topology
     topology_data = {

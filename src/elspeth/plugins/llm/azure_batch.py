@@ -397,6 +397,7 @@ class AzureBatchLLMTransform(BaseTransform):
             "operation": "files.create",
             "filename": "batch_input.jsonl",
             "purpose": "batch",
+            "content": jsonl_content,  # BUG-AZURE-01 FIX: Include actual JSONL content
             "content_size": len(jsonl_content),
         }
         start = time.perf_counter()
@@ -597,6 +598,7 @@ class AzureBatchLLMTransform(BaseTransform):
             request_data=download_request,
             response_data={
                 "file_id": output_file_id,
+                "content": output_content.text,  # BUG-AZURE-01 FIX: Include actual JSONL output
                 "content_length": len(output_content.text),
             },
             latency_ms=(time.perf_counter() - start) * 1000,

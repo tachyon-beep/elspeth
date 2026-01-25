@@ -33,7 +33,8 @@ class NullSource(BaseSource):
     stored payloads instead.
 
     This source is deterministic (always yields nothing) and requires
-    no configuration.
+    no configuration. The schema for type restoration comes from the
+    original run's audit trail, not from NullSource.
     """
 
     name = "null"
@@ -48,7 +49,7 @@ class NullSource(BaseSource):
             config: Configuration dict (ignored - NullSource needs no config).
         """
         super().__init__(config)
-        # Bug #4 fix: Set _schema_class for type fidelity on resume
+        # Set _schema_class to satisfy protocol, but resume will use stored schema from audit trail
         self._schema_class = NullSourceSchema
 
     def load(self, ctx: PluginContext) -> Iterator[SourceRow]:

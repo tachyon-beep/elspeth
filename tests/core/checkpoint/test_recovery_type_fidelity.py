@@ -142,6 +142,8 @@ def test_get_unprocessed_row_data_preserves_type_fidelity(
                 token_id="token_0",
                 node_id="source",
                 sequence_number=0,
+                upstream_topology_hash="test-upstream-hash",  # Bug #12: required field
+                checkpoint_node_config_hash="test-node-config-hash",  # Bug #12: required field
                 created_at=now,
             )
         )

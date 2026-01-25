@@ -364,6 +364,12 @@ class GateExecutor:
             input_data=token.row_data,
         )
 
+        # BUG-RECORDER-01 fix: Set state_id on context for external call recording
+        # Gates may need to make external calls (e.g., LLM API for routing decisions)
+        ctx.state_id = state.state_id
+        ctx.node_id = gate.node_id
+        ctx._call_index = 0  # Reset call index for this state
+
         # Execute with timing and span
         with self._spans.gate_span(gate.name, input_hash=input_hash):
             start = time.perf_counter()
@@ -1137,6 +1143,9 @@ class AggregationExecutor:
                 "elapsed_age_seconds": elapsed_age_seconds,  # Bug #6: Preserve timeout window
             }
 
+        # Add version field for future compatibility (Bug #12 fix)
+        state["_version"] = "1.0"
+
         # Size validation (on serialized checkpoint)
         serialized = json.dumps(state)
         size_mb = len(serialized) / 1_000_000
@@ -1166,6 +1175,7 @@ class AggregationExecutor:
         Args:
             state: Checkpoint state with format:
                 {
+                    "_version": "1.0",
                     "node_id": {
                         "tokens": [{"token_id", "row_id", "branch_name", "row_data"}],
                         "batch_id": str | None
@@ -1175,7 +1185,22 @@ class AggregationExecutor:
         Raises:
             ValueError: If checkpoint format is invalid (per CLAUDE.md - our data, full trust)
         """
+        # Validate checkpoint version (Bug #12 fix)
+        CHECKPOINT_VERSION = "1.0"
+        version = state.get("_version")
+
+        if version != CHECKPOINT_VERSION:
+            raise ValueError(
+                f"Incompatible checkpoint version: {version!r}. "
+                f"Expected: {CHECKPOINT_VERSION!r}. "
+                f"Cannot resume from incompatible checkpoint format. "
+                f"This checkpoint may be from a different ELSPETH version."
+            )
+
         for node_id, node_state in state.items():
+            # Skip version metadata field
+            if node_id == "_version":
+                continue
             # Validate checkpoint format (OUR DATA - crash on mismatch, don't hide with .get())
             if "tokens" not in node_state:
                 raise ValueError(
@@ -1421,6 +1446,13 @@ class SinkExecutor:
                 input_data=token.row_data,
             )
             states.append((token, state))
+
+        # BUG-RECORDER-01 fix: Set state_id on context for external call recording
+        # Sinks may make external calls (e.g., HTTP POST, database INSERT)
+        # Use first token's state_id since sink operations are typically bulk operations
+        ctx.state_id = states[0][1].state_id
+        ctx.node_id = sink_node_id
+        ctx._call_index = 0  # Reset call index for this sink operation
 
         # Execute sink write with timing and span
         with self._spans.sink_span(sink.name):

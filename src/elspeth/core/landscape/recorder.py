@@ -248,6 +248,7 @@ class LandscapeRecorder:
         run_id: str | None = None,
         reproducibility_grade: str | None = None,
         status: RunStatus | str = RunStatus.RUNNING,
+        source_schema_json: str | None = None,
     ) -> Run:
         """Begin a new pipeline run.
 
@@ -257,6 +258,9 @@ class LandscapeRecorder:
             run_id: Optional run ID (generated if not provided)
             reproducibility_grade: Optional grade (FULL_REPRODUCIBLE, etc.)
             status: Initial run status (defaults to RUNNING)
+            source_schema_json: Optional serialized source schema for resume type restoration.
+                Should be Pydantic model_json_schema() output. Required for proper resume
+                type fidelity (datetime/Decimal restoration from payload JSON strings).
 
         Returns:
             Run model with generated run_id
@@ -292,6 +296,7 @@ class LandscapeRecorder:
                     canonical_version=run.canonical_version,
                     status=run.status,
                     reproducibility_grade=run.reproducibility_grade,
+                    source_schema_json=source_schema_json,
                 )
             )
 

@@ -385,6 +385,75 @@ def as_gate(gate: Any) -> "GateProtocol":
     return cast("GateProtocol", gate)
 
 
+# =============================================================================
+# Integration Test Fixtures (INFRA-02)
+# =============================================================================
+# These provide REAL database and recorder instances with FK constraints enabled.
+# Use these for integration tests that validate audit trail integrity.
+
+
+@pytest.fixture
+def real_landscape_db(tmp_path):
+    """Real LandscapeDB with FK constraints enabled.
+
+    Use this for integration tests that validate:
+    - FK constraints are satisfied
+    - Unique constraints work correctly
+    - Audit trail completeness
+
+    Returns an in-memory SQLite database with all tables created
+    and FK constraints ENABLED (enforced).
+
+    Example:
+        def test_batch_fk_constraints(real_landscape_db):
+            recorder = LandscapeRecorder(real_landscape_db)
+            # ... test validates no FK violations ...
+    """
+    from elspeth.core.landscape.database import LandscapeDB
+
+    # Use in-memory database for fast tests
+    db = LandscapeDB.in_memory()
+    db.create_tables()
+    return db
+
+
+@pytest.fixture
+def real_landscape_recorder(real_landscape_db):
+    """Real LandscapeRecorder with FK constraint enforcement.
+
+    Combines real_landscape_db with a recorder instance.
+    Use for integration tests that record audit trail data.
+
+    Example:
+        def test_call_recording(real_landscape_recorder):
+            run = real_landscape_recorder.begin_run(...)
+            # ... test validates calls are recorded correctly ...
+    """
+    from elspeth.core.landscape.recorder import LandscapeRecorder
+
+    return LandscapeRecorder(real_landscape_db)
+
+
+@pytest.fixture
+def real_landscape_recorder_with_payload_store(real_landscape_db, tmp_path):
+    """Real LandscapeRecorder with payload store enabled.
+
+    Use for integration tests that validate large payload storage
+    (e.g., JSONL batch requests/responses).
+
+    Example:
+        def test_batch_payload_recording(real_landscape_recorder_with_payload_store):
+            recorder = real_landscape_recorder_with_payload_store
+            # ... test validates payloads are stored and retrievable ...
+    """
+    from elspeth.core.landscape.recorder import LandscapeRecorder
+    from elspeth.core.payload_store import FilesystemPayloadStore
+
+    payload_dir = tmp_path / "payloads"
+    payload_store = FilesystemPayloadStore(payload_dir)
+    return LandscapeRecorder(real_landscape_db, payload_store=payload_store)
+
+
 # Re-export for convenient import
 __all__ = [
     "_TestSchema",
@@ -396,4 +465,7 @@ __all__ = [
     "as_source",
     "as_transform",
     "plugin_manager",
+    "real_landscape_db",
+    "real_landscape_recorder",
+    "real_landscape_recorder_with_payload_store",
 ]

@@ -325,6 +325,9 @@ class TestCheckpointRecoveryIntegration:
         output_path = tmp_path / "resume_output.csv"
         now = datetime.now(UTC)
 
+        # Create source schema for resume ({"id": int, "name": str})
+        source_schema_json = json.dumps({"properties": {"id": {"type": "integer"}, "name": {"type": "string"}}, "required": ["id", "name"]})
+
         with db.engine.connect() as conn:
             # Create run
             conn.execute(
@@ -335,6 +338,7 @@ class TestCheckpointRecoveryIntegration:
                     settings_json="{}",
                     canonical_version="v1",
                     status="failed",
+                    source_schema_json=source_schema_json,
                 )
             )
 

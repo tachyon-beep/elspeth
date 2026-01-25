@@ -10,6 +10,7 @@ Coordinates:
 - Post-run audit export (when configured)
 """
 
+import json
 import os
 import time
 from collections.abc import Callable
@@ -451,10 +452,18 @@ class Orchestrator:
         try:
             self._events.emit(PhaseStarted(phase=PipelinePhase.DATABASE, action=PhaseAction.CONNECTING))
 
+            # Serialize source schema for resume type restoration
+            # This enables proper type coercion (datetime/Decimal) when resuming from JSON payloads
+            source_schema_class = getattr(config.source, "_schema_class", None)
+            source_schema_json = None
+            if source_schema_class is not None:
+                source_schema_json = json.dumps(source_schema_class.model_json_schema())
+
             recorder = LandscapeRecorder(self._db, payload_store=payload_store)
             run = recorder.begin_run(
                 config=config.config,
                 canonical_version=self._canonical_version,
+                source_schema_json=source_schema_json,
             )
 
             self._events.emit(PhaseCompleted(phase=PipelinePhase.DATABASE, duration_seconds=time.perf_counter() - phase_start))
@@ -1286,6 +1295,140 @@ class Orchestrator:
                 for rec in flat_records:
                     writer.writerow(rec)
 
+    def _reconstruct_schema_from_json(self, schema_dict: dict[str, Any]) -> type:
+        """Reconstruct Pydantic schema class from JSON schema dict.
+
+        Handles complete Pydantic JSON schema including:
+        - Primitive types: string, integer, number, boolean
+        - datetime: string with format="date-time"
+        - Decimal: anyOf with number/string (for precision preservation)
+        - Arrays: type="array" with items schema
+        - Nested objects: type="object" with properties schema
+
+        Args:
+            schema_dict: Pydantic JSON schema dict (from model_json_schema())
+
+        Returns:
+            Dynamically created Pydantic model class
+
+        Raises:
+            ValueError: If schema is malformed, empty, or contains unsupported types
+        """
+
+        from pydantic import create_model
+
+        from elspeth.contracts import PluginSchema
+
+        # Extract field definitions from Pydantic JSON schema
+        properties = schema_dict.get("properties")
+        if properties is None:
+            raise ValueError(
+                "Resume failed: Schema JSON has no 'properties' field. This indicates a malformed schema. Cannot reconstruct types."
+            )
+
+        if not properties:
+            raise ValueError(
+                "Resume failed: Schema has zero fields defined. "
+                "Cannot resume with empty schema - this would silently discard all row data. "
+                "The original source schema must have at least one field."
+            )
+
+        required_fields = set(schema_dict.get("required", []))
+
+        # Build field definitions for create_model
+        field_definitions: dict[str, Any] = {}
+
+        for field_name, field_info in properties.items():
+            # Determine Python type from JSON schema
+            field_type = self._json_schema_to_python_type(field_name, field_info)
+
+            # Handle optional vs required fields
+            if field_name in required_fields:
+                field_definitions[field_name] = (field_type, ...)  # Required field
+            else:
+                field_definitions[field_name] = (field_type, None)  # Optional field
+
+        # Recreate the schema class dynamically
+        return create_model("RestoredSourceSchema", __base__=PluginSchema, **field_definitions)
+
+    def _json_schema_to_python_type(self, field_name: str, field_info: dict[str, Any]) -> type:
+        """Map Pydantic JSON schema field to Python type.
+
+        Handles Pydantic's type mapping including special cases:
+        - datetime: {"type": "string", "format": "date-time"}
+        - Decimal: {"anyOf": [{"type": "number"}, {"type": "string"}]}
+        - list[T]: {"type": "array", "items": {...}}
+        - dict: {"type": "object"} without properties
+
+        Args:
+            field_name: Field name (for error messages)
+            field_info: JSON schema field definition
+
+        Returns:
+            Python type for Pydantic field
+
+        Raises:
+            ValueError: If field type is not supported (prevents silent degradation)
+        """
+        from datetime import datetime
+        from decimal import Decimal
+
+        # Check for datetime first (string with format annotation)
+        if field_info.get("type") == "string" and field_info.get("format") == "date-time":
+            return datetime
+
+        # Check for Decimal (anyOf pattern)
+        if "anyOf" in field_info:
+            # Pydantic emits: {"anyOf": [{"type": "number"}, {"type": "string"}]}
+            # This indicates Decimal (accepts both for parsing flexibility)
+            any_of_types = field_info["anyOf"]
+            type_strs = {item.get("type") for item in any_of_types if "type" in item}
+            if {"number", "string"}.issubset(type_strs):
+                return Decimal
+
+        # Get basic type
+        field_type_str = field_info.get("type")
+        if field_type_str is None:
+            raise ValueError(
+                f"Resume failed: Field '{field_name}' has no 'type' in schema. "
+                f"Schema definition: {field_info}. "
+                f"Cannot determine Python type for field."
+            )
+
+        # Handle array types
+        if field_type_str == "array":
+            items_schema = field_info.get("items")
+            if items_schema is None:
+                # Generic list without item type constraint
+                return list
+            # For typed arrays, we'd need recursive handling
+            # For now, return list (Pydantic will validate items at parse time)
+            return list
+
+        # Handle nested object types
+        if field_type_str == "object":
+            # Generic dict (no specific structure)
+            return dict
+
+        # Handle primitive types
+        primitive_type_map = {
+            "string": str,
+            "integer": int,
+            "number": float,
+            "boolean": bool,
+        }
+
+        if field_type_str in primitive_type_map:
+            return primitive_type_map[field_type_str]
+
+        # Unknown type - CRASH instead of silent degradation
+        raise ValueError(
+            f"Resume failed: Field '{field_name}' has unsupported type '{field_type_str}'. "
+            f"Supported types: string, integer, number, boolean, date-time, Decimal, array, object. "
+            f"Schema definition: {field_info}. "
+            f"This is a bug in schema reconstruction - please report this."
+        )
+
     def resume(
         self,
         resume_point: "ResumePoint",
@@ -1340,25 +1483,44 @@ class Orchestrator:
             raise ValueError("CheckpointManager is required for resume - Orchestrator must be initialized with checkpoint_manager")
         recovery = RecoveryManager(self._db, self._checkpoint_manager)
 
-        # TYPE FIDELITY: Pass source schema to restore coerced types (datetime, Decimal, etc.)
-        # The source's _schema_class attribute contains the Pydantic model with allow_coercion=True
-        source_schema_class = getattr(config.source, "_schema_class", None)
+        # TYPE FIDELITY: Retrieve source schema from audit trail for type restoration
+        # Resume must use the ORIGINAL run's schema, not the current source's schema
+        # This enables proper type coercion (datetime/Decimal) from JSON payload strings
+        from sqlalchemy import select
 
-        # REQUIRED: Schema must be available for type restoration (Bug #4 fix)
+        from elspeth.core.landscape.schema import runs_table
+
+        with self._db.engine.connect() as conn:
+            result = conn.execute(select(runs_table.c.source_schema_json).where(runs_table.c.run_id == run_id)).fetchone()
+
+        if result is None:
+            raise ValueError(f"Resume failed: Run {run_id} not found in database")
+
+        source_schema_json = result.source_schema_json
+
+        # REQUIRED: Schema must be stored in audit trail for type restoration
         # Without schema, resumed rows would have degraded types (str instead of datetime/Decimal)
-        if source_schema_class is None:
+        if source_schema_json is None:
             raise ValueError(
-                f"Resume failed: Source plugin '{config.source.name}' does not provide schema class. "
-                f"Resume requires type restoration via source._schema_class attribute. "
-                f"Source plugin must set _schema_class during initialization. "
-                f"Cannot resume without schema - type fidelity would be violated."
+                f"Resume failed: Run {run_id} has no source schema stored. "
+                f"This run was created before source schema storage was implemented. "
+                f"Cannot resume without schema - type fidelity would be violated. "
+                f"Please re-run the pipeline from scratch."
             )
+
+        # Deserialize schema and recreate Pydantic model class with full type fidelity
+        schema_dict = json.loads(source_schema_json)
+        source_schema_class = self._reconstruct_schema_from_json(schema_dict)
 
         unprocessed_rows = recovery.get_unprocessed_row_data(run_id, payload_store, source_schema_class=source_schema_class)
 
         if not unprocessed_rows:
             # All rows were processed - complete the run
             recorder.complete_run(run_id, status="completed")
+
+            # Delete checkpoints on successful completion (Bug #8 fix)
+            self._delete_checkpoints(run_id)
+
             return RunResult(
                 run_id=run_id,
                 status=RunStatus.COMPLETED,

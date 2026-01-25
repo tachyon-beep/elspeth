@@ -203,6 +203,18 @@ class RecoveryManager:
                 validated = source_schema_class.model_validate(degraded_data)
                 row_data = validated.to_row()
 
+                # DEFENSE-IN-DEPTH: Detect silent data loss from empty schemas
+                # If source data has fields but restored data is empty, the schema is losing data.
+                # This catches bugs like NullSourceSchema (no fields) being used for resume.
+                if degraded_data and not row_data:
+                    raise ValueError(
+                        f"Resume failed for row {row_id}: Schema validation returned empty data "
+                        f"but source had {len(degraded_data)} fields. "
+                        f"Schema class '{source_schema_class.__name__}' appears to have no fields defined. "
+                        f"Cannot resume - this would silently discard all row data. "
+                        f"The source plugin's schema must declare fields matching the stored row structure."
+                    )
+
                 result.append((row_id, row_index, row_data))
 
         return result
