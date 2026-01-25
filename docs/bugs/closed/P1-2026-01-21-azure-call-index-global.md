@@ -208,3 +208,117 @@ Compare with landscape recorder tests (`tests/core/landscape/test_recorder_calls
 ### Verdict
 
 **STILL VALID** - The bug persists in RC-1. The fix applied to LLM plugins was not propagated to Azure transform plugins.
+
+---
+
+## RESOLUTION: 2026-01-26
+
+**Status:** FIXED
+
+**Fixed by:** Claude Code (fix/rc1-bug-burndown-session-5)
+
+**Implementation:**
+
+Applied the same per-state_id client caching pattern from commit `91c04a1` to both Azure transform plugins:
+
+### Files Changed
+
+1. **`src/elspeth/plugins/transforms/azure/content_safety.py`**
+2. **`src/elspeth/plugins/transforms/azure/prompt_shield.py`**
+
+### Code Evidence
+
+**Before (global counter - BUGGY):**
+```python
+# Instance-wide counter (lines 177-180 in both files)
+self._call_index = 0
+self._call_index_lock = Lock()
+
+def _next_call_index(self) -> int:
+    with self._call_index_lock:
+        index = self._call_index
+        self._call_index += 1
+        return index
+```
+
+**After (per-state_id caching - FIXED):**
+```python
+# Per-state_id HTTP client cache (lines 138-140 in both files)
+self._underlying_http_client: httpx.Client | None = None
+self._http_clients: dict[str, Any] = {}  # state_id -> AuditedHTTPClient
+self._http_clients_lock = Lock()
+
+def _get_http_client(self, state_id: str) -> Any:
+    """Get or create audited HTTP client for a state_id.
+
+    Clients are cached to preserve call_index across retries.
+    This ensures uniqueness of (state_id, call_index) even when
+    the pooled executor retries after CapacityError.
+    """
+    from elspeth.plugins.clients.http import AuditedHTTPClient
+
+    with self._http_clients_lock:
+        if state_id not in self._http_clients:
+            if self._recorder is None:
+                raise RuntimeError("Plugin requires recorder for audited calls.")
+            self._http_clients[state_id] = AuditedHTTPClient(
+                recorder=self._recorder,
+                state_id=state_id,
+                timeout=30.0,
+            )
+        return self._http_clients[state_id]
+```
+
+### Key Changes
+
+1. **Removed global counter**: Deleted `_call_index`, `_call_index_lock`, and `_next_call_index()` method
+2. **Added per-state_id cache**: `_http_clients` dictionary keyed by `state_id`
+3. **Automatic recording**: `AuditedHTTPClient` handles timing and `record_call()` automatically
+4. **Simplified methods**: Removed ~80 lines of manual timing/recording logic from `_analyze_content()` and `_analyze_prompt()`
+
+### Why This Fix Works
+
+Each `AuditedHTTPClient` instance inherits from `AuditedClientBase` which provides a per-instance `_call_index` counter. By caching one client per `state_id`, we get:
+
+- **Per-state scoping**: Each state_id gets its own client with its own counter starting at 0
+- **Retry preservation**: Counter survives pooled executor retries via cache lookup
+- **Thread safety**: Lock protects cache access, individual clients have their own counter locks
+- **Audit integrity**: `(state_id, call_index)` uniqueness enforced naturally
+
+### Verification
+
+**Scenario 1: Sequential processing**
+```python
+# Row 1 (state_id="state-001") → Creates new client, call_index=0
+# Row 2 (state_id="state-002") → Creates new client, call_index=0 ✓
+```
+
+**Scenario 2: Retry after 429**
+```python
+# Row 1 attempt 1 (state_id="state-001") → call_index=0, fails with 429
+# Row 1 attempt 2 (same state_id) → Reuses cached client, call_index=1 ✓
+```
+
+**Scenario 3: Batch aggregation**
+```python
+# All rows share state_id="batch-001" → All use same cached client
+# call_index=0,1,2,... within that single state ✓
+```
+
+### Removed Manual Recording
+
+**Before**: ~80 lines of manual timing, call_index tracking, and conditional `record_call()` logic across 3 exception handlers
+
+**After**: `AuditedHTTPClient.post()` handles everything automatically
+- Timing captured automatically
+- call_index incremented automatically
+- Success/error recording automatic
+- Response/error data captured automatically
+
+### Pattern Match
+
+This fix is identical to the working pattern in LLM plugins (commit `91c04a1`):
+- `src/elspeth/plugins/llm/azure.py:143-148` - per-state_id `_llm_clients` cache
+- `src/elspeth/plugins/llm/azure.py:277-296` - `_get_llm_client(state_id)` method
+
+The Azure transforms now follow the same architectural pattern.

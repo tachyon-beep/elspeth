@@ -14,14 +14,13 @@ Supports both sequential (pool_size=1) and pooled (pool_size>1) execution modes.
 
 from __future__ import annotations
 
-import time
 from threading import Lock
 from typing import TYPE_CHECKING, Any
 
 import httpx
 from pydantic import BaseModel, Field
 
-from elspeth.contracts import CallStatus, CallType, Determinism
+from elspeth.contracts import Determinism
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.config_base import TransformDataConfig
 from elspeth.plugins.context import PluginContext
@@ -161,9 +160,8 @@ class AzureContentSafety(BaseTransform):
         self.input_schema = schema
         self.output_schema = schema
 
-        # Create own HTTP client (following OpenRouter pattern)
-        # Single shared client since httpx.Client is stateless
-        self._http_client: httpx.Client | None = None
+        # Underlying HTTP client (stateless, can be shared)
+        self._underlying_http_client: httpx.Client | None = None
 
         # Recorder reference for pooled execution (set in on_start)
         self._recorder: LandscapeRecorder | None = None
@@ -174,9 +172,11 @@ class AzureContentSafety(BaseTransform):
         else:
             self._executor = None
 
-        # Thread-safe call index counter for audit trail
-        self._call_index = 0
-        self._call_index_lock = Lock()
+        # Per-state_id HTTP client cache - ensures call_index uniqueness across retries
+        # Each state_id gets its own AuditedHTTPClient with monotonically increasing call indices
+        # (follows same pattern as LLM plugins fixed in commit 91c04a1)
+        self._http_clients: dict[str, Any] = {}  # AuditedHTTPClient instances
+        self._http_clients_lock = Lock()
 
         # Dynamic is_batch_aware based on pool_size
         # Set as instance attribute to override class attribute
@@ -447,18 +447,39 @@ class AzureContentSafety(BaseTransform):
         else:
             return self._fields
 
-    def _get_http_client(self) -> httpx.Client:
-        """Get or create HTTP client for API calls."""
-        if self._http_client is None:
-            self._http_client = httpx.Client(timeout=30.0)
-        return self._http_client
+    def _get_underlying_http_client(self) -> httpx.Client:
+        """Get or create the underlying HTTP client (stateless, shared across all calls)."""
+        if self._underlying_http_client is None:
+            self._underlying_http_client = httpx.Client(timeout=30.0)
+        return self._underlying_http_client
 
-    def _next_call_index(self) -> int:
-        """Get next call index in thread-safe manner."""
-        with self._call_index_lock:
-            index = self._call_index
-            self._call_index += 1
-            return index
+    def _get_http_client(self, state_id: str) -> Any:  # Returns AuditedHTTPClient
+        """Get or create audited HTTP client for a state_id.
+
+        Clients are cached to preserve call_index across retries.
+        This ensures uniqueness of (state_id, call_index) even when
+        the pooled executor retries after CapacityError.
+
+        Thread-safe: multiple workers can call this concurrently.
+
+        Args:
+            state_id: Node state ID for audit linkage
+
+        Returns:
+            AuditedHTTPClient instance for this state_id
+        """
+        from elspeth.plugins.clients.http import AuditedHTTPClient
+
+        with self._http_clients_lock:
+            if state_id not in self._http_clients:
+                if self._recorder is None:
+                    raise RuntimeError("ContentSafety requires recorder. Ensure on_start was called.")
+                self._http_clients[state_id] = AuditedHTTPClient(
+                    recorder=self._recorder,
+                    state_id=state_id,
+                    timeout=30.0,
+                )
+            return self._http_clients[state_id]
 
     def _analyze_content(
         self,
@@ -475,7 +496,11 @@ class AzureContentSafety(BaseTransform):
 
         Records all API calls to audit trail for full traceability.
         """
-        client = self._get_http_client()
+        # Use audited client for state_id (automatic recording), stateless client otherwise
+        if state_id is None:
+            client = self._get_underlying_http_client()
+        else:
+            client = self._get_http_client(state_id)
 
         url = f"{self._endpoint}/contentsafety/text:analyze?api-version={self.API_VERSION}"
 
@@ -483,11 +508,8 @@ class AzureContentSafety(BaseTransform):
             "text": text,
         }
 
-        # Track timing for audit
-        start_time = time.monotonic()
-        call_index = self._next_call_index()
-
         try:
+            # AuditedHTTPClient records call automatically (timing, request, response)
             response = client.post(
                 url,
                 json=request_data,
@@ -506,69 +528,14 @@ class AzureContentSafety(BaseTransform):
                 category = item["category"].lower().replace("selfharm", "self_harm")
                 result[category] = item["severity"]
 
-            latency_ms = (time.monotonic() - start_time) * 1000
-
-            # Record successful call to audit trail
-            if self._recorder is not None and state_id is not None:
-                self._recorder.record_call(
-                    state_id=state_id,
-                    call_index=call_index,
-                    call_type=CallType.HTTP,
-                    status=CallStatus.SUCCESS,
-                    request_data={"url": url, "body": request_data},
-                    response_data=data,
-                    latency_ms=latency_ms,
-                )
-
             return result
 
         except (KeyError, TypeError, ValueError) as e:
-            latency_ms = (time.monotonic() - start_time) * 1000
-            # Record failed call to audit trail
-            if self._recorder is not None and state_id is not None:
-                self._recorder.record_call(
-                    state_id=state_id,
-                    call_index=call_index,
-                    call_type=CallType.HTTP,
-                    status=CallStatus.ERROR,
-                    request_data={"url": url, "body": request_data},
-                    error={"reason": "malformed_response", "message": str(e)},
-                    latency_ms=latency_ms,
-                )
+            # Malformed response - AuditedHTTPClient already recorded the call
             raise httpx.RequestError(f"Malformed API response: {e}") from e
 
-        except httpx.HTTPStatusError as e:
-            latency_ms = (time.monotonic() - start_time) * 1000
-            # Record failed call to audit trail
-            if self._recorder is not None and state_id is not None:
-                self._recorder.record_call(
-                    state_id=state_id,
-                    call_index=call_index,
-                    call_type=CallType.HTTP,
-                    status=CallStatus.ERROR,
-                    request_data={"url": url, "body": request_data},
-                    error={
-                        "reason": "http_error",
-                        "status_code": e.response.status_code,
-                        "message": str(e),
-                    },
-                    latency_ms=latency_ms,
-                )
-            raise
-
-        except httpx.RequestError as e:
-            latency_ms = (time.monotonic() - start_time) * 1000
-            # Record failed call to audit trail
-            if self._recorder is not None and state_id is not None:
-                self._recorder.record_call(
-                    state_id=state_id,
-                    call_index=call_index,
-                    call_type=CallType.HTTP,
-                    status=CallStatus.ERROR,
-                    request_data={"url": url, "body": request_data},
-                    error={"reason": "network_error", "message": str(e)},
-                    latency_ms=latency_ms,
-                )
+        except (httpx.HTTPStatusError, httpx.RequestError):
+            # Network/HTTP errors - AuditedHTTPClient already recorded the call
             raise
 
     def _check_thresholds(
@@ -611,7 +578,16 @@ class AzureContentSafety(BaseTransform):
         """Release resources."""
         if self._executor is not None:
             self._executor.shutdown(wait=True)
-        if self._http_client is not None:
-            self._http_client.close()
-            self._http_client = None
+
+        # Close all cached HTTP clients
+        with self._http_clients_lock:
+            for client in self._http_clients.values():
+                client.close()
+            self._http_clients.clear()
+
+        # Close underlying stateless client
+        if self._underlying_http_client is not None:
+            self._underlying_http_client.close()
+            self._underlying_http_client = None
+
         self._recorder = None
