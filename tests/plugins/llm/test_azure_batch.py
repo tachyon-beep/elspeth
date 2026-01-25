@@ -8,8 +8,7 @@ from unittest.mock import Mock
 
 import pytest
 
-from elspeth.contracts import Determinism
-from elspeth.contracts import BatchPendingError
+from elspeth.contracts import BatchPendingError, Determinism
 from elspeth.plugins.config_base import PluginConfigError
 from elspeth.plugins.context import PluginContext
 from elspeth.plugins.llm.azure_batch import AzureBatchConfig, AzureBatchLLMTransform

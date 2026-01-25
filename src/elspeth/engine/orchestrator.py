@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from elspeth.core.events import EventBusProtocol
 
-from elspeth.contracts import NodeType, RowOutcome, RunStatus, TokenInfo
+from elspeth.contracts import BatchPendingError, NodeType, RowOutcome, RunStatus, TokenInfo
 from elspeth.contracts.cli import ProgressEvent
 from elspeth.contracts.events import (
     PhaseAction,
@@ -37,7 +37,6 @@ from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
 from elspeth.engine.processor import RowProcessor
 from elspeth.engine.retry import RetryConfig, RetryManager
-from elspeth.contracts import BatchPendingError
 from elspeth.engine.spans import SpanFactory
 from elspeth.plugins.base import BaseGate, BaseTransform
 from elspeth.plugins.context import PluginContext

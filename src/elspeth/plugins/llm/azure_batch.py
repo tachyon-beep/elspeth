@@ -24,8 +24,7 @@ from typing import Any
 
 from pydantic import Field
 
-from elspeth.contracts import CallStatus, CallType, Determinism, TransformResult
-from elspeth.contracts import BatchPendingError
+from elspeth.contracts import BatchPendingError, CallStatus, CallType, Determinism, TransformResult
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.config_base import TransformDataConfig
 from elspeth.plugins.context import PluginContext
