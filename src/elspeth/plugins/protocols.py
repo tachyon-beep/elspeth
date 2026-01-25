@@ -432,9 +432,22 @@ class SinkProtocol(Protocol):
         ...
 
     def flush(self) -> None:
-        """Flush any buffered data.
+        """Ensure all buffered writes are durable.
 
-        Called periodically and at end of run.
+        MUST guarantee that when this method returns:
+        - All data passed to write() is persisted
+        - Data survives process crash
+        - Data survives power loss (for file/block storage)
+
+        This method MUST block until durability is guaranteed.
+
+        For file-based sinks: Call file.flush() + os.fsync(file.fileno())
+        For database sinks: Call connection.commit()
+        For async sinks: Await flush completion
+
+        This is called by the orchestrator BEFORE creating checkpoints.
+        If this method returns successfully, the checkpoint system assumes
+        all data is durable and will NOT replay these writes on resume.
         """
         ...
 

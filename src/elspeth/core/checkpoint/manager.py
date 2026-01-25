@@ -62,18 +62,31 @@ class CheckpointManager:
 
         Returns:
             The created Checkpoint
+
+        Raises:
+            ValueError: If graph is None or node_id not in graph
         """
-        checkpoint_id = f"cp-{uuid.uuid4().hex[:12]}"
-        now = datetime.now(UTC)
+        # Validate parameters (Bug #9 - early validation)
+        if graph is None:
+            raise ValueError("graph parameter is required for checkpoint creation")
+        if not graph.has_node(node_id):
+            raise ValueError(f"node_id '{node_id}' does not exist in graph")
 
-        agg_json = json.dumps(aggregation_state) if aggregation_state is not None else None
+        # All checkpoint data generation happens INSIDE transaction for atomicity
+        with self._db.engine.begin() as conn:
+            # Generate IDs and timestamps within transaction boundary
+            checkpoint_id = f"cp-{uuid.uuid4().hex[:12]}"
+            created_at = datetime.now(UTC)
 
-        # Compute topology hashes
-        upstream_topology_hash = compute_upstream_topology_hash(graph, node_id)
-        node_info = graph.get_node_info(node_id)
-        checkpoint_node_config_hash = stable_hash(node_info.config)
+            # Prepare aggregation state JSON
+            agg_json = json.dumps(aggregation_state) if aggregation_state is not None else None
 
-        with self._db.engine.connect() as conn:
+            # Compute topology hashes INSIDE transaction (Bug #1 fix)
+            # This ensures hash matches graph state at exact moment of checkpoint creation
+            upstream_topology_hash = compute_upstream_topology_hash(graph, node_id)
+            node_info = graph.get_node_info(node_id)
+            checkpoint_node_config_hash = stable_hash(node_info.config)
+
             conn.execute(
                 checkpoints_table.insert().values(
                     checkpoint_id=checkpoint_id,
@@ -82,12 +95,12 @@ class CheckpointManager:
                     node_id=node_id,
                     sequence_number=sequence_number,
                     aggregation_state_json=agg_json,
-                    created_at=now,
+                    created_at=created_at,
                     upstream_topology_hash=upstream_topology_hash,
                     checkpoint_node_config_hash=checkpoint_node_config_hash,
                 )
             )
-            conn.commit()
+            # begin() auto-commits on clean exit, auto-rollbacks on exception
 
         return Checkpoint(
             checkpoint_id=checkpoint_id,
@@ -96,7 +109,7 @@ class CheckpointManager:
             node_id=node_id,
             sequence_number=sequence_number,
             aggregation_state_json=agg_json,
-            created_at=now,
+            created_at=created_at,
             upstream_topology_hash=upstream_topology_hash,
             checkpoint_node_config_hash=checkpoint_node_config_hash,
         )
@@ -181,9 +194,9 @@ class CheckpointManager:
         Returns:
             Number of checkpoints deleted
         """
-        with self._db.engine.connect() as conn:
+        with self._db.engine.begin() as conn:
             result = conn.execute(delete(checkpoints_table).where(checkpoints_table.c.run_id == run_id))
-            conn.commit()
+            # begin() auto-commits on clean exit, auto-rollbacks on exception
             return result.rowcount
 
     def _validate_checkpoint_compatibility(self, checkpoint: Checkpoint) -> None:

@@ -428,7 +428,18 @@ class AzureBlobSink(BaseSink):
     def flush(self) -> None:
         """Flush buffered data.
 
-        Azure Blob uploads are synchronous, so this is a no-op.
+        No-op for Azure Blob sink - durability is guaranteed by synchronous upload in write().
+
+        Azure Blob Storage uploads in write() are synchronous and complete before
+        returning. The blob is committed to Azure's redundant storage (LRS/GRS) when
+        write() returns, providing the same durability guarantee as an explicit flush().
+
+        This means data survives:
+        - Process crash (blob upload already completed)
+        - Azure datacenter failure (redundant storage)
+        - Network interruption (upload completed or failed, no partial state)
+
+        Future enhancement: Support async uploads with explicit flush() for batching.
         """
         pass
 

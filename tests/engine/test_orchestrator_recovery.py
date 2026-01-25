@@ -46,10 +46,19 @@ class TestOrchestratorResume:
         return FilesystemPayloadStore(tmp_path / "payloads")
 
     @pytest.fixture
+    def mock_graph(self) -> ExecutionGraph:
+        """Create a minimal mock graph for recovery tests."""
+        graph = ExecutionGraph()
+        graph.add_node("source", node_type="source", plugin_name="null")
+        graph.add_node("agg_node", node_type="aggregation", plugin_name="test_agg")
+        return graph
+
+    @pytest.fixture
     def failed_run_with_batch(
         self,
         landscape_db: LandscapeDB,
         checkpoint_manager: CheckpointManager,
+        mock_graph: ExecutionGraph,
     ) -> dict[str, Any]:
         """Create a failed run with an incomplete batch."""
         recorder = LandscapeRecorder(landscape_db)
@@ -109,6 +118,7 @@ class TestOrchestratorResume:
             node_id="agg_node",
             sequence_number=2,
             aggregation_state=agg_state,
+            graph=mock_graph,
         )
 
         # Simulate crash mid-flush
@@ -137,13 +147,14 @@ class TestOrchestratorResume:
         recovery_manager: RecoveryManager,
         payload_store: FilesystemPayloadStore,
         plugin_manager,
+        mock_graph: ExecutionGraph,
     ) -> None:
         """resume() retries batches that were executing when crash occurred."""
         run_id = failed_run_with_batch["run_id"]
         original_batch_id = failed_run_with_batch["batch_id"]
 
         # Get resume point
-        resume_point = recovery_manager.get_resume_point(run_id)
+        resume_point = recovery_manager.get_resume_point(run_id, mock_graph)
         assert resume_point is not None
 
         # Create minimal config for resume

@@ -9,6 +9,7 @@ output correct types. Wrong types = upstream bug = crash.
 
 import csv
 import hashlib
+import os
 from collections.abc import Sequence
 from typing import IO, Any
 
@@ -222,9 +223,19 @@ class CSVSink(BaseSink):
         return sha256.hexdigest()
 
     def flush(self) -> None:
-        """Flush buffered data to disk."""
+        """Flush buffered data to disk with fsync for durability.
+
+        CRITICAL: Ensures data survives process crash and power loss.
+        Called by orchestrator BEFORE creating checkpoints.
+
+        This guarantees:
+        - OS buffer flushed to disk (file.flush())
+        - Filesystem metadata persisted (os.fsync())
+        - Data durable on storage device
+        """
         if self._file is not None:
             self._file.flush()
+            os.fsync(self._file.fileno())
 
     def close(self) -> None:
         """Close the file handle."""

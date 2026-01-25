@@ -242,7 +242,15 @@ class DatabaseSink(BaseSink):
     def flush(self) -> None:
         """Flush any pending operations.
 
-        No-op for DatabaseSink - writes are immediate.
+        No-op for DatabaseSink - durability is guaranteed by auto-commit in write().
+
+        DatabaseSink uses `engine.begin()` context manager which commits the
+        transaction when write() returns. This provides the same durability
+        guarantee as an explicit flush() - all data is committed to the database
+        before this method is called.
+
+        Future enhancement: Hold transaction open between write() and flush()
+        for explicit two-phase durability control.
         """
 
     def close(self) -> None:

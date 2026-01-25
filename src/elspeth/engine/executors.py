@@ -8,6 +8,7 @@ Each executor handles a specific plugin type:
 - SinkExecutor: Output sinks (Task 16)
 """
 
+import logging
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -42,6 +43,8 @@ from elspeth.plugins.results import (
 
 if TYPE_CHECKING:
     from elspeth.engine.tokens import TokenManager
+
+logger = logging.getLogger(__name__)
 
 
 class MissingEdgeError(Exception):
@@ -1114,6 +1117,11 @@ class AggregationExecutor:
         for node_id, tokens in self._buffer_tokens.items():
             if not tokens:  # Only include non-empty buffers
                 continue
+
+            # Get timeout elapsed time for SLA preservation (Bug #6 fix)
+            evaluator = self._trigger_evaluators.get(node_id)
+            elapsed_age_seconds = evaluator.get_age_seconds() if evaluator is not None else 0.0
+
             # Store full TokenInfo as dicts (not just IDs)
             state[node_id] = {
                 "tokens": [
@@ -1126,6 +1134,7 @@ class AggregationExecutor:
                     for t in tokens
                 ],
                 "batch_id": self._batch_ids.get(node_id),
+                "elapsed_age_seconds": elapsed_age_seconds,  # Bug #6: Preserve timeout window
             }
 
         # Size validation (on serialized checkpoint)
@@ -1214,12 +1223,21 @@ class AggregationExecutor:
                 self._batch_ids[node_id] = batch_id
                 self._member_counts[batch_id] = len(reconstructed_tokens)
 
-            # Restore trigger evaluator count (so next row triggers at correct count)
+            # Restore trigger evaluator count and timeout age (Bug #6 fix)
             evaluator = self._trigger_evaluators.get(node_id)
             if evaluator is not None:
                 # Record each restored row as "accepted" to advance the count
                 for _ in reconstructed_tokens:
                     evaluator.record_accept()
+
+                # Restore timeout age to preserve SLA (Bug #6 fix)
+                # The checkpoint stores how much time had elapsed before the crash.
+                # We adjust _first_accept_time backwards so batch_age_seconds
+                # reflects the true elapsed time (not reset to zero).
+                elapsed_seconds = node_state.get("elapsed_age_seconds", 0.0)
+                if elapsed_seconds > 0.0:
+                    # Adjust timer: make it think first accept was N seconds ago
+                    evaluator._first_accept_time = time.monotonic() - elapsed_seconds
 
     def get_batch_id(self, node_id: str) -> str | None:
         """Get current batch ID for an aggregation node.
@@ -1426,6 +1444,10 @@ class SinkExecutor:
                     )
                 raise
 
+        # CRITICAL: Flush sink to ensure durability BEFORE checkpointing
+        # If this fails, we want to crash - can't checkpoint non-durable data
+        sink.flush()
+
         # Complete all token states - status="completed" means they reached terminal
         # Output is the row data that was written to the sink, plus artifact reference
         for token, state in states:
@@ -1454,9 +1476,27 @@ class SinkExecutor:
             size_bytes=artifact_info.size_bytes,
         )
 
-        # Call checkpoint callback for each token after successful write
+        # Call checkpoint callback for each token after successful write + flush
+        # CRITICAL: Sink write + flush are durable - we CANNOT roll them back.
+        # If checkpoint creation fails, we log the error but don't raise.
+        # The sink artifact exists, but no checkpoint record → resume will replay
+        # these rows → duplicate writes (acceptable for RC-1, see Bug #10 docs).
         if on_token_written is not None:
             for token in tokens:
-                on_token_written(token)
+                try:
+                    on_token_written(token)
+                except Exception as e:
+                    # Sink write is durable, can't undo. Log error and continue.
+                    # Operator must manually clean up checkpoint inconsistency.
+                    logger.error(
+                        "Checkpoint failed after durable sink write for token %s. "
+                        "Sink artifact exists but no checkpoint record created. "
+                        "Resume will replay this row (duplicate write). "
+                        "Manual cleanup may be required. Error: %s",
+                        token.token_id,
+                        e,
+                        exc_info=True,
+                    )
+                    # Don't raise - we can't undo the sink write
 
         return artifact

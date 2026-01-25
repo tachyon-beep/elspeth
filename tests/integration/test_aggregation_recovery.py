@@ -15,6 +15,7 @@ import pytest
 
 from elspeth.contracts.enums import BatchStatus
 from elspeth.core.checkpoint import CheckpointManager, RecoveryManager
+from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
 
@@ -37,7 +38,16 @@ class TestAggregationRecoveryIntegration:
             "recorder": recorder,
         }
 
-    def test_full_recovery_cycle(self, test_env: dict[str, Any]) -> None:
+    @pytest.fixture
+    def mock_graph(self) -> ExecutionGraph:
+        """Create a minimal mock graph for aggregation recovery tests."""
+        graph = ExecutionGraph()
+        graph.add_node("source", node_type="source", plugin_name="test")
+        graph.add_node("sum_aggregator", node_type="aggregation", plugin_name="test")
+        graph.add_node("count_aggregator", node_type="aggregation", plugin_name="count_agg")
+        return graph
+
+    def test_full_recovery_cycle(self, test_env: dict[str, Any], mock_graph: ExecutionGraph) -> None:
         """Simulate crash during flush and verify recovery works."""
         db = test_env["db"]
         checkpoint_mgr = test_env["checkpoint_manager"]
@@ -83,6 +93,7 @@ class TestAggregationRecoveryIntegration:
             node_id="sum_aggregator",
             sequence_number=2,
             aggregation_state=agg_state,
+            graph=mock_graph,
         )
 
         # Simulate crash during flush
@@ -91,10 +102,10 @@ class TestAggregationRecoveryIntegration:
 
         # === PHASE 2: Verify recovery is possible ===
 
-        check = recovery_mgr.can_resume(run.run_id)
+        check = recovery_mgr.can_resume(run.run_id, mock_graph)
         assert check.can_resume is True, f"Cannot resume: {check.reason}"
 
-        resume_point = recovery_mgr.get_resume_point(run.run_id)
+        resume_point = recovery_mgr.get_resume_point(run.run_id, mock_graph)
         assert resume_point is not None
         assert resume_point.aggregation_state == agg_state
 
@@ -133,7 +144,7 @@ class TestAggregationRecoveryIntegration:
         attempts = sorted([b.attempt for b in all_batches])
         assert attempts == [0, 1]
 
-    def test_recovery_with_multiple_aggregations(self, test_env: dict[str, Any]) -> None:
+    def test_recovery_with_multiple_aggregations(self, test_env: dict[str, Any], mock_graph: ExecutionGraph) -> None:
         """Verify recovery handles multiple aggregation nodes independently."""
         db = test_env["db"]
         checkpoint_mgr = test_env["checkpoint_manager"]
@@ -191,12 +202,13 @@ class TestAggregationRecoveryIntegration:
             node_id="count_aggregator",
             sequence_number=3,
             aggregation_state={"count": 2},
+            graph=mock_graph,
         )
 
         recorder.complete_run(run.run_id, status="failed")
 
         # Verify recovery
-        check = recovery_mgr.can_resume(run.run_id)
+        check = recovery_mgr.can_resume(run.run_id, mock_graph)
         assert check.can_resume is True
 
         # Only count_aggregator batch should be incomplete
@@ -205,7 +217,7 @@ class TestAggregationRecoveryIntegration:
         assert incomplete[0].aggregation_node_id == "count_aggregator"
         assert incomplete[0].status == BatchStatus.EXECUTING
 
-    def test_recovery_preserves_batch_member_order(self, test_env: dict[str, Any]) -> None:
+    def test_recovery_preserves_batch_member_order(self, test_env: dict[str, Any], mock_graph: ExecutionGraph) -> None:
         """Verify batch member ordinals are preserved through retry."""
         db = test_env["db"]
         checkpoint_mgr = test_env["checkpoint_manager"]
@@ -248,6 +260,7 @@ class TestAggregationRecoveryIntegration:
             token_id=tokens[-1].token_id,
             node_id="sum_aggregator",
             sequence_number=4,
+            graph=mock_graph,
         )
 
         # Retry
@@ -369,3 +382,157 @@ class TestAggregationRecoveryIntegration:
                     )
 
             conn.commit()
+
+    def test_timeout_preservation_on_resume(self, test_env: dict[str, Any], mock_graph: ExecutionGraph) -> None:
+        """Verify aggregation timeout window doesn't reset on resume (Bug #6).
+
+        Scenario:
+        1. Create aggregation with 60s timeout
+        2. Accept rows, simulate 30s elapsed
+        3. Create checkpoint (should store elapsed_age_seconds=30.0)
+        4. Crash and resume
+        5. Verify timeout triggers after 30 more seconds (not 60s)
+
+        This is Bug #6 fix: timeout windows must preserve SLA across resume.
+        """
+        import time
+
+        from elspeth.core.config import TriggerConfig
+        from elspeth.engine.executors import AggregationExecutor
+        from elspeth.engine.triggers import TriggerEvaluator
+
+        db = test_env["db"]
+        checkpoint_mgr = test_env["checkpoint_manager"]
+        recorder = test_env["recorder"]
+
+        # === PHASE 1: Original run with timeout trigger ===
+
+        run = recorder.begin_run(
+            config={"aggregation": {"trigger": {"timeout_seconds": 60}}},
+            canonical_version="sha256-rfc8785-v1",
+        )
+
+        self._register_nodes_raw(db, run.run_id)
+
+        # Create trigger evaluator with 60s timeout
+        trigger_config = TriggerConfig(timeout_seconds=60.0)
+        evaluator = TriggerEvaluator(trigger_config)
+
+        # Simulate accepting 3 rows over time
+        tokens = []
+        for i in range(3):
+            row_obj = recorder.create_row(
+                run_id=run.run_id,
+                source_node_id="source",
+                row_index=i,
+                data={"id": i, "value": i * 100},
+            )
+            token = recorder.create_token(row_id=row_obj.row_id)
+            tokens.append(token)
+            evaluator.record_accept()
+
+        # Verify initial state: 3 rows accepted, no trigger yet
+        assert evaluator.batch_count == 3
+        assert evaluator.should_trigger() is False  # Only 0 seconds elapsed so far
+
+        # Simulate 30 seconds passing by mocking time.monotonic()
+        # Store the original first_accept_time, then adjust it backward
+        original_monotonic = time.monotonic()
+        elapsed_seconds = 30.0
+        evaluator._first_accept_time = original_monotonic - elapsed_seconds
+
+        # Verify elapsed time is now 30s
+        assert 29.0 <= evaluator.batch_age_seconds <= 31.0  # Allow small timing variance
+
+        # Should NOT trigger yet (need 60s total)
+        assert evaluator.should_trigger() is False
+
+        # Create checkpoint with aggregation state
+        agg_state = {
+            "tokens": [
+                {
+                    "token_id": t.token_id,
+                    "row_id": t.row_id,
+                    "branch_name": None,
+                    "row_data": {},
+                }
+                for t in tokens
+            ],
+            "batch_id": None,
+            "elapsed_age_seconds": evaluator.get_age_seconds(),  # Bug #6 fix: store elapsed time
+        }
+
+        # Verify elapsed time is stored in checkpoint state
+        assert "elapsed_age_seconds" in agg_state
+        assert 29.0 <= agg_state["elapsed_age_seconds"] <= 31.0
+
+        checkpoint_mgr.create_checkpoint(
+            run_id=run.run_id,
+            token_id=tokens[-1].token_id,
+            node_id="sum_aggregator",
+            sequence_number=2,
+            aggregation_state=agg_state,
+            graph=mock_graph,
+        )
+
+        # Simulate crash
+        recorder.complete_run(run.run_id, status="failed")
+
+        # === PHASE 2: Resume and verify timeout preservation ===
+
+        # Create new aggregation executor to simulate resume
+        from elspeth.core.config import AggregationSettings
+        from elspeth.engine.spans import SpanFactory
+
+        span_factory = SpanFactory()  # No tracer = no-op spans
+
+        # Create aggregation settings with timeout trigger
+        agg_settings = {
+            "sum_aggregator": AggregationSettings(
+                name="sum_aggregator",
+                plugin="test_aggregation",
+                trigger=trigger_config,
+                output_mode="single",
+                options={},
+            )
+        }
+
+        executor = AggregationExecutor(
+            recorder=recorder,
+            span_factory=span_factory,
+            run_id=run.run_id,
+            aggregation_settings=agg_settings,
+        )
+
+        # Restore state from checkpoint
+        executor.restore_from_checkpoint({"sum_aggregator": agg_state})
+
+        # Verify buffer was restored
+        assert executor.get_buffer_count("sum_aggregator") == 3
+
+        # Get the restored evaluator
+        restored_evaluator = executor._trigger_evaluators.get("sum_aggregator")
+        assert restored_evaluator is not None
+
+        # Verify batch count was restored
+        assert restored_evaluator.batch_count == 3
+
+        # Verify timeout age was restored (Bug #6 fix)
+        # The restored evaluator should think 30s have already elapsed
+        restored_age = restored_evaluator.batch_age_seconds
+        assert 29.0 <= restored_age <= 31.0, f"Expected ~30s, got {restored_age}s"
+
+        # Should NOT trigger immediately (need 30 more seconds)
+        assert restored_evaluator.should_trigger() is False
+
+        # Simulate 30 more seconds passing (total 60s)
+        restored_evaluator._first_accept_time = time.monotonic() - 60.0
+
+        # NOW it should trigger (60s total elapsed)
+        assert restored_evaluator.should_trigger() is True
+        assert restored_evaluator.which_triggered() == "timeout"
+
+        # Verify it triggers at ~60s, not at ~90s (which would be 30s stored + 60s new timeout)
+        # If Bug #6 wasn't fixed, timeout would reset and need another 60s (90s total)
+        final_age = restored_evaluator.batch_age_seconds
+        assert 59.0 <= final_age <= 61.0, f"Timeout should trigger at ~60s, got {final_age}s"

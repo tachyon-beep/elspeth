@@ -1343,6 +1343,17 @@ class Orchestrator:
         # TYPE FIDELITY: Pass source schema to restore coerced types (datetime, Decimal, etc.)
         # The source's _schema_class attribute contains the Pydantic model with allow_coercion=True
         source_schema_class = getattr(config.source, "_schema_class", None)
+
+        # REQUIRED: Schema must be available for type restoration (Bug #4 fix)
+        # Without schema, resumed rows would have degraded types (str instead of datetime/Decimal)
+        if source_schema_class is None:
+            raise ValueError(
+                f"Resume failed: Source plugin '{config.source.name}' does not provide schema class. "
+                f"Resume requires type restoration via source._schema_class attribute. "
+                f"Source plugin must set _schema_class during initialization. "
+                f"Cannot resume without schema - type fidelity would be violated."
+            )
+
         unprocessed_rows = recovery.get_unprocessed_row_data(run_id, payload_store, source_schema_class=source_schema_class)
 
         if not unprocessed_rows:
@@ -1424,12 +1435,29 @@ class Orchestrator:
         coalesce_id_map = graph.get_coalesce_id_map()
         output_sink_name = graph.get_output_sink()
 
-        # Build edge_map from graph edges
+        # Build edge_map from database (load real edge IDs registered in original run)
+        # CRITICAL: Must use real edge_ids for FK integrity when recording routing events
+        from sqlalchemy import select
+
+        from elspeth.core.landscape.schema import edges_table
+
         edge_map: dict[tuple[str, str], str] = {}
-        for i, edge_info in enumerate(graph.get_edges()):
-            # Generate synthetic edge_id for resume (edges were registered in original run)
-            edge_id = f"resume_edge_{i}"
-            edge_map[(edge_info.from_node, edge_info.label)] = edge_id
+        with self._db.engine.connect() as conn:
+            edges = conn.execute(select(edges_table).where(edges_table.c.run_id == run_id)).fetchall()
+
+            for edge in edges:
+                # Use real edge_id from database (not synthetic)
+                edge_map[(edge.from_node_id, edge.label)] = edge.edge_id
+
+        # Validate: If graph has edges, database MUST have matching edges (Tier 1 trust)
+        # Missing edges = data corruption or incomplete original run registration
+        graph_edges = graph.get_edges()
+        if graph_edges and not edge_map:
+            raise ValueError(
+                f"Resume failed: Graph has {len(graph_edges)} edges but no edges found in database "
+                f"for run_id '{run_id}'. This indicates data corruption or incomplete edge registration "
+                f"in the original run. Cannot resume without edge data."
+            )
 
         # Get route resolution map
         route_resolution_map = graph.get_route_resolution_map()

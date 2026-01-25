@@ -45,21 +45,21 @@ def recovery_manager(landscape_db: LandscapeDB, checkpoint_manager: CheckpointMa
     return RecoveryManager(landscape_db, checkpoint_manager)
 
 
-def test_get_unprocessed_row_data_loses_type_fidelity(
+def test_get_unprocessed_row_data_preserves_type_fidelity(
     landscape_db: LandscapeDB,
     payload_store: FilesystemPayloadStore,
     checkpoint_manager: CheckpointManager,
     recovery_manager: RecoveryManager,
 ):
-    """Demonstrate that get_unprocessed_row_data() loses type fidelity.
+    """Verify that get_unprocessed_row_data() preserves type fidelity (Bug #4 fix).
 
-    BUG REPRODUCTION:
+    SCENARIO:
     1. Store row with datetime and Decimal fields via canonical_json()
-    2. Call get_unprocessed_row_data() to retrieve row
-    3. Observe that datetime becomes str, Decimal becomes str
+    2. Call get_unprocessed_row_data() with source schema (REQUIRED)
+    3. Verify that types are restored (datetime, Decimal, not str)
 
-    EXPECTED: Types are restored (datetime, Decimal)
-    ACTUAL: Types are degraded (str, str)
+    This tests Bug #4 fix: schema is now required to guarantee type fidelity.
+    Without schema, the function would raise TypeError (missing required parameter).
     """
     run_id = "test-type-fidelity"
     now = datetime.now(UTC)
@@ -146,32 +146,8 @@ def test_get_unprocessed_row_data_loses_type_fidelity(
             )
         )
 
-    # Step 4a: WITHOUT schema - types are degraded (demonstrating the bug)
-    unprocessed_no_schema = recovery_manager.get_unprocessed_row_data(run_id, payload_store)
-
-    assert len(unprocessed_no_schema) == 2  # Rows 1 and 2 are unprocessed
-
-    # Unpack first unprocessed row
-    row_id, row_index, row_data_degraded = unprocessed_no_schema[0]
-
-    assert row_index == 1
-    assert row_data_degraded["id"] == 2
-
-    # BUG DEMONSTRATION: These should be datetime and Decimal, but they are str!
-    timestamp_degraded = row_data_degraded["timestamp"]
-    amount_degraded = row_data_degraded["amount"]
-
-    print("\n=== WITHOUT SCHEMA (degraded types) ===")
-    print(f"Type of timestamp: {type(timestamp_degraded)}")
-    print(f"Value of timestamp: {timestamp_degraded}")
-    print(f"Type of amount: {type(amount_degraded)}")
-    print(f"Value of amount: {amount_degraded}")
-
-    # Confirm degradation
-    assert isinstance(timestamp_degraded, str), "Without schema, timestamp should be str"
-    assert isinstance(amount_degraded, str), "Without schema, amount should be str"
-
-    # Step 4b: WITH schema - types are restored (the fix!)
+    # Step 4: WITH schema - types are restored (Bug #4 fix!)
+    # Schema is now REQUIRED - calling without it would raise TypeError
     # Create a Pydantic schema directly (sources with datetime/Decimal do this)
     from pydantic import ConfigDict
 
@@ -188,22 +164,26 @@ def test_get_unprocessed_row_data_loses_type_fidelity(
 
     source_schema_class = RestoredSchema
 
-    unprocessed_with_schema = recovery_manager.get_unprocessed_row_data(run_id, payload_store, source_schema_class=source_schema_class)
+    unprocessed = recovery_manager.get_unprocessed_row_data(run_id, payload_store, source_schema_class=source_schema_class)
 
-    row_id, row_index, row_data_restored = unprocessed_with_schema[0]
+    assert len(unprocessed) == 2  # Rows 1 and 2 are unprocessed
+
+    row_id, row_index, row_data_restored = unprocessed[0]
+
+    assert row_index == 1
+    assert row_data_restored["id"] == 2
 
     timestamp_restored = row_data_restored["timestamp"]
     amount_restored = row_data_restored["amount"]
 
-    print("\n=== WITH SCHEMA (restored types) ===")
+    print("\n=== Type Fidelity Preserved ===")
     print(f"Type of timestamp: {type(timestamp_restored)}")
     print(f"Value of timestamp: {timestamp_restored}")
     print(f"Type of amount: {type(amount_restored)}")
     print(f"Value of amount: {amount_restored}")
 
-    # THIS SHOULD PASS - types are restored!
+    # Verify types are restored (not degraded to str)
     assert isinstance(timestamp_restored, datetime), f"Expected datetime, got {type(timestamp_restored).__name__}. Type restoration failed!"
-
     assert isinstance(amount_restored, Decimal), f"Expected Decimal, got {type(amount_restored).__name__}. Type restoration failed!"
 
     # Verify values are correct

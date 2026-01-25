@@ -48,6 +48,8 @@ class NullSource(BaseSource):
             config: Configuration dict (ignored - NullSource needs no config).
         """
         super().__init__(config)
+        # Bug #4 fix: Set _schema_class for type fidelity on resume
+        self._schema_class = NullSourceSchema
 
     def load(self, ctx: PluginContext) -> Iterator[SourceRow]:
         """Yield no rows.

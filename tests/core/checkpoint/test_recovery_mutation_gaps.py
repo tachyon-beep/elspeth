@@ -432,8 +432,13 @@ class TestGetUnprocessedRowDataErrors:
         # Mock get_unprocessed_rows to return empty
         recovery_manager.get_unprocessed_rows = MagicMock(return_value=[])  # type: ignore[method-assign]
 
+        # Create mock schema (required after Bug #4 fix)
+        from elspeth.plugins.schema_factory import _create_dynamic_schema
+
+        mock_schema = _create_dynamic_schema("MockSchema")
+
         mock_payload_store = MagicMock()
-        result = recovery_manager.get_unprocessed_row_data("run-id", mock_payload_store)
+        result = recovery_manager.get_unprocessed_row_data("run-id", mock_payload_store, source_schema_class=mock_schema)
 
         assert result == []
 
@@ -444,10 +449,15 @@ class TestGetUnprocessedRowDataErrors:
         # Mock get_unprocessed_rows to return a row_id that doesn't exist
         recovery_manager.get_unprocessed_rows = MagicMock(return_value=["nonexistent-row"])  # type: ignore[method-assign]
 
+        # Create mock schema (required after Bug #4 fix)
+        from elspeth.plugins.schema_factory import _create_dynamic_schema
+
+        mock_schema = _create_dynamic_schema("MockSchema")
+
         mock_payload_store = MagicMock()
 
         with pytest.raises(ValueError) as exc_info:
-            recovery_manager.get_unprocessed_row_data("run-id", mock_payload_store)
+            recovery_manager.get_unprocessed_row_data("run-id", mock_payload_store, source_schema_class=mock_schema)
 
         assert "not found in database" in str(exc_info.value)
         assert "nonexistent-row" in str(exc_info.value)
@@ -502,10 +512,15 @@ class TestGetUnprocessedRowDataErrors:
         # Mock get_unprocessed_rows to return this row
         recovery_manager.get_unprocessed_rows = MagicMock(return_value=[row_id])  # type: ignore[method-assign]
 
+        # Create mock schema (required after Bug #4 fix)
+        from elspeth.plugins.schema_factory import _create_dynamic_schema
+
+        mock_schema = _create_dynamic_schema("MockSchema")
+
         mock_payload_store = MagicMock()
 
         with pytest.raises(ValueError) as exc_info:
-            recovery_manager.get_unprocessed_row_data(run_id, mock_payload_store)
+            recovery_manager.get_unprocessed_row_data(run_id, mock_payload_store, source_schema_class=mock_schema)
 
         assert "no source_data_ref" in str(exc_info.value)
         assert "cannot resume without payload" in str(exc_info.value)
@@ -559,12 +574,17 @@ class TestGetUnprocessedRowDataErrors:
         # Mock get_unprocessed_rows to return this row
         recovery_manager.get_unprocessed_rows = MagicMock(return_value=[row_id])  # type: ignore[method-assign]
 
+        # Create mock schema (required after Bug #4 fix)
+        from elspeth.plugins.schema_factory import _create_dynamic_schema
+
+        mock_schema = _create_dynamic_schema("MockSchema")
+
         # Mock payload store to raise KeyError (simulating purged data)
         mock_payload_store = MagicMock()
         mock_payload_store.retrieve.side_effect = KeyError("ref-that-was-purged")
 
         with pytest.raises(ValueError) as exc_info:
-            recovery_manager.get_unprocessed_row_data(run_id, mock_payload_store)
+            recovery_manager.get_unprocessed_row_data(run_id, mock_payload_store, source_schema_class=mock_schema)
 
         assert "purged" in str(exc_info.value).lower()
         assert "cannot resume" in str(exc_info.value)
