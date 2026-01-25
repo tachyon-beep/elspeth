@@ -233,9 +233,11 @@ async def _run_codex_with_retry(
     file_display: str,
     output_display: str,
     rate_limiter: RateLimiter | None,
+    bugs_open_dir: Path | None,
+    deduplicate: bool,
     max_retries: int = 3,
-) -> None:
-    """Run codex with retry logic and rate limiting."""
+) -> dict[str, int]:
+    """Run codex with retry logic, deduplication, and rate limiting. Returns stats."""
     if rate_limiter:
         await rate_limiter.acquire()
 
@@ -244,6 +246,7 @@ async def _run_codex_with_retry(
     status = "ok"
     note = ""
     gated_count = 0
+    merged_count = 0
 
     cmd = [
         "codex",
@@ -267,7 +270,15 @@ async def _run_codex_with_retry(
                 raise RuntimeError(f"codex exec failed for {file_path} with code {return_code}")
 
             gated_count = _apply_evidence_gate(output_path)
-            if gated_count > 0:
+
+            # Deduplicate against existing bugs if requested
+            if deduplicate and bugs_open_dir and bugs_open_dir.exists():
+                merged_count = _deduplicate_and_merge(output_path, bugs_open_dir, repo_root)
+                if merged_count > 0:
+                    note = f"merged={merged_count}"
+                elif gated_count > 0:
+                    note = f"evidence_gate={gated_count}"
+            elif gated_count > 0:
                 note = f"evidence_gate={gated_count}"
 
             # Success - break out of retry loop
@@ -299,6 +310,8 @@ async def _run_codex_with_retry(
         note=note,
     )
 
+    return {"gated": gated_count, "merged": merged_count}
+
 
 def _chunked(paths: list[Path], size: int) -> list[list[Path]]:
     return [paths[i : i + size] for i in range(0, len(paths), size)]
@@ -318,10 +331,14 @@ async def _run_batches(
     context: str,
     rate_limit: int | None,
     organize_by_priority: bool,
+    bugs_open_dir: Path | None,
+    deduplicate: bool,
 ) -> dict[str, int]:
     """Run analysis in batches. Returns statistics."""
     log_lock = asyncio.Lock()
     failed_files: list[tuple[Path, Exception]] = []
+    total_merged = 0
+    total_gated = 0
 
     # Setup rate limiter if requested
     rate_limiter = RateLimiter(rate=rate_limit, per_seconds=60.0) if rate_limit else None
@@ -330,7 +347,7 @@ async def _run_batches(
     pbar = async_tqdm(total=len(files), desc="Analyzing files", unit="file")
 
     for batch in _chunked(files, batch_size):
-        tasks: list[asyncio.Task[None]] = []
+        tasks: list[asyncio.Task[dict[str, int]]] = []
         batch_files: list[Path] = []
 
         for file_path in batch:
@@ -357,6 +374,8 @@ async def _run_batches(
                         file_display=str(file_path.relative_to(repo_root).as_posix()),
                         output_display=str(output_path.relative_to(repo_root).as_posix()),
                         rate_limiter=rate_limiter,
+                        bugs_open_dir=bugs_open_dir,
+                        deduplicate=deduplicate,
                     )
                 )
             )
@@ -366,6 +385,9 @@ async def _run_batches(
             for file_path, result in zip(batch_files, results, strict=False):
                 if isinstance(result, Exception):
                     failed_files.append((file_path, result))
+                elif isinstance(result, dict):
+                    total_merged += result.get("merged", 0)
+                    total_gated += result.get("gated", 0)
                 pbar.update(1)
 
     pbar.close()
@@ -378,12 +400,19 @@ async def _run_batches(
         if len(failed_files) > 10:
             print(f"  ... and {len(failed_files) - 10} more (see {log_path})", file=sys.stderr)
 
+    # Report deduplication stats
+    if deduplicate and total_merged > 0:
+        print(f"\n🔗 {total_merged} bugs merged into existing reports in docs/bugs/open/")
+
     # Organize outputs by priority if requested
     if organize_by_priority:
         _organize_by_priority(output_dir)
 
     # Generate summary statistics
-    return _generate_summary(output_dir)
+    summary = _generate_summary(output_dir)
+    summary["merged"] = total_merged
+    summary["gated"] = total_gated
+    return summary
 
 
 def _ensure_log_file(log_path: Path) -> None:
@@ -565,6 +594,166 @@ def _priority_from_report(text: str) -> str:
     return "unknown"
 
 
+def _extract_file_references(text: str) -> set[str]:
+    """Extract all file paths referenced in the text."""
+    patterns = [
+        r"\b([\w./-]+/[\w./-]+\.py):\d+",  # path/to/file.py:123
+        r"\b(src/[\w./-]+\.py)\b",  # src/path/file.py
+        r"`([\w./-]+\.py)`",  # `file.py`
+    ]
+    files = set()
+    for pattern in patterns:
+        for match in re.finditer(pattern, text):
+            files.add(match.group(1))
+    return files
+
+
+def _calculate_bug_similarity(report1: str, report2: str) -> float:
+    """Calculate similarity score between two bug reports (0.0 to 1.0)."""
+    # Extract key sections
+    summary1 = _extract_section(report1, "Summary").lower()
+    summary2 = _extract_section(report2, "Summary").lower()
+    evidence1 = _extract_section(report1, "Evidence").lower()
+    evidence2 = _extract_section(report2, "Evidence").lower()
+
+    # Extract file references
+    files1 = _extract_file_references(report1)
+    files2 = _extract_file_references(report2)
+
+    # Calculate file overlap
+    if files1 and files2:
+        file_overlap = len(files1 & files2) / len(files1 | files2)
+    else:
+        file_overlap = 0.0
+
+    # Calculate text similarity (simple word overlap)
+    def word_similarity(text1: str, text2: str) -> float:
+        words1 = set(text1.split())
+        words2 = set(text2.split())
+        if not words1 or not words2:
+            return 0.0
+        return len(words1 & words2) / len(words1 | words2)
+
+    summary_sim = word_similarity(summary1, summary2)
+    evidence_sim = word_similarity(evidence1, evidence2)
+
+    # Weighted average: files matter most, then summary, then evidence
+    return 0.5 * file_overlap + 0.3 * summary_sim + 0.2 * evidence_sim
+
+
+def _find_similar_bug(report: str, bugs_dir: Path, threshold: float = 0.6) -> Path | None:
+    """Search for similar bug in docs/bugs/open/. Returns path if found."""
+    if not bugs_dir.exists():
+        return None
+
+    # Extract target file from the report to narrow search
+    target_files = _extract_file_references(report)
+    if not target_files:
+        return None
+
+    best_match: tuple[Path, float] | None = None
+
+    # Search all bug files in open/
+    for bug_file in bugs_dir.rglob("*.md"):
+        # Skip README files
+        if bug_file.name == "README.md":
+            continue
+
+        existing_text = bug_file.read_text(encoding="utf-8")
+        similarity = _calculate_bug_similarity(report, existing_text)
+
+        if similarity >= threshold and (best_match is None or similarity > best_match[1]):
+            best_match = (bug_file, similarity)
+
+    return best_match[0] if best_match else None
+
+
+def _merge_bug_reports(existing_path: Path, new_report: str, repo_root: Path) -> str:
+    """Merge new analysis into existing bug report. Returns log message."""
+    existing_text = existing_path.read_text(encoding="utf-8")
+
+    # Extract sections from new report
+    new_evidence = _extract_section(new_report, "Evidence")
+    new_root_cause = _extract_section(new_report, "Root Cause Hypothesis")
+
+    # Add a verification section with the new analysis
+    timestamp = datetime.now(UTC).strftime("%Y-%m-%d")
+    verification_section = (
+        f"\n\n---\n\n## Re-verification ({timestamp})\n\n"
+        f"**Status: RE-ANALYZED**\n\n"
+        f"### New Analysis\n\n"
+        f"Re-ran static analysis on {timestamp}. Key findings:\n\n"
+        f"**Evidence:**\n{new_evidence}\n\n"
+        f"**Root Cause:**\n{new_root_cause}\n"
+    )
+
+    # Append to existing bug
+    updated_text = existing_text.rstrip() + verification_section
+    existing_path.write_text(updated_text, encoding="utf-8")
+
+    rel_path = existing_path.relative_to(repo_root) if repo_root else existing_path
+    return f"Updated existing bug: {rel_path}"
+
+
+def _deduplicate_and_merge(
+    output_path: Path,
+    bugs_open_dir: Path,
+    repo_root: Path,
+    similarity_threshold: float = 0.6,
+) -> int:
+    """
+    Check generated reports against docs/bugs/open/ and merge duplicates.
+    Returns count of bugs merged into existing reports.
+    """
+    if not output_path.exists():
+        return 0
+
+    text = output_path.read_text(encoding="utf-8")
+    reports = []
+    current = []
+    for line in text.splitlines():
+        if line.strip() == "---":
+            reports.append("\n".join(current).strip())
+            current = []
+            continue
+        current.append(line)
+    if current:
+        reports.append("\n".join(current).strip())
+
+    merged_count = 0
+    kept_reports = []
+
+    for report in reports:
+        if not report.strip():
+            continue
+
+        # Check if this is a "no bug found" report
+        summary = _extract_section(report, "Summary")
+        if "no concrete bug found" in summary.lower():
+            continue  # Don't keep these
+
+        # Look for similar existing bug
+        similar_bug = _find_similar_bug(report, bugs_open_dir, similarity_threshold)
+
+        if similar_bug:
+            # Merge into existing bug
+            _merge_bug_reports(similar_bug, report, repo_root)
+            merged_count += 1
+        else:
+            # Keep as new bug
+            kept_reports.append(report)
+
+    # Rewrite output with only new (non-duplicate) bugs
+    if kept_reports:
+        new_text = "\n---\n".join(kept_reports).rstrip() + "\n"
+        output_path.write_text(new_text, encoding="utf-8")
+    elif output_path.exists():
+        # All bugs were duplicates or "no bug found" - remove the file
+        output_path.unlink()
+
+    return merged_count
+
+
 def _organize_by_priority(output_dir: Path) -> None:
     """Organize outputs into by-priority/ subdirectories."""
     by_priority_dir = output_dir / "by-priority"
@@ -610,7 +799,7 @@ def _print_summary(stats: dict[str, int]) -> None:
     print("📊 Analysis Summary")
     print("=" * 60)
 
-    total_bugs = sum(v for k, v in stats.items() if k != "no_bug")
+    total_bugs = sum(v for k, v in stats.items() if k not in ["no_bug", "merged", "gated", "unknown"])
 
     if total_bugs > 0:
         print(f"\n🐛 Bugs Found: {total_bugs}")
@@ -623,6 +812,14 @@ def _print_summary(stats: dict[str, int]) -> None:
     no_bug_count = stats.get("no_bug", 0)
     if no_bug_count > 0:
         print(f"\n✅ Clean Files: {no_bug_count}")
+
+    merged = stats.get("merged", 0)
+    if merged > 0:
+        print(f"\n🔗 Merged into existing bugs: {merged}")
+
+    gated = stats.get("gated", 0)
+    if gated > 0:
+        print(f"\n⚠️  Downgraded (evidence gate): {gated}")
 
     unknown = stats.get("unknown", 0)
     if unknown > 0:
@@ -819,6 +1016,16 @@ Examples:
         action="store_true",
         help="Show which files would be scanned without running analysis.",
     )
+    parser.add_argument(
+        "--deduplicate",
+        action="store_true",
+        help="Check generated bugs against docs/bugs/open/ and merge duplicates.",
+    )
+    parser.add_argument(
+        "--bugs-dir",
+        default="docs/bugs/open",
+        help="Directory to search for existing bugs (default: docs/bugs/open).",
+    )
 
     args = parser.parse_args()
 
@@ -836,6 +1043,7 @@ Examples:
     template_path = _resolve_path(repo_root, args.template)
     output_dir = _resolve_path(repo_root, args.output_dir)
     log_path = _resolve_path(repo_root, "docs/bugs/process/CODEX_LOG.md")
+    bugs_open_dir = _resolve_path(repo_root, args.bugs_dir) if args.deduplicate else None
 
     # List files to scan
     paths_from = _resolve_path(repo_root, args.paths_from) if args.paths_from else None
@@ -880,6 +1088,8 @@ Examples:
             context=context_text,
             rate_limit=args.rate_limit,
             organize_by_priority=args.organize_by_priority,
+            bugs_open_dir=bugs_open_dir,
+            deduplicate=args.deduplicate,
         )
     )
 
