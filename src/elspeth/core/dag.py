@@ -316,17 +316,21 @@ class ExecutionGraph:
 
         graph = cls()
 
-        def node_id(prefix: str, name: str, config: dict[str, Any]) -> str:
+        def node_id(prefix: str, name: str, config: dict[str, Any], sequence: int | None = None) -> str:
             """Generate deterministic node ID based on plugin type and config.
 
             Node IDs must be deterministic for checkpoint/resume compatibility.
             If a pipeline is checkpointed and later resumed, the node IDs must
             be identical so checkpoint state can be restored correctly.
 
+            For nodes that can appear multiple times with identical configs
+            (transforms, aggregations), include sequence number to ensure uniqueness.
+
             Args:
                 prefix: Node type prefix (source_, transform_, sink_, etc.)
                 name: Plugin name
                 config: Plugin configuration dict
+                sequence: Optional sequence number for duplicate configs (transforms, aggregations)
 
             Returns:
                 Deterministic node ID
@@ -337,6 +341,9 @@ class ExecutionGraph:
             config_str = canonical_json(config)
             config_hash = hashlib.sha256(config_str.encode()).hexdigest()[:12]  # 48 bits
 
+            # Include sequence number for nodes that can have duplicates
+            if sequence is not None:
+                return f"{prefix}_{name}_{config_hash}_{sequence}"
             return f"{prefix}_{name}_{config_hash}"
 
         # Add source - extract schema from instance
@@ -373,7 +380,8 @@ class ExecutionGraph:
 
         for i, transform in enumerate(transforms):
             transform_config = getattr(transform, "config", {})
-            tid = node_id("transform", transform.name, transform_config)
+            # Include sequence to prevent ID collisions when configs are identical
+            tid = node_id("transform", transform.name, transform_config, sequence=i)
             transform_ids[i] = tid
 
             graph.add_node(
