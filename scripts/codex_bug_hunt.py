@@ -875,18 +875,91 @@ def _changed_files_since(repo_root: Path, root_dir: Path, git_ref: str) -> list[
     return selected
 
 
+def _changed_files_on_branch(repo_root: Path, root_dir: Path, base_branch: str) -> list[Path]:
+    """Get files changed on current branch vs base branch using merge-base."""
+    # Find merge base
+    merge_base_cmd = ["git", "merge-base", base_branch, "HEAD"]
+    result = subprocess.run(merge_base_cmd, cwd=repo_root, check=False, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr.strip() or f"git merge-base failed for {base_branch}")
+    merge_base = result.stdout.strip()
+
+    # Get diff from merge base to HEAD
+    try:
+        root_rel = root_dir.relative_to(repo_root)
+    except ValueError:
+        root_rel = root_dir
+    cmd = ["git", "diff", "--name-only", f"{merge_base}..HEAD", "--", str(root_rel)]
+    result = subprocess.run(cmd, cwd=repo_root, check=False, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr.strip() or "git diff failed")
+
+    selected = []
+    for line in result.stdout.splitlines():
+        rel = line.strip()
+        if not rel:
+            continue
+        path = (repo_root / rel).resolve()
+        if path.is_file() and _is_under_root(path, root_dir) and not _is_cache_path(path):
+            selected.append(path)
+    return selected
+
+
+def _changed_files_in_range(repo_root: Path, root_dir: Path, commit_range: str) -> list[Path]:
+    """Get files changed in commit range (e.g., 'abc123..def456')."""
+    # Validate range format
+    if ".." not in commit_range:
+        raise ValueError(f"Invalid commit range format: {commit_range}. Expected format: 'START..END'")
+
+    # Get diff for the range
+    try:
+        root_rel = root_dir.relative_to(repo_root)
+    except ValueError:
+        root_rel = root_dir
+    cmd = ["git", "diff", "--name-only", commit_range, "--", str(root_rel)]
+    result = subprocess.run(cmd, cwd=repo_root, check=False, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(result.stderr.strip() or f"git diff failed for range {commit_range}")
+
+    selected = []
+    for line in result.stdout.splitlines():
+        rel = line.strip()
+        if not rel:
+            continue
+        path = (repo_root / rel).resolve()
+        if path.is_file() and _is_under_root(path, root_dir) and not _is_cache_path(path):
+            selected.append(path)
+    return selected
+
+
 def _list_files(
     *,
     root_dir: Path,
     repo_root: Path,
     changed_since: str | None,
+    branch: str | None,
+    commit_range: str | None,
     paths_from: Path | None,
     file_type: str,
 ) -> list[Path]:
+    # Check mutual exclusivity of git filters
+    git_filters = [changed_since, branch, commit_range]
+    active_filters = [f for f in git_filters if f is not None]
+    if len(active_filters) > 1:
+        raise ValueError("Only one of --changed-since, --branch, or --commit-range can be used at a time")
+
     selected: set[Path] | None = None
 
     if changed_since:
         changed = set(_changed_files_since(repo_root, root_dir, changed_since))
+        selected = changed if selected is None else selected & changed
+
+    if branch:
+        changed = set(_changed_files_on_branch(repo_root, root_dir, branch))
+        selected = changed if selected is None else selected & changed
+
+    if commit_range:
+        changed = set(_changed_files_in_range(repo_root, root_dir, commit_range))
         selected = changed if selected is None else selected & changed
 
     if paths_from:
@@ -937,6 +1010,12 @@ Examples:
   # Scan only changed files since HEAD~5
   %(prog)s --changed-since HEAD~5
 
+  # Scan files changed on current branch vs main
+  %(prog)s --branch main
+
+  # Scan files changed in a specific commit range
+  %(prog)s --commit-range abc123..def456
+
   # Dry run to see what would be scanned
   %(prog)s --dry-run
 
@@ -977,6 +1056,16 @@ Examples:
         "--changed-since",
         default=None,
         help="Only scan files changed since this git ref (e.g. HEAD~1).",
+    )
+    parser.add_argument(
+        "--branch",
+        default=None,
+        help="Compare against base branch to get files changed on current branch (e.g. 'main').",
+    )
+    parser.add_argument(
+        "--commit-range",
+        default=None,
+        help="Only scan files changed in commit range (e.g. 'abc123..def456').",
     )
     parser.add_argument(
         "--paths-from",
@@ -1051,6 +1140,8 @@ Examples:
         root_dir=root_dir,
         repo_root=repo_root,
         changed_since=args.changed_since,
+        branch=args.branch,
+        commit_range=args.commit_range,
         paths_from=paths_from,
         file_type=args.file_type,
     )
