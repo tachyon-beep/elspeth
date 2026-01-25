@@ -192,3 +192,78 @@
 - No changes to azure_batch.py since RC-1
 - Audit recording added in d647d4b but incomplete
 - No fixes in subsequent commits
+
+---
+
+## RESOLUTION: 2026-01-25 (via systematic debugging review 2026-01-26)
+
+**Status:** FIXED
+
+**Fixed by:** Commit `b5f3f50` (2026-01-25) - "fix(infra): thread safety, integration tests, and Azure audit trail"
+
+**Root Cause Analysis (Phase 1):**
+Systematic debugging revealed this bug was introduced when batch audit recording was first added (commit `d647d4b`, 2026-01-20) with only metadata captured. The bug was fixed 5 days later in commit `b5f3f50`.
+
+**Original Issue:**
+The audit trail recorded only metadata for batch operations:
+- Upload: `{"operation": "files.create", "filename": "...", "content_size": ...}` ❌ Missing JSONL
+- Download: `{"file_id": "...", "content_length": ...}` ❌ Missing responses
+
+This violated CLAUDE.md: "External calls - Full request AND response recorded"
+
+**The Fix:**
+
+**Upload side (line 399):**
+```python
+upload_request = {
+    "operation": "files.create",
+    "filename": "batch_input.jsonl",
+    "purpose": "batch",
+    "content": jsonl_content,  # BUG-AZURE-01 FIX: Include actual JSONL content
+    "content_size": len(jsonl_content),
+}
+```
+
+**Download side (line 657):**
+```python
+response_data={
+    "file_id": output_file_id,
+    "content": output_content.text,  # BUG-AZURE-01 FIX: Include actual JSONL output
+    "content_length": len(output_content.text),
+}
+```
+
+**How Auto-Persist Works:**
+The recorder's auto-persist logic (lines 2067-2077 in recorder.py) automatically:
+1. Detects large payloads (> threshold)
+2. Persists to PayloadStore
+3. Records refs in `calls.request_ref` and `calls.response_ref`
+4. Hashes content for integrity verification
+
+This means:
+- ✅ Small JSONL stored inline in audit trail
+- ✅ Large JSONL persisted to payload store with refs
+- ✅ All payloads content-hashed for verification
+- ✅ `explain()` can retrieve full prompts and responses
+
+**Why Option 1 (Simple) Was Chosen:**
+The verification report (2026-01-24) listed 3 options. The fix implemented **Option 1: Include JSONL in request_data/response_data** because:
+- Leverages existing auto-persist infrastructure (no API changes)
+- Recorder handles large payloads automatically
+- Simple implementation (2 line changes)
+- Consistent with other LLM transform patterns
+
+**Audit Trail Now Complete:**
+- ✅ Full JSONL input (all rendered prompts for batch)
+- ✅ Full JSONL output (all LLM responses)
+- ✅ Auto-persisted to payload store when large
+- ✅ Content hashed for integrity
+- ✅ Can replay/verify batch operations
+
+**Files changed:**
+- `src/elspeth/plugins/llm/azure_batch.py` (lines 399, 657)
+
+**Verification confidence:** HIGH - Fix uses proven auto-persist pattern, both upload and download sides implemented.
+
+**Systematic Debugging Outcome:**
+Phase 1 investigation immediately revealed the bug was already fixed (commit b5f3f50 includes "BUG-AZURE-01" in message). No implementation needed - just documentation closure.
