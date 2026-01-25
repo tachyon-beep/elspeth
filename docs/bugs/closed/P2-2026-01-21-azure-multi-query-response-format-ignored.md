@@ -135,3 +135,22 @@ This means users configuring `response_format: json` to request JSON-mode respon
 2. The OpenAI SDK expects `response_format={"type": "json_object"}` for JSON mode (not just the string "json"), so the code may need to transform the config value
 3. Alternatively, if Azure OpenAI doesn't support this parameter in all API versions, the code should validate at init time or document the limitation
 4. The example configuration in `examples/multi_query_assessment/suite.yaml` explicitly uses this feature, so users are expecting it to work
+
+---
+
+## RESOLUTION: 2026-01-26
+
+**Status:** FIXED
+
+**Fixed by:** Claude Code (fix/rc1-bug-burndown-session-5)
+
+**Implementation:**
+- Added conditional `response_format` parameter passing at line 211-224
+- When `self._response_format == "json"`, passes `{"type": "json_object"}` to LLM API
+- Uses proper OpenAI/Azure OpenAI format
+- Reduces JSON parse failures by enforcing JSON mode at LLM level
+
+**Code review:** Approved by pr-review-toolkit:code-reviewer agent
+
+**Files changed:**
+- `src/elspeth/plugins/llm/azure_multi_query.py`

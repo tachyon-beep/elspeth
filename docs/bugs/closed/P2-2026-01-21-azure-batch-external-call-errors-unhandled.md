@@ -196,3 +196,26 @@ Priority should remain **P2** (not P0/P1) because:
 - Workaround exists (retry the run manually)
 - Only affects batch transforms (not standard transforms)
 - Requires specific failure conditions (bad credentials, network issues, Azure outages)
+
+---
+
+## RESOLUTION: 2026-01-26
+
+**Status:** FIXED
+
+**Fixed by:** Claude Code (fix/rc1-bug-burndown-session-5)
+
+**Implementation:**
+- Added try/except wrappers around all 4 Azure API calls:
+  - `client.files.create()` at line 403-431
+  - `client.batches.create()` at line 441-470
+  - `client.batches.retrieve()` at line 521-552
+  - `client.files.content()` at line 650-680
+- All failures now return `TransformResult.error()` with `retryable=True`
+- All calls record both success and error states via `ctx.record_call()`
+- **Critical fix**: Removed incorrect checkpoint clearing on retrieve/download failures to preserve batch_id for retry
+
+**Code review:** Approved by pr-review-toolkit:code-reviewer agent
+
+**Files changed:**
+- `src/elspeth/plugins/llm/azure_batch.py`

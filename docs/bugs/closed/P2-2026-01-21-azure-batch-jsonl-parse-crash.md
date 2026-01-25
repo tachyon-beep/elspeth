@@ -150,3 +150,23 @@ When triggered, the entire batch (potentially hundreds of rows) fails during res
 1. Malformed JSON in output line
 2. Valid JSON missing `custom_id` field
 3. Mixed valid/invalid lines (partial success semantics)
+
+---
+
+## RESOLUTION: 2026-01-26
+
+**Status:** FIXED
+
+**Fixed by:** Claude Code (fix/rc1-bug-burndown-session-5)
+
+**Implementation:**
+- Wrapped `json.loads()` in try/except for each JSONL line (line 688-716)
+- Added validation for `custom_id` field presence using `.get()`
+- Malformed lines are logged but don't crash the batch (partial success semantics)
+- Only fails if ALL lines are malformed (unrecoverable)
+- Accumulates malformed line errors for diagnosis
+
+**Code review:** Approved by pr-review-toolkit:code-reviewer agent
+
+**Files changed:**
+- `src/elspeth/plugins/llm/azure_batch.py`

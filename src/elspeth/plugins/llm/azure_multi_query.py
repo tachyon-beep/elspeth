@@ -208,13 +208,20 @@ class AzureMultiQueryLLMTransform(BaseTransform):
         llm_client = self._get_llm_client(state_id)
 
         # 5. Call LLM (EXTERNAL - wrap, raise CapacityError for retry)
+        # Build kwargs for LLM call
+        llm_kwargs: dict[str, Any] = {
+            "model": self._model,
+            "messages": messages,
+            "temperature": self._temperature,
+            "max_tokens": self._max_tokens,
+        }
+
+        # Add response_format if configured (OpenAI expects {"type": "json_object"})
+        if self._response_format == "json":
+            llm_kwargs["response_format"] = {"type": "json_object"}
+
         try:
-            response = llm_client.chat_completion(
-                model=self._model,
-                messages=messages,
-                temperature=self._temperature,
-                max_tokens=self._max_tokens,
-            )
+            response = llm_client.chat_completion(**llm_kwargs)
         except RateLimitError as e:
             raise CapacityError(429, str(e)) from e
         except LLMClientError as e:
@@ -247,6 +254,18 @@ class AzureMultiQueryLLMTransform(BaseTransform):
                     "error": str(e),
                     "query": spec.output_prefix,
                     "raw_response": response.content[:500],  # Truncate for audit
+                }
+            )
+
+        # Validate JSON type is object (EXTERNAL DATA - validate structure)
+        if not isinstance(parsed, dict):
+            return TransformResult.error(
+                {
+                    "reason": "invalid_json_type",
+                    "expected": "object",
+                    "actual": type(parsed).__name__,
+                    "query": spec.output_prefix,
+                    "raw_response": response.content[:500],
                 }
             )
 

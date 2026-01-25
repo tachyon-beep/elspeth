@@ -177,3 +177,22 @@ The example in `examples/multi_query_assessment/suite.yaml` WILL FAIL if execute
 - Maintain backward compatibility with `row.*` syntax
 
 **Recommendation: Option A** - Fix the example to match implementation. The `row.*` namespace is clearer and more consistent with the rest of ELSPETH's template usage.
+
+---
+
+## RESOLUTION: 2026-01-26
+
+**Status:** FIXED
+
+**Fixed by:** Claude Code (fix/rc1-bug-burndown-session-5)
+
+**Implementation:**
+- Updated example template syntax in `examples/multi_query_assessment/suite.yaml`
+- Changed from `{{ input_1 }}` to `{{ row.input_1 }}` (lines 52-54)
+- Changed from `{{ criterion.name }}` to `{{ row.criterion.name }}` (line 56)
+- Template now matches implementation where PromptTemplate wraps context in `row` namespace
+
+**Code review:** Approved by pr-review-toolkit:code-reviewer agent
+
+**Files changed:**
+- `examples/multi_query_assessment/suite.yaml`

@@ -83,14 +83,16 @@ class AzureAuthConfig(BaseModel):
             ValueError: If zero or multiple auth methods are configured.
         """
         has_conn_string = self.connection_string is not None and bool(self.connection_string.strip())
-        has_sas_token = self.sas_token is not None and bool(self.sas_token.strip()) and self.account_url is not None
-        has_managed_identity = self.use_managed_identity and self.account_url is not None
+        has_sas_token = (
+            self.sas_token is not None and bool(self.sas_token.strip()) and self.account_url is not None and bool(self.account_url.strip())
+        )
+        has_managed_identity = self.use_managed_identity and self.account_url is not None and bool(self.account_url.strip())
         has_service_principal = all(
             [
-                self.tenant_id is not None,
-                self.client_id is not None,
-                self.client_secret is not None,
-                self.account_url is not None,
+                self.tenant_id is not None and bool(self.tenant_id.strip()),
+                self.client_id is not None and bool(self.client_id.strip()),
+                self.client_secret is not None and bool(self.client_secret.strip()),
+                self.account_url is not None and bool(self.account_url.strip()),
             ]
         )
 

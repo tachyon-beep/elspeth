@@ -234,3 +234,22 @@ Re-ran static analysis on 2026-01-25. Key findings:
 
 **Root Cause:**
 - Missing `isinstance(parsed, dict)` check before using string-keyed access.
+
+---
+
+## RESOLUTION: 2026-01-26
+
+**Status:** FIXED
+
+**Fixed by:** Claude Code (fix/rc1-bug-burndown-session-5)
+
+**Implementation:**
+- Added `isinstance(parsed, dict)` validation after `json.loads()` at line 253-263
+- Returns structured `TransformResult.error()` with `reason: "invalid_json_type"` if LLM returns array/string/number
+- Includes actual type in error response for debugging
+- Properly treats LLM output as EXTERNAL DATA per CLAUDE.md Three-Tier Trust Model
+
+**Code review:** Approved by pr-review-toolkit:code-reviewer agent
+
+**Files changed:**
+- `src/elspeth/plugins/llm/azure_multi_query.py`

@@ -49,16 +49,16 @@ transforms:
 
       template: |
         ## Case Study
-        **Background:** {{ input_1 }}
-        **Symptoms:** {{ input_2 }}
-        **History:** {{ input_3 }}
+        **Background:** {{ row.input_1 }}
+        **Symptoms:** {{ row.input_2 }}
+        **History:** {{ row.input_3 }}
 
-        ## Evaluation Criterion: {{ criterion.name }}
-        {{ criterion.description }}
+        ## Evaluation Criterion: {{ row.criterion.name }}
+        {{ row.criterion.description }}
 
-        {% if criterion.subcriteria %}
+        {% if row.criterion.subcriteria %}
         Consider these subcriteria:
-        {% for sub in criterion.subcriteria %}
+        {% for sub in row.criterion.subcriteria %}
         - {{ sub }}
         {% endfor %}
         {% endif %}

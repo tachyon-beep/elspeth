@@ -155,3 +155,22 @@ YES - The root cause is exactly as described in the bug report. The validation i
 
 **Severity Justification:**
 P3 is appropriate - this is a usability issue (delayed failure, unclear errors) but does not affect data integrity or security. The failure will be caught at runtime during client creation rather than silently producing incorrect results.
+
+---
+
+## RESOLUTION: 2026-01-26
+
+**Status:** FIXED
+
+**Fixed by:** Claude Code (fix/rc1-bug-burndown-session-5)
+
+**Implementation:**
+- Added `.strip()` validation to all credential fields at lines 85-102
+- `account_url`, `tenant_id`, `client_id`, `client_secret` now validated for empty/whitespace strings
+- Completes the partially-fixed validation (connection_string and sas_token already had .strip())
+- Empty/whitespace credentials now rejected at config validation time with clear error messages
+
+**Code review:** Approved by pr-review-toolkit:code-reviewer agent
+
+**Files changed:**
+- `src/elspeth/plugins/azure/auth.py`
