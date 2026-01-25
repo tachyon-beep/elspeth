@@ -264,3 +264,55 @@ Unit tests use mocked landscape (no real database). An integration test with rea
 - `tests/plugins/llm/test_azure_multi_query.py` (new tests)
 
 **Verification confidence:** HIGH - Fix is correct, tested, and matches CLAUDE.md audit requirements.
+
+### Git Diff Evidence
+
+```bash
+$ git show b5f3f50 -- src/elspeth/plugins/llm/azure_multi_query.py | grep -A 5 -B 5 "row_state_id\|ctx.state_id"
+```
+
+```diff
+-        for i, row in enumerate(rows):
+-            row_state_id = f"{ctx.state_id}_row{i}"
++        # BUG-AZURE-02 FIX: Use ONE LLM client for entire batch
++        # All rows share ctx.state_id, ensuring FK constraint satisfaction
++
++        try:
++            for _i, row in enumerate(rows):
++                # BUG-AZURE-02 FIX: Use shared state_id for all rows in batch
++                # (removed synthetic row_state_id creation)
++                result = self._process_single_row_internal(row, ctx.state_id)
+```
+
+### Current Code Verification
+
+**File:** `src/elspeth/plugins/llm/azure_multi_query.py`
+
+**Line 522:** Uses `ctx.state_id` directly (no synthetic suffix)
+```python
+result = self._process_single_row_internal(row, ctx.state_id)
+```
+
+**Grep verification:**
+```bash
+$ grep -n "row_state_id" src/elspeth/plugins/llm/azure_multi_query.py
+521:                # (removed synthetic row_state_id creation)
+```
+Only appears in comment documenting removal - pattern is gone from code.
+
+### Test Evidence
+
+**File:** `tests/plugins/llm/test_azure_multi_query.py:514-577`
+
+Key assertions:
+```python
+# Line 572: Verify ALL calls use shared state_id
+unique_state_ids = set(created_state_ids)
+assert len(unique_state_ids) == 1
+
+# Line 577: Verify NO synthetic IDs created
+for state_id in created_state_ids:
+    assert "_row" not in state_id
+```
+
+Test explicitly validates the fix by checking no `_row` suffix exists.

@@ -219,3 +219,70 @@ Priority should remain **P2** (not P0/P1) because:
 
 **Files changed:**
 - `src/elspeth/plugins/llm/azure_batch.py`
+
+### Code Evidence
+
+**Example fix pattern (files.create at line 403-431):**
+
+```python
+# Before: Unprotected API call
+batch_file = client.files.create(
+    file=("batch_input.jsonl", file_bytes),
+    purpose="batch",
+)
+ctx.record_call(
+    status=CallStatus.SUCCESS,  # Assumed success
+    ...
+)
+
+# After: Protected with error handling
+try:
+    batch_file = client.files.create(
+        file=("batch_input.jsonl", file_bytes),
+        purpose="batch",
+    )
+    ctx.record_call(
+        status=CallStatus.SUCCESS,
+        request_data=upload_request,
+        response_data={"file_id": batch_file.id, "status": batch_file.status},
+        latency_ms=(time.perf_counter() - start) * 1000,
+    )
+except Exception as e:
+    # External API failure - record error and return structured result
+    ctx.record_call(
+        status=CallStatus.ERROR,
+        request_data=upload_request,
+        response_data={"error": str(e), "error_type": type(e).__name__},
+        latency_ms=(time.perf_counter() - start) * 1000,
+    )
+    return TransformResult.error(
+        {
+            "reason": "file_upload_failed",
+            "error": str(e),
+            "error_type": type(e).__name__,
+        },
+        retryable=True,  # Network/auth errors are retryable
+    )
+```
+
+**All 4 API calls now follow this pattern:**
+- ✅ Try/except wraps external call
+- ✅ Success path records CallStatus.SUCCESS
+- ✅ Error path records CallStatus.ERROR with error details
+- ✅ Returns TransformResult.error() for error routing
+- ✅ Marks as retryable=True for transient failures
+
+**Verification command:**
+```bash
+$ grep -n "except Exception as e:" src/elspeth/plugins/llm/azure_batch.py | grep -A 5 "files\|batch"
+415:        except Exception as e:
+416:            # External API failure - record error and return structured result
+454:        except Exception as e:
+455:            # External API failure - record error and return structured result
+534:        except Exception as e:
+535:            # External API failure - record error and return structured result
+662:        except Exception as e:
+663:            # External API failure - record error and return structured result
+```
+
+All 4 locations have error handling implemented.

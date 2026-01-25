@@ -267,3 +267,74 @@ The verification report (2026-01-24) listed 3 options. The fix implemented **Opt
 
 **Systematic Debugging Outcome:**
 Phase 1 investigation immediately revealed the bug was already fixed (commit b5f3f50 includes "BUG-AZURE-01" in message). No implementation needed - just documentation closure.
+
+### Git Diff Evidence
+
+```bash
+$ git show b5f3f50 -- src/elspeth/plugins/llm/azure_batch.py | grep -A 3 -B 3 "BUG-AZURE-01"
+```
+
+**Upload side (file creation):**
+```diff
+         upload_request = {
+             "operation": "files.create",
+             "filename": "batch_input.jsonl",
+             "purpose": "batch",
++            "content": jsonl_content,  # BUG-AZURE-01 FIX: Include actual JSONL content
+             "content_size": len(jsonl_content),
+         }
+```
+
+**Download side (file retrieval):**
+```diff
+             ctx.record_call(
+                 call_type=CallType.HTTP,
+                 status=CallStatus.SUCCESS,
+                 request_data=download_request,
+                 response_data={
+                     "file_id": output_file_id,
++                    "content": output_content.text,  # BUG-AZURE-01 FIX: Include actual JSONL output
+                     "content_length": len(output_content.text),
+                 },
+```
+
+### Current Code Verification
+
+**Upload (Line 399):**
+```python
+"content": jsonl_content,  # BUG-AZURE-01 FIX: Include actual JSONL content
+```
+
+**Download (Line 657):**
+```python
+"content": output_content.text,  # BUG-AZURE-01 FIX: Include actual JSONL output
+```
+
+**Grep verification - Both payloads included:**
+```bash
+$ grep -n "content.*BUG-AZURE-01" src/elspeth/plugins/llm/azure_batch.py
+399:            "content": jsonl_content,  # BUG-AZURE-01 FIX: Include actual JSONL content
+657:                    "content": output_content.text,  # BUG-AZURE-01 FIX: Include actual JSONL output
+```
+
+### Auto-Persist Mechanism Evidence
+
+**File:** `src/elspeth/core/landscape/recorder.py:2067-2077`
+
+The recorder automatically persists large payloads:
+```python
+# Line 2067-2077: Auto-persist logic
+if request_data is not None and request_ref is None:
+    request_ref = self._persist_payload(request_data, call_type)
+
+if response_data is not None and response_ref is None:
+    response_ref = self._persist_payload(response_data, call_type)
+```
+
+This means including content in request_data/response_data automatically:
+1. ✅ Stores small payloads inline
+2. ✅ Persists large payloads to payload_store
+3. ✅ Records refs in calls.request_ref/response_ref
+4. ✅ Hashes all content for integrity
+
+No plugin code changes needed beyond including the content field.

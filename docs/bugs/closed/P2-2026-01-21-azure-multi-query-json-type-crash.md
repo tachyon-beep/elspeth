@@ -253,3 +253,58 @@ Re-ran static analysis on 2026-01-25. Key findings:
 
 **Files changed:**
 - `src/elspeth/plugins/llm/azure_multi_query.py`
+
+### Code Evidence
+
+**Before (line 251 - no type validation):**
+```python
+try:
+    parsed = json.loads(content)
+except json.JSONDecodeError as e:
+    return TransformResult.error(...)
+
+# ❌ Assumed parsed is dict, but LLM could return array/string/number
+output: dict[str, Any] = {}
+for json_field, suffix in self._output_mapping.items():
+    output_key = f"{spec.output_prefix}_{suffix}"
+    if json_field not in parsed:  # ❌ TypeError if parsed is not dict
+```
+
+**After (lines 253-263 - type validation added):**
+```python
+try:
+    parsed = json.loads(content)
+except json.JSONDecodeError as e:
+    return TransformResult.error(...)
+
+# ✅ Validate JSON type is object (EXTERNAL DATA - validate structure)
+if not isinstance(parsed, dict):
+    return TransformResult.error(
+        {
+            "reason": "invalid_json_type",
+            "expected": "object",
+            "actual": type(parsed).__name__,
+            "query": spec.output_prefix,
+            "raw_response": response.content[:500],
+        }
+    )
+
+# Now safe to treat as dict
+output: dict[str, Any] = {}
+for json_field, suffix in self._output_mapping.items():
+    ...
+```
+
+**Crash vectors prevented:**
+- `[]` (array) → Returns error with `actual: "list"`
+- `"text"` (string) → Returns error with `actual: "str"`
+- `42` (number) → Returns error with `actual: "int"`
+- `null` (None) → Returns error with `actual: "NoneType"`
+
+**Verification:**
+```bash
+$ grep -n "isinstance(parsed, dict)" src/elspeth/plugins/llm/azure_multi_query.py
+254:        if not isinstance(parsed, dict):
+```
+
+Type validation added at external data boundary per CLAUDE.md Three-Tier Trust Model.

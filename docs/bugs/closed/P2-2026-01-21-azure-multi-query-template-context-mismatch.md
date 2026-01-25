@@ -196,3 +196,60 @@ The example in `examples/multi_query_assessment/suite.yaml` WILL FAIL if execute
 
 **Files changed:**
 - `examples/multi_query_assessment/suite.yaml`
+
+### Code Evidence
+
+**Before (lines 50-66 - wrong syntax):**
+```yaml
+template: |
+  ## Case Study
+  **Background:** {{ input_1 }}  # ❌ Undefined variable
+  **Symptoms:** {{ input_2 }}    # ❌ Undefined variable
+  **History:** {{ input_3 }}      # ❌ Undefined variable
+
+  ## Evaluation Criterion: {{ criterion.name }}  # ❌ Undefined variable
+  {{ criterion.description }}  # ❌ Undefined variable
+```
+
+**After (lines 50-66 - correct syntax):**
+```yaml
+template: |
+  ## Case Study
+  **Background:** {{ row.input_1 }}  # ✅ References row namespace
+  **Symptoms:** {{ row.input_2 }}    # ✅ References row namespace
+  **History:** {{ row.input_3 }}      # ✅ References row namespace
+
+  ## Evaluation Criterion: {{ row.criterion.name }}  # ✅ Correct
+  {{ row.criterion.description }}  # ✅ Correct
+```
+
+**Why this is needed:**
+
+The implementation wraps template context in `row` namespace:
+
+**File:** `src/elspeth/plugins/llm/templates.py:148-152`
+```python
+def render(self, context: dict[str, Any], lookup_data: dict[str, Any] | None = None) -> str:
+    render_context = {
+        "row": context,  # ← Context wrapped in "row" key
+        "lookup": lookup_data or {},
+    }
+    return self._template.render(render_context)
+```
+
+**Error without fix:**
+```
+jinja2.exceptions.UndefinedError: 'input_1' is undefined
+```
+
+**Verification:**
+```bash
+$ grep -n "{{ row\." examples/multi_query_assessment/suite.yaml | head -5
+52:        **Background:** {{ row.input_1 }}
+53:        **Symptoms:** {{ row.input_2 }}
+54:        **History:** {{ row.input_3 }}
+56:        ## Evaluation Criterion: {{ row.criterion.name }}
+57:        {{ row.criterion.description }}
+```
+
+Template syntax now matches implementation's context structure.

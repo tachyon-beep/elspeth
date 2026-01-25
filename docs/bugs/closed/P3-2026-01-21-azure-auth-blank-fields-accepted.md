@@ -174,3 +174,62 @@ P3 is appropriate - this is a usability issue (delayed failure, unclear errors) 
 
 **Files changed:**
 - `src/elspeth/plugins/azure/auth.py`
+
+### Code Evidence
+
+**Before (lines 87-95 - incomplete validation):**
+```python
+has_managed_identity = (
+    self.use_managed_identity
+    and self.account_url is not None  # ❌ Only checks not None
+)
+has_service_principal = all([
+    self.tenant_id is not None,  # ❌ Only checks not None
+    self.client_id is not None,
+    self.client_secret is not None,
+    self.account_url is not None,
+])
+```
+
+**After (lines 85-102 - complete validation):**
+```python
+has_conn_string = self.connection_string is not None and bool(self.connection_string.strip())
+has_sas_token = (
+    self.sas_token is not None
+    and bool(self.sas_token.strip())  # ✅ Checks not empty/whitespace
+    and self.account_url is not None
+    and bool(self.account_url.strip())  # ✅ Added
+)
+has_managed_identity = (
+    self.use_managed_identity
+    and self.account_url is not None
+    and bool(self.account_url.strip())  # ✅ Added
+)
+has_service_principal = all([
+    self.tenant_id is not None and bool(self.tenant_id.strip()),  # ✅ Added
+    self.client_id is not None and bool(self.client_id.strip()),  # ✅ Added
+    self.client_secret is not None and bool(self.client_secret.strip()),  # ✅ Added
+    self.account_url is not None and bool(self.account_url.strip()),  # ✅ Added
+])
+```
+
+**Cases now rejected:**
+- `account_url: ""` → ValueError at config validation
+- `account_url: "   "` → ValueError (whitespace-only)
+- `tenant_id: "\t\n"` → ValueError (whitespace-only)
+- `client_secret: ""` → ValueError (empty string)
+
+**Verification:**
+```bash
+$ grep -n "bool.*strip()" src/elspeth/plugins/azure/auth.py
+85:        has_conn_string = self.connection_string is not None and bool(self.connection_string.strip())
+88:            and bool(self.sas_token.strip())
+90:            and bool(self.account_url.strip())
+93:            self.use_managed_identity and self.account_url is not None and bool(self.account_url.strip())
+97:                self.tenant_id is not None and bool(self.tenant_id.strip()),
+98:                self.client_id is not None and bool(self.client_id.strip()),
+99:                self.client_secret is not None and bool(self.client_secret.strip()),
+100:                self.account_url is not None and bool(self.account_url.strip()),
+```
+
+All credential fields now validate for empty/whitespace strings.

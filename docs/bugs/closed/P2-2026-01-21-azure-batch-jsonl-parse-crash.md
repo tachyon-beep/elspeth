@@ -170,3 +170,61 @@ When triggered, the entire batch (potentially hundreds of rows) fails during res
 
 **Files changed:**
 - `src/elspeth/plugins/llm/azure_batch.py`
+
+### Code Evidence
+
+**Before (lines 618-619 - unprotected parsing):**
+```python
+for line in output_content.text.strip().split("\n"):
+    if line:
+        result = json.loads(line)  # ❌ Can raise JSONDecodeError
+        results_by_id[result["custom_id"]] = result  # ❌ Can raise KeyError
+```
+
+**After (lines 684-716 - defensive parsing):**
+```python
+# Parse JSONL results (EXTERNAL DATA - wrap parsing)
+results_by_id: dict[str, dict[str, Any]] = {}
+malformed_lines: list[str] = []
+
+for line_num, line in enumerate(output_content.text.strip().split("\n"), start=1):
+    if not line:
+        continue
+
+    try:
+        result = json.loads(line)  # ✅ Wrapped
+    except json.JSONDecodeError as e:
+        malformed_lines.append(f"Line {line_num}: JSON parse error - {e}")
+        continue  # ✅ Partial success - continue processing
+
+    # Validate custom_id presence
+    custom_id = result.get("custom_id")  # ✅ Safe access
+    if custom_id is None:
+        malformed_lines.append(f"Line {line_num}: Missing 'custom_id' field")
+        continue
+
+    results_by_id[custom_id] = result
+
+# If ALL lines are malformed, fail the entire batch
+if not results_by_id and malformed_lines:
+    return TransformResult.error({
+        "reason": "all_output_lines_malformed",
+        "malformed_count": len(malformed_lines),
+        "errors": malformed_lines[:10],
+    })
+```
+
+**Key improvements:**
+- ✅ Try/except around json.loads() per line
+- ✅ Safe .get() for custom_id field access
+- ✅ Partial success semantics (continues on malformed lines)
+- ✅ Only fails if ALL lines malformed
+- ✅ Collects error diagnostics for debugging
+
+**Verification:**
+```bash
+$ grep -n "json.JSONDecodeError" src/elspeth/plugins/llm/azure_batch.py
+694:            except json.JSONDecodeError as e:
+```
+
+Parser properly handles external data from Azure API response.

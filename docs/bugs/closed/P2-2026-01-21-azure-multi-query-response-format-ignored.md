@@ -154,3 +154,47 @@ This means users configuring `response_format: json` to request JSON-mode respon
 
 **Files changed:**
 - `src/elspeth/plugins/llm/azure_multi_query.py`
+
+### Code Evidence
+
+**Before (lines 221-226 - response_format not passed):**
+```python
+response = llm_client.chat_completion(
+    model=self._model,
+    messages=messages,
+    temperature=self._temperature,
+    max_tokens=self._max_tokens,
+    # ❌ response_format stored in self._response_format but never used
+)
+```
+
+**After (lines 211-224 - response_format conditionally passed):**
+```python
+# Build kwargs for LLM call
+llm_kwargs: dict[str, Any] = {
+    "model": self._model,
+    "messages": messages,
+    "temperature": self._temperature,
+    "max_tokens": self._max_tokens,
+}
+
+# ✅ Add response_format if configured (OpenAI expects {"type": "json_object"})
+if self._response_format == "json":
+    llm_kwargs["response_format"] = {"type": "json_object"}
+
+try:
+    response = llm_client.chat_completion(**llm_kwargs)  # ✅ Kwargs expanded
+```
+
+**Impact:**
+- Config `response_format: json` now enforces JSON mode at LLM level
+- Reduces JSON parse failures by instructing LLM to return valid JSON
+- Uses proper OpenAI format: `{"type": "json_object"}`
+
+**Verification:**
+```bash
+$ grep -n 'response_format.*json_object' src/elspeth/plugins/llm/azure_multi_query.py
+221:            llm_kwargs["response_format"] = {"type": "json_object"}
+```
+
+Config value now properly passed to LLM API.
