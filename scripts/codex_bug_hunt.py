@@ -7,76 +7,23 @@ import re
 import shutil
 import subprocess
 import sys
-import time
-from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
 
-try:
-    from tqdm.asyncio import tqdm as async_tqdm
-
-    HAS_TQDM = True
-except ImportError:
-    HAS_TQDM = False
-
-    # Fallback for when tqdm not installed
-    class async_tqdm:  # type: ignore
-        def __init__(self, *args: Any, **kwargs: Any):
-            self.total = kwargs.get("total", 0)
-            self.desc = kwargs.get("desc", "")
-            self.n = 0
-
-        def update(self, n: int = 1) -> None:
-            self.n += n
-            if self.total > 0:
-                pct = (self.n / self.total) * 100
-                print(f"\r{self.desc}: {self.n}/{self.total} ({pct:.1f}%)", end="", file=sys.stderr)
-
-        def close(self) -> None:
-            if self.total > 0:
-                print(file=sys.stderr)
-
-
-def _resolve_path(repo_root: Path, value: str) -> Path:
-    path = Path(value)
-    if path.is_absolute():
-        return path
-    return (repo_root / path).resolve()
-
-
-# Directories and file patterns to exclude from scanning
-_EXCLUDE_DIRS = {
-    "__pycache__",
-    ".pytest_cache",
-    ".mypy_cache",
-    ".ruff_cache",
-    ".git",
-    ".tox",
-    ".nox",
-    ".hypothesis",
-    "node_modules",
-    ".venv",
-    "venv",
-    ".eggs",
-    "htmlcov",
-    ".coverage",
-}
-
-_EXCLUDE_SUFFIXES = {".pyc", ".pyo"}
-
-
-def _is_cache_path(path: Path) -> bool:
-    """Check if path is a cache file or inside a cache directory."""
-    # Check if any parent directory is an excluded directory
-    for part in path.parts:
-        if part in _EXCLUDE_DIRS:
-            return True
-        # Handle *.egg-info directories
-        if part.endswith(".egg-info"):
-            return True
-    # Check file suffix
-    return path.suffix in _EXCLUDE_SUFFIXES
+from codex_audit_common import (
+    AsyncTqdm,
+    chunked,
+    ensure_log_file,
+    extract_section,
+    generate_summary,
+    is_cache_path,
+    load_context,
+    print_summary,
+    priority_from_report,
+    resolve_path,
+    run_codex_with_retry_and_logging,
+)
+from pyrate_limiter import Duration, Limiter, Rate
 
 
 def _is_python_file(path: Path) -> bool:
@@ -193,407 +140,6 @@ def _build_prompt(file_path: Path, template: str, context: str) -> str:
     )
 
 
-class RateLimiter:
-    """Simple token bucket rate limiter for API calls."""
-
-    def __init__(self, rate: int, per_seconds: float):
-        self.rate = rate
-        self.per_seconds = per_seconds
-        self.tokens = float(rate)
-        self.updated_at = time.monotonic()
-        self.lock = asyncio.Lock()
-
-    async def acquire(self) -> None:
-        """Acquire a token, waiting if necessary."""
-        async with self.lock:
-            now = time.monotonic()
-            elapsed = now - self.updated_at
-            # Add tokens based on time elapsed
-            self.tokens = min(self.rate, self.tokens + elapsed * (self.rate / self.per_seconds))
-            self.updated_at = now
-
-            if self.tokens < 1:
-                # Need to wait for a token
-                sleep_time = (1 - self.tokens) * (self.per_seconds / self.rate)
-                await asyncio.sleep(sleep_time)
-                self.tokens = 0
-            else:
-                self.tokens -= 1
-
-
-async def _run_codex_with_retry(
-    *,
-    file_path: Path,
-    output_path: Path,
-    model: str | None,
-    prompt: str,
-    repo_root: Path,
-    log_path: Path,
-    log_lock: asyncio.Lock,
-    file_display: str,
-    output_display: str,
-    rate_limiter: RateLimiter | None,
-    bugs_open_dir: Path | None,
-    deduplicate: bool,
-    max_retries: int = 3,
-) -> dict[str, int]:
-    """Run codex with retry logic, deduplication, and rate limiting. Returns stats."""
-    if rate_limiter:
-        await rate_limiter.acquire()
-
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    start_time = time.monotonic()
-    status = "ok"
-    note = ""
-    gated_count = 0
-    merged_count = 0
-
-    cmd = [
-        "codex",
-        "exec",
-        "--sandbox",
-        "read-only",
-        "-c",
-        'approval_policy="never"',
-        "--output-last-message",
-        str(output_path),
-    ]
-    if model is not None:
-        cmd.extend(["--model", model])
-    cmd.append(prompt)
-
-    for attempt in range(max_retries):
-        try:
-            process = await asyncio.create_subprocess_exec(*cmd, cwd=repo_root)
-            return_code = await process.wait()
-            if return_code != 0:
-                raise RuntimeError(f"codex exec failed for {file_path} with code {return_code}")
-
-            gated_count = _apply_evidence_gate(output_path)
-
-            # Deduplicate against existing bugs if requested
-            if deduplicate and bugs_open_dir and bugs_open_dir.exists():
-                merged_count = _deduplicate_and_merge(output_path, bugs_open_dir, repo_root)
-                if merged_count > 0:
-                    note = f"merged={merged_count}"
-                elif gated_count > 0:
-                    note = f"evidence_gate={gated_count}"
-            elif gated_count > 0:
-                note = f"evidence_gate={gated_count}"
-
-            # Success - break out of retry loop
-            break
-
-        except Exception as exc:
-            if attempt < max_retries - 1:
-                # Wait with exponential backoff before retry
-                wait_time = (2**attempt) * 2  # 2s, 4s, 8s
-                await asyncio.sleep(wait_time)
-                note = f"retry_{attempt + 1}"
-            else:
-                # Final attempt failed
-                status = "failed"
-                note = str(exc)
-                raise
-
-    # Only reached if we broke out of loop successfully
-    duration_s = time.monotonic() - start_time
-    await _append_log(
-        log_path=log_path,
-        log_lock=log_lock,
-        timestamp=_utc_now(),
-        status=status,
-        file_display=file_display,
-        output_display=output_display,
-        model=model or "",
-        duration_s=duration_s,
-        note=note,
-    )
-
-    return {"gated": gated_count, "merged": merged_count}
-
-
-def _chunked(paths: list[Path], size: int) -> list[list[Path]]:
-    return [paths[i : i + size] for i in range(0, len(paths), size)]
-
-
-async def _run_batches(
-    *,
-    files: list[Path],
-    output_dir: Path,
-    model: str | None,
-    prompt_template: str,
-    repo_root: Path,
-    skip_existing: bool,
-    batch_size: int,
-    root_dir: Path,
-    log_path: Path,
-    context: str,
-    rate_limit: int | None,
-    organize_by_priority: bool,
-    bugs_open_dir: Path | None,
-    deduplicate: bool,
-) -> dict[str, int]:
-    """Run analysis in batches. Returns statistics."""
-    log_lock = asyncio.Lock()
-    failed_files: list[tuple[Path, Exception]] = []
-    total_merged = 0
-    total_gated = 0
-
-    # Setup rate limiter if requested
-    rate_limiter = RateLimiter(rate=rate_limit, per_seconds=60.0) if rate_limit else None
-
-    # Progress bar
-    pbar = async_tqdm(total=len(files), desc="Analyzing files", unit="file")
-
-    for batch in _chunked(files, batch_size):
-        tasks: list[asyncio.Task[dict[str, int]]] = []
-        batch_files: list[Path] = []
-
-        for file_path in batch:
-            relative = file_path.relative_to(root_dir)
-            output_path = output_dir / relative
-            output_path = output_path.with_suffix(output_path.suffix + ".md")
-
-            if skip_existing and output_path.exists():
-                pbar.update(1)
-                continue
-
-            prompt = _build_prompt(file_path, prompt_template, context)
-            batch_files.append(file_path)
-            tasks.append(
-                asyncio.create_task(
-                    _run_codex_with_retry(
-                        file_path=file_path,
-                        output_path=output_path,
-                        model=model,
-                        prompt=prompt,
-                        repo_root=repo_root,
-                        log_path=log_path,
-                        log_lock=log_lock,
-                        file_display=str(file_path.relative_to(repo_root).as_posix()),
-                        output_display=str(output_path.relative_to(repo_root).as_posix()),
-                        rate_limiter=rate_limiter,
-                        bugs_open_dir=bugs_open_dir,
-                        deduplicate=deduplicate,
-                    )
-                )
-            )
-
-        if tasks:
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-            for file_path, result in zip(batch_files, results, strict=False):
-                if isinstance(result, Exception):
-                    failed_files.append((file_path, result))
-                elif isinstance(result, dict):
-                    total_merged += result.get("merged", 0)
-                    total_gated += result.get("gated", 0)
-                pbar.update(1)
-
-    pbar.close()
-
-    # Report failures
-    if failed_files:
-        print(f"\n⚠️  {len(failed_files)} files failed:", file=sys.stderr)
-        for path, exc in failed_files[:10]:
-            print(f"  {path.relative_to(repo_root)}: {exc}", file=sys.stderr)
-        if len(failed_files) > 10:
-            print(f"  ... and {len(failed_files) - 10} more (see {log_path})", file=sys.stderr)
-
-    # Report deduplication stats
-    if deduplicate and total_merged > 0:
-        print(f"\n🔗 {total_merged} bugs merged into existing reports in docs/bugs/open/")
-
-    # Organize outputs by priority if requested
-    if organize_by_priority:
-        _organize_by_priority(output_dir)
-
-    # Generate summary statistics
-    summary = _generate_summary(output_dir)
-    summary["merged"] = total_merged
-    summary["gated"] = total_gated
-    return summary
-
-
-def _ensure_log_file(log_path: Path) -> None:
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    if log_path.exists() and log_path.stat().st_size > 0:
-        return
-    header = (
-        "# Codex Bug Hunt Log\n\n"
-        "| Timestamp (UTC) | Status | File | Output | Model | Duration_s | Note |\n"
-        "| --- | --- | --- | --- | --- | --- | --- |\n"
-    )
-    log_path.write_text(header, encoding="utf-8")
-
-
-def _utc_now() -> str:
-    return datetime.now(UTC).replace(microsecond=0).isoformat()
-
-
-def _escape_cell(value: str) -> str:
-    return value.replace("|", "\\|").replace("\n", "\\n").replace("\r", "")
-
-
-def _load_context(repo_root: Path, extra_files: list[str] | None = None) -> str:
-    """Load context from CLAUDE.md, ARCHITECTURE.md, and optional extra files."""
-    parts = []
-
-    # Core context files
-    for filename in ["CLAUDE.md", "ARCHITECTURE.md"]:
-        path = repo_root / filename
-        if path.exists():
-            parts.append(f"--- {filename} ---\n{path.read_text(encoding='utf-8')}")
-
-    # Optional additional context
-    if extra_files:
-        for filename in extra_files:
-            path = repo_root / filename
-            if path.exists():
-                parts.append(f"--- {filename} ---\n{path.read_text(encoding='utf-8')}")
-            else:
-                print(f"Warning: Context file not found: {filename}", file=sys.stderr)
-
-    return "\n\n".join(parts)
-
-
-def _extract_section(report: str, heading: str) -> str:
-    lines = report.splitlines()
-    in_section = False
-    collected: list[str] = []
-    for line in lines:
-        if line.strip().startswith("## "):
-            if in_section:
-                break
-            if line.strip() == f"## {heading}":
-                in_section = True
-                continue
-        if in_section:
-            collected.append(line)
-    return "\n".join(collected).strip()
-
-
-def _replace_section(report: str, heading: str, new_lines: list[str]) -> str:
-    lines = report.splitlines()
-    out: list[str] = []
-    in_target = False
-    for line in lines:
-        if line.strip().startswith("## "):
-            if in_target:
-                in_target = False
-            if line.strip() == f"## {heading}":
-                out.append(line)
-                out.extend(new_lines)
-                in_target = True
-                continue
-        if in_target:
-            continue
-        out.append(line)
-    return "\n".join(out).rstrip() + "\n"
-
-
-def _has_file_line_evidence(evidence: str) -> bool:
-    """Check if evidence contains file:line citations."""
-    patterns = [
-        r"\b[\w./-]+\.[\w]+:\d+\b",  # file.py:123
-        r"\b[\w./-]+#L\d+\b",  # file.py#L123
-        r"\bline\s+\d+\b",  # line 123
-        r"\b[\w./-]+\(line\s+\d+\)",  # file.py (line 123)
-        r"\bat\s+[\w./-]+\.[\w]+:\d+",  # at file.py:123
-        r"\bin\s+[\w./-]+\.[\w]+:\d+",  # in file.py:123
-        r"```[a-z]*\n[\w./-]+\.[\w]+:\d+",  # code blocks with file:line
-    ]
-    return any(re.search(pattern, evidence, re.IGNORECASE) for pattern in patterns)
-
-
-def _evidence_quality_score(evidence: str) -> int:
-    """Score evidence quality 0-3 based on specificity."""
-    score = 0
-    if _has_file_line_evidence(evidence):
-        score += 1
-    if re.search(r"```python", evidence, re.IGNORECASE):
-        score += 1  # Has code example
-    if len(evidence) > 100:
-        score += 1  # Detailed explanation
-    return score
-
-
-def _apply_evidence_gate(output_path: Path) -> int:
-    """Apply evidence gate: downgrade reports without file:line citations."""
-    text = output_path.read_text(encoding="utf-8")
-    reports: list[str] = []
-    current: list[str] = []
-    for line in text.splitlines():
-        if line.strip() == "---":
-            reports.append("\n".join(current).strip())
-            current = []
-            continue
-        current.append(line)
-    if current:
-        reports.append("\n".join(current).strip())
-
-    gated_count = 0
-    new_reports: list[str] = []
-    for report in reports:
-        if not report.strip():
-            continue
-
-        evidence = _extract_section(report, "Evidence")
-        quality = _evidence_quality_score(evidence)
-
-        # Quality-based downgrading
-        if quality == 0:
-            # No evidence at all - downgrade to P3/trivial
-            gated_count += 1
-            report = _replace_section(
-                report,
-                "Summary",
-                ["", "- Needs verification: missing file/line evidence."],
-            )
-            report = _replace_section(
-                report,
-                "Severity",
-                ["", "- Severity: trivial", "- Priority: P3"],
-            )
-            report = _replace_section(
-                report,
-                "Root Cause Hypothesis",
-                ["", "- Unverified; no file/line evidence provided."],
-            )
-            report = _replace_section(
-                report,
-                "Evidence",
-                ["", "- No file/line evidence provided."],
-            )
-        elif quality == 1:
-            # Minimal evidence - downgrade to P2/minor
-            gated_count += 1
-            severity = _extract_section(report, "Severity")
-            # Only downgrade if currently P0 or P1
-            if "P0" in severity or "P1" in severity:
-                report = _replace_section(
-                    report,
-                    "Severity",
-                    ["", "- Severity: minor", "- Priority: P2 (downgraded: minimal evidence)"],
-                )
-        # quality >= 2: keep original
-
-        new_reports.append(report.strip())
-
-    new_text = "\n---\n".join(new_reports).rstrip() + "\n"
-    if new_text != text:
-        output_path.write_text(new_text, encoding="utf-8")
-
-    return gated_count
-
-
-def _priority_from_report(text: str) -> str:
-    """Extract priority level from report text."""
-    if match := re.search(r"Priority:\s*(P\d)", text, re.IGNORECASE):
-        return match.group(1).upper()
-    return "unknown"
-
-
 def _extract_file_references(text: str) -> set[str]:
     """Extract all file paths referenced in the text."""
     patterns = [
@@ -611,10 +157,10 @@ def _extract_file_references(text: str) -> set[str]:
 def _calculate_bug_similarity(report1: str, report2: str) -> float:
     """Calculate similarity score between two bug reports (0.0 to 1.0)."""
     # Extract key sections
-    summary1 = _extract_section(report1, "Summary").lower()
-    summary2 = _extract_section(report2, "Summary").lower()
-    evidence1 = _extract_section(report1, "Evidence").lower()
-    evidence2 = _extract_section(report2, "Evidence").lower()
+    summary1 = extract_section(report1, "Summary").lower()
+    summary2 = extract_section(report2, "Summary").lower()
+    evidence1 = extract_section(report1, "Evidence").lower()
+    evidence2 = extract_section(report2, "Evidence").lower()
 
     # Extract file references
     files1 = _extract_file_references(report1)
@@ -673,8 +219,8 @@ def _merge_bug_reports(existing_path: Path, new_report: str, repo_root: Path) ->
     existing_text = existing_path.read_text(encoding="utf-8")
 
     # Extract sections from new report
-    new_evidence = _extract_section(new_report, "Evidence")
-    new_root_cause = _extract_section(new_report, "Root Cause Hypothesis")
+    new_evidence = extract_section(new_report, "Evidence")
+    new_root_cause = extract_section(new_report, "Root Cause Hypothesis")
 
     # Add a verification section with the new analysis
     timestamp = datetime.now(UTC).strftime("%Y-%m-%d")
@@ -728,7 +274,7 @@ def _deduplicate_and_merge(
             continue
 
         # Check if this is a "no bug found" report
-        summary = _extract_section(report, "Summary")
+        summary = extract_section(report, "Summary")
         if "no concrete bug found" in summary.lower():
             continue  # Don't keep these
 
@@ -764,7 +310,7 @@ def _organize_by_priority(output_dir: Path) -> None:
             continue
 
         text = md_file.read_text(encoding="utf-8")
-        priority = _priority_from_report(text)
+        priority = priority_from_report(text)
 
         # Copy to priority subdirectory
         dest_dir = by_priority_dir / priority
@@ -773,59 +319,109 @@ def _organize_by_priority(output_dir: Path) -> None:
         shutil.copy2(md_file, dest_path)
 
 
-def _generate_summary(output_dir: Path) -> dict[str, int]:
-    """Parse all outputs and count bugs by priority."""
-    stats: Counter[str] = Counter()
+async def _run_batches(
+    *,
+    files: list[Path],
+    output_dir: Path,
+    model: str | None,
+    prompt_template: str,
+    repo_root: Path,
+    skip_existing: bool,
+    batch_size: int,
+    root_dir: Path,
+    log_path: Path,
+    context: str,
+    rate_limit: int | None,
+    organize_by_priority: bool,
+    bugs_open_dir: Path | None,
+    deduplicate: bool,
+) -> dict[str, int]:
+    """Run analysis in batches. Returns statistics."""
+    log_lock = asyncio.Lock()
+    failed_files: list[tuple[Path, Exception]] = []
+    total_merged = 0
+    total_gated = 0
 
-    for md_file in output_dir.rglob("*.md"):
-        # Skip by-priority copies to avoid double-counting
-        if "by-priority" in md_file.parts:
-            continue
+    # Use pyrate-limiter for rate limiting
+    rate_limiter = Limiter(Rate(rate_limit, Duration.MINUTE)) if rate_limit else None
+    pbar = AsyncTqdm(total=len(files), desc="Analyzing files", unit="file")
 
-        text = md_file.read_text(encoding="utf-8")
+    for batch in chunked(files, batch_size):
+        tasks: list[asyncio.Task[dict[str, int]]] = []
+        batch_files: list[Path] = []
 
-        if "No concrete bug found" in text:
-            stats["no_bug"] += 1
-        else:
-            priority = _priority_from_report(text)
-            stats[priority] += 1
+        for file_path in batch:
+            relative = file_path.relative_to(root_dir)
+            output_path = output_dir / relative
+            output_path = output_path.with_suffix(output_path.suffix + ".md")
 
-    return dict(stats)
+            if skip_existing and output_path.exists():
+                pbar.update(1)
+                continue
 
+            prompt = _build_prompt(file_path, prompt_template, context)
+            batch_files.append(file_path)
+            tasks.append(
+                asyncio.create_task(
+                    run_codex_with_retry_and_logging(
+                        file_path=file_path,
+                        output_path=output_path,
+                        model=model,
+                        prompt=prompt,
+                        repo_root=repo_root,
+                        log_path=log_path,
+                        log_lock=log_lock,
+                        file_display=str(file_path.relative_to(repo_root).as_posix()),
+                        output_display=str(output_path.relative_to(repo_root).as_posix()),
+                        rate_limiter=rate_limiter,
+                        evidence_gate_summary_prefix="",
+                    )
+                )
+            )
 
-def _print_summary(stats: dict[str, int]) -> None:
-    """Print formatted summary statistics."""
-    print("\n" + "=" * 60)
-    print("📊 Analysis Summary")
-    print("=" * 60)
+        if tasks:
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            for file_path, result in zip(batch_files, results, strict=False):
+                if isinstance(result, Exception):
+                    failed_files.append((file_path, result))
+                elif isinstance(result, dict):
+                    total_gated += result["gated"]  # Crash if missing - our contract violation
 
-    total_bugs = sum(v for k, v in stats.items() if k not in ["no_bug", "merged", "gated", "unknown"])
+                    # Deduplicate after successful run
+                    if deduplicate and bugs_open_dir and bugs_open_dir.exists():
+                        # Get the output path for this file
+                        relative = file_path.relative_to(root_dir)
+                        output_path = output_dir / relative
+                        output_path = output_path.with_suffix(output_path.suffix + ".md")
 
-    if total_bugs > 0:
-        print(f"\n🐛 Bugs Found: {total_bugs}")
-        for priority in ["P0", "P1", "P2", "P3"]:
-            count = stats.get(priority, 0)
-            if count > 0:
-                bar = "█" * min(count, 40)
-                print(f"  {priority}: {count:3d} {bar}")
+                        merged_count = _deduplicate_and_merge(output_path, bugs_open_dir, repo_root)
+                        total_merged += merged_count
 
-    no_bug_count = stats.get("no_bug", 0)
-    if no_bug_count > 0:
-        print(f"\n✅ Clean Files: {no_bug_count}")
+                pbar.update(1)
 
-    merged = stats.get("merged", 0)
-    if merged > 0:
-        print(f"\n🔗 Merged into existing bugs: {merged}")
+    pbar.close()
 
-    gated = stats.get("gated", 0)
-    if gated > 0:
-        print(f"\n⚠️  Downgraded (evidence gate): {gated}")
+    # Report failures
+    if failed_files:
+        print(f"\n⚠️  {len(failed_files)} files failed:", file=sys.stderr)
+        for path, exc in failed_files[:10]:
+            print(f"  {path.relative_to(repo_root)}: {exc}", file=sys.stderr)
+        if len(failed_files) > 10:
+            print(f"  ... and {len(failed_files) - 10} more (see {log_path})", file=sys.stderr)
 
-    unknown = stats.get("unknown", 0)
-    if unknown > 0:
-        print(f"\n❓ Unknown Priority: {unknown}")
+    # Report deduplication stats
+    if deduplicate and total_merged > 0:
+        print(f"\n🔗 {total_merged} bugs merged into existing reports in docs/bugs/open/")
 
-    print("=" * 60 + "\n")
+    # Organize outputs by priority if requested
+    if organize_by_priority:
+        _organize_by_priority(output_dir)
+
+    # Generate summary statistics
+    summary = generate_summary(output_dir, no_defect_marker="No concrete bug found")
+    summary["merged"] = total_merged
+    summary["gated"] = total_gated
+    return summary
 
 
 def _paths_from_file(path_file: Path, repo_root: Path, root_dir: Path) -> list[Path]:
@@ -840,9 +436,9 @@ def _paths_from_file(path_file: Path, repo_root: Path, root_dir: Path) -> list[P
         if not path.exists():
             raise RuntimeError(f"paths-from entry does not exist: {raw_path}")
         if path.is_dir():
-            selected.extend([p for p in path.rglob("*") if p.is_file() and not _is_cache_path(p)])
+            selected.extend([p for p in path.rglob("*") if p.is_file() and not is_cache_path(p)])
         else:
-            if not _is_cache_path(path):
+            if not is_cache_path(path):
                 selected.append(path)
     return [path for path in selected if _is_under_root(path, root_dir)]
 
@@ -870,7 +466,7 @@ def _changed_files_since(repo_root: Path, root_dir: Path, git_ref: str) -> list[
         if not rel:
             continue
         path = (repo_root / rel).resolve()
-        if path.is_file() and _is_under_root(path, root_dir) and not _is_cache_path(path):
+        if path.is_file() and _is_under_root(path, root_dir) and not is_cache_path(path):
             selected.append(path)
     return selected
 
@@ -900,7 +496,7 @@ def _changed_files_on_branch(repo_root: Path, root_dir: Path, base_branch: str) 
         if not rel:
             continue
         path = (repo_root / rel).resolve()
-        if path.is_file() and _is_under_root(path, root_dir) and not _is_cache_path(path):
+        if path.is_file() and _is_under_root(path, root_dir) and not is_cache_path(path):
             selected.append(path)
     return selected
 
@@ -927,7 +523,7 @@ def _changed_files_in_range(repo_root: Path, root_dir: Path, commit_range: str) 
         if not rel:
             continue
         path = (repo_root / rel).resolve()
-        if path.is_file() and _is_under_root(path, root_dir) and not _is_cache_path(path):
+        if path.is_file() and _is_under_root(path, root_dir) and not is_cache_path(path):
             selected.append(path)
     return selected
 
@@ -967,35 +563,13 @@ def _list_files(
         selected = listed if selected is None else selected & listed
 
     if selected is None:
-        selected = {path for path in root_dir.rglob("*") if path.is_file() and not _is_cache_path(path)}
+        selected = {path for path in root_dir.rglob("*") if path.is_file() and not is_cache_path(path)}
 
     # Apply file type filter
     if file_type == "python":
         selected = {p for p in selected if _is_python_file(p)}
 
     return sorted(selected)
-
-
-async def _append_log(
-    *,
-    log_path: Path,
-    log_lock: asyncio.Lock,
-    timestamp: str,
-    status: str,
-    file_display: str,
-    output_display: str,
-    model: str,
-    duration_s: float,
-    note: str,
-) -> None:
-    line = (
-        f"| {_escape_cell(timestamp)} | {_escape_cell(status)} | "
-        f"{_escape_cell(file_display)} | {_escape_cell(output_display)} | "
-        f"{_escape_cell(model)} | {duration_s:.2f} | {_escape_cell(note)} |\n"
-    )
-    async with log_lock:
-        with log_path.open("a", encoding="utf-8") as handle:
-            handle.write(line)
 
 
 def main() -> int:
@@ -1128,14 +702,14 @@ Examples:
         raise RuntimeError("codex CLI not found on PATH")
 
     repo_root = Path(__file__).resolve().parents[1]
-    root_dir = _resolve_path(repo_root, args.root)
-    template_path = _resolve_path(repo_root, args.template)
-    output_dir = _resolve_path(repo_root, args.output_dir)
-    log_path = _resolve_path(repo_root, "docs/bugs/process/CODEX_LOG.md")
-    bugs_open_dir = _resolve_path(repo_root, args.bugs_dir) if args.deduplicate else None
+    root_dir = resolve_path(repo_root, args.root)
+    template_path = resolve_path(repo_root, args.template)
+    output_dir = resolve_path(repo_root, args.output_dir)
+    log_path = resolve_path(repo_root, "docs/bugs/process/CODEX_LOG.md")
+    bugs_open_dir = resolve_path(repo_root, args.bugs_dir) if args.deduplicate else None
 
     # List files to scan
-    paths_from = _resolve_path(repo_root, args.paths_from) if args.paths_from else None
+    paths_from = resolve_path(repo_root, args.paths_from) if args.paths_from else None
     files = _list_files(
         root_dir=root_dir,
         repo_root=repo_root,
@@ -1161,8 +735,8 @@ Examples:
 
     # Load template and context
     template_text = template_path.read_text(encoding="utf-8")
-    context_text = _load_context(repo_root, extra_files=args.context_files)
-    _ensure_log_file(log_path)
+    context_text = load_context(repo_root, extra_files=args.context_files)
+    ensure_log_file(log_path, header_title="Codex Bug Hunt Log")
 
     # Run analysis
     stats = asyncio.run(
@@ -1185,7 +759,7 @@ Examples:
     )
 
     # Print summary
-    _print_summary(stats)
+    print_summary(stats, icon="🐛", title="Bug Hunt Summary")
 
     return 0
 

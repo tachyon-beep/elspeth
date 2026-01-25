@@ -14,86 +14,28 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import re
 import shutil
-import subprocess
 import sys
 import time
-from collections import Counter
-from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
 
+from codex_audit_common import (
+    AsyncTqdm,
+    chunked,
+    ensure_log_file,
+    generate_summary,
+    get_git_commit,
+    is_cache_path,
+    load_context,
+    print_summary,
+    resolve_path,
+    run_codex_with_retry_and_logging,
+    utc_now,
+    write_findings_index,
+    write_run_metadata,
+    write_summary_file,
+)
 from pyrate_limiter import Duration, Limiter, Rate
-from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
-
-try:
-    from tqdm.asyncio import tqdm as async_tqdm
-
-    HAS_TQDM = True
-except ImportError:
-    HAS_TQDM = False
-
-    class async_tqdm:  # type: ignore
-        def __init__(self, *args: Any, **kwargs: Any):
-            self.total = kwargs.get("total", 0)
-            self.desc = kwargs.get("desc", "")
-            self.n = 0
-
-        def update(self, n: int = 1) -> None:
-            self.n += n
-            if self.total > 0:
-                pct = (self.n / self.total) * 100
-                print(f"\r{self.desc}: {self.n}/{self.total} ({pct:.1f}%)", end="", file=sys.stderr)
-
-        def close(self) -> None:
-            if self.total > 0:
-                print(file=sys.stderr)
-
-
-# === Constants ===
-_MAX_RETRIES = 3
-_RETRY_MIN_WAIT_S = 2
-_RETRY_MAX_WAIT_S = 60
-_RETRY_MULTIPLIER = 2
-_STDERR_TRUNCATE_CHARS = 500
-
-
-def _resolve_path(repo_root: Path, value: str) -> Path:
-    path = Path(value)
-    if path.is_absolute():
-        return path
-    return (repo_root / path).resolve()
-
-
-_EXCLUDE_DIRS = {
-    "__pycache__",
-    ".pytest_cache",
-    ".mypy_cache",
-    ".ruff_cache",
-    ".git",
-    ".tox",
-    ".nox",
-    ".hypothesis",
-    "node_modules",
-    ".venv",
-    "venv",
-    ".eggs",
-    "htmlcov",
-    ".coverage",
-}
-
-_EXCLUDE_SUFFIXES = {".pyc", ".pyo"}
-
-
-def _is_cache_path(path: Path) -> bool:
-    """Check if path is a cache file or inside a cache directory."""
-    for part in path.parts:
-        if part in _EXCLUDE_DIRS:
-            return True
-        if part.endswith(".egg-info"):
-            return True
-    return path.suffix in _EXCLUDE_SUFFIXES
 
 
 def _is_test_file(path: Path) -> bool:
@@ -261,133 +203,6 @@ def _build_test_quality_prompt(file_path: Path, template: str, context: str) -> 
     )
 
 
-async def _run_codex_once(
-    *,
-    file_path: Path,
-    output_path: Path,
-    model: str | None,
-    prompt: str,
-    repo_root: Path,
-    file_display: str,
-    output_display: str,
-) -> None:
-    """Run codex exec once. Raises on failure. Does not handle retries or logging."""
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-
-    cmd = [
-        "codex",
-        "exec",
-        "--sandbox",
-        "read-only",
-        "-c",
-        'approval_policy="never"',
-        "--output-last-message",
-        str(output_path),
-    ]
-    if model is not None:
-        cmd.extend(["--model", model])
-    cmd.append(prompt)
-
-    # Create subprocess with stdout/stderr capture for diagnostics
-    process = await asyncio.create_subprocess_exec(
-        *cmd,
-        cwd=repo_root,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-
-    try:
-        _stdout, stderr = await process.communicate()
-
-        if process.returncode != 0:
-            stderr_text = stderr.decode("utf-8", errors="replace")
-            # Truncate stderr for log readability
-            if len(stderr_text) > _STDERR_TRUNCATE_CHARS:
-                stderr_text = stderr_text[:_STDERR_TRUNCATE_CHARS] + "... (truncated)"
-
-            raise RuntimeError(f"codex exec failed for {file_display} with code {process.returncode}\nstderr: {stderr_text}")
-
-    finally:
-        # Ensure subprocess cleanup if still running
-        if process.returncode is None:
-            process.terminate()
-            await process.wait()
-
-
-async def _run_codex_with_retry_and_logging(
-    *,
-    file_path: Path,
-    output_path: Path,
-    model: str | None,
-    prompt: str,
-    repo_root: Path,
-    log_path: Path,
-    log_lock: asyncio.Lock,
-    file_display: str,
-    output_display: str,
-    rate_limiter: Limiter | None,
-) -> dict[str, int]:
-    """Run codex with retry logic, rate limiting, evidence gate, and logging. Returns stats."""
-    if rate_limiter:
-        rate_limiter.try_acquire("codex_api")
-
-    start_time = time.monotonic()
-    status = "ok"
-    note = ""
-    gated_count = 0
-
-    # Create retry decorator dynamically
-    retry_decorator = retry(
-        stop=stop_after_attempt(_MAX_RETRIES),
-        wait=wait_exponential(multiplier=_RETRY_MULTIPLIER, min=_RETRY_MIN_WAIT_S, max=_RETRY_MAX_WAIT_S),
-        retry=retry_if_exception_type((RuntimeError, asyncio.TimeoutError)),
-        reraise=True,
-    )
-
-    try:
-        # Apply retry decorator to the function call
-        await retry_decorator(_run_codex_once)(
-            file_path=file_path,
-            output_path=output_path,
-            model=model,
-            prompt=prompt,
-            repo_root=repo_root,
-            file_display=file_display,
-            output_display=output_display,
-        )
-
-        # Apply evidence gate after successful completion
-        gated_count = _apply_evidence_gate(output_path)
-        if gated_count > 0:
-            note = f"evidence_gate={gated_count}"
-
-    except Exception as exc:
-        status = "failed"
-        note = str(exc)[:200]  # Truncate long error messages
-        raise
-
-    finally:
-        duration_s = time.monotonic() - start_time
-        await _append_log(
-            log_path=log_path,
-            log_lock=log_lock,
-            timestamp=_utc_now(),
-            status=status,
-            file_display=file_display,
-            output_display=output_display,
-            model=model or "",
-            duration_s=duration_s,
-            note=note,
-        )
-
-    return {"gated": gated_count}
-
-
-def _chunked(paths: list[Path], size: int) -> list[list[Path]]:
-    """Split paths into chunks of at most `size` elements for batched processing."""
-    return [paths[i : i + size] for i in range(0, len(paths), size)]
-
-
 async def _run_batches(
     *,
     files: list[Path],
@@ -409,9 +224,9 @@ async def _run_batches(
 
     # Use pyrate-limiter for rate limiting
     rate_limiter = Limiter(Rate(rate_limit, Duration.MINUTE)) if rate_limit else None
-    pbar = async_tqdm(total=len(files), desc="Analyzing test files", unit="file")
+    pbar = AsyncTqdm(total=len(files), desc="Analyzing test files", unit="file")
 
-    for batch in _chunked(files, batch_size):
+    for batch in chunked(files, batch_size):
         tasks: list[asyncio.Task[dict[str, int]]] = []
         batch_files: list[Path] = []
 
@@ -428,7 +243,7 @@ async def _run_batches(
             batch_files.append(file_path)
             tasks.append(
                 asyncio.create_task(
-                    _run_codex_with_retry_and_logging(
+                    run_codex_with_retry_and_logging(
                         file_path=file_path,
                         output_path=output_path,
                         model=model,
@@ -439,6 +254,7 @@ async def _run_batches(
                         file_display=str(file_path.relative_to(repo_root).as_posix()),
                         output_display=str(output_path.relative_to(repo_root).as_posix()),
                         rate_limiter=rate_limiter,
+                        evidence_gate_summary_prefix="",
                     )
                 )
             )
@@ -449,7 +265,7 @@ async def _run_batches(
                 if isinstance(result, Exception):
                     failed_files.append((file_path, result))
                 elif isinstance(result, dict):
-                    total_gated += result.get("gated", 0)
+                    total_gated += result["gated"]  # Fixed: removed .get() - our data (Tier 2)
                 pbar.update(1)
 
     pbar.close()
@@ -461,468 +277,9 @@ async def _run_batches(
         if len(failed_files) > 10:
             print(f"  ... and {len(failed_files) - 10} more (see {log_path})", file=sys.stderr)
 
-    summary = _generate_summary(output_dir)
+    summary = generate_summary(output_dir, no_defect_marker="No test defect found")
     summary["gated"] = total_gated
     return summary
-
-
-def _ensure_log_file(log_path: Path) -> None:
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    if log_path.exists() and log_path.stat().st_size > 0:
-        return
-    header = (
-        "# Codex Test Defect Hunt Log\n\n"
-        "| Timestamp (UTC) | Status | File | Output | Model | Duration_s | Note |\n"
-        "| --- | --- | --- | --- | --- | --- | --- |\n"
-    )
-    log_path.write_text(header, encoding="utf-8")
-
-
-def _utc_now() -> str:
-    return datetime.now(UTC).replace(microsecond=0).isoformat()
-
-
-def _escape_cell(value: str) -> str:
-    return value.replace("|", "\\|").replace("\n", "\\n").replace("\r", "")
-
-
-def _load_context(repo_root: Path, extra_files: list[str] | None = None) -> str:
-    """Load context from CLAUDE.md and optional extra files for agent prompts.
-
-    Returns concatenated content of CLAUDE.md and any additional context files,
-    separated by headers showing filename.
-    """
-    parts = []
-
-    claude_md = repo_root / "CLAUDE.md"
-    if claude_md.exists():
-        parts.append(f"--- CLAUDE.md ---\n{claude_md.read_text(encoding='utf-8')}")
-
-    if extra_files:
-        for filename in extra_files:
-            path = repo_root / filename
-            if path.exists():
-                parts.append(f"--- {filename} ---\n{path.read_text(encoding='utf-8')}")
-            else:
-                print(f"Warning: Context file not found: {filename}", file=sys.stderr)
-
-    return "\n\n".join(parts)
-
-
-def _extract_section(report: str, heading: str) -> str:
-    """Extract content from a markdown section with the given heading.
-
-    Returns the text between `## {heading}` and the next `##` heading.
-    """
-    lines = report.splitlines()
-    in_section = False
-    collected: list[str] = []
-    for line in lines:
-        if line.strip().startswith("## "):
-            if in_section:
-                break
-            if line.strip() == f"## {heading}":
-                in_section = True
-                continue
-        if in_section:
-            collected.append(line)
-    return "\n".join(collected).strip()
-
-
-def _replace_section(report: str, heading: str, new_lines: list[str]) -> str:
-    """Replace content in a markdown section with the given heading.
-
-    Keeps the heading line, replaces everything until the next heading with new_lines.
-    """
-    lines = report.splitlines()
-    out: list[str] = []
-    in_target = False
-    for line in lines:
-        if line.strip().startswith("## "):
-            if in_target:
-                in_target = False
-            if line.strip() == f"## {heading}":
-                out.append(line)
-                out.extend(new_lines)
-                in_target = True
-                continue
-        if in_target:
-            continue
-        out.append(line)
-    return "\n".join(out).rstrip() + "\n"
-
-
-def _has_file_line_evidence(evidence: str) -> bool:
-    """Check if evidence contains file:line citations."""
-    patterns = [
-        r"\b[\w./-]+\.[\w]+:\d+\b",  # file.py:123
-        r"\b[\w./-]+#L\d+\b",  # file.py#L123
-        r"\bline\s+\d+\b",  # line 123
-        r"\b[\w./-]+\(line\s+\d+\)",  # file.py (line 123)
-        r"\bat\s+[\w./-]+\.[\w]+:\d+",  # at file.py:123
-        r"\bin\s+[\w./-]+\.[\w]+:\d+",  # in file.py:123
-    ]
-    return any(re.search(pattern, evidence, re.IGNORECASE) for pattern in patterns)
-
-
-def _evidence_quality_score(evidence: str) -> int:
-    """Score evidence quality 0-3 based on specificity."""
-    score = 0
-    if _has_file_line_evidence(evidence):
-        score += 1
-    if re.search(r"```python", evidence, re.IGNORECASE):
-        score += 1
-    if len(evidence) > 100:
-        score += 1
-    return score
-
-
-def _apply_evidence_gate(output_path: Path) -> int:
-    """Apply evidence gate: downgrade reports without file:line citations."""
-    text = output_path.read_text(encoding="utf-8")
-    reports: list[str] = []
-    current: list[str] = []
-    for line in text.splitlines():
-        if line.strip() == "---":
-            reports.append("\n".join(current).strip())
-            current = []
-            continue
-        current.append(line)
-    if current:
-        reports.append("\n".join(current).strip())
-
-    gated_count = 0
-    new_reports: list[str] = []
-    for report in reports:
-        if not report.strip():
-            continue
-
-        evidence = _extract_section(report, "Evidence")
-        quality = _evidence_quality_score(evidence)
-
-        if quality == 0:
-            gated_count += 1
-            report = _replace_section(
-                report,
-                "Summary",
-                ["", "- Needs verification: missing file/line evidence."],
-            )
-            report = _replace_section(
-                report,
-                "Severity",
-                ["", "- Severity: trivial", "- Priority: P3"],
-            )
-        elif quality == 1:
-            gated_count += 1
-            severity = _extract_section(report, "Severity")
-            # Use word boundaries to avoid false positives like "The P0 ticket"
-            if re.search(r"\bP[01]\b", severity):
-                report = _replace_section(
-                    report,
-                    "Severity",
-                    ["", "- Severity: minor", "- Priority: P2 (downgraded: minimal evidence)"],
-                )
-
-        new_reports.append(report.strip())
-
-    new_text = "\n---\n".join(new_reports).rstrip() + "\n"
-    if new_text != text:
-        output_path.write_text(new_text, encoding="utf-8")
-
-    return gated_count
-
-
-def _priority_from_report(text: str) -> str:
-    """Extract priority level from report text."""
-    if match := re.search(r"Priority:\s*(P\d)", text, re.IGNORECASE):
-        return match.group(1).upper()
-    return "unknown"
-
-
-def _generate_summary(output_dir: Path) -> dict[str, int]:
-    """Parse all outputs and count defects by priority."""
-    stats: Counter[str] = Counter()
-
-    for md_file in output_dir.rglob("*.md"):
-        text = md_file.read_text(encoding="utf-8")
-
-        if "No test defect found" in text:
-            stats["no_defect"] += 1
-        else:
-            priority = _priority_from_report(text)
-            stats[priority] += 1
-
-    return dict(stats)
-
-
-def _write_run_metadata(
-    *,
-    output_dir: Path,
-    repo_root: Path,
-    start_time: str,
-    end_time: str,
-    duration_s: float,
-    files_scanned: int,
-    model: str | None,
-    batch_size: int,
-    rate_limit: int | None,
-    git_commit: str,
-) -> None:
-    """Write run metadata file for triage tracking."""
-    metadata_path = output_dir / "RUN_METADATA.md"
-    content = f"""# Test Quality Audit Run Metadata
-
-## Execution Details
-
-- **Start Time (UTC):** {start_time}
-- **End Time (UTC):** {end_time}
-- **Duration:** {duration_s:.1f}s
-- **Git Commit:** {git_commit}
-
-## Scan Parameters
-
-- **Files Scanned:** {files_scanned}
-- **Model:** {model or "default (from codex config)"}
-- **Batch Size:** {batch_size}
-- **Rate Limit:** {rate_limit if rate_limit else "none"}
-
-## Output Structure
-
-```
-{output_dir.relative_to(repo_root)}/
-├── RUN_METADATA.md          # This file
-├── SUMMARY.md               # Statistics and triage dashboard
-├── FINDINGS_INDEX.md        # Table of all findings
-├── <test-path>.py.md        # Individual finding reports
-└── ...
-```
-
-## Triage Workflow
-
-1. Review `SUMMARY.md` for overview
-2. Triage high-priority findings first (P0, P1)
-3. Use `FINDINGS_INDEX.md` to track triage status
-4. Update individual finding files with triage decisions
-
----
-Generated by: `scripts/codex_test_defect_hunt.py`
-"""
-    metadata_path.write_text(content, encoding="utf-8")
-
-
-def _write_summary_file(
-    *,
-    output_dir: Path,
-    stats: dict[str, int],
-    total_files: int,
-) -> None:
-    """Write summary statistics file for triage dashboard."""
-    summary_path = output_dir / "SUMMARY.md"
-
-    total_defects = sum(v for k, v in stats.items() if k not in ["no_defect", "gated", "unknown"])
-    no_defect_count = stats.get("no_defect", 0)
-    gated = stats.get("gated", 0)
-    unknown = stats.get("unknown", 0)
-
-    # Build priority breakdown
-    priority_lines = []
-    for priority in ["P0", "P1", "P2", "P3"]:
-        count = stats.get(priority, 0)
-        if count > 0:
-            bar = "█" * min(count, 40)
-            priority_lines.append(f"- **{priority}**: {count:3d} {bar}")
-
-    content = f"""# Test Quality Audit Summary
-
-## Overview
-
-| Metric | Count |
-|--------|-------|
-| **Total Files Scanned** | {total_files} |
-| **Test Defects Found** | {total_defects} |
-| **Clean Test Files** | {no_defect_count} |
-| **Downgraded (Evidence Gate)** | {gated} |
-| **Unknown Priority** | {unknown} |
-
-## Priority Breakdown
-
-{chr(10).join(priority_lines) if priority_lines else "No defects found."}
-
-## Triage Status
-
-- [ ] Review all P0 findings (critical)
-- [ ] Review all P1 findings (high)
-- [ ] Triage P2 findings (medium)
-- [ ] Triage P3 findings (low)
-
-## Next Steps
-
-1. Open `FINDINGS_INDEX.md` to see all findings in table format
-2. Start with P0/P1 findings
-3. For each finding:
-   - Review the evidence
-   - Verify the defect is real (not hallucinated)
-   - Create GitHub issue or fix immediately
-   - Update finding file with triage decision
-
----
-Last updated: {_utc_now()}
-"""
-    summary_path.write_text(content, encoding="utf-8")
-
-
-def _write_findings_index(
-    *,
-    output_dir: Path,
-    repo_root: Path,
-) -> None:
-    """Write findings index with table of all reports for easy triage."""
-    findings: list[dict[str, str]] = []
-
-    for md_file in sorted(output_dir.rglob("*.md")):
-        # Skip metadata files
-        if md_file.name in ["RUN_METADATA.md", "SUMMARY.md", "FINDINGS_INDEX.md"]:
-            continue
-
-        text = md_file.read_text(encoding="utf-8")
-
-        # Extract summary (first non-heading line after ## Summary)
-        summary = "No summary found"
-        lines = text.splitlines()
-        in_summary = False
-        for line in lines:
-            if line.strip() == "## Summary":
-                in_summary = True
-                continue
-            if in_summary:
-                if line.strip().startswith("## "):
-                    break
-                if line.strip() and not line.strip().startswith("-"):
-                    summary = line.strip()[:100]  # Truncate long summaries
-                    break
-
-        # Extract priority
-        priority = _priority_from_report(text)
-
-        # Check if it's a "no defect" report
-        is_clean = "No test defect found" in text
-
-        findings.append(
-            {
-                "file": str(md_file.relative_to(output_dir)),
-                "test_file": str(md_file.relative_to(output_dir).with_suffix("").with_suffix("")),
-                "priority": priority if not is_clean else "clean",
-                "summary": summary,
-                "status": "pending",  # For manual triage updates
-            }
-        )
-
-    # Sort by priority (P0 > P1 > P2 > P3 > clean)
-    priority_order = {"P0": 0, "P1": 1, "P2": 2, "P3": 3, "unknown": 4, "clean": 5}
-    findings.sort(key=lambda f: (priority_order.get(f["priority"], 99), f["test_file"]))
-
-    # Build table
-    index_path = output_dir / "FINDINGS_INDEX.md"
-    content = f"""# Test Quality Findings Index
-
-Total findings: {len(findings)}
-
-## Triage Table
-
-| Priority | Test File | Summary | Status | Report |
-|----------|-----------|---------|--------|--------|
-"""
-
-    for finding in findings:
-        # Skip "clean" reports for triage focus
-        if finding["priority"] == "clean":
-            continue
-
-        content += (
-            f"| {finding['priority']} | `{finding['test_file']}` | "
-            f"{finding['summary']} | {finding['status']} | [{finding['file']}]({finding['file']}) |\n"
-        )
-
-    content += f"""
-
-## Clean Test Files ({sum(1 for f in findings if f["priority"] == "clean")})
-
-"""
-
-    clean_files = [f for f in findings if f["priority"] == "clean"]
-    if clean_files:
-        content += "| Test File |\n|-----------|\n"
-        for finding in clean_files:
-            content += f"| `{finding['test_file']}` |\n"
-    else:
-        content += "_No clean test files found._\n"
-
-    content += (
-        """
-
-## Triage Status Legend
-
-- **pending**: Not yet reviewed
-- **confirmed**: Defect verified, issue created
-- **invalid**: False positive, not a real defect
-- **duplicate**: Already tracked elsewhere
-- **fixed**: Defect fixed
-
----
-Last updated: """
-        + _utc_now()
-        + "\n"
-    )
-
-    index_path.write_text(content, encoding="utf-8")
-
-
-def _print_summary(stats: dict[str, int]) -> None:
-    """Print formatted summary statistics to stdout."""
-    print("\n" + "=" * 60)
-    print("📊 Test Quality Audit Summary")
-    print("=" * 60)
-
-    total_defects = sum(v for k, v in stats.items() if k not in ["no_defect", "gated", "unknown"])
-
-    if total_defects > 0:
-        print(f"\n🔍 Test Defects Found: {total_defects}")
-        for priority in ["P0", "P1", "P2", "P3"]:
-            count = stats.get(priority, 0)
-            if count > 0:
-                bar = "█" * min(count, 40)
-                print(f"  {priority}: {count:3d} {bar}")
-
-    no_defect_count = stats.get("no_defect", 0)
-    if no_defect_count > 0:
-        print(f"\n✅ Clean Test Files: {no_defect_count}")
-
-    gated = stats.get("gated", 0)
-    if gated > 0:
-        print(f"\n⚠️  Downgraded (evidence gate): {gated}")
-
-    unknown = stats.get("unknown", 0)
-    if unknown > 0:
-        print(f"\n❓ Unknown Priority: {unknown}")
-
-    print("=" * 60 + "\n")
-
-
-def _get_git_commit(repo_root: Path) -> str:
-    """Get current git commit hash, or 'unknown' if not in a git repo."""
-    try:
-        result = subprocess.run(
-            ["git", "rev-parse", "--short", "HEAD"],
-            cwd=repo_root,
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        if result.returncode == 0:
-            return result.stdout.strip()
-    except Exception:
-        pass
-    return "unknown"
 
 
 def _list_test_files(
@@ -930,30 +287,8 @@ def _list_test_files(
     root_dir: Path,
 ) -> list[Path]:
     """List all test files under root_dir."""
-    selected = {path for path in root_dir.rglob("test_*.py") if path.is_file() and not _is_cache_path(path)}
+    selected = {path for path in root_dir.rglob("test_*.py") if path.is_file() and not is_cache_path(path)}
     return sorted(selected)
-
-
-async def _append_log(
-    *,
-    log_path: Path,
-    log_lock: asyncio.Lock,
-    timestamp: str,
-    status: str,
-    file_display: str,
-    output_display: str,
-    model: str,
-    duration_s: float,
-    note: str,
-) -> None:
-    line = (
-        f"| {_escape_cell(timestamp)} | {_escape_cell(status)} | "
-        f"{_escape_cell(file_display)} | {_escape_cell(output_display)} | "
-        f"{_escape_cell(model)} | {duration_s:.2f} | {_escape_cell(note)} |\n"
-    )
-    async with log_lock:
-        with log_path.open("a", encoding="utf-8") as handle:
-            handle.write(line)
 
 
 def main() -> int:
@@ -1035,10 +370,10 @@ Examples:
         raise RuntimeError("codex CLI not found on PATH")
 
     repo_root = Path(__file__).resolve().parents[1]
-    root_dir = _resolve_path(repo_root, args.root)
-    template_path = _resolve_path(repo_root, args.template)
-    output_dir = _resolve_path(repo_root, args.output_dir)
-    log_path = _resolve_path(repo_root, "docs/quality-audit/TEST_DEFECT_LOG.md")
+    root_dir = resolve_path(repo_root, args.root)
+    template_path = resolve_path(repo_root, args.template)
+    output_dir = resolve_path(repo_root, args.output_dir)
+    log_path = resolve_path(repo_root, "docs/quality-audit/TEST_DEFECT_LOG.md")
 
     # List test files
     files = _list_test_files(root_dir=root_dir)
@@ -1057,18 +392,18 @@ Examples:
         return 0
 
     # Get git commit for metadata
-    git_commit = _get_git_commit(repo_root)
+    git_commit = get_git_commit(repo_root)
 
     # Load template and context
     template_text = template_path.read_text(encoding="utf-8")
-    context_text = _load_context(repo_root, extra_files=args.context_files)
-    _ensure_log_file(log_path)
+    context_text = load_context(repo_root, extra_files=args.context_files)
+    ensure_log_file(log_path, header_title="Codex Test Defect Hunt Log")
 
     # Ensure output directory exists
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Track execution time
-    start_time = _utc_now()
+    start_time = utc_now()
     start_monotonic = time.monotonic()
 
     # Run analysis
@@ -1089,11 +424,11 @@ Examples:
     )
 
     # Track completion time
-    end_time = _utc_now()
+    end_time = utc_now()
     duration_s = time.monotonic() - start_monotonic
 
     # Write structured output files for triage
-    _write_run_metadata(
+    write_run_metadata(
         output_dir=output_dir,
         repo_root=repo_root,
         start_time=start_time,
@@ -1104,21 +439,30 @@ Examples:
         batch_size=args.batch_size,
         rate_limit=args.rate_limit,
         git_commit=git_commit,
+        title="Test Quality Audit Run Metadata",
+        script_name="scripts/codex_test_defect_hunt.py",
     )
 
-    _write_summary_file(
+    write_summary_file(
         output_dir=output_dir,
         stats=stats,
         total_files=len(files),
+        title="Test Quality Audit Summary",
+        defects_label="Test Defects Found",
+        clean_label="Clean Test Files",
     )
 
-    _write_findings_index(
+    write_findings_index(
         output_dir=output_dir,
         repo_root=repo_root,
+        title="Test Quality Findings Index",
+        file_column_label="Test File",
+        no_defect_marker="No test defect found",
+        clean_section_title="Clean Test Files",
     )
 
     # Print summary to stdout for immediate feedback
-    _print_summary(stats)
+    print_summary(stats, icon="📊", title="Test Quality Audit Summary")
 
     # Tell user where to find the results
     print(f"📁 Detailed results written to: {output_dir.relative_to(repo_root)}/")

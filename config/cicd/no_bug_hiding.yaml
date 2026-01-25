@@ -151,11 +151,6 @@ allow_hits:
   reason: 'Trust boundary: external policy dict may have invalid/missing values'
   safety: max() ensures minimum valid value, docstring documents this behavior
   expires: null
-- key: engine/processor.py:R1:RowProcessor:_process_single_token:line=696
-  owner: architecture
-  reason: 'Forward-compatibility: step map may not be fully populated during integration'
-  safety: None is valid - means coalesce step not yet computed, child skips coalesce
-  expires: null
 - key: engine/processor.py:R1:RowProcessor:_process_single_token:line=916
   owner: architecture
   reason: 'Forward-compatibility: step map may not be fully populated during integration'
@@ -476,56 +471,32 @@ allow_hits:
   safety: Error recorded in checks dict with status='error' - health check reports
     plugins as unhealthy
   expires: null
-- key: engine/orchestrator.py:R4:Orchestrator:_cleanup_transforms:line=215
-  owner: architecture
-  reason: 'Best-effort cleanup: one plugin failure shouldn''t prevent others from
-    cleanup'
-  safety: Logged with warning, other plugins still get close() called
-  expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_validate_route_destinations:line=252
+- key: engine/orchestrator.py:R1:Orchestrator:_validate_route_destinations:line=265
   owner: architecture
   reason: Building lookup for gate names - only gates (not transforms) are in map
   safety: None means 'not a gate at this sequence' - correctly skipped
   expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_validate_route_destinations:line=259
+- key: engine/orchestrator.py:R1:Orchestrator:_validate_route_destinations:line=265
   owner: architecture
   reason: Building lookup for gate names - only gates (not transforms) are in map
   safety: None means 'not a gate at this sequence' - correctly skipped
   expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_validate_route_destinations:line=275
+- key: engine/orchestrator.py:R1:Orchestrator:_validate_route_destinations:line=265
   owner: architecture
   reason: Fallback for error message - use node_id if gate name not found
   safety: Error message still produced with node_id as fallback
   expires: null
-- key: engine/orchestrator.py:R2:Orchestrator:_validate_source_quarantine_destination:line=348
+- key: engine/orchestrator.py:R2:Orchestrator:_validate_source_quarantine_destination:line=361
   owner: architecture
   reason: Optional protocol extension - _on_validation_failure only on sources with
     SourceDataConfig
   safety: None default means source doesn't support quarantine routing - validation
     skipped
   expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_execute_run:line=687
+- key: engine/orchestrator.py:R1:Orchestrator:_execute_run:line=700
   owner: architecture
   reason: Optional schema config with explicit default - not all nodes define schemas
   safety: 'Default value is well-defined: dynamic fields'
-  expires: null
-- key: core/dag.py:R2:ExecutionGraph:from_plugin_instances:line=365
-  owner: architecture
-  reason: 'Trust boundary: plugin instances may not have config attribute (legacy
-    plugins)'
-  safety: Empty dict default is safe - used for deterministic node ID generation
-  expires: null
-- key: core/dag.py:R2:ExecutionGraph:from_plugin_instances:line=378
-  owner: architecture
-  reason: 'Trust boundary: plugin instances may not have config attribute (legacy
-    plugins)'
-  safety: Empty dict default is safe - used for deterministic node ID generation
-  expires: null
-- key: core/dag.py:R2:ExecutionGraph:from_plugin_instances:line=397
-  owner: architecture
-  reason: 'Trust boundary: plugin instances may not have config attribute (legacy
-    plugins)'
-  safety: Empty dict default is safe - used for deterministic node ID generation
   expires: null
 - key: engine/executors.py:R1:GateExecutor:execute_gate:line=416
   owner: architecture
@@ -661,35 +632,37 @@ allow_hits:
   expires: null
 - key: engine/executors.py:R4:SinkExecutor:write:line=1520
   owner: architecture
-  reason: 'Trust boundary: sink plugin operations can fail in many ways'
-  safety: Logged and returned as PluginError - row quarantined with full error details
+  reason: 'Post-durability callbacks: checkpoint callback fails after durable sink
+    write'
+  safety: Logged with error - sink artifact exists but checkpoint failed, resume will
+    replay
   expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_reconstruct_schema_from_json:line=1321
+- key: engine/orchestrator.py:R1:Orchestrator:_reconstruct_schema_from_json:line=1347
   owner: architecture
   reason: 'Trust boundary: JSON schema from database may have varying structure'
   safety: None check with fallback to empty schema
   expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_reconstruct_schema_from_json:line=1334
+- key: engine/orchestrator.py:R1:Orchestrator:_reconstruct_schema_from_json:line=1347
   owner: architecture
   reason: 'Trust boundary: JSON schema ''required'' field is optional'
   safety: Empty list default is safe
   expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_json_schema_to_python_type:line=1375
+- key: engine/orchestrator.py:R1:Orchestrator:_json_schema_to_python_type:line=1396
   owner: architecture
   reason: 'Trust boundary: JSON schema field info may be incomplete'
   safety: None check with type-specific handling
   expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_json_schema_to_python_type:line=1383
+- key: engine/orchestrator.py:R1:Orchestrator:_json_schema_to_python_type:line=1396
   owner: architecture
   reason: 'Trust boundary: JSON schema anyOf is optional'
   safety: None check before processing alternatives
   expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_json_schema_to_python_type:line=1388
+- key: engine/orchestrator.py:R1:Orchestrator:_json_schema_to_python_type:line=1396
   owner: architecture
   reason: 'Trust boundary: JSON schema type field may be missing'
   safety: Returns Any for unknown types
   expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_json_schema_to_python_type:line=1398
+- key: engine/orchestrator.py:R1:Orchestrator:_json_schema_to_python_type:line=1396
   owner: architecture
   reason: 'Trust boundary: JSON schema items field for arrays may be missing'
   safety: Returns list[Any] for untyped arrays
