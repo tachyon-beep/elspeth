@@ -30,12 +30,16 @@ class TestGetRowDataExplicitStates:
         assert result.data is None
 
     def test_never_stored(self, tmp_path: Path) -> None:
-        """Returns NEVER_STORED when source_data_ref is None."""
-        db = LandscapeDB.in_memory()
-        payload_store = FilesystemPayloadStore(tmp_path / "payloads")
-        recorder = LandscapeRecorder(db, payload_store=payload_store)
+        """Returns NEVER_STORED when payload_store is not configured.
 
-        # Create run and row without payload_ref
+        When LandscapeRecorder is created without a payload_store, rows are
+        created without payload storage (source_data_ref is None).
+        """
+        db = LandscapeDB.in_memory()
+        # No payload_store configured - payloads won't be stored
+        recorder = LandscapeRecorder(db, payload_store=None)
+
+        # Create run and row - payload will not be stored
         run = recorder.begin_run(config={}, canonical_version="v1")
         source = recorder.register_node(
             run_id=run.run_id,

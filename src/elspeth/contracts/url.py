@@ -1,4 +1,4 @@
-# src/elspeth/core/security/url.py
+# src/elspeth/contracts/url.py
 """URL sanitization types for audit-safe storage.
 
 These types GUARANTEE URLs cannot contain credentials when stored in the audit trail.
@@ -6,7 +6,7 @@ Callers must explicitly sanitize using the factory methods, making accidental
 secret leaks impossible at the type level.
 
 Usage:
-    from elspeth.core.security.url import SanitizedDatabaseUrl, SanitizedWebhookUrl
+    from elspeth.contracts.url import SanitizedDatabaseUrl, SanitizedWebhookUrl
 
     # Database URLs - reuses existing _sanitize_dsn infrastructure
     sanitized = SanitizedDatabaseUrl.from_raw_url("postgresql://user:secret@host/db")

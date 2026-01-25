@@ -25,10 +25,10 @@ from typing import Any
 from pydantic import Field
 
 from elspeth.contracts import CallStatus, CallType, Determinism, TransformResult
+from elspeth.contracts import BatchPendingError
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.config_base import TransformDataConfig
 from elspeth.plugins.context import PluginContext
-from elspeth.plugins.llm.batch_errors import BatchPendingError
 from elspeth.plugins.llm.templates import PromptTemplate, TemplateError
 from elspeth.plugins.schema_factory import create_schema_from_config
 

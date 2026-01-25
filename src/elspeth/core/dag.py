@@ -362,7 +362,7 @@ class ExecutionGraph:
             return f"{prefix}_{name}_{config_hash}"
 
         # Add source - extract schema from instance
-        source_config = getattr(source, "config", {})
+        source_config = source.config  # type: ignore[attr-defined]
         source_id = node_id("source", source.name, source_config)
         graph.add_node(
             source_id,
@@ -375,7 +375,7 @@ class ExecutionGraph:
         # Add sinks
         sink_ids: dict[str, str] = {}
         for sink_name, sink in sinks.items():
-            sink_config = getattr(sink, "config", {})
+            sink_config = sink.config  # type: ignore[attr-defined]
             sid = node_id("sink", sink_name, sink_config)
             sink_ids[sink_name] = sid
             graph.add_node(
@@ -394,7 +394,7 @@ class ExecutionGraph:
         prev_node_id = source_id
 
         for i, transform in enumerate(transforms):
-            transform_config = getattr(transform, "config", {})
+            transform_config = transform.config  # type: ignore[attr-defined]
             # Include sequence to prevent ID collisions when configs are identical
             tid = node_id("transform", transform.name, transform_config, sequence=i)
             transform_ids[i] = tid

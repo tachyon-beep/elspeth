@@ -26,7 +26,7 @@ from elspeth.contracts.results import (
     RowResult,
     TransformResult,
 )
-from elspeth.core.security.url import SanitizedDatabaseUrl, SanitizedWebhookUrl
+from elspeth.contracts.url import SanitizedDatabaseUrl, SanitizedWebhookUrl
 from elspeth.engine.retry import MaxRetriesExceeded
 
 

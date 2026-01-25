@@ -37,10 +37,10 @@ from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
 from elspeth.engine.processor import RowProcessor
 from elspeth.engine.retry import RetryConfig, RetryManager
+from elspeth.contracts import BatchPendingError
 from elspeth.engine.spans import SpanFactory
 from elspeth.plugins.base import BaseGate, BaseTransform
 from elspeth.plugins.context import PluginContext
-from elspeth.plugins.llm.batch_errors import BatchPendingError
 from elspeth.plugins.protocols import SinkProtocol, SourceProtocol
 
 # Type alias for row-processing plugins in the transforms pipeline
@@ -203,7 +203,20 @@ class Orchestrator:
         """Call close() on all transforms and gates.
 
         Called in finally block to ensure cleanup happens even on failure.
-        Logs but doesn't raise if individual cleanup fails.
+
+        EXCEPTION TO "PLUGIN BUGS SHOULD CRASH" PRINCIPLE:
+        ---------------------------------------------------
+        Cleanup is best-effort even if individual close() fails. This violates
+        the general principle that plugin method exceptions should crash, but
+        is justified for cleanup specifically:
+
+        1. Called in finally block - crash prevents other plugins from cleanup
+        2. Resource leaks worse than ignoring close() bugs during teardown
+        3. Errors ARE logged - bugs aren't silently swallowed
+        4. Close() bugs should be fixed, but shouldn't compound damage
+
+        In normal operation (process(), evaluate(), etc.), plugin bugs crash
+        immediately. Only cleanup gets special treatment.
         """
         import structlog
 
@@ -213,11 +226,12 @@ class Orchestrator:
             try:
                 transform.close()
             except Exception as e:
-                # Log but don't raise - cleanup should be best-effort
+                # Log but don't raise - best-effort cleanup
                 logger.warning(
-                    "Transform cleanup failed",
+                    "Transform cleanup failed - plugin close() raised exception",
                     transform=transform.name,
                     error=str(e),
+                    error_type=type(e).__name__,
                 )
 
     def _validate_route_destinations(
@@ -1467,7 +1481,7 @@ class Orchestrator:
         self._handle_incomplete_batches(recorder, run_id)
 
         # 2. Update run status to running
-        self._update_run_status(recorder, run_id, RunStatus.RUNNING)
+        recorder.update_run_status(run_id, RunStatus.RUNNING)
 
         # 3. Build restored aggregation state map
         restored_state: dict[str, dict[str, Any]] = {}
@@ -1484,27 +1498,7 @@ class Orchestrator:
         # TYPE FIDELITY: Retrieve source schema from audit trail for type restoration
         # Resume must use the ORIGINAL run's schema, not the current source's schema
         # This enables proper type coercion (datetime/Decimal) from JSON payload strings
-        from sqlalchemy import select
-
-        from elspeth.core.landscape.schema import runs_table
-
-        with self._db.engine.connect() as conn:
-            run_row = conn.execute(select(runs_table.c.source_schema_json).where(runs_table.c.run_id == run_id)).fetchone()
-
-        if run_row is None:
-            raise ValueError(f"Resume failed: Run {run_id} not found in database")
-
-        source_schema_json = run_row.source_schema_json
-
-        # REQUIRED: Schema must be stored in audit trail for type restoration
-        # Without schema, resumed rows would have degraded types (str instead of datetime/Decimal)
-        if source_schema_json is None:
-            raise ValueError(
-                f"Resume failed: Run {run_id} has no source schema stored. "
-                f"This run was created before source schema storage was implemented. "
-                f"Cannot resume without schema - type fidelity would be violated. "
-                f"Please re-run the pipeline from scratch."
-            )
+        source_schema_json = recorder.get_source_schema(run_id)
 
         # Deserialize schema and recreate Pydantic model class with full type fidelity
         schema_dict = json.loads(source_schema_json)
@@ -1597,17 +1591,7 @@ class Orchestrator:
 
         # Build edge_map from database (load real edge IDs registered in original run)
         # CRITICAL: Must use real edge_ids for FK integrity when recording routing events
-        from sqlalchemy import select
-
-        from elspeth.core.landscape.schema import edges_table
-
-        edge_map: dict[tuple[str, str], str] = {}
-        with self._db.engine.connect() as conn:
-            edges = conn.execute(select(edges_table).where(edges_table.c.run_id == run_id)).fetchall()
-
-            for edge in edges:
-                # Use real edge_id from database (not synthetic)
-                edge_map[(edge.from_node_id, edge.label)] = edge.edge_id
+        edge_map = recorder.get_edge_map(run_id)
 
         # Validate: If graph has edges, database MUST have matching edges (Tier 1 trust)
         # Missing edges = data corruption or incomplete original run registration
@@ -1902,26 +1886,6 @@ class Orchestrator:
                 # Previous failure, retry
                 recorder.retry_batch(batch.batch_id)
             # DRAFT batches continue normally (collection resumes)
-
-    def _update_run_status(
-        self,
-        recorder: LandscapeRecorder,
-        run_id: str,
-        status: RunStatus,
-    ) -> None:
-        """Update run status without completing the run.
-
-        Used during recovery to set status back to RUNNING.
-
-        Args:
-            recorder: LandscapeRecorder for database operations
-            run_id: Run to update
-            status: New status
-        """
-        from elspeth.core.landscape.schema import runs_table
-
-        with self._db.connection() as conn:
-            conn.execute(runs_table.update().where(runs_table.c.run_id == run_id).values(status=status.value))
 
     def _flush_remaining_aggregation_buffers(
         self,

@@ -218,6 +218,10 @@ class _TestSourceBase:
     determinism = Determinism.DETERMINISTIC
     plugin_version = "1.0.0"
 
+    def __init__(self) -> None:
+        """Initialize test source with empty config."""
+        self.config: dict[str, Any] = {}
+
     def wrap_rows(self, rows: list[dict[str, Any]]) -> Iterator[SourceRow]:
         """Wrap plain dicts in SourceRow.valid() as required by source protocol."""
         for row in rows:
@@ -280,6 +284,10 @@ class _TestSinkBase:
     determinism = Determinism.DETERMINISTIC
     plugin_version = "1.0.0"
 
+    def __init__(self) -> None:
+        """Initialize test sink with empty config."""
+        self.config: dict[str, Any] = {}
+
     def on_start(self, ctx: Any) -> None:
         """Lifecycle hook - no-op for tests."""
         pass
@@ -337,6 +345,10 @@ class _TestTransformBase:
     is_batch_aware: bool = False
     creates_tokens: bool = False
     _on_error: str | None = None
+
+    def __init__(self) -> None:
+        """Initialize test transform with empty config."""
+        self.config: dict[str, Any] = {}
 
     def on_start(self, ctx: Any) -> None:
         """Lifecycle hook - no-op for tests."""

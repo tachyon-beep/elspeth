@@ -17,7 +17,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.types import TypeEngine
 
 from elspeth.contracts import ArtifactDescriptor, PluginSchema
-from elspeth.core.security.url import SanitizedDatabaseUrl
+from elspeth.contracts.url import SanitizedDatabaseUrl
 from elspeth.plugins.base import BaseSink
 from elspeth.plugins.config_base import DataPluginConfig
 from elspeth.plugins.context import PluginContext

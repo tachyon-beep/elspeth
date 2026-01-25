@@ -12,7 +12,7 @@ from typing import Any
 
 import pytest
 
-from elspeth.contracts import TokenInfo
+from elspeth.contracts import BatchPendingError, TokenInfo
 from elspeth.contracts.enums import BatchStatus, NodeStateStatus, TriggerType
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.core.config import AggregationSettings, TriggerConfig
@@ -20,7 +20,6 @@ from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
 from elspeth.engine.executors import AggregationExecutor
 from elspeth.engine.spans import SpanFactory
 from elspeth.plugins.context import PluginContext
-from elspeth.plugins.llm.batch_errors import BatchPendingError
 from elspeth.plugins.results import TransformResult
 from tests.conftest import _TestTransformBase, as_transform
 

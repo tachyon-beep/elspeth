@@ -31,10 +31,10 @@ from elspeth.plugins.clients.llm import (
     AuditedLLMClient,
     LLMClientError,
 )
+from elspeth.contracts import BatchPendingError
 from elspeth.plugins.context import PluginContext
 from elspeth.plugins.llm.azure_batch import AzureBatchLLMTransform
 from elspeth.plugins.llm.base import BaseLLMTransform
-from elspeth.plugins.llm.batch_errors import BatchPendingError
 from elspeth.plugins.llm.openrouter import OpenRouterLLMTransform
 
 # Dynamic schema for tests

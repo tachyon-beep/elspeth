@@ -693,7 +693,7 @@ class RowProcessor:
 
                         if branch_name and branch_name in self._branch_to_coalesce:
                             child_coalesce_name = self._branch_to_coalesce[branch_name]
-                            child_coalesce_step = self._coalesce_step_map.get(child_coalesce_name)
+                            child_coalesce_step = self._coalesce_step_map[child_coalesce_name]
 
                         child_items.append(
                             _WorkItem(

@@ -21,7 +21,6 @@ EXCLUDED_FILES: frozenset[str] = frozenset(
         "base.py",
         "templates.py",
         "auth.py",
-        "batch_errors.py",
         "sentinels.py",
         "schema_factory.py",
         "utils.py",

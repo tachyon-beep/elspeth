@@ -9,10 +9,10 @@ from unittest.mock import Mock
 import pytest
 
 from elspeth.contracts import Determinism
+from elspeth.contracts import BatchPendingError
 from elspeth.plugins.config_base import PluginConfigError
 from elspeth.plugins.context import PluginContext
 from elspeth.plugins.llm.azure_batch import AzureBatchConfig, AzureBatchLLMTransform
-from elspeth.plugins.llm.batch_errors import BatchPendingError
 
 # Common schema config for dynamic field handling
 DYNAMIC_SCHEMA = {"fields": "dynamic"}

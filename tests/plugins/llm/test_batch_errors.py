@@ -8,7 +8,7 @@ the engine to schedule retry checks later. These tests verify:
 4. Exception is catchable and carries correct state
 """
 
-from elspeth.plugins.llm.batch_errors import BatchPendingError
+from elspeth.contracts import BatchPendingError
 
 
 class TestBatchPendingErrorConstruction:

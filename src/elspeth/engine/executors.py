@@ -27,10 +27,10 @@ from elspeth.core.canonical import stable_hash
 from elspeth.core.config import AggregationSettings, GateSettings
 from elspeth.core.landscape import LandscapeRecorder
 from elspeth.engine.expression_parser import ExpressionParser
+from elspeth.contracts import BatchPendingError
 from elspeth.engine.spans import SpanFactory
 from elspeth.engine.triggers import TriggerEvaluator
 from elspeth.plugins.context import PluginContext
-from elspeth.plugins.llm.batch_errors import BatchPendingError
 from elspeth.plugins.protocols import (
     GateProtocol,
     SinkProtocol,
