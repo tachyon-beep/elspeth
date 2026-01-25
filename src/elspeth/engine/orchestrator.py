@@ -1074,10 +1074,10 @@ class Orchestrator:
                             rows_coalesced += 1
                             pending_tokens[output_sink_name].append(outcome.merged_token)
                         elif outcome.failure_reason:
-                            # Coalesce failed (timeout, missing branches, etc.)
-                            # Failure is recorded in audit trail by executor.
-                            # Not counted as rows_failed since the individual fork children
-                            # were already counted when they reached their terminal states.
+                            # Coalesce failed (quorum_not_met, incomplete_branches)
+                            # Audit trail recorded by executor: each consumed token has
+                            # node_state with status="failed" and error_json explaining why.
+                            # No further action needed here - tokens are terminal.
                             pass
 
                 # Write to sinks using SinkExecutor

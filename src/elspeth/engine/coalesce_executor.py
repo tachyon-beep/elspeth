@@ -4,11 +4,13 @@ Coalesce is a stateful barrier that holds tokens until merge conditions are met.
 Tokens are correlated by row_id (same source row that was forked).
 """
 
+import hashlib
 import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from elspeth.contracts import TokenInfo
+from elspeth.contracts.enums import RowOutcome
 from elspeth.core.config import CoalesceSettings
 from elspeth.core.landscape import LandscapeRecorder
 from elspeth.engine.spans import SpanFactory
@@ -248,6 +250,14 @@ class CoalesceExecutor:
                 duration_ms=0,
             )
 
+            # Record terminal token outcome (COALESCED)
+            self._recorder.record_token_outcome(
+                run_id=self._run_id,
+                token_id=token.token_id,
+                outcome=RowOutcome.COALESCED,
+                join_group_id=merged_token.token_id,
+            )
+
         # Build audit metadata
         coalesce_metadata = {
             "policy": settings.policy,
@@ -420,11 +430,42 @@ class CoalesceExecutor:
                     results.append(outcome)
                 else:
                     # Quorum not met - record failure
+                    # MUST capture tokens before deleting pending state
+                    consumed_tokens = list(pending.arrived.values())
+
+                    # Compute error hash for failure reason
+                    error_msg = "quorum_not_met"
+                    error_hash = hashlib.sha256(error_msg.encode()).hexdigest()[:16]
+
+                    # Record node states for consumed tokens (audit trail)
+                    for token in consumed_tokens:
+                        state = self._recorder.begin_node_state(
+                            token_id=token.token_id,
+                            node_id=node_id,
+                            step_index=step_in_pipeline,
+                            input_data=token.row_data,
+                        )
+                        self._recorder.complete_node_state(
+                            state_id=state.state_id,
+                            status="failed",
+                            error={"failure_reason": "quorum_not_met"},
+                            duration_ms=0,
+                        )
+
+                        # Record terminal token outcome (FAILED)
+                        self._recorder.record_token_outcome(
+                            run_id=self._run_id,
+                            token_id=token.token_id,
+                            outcome=RowOutcome.FAILED,
+                            error_hash=error_hash,
+                        )
+
                     del self._pending[key]
                     results.append(
                         CoalesceOutcome(
                             held=False,
                             failure_reason="quorum_not_met",
+                            consumed_tokens=consumed_tokens,
                             coalesce_metadata={
                                 "policy": settings.policy,
                                 "quorum_required": settings.quorum_count,
@@ -435,11 +476,42 @@ class CoalesceExecutor:
 
             elif settings.policy == "require_all":
                 # require_all never does partial merge
+                # MUST capture tokens before deleting pending state
+                consumed_tokens = list(pending.arrived.values())
+
+                # Compute error hash for failure reason
+                error_msg = "incomplete_branches"
+                error_hash = hashlib.sha256(error_msg.encode()).hexdigest()[:16]
+
+                # Record node states for consumed tokens (audit trail)
+                for token in consumed_tokens:
+                    state = self._recorder.begin_node_state(
+                        token_id=token.token_id,
+                        node_id=node_id,
+                        step_index=step_in_pipeline,
+                        input_data=token.row_data,
+                    )
+                    self._recorder.complete_node_state(
+                        state_id=state.state_id,
+                        status="failed",
+                        error={"failure_reason": "incomplete_branches"},
+                        duration_ms=0,
+                    )
+
+                    # Record terminal token outcome (FAILED)
+                    self._recorder.record_token_outcome(
+                        run_id=self._run_id,
+                        token_id=token.token_id,
+                        outcome=RowOutcome.FAILED,
+                        error_hash=error_hash,
+                    )
+
                 del self._pending[key]
                 results.append(
                     CoalesceOutcome(
                         held=False,
                         failure_reason="incomplete_branches",
+                        consumed_tokens=consumed_tokens,
                         coalesce_metadata={
                             "policy": settings.policy,
                             "expected_branches": settings.branches,

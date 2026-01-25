@@ -485,6 +485,151 @@ class TestCoalesceExecutorQuorum:
         timed_out = executor.check_timeouts("quorum_merge", step_in_pipeline=2)
         assert len(timed_out) == 0
 
+    def test_flush_pending_quorum_failure_records_audit_trail(
+        self,
+        recorder: LandscapeRecorder,
+        run: Run,
+    ) -> None:
+        """When coalesce fails (quorum not met), consumed tokens MUST have audit records.
+
+        This test verifies the fix for Issue #1 from integration seam analysis.
+
+        Audit gap scenario:
+        - Fork creates 3 child tokens (branches A, B, C)
+        - Only branches A and B arrive at coalesce (need all 3 for quorum)
+        - flush_pending() called at end-of-source
+        - Result: quorum_not_met failure
+
+        Expected audit trail:
+        - consumed_tokens list populated in CoalesceOutcome
+        - Each consumed token has node_state recorded (status="failed")
+
+        Without this, tokens "disappear" from audit trail - violating auditability contract.
+        """
+        from elspeth.contracts import NodeType, TokenInfo
+        from elspeth.engine.coalesce_executor import CoalesceExecutor
+        from elspeth.engine.tokens import TokenManager
+
+        span_factory = SpanFactory()
+        token_manager = TokenManager(recorder)
+
+        source_node = recorder.register_node(
+            run_id=run.run_id,
+            node_id="source_1",
+            plugin_name="test_source",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+        coalesce_node = recorder.register_node(
+            run_id=run.run_id,
+            node_id="coalesce_1",
+            plugin_name="quorum_merge",
+            node_type=NodeType.COALESCE,
+            plugin_version="1.0.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+
+        settings = CoalesceSettings(
+            name="quorum_merge",
+            branches=["path_a", "path_b", "path_c"],
+            policy="quorum",
+            quorum_count=3,  # Need all 3 branches
+            merge="union",
+        )
+
+        executor = CoalesceExecutor(
+            recorder=recorder,
+            span_factory=span_factory,
+            token_manager=token_manager,
+            run_id=run.run_id,
+        )
+        executor.register_coalesce(settings, coalesce_node.node_id)
+
+        # Create parent token and fork it
+        initial_token = token_manager.create_initial_token(
+            run_id=run.run_id,
+            source_node_id=source_node.node_id,
+            row_index=0,
+            row_data={"value": 100},
+        )
+        children = token_manager.fork_token(
+            parent_token=initial_token,
+            branches=["path_a", "path_b", "path_c"],
+            step_in_pipeline=1,
+        )
+
+        # Accept only 2 of 3 tokens (quorum not met)
+        token_a = TokenInfo(
+            row_id=children[0].row_id,
+            token_id=children[0].token_id,
+            row_data={"value": 100, "a_result": 1},
+            branch_name="path_a",
+        )
+        token_b = TokenInfo(
+            row_id=children[1].row_id,
+            token_id=children[1].token_id,
+            row_data={"value": 100, "b_result": 2},
+            branch_name="path_b",
+        )
+
+        outcome_a = executor.accept(token_a, "quorum_merge", step_in_pipeline=2)
+        assert outcome_a.held is True  # Waiting for siblings
+
+        outcome_b = executor.accept(token_b, "quorum_merge", step_in_pipeline=2)
+        assert outcome_b.held is True  # Still waiting (need 3)
+
+        # End-of-source: flush pending coalesces
+        flushed = executor.flush_pending(step_in_pipeline=2)
+
+        # Verify failure outcome returned
+        assert len(flushed) == 1
+        failure_outcome = flushed[0]
+        assert failure_outcome.held is False
+        assert failure_outcome.merged_token is None
+        assert failure_outcome.failure_reason == "quorum_not_met"
+
+        # CRITICAL: consumed_tokens MUST be populated
+        assert failure_outcome.consumed_tokens is not None, (
+            "CoalesceOutcome.consumed_tokens must be populated on failure (currently returns empty list, losing tokens)"
+        )
+        assert len(failure_outcome.consumed_tokens) == 2, (
+            f"Expected 2 consumed tokens (A and B), got {len(failure_outcome.consumed_tokens)}"
+        )
+
+        # Verify the tokens are the ones we submitted
+        consumed_ids = {t.token_id for t in failure_outcome.consumed_tokens}
+        assert token_a.token_id in consumed_ids
+        assert token_b.token_id in consumed_ids
+
+        # AUDIT TRAIL VERIFICATION:
+        # Each consumed token MUST have node state recorded
+        for token in failure_outcome.consumed_tokens:
+            node_states = recorder.get_node_states_for_token(token.token_id)
+
+            # Find the coalesce node state
+            coalesce_states = [ns for ns in node_states if ns.node_id == coalesce_node.node_id]
+
+            assert len(coalesce_states) > 0, (
+                f"Token {token.token_id} has NO node state for coalesce_1 - audit gap! Cannot trace what happened to this token."
+            )
+
+            coalesce_state = coalesce_states[0]
+
+            # Verify node state indicates failure
+            assert coalesce_state.status == "failed", f"Token {token.token_id} node state should be 'failed', got '{coalesce_state.status}'"
+
+            # Verify error_json explains the failure
+            assert coalesce_state.error_json is not None, f"Token {token.token_id} failed node state must have error_json populated"
+
+            import json
+
+            error_data = json.loads(coalesce_state.error_json)
+            assert "failure_reason" in error_data, f"Token {token.token_id} node state missing failure explanation in error_json"
+            assert error_data["failure_reason"] == "quorum_not_met"
+
 
 class TestCoalesceExecutorBestEffort:
     """Test BEST_EFFORT policy with timeout."""

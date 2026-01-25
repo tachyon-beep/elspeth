@@ -1,0 +1,444 @@
+"""Tests for coalesce audit gaps identified in deep dive analysis.
+
+These tests verify that fork/coalesce operations maintain complete audit trail:
+- Gap 1a: Successful merge - consumed tokens must have token_outcome records
+- Gap 1b: Failed coalesce - consumed tokens must have token_outcome records
+- Gap 2: Fork child fails before coalesce - siblings should not be stranded
+
+References:
+- Deep dive analysis by Opus agent (acb14c0)
+- Integration seam analysis Issue #1 (partially fixed)
+"""
+
+import pytest
+
+from elspeth.contracts import NodeType, Run, TokenInfo
+from elspeth.contracts.enums import RowOutcome
+from elspeth.contracts.schema import SchemaConfig
+from elspeth.core.config import CoalesceSettings
+from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+from elspeth.engine.coalesce_executor import CoalesceExecutor
+from elspeth.engine.spans import SpanFactory
+from elspeth.engine.tokens import TokenManager
+
+DYNAMIC_SCHEMA = SchemaConfig.from_dict({"fields": "dynamic"})
+
+
+@pytest.fixture
+def db() -> LandscapeDB:
+    return LandscapeDB.in_memory()
+
+
+@pytest.fixture
+def recorder(db: LandscapeDB) -> LandscapeRecorder:
+    return LandscapeRecorder(db)
+
+
+@pytest.fixture
+def run(recorder: LandscapeRecorder) -> Run:
+    return recorder.begin_run(config={}, canonical_version="v1")
+
+
+class TestCoalesceAuditGap1a:
+    """Gap 1a: Successful merge must record token_outcome for consumed tokens.
+
+    Current behavior: Consumed tokens get node_state records but NO token_outcome.
+    Expected: Each consumed token should have RowOutcome.COALESCED recorded.
+
+    This is inconsistent with the rest of ELSPETH where terminal states are
+    recorded in BOTH node_state (for lineage) AND token_outcome (for O(1) lookup).
+    """
+
+    def test_successful_merge_records_token_outcomes_for_consumed_tokens(
+        self,
+        recorder: LandscapeRecorder,
+        run: Run,
+    ) -> None:
+        """When coalesce succeeds, each consumed token MUST have token_outcome record.
+
+        Audit contract violation: get_token_outcome() currently returns None for
+        consumed tokens, forcing queries to infer terminal state from node_states.
+
+        Expected: Each consumed token should have:
+        - token_outcome with RowOutcome.COALESCED
+        - join_group_id pointing to merged token
+        """
+        span_factory = SpanFactory()
+        token_manager = TokenManager(recorder)
+
+        # Register nodes
+        source_node = recorder.register_node(
+            run_id=run.run_id,
+            node_id="source_1",
+            plugin_name="test_source",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+        coalesce_node = recorder.register_node(
+            run_id=run.run_id,
+            node_id="coalesce_1",
+            plugin_name="merge_all",
+            node_type=NodeType.COALESCE,
+            plugin_version="1.0.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+
+        # Configure coalesce
+        settings = CoalesceSettings(
+            name="merge_all",
+            branches=["path_a", "path_b"],
+            policy="require_all",
+            merge="union",
+        )
+
+        executor = CoalesceExecutor(
+            recorder=recorder,
+            span_factory=span_factory,
+            token_manager=token_manager,
+            run_id=run.run_id,
+        )
+        executor.register_coalesce(settings, coalesce_node.node_id)
+
+        # Create and fork initial token
+        initial_token = token_manager.create_initial_token(
+            run_id=run.run_id,
+            source_node_id=source_node.node_id,
+            row_index=0,
+            row_data={"value": 100},
+        )
+        children = token_manager.fork_token(
+            parent_token=initial_token,
+            branches=["path_a", "path_b"],
+            step_in_pipeline=1,
+        )
+
+        # Accept both tokens (triggers merge)
+        token_a = TokenInfo(
+            row_id=children[0].row_id,
+            token_id=children[0].token_id,
+            row_data={"value": 100, "a_result": 1},
+            branch_name="path_a",
+        )
+        token_b = TokenInfo(
+            row_id=children[1].row_id,
+            token_id=children[1].token_id,
+            row_data={"value": 100, "b_result": 2},
+            branch_name="path_b",
+        )
+
+        outcome_a = executor.accept(token_a, "merge_all", step_in_pipeline=2)
+        assert outcome_a.held is True
+
+        outcome_b = executor.accept(token_b, "merge_all", step_in_pipeline=2)
+        assert outcome_b.held is False
+        assert outcome_b.merged_token is not None
+
+        merged_token = outcome_b.merged_token
+        consumed_tokens = outcome_b.consumed_tokens
+
+        # CRITICAL: Each consumed token MUST have token_outcome record
+        for consumed_token in consumed_tokens:
+            token_outcome = recorder.get_token_outcome(consumed_token.token_id)
+
+            assert token_outcome is not None, (
+                f"Gap 1a: Consumed token {consumed_token.token_id} has NO token_outcome! "
+                f"get_token_outcome() returns None, violating audit contract. "
+                f"Expected: RowOutcome.COALESCED with join_group_id={merged_token.token_id}"
+            )
+
+            # Verify outcome details
+            assert token_outcome.outcome == RowOutcome.COALESCED, (
+                f"Consumed token {consumed_token.token_id} should have outcome=COALESCED, got {token_outcome.outcome}"
+            )
+
+            assert token_outcome.join_group_id == merged_token.token_id, (
+                f"Consumed token {consumed_token.token_id} should link to merged token "
+                f"via join_group_id={merged_token.token_id}, got {token_outcome.join_group_id}"
+            )
+
+
+class TestCoalesceAuditGap1b:
+    """Gap 1b: Failed coalesce must record token_outcome for consumed tokens.
+
+    Current behavior: Consumed tokens get node_state(failed) + error_json but NO token_outcome.
+    Expected: Each consumed token should have RowOutcome.FAILED recorded.
+
+    This was part of Issue #1 fix but we only added node_state records, not token_outcome.
+    """
+
+    def test_failed_coalesce_records_token_outcomes_for_consumed_tokens(
+        self,
+        recorder: LandscapeRecorder,
+        run: Run,
+    ) -> None:
+        """When coalesce fails, each consumed token MUST have token_outcome record.
+
+        Scenario: Quorum not met (need 3 branches, only 2 arrive)
+
+        Expected: Each consumed token should have:
+        - token_outcome with RowOutcome.FAILED
+        - error_hash explaining failure reason
+        """
+        span_factory = SpanFactory()
+        token_manager = TokenManager(recorder)
+
+        # Register nodes
+        source_node = recorder.register_node(
+            run_id=run.run_id,
+            node_id="source_1",
+            plugin_name="test_source",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+        coalesce_node = recorder.register_node(
+            run_id=run.run_id,
+            node_id="coalesce_1",
+            plugin_name="quorum_merge",
+            node_type=NodeType.COALESCE,
+            plugin_version="1.0.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+
+        # Configure quorum coalesce
+        settings = CoalesceSettings(
+            name="quorum_merge",
+            branches=["path_a", "path_b", "path_c"],
+            policy="quorum",
+            quorum_count=3,  # Need all 3
+            merge="union",
+        )
+
+        executor = CoalesceExecutor(
+            recorder=recorder,
+            span_factory=span_factory,
+            token_manager=token_manager,
+            run_id=run.run_id,
+        )
+        executor.register_coalesce(settings, coalesce_node.node_id)
+
+        # Create and fork initial token
+        initial_token = token_manager.create_initial_token(
+            run_id=run.run_id,
+            source_node_id=source_node.node_id,
+            row_index=0,
+            row_data={"value": 100},
+        )
+        children = token_manager.fork_token(
+            parent_token=initial_token,
+            branches=["path_a", "path_b", "path_c"],
+            step_in_pipeline=1,
+        )
+
+        # Accept only 2 of 3 (quorum not met)
+        token_a = TokenInfo(
+            row_id=children[0].row_id,
+            token_id=children[0].token_id,
+            row_data={"value": 100, "a_result": 1},
+            branch_name="path_a",
+        )
+        token_b = TokenInfo(
+            row_id=children[1].row_id,
+            token_id=children[1].token_id,
+            row_data={"value": 100, "b_result": 2},
+            branch_name="path_b",
+        )
+
+        executor.accept(token_a, "quorum_merge", step_in_pipeline=2)
+        executor.accept(token_b, "quorum_merge", step_in_pipeline=2)
+
+        # Flush at end-of-source (triggers failure)
+        flushed = executor.flush_pending(step_in_pipeline=2)
+        assert len(flushed) == 1
+
+        failure_outcome = flushed[0]
+        assert failure_outcome.failure_reason == "quorum_not_met"
+        consumed_tokens = failure_outcome.consumed_tokens
+
+        # CRITICAL: Each consumed token MUST have token_outcome record
+        for consumed_token in consumed_tokens:
+            token_outcome = recorder.get_token_outcome(consumed_token.token_id)
+
+            assert token_outcome is not None, (
+                f"Gap 1b: Consumed token {consumed_token.token_id} from FAILED coalesce has NO token_outcome! "
+                f"get_token_outcome() returns None, violating audit contract. "
+                f"Expected: RowOutcome.FAILED with error explaining quorum_not_met"
+            )
+
+            # Verify outcome details
+            assert token_outcome.outcome == RowOutcome.FAILED, (
+                f"Consumed token {consumed_token.token_id} from failed coalesce should have outcome=FAILED, got {token_outcome.outcome}"
+            )
+
+            assert token_outcome.error_hash is not None, (
+                f"Consumed token {consumed_token.token_id} failed outcome should have error_hash "
+                f"explaining why coalesce failed (quorum_not_met)"
+            )
+
+
+class TestCoalesceAuditGap2:
+    """Gap 2: Fork child fails before coalesce - siblings should not be stranded.
+
+    Current behavior: If one fork child fails, siblings are held until flush_pending.
+    Expected: This is handled correctly, but test verifies audit trail completeness.
+
+    Scenario:
+    1. Fork creates children A, B, C
+    2. Child A fails at transform (before reaching coalesce)
+    3. Children B, C arrive at coalesce (require_all policy)
+    4. Coalesce waits for A (which will never arrive)
+    5. flush_pending() should record failure for B and C
+
+    This test verifies that the audit trail correctly shows:
+    - Child A: FAILED outcome (at transform)
+    - Children B, C: FAILED outcome (at coalesce, with incomplete_branches reason)
+    """
+
+    def test_fork_child_fails_before_coalesce_siblings_recorded_at_flush(
+        self,
+        recorder: LandscapeRecorder,
+        run: Run,
+    ) -> None:
+        """When fork child fails before coalesce, siblings should have complete audit trail.
+
+        This tests the "sibling stranding" scenario identified in the deep dive.
+
+        Expected audit trail:
+        - Parent: FORKED outcome
+        - Failed child A: FAILED outcome (at transform where it failed)
+        - Held children B, C: FAILED outcomes (at coalesce, incomplete_branches)
+        """
+        span_factory = SpanFactory()
+        token_manager = TokenManager(recorder)
+
+        # Register nodes
+        source_node = recorder.register_node(
+            run_id=run.run_id,
+            node_id="source_1",
+            plugin_name="test_source",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+        # Note: transform_node registered but not used in this test
+        # (simulates child A failing at transform before reaching coalesce)
+        recorder.register_node(
+            run_id=run.run_id,
+            node_id="transform_1",
+            plugin_name="filter_transform",
+            node_type=NodeType.TRANSFORM,
+            plugin_version="1.0.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+        coalesce_node = recorder.register_node(
+            run_id=run.run_id,
+            node_id="coalesce_1",
+            plugin_name="merge_all",
+            node_type=NodeType.COALESCE,
+            plugin_version="1.0.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+
+        # Configure coalesce
+        settings = CoalesceSettings(
+            name="merge_all",
+            branches=["path_a", "path_b", "path_c"],
+            policy="require_all",
+            merge="union",
+        )
+
+        executor = CoalesceExecutor(
+            recorder=recorder,
+            span_factory=span_factory,
+            token_manager=token_manager,
+            run_id=run.run_id,
+        )
+        executor.register_coalesce(settings, coalesce_node.node_id)
+
+        # Create and fork initial token
+        initial_token = token_manager.create_initial_token(
+            run_id=run.run_id,
+            source_node_id=source_node.node_id,
+            row_index=0,
+            row_data={"value": 100},
+        )
+        children = token_manager.fork_token(
+            parent_token=initial_token,
+            branches=["path_a", "path_b", "path_c"],
+            step_in_pipeline=1,
+        )
+
+        # Simulate child A failing at transform (before coalesce)
+        child_a = children[0]
+        recorder.record_token_outcome(
+            run_id=run.run_id,
+            token_id=child_a.token_id,
+            outcome=RowOutcome.FAILED,
+            error_hash="simulated_transform_failure",
+        )
+
+        # Children B and C arrive at coalesce (waiting for A)
+        token_b = TokenInfo(
+            row_id=children[1].row_id,
+            token_id=children[1].token_id,
+            row_data={"value": 100, "b_result": 2},
+            branch_name="path_b",
+        )
+        token_c = TokenInfo(
+            row_id=children[2].row_id,
+            token_id=children[2].token_id,
+            row_data={"value": 100, "c_result": 3},
+            branch_name="path_c",
+        )
+
+        executor.accept(token_b, "merge_all", step_in_pipeline=2)
+        executor.accept(token_c, "merge_all", step_in_pipeline=2)
+
+        # End-of-source: flush pending (A will never arrive)
+        flushed = executor.flush_pending(step_in_pipeline=2)
+        assert len(flushed) == 1
+
+        failure_outcome = flushed[0]
+        assert failure_outcome.failure_reason == "incomplete_branches"
+
+        # AUDIT TRAIL VERIFICATION
+        # Child A should have FAILED outcome (from transform)
+        outcome_a = recorder.get_token_outcome(child_a.token_id)
+        assert outcome_a is not None
+        assert outcome_a.outcome == RowOutcome.FAILED
+
+        # Children B and C should have FAILED outcomes (from coalesce flush)
+        for consumed_token in failure_outcome.consumed_tokens:
+            token_outcome = recorder.get_token_outcome(consumed_token.token_id)
+
+            assert token_outcome is not None, (
+                f"Gap 2: Stranded sibling {consumed_token.token_id} has NO token_outcome! "
+                f"When sibling A failed before coalesce, B and C were held until flush. "
+                f"Expected: RowOutcome.FAILED recorded at flush_pending"
+            )
+
+            assert token_outcome.outcome == RowOutcome.FAILED, (
+                f"Stranded sibling {consumed_token.token_id} should have outcome=FAILED, got {token_outcome.outcome}"
+            )
+
+        # Verify all three children reached terminal state
+        all_outcomes = recorder.get_token_outcomes_for_row(run.run_id, initial_token.row_id)
+        child_outcomes = [o for o in all_outcomes if o.token_id in [c.token_id for c in children]]
+
+        assert len(child_outcomes) == 3, (
+            f"Expected 3 child tokens to have outcomes, got {len(child_outcomes)}. "
+            f"Missing outcomes means tokens disappeared from audit trail."
+        )
+
+        # All should be FAILED (A from transform, B+C from coalesce)
+        assert all(o.outcome == RowOutcome.FAILED for o in child_outcomes), (
+            f"All fork children should eventually reach FAILED outcome. Got outcomes: {[o.outcome for o in child_outcomes]}"
+        )
