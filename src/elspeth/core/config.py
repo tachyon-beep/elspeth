@@ -216,7 +216,7 @@ class GateSettings(BaseModel):
         Note: Sink destinations are NOT restricted to identifier-like names.
         Sink names can be any valid dict key (including hyphenated names like "my-sink").
         The DAG builder validates that destinations are actual sink keys at graph
-        compilation time (ExecutionGraph.from_config), which provides better error
+        compilation time (ExecutionGraph.from_plugin_instances), which provides better error
         messages referencing available sinks.
         """
         if not v:

@@ -10,6 +10,7 @@ Coordinates:
 - Post-run audit export (when configured)
 """
 
+import json
 import os
 import time
 from collections.abc import Callable
@@ -20,7 +21,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from elspeth.core.events import EventBusProtocol
 
-from elspeth.contracts import NodeType, RowOutcome, RunStatus, TokenInfo
+from elspeth.contracts import BatchPendingError, NodeType, RowOutcome, RunStatus, TokenInfo
 from elspeth.contracts.cli import ProgressEvent
 from elspeth.contracts.events import (
     PhaseAction,
@@ -36,11 +37,9 @@ from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
 from elspeth.engine.processor import RowProcessor
 from elspeth.engine.retry import RetryConfig, RetryManager
-from elspeth.engine.schema_validator import validate_pipeline_schemas
 from elspeth.engine.spans import SpanFactory
 from elspeth.plugins.base import BaseGate, BaseTransform
 from elspeth.plugins.context import PluginContext
-from elspeth.plugins.llm.batch_errors import BatchPendingError
 from elspeth.plugins.protocols import SinkProtocol, SourceProtocol
 
 # Type alias for row-processing plugins in the transforms pipeline
@@ -50,8 +49,8 @@ RowPlugin = BaseTransform | BaseGate
 """Union of all row-processing plugin types for pipeline transforms list."""
 
 if TYPE_CHECKING:
+    from elspeth.contracts import ResumePoint
     from elspeth.core.checkpoint import CheckpointManager
-    from elspeth.core.checkpoint.recovery import ResumePoint
     from elspeth.core.config import CheckpointSettings, ElspethSettings
 
 
@@ -143,6 +142,7 @@ class Orchestrator:
         self._checkpoint_manager = checkpoint_manager
         self._checkpoint_settings = checkpoint_settings
         self._sequence_number = 0  # Monotonic counter for checkpoint ordering
+        self._current_graph: ExecutionGraph | None = None  # Set during execution for checkpointing
 
     def _maybe_checkpoint(self, run_id: str, token_id: str, node_id: str) -> None:
         """Create checkpoint if configured.
@@ -164,6 +164,9 @@ class Orchestrator:
             return
         if self._checkpoint_manager is None:
             return
+        if self._current_graph is None:
+            # Should never happen - graph is set during execution
+            raise RuntimeError("Cannot create checkpoint: execution graph not available")
 
         self._sequence_number += 1
 
@@ -183,6 +186,7 @@ class Orchestrator:
                 token_id=token_id,
                 node_id=node_id,
                 sequence_number=self._sequence_number,
+                graph=self._current_graph,
             )
 
     def _delete_checkpoints(self, run_id: str) -> None:
@@ -198,7 +202,20 @@ class Orchestrator:
         """Call close() on all transforms and gates.
 
         Called in finally block to ensure cleanup happens even on failure.
-        Logs but doesn't raise if individual cleanup fails.
+
+        EXCEPTION TO "PLUGIN BUGS SHOULD CRASH" PRINCIPLE:
+        ---------------------------------------------------
+        Cleanup is best-effort even if individual close() fails. This violates
+        the general principle that plugin method exceptions should crash, but
+        is justified for cleanup specifically:
+
+        1. Called in finally block - crash prevents other plugins from cleanup
+        2. Resource leaks worse than ignoring close() bugs during teardown
+        3. Errors ARE logged - bugs aren't silently swallowed
+        4. Close() bugs should be fixed, but shouldn't compound damage
+
+        In normal operation (process(), evaluate(), etc.), plugin bugs crash
+        immediately. Only cleanup gets special treatment.
         """
         import structlog
 
@@ -208,11 +225,12 @@ class Orchestrator:
             try:
                 transform.close()
             except Exception as e:
-                # Log but don't raise - cleanup should be best-effort
+                # Log but don't raise - best-effort cleanup
                 logger.warning(
-                    "Transform cleanup failed",
+                    "Transform cleanup failed - plugin close() raised exception",
                     transform=transform.name,
                     error=str(e),
+                    error_type=type(e).__name__,
                 )
 
     def _validate_route_destinations(
@@ -438,42 +456,25 @@ class Orchestrator:
             ValueError: If graph is not provided
         """
         if graph is None:
-            raise ValueError("ExecutionGraph is required. Build with ExecutionGraph.from_config(settings)")
+            raise ValueError("ExecutionGraph is required. Build with ExecutionGraph.from_plugin_instances()")
 
-        # SCHEMA_VALIDATION phase - validate pipeline schemas
-        phase_start = time.perf_counter()
-        try:
-            self._events.emit(PhaseStarted(phase=PipelinePhase.SCHEMA_VALIDATION, action=PhaseAction.VALIDATING))
-
-            # Schemas are required by plugin protocols - access directly
-            source_output = config.source.output_schema
-            transform_inputs = [t.input_schema for t in config.transforms]
-            transform_outputs = [t.output_schema for t in config.transforms]
-            sink_inputs = [s.input_schema for s in config.sinks.values()]
-
-            schema_errors = validate_pipeline_schemas(
-                source_output=source_output,
-                transform_inputs=transform_inputs,  # type: ignore[arg-type]
-                transform_outputs=transform_outputs,  # type: ignore[arg-type]
-                sink_inputs=sink_inputs,  # type: ignore[arg-type]
-            )
-            if schema_errors:
-                raise ValueError(f"Pipeline schema incompatibility: {'; '.join(schema_errors)}")
-
-            self._events.emit(PhaseCompleted(phase=PipelinePhase.SCHEMA_VALIDATION, duration_seconds=time.perf_counter() - phase_start))
-        except Exception as e:
-            self._events.emit(PhaseError(phase=PipelinePhase.SCHEMA_VALIDATION, error=e))
-            raise  # CRITICAL: Always re-raise - this is our code, must crash
+        # Schema validation now happens in ExecutionGraph.validate() during graph construction
 
         # DATABASE phase - create recorder and begin run
         phase_start = time.perf_counter()
         try:
             self._events.emit(PhaseStarted(phase=PipelinePhase.DATABASE, action=PhaseAction.CONNECTING))
 
+            # Serialize source schema for resume type restoration
+            # This enables proper type coercion (datetime/Decimal) when resuming from JSON payloads
+            # SourceProtocol requires output_schema - all sources have schemas (even dynamic ones)
+            source_schema_json = json.dumps(config.source.output_schema.model_json_schema())
+
             recorder = LandscapeRecorder(self._db, payload_store=payload_store)
             run = recorder.begin_run(
                 config=config.config,
                 canonical_version=self._canonical_version,
+                source_schema_json=source_schema_json,
             )
 
             self._events.emit(PhaseCompleted(phase=PipelinePhase.DATABASE, duration_seconds=time.perf_counter() - phase_start))
@@ -626,6 +627,9 @@ class Orchestrator:
             batch_checkpoints: Restored batch checkpoints (maps node_id -> checkpoint_data)
             payload_store: Optional PayloadStore for persisting source row payloads
         """
+        # Store graph for checkpointing during execution
+        self._current_graph = graph
+
         # Get execution order from graph
         execution_order = graph.topological_order()
 
@@ -978,6 +982,16 @@ class Orchestrator:
                             sink_name = output_sink_name
                             if result.token.branch_name is not None and result.token.branch_name in config.sinks:
                                 sink_name = result.token.branch_name
+
+                            # Record COMPLETED outcome with sink_name (AUD-001 fix)
+                            # MUST be here (not processor) because only orchestrator knows branch→sink mapping
+                            recorder.record_token_outcome(
+                                run_id=run_id,
+                                token_id=result.token.token_id,
+                                outcome=RowOutcome.COMPLETED,
+                                sink_name=sink_name,
+                            )
+
                             pending_tokens[sink_name].append(result.token)
                         elif result.outcome == RowOutcome.ROUTED:
                             rows_routed += 1
@@ -1040,6 +1054,7 @@ class Orchestrator:
                         pending_tokens=pending_tokens,
                         output_sink_name=output_sink_name,
                         run_id=run_id,
+                        recorder=recorder,
                         checkpoint=False,  # Checkpointing now happens after sink write
                         last_node_id=default_last_node_id,
                     )
@@ -1142,6 +1157,9 @@ class Orchestrator:
             config.source.close()
             for sink in config.sinks.values():
                 sink.close()
+
+        # Clear graph after execution completes
+        self._current_graph = None
 
         return RunResult(
             run_id=run_id,
@@ -1288,6 +1306,140 @@ class Orchestrator:
                 for rec in flat_records:
                     writer.writerow(rec)
 
+    def _reconstruct_schema_from_json(self, schema_dict: dict[str, Any]) -> type:
+        """Reconstruct Pydantic schema class from JSON schema dict.
+
+        Handles complete Pydantic JSON schema including:
+        - Primitive types: string, integer, number, boolean
+        - datetime: string with format="date-time"
+        - Decimal: anyOf with number/string (for precision preservation)
+        - Arrays: type="array" with items schema
+        - Nested objects: type="object" with properties schema
+
+        Args:
+            schema_dict: Pydantic JSON schema dict (from model_json_schema())
+
+        Returns:
+            Dynamically created Pydantic model class
+
+        Raises:
+            ValueError: If schema is malformed, empty, or contains unsupported types
+        """
+
+        from pydantic import create_model
+
+        from elspeth.contracts import PluginSchema
+
+        # Extract field definitions from Pydantic JSON schema
+        properties = schema_dict.get("properties")
+        if properties is None:
+            raise ValueError(
+                "Resume failed: Schema JSON has no 'properties' field. This indicates a malformed schema. Cannot reconstruct types."
+            )
+
+        if not properties:
+            raise ValueError(
+                "Resume failed: Schema has zero fields defined. "
+                "Cannot resume with empty schema - this would silently discard all row data. "
+                "The original source schema must have at least one field."
+            )
+
+        required_fields = set(schema_dict.get("required", []))
+
+        # Build field definitions for create_model
+        field_definitions: dict[str, Any] = {}
+
+        for field_name, field_info in properties.items():
+            # Determine Python type from JSON schema
+            field_type = self._json_schema_to_python_type(field_name, field_info)
+
+            # Handle optional vs required fields
+            if field_name in required_fields:
+                field_definitions[field_name] = (field_type, ...)  # Required field
+            else:
+                field_definitions[field_name] = (field_type, None)  # Optional field
+
+        # Recreate the schema class dynamically
+        return create_model("RestoredSourceSchema", __base__=PluginSchema, **field_definitions)
+
+    def _json_schema_to_python_type(self, field_name: str, field_info: dict[str, Any]) -> type:
+        """Map Pydantic JSON schema field to Python type.
+
+        Handles Pydantic's type mapping including special cases:
+        - datetime: {"type": "string", "format": "date-time"}
+        - Decimal: {"anyOf": [{"type": "number"}, {"type": "string"}]}
+        - list[T]: {"type": "array", "items": {...}}
+        - dict: {"type": "object"} without properties
+
+        Args:
+            field_name: Field name (for error messages)
+            field_info: JSON schema field definition
+
+        Returns:
+            Python type for Pydantic field
+
+        Raises:
+            ValueError: If field type is not supported (prevents silent degradation)
+        """
+        from datetime import datetime
+        from decimal import Decimal
+
+        # Check for datetime first (string with format annotation)
+        if field_info.get("type") == "string" and field_info.get("format") == "date-time":
+            return datetime
+
+        # Check for Decimal (anyOf pattern)
+        if "anyOf" in field_info:
+            # Pydantic emits: {"anyOf": [{"type": "number"}, {"type": "string"}]}
+            # This indicates Decimal (accepts both for parsing flexibility)
+            any_of_types = field_info["anyOf"]
+            type_strs = {item.get("type") for item in any_of_types if "type" in item}
+            if {"number", "string"}.issubset(type_strs):
+                return Decimal
+
+        # Get basic type
+        field_type_str = field_info.get("type")
+        if field_type_str is None:
+            raise ValueError(
+                f"Resume failed: Field '{field_name}' has no 'type' in schema. "
+                f"Schema definition: {field_info}. "
+                f"Cannot determine Python type for field."
+            )
+
+        # Handle array types
+        if field_type_str == "array":
+            items_schema = field_info.get("items")
+            if items_schema is None:
+                # Generic list without item type constraint
+                return list
+            # For typed arrays, we'd need recursive handling
+            # For now, return list (Pydantic will validate items at parse time)
+            return list
+
+        # Handle nested object types
+        if field_type_str == "object":
+            # Generic dict (no specific structure)
+            return dict
+
+        # Handle primitive types
+        primitive_type_map = {
+            "string": str,
+            "integer": int,
+            "number": float,
+            "boolean": bool,
+        }
+
+        if field_type_str in primitive_type_map:
+            return primitive_type_map[field_type_str]
+
+        # Unknown type - CRASH instead of silent degradation
+        raise ValueError(
+            f"Resume failed: Field '{field_name}' has unsupported type '{field_type_str}'. "
+            f"Supported types: string, integer, number, boolean, date-time, Decimal, array, object. "
+            f"Schema definition: {field_info}. "
+            f"This is a bug in schema reconstruction - please report this."
+        )
+
     def resume(
         self,
         resume_point: "ResumePoint",
@@ -1328,7 +1480,7 @@ class Orchestrator:
         self._handle_incomplete_batches(recorder, run_id)
 
         # 2. Update run status to running
-        self._update_run_status(recorder, run_id, RunStatus.RUNNING)
+        recorder.update_run_status(run_id, RunStatus.RUNNING)
 
         # 3. Build restored aggregation state map
         restored_state: dict[str, dict[str, Any]] = {}
@@ -1342,14 +1494,24 @@ class Orchestrator:
             raise ValueError("CheckpointManager is required for resume - Orchestrator must be initialized with checkpoint_manager")
         recovery = RecoveryManager(self._db, self._checkpoint_manager)
 
-        # TYPE FIDELITY: Pass source schema to restore coerced types (datetime, Decimal, etc.)
-        # The source's _schema_class attribute contains the Pydantic model with allow_coercion=True
-        source_schema_class = getattr(config.source, "_schema_class", None)
+        # TYPE FIDELITY: Retrieve source schema from audit trail for type restoration
+        # Resume must use the ORIGINAL run's schema, not the current source's schema
+        # This enables proper type coercion (datetime/Decimal) from JSON payload strings
+        source_schema_json = recorder.get_source_schema(run_id)
+
+        # Deserialize schema and recreate Pydantic model class with full type fidelity
+        schema_dict = json.loads(source_schema_json)
+        source_schema_class = self._reconstruct_schema_from_json(schema_dict)
+
         unprocessed_rows = recovery.get_unprocessed_row_data(run_id, payload_store, source_schema_class=source_schema_class)
 
         if not unprocessed_rows:
             # All rows were processed - complete the run
             recorder.complete_run(run_id, status="completed")
+
+            # Delete checkpoints on successful completion (Bug #8 fix)
+            self._delete_checkpoints(run_id)
+
             return RunResult(
                 run_id=run_id,
                 status=RunStatus.COMPLETED,
@@ -1413,6 +1575,9 @@ class Orchestrator:
         Returns:
             RunResult with processing counts
         """
+        # Store graph for checkpointing during execution
+        self._current_graph = graph
+
         # Get explicit node ID mappings from graph
         source_id = graph.get_source()
         if source_id is None:
@@ -1423,12 +1588,19 @@ class Orchestrator:
         coalesce_id_map = graph.get_coalesce_id_map()
         output_sink_name = graph.get_output_sink()
 
-        # Build edge_map from graph edges
-        edge_map: dict[tuple[str, str], str] = {}
-        for i, edge_info in enumerate(graph.get_edges()):
-            # Generate synthetic edge_id for resume (edges were registered in original run)
-            edge_id = f"resume_edge_{i}"
-            edge_map[(edge_info.from_node, edge_info.label)] = edge_id
+        # Build edge_map from database (load real edge IDs registered in original run)
+        # CRITICAL: Must use real edge_ids for FK integrity when recording routing events
+        edge_map = recorder.get_edge_map(run_id)
+
+        # Validate: If graph has edges, database MUST have matching edges (Tier 1 trust)
+        # Missing edges = data corruption or incomplete original run registration
+        graph_edges = graph.get_edges()
+        if graph_edges and not edge_map:
+            raise ValueError(
+                f"Resume failed: Graph has {len(graph_edges)} edges but no edges found in database "
+                f"for run_id '{run_id}'. This indicates data corruption or incomplete edge registration "
+                f"in the original run. Cannot resume without edge data."
+            )
 
         # Get route resolution map
         route_resolution_map = graph.get_route_resolution_map()
@@ -1583,6 +1755,16 @@ class Orchestrator:
                         sink_name = output_sink_name
                         if result.token.branch_name is not None and result.token.branch_name in config.sinks:
                             sink_name = result.token.branch_name
+
+                        # Record COMPLETED outcome with sink_name (AUD-001 fix)
+                        # Same pattern as main execution path
+                        recorder.record_token_outcome(
+                            run_id=run_id,
+                            token_id=result.token.token_id,
+                            outcome=RowOutcome.COMPLETED,
+                            sink_name=sink_name,
+                        )
+
                         pending_tokens[sink_name].append(result.token)
                     elif result.outcome == RowOutcome.ROUTED:
                         rows_routed += 1
@@ -1615,6 +1797,7 @@ class Orchestrator:
                     pending_tokens=pending_tokens,
                     output_sink_name=output_sink_name,
                     run_id=run_id,
+                    recorder=recorder,
                     checkpoint=False,  # No checkpointing during resume
                 )
                 rows_succeeded += agg_succeeded
@@ -1656,6 +1839,9 @@ class Orchestrator:
             # Close all sinks (NOT source - wasn't opened)
             for sink in config.sinks.values():
                 sink.close()
+
+        # Clear graph after execution completes
+        self._current_graph = None
 
         return RunResult(
             run_id=run_id,
@@ -1700,26 +1886,6 @@ class Orchestrator:
                 recorder.retry_batch(batch.batch_id)
             # DRAFT batches continue normally (collection resumes)
 
-    def _update_run_status(
-        self,
-        recorder: LandscapeRecorder,
-        run_id: str,
-        status: RunStatus,
-    ) -> None:
-        """Update run status without completing the run.
-
-        Used during recovery to set status back to RUNNING.
-
-        Args:
-            recorder: LandscapeRecorder for database operations
-            run_id: Run to update
-            status: New status
-        """
-        from elspeth.core.landscape.schema import runs_table
-
-        with self._db.connection() as conn:
-            conn.execute(runs_table.update().where(runs_table.c.run_id == run_id).values(status=status.value))
-
     def _flush_remaining_aggregation_buffers(
         self,
         config: PipelineConfig,
@@ -1728,6 +1894,7 @@ class Orchestrator:
         pending_tokens: dict[str, list[TokenInfo]],
         output_sink_name: str,
         run_id: str,
+        recorder: LandscapeRecorder,
         checkpoint: bool = True,
         last_node_id: str | None = None,
     ) -> tuple[int, int]:
@@ -1743,6 +1910,7 @@ class Orchestrator:
             pending_tokens: Dict of sink_name -> tokens to append results to
             output_sink_name: Default sink for aggregation output
             run_id: Current run ID (for checkpointing)
+            recorder: LandscapeRecorder for recording outcomes
             checkpoint: Whether to create checkpoints for flushed tokens
                        (True for _execute_run, False for _process_resumed_rows)
             last_node_id: Node ID to use for checkpointing (required if checkpoint=True)
@@ -1810,6 +1978,15 @@ class Orchestrator:
                         row_data=flush_result.row,
                         branch_name=buffered_tokens[0].branch_name,
                     )
+
+                    # Record COMPLETED outcome with sink_name (AUD-001 fix)
+                    recorder.record_token_outcome(
+                        run_id=run_id,
+                        token_id=output_token.token_id,
+                        outcome=RowOutcome.COMPLETED,
+                        sink_name=output_sink_name,
+                    )
+
                     pending_tokens[output_sink_name].append(output_token)
                     rows_succeeded += 1
 
@@ -1828,6 +2005,14 @@ class Orchestrator:
                         step_in_pipeline=agg_step,
                     )
                     for exp_token in expanded:
+                        # Record COMPLETED outcome for each expanded token (AUD-001 fix)
+                        recorder.record_token_outcome(
+                            run_id=run_id,
+                            token_id=exp_token.token_id,
+                            outcome=RowOutcome.COMPLETED,
+                            sink_name=output_sink_name,
+                        )
+
                         pending_tokens[output_sink_name].append(exp_token)
                         rows_succeeded += 1
 

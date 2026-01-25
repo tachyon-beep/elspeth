@@ -309,6 +309,7 @@ class TestCSVSourceQuarantineYielding:
         # Second row quarantined (parse error)
         assert results[1].is_quarantined is True
         assert results[1].quarantine_destination == "quarantine"
+        assert results[1].quarantine_error is not None
         assert "parse error" in results[1].quarantine_error.lower()
         assert "__raw_line__" in results[1].row
         assert "__line_number__" in results[1].row
@@ -421,6 +422,7 @@ class TestCSVSourceQuarantineYielding:
         assert quarantined_row["__line_number__"] == 4
 
         # Error message should also show correct line number
+        assert results[1].quarantine_error is not None
         assert "line 4" in results[1].quarantine_error
 
         # Third row valid (line 5 in file)

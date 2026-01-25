@@ -7,10 +7,14 @@ Tests targeting specific mutation survivors:
 
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from elspeth.core.checkpoint.manager import CheckpointManager
+
+if TYPE_CHECKING:
+    from elspeth.core.dag import ExecutionGraph
 
 
 class TestCheckpointIdFormat:
@@ -27,6 +31,15 @@ class TestCheckpointIdFormat:
 
         db = LandscapeDB(f"sqlite:///{tmp_path}/test.db")
         return CheckpointManager(db)
+
+    @pytest.fixture
+    def mock_graph(self) -> "ExecutionGraph":
+        """Create a simple mock graph for testing."""
+        from elspeth.core.dag import ExecutionGraph
+
+        graph = ExecutionGraph()
+        graph.add_node("node-001", node_type="transform", plugin_name="test", config={})
+        return graph
 
     @pytest.fixture
     def setup_run(self, manager: CheckpointManager) -> str:
@@ -83,7 +96,7 @@ class TestCheckpointIdFormat:
             conn.commit()
         return "run-001"
 
-    def test_checkpoint_id_starts_with_cp_prefix(self, manager: CheckpointManager, setup_run: str) -> None:
+    def test_checkpoint_id_starts_with_cp_prefix(self, manager: CheckpointManager, setup_run: str, mock_graph: "ExecutionGraph") -> None:
         """Line 54: checkpoint_id must start with 'cp-' prefix.
 
         Ensures mutants that change the prefix (e.g., 'cp-' to 'XX-') are killed.
@@ -92,12 +105,13 @@ class TestCheckpointIdFormat:
             run_id="run-001",
             token_id="tok-001",
             node_id="node-001",
+            graph=mock_graph,
             sequence_number=1,
         )
 
         assert checkpoint.checkpoint_id.startswith("cp-"), f"checkpoint_id must start with 'cp-' prefix, got: {checkpoint.checkpoint_id}"
 
-    def test_checkpoint_id_has_correct_format(self, manager: CheckpointManager, setup_run: str) -> None:
+    def test_checkpoint_id_has_correct_format(self, manager: CheckpointManager, setup_run: str, mock_graph: "ExecutionGraph") -> None:
         """Line 54: checkpoint_id format is 'cp-' + 12 hex chars.
 
         Format: cp-{uuid.uuid4().hex[:12]} = "cp-" + exactly 12 hex characters.
@@ -106,6 +120,7 @@ class TestCheckpointIdFormat:
             run_id="run-001",
             token_id="tok-001",
             node_id="node-001",
+            graph=mock_graph,
             sequence_number=1,
         )
 
@@ -139,6 +154,15 @@ class TestGetLatestCheckpointOrdering:
         return CheckpointManager(db)
 
     @pytest.fixture
+    def mock_graph(self) -> "ExecutionGraph":
+        """Create a simple mock graph for testing."""
+        from elspeth.core.dag import ExecutionGraph
+
+        graph = ExecutionGraph()
+        graph.add_node("node-001", node_type="transform", plugin_name="test", config={})
+        return graph
+
+    @pytest.fixture
     def setup_run(self, manager: CheckpointManager) -> str:
         """Create a run with tokens for checkpoint tests."""
         from elspeth.core.landscape.schema import (
@@ -193,7 +217,9 @@ class TestGetLatestCheckpointOrdering:
             conn.commit()
         return "run-001"
 
-    def test_get_latest_returns_highest_sequence_not_lowest(self, manager: CheckpointManager, setup_run: str) -> None:
+    def test_get_latest_returns_highest_sequence_not_lowest(
+        self, manager: CheckpointManager, setup_run: str, mock_graph: "ExecutionGraph"
+    ) -> None:
         """Line 96: get_latest_checkpoint must use DESC order.
 
         Creates checkpoints with sequence numbers [1, 5, 3] and verifies
@@ -202,9 +228,9 @@ class TestGetLatestCheckpointOrdering:
         This kills mutants that change desc() to asc().
         """
         # Create checkpoints out of order to test sorting
-        manager.create_checkpoint("run-001", "tok-001", "node-001", sequence_number=1)
-        manager.create_checkpoint("run-001", "tok-001", "node-001", sequence_number=5)
-        manager.create_checkpoint("run-001", "tok-001", "node-001", sequence_number=3)
+        manager.create_checkpoint("run-001", "tok-001", "node-001", 1, mock_graph)
+        manager.create_checkpoint("run-001", "tok-001", "node-001", 5, mock_graph)
+        manager.create_checkpoint("run-001", "tok-001", "node-001", 3, mock_graph)
 
         latest = manager.get_latest_checkpoint("run-001")
 
@@ -215,28 +241,30 @@ class TestGetLatestCheckpointOrdering:
             "This suggests DESC ordering is broken."
         )
 
-    def test_get_latest_with_only_one_checkpoint(self, manager: CheckpointManager, setup_run: str) -> None:
+    def test_get_latest_with_only_one_checkpoint(self, manager: CheckpointManager, setup_run: str, mock_graph: "ExecutionGraph") -> None:
         """Line 96: With single checkpoint, should return that checkpoint.
 
         Edge case: ordering shouldn't matter with only one record.
         """
-        manager.create_checkpoint("run-001", "tok-001", "node-001", sequence_number=42)
+        manager.create_checkpoint("run-001", "tok-001", "node-001", 42, mock_graph)
 
         latest = manager.get_latest_checkpoint("run-001")
 
         assert latest is not None
         assert latest.sequence_number == 42
 
-    def test_get_latest_returns_most_recent_not_first_created(self, manager: CheckpointManager, setup_run: str) -> None:
+    def test_get_latest_returns_most_recent_not_first_created(
+        self, manager: CheckpointManager, setup_run: str, mock_graph: "ExecutionGraph"
+    ) -> None:
         """Line 96: Must return highest sequence_number, not first inserted.
 
         Additional test: insert in ascending order to verify it's not just
         returning the first row.
         """
         # Create in ascending order
-        manager.create_checkpoint("run-001", "tok-001", "node-001", sequence_number=10)
-        manager.create_checkpoint("run-001", "tok-001", "node-001", sequence_number=20)
-        manager.create_checkpoint("run-001", "tok-001", "node-001", sequence_number=30)
+        manager.create_checkpoint("run-001", "tok-001", "node-001", 10, mock_graph)
+        manager.create_checkpoint("run-001", "tok-001", "node-001", 20, mock_graph)
+        manager.create_checkpoint("run-001", "tok-001", "node-001", 30, mock_graph)
 
         latest = manager.get_latest_checkpoint("run-001")
 

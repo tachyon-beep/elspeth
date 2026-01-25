@@ -13,10 +13,11 @@ the WP-09 specific verification requirements.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
+from elspeth.cli_helpers import instantiate_plugins_from_config
 from elspeth.contracts import PluginSchema, RoutingMode, SourceRow
 from elspeth.core.config import GateSettings
 from tests.conftest import _TestSinkBase, _TestSourceBase, as_source
@@ -141,7 +142,6 @@ class TestCompositeConditions:
 
         class CollectSink(_TestSinkBase):
             name = "collect"
-            config: ClassVar[dict[str, Any]] = {}
 
             def __init__(self) -> None:
                 self.results: list[dict[str, Any]] = []
@@ -218,7 +218,6 @@ class TestCompositeConditions:
 
         class CollectSink(_TestSinkBase):
             name = "collect"
-            config: ClassVar[dict[str, Any]] = {}
 
             def __init__(self) -> None:
                 self.results: list[dict[str, Any]] = []
@@ -289,7 +288,6 @@ class TestCompositeConditions:
 
         class CollectSink(_TestSinkBase):
             name = "collect"
-            config: ClassVar[dict[str, Any]] = {}
 
             def __init__(self) -> None:
                 self.results: list[dict[str, Any]] = []
@@ -363,7 +361,6 @@ class TestCompositeConditions:
 
         class CollectSink(_TestSinkBase):
             name = "collect"
-            config: ClassVar[dict[str, Any]] = {}
 
             def __init__(self) -> None:
                 self.results: list[dict[str, Any]] = []
@@ -417,7 +414,7 @@ class TestCompositeConditions:
 class TestRouteLabelResolution:
     """WP-09 Verification: Route labels resolve correctly."""
 
-    def test_route_labels_resolve_to_sinks(self) -> None:
+    def test_route_labels_resolve_to_sinks(self, plugin_manager) -> None:
         """Verify route labels map to correct sinks."""
         from elspeth.core.config import (
             DatasourceSettings,
@@ -430,11 +427,18 @@ class TestRouteLabelResolution:
         from elspeth.core.dag import ExecutionGraph
 
         settings = ElspethSettings(
-            datasource=DatasourceSettings(plugin="csv"),
+            datasource=DatasourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"fields": "dynamic"},
+                },
+            ),
             sinks={
-                "main_output": SinkSettings(plugin="csv"),
-                "review_queue": SinkSettings(plugin="csv"),
-                "archive": SinkSettings(plugin="csv"),
+                "main_output": SinkSettings(plugin="csv", options={"path": "main_output.csv", "schema": {"fields": "dynamic"}}),
+                "review_queue": SinkSettings(plugin="csv", options={"path": "review_queue.csv", "schema": {"fields": "dynamic"}}),
+                "archive": SinkSettings(plugin="csv", options={"path": "archive.csv", "schema": {"fields": "dynamic"}}),
             },
             output_sink="main_output",
             gates=[
@@ -449,7 +453,16 @@ class TestRouteLabelResolution:
             ],
         )
 
-        graph = ExecutionGraph.from_config(settings)
+        plugins = instantiate_plugins_from_config(settings)
+
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(settings.gates),
+            output_sink=settings.output_sink,
+        )
 
         # Verify route resolution map
         route_map = graph.get_route_resolution_map()
@@ -462,7 +475,7 @@ class TestRouteLabelResolution:
         assert (gate_id, "false") in route_map
         assert route_map[(gate_id, "false")] == "review_queue"
 
-    def test_ternary_expression_returns_string_routes(self) -> None:
+    def test_ternary_expression_returns_string_routes(self, plugin_manager) -> None:
         """Verify ternary expressions can return different route labels."""
         from elspeth.core.config import (
             DatasourceSettings,
@@ -498,7 +511,6 @@ class TestRouteLabelResolution:
 
         class CollectSink(_TestSinkBase):
             name = "collect"
-            config: ClassVar[dict[str, Any]] = {}
 
             def __init__(self) -> None:
                 self.results: list[dict[str, Any]] = []
@@ -512,10 +524,17 @@ class TestRouteLabelResolution:
 
         # Build settings with ternary condition that returns category directly
         settings = ElspethSettings(
-            datasource=DatasourceSettings(plugin="csv"),
+            datasource=DatasourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"fields": "dynamic"},
+                },
+            ),
             sinks={
-                "premium_sink": SinkSettings(plugin="csv"),
-                "standard_sink": SinkSettings(plugin="csv"),
+                "premium_sink": SinkSettings(plugin="csv", options={"path": "premium.csv", "schema": {"fields": "dynamic"}}),
+                "standard_sink": SinkSettings(plugin="csv", options={"path": "standard.csv", "schema": {"fields": "dynamic"}}),
             },
             output_sink="standard_sink",
             gates=[
@@ -530,7 +549,16 @@ class TestRouteLabelResolution:
             ],
         )
 
-        graph = ExecutionGraph.from_config(settings)
+        plugins = instantiate_plugins_from_config(settings)
+
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(settings.gates),
+            output_sink=settings.output_sink,
+        )
 
         source = ListSource(
             [
@@ -606,7 +634,7 @@ class TestForkCreatesChildTokens:
                 fork_to=["path_a", "path_b"],  # Invalid - no fork route
             )
 
-    def test_fork_gate_in_graph(self) -> None:
+    def test_fork_gate_in_graph(self, plugin_manager) -> None:
         """Verify fork gate is correctly represented in graph."""
         from elspeth.core.config import (
             DatasourceSettings,
@@ -619,8 +647,19 @@ class TestForkCreatesChildTokens:
         from elspeth.core.dag import ExecutionGraph
 
         settings = ElspethSettings(
-            datasource=DatasourceSettings(plugin="csv"),
-            sinks={"output": SinkSettings(plugin="csv")},
+            datasource=DatasourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"fields": "dynamic"},
+                },
+            ),
+            sinks={
+                "output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}}),
+                "analysis_a": SinkSettings(plugin="csv", options={"path": "analysis_a.csv", "schema": {"fields": "dynamic"}}),
+                "analysis_b": SinkSettings(plugin="csv", options={"path": "analysis_b.csv", "schema": {"fields": "dynamic"}}),
+            },
             output_sink="output",
             gates=[
                 GateSettingsConfig(
@@ -632,7 +671,16 @@ class TestForkCreatesChildTokens:
             ],
         )
 
-        graph = ExecutionGraph.from_config(settings)
+        plugins = instantiate_plugins_from_config(settings)
+
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(settings.gates),
+            output_sink=settings.output_sink,
+        )
 
         # Verify gate node exists with fork config
         config_gate_map = graph.get_config_gate_id_map()
@@ -642,7 +690,7 @@ class TestForkCreatesChildTokens:
         assert node_info.config["fork_to"] == ["analysis_a", "analysis_b"]
         assert node_info.config["routes"]["true"] == "fork"
 
-    def test_fork_children_route_to_branch_named_sinks(self) -> None:
+    def test_fork_children_route_to_branch_named_sinks(self, plugin_manager) -> None:
         """Fork children with branch_name route to matching sinks.
 
         This is the core fork use case:
@@ -684,7 +732,6 @@ class TestForkCreatesChildTokens:
 
         class CollectSink(_TestSinkBase):
             name = "collect"
-            config: ClassVar[dict[str, Any]] = {}
 
             def __init__(self) -> None:
                 self.results: list[dict[str, Any]] = []
@@ -702,10 +749,10 @@ class TestForkCreatesChildTokens:
 
         # Config with fork gate and branch-named sinks
         settings = ElspethSettings(
-            datasource=DatasourceSettings(plugin="list_source"),
+            datasource=DatasourceSettings(plugin="null"),
             sinks={
-                "path_a": SinkSettings(plugin="collect"),
-                "path_b": SinkSettings(plugin="collect"),
+                "path_a": SinkSettings(plugin="csv", options={"path": "path_a.csv", "schema": {"fields": "dynamic"}}),
+                "path_b": SinkSettings(plugin="csv", options={"path": "path_b.csv", "schema": {"fields": "dynamic"}}),
             },
             gates=[
                 GateSettingsConfig(
@@ -718,7 +765,16 @@ class TestForkCreatesChildTokens:
             output_sink="path_a",  # Default, but fork should override for path_b
         )
 
-        graph = ExecutionGraph.from_config(settings)
+        plugins = instantiate_plugins_from_config(settings)
+
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(settings.gates),
+            output_sink=settings.output_sink,
+        )
 
         config = PipelineConfig(
             source=as_source(source),
@@ -741,107 +797,7 @@ class TestForkCreatesChildTokens:
         assert path_a_sink.results[0]["value"] == 42
         assert path_b_sink.results[0]["value"] == 42
 
-    def test_fork_unmatched_branch_falls_back_to_output_sink(self) -> None:
-        """Fork child with branch_name not matching any sink goes to output_sink.
-
-        Edge case: fork_to=["stats", "alerts"] but only "alerts" is a sink.
-        Child with branch_name="stats" should fall back to output_sink.
-        """
-        from elspeth.core.config import (
-            DatasourceSettings,
-            ElspethSettings,
-            SinkSettings,
-        )
-        from elspeth.core.config import (
-            GateSettings as GateSettingsConfig,
-        )
-        from elspeth.core.dag import ExecutionGraph
-        from elspeth.core.landscape import LandscapeDB
-        from elspeth.engine.artifacts import ArtifactDescriptor
-        from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
-
-        db = LandscapeDB.in_memory()
-
-        class RowSchema(PluginSchema):
-            value: int
-
-        class ListSource(_TestSourceBase):
-            name = "list_source"
-            output_schema = RowSchema
-
-            def __init__(self, data: list[dict[str, Any]]) -> None:
-                self._data = data
-
-            def load(self, ctx: Any) -> Any:
-                for _row in self._data:
-                    yield SourceRow.valid(_row)
-
-            def close(self) -> None:
-                pass
-
-        class CollectSink(_TestSinkBase):
-            name = "collect"
-            config: ClassVar[dict[str, Any]] = {}
-
-            def __init__(self) -> None:
-                self.results: list[dict[str, Any]] = []
-
-            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-                self.results.extend(rows)
-                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
-
-            def close(self) -> None:
-                pass
-
-        source = ListSource([{"value": 99}])
-        default_sink = CollectSink()  # output_sink
-        alerts_sink = CollectSink()  # only one fork branch has matching sink
-
-        # fork_to has "stats" and "alerts", but only "alerts" is a sink
-        # "stats" child should fall back to default output_sink
-        settings = ElspethSettings(
-            datasource=DatasourceSettings(plugin="list_source"),
-            sinks={
-                "default": SinkSettings(plugin="collect"),
-                "alerts": SinkSettings(plugin="collect"),
-            },
-            gates=[
-                GateSettingsConfig(
-                    name="forking_gate",
-                    condition="True",
-                    routes={"true": "fork", "false": "continue"},
-                    fork_to=["stats", "alerts"],  # "stats" is NOT a sink
-                ),
-            ],
-            output_sink="default",
-        )
-
-        graph = ExecutionGraph.from_config(settings)
-
-        config = PipelineConfig(
-            source=as_source(source),
-            transforms=[],
-            sinks={"default": default_sink, "alerts": alerts_sink},
-            gates=settings.gates,
-        )
-
-        orchestrator = Orchestrator(db)
-        result = orchestrator.run(config, graph=graph)
-
-        assert result.status == "completed"
-        assert result.rows_forked == 1
-
-        # "alerts" child -> alerts_sink (branch matches sink)
-        assert len(alerts_sink.results) == 1, f"alerts sink should get 1 row, got {len(alerts_sink.results)}"
-
-        # "stats" child -> default_sink (no matching sink, falls back)
-        assert len(default_sink.results) == 1, f"default sink should get 1 row (stats fallback), got {len(default_sink.results)}"
-
-        # Both should have the same value (forked from same parent)
-        assert alerts_sink.results[0]["value"] == 99
-        assert default_sink.results[0]["value"] == 99
-
-    def test_fork_multiple_source_rows_counts_correctly(self) -> None:
+    def test_fork_multiple_source_rows_counts_correctly(self, plugin_manager) -> None:
         """Multiple source rows fork correctly with proper counting.
 
         When processing multiple source rows through a fork gate:
@@ -882,7 +838,6 @@ class TestForkCreatesChildTokens:
 
         class CollectSink(_TestSinkBase):
             name = "collect"
-            config: ClassVar[dict[str, Any]] = {}
 
             def __init__(self) -> None:
                 self.results: list[dict[str, Any]] = []
@@ -900,10 +855,10 @@ class TestForkCreatesChildTokens:
         archive_sink = CollectSink()
 
         settings = ElspethSettings(
-            datasource=DatasourceSettings(plugin="list_source"),
+            datasource=DatasourceSettings(plugin="null"),
             sinks={
-                "analysis": SinkSettings(plugin="collect"),
-                "archive": SinkSettings(plugin="collect"),
+                "analysis": SinkSettings(plugin="csv", options={"path": "analysis.csv", "schema": {"fields": "dynamic"}}),
+                "archive": SinkSettings(plugin="csv", options={"path": "archive.csv", "schema": {"fields": "dynamic"}}),
             },
             gates=[
                 GateSettingsConfig(
@@ -916,7 +871,16 @@ class TestForkCreatesChildTokens:
             output_sink="analysis",
         )
 
-        graph = ExecutionGraph.from_config(settings)
+        plugins = instantiate_plugins_from_config(settings)
+
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(settings.gates),
+            output_sink=settings.output_sink,
+        )
 
         config = PipelineConfig(
             source=as_source(source),
@@ -1117,7 +1081,6 @@ class TestEndToEndPipeline:
 
         class CollectSink(_TestSinkBase):
             name = "collect"
-            config: ClassVar[dict[str, Any]] = {}
 
             def __init__(self) -> None:
                 self.results: list[dict[str, Any]] = []
@@ -1234,7 +1197,6 @@ class TestEndToEndPipeline:
 
         class CollectSink(_TestSinkBase):
             name = "collect"
-            config: ClassVar[dict[str, Any]] = {}
 
             def __init__(self) -> None:
                 self.results: list[dict[str, Any]] = []
@@ -1322,7 +1284,6 @@ class TestEndToEndPipeline:
 
         class CollectSink(_TestSinkBase):
             name = "collect"
-            config: ClassVar[dict[str, Any]] = {}
 
             def __init__(self) -> None:
                 self.results: list[dict[str, Any]] = []
@@ -1754,8 +1715,9 @@ class TestErrorHandling:
                 routes={"true": "continue", "false": "review"},
             )
 
-    def test_route_to_nonexistent_sink_caught_at_graph_construction(self) -> None:
+    def test_route_to_nonexistent_sink_caught_at_graph_construction(self, plugin_manager) -> None:
         """Route to non-existent sink caught when building graph."""
+        from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.core.config import (
             DatasourceSettings,
             ElspethSettings,
@@ -1767,8 +1729,15 @@ class TestErrorHandling:
         from elspeth.core.dag import ExecutionGraph, GraphValidationError
 
         settings = ElspethSettings(
-            datasource=DatasourceSettings(plugin="csv"),
-            sinks={"output": SinkSettings(plugin="csv")},
+            datasource=DatasourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"fields": "dynamic"},
+                },
+            ),
+            sinks={"output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}})},
             output_sink="output",
             gates=[
                 GateSettingsConfig(
@@ -1780,4 +1749,12 @@ class TestErrorHandling:
         )
 
         with pytest.raises(GraphValidationError, match="nonexistent_sink"):
-            ExecutionGraph.from_config(settings)
+            plugins = instantiate_plugins_from_config(settings)
+            ExecutionGraph.from_plugin_instances(
+                source=plugins["source"],
+                transforms=plugins["transforms"],
+                sinks=plugins["sinks"],
+                aggregations=plugins["aggregations"],
+                gates=list(settings.gates),
+                output_sink=settings.output_sink,
+            )

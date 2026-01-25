@@ -175,9 +175,6 @@ class BaseLLMTransform(BaseTransform):
         self.input_schema = schema
         self.output_schema = schema
 
-    # name must be set by subclasses - this is enforced by BaseTransform
-    # Example: name = "my_llm_transform"
-
     @abstractmethod
     def _get_llm_client(self, ctx: PluginContext) -> AuditedLLMClient:
         """Create or return an AuditedLLMClient for this transform.

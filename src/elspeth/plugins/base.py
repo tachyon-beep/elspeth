@@ -67,7 +67,11 @@ class BaseTransform(ABC):
     _on_error: str | None = None
 
     def __init__(self, config: dict[str, Any]) -> None:
-        """Initialize with configuration."""
+        """Initialize with configuration.
+
+        Args:
+            config: Plugin configuration
+        """
         self.config = config
 
     @abstractmethod
@@ -143,7 +147,11 @@ class BaseGate(ABC):
     plugin_version: str = "0.0.0"
 
     def __init__(self, config: dict[str, Any]) -> None:
-        """Initialize with configuration."""
+        """Initialize with configuration.
+
+        Args:
+            config: Plugin configuration
+        """
         self.config = config
 
     @abstractmethod
@@ -227,7 +235,11 @@ class BaseSink(ABC):
     plugin_version: str = "0.0.0"
 
     def __init__(self, config: dict[str, Any]) -> None:
-        """Initialize with configuration."""
+        """Initialize with configuration.
+
+        Args:
+            config: Plugin configuration
+        """
         self.config = config
 
     @abstractmethod
@@ -297,7 +309,11 @@ class BaseSource(ABC):
     plugin_version: str = "0.0.0"
 
     def __init__(self, config: dict[str, Any]) -> None:
-        """Initialize with configuration."""
+        """Initialize with configuration.
+
+        Args:
+            config: Plugin configuration
+        """
         self.config = config
 
     @abstractmethod

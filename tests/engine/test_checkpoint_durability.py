@@ -306,8 +306,11 @@ class TestCheckpointDurability:
 
         recorder = LandscapeRecorder(db, payload_store=payload_store)
 
-        # Create the run
-        run = recorder.begin_run(config={}, canonical_version="v1")
+        # Create the run with source schema for resume type restoration
+        import json as json_lib
+
+        source_schema_json = json_lib.dumps(RowSchema.model_json_schema())
+        run = recorder.begin_run(config={}, canonical_version="v1", source_schema_json=source_schema_json)
         run_id = run.run_id
 
         # Register source node
@@ -349,6 +352,22 @@ class TestCheckpointDurability:
             schema_config=SchemaConfig(mode=None, fields=None, is_dynamic=True),
         )
 
+        # Register edges (required for resume to build edge_map)
+        recorder.register_edge(
+            run_id=run_id,
+            from_node_id="source",
+            to_node_id="transform_0",
+            label="continue",
+            mode=RoutingMode.MOVE,
+        )
+        recorder.register_edge(
+            run_id=run_id,
+            from_node_id="transform_0",
+            to_node_id="sink_default",
+            label="continue",
+            mode=RoutingMode.MOVE,
+        )
+
         # Create 5 source rows with payload storage
         all_rows = [{"value": i} for i in range(5)]
         row_ids = []
@@ -372,6 +391,14 @@ class TestCheckpointDurability:
             token = recorder.create_token(row_id=row.row_id)
             token_ids.append(token.token_id)
 
+        # Build graph for checkpoint topology validation
+        test_graph = ExecutionGraph()
+        test_graph.add_node("source", node_type="source", plugin_name="list_source", config={})
+        test_graph.add_node("transform_0", node_type="transform", plugin_name="passthrough", config={})
+        test_graph.add_node("sink_default", node_type="sink", plugin_name="tracking_sink", config={})
+        test_graph.add_edge("source", "transform_0", label="continue")
+        test_graph.add_edge("transform_0", "sink_default", label="continue")
+
         # Simulate: First 2 rows were successfully written to sink and checkpointed
         # (In real scenario, this happens in orchestrator after sink.write() returns)
         for i in range(2):
@@ -380,6 +407,7 @@ class TestCheckpointDurability:
                 token_id=token_ids[i],
                 node_id="sink_default",  # Checkpoint at sink node
                 sequence_number=i + 1,
+                graph=test_graph,
             )
 
         # Mark run as failed (simulating crash after 2 rows written)
@@ -395,15 +423,6 @@ class TestCheckpointDurability:
         unprocessed_row_ids = recovery.get_unprocessed_rows(run_id)
         assert len(unprocessed_row_ids) == 3, f"Expected 3 unprocessed rows, got {len(unprocessed_row_ids)}"
 
-        # Verify can_resume returns True
-        resume_check = recovery.can_resume(run_id)
-        assert resume_check.can_resume, f"Cannot resume: {resume_check.reason}"
-
-        # --- Phase 3: Resume and verify recovery ---
-        # Get resume point
-        resume_point = recovery.get_resume_point(run_id)
-        assert resume_point is not None
-
         # Create fresh components for resume (simulating new process)
         source = ListSource(all_rows)  # Same data
         transform = PassthroughTransform()
@@ -414,6 +433,18 @@ class TestCheckpointDurability:
             transforms=[transform],
             sinks={"default": as_sink(sink)},
         )
+
+        # Build graph for topology validation
+        graph = _build_test_graph(config)
+
+        # Verify can_resume returns True
+        resume_check = recovery.can_resume(run_id, graph)
+        assert resume_check.can_resume, f"Cannot resume: {resume_check.reason}"
+
+        # --- Phase 3: Resume and verify recovery ---
+        # Get resume point
+        resume_point = recovery.get_resume_point(run_id, graph)
+        assert resume_point is not None
 
         orchestrator = Orchestrator(
             db,

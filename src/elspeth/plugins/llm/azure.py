@@ -147,6 +147,8 @@ class AzureLLMTransform(BaseTransform):
         # Cache underlying Azure clients to avoid recreating them
         self._underlying_client: AzureOpenAI | None = None
 
+        # PHASE 1: Validate self-consistency
+
     def on_start(self, ctx: PluginContext) -> None:
         """Capture recorder reference for pooled execution.
 

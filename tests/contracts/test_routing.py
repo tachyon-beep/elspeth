@@ -45,12 +45,23 @@ class TestRoutingAction:
         assert action.destinations == ("above",)
         assert action.mode == RoutingMode.MOVE
 
-    def test_route_with_copy(self) -> None:
-        """route can specify COPY mode."""
+    def test_route_with_copy_raises(self) -> None:
+        """route with COPY mode raises ValueError (architectural limitation).
+
+        COPY mode is only valid for FORK_TO_PATHS because it creates child tokens,
+        each with their own terminal state. ROUTE with COPY would require a single
+        token to have dual terminal states (ROUTED + COMPLETED), which violates
+        ELSPETH's single-terminal-state audit model.
+
+        Users should use fork_to_paths() to route to a sink and continue processing.
+        """
         from elspeth.contracts import RoutingAction, RoutingMode
 
-        action = RoutingAction.route("above", mode=RoutingMode.COPY)
-        assert action.mode == RoutingMode.COPY
+        with pytest.raises(
+            ValueError,
+            match=r"COPY mode not supported for ROUTE kind.*Use FORK_TO_PATHS",
+        ):
+            RoutingAction.route("above", mode=RoutingMode.COPY)
 
     def test_route_with_reason(self) -> None:
         """route can include audit reason."""

@@ -109,7 +109,7 @@ class TestDeaggregationPipeline:
             assert "item" in row, "Each row should have item field"
             assert "item_index" in row, "Each row should have item_index"
 
-    def test_preserves_item_order(self, pipeline_config: Path, tmp_path: Path) -> None:
+    def test_preserves_item_order(self, pipeline_config: Path, tmp_path: Path, plugin_manager) -> None:
         """Verify item_index ordering is preserved within each order."""
         from elspeth.cli import app
 
@@ -162,7 +162,7 @@ class TestDeaggregationAuditTrail:
         return input_file
 
     @pytest.fixture
-    def run_pipeline(self, tmp_path: Path, input_data: Path) -> tuple[str, "LandscapeDB"]:
+    def run_pipeline(self, tmp_path: Path, input_data: Path, plugin_manager) -> tuple[str, "LandscapeDB"]:
         """Run pipeline and return run_id and database for verification.
 
         Returns:
@@ -225,7 +225,17 @@ class TestDeaggregationAuditTrail:
         db = LandscapeDB.from_url(settings.landscape.url)
 
         # Build graph
-        graph = ExecutionGraph.from_config(settings)
+        from elspeth.cli_helpers import instantiate_plugins_from_config
+
+        plugins = instantiate_plugins_from_config(settings)
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(settings.gates),
+            output_sink=settings.output_sink,
+        )
 
         # Instantiate plugins
         source = JSONSource(dict(settings.datasource.options))

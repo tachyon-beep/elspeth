@@ -330,6 +330,12 @@ class Checkpoint:
     node_id: str
     sequence_number: int
     created_at: datetime  # Required - schema enforces NOT NULL (Tier 1 audit data)
+    # Topology validation fields (added for checkpoint compatibility checking)
+    # Bug #7 fix: These are REQUIRED for NEW checkpoints (NOT NULL in schema for new data)
+    # Legacy checkpoints (pre-topology) have None - handled by rejecting resume
+    upstream_topology_hash: str | None  # Hash of nodes + edges upstream of checkpoint
+    checkpoint_node_config_hash: str | None  # Hash of checkpoint node config only
+    # Optional fields (with defaults) MUST come after required fields in dataclass
     aggregation_state_json: str | None = None
 
 

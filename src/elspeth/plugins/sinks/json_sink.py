@@ -9,6 +9,7 @@ output correct types. Wrong types = upstream bug = crash.
 
 import hashlib
 import json
+import os
 from typing import IO, Any, Literal
 
 from elspeth.contracts import ArtifactDescriptor, PluginSchema
@@ -165,9 +166,19 @@ class JSONSink(BaseSink):
         return sha256.hexdigest()
 
     def flush(self) -> None:
-        """Flush buffered data to disk."""
+        """Flush buffered data to disk with fsync for durability.
+
+        CRITICAL: Ensures data survives process crash and power loss.
+        Called by orchestrator BEFORE creating checkpoints.
+
+        This guarantees:
+        - OS buffer flushed to disk (file.flush())
+        - Filesystem metadata persisted (os.fsync())
+        - Data durable on storage device
+        """
         if self._file is not None:
             self._file.flush()
+            os.fsync(self._file.fileno())
 
     def close(self) -> None:
         """Close the file handle."""

@@ -658,6 +658,8 @@ class TestCheckpoint:
             node_id="node-1",
             sequence_number=42,
             created_at=now,
+            upstream_topology_hash="a" * 64,
+            checkpoint_node_config_hash="b" * 64,
         )
 
         assert checkpoint.checkpoint_id == "cp-123"
@@ -679,25 +681,36 @@ class TestCheckpoint:
             node_id="node-1",
             sequence_number=42,
             created_at=datetime.now(UTC),
+            upstream_topology_hash="a" * 64,
+            checkpoint_node_config_hash="b" * 64,
             aggregation_state_json='{"count": 10, "sum": 500}',
         )
 
         assert checkpoint.aggregation_state_json == '{"count": 10, "sum": 500}'
 
-    def test_checkpoint_created_at_optional(self) -> None:
-        """Checkpoint.created_at can be None."""
+    def test_checkpoint_created_at_required(self) -> None:
+        """Checkpoint.created_at is required (Tier 1 audit data).
+
+        Per Data Manifesto: Audit trail data must be 100% pristine.
+        created_at is enforced as NOT NULL in the schema.
+        """
         from elspeth.contracts import Checkpoint
 
+        now = datetime.now(UTC)
         checkpoint = Checkpoint(
             checkpoint_id="cp-123",
             run_id="run-456",
             token_id="token-789",
             node_id="node-1",
             sequence_number=0,
-            created_at=None,
+            created_at=now,
+            upstream_topology_hash="a" * 64,
+            checkpoint_node_config_hash="b" * 64,
         )
 
-        assert checkpoint.created_at is None
+        # created_at is always present and valid for audit integrity
+        assert checkpoint.created_at == now
+        assert isinstance(checkpoint.created_at, datetime)
 
 
 class TestRowLineage:

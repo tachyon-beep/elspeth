@@ -155,3 +155,18 @@ class TestPassThrough:
         # Any data passes with dynamic schema
         result = transform.process({"anything": "goes", "count": "string"}, ctx)
         assert result.status == "success"
+
+    def test_passthrough_validates_schema_compatibility(self) -> None:
+        """PassThrough should validate schema is self-compatible."""
+        from elspeth.plugins.transforms.passthrough import PassThrough
+
+        # Valid: Dynamic schema (always compatible with itself)
+        dynamic_config = {"schema": {"fields": "dynamic"}}
+        PassThrough(dynamic_config)  # Should succeed
+
+        # Valid: Explicit schema (compatible with itself)
+        explicit_config = {"schema": {"mode": "strict", "fields": ["id: int", "name: str"]}}
+        PassThrough(explicit_config)  # Should succeed
+
+        # Note: PassThrough has same input/output schema, so always compatible
+        # More complex transforms tested separately

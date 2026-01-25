@@ -65,30 +65,75 @@ def explain(
     run_id: str,
     token_id: str | None = None,
     row_id: str | None = None,
+    sink: str | None = None,
 ) -> LineageResult | None:
     """Query complete lineage for a token or row.
 
     Args:
         recorder: LandscapeRecorder with query methods.
         run_id: Run ID to query.
-        token_id: Token ID for precise lineage (preferred).
-        row_id: Row ID (will use first token for that row).
+        token_id: Token ID for precise lineage (preferred for DAGs with forks).
+        row_id: Row ID (requires disambiguation if multiple terminal tokens exist).
+        sink: Sink name to disambiguate when row has multiple terminal tokens.
 
     Returns:
-        LineageResult with complete lineage, or None if not found.
+        LineageResult with complete lineage, or None if:
+        - Token/row not found
+        - No terminal tokens exist yet (e.g., all tokens BUFFERED)
+        - Specified sink has no terminal tokens from this row
 
     Raises:
         ValueError: If neither token_id nor row_id provided.
+        ValueError: If row_id has multiple terminal tokens and sink not specified.
+        ValueError: If row_id with sink has multiple tokens (pipeline config issue).
     """
     if token_id is None and row_id is None:
         raise ValueError("Must provide either token_id or row_id")
 
     # Resolve token_id from row_id if needed
     if token_id is None and row_id is not None:
-        tokens = recorder.get_tokens(row_id)
-        if not tokens:
+        # BATCH QUERY: Get all outcomes for this row in one query (avoid N+1)
+        outcomes = recorder.get_token_outcomes_for_row(run_id, row_id)
+
+        if not outcomes:
+            return None  # Row not found or no outcomes recorded yet
+
+        # Filter to terminal outcomes only
+        terminal_outcomes = [o for o in outcomes if o.is_terminal]
+
+        if not terminal_outcomes:
+            # All tokens are non-terminal (e.g., BUFFERED awaiting aggregation)
             return None
-        token_id = tokens[0].token_id
+
+        # If sink specified, filter to that sink
+        if sink is not None:
+            matching_outcomes = [o for o in terminal_outcomes if o.sink_name == sink]
+
+            if not matching_outcomes:
+                return None  # No tokens reached this sink
+
+            if len(matching_outcomes) > 1:
+                # Multiple tokens to same sink - ambiguous, fail explicitly
+                token_ids = [o.token_id for o in matching_outcomes]
+                raise ValueError(
+                    f"Row {row_id} has {len(matching_outcomes)} tokens at sink '{sink}'. "
+                    f"This may indicate fork paths reaching the same sink. "
+                    f"Use token_id for precision: {token_ids[:5]}"
+                    f"{'...' if len(token_ids) > 5 else ''}"
+                )
+
+            token_id = matching_outcomes[0].token_id
+        else:
+            # No sink - require exactly one terminal token
+            if len(terminal_outcomes) > 1:
+                sink_names = {o.sink_name for o in terminal_outcomes if o.sink_name}
+                raise ValueError(
+                    f"Row {row_id} has {len(terminal_outcomes)} terminal tokens "
+                    f"across sinks: {sink_names}. "
+                    f"Provide sink parameter to disambiguate, or use token_id for precision."
+                )
+
+            token_id = terminal_outcomes[0].token_id
 
     # At this point token_id is guaranteed to be set (either passed in or resolved from row_id)
     assert token_id is not None  # for type narrowing

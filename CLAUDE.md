@@ -547,3 +547,7 @@ Ask yourself:
 | Am I adding this because "something might be None"? | — | ❌ Fix the root cause |
 
 If you're wrapping to hide a bug that "shouldn't happen," remove the wrapper and fix the bug.
+
+## FINAL COMMENT
+
+If you are proposing or implementing a fix and it invovles 'a patch or temporary workaround', STOP. This codebase does not allow patches or temporary workarounds. WE ONLY HAVE ONE CHANCE TO FIX THINGS PRE-RELEASE. Make the fix right, not quick. Do not create 5 hours of technical debt because you wanted to avoid 5 minutes of work today. THIS ESPECIALLY INCLUDES ARCHITECTURAL DEFECTS WHICH MUST BE FIXED PROPERLY NOW.

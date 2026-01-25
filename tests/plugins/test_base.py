@@ -275,3 +275,37 @@ class TestBaseSource:
         source = CustomSource({})
         assert source.determinism == Determinism.DETERMINISTIC
         assert source.plugin_version == "2.0.0"
+
+
+class TestNoValidationEnforcement:
+    """Verify validation enforcement has been removed from base classes."""
+
+    def test_plugins_instantiate_without_validation_call(self) -> None:
+        """Plugins no longer require _validate_self_consistency() call.
+
+        Validation now happens BEFORE instantiation (in PluginManager),
+        not during construction (__init__ calling _validate_self_consistency).
+        """
+        from elspeth.contracts import PluginSchema
+        from elspeth.plugins.base import BaseTransform
+        from elspeth.plugins.context import PluginContext
+        from elspeth.plugins.results import TransformResult
+
+        class TestSchema(PluginSchema):
+            x: int
+
+        class NoValidationTransform(BaseTransform):
+            name = "no_validation"
+            input_schema = TestSchema
+            output_schema = TestSchema
+
+            def __init__(self, config: dict[str, Any]) -> None:
+                super().__init__(config)
+                # NOT calling self._validate_self_consistency()
+
+            def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+                return TransformResult.success(row)
+
+        # Should instantiate without RuntimeError
+        plugin = NoValidationTransform({})
+        assert plugin is not None

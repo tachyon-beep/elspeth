@@ -10,12 +10,12 @@ Tests for:
 
 import pytest
 
-from elspeth.core.config import SecretFingerprintError
-from elspeth.core.security.url import (
+from elspeth.contracts.url import (
     SENSITIVE_PARAMS,
     SanitizedDatabaseUrl,
     SanitizedWebhookUrl,
 )
+from elspeth.core.config import SecretFingerprintError
 
 
 class TestSanitizedDatabaseUrl:

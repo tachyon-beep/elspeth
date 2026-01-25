@@ -23,7 +23,7 @@ from unittest.mock import MagicMock, Mock
 import httpx
 import pytest
 
-from elspeth.contracts import CallStatus, CallType, TransformResult
+from elspeth.contracts import BatchPendingError, CallStatus, CallType, TransformResult
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
@@ -34,7 +34,6 @@ from elspeth.plugins.clients.llm import (
 from elspeth.plugins.context import PluginContext
 from elspeth.plugins.llm.azure_batch import AzureBatchLLMTransform
 from elspeth.plugins.llm.base import BaseLLMTransform
-from elspeth.plugins.llm.batch_errors import BatchPendingError
 from elspeth.plugins.llm.openrouter import OpenRouterLLMTransform
 
 # Dynamic schema for tests

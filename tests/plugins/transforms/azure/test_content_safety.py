@@ -623,6 +623,7 @@ class TestAzureContentSafetyTransform:
 
         # Should block - severity 1 IS > threshold 0
         assert result.status == "error"
+        assert result.reason is not None
         assert result.reason["reason"] == "content_safety_violation"
         assert result.reason["categories"]["self_harm"]["exceeded"] is True
 
@@ -864,7 +865,7 @@ class TestContentSafetyPooledExecution:
             }
         )
 
-        def make_response(*args, **kwargs):
+        def make_response(*args: Any, **kwargs: Any) -> MagicMock:
             """Return response based on content, not call order (avoids race condition)."""
             response = MagicMock()
             response.status_code = 200

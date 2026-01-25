@@ -24,11 +24,10 @@ from typing import Any
 
 from pydantic import Field
 
-from elspeth.contracts import CallStatus, CallType, Determinism, TransformResult
+from elspeth.contracts import BatchPendingError, CallStatus, CallType, Determinism, TransformResult
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.config_base import TransformDataConfig
 from elspeth.plugins.context import PluginContext
-from elspeth.plugins.llm.batch_errors import BatchPendingError
 from elspeth.plugins.llm.templates import PromptTemplate, TemplateError
 from elspeth.plugins.schema_factory import create_schema_from_config
 
@@ -163,6 +162,8 @@ class AzureBatchLLMTransform(BaseTransform):
 
         # Azure OpenAI client (lazy init)
         self._client: Any = None
+
+        # PHASE 1: Validate self-consistency
 
     def _get_client(self) -> Any:
         """Lazy-initialize Azure OpenAI client.
@@ -395,6 +396,7 @@ class AzureBatchLLMTransform(BaseTransform):
             "operation": "files.create",
             "filename": "batch_input.jsonl",
             "purpose": "batch",
+            "content": jsonl_content,  # BUG-AZURE-01 FIX: Include actual JSONL content
             "content_size": len(jsonl_content),
         }
         start = time.perf_counter()
@@ -595,6 +597,7 @@ class AzureBatchLLMTransform(BaseTransform):
             request_data=download_request,
             response_data={
                 "file_id": output_file_id,
+                "content": output_content.text,  # BUG-AZURE-01 FIX: Include actual JSONL output
                 "content_length": len(output_content.text),
             },
             latency_ms=(time.perf_counter() - start) * 1000,

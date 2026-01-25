@@ -70,6 +70,52 @@ class TestNanInfinityRejection:
         assert _normalize_value(-0.0) == -0.0
         assert _normalize_value(1e308) == 1e308
 
+    def test_numpy_array_with_nan_rejected(self) -> None:
+        """BUG-CANON-01: Multi-dimensional arrays with NaN must be rejected."""
+        from elspeth.core.canonical import _normalize_value
+
+        # 2D array with NaN
+        array_with_nan = np.array([[1.0, float("nan")], [2.0, 3.0]])
+        with pytest.raises(ValueError, match="NaN/Infinity found in NumPy array"):
+            _normalize_value(array_with_nan)
+
+    def test_numpy_array_with_inf_rejected(self) -> None:
+        """BUG-CANON-01: Multi-dimensional arrays with Infinity must be rejected."""
+        from elspeth.core.canonical import _normalize_value
+
+        # 3D array with Inf
+        array_with_inf = np.array([[[1.0, 2.0], [3.0, float("inf")]], [[5.0, 6.0], [7.0, 8.0]]])
+        with pytest.raises(ValueError, match="NaN/Infinity found in NumPy array"):
+            _normalize_value(array_with_inf)
+
+    def test_numpy_array_all_finite_accepted(self) -> None:
+        """BUG-CANON-01: Arrays with all finite values should pass validation."""
+        from elspeth.core.canonical import _normalize_value
+
+        # Valid 2D array
+        valid_array = np.array([[1.0, 2.0], [3.0, 4.0]])
+        result = _normalize_value(valid_array)
+        assert result == [[1.0, 2.0], [3.0, 4.0]]
+
+        # Valid 1D array
+        valid_1d = np.array([1.0, 2.0, 3.0])
+        result_1d = _normalize_value(valid_1d)
+        assert result_1d == [1.0, 2.0, 3.0]
+
+        # Empty array (edge case)
+        empty_array = np.array([])
+        result_empty = _normalize_value(empty_array)
+        assert result_empty == []
+
+    def test_numpy_string_array_passes(self) -> None:
+        """BUG-CANON-01: Non-numeric arrays should not raise TypeError."""
+        from elspeth.core.canonical import _normalize_value
+
+        # String arrays don't have NaN/Inf, should pass
+        string_array = np.array(["hello", "world"])
+        result = _normalize_value(string_array)
+        assert result == ["hello", "world"]
+
 
 class TestDecimalNonFiniteRejection:
     """Decimal NaN and Infinity must be rejected like float NaN/Infinity.

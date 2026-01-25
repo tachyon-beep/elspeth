@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
-    from elspeth.core.security.url import SanitizedDatabaseUrl, SanitizedWebhookUrl
+    from elspeth.contracts.url import SanitizedDatabaseUrl, SanitizedWebhookUrl
     from elspeth.engine.retry import MaxRetriesExceeded
 
 from elspeth.contracts.enums import RowOutcome

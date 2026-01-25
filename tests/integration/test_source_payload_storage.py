@@ -161,6 +161,8 @@ def test_source_row_payloads_are_stored_during_run(tmp_path: Path) -> None:
 
     # Verify payloads actually exist in filesystem
     for row in rows:
-        assert payload_store.exists(row.source_data_ref), f"Payload file {row.source_data_ref} should exist in {payload_path}"
+        source_data_ref = row.source_data_ref
+        assert source_data_ref is not None, f"Row {row.row_id} source_data_ref should be set"
+        assert payload_store.exists(source_data_ref), f"Payload file {source_data_ref} should exist in {payload_path}"
 
     db.close()

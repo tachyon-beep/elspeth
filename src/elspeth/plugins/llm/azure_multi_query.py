@@ -127,6 +127,8 @@ class AzureMultiQueryLLMTransform(BaseTransform):
         self._llm_clients_lock = Lock()
         self._underlying_client: AzureOpenAI | None = None
 
+        # PHASE 1: Validate self-consistency
+
     def on_start(self, ctx: PluginContext) -> None:
         """Capture recorder reference for pooled execution."""
         self._recorder = ctx.landscape
@@ -487,13 +489,18 @@ class AzureMultiQueryLLMTransform(BaseTransform):
         if self._recorder is None:
             self._recorder = ctx.landscape
 
+        # BUG-AZURE-02 FIX: Use ONE LLM client for entire batch
+        # All rows share ctx.state_id, ensuring FK constraint satisfaction
+        # and maintaining call_index continuity across all queries.
+        # The client is cached by _get_llm_client(), so all rows reuse the same instance.
+
         output_rows: list[dict[str, Any]] = []
 
-        for i, row in enumerate(rows):
-            row_state_id = f"{ctx.state_id}_row{i}"
-
-            try:
-                result = self._process_single_row_internal(row, row_state_id)
+        try:
+            for _i, row in enumerate(rows):
+                # BUG-AZURE-02 FIX: Use shared state_id for all rows in batch
+                # (removed synthetic row_state_id creation)
+                result = self._process_single_row_internal(row, ctx.state_id)
 
                 if result.status == "success" and result.row is not None:
                     output_rows.append(result.row)
@@ -502,10 +509,10 @@ class AzureMultiQueryLLMTransform(BaseTransform):
                     error_row = dict(row)
                     error_row["_error"] = result.reason
                     output_rows.append(error_row)
-            finally:
-                # Clean up per-row client cache
-                with self._llm_clients_lock:
-                    self._llm_clients.pop(row_state_id, None)
+        finally:
+            # Clean up batch client after all rows processed
+            with self._llm_clients_lock:
+                self._llm_clients.pop(ctx.state_id, None)
 
         return TransformResult.success_multi(output_rows)
 

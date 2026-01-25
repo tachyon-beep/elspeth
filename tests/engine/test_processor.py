@@ -13,6 +13,8 @@ See TestProcessorBatchTransforms for the new approach.
 from pathlib import Path
 from typing import Any, ClassVar
 
+from pydantic import ConfigDict
+
 from elspeth.contracts import PluginSchema, RoutingMode
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.plugins.base import BaseTransform
@@ -30,7 +32,7 @@ DYNAMIC_SCHEMA = SchemaConfig.from_dict({"fields": "dynamic"})
 class _TestSchema(PluginSchema):
     """Dynamic schema for test plugins."""
 
-    model_config: ClassVar[dict[str, Any]] = {"extra": "allow"}
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra="allow")
 
 
 class TestRowProcessor:
@@ -2948,12 +2950,26 @@ class TestProcessorBatchTransforms:
         )
 
         # Simulate restored checkpoint with 2 rows already buffered
+        # Note: _version field required since Bug #12 checkpoint versioning fix
         restored_buffer_state = {
+            "_version": "1.0",
             sum_node.node_id: {
-                "rows": [{"value": 1}, {"value": 2}],
-                "token_ids": [token0.token_id, token1.token_id],
+                "tokens": [
+                    {
+                        "token_id": token0.token_id,
+                        "row_id": row0.row_id,
+                        "row_data": {"value": 1},
+                        "branch_name": None,
+                    },
+                    {
+                        "token_id": token1.token_id,
+                        "row_id": row1.row_id,
+                        "row_data": {"value": 2},
+                        "branch_name": None,
+                    },
+                ],
                 "batch_id": old_batch.batch_id,
-            }
+            },
         }
 
         processor = RowProcessor(

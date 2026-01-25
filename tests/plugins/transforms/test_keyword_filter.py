@@ -213,6 +213,7 @@ class TestKeywordFilterProcessing:
         result = transform.process(row, make_mock_context())
 
         assert result.status == "error"
+        assert result.reason is not None
         assert "match_context" in result.reason
         assert "ssn" in result.reason["match_context"]
 
@@ -233,6 +234,7 @@ class TestKeywordFilterProcessing:
         result = transform.process(row, make_mock_context())
 
         assert result.status == "error"
+        assert result.reason is not None
         assert result.reason["field"] == "body"
 
     def test_all_keyword_scans_string_fields(self) -> None:
@@ -251,6 +253,7 @@ class TestKeywordFilterProcessing:
         result = transform.process(row, make_mock_context())
 
         assert result.status == "error"
+        assert result.reason is not None
         assert result.reason["field"] == "data"
 
     def test_skips_non_string_fields_when_all(self) -> None:
@@ -339,4 +342,5 @@ class TestKeywordFilterProcessing:
         result = transform.process(row, make_mock_context())
 
         assert result.status == "error"
+        assert result.reason is not None
         assert result.reason["field"] == "content"

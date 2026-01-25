@@ -7,7 +7,7 @@ They are processed AFTER plugin transforms but BEFORE sinks.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
@@ -131,9 +131,9 @@ class TestConfigGateIntegration:
 
         class CollectSink(_TestSinkBase):
             name = "collect"
-            config: ClassVar[dict[str, Any]] = {}
 
             def __init__(self) -> None:
+                super().__init__()
                 self.results: list[dict[str, Any]] = []
 
             def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
@@ -195,9 +195,9 @@ class TestConfigGateIntegration:
 
         class CollectSink(_TestSinkBase):
             name = "collect"
-            config: ClassVar[dict[str, Any]] = {}
 
             def __init__(self) -> None:
+                super().__init__()
                 self.results: list[dict[str, Any]] = []
 
             def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
@@ -241,11 +241,12 @@ class TestConfigGateIntegration:
         assert len(high_sink.results) == 1
         assert high_sink.results[0]["value"] == 100
 
-    def test_config_gate_with_string_result(self) -> None:
+    def test_config_gate_with_string_result(self, plugin_manager) -> None:
         """Config gate condition can return a string route label.
 
-        This test uses ExecutionGraph.from_config() for proper edge building.
+        This test uses ExecutionGraph.from_plugin_instances() for proper edge building.
         """
+        from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.core.config import (
             DatasourceSettings,
             ElspethSettings,
@@ -280,9 +281,9 @@ class TestConfigGateIntegration:
 
         class CollectSink(_TestSinkBase):
             name = "collect"
-            config: ClassVar[dict[str, Any]] = {}
 
             def __init__(self) -> None:
+                super().__init__()
                 self.results: list[dict[str, Any]] = []
 
             def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
@@ -296,12 +297,19 @@ class TestConfigGateIntegration:
         a_sink = CollectSink()
         b_sink = CollectSink()
 
-        # Build settings to use ExecutionGraph.from_config()
+        # Build settings for graph construction
         settings = ElspethSettings(
-            datasource=DatasourceSettings(plugin="csv"),
+            datasource=DatasourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"fields": "dynamic"},
+                },
+            ),
             sinks={
-                "a_sink": SinkSettings(plugin="csv"),
-                "b_sink": SinkSettings(plugin="csv"),
+                "a_sink": SinkSettings(plugin="csv", options={"path": "a.csv", "schema": {"fields": "dynamic"}}),
+                "b_sink": SinkSettings(plugin="csv", options={"path": "b.csv", "schema": {"fields": "dynamic"}}),
             },
             output_sink="a_sink",
             gates=[
@@ -316,8 +324,18 @@ class TestConfigGateIntegration:
             ],
         )
 
-        # Build graph from settings (proper edge construction)
-        graph = ExecutionGraph.from_config(settings)
+        # Instantiate plugins from config
+        plugins = instantiate_plugins_from_config(settings)
+
+        # Build graph from plugin instances
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(settings.gates),
+            output_sink=settings.output_sink,
+        )
 
         # Build PipelineConfig with actual plugin instances
         config = PipelineConfig(
@@ -337,15 +355,16 @@ class TestConfigGateIntegration:
         assert len(a_sink.results) == 2
         assert len(b_sink.results) == 1
 
-    def test_config_gate_integer_route_label(self) -> None:
+    def test_config_gate_integer_route_label(self, plugin_manager) -> None:
         """Config gate condition can return an integer that maps to route labels.
 
         When an expression returns an integer (e.g., row['priority'] returns 1, 2, 3),
         the executor converts it to a string for route lookup. So routes must use
         string keys like {"1": "priority_1", "2": "priority_2"}.
 
-        This test uses ExecutionGraph.from_config() for proper edge building.
+        This test uses ExecutionGraph.from_plugin_instances() for proper edge building.
         """
+        from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.core.config import (
             DatasourceSettings,
             ElspethSettings,
@@ -380,9 +399,9 @@ class TestConfigGateIntegration:
 
         class CollectSink(_TestSinkBase):
             name = "collect"
-            config: ClassVar[dict[str, Any]] = {}
 
             def __init__(self) -> None:
+                super().__init__()
                 self.results: list[dict[str, Any]] = []
 
             def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
@@ -397,14 +416,21 @@ class TestConfigGateIntegration:
         priority_1_sink = CollectSink()
         priority_2_sink = CollectSink()
 
-        # Build settings to use ExecutionGraph.from_config()
+        # Build settings for graph construction
         # NOTE: Route keys must be strings because the executor converts
         # non-bool/non-string results to strings via str()
         settings = ElspethSettings(
-            datasource=DatasourceSettings(plugin="csv"),
+            datasource=DatasourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"fields": "dynamic"},
+                },
+            ),
             sinks={
-                "priority_1": SinkSettings(plugin="csv"),
-                "priority_2": SinkSettings(plugin="csv"),
+                "priority_1": SinkSettings(plugin="csv", options={"path": "priority_1.csv", "schema": {"fields": "dynamic"}}),
+                "priority_2": SinkSettings(plugin="csv", options={"path": "priority_2.csv", "schema": {"fields": "dynamic"}}),
             },
             output_sink="priority_1",
             gates=[
@@ -419,8 +445,18 @@ class TestConfigGateIntegration:
             ],
         )
 
-        # Build graph from settings (proper edge construction)
-        graph = ExecutionGraph.from_config(settings)
+        # Instantiate plugins from config
+        plugins = instantiate_plugins_from_config(settings)
+
+        # Build graph from plugin instances
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(settings.gates),
+            output_sink=settings.output_sink,
+        )
 
         # Build PipelineConfig with actual plugin instances
         config = PipelineConfig(
@@ -474,9 +510,9 @@ class TestConfigGateIntegration:
 
         class CollectSink(_TestSinkBase):
             name = "collect"
-            config: ClassVar[dict[str, Any]] = {}
 
             def __init__(self) -> None:
+                super().__init__()
                 self.results: list[dict[str, Any]] = []
 
             def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
@@ -523,10 +559,11 @@ class TestConfigGateIntegration:
 
 
 class TestConfigGateFromSettings:
-    """Tests for config gates built via ExecutionGraph.from_config()."""
+    """Tests for config gates built via ExecutionGraph.from_plugin_instances()."""
 
-    def test_from_config_builds_config_gates(self) -> None:
-        """ExecutionGraph.from_config() includes config gates."""
+    def test_from_config_builds_config_gates(self, plugin_manager) -> None:
+        """ExecutionGraph.from_plugin_instances() includes config gates."""
+        from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.core.config import (
             DatasourceSettings,
             ElspethSettings,
@@ -536,10 +573,17 @@ class TestConfigGateFromSettings:
         from elspeth.core.dag import ExecutionGraph
 
         settings = ElspethSettings(
-            datasource=DatasourceSettings(plugin="csv"),
+            datasource=DatasourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"fields": "dynamic"},
+                },
+            ),
             sinks={
-                "output": SinkSettings(plugin="csv"),
-                "review": SinkSettings(plugin="csv"),
+                "output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}}),
+                "review": SinkSettings(plugin="csv", options={"path": "review.csv", "schema": {"fields": "dynamic"}}),
             },
             output_sink="output",
             gates=[
@@ -551,7 +595,15 @@ class TestConfigGateFromSettings:
             ],
         )
 
-        graph = ExecutionGraph.from_config(settings)
+        plugins = instantiate_plugins_from_config(settings)
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(settings.gates),
+            output_sink=settings.output_sink,
+        )
 
         # Should have: source, config_gate, output_sink, review_sink
         assert graph.node_count == 4
@@ -568,8 +620,9 @@ class TestConfigGateFromSettings:
         assert (gate_id, "false") in route_map
         assert route_map[(gate_id, "false")] == "review"
 
-    def test_from_config_validates_gate_sink_targets(self) -> None:
-        """ExecutionGraph.from_config() validates gate route targets."""
+    def test_from_config_validates_gate_sink_targets(self, plugin_manager) -> None:
+        """ExecutionGraph.from_plugin_instances() validates gate route targets."""
+        from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.core.config import (
             DatasourceSettings,
             ElspethSettings,
@@ -579,8 +632,15 @@ class TestConfigGateFromSettings:
         from elspeth.core.dag import ExecutionGraph, GraphValidationError
 
         settings = ElspethSettings(
-            datasource=DatasourceSettings(plugin="csv"),
-            sinks={"output": SinkSettings(plugin="csv")},
+            datasource=DatasourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"fields": "dynamic"},
+                },
+            ),
+            sinks={"output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}})},
             output_sink="output",
             gates=[
                 GateSettings(
@@ -591,13 +651,22 @@ class TestConfigGateFromSettings:
             ],
         )
 
+        plugins = instantiate_plugins_from_config(settings)
         with pytest.raises(GraphValidationError) as exc_info:
-            ExecutionGraph.from_config(settings)
+            ExecutionGraph.from_plugin_instances(
+                source=plugins["source"],
+                transforms=plugins["transforms"],
+                sinks=plugins["sinks"],
+                aggregations=plugins["aggregations"],
+                gates=list(settings.gates),
+                output_sink=settings.output_sink,
+            )
 
         assert "nonexistent_sink" in str(exc_info.value)
 
-    def test_config_gates_ordered_after_transforms(self) -> None:
+    def test_config_gates_ordered_after_transforms(self, plugin_manager) -> None:
         """Config gates come after plugin transforms in topological order."""
+        from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.core.config import (
             DatasourceSettings,
             ElspethSettings,
@@ -608,11 +677,18 @@ class TestConfigGateFromSettings:
         from elspeth.core.dag import ExecutionGraph
 
         settings = ElspethSettings(
-            datasource=DatasourceSettings(plugin="csv"),
-            sinks={"output": SinkSettings(plugin="csv")},
+            datasource=DatasourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"fields": "dynamic"},
+                },
+            ),
+            sinks={"output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}})},
             output_sink="output",
             row_plugins=[
-                RowPluginSettings(plugin="transform_a"),
+                RowPluginSettings(plugin="passthrough", options={"schema": {"fields": "dynamic"}}),
             ],
             gates=[
                 GateSettings(
@@ -623,11 +699,19 @@ class TestConfigGateFromSettings:
             ],
         )
 
-        graph = ExecutionGraph.from_config(settings)
+        plugins = instantiate_plugins_from_config(settings)
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(settings.gates),
+            output_sink=settings.output_sink,
+        )
         order = graph.topological_order()
 
         # Find indices
-        transform_idx = next(i for i, n in enumerate(order) if "transform_a" in n)
+        transform_idx = next(i for i, n in enumerate(order) if "passthrough" in n)
         gate_idx = next(i for i, n in enumerate(order) if "config_gate" in n)
         sink_idx = next(i for i, n in enumerate(order) if "sink" in n)
 
@@ -666,9 +750,9 @@ class TestMultipleConfigGates:
 
         class CollectSink(_TestSinkBase):
             name = "collect"
-            config: ClassVar[dict[str, Any]] = {}
 
             def __init__(self) -> None:
+                super().__init__()
                 self.results: list[dict[str, Any]] = []
 
             def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:

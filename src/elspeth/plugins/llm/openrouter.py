@@ -115,6 +115,8 @@ class OpenRouterLLMTransform(BaseTransform):
         self._http_clients: dict[str, AuditedHTTPClient] = {}
         self._http_clients_lock = Lock()
 
+        # PHASE 1: Validate self-consistency
+
     def on_start(self, ctx: PluginContext) -> None:
         """Capture recorder reference for pooled execution."""
         self._recorder = ctx.landscape

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 import typer
 from pydantic import ValidationError
@@ -26,8 +26,12 @@ from elspeth.core.dag import ExecutionGraph, GraphValidationError
 
 if TYPE_CHECKING:
     from elspeth.core.landscape import LandscapeDB
-    from elspeth.engine import PipelineConfig
     from elspeth.plugins.manager import PluginManager
+
+__all__ = [
+    "app",
+    "load_settings",  # Re-exported from config for convenience
+]
 
 # Module-level singleton for plugin manager
 _plugin_manager_cache: PluginManager | None = None
@@ -159,6 +163,8 @@ def run(
     Requires --execute flag to actually run (safety feature).
     Use --dry-run to validate configuration without executing.
     """
+    from elspeth.cli_helpers import instantiate_plugins_from_config
+
     settings_path = Path(settings).expanduser()
 
     # Load and validate config via Pydantic
@@ -174,10 +180,30 @@ def run(
             typer.echo(f"  - {loc}: {error['msg']}", err=True)
         raise typer.Exit(1) from None
 
-    # Build and validate execution graph
+    # NEW: Instantiate plugins BEFORE graph construction
     try:
-        graph = ExecutionGraph.from_config(config)
+        plugins = instantiate_plugins_from_config(config)
+    except Exception as e:
+        typer.echo(f"Error instantiating plugins: {e}", err=True)
+        raise typer.Exit(1) from None
+
+    # NEW: Build and validate graph from plugin instances
+    try:
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(config.gates),
+            output_sink=config.output_sink,
+            coalesce_settings=list(config.coalesce) if config.coalesce else None,
+        )
         graph.validate()
+    except ValueError as e:
+        # Schema compatibility errors raised during graph construction (PHASE 2)
+        # Updated for Task 4: Schema validation moved to construction time
+        typer.echo(f"Schema validation error: {e}", err=True)
+        raise typer.Exit(1) from None
     except GraphValidationError as e:
         typer.echo(f"Pipeline graph error: {e}", err=True)
         raise typer.Exit(1) from None
@@ -192,34 +218,30 @@ def run(
             typer.echo(f"  Source: {config.datasource.plugin}")
             typer.echo(f"  Transforms: {len(config.row_plugins)}")
             typer.echo(f"  Sinks: {', '.join(config.sinks.keys())}")
-            typer.echo(f"  Output sink: {config.output_sink}")
-            if verbose:
-                typer.echo(f"  Graph: {graph.node_count} nodes, {graph.edge_count} edges")
-                typer.echo(f"  Execution order: {len(graph.topological_order())} steps")
-                typer.echo(f"  Concurrency: {config.concurrency.max_workers} workers")
-                typer.echo(f"  Landscape: {config.landscape.url}")
             return
 
         # Safety check: require explicit --execute flag
         if not execute:
             typer.echo("Pipeline configuration valid.")
             typer.echo(f"  Source: {config.datasource.plugin}")
-            typer.echo(f"  Sinks: {', '.join(config.sinks.keys())}")
             typer.echo("")
             typer.echo("To execute, add --execute (or -x) flag:", err=True)
             typer.echo(f"  elspeth run -s {settings} --execute", err=True)
             raise typer.Exit(1)
     else:
         # JSON mode: early exits without console output
-        if dry_run:
-            return  # Silently skip execution in dry-run + JSON mode
-        if not execute:
-            raise typer.Exit(1)  # Silently exit if --execute not provided
+        if dry_run or not execute:
+            raise typer.Exit(1)
 
-    # Execute pipeline with validated config and graph
-    # RunCompleted event provides summary in both console and JSON modes
+    # Execute pipeline with pre-instantiated plugins
     try:
-        _execute_pipeline(config, graph=graph, verbose=verbose, output_format=output_format)
+        _execute_pipeline_with_instances(
+            config,
+            graph,
+            plugins,
+            verbose=verbose,
+            output_format=output_format,
+        )
     except Exception as e:
         # Emit structured error for JSON mode, human-readable for console
         if output_format == "json":
@@ -346,9 +368,6 @@ def _execute_pipeline(
     source_options = dict(config.datasource.options)
 
     source_cls = manager.get_source_by_name(source_plugin)
-    if source_cls is None:
-        available = [s.name for s in manager.get_sources()]
-        raise ValueError(f"Unknown source plugin: {source_plugin}. Available: {available}")
     source = source_cls(source_options)
 
     # Instantiate sinks via PluginManager
@@ -358,9 +377,6 @@ def _execute_pipeline(
         sink_options = dict(sink_settings.options)
 
         sink_cls = manager.get_sink_by_name(sink_plugin)
-        if sink_cls is None:
-            available = [s.name for s in manager.get_sinks()]
-            raise ValueError(f"Unknown sink plugin: {sink_plugin}. Available: {available}")
         sinks[sink_name] = sink_cls(sink_options)  # type: ignore[assignment]
 
     # Get database URL from settings
@@ -375,9 +391,6 @@ def _execute_pipeline(
             plugin_options = dict(plugin_config.options)
 
             transform_cls = manager.get_transform_by_name(plugin_name)
-            if transform_cls is None:
-                available = [t.name for t in manager.get_transforms()]
-                raise typer.BadParameter(f"Unknown transform plugin: {plugin_name}. Available: {available}")
             transforms.append(transform_cls(plugin_options))  # type: ignore[arg-type]
 
         # Use the validated graph passed from run() command
@@ -395,9 +408,6 @@ def _execute_pipeline(
             # Instantiate the aggregation transform plugin via PluginManager
             plugin_name = agg_config.plugin
             transform_cls = manager.get_transform_by_name(plugin_name)
-            if transform_cls is None:
-                available = [t.name for t in manager.get_transforms()]
-                raise typer.BadParameter(f"Unknown aggregation plugin: {plugin_name}. Available: {available}")
 
             # Merge aggregation options with schema from config
             agg_options = dict(agg_config.options)
@@ -574,6 +584,218 @@ def _execute_pipeline(
         db.close()
 
 
+def _execute_pipeline_with_instances(
+    config: ElspethSettings,
+    graph: ExecutionGraph,
+    plugins: dict[str, Any],
+    verbose: bool = False,
+    output_format: Literal["console", "json"] = "console",
+) -> ExecutionResult:
+    """Execute pipeline using pre-instantiated plugin instances.
+
+    NEW execution path that reuses plugins instantiated during graph construction.
+    Eliminates double instantiation.
+
+    Args:
+        config: Validated ElspethSettings
+        graph: Validated ExecutionGraph (schemas populated)
+        plugins: Pre-instantiated plugins from instantiate_plugins_from_config()
+        verbose: Show detailed output
+        output_format: 'console' or 'json'
+
+    Returns:
+        ExecutionResult with run_id, status, rows_processed
+    """
+    from elspeth.core.config import AggregationSettings
+    from elspeth.core.landscape import LandscapeDB
+    from elspeth.engine import Orchestrator, PipelineConfig
+    from elspeth.plugins.base import BaseTransform
+
+    # Use pre-instantiated plugins
+    source = plugins["source"]
+    sinks = plugins["sinks"]
+
+    # Build transforms list: row_plugins + aggregations (with node_id)
+    transforms: list[BaseTransform] = list(plugins["transforms"])
+
+    # Add aggregation transforms with node_id attached
+    agg_id_map = graph.get_aggregation_id_map()
+    aggregation_settings: dict[str, AggregationSettings] = {}
+
+    for agg_name, (transform, agg_config) in plugins["aggregations"].items():
+        node_id = agg_id_map[agg_name]
+        aggregation_settings[node_id] = agg_config
+
+        # Set node_id so processor can identify as aggregation
+        transform.node_id = node_id
+        transforms.append(transform)  # type: ignore[arg-type]
+
+    # Get database
+    db_url = config.landscape.url
+    db = LandscapeDB.from_url(db_url)
+
+    try:
+        # Build PipelineConfig with pre-instantiated plugins
+        pipeline_config = PipelineConfig(
+            source=source,  # type: ignore[arg-type]
+            transforms=transforms,  # type: ignore[arg-type]
+            sinks=sinks,  # type: ignore[arg-type]
+            config=resolve_config(config),
+            gates=list(config.gates),
+            aggregation_settings=aggregation_settings,
+        )
+
+        if verbose:
+            typer.echo("Starting pipeline execution...")
+
+        # Create event bus and subscribe progress formatter
+        from elspeth.core import EventBus
+
+        event_bus = EventBus()
+
+        # Choose formatters based on output format
+        if output_format == "json":
+            import json
+
+            # JSON formatters - output structured JSON for each event
+            def _format_phase_started_json(event: PhaseStarted) -> None:
+                typer.echo(
+                    json.dumps(
+                        {
+                            "event": "phase_started",
+                            "phase": event.phase.value,
+                            "action": event.action.value,
+                            "target": event.target,
+                        }
+                    )
+                )
+
+            def _format_phase_completed_json(event: PhaseCompleted) -> None:
+                typer.echo(
+                    json.dumps(
+                        {
+                            "event": "phase_completed",
+                            "phase": event.phase.value,
+                            "duration_seconds": event.duration_seconds,
+                        }
+                    )
+                )
+
+            def _format_phase_error_json(event: PhaseError) -> None:
+                typer.echo(
+                    json.dumps(
+                        {
+                            "event": "phase_error",
+                            "phase": event.phase.value,
+                            "error": event.error_message,
+                            "target": event.target,
+                        }
+                    ),
+                    err=True,
+                )
+
+            def _format_run_completed_json(event: RunCompleted) -> None:
+                typer.echo(
+                    json.dumps(
+                        {
+                            "event": "run_completed",
+                            "run_id": event.run_id,
+                            "status": event.status.value,
+                            "total_rows": event.total_rows,
+                            "succeeded": event.succeeded,
+                            "failed": event.failed,
+                            "quarantined": event.quarantined,
+                            "duration_seconds": event.duration_seconds,
+                            "exit_code": event.exit_code,
+                        }
+                    )
+                )
+
+            def _format_progress_json(event: ProgressEvent) -> None:
+                rate = event.rows_processed / event.elapsed_seconds if event.elapsed_seconds > 0 else 0
+                typer.echo(
+                    json.dumps(
+                        {
+                            "event": "progress",
+                            "rows_processed": event.rows_processed,
+                            "rows_succeeded": event.rows_succeeded,
+                            "rows_failed": event.rows_failed,
+                            "rows_quarantined": event.rows_quarantined,
+                            "elapsed_seconds": event.elapsed_seconds,
+                            "rows_per_second": rate,
+                        }
+                    )
+                )
+
+            # Subscribe JSON formatters
+            event_bus.subscribe(PhaseStarted, _format_phase_started_json)
+            event_bus.subscribe(PhaseCompleted, _format_phase_completed_json)
+            event_bus.subscribe(PhaseError, _format_phase_error_json)
+            event_bus.subscribe(RunCompleted, _format_run_completed_json)
+            event_bus.subscribe(ProgressEvent, _format_progress_json)
+
+        else:  # console format (default)
+            # Console formatters for human-readable output
+            def _format_phase_started(event: PhaseStarted) -> None:
+                target_info = f" → {event.target}" if event.target else ""
+                typer.echo(f"[{event.phase.value.upper()}] {event.action.value.capitalize()}{target_info}...")
+
+            def _format_phase_completed(event: PhaseCompleted) -> None:
+                duration_str = f"{event.duration_seconds:.2f}s" if event.duration_seconds < 60 else f"{event.duration_seconds / 60:.1f}m"
+                typer.echo(f"[{event.phase.value.upper()}] ✓ Completed in {duration_str}")
+
+            def _format_phase_error(event: PhaseError) -> None:
+                target_info = f" ({event.target})" if event.target else ""
+                typer.echo(f"[{event.phase.value.upper()}] ✗ Error{target_info}: {event.error_message}", err=True)
+
+            def _format_run_completed(event: RunCompleted) -> None:
+                status_symbols = {
+                    "completed": "✓",
+                    "partial": "⚠",
+                    "failed": "✗",
+                }
+                symbol = status_symbols.get(event.status.value, "?")
+                typer.echo(
+                    f"\n{symbol} Run {event.status.value.upper()}: "
+                    f"{event.total_rows:,} rows processed | "
+                    f"✓{event.succeeded:,} succeeded | "
+                    f"✗{event.failed:,} failed | "
+                    f"⚠{event.quarantined:,} quarantined | "
+                    f"{event.duration_seconds:.2f}s total"
+                )
+
+            def _format_progress(event: ProgressEvent) -> None:
+                rate = event.rows_processed / event.elapsed_seconds if event.elapsed_seconds > 0 else 0
+                typer.echo(
+                    f"  Processing: {event.rows_processed:,} rows | "
+                    f"{rate:.0f} rows/sec | "
+                    f"✓{event.rows_succeeded:,} ✗{event.rows_failed} ⚠{event.rows_quarantined}"
+                )
+
+            # Subscribe console formatters
+            event_bus.subscribe(PhaseStarted, _format_phase_started)
+            event_bus.subscribe(PhaseCompleted, _format_phase_completed)
+            event_bus.subscribe(PhaseError, _format_phase_error)
+            event_bus.subscribe(RunCompleted, _format_run_completed)
+            event_bus.subscribe(ProgressEvent, _format_progress)
+
+        # Execute via Orchestrator (creates full audit trail)
+        orchestrator = Orchestrator(db, event_bus=event_bus)
+        result = orchestrator.run(
+            pipeline_config,
+            graph=graph,
+            settings=config,
+        )
+
+        return {
+            "run_id": result.run_id,
+            "status": result.status.value,  # Convert enum to string for TypedDict
+            "rows_processed": result.rows_processed,
+        }
+    finally:
+        db.close()
+
+
 @app.command()
 def validate(
     settings: str = typer.Option(
@@ -584,6 +806,8 @@ def validate(
     ),
 ) -> None:
     """Validate pipeline configuration without running."""
+    from elspeth.cli_helpers import instantiate_plugins_from_config
+
     settings_path = Path(settings).expanduser()
 
     # Load and validate config via Pydantic
@@ -599,19 +823,39 @@ def validate(
             typer.echo(f"  - {loc}: {error['msg']}", err=True)
         raise typer.Exit(1) from None
 
-    # Build and validate execution graph
+    # NEW: Instantiate plugins BEFORE graph construction
     try:
-        graph = ExecutionGraph.from_config(config)
+        plugins = instantiate_plugins_from_config(config)
+    except Exception as e:
+        typer.echo(f"Error instantiating plugins: {e}", err=True)
+        raise typer.Exit(1) from None
+
+    # NEW: Build and validate graph from plugin instances
+    try:
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(config.gates),
+            output_sink=config.output_sink,
+            coalesce_settings=list(config.coalesce) if config.coalesce else None,
+        )
         graph.validate()
+    except ValueError as e:
+        # Schema compatibility errors raised during graph construction (PHASE 2)
+        # Updated for Task 4: Schema validation moved to construction time
+        typer.echo(f"Schema validation error: {e}", err=True)
+        raise typer.Exit(1) from None
     except GraphValidationError as e:
         typer.echo(f"Pipeline graph error: {e}", err=True)
         raise typer.Exit(1) from None
 
-    typer.echo(f"Configuration valid: {settings_path.name}")
+    typer.echo("✅ Pipeline configuration valid!")
     typer.echo(f"  Source: {config.datasource.plugin}")
     typer.echo(f"  Transforms: {len(config.row_plugins)}")
+    typer.echo(f"  Aggregations: {len(config.aggregations)}")
     typer.echo(f"  Sinks: {', '.join(config.sinks.keys())}")
-    typer.echo(f"  Output: {config.output_sink}")
     typer.echo(f"  Graph: {graph.node_count} nodes, {graph.edge_count} edges")
 
 
@@ -848,126 +1092,193 @@ def purge(
         db.close()
 
 
-def _build_resume_pipeline_config(
-    settings: ElspethSettings,
-) -> PipelineConfig:
-    """Build PipelineConfig for resume from settings.
+def _execute_resume_with_instances(
+    config: ElspethSettings,
+    graph: ExecutionGraph,
+    plugins: dict[str, Any],
+    resume_point: Any,
+    payload_store: Any,
+    db: LandscapeDB,
+) -> Any:  # Returns RunResult from orchestrator.resume()
+    """Execute resume using pre-instantiated plugins.
 
-    For resume, source is NullSource (data comes from payloads).
-    Transforms and sinks are rebuilt from settings.
+    Similar to _execute_pipeline_with_instances but for resume operations.
 
     Args:
-        settings: Full ElspethSettings configuration.
+        config: Validated ElspethSettings
+        graph: Validated ExecutionGraph
+        plugins: Pre-instantiated plugins (with NullSource)
+        resume_point: Resume point information
+        payload_store: Payload store for retrieving row data
+        db: LandscapeDB connection
 
     Returns:
-        PipelineConfig ready for resume.
+        RunResult from orchestrator.resume()
     """
-    from elspeth.engine import PipelineConfig
-    from elspeth.plugins.base import BaseSink, BaseTransform
-    from elspeth.plugins.sources.null_source import NullSource
-
-    # Get plugin manager for dynamic plugin lookup
-    manager = _get_plugin_manager()
-
-    # Source is NullSource for resume - data comes from payloads
-    source = NullSource({})
-
-    # Build transforms from settings via PluginManager
-    transforms: list[BaseTransform] = []
-    for plugin_config in settings.row_plugins:
-        plugin_name = plugin_config.plugin
-        plugin_options = dict(plugin_config.options)
-
-        transform_cls = manager.get_transform_by_name(plugin_name)
-        if transform_cls is None:
-            available = [t.name for t in manager.get_transforms()]
-            raise ValueError(f"Unknown transform plugin: {plugin_name}. Available: {available}")
-        transforms.append(transform_cls(plugin_options))  # type: ignore[arg-type]
-
-    # Build aggregation transforms via PluginManager
-    # Need the graph to get aggregation node IDs
-    graph = ExecutionGraph.from_config(settings)
-    agg_id_map = graph.get_aggregation_id_map()
-
+    from elspeth.core.checkpoint import CheckpointManager
     from elspeth.core.config import AggregationSettings
+    from elspeth.engine import Orchestrator, PipelineConfig
+    from elspeth.plugins.base import BaseTransform
 
+    # Use pre-instantiated plugins
+    source = plugins["source"]
+    sinks = plugins["sinks"]
+
+    # Build transforms list: row_plugins + aggregations (with node_id)
+    transforms: list[BaseTransform] = list(plugins["transforms"])
+
+    # Add aggregation transforms with node_id attached
+    agg_id_map = graph.get_aggregation_id_map()
     aggregation_settings: dict[str, AggregationSettings] = {}
-    for agg_config in settings.aggregations:
-        node_id = agg_id_map[agg_config.name]
+
+    for agg_name, (transform, agg_config) in plugins["aggregations"].items():
+        node_id = agg_id_map[agg_name]
         aggregation_settings[node_id] = agg_config
 
-        plugin_name = agg_config.plugin
-        transform_cls = manager.get_transform_by_name(plugin_name)
-        if transform_cls is None:
-            available = [t.name for t in manager.get_transforms()]
-            raise ValueError(f"Unknown aggregation plugin: {plugin_name}. Available: {available}")
-
-        agg_options = dict(agg_config.options)
-        transform = transform_cls(agg_options)
+        # Set node_id so processor can identify as aggregation
         transform.node_id = node_id
         transforms.append(transform)  # type: ignore[arg-type]
 
-    # Build sinks from settings via PluginManager
-    # CRITICAL: Resume must append to existing output, not overwrite
-    sinks: dict[str, BaseSink] = {}
-    for sink_name, sink_settings in settings.sinks.items():
-        sink_plugin = sink_settings.plugin
-        sink_options = dict(sink_settings.options)
-        sink_options["mode"] = "append"  # Resume appends to existing files
-
-        sink_cls = manager.get_sink_by_name(sink_plugin)
-        if sink_cls is None:
-            available = [s.name for s in manager.get_sinks()]
-            raise ValueError(f"Unknown sink plugin: {sink_plugin}. Available: {available}")
-        sinks[sink_name] = sink_cls(sink_options)  # type: ignore[assignment]
-
-    return PipelineConfig(
+    # Build PipelineConfig with pre-instantiated plugins
+    pipeline_config = PipelineConfig(
         source=source,  # type: ignore[arg-type]
         transforms=transforms,  # type: ignore[arg-type]
         sinks=sinks,  # type: ignore[arg-type]
-        config=resolve_config(settings),
-        gates=list(settings.gates),
+        config=resolve_config(config),
+        gates=list(config.gates),
         aggregation_settings=aggregation_settings,
     )
 
+    # Create event bus for progress reporting
+    from elspeth.contracts.events import (
+        PhaseCompleted,
+        PhaseError,
+        PhaseStarted,
+        RunCompleted,
+    )
+    from elspeth.core import EventBus
 
-def _build_resume_graph_from_db(
-    db: LandscapeDB,
-    run_id: str,
-) -> ExecutionGraph:
-    """Reconstruct ExecutionGraph from nodes/edges registered in database.
+    event_bus = EventBus()
 
-    Args:
-        db: LandscapeDB connection.
-        run_id: Run ID to reconstruct graph for.
+    # Console formatters for human-readable output
+    def _format_phase_started(event: PhaseStarted) -> None:
+        target_info = f" → {event.target}" if event.target else ""
+        typer.echo(f"[{event.phase.value.upper()}] {event.action.value.capitalize()}{target_info}...")
 
-    Returns:
-        ExecutionGraph reconstructed from database.
-    """
-    import json
+    def _format_phase_completed(event: PhaseCompleted) -> None:
+        duration_str = f"{event.duration_seconds:.2f}s" if event.duration_seconds < 60 else f"{event.duration_seconds / 60:.1f}m"
+        typer.echo(f"[{event.phase.value.upper()}] ✓ Completed in {duration_str}")
 
-    from sqlalchemy import select
+    def _format_phase_error(event: PhaseError) -> None:
+        target_info = f" ({event.target})" if event.target else ""
+        typer.echo(f"[{event.phase.value.upper()}] ✗ Error{target_info}: {event.error_message}", err=True)
 
-    from elspeth.core.landscape import edges_table, nodes_table
-
-    graph = ExecutionGraph()
-
-    with db.engine.connect() as conn:
-        nodes = conn.execute(select(nodes_table).where(nodes_table.c.run_id == run_id)).fetchall()
-
-        edges = conn.execute(select(edges_table).where(edges_table.c.run_id == run_id)).fetchall()
-
-    for node in nodes:
-        graph.add_node(
-            node.node_id,
-            node_type=node.node_type,
-            plugin_name=node.plugin_name,
-            config=json.loads(node.config_json) if node.config_json else {},
+    def _format_run_completed(event: RunCompleted) -> None:
+        status_symbols = {
+            "completed": "✓",
+            "partial": "⚠",
+            "failed": "✗",
+        }
+        symbol = status_symbols.get(event.status.value, "?")
+        typer.echo(
+            f"\n{symbol} Resume {event.status.value.upper()}: "
+            f"{event.total_rows:,} rows processed | "
+            f"✓{event.succeeded:,} succeeded | "
+            f"✗{event.failed:,} failed | "
+            f"⚠{event.quarantined:,} quarantined | "
+            f"{event.duration_seconds:.2f}s total"
         )
 
-    for edge in edges:
-        graph.add_edge(edge.from_node_id, edge.to_node_id, label=edge.label)
+    def _format_progress(event: ProgressEvent) -> None:
+        rate = event.rows_processed / event.elapsed_seconds if event.elapsed_seconds > 0 else 0
+        typer.echo(
+            f"  Processing: {event.rows_processed:,} rows | "
+            f"{rate:.0f} rows/sec | "
+            f"✓{event.rows_succeeded:,} ✗{event.rows_failed} ⚠{event.rows_quarantined}"
+        )
 
+    # Subscribe console formatters
+    event_bus.subscribe(PhaseStarted, _format_phase_started)
+    event_bus.subscribe(PhaseCompleted, _format_phase_completed)
+    event_bus.subscribe(PhaseError, _format_phase_error)
+    event_bus.subscribe(RunCompleted, _format_run_completed)
+    event_bus.subscribe(ProgressEvent, _format_progress)
+
+    # Create checkpoint manager and orchestrator for resume
+    checkpoint_manager = CheckpointManager(db)
+    orchestrator = Orchestrator(db, event_bus=event_bus, checkpoint_manager=checkpoint_manager)
+
+    # Execute resume
+    result = orchestrator.resume(
+        resume_point=resume_point,
+        config=pipeline_config,
+        graph=graph,
+        payload_store=payload_store,
+        settings=config,
+    )
+
+    return result
+
+
+def _build_validation_graph(settings_config: ElspethSettings) -> ExecutionGraph:
+    """Build execution graph for resume topology validation.
+
+    CRITICAL: Uses the ORIGINAL source plugin configuration (not NullSource)
+    to match the topology hash computed during the original run.
+
+    The checkpoint's upstream_topology_hash was computed with the real source,
+    so validation must use the same source to avoid false topology mismatches.
+
+    Returns:
+        ExecutionGraph with original source for topology validation
+    """
+    from elspeth.cli_helpers import instantiate_plugins_from_config
+
+    plugins = instantiate_plugins_from_config(settings_config)
+
+    graph = ExecutionGraph.from_plugin_instances(
+        source=plugins["source"],  # Use ORIGINAL source, not NullSource
+        transforms=plugins["transforms"],
+        sinks=plugins["sinks"],
+        aggregations=plugins["aggregations"],
+        gates=list(settings_config.gates),
+        output_sink=settings_config.output_sink,
+        coalesce_settings=list(settings_config.coalesce) if settings_config.coalesce else None,
+    )
+
+    graph.validate()
+    return graph
+
+
+def _build_execution_graph(settings_config: ElspethSettings) -> ExecutionGraph:
+    """Build execution graph for resume execution.
+
+    Uses NullSource because resume data comes from stored payloads,
+    not from re-reading the original source.
+
+    Returns:
+        ExecutionGraph with NullSource for execution
+    """
+    from elspeth.cli_helpers import instantiate_plugins_from_config
+    from elspeth.plugins.sources.null_source import NullSource
+
+    plugins = instantiate_plugins_from_config(settings_config)
+
+    # Override source with NullSource for resume execution
+    null_source = NullSource({})
+    resume_plugins = {**plugins, "source": null_source}
+
+    graph = ExecutionGraph.from_plugin_instances(
+        source=resume_plugins["source"],
+        transforms=resume_plugins["transforms"],
+        sinks=resume_plugins["sinks"],
+        aggregations=resume_plugins["aggregations"],
+        gates=list(settings_config.gates),
+        output_sink=settings_config.output_sink,
+        coalesce_settings=list(settings_config.coalesce) if settings_config.coalesce else None,
+    )
+
+    graph.validate()
     return graph
 
 
@@ -1012,35 +1323,28 @@ def resume(
     from elspeth.core.checkpoint import CheckpointManager, RecoveryManager
     from elspeth.core.landscape import LandscapeDB
 
-    # Try to load settings - needed for execute mode and optional for dry-run
+    # Settings are REQUIRED for topology validation
     settings_config: ElspethSettings | None = None
     settings_path = Path(settings_file).expanduser() if settings_file else Path("settings.yaml")
-    if settings_path.exists():
-        try:
-            settings_config = load_settings(settings_path)
-        except Exception as e:
-            if execute:
-                typer.echo(f"Error loading {settings_path}: {e}", err=True)
-                typer.echo(
-                    "Settings are required for --execute mode to rebuild pipeline.",
-                    err=True,
-                )
-                raise typer.Exit(1) from None
-            # For dry-run, settings are optional - continue without
+
+    if not settings_path.exists():
+        typer.echo(f"Error: Settings file not found: {settings_path}", err=True)
+        typer.echo("Settings are required to validate checkpoint compatibility.", err=True)
+        raise typer.Exit(1)
+
+    try:
+        settings_config = load_settings(settings_path)
+    except Exception as e:
+        typer.echo(f"Error loading {settings_path}: {e}", err=True)
+        raise typer.Exit(1) from None
 
     # Resolve database URL
-    db_url: str | None = None
-
     if database:
         db_path = Path(database).expanduser()
         db_url = f"sqlite:///{db_path.resolve()}"
-    elif settings_config is not None:
+    else:
         db_url = settings_config.landscape.url
         typer.echo(f"Using database from settings.yaml: {db_url}")
-    else:
-        typer.echo("Error: No settings.yaml found and --database not provided.", err=True)
-        typer.echo("Specify --database to provide path to Landscape database.", err=True)
-        raise typer.Exit(1)
 
     # Initialize database and recovery manager
     try:
@@ -1053,15 +1357,22 @@ def resume(
         checkpoint_manager = CheckpointManager(db)
         recovery_manager = RecoveryManager(db, checkpoint_manager)
 
-        # Check if run can be resumed
-        check = recovery_manager.can_resume(run_id)
+        # Build graph for topology validation (uses original source)
+        try:
+            validation_graph = _build_validation_graph(settings_config)
+        except Exception as e:
+            typer.echo(f"Error building validation graph: {e}", err=True)
+            raise typer.Exit(1) from None
+
+        # Check if run can be resumed (with topology validation)
+        check = recovery_manager.can_resume(run_id, validation_graph)
 
         if not check.can_resume:
             typer.echo(f"Cannot resume run {run_id}: {check.reason}", err=True)
             raise typer.Exit(1)
 
         # Get resume point information
-        resume_point = recovery_manager.get_resume_point(run_id)
+        resume_point = recovery_manager.get_resume_point(run_id, validation_graph)
         if resume_point is None:
             typer.echo(f"Error: Could not get resume point for run {run_id}", err=True)
             raise typer.Exit(1)
@@ -1083,13 +1394,10 @@ def resume(
 
         if not execute:
             typer.echo("\nDry run - use --execute to actually resume processing.")
+            typer.echo("Topology validation passed - checkpoint is compatible with current config.")
             return
 
-        # Execute resume
-        if settings_config is None:
-            typer.echo("Error: settings.yaml required for --execute mode.", err=True)
-            raise typer.Exit(1)
-
+        # Execute resume (graph already built above for validation)
         typer.echo(f"\nResuming run {run_id}...")
 
         # Get payload store from settings
@@ -1102,22 +1410,51 @@ def resume(
 
         payload_store = FilesystemPayloadStore(payload_path)
 
-        # Build pipeline config and graph for resume
-        pipeline_config = _build_resume_pipeline_config(settings_config)
-        graph = _build_resume_graph_from_db(db, run_id)
+        # Build execution graph (uses NullSource for resume)
+        try:
+            execution_graph = _build_execution_graph(settings_config)
+        except Exception as e:
+            typer.echo(f"Error building execution graph: {e}", err=True)
+            raise typer.Exit(1) from None
 
-        # Create orchestrator with checkpoint manager and resume
-        from elspeth.engine import Orchestrator
-
-        orchestrator = Orchestrator(db, checkpoint_manager=checkpoint_manager)
+        # Instantiate plugins for execution
+        from elspeth.cli_helpers import instantiate_plugins_from_config
+        from elspeth.plugins.sources.null_source import NullSource
 
         try:
-            result = orchestrator.resume(
+            plugins = instantiate_plugins_from_config(settings_config)
+        except Exception as e:
+            typer.echo(f"Error instantiating plugins: {e}", err=True)
+            raise typer.Exit(1) from None
+
+        # CRITICAL: Force sinks to append mode to prevent data loss
+        # Resume must ADD to existing output, not truncate it
+        manager = _get_plugin_manager()
+        resume_sinks = {}
+        for sink_name, sink_config in settings_config.sinks.items():
+            sink_options = dict(sink_config.options)
+            sink_options["mode"] = "append"  # Override mode to append
+
+            sink_cls = manager.get_sink_by_name(sink_config.plugin)
+            resume_sinks[sink_name] = sink_cls(sink_options)  # type: ignore[assignment]
+
+        # Override source with NullSource for resume (data comes from payloads)
+        null_source = NullSource({})
+        resume_plugins = {
+            **plugins,
+            "source": null_source,
+            "sinks": resume_sinks,  # Use append-mode sinks
+        }
+
+        # Execute resume with execution graph (NullSource)
+        try:
+            result = _execute_resume_with_instances(
+                config=settings_config,
+                graph=execution_graph,
+                plugins=resume_plugins,
                 resume_point=resume_point,
-                config=pipeline_config,
-                graph=graph,
                 payload_store=payload_store,
-                settings=settings_config,
+                db=db,
             )
         except Exception as e:
             typer.echo(f"Error during resume: {e}", err=True)

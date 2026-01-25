@@ -246,6 +246,8 @@ class TestPhase5CheckpointSchema:
             node_id="node-001",
             sequence_number=42,
             created_at=None,
+            upstream_topology_hash="a" * 64,
+            checkpoint_node_config_hash="b" * 64,
         )
         assert checkpoint.sequence_number == 42
 
@@ -260,6 +262,8 @@ class TestPhase5CheckpointSchema:
             node_id="node-001",
             sequence_number=100,
             created_at=None,
+            upstream_topology_hash="a" * 64,
+            checkpoint_node_config_hash="b" * 64,
             aggregation_state_json='{"buffer": [1, 2, 3]}',
         )
         assert checkpoint.aggregation_state_json == '{"buffer": [1, 2, 3]}'

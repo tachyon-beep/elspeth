@@ -665,7 +665,9 @@ class TestAzureLLMTransformPooledExecution:
             }
         )
 
-        assert transform._recorder is None
+        # Verify _recorder starts as None (use local var to avoid mypy type narrowing)
+        initial_recorder = transform._recorder
+        assert initial_recorder is None
 
         mock_recorder = Mock()
         ctx = PluginContext(
@@ -676,7 +678,10 @@ class TestAzureLLMTransformPooledExecution:
         )
         transform.on_start(ctx)
 
-        assert transform._recorder is mock_recorder
+        # Verify recorder was captured
+        assert transform._recorder is not None
+        # Use id() comparison to verify same object (avoids mypy type narrowing issues)
+        assert id(transform._recorder) == id(mock_recorder)
 
         transform.close()
 

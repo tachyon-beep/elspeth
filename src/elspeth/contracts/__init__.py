@@ -28,6 +28,7 @@ from elspeth.contracts.enums import (
     TriggerType,
 )
 from elspeth.contracts.errors import (
+    BatchPendingError,
     ExecutionError,
     RoutingReason,
     TransformReason,
@@ -60,6 +61,7 @@ from elspeth.contracts.audit import (
     ValidationErrorRecord,
 )
 from elspeth.contracts.identity import TokenInfo
+from elspeth.contracts.checkpoint import ResumeCheck, ResumePoint
 from elspeth.contracts.results import (
     ArtifactDescriptor,
     FailureInfo,
@@ -101,11 +103,17 @@ from elspeth.contracts.events import (
 )
 from elspeth.contracts.engine import RetryPolicy
 from elspeth.contracts.cli import ExecutionResult, ProgressEvent
+from elspeth.contracts.url import (
+    SENSITIVE_PARAMS,
+    SanitizedDatabaseUrl,
+    SanitizedWebhookUrl,
+)
 
 __all__ = [  # Grouped by category for readability
     # audit
     "Artifact",
     # errors
+    "BatchPendingError",
     "ExecutionError",
     "RoutingReason",
     "TransformReason",
@@ -162,6 +170,9 @@ __all__ = [  # Grouped by category for readability
     "TriggerType",
     # identity
     "TokenInfo",
+    # checkpoint
+    "ResumeCheck",
+    "ResumePoint",
     # results (NOTE: AcceptResult deleted in aggregation structural cleanup)
     "ArtifactDescriptor",
     "FailureInfo",
@@ -192,4 +203,8 @@ __all__ = [  # Grouped by category for readability
     # cli
     "ExecutionResult",
     "ProgressEvent",
+    # url
+    "SENSITIVE_PARAMS",
+    "SanitizedDatabaseUrl",
+    "SanitizedWebhookUrl",
 ]

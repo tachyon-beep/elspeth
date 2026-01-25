@@ -502,6 +502,30 @@ class TestResumeCommand:
         from elspeth.core.landscape import LandscapeDB
         from elspeth.core.landscape.schema import runs_table
 
+        # Create minimal settings file for resume command
+        settings_file = tmp_path / "settings.yaml"
+        settings_file.write_text(f"""
+landscape:
+  url: "sqlite:///{tmp_path / "test.db"}"
+datasource:
+  plugin: csv
+  options:
+    path: dummy.csv
+    on_validation_failure: quarantine
+    schema:
+      fields: dynamic
+transforms:
+  - plugin: passthrough
+sinks:
+  output:
+    plugin: csv
+    options:
+      path: output.csv
+      schema:
+        fields: dynamic
+output_sink: output
+""")
+
         # Set up database with a completed run
         db_file = tmp_path / "test.db"
         db_url = f"sqlite:///{db_file}"
@@ -527,8 +551,8 @@ class TestResumeCommand:
             [
                 "resume",
                 "completed-run-001",
-                "--database",
-                str(db_file),
+                "--settings",
+                str(settings_file),
             ],
         )
 
@@ -545,6 +569,30 @@ class TestResumeCommand:
         from elspeth.cli import app
         from elspeth.core.landscape import LandscapeDB
         from elspeth.core.landscape.schema import runs_table
+
+        # Create minimal settings file for resume command
+        settings_file = tmp_path / "settings.yaml"
+        settings_file.write_text(f"""
+landscape:
+  url: "sqlite:///{tmp_path / "test.db"}"
+datasource:
+  plugin: csv
+  options:
+    path: dummy.csv
+    on_validation_failure: quarantine
+    schema:
+      fields: dynamic
+transforms:
+  - plugin: passthrough
+sinks:
+  output:
+    plugin: csv
+    options:
+      path: output.csv
+      schema:
+        fields: dynamic
+output_sink: output
+""")
 
         # Set up database with a running run
         db_file = tmp_path / "test.db"
@@ -571,8 +619,8 @@ class TestResumeCommand:
             [
                 "resume",
                 "running-run-001",
-                "--database",
-                str(db_file),
+                "--settings",
+                str(settings_file),
             ],
         )
 
@@ -633,12 +681,64 @@ class TestResumeCommand:
         from elspeth.cli import app
         from elspeth.core.landscape import LandscapeDB
         from elspeth.core.landscape.schema import (
-            checkpoints_table,
             nodes_table,
             rows_table,
             runs_table,
             tokens_table,
         )
+
+        # Create minimal settings file for resume command
+        settings_file = tmp_path / "settings.yaml"
+        settings_file.write_text(f"""
+landscape:
+  url: "sqlite:///{tmp_path / "test.db"}"
+datasource:
+  plugin: csv
+  options:
+    path: dummy.csv
+    on_validation_failure: quarantine
+    schema:
+      fields: dynamic
+transforms:
+  - plugin: passthrough
+sinks:
+  output:
+    plugin: csv
+    options:
+      path: output.csv
+      schema:
+        fields: dynamic
+output_sink: output
+""")
+
+        # Build graph to get actual node IDs (use ORIGINAL source for validation)
+        from elspeth.core.config import load_settings
+        from elspeth.core.dag import ExecutionGraph
+
+        settings_config = load_settings(settings_file)
+
+        # Build graph using original source (not NullSource) for topology validation
+        from elspeth.cli_helpers import instantiate_plugins_from_config
+
+        plugins = instantiate_plugins_from_config(settings_config)
+
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],  # Use original source, NOT NullSource
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(settings_config.gates),
+            output_sink=settings_config.output_sink,
+            coalesce_settings=list(settings_config.coalesce) if settings_config.coalesce else None,
+        )
+        graph.validate()
+
+        # Get actual node IDs from graph
+        all_nodes = list(graph.get_nx_graph().nodes())
+        source_node_id = next(n for n in all_nodes if graph.get_node_info(n).node_type == "source")
+        # Use sink node for checkpoint (transforms may not exist in simple pipeline)
+        sink_node_id = next(n for n in all_nodes if graph.get_node_info(n).node_type == "sink")
+        checkpoint_node_id = sink_node_id
 
         # Set up database with a failed run that has a checkpoint
         db_file = tmp_path / "test.db"
@@ -660,39 +760,43 @@ class TestResumeCommand:
                     canonical_version="1.0.0",
                 )
             )
-            # Insert nodes (source and transform) for FK integrity
+            # Insert nodes (source and sink) for FK integrity using actual node IDs
+            from elspeth.contracts import Determinism
+
+            source_info = graph.get_node_info(source_node_id)
             conn.execute(
                 insert(nodes_table).values(
-                    node_id="source-node",
+                    node_id=source_node_id,
                     run_id=run_id,
-                    plugin_name="CSVSource",
-                    node_type="source",
+                    plugin_name=source_info.plugin_name,
+                    node_type=source_info.node_type,
                     plugin_version="1.0.0",
-                    determinism="deterministic",
+                    determinism=Determinism.DETERMINISTIC,
                     config_hash="hash1",
                     config_json="{}",
                     registered_at=now,
                 )
             )
+            sink_info = graph.get_node_info(sink_node_id)
             conn.execute(
                 insert(nodes_table).values(
-                    node_id="transform-xyz",
+                    node_id=sink_node_id,
                     run_id=run_id,
-                    plugin_name="TestTransform",
-                    node_type="transform",
+                    plugin_name=sink_info.plugin_name,
+                    node_type=sink_info.node_type,
                     plugin_version="1.0.0",
-                    determinism="deterministic",
+                    determinism=Determinism.DETERMINISTIC,
                     config_hash="hash2",
                     config_json="{}",
                     registered_at=now,
                 )
             )
-            # Insert row (references source node)
+            # Insert row (references actual source node)
             conn.execute(
                 insert(rows_table).values(
                     row_id="row-001",
                     run_id=run_id,
-                    source_node_id="source-node",
+                    source_node_id=source_node_id,
                     row_index=0,
                     source_data_hash="hash123",
                     created_at=now,
@@ -706,18 +810,20 @@ class TestResumeCommand:
                     created_at=now,
                 )
             )
-            # Insert checkpoint (references token and node)
-            conn.execute(
-                insert(checkpoints_table).values(
-                    checkpoint_id="cp-test123",
-                    run_id=run_id,
-                    token_id="token-abc",
-                    node_id="transform-xyz",
-                    sequence_number=42,
-                    created_at=now,
-                    aggregation_state_json=None,
-                )
-            )
+            conn.commit()
+
+        # Create checkpoint with topology validation
+        from elspeth.core.checkpoint.manager import CheckpointManager
+
+        checkpoint_manager = CheckpointManager(db)
+        checkpoint_manager.create_checkpoint(
+            run_id=run_id,
+            token_id="token-abc",
+            node_id=checkpoint_node_id,
+            sequence_number=42,
+            graph=graph,
+        )
+
         db.close()
 
         result = runner.invoke(
@@ -725,8 +831,8 @@ class TestResumeCommand:
             [
                 "resume",
                 "failed-with-checkpoint-001",
-                "--database",
-                str(db_file),
+                "--settings",
+                str(settings_file),
             ],
         )
 

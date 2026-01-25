@@ -6,7 +6,7 @@ source -> fork gate -> parallel paths -> coalesce -> sink
 Unlike the unit tests in test_coalesce_executor.py, these tests use:
 - Real source/sink plugins (inline test fixtures)
 - Real Orchestrator
-- Real ExecutionGraph.from_config()
+- Real ExecutionGraph.from_plugin_instances()
 - Real LandscapeDB (in-memory)
 """
 
@@ -69,10 +69,7 @@ class CollectSink(_TestSinkBase):
 
     def __init__(self) -> None:
         self.rows: list[dict[str, Any]] = []
-
-    @property
-    def config(self) -> dict[str, Any]:
-        return {}
+        self.config: dict[str, Any] = {}
 
     def on_start(self, ctx: Any) -> None:
         pass
@@ -99,7 +96,7 @@ def _build_fork_coalesce_graph(
 ) -> ExecutionGraph:
     """Build a test graph that supports fork and coalesce operations.
 
-    This manually builds the graph because ExecutionGraph.from_config() requires
+    This manually builds the graph because ExecutionGraph.from_plugin_instances() requires
     plugins to be registered, which we can't do with inline test fixtures.
 
     Args:

@@ -2142,14 +2142,17 @@ class TestExplainGracefulDegradation:
         assert lineage.payload_available is False
 
     def test_explain_row_with_no_payload_ref(self, tmp_path: Path) -> None:
-        """explain_row() handles rows created without payload_ref."""
+        """explain_row() handles rows when no payload_store is configured.
+
+        When LandscapeRecorder is created without a payload_store, rows are
+        created without payload storage (payload_ref is None).
+        """
         from elspeth.core.landscape.database import LandscapeDB
         from elspeth.core.landscape.recorder import LandscapeRecorder
-        from elspeth.core.payload_store import FilesystemPayloadStore
 
         db = LandscapeDB.in_memory()
-        payload_store = FilesystemPayloadStore(tmp_path / "payloads")
-        recorder = LandscapeRecorder(db, payload_store=payload_store)
+        # No payload_store configured - payloads won't be stored
+        recorder = LandscapeRecorder(db, payload_store=None)
 
         run = recorder.begin_run(config={}, canonical_version="v1")
         source = recorder.register_node(

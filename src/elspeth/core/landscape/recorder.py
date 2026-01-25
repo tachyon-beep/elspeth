@@ -248,6 +248,7 @@ class LandscapeRecorder:
         run_id: str | None = None,
         reproducibility_grade: str | None = None,
         status: RunStatus | str = RunStatus.RUNNING,
+        source_schema_json: str | None = None,
     ) -> Run:
         """Begin a new pipeline run.
 
@@ -257,6 +258,9 @@ class LandscapeRecorder:
             run_id: Optional run ID (generated if not provided)
             reproducibility_grade: Optional grade (FULL_REPRODUCIBLE, etc.)
             status: Initial run status (defaults to RUNNING)
+            source_schema_json: Optional serialized source schema for resume type restoration.
+                Should be Pydantic model_json_schema() output. Required for proper resume
+                type fidelity (datetime/Decimal restoration from payload JSON strings).
 
         Returns:
             Run model with generated run_id
@@ -292,6 +296,7 @@ class LandscapeRecorder:
                     canonical_version=run.canonical_version,
                     status=run.status,
                     reproducibility_grade=run.reproducibility_grade,
+                    source_schema_json=source_schema_json,
                 )
             )
 
@@ -368,6 +373,86 @@ class LandscapeRecorder:
             export_format=row.export_format,
             export_sink=row.export_sink,
         )
+
+    def get_source_schema(self, run_id: str) -> str:
+        """Get source schema JSON for a run (for resume/type restoration).
+
+        Args:
+            run_id: Run to query
+
+        Returns:
+            Source schema JSON string
+
+        Raises:
+            ValueError: If run not found or has no source schema
+
+        Note:
+            This encapsulates Landscape schema access for Orchestrator resume.
+            Schema is required for type fidelity when restoring rows from payloads.
+        """
+        with self._db.connection() as conn:
+            run_row = conn.execute(select(runs_table.c.source_schema_json).where(runs_table.c.run_id == run_id)).fetchone()
+
+        if run_row is None:
+            raise ValueError(f"Run {run_id} not found in database")
+
+        source_schema_json = run_row.source_schema_json
+        if source_schema_json is None:
+            raise ValueError(
+                f"Run {run_id} has no source schema stored. "
+                f"This run was created before source schema storage was implemented. "
+                f"Cannot resume without schema - type fidelity would be violated."
+            )
+
+        return str(source_schema_json)
+
+    def get_edge_map(self, run_id: str) -> dict[tuple[str, str], str]:
+        """Get edge mapping for a run (from_node_id, label) -> edge_id.
+
+        Args:
+            run_id: Run to query
+
+        Returns:
+            Dictionary mapping (from_node_id, label) to edge_id
+
+        Raises:
+            ValueError: If run has no edges registered (data corruption)
+
+        Note:
+            This encapsulates Landscape schema access for Orchestrator resume.
+            Edge IDs are required for FK integrity when recording routing events.
+        """
+        with self._db.connection() as conn:
+            edges = conn.execute(select(edges_table).where(edges_table.c.run_id == run_id)).fetchall()
+
+        edge_map: dict[tuple[str, str], str] = {}
+        for edge in edges:
+            edge_map[(edge.from_node_id, edge.label)] = edge.edge_id
+
+        return edge_map
+
+    def update_run_status(self, run_id: str, status: RunStatus | str) -> None:
+        """Update run status without setting completed_at.
+
+        Used for intermediate status changes (e.g., paused → running during resume).
+        For final completion, use complete_run() instead.
+
+        Args:
+            run_id: Run to update
+            status: New status - must be valid RunStatus
+
+        Raises:
+            ValueError: If status string is not a valid RunStatus value
+
+        Note:
+            This encapsulates run status updates for Orchestrator recovery.
+            Only updates status field - does not set completed_at or reproducibility_grade.
+        """
+        # Validate and coerce status enum - fail fast on typos
+        status_enum = _coerce_enum(status, RunStatus)
+
+        with self._db.connection() as conn:
+            conn.execute(runs_table.update().where(runs_table.c.run_id == run_id).values(status=status_enum.value))
 
     def list_runs(self, *, status: RunStatus | str | None = None) -> list[Run]:
         """List all runs in the database.
@@ -733,16 +818,34 @@ class LandscapeRecorder:
             run_id: Run this row belongs to
             source_node_id: Source node that loaded this row
             row_index: Position in source (0-indexed)
-            data: Row data for hashing
+            data: Row data for hashing and optional storage
             row_id: Optional row ID (generated if not provided)
-            payload_ref: Optional reference to payload store
+            payload_ref: DEPRECATED - payload persistence now handled internally
 
         Returns:
             Row model
+
+        Note:
+            Payload persistence is now handled by LandscapeRecorder, not callers.
+            If self._payload_store is configured, the method will:
+            1. Serialize data using canonical_json (handles pandas/numpy/datetime/Decimal)
+            2. Store in payload store
+            3. Record reference in audit trail
+
+            This ensures Landscape owns its audit format end-to-end.
         """
+        from elspeth.core.canonical import canonical_json
+
         row_id = row_id or _generate_id()
         data_hash = stable_hash(data)
         now = _now()
+
+        # Landscape owns payload persistence - serialize and store if configured
+        final_payload_ref = payload_ref  # Legacy path (will be removed)
+        if self._payload_store is not None and payload_ref is None:
+            # Canonical JSON handles pandas/numpy/Decimal/datetime types
+            payload_bytes = canonical_json(data).encode("utf-8")
+            final_payload_ref = self._payload_store.store(payload_bytes)
 
         row = Row(
             row_id=row_id,
@@ -750,7 +853,7 @@ class LandscapeRecorder:
             source_node_id=source_node_id,
             row_index=row_index,
             source_data_hash=data_hash,
-            source_data_ref=payload_ref,
+            source_data_ref=final_payload_ref,
             created_at=now,
         )
 
@@ -2312,6 +2415,69 @@ class LandscapeRecorder:
                 error_hash=result.error_hash,
                 context_json=result.context_json,
             )
+
+    def get_token_outcomes_for_row(self, run_id: str, row_id: str) -> list[TokenOutcome]:
+        """Get all token outcomes for a row in a single query.
+
+        Uses JOIN to avoid N+1 query pattern when resolving row_id to tokens.
+        Critical for explain() disambiguation with forks/expands.
+
+        Args:
+            run_id: Run ID to filter by (prevents cross-run contamination)
+            row_id: Row ID
+
+        Returns:
+            List of TokenOutcome objects, empty if no outcomes recorded.
+            Ordered by recorded_at for deterministic behavior.
+        """
+        with self._db.connection() as conn:
+            # Single JOIN query: tokens + outcomes
+            query = (
+                select(
+                    token_outcomes_table.c.outcome_id,
+                    token_outcomes_table.c.run_id,
+                    token_outcomes_table.c.token_id,
+                    token_outcomes_table.c.outcome,
+                    token_outcomes_table.c.is_terminal,
+                    token_outcomes_table.c.recorded_at,
+                    token_outcomes_table.c.sink_name,
+                    token_outcomes_table.c.batch_id,
+                    token_outcomes_table.c.fork_group_id,
+                    token_outcomes_table.c.join_group_id,
+                    token_outcomes_table.c.expand_group_id,
+                    token_outcomes_table.c.error_hash,
+                    token_outcomes_table.c.context_json,
+                )
+                .join(
+                    tokens_table,
+                    token_outcomes_table.c.token_id == tokens_table.c.token_id,
+                )
+                .where(tokens_table.c.row_id == row_id)
+                .where(token_outcomes_table.c.run_id == run_id)
+                .order_by(token_outcomes_table.c.recorded_at)
+            )
+
+            rows = conn.execute(query).fetchall()
+
+            # Tier 1 Trust Model: This is OUR data. Trust DB values directly.
+            return [
+                TokenOutcome(
+                    outcome_id=r.outcome_id,
+                    run_id=r.run_id,
+                    token_id=r.token_id,
+                    outcome=RowOutcome(r.outcome),
+                    is_terminal=r.is_terminal == 1,
+                    recorded_at=r.recorded_at,
+                    sink_name=r.sink_name,
+                    batch_id=r.batch_id,
+                    fork_group_id=r.fork_group_id,
+                    join_group_id=r.join_group_id,
+                    expand_group_id=r.expand_group_id,
+                    error_hash=r.error_hash,
+                    context_json=r.context_json,
+                )
+                for r in rows
+            ]
 
     # === Validation Error Recording (WP-11.99) ===
 

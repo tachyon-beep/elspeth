@@ -153,6 +153,7 @@ class TestSingleQueryProcessing:
             }
             spec = transform._query_specs[0]  # cs1_diagnosis
 
+            assert ctx.state_id is not None
             transform._process_single_query(row, spec, ctx.state_id)
 
             # Check template was rendered with correct content
@@ -175,6 +176,7 @@ class TestSingleQueryProcessing:
             row = {"cs1_bg": "data", "cs1_sym": "data", "cs1_hist": "data"}
             spec = transform._query_specs[0]  # cs1_diagnosis
 
+            assert ctx.state_id is not None
             result = transform._process_single_query(row, spec, ctx.state_id)
 
             assert result.status == "success"
@@ -202,9 +204,11 @@ class TestSingleQueryProcessing:
             row = {"cs1_bg": "data", "cs1_sym": "data", "cs1_hist": "data"}
             spec = transform._query_specs[0]
 
+            assert ctx.state_id is not None
             result = transform._process_single_query(row, spec, ctx.state_id)
 
             assert result.status == "error"
+            assert result.reason is not None
             assert "json" in result.reason["reason"].lower()
 
     def test_process_single_query_raises_capacity_error_on_rate_limit(self) -> None:
@@ -230,6 +234,7 @@ class TestSingleQueryProcessing:
                 mock_llm_client.chat_completion.side_effect = RateLimitError("Rate limit exceeded")
                 mock_get_client.return_value = mock_llm_client
 
+                assert ctx.state_id is not None
                 with pytest.raises(CapacityError) as exc_info:
                     transform._process_single_query(row, spec, ctx.state_id)
 
@@ -250,9 +255,11 @@ class TestSingleQueryProcessing:
             with patch.object(transform._template, "render_with_metadata") as mock_render:
                 mock_render.side_effect = TemplateError("Undefined variable 'missing'")
 
+                assert ctx.state_id is not None
                 result = transform._process_single_query(row, spec, ctx.state_id)
 
                 assert result.status == "error"
+                assert result.reason is not None
                 assert result.reason["reason"] == "template_rendering_failed"
                 assert "missing" in result.reason["error"]
 
@@ -326,6 +333,7 @@ class TestRowProcessing:
             result = transform.process(row, ctx)
 
             assert result.status == "success"
+            assert result.row is not None
             output = result.row
 
             # Original fields preserved
@@ -379,6 +387,7 @@ class TestRowProcessing:
 
             # Entire row fails
             assert result.status == "error"
+            assert result.reason is not None
             assert "query_failed" in result.reason["reason"]
 
 
@@ -502,10 +511,18 @@ class TestBatchProcessing:
             assert result.row["batch_empty"] is True
             assert result.row["row_count"] == 0
 
-    def test_process_batch_uses_per_row_state_ids(self) -> None:
-        """Each row in batch gets unique state_id for audit trail isolation."""
-        # We can verify this by checking that different rows create different
-        # client cache entries (which use state_id as key)
+    def test_process_batch_uses_shared_state_id(self) -> None:
+        """All rows in batch use shared state_id (BUG-AZURE-02 fix).
+
+        BEFORE BUG-AZURE-02 fix: Each row got synthetic state_id like
+        "batch-001_row0", "batch-001_row1" which violated FK constraints.
+
+        AFTER BUG-AZURE-02 fix: All rows share ctx.state_id, ensuring:
+        - FK constraints satisfied (all calls reference valid state_id)
+        - Single LLM client cached per batch (not per row)
+        - Call index continuity across all queries
+        """
+        # 2 rows x 4 queries = 8 responses needed
         responses = [{"score": i, "rationale": f"R{i}"} for i in range(8)]
         created_state_ids: list[str] = []
 
@@ -545,18 +562,29 @@ class TestBatchProcessing:
 
             transform.process(rows, ctx)
 
-            # Should have state_ids like "batch-001_row0" and "batch-001_row1"
-            # (4 queries per row = 4 calls to _get_llm_client per row)
-            row0_ids = [s for s in created_state_ids if "row0" in s]
-            row1_ids = [s for s in created_state_ids if "row1" in s]
+            # BUG-AZURE-02 FIX: All queries should use the SAME state_id
+            # _get_llm_client is called once per query (8 times for 2 rows x 4 queries)
+            # but all calls use the shared state_id, not synthetic per-row IDs
+            assert len(created_state_ids) > 0, "Should have tracked state_ids"
 
-            assert len(row0_ids) > 0, "Row 0 should have unique state_ids"
-            assert len(row1_ids) > 0, "Row 1 should have unique state_ids"
-            assert "batch-001_row0" in row0_ids[0]
-            assert "batch-001_row1" in row1_ids[0]
+            # Verify ALL calls use the shared state_id from context
+            unique_state_ids = set(created_state_ids)
+            assert len(unique_state_ids) == 1, f"Expected all calls to use shared state_id, but got multiple: {unique_state_ids}"
+            assert unique_state_ids == {"batch-001"}, f"Expected shared state_id 'batch-001', got {unique_state_ids}"
 
-    def test_process_batch_cleans_up_per_row_clients(self) -> None:
-        """Client cache is cleaned up after each row in batch."""
+            # Verify NO synthetic per-row state_ids were created
+            for state_id in created_state_ids:
+                assert "_row" not in state_id, f"Found synthetic per-row state_id: {state_id}"
+
+    def test_process_batch_cleans_up_shared_client(self) -> None:
+        """Batch client is cleaned up after processing all rows (BUG-AZURE-02 fix).
+
+        BEFORE BUG-AZURE-02 fix: Each row had its own client in cache
+        (batch-002_row0, batch-002_row1, etc.)
+
+        AFTER BUG-AZURE-02 fix: Single client for entire batch, keyed by
+        ctx.state_id, cleaned up after batch completion.
+        """
         responses = [{"score": i, "rationale": f"R{i}"} for i in range(8)]
 
         with mock_azure_openai_responses(responses):
@@ -585,6 +613,9 @@ class TestBatchProcessing:
 
             transform.process(rows, ctx)
 
-            # After processing, per-row state_ids should be cleaned up
-            assert "batch-002_row0" not in transform._llm_clients
-            assert "batch-002_row1" not in transform._llm_clients
+            # BUG-AZURE-02 FIX: After processing, shared batch client cleaned up
+            assert "batch-002" not in transform._llm_clients, "Batch client should be cleaned up after completion"
+
+            # Verify NO per-row synthetic state_ids in cache
+            for client_key in transform._llm_clients:
+                assert "_row" not in client_key, f"Found synthetic per-row client key: {client_key}"

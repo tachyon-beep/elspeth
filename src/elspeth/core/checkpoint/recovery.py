@@ -8,49 +8,26 @@ The actual resume logic (Orchestrator.resume()) is implemented separately.
 """
 
 import json
-from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import select
 from sqlalchemy.engine import Row
 
-from elspeth.contracts import Checkpoint, RunStatus
+from elspeth.contracts import PluginSchema, ResumeCheck, ResumePoint, RunStatus
+from elspeth.core.checkpoint.compatibility import CheckpointCompatibilityValidator
 from elspeth.core.checkpoint.manager import CheckpointManager
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.schema import rows_table, runs_table, tokens_table
 from elspeth.core.payload_store import PayloadStore
 
+if TYPE_CHECKING:
+    from elspeth.core.dag import ExecutionGraph
 
-@dataclass(frozen=True)
-class ResumeCheck:
-    """Result of checking if a run can be resumed.
-
-    Replaces tuple[bool, str | None] return type from can_resume().
-    """
-
-    can_resume: bool
-    reason: str | None = None
-
-    def __post_init__(self) -> None:
-        if self.can_resume and self.reason is not None:
-            raise ValueError("can_resume=True should not have a reason")
-        if not self.can_resume and self.reason is None:
-            raise ValueError("can_resume=False must have a reason explaining why")
-
-
-@dataclass
-class ResumePoint:
-    """Information needed to resume a run.
-
-    Contains all the data needed by Orchestrator.resume() to continue
-    processing from where a failed run left off.
-    """
-
-    checkpoint: Checkpoint
-    token_id: str
-    node_id: str
-    sequence_number: int
-    aggregation_state: dict[str, Any] | None
+__all__ = [
+    "RecoveryManager",
+    "ResumeCheck",  # Re-exported from contracts for convenience
+    "ResumePoint",  # Re-exported from contracts for convenience
+]
 
 
 class RecoveryManager:
@@ -81,16 +58,18 @@ class RecoveryManager:
         self._db = db
         self._checkpoint_manager = checkpoint_manager
 
-    def can_resume(self, run_id: str) -> ResumeCheck:
+    def can_resume(self, run_id: str, graph: "ExecutionGraph") -> ResumeCheck:
         """Check if a run can be resumed.
 
         A run can be resumed if:
         - It exists in the database
         - Its status is "failed" (not "completed" or "running")
         - At least one checkpoint exists for recovery
+        - The checkpoint's upstream topology is compatible with current graph
 
         Args:
             run_id: The run to check
+            graph: The current execution graph to validate against
 
         Returns:
             ResumeCheck with can_resume=True if resumable,
@@ -110,9 +89,11 @@ class RecoveryManager:
         if checkpoint is None:
             return ResumeCheck(can_resume=False, reason="No checkpoint found for recovery")
 
-        return ResumeCheck(can_resume=True)
+        # Validate topological compatibility
+        validator = CheckpointCompatibilityValidator()
+        return validator.validate(checkpoint, graph)
 
-    def get_resume_point(self, run_id: str) -> ResumePoint | None:
+    def get_resume_point(self, run_id: str, graph: "ExecutionGraph") -> ResumePoint | None:
         """Get the resume point for a failed run.
 
         Returns all information needed to resume processing:
@@ -124,11 +105,12 @@ class RecoveryManager:
 
         Args:
             run_id: The run to get resume point for
+            graph: The current execution graph to validate against
 
         Returns:
             ResumePoint if run can be resumed, None otherwise
         """
-        check = self.can_resume(run_id)
+        check = self.can_resume(run_id, graph)
         if not check.can_resume:
             return None
 
@@ -153,7 +135,7 @@ class RecoveryManager:
         run_id: str,
         payload_store: PayloadStore,
         *,
-        source_schema_class: type[Any] | None = None,
+        source_schema_class: type[PluginSchema],
     ) -> list[tuple[str, int, dict[str, Any]]]:
         """Get row data for unprocessed rows with type fidelity preservation.
 
@@ -161,30 +143,34 @@ class RecoveryManager:
         processing during resume. Returns tuples of (row_id, row_index, row_data)
         ordered by row_index for deterministic processing.
 
-        IMPORTANT: Type Fidelity Preservation
-        ---------------------------------------
+        IMPORTANT: Type Fidelity Preservation (REQUIRED)
+        -------------------------------------------------
         Payloads are stored via canonical_json(), which normalizes non-JSON types:
         - datetime → ISO string ("2024-01-01T00:00:00+00:00")
         - Decimal → string ("42.50")
         - pandas/numpy scalars → primitives
 
         On resume, json.loads() returns degraded types (all strings). To restore
-        type fidelity, pass source_schema_class to re-validate rows through the
-        source's Pydantic schema, which will re-coerce strings back to typed values.
+        type fidelity, this method REQUIRES source_schema_class to re-validate rows
+        through the source's Pydantic schema, which re-coerces strings back to typed values.
+
+        Without schema validation, transforms would receive wrong types (str instead of
+        datetime/Decimal), violating the Tier 2 pipeline data trust model from CLAUDE.md.
 
         Args:
             run_id: The run to get unprocessed rows for
             payload_store: PayloadStore for retrieving row data
-            source_schema_class: Optional Pydantic schema class for type restoration.
-                If provided, degraded JSON data is re-validated through this schema
-                to restore datetime, Decimal, and other coerced types.
+            source_schema_class: Pydantic schema class for type restoration (REQUIRED).
+                Resume cannot guarantee type fidelity without schema validation.
+                The schema must have allow_coercion=True to handle string→typed conversions.
 
         Returns:
             List of (row_id, row_index, row_data) tuples, ordered by row_index.
             Empty list if run cannot be resumed or all rows were processed.
 
         Raises:
-            ValueError: If row data cannot be retrieved (payload purged or missing)
+            ValueError: If row data cannot be retrieved (payload purged or missing),
+                or if schema validation fails (indicates data corruption or schema mismatch)
         """
         row_ids = self.get_unprocessed_rows(run_id)
         if not row_ids:
@@ -216,15 +202,24 @@ class RecoveryManager:
                     raise ValueError(f"Row {row_id} payload has been purged - cannot resume") from None
 
                 # TYPE FIDELITY RESTORATION:
-                # If source schema is provided, re-validate to restore types.
+                # Re-validate through source schema to restore types.
                 # This is critical for datetime, Decimal, and other coerced types
                 # that canonical_json normalizes to strings.
-                if source_schema_class is not None:
-                    validated = source_schema_class.model_validate(degraded_data)
-                    row_data = validated.to_row()
-                else:
-                    # No schema provided - return degraded types (backward compatibility)
-                    row_data = degraded_data
+                # Schema is now REQUIRED - no fallback to degraded types.
+                validated = source_schema_class.model_validate(degraded_data)
+                row_data = validated.to_row()
+
+                # DEFENSE-IN-DEPTH: Detect silent data loss from empty schemas
+                # If source data has fields but restored data is empty, the schema is losing data.
+                # This catches bugs like NullSourceSchema (no fields) being used for resume.
+                if degraded_data and not row_data:
+                    raise ValueError(
+                        f"Resume failed for row {row_id}: Schema validation returned empty data "
+                        f"but source had {len(degraded_data)} fields. "
+                        f"Schema class '{source_schema_class.__name__}' appears to have no fields defined. "
+                        f"Cannot resume - this would silently discard all row data. "
+                        f"The source plugin's schema must declare fields matching the stored row structure."
+                    )
 
                 result.append((row_id, row_index, row_data))
 

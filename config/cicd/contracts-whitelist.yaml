@@ -5,8 +5,6 @@ allowed_external_types:
   - "tui/types:TokenDisplayInfo"
   # Plugin execution context - framework infrastructure, not a data contract
   - "plugins/context:PluginContext"
-  # Checkpoint recovery - internal to checkpoint subsystem
-  - "core/checkpoint/recovery:ResumePoint"
 
 # dict[str, Any] patterns that are intentional
 # Format: "file_path:context:param_name"
@@ -118,8 +116,27 @@ allowed_dict_patterns:
   - "src/elspeth/plugins/sources/csv_source.py:CSVSource.__init__:config"
   - "src/elspeth/plugins/sources/null_source.py:NullSource.__init__:config"
 
+  # Plugin manager - factory methods for creating plugins from config
+  - "src/elspeth/plugins/manager.py:PluginManager.create_source:config"
+  - "src/elspeth/plugins/manager.py:PluginManager.create_transform:config"
+  - "src/elspeth/plugins/manager.py:PluginManager.create_gate:config"
+  - "src/elspeth/plugins/manager.py:PluginManager.create_sink:config"
+
+  # Plugin validation - config validation before plugin instantiation
+  - "src/elspeth/plugins/validation.py:PluginConfigValidator.validate_source_config:config"
+  - "src/elspeth/plugins/validation.py:PluginConfigValidator.validate_transform_config:config"
+  - "src/elspeth/plugins/validation.py:PluginConfigValidator.validate_gate_config:config"
+  - "src/elspeth/plugins/validation.py:PluginConfigValidator.validate_sink_config:config"
+  - "src/elspeth/plugins/validation.py:PluginConfigValidator.validate_schema_config:schema_config"
+
+  # CLI - plugin instantiation from configuration
+  - "src/elspeth/cli_helpers.py:instantiate_plugins_from_config:return"
+  - "src/elspeth/cli.py:_execute_pipeline_with_instances:plugins"
+  - "src/elspeth/cli.py:_execute_resume_with_instances:plugins"
+
   # DAG and config - runtime configuration dicts
   - "src/elspeth/core/dag.py:ExecutionGraph.add_node:config"
+  - "src/elspeth/core/dag.py:ExecutionGraph.node_id:config"
   - "src/elspeth/core/config.py:resolve_config:return"
   - "src/elspeth/core/config.py:_expand_env_vars:config"
   - "src/elspeth/core/config.py:_expand_env_vars:return"
@@ -133,6 +150,13 @@ allowed_dict_patterns:
   - "src/elspeth/core/config.py:_expand_template_files:return"
   - "src/elspeth/core/config.py:_recurse:d"
   - "src/elspeth/core/config.py:_recurse:return"
+
+  # Canonical representation - deterministic JSON for hashing
+  - "src/elspeth/core/canonical.py:_edge_to_canonical_dict:return"
+
+  # Schema reconstruction - deserializing schemas from landscape database
+  - "src/elspeth/engine/orchestrator.py:Orchestrator._reconstruct_schema_from_json:schema_dict"
+  - "src/elspeth/engine/orchestrator.py:Orchestrator._json_schema_to_python_type:field_info"
 
   # ═══════════════════════════════════════════════════════════════════════════
   # AGGREGATION STATE
@@ -173,7 +197,6 @@ allowed_dict_patterns:
   - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.record_call:response_data"
   - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.record_call:error"
   - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.record_token_outcome:context"
-  - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.record_validation_error:row_data"
   - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.record_transform_error:row_data"
   - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.record_transform_error:error_details"
   - "src/elspeth/core/landscape/recorder.py:LandscapeRecorder.get_call_response_data:return"

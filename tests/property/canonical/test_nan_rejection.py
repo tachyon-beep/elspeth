@@ -199,7 +199,7 @@ class TestNonFiniteEdgeCases:
     def test_non_finite_in_numpy_array_rejected(self, non_finite: float) -> None:
         """Property: Non-finite values in numpy arrays are rejected."""
         arr = np.array([1.0, 2.0, non_finite, 4.0])
-        with pytest.raises(ValueError, match="non-finite"):
+        with pytest.raises(ValueError, match="NaN/Infinity found in NumPy array"):
             canonical_json({"array": arr})
 
     def test_very_large_float_not_infinity(self) -> None:

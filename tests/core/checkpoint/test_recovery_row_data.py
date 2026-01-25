@@ -28,10 +28,16 @@ class TestRecoveryManagerRowData:
         """get_unprocessed_row_data returns actual row data, not just IDs."""
         run_id = run_with_checkpoint_and_payloads
 
+        # Create mock schema (required after Bug #4 fix)
+        from elspeth.plugins.schema_factory import _create_dynamic_schema
+
+        mock_schema = _create_dynamic_schema("MockSchema")
+
         # Get row data for unprocessed rows
         row_data_list = recovery_manager.get_unprocessed_row_data(
             run_id=run_id,
             payload_store=payload_store,
+            source_schema_class=mock_schema,
         )
 
         # Should return list of (row_id, row_index, row_data) tuples
@@ -113,14 +119,23 @@ class TestRecoveryManagerRowData:
             conn.commit()
 
         # Checkpoint at last row
+        from tests.core.checkpoint.conftest import _create_test_graph
+
+        graph = _create_test_graph(checkpoint_node="node")
         checkpoint_manager.create_checkpoint(
             run_id=run_id,
             token_id="tok-0",
             node_id="node",
             sequence_number=0,
+            graph=graph,
         )
 
-        result = recovery_manager.get_unprocessed_row_data(run_id, payload_store)
+        # Create mock schema (required after Bug #4 fix)
+        from elspeth.plugins.schema_factory import _create_dynamic_schema
+
+        mock_schema = _create_dynamic_schema("MockSchema")
+
+        result = recovery_manager.get_unprocessed_row_data(run_id, payload_store, source_schema_class=mock_schema)
         assert result == []
 
     def test_get_unprocessed_row_data_raises_on_missing_payload(
@@ -201,12 +216,21 @@ class TestRecoveryManagerRowData:
             conn.commit()
 
         # Checkpoint at row 0
+        from tests.core.checkpoint.conftest import _create_test_graph
+
+        graph = _create_test_graph(checkpoint_node="node")
         checkpoint_manager.create_checkpoint(
             run_id=run_id,
             token_id="tok-0",
             node_id="node",
             sequence_number=0,
+            graph=graph,
         )
 
+        # Create mock schema (required after Bug #4 fix)
+        from elspeth.plugins.schema_factory import _create_dynamic_schema
+
+        mock_schema = _create_dynamic_schema("MockSchema")
+
         with pytest.raises(ValueError, match="payload has been purged"):
-            recovery_manager.get_unprocessed_row_data(run_id, payload_store)
+            recovery_manager.get_unprocessed_row_data(run_id, payload_store, source_schema_class=mock_schema)

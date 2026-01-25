@@ -233,11 +233,7 @@ class RowProcessor:
                     row_data=final_data,
                     branch_name=current_token.branch_name,
                 )
-                self._recorder.record_token_outcome(
-                    run_id=self._run_id,
-                    token_id=updated_token.token_id,
-                    outcome=RowOutcome.COMPLETED,
-                )
+                # COMPLETED outcome now recorded in orchestrator with sink_name (AUD-001)
                 return (
                     RowResult(
                         token=updated_token,
@@ -297,11 +293,7 @@ class RowProcessor:
                             row_data=enriched_data,
                             branch_name=token.branch_name,
                         )
-                        self._recorder.record_token_outcome(
-                            run_id=self._run_id,
-                            token_id=updated_token.token_id,
-                            outcome=RowOutcome.COMPLETED,
-                        )
+                        # COMPLETED outcome now recorded in orchestrator with sink_name (AUD-001)
                         results.append(
                             RowResult(
                                 token=updated_token,
@@ -366,11 +358,7 @@ class RowProcessor:
                     # No more transforms - return COMPLETED for expanded tokens
                     output_results: list[RowResult] = [triggering_result]
                     for token in expanded_tokens:
-                        self._recorder.record_token_outcome(
-                            run_id=self._run_id,
-                            token_id=token.token_id,
-                            outcome=RowOutcome.COMPLETED,
-                        )
+                        # COMPLETED outcome now recorded in orchestrator with sink_name (AUD-001)
                         output_results.append(
                             RowResult(
                                 token=token,
@@ -705,7 +693,7 @@ class RowProcessor:
 
                         if branch_name and branch_name in self._branch_to_coalesce:
                             child_coalesce_name = self._branch_to_coalesce[branch_name]
-                            child_coalesce_step = self._coalesce_step_map.get(child_coalesce_name)
+                            child_coalesce_step = self._coalesce_step_map[child_coalesce_name]
 
                         child_items.append(
                             _WorkItem(
@@ -997,15 +985,8 @@ class RowProcessor:
                         child_items,
                     )
 
-        # Record COMPLETED outcome in audit trail (AUD-001)
-        # Note: sink_name is determined by orchestrator based on routing,
-        # so we record without sink_name here - the sink write records that.
-        self._recorder.record_token_outcome(
-            run_id=self._run_id,
-            token_id=current_token.token_id,
-            outcome=RowOutcome.COMPLETED,
-        )
-
+        # COMPLETED outcome now recorded in orchestrator with sink_name (AUD-001)
+        # Orchestrator knows branch→sink mapping, processor does not.
         return (
             RowResult(
                 token=current_token,

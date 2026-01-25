@@ -4,6 +4,8 @@
 from collections.abc import Iterator
 from typing import Any, ClassVar
 
+from elspeth.contracts import SourceRow
+
 
 class TestSourceProtocol:
     """Source plugin protocol."""
@@ -34,9 +36,9 @@ class TestSourceProtocol:
             def __init__(self, config: dict[str, Any]) -> None:
                 self.config = config
 
-            def load(self, ctx: PluginContext) -> Iterator[dict[str, Any]]:
+            def load(self, ctx: PluginContext) -> Iterator[SourceRow]:
                 for i in range(3):
-                    yield {"value": i}
+                    yield SourceRow.valid({"value": i})
 
             def close(self) -> None:
                 pass
@@ -52,15 +54,15 @@ class TestSourceProtocol:
         # IMPORTANT: Verify protocol conformance at runtime
         # This is why we use @runtime_checkable
         assert isinstance(
-            source,
-            SourceProtocol,  # type: ignore[unreachable]
+            source,  # type: ignore[unreachable]
+            SourceProtocol,
         ), "Source must conform to SourceProtocol"
 
         ctx = PluginContext(run_id="test", config={})  # type: ignore[unreachable]
 
-        rows = list(source.load(ctx))
-        assert len(rows) == 3
-        assert rows[0] == {"value": 0}
+        source_rows = list(source.load(ctx))
+        assert len(source_rows) == 3
+        assert source_rows[0].row == {"value": 0}
 
     def test_source_has_lifecycle_hooks(self) -> None:
         from elspeth.plugins.protocols import SourceProtocol
@@ -100,8 +102,8 @@ class TestSourceProtocol:
             def __init__(self, config: dict[str, Any]) -> None:
                 self.config = config
 
-            def load(self, ctx: PluginContext) -> Iterator[dict[str, Any]]:
-                yield {"value": 1}
+            def load(self, ctx: PluginContext) -> Iterator[SourceRow]:
+                yield SourceRow.valid({"value": 1})
 
             def close(self) -> None:
                 pass
@@ -169,8 +171,8 @@ class TestTransformProtocol:
 
         # IMPORTANT: Verify protocol conformance at runtime
         assert isinstance(
-            transform,
-            TransformProtocol,  # type: ignore[unreachable]
+            transform,  # type: ignore[unreachable]
+            TransformProtocol,
         ), "Must conform to TransformProtocol"
 
         ctx = PluginContext(run_id="test", config={})  # type: ignore[unreachable]
@@ -341,18 +343,13 @@ class TestCoalesceProtocol:
             name = "quorum_merge"
             policy = CoalescePolicy.QUORUM
             quorum_threshold = 2  # At least 2 branches must arrive
-            expected_branches: ClassVar[list[str]] = [
-                "branch_a",
-                "branch_b",
-                "branch_c",
-            ]
             output_schema = OutputSchema
             node_id: str | None = None  # Set by orchestrator
             determinism = Determinism.DETERMINISTIC
             plugin_version = "1.0.0"
 
             def __init__(self, config: dict[str, Any]) -> None:
-                pass
+                self.expected_branches = ["branch_a", "branch_b", "branch_c"]
 
             def merge(self, branch_outputs: dict[str, dict[str, Any]], ctx: PluginContext) -> dict[str, Any]:
                 return {"combined": "+".join(branch_outputs.keys())}
@@ -369,8 +366,8 @@ class TestCoalesceProtocol:
         # mypy may report this as unreachable due to structural subtyping analysis
         # but runtime_checkable protocols DO work at runtime
         assert isinstance(
-            coalesce,
-            CoalesceProtocol,  # type: ignore[unreachable]
+            coalesce,  # type: ignore[unreachable]
+            CoalesceProtocol,
         ), "Must conform to CoalesceProtocol"
 
         assert coalesce.quorum_threshold == 2  # type: ignore[unreachable]
@@ -389,14 +386,13 @@ class TestCoalesceProtocol:
             name = "sum_merge"
             policy = CoalescePolicy.REQUIRE_ALL
             quorum_threshold = None
-            expected_branches: ClassVar[list[str]] = ["branch_a", "branch_b"]
             output_schema = OutputSchema
             node_id: str | None = None  # Set by orchestrator
             determinism = Determinism.DETERMINISTIC
             plugin_version = "1.0.0"
 
             def __init__(self, config: dict[str, Any]) -> None:
-                pass
+                self.expected_branches = ["branch_a", "branch_b"]
 
             def merge(self, branch_outputs: dict[str, dict[str, Any]], ctx: PluginContext) -> dict[str, Any]:
                 total = sum(out["value"] for out in branch_outputs.values())
@@ -502,7 +498,6 @@ class TestSinkProtocol:
 
     def test_sink_implementation(self) -> None:
         """Test sink conforming to updated batch protocol."""
-        from typing import ClassVar
 
         from elspeth.contracts import ArtifactDescriptor, Determinism, PluginSchema
         from elspeth.plugins.context import PluginContext

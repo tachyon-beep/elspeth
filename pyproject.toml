@@ -168,6 +168,8 @@ show_error_codes = true
 plugins = ["pydantic.mypy"]
 # Allow unused ignores - needed for pre-commit which runs in isolated env
 warn_unused_ignores = false
+# Exclude alembic migration files - they're not packages
+exclude = ["alembic/versions/.*\\.py$"]
 
 [[tool.mypy.overrides]]
 module = [
@@ -187,12 +189,29 @@ ignore_missing_imports = true
 module = "tests.*"
 # Test files use hypothesis decorators that don't have type stubs
 disallow_untyped_decorators = false
+# Pytest functions don't need complete type annotations
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+check_untyped_defs = false
 
 [[tool.mypy.overrides]]
 module = "elspeth.tui.*"
 # TUI uses textual which has incomplete type stubs
 # App[None] inheritance triggers "Class cannot subclass value of type Any"
 disallow_subclassing_any = false
+
+[[tool.mypy.overrides]]
+module = "scripts.*"
+# Script modules may have relaxed type checking
+ignore_missing_imports = true
+# Scripts are auxiliary tools, not production code
+check_untyped_defs = false
+
+[[tool.mypy.overrides]]
+module = "examples.*"
+# Examples don't need complete type annotations
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
 
 # === Pytest Configuration ===
 [tool.pytest.ini_options]
@@ -207,6 +226,7 @@ markers = [
     "slow: marks tests as slow (deselect with '-m \"not slow\"')",
     "integration: marks tests requiring external services",
     "asyncio: marks tests as async (handled by pytest-asyncio)",
+    "performance: marks tests as performance benchmarks",
 ]
 # Load .env file for integration tests (API keys)
 env_files = [".env"]

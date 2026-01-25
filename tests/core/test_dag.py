@@ -282,12 +282,222 @@ class TestExecutionGraphAccessors:
 
         assert edges == []
 
+    def test_get_incoming_edges_returns_edges_pointing_to_node(self):
+        """get_incoming_edges() returns all edges with to_node matching the given node_id."""
+        from elspeth.contracts import RoutingMode
+        from elspeth.core.dag import ExecutionGraph
+
+        graph = ExecutionGraph()
+        graph.add_node("A", node_type="source", plugin_name="csv")
+        graph.add_node("B", node_type="transform", plugin_name="mapper")
+        graph.add_node("C", node_type="sink", plugin_name="csv")
+
+        graph.add_edge("A", "B", label="continue", mode=RoutingMode.MOVE)
+        graph.add_edge("B", "C", label="continue", mode=RoutingMode.MOVE)
+
+        incoming = graph.get_incoming_edges("B")
+
+        assert len(incoming) == 1
+        assert incoming[0].from_node == "A"
+        assert incoming[0].to_node == "B"
+        assert incoming[0].label == "continue"
+        assert incoming[0].mode == RoutingMode.MOVE
+
+    def test_get_incoming_edges_returns_empty_for_source_node(self):
+        """get_incoming_edges() returns empty list for nodes with no predecessors."""
+        from elspeth.core.dag import ExecutionGraph
+
+        graph = ExecutionGraph()
+        graph.add_node("A", node_type="source", plugin_name="csv")
+        graph.add_node("B", node_type="sink", plugin_name="csv")
+
+        incoming = graph.get_incoming_edges("A")
+
+        assert incoming == []
+
+    def test_get_effective_producer_schema_walks_through_gates(self) -> None:
+        """_get_effective_producer_schema() recursively finds schema through gate chain."""
+        from elspeth.contracts import PluginSchema, RoutingMode
+        from elspeth.core.dag import ExecutionGraph
+
+        class OutputSchema(PluginSchema):
+            value: int
+
+        graph = ExecutionGraph()
+
+        # Build chain: source -> gate -> sink
+        graph.add_node("source", node_type="source", plugin_name="csv", output_schema=OutputSchema)
+        graph.add_node("gate", node_type="gate", plugin_name="config_gate:check")  # No schema
+        graph.add_node("sink", node_type="sink", plugin_name="csv")
+
+        graph.add_edge("source", "gate", label="continue", mode=RoutingMode.MOVE)
+        graph.add_edge("gate", "sink", label="flagged", mode=RoutingMode.MOVE)
+
+        # Gate's effective producer schema should be source's output schema
+        effective_schema = graph._get_effective_producer_schema("gate")
+
+        assert effective_schema == OutputSchema
+
+    def test_get_effective_producer_schema_crashes_on_gate_without_inputs(self):
+        """_get_effective_producer_schema() crashes if gate has no incoming edges."""
+        from elspeth.core.dag import ExecutionGraph
+
+        graph = ExecutionGraph()
+        graph.add_node("gate", node_type="gate", plugin_name="config_gate:orphan")
+
+        # Gate with no inputs is a bug in our code - should crash
+        # ValueError is raised by internal validation during edge compatibility checking
+        with pytest.raises(ValueError) as exc_info:
+            graph._get_effective_producer_schema("gate")
+
+        assert "no incoming edges" in str(exc_info.value).lower()
+        assert "bug in graph construction" in str(exc_info.value).lower()
+
+    def test_get_effective_producer_schema_handles_chained_gates(self) -> None:
+        """_get_effective_producer_schema() recursively walks through multiple gates."""
+        from elspeth.contracts import PluginSchema, RoutingMode
+        from elspeth.core.dag import ExecutionGraph
+
+        class SourceOutput(PluginSchema):
+            id: int
+            name: str
+
+        graph = ExecutionGraph()
+
+        # Build chain: source -> gate1 -> gate2 -> sink
+        graph.add_node("source", node_type="source", plugin_name="csv", output_schema=SourceOutput)
+        graph.add_node("gate1", node_type="gate", plugin_name="config_gate:first")
+        graph.add_node("gate2", node_type="gate", plugin_name="config_gate:second")
+        graph.add_node("sink", node_type="sink", plugin_name="csv")
+
+        graph.add_edge("source", "gate1", label="continue", mode=RoutingMode.MOVE)
+        graph.add_edge("gate1", "gate2", label="continue", mode=RoutingMode.MOVE)
+        graph.add_edge("gate2", "sink", label="approved", mode=RoutingMode.MOVE)
+
+        # gate2's effective schema should trace back to source
+        effective_schema = graph._get_effective_producer_schema("gate2")
+
+        assert effective_schema == SourceOutput
+
+    def test_dag_validation_only_checks_structure(self) -> None:
+        """DAG validation should only check cycles and connectivity, not schemas."""
+        from elspeth.contracts import PluginSchema
+        from elspeth.core.dag import ExecutionGraph
+
+        class OutputSchema(PluginSchema):
+            value: int
+
+        class DifferentSchema(PluginSchema):
+            different: str  # Incompatible!
+
+        graph = ExecutionGraph()
+
+        # Add incompatible schemas
+        graph.add_node("source", node_type="source", plugin_name="csv", output_schema=OutputSchema)
+        graph.add_node("sink", node_type="sink", plugin_name="csv", input_schema=DifferentSchema)
+        graph.add_edge("source", "sink", label="continue")
+
+        # OLD behavior: Would raise GraphValidationError for schema mismatch
+        # NEW behavior: Only checks structural validity (no cycles)
+        graph.validate()  # Should NOT raise - no structural problems
+
+    def test_get_effective_producer_schema_returns_direct_schema_for_transform(self) -> None:
+        """_get_effective_producer_schema() returns output_schema directly for transform nodes."""
+        from elspeth.contracts import PluginSchema
+        from elspeth.core.dag import ExecutionGraph
+
+        class TransformOutput(PluginSchema):
+            result: str
+
+        graph = ExecutionGraph()
+        graph.add_node(
+            "transform",
+            node_type="transform",
+            plugin_name="field_mapper",
+            output_schema=TransformOutput,
+        )
+
+        effective_schema = graph._get_effective_producer_schema("transform")
+
+        assert effective_schema == TransformOutput
+
+    def test_validate_edge_schemas_uses_effective_schema_for_gates(self) -> None:
+        """validate_edge_compatibility() uses effective producer schema for gate edges."""
+        from elspeth.contracts import PluginSchema, RoutingMode
+        from elspeth.core.dag import ExecutionGraph
+
+        class SourceOutput(PluginSchema):
+            id: int
+            name: str
+            # Note: does NOT have 'score' field
+
+        class SinkInput(PluginSchema):
+            id: int
+            score: float  # Required field not in source output
+
+        graph = ExecutionGraph()
+
+        # Pipeline: source -> gate -> sink
+        # Gate has NO schemas (simulates config-driven gate from from_config())
+        graph.add_node("source", node_type="source", plugin_name="csv", output_schema=SourceOutput)
+        graph.add_node("gate", node_type="gate", plugin_name="config_gate:check")  # NO SCHEMA
+        graph.add_node("sink", node_type="sink", plugin_name="csv", input_schema=SinkInput)
+
+        graph.add_edge("source", "gate", label="continue", mode=RoutingMode.MOVE)
+        graph.add_edge("gate", "sink", label="flagged", mode=RoutingMode.MOVE)
+
+        # Should detect schema incompatibility on gate -> sink edge
+        # validate_edge_compatibility() raises ValueError for schema mismatches
+        with pytest.raises(ValueError) as exc_info:
+            graph.validate_edge_compatibility()
+
+        # Verify error mentions the missing field
+        assert "score" in str(exc_info.value).lower()
+        # Verify error includes node IDs (gate -> sink)
+        assert "gate" in str(exc_info.value)
+        assert "sink" in str(exc_info.value)
+
+    def test_validate_edge_schemas_validates_all_fork_destinations(self) -> None:
+        """Fork gates validate all destination edges against effective schema."""
+        from elspeth.contracts import PluginSchema, RoutingMode
+        from elspeth.core.dag import ExecutionGraph
+
+        class SourceOutput(PluginSchema):
+            id: int
+            name: str
+
+        class SinkA(PluginSchema):
+            id: int  # Compatible - only requires id
+
+        class SinkB(PluginSchema):
+            id: int
+            score: float  # Incompatible - requires field not in source
+
+        graph = ExecutionGraph()
+        graph.add_node("source", node_type="source", plugin_name="csv", output_schema=SourceOutput)
+        graph.add_node("gate", node_type="gate", plugin_name="config_gate:fork")  # NO SCHEMA
+        graph.add_node("sink_a", node_type="sink", plugin_name="csv_a", input_schema=SinkA)
+        graph.add_node("sink_b", node_type="sink", plugin_name="csv_b", input_schema=SinkB)
+
+        graph.add_edge("source", "gate", label="continue", mode=RoutingMode.MOVE)
+        graph.add_edge("gate", "sink_a", label="branch_a", mode=RoutingMode.COPY)  # Fork: COPY mode
+        graph.add_edge("gate", "sink_b", label="branch_b", mode=RoutingMode.COPY)  # Fork: COPY mode
+
+        # Should detect incompatibility on gate -> sink_b edge
+        # validate_edge_compatibility() raises ValueError for schema mismatches
+        with pytest.raises(ValueError) as exc_info:
+            graph.validate_edge_compatibility()
+
+        assert "score" in str(exc_info.value).lower()
+        assert "gate" in str(exc_info.value)
+
 
 class TestExecutionGraphFromConfig:
     """Build ExecutionGraph from ElspethSettings."""
 
-    def test_from_config_minimal(self) -> None:
+    def test_from_config_minimal(self, plugin_manager) -> None:
         """Build graph from minimal config (source -> sink only)."""
+        from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.core.config import (
             DatasourceSettings,
             ElspethSettings,
@@ -296,12 +506,27 @@ class TestExecutionGraphFromConfig:
         from elspeth.core.dag import ExecutionGraph
 
         config = ElspethSettings(
-            datasource=DatasourceSettings(plugin="csv"),
-            sinks={"output": SinkSettings(plugin="csv")},
+            datasource=DatasourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"fields": "dynamic"},
+                },
+            ),
+            sinks={"output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}})},
             output_sink="output",
         )
 
-        graph = ExecutionGraph.from_config(config)
+        plugins = instantiate_plugins_from_config(config)
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(config.gates),
+            output_sink=config.output_sink,
+        )
 
         # Should have: source -> output_sink
         assert graph.node_count == 2
@@ -309,8 +534,9 @@ class TestExecutionGraphFromConfig:
         assert graph.get_source() is not None
         assert len(graph.get_sinks()) == 1
 
-    def test_from_config_is_valid(self) -> None:
+    def test_from_config_is_valid(self, plugin_manager) -> None:
         """Graph from valid config passes validation."""
+        from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.core.config import (
             DatasourceSettings,
             ElspethSettings,
@@ -319,19 +545,35 @@ class TestExecutionGraphFromConfig:
         from elspeth.core.dag import ExecutionGraph
 
         config = ElspethSettings(
-            datasource=DatasourceSettings(plugin="csv"),
-            sinks={"output": SinkSettings(plugin="csv")},
+            datasource=DatasourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"fields": "dynamic"},
+                },
+            ),
+            sinks={"output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}})},
             output_sink="output",
         )
 
-        graph = ExecutionGraph.from_config(config)
+        plugins = instantiate_plugins_from_config(config)
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(config.gates),
+            output_sink=config.output_sink,
+        )
 
         # Should not raise
         graph.validate()
         assert graph.is_acyclic()
 
-    def test_from_config_with_transforms(self) -> None:
+    def test_from_config_with_transforms(self, plugin_manager) -> None:
         """Build graph with transform chain."""
+        from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.core.config import (
             DatasourceSettings,
             ElspethSettings,
@@ -341,18 +583,33 @@ class TestExecutionGraphFromConfig:
         from elspeth.core.dag import ExecutionGraph
 
         config = ElspethSettings(
-            datasource=DatasourceSettings(plugin="csv"),
-            sinks={"output": SinkSettings(plugin="csv")},
+            datasource=DatasourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"fields": "dynamic"},
+                },
+            ),
+            sinks={"output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}})},
             row_plugins=[
-                RowPluginSettings(plugin="transform_a"),
-                RowPluginSettings(plugin="transform_b"),
+                RowPluginSettings(plugin="passthrough", options={"schema": {"fields": "dynamic"}}),
+                RowPluginSettings(plugin="field_mapper", options={"schema": {"fields": "dynamic"}}),
             ],
             output_sink="output",
         )
 
-        graph = ExecutionGraph.from_config(config)
+        plugins = instantiate_plugins_from_config(config)
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(config.gates),
+            output_sink=config.output_sink,
+        )
 
-        # Should have: source -> transform_a -> transform_b -> output_sink
+        # Should have: source -> passthrough -> field_mapper -> output_sink
         assert graph.node_count == 4
         assert graph.edge_count == 3
 
@@ -363,13 +620,14 @@ class TestExecutionGraphFromConfig:
         assert "source" in order[0]
         # Sink should be last (has "sink" in node_id)
         assert "sink" in order[-1]
-        # Verify transform ordering (transform_a before transform_b)
-        transform_a_idx = next(i for i, n in enumerate(order) if "transform_a" in n)
-        transform_b_idx = next(i for i, n in enumerate(order) if "transform_b" in n)
-        assert transform_a_idx < transform_b_idx
+        # Verify transform ordering (passthrough before field_mapper)
+        passthrough_idx = next(i for i, n in enumerate(order) if "passthrough" in n)
+        field_mapper_idx = next(i for i, n in enumerate(order) if "field_mapper" in n)
+        assert passthrough_idx < field_mapper_idx
 
-    def test_from_config_with_gate_routes(self) -> None:
+    def test_from_config_with_gate_routes(self, plugin_manager) -> None:
         """Build graph with config-driven gate routing to multiple sinks."""
+        from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.core.config import (
             DatasourceSettings,
             ElspethSettings,
@@ -379,10 +637,17 @@ class TestExecutionGraphFromConfig:
         from elspeth.core.dag import ExecutionGraph
 
         config = ElspethSettings(
-            datasource=DatasourceSettings(plugin="csv"),
+            datasource=DatasourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"fields": "dynamic"},
+                },
+            ),
             sinks={
-                "results": SinkSettings(plugin="csv"),
-                "flagged": SinkSettings(plugin="csv"),
+                "results": SinkSettings(plugin="csv", options={"path": "results.csv", "schema": {"fields": "dynamic"}}),
+                "flagged": SinkSettings(plugin="csv", options={"path": "flagged.csv", "schema": {"fields": "dynamic"}}),
             },
             gates=[
                 GateSettings(
@@ -394,7 +659,15 @@ class TestExecutionGraphFromConfig:
             output_sink="results",
         )
 
-        graph = ExecutionGraph.from_config(config)
+        plugins = instantiate_plugins_from_config(config)
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(config.gates),
+            output_sink=config.output_sink,
+        )
 
         # Should have:
         #   source -> safety_gate -> results (via "continue")
@@ -403,8 +676,9 @@ class TestExecutionGraphFromConfig:
         # Edges: source->gate, gate->results (continue), gate->flagged (route)
         assert graph.edge_count == 3
 
-    def test_from_config_validates_route_targets(self) -> None:
+    def test_from_config_validates_route_targets(self, plugin_manager) -> None:
         """Config gate routes must reference existing sinks."""
+        from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.core.config import (
             DatasourceSettings,
             ElspethSettings,
@@ -414,8 +688,15 @@ class TestExecutionGraphFromConfig:
         from elspeth.core.dag import ExecutionGraph, GraphValidationError
 
         config = ElspethSettings(
-            datasource=DatasourceSettings(plugin="csv"),
-            sinks={"output": SinkSettings(plugin="csv")},
+            datasource=DatasourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"fields": "dynamic"},
+                },
+            ),
+            sinks={"output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}})},
             gates=[
                 GateSettings(
                     name="bad_gate",
@@ -427,12 +708,21 @@ class TestExecutionGraphFromConfig:
         )
 
         with pytest.raises(GraphValidationError) as exc_info:
-            ExecutionGraph.from_config(config)
+            plugins = instantiate_plugins_from_config(config)
+            ExecutionGraph.from_plugin_instances(
+                source=plugins["source"],
+                transforms=plugins["transforms"],
+                sinks=plugins["sinks"],
+                aggregations=plugins["aggregations"],
+                gates=list(config.gates),
+                output_sink=config.output_sink,
+            )
 
         assert "nonexistent_sink" in str(exc_info.value)
 
-    def test_get_sink_id_map(self) -> None:
+    def test_get_sink_id_map(self, plugin_manager) -> None:
         """Get explicit sink_name -> node_id mapping."""
+        from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.core.config import (
             DatasourceSettings,
             ElspethSettings,
@@ -441,15 +731,30 @@ class TestExecutionGraphFromConfig:
         from elspeth.core.dag import ExecutionGraph
 
         config = ElspethSettings(
-            datasource=DatasourceSettings(plugin="csv"),
+            datasource=DatasourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"fields": "dynamic"},
+                },
+            ),
             sinks={
-                "results": SinkSettings(plugin="csv"),
-                "flagged": SinkSettings(plugin="csv"),
+                "results": SinkSettings(plugin="csv", options={"path": "results.csv", "schema": {"fields": "dynamic"}}),
+                "flagged": SinkSettings(plugin="csv", options={"path": "flagged.csv", "schema": {"fields": "dynamic"}}),
             },
             output_sink="results",
         )
 
-        graph = ExecutionGraph.from_config(config)
+        plugins = instantiate_plugins_from_config(config)
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(config.gates),
+            output_sink=config.output_sink,
+        )
         sink_map = graph.get_sink_id_map()
 
         # Explicit mapping - no substring matching
@@ -457,8 +762,9 @@ class TestExecutionGraphFromConfig:
         assert "flagged" in sink_map
         assert sink_map["results"] != sink_map["flagged"]
 
-    def test_get_transform_id_map(self) -> None:
+    def test_get_transform_id_map(self, plugin_manager) -> None:
         """Get explicit sequence -> node_id mapping for transforms."""
+        from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.core.config import (
             DatasourceSettings,
             ElspethSettings,
@@ -468,25 +774,41 @@ class TestExecutionGraphFromConfig:
         from elspeth.core.dag import ExecutionGraph
 
         config = ElspethSettings(
-            datasource=DatasourceSettings(plugin="csv"),
-            sinks={"output": SinkSettings(plugin="csv")},
+            datasource=DatasourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"fields": "dynamic"},
+                },
+            ),
+            sinks={"output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}})},
             row_plugins=[
-                RowPluginSettings(plugin="transform_a"),
-                RowPluginSettings(plugin="transform_b"),
+                RowPluginSettings(plugin="passthrough", options={"schema": {"fields": "dynamic"}}),
+                RowPluginSettings(plugin="field_mapper", options={"schema": {"fields": "dynamic"}}),
             ],
             output_sink="output",
         )
 
-        graph = ExecutionGraph.from_config(config)
+        plugins = instantiate_plugins_from_config(config)
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(config.gates),
+            output_sink=config.output_sink,
+        )
         transform_map = graph.get_transform_id_map()
 
         # Explicit mapping by sequence position
-        assert 0 in transform_map  # transform_a
-        assert 1 in transform_map  # transform_b
+        assert 0 in transform_map  # passthrough
+        assert 1 in transform_map  # field_mapper
         assert transform_map[0] != transform_map[1]
 
-    def test_get_output_sink(self) -> None:
+    def test_get_output_sink(self, plugin_manager) -> None:
         """Get the output sink name."""
+        from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.core.config import (
             DatasourceSettings,
             ElspethSettings,
@@ -495,15 +817,30 @@ class TestExecutionGraphFromConfig:
         from elspeth.core.dag import ExecutionGraph
 
         config = ElspethSettings(
-            datasource=DatasourceSettings(plugin="csv"),
+            datasource=DatasourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"fields": "dynamic"},
+                },
+            ),
             sinks={
-                "results": SinkSettings(plugin="csv"),
-                "flagged": SinkSettings(plugin="csv"),
+                "results": SinkSettings(plugin="csv", options={"path": "results.csv", "schema": {"fields": "dynamic"}}),
+                "flagged": SinkSettings(plugin="csv", options={"path": "flagged.csv", "schema": {"fields": "dynamic"}}),
             },
             output_sink="results",
         )
 
-        graph = ExecutionGraph.from_config(config)
+        plugins = instantiate_plugins_from_config(config)
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(config.gates),
+            output_sink=config.output_sink,
+        )
 
         assert graph.get_output_sink() == "results"
 
@@ -511,8 +848,9 @@ class TestExecutionGraphFromConfig:
 class TestExecutionGraphRouteMapping:
     """Test route label <-> sink name mapping for edge lookup."""
 
-    def test_get_route_label_for_sink(self) -> None:
+    def test_get_route_label_for_sink(self, plugin_manager) -> None:
         """Get route label that leads to a sink from a config gate."""
+        from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.core.config import (
             DatasourceSettings,
             ElspethSettings,
@@ -522,10 +860,17 @@ class TestExecutionGraphRouteMapping:
         from elspeth.core.dag import ExecutionGraph
 
         config = ElspethSettings(
-            datasource=DatasourceSettings(plugin="csv"),
+            datasource=DatasourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"fields": "dynamic"},
+                },
+            ),
             sinks={
-                "results": SinkSettings(plugin="csv"),
-                "flagged": SinkSettings(plugin="csv"),
+                "results": SinkSettings(plugin="csv", options={"path": "results.csv", "schema": {"fields": "dynamic"}}),
+                "flagged": SinkSettings(plugin="csv", options={"path": "flagged.csv", "schema": {"fields": "dynamic"}}),
             },
             gates=[
                 GateSettings(
@@ -537,7 +882,15 @@ class TestExecutionGraphRouteMapping:
             output_sink="results",
         )
 
-        graph = ExecutionGraph.from_config(config)
+        plugins = instantiate_plugins_from_config(config)
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(config.gates),
+            output_sink=config.output_sink,
+        )
 
         # Get the config gate's node_id
         gate_node_id = graph.get_config_gate_id_map()["classifier"]
@@ -547,8 +900,9 @@ class TestExecutionGraphRouteMapping:
 
         assert route_label == "true"
 
-    def test_get_route_label_for_continue(self) -> None:
+    def test_get_route_label_for_continue(self, plugin_manager) -> None:
         """Continue routes return 'continue' as label."""
+        from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.core.config import (
             DatasourceSettings,
             ElspethSettings,
@@ -558,8 +912,15 @@ class TestExecutionGraphRouteMapping:
         from elspeth.core.dag import ExecutionGraph
 
         config = ElspethSettings(
-            datasource=DatasourceSettings(plugin="csv"),
-            sinks={"results": SinkSettings(plugin="csv")},
+            datasource=DatasourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"fields": "dynamic"},
+                },
+            ),
+            sinks={"results": SinkSettings(plugin="csv", options={"path": "results.csv", "schema": {"fields": "dynamic"}})},
             gates=[
                 GateSettings(
                     name="gate",
@@ -570,19 +931,28 @@ class TestExecutionGraphRouteMapping:
             output_sink="results",
         )
 
-        graph = ExecutionGraph.from_config(config)
+        plugins = instantiate_plugins_from_config(config)
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(config.gates),
+            output_sink=config.output_sink,
+        )
         gate_node_id = graph.get_config_gate_id_map()["gate"]
 
         # The edge to output sink uses "continue" label (both routes resolve to continue)
         route_label = graph.get_route_label(gate_node_id, "results")
         assert route_label == "continue"
 
-    def test_hyphenated_sink_names_work_in_dag(self) -> None:
+    def test_hyphenated_sink_names_work_in_dag(self, plugin_manager) -> None:
         """Gate routing to hyphenated sink names works correctly.
 
         Regression test for gate-route-destination-name-validation-mismatch bug.
         Sink names don't need to match identifier pattern - they're just dict keys.
         """
+        from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.core.config import (
             DatasourceSettings,
             ElspethSettings,
@@ -592,10 +962,17 @@ class TestExecutionGraphRouteMapping:
         from elspeth.core.dag import ExecutionGraph
 
         config = ElspethSettings(
-            datasource=DatasourceSettings(plugin="csv"),
+            datasource=DatasourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"fields": "dynamic"},
+                },
+            ),
             sinks={
-                "output-sink": SinkSettings(plugin="csv"),
-                "quarantine-bucket": SinkSettings(plugin="csv"),
+                "output-sink": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}}),
+                "quarantine-bucket": SinkSettings(plugin="csv", options={"path": "quarantine.csv", "schema": {"fields": "dynamic"}}),
             },
             gates=[
                 GateSettings(
@@ -608,7 +985,15 @@ class TestExecutionGraphRouteMapping:
         )
 
         # DAG compilation should succeed with hyphenated sink names
-        graph = ExecutionGraph.from_config(config)
+        plugins = instantiate_plugins_from_config(config)
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(config.gates),
+            output_sink=config.output_sink,
+        )
 
         # Verify both hyphenated sinks exist
         sink_ids = graph.get_sink_id_map()
@@ -706,13 +1091,14 @@ class TestEdgeInfoIntegration:
 class TestMultiEdgeScenarios:
     """Tests for scenarios requiring multiple edges between same nodes."""
 
-    def test_fork_gate_config_parses_into_valid_graph(self) -> None:
+    def test_fork_gate_config_parses_into_valid_graph(self, plugin_manager) -> None:
         """Fork gate configuration parses into valid graph structure.
 
         Note: This tests config parsing, not the multi-edge bug. Fork routes
         with target="fork" don't create edges to sinks - they create child tokens.
         The multi-edge bug is tested by test_gate_multiple_routes_same_sink.
         """
+        from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.core.config import (
             DatasourceSettings,
             ElspethSettings,
@@ -722,8 +1108,19 @@ class TestMultiEdgeScenarios:
         from elspeth.core.dag import ExecutionGraph
 
         config = ElspethSettings(
-            datasource=DatasourceSettings(plugin="csv"),
-            sinks={"output": SinkSettings(plugin="csv")},
+            datasource=DatasourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"fields": "dynamic"},
+                },
+            ),
+            sinks={
+                "output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}}),
+                "path_a": SinkSettings(plugin="csv", options={"path": "path_a.csv", "schema": {"fields": "dynamic"}}),
+                "path_b": SinkSettings(plugin="csv", options={"path": "path_b.csv", "schema": {"fields": "dynamic"}}),
+            },
             gates=[
                 GateSettings(
                     name="fork_gate",
@@ -735,7 +1132,15 @@ class TestMultiEdgeScenarios:
             output_sink="output",
         )
 
-        graph = ExecutionGraph.from_config(config)
+        plugins = instantiate_plugins_from_config(config)
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(config.gates),
+            output_sink=config.output_sink,
+        )
 
         # Validate graph is still valid (DAG, has source and sink)
         graph.validate()
@@ -779,8 +1184,9 @@ class TestMultiEdgeScenarios:
 class TestCoalesceNodes:
     """Test coalesce node creation in DAG."""
 
-    def test_from_config_creates_coalesce_node(self) -> None:
+    def test_from_config_creates_coalesce_node(self, plugin_manager) -> None:
         """Coalesce config should create a coalesce node in the graph."""
+        from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.core.config import (
             CoalesceSettings,
             DatasourceSettings,
@@ -791,9 +1197,16 @@ class TestCoalesceNodes:
         from elspeth.core.dag import ExecutionGraph
 
         settings = ElspethSettings(
-            datasource=DatasourceSettings(plugin="csv", options={"path": "test.csv"}),
+            datasource=DatasourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"fields": "dynamic"},
+                },
+            ),
             sinks={
-                "output": SinkSettings(plugin="csv", options={"path": "out.csv"}),
+                "output": SinkSettings(plugin="csv", options={"path": "out.csv", "schema": {"fields": "dynamic"}}),
             },
             output_sink="output",
             gates=[
@@ -814,7 +1227,16 @@ class TestCoalesceNodes:
             ],
         )
 
-        graph = ExecutionGraph.from_config(settings)
+        plugins = instantiate_plugins_from_config(settings)
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(settings.gates),
+            output_sink=settings.output_sink,
+            coalesce_settings=settings.coalesce,
+        )
 
         # Use proper accessor, not string matching
         coalesce_map = graph.get_coalesce_id_map()
@@ -826,8 +1248,9 @@ class TestCoalesceNodes:
         assert node_info.node_type == "coalesce"
         assert node_info.plugin_name == "coalesce:merge_results"
 
-    def test_from_config_coalesce_edges_from_fork_branches(self) -> None:
+    def test_from_config_coalesce_edges_from_fork_branches(self, plugin_manager) -> None:
         """Coalesce node should have edges from fork gate (via branches)."""
+        from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.contracts import RoutingMode
         from elspeth.core.config import (
             CoalesceSettings,
@@ -839,9 +1262,16 @@ class TestCoalesceNodes:
         from elspeth.core.dag import ExecutionGraph
 
         settings = ElspethSettings(
-            datasource=DatasourceSettings(plugin="csv"),
+            datasource=DatasourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"fields": "dynamic"},
+                },
+            ),
             sinks={
-                "output": SinkSettings(plugin="csv"),
+                "output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}}),
             },
             output_sink="output",
             gates=[
@@ -862,7 +1292,16 @@ class TestCoalesceNodes:
             ],
         )
 
-        graph = ExecutionGraph.from_config(settings)
+        plugins = instantiate_plugins_from_config(settings)
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(settings.gates),
+            output_sink=settings.output_sink,
+            coalesce_settings=settings.coalesce,
+        )
 
         # Get node IDs
         gate_id = graph.get_config_gate_id_map()["forker"]
@@ -880,8 +1319,10 @@ class TestCoalesceNodes:
 
     def test_partial_branch_coverage_branches_not_in_coalesce_route_to_sink(
         self,
+        plugin_manager,
     ) -> None:
         """Fork branches not in any coalesce should still route to output sink."""
+        from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.core.config import (
             CoalesceSettings,
             DatasourceSettings,
@@ -892,9 +1333,17 @@ class TestCoalesceNodes:
         from elspeth.core.dag import ExecutionGraph
 
         settings = ElspethSettings(
-            datasource=DatasourceSettings(plugin="csv"),
+            datasource=DatasourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"fields": "dynamic"},
+                },
+            ),
             sinks={
-                "output": SinkSettings(plugin="csv"),
+                "output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}}),
+                "path_c": SinkSettings(plugin="csv", options={"path": "path_c.csv", "schema": {"fields": "dynamic"}}),
             },
             output_sink="output",
             gates=[
@@ -915,27 +1364,37 @@ class TestCoalesceNodes:
             ],
         )
 
-        graph = ExecutionGraph.from_config(settings)
+        plugins = instantiate_plugins_from_config(settings)
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(settings.gates),
+            output_sink=settings.output_sink,
+            coalesce_settings=settings.coalesce,
+        )
 
         # Get node IDs
         gate_id = graph.get_config_gate_id_map()["forker"]
         coalesce_id = graph.get_coalesce_id_map()["merge_results"]
-        output_sink_id = graph.get_sink_id_map()["output"]
+        path_c_sink_id = graph.get_sink_id_map()["path_c"]
 
-        # Verify path_c goes to output sink, not coalesce
+        # Verify path_c goes to path_c sink, not coalesce
         edges = graph.get_edges()
         path_c_edges = [e for e in edges if e.from_node == gate_id and e.label == "path_c"]
 
         assert len(path_c_edges) == 1
-        assert path_c_edges[0].to_node == output_sink_id
+        assert path_c_edges[0].to_node == path_c_sink_id
 
         # Verify path_a and path_b go to coalesce
         coalesce_edges = [e for e in edges if e.from_node == gate_id and e.to_node == coalesce_id]
         coalesce_labels = {e.label for e in coalesce_edges}
         assert coalesce_labels == {"path_a", "path_b"}
 
-    def test_get_coalesce_id_map_returns_mapping(self) -> None:
+    def test_get_coalesce_id_map_returns_mapping(self, plugin_manager) -> None:
         """get_coalesce_id_map should return coalesce_name -> node_id."""
+        from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.core.config import (
             CoalesceSettings,
             DatasourceSettings,
@@ -946,9 +1405,16 @@ class TestCoalesceNodes:
         from elspeth.core.dag import ExecutionGraph
 
         settings = ElspethSettings(
-            datasource=DatasourceSettings(plugin="csv"),
+            datasource=DatasourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"fields": "dynamic"},
+                },
+            ),
             sinks={
-                "output": SinkSettings(plugin="csv"),
+                "output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}}),
             },
             output_sink="output",
             gates=[
@@ -975,7 +1441,16 @@ class TestCoalesceNodes:
             ],
         )
 
-        graph = ExecutionGraph.from_config(settings)
+        plugins = instantiate_plugins_from_config(settings)
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(settings.gates),
+            output_sink=settings.output_sink,
+            coalesce_settings=settings.coalesce,
+        )
         coalesce_map = graph.get_coalesce_id_map()
 
         # Should have both coalesce nodes
@@ -989,8 +1464,9 @@ class TestCoalesceNodes:
         assert graph.has_node(coalesce_map["merge_ab"])
         assert graph.has_node(coalesce_map["merge_cd"])
 
-    def test_get_branch_to_coalesce_map_returns_mapping(self) -> None:
+    def test_get_branch_to_coalesce_map_returns_mapping(self, plugin_manager) -> None:
         """get_branch_to_coalesce_map should return branch_name -> coalesce_name."""
+        from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.core.config import (
             CoalesceSettings,
             DatasourceSettings,
@@ -1001,9 +1477,16 @@ class TestCoalesceNodes:
         from elspeth.core.dag import ExecutionGraph
 
         settings = ElspethSettings(
-            datasource=DatasourceSettings(plugin="csv"),
+            datasource=DatasourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"fields": "dynamic"},
+                },
+            ),
             sinks={
-                "output": SinkSettings(plugin="csv"),
+                "output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}}),
             },
             output_sink="output",
             gates=[
@@ -1024,15 +1507,26 @@ class TestCoalesceNodes:
             ],
         )
 
-        graph = ExecutionGraph.from_config(settings)
+        plugins = instantiate_plugins_from_config(settings)
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(settings.gates),
+            output_sink=settings.output_sink,
+            coalesce_settings=settings.coalesce,
+        )
         branch_map = graph.get_branch_to_coalesce_map()
+        coalesce_id = graph.get_coalesce_id_map()["merge_results"]
 
-        # Should map branches to coalesce name
-        assert branch_map["path_a"] == "merge_results"
-        assert branch_map["path_b"] == "merge_results"
+        # Should map branches to coalesce node ID
+        assert branch_map["path_a"] == coalesce_id
+        assert branch_map["path_b"] == coalesce_id
 
-    def test_coalesce_node_has_edge_to_output_sink(self) -> None:
+    def test_coalesce_node_has_edge_to_output_sink(self, plugin_manager) -> None:
         """Coalesce node should have an edge to the output sink."""
+        from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.contracts import RoutingMode
         from elspeth.core.config import (
             CoalesceSettings,
@@ -1044,9 +1538,16 @@ class TestCoalesceNodes:
         from elspeth.core.dag import ExecutionGraph
 
         settings = ElspethSettings(
-            datasource=DatasourceSettings(plugin="csv"),
+            datasource=DatasourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"fields": "dynamic"},
+                },
+            ),
             sinks={
-                "output": SinkSettings(plugin="csv"),
+                "output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}}),
             },
             output_sink="output",
             gates=[
@@ -1067,7 +1568,16 @@ class TestCoalesceNodes:
             ],
         )
 
-        graph = ExecutionGraph.from_config(settings)
+        plugins = instantiate_plugins_from_config(settings)
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(settings.gates),
+            output_sink=settings.output_sink,
+            coalesce_settings=settings.coalesce,
+        )
 
         coalesce_id = graph.get_coalesce_id_map()["merge_results"]
         output_sink_id = graph.get_sink_id_map()["output"]
@@ -1080,8 +1590,9 @@ class TestCoalesceNodes:
         assert coalesce_to_sink_edges[0].label == "continue"
         assert coalesce_to_sink_edges[0].mode == RoutingMode.MOVE
 
-    def test_coalesce_node_stores_config(self) -> None:
+    def test_coalesce_node_stores_config(self, plugin_manager) -> None:
         """Coalesce node should store configuration for audit trail."""
+        from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.core.config import (
             CoalesceSettings,
             DatasourceSettings,
@@ -1092,9 +1603,16 @@ class TestCoalesceNodes:
         from elspeth.core.dag import ExecutionGraph
 
         settings = ElspethSettings(
-            datasource=DatasourceSettings(plugin="csv"),
+            datasource=DatasourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"fields": "dynamic"},
+                },
+            ),
             sinks={
-                "output": SinkSettings(plugin="csv"),
+                "output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}}),
             },
             output_sink="output",
             gates=[
@@ -1117,7 +1635,16 @@ class TestCoalesceNodes:
             ],
         )
 
-        graph = ExecutionGraph.from_config(settings)
+        plugins = instantiate_plugins_from_config(settings)
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(settings.gates),
+            output_sink=settings.output_sink,
+            coalesce_settings=settings.coalesce,
+        )
 
         coalesce_id = graph.get_coalesce_id_map()["merge_results"]
         node_info = graph.get_node_info(coalesce_id)
@@ -1128,3 +1655,666 @@ class TestCoalesceNodes:
         assert node_info.config["merge"] == "nested"
         assert node_info.config["timeout_seconds"] == 30.0
         assert node_info.config["quorum_count"] == 1
+
+
+class TestSchemaValidation:
+    """Tests for graph-based schema compatibility validation."""
+
+    def test_schema_validation_catches_gate_routing_to_incompatible_sink(self) -> None:
+        """Gate routes to sink before required field is added - should fail validation.
+
+        This is the bug scenario: A gate routes rows directly to a sink from an
+        intermediate point in the pipeline, but the sink requires a field that
+        hasn't been added yet. The old linear validator checked all sinks against
+        the "final transform output", missing this incompatibility.
+        """
+        from elspeth.contracts import PluginSchema
+        from elspeth.core.dag import ExecutionGraph
+
+        class SourceSchema(PluginSchema):
+            """Source provides: name, quality."""
+
+            name: str
+            quality: str
+
+        class AddScoreSchema(PluginSchema):
+            """After add_score transform: name, quality, score."""
+
+            name: str
+            quality: str
+            score: int
+
+        class RawSinkSchema(PluginSchema):
+            """Raw sink requires: name, quality, score."""
+
+            name: str
+            quality: str
+            score: int  # NOT PROVIDED by source or gate!
+
+        graph = ExecutionGraph()
+
+        # Build pipeline: Source -> Gate -> [routes to raw_sink OR continues to add_score]
+        graph.add_node(
+            "src",
+            node_type="source",
+            plugin_name="csv",
+            output_schema=SourceSchema,
+        )
+        graph.add_node(
+            "gate",
+            node_type="gate",
+            plugin_name="quality_gate",
+            input_schema=SourceSchema,
+            output_schema=SourceSchema,  # Gate doesn't modify data
+        )
+        graph.add_node(
+            "add_score",
+            node_type="transform",
+            plugin_name="add_score_transform",
+            input_schema=SourceSchema,
+            output_schema=AddScoreSchema,  # Adds 'score' field
+        )
+        graph.add_node(
+            "raw_sink",
+            node_type="sink",
+            plugin_name="csv",
+            input_schema=RawSinkSchema,  # Requires 'score' field!
+        )
+        graph.add_node(
+            "processed_sink",
+            node_type="sink",
+            plugin_name="csv",
+            input_schema=AddScoreSchema,
+        )
+
+        # Edges
+        graph.add_edge("src", "gate", label="continue")
+        graph.add_edge("gate", "raw_sink", label="raw")  # BUG: Routes BEFORE add_score!
+        graph.add_edge("gate", "add_score", label="continue")
+        graph.add_edge("add_score", "processed_sink", label="continue")
+
+        # The gate routes to raw_sink with SourceSchema (no 'score' field),
+        # but raw_sink requires RawSinkSchema (with 'score' field).
+        # validate_edge_compatibility() raises ValueError for schema mismatches
+        with pytest.raises(ValueError, match="score"):
+            graph.validate_edge_compatibility()
+
+    def test_coalesce_rejects_incompatible_branch_schemas(self) -> None:
+        """Coalesce with incompatible branch schemas should fail validation.
+
+        CRITICAL P0 BLOCKER: Coalesce incompatible schema behavior was UNDEFINED.
+        Manual graph construction bypasses config schema limitation that
+        doesn't support per-branch transforms.
+        """
+        from elspeth.contracts import PluginSchema, RoutingMode
+        from elspeth.core.dag import ExecutionGraph
+
+        class SourceOutput(PluginSchema):
+            id: int
+            name: str
+
+        class BranchAOutput(PluginSchema):
+            """Branch A adds score field."""
+
+            id: int
+            name: str
+            score: float
+
+        class BranchBOutput(PluginSchema):
+            """Branch B adds rank field (different from Branch A)."""
+
+            id: int
+            name: str
+            rank: int
+
+        graph = ExecutionGraph()
+
+        # Build fork/join DAG with INCOMPATIBLE branch schemas
+        graph.add_node("source", node_type="source", plugin_name="csv", output_schema=SourceOutput)
+        graph.add_node("fork_gate", node_type="gate", plugin_name="fork_gate")
+
+        # Branch A: adds score field
+        graph.add_node(
+            "transform_a",
+            node_type="transform",
+            plugin_name="add_score",
+            input_schema=SourceOutput,
+            output_schema=BranchAOutput,
+        )
+
+        # Branch B: adds rank field (incompatible with Branch A)
+        graph.add_node(
+            "transform_b",
+            node_type="transform",
+            plugin_name="add_rank",
+            input_schema=SourceOutput,
+            output_schema=BranchBOutput,
+        )
+
+        # Coalesce attempts to merge incompatible schemas
+        graph.add_node(
+            "coalesce",
+            node_type="coalesce",
+            plugin_name="coalesce:merge",
+            config={
+                "branches": ["branch_a", "branch_b"],
+                "policy": "require_all",
+                "merge": "union",
+            },
+        )
+
+        graph.add_node("sink", node_type="sink", plugin_name="csv")
+
+        # Build edges
+        graph.add_edge("source", "fork_gate", label="continue", mode=RoutingMode.MOVE)
+        graph.add_edge("fork_gate", "transform_a", label="branch_a", mode=RoutingMode.COPY)
+        graph.add_edge("fork_gate", "transform_b", label="branch_b", mode=RoutingMode.COPY)
+        graph.add_edge("transform_a", "coalesce", label="branch_a", mode=RoutingMode.MOVE)
+        graph.add_edge("transform_b", "coalesce", label="branch_b", mode=RoutingMode.MOVE)
+        graph.add_edge("coalesce", "sink", label="continue", mode=RoutingMode.MOVE)
+
+        # Should crash: coalesce can't merge BranchAOutput and BranchBOutput
+        # validate_edge_compatibility() raises ValueError for schema mismatches
+        with pytest.raises(ValueError) as exc_info:
+            graph.validate_edge_compatibility()
+
+        # Error should mention incompatible schemas
+        error_msg = str(exc_info.value).lower()
+        assert "schema" in error_msg or "incompatible" in error_msg
+
+    def test_aggregation_schema_transition_in_topology(self) -> None:
+        """Aggregation with input_schema and output_schema in single topology.
+
+        Verifies source→agg validates against input_schema,
+        and agg→sink validates against output_schema.
+        """
+        from elspeth.contracts import PluginSchema
+        from elspeth.core.dag import ExecutionGraph
+
+        class SourceOutput(PluginSchema):
+            value: float
+
+        class AggregationOutput(PluginSchema):
+            count: int
+            sum: float
+
+        graph = ExecutionGraph()
+
+        graph.add_node("source", node_type="source", plugin_name="csv", output_schema=SourceOutput)
+        graph.add_node(
+            "agg",
+            node_type="aggregation",
+            plugin_name="batch_stats",
+            input_schema=SourceOutput,  # Incoming edge validates against this
+            output_schema=AggregationOutput,  # Outgoing edge validates against this
+            config={},
+        )
+        graph.add_node("sink", node_type="sink", plugin_name="csv", input_schema=AggregationOutput)
+
+        graph.add_edge("source", "agg", label="continue")
+        graph.add_edge("agg", "sink", label="continue")
+
+        # Should pass - schemas compatible at both edges
+        graph.validate()
+
+    def test_aggregation_schema_transition_incompatible_output(self) -> None:
+        """Aggregation with incompatible output_schema should fail validation."""
+        from elspeth.contracts import PluginSchema
+        from elspeth.core.dag import ExecutionGraph
+
+        class SourceOutput(PluginSchema):
+            value: float
+
+        class AggregationOutput(PluginSchema):
+            count: int
+            sum: float
+
+        class SinkInput(PluginSchema):
+            """Sink requires 'average' field not in aggregation output."""
+
+            count: int
+            sum: float
+            average: float  # NOT in AggregationOutput!
+
+        graph = ExecutionGraph()
+
+        graph.add_node("source", node_type="source", plugin_name="csv", output_schema=SourceOutput)
+        graph.add_node(
+            "agg",
+            node_type="aggregation",
+            plugin_name="batch_stats",
+            input_schema=SourceOutput,
+            output_schema=AggregationOutput,
+            config={},
+        )
+        graph.add_node("sink", node_type="sink", plugin_name="csv", input_schema=SinkInput)
+
+        graph.add_edge("source", "agg", label="continue")
+        graph.add_edge("agg", "sink", label="continue")
+
+        # Should crash - sink requires 'average' field
+        # validate_edge_compatibility() raises ValueError for schema mismatches
+        with pytest.raises(ValueError) as exc_info:
+            graph.validate_edge_compatibility()
+
+        assert "average" in str(exc_info.value).lower()
+
+    def test_schema_validation_error_includes_diagnostic_details(self) -> None:
+        """Schema validation errors include field name, producer node, consumer node."""
+        from elspeth.contracts import PluginSchema
+        from elspeth.core.dag import ExecutionGraph
+
+        class SourceOutput(PluginSchema):
+            id: int
+            name: str
+
+        class SinkInput(PluginSchema):
+            id: int
+            name: str
+            score: float  # Missing from source output
+
+        graph = ExecutionGraph()
+
+        graph.add_node("my_source", node_type="source", plugin_name="csv_reader", output_schema=SourceOutput)
+        graph.add_node("my_sink", node_type="sink", plugin_name="db_writer", input_schema=SinkInput)
+
+        graph.add_edge("my_source", "my_sink", label="continue")
+
+        # Capture error and verify diagnostic details
+        # validate_edge_compatibility() raises ValueError for schema mismatches
+        with pytest.raises(ValueError) as exc_info:
+            graph.validate_edge_compatibility()
+
+        error_msg = str(exc_info.value)
+
+        # Should include field name
+        assert "score" in error_msg.lower()
+
+        # Should include producer node ID
+        assert "my_source" in error_msg
+
+        # Should include consumer node ID
+        assert "my_sink" in error_msg
+
+
+def test_from_plugin_instances_extracts_schemas():
+    """Verify from_plugin_instances extracts schemas from instances."""
+    import tempfile
+    from pathlib import Path
+
+    from elspeth.cli_helpers import instantiate_plugins_from_config
+    from elspeth.core.config import load_settings
+    from elspeth.core.dag import ExecutionGraph
+
+    config_yaml = """
+datasource:
+  plugin: csv
+  options:
+    path: test.csv
+    schema:
+      mode: strict
+      fields:
+        - "value: float"
+    on_validation_failure: discard
+
+row_plugins:
+  - plugin: passthrough
+    options:
+      schema:
+        mode: strict
+        fields:
+          - "value: float"
+
+sinks:
+  output:
+    plugin: csv
+    options:
+      path: output.csv
+      schema:
+        mode: strict
+        fields:
+          - "value: float"
+
+output_sink: output
+"""
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+        f.write(config_yaml)
+        config_file = Path(f.name)
+
+    try:
+        config = load_settings(config_file)
+        plugins = instantiate_plugins_from_config(config)
+
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(config.gates),
+            output_sink=config.output_sink,
+            coalesce_settings=list(config.coalesce) if config.coalesce else None,
+        )
+
+        # Verify schemas extracted
+        source_nodes = [n for n, d in graph._graph.nodes(data=True) if d["info"].node_type == "source"]
+        source_info = graph.get_node_info(source_nodes[0])
+        assert source_info.output_schema is not None
+
+    finally:
+        config_file.unlink()
+
+
+def test_validate_aggregation_dual_schema():
+    """Verify aggregation edges validate against correct schemas."""
+    from elspeth.contracts.schema import SchemaConfig
+    from elspeth.core.dag import ExecutionGraph
+    from elspeth.plugins.schema_factory import create_schema_from_config
+
+    InputSchema = create_schema_from_config(
+        SchemaConfig.from_dict({"mode": "strict", "fields": ["value: float"]}),
+        "InputSchema",
+        allow_coercion=False,
+    )
+
+    OutputSchema = create_schema_from_config(
+        SchemaConfig.from_dict({"mode": "strict", "fields": ["count: int", "sum: float"]}),
+        "OutputSchema",
+        allow_coercion=False,
+    )
+
+    graph = ExecutionGraph()
+    graph.add_node("source", node_type="source", plugin_name="csv", output_schema=InputSchema)
+    graph.add_node(
+        "agg",
+        node_type="aggregation",
+        plugin_name="batch_stats",
+        input_schema=InputSchema,
+        output_schema=OutputSchema,
+        config={},
+    )
+    graph.add_node("sink", node_type="sink", plugin_name="csv", input_schema=OutputSchema)
+
+    graph.add_edge("source", "agg", label="continue")
+    graph.add_edge("agg", "sink", label="continue")
+
+    # Should pass - validate_edge_compatibility() raises ValueError on failure
+    graph.validate_edge_compatibility()  # No exception means success
+
+
+def test_validate_aggregation_detects_incompatibility():
+    """Verify validation detects aggregation output mismatch."""
+    from elspeth.contracts.schema import SchemaConfig
+    from elspeth.core.dag import ExecutionGraph
+    from elspeth.plugins.schema_factory import create_schema_from_config
+
+    InputSchema = create_schema_from_config(
+        SchemaConfig.from_dict({"mode": "strict", "fields": ["value: float"]}),
+        "InputSchema",
+        allow_coercion=False,
+    )
+
+    OutputSchema = create_schema_from_config(
+        SchemaConfig.from_dict({"mode": "strict", "fields": ["count: int"]}),  # Missing 'sum'
+        "OutputSchema",
+        allow_coercion=False,
+    )
+
+    SinkSchema = create_schema_from_config(
+        SchemaConfig.from_dict({"mode": "strict", "fields": ["count: int", "sum: float"]}),
+        "SinkSchema",
+        allow_coercion=False,
+    )
+
+    graph = ExecutionGraph()
+    graph.add_node("source", node_type="source", plugin_name="csv", output_schema=InputSchema)
+    graph.add_node(
+        "agg",
+        node_type="aggregation",
+        plugin_name="batch_stats",
+        input_schema=InputSchema,
+        output_schema=OutputSchema,
+        config={},
+    )
+    graph.add_node("sink", node_type="sink", plugin_name="csv", input_schema=SinkSchema)
+
+    graph.add_edge("source", "agg", label="continue")
+    graph.add_edge("agg", "sink", label="continue")
+
+    # Should fail - sink requires 'sum' which aggregation output doesn't provide
+    with pytest.raises(ValueError) as exc_info:
+        graph.validate_edge_compatibility()
+
+    assert "sum" in str(exc_info.value).lower()
+
+
+class TestDynamicSchemaDetection:
+    """Tests for detecting and handling dynamic schemas."""
+
+    def test_dynamic_source_to_specific_sink_should_skip_validation(self) -> None:
+        """Dynamic source → specific sink should PASS (validation skipped).
+
+        Manually constructed graph with dynamic output_schema and specific input_schema.
+        Validation should be skipped for dynamic schemas.
+        """
+        from elspeth.contracts.schema import SchemaConfig
+        from elspeth.core.dag import ExecutionGraph
+        from elspeth.plugins.schema_factory import create_schema_from_config
+
+        # Create dynamic schema (no fields, extra='allow')
+        DynamicSchema = create_schema_from_config(
+            SchemaConfig.from_dict({"fields": "dynamic"}),
+            "DynamicSchema",
+            allow_coercion=False,
+        )
+
+        # Create specific schema (has fields, extra='forbid')
+        SpecificSchema = create_schema_from_config(
+            SchemaConfig.from_dict({"mode": "strict", "fields": ["value: float", "name: str"]}),
+            "SpecificSchema",
+            allow_coercion=False,
+        )
+
+        graph = ExecutionGraph()
+        graph.add_node("source", node_type="source", plugin_name="csv", output_schema=DynamicSchema)
+        graph.add_node("sink", node_type="sink", plugin_name="csv", input_schema=SpecificSchema)
+        graph.add_edge("source", "sink", label="continue")
+
+        # Should NOT raise - validation is skipped for dynamic schemas
+        graph.validate()
+
+    def test_specific_source_to_dynamic_sink_should_skip_validation(self) -> None:
+        """Specific source → dynamic sink should PASS (validation skipped).
+
+        Manually constructed graph with specific output_schema and dynamic input_schema.
+        Validation should be skipped for dynamic schemas.
+        """
+        from elspeth.contracts.schema import SchemaConfig
+        from elspeth.core.dag import ExecutionGraph
+        from elspeth.plugins.schema_factory import create_schema_from_config
+
+        # Create specific schema
+        SpecificSchema = create_schema_from_config(
+            SchemaConfig.from_dict({"mode": "strict", "fields": ["value: float"]}),
+            "SpecificSchema",
+            allow_coercion=False,
+        )
+
+        # Create dynamic schema
+        DynamicSchema = create_schema_from_config(
+            SchemaConfig.from_dict({"fields": "dynamic"}),
+            "DynamicSchema",
+            allow_coercion=False,
+        )
+
+        graph = ExecutionGraph()
+        graph.add_node("source", node_type="source", plugin_name="csv", output_schema=SpecificSchema)
+        graph.add_node("sink", node_type="sink", plugin_name="csv", input_schema=DynamicSchema)
+        graph.add_edge("source", "sink", label="continue")
+
+        # Should NOT raise - validation is skipped for dynamic schemas
+        graph.validate()
+
+    def test_dynamic_schema_detection_in_validation(self) -> None:
+        """Dynamic schema detection correctly identifies dynamic vs explicit schemas.
+
+        Dynamic schemas have no fields and extra='allow', matching the detection
+        logic in ExecutionGraph._get_missing_required_fields().
+        """
+        from elspeth.contracts import PluginSchema
+        from elspeth.contracts.schema import SchemaConfig
+        from elspeth.plugins.schema_factory import create_schema_from_config
+
+        # Create dynamic schema
+        DynamicSchema = create_schema_from_config(
+            SchemaConfig.from_dict({"fields": "dynamic"}),
+            "DynamicSchema",
+            allow_coercion=False,
+        )
+
+        # Create explicit schema
+        ExplicitSchema = create_schema_from_config(
+            SchemaConfig.from_dict({"mode": "strict", "fields": ["value: float"]}),
+            "ExplicitSchema",
+            allow_coercion=False,
+        )
+
+        # Helper to check if schema is dynamic (matches logic in dag.py)
+        def is_dynamic_schema(schema: type[PluginSchema] | None) -> bool:
+            if schema is None:
+                return True
+            return len(schema.model_fields) == 0 and schema.model_config.get("extra") == "allow"
+
+        # Test dynamic schema detection
+        assert is_dynamic_schema(DynamicSchema) is True
+
+        # Test explicit schema detection
+        assert is_dynamic_schema(ExplicitSchema) is False
+
+        # Test backwards compat (None = dynamic)
+        assert is_dynamic_schema(None) is True
+
+
+class TestDeterministicNodeIDs:
+    """Tests for deterministic node ID generation."""
+
+    def test_node_ids_are_deterministic_for_same_config(self) -> None:
+        """Node IDs must be deterministic for checkpoint/resume compatibility."""
+        from elspeth.cli_helpers import instantiate_plugins_from_config
+        from elspeth.core.config import (
+            DatasourceSettings,
+            ElspethSettings,
+            RowPluginSettings,
+            SinkSettings,
+        )
+        from elspeth.core.dag import ExecutionGraph
+
+        config = ElspethSettings(
+            datasource=DatasourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"fields": "dynamic"},
+                },
+            ),
+            row_plugins=[
+                RowPluginSettings(
+                    plugin="passthrough",
+                    options={"schema": {"fields": "dynamic"}},
+                )
+            ],
+            sinks={"out": SinkSettings(plugin="csv", options={"path": "out.csv", "schema": {"fields": "dynamic"}})},
+            output_sink="out",
+        )
+
+        # Build graph twice with same config
+        plugins1 = instantiate_plugins_from_config(config)
+        graph1 = ExecutionGraph.from_plugin_instances(
+            source=plugins1["source"],
+            transforms=plugins1["transforms"],
+            sinks=plugins1["sinks"],
+            aggregations=plugins1["aggregations"],
+            gates=list(config.gates),
+            output_sink=config.output_sink,
+        )
+
+        plugins2 = instantiate_plugins_from_config(config)
+        graph2 = ExecutionGraph.from_plugin_instances(
+            source=plugins2["source"],
+            transforms=plugins2["transforms"],
+            sinks=plugins2["sinks"],
+            aggregations=plugins2["aggregations"],
+            gates=list(config.gates),
+            output_sink=config.output_sink,
+        )
+
+        # Node IDs must be identical
+        nodes1 = sorted(graph1._graph.nodes())
+        nodes2 = sorted(graph2._graph.nodes())
+
+        assert nodes1 == nodes2, "Node IDs must be deterministic for checkpoint compatibility"
+
+    def test_node_ids_change_when_config_changes(self) -> None:
+        """Node IDs should change if plugin config changes."""
+        from elspeth.cli_helpers import instantiate_plugins_from_config
+        from elspeth.core.config import (
+            DatasourceSettings,
+            ElspethSettings,
+            SinkSettings,
+        )
+        from elspeth.core.dag import ExecutionGraph
+
+        config1 = ElspethSettings(
+            datasource=DatasourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"fields": "dynamic"},
+                },
+            ),
+            row_plugins=[],
+            sinks={"out": SinkSettings(plugin="csv", options={"path": "out.csv", "schema": {"fields": "dynamic"}})},
+            output_sink="out",
+        )
+
+        config2 = ElspethSettings(
+            datasource=DatasourceSettings(
+                plugin="csv",
+                options={
+                    "path": "test.csv",
+                    "on_validation_failure": "discard",
+                    "schema": {"mode": "strict", "fields": ["id: int"]},  # Different!
+                },
+            ),
+            row_plugins=[],
+            sinks={"out": SinkSettings(plugin="csv", options={"path": "out.csv", "schema": {"fields": "dynamic"}})},
+            output_sink="out",
+        )
+
+        plugins1 = instantiate_plugins_from_config(config1)
+        graph1 = ExecutionGraph.from_plugin_instances(
+            source=plugins1["source"],
+            transforms=plugins1["transforms"],
+            sinks=plugins1["sinks"],
+            aggregations=plugins1["aggregations"],
+            gates=list(config1.gates),
+            output_sink=config1.output_sink,
+        )
+
+        plugins2 = instantiate_plugins_from_config(config2)
+        graph2 = ExecutionGraph.from_plugin_instances(
+            source=plugins2["source"],
+            transforms=plugins2["transforms"],
+            sinks=plugins2["sinks"],
+            aggregations=plugins2["aggregations"],
+            gates=list(config2.gates),
+            output_sink=config2.output_sink,
+        )
+
+        # Source node IDs should differ (different config)
+        source_id_1 = next(n for n in graph1._graph.nodes() if n.startswith("source_"))
+        source_id_2 = next(n for n in graph2._graph.nodes() if n.startswith("source_"))
+
+        assert source_id_1 != source_id_2

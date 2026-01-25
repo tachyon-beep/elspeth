@@ -24,6 +24,7 @@ from elspeth.plugins.protocols import (
     SourceProtocol,
     TransformProtocol,
 )
+from elspeth.plugins.validation import PluginConfigValidator
 
 
 def _schema_hash(schema_cls: Any) -> str | None:
@@ -128,6 +129,9 @@ class PluginManager:
         self._gates: dict[str, type[GateProtocol]] = {}
         self._sinks: dict[str, type[SinkProtocol]] = {}
 
+        # Config validator
+        self._validator = PluginConfigValidator()
+
     def register_builtin_plugins(self) -> None:
         """Discover and register all built-in plugins.
 
@@ -225,18 +229,184 @@ class PluginManager:
 
     # === Lookup by name ===
 
-    def get_source_by_name(self, name: str) -> type[SourceProtocol] | None:
-        """Get source plugin by name."""
-        return self._sources.get(name)
+    def get_source_by_name(self, name: str) -> type[SourceProtocol]:
+        """Get source plugin class by name.
 
-    def get_transform_by_name(self, name: str) -> type[TransformProtocol] | None:
-        """Get transform plugin by name."""
-        return self._transforms.get(name)
+        Args:
+            name: Plugin name to look up
 
-    def get_gate_by_name(self, name: str) -> type[GateProtocol] | None:
-        """Get gate plugin by name."""
-        return self._gates.get(name)
+        Returns:
+            Source plugin class
 
-    def get_sink_by_name(self, name: str) -> type[SinkProtocol] | None:
-        """Get sink plugin by name."""
-        return self._sinks.get(name)
+        Raises:
+            ValueError: If plugin not found (configuration bug, should crash)
+        """
+        if name in self._sources:
+            return self._sources[name]
+
+        available = sorted(self._sources.keys())
+        raise ValueError(f"Unknown source plugin: {name}. Available source plugins: {available}")
+
+    def get_transform_by_name(self, name: str) -> type[TransformProtocol]:
+        """Get transform plugin class by name.
+
+        Args:
+            name: Plugin name to look up
+
+        Returns:
+            Transform plugin class
+
+        Raises:
+            ValueError: If plugin not found (configuration bug, should crash)
+        """
+        if name in self._transforms:
+            return self._transforms[name]
+
+        available = sorted(self._transforms.keys())
+        raise ValueError(f"Unknown transform plugin: {name}. Available transform plugins: {available}")
+
+    def get_gate_by_name(self, name: str) -> type[GateProtocol]:
+        """Get gate plugin class by name.
+
+        Args:
+            name: Plugin name to look up
+
+        Returns:
+            Gate plugin class
+
+        Raises:
+            ValueError: If plugin not found (configuration bug, should crash)
+        """
+        if name in self._gates:
+            return self._gates[name]
+
+        available = sorted(self._gates.keys())
+        raise ValueError(f"Unknown gate plugin: {name}. Available gate plugins: {available}")
+
+    def get_sink_by_name(self, name: str) -> type[SinkProtocol]:
+        """Get sink plugin class by name.
+
+        Args:
+            name: Plugin name to look up
+
+        Returns:
+            Sink plugin class
+
+        Raises:
+            ValueError: If plugin not found (configuration bug, should crash)
+        """
+        if name in self._sinks:
+            return self._sinks[name]
+
+        available = sorted(self._sinks.keys())
+        raise ValueError(f"Unknown sink plugin: {name}. Available sink plugins: {available}")
+
+    # === Plugin creation with validation ===
+
+    def create_source(self, source_type: str, config: dict[str, Any]) -> SourceProtocol:
+        """Create source plugin instance with validated config.
+
+        Args:
+            source_type: Plugin type name (e.g., "csv", "json")
+            config: Plugin configuration dict
+
+        Returns:
+            Instantiated source plugin
+
+        Raises:
+            ValueError: If config is invalid or plugin type not found
+        """
+        # Validate config first
+        errors = self._validator.validate_source_config(source_type, config)
+        if errors:
+            # Format errors into readable message with field names
+            error_lines = [f"  - {err.field}: {err.message}" for err in errors]
+            error_msg = f"Invalid configuration for source '{source_type}':\n" + "\n".join(error_lines)
+            raise ValueError(error_msg)
+
+        # Get plugin class
+        plugin_cls = self.get_source_by_name(source_type)
+
+        # Instantiate with validated config
+        return plugin_cls(config)
+
+    def create_transform(self, transform_type: str, config: dict[str, Any]) -> TransformProtocol:
+        """Create transform plugin instance with validated config.
+
+        Args:
+            transform_type: Plugin type name (e.g., "passthrough", "field_mapper")
+            config: Plugin configuration dict
+
+        Returns:
+            Instantiated transform plugin
+
+        Raises:
+            ValueError: If config is invalid or plugin type not found
+        """
+        # Validate config first
+        errors = self._validator.validate_transform_config(transform_type, config)
+        if errors:
+            # Format errors into readable message with field names
+            error_lines = [f"  - {err.field}: {err.message}" for err in errors]
+            error_msg = f"Invalid configuration for transform '{transform_type}':\n" + "\n".join(error_lines)
+            raise ValueError(error_msg)
+
+        # Get plugin class
+        plugin_cls = self.get_transform_by_name(transform_type)
+
+        # Instantiate with validated config
+        return plugin_cls(config)
+
+    def create_gate(self, gate_type: str, config: dict[str, Any]) -> GateProtocol:
+        """Create gate plugin instance with validated config.
+
+        Args:
+            gate_type: Plugin type name
+            config: Plugin configuration dict
+
+        Returns:
+            Instantiated gate plugin
+
+        Raises:
+            ValueError: If config is invalid or plugin type not found
+        """
+        # Validate config first
+        errors = self._validator.validate_gate_config(gate_type, config)
+        if errors:
+            # Format errors into readable message with field names
+            error_lines = [f"  - {err.field}: {err.message}" for err in errors]
+            error_msg = f"Invalid configuration for gate '{gate_type}':\n" + "\n".join(error_lines)
+            raise ValueError(error_msg)
+
+        # Get plugin class
+        plugin_cls = self.get_gate_by_name(gate_type)
+
+        # Instantiate with validated config
+        return plugin_cls(config)
+
+    def create_sink(self, sink_type: str, config: dict[str, Any]) -> SinkProtocol:
+        """Create sink plugin instance with validated config.
+
+        Args:
+            sink_type: Plugin type name (e.g., "csv", "json")
+            config: Plugin configuration dict
+
+        Returns:
+            Instantiated sink plugin
+
+        Raises:
+            ValueError: If config is invalid or plugin type not found
+        """
+        # Validate config first
+        errors = self._validator.validate_sink_config(sink_type, config)
+        if errors:
+            # Format errors into readable message with field names
+            error_lines = [f"  - {err.field}: {err.message}" for err in errors]
+            error_msg = f"Invalid configuration for sink '{sink_type}':\n" + "\n".join(error_lines)
+            raise ValueError(error_msg)
+
+        # Get plugin class
+        plugin_cls = self.get_sink_by_name(sink_type)
+
+        # Instantiate with validated config
+        return plugin_cls(config)

@@ -281,6 +281,8 @@ class AzureBlobSource(BaseSource):
         # Lazy-loaded blob client
         self._blob_client: BlobClient | None = None
 
+        # PHASE 1: Validate self-consistency
+
     def _get_blob_client(self) -> BlobClient:
         """Get or create the Azure Blob client.
 
@@ -358,15 +360,39 @@ class AzureBlobSource(BaseSource):
         except UnicodeDecodeError as e:
             raise ValueError(f"Failed to decode blob as {encoding}: {e}") from e
 
-        # Use pandas for robust CSV parsing (consistent with CSVSource)
-        header_arg = 0 if has_header else None
-        df = pd.read_csv(
-            io.StringIO(text_data),
-            delimiter=delimiter,
-            header=header_arg,
-            dtype=str,  # Keep all values as strings for consistent handling
-            keep_default_na=False,  # Don't convert empty strings to NaN
-        )
+        # BUG-BLOB-01 fix: Wrap pandas CSV parsing to quarantine on structural errors
+        # Even with pandas' robustness, severely malformed CSVs can cause parse failures
+        try:
+            # Use pandas for robust CSV parsing (consistent with CSVSource)
+            header_arg = 0 if has_header else None
+            df = pd.read_csv(
+                io.StringIO(text_data),
+                delimiter=delimiter,
+                header=header_arg,
+                dtype=str,  # Keep all values as strings for consistent handling
+                keep_default_na=False,  # Don't convert empty strings to NaN
+                on_bad_lines="warn",  # Warn but skip bad lines instead of crashing
+            )
+        except Exception as e:
+            # Catastrophic CSV structure failure - entire file unparseable
+            # This is rare with pandas but can happen with severely malformed files
+            error_msg = f"CSV parse error: Unable to parse blob structure: {e}"
+            raw_row = {"__raw_blob_preview__": text_data[:200], "__encoding__": encoding}
+
+            ctx.record_validation_error(
+                row=raw_row,
+                error=error_msg,
+                schema_mode="parse",
+                destination=self._on_validation_failure,
+            )
+
+            if self._on_validation_failure != "discard":
+                yield SourceRow.quarantined(
+                    row=raw_row,
+                    error=error_msg,
+                    destination=self._on_validation_failure,
+                )
+            return  # No rows to process if file is completely unparseable
 
         # DataFrame columns are strings from CSV headers
         for record in df.to_dict(orient="records"):

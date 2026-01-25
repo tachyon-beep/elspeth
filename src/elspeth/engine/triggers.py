@@ -71,6 +71,18 @@ class TriggerEvaluator:
             return 0.0
         return time.monotonic() - self._first_accept_time
 
+    def get_age_seconds(self) -> float:
+        """Get elapsed time since first accept (alias for batch_age_seconds).
+
+        This method exists for clarity when checkpointing - it returns the
+        elapsed time that should be stored in checkpoint state for timeout
+        preservation across resume.
+
+        Returns:
+            Elapsed seconds since first accept, or 0.0 if no accepts yet
+        """
+        return self.batch_age_seconds
+
     def record_accept(self) -> None:
         """Record that a row was accepted into the batch.
 

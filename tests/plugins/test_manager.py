@@ -111,11 +111,7 @@ class TestPluginManager:
         manager.register(MyPlugin())
 
         transform = manager.get_transform_by_name("transform_b")
-        assert transform is not None
         assert transform.name == "transform_b"
-
-        missing = manager.get_transform_by_name("nonexistent")
-        assert missing is None
 
 
 class TestPluginSpec:
@@ -264,6 +260,44 @@ class TestPluginSpecSchemaHashes:
         assert spec1.input_schema_hash == spec2.input_schema_hash
 
 
+class TestMissingPluginRaises:
+    """Verify PluginManager raises on unknown plugins."""
+
+    def test_get_source_by_name_raises_on_unknown_plugin(self) -> None:
+        """Verify PluginManager raises ValueError for unknown source plugins."""
+        import pytest
+
+        from elspeth.plugins.manager import PluginManager
+
+        manager = PluginManager()
+
+        # Try to get plugin that doesn't exist
+        with pytest.raises(ValueError, match="Unknown source plugin: nonexistent"):
+            manager.get_source_by_name("nonexistent")
+
+    def test_get_transform_by_name_raises_on_unknown_plugin(self) -> None:
+        """Verify PluginManager raises ValueError for unknown transform plugins."""
+        import pytest
+
+        from elspeth.plugins.manager import PluginManager
+
+        manager = PluginManager()
+
+        with pytest.raises(ValueError, match="Unknown transform plugin: nonexistent"):
+            manager.get_transform_by_name("nonexistent")
+
+    def test_get_sink_by_name_raises_on_unknown_plugin(self) -> None:
+        """Verify PluginManager raises ValueError for unknown sink plugins."""
+        import pytest
+
+        from elspeth.plugins.manager import PluginManager
+
+        manager = PluginManager()
+
+        with pytest.raises(ValueError, match="Unknown sink plugin: nonexistent"):
+            manager.get_sink_by_name("nonexistent")
+
+
 class TestDiscoveryBasedRegistration:
     """Test PluginManager with automatic discovery."""
 
@@ -303,3 +337,48 @@ class TestDiscoveryBasedRegistration:
 
         assert "csv" in names
         assert "json" in names
+
+
+class TestManagerValidation:
+    """PluginManager validates configs before instantiation."""
+
+    def test_manager_validates_before_instantiation(self) -> None:
+        """Invalid config raises ValueError with field name."""
+        import pytest
+
+        from elspeth.plugins.manager import PluginManager
+
+        manager = PluginManager()
+        manager.register_builtin_plugins()
+
+        # Invalid config - missing required 'path'
+        invalid_config = {
+            "schema": {"fields": "dynamic"},
+            "on_validation_failure": "quarantine",
+        }
+
+        with pytest.raises(ValueError) as exc_info:
+            manager.create_source("csv", invalid_config)
+
+        # Error message should mention the field name
+        assert "path" in str(exc_info.value)
+
+    def test_manager_creates_plugin_with_valid_config(self) -> None:
+        """Valid config creates working plugin."""
+        from elspeth.plugins.manager import PluginManager
+
+        manager = PluginManager()
+        manager.register_builtin_plugins()
+
+        valid_config = {
+            "path": "/tmp/test.csv",
+            "schema": {"fields": "dynamic"},
+            "on_validation_failure": "quarantine",
+        }
+
+        source = manager.create_source("csv", valid_config)
+
+        # Verify plugin is functional
+        assert source.name == "csv"
+        assert source.output_schema is not None
+        assert hasattr(source, "load")

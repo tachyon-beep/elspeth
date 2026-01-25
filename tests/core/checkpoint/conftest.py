@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from elspeth.core.checkpoint import CheckpointManager, RecoveryManager
+from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.schema import (
     nodes_table,
@@ -15,6 +16,30 @@ from elspeth.core.landscape.schema import (
     tokens_table,
 )
 from elspeth.core.payload_store import FilesystemPayloadStore
+
+
+def _create_test_graph(checkpoint_node: str = "sink-node") -> ExecutionGraph:
+    """Create a minimal test graph for checkpoint tests.
+
+    Args:
+        checkpoint_node: The node ID where checkpoint will be created.
+                        If not in default nodes, it will be added as a sink.
+    """
+    graph = ExecutionGraph()
+    graph.add_node("source-node", node_type="source", plugin_name="test-source", config={})
+    graph.add_node("transform-node", node_type="transform", plugin_name="test-transform", config={})
+
+    # Add the checkpoint node if it's custom
+    if checkpoint_node not in ["source-node", "transform-node", "sink-node"]:
+        graph.add_node(checkpoint_node, node_type="sink", plugin_name="test-sink", config={})
+        graph.add_edge("source-node", "transform-node", label="continue")
+        graph.add_edge("transform-node", checkpoint_node, label="continue")
+    else:
+        graph.add_node("sink-node", node_type="sink", plugin_name="test-sink", config={})
+        graph.add_edge("source-node", "transform-node", label="continue")
+        graph.add_edge("transform-node", "sink-node", label="continue")
+
+    return graph
 
 
 @pytest.fixture
@@ -114,11 +139,13 @@ def run_with_checkpoint_and_payloads(
         conn.commit()
 
     # Create checkpoint at row 2 (rows 3-4 are unprocessed)
+    graph = _create_test_graph()
     checkpoint_manager.create_checkpoint(
         run_id=run_id,
         token_id="tok-002",
         node_id="source-node",
         sequence_number=2,
+        graph=graph,
     )
 
     return run_id

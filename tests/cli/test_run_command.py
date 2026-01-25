@@ -183,14 +183,27 @@ class TestRunCommandGraphValidation:
 
     def test_run_validates_graph_before_execution(self, tmp_path: Path) -> None:
         """Run command validates graph before any execution."""
+        # Create minimal valid CSV file
+        csv_file = tmp_path / "test.csv"
+        csv_file.write_text("field_a\nvalue1\n")
+
         config_file = tmp_path / "settings.yaml"
-        config_file.write_text("""
+        config_file.write_text(f"""
 datasource:
   plugin: csv
+  options:
+    path: {csv_file}
+    schema:
+      fields: dynamic
+    on_validation_failure: quarantine
 
 sinks:
   output:
     plugin: csv
+    options:
+      path: {tmp_path / "output.csv"}
+      schema:
+        fields: dynamic
 
 gates:
   - name: bad_gate
@@ -204,23 +217,40 @@ output_sink: output
 
         result = runner.invoke(app, ["run", "-s", str(config_file), "--execute"])
 
-        # Should fail at validation, not during execution
+        # Should fail at graph validation (missing_sink doesn't exist), not during execution
         assert result.exit_code != 0
         output = result.stdout + (result.stderr or "")
         assert "missing_sink" in output.lower() or "graph" in output.lower()
 
     def test_dry_run_shows_graph_info(self, tmp_path: Path) -> None:
         """Dry run shows graph structure."""
+        # Create test CSV file
+        csv_file = tmp_path / "test.csv"
+        csv_file.write_text("field_a\nvalue1\n")
+
         config_file = tmp_path / "settings.yaml"
-        config_file.write_text("""
+        config_file.write_text(f"""
 datasource:
   plugin: csv
+  options:
+    path: {csv_file}
+    schema:
+      fields: dynamic
+    on_validation_failure: quarantine
 
 sinks:
   results:
     plugin: csv
+    options:
+      path: {tmp_path / "results.csv"}
+      schema:
+        fields: dynamic
   flagged:
     plugin: csv
+    options:
+      path: {tmp_path / "flagged.csv"}
+      schema:
+        fields: dynamic
 
 gates:
   - name: classifier
@@ -287,17 +317,15 @@ class TestRunCommandResourceCleanup:
         settings_file.write_text(yaml.dump(settings))
 
         # Track if close was called
-        close_called = []
-        original_close = None
-
-        def track_close(self: object) -> None:
-            close_called.append(True)
-            if original_close:
-                original_close(self)
+        close_called: list[bool] = []
 
         from elspeth.core.landscape import LandscapeDB
 
         original_close = LandscapeDB.close
+
+        def track_close(self: LandscapeDB) -> None:
+            close_called.append(True)
+            original_close(self)
 
         with patch.object(LandscapeDB, "close", track_close):
             result = runner.invoke(app, ["run", "--settings", str(settings_file), "--execute"])
@@ -346,17 +374,15 @@ class TestRunCommandResourceCleanup:
         settings_file.write_text(yaml.dump(settings))
 
         # Track if close was called
-        close_called = []
-        original_close = None
-
-        def track_close(self: object) -> None:
-            close_called.append(True)
-            if original_close:
-                original_close(self)
+        close_called: list[bool] = []
 
         from elspeth.core.landscape import LandscapeDB
 
         original_close = LandscapeDB.close
+
+        def track_close(self: LandscapeDB) -> None:
+            close_called.append(True)
+            original_close(self)
 
         with patch.object(LandscapeDB, "close", track_close):
             result = runner.invoke(app, ["run", "--settings", str(settings_file), "--execute"])
@@ -438,7 +464,7 @@ class TestRunCommandProgress:
 class TestRunCommandGraphReuse:
     """Verify that run command constructs ExecutionGraph only once."""
 
-    def test_run_constructs_graph_once(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_run_constructs_graph_once(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, plugin_manager) -> None:
         """run command constructs ExecutionGraph once and reuses validated instance.
 
         Regression test for P2-2026-01-20-cli-run-rebuilds-unvalidated-graph.
@@ -479,14 +505,14 @@ landscape:
   url: sqlite:///{landscape_db}
 """)
 
-        # Track how many times ExecutionGraph.from_config is called
-        from_config_calls = []
-        original_from_config = ExecutionGraph.from_config
+        # Track how many times ExecutionGraph.from_plugin_instances is called
+        from_instances_calls = []
+        original_from_instances = ExecutionGraph.from_plugin_instances
 
-        def tracked_from_config(*args, **kwargs):
-            graph = original_from_config(*args, **kwargs)
+        def tracked_from_instances(*args, **kwargs):
+            graph = original_from_instances(*args, **kwargs)
             # Record the graph instance and its node IDs
-            from_config_calls.append(
+            from_instances_calls.append(
                 {
                     "graph_id": id(graph),
                     "node_ids": sorted(graph._graph.nodes()),
@@ -494,26 +520,28 @@ landscape:
             )
             return graph
 
-        with patch.object(ExecutionGraph, "from_config", side_effect=tracked_from_config):
+        with patch.object(ExecutionGraph, "from_plugin_instances", side_effect=tracked_from_instances):
             result = runner.invoke(app, ["run", "--settings", str(settings_file), "--execute"])
             assert result.exit_code == 0
 
-        # CRITICAL: from_config should be called exactly once
-        assert len(from_config_calls) == 1, (
-            f"Expected ExecutionGraph.from_config() to be called once, "
-            f"but it was called {len(from_config_calls)} times. "
-            f"This means run() builds one graph and _execute_pipeline() builds another, "
+        # CRITICAL: from_plugin_instances should be called exactly once
+        assert len(from_instances_calls) == 1, (
+            f"Expected ExecutionGraph.from_plugin_instances() to be called once, "
+            f"but it was called {len(from_instances_calls)} times. "
+            f"This means run() builds one graph and _execute_pipeline_with_instances() builds another, "
             f"so validation doesn't apply to the executed graph."
         )
 
-    def test_validated_graph_has_consistent_node_ids(self, tmp_path: Path) -> None:
-        """Validated graph node IDs match those recorded in Landscape.
+    def test_validated_graph_has_consistent_node_ids(self, tmp_path: Path, plugin_manager) -> None:
+        """Node IDs are deterministic across graph rebuilds.
 
-        Ensures the graph passed to orchestrator.run() is the same instance
-        that was validated, not a rebuilt graph with different UUIDs.
+        Verifies that building a graph from the same config produces identical
+        node IDs. This is critical for checkpoint compatibility - resuming a
+        run requires matching node IDs between the checkpoint and rebuilt graph.
         """
         from sqlalchemy import select
 
+        from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.core.dag import ExecutionGraph
         from elspeth.core.landscape import LandscapeDB, nodes_table
 
@@ -563,17 +591,24 @@ landscape:
         # If _execute_pipeline() rebuilt the graph, these would be different UUIDs
         assert len(recorded_node_ids) > 0, "Expected nodes to be recorded in Landscape"
 
-        # Build graph from same config and verify UUIDs are different
-        # (proves that rebuilding produces different IDs)
+        # Build graph from same config and verify node IDs are identical
+        # (proves deterministic node ID generation)
         from elspeth.cli import load_settings
 
         config = load_settings(settings_file)
-        rebuilt_graph = ExecutionGraph.from_config(config)
+        plugins = instantiate_plugins_from_config(config)
+        rebuilt_graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(config.gates),
+            output_sink=config.output_sink,
+        )
         rebuilt_node_ids = set(rebuilt_graph._graph.nodes())
 
-        # Node IDs should differ (due to UUID randomization)
-        assert recorded_node_ids != rebuilt_node_ids, (
-            "Rebuilding graph should produce different node IDs (UUIDs change). "
-            "This test verifies that the fix ensures the validated graph is executed, "
-            "not a rebuilt one."
+        # Node IDs should be identical (due to deterministic generation)
+        assert recorded_node_ids == rebuilt_node_ids, (
+            "Rebuilding graph should produce identical node IDs (deterministic generation). "
+            "This ensures checkpoint compatibility - same config = same node IDs."
         )

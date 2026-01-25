@@ -37,9 +37,10 @@ class TestRowResultOutcome:
         )
         # AUD-001: RowOutcome is now (str, Enum) for token_outcomes table storage.
         # The enum instance IS equal to the raw string for database serialization.
-        assert result.outcome == "completed"  # type: ignore[comparison-overlap]
-        # Value can also be accessed explicitly
-        assert result.outcome.value == "completed"
+        # Access .value first to avoid mypy type narrowing from string comparison.
+        outcome = result.outcome
+        assert outcome.value == "completed"
+        assert outcome == "completed"  # type: ignore[comparison-overlap]
 
     def test_consumed_in_batch_outcome(self) -> None:
         """CONSUMED_IN_BATCH maps to consumed_in_batch value."""

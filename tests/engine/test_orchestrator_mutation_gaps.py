@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from elspeth.contracts import Determinism, SourceRow
+from elspeth.contracts import Determinism, RunStatus, SourceRow
 from elspeth.engine.orchestrator import PipelineConfig, RouteValidationError, RunResult
 from tests.conftest import (
     _TestSchema,
@@ -47,7 +47,7 @@ class TestRunResultDefaults:
         # Create RunResult with only required fields
         result = RunResult(
             run_id="test-run",
-            status="completed",
+            status=RunStatus.COMPLETED,
             rows_processed=10,
             rows_succeeded=10,
             rows_failed=0,
@@ -61,7 +61,7 @@ class TestRunResultDefaults:
         """Line 82: rows_quarantined must default to 0."""
         result = RunResult(
             run_id="test-run",
-            status="completed",
+            status=RunStatus.COMPLETED,
             rows_processed=10,
             rows_succeeded=10,
             rows_failed=0,
@@ -75,7 +75,7 @@ class TestRunResultDefaults:
         """Line 83: rows_forked must default to 0."""
         result = RunResult(
             run_id="test-run",
-            status="completed",
+            status=RunStatus.COMPLETED,
             rows_processed=10,
             rows_succeeded=10,
             rows_failed=0,
@@ -88,7 +88,7 @@ class TestRunResultDefaults:
         """Line 84: rows_coalesced must default to 0."""
         result = RunResult(
             run_id="test-run",
-            status="completed",
+            status=RunStatus.COMPLETED,
             rows_processed=10,
             rows_succeeded=10,
             rows_failed=0,
@@ -101,7 +101,7 @@ class TestRunResultDefaults:
         """Line 85: rows_expanded must default to 0."""
         result = RunResult(
             run_id="test-run",
-            status="completed",
+            status=RunStatus.COMPLETED,
             rows_processed=10,
             rows_succeeded=10,
             rows_failed=0,
@@ -114,7 +114,7 @@ class TestRunResultDefaults:
         """Line 86: rows_buffered must default to 0."""
         result = RunResult(
             run_id="test-run",
-            status="completed",
+            status=RunStatus.COMPLETED,
             rows_processed=10,
             rows_succeeded=10,
             rows_failed=0,
@@ -141,8 +141,8 @@ class TestPipelineConfigDefaults:
             name = "minimal_source"
             output_schema = _TestSchema
 
-            def wrap_rows(self) -> Iterator[SourceRow]:
-                yield SourceRow(row_id=0, data={"x": 1})
+            def load(self, ctx: Any) -> Iterator[SourceRow]:
+                yield SourceRow.valid({"x": 1})
 
         return MinimalSource()
 
@@ -392,8 +392,8 @@ class TestSourceQuarantineValidation:
             output_schema = _TestSchema
             _on_validation_failure = "discard"
 
-            def wrap_rows(self) -> Iterator[SourceRow]:
-                yield SourceRow(row_id=0, data={"x": 1})
+            def load(self, ctx: Any) -> Iterator[SourceRow]:
+                yield SourceRow.valid({"x": 1})
 
         source = SourceDiscardInvalid()
         available_sinks = {"output"}
@@ -412,8 +412,8 @@ class TestSourceQuarantineValidation:
             output_schema = _TestSchema
             _on_validation_failure = "nonexistent_quarantine"
 
-            def wrap_rows(self) -> Iterator[SourceRow]:
-                yield SourceRow(row_id=0, data={"x": 1})
+            def load(self, ctx: Any) -> Iterator[SourceRow]:
+                yield SourceRow.valid({"x": 1})
 
         source = SourceBadQuarantine()
         available_sinks = {"output", "errors"}
@@ -478,8 +478,10 @@ class TestCheckpointSequencing:
         the counter without attempting DB insert (avoids FK constraint on run_id).
         The increment at line 152 happens unconditionally when checkpointing is enabled.
         """
+        from elspeth.contracts import RoutingMode
         from elspeth.core.checkpoint import CheckpointManager
         from elspeth.core.config import CheckpointSettings
+        from elspeth.core.dag import ExecutionGraph
         from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import Orchestrator
 
@@ -493,6 +495,15 @@ class TestCheckpointSequencing:
             checkpoint_manager=checkpoint_manager,
             checkpoint_settings=checkpoint_settings,
         )
+
+        # Build graph matching the nodes used in _maybe_checkpoint calls
+        graph = ExecutionGraph()
+        graph.add_node("source-1", node_type="source", plugin_name="null", config={})
+        graph.add_node("sink-1", node_type="sink", plugin_name="csv", config={})
+        graph.add_edge("source-1", "sink-1", label="continue", mode=RoutingMode.MOVE)
+
+        # Set the graph on the orchestrator (normally done in execute())
+        orchestrator._current_graph = graph
 
         # Initial sequence number
         assert orchestrator._sequence_number == 0

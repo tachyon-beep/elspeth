@@ -8,6 +8,7 @@ Each executor handles a specific plugin type:
 - SinkExecutor: Output sinks (Task 16)
 """
 
+import logging
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -15,6 +16,7 @@ from typing import TYPE_CHECKING, Any
 
 from elspeth.contracts import (
     Artifact,
+    BatchPendingError,
     ExecutionError,
     NodeStateOpen,
     RoutingAction,
@@ -29,7 +31,6 @@ from elspeth.engine.expression_parser import ExpressionParser
 from elspeth.engine.spans import SpanFactory
 from elspeth.engine.triggers import TriggerEvaluator
 from elspeth.plugins.context import PluginContext
-from elspeth.plugins.llm.batch_errors import BatchPendingError
 from elspeth.plugins.protocols import (
     GateProtocol,
     SinkProtocol,
@@ -42,6 +43,19 @@ from elspeth.plugins.results import (
 
 if TYPE_CHECKING:
     from elspeth.engine.tokens import TokenManager
+
+__all__ = [
+    "AggregationExecutor",
+    "GateExecutor",
+    "GateOutcome",
+    "MissingEdgeError",
+    "SinkExecutor",
+    "TokenInfo",  # Re-exported from contracts for convenience
+    "TransformExecutor",
+    "TriggerType",  # Re-exported from contracts.enums for convenience
+]
+
+logger = logging.getLogger(__name__)
 
 
 class MissingEdgeError(Exception):
@@ -360,6 +374,12 @@ class GateExecutor:
             step_index=step_in_pipeline,
             input_data=token.row_data,
         )
+
+        # BUG-RECORDER-01 fix: Set state_id on context for external call recording
+        # Gates may need to make external calls (e.g., LLM API for routing decisions)
+        ctx.state_id = state.state_id
+        ctx.node_id = gate.node_id
+        ctx._call_index = 0  # Reset call index for this state
 
         # Execute with timing and span
         with self._spans.gate_span(gate.name, input_hash=input_hash):
@@ -890,6 +910,17 @@ class AggregationExecutor:
         if not buffered_rows:
             raise RuntimeError(f"Cannot flush empty buffer for node {node_id}")
 
+        # Defensive validation: buffer and tokens must be same length
+        # This should never happen (checkpoint restore ensures they stay in sync)
+        # but crashes explicitly if internal state is corrupted
+        if len(buffered_rows) != len(buffered_tokens):
+            raise RuntimeError(
+                f"Internal state corruption in AggregationExecutor node '{node_id}': "
+                f"buffer has {len(buffered_rows)} rows but tokens has {len(buffered_tokens)} entries. "
+                f"These must always match. This indicates a bug in checkpoint "
+                f"restore or buffer management."
+            )
+
         # Compute input hash for batch (hash of all input rows)
         input_hash = stable_hash(buffered_rows)
 
@@ -1068,56 +1099,181 @@ class AggregationExecutor:
         return len(self._buffers.get(node_id, []))
 
     def get_checkpoint_state(self) -> dict[str, Any]:
-        """Get serializable state for checkpointing.
+        """Return checkpoint state for persistence.
 
-        Returns a dict that can be JSON-serialized and stored in
-        checkpoint.aggregation_state_json. On recovery, pass this
-        to restore_from_checkpoint().
+        Stores complete TokenInfo objects (not just IDs) to enable restoration
+        without database queries. Validates size to prevent pathological growth.
 
         Returns:
-            Dict mapping node_id -> buffer state (only non-empty buffers)
-        """
-        state: dict[str, Any] = {}
-        for node_id in self._buffers:
-            if self._buffers[node_id]:  # Only include non-empty buffers
-                state[node_id] = {
-                    "rows": list(self._buffers[node_id]),
-                    "token_ids": [t.token_id for t in self._buffer_tokens[node_id]],
-                    "batch_id": self._batch_ids.get(node_id),
+            dict[str, Any]: Checkpoint state with format:
+                {
+                    "node_id_1": {
+                        "tokens": [
+                            {
+                                "token_id": str,
+                                "row_id": str,
+                                "branch_name": str | None,
+                                "row_data": dict[str, Any]
+                            },
+                            ...
+                        ]
+                    },
+                    ...
                 }
+
+        Raises:
+            RuntimeError: If checkpoint exceeds 10MB size limit
+        """
+        import json
+        import logging
+
+        logger = logging.getLogger(__name__)
+
+        # Build checkpoint state from all buffers
+        state: dict[str, Any] = {}
+        for node_id, tokens in self._buffer_tokens.items():
+            if not tokens:  # Only include non-empty buffers
+                continue
+
+            # Get timeout elapsed time for SLA preservation (Bug #6 fix)
+            evaluator = self._trigger_evaluators.get(node_id)
+            elapsed_age_seconds = evaluator.get_age_seconds() if evaluator is not None else 0.0
+
+            # Store full TokenInfo as dicts (not just IDs)
+            state[node_id] = {
+                "tokens": [
+                    {
+                        "token_id": t.token_id,
+                        "row_id": t.row_id,
+                        "branch_name": t.branch_name,
+                        "row_data": t.row_data,
+                    }
+                    for t in tokens
+                ],
+                "batch_id": self._batch_ids.get(node_id),
+                "elapsed_age_seconds": elapsed_age_seconds,  # Bug #6: Preserve timeout window
+            }
+
+        # Add version field for future compatibility (Bug #12 fix)
+        state["_version"] = "1.0"
+
+        # Size validation (on serialized checkpoint)
+        serialized = json.dumps(state)
+        size_mb = len(serialized) / 1_000_000
+        total_rows = sum(len(b) for b in self._buffer_tokens.values())
+
+        if size_mb > 1:
+            logger.warning(f"Large checkpoint: {size_mb:.1f}MB for {total_rows} buffered rows across {len(state)} nodes")
+
+        if size_mb > 10:
+            raise RuntimeError(
+                f"Checkpoint size {size_mb:.1f}MB exceeds 10MB limit. "
+                f"Buffer contains {total_rows} total rows across {len(state)} nodes. "
+                f"Solutions: (1) Reduce aggregation count trigger to <5000 rows, "
+                f"(2) Reduce row_data payload size, or (3) Implement checkpoint retention "
+                f"policy (see P3-2026-01-21). See capacity planning in "
+                f"docs/plans/2026-01-24-fix-aggregation-checkpoint-restore.md"
+            )
+
         return state
 
     def restore_from_checkpoint(self, state: dict[str, Any]) -> None:
-        """Restore buffer state from checkpoint.
+        """Restore executor state from checkpoint.
 
-        Called during recovery to restore buffers from a previous
-        run's checkpoint. Also restores trigger evaluator counts.
+        Reconstructs full TokenInfo objects from checkpoint data, eliminating
+        database queries during restoration. Expects format from get_checkpoint_state().
 
         Args:
-            state: Dict from get_checkpoint_state() of previous run
+            state: Checkpoint state with format:
+                {
+                    "_version": "1.0",
+                    "node_id": {
+                        "tokens": [{"token_id", "row_id", "branch_name", "row_data"}],
+                        "batch_id": str | None
+                    }
+                }
+
+        Raises:
+            ValueError: If checkpoint format is invalid (per CLAUDE.md - our data, full trust)
         """
+        # Validate checkpoint version (Bug #12 fix)
+        CHECKPOINT_VERSION = "1.0"
+        version = state.get("_version")
+
+        if version != CHECKPOINT_VERSION:
+            raise ValueError(
+                f"Incompatible checkpoint version: {version!r}. "
+                f"Expected: {CHECKPOINT_VERSION!r}. "
+                f"Cannot resume from incompatible checkpoint format. "
+                f"This checkpoint may be from a different ELSPETH version."
+            )
+
         for node_id, node_state in state.items():
-            rows = node_state.get("rows", [])
+            # Skip version metadata field
+            if node_id == "_version":
+                continue
+            # Validate checkpoint format (OUR DATA - crash on mismatch, don't hide with .get())
+            if "tokens" not in node_state:
+                raise ValueError(
+                    f"Invalid checkpoint format for node {node_id}: missing 'tokens' key. "
+                    f"Found keys: {list(node_state.keys())}. "
+                    f"Expected format: {{'tokens': [...], 'batch_id': str|None}}. "
+                    f"This checkpoint may be from an incompatible ELSPETH version."
+                )
+
+            tokens_data = node_state["tokens"]
+
+            # Validate tokens is a list
+            if not isinstance(tokens_data, list):
+                raise ValueError(f"Invalid checkpoint format for node {node_id}: 'tokens' must be a list, got {type(tokens_data).__name__}")
+
+            # Reconstruct TokenInfo objects directly from checkpoint
+            reconstructed_tokens = []
+            for t in tokens_data:
+                # Validate required fields (crash on missing - per CLAUDE.md)
+                required_fields = {"token_id", "row_id", "row_data"}
+                missing = required_fields - set(t.keys())
+                if missing:
+                    raise ValueError(
+                        f"Checkpoint token missing required fields: {missing}. Required: {required_fields}. Found: {set(t.keys())}"
+                    )
+
+                # Reconstruct with explicit handling of optional field
+                # branch_name is OPTIONAL per TokenInfo contract (default=None)
+                reconstructed_tokens.append(
+                    TokenInfo(
+                        row_id=t["row_id"],
+                        token_id=t["token_id"],
+                        row_data=t["row_data"],
+                        branch_name=t.get("branch_name"),  # Optional field, None if missing
+                    )
+                )
+
+            # Restore buffer state
+            self._buffer_tokens[node_id] = reconstructed_tokens
+            self._buffers[node_id] = [t.row_data for t in reconstructed_tokens]
+
+            # Restore batch tracking (batch_id is optional)
             batch_id = node_state.get("batch_id")
-
-            # Restore buffer (we don't store full TokenInfo, just rows)
-            self._buffers[node_id] = list(rows)
-
-            # Restore batch ID and member count
-            if batch_id:
+            if batch_id is not None:
                 self._batch_ids[node_id] = batch_id
-                self._member_counts[batch_id] = len(rows)
+                self._member_counts[batch_id] = len(reconstructed_tokens)
 
-            # Restore trigger evaluator count
+            # Restore trigger evaluator count and timeout age (Bug #6 fix)
             evaluator = self._trigger_evaluators.get(node_id)
-            if evaluator:
-                for _ in range(len(rows)):
+            if evaluator is not None:
+                # Record each restored row as "accepted" to advance the count
+                for _ in reconstructed_tokens:
                     evaluator.record_accept()
 
-            # Note: We don't restore full TokenInfo objects - only token_ids
-            # are stored. The actual TokenInfo will be reconstructed if needed
-            # from the tokens table. Clear the list for now.
-            self._buffer_tokens[node_id] = []
+                # Restore timeout age to preserve SLA (Bug #6 fix)
+                # The checkpoint stores how much time had elapsed before the crash.
+                # We adjust _first_accept_time backwards so batch_age_seconds
+                # reflects the true elapsed time (not reset to zero).
+                elapsed_seconds = node_state.get("elapsed_age_seconds", 0.0)
+                if elapsed_seconds > 0.0:
+                    # Adjust timer: make it think first accept was N seconds ago
+                    evaluator._first_accept_time = time.monotonic() - elapsed_seconds
 
     def get_batch_id(self, node_id: str) -> str | None:
         """Get current batch ID for an aggregation node.
@@ -1302,6 +1458,13 @@ class SinkExecutor:
             )
             states.append((token, state))
 
+        # BUG-RECORDER-01 fix: Set state_id on context for external call recording
+        # Sinks may make external calls (e.g., HTTP POST, database INSERT)
+        # Use first token's state_id since sink operations are typically bulk operations
+        ctx.state_id = states[0][1].state_id
+        ctx.node_id = sink_node_id
+        ctx._call_index = 0  # Reset call index for this sink operation
+
         # Execute sink write with timing and span
         with self._spans.sink_span(sink.name):
             start = time.perf_counter()
@@ -1323,6 +1486,10 @@ class SinkExecutor:
                         error=error,
                     )
                 raise
+
+        # CRITICAL: Flush sink to ensure durability BEFORE checkpointing
+        # If this fails, we want to crash - can't checkpoint non-durable data
+        sink.flush()
 
         # Complete all token states - status="completed" means they reached terminal
         # Output is the row data that was written to the sink, plus artifact reference
@@ -1352,9 +1519,27 @@ class SinkExecutor:
             size_bytes=artifact_info.size_bytes,
         )
 
-        # Call checkpoint callback for each token after successful write
+        # Call checkpoint callback for each token after successful write + flush
+        # CRITICAL: Sink write + flush are durable - we CANNOT roll them back.
+        # If checkpoint creation fails, we log the error but don't raise.
+        # The sink artifact exists, but no checkpoint record → resume will replay
+        # these rows → duplicate writes (acceptable for RC-1, see Bug #10 docs).
         if on_token_written is not None:
             for token in tokens:
-                on_token_written(token)
+                try:
+                    on_token_written(token)
+                except Exception as e:
+                    # Sink write is durable, can't undo. Log error and continue.
+                    # Operator must manually clean up checkpoint inconsistency.
+                    logger.error(
+                        "Checkpoint failed after durable sink write for token %s. "
+                        "Sink artifact exists but no checkpoint record created. "
+                        "Resume will replay this row (duplicate write). "
+                        "Manual cleanup may be required. Error: %s",
+                        token.token_id,
+                        e,
+                        exc_info=True,
+                    )
+                    # Don't raise - we can't undo the sink write
 
         return artifact

@@ -18,6 +18,7 @@ import pytest
 
 from elspeth.contracts import RunStatus
 from elspeth.core.checkpoint.recovery import RecoveryManager, ResumeCheck, ResumePoint
+from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape.schema import (
     nodes_table,
     rows_table,
@@ -175,14 +176,23 @@ class TestCanResumeBranches:
 
         return LandscapeRecorder(in_memory_db)
 
-    def test_nonexistent_run_returns_cannot_resume(self, recovery_manager: RecoveryManager) -> None:
+    @pytest.fixture
+    def mock_graph(self) -> ExecutionGraph:
+        """Create a simple mock graph for recovery tests."""
+        graph = ExecutionGraph()
+        graph.add_node("test-node", node_type="transform", plugin_name="test")
+        return graph
+
+    def test_nonexistent_run_returns_cannot_resume(self, recovery_manager: RecoveryManager, mock_graph: ExecutionGraph) -> None:
         """Line 100: Non-existent run returns can_resume=False."""
-        result = recovery_manager.can_resume("nonexistent-run-id")
+        result = recovery_manager.can_resume("nonexistent-run-id", mock_graph)
 
         assert result.can_resume is False
         assert "not found" in result.reason.lower()  # type: ignore[union-attr]
 
-    def test_completed_run_returns_cannot_resume(self, recovery_manager: RecoveryManager, recorder: Any) -> None:
+    def test_completed_run_returns_cannot_resume(
+        self, recovery_manager: RecoveryManager, recorder: Any, mock_graph: ExecutionGraph
+    ) -> None:
         """Line 103: Completed run returns can_resume=False."""
         # Create a completed run
         run = recorder.begin_run(
@@ -191,12 +201,12 @@ class TestCanResumeBranches:
             status=RunStatus.COMPLETED,
         )
 
-        result = recovery_manager.can_resume(run.run_id)
+        result = recovery_manager.can_resume(run.run_id, mock_graph)
 
         assert result.can_resume is False
         assert "completed" in result.reason.lower()  # type: ignore[union-attr]
 
-    def test_running_run_returns_cannot_resume(self, recovery_manager: RecoveryManager, recorder: Any) -> None:
+    def test_running_run_returns_cannot_resume(self, recovery_manager: RecoveryManager, recorder: Any, mock_graph: ExecutionGraph) -> None:
         """Line 106: Running run returns can_resume=False."""
         # Create a running run
         run = recorder.begin_run(
@@ -205,12 +215,14 @@ class TestCanResumeBranches:
             status=RunStatus.RUNNING,
         )
 
-        result = recovery_manager.can_resume(run.run_id)
+        result = recovery_manager.can_resume(run.run_id, mock_graph)
 
         assert result.can_resume is False
         assert "in progress" in result.reason.lower()  # type: ignore[union-attr]
 
-    def test_failed_run_without_checkpoint_returns_cannot_resume(self, recovery_manager: RecoveryManager, recorder: Any) -> None:
+    def test_failed_run_without_checkpoint_returns_cannot_resume(
+        self, recovery_manager: RecoveryManager, recorder: Any, mock_graph: ExecutionGraph
+    ) -> None:
         """Line 110: Failed run without checkpoint returns can_resume=False."""
         # Create a failed run (no checkpoint)
         run = recorder.begin_run(
@@ -219,7 +231,7 @@ class TestCanResumeBranches:
             status=RunStatus.FAILED,
         )
 
-        result = recovery_manager.can_resume(run.run_id)
+        result = recovery_manager.can_resume(run.run_id, mock_graph)
 
         assert result.can_resume is False
         assert "checkpoint" in result.reason.lower()  # type: ignore[union-attr]
@@ -229,6 +241,7 @@ class TestCanResumeBranches:
         recovery_manager: RecoveryManager,
         in_memory_db: LandscapeDB,
         checkpoint_manager: CheckpointManager,
+        mock_graph: ExecutionGraph,
     ) -> None:
         """Full success path: Failed run with checkpoint returns can_resume=True."""
         run_id = "test-failed-run"
@@ -248,9 +261,10 @@ class TestCanResumeBranches:
             token_id=token_id,
             node_id="test-node",
             sequence_number=1,
+            graph=mock_graph,
         )
 
-        result = recovery_manager.can_resume(run_id)
+        result = recovery_manager.can_resume(run_id, mock_graph)
 
         assert result.can_resume is True
         assert result.reason is None
@@ -290,9 +304,17 @@ class TestGetResumePoint:
 
         return LandscapeRecorder(in_memory_db)
 
-    def test_get_resume_point_returns_none_for_nonresumable(self, recovery_manager: RecoveryManager) -> None:
+    @pytest.fixture
+    def mock_graph(self) -> ExecutionGraph:
+        """Create a simple mock graph for recovery tests."""
+        graph = ExecutionGraph()
+        graph.add_node("test-node", node_type="transform", plugin_name="test")
+        graph.add_node("test-node-456", node_type="transform", plugin_name="test")
+        return graph
+
+    def test_get_resume_point_returns_none_for_nonresumable(self, recovery_manager: RecoveryManager, mock_graph: ExecutionGraph) -> None:
         """Line 138 area: Non-resumable run returns None."""
-        result = recovery_manager.get_resume_point("nonexistent-run")
+        result = recovery_manager.get_resume_point("nonexistent-run", mock_graph)
 
         assert result is None
 
@@ -301,6 +323,7 @@ class TestGetResumePoint:
         recovery_manager: RecoveryManager,
         in_memory_db: LandscapeDB,
         checkpoint_manager: CheckpointManager,
+        mock_graph: ExecutionGraph,
     ) -> None:
         """Line 138: Resumable run returns ResumePoint with all fields."""
         run_id = "test-resume-run"
@@ -323,9 +346,10 @@ class TestGetResumePoint:
             node_id="test-node-456",
             sequence_number=5,
             aggregation_state=agg_state,  # Accepts dict, serialized internally
+            graph=mock_graph,
         )
 
-        result = recovery_manager.get_resume_point(run_id)
+        result = recovery_manager.get_resume_point(run_id, mock_graph)
 
         assert result is not None
         assert isinstance(result, ResumePoint)
@@ -339,6 +363,7 @@ class TestGetResumePoint:
         recovery_manager: RecoveryManager,
         in_memory_db: LandscapeDB,
         checkpoint_manager: CheckpointManager,
+        mock_graph: ExecutionGraph,
     ) -> None:
         """ResumePoint with no aggregation state has aggregation_state=None."""
         run_id = "test-no-agg-run"
@@ -358,9 +383,10 @@ class TestGetResumePoint:
             token_id=token_id,
             node_id="test-node",
             sequence_number=1,
+            graph=mock_graph,
         )
 
-        result = recovery_manager.get_resume_point(run_id)
+        result = recovery_manager.get_resume_point(run_id, mock_graph)
 
         assert result is not None
         assert result.aggregation_state is None
@@ -394,30 +420,51 @@ class TestGetUnprocessedRowDataErrors:
         """Create recovery manager."""
         return RecoveryManager(in_memory_db, checkpoint_manager)
 
-    def test_empty_unprocessed_rows_returns_empty_list(self, recovery_manager: RecoveryManager) -> None:
+    @pytest.fixture
+    def mock_graph(self) -> ExecutionGraph:
+        """Create a simple mock graph for recovery tests."""
+        graph = ExecutionGraph()
+        graph.add_node("test-node", node_type="transform", plugin_name="test")
+        return graph
+
+    def test_empty_unprocessed_rows_returns_empty_list(self, recovery_manager: RecoveryManager, mock_graph: ExecutionGraph) -> None:
         """Line 174-175: When no unprocessed rows, return empty list."""
         # Mock get_unprocessed_rows to return empty
         recovery_manager.get_unprocessed_rows = MagicMock(return_value=[])  # type: ignore[method-assign]
 
+        # Create mock schema (required after Bug #4 fix)
+        from elspeth.plugins.schema_factory import _create_dynamic_schema
+
+        mock_schema = _create_dynamic_schema("MockSchema")
+
         mock_payload_store = MagicMock()
-        result = recovery_manager.get_unprocessed_row_data("run-id", mock_payload_store)
+        result = recovery_manager.get_unprocessed_row_data("run-id", mock_payload_store, source_schema_class=mock_schema)
 
         assert result == []
 
-    def test_row_not_found_raises_value_error(self, recovery_manager: RecoveryManager, in_memory_db: LandscapeDB) -> None:
+    def test_row_not_found_raises_value_error(
+        self, recovery_manager: RecoveryManager, in_memory_db: LandscapeDB, mock_graph: ExecutionGraph
+    ) -> None:
         """Line 186: Row not in database raises ValueError."""
         # Mock get_unprocessed_rows to return a row_id that doesn't exist
         recovery_manager.get_unprocessed_rows = MagicMock(return_value=["nonexistent-row"])  # type: ignore[method-assign]
 
+        # Create mock schema (required after Bug #4 fix)
+        from elspeth.plugins.schema_factory import _create_dynamic_schema
+
+        mock_schema = _create_dynamic_schema("MockSchema")
+
         mock_payload_store = MagicMock()
 
         with pytest.raises(ValueError) as exc_info:
-            recovery_manager.get_unprocessed_row_data("run-id", mock_payload_store)
+            recovery_manager.get_unprocessed_row_data("run-id", mock_payload_store, source_schema_class=mock_schema)
 
         assert "not found in database" in str(exc_info.value)
         assert "nonexistent-row" in str(exc_info.value)
 
-    def test_missing_source_data_ref_raises_value_error(self, recovery_manager: RecoveryManager, in_memory_db: LandscapeDB) -> None:
+    def test_missing_source_data_ref_raises_value_error(
+        self, recovery_manager: RecoveryManager, in_memory_db: LandscapeDB, mock_graph: ExecutionGraph
+    ) -> None:
         """Line 192: Row with no source_data_ref raises ValueError."""
         run_id = "test-no-ref-run"
         row_id = "test-row-no-ref"
@@ -465,15 +512,22 @@ class TestGetUnprocessedRowDataErrors:
         # Mock get_unprocessed_rows to return this row
         recovery_manager.get_unprocessed_rows = MagicMock(return_value=[row_id])  # type: ignore[method-assign]
 
+        # Create mock schema (required after Bug #4 fix)
+        from elspeth.plugins.schema_factory import _create_dynamic_schema
+
+        mock_schema = _create_dynamic_schema("MockSchema")
+
         mock_payload_store = MagicMock()
 
         with pytest.raises(ValueError) as exc_info:
-            recovery_manager.get_unprocessed_row_data(run_id, mock_payload_store)
+            recovery_manager.get_unprocessed_row_data(run_id, mock_payload_store, source_schema_class=mock_schema)
 
         assert "no source_data_ref" in str(exc_info.value)
         assert "cannot resume without payload" in str(exc_info.value)
 
-    def test_purged_payload_raises_value_error(self, recovery_manager: RecoveryManager, in_memory_db: LandscapeDB) -> None:
+    def test_purged_payload_raises_value_error(
+        self, recovery_manager: RecoveryManager, in_memory_db: LandscapeDB, mock_graph: ExecutionGraph
+    ) -> None:
         """Line 199: Purged payload (KeyError) raises ValueError."""
         run_id = "test-purged-run"
         row_id = "test-row-purged"
@@ -520,12 +574,17 @@ class TestGetUnprocessedRowDataErrors:
         # Mock get_unprocessed_rows to return this row
         recovery_manager.get_unprocessed_rows = MagicMock(return_value=[row_id])  # type: ignore[method-assign]
 
+        # Create mock schema (required after Bug #4 fix)
+        from elspeth.plugins.schema_factory import _create_dynamic_schema
+
+        mock_schema = _create_dynamic_schema("MockSchema")
+
         # Mock payload store to raise KeyError (simulating purged data)
         mock_payload_store = MagicMock()
         mock_payload_store.retrieve.side_effect = KeyError("ref-that-was-purged")
 
         with pytest.raises(ValueError) as exc_info:
-            recovery_manager.get_unprocessed_row_data(run_id, mock_payload_store)
+            recovery_manager.get_unprocessed_row_data(run_id, mock_payload_store, source_schema_class=mock_schema)
 
         assert "purged" in str(exc_info.value).lower()
         assert "cannot resume" in str(exc_info.value)
@@ -566,7 +625,14 @@ class TestGetUnprocessedRowsErrors:
 
         return LandscapeRecorder(in_memory_db)
 
-    def test_no_checkpoint_returns_empty_list(self, recovery_manager: RecoveryManager) -> None:
+    @pytest.fixture
+    def mock_graph(self) -> ExecutionGraph:
+        """Create a simple mock graph for recovery tests."""
+        graph = ExecutionGraph()
+        graph.add_node("test-node", node_type="transform", plugin_name="test")
+        return graph
+
+    def test_no_checkpoint_returns_empty_list(self, recovery_manager: RecoveryManager, mock_graph: ExecutionGraph) -> None:
         """Lines 223-225: No checkpoint returns empty list."""
         result = recovery_manager.get_unprocessed_rows("nonexistent-run")
 
@@ -577,6 +643,7 @@ class TestGetUnprocessedRowsErrors:
         recovery_manager: RecoveryManager,
         in_memory_db: LandscapeDB,
         checkpoint_manager: CheckpointManager,
+        mock_graph: ExecutionGraph,
     ) -> None:
         """Lines 243-244: Checkpoint with non-existent token raises RuntimeError.
 
@@ -608,6 +675,7 @@ class TestGetUnprocessedRowsErrors:
             token_id=token_id,
             node_id="test-node",
             sequence_number=1,
+            graph=mock_graph,
         )
 
         # Simulate database corruption by deleting the token

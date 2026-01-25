@@ -1,12 +1,14 @@
 """Tests for orchestrator crash recovery."""
 
+import json
 from pathlib import Path
 from typing import Any
 from unittest.mock import Mock
 
 import pytest
 
-from elspeth.contracts import Determinism, NodeType
+from elspeth.cli_helpers import instantiate_plugins_from_config
+from elspeth.contracts import Determinism, NodeType, PluginSchema
 from elspeth.contracts.enums import BatchStatus
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.core.checkpoint import CheckpointManager, RecoveryManager
@@ -15,6 +17,13 @@ from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.core.payload_store import FilesystemPayloadStore
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
+
+
+class RowSchema(PluginSchema):
+    """Schema for row data used in recovery tests."""
+
+    id: int
+    value: int
 
 
 class TestOrchestratorResume:
@@ -45,22 +54,32 @@ class TestOrchestratorResume:
         return FilesystemPayloadStore(tmp_path / "payloads")
 
     @pytest.fixture
+    def mock_graph(self) -> ExecutionGraph:
+        """Create a minimal mock graph for recovery tests."""
+        graph = ExecutionGraph()
+        graph.add_node("source", node_type="source", plugin_name="null")
+        graph.add_node("agg_node", node_type="aggregation", plugin_name="test_agg")
+        return graph
+
+    @pytest.fixture
     def failed_run_with_batch(
         self,
         landscape_db: LandscapeDB,
         checkpoint_manager: CheckpointManager,
+        mock_graph: ExecutionGraph,
     ) -> dict[str, Any]:
         """Create a failed run with an incomplete batch."""
         recorder = LandscapeRecorder(landscape_db)
 
-        # Create run
-        run = recorder.begin_run(config={}, canonical_version="v1")
+        # Create run with source schema for resume type restoration
+        source_schema_json = json.dumps(RowSchema.model_json_schema())
+        run = recorder.begin_run(config={}, canonical_version="v1", source_schema_json=source_schema_json)
 
         # Register nodes
         recorder.register_node(
             run_id=run.run_id,
             node_id="source",
-            plugin_name="test_source",
+            plugin_name="null",
             node_type=NodeType.SOURCE,
             plugin_version="1.0",
             config={},
@@ -108,6 +127,7 @@ class TestOrchestratorResume:
             node_id="agg_node",
             sequence_number=2,
             aggregation_state=agg_state,
+            graph=mock_graph,
         )
 
         # Simulate crash mid-flush
@@ -135,18 +155,20 @@ class TestOrchestratorResume:
         failed_run_with_batch: dict[str, Any],
         recovery_manager: RecoveryManager,
         payload_store: FilesystemPayloadStore,
+        plugin_manager,
+        mock_graph: ExecutionGraph,
     ) -> None:
         """resume() retries batches that were executing when crash occurred."""
         run_id = failed_run_with_batch["run_id"]
         original_batch_id = failed_run_with_batch["batch_id"]
 
         # Get resume point
-        resume_point = recovery_manager.get_resume_point(run_id)
+        resume_point = recovery_manager.get_resume_point(run_id, mock_graph)
         assert resume_point is not None
 
         # Create minimal config for resume
         config = self._create_minimal_config()
-        graph = self._create_minimal_graph()
+        graph = self._create_minimal_graph(plugin_manager)
 
         # Act
         orchestrator.resume(resume_point, config, graph, payload_store=payload_store)
@@ -167,14 +189,14 @@ class TestOrchestratorResume:
         """Create minimal config for resume testing."""
         # Mock source and sink
         source = Mock()
-        source.name = "test_source"
+        source.name = "null"
         source.plugin_version = "1.0"
         source.determinism = Determinism.DETERMINISTIC
         source.output_schema = {"fields": "dynamic"}
         source.load = Mock(return_value=[])
 
         sink = Mock()
-        sink.name = "default"
+        sink.name = "csv"
         sink.plugin_version = "1.0"
         sink.determinism = Determinism.DETERMINISTIC
         sink.input_schema = {"fields": "dynamic"}
@@ -186,7 +208,7 @@ class TestOrchestratorResume:
             sinks={"default": sink},
         )
 
-    def _create_minimal_graph(self) -> ExecutionGraph:
+    def _create_minimal_graph(self, plugin_manager) -> ExecutionGraph:
         """Create minimal execution graph for resume testing."""
         from elspeth.core.config import (
             DatasourceSettings,
@@ -196,11 +218,22 @@ class TestOrchestratorResume:
         from elspeth.core.dag import ExecutionGraph
 
         settings = ElspethSettings(
-            datasource=DatasourceSettings(plugin="test_source"),
-            sinks={"default": SinkSettings(plugin="test_sink")},
+            datasource=DatasourceSettings(
+                plugin="null",
+                options={"schema": {"fields": "dynamic"}},
+            ),
+            sinks={"default": SinkSettings(plugin="csv", options={"path": "default.csv", "schema": {"fields": "dynamic"}})},
             output_sink="default",
         )
-        return ExecutionGraph.from_config(settings)
+        plugins = instantiate_plugins_from_config(settings)
+        return ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(settings.gates),
+            output_sink=settings.output_sink,
+        )
 
 
 def _make_dynamic_schema() -> SchemaConfig:
