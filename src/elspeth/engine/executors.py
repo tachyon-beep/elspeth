@@ -44,6 +44,17 @@ from elspeth.plugins.results import (
 if TYPE_CHECKING:
     from elspeth.engine.tokens import TokenManager
 
+__all__ = [
+    "AggregationExecutor",
+    "GateExecutor",
+    "GateOutcome",
+    "MissingEdgeError",
+    "SinkExecutor",
+    "TokenInfo",  # Re-exported from contracts for convenience
+    "TransformExecutor",
+    "TriggerType",  # Re-exported from contracts.enums for convenience
+]
+
 logger = logging.getLogger(__name__)
 
 

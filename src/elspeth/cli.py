@@ -28,6 +28,11 @@ if TYPE_CHECKING:
     from elspeth.core.landscape import LandscapeDB
     from elspeth.plugins.manager import PluginManager
 
+__all__ = [
+    "app",
+    "load_settings",  # Re-exported from config for convenience
+]
+
 # Module-level singleton for plugin manager
 _plugin_manager_cache: PluginManager | None = None
 

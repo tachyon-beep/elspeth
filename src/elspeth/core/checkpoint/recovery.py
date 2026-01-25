@@ -23,6 +23,12 @@ from elspeth.core.payload_store import PayloadStore
 if TYPE_CHECKING:
     from elspeth.core.dag import ExecutionGraph
 
+__all__ = [
+    "RecoveryManager",
+    "ResumeCheck",  # Re-exported from contracts for convenience
+    "ResumePoint",  # Re-exported from contracts for convenience
+]
+
 
 class RecoveryManager:
     """Manages recovery of failed runs from checkpoints.
