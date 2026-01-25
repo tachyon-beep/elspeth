@@ -13,12 +13,14 @@ GateSettings which are processed by the engine's ExpressionParser.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any
 
 import pytest
 
 from elspeth.contracts import RoutingMode, SourceRow
 from elspeth.core.config import GateSettings
+from elspeth.engine.artifacts import ArtifactDescriptor
 from elspeth.plugins.base import BaseTransform
 from tests.conftest import (
     _TestSchema,
@@ -29,9 +31,87 @@ from tests.conftest import (
 )
 
 if TYPE_CHECKING:
-    from elspeth.contracts.results import ArtifactDescriptor, TransformResult
+    from elspeth.contracts.results import TransformResult
     from elspeth.core.dag import ExecutionGraph
     from elspeth.engine.orchestrator import PipelineConfig
+
+
+# =============================================================================
+# Module-Level Test Fixtures (P2 Fix: Reduce inline class duplication)
+# =============================================================================
+# These helpers consolidate the >10 duplicate inline ListSource/CollectSink
+# definitions into reusable parameterized classes.
+
+
+class _ListSource(_TestSourceBase):
+    """Reusable source that emits rows from a provided list.
+
+    Usage:
+        source = _ListSource([{"value": 1}, {"value": 2}], schema=MySchema)
+    """
+
+    name = "list_source"
+
+    def __init__(
+        self,
+        data: list[dict[str, Any]],
+        schema: type | None = None,
+        source_name: str = "list_source",
+    ) -> None:
+        self._data = data
+        self.name = source_name
+        if schema is not None:
+            self.output_schema = schema  # type: ignore[assignment]
+
+    def on_start(self, ctx: Any) -> None:
+        pass
+
+    def load(self, ctx: Any) -> Iterator[SourceRow]:
+        for row in self._data:
+            yield SourceRow.valid(row)
+
+    def close(self) -> None:
+        pass
+
+
+class _CollectSink(_TestSinkBase):
+    """Reusable sink that collects written rows.
+
+    Usage:
+        sink = _CollectSink()
+        # ... run pipeline ...
+        assert len(sink.results) == expected
+    """
+
+    name = "collect_sink"
+
+    def __init__(
+        self,
+        sink_name: str = "collect_sink",
+        content_hash: str = "test_hash",
+    ) -> None:
+        self.name = sink_name
+        self._content_hash = content_hash
+        self.results: list[dict[str, Any]] = []
+        self._artifact_counter = 0
+
+    def on_start(self, ctx: Any) -> None:
+        pass
+
+    def on_complete(self, ctx: Any) -> None:
+        pass
+
+    def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
+        self.results.extend(rows)
+        self._artifact_counter += 1
+        return ArtifactDescriptor.for_file(
+            path=f"memory://{self.name}_{self._artifact_counter}",
+            size_bytes=len(str(rows)),
+            content_hash=self._content_hash,
+        )
+
+    def close(self) -> None:
+        pass
 
 
 def _build_test_graph(config: PipelineConfig) -> ExecutionGraph:
@@ -272,6 +352,30 @@ class TestEngineIntegration:
         artifacts = recorder.get_artifacts(result.run_id)
         assert len(artifacts) == 1
         assert artifacts[0].content_hash == "abc123"
+
+        # P1 Fix: Verify node_states and token_outcomes for audit completeness
+        for row in rows:
+            tokens = recorder.get_tokens(row.row_id)
+            assert len(tokens) >= 1, f"Row {row.row_id} has no tokens"
+
+            for token in tokens:
+                # Verify node_states have hashes
+                states = recorder.get_node_states_for_token(token.token_id)
+                assert len(states) > 0, f"Token {token.token_id} has no node_states"
+                for state in states:
+                    assert state.input_hash, f"Node state {state.state_id} missing input_hash"
+                    # Only completed states have output_hash
+                    if state.status == "completed":
+                        assert state.output_hash, f"Completed node state {state.state_id} missing output_hash"
+                    # Failed states have error_json, not output_hash, and that's OK
+                    if hasattr(state, "error_json"):
+                        # Failed state - error_json is optional, no output_hash required
+                        pass
+
+                # Verify token outcomes - exactly one terminal outcome per token
+                outcome = recorder.get_token_outcome(token.token_id)
+                assert outcome is not None, f"Token {token.token_id} has no outcome"
+                assert outcome.is_terminal, f"Token {token.token_id} outcome is not terminal"
 
     def test_audit_spine_intact(self) -> None:
         """THE audit spine test: proves chassis doesn't wobble.

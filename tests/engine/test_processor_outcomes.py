@@ -120,6 +120,22 @@ class TestAllOutcomeTypesRecorded:
         assert recorded.outcome == outcome
         assert recorded.is_terminal == outcome.is_terminal
 
+        # === P1: Assert outcome-specific context fields ===
+        if outcome == RowOutcome.COMPLETED:
+            assert recorded.sink_name == kwargs["sink_name"], "COMPLETED should have sink_name"
+        elif outcome == RowOutcome.ROUTED:
+            assert recorded.sink_name == kwargs["sink_name"], "ROUTED should have sink_name"
+        elif outcome == RowOutcome.FORKED:
+            assert recorded.fork_group_id == kwargs["fork_group_id"], "FORKED should have fork_group_id"
+        elif outcome == RowOutcome.COALESCED:
+            assert recorded.join_group_id == kwargs["join_group_id"], "COALESCED should have join_group_id"
+        elif outcome == RowOutcome.FAILED:
+            assert recorded.error_hash == kwargs["error_hash"], "FAILED should have error_hash"
+        elif outcome == RowOutcome.QUARANTINED:
+            assert recorded.error_hash == kwargs["error_hash"], "QUARANTINED should have error_hash"
+        elif outcome == RowOutcome.EXPANDED:
+            assert recorded.expand_group_id == kwargs["expand_group_id"], "EXPANDED should have expand_group_id"
+
     @pytest.mark.parametrize(
         "outcome",
         [
@@ -378,3 +394,288 @@ class TestExplainShowsRecordedOutcome:
 
         assert lineage is not None
         assert lineage.outcome is None
+
+
+class TestEngineIntegrationOutcomes:
+    """Engine-level tests that run processor and verify outcomes in audit trail.
+
+    Unlike the direct LandscapeRecorder tests above, these tests exercise the full
+    RowProcessor path to verify outcomes are recorded correctly end-to-end.
+    """
+
+    def test_processor_records_completed_outcome_with_context(self) -> None:
+        """RowProcessor should record COMPLETED outcome with correct context."""
+        from typing import Any, ClassVar
+
+        from pydantic import ConfigDict
+
+        from elspeth.contracts import PluginSchema, RowOutcome
+        from elspeth.contracts.schema import SchemaConfig
+        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.engine.processor import RowProcessor
+        from elspeth.engine.spans import SpanFactory
+        from elspeth.plugins.base import BaseTransform
+        from elspeth.plugins.context import PluginContext
+        from elspeth.plugins.results import TransformResult
+
+        class _TestSchema(PluginSchema):
+            model_config: ClassVar[ConfigDict] = ConfigDict(extra="allow")
+
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        run = recorder.begin_run(config={}, canonical_version="v1")
+
+        source = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="source",
+            node_type="source",
+            plugin_version="1.0",
+            config={},
+            schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
+        )
+        transform = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="enricher",
+            node_type="transform",
+            plugin_version="1.0",
+            config={},
+            schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
+        )
+
+        class EnricherTransform(BaseTransform):
+            name = "enricher"
+            input_schema = _TestSchema
+            output_schema = _TestSchema
+
+            def __init__(self, node_id: str) -> None:
+                super().__init__({})
+                self.node_id = node_id
+
+            def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+                return TransformResult.success({**row, "enriched": True})
+
+        processor = RowProcessor(
+            recorder=recorder,
+            span_factory=SpanFactory(),
+            run_id=run.run_id,
+            source_node_id=source.node_id,
+        )
+
+        ctx = PluginContext(run_id=run.run_id, config={})
+        results = processor.process_row(
+            row_index=0,
+            row_data={"value": 42},
+            transforms=[EnricherTransform(transform.node_id)],
+            ctx=ctx,
+        )
+
+        # Verify result
+        assert len(results) == 1
+        result = results[0]
+        assert result.outcome == RowOutcome.COMPLETED
+
+        # Note: COMPLETED token_outcomes are recorded by orchestrator at sink level,
+        # not by the processor. The processor records node_states for transforms.
+        # We verify the node_states were recorded correctly with hashes.
+        states = recorder.get_node_states_for_token(result.token_id)
+        assert len(states) == 1, "Should have node_state for the transform"
+        state = states[0]
+        assert state.status.value == "completed", "Transform should complete successfully"
+        assert state.input_hash is not None, "Input hash should be recorded"
+        assert state.output_hash is not None, "Output hash should be recorded"
+
+    def test_processor_records_quarantined_outcome_with_error_hash(self) -> None:
+        """RowProcessor should record QUARANTINED outcome with error_hash."""
+        from typing import Any, ClassVar
+
+        from pydantic import ConfigDict
+
+        from elspeth.contracts import PluginSchema, RowOutcome
+        from elspeth.contracts.schema import SchemaConfig
+        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.engine.processor import RowProcessor
+        from elspeth.engine.spans import SpanFactory
+        from elspeth.plugins.base import BaseTransform
+        from elspeth.plugins.context import PluginContext
+        from elspeth.plugins.results import TransformResult
+
+        class _TestSchema(PluginSchema):
+            model_config: ClassVar[ConfigDict] = ConfigDict(extra="allow")
+
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        run = recorder.begin_run(config={}, canonical_version="v1")
+
+        source = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="source",
+            node_type="source",
+            plugin_version="1.0",
+            config={},
+            schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
+        )
+        transform = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="validator",
+            node_type="transform",
+            plugin_version="1.0",
+            config={},
+            schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
+        )
+
+        class ValidatingTransform(BaseTransform):
+            name = "validator"
+            input_schema = _TestSchema
+            output_schema = _TestSchema
+            _on_error = "discard"  # Quarantine on error
+
+            def __init__(self, node_id: str) -> None:
+                super().__init__({})
+                self.node_id = node_id
+
+            def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+                if row["value"] < 0:
+                    return TransformResult.error({"reason": "negative_value"})
+                return TransformResult.success(row)
+
+        processor = RowProcessor(
+            recorder=recorder,
+            span_factory=SpanFactory(),
+            run_id=run.run_id,
+            source_node_id=source.node_id,
+        )
+
+        ctx = PluginContext(run_id=run.run_id, config={}, landscape=recorder)
+        results = processor.process_row(
+            row_index=0,
+            row_data={"value": -5},
+            transforms=[ValidatingTransform(transform.node_id)],
+            ctx=ctx,
+        )
+
+        # Verify result
+        assert len(results) == 1
+        result = results[0]
+        assert result.outcome == RowOutcome.QUARANTINED
+
+        # Query the audit trail directly and verify outcome with error_hash
+        outcome = recorder.get_token_outcome(result.token_id)
+        assert outcome is not None, "Token outcome should be recorded by processor"
+        assert outcome.outcome == RowOutcome.QUARANTINED, "Outcome should be QUARANTINED"
+        assert outcome.error_hash is not None, "Error hash should be recorded for quarantine"
+        assert outcome.is_terminal is True, "QUARANTINED is terminal"
+
+    def test_processor_records_forked_outcome_with_fork_group_id(self) -> None:
+        """RowProcessor should record FORKED outcome with fork_group_id and parent lineage."""
+        from elspeth.contracts import RoutingMode, RowOutcome
+        from elspeth.contracts.schema import SchemaConfig
+        from elspeth.core.config import GateSettings
+        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.engine.processor import RowProcessor
+        from elspeth.engine.spans import SpanFactory
+        from elspeth.plugins.context import PluginContext
+
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        run = recorder.begin_run(config={}, canonical_version="v1")
+
+        source = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="source",
+            node_type="source",
+            plugin_version="1.0",
+            config={},
+            schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
+        )
+        gate = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="splitter",
+            node_type="gate",
+            plugin_version="1.0",
+            config={},
+            schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
+        )
+        path_a = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="path_a",
+            node_type="transform",
+            plugin_version="1.0",
+            config={},
+            schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
+        )
+        path_b = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="path_b",
+            node_type="transform",
+            plugin_version="1.0",
+            config={},
+            schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
+        )
+
+        # Register edges for fork
+        edge_a = recorder.register_edge(
+            run_id=run.run_id,
+            from_node_id=gate.node_id,
+            to_node_id=path_a.node_id,
+            label="path_a",
+            mode=RoutingMode.COPY,
+        )
+        edge_b = recorder.register_edge(
+            run_id=run.run_id,
+            from_node_id=gate.node_id,
+            to_node_id=path_b.node_id,
+            label="path_b",
+            mode=RoutingMode.COPY,
+        )
+
+        # Config-driven fork gate
+        splitter_gate = GateSettings(
+            name="splitter",
+            condition="True",
+            routes={"true": "fork", "false": "continue"},
+            fork_to=["path_a", "path_b"],
+        )
+
+        processor = RowProcessor(
+            recorder=recorder,
+            span_factory=SpanFactory(),
+            run_id=run.run_id,
+            source_node_id=source.node_id,
+            edge_map={
+                (gate.node_id, "path_a"): edge_a.edge_id,
+                (gate.node_id, "path_b"): edge_b.edge_id,
+            },
+            config_gates=[splitter_gate],
+            config_gate_id_map={"splitter": gate.node_id},
+        )
+
+        ctx = PluginContext(run_id=run.run_id, config={})
+        results = processor.process_row(
+            row_index=0,
+            row_data={"value": 42},
+            transforms=[],
+            ctx=ctx,
+        )
+
+        # Should have parent (FORKED) + 2 children (COMPLETED)
+        assert len(results) == 3
+
+        forked_results = [r for r in results if r.outcome == RowOutcome.FORKED]
+        completed_results = [r for r in results if r.outcome == RowOutcome.COMPLETED]
+
+        assert len(forked_results) == 1
+        assert len(completed_results) == 2
+
+        parent = forked_results[0]
+
+        # Verify FORKED outcome has fork_group_id
+        parent_outcome = recorder.get_token_outcome(parent.token_id)
+        assert parent_outcome is not None, "Parent token outcome should be recorded"
+        assert parent_outcome.outcome == RowOutcome.FORKED, "Should be FORKED"
+        assert parent_outcome.fork_group_id is not None, "Fork group ID should be set"
+
+        # Verify children have parent lineage
+        for child in completed_results:
+            parents = recorder.get_token_parents(child.token_id)
+            assert len(parents) == 1, "Each child should have exactly 1 parent"
+            assert parents[0].parent_token_id == parent.token_id, "Parent should be forked token"

@@ -451,6 +451,7 @@ class TestOrchestratorAuditTrail:
 
         # Query Landscape to verify audit trail
         from elspeth.contracts import RunStatus
+        from elspeth.core.canonical import stable_hash
 
         recorder = LandscapeRecorder(db)
         run = recorder.get_run(run_result.run_id)
@@ -466,6 +467,46 @@ class TestOrchestratorAuditTrail:
         assert "test_source" in node_names
         assert "identity" in node_names
         assert "test_sink" in node_names
+
+        # P1 Fix: Verify node_states have expected statuses with non-null hashes
+        rows = recorder.get_rows(run_result.run_id)
+        assert len(rows) == 1  # Single row processed
+        row = rows[0]
+
+        # Get tokens for this row
+        tokens = recorder.get_tokens(row.row_id)
+        assert len(tokens) == 1  # Single token (no forks)
+        token = tokens[0]
+
+        # Verify node states have input/output hashes
+        node_states = recorder.get_node_states_for_token(token.token_id)
+        assert len(node_states) >= 1  # At least one node state (transform)
+
+        for state in node_states:
+            # All node states should have input_hash (proves we captured input)
+            assert state.input_hash is not None, f"Node state {state.state_id} missing input_hash"
+            # Successful states should have output_hash
+            if state.status == "completed":
+                assert state.output_hash is not None, f"Completed node state {state.state_id} missing output_hash"
+
+        # Verify token outcomes have correct terminal outcome and sink_name
+        token_outcomes = recorder.get_token_outcomes_for_row(run_result.run_id, row.row_id)
+        assert len(token_outcomes) == 1  # Single terminal outcome
+        outcome = token_outcomes[0]
+        assert outcome.is_terminal is True
+        assert outcome.sink_name == "default"  # Routed to default sink
+
+        # Verify artifacts have content_hash and correct metadata
+        artifacts = recorder.get_artifacts(run_result.run_id)
+        assert len(artifacts) >= 1  # At least one artifact from sink
+        artifact = artifacts[0]
+        assert artifact.content_hash is not None, "Artifact missing content_hash"
+        assert artifact.artifact_type is not None, "Artifact missing artifact_type"
+
+        # Verify hash integrity using stable_hash
+        # The source data hash should match what we compute
+        expected_hash = stable_hash({"value": 42})
+        assert row.source_data_hash == expected_hash, f"Source data hash mismatch: expected {expected_hash}, got {row.source_data_hash}"
 
 
 class TestOrchestratorErrorHandling:
@@ -921,11 +962,14 @@ class TestOrchestratorAcceptsGraph:
             coalesce_settings=settings.coalesce,
         )
 
-        # Create mock source and sink
+        # P2 Fix: Use explicit node_id initialization instead of hasattr on MagicMock
+        # MagicMock auto-creates attributes on access, making hasattr meaningless.
+        # Initialize node_id to a sentinel value to verify it was actually set.
         mock_source = MagicMock()
         mock_source.name = "csv"
         mock_source.determinism = Determinism.IO_READ
         mock_source.plugin_version = "1.0.0"
+        mock_source.node_id = None  # Explicit initialization - orchestrator should set this
         schema_mock = MagicMock()
 
         schema_mock.model_json_schema.return_value = {"type": "object"}
@@ -937,6 +981,7 @@ class TestOrchestratorAcceptsGraph:
         mock_sink.name = "csv"
         mock_sink.determinism = Determinism.IO_WRITE
         mock_sink.plugin_version = "1.0.0"
+        mock_sink.node_id = None  # Explicit initialization - orchestrator should set this
         schema_mock = MagicMock()
 
         schema_mock.model_json_schema.return_value = {"type": "object"}
@@ -952,14 +997,16 @@ class TestOrchestratorAcceptsGraph:
         orchestrator = Orchestrator(db)
         orchestrator.run(pipeline_config, graph=graph)
 
-        # Source should have node_id set from graph
-        assert hasattr(mock_source, "node_id")
-        assert mock_source.node_id == graph.get_source()
+        # Source should have node_id set from graph (was None, now should be set)
+        expected_source_id = graph.get_source()
+        assert mock_source.node_id == expected_source_id, (
+            f"Source node_id not set: expected {expected_source_id}, got {mock_source.node_id}"
+        )
 
         # Sink should have node_id set from graph's sink_id_map
         sink_id_map = graph.get_sink_id_map()
-        assert hasattr(mock_sink, "node_id")
-        assert mock_sink.node_id == sink_id_map["output"]
+        expected_sink_id = sink_id_map["output"]
+        assert mock_sink.node_id == expected_sink_id, f"Sink node_id not set: expected {expected_sink_id}, got {mock_sink.node_id}"
 
     def test_orchestrator_run_accepts_graph(self) -> None:
         """Orchestrator.run() accepts graph parameter."""
@@ -2210,6 +2257,7 @@ class TestOrchestratorCheckpointing:
 
     def test_maybe_checkpoint_creates_on_every_row(self) -> None:
         """_maybe_checkpoint creates checkpoint when frequency=every_row."""
+
         from elspeth.contracts import PluginSchema, SourceRow
         from elspeth.core.checkpoint import CheckpointManager
         from elspeth.core.config import CheckpointSettings
@@ -2221,6 +2269,16 @@ class TestOrchestratorCheckpointing:
         db = LandscapeDB.in_memory()
         checkpoint_mgr = CheckpointManager(db)
         settings = CheckpointSettings(enabled=True, frequency="every_row")
+
+        # P2 Fix: Track checkpoint creation calls
+        checkpoint_calls: list[dict[str, Any]] = []
+        original_create = checkpoint_mgr.create_checkpoint
+
+        def tracking_create(*args: Any, **kwargs: Any) -> Any:
+            checkpoint_calls.append({"args": args, "kwargs": kwargs})
+            return original_create(*args, **kwargs)
+
+        checkpoint_mgr.create_checkpoint = tracking_create  # type: ignore[method-assign]
 
         class ValueSchema(PluginSchema):
             value: int
@@ -2292,10 +2350,9 @@ class TestOrchestratorCheckpointing:
         assert result.status == "completed"
         assert result.rows_processed == 3
 
-        # Checkpoints should have been created during processing
-        # After completion, they should be deleted
-        # So we can't check the checkpoint count here - it's cleaned up
-        # Instead, we verify the run completed successfully with checkpointing enabled
+        # P2 Fix: Verify checkpoint was called for each row
+        # With frequency=every_row and 3 rows, we expect 3 checkpoint calls
+        assert len(checkpoint_calls) == 3, f"Expected 3 checkpoint calls (one per row), got {len(checkpoint_calls)}"
 
     def test_maybe_checkpoint_respects_interval(self) -> None:
         """_maybe_checkpoint only creates checkpoint every N rows."""
@@ -2311,6 +2368,16 @@ class TestOrchestratorCheckpointing:
         checkpoint_mgr = CheckpointManager(db)
         # Checkpoint every 3 rows
         settings = CheckpointSettings(enabled=True, frequency="every_n", checkpoint_interval=3)
+
+        # P2 Fix: Track checkpoint creation calls
+        checkpoint_calls: list[dict[str, Any]] = []
+        original_create = checkpoint_mgr.create_checkpoint
+
+        def tracking_create(*args: Any, **kwargs: Any) -> Any:
+            checkpoint_calls.append({"args": args, "kwargs": kwargs})
+            return original_create(*args, **kwargs)
+
+        checkpoint_mgr.create_checkpoint = tracking_create  # type: ignore[method-assign]
 
         class ValueSchema(PluginSchema):
             value: int
@@ -2382,6 +2449,11 @@ class TestOrchestratorCheckpointing:
 
         assert result.status == "completed"
         assert result.rows_processed == 7
+
+        # P2 Fix: Verify checkpoint was called at correct intervals
+        # With frequency=every_n, interval=3, and 7 rows, we expect checkpoints at rows 3, 6
+        # (rows 1, 2 don't checkpoint; row 3 checkpoints; rows 4, 5 don't; row 6 checkpoints; row 7 doesn't)
+        assert len(checkpoint_calls) == 2, f"Expected 2 checkpoint calls (at rows 3 and 6), got {len(checkpoint_calls)}"
 
     def test_checkpoint_deleted_on_successful_completion(self) -> None:
         """Checkpoints are deleted when run completes successfully."""
@@ -2665,6 +2737,16 @@ class TestOrchestratorCheckpointing:
         checkpoint_mgr = CheckpointManager(db)
         settings = CheckpointSettings(enabled=False)
 
+        # P2 Fix: Track checkpoint creation calls to verify none are made
+        checkpoint_calls: list[dict[str, Any]] = []
+        original_create = checkpoint_mgr.create_checkpoint
+
+        def tracking_create(*args: Any, **kwargs: Any) -> Any:
+            checkpoint_calls.append({"args": args, "kwargs": kwargs})
+            return original_create(*args, **kwargs)
+
+        checkpoint_mgr.create_checkpoint = tracking_create  # type: ignore[method-assign]
+
         class ValueSchema(PluginSchema):
             value: int
 
@@ -2734,9 +2816,8 @@ class TestOrchestratorCheckpointing:
 
         assert result.status == "completed"
 
-        # Even after run, no checkpoints should exist since disabled
-        # (would have been deleted anyway, but let's verify with failure case)
-        # We'll run a separate test with failure to verify
+        # P2 Fix: Verify no checkpoint calls were made when disabled
+        assert len(checkpoint_calls) == 0, f"Expected 0 checkpoint calls when disabled, got {len(checkpoint_calls)}"
 
     def test_no_checkpoint_manager_skips_checkpointing(self) -> None:
         """Orchestrator works fine without checkpoint manager."""
@@ -4875,21 +4956,32 @@ class TestOrchestratorProgress:
             graph=_build_test_graph(config),
         )
 
-        # Should be called at 1 (first row), 100, 200, and 250 (final)
-        assert len(progress_events) == 4
+        # P1 Fix: Relax exact count assertion - orchestrator also emits on 5-second intervals
+        # which can cause extra events on slow machines. Assert required checkpoints exist.
+        # Required checkpoints: row 1 (first), 100, 200, and 250 (final)
+        assert len(progress_events) >= 4, f"Expected at least 4 progress events (1, 100, 200, 250), got {len(progress_events)}"
 
-        # Verify row counts at each emission
-        assert progress_events[0].rows_processed == 1  # First row - immediate feedback
-        assert progress_events[1].rows_processed == 100
-        assert progress_events[2].rows_processed == 200
-        assert progress_events[3].rows_processed == 250  # Final emission
+        # Extract rows_processed values for verification
+        rows_at_events = [e.rows_processed for e in progress_events]
+
+        # Verify required checkpoints exist (may have extra time-based events)
+        assert 1 in rows_at_events, "Missing first row progress event"
+        assert 100 in rows_at_events, "Missing 100-row checkpoint"
+        assert 200 in rows_at_events, "Missing 200-row checkpoint"
+        assert 250 in rows_at_events, "Missing final row (250) progress event"
+
+        # Verify ordering: rows_processed should be monotonically increasing
+        for i in range(1, len(progress_events)):
+            assert progress_events[i].rows_processed >= progress_events[i - 1].rows_processed, (
+                f"Progress events not monotonically increasing: "
+                f"{progress_events[i - 1].rows_processed} -> {progress_events[i].rows_processed}"
+            )
 
         # Verify timing is recorded
-        assert all(e.elapsed_seconds >= 0 for e in progress_events)  # First row might be very fast
+        assert all(e.elapsed_seconds >= 0 for e in progress_events)
         # Elapsed should be monotonically increasing
-        assert progress_events[0].elapsed_seconds <= progress_events[1].elapsed_seconds
-        assert progress_events[1].elapsed_seconds <= progress_events[2].elapsed_seconds
-        assert progress_events[2].elapsed_seconds <= progress_events[3].elapsed_seconds
+        for i in range(1, len(progress_events)):
+            assert progress_events[i].elapsed_seconds >= progress_events[i - 1].elapsed_seconds, "Elapsed time not monotonically increasing"
 
     def test_progress_callback_not_called_when_none(self) -> None:
         """Verify no crash when on_progress is None."""
@@ -5007,19 +5099,27 @@ class TestOrchestratorProgress:
             graph=_build_test_graph(config),
         )
 
-        # Progress should fire at row 1 (first), 100, and final 150
-        assert len(progress_events) == 3  # At 1 (first row), 100, and final 150
+        # P1 Fix: Relax exact count assertion - orchestrator also emits on 5-second intervals
+        # Required checkpoints: row 1 (first), 100, and final 150
+        assert len(progress_events) >= 3, f"Expected at least 3 progress events (1, 100, 150), got {len(progress_events)}"
 
-        # First progress at row 1 - immediate feedback
-        assert progress_events[0].rows_processed == 1
-        assert progress_events[0].rows_quarantined == 0  # First row not quarantined yet
+        # Extract rows_processed values for verification
+        rows_at_events = [e.rows_processed for e in progress_events]
 
-        # Second progress at row 100 - quarantined count should be 1
-        assert progress_events[1].rows_processed == 100
-        assert progress_events[1].rows_quarantined == 1
+        # Verify required checkpoints exist
+        assert 1 in rows_at_events, "Missing first row progress event"
+        assert 100 in rows_at_events, "Missing 100-row checkpoint"
+        assert 150 in rows_at_events, "Missing final row (150) progress event"
 
-        # Final progress at row 150
-        assert progress_events[2].rows_processed == 150
+        # Find specific events by rows_processed for quarantine verification
+        first_event = next(e for e in progress_events if e.rows_processed == 1)
+        row_100_event = next(e for e in progress_events if e.rows_processed == 100)
+        final_event = next(e for e in progress_events if e.rows_processed == 150)
+
+        # Verify quarantine counts at checkpoints
+        assert first_event.rows_quarantined == 0  # First row not quarantined yet
+        assert row_100_event.rows_quarantined == 1  # Row 100 (0-indexed 99) was quarantined
+        assert final_event.rows_quarantined == 1  # Still 1 quarantined at final
 
     def test_progress_callback_includes_routed_rows_in_success(self) -> None:
         """Verify routed rows are counted as successes in progress events.
@@ -5093,14 +5193,28 @@ class TestOrchestratorProgress:
             graph=_build_test_graph(config),
         )
 
-        # Should have progress at 1 (first row), 100, and final 150
-        assert len(progress_events) == 3
+        # P1 Fix: Relax exact count assertion - orchestrator also emits on 5-second intervals
+        # Required checkpoints: row 1 (first), 100, and final 150
+        assert len(progress_events) >= 3, f"Expected at least 3 progress events (1, 100, 150), got {len(progress_events)}"
+
+        # Extract rows_processed values for verification
+        rows_at_events = [e.rows_processed for e in progress_events]
+
+        # Verify required checkpoints exist
+        assert 1 in rows_at_events, "Missing first row progress event"
+        assert 100 in rows_at_events, "Missing 100-row checkpoint"
+        assert 150 in rows_at_events, "Missing final row (150) progress event"
+
+        # Find specific events by rows_processed for success verification
+        first_event = next(e for e in progress_events if e.rows_processed == 1)
+        row_100_event = next(e for e in progress_events if e.rows_processed == 100)
+        final_event = next(e for e in progress_events if e.rows_processed == 150)
 
         # All rows were routed - they should count as succeeded, not zero
         # Bug: without fix, this shows rows_succeeded=0 because routed rows weren't counted
-        assert progress_events[0].rows_succeeded == 1  # First row
-        assert progress_events[1].rows_succeeded == 100
-        assert progress_events[2].rows_succeeded == 150
+        assert first_event.rows_succeeded == 1  # First row
+        assert row_100_event.rows_succeeded == 100
+        assert final_event.rows_succeeded == 150
 
         # Verify routed sink received rows, default did not
         assert mock_routed.write.called

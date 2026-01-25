@@ -5,6 +5,21 @@
 class TestRetryPolicy:
     """Verify RetryPolicy TypedDict works correctly."""
 
+    def test_retry_policy_schema(self) -> None:
+        """RetryPolicy should be a partial TypedDict with expected fields."""
+        from elspeth.contracts import RetryPolicy
+
+        # Verify total=False (all fields optional)
+        assert RetryPolicy.__total__ is False
+
+        # Verify exact schema - all 4 fields present
+        assert set(RetryPolicy.__annotations__) == {
+            "max_attempts",
+            "base_delay",
+            "max_delay",
+            "jitter",
+        }
+
     def test_retry_policy_importable(self) -> None:
         """RetryPolicy should be importable from contracts."""
         from elspeth.contracts import RetryPolicy
@@ -34,7 +49,7 @@ class TestRetryPolicy:
         assert config.jitter == 0.5
 
     def test_retry_policy_partial(self) -> None:
-        """RetryPolicy should allow partial specification."""
+        """RetryPolicy should allow partial specification with correct defaults."""
         from elspeth.contracts import RetryPolicy
         from elspeth.engine.retry import RetryConfig
 
@@ -42,5 +57,7 @@ class TestRetryPolicy:
         policy: RetryPolicy = {"max_attempts": 10}
         config = RetryConfig.from_policy(policy)
         assert config.max_attempts == 10
-        # Defaults for unspecified fields
+        # Defaults for unspecified fields - verify ALL optional fields have defaults
         assert config.base_delay == 1.0
+        assert config.max_delay == 60.0
+        assert config.jitter == 1.0

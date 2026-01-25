@@ -1,4 +1,8 @@
-"""Tests for RowResult using RowOutcome enum."""
+"""Tests for RowResult using RowOutcome enum.
+
+This module tests the engine's RowResult dataclass with RowOutcome enum values.
+RowOutcome enum contract tests are in tests/contracts/test_enums.py.
+"""
 
 from elspeth.contracts import RowOutcome, RowResult, TokenInfo
 
@@ -17,15 +21,27 @@ class TestRowResultOutcome:
         assert isinstance(result.outcome, RowOutcome)
 
     def test_all_outcomes_accepted(self) -> None:
-        """All RowOutcome values should work."""
+        """All RowOutcome values should work with RowResult."""
         token = TokenInfo(row_id="r1", token_id="t1", row_data={}, branch_name=None)
-        for outcome in [RowOutcome.COMPLETED, RowOutcome.ROUTED, RowOutcome.FAILED]:
+
+        # Iterate over ALL enum members - not a hardcoded subset
+        for outcome in RowOutcome:
             result = RowResult(
                 token=token,
                 final_data={},
                 outcome=outcome,
             )
             assert result.outcome == outcome
+            assert result.outcome is outcome
+
+    def test_row_result_preserves_outcome_identity(self) -> None:
+        """RowResult should preserve exact enum identity, not just equality."""
+        token = TokenInfo(row_id="r1", token_id="t1", row_data={}, branch_name=None)
+
+        for outcome in RowOutcome:
+            result = RowResult(token=token, final_data={}, outcome=outcome)
+            # Use 'is' to verify identity, not just value equality
+            assert result.outcome is outcome
 
     def test_outcome_equals_string_for_database_storage(self) -> None:
         """(str, Enum) values equal raw strings for database storage (AUD-001)."""
@@ -50,5 +66,34 @@ class TestRowResultOutcome:
             final_data={},
             outcome=RowOutcome.CONSUMED_IN_BATCH,
         )
-        assert result.outcome == RowOutcome.CONSUMED_IN_BATCH
+        assert result.outcome is RowOutcome.CONSUMED_IN_BATCH
         assert result.outcome.value == "consumed_in_batch"
+
+    def test_all_terminal_outcomes_have_is_terminal_true(self) -> None:
+        """All terminal outcomes should have is_terminal=True via RowResult."""
+        token = TokenInfo(row_id="r1", token_id="t1", row_data={}, branch_name=None)
+
+        terminal_outcomes = [
+            RowOutcome.COMPLETED,
+            RowOutcome.ROUTED,
+            RowOutcome.FORKED,
+            RowOutcome.FAILED,
+            RowOutcome.QUARANTINED,
+            RowOutcome.CONSUMED_IN_BATCH,
+            RowOutcome.COALESCED,
+            RowOutcome.EXPANDED,
+        ]
+
+        for outcome in terminal_outcomes:
+            result = RowResult(token=token, final_data={}, outcome=outcome)
+            assert result.outcome.is_terminal is True
+
+    def test_buffered_outcome_is_not_terminal(self) -> None:
+        """BUFFERED is the only non-terminal outcome."""
+        token = TokenInfo(row_id="r1", token_id="t1", row_data={}, branch_name=None)
+        result = RowResult(
+            token=token,
+            final_data={},
+            outcome=RowOutcome.BUFFERED,
+        )
+        assert result.outcome.is_terminal is False

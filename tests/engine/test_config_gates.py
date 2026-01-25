@@ -10,9 +10,11 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 import pytest
+from sqlalchemy import text
 
 from elspeth.contracts import PluginSchema, RoutingMode, SourceRow
 from elspeth.core.config import GateSettings
+from elspeth.engine.artifacts import ArtifactDescriptor
 from tests.conftest import (
     _TestSinkBase,
     _TestSourceBase,
@@ -23,6 +25,168 @@ from tests.conftest import (
 if TYPE_CHECKING:
     from elspeth.core.dag import ExecutionGraph
     from elspeth.engine.orchestrator import PipelineConfig
+
+
+# =============================================================================
+# Shared Test Plugin Classes (P3 Fix: Deduplicate from individual tests)
+# =============================================================================
+
+
+class _ValueSchema(PluginSchema):
+    """Schema with integer value field."""
+
+    value: int
+
+
+class _CategorySchema(PluginSchema):
+    """Schema with string category field."""
+
+    category: str
+
+
+class _PrioritySchema(PluginSchema):
+    """Schema with integer priority field."""
+
+    priority: int
+
+
+class ListSource(_TestSourceBase):
+    """Test source that yields rows from a list.
+
+    This is the standard test source for config gate tests.
+    Provides rows from an in-memory list with configurable schema.
+    """
+
+    name = "list_source"
+    output_schema: type[PluginSchema] = _ValueSchema  # Default, can be overridden
+
+    def __init__(self, data: list[dict[str, Any]], schema: type[PluginSchema] | None = None) -> None:
+        super().__init__()
+        self._data = data
+        if schema is not None:
+            self.output_schema = schema
+
+    def load(self, ctx: Any) -> Any:
+        for row in self._data:
+            yield SourceRow.valid(row)
+
+    def close(self) -> None:
+        pass
+
+
+class CollectSink(_TestSinkBase):
+    """Test sink that collects rows into a list.
+
+    This is the standard test sink for config gate tests.
+    Collects all written rows for assertion after pipeline completion.
+    """
+
+    name = "collect"
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.results: list[dict[str, Any]] = []
+
+    def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
+        self.results.extend(rows)
+        return ArtifactDescriptor.for_file(path="memory://collect", size_bytes=0, content_hash="")
+
+    def close(self) -> None:
+        pass
+
+
+# =============================================================================
+# Audit Trail Verification Helpers
+# =============================================================================
+
+
+def verify_audit_trail(
+    db: Any,
+    run_id: str,
+    expected_rows: int,
+    expected_gate_name: str,
+    expected_terminal_outcomes: dict[str, int],
+) -> None:
+    """Verify audit trail completeness for config gate tests.
+
+    Args:
+        db: LandscapeDB instance
+        run_id: Run ID to verify
+        expected_rows: Expected number of source rows processed
+        expected_gate_name: Name of the config gate (without "config_gate:" prefix)
+        expected_terminal_outcomes: Dict mapping outcome type (lowercase) to expected count
+            e.g., {"completed": 2, "routed": 1}
+    """
+    with db.engine.connect() as conn:
+        # 1. Verify gate node is registered
+        gate_node = conn.execute(
+            text("""
+                SELECT node_id, plugin_name, config_json
+                FROM nodes
+                WHERE run_id = :run_id
+                AND plugin_name = :plugin_name
+            """),
+            {"run_id": run_id, "plugin_name": f"config_gate:{expected_gate_name}"},
+        ).fetchone()
+
+        assert gate_node is not None, f"Gate node 'config_gate:{expected_gate_name}' should be registered"
+        gate_node_id = gate_node[0]
+
+        # 2. Verify node_states for the gate (one per row processed)
+        gate_states = conn.execute(
+            text("""
+                SELECT state_id, token_id, status, input_hash, output_hash, error_json
+                FROM node_states
+                WHERE node_id = :node_id
+                ORDER BY started_at
+            """),
+            {"node_id": gate_node_id},
+        ).fetchall()
+
+        assert len(gate_states) == expected_rows, f"Expected {expected_rows} node_states for gate, got {len(gate_states)}"
+
+        for state in gate_states:
+            _state_id, _token_id, status, input_hash, output_hash, error_json = state
+            assert status == "completed", f"Gate state should be 'completed', got '{status}'"
+            assert input_hash is not None, "input_hash must be recorded"
+            assert output_hash is not None, "output_hash must be recorded"
+            assert error_json is None, "error_json should be None for successful gate evaluation"
+
+        # 3. Verify token_outcomes have correct terminal outcomes
+        outcomes = conn.execute(
+            text("""
+                SELECT outcome, sink_name, COUNT(*)
+                FROM token_outcomes
+                WHERE run_id = :run_id
+                AND is_terminal = 1
+                GROUP BY outcome, sink_name
+            """),
+            {"run_id": run_id},
+        ).fetchall()
+
+        outcome_counts: dict[str, int] = {}
+        for outcome, _sink_name, count in outcomes:
+            outcome_counts[outcome] = outcome_counts.get(outcome, 0) + count
+
+        for expected_outcome, expected_count in expected_terminal_outcomes.items():
+            actual = outcome_counts.get(expected_outcome, 0)
+            assert actual == expected_count, (
+                f"Expected {expected_count} {expected_outcome} outcomes, got {actual}. All outcomes: {outcome_counts}"
+            )
+
+        # 4. Verify artifacts exist for sinks that received rows
+        artifacts = conn.execute(
+            text("""
+                SELECT artifact_id, artifact_type, content_hash, path_or_uri
+                FROM artifacts
+                WHERE run_id = :run_id
+            """),
+            {"run_id": run_id},
+        ).fetchall()
+
+        # At least one artifact should exist (from sink writes)
+        # Note: CollectSink produces artifacts with empty content_hash
+        assert len(artifacts) > 0 or sum(expected_terminal_outcomes.values()) == 0, "Should have artifacts for sink writes"
 
 
 def _build_test_graph_with_config_gates(
@@ -105,43 +269,14 @@ class TestConfigGateIntegration:
     """Integration tests for config-driven gates."""
 
     def test_config_gate_continue(self) -> None:
-        """Config gate with 'continue' destination passes rows through."""
+        """Config gate with 'continue' destination passes rows through.
+
+        P1 Fix: Added audit trail verification for node_states, token_outcomes.
+        """
         from elspeth.core.landscape import LandscapeDB
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
         db = LandscapeDB.in_memory()
-
-        class InputSchema(PluginSchema):
-            value: int
-
-        class ListSource(_TestSourceBase):
-            name = "list_source"
-            output_schema = InputSchema
-
-            def __init__(self, data: list[dict[str, Any]]) -> None:
-                self._data = data
-
-            def load(self, ctx: Any) -> Any:
-                for _row in self._data:
-                    yield SourceRow.valid(_row)
-
-            def close(self) -> None:
-                pass
-
-        class CollectSink(_TestSinkBase):
-            name = "collect"
-
-            def __init__(self) -> None:
-                super().__init__()
-                self.results: list[dict[str, Any]] = []
-
-            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-                self.results.extend(rows)
-                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
-
-            def close(self) -> None:
-                pass
 
         source = ListSource([{"value": 10}, {"value": 20}])
         sink = CollectSink()
@@ -168,44 +303,24 @@ class TestConfigGateIntegration:
         assert result.rows_succeeded == 2
         assert len(sink.results) == 2
 
+        # P1 Fix: Verify audit trail
+        verify_audit_trail(
+            db=db,
+            run_id=result.run_id,
+            expected_rows=2,
+            expected_gate_name="always_pass",
+            expected_terminal_outcomes={"completed": 2},
+        )
+
     def test_config_gate_routes_to_sink(self) -> None:
-        """Config gate routes rows to different sinks based on condition."""
+        """Config gate routes rows to different sinks based on condition.
+
+        P1 Fix: Added audit trail verification for node_states, token_outcomes.
+        """
         from elspeth.core.landscape import LandscapeDB
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
         db = LandscapeDB.in_memory()
-
-        class RowSchema(PluginSchema):
-            value: int
-
-        class ListSource(_TestSourceBase):
-            name = "list_source"
-            output_schema = RowSchema
-
-            def __init__(self, data: list[dict[str, Any]]) -> None:
-                self._data = data
-
-            def load(self, ctx: Any) -> Any:
-                for _row in self._data:
-                    yield SourceRow.valid(_row)
-
-            def close(self) -> None:
-                pass
-
-        class CollectSink(_TestSinkBase):
-            name = "collect"
-
-            def __init__(self) -> None:
-                super().__init__()
-                self.results: list[dict[str, Any]] = []
-
-            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-                self.results.extend(rows)
-                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
-
-            def close(self) -> None:
-                pass
 
         # Rows: 10 (low), 100 (high), 30 (low)
         source = ListSource([{"value": 10}, {"value": 100}, {"value": 30}])
@@ -241,10 +356,48 @@ class TestConfigGateIntegration:
         assert len(high_sink.results) == 1
         assert high_sink.results[0]["value"] == 100
 
+        # P1 Fix: Verify audit trail
+        verify_audit_trail(
+            db=db,
+            run_id=result.run_id,
+            expected_rows=3,
+            expected_gate_name="threshold_gate",
+            expected_terminal_outcomes={"completed": 2, "routed": 1},
+        )
+
+        # Additional verification: Check routing event for high-value row
+        with db.engine.connect() as conn:
+            gate_node = conn.execute(
+                text("""
+                    SELECT node_id FROM nodes
+                    WHERE run_id = :run_id AND plugin_name = 'config_gate:threshold_gate'
+                """),
+                {"run_id": result.run_id},
+            ).fetchone()
+
+            routing_events = conn.execute(
+                text("""
+                    SELECT re.event_id, e.label, e.to_node_id
+                    FROM routing_events re
+                    JOIN node_states ns ON re.state_id = ns.state_id
+                    JOIN edges e ON re.edge_id = e.edge_id
+                    WHERE ns.node_id = :gate_node_id
+                """),
+                {"gate_node_id": gate_node[0]},
+            ).fetchall()
+
+            # Should have routing events (both for true->high and false->continue per AUD-002)
+            assert len(routing_events) == 3, f"Expected 3 routing events, got {len(routing_events)}"
+
+            # Verify the "true" route event exists (routes to high sink)
+            true_events = [e for e in routing_events if e[1] == "true"]
+            assert len(true_events) == 1, "Should have exactly 1 'true' routing event"
+
     def test_config_gate_with_string_result(self, plugin_manager) -> None:
         """Config gate condition can return a string route label.
 
         This test uses ExecutionGraph.from_plugin_instances() for proper edge building.
+        P1 Fix: Added audit trail verification for node_states, token_outcomes.
         """
         from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.core.config import (
@@ -257,43 +410,14 @@ class TestConfigGateIntegration:
         )
         from elspeth.core.dag import ExecutionGraph
         from elspeth.core.landscape import LandscapeDB
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
         db = LandscapeDB.in_memory()
 
-        class RowSchema(PluginSchema):
-            category: str
-
-        class ListSource(_TestSourceBase):
-            name = "list_source"
-            output_schema = RowSchema
-
-            def __init__(self, data: list[dict[str, Any]]) -> None:
-                self._data = data
-
-            def load(self, ctx: Any) -> Any:
-                for _row in self._data:
-                    yield SourceRow.valid(_row)
-
-            def close(self) -> None:
-                pass
-
-        class CollectSink(_TestSinkBase):
-            name = "collect"
-
-            def __init__(self) -> None:
-                super().__init__()
-                self.results: list[dict[str, Any]] = []
-
-            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-                self.results.extend(rows)
-                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
-
-            def close(self) -> None:
-                pass
-
-        source = ListSource([{"category": "A"}, {"category": "B"}, {"category": "A"}])
+        source = ListSource(
+            [{"category": "A"}, {"category": "B"}, {"category": "A"}],
+            schema=_CategorySchema,
+        )
         a_sink = CollectSink()
         b_sink = CollectSink()
 
@@ -355,6 +479,15 @@ class TestConfigGateIntegration:
         assert len(a_sink.results) == 2
         assert len(b_sink.results) == 1
 
+        # P1 Fix: Verify audit trail
+        verify_audit_trail(
+            db=db,
+            run_id=result.run_id,
+            expected_rows=3,
+            expected_gate_name="category_router",
+            expected_terminal_outcomes={"routed": 3},
+        )
+
     def test_config_gate_integer_route_label(self, plugin_manager) -> None:
         """Config gate condition can return an integer that maps to route labels.
 
@@ -363,6 +496,7 @@ class TestConfigGateIntegration:
         string keys like {"1": "priority_1", "2": "priority_2"}.
 
         This test uses ExecutionGraph.from_plugin_instances() for proper edge building.
+        P1 Fix: Added audit trail verification for node_states, token_outcomes.
         """
         from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.core.config import (
@@ -375,44 +509,15 @@ class TestConfigGateIntegration:
         )
         from elspeth.core.dag import ExecutionGraph
         from elspeth.core.landscape import LandscapeDB
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
         db = LandscapeDB.in_memory()
 
-        class RowSchema(PluginSchema):
-            priority: int
-
-        class ListSource(_TestSourceBase):
-            name = "list_source"
-            output_schema = RowSchema
-
-            def __init__(self, data: list[dict[str, Any]]) -> None:
-                self._data = data
-
-            def load(self, ctx: Any) -> Any:
-                for _row in self._data:
-                    yield SourceRow.valid(_row)
-
-            def close(self) -> None:
-                pass
-
-        class CollectSink(_TestSinkBase):
-            name = "collect"
-
-            def __init__(self) -> None:
-                super().__init__()
-                self.results: list[dict[str, Any]] = []
-
-            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-                self.results.extend(rows)
-                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
-
-            def close(self) -> None:
-                pass
-
         # 3 rows with priorities 1, 2, 1 -> expect 2 go to priority_1, 1 goes to priority_2
-        source = ListSource([{"priority": 1}, {"priority": 2}, {"priority": 1}])
+        source = ListSource(
+            [{"priority": 1}, {"priority": 2}, {"priority": 1}],
+            schema=_PrioritySchema,
+        )
         priority_1_sink = CollectSink()
         priority_2_sink = CollectSink()
 
@@ -483,44 +588,24 @@ class TestConfigGateIntegration:
         assert all(row["priority"] == 1 for row in priority_1_sink.results)
         assert all(row["priority"] == 2 for row in priority_2_sink.results)
 
+        # P1 Fix: Verify audit trail
+        verify_audit_trail(
+            db=db,
+            run_id=result.run_id,
+            expected_rows=3,
+            expected_gate_name="priority_router",
+            expected_terminal_outcomes={"routed": 3},
+        )
+
     def test_config_gate_node_registered_in_landscape(self) -> None:
-        """Config gates are registered as nodes in Landscape."""
+        """Config gates are registered as nodes in Landscape.
+
+        P1 Fix: Added comprehensive audit trail verification beyond node registration.
+        """
         from elspeth.core.landscape import LandscapeDB
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
         db = LandscapeDB.in_memory()
-
-        class InputSchema(PluginSchema):
-            value: int
-
-        class ListSource(_TestSourceBase):
-            name = "list_source"
-            output_schema = InputSchema
-
-            def __init__(self, data: list[dict[str, Any]]) -> None:
-                self._data = data
-
-            def load(self, ctx: Any) -> Any:
-                for _row in self._data:
-                    yield SourceRow.valid(_row)
-
-            def close(self) -> None:
-                pass
-
-        class CollectSink(_TestSinkBase):
-            name = "collect"
-
-            def __init__(self) -> None:
-                super().__init__()
-                self.results: list[dict[str, Any]] = []
-
-            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-                self.results.extend(rows)
-                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
-
-            def close(self) -> None:
-                pass
 
         source = ListSource([{"value": 42}])
         sink = CollectSink()
@@ -543,8 +628,6 @@ class TestConfigGateIntegration:
 
         # Query Landscape for registered nodes
         with db.engine.connect() as conn:
-            from sqlalchemy import text
-
             nodes = conn.execute(
                 text("SELECT plugin_name, node_type FROM nodes WHERE run_id = :run_id"),
                 {"run_id": result.run_id},
@@ -556,6 +639,15 @@ class TestConfigGateIntegration:
 
         assert "config_gate:my_gate" in node_names
         assert "gate" in node_types
+
+        # P1 Fix: Verify audit trail completeness
+        verify_audit_trail(
+            db=db,
+            run_id=result.run_id,
+            expected_rows=1,
+            expected_gate_name="my_gate",
+            expected_terminal_outcomes={"completed": 1},
+        )
 
 
 class TestConfigGateFromSettings:
@@ -724,43 +816,14 @@ class TestMultipleConfigGates:
     """Tests for multiple config gates in sequence."""
 
     def test_multiple_config_gates_processed_in_order(self) -> None:
-        """Multiple config gates are processed in definition order."""
+        """Multiple config gates are processed in definition order.
+
+        P1 Fix: Added audit trail verification for both gates in sequence.
+        """
         from elspeth.core.landscape import LandscapeDB
-        from elspeth.engine.artifacts import ArtifactDescriptor
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
         db = LandscapeDB.in_memory()
-
-        class RowSchema(PluginSchema):
-            value: int
-
-        class ListSource(_TestSourceBase):
-            name = "list_source"
-            output_schema = RowSchema
-
-            def __init__(self, data: list[dict[str, Any]]) -> None:
-                self._data = data
-
-            def load(self, ctx: Any) -> Any:
-                for _row in self._data:
-                    yield SourceRow.valid(_row)
-
-            def close(self) -> None:
-                pass
-
-        class CollectSink(_TestSinkBase):
-            name = "collect"
-
-            def __init__(self) -> None:
-                super().__init__()
-                self.results: list[dict[str, Any]] = []
-
-            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
-                self.results.extend(rows)
-                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
-
-            def close(self) -> None:
-                pass
 
         # Row: value=25 should pass gate1 (>10) but fail gate2 (>50)
         source = ListSource([{"value": 25}])
@@ -799,3 +862,40 @@ class TestMultipleConfigGates:
         assert len(mid_sink.results) == 1
         assert len(default_sink.results) == 0
         assert len(low_sink.results) == 0
+
+        # P1 Fix: Verify audit trail for both gates
+        # Gate1 should process the row (continue)
+        verify_audit_trail(
+            db=db,
+            run_id=result.run_id,
+            expected_rows=1,
+            expected_gate_name="gate1",
+            expected_terminal_outcomes={"routed": 1},  # Final outcome is ROUTED via gate2
+        )
+
+        # Gate2 should also have processed the row
+        with db.engine.connect() as conn:
+            gate2_node = conn.execute(
+                text("""
+                    SELECT node_id FROM nodes
+                    WHERE run_id = :run_id AND plugin_name = 'config_gate:gate2'
+                """),
+                {"run_id": result.run_id},
+            ).fetchone()
+
+            assert gate2_node is not None, "Gate2 should be registered"
+
+            gate2_states = conn.execute(
+                text("""
+                    SELECT status, input_hash, output_hash
+                    FROM node_states
+                    WHERE node_id = :node_id
+                """),
+                {"node_id": gate2_node[0]},
+            ).fetchall()
+
+            assert len(gate2_states) == 1, "Gate2 should have processed 1 row"
+            status, input_hash, output_hash = gate2_states[0]
+            assert status == "completed"
+            assert input_hash is not None
+            assert output_hash is not None

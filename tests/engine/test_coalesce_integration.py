@@ -312,8 +312,8 @@ class TestForkCoalescePipeline:
         # The fork children were coalesced
         assert result.rows_coalesced == 1
 
-        # Sink should have received merged output
-        assert len(sink.rows) >= 1
+        # Sink should have received exactly 1 merged output
+        assert len(sink.rows) == 1
         merged = sink.rows[0]
         assert merged["id"] == 1
         assert merged["value"] == 100
@@ -460,7 +460,7 @@ class TestForkCoalescePipeline:
         assert result.rows_coalesced == 1
 
         # Merged output should have enriched=True from transform
-        assert len(sink.rows) >= 1
+        assert len(sink.rows) == 1
         merged = sink.rows[0]
         assert merged["id"] == 1
         assert merged["value"] == 42
@@ -591,8 +591,18 @@ class TestCoalesceAuditTrail:
         assert result.status == "completed"
         assert result.rows_coalesced == 1
 
-        # Query the audit trail for node states at the coalesce node
-        from elspeth.core.landscape.schema import node_states_table, nodes_table
+        # Query the audit trail for complete verification
+        from elspeth.contracts.enums import RowOutcome
+        from elspeth.core.landscape import LandscapeRecorder
+        from elspeth.core.landscape.schema import (
+            artifacts_table,
+            node_states_table,
+            nodes_table,
+            token_outcomes_table,
+            tokens_table,
+        )
+
+        recorder = LandscapeRecorder(db)
 
         with db.connection() as conn:
             # Find coalesce node
@@ -609,3 +619,63 @@ class TestCoalesceAuditTrail:
             assert len(states_result) == 2
             for state in states_result:
                 assert state.status == "completed"
+                # P1: Verify hashes are non-null
+                assert state.input_hash is not None, "Node state must have input_hash for audit trail"
+                assert state.output_hash is not None, "Completed node state must have output_hash"
+                # P1: Verify no error for successful coalesce
+                assert state.error_json is None, "Completed node state should not have error_json"
+
+            # P1: Verify token_outcomes for consumed tokens (should be COALESCED)
+            consumed_token_ids = [state.token_id for state in states_result]
+            for token_id in consumed_token_ids:
+                outcome = recorder.get_token_outcome(token_id)
+                assert outcome is not None, f"Token {token_id} must have terminal outcome recorded"
+                assert outcome.outcome == RowOutcome.COALESCED, f"Consumed token should have COALESCED outcome, got {outcome.outcome}"
+                # join_group_id should point to the merged token
+                assert outcome.join_group_id is not None, "COALESCED outcome must have join_group_id pointing to merged token"
+
+            # P1: Verify the parent token had FORKED outcome
+            # Find gate node (where fork happened)
+            gate_nodes = conn.execute(nodes_table.select().where(nodes_table.c.node_type == "gate")).fetchall()
+            assert len(gate_nodes) == 1, "Should have exactly one gate node"
+
+            # Get all tokens to find parent/fork relationships
+            all_tokens = conn.execute(tokens_table.select()).fetchall()
+
+            # Find tokens with fork_group_id (these are fork children)
+            fork_children = [t for t in all_tokens if t.fork_group_id is not None]
+            assert len(fork_children) >= 2, "Should have at least 2 fork child tokens"
+
+            # Find the parent token by looking for outcome=FORKED
+            # Note: fork_group_id on children is a grouping ID, NOT the parent token_id
+            forked_outcomes = conn.execute(token_outcomes_table.select().where(token_outcomes_table.c.outcome == "forked")).fetchall()
+            assert len(forked_outcomes) >= 1, "Should have at least 1 FORKED outcome"
+
+            parent_outcome_row = forked_outcomes[0]
+            parent_token_id = parent_outcome_row.token_id
+            parent_outcome = recorder.get_token_outcome(parent_token_id)
+            assert parent_outcome is not None, "Parent token must have outcome recorded"
+            assert parent_outcome.outcome == RowOutcome.FORKED, f"Parent token should have FORKED outcome, got {parent_outcome.outcome}"
+            assert parent_outcome.fork_group_id is not None, "FORKED outcome must have fork_group_id"
+
+            # P1: Verify token_parents for merged token (should have 2 parents with proper ordinals)
+            # The merged token is the join_group_id from the consumed tokens
+            merged_token_id = recorder.get_token_outcome(consumed_token_ids[0]).join_group_id
+            parents = recorder.get_token_parents(merged_token_id)
+            assert len(parents) == 2, f"Merged token should have 2 parents, got {len(parents)}"
+
+            # Verify ordinals are 0 and 1 (ordered)
+            ordinals = sorted([p.ordinal for p in parents])
+            assert ordinals == [0, 1], f"Parent ordinals should be [0, 1], got {ordinals}"
+
+            # Verify parent token_ids match consumed tokens
+            parent_ids = {p.parent_token_id for p in parents}
+            assert parent_ids == set(consumed_token_ids), "Merged token parents should match consumed tokens"
+
+            # P1: Verify artifacts have content_hash, artifact_type, sink_node_id
+            artifacts = conn.execute(artifacts_table.select()).fetchall()
+            assert len(artifacts) >= 1, "Should have at least 1 artifact from sink"
+            for artifact in artifacts:
+                assert artifact.content_hash is not None, "Artifact must have content_hash"
+                assert artifact.artifact_type is not None, "Artifact must have artifact_type"
+                assert artifact.sink_node_id is not None, "Artifact must have sink_node_id"

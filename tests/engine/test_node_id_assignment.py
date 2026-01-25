@@ -175,3 +175,45 @@ class TestNodeIdAssignment:
         assert t2.node_id == "xform-1"
         assert sink1.node_id == "sink-default"
         assert sink2.node_id == "sink-errors"
+
+    def test_assign_plugin_node_ids_preserves_preassigned_transform_ids(self) -> None:
+        """Should preserve pre-assigned node_ids on transforms (aggregation path).
+
+        Aggregation transforms have their node_id assigned by CLI from
+        aggregation_id_map before _assign_plugin_node_ids is called.
+        The method should skip these transforms without error.
+        """
+        db = MagicMock(spec=LandscapeDB)
+        orchestrator = Orchestrator(db)
+
+        source = MagicMock()
+        source.node_id = None
+
+        # Regular transform without node_id
+        t1 = MagicMock()
+        t1.node_id = None
+
+        # Aggregation transform with pre-assigned node_id
+        t2 = MagicMock()
+        t2.node_id = "agg-1"  # Pre-assigned by CLI
+
+        # Regular transform without node_id
+        t3 = MagicMock()
+        t3.node_id = None
+
+        # Note: transform_id_map only has entries for transforms WITHOUT pre-assigned node_ids
+        # Sequence 1 (t2) is not in the map because it already has node_id
+        orchestrator._assign_plugin_node_ids(
+            source=source,
+            transforms=[t1, t2, t3],
+            sinks={},
+            source_id="source-1",
+            transform_id_map={0: "transform-0", 2: "transform-2"},  # No entry for seq 1
+            sink_id_map={},
+        )
+
+        # Verify pre-assigned node_id remains unchanged
+        assert t2.node_id == "agg-1"
+        # Verify other transforms get assigned from map
+        assert t1.node_id == "transform-0"
+        assert t3.node_id == "transform-2"

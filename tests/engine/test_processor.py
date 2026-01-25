@@ -123,6 +123,23 @@ class TestRowProcessor:
         assert result.final_data == {"value": 21}
         assert result.outcome == RowOutcome.COMPLETED
 
+        # === P1: Audit trail verification ===
+        # Note: COMPLETED token_outcomes are recorded by the orchestrator at sink level,
+        # not by the processor. The processor records node_states for each transform.
+        # Verify node_states for each transform
+        states = recorder.get_node_states_for_token(result.token_id)
+        assert len(states) == 2, "Should have 2 node_states (one per transform)"
+
+        # Verify hashes for each state
+        for state in states:
+            assert state.input_hash is not None, "Input hash should be recorded"
+            assert state.output_hash is not None, "Output hash should be recorded"
+            assert state.status.value == "completed", "State should be completed"
+
+        # Verify correct step indices (source is 0, transforms start at 1)
+        step_indices = {s.step_index for s in states}
+        assert step_indices == {1, 2}, "Steps should be 1 and 2"
+
     def test_process_single_transform(self) -> None:
         """Single transform processes correctly."""
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
@@ -359,6 +376,20 @@ class TestRowProcessor:
         # Original data preserved
         assert result.final_data == {"value": -5}
 
+        # === P1: Audit trail verification for QUARANTINED ===
+        # Verify token outcome was recorded with error_hash
+        outcome = recorder.get_token_outcome(result.token_id)
+        assert outcome is not None, "Token outcome should be recorded"
+        assert outcome.outcome == RowOutcome.QUARANTINED, "Outcome should be QUARANTINED"
+        assert outcome.error_hash is not None, "Error hash should be recorded for quarantined rows"
+        assert outcome.is_terminal is True, "QUARANTINED is terminal"
+
+        # Verify node_state was recorded as failed
+        states = recorder.get_node_states_for_token(result.token_id)
+        assert len(states) == 1, "Should have 1 node_state for the validator"
+        state = states[0]
+        assert state.status.value == "failed", "State should be failed"
+
     def test_transform_error_with_sink_returns_routed(self) -> None:
         """Transform error with on_error=sink_name should return ROUTED."""
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
@@ -427,6 +458,14 @@ class TestRowProcessor:
         assert result.sink_name == "error_sink"
         # Original data preserved
         assert result.final_data == {"value": -5}
+
+        # === P1: Audit trail verification for ROUTED ===
+        # Verify token outcome was recorded with sink_name
+        outcome = recorder.get_token_outcome(result.token_id)
+        assert outcome is not None, "Token outcome should be recorded"
+        assert outcome.outcome == RowOutcome.ROUTED, "Outcome should be ROUTED"
+        assert outcome.sink_name == "error_sink", "Sink name should be recorded"
+        assert outcome.is_terminal is True, "ROUTED is terminal"
 
 
 class TestRowProcessorGates:
@@ -712,6 +751,22 @@ class TestRowProcessorGates:
         for child in completed_results:
             assert child.final_data == {"value": 42}
             assert child.token.branch_name in ("path_a", "path_b")
+
+        # === P1: Audit trail verification for FORKED ===
+        # Verify FORKED outcome for parent (processor records this)
+        parent_outcome = recorder.get_token_outcome(parent.token_id)
+        assert parent_outcome is not None, "Parent token outcome should be recorded"
+        assert parent_outcome.outcome == RowOutcome.FORKED, "Parent should be FORKED"
+        assert parent_outcome.fork_group_id is not None, "Fork group ID should be set"
+        assert parent_outcome.is_terminal is True, "FORKED is terminal"
+
+        # Verify children have correct lineage via get_token_parents
+        # Note: COMPLETED token_outcomes for children are recorded by orchestrator at sink,
+        # but parent relationships (fork lineage) are recorded by processor via TokenManager
+        for child in completed_results:
+            parents = recorder.get_token_parents(child.token_id)
+            assert len(parents) == 1, "Each child should have exactly 1 parent"
+            assert parents[0].parent_token_id == parent.token_id, "Parent should be the forked token"
 
 
 # NOTE: TestRowProcessorAggregation was DELETED in aggregation structural cleanup.
@@ -1064,11 +1119,18 @@ class TestRowProcessorNestedForks:
 class TestRowProcessorWorkQueue:
     """Work queue tests for fork child execution."""
 
-    def test_work_queue_iteration_guard_prevents_infinite_loop(self) -> None:
-        """Work queue should fail if iterations exceed limit."""
+    def test_work_queue_iteration_guard_prevents_infinite_loop(self, monkeypatch: Any) -> None:
+        """Work queue should fail if iterations exceed limit.
+
+        This test verifies that the iteration guard protects against bugs that
+        could cause infinite loops by continuously re-enqueuing work items.
+        """
+        import pytest
+
         import elspeth.engine.processor as proc_module
+        from elspeth.contracts import TokenInfo
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
-        from elspeth.engine.processor import RowProcessor
+        from elspeth.engine.processor import RowProcessor, _WorkItem
         from elspeth.engine.spans import SpanFactory
 
         db = LandscapeDB.in_memory()
@@ -1084,10 +1146,6 @@ class TestRowProcessorWorkQueue:
             schema_config=DYNAMIC_SCHEMA,
         )
 
-        # Create a transform that somehow creates infinite work
-        # (This shouldn't be possible with correct implementation,
-        # but the guard protects against bugs)
-
         processor = RowProcessor(
             recorder=recorder,
             span_factory=SpanFactory(),
@@ -1095,23 +1153,37 @@ class TestRowProcessorWorkQueue:
             source_node_id=source_node.node_id,
         )
 
+        # Create a mock _process_single_token that always re-enqueues work
+        def infinite_loop_process(
+            self: RowProcessor,
+            token: TokenInfo,
+            transforms: list[Any],
+            ctx: PluginContext,
+            start_step: int,
+            coalesce_at_step: int | None = None,
+            coalesce_name: str | None = None,
+        ) -> tuple[None, list[_WorkItem]]:
+            # Always return a new work item, simulating a bug that causes infinite loop
+            return (None, [_WorkItem(token=token, start_step=0)])
+
         # Patch MAX_WORK_QUEUE_ITERATIONS to a small number for testing
         original_max = proc_module.MAX_WORK_QUEUE_ITERATIONS
         proc_module.MAX_WORK_QUEUE_ITERATIONS = 5
 
         try:
-            # This test verifies the guard exists - actual infinite loop
-            # would require a bug in the implementation
+            # Patch the method to create infinite work
+            monkeypatch.setattr(RowProcessor, "_process_single_token", infinite_loop_process)
+
             ctx = PluginContext(run_id=run.run_id, config={})
-            results = processor.process_row(
-                row_index=0,
-                row_data={"value": 42},
-                transforms=[],
-                ctx=ctx,
-            )
-            # Should complete normally with no transforms
-            assert len(results) == 1
-            assert results[0].outcome == RowOutcome.COMPLETED
+
+            # Should raise RuntimeError when iterations exceed limit
+            with pytest.raises(RuntimeError, match=r"Work queue exceeded \d+ iterations"):
+                processor.process_row(
+                    row_index=0,
+                    row_data={"value": 42},
+                    transforms=[],
+                    ctx=ctx,
+                )
         finally:
             proc_module.MAX_WORK_QUEUE_ITERATIONS = original_max
 

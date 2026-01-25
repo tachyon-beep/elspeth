@@ -124,7 +124,7 @@ class TestTransformExecutor:
         )
         recorder.create_token(row_id=row.row_id, token_id=token.token_id)
 
-        result, _, _error_sink = executor.execute_transform(
+        result, _, error_sink = executor.execute_transform(
             transform=as_transform(transform),
             token=token,
             ctx=ctx,
@@ -133,6 +133,19 @@ class TestTransformExecutor:
 
         assert result.status == "error"
         assert result.reason == {"message": "validation failed"}
+
+        # Verify audit trail records the error
+        states = recorder.get_node_states_for_token(token.token_id)
+        assert len(states) == 1
+        state = states[0]
+        assert state.status == "failed"
+        assert state.duration_ms is not None
+
+        # Verify transform error is recorded with correct attribution
+        errors = recorder.get_transform_errors_for_token(token.token_id)
+        assert len(errors) == 1
+        assert errors[0].transform_id == node.node_id
+        assert errors[0].destination == error_sink
 
     def test_execute_transform_exception_records_failure(self) -> None:
         """Transform raising exception still records audit state."""
@@ -193,8 +206,8 @@ class TestTransformExecutor:
         assert len(states) == 1
         state = states[0]
         assert state.status == "failed"
-        # Type narrowing: failed status means NodeStateFailed which has duration_ms
-        assert hasattr(state, "duration_ms") and state.duration_ms is not None
+        # NodeStateFailed has duration_ms - access directly (no hasattr guards)
+        assert state.duration_ms is not None
 
     def test_execute_transform_updates_token_row_data(self) -> None:
         """Updated token should have new row_data."""
@@ -313,9 +326,9 @@ class TestTransformExecutor:
         assert len(states) == 1
         state = states[0]
         assert state.status == "completed"
-        # Type narrowing: completed status means NodeStateCompleted which has output_hash
+        # NodeStateCompleted has input_hash and output_hash - access directly (no hasattr guards)
         assert state.input_hash is not None
-        assert hasattr(state, "output_hash") and state.output_hash is not None
+        assert state.output_hash is not None
         # Same input/output data means same hashes for identity transform
         assert state.input_hash == state.output_hash
 
@@ -375,6 +388,19 @@ class TestTransformExecutor:
 
         assert result.status == "error"
         assert error_sink == "discard"
+
+        # Verify audit trail records the error
+        states = recorder.get_node_states_for_token(token.token_id)
+        assert len(states) == 1
+        state = states[0]
+        assert state.status == "failed"
+        assert state.duration_ms is not None
+
+        # Verify transform error is recorded with correct destination
+        errors = recorder.get_transform_errors_for_token(token.token_id)
+        assert len(errors) == 1
+        assert errors[0].transform_id == node.node_id
+        assert errors[0].destination == "discard"
 
     def test_execute_transform_returns_error_sink_name(self) -> None:
         """When transform errors with on_error=sink_name, returns that sink name."""
@@ -1207,8 +1233,8 @@ class TestGateExecutor:
         assert len(states) == 1
         state = states[0]
         assert state.status == "failed"
-        # Type narrowing: failed status means NodeStateFailed which has duration_ms
-        assert hasattr(state, "duration_ms") and state.duration_ms is not None
+        # NodeStateFailed has duration_ms - access directly (no hasattr guards)
+        assert state.duration_ms is not None
 
     def test_gate_context_has_state_id_for_call_recording(self) -> None:
         """BUG-RECORDER-01: Gate execution sets state_id on context for external call recording."""
@@ -2169,8 +2195,8 @@ class TestSinkExecutor:
             state = states[0]
             assert state.status == "completed"
             assert state.node_id == sink_node.node_id
-            # Type narrowing: completed status means NodeStateCompleted which has duration_ms
-            assert hasattr(state, "duration_ms") and state.duration_ms is not None
+            # NodeStateCompleted has duration_ms - access directly (no hasattr guards)
+            assert state.duration_ms is not None
 
     def test_write_empty_tokens_returns_none(self) -> None:
         """Write with empty tokens returns None without side effects."""
@@ -2279,8 +2305,8 @@ class TestSinkExecutor:
             assert len(states) == 1
             state = states[0]
             assert state.status == "failed"
-            # Type narrowing: failed status means NodeStateFailed which has duration_ms
-            assert hasattr(state, "duration_ms") and state.duration_ms is not None
+            # NodeStateFailed has duration_ms - access directly (no hasattr guards)
+            assert state.duration_ms is not None
 
         # Verify no artifact recorded (write failed)
         artifacts = recorder.get_artifacts(run.run_id)

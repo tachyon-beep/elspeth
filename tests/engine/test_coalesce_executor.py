@@ -408,13 +408,21 @@ class TestCoalesceExecutorQuorum:
         self,
         recorder: LandscapeRecorder,
         run: Run,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """QUORUM should NOT merge on timeout if quorum not met."""
-        import time
-
+        import elspeth.engine.coalesce_executor as coalesce_mod
         from elspeth.contracts import NodeType, TokenInfo
         from elspeth.engine.coalesce_executor import CoalesceExecutor
         from elspeth.engine.tokens import TokenManager
+
+        # Deterministic clock for timeout testing (use list for mutable closure)
+        fake_time = [100.0]
+
+        def fake_monotonic() -> float:
+            return fake_time[0]
+
+        monkeypatch.setattr(coalesce_mod.time, "monotonic", fake_monotonic)
 
         span_factory = SpanFactory()
         token_manager = TokenManager(recorder)
@@ -478,8 +486,8 @@ class TestCoalesceExecutorQuorum:
         outcome = executor.accept(token_a, "quorum_merge", step_in_pipeline=2)
         assert outcome.held is True
 
-        # Wait for timeout
-        time.sleep(0.15)
+        # Advance clock past timeout (0.1s + 0.05s margin)
+        fake_time[0] = 100.15
 
         # check_timeouts should return empty list (quorum not met)
         timed_out = executor.check_timeouts("quorum_merge", step_in_pipeline=2)
@@ -638,13 +646,21 @@ class TestCoalesceExecutorBestEffort:
         self,
         recorder: LandscapeRecorder,
         run: Run,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """BEST_EFFORT should merge whatever arrived when timeout expires."""
-        import time
-
+        import elspeth.engine.coalesce_executor as coalesce_mod
         from elspeth.contracts import NodeType, TokenInfo
         from elspeth.engine.coalesce_executor import CoalesceExecutor
         from elspeth.engine.tokens import TokenManager
+
+        # Deterministic clock for timeout testing (use list for mutable closure)
+        fake_time = [100.0]
+
+        def fake_monotonic() -> float:
+            return fake_time[0]
+
+        monkeypatch.setattr(coalesce_mod.time, "monotonic", fake_monotonic)
 
         span_factory = SpanFactory()
         token_manager = TokenManager(recorder)
@@ -707,8 +723,8 @@ class TestCoalesceExecutorBestEffort:
         outcome1 = executor.accept(token_a, "best_effort_merge", step_in_pipeline=2)
         assert outcome1.held is True
 
-        # Wait for timeout
-        time.sleep(0.15)
+        # Advance clock past timeout (0.1s + 0.05s margin)
+        fake_time[0] = 100.15
 
         # Check timeout and force merge
         timed_out = executor.check_timeouts("best_effort_merge", step_in_pipeline=2)
@@ -846,6 +862,53 @@ class TestCoalesceAuditMetadata:
             assert "branch" in entry
             assert "arrival_offset_ms" in entry
             assert entry["arrival_offset_ms"] >= 0
+
+        # P1: Verify audit trail - node_states for consumed tokens
+        from elspeth.contracts.enums import NodeStateStatus, RowOutcome
+        from elspeth.core.canonical import stable_hash
+
+        for token in outcome2.consumed_tokens:
+            node_states = recorder.get_node_states_for_token(token.token_id)
+
+            # Find the coalesce node state
+            coalesce_states = [ns for ns in node_states if ns.node_id == coalesce_node.node_id]
+            assert len(coalesce_states) == 1, f"Token {token.token_id} should have exactly 1 node state for coalesce node"
+
+            state = coalesce_states[0]
+            # Verify status is COMPLETED for successful merge
+            assert state.status == NodeStateStatus.COMPLETED, (
+                f"Token {token.token_id} coalesce node state should be COMPLETED, got {state.status}"
+            )
+            # Verify input_hash is present (audit trail integrity)
+            assert state.input_hash is not None, f"Token {token.token_id} node state must have input_hash for audit trail"
+            # Verify input_hash matches the token's row_data
+            expected_input_hash = stable_hash(token.row_data)
+            assert state.input_hash == expected_input_hash, (
+                f"Token {token.token_id} input_hash mismatch: expected {expected_input_hash}, got {state.input_hash}"
+            )
+            # Verify output_hash is present for completed state
+            assert state.output_hash is not None, f"Token {token.token_id} completed node state must have output_hash"
+
+            # Verify token outcome is COALESCED
+            token_outcome = recorder.get_token_outcome(token.token_id)
+            assert token_outcome is not None, f"Token {token.token_id} must have outcome recorded"
+            assert token_outcome.outcome == RowOutcome.COALESCED, (
+                f"Token {token.token_id} outcome should be COALESCED, got {token_outcome.outcome}"
+            )
+
+        # P1: Verify token_parents lineage for merged token
+        merged_token_id = outcome2.merged_token.token_id
+        parents = recorder.get_token_parents(merged_token_id)
+        assert len(parents) == 2, f"Merged token should have 2 parents, got {len(parents)}"
+
+        # Verify ordinals are 0 and 1 (ordered correctly)
+        ordinals = sorted([p.ordinal for p in parents])
+        assert ordinals == [0, 1], f"Parent ordinals should be [0, 1], got {ordinals}"
+
+        # Verify parent token_ids match consumed tokens
+        parent_ids = {p.parent_token_id for p in parents}
+        consumed_ids = {t.token_id for t in outcome2.consumed_tokens}
+        assert parent_ids == consumed_ids, f"Merged token parents {parent_ids} should match consumed tokens {consumed_ids}"
 
 
 class TestCoalesceIntegration:

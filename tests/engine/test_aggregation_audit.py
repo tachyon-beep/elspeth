@@ -223,13 +223,19 @@ class TestAggregationFlushAuditTrail:
         aggregation_executor: AggregationExecutor,
         ctx: PluginContext,
     ) -> None:
-        """Flushing a batch should create a node_state record."""
+        """Flushing a batch should create a node_state record with proper audit fields."""
+        from elspeth.core.canonical import stable_hash
+
         # Create and buffer tokens
         token1 = create_token(recorder, run_id, source_node_id, 0, {"x": 10})
         token2 = create_token(recorder, run_id, source_node_id, 1, {"x": 20})
 
         aggregation_executor.buffer_row(aggregation_node_id, token1)
         aggregation_executor.buffer_row(aggregation_node_id, token2)
+
+        # Get batch_id before flush for linkage verification
+        batch_id = aggregation_executor.get_batch_id(aggregation_node_id)
+        assert batch_id is not None
 
         # Create transform with node_id set
         transform = MockBatchTransform()
@@ -248,8 +254,7 @@ class TestAggregationFlushAuditTrail:
         assert result.status == "success"
         assert result.row == {"sum": 30, "count": 2}
 
-        # Verify node_state was created
-        # The node_state is created using the first token's ID
+        # Verify node_state was created with proper audit fields
         states = recorder.get_node_states_for_token(token1.token_id)
         assert len(states) >= 1
 
@@ -257,6 +262,26 @@ class TestAggregationFlushAuditTrail:
         agg_state = next((s for s in states if s.node_id == aggregation_node_id), None)
         assert agg_state is not None
         assert agg_state.status == "completed"
+
+        # Verify audit fields: input_hash computed from batch input
+        # Note: AggregationExecutor wraps batch rows in {"batch_rows": ...} for node_state
+        batch_input = {"batch_rows": [{"x": 10}, {"x": 20}]}
+        expected_input_hash = stable_hash(batch_input)
+        assert agg_state.input_hash == expected_input_hash
+
+        # Verify audit fields: output_hash computed from result
+        expected_output_hash = stable_hash({"sum": 30, "count": 2})
+        assert agg_state.output_hash == expected_output_hash
+
+        # Verify duration_ms is populated
+        assert agg_state.duration_ms is not None
+        assert agg_state.duration_ms >= 0
+
+        # Verify batch linkage to aggregation state
+        batch = recorder.get_batch(batch_id)
+        assert batch is not None
+        assert batch.aggregation_state_id == agg_state.state_id
+        assert batch.trigger_type == TriggerType.COUNT.value
 
     def test_flush_transitions_batch_status(
         self,
@@ -307,7 +332,11 @@ class TestAggregationFlushAuditTrail:
         aggregation_executor: AggregationExecutor,
         ctx: PluginContext,
     ) -> None:
-        """Exception during flush should mark batch as failed."""
+        """Exception during flush should mark batch as failed with proper audit fields."""
+        import json
+
+        from elspeth.core.canonical import stable_hash
+
         # Create and buffer token
         token = create_token(recorder, run_id, source_node_id, 0, {"x": 10})
         aggregation_executor.buffer_row(aggregation_node_id, token)
@@ -334,11 +363,32 @@ class TestAggregationFlushAuditTrail:
         assert batch is not None
         assert batch.status == BatchStatus.FAILED.value
 
-        # Verify node_state was also marked as failed
+        # Verify node_state was also marked as failed with proper audit fields
         states = recorder.get_node_states_for_token(token.token_id)
         agg_state = next((s for s in states if s.node_id == aggregation_node_id), None)
         assert agg_state is not None
         assert agg_state.status == "failed"
+
+        # Verify failed state has input_hash (batch input was captured before failure)
+        # Note: AggregationExecutor wraps batch rows in {"batch_rows": ...} for node_state
+        batch_input = {"batch_rows": [{"x": 10}]}
+        expected_input_hash = stable_hash(batch_input)
+        assert agg_state.input_hash == expected_input_hash
+
+        # Verify failed state has no output_hash (failure means no output)
+        assert agg_state.output_hash is None
+
+        # Verify failed state has error_json with exception details
+        assert agg_state.error_json is not None
+        error = json.loads(agg_state.error_json)
+        assert error["type"] == "RuntimeError"
+        assert "intentional failure" in error["exception"]
+
+        # Verify duration_ms is still populated
+        assert agg_state.duration_ms is not None
+
+        # Verify batch linkage to aggregation state
+        assert batch.aggregation_state_id == agg_state.state_id
 
     def test_error_result_marks_batch_failed(
         self,
@@ -349,7 +399,11 @@ class TestAggregationFlushAuditTrail:
         aggregation_executor: AggregationExecutor,
         ctx: PluginContext,
     ) -> None:
-        """Transform returning error result (not exception) should mark batch failed."""
+        """Transform returning error result (not exception) should mark batch failed with audit fields."""
+        import json
+
+        from elspeth.core.canonical import stable_hash
+
         # Create and buffer token
         token = create_token(recorder, run_id, source_node_id, 0, {"x": 10})
         aggregation_executor.buffer_row(aggregation_node_id, token)
@@ -382,11 +436,35 @@ class TestAggregationFlushAuditTrail:
         assert batch is not None
         assert batch.status == BatchStatus.FAILED.value
 
-        # Verify node_state was also marked as failed
+        # Verify node_state was also marked as failed with proper audit fields
         states = recorder.get_node_states_for_token(token.token_id)
         agg_state = next((s for s in states if s.node_id == aggregation_node_id), None)
         assert agg_state is not None
         assert agg_state.status == "failed"
+
+        # Verify failed state has input_hash (batch input was captured)
+        # Note: AggregationExecutor wraps batch rows in {"batch_rows": ...} for node_state
+        batch_input = {"batch_rows": [{"x": 10}]}
+        expected_input_hash = stable_hash(batch_input)
+        assert agg_state.input_hash == expected_input_hash
+
+        # Verify failed state has no output_hash (error result means no successful output)
+        assert agg_state.output_hash is None
+
+        # Verify failed state has error_json with TransformResult error reason
+        # Note: error is stored as {"exception": str(reason), "type": "TransformError"}
+        assert agg_state.error_json is not None
+        error = json.loads(agg_state.error_json)
+        assert error["type"] == "TransformError"
+        # The exception field contains the stringified reason dict
+        assert "batch processing failed" in error["exception"]
+        assert "BATCH_ERROR" in error["exception"]
+
+        # Verify duration_ms is populated
+        assert agg_state.duration_ms is not None
+
+        # Verify batch linkage to aggregation state
+        assert batch.aggregation_state_id == agg_state.state_id
 
     def test_end_of_source_trigger_recorded(
         self,
