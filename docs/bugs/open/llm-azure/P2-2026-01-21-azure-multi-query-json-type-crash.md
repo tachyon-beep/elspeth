@@ -199,3 +199,20 @@ When triggered, the entire row fails with an unhandled TypeError exception inste
    - JSON null response `null`
 
 All tests should verify TransformResult.error with `reason: "invalid_json_type"` rather than unhandled TypeError.
+
+---
+
+## Re-verification (2026-01-25)
+
+**Status: RE-ANALYZED**
+
+### New Analysis
+
+Re-ran static analysis on 2026-01-25. Key findings:
+
+**Evidence:**
+- `src/elspeth/plugins/llm/azure_multi_query.py:241` parses JSON without validating the resulting type.
+- `src/elspeth/plugins/llm/azure_multi_query.py:255` assumes `parsed` is dict-like and indexes with string keys.
+
+**Root Cause:**
+- The code does not validate that `json.loads` returns a dict before using string-key access, violating external-data handling rules.
