@@ -2232,9 +2232,8 @@ class TestRowProcessorCoalesce:
 
         # === Late arrival behavior ===
         # The slow branch arrives after merge is complete.
-        # Since pending state was deleted, this creates a NEW pending entry.
-        # This is by design - the row processing would have already continued
-        # with the merged token, so this late arrival is effectively orphaned.
+        # With Gap #2 fix, late arrivals are now rejected with failure_reason.
+        # This prevents orphan pending entries and confusing duplicate audit records.
         slow_token = TokenInfo(
             row_id=children[2].row_id,
             token_id=children[2].token_id,
@@ -2243,11 +2242,12 @@ class TestRowProcessorCoalesce:
         )
         outcome3 = coalesce_executor.accept(slow_token, "merger", step_in_pipeline=3)
 
-        # Late arrival creates new pending state (waiting for more branches)
-        # This is the expected behavior - in real pipelines, the orchestrator
-        # would track that this row already coalesced and not submit the late token.
-        assert outcome3.held is True
+        # Late arrival gets rejected with proper failure outcome
+        assert outcome3.held is False
         assert outcome3.merged_token is None
+        assert outcome3.failure_reason == "late_arrival_after_merge"
+        assert len(outcome3.consumed_tokens) == 1
+        assert outcome3.consumed_tokens[0].token_id == slow_token.token_id
 
     def test_nested_fork_coalesce(self) -> None:
         """Test fork within fork, with coalesce at each level.

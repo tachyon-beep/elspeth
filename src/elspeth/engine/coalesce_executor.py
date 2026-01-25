@@ -45,6 +45,7 @@ class _PendingCoalesce:
     arrived: dict[str, TokenInfo]  # branch_name -> token
     arrival_times: dict[str, float]  # branch_name -> monotonic time
     first_arrival: float  # For timeout calculation
+    pending_state_ids: dict[str, str]  # branch_name -> state_id (for completing pending states)
 
 
 class CoalesceExecutor:
@@ -96,6 +97,9 @@ class CoalesceExecutor:
         self._node_ids: dict[str, str] = {}
         # Pending tokens: (coalesce_name, row_id) -> _PendingCoalesce
         self._pending: dict[tuple[str, str], _PendingCoalesce] = {}
+        # Completed coalesces: tracks keys that have already merged/failed
+        # Used to detect late arrivals after merge and reject them gracefully
+        self._completed_keys: set[tuple[str, str]] = set()
 
     def register_coalesce(
         self,
@@ -162,11 +166,40 @@ class CoalesceExecutor:
         key = (coalesce_name, token.row_id)
         now = time.monotonic()
 
+        # Check if this coalesce already completed (late arrival)
+        if key in self._completed_keys:
+            # Late arrival after merge/failure already happened
+            # Record failure audit trail for this late token
+            state = self._recorder.begin_node_state(
+                token_id=token.token_id,
+                node_id=node_id,
+                step_index=step_in_pipeline,
+                input_data=token.row_data,
+            )
+            self._recorder.complete_node_state(
+                state_id=state.state_id,
+                status="failed",
+                error={"failure_reason": "late_arrival_after_merge"},
+                duration_ms=0,
+            )
+
+            # Return failure outcome
+            return CoalesceOutcome(
+                held=False,
+                failure_reason="late_arrival_after_merge",
+                consumed_tokens=[token],
+                coalesce_metadata={
+                    "policy": settings.policy,
+                    "reason": "Siblings already merged/failed, this token arrived too late",
+                },
+            )
+
         if key not in self._pending:
             self._pending[key] = _PendingCoalesce(
                 arrived={},
                 arrival_times={},
                 first_arrival=now,
+                pending_state_ids={},
             )
 
         pending = self._pending[key]
@@ -174,6 +207,16 @@ class CoalesceExecutor:
         # Record arrival
         pending.arrived[token.branch_name] = token
         pending.arrival_times[token.branch_name] = now
+
+        # Record pending node state for audit trail
+        # This ensures held tokens are visible in explain() queries
+        state = self._recorder.begin_node_state(
+            token_id=token.token_id,
+            node_id=node_id,
+            step_index=step_in_pipeline,
+            input_data=token.row_data,
+        )
+        pending.pending_state_ids[token.branch_name] = state.state_id
 
         # Check if merge conditions are met
         if self._should_merge(settings, pending):
@@ -185,7 +228,7 @@ class CoalesceExecutor:
                 key=key,
             )
 
-        # Hold token
+        # Hold token - audit trail already recorded above
         return CoalesceOutcome(held=True)
 
     def _should_merge(
@@ -235,19 +278,18 @@ class CoalesceExecutor:
             step_in_pipeline=step_in_pipeline,
         )
 
-        # Record node states for consumed tokens
-        for token in consumed_tokens:
-            state = self._recorder.begin_node_state(
-                token_id=token.token_id,
-                node_id=node_id,
-                step_index=step_in_pipeline,
-                input_data=token.row_data,
-            )
+        # Complete pending node states for consumed tokens
+        # (These states were created as "pending" when tokens were held in accept())
+        for branch_name, token in pending.arrived.items():
+            # Get the pending state_id that was created when token was held
+            state_id = pending.pending_state_ids[branch_name]
+
+            # Complete it now that merge is happening
             self._recorder.complete_node_state(
-                state_id=state.state_id,
+                state_id=state_id,
                 status="completed",
                 output_data={"merged_into": merged_token.token_id},
-                duration_ms=0,
+                duration_ms=(now - pending.arrival_times[branch_name]) * 1000,
             )
 
             # Record terminal token outcome (COALESCED)
@@ -274,8 +316,9 @@ class CoalesceExecutor:
             "wait_duration_ms": (now - pending.first_arrival) * 1000,
         }
 
-        # Clean up pending state
+        # Clean up pending state and mark as completed
         del self._pending[key]
+        self._completed_keys.add(key)  # Track completion to reject late arrivals
 
         return CoalesceOutcome(
             held=False,
@@ -437,19 +480,21 @@ class CoalesceExecutor:
                     error_msg = "quorum_not_met"
                     error_hash = hashlib.sha256(error_msg.encode()).hexdigest()[:16]
 
-                    # Record node states for consumed tokens (audit trail)
-                    for token in consumed_tokens:
-                        state = self._recorder.begin_node_state(
-                            token_id=token.token_id,
-                            node_id=node_id,
-                            step_index=step_in_pipeline,
-                            input_data=token.row_data,
-                        )
+                    # Compute wait duration
+                    now = time.monotonic()
+
+                    # Complete pending node states for consumed tokens (audit trail)
+                    # (These states were created as "pending" when tokens were held in accept())
+                    for branch_name, token in pending.arrived.items():
+                        # Get the pending state_id that was created when token was held
+                        state_id = pending.pending_state_ids[branch_name]
+
+                        # Complete it now with failure status
                         self._recorder.complete_node_state(
-                            state_id=state.state_id,
+                            state_id=state_id,
                             status="failed",
                             error={"failure_reason": "quorum_not_met"},
-                            duration_ms=0,
+                            duration_ms=(now - pending.arrival_times[branch_name]) * 1000,
                         )
 
                         # Record terminal token outcome (FAILED)
@@ -461,6 +506,7 @@ class CoalesceExecutor:
                         )
 
                     del self._pending[key]
+                    self._completed_keys.add(key)  # Track completion to reject late arrivals
                     results.append(
                         CoalesceOutcome(
                             held=False,
@@ -483,19 +529,21 @@ class CoalesceExecutor:
                 error_msg = "incomplete_branches"
                 error_hash = hashlib.sha256(error_msg.encode()).hexdigest()[:16]
 
-                # Record node states for consumed tokens (audit trail)
-                for token in consumed_tokens:
-                    state = self._recorder.begin_node_state(
-                        token_id=token.token_id,
-                        node_id=node_id,
-                        step_index=step_in_pipeline,
-                        input_data=token.row_data,
-                    )
+                # Compute wait duration
+                now = time.monotonic()
+
+                # Complete pending node states for consumed tokens (audit trail)
+                # (These states were created as "pending" when tokens were held in accept())
+                for branch_name, token in pending.arrived.items():
+                    # Get the pending state_id that was created when token was held
+                    state_id = pending.pending_state_ids[branch_name]
+
+                    # Complete it now with failure status
                     self._recorder.complete_node_state(
-                        state_id=state.state_id,
+                        state_id=state_id,
                         status="failed",
                         error={"failure_reason": "incomplete_branches"},
-                        duration_ms=0,
+                        duration_ms=(now - pending.arrival_times[branch_name]) * 1000,
                     )
 
                     # Record terminal token outcome (FAILED)
@@ -507,6 +555,7 @@ class CoalesceExecutor:
                     )
 
                 del self._pending[key]
+                self._completed_keys.add(key)  # Track completion to reject late arrivals
                 results.append(
                     CoalesceOutcome(
                         held=False,
