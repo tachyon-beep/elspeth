@@ -302,6 +302,17 @@ class CoalesceSettings(BaseModel):
     Coalesce merges tokens from parallel fork paths back into a single token.
     Tokens are correlated by row_id (same source row that was forked).
 
+    Memory Implications:
+        When using 'require_all' or 'quorum' policies, tokens arriving early
+        are held in memory waiting for their siblings. If one branch consistently
+        fails before reaching coalesce, the other branches' tokens will be held
+        until flush_pending() is called at end-of-source.
+
+        For high-volume pipelines with unreliable branches:
+        - Consider 'best_effort' with timeout for faster memory release
+        - Consider 'first' to avoid holding tokens entirely
+        - Monitor rows_coalesce_failed counter for excessive failures
+
     Example YAML:
         coalesce:
           - name: merge_analysis

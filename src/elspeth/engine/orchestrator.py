@@ -93,6 +93,7 @@ class RunResult:
     rows_quarantined: int = 0
     rows_forked: int = 0
     rows_coalesced: int = 0
+    rows_coalesce_failed: int = 0  # Coalesce failures (quorum_not_met, incomplete_branches)
     rows_expanded: int = 0  # Deaggregation parent tokens
     rows_buffered: int = 0  # Passthrough mode buffered tokens
 
@@ -869,6 +870,7 @@ class Orchestrator:
         rows_quarantined = 0
         rows_forked = 0
         rows_coalesced = 0
+        rows_coalesce_failed = 0
         rows_expanded = 0
         rows_buffered = 0
         pending_tokens: dict[str, list[TokenInfo]] = {name: [] for name in config.sinks}
@@ -1077,8 +1079,8 @@ class Orchestrator:
                             # Coalesce failed (quorum_not_met, incomplete_branches)
                             # Audit trail recorded by executor: each consumed token has
                             # node_state with status="failed" and error_json explaining why.
-                            # No further action needed here - tokens are terminal.
-                            pass
+                            # Count failed coalesces for observability.
+                            rows_coalesce_failed += 1
 
                 # Write to sinks using SinkExecutor
                 sink_executor = SinkExecutor(recorder, self._span_factory, run_id)
@@ -1171,6 +1173,7 @@ class Orchestrator:
             rows_quarantined=rows_quarantined,
             rows_forked=rows_forked,
             rows_coalesced=rows_coalesced,
+            rows_coalesce_failed=rows_coalesce_failed,
             rows_expanded=rows_expanded,
             rows_buffered=rows_buffered,
         )
@@ -1722,6 +1725,7 @@ class Orchestrator:
         rows_quarantined = 0
         rows_forked = 0
         rows_coalesced = 0
+        rows_coalesce_failed = 0
         rows_expanded = 0
         rows_buffered = 0
         pending_tokens: dict[str, list[TokenInfo]] = {name: [] for name in config.sinks}
@@ -1812,6 +1816,9 @@ class Orchestrator:
                     if outcome.merged_token is not None:
                         rows_coalesced += 1
                         pending_tokens[output_sink_name].append(outcome.merged_token)
+                    elif outcome.failure_reason:
+                        # Coalesce failed - audit trail already recorded by executor
+                        rows_coalesce_failed += 1
 
             # Write to sinks using SinkExecutor
             sink_executor = SinkExecutor(recorder, self._span_factory, run_id)
@@ -1853,6 +1860,7 @@ class Orchestrator:
             rows_quarantined=rows_quarantined,
             rows_forked=rows_forked,
             rows_coalesced=rows_coalesced,
+            rows_coalesce_failed=rows_coalesce_failed,
             rows_expanded=rows_expanded,
             rows_buffered=rows_buffered,
         )

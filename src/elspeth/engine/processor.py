@@ -969,6 +969,12 @@ class RowProcessor:
                 if coalesce_outcome.merged_token is not None:
                     # All siblings arrived - return COALESCED with merged data
                     # Use coalesce_name + parent token for join group identification
+                    #
+                    # DUAL-OUTCOME SEMANTICS: The merged token will have TWO outcomes recorded:
+                    # 1. COALESCED (here) - indicates this token is the result of a merge
+                    # 2. COMPLETED (later, at sink) - indicates final destination
+                    # This is consistent with the BUFFERED pattern where tokens transition
+                    # through multiple states before reaching their final outcome.
                     join_group_id = f"{coalesce_name}_{uuid.uuid4().hex[:8]}"
                     self._recorder.record_token_outcome(
                         run_id=self._run_id,
