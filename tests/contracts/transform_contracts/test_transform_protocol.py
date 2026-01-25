@@ -36,7 +36,7 @@ import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
-from elspeth.contracts import Determinism, TransformResult
+from elspeth.contracts import Determinism, PluginSchema, TransformResult
 from elspeth.plugins.context import PluginContext
 
 if TYPE_CHECKING:
@@ -85,14 +85,14 @@ class TransformContractTestBase(ABC):
         assert len(transform.name) > 0
 
     def test_transform_has_input_schema(self, transform: TransformProtocol) -> None:
-        """Contract: Transform MUST have an 'input_schema' attribute."""
-        assert hasattr(transform, "input_schema")
+        """Contract: Transform MUST have an 'input_schema' attribute that is a PluginSchema subclass."""
         assert isinstance(transform.input_schema, type)
+        assert issubclass(transform.input_schema, PluginSchema)
 
     def test_transform_has_output_schema(self, transform: TransformProtocol) -> None:
-        """Contract: Transform MUST have an 'output_schema' attribute."""
-        assert hasattr(transform, "output_schema")
+        """Contract: Transform MUST have an 'output_schema' attribute that is a PluginSchema subclass."""
         assert isinstance(transform.output_schema, type)
+        assert issubclass(transform.output_schema, PluginSchema)
 
     def test_transform_has_determinism(self, transform: TransformProtocol) -> None:
         """Contract: Transform MUST have a 'determinism' attribute."""
@@ -203,8 +203,7 @@ class TransformContractTestBase(ABC):
         ctx: PluginContext,
     ) -> None:
         """Contract: on_start() lifecycle hook MUST not raise."""
-        if hasattr(transform, "on_start"):
-            transform.on_start(ctx)
+        transform.on_start(ctx)
 
     def test_on_complete_does_not_raise(
         self,
@@ -213,9 +212,8 @@ class TransformContractTestBase(ABC):
         ctx: PluginContext,
     ) -> None:
         """Contract: on_complete() lifecycle hook MUST not raise."""
-        if hasattr(transform, "on_complete"):
-            transform.process(valid_input, ctx)
-            transform.on_complete(ctx)
+        transform.process(valid_input, ctx)
+        transform.on_complete(ctx)
 
 
 class TransformContractPropertyTestBase(TransformContractTestBase):
@@ -239,18 +237,13 @@ class TransformContractPropertyTestBase(TransformContractTestBase):
         ctx: PluginContext,
         extra_field: str,
     ) -> None:
-        """Property: Transform should handle input with extra fields.
+        """Property: Transform MUST return TransformResult even with extra fields.
 
-        Note: Behavior depends on schema mode. This test verifies no crash.
+        Extra fields are ignored per PluginSchema (extra="ignore").
         """
         input_with_extra = {**valid_input, extra_field: "extra_value"}
-        # Should not crash - may succeed or error depending on schema
-        try:
-            result = transform.process(input_with_extra, ctx)
-            assert isinstance(result, TransformResult)
-        except Exception:
-            # Some transforms may reject extra fields - that's valid behavior
-            pass
+        result = transform.process(input_with_extra, ctx)
+        assert isinstance(result, TransformResult)
 
     def test_deterministic_transform_produces_same_output(
         self,
@@ -263,8 +256,11 @@ class TransformContractPropertyTestBase(TransformContractTestBase):
             result1 = transform.process(valid_input, ctx)
             result2 = transform.process(valid_input, ctx)
 
-            if result1.status == "success" and result2.status == "success" and result1.row is not None and result2.row is not None:
-                assert result1.row == result2.row, "Deterministic transform produced different outputs"
+            assert result1.status == "success"
+            assert result2.status == "success"
+            assert result1.row is not None
+            assert result2.row is not None
+            assert result1.row == result2.row, "Deterministic transform produced different outputs"
 
 
 class TransformErrorContractTestBase(TransformContractTestBase):
@@ -279,6 +275,16 @@ class TransformErrorContractTestBase(TransformContractTestBase):
         """Provide an input that should cause the transform to return an error."""
         raise NotImplementedError
 
+    def test_error_input_returns_error_status(
+        self,
+        transform: TransformProtocol,
+        error_input: dict[str, Any],
+        ctx: PluginContext,
+    ) -> None:
+        """Contract: error_input fixture MUST produce an error result."""
+        result = transform.process(error_input, ctx)
+        assert result.status == "error", f"error_input MUST produce error, got status={result.status}"
+
     def test_error_result_has_reason(
         self,
         transform: TransformProtocol,
@@ -287,9 +293,9 @@ class TransformErrorContractTestBase(TransformContractTestBase):
     ) -> None:
         """Contract: Error results MUST have a reason dict."""
         result = transform.process(error_input, ctx)
-        if result.status == "error":
-            assert result.reason is not None, "Error TransformResult has None reason"
-            assert isinstance(result.reason, dict), f"TransformResult.reason is {type(result.reason).__name__}, expected dict"
+        assert result.status == "error"
+        assert result.reason is not None, "Error TransformResult has None reason"
+        assert isinstance(result.reason, dict), f"TransformResult.reason is {type(result.reason).__name__}, expected dict"
 
     def test_error_result_has_no_output_data(
         self,
@@ -299,9 +305,9 @@ class TransformErrorContractTestBase(TransformContractTestBase):
     ) -> None:
         """Contract: Error results should NOT have output data."""
         result = transform.process(error_input, ctx)
-        if result.status == "error":
-            assert result.row is None, "Error result should not have row"
-            assert result.rows is None, "Error result should not have rows"
+        assert result.status == "error"
+        assert result.row is None, "Error result should not have row"
+        assert result.rows is None, "Error result should not have rows"
 
     def test_error_result_has_retryable_flag(
         self,
@@ -311,6 +317,5 @@ class TransformErrorContractTestBase(TransformContractTestBase):
     ) -> None:
         """Contract: Error results MUST have a retryable flag."""
         result = transform.process(error_input, ctx)
-        if result.status == "error":
-            assert hasattr(result, "retryable")
-            assert isinstance(result.retryable, bool)
+        assert result.status == "error"
+        assert isinstance(result.retryable, bool)

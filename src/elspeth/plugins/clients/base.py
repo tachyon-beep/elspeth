@@ -54,3 +54,11 @@ class AuditedClientBase:
             Sequential call index, unique within this state_id (not just this client)
         """
         return self._recorder.allocate_call_index(self._state_id)
+
+    def close(self) -> None:
+        """Release any resources held by the client.
+
+        Default implementation is a no-op. Subclasses may override
+        to close underlying connections or resources.
+        """
+        pass

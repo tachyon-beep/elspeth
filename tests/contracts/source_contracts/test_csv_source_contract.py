@@ -11,6 +11,11 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from elspeth.contracts import SourceRow
+from elspeth.contracts.schema import SchemaConfig
+from elspeth.core.canonical import CANONICAL_VERSION, stable_hash
+from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+from elspeth.plugins.context import PluginContext
 from elspeth.plugins.sources.csv_source import CSVSource
 
 from .test_source_protocol import SourceContractPropertyTestBase
@@ -44,10 +49,6 @@ class TestCSVSourceContract(SourceContractPropertyTestBase):
 
     def test_csv_source_respects_delimiter(self, tmp_path: Path) -> None:
         """CSVSource MUST respect delimiter configuration."""
-        from elspeth.contracts import SourceRow
-        from elspeth.plugins.context import PluginContext
-
-        # Create tab-delimited file
         tsv_file = tmp_path / "data.tsv"
         tsv_file.write_text("id\tname\n1\tAlice\n2\tBob\n")
 
@@ -77,8 +78,6 @@ class TestCSVSourceContract(SourceContractPropertyTestBase):
         gracefully by detecting StopIteration on the first next() call
         (no headers available). This is better than raising EmptyDataError.
         """
-        from elspeth.plugins.context import PluginContext
-
         empty_file = tmp_path / "empty.csv"
         empty_file.write_text("")
 
@@ -97,8 +96,6 @@ class TestCSVSourceContract(SourceContractPropertyTestBase):
 
     def test_csv_source_handles_header_only(self, tmp_path: Path) -> None:
         """CSVSource MUST handle files with only headers."""
-        from elspeth.plugins.context import PluginContext
-
         header_only = tmp_path / "header_only.csv"
         header_only.write_text("id,name,value\n")
 
@@ -118,14 +115,14 @@ class TestCSVSourceContract(SourceContractPropertyTestBase):
 class TestCSVSourceQuarantineContract(SourceContractPropertyTestBase):
     """Contract tests for CSVSource quarantine behavior.
 
-    Verifies that validation failures produce proper SourceRow.quarantined() results.
+    Verifies that validation failures produce proper SourceRow.quarantined() results
+    and are recorded in the audit trail.
     """
 
     @pytest.fixture
     def source_data_with_invalid(self, tmp_path: Path) -> Path:
         """Create a CSV file with rows that will fail strict validation."""
         csv_file = tmp_path / "mixed_data.csv"
-        # id should be int, but "not_an_int" will fail
         csv_file.write_text("id,name\n1,Alice\nnot_an_int,Bob\n3,Charlie\n")
         return csv_file
 
@@ -145,29 +142,53 @@ class TestCSVSourceQuarantineContract(SourceContractPropertyTestBase):
 
     def test_invalid_rows_are_quarantined(self, source: SourceProtocol) -> None:
         """Contract: Invalid rows MUST be yielded as SourceRow.quarantined()."""
-        from elspeth.plugins.context import PluginContext
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        run = recorder.begin_run(config={}, canonical_version=CANONICAL_VERSION, run_id="test-quarantine")
 
-        ctx = PluginContext(run_id="test", config={})
+        recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="csv",
+            node_type="source",
+            plugin_version="1.0",
+            config={},
+            schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
+            node_id="csv_source",
+            sequence=0,
+        )
+
+        ctx = PluginContext(
+            run_id=run.run_id,
+            config={},
+            landscape=recorder,
+            node_id="csv_source",
+        )
         rows = list(source.load(ctx))
 
-        # Should have 2 valid rows and 1 quarantined
         valid_rows = [r for r in rows if not r.is_quarantined]
         quarantined_rows = [r for r in rows if r.is_quarantined]
 
         assert len(valid_rows) == 2, f"Expected 2 valid rows, got {len(valid_rows)}"
         assert len(quarantined_rows) == 1, f"Expected 1 quarantined row, got {len(quarantined_rows)}"
 
-        # Verify quarantined row has proper attributes
         q_row = quarantined_rows[0]
-        assert q_row.quarantine_error is not None
+        assert q_row.is_quarantined is True
+        assert q_row.row == {"id": "not_an_int", "name": "Bob"}
+        assert "id" in q_row.quarantine_error.lower()
         assert q_row.quarantine_destination == "quarantine_sink"
-        assert q_row.row is not None  # Original row data preserved
+
+        row_hash = stable_hash({"id": "not_an_int", "name": "Bob"})
+        errors = recorder.get_validation_errors_for_row(run.run_id, row_hash)
+        assert len(errors) == 1
+        assert errors[0].schema_mode == "strict"
+        assert errors[0].destination == "quarantine_sink"
 
 
 class TestCSVSourceDiscardContract:
     """Contract tests for CSVSource discard behavior.
 
-    When on_validation_failure="discard", invalid rows should not be yielded.
+    When on_validation_failure="discard", invalid rows should not be yielded
+    but MUST still be recorded in the audit trail.
     """
 
     @pytest.fixture
@@ -177,9 +198,22 @@ class TestCSVSourceDiscardContract:
         csv_file.write_text("id,name\n1,Alice\nnot_an_int,Bob\n3,Charlie\n")
         return csv_file
 
-    def test_discarded_rows_not_yielded(self, source_data_with_invalid: Path) -> None:
-        """Contract: When discard mode, invalid rows MUST NOT be yielded."""
-        from elspeth.plugins.context import PluginContext
+    def test_discarded_rows_not_yielded_but_recorded(self, source_data_with_invalid: Path) -> None:
+        """Contract: When discard mode, invalid rows NOT yielded but MUST be recorded."""
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        run = recorder.begin_run(config={}, canonical_version=CANONICAL_VERSION, run_id="test-discard")
+
+        recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="csv",
+            node_type="source",
+            plugin_version="1.0",
+            config={},
+            schema_config=SchemaConfig.from_dict({"fields": "dynamic"}),
+            node_id="csv_source",
+            sequence=0,
+        )
 
         source = CSVSource(
             {
@@ -191,14 +225,24 @@ class TestCSVSourceDiscardContract:
                 "on_validation_failure": "discard",
             }
         )
-        ctx = PluginContext(run_id="test", config={})
+        ctx = PluginContext(
+            run_id=run.run_id,
+            config={},
+            landscape=recorder,
+            node_id="csv_source",
+        )
 
         rows = list(source.load(ctx))
 
-        # Should only have 2 valid rows (invalid one discarded)
         assert len(rows) == 2
         for row in rows:
             assert not row.is_quarantined
+
+        row_hash = stable_hash({"id": "not_an_int", "name": "Bob"})
+        errors = recorder.get_validation_errors_for_row(run.run_id, row_hash)
+        assert len(errors) == 1
+        assert errors[0].schema_mode == "strict"
+        assert errors[0].destination == "discard"
 
 
 class TestCSVSourceFileNotFoundContract:
@@ -206,8 +250,6 @@ class TestCSVSourceFileNotFoundContract:
 
     def test_file_not_found_raises(self, tmp_path: Path) -> None:
         """Contract: Non-existent file MUST raise FileNotFoundError."""
-        from elspeth.plugins.context import PluginContext
-
         source = CSVSource(
             {
                 "path": str(tmp_path / "nonexistent.csv"),

@@ -14,14 +14,16 @@ Contract guarantees verified:
 
 Usage:
     Create a subclass with fixtures providing:
-    - sink: The sink plugin instance
+    - sink_factory: A callable that returns a fresh sink instance
     - sample_rows: A list of row dicts to write
     - ctx: A PluginContext for the test
 
     class TestMySinkContract(SinkContractTestBase):
         @pytest.fixture
-        def sink(self, tmp_path):
-            return MySink({"path": str(tmp_path / "output.csv"), ...})
+        def sink_factory(self, tmp_path):
+            def factory():
+                return MySink({"path": str(tmp_path / "output.csv"), ...})
+            return factory
 
         @pytest.fixture
         def sample_rows(self):
@@ -31,11 +33,12 @@ Usage:
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 import pytest
 
-from elspeth.contracts import ArtifactDescriptor, Determinism
+from elspeth.contracts import ArtifactDescriptor, Determinism, PluginSchema
 from elspeth.plugins.context import PluginContext
 
 if TYPE_CHECKING:
@@ -46,16 +49,21 @@ class SinkContractTestBase(ABC):
     """Abstract base class for sink contract verification.
 
     Subclasses must provide fixtures for:
-    - sink: The sink plugin instance to test
+    - sink_factory: A callable that returns a fresh sink instance
     - sample_rows: A list of row dicts to write
     - ctx: A PluginContext for the test
     """
 
     @pytest.fixture
     @abstractmethod
-    def sink(self) -> SinkProtocol:
-        """Provide a configured sink instance."""
+    def sink_factory(self) -> Callable[[], SinkProtocol]:
+        """Provide a factory that creates fresh sink instances."""
         raise NotImplementedError
+
+    @pytest.fixture
+    def sink(self, sink_factory: Callable[[], SinkProtocol]) -> SinkProtocol:
+        """Provide a configured sink instance (for backwards compatibility)."""
+        return sink_factory()
 
     @pytest.fixture
     @abstractmethod
@@ -79,28 +87,24 @@ class SinkContractTestBase(ABC):
 
     def test_sink_has_name(self, sink: SinkProtocol) -> None:
         """Contract: Sink MUST have a 'name' attribute."""
-        assert hasattr(sink, "name")
         assert isinstance(sink.name, str)
         assert len(sink.name) > 0
 
     def test_sink_has_input_schema(self, sink: SinkProtocol) -> None:
-        """Contract: Sink MUST have an 'input_schema' attribute."""
-        assert hasattr(sink, "input_schema")
+        """Contract: Sink MUST have an 'input_schema' that is a PluginSchema subclass."""
         assert isinstance(sink.input_schema, type)
+        assert issubclass(sink.input_schema, PluginSchema)
 
     def test_sink_has_determinism(self, sink: SinkProtocol) -> None:
         """Contract: Sink MUST have a 'determinism' attribute."""
-        assert hasattr(sink, "determinism")
         assert isinstance(sink.determinism, Determinism)
 
     def test_sink_has_plugin_version(self, sink: SinkProtocol) -> None:
         """Contract: Sink MUST have a 'plugin_version' attribute."""
-        assert hasattr(sink, "plugin_version")
         assert isinstance(sink.plugin_version, str)
 
     def test_sink_has_idempotent_flag(self, sink: SinkProtocol) -> None:
         """Contract: Sink MUST have an 'idempotent' attribute."""
-        assert hasattr(sink, "idempotent")
         assert isinstance(sink.idempotent, bool)
 
     # =========================================================================
@@ -209,7 +213,6 @@ class SinkContractTestBase(ABC):
         """Contract: flush() MUST be safe to call multiple times."""
         sink.write(sample_rows, ctx)
 
-        # flush() should not raise on multiple calls
         sink.flush()
         sink.flush()
         sink.flush()
@@ -224,7 +227,6 @@ class SinkContractTestBase(ABC):
         sink.write(sample_rows, ctx)
         sink.flush()
 
-        # close() should not raise on multiple calls
         sink.close()
         sink.close()
         sink.close()
@@ -235,8 +237,7 @@ class SinkContractTestBase(ABC):
         ctx: PluginContext,
     ) -> None:
         """Contract: on_start() lifecycle hook MUST not raise."""
-        if hasattr(sink, "on_start"):
-            sink.on_start(ctx)
+        sink.on_start(ctx)
 
     def test_on_complete_does_not_raise(
         self,
@@ -245,20 +246,21 @@ class SinkContractTestBase(ABC):
         ctx: PluginContext,
     ) -> None:
         """Contract: on_complete() lifecycle hook MUST not raise."""
-        if hasattr(sink, "on_complete"):
-            sink.write(sample_rows, ctx)
-            sink.on_complete(ctx)
+        sink.write(sample_rows, ctx)
+        sink.on_complete(ctx)
 
 
 class SinkDeterminismContractTestBase(SinkContractTestBase):
     """Extended base for testing sink content hash determinism.
 
     Critical for audit integrity: same data MUST produce same content_hash.
+
+    Subclasses must provide a sink_factory fixture that returns fresh instances.
     """
 
     def test_same_data_same_hash(
         self,
-        sink: SinkProtocol,
+        sink_factory: Callable[[], SinkProtocol],
         sample_rows: list[dict[str, Any]],
         ctx: PluginContext,
     ) -> None:
@@ -267,21 +269,23 @@ class SinkDeterminismContractTestBase(SinkContractTestBase):
         This is THE critical property for sinks. If this fails, the audit
         trail cannot be verified because hashes won't match.
         """
-        # Write once
-        result = sink.write(sample_rows, ctx)
-        first_hash = result.content_hash
+        first_sink = sink_factory()
+        first_result = first_sink.write(sample_rows, ctx)
+        first_hash = first_result.content_hash
+        first_sink.close()
 
-        # Close and recreate sink (simulates fresh run)
-        sink.flush()
-        sink.close()
+        second_sink = sink_factory()
+        second_result = second_sink.write(sample_rows, ctx)
+        second_hash = second_result.content_hash
+        second_sink.close()
 
-        # Verify hash was captured (actual cross-run comparison happens
-        # in plugin-specific determinism tests with fresh sink instances)
-        assert len(first_hash) == 64, "Content hash must be SHA-256 hex"
+        assert first_hash == second_hash, (
+            f"Same data produced different hashes - audit integrity compromised! first={first_hash}, second={second_hash}"
+        )
 
     def test_content_hash_changes_with_data(
         self,
-        sink: SinkProtocol,
+        sink_factory: Callable[[], SinkProtocol],
         sample_rows: list[dict[str, Any]],
         ctx: PluginContext,
     ) -> None:
@@ -290,9 +294,19 @@ class SinkDeterminismContractTestBase(SinkContractTestBase):
         Note: Collisions are theoretically possible but astronomically unlikely.
         This test verifies the hash is computed from actual content.
         """
-        result = sink.write(sample_rows, ctx)
+        first_sink = sink_factory()
+        first_result = first_sink.write(sample_rows, ctx)
+        first_hash = first_result.content_hash
+        first_sink.close()
 
-        # Verify hash was computed (actual different-data comparison happens
-        # in plugin-specific tests where fresh sink instances can be created)
-        assert result.content_hash is not None
-        assert len(result.content_hash) == 64
+        modified_rows = [dict(row) for row in sample_rows]
+        if modified_rows:
+            first_key = next(iter(modified_rows[0].keys()))
+            modified_rows[0][first_key] = "MODIFIED_VALUE_FOR_HASH_TEST"
+
+        second_sink = sink_factory()
+        second_result = second_sink.write(modified_rows, ctx)
+        second_hash = second_result.content_hash
+        second_sink.close()
+
+        assert first_hash != second_hash, f"Different data produced same hash - hash not computed from content! hash={first_hash}"

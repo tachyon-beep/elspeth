@@ -7,17 +7,11 @@ class TestDeterminism:
     """Tests for Determinism enum - critical for replay/verify."""
 
     def test_has_all_required_values(self) -> None:
-        """Determinism has all 6 values from architecture."""
+        """Determinism has exactly 6 values from architecture."""
         from elspeth.contracts import Determinism
 
-        assert hasattr(Determinism, "DETERMINISTIC")
-        assert hasattr(Determinism, "SEEDED")
-        assert hasattr(Determinism, "IO_READ")
-        assert hasattr(Determinism, "IO_WRITE")
-        assert hasattr(Determinism, "EXTERNAL_CALL")
-        assert hasattr(Determinism, "NON_DETERMINISTIC")
-        # Explicit count verification - architecture specifies exactly 6 values
-        assert len(list(Determinism)) == 6
+        expected = {"DETERMINISTIC", "SEEDED", "IO_READ", "IO_WRITE", "EXTERNAL_CALL", "NON_DETERMINISTIC"}
+        assert {e.name for e in Determinism} == expected
 
     def test_no_unknown_value(self) -> None:
         """Determinism must NOT have 'unknown' - we crash instead."""
@@ -53,16 +47,40 @@ class TestRowOutcome:
         assert RowOutcome("completed") == RowOutcome.COMPLETED  # type: ignore[unreachable]
 
     def test_has_all_terminal_states(self) -> None:
-        """RowOutcome has all terminal states from architecture."""
+        """RowOutcome has all values and correct string representations."""
         from elspeth.contracts import RowOutcome
 
-        assert hasattr(RowOutcome, "COMPLETED")
-        assert hasattr(RowOutcome, "ROUTED")
-        assert hasattr(RowOutcome, "FORKED")
-        assert hasattr(RowOutcome, "FAILED")
-        assert hasattr(RowOutcome, "QUARANTINED")
-        assert hasattr(RowOutcome, "CONSUMED_IN_BATCH")
-        assert hasattr(RowOutcome, "COALESCED")
+        expected_values = {
+            RowOutcome.COMPLETED: "completed",
+            RowOutcome.ROUTED: "routed",
+            RowOutcome.FORKED: "forked",
+            RowOutcome.FAILED: "failed",
+            RowOutcome.QUARANTINED: "quarantined",
+            RowOutcome.CONSUMED_IN_BATCH: "consumed_in_batch",
+            RowOutcome.COALESCED: "coalesced",
+            RowOutcome.EXPANDED: "expanded",
+            RowOutcome.BUFFERED: "buffered",
+        }
+        assert {o: o.value for o in RowOutcome} == expected_values
+
+    def test_terminal_mappings(self) -> None:
+        """RowOutcome terminal/non-terminal mappings are correct."""
+        from elspeth.contracts import RowOutcome
+
+        terminal_outcomes = {
+            RowOutcome.COMPLETED,
+            RowOutcome.ROUTED,
+            RowOutcome.FORKED,
+            RowOutcome.FAILED,
+            RowOutcome.QUARANTINED,
+            RowOutcome.CONSUMED_IN_BATCH,
+            RowOutcome.COALESCED,
+            RowOutcome.EXPANDED,
+        }
+        non_terminal_outcomes = {RowOutcome.BUFFERED}
+
+        assert {o for o in RowOutcome if o.is_terminal} == terminal_outcomes
+        assert {o for o in RowOutcome if not o.is_terminal} == non_terminal_outcomes
 
     def test_row_outcome_expanded_exists(self) -> None:
         """RowOutcome.EXPANDED is available for deaggregation."""

@@ -850,7 +850,10 @@ class TestNodeStatePending:
         """NodeStatePending does not have output_hash (result pending).
 
         This is the key distinction from NodeStateCompleted.
+        The dataclass simply does not define an output_hash field.
         """
+        import dataclasses
+
         now = datetime.now(UTC)
         state = NodeStatePending(
             state_id="state-1",
@@ -864,8 +867,8 @@ class TestNodeStatePending:
             completed_at=now,
             duration_ms=100.0,
         )
-        # NodeStatePending has no output_hash attribute
-        assert not hasattr(state, "output_hash") or getattr(state, "output_hash", None) is None
+        field_names = {f.name for f in dataclasses.fields(state)}
+        assert "output_hash" not in field_names
 
     def test_pending_state_is_frozen(self) -> None:
         """NodeStatePending is frozen (immutable) for audit integrity."""

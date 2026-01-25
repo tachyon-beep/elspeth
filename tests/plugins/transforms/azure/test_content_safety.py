@@ -1,7 +1,8 @@
 """Tests for AzureContentSafety transform."""
 
+import itertools
 from typing import TYPE_CHECKING, Any
-from unittest.mock import MagicMock, Mock
+from unittest.mock import MagicMock, Mock, patch
 
 import pytest
 
@@ -11,13 +12,46 @@ if TYPE_CHECKING:
     from elspeth.plugins.transforms.azure.content_safety import AzureContentSafety
 
 
+# Global mock HTTP client instance - set by autouse fixture, configured per test
+_mock_http_client_instance: MagicMock | None = None
+
+
+@pytest.fixture(autouse=True)
+def mock_httpx_client():
+    """Patch httpx.Client globally to prevent real HTTP calls.
+
+    The AzureContentSafety transform uses AuditedHTTPClient which creates
+    httpx.Client instances inside its post() method. This fixture patches
+    at the module level to intercept all calls.
+    """
+    global _mock_http_client_instance
+
+    mock_client = MagicMock()
+    mock_client.__enter__ = Mock(return_value=mock_client)
+    mock_client.__exit__ = Mock(return_value=False)
+
+    _mock_http_client_instance = mock_client
+
+    with patch("httpx.Client", return_value=mock_client):
+        yield mock_client
+
+
 def make_mock_context() -> Mock:
-    """Create mock PluginContext."""
+    """Create mock PluginContext with properly configured recorder.
+
+    Sets up allocate_call_index to return sequential indices.
+    """
     from elspeth.plugins.context import PluginContext
 
     ctx = Mock(spec=PluginContext, run_id="test-run")
     ctx.state_id = "test-state-id"
     ctx.landscape = Mock()
+
+    # Configure allocate_call_index to return sequential indices
+    counter = itertools.count()
+    ctx.landscape.allocate_call_index.side_effect = lambda _: next(counter)
+    ctx.landscape.record_call = Mock()
+
     return ctx
 
 
@@ -28,25 +62,38 @@ def make_content_safety_with_mock_response(
     """Create Content Safety transform with mocked HTTP client.
 
     Returns the transform and the mock client for assertions.
+
+    Sets up:
+    - Transform with given config
+    - Mock HTTP response configured with response_data
+    - Calls on_start() to initialize recorder reference
     """
     from elspeth.plugins.transforms.azure.content_safety import AzureContentSafety
 
+    global _mock_http_client_instance
+
+    # The autouse fixture ensures this is always set
+    assert _mock_http_client_instance is not None, "mock_httpx_client fixture not active"
+
     transform = AzureContentSafety(config)
+
+    # Create mock context and call on_start to set recorder
+    ctx = make_mock_context()
+    transform.on_start(ctx)
 
     # Create mock response
     response_mock = MagicMock()
     response_mock.status_code = 200
     response_mock.json.return_value = response_data
     response_mock.raise_for_status = MagicMock()
+    response_mock.headers = {"content-type": "application/json"}
+    response_mock.content = b"{}"
+    response_mock.text = "{}"
 
-    # Create mock client
-    mock_client = MagicMock()
-    mock_client.post.return_value = response_mock
+    # Configure the global mock client to return this response
+    _mock_http_client_instance.post.return_value = response_mock
 
-    # Inject mock client directly (bypassing _get_http_client)
-    transform._http_client = mock_client
-
-    return transform, mock_client
+    return transform, _mock_http_client_instance
 
 
 class TestAzureContentSafetyConfig:
@@ -382,7 +429,7 @@ class TestAzureContentSafetyTransform:
         assert result.reason["categories"]["hate"]["exceeded"] is True
         assert result.reason["categories"]["hate"]["severity"] == 4
 
-    def test_api_error_returns_retryable_error(self) -> None:
+    def test_api_error_returns_retryable_error(self, mock_httpx_client: MagicMock) -> None:
         """API rate limit errors return retryable error result."""
         import httpx
 
@@ -398,16 +445,17 @@ class TestAzureContentSafetyTransform:
             }
         )
 
-        # Create mock client that raises HTTPStatusError
-        mock_client = MagicMock()
-        mock_client.post.side_effect = httpx.HTTPStatusError(
+        # Initialize recorder
+        ctx = make_mock_context()
+        transform.on_start(ctx)
+
+        # Configure mock client to raise HTTPStatusError
+        mock_httpx_client.post.side_effect = httpx.HTTPStatusError(
             "Rate limited",
             request=Mock(),
             response=Mock(status_code=429),
         )
-        transform._http_client = mock_client
 
-        ctx = make_mock_context()
         row = {"content": "test", "id": 1}
         result = transform.process(row, ctx)
 
@@ -416,7 +464,7 @@ class TestAzureContentSafetyTransform:
         assert result.reason["reason"] == "api_error"
         assert result.retryable is True
 
-    def test_network_error_returns_retryable_error(self) -> None:
+    def test_network_error_returns_retryable_error(self, mock_httpx_client: MagicMock) -> None:
         """Network errors return retryable error result."""
         import httpx
 
@@ -432,12 +480,13 @@ class TestAzureContentSafetyTransform:
             }
         )
 
-        # Create mock client that raises RequestError
-        mock_client = MagicMock()
-        mock_client.post.side_effect = httpx.RequestError("Connection failed")
-        transform._http_client = mock_client
-
+        # Initialize recorder
         ctx = make_mock_context()
+        transform.on_start(ctx)
+
+        # Configure mock client to raise RequestError
+        mock_httpx_client.post.side_effect = httpx.RequestError("Connection failed")
+
         row = {"content": "test", "id": 1}
         result = transform.process(row, ctx)
 
@@ -806,7 +855,7 @@ class TestContentSafetyPooledExecution:
 
         assert transform.is_batch_aware is False
 
-    def test_pooled_execution_processes_batch_concurrently(self) -> None:
+    def test_pooled_execution_processes_batch_concurrently(self, mock_httpx_client: MagicMock) -> None:
         """Pooled transform processes batch rows concurrently."""
         from elspeth.plugins.transforms.azure.content_safety import AzureContentSafety
 
@@ -821,6 +870,10 @@ class TestContentSafetyPooledExecution:
             }
         )
 
+        # Initialize recorder
+        ctx = make_mock_context()
+        transform.on_start(ctx)
+
         # Create mock response for safe content
         response_mock = MagicMock()
         response_mock.status_code = 200
@@ -833,12 +886,12 @@ class TestContentSafetyPooledExecution:
             ]
         }
         response_mock.raise_for_status = MagicMock()
+        response_mock.headers = {"content-type": "application/json"}
+        response_mock.content = b"{}"
+        response_mock.text = "{}"
 
-        mock_client = MagicMock()
-        mock_client.post.return_value = response_mock
-        transform._http_client = mock_client
+        mock_httpx_client.post.return_value = response_mock
 
-        ctx = make_mock_context()
         rows = [
             {"content": "Hello", "id": 1},
             {"content": "World", "id": 2},
@@ -850,7 +903,7 @@ class TestContentSafetyPooledExecution:
         assert result.rows is not None
         assert len(result.rows) == 3
 
-    def test_pooled_execution_handles_threshold_violations(self) -> None:
+    def test_pooled_execution_handles_threshold_violations(self, mock_httpx_client: MagicMock) -> None:
         """Pooled execution correctly handles content violations."""
         from elspeth.plugins.transforms.azure.content_safety import AzureContentSafety
 
@@ -865,11 +918,18 @@ class TestContentSafetyPooledExecution:
             }
         )
 
+        # Initialize recorder
+        ctx = make_mock_context()
+        transform.on_start(ctx)
+
         def make_response(*args: Any, **kwargs: Any) -> MagicMock:
             """Return response based on content, not call order (avoids race condition)."""
             response = MagicMock()
             response.status_code = 200
             response.raise_for_status = MagicMock()
+            response.headers = {"content-type": "application/json"}
+            response.content = b"{}"
+            response.text = "{}"
 
             # Check the actual content being analyzed
             request_body = kwargs.get("json", {})
@@ -895,11 +955,8 @@ class TestContentSafetyPooledExecution:
                 }
             return response
 
-        mock_client = MagicMock()
-        mock_client.post.side_effect = make_response
-        transform._http_client = mock_client
+        mock_httpx_client.post.side_effect = make_response
 
-        ctx = make_mock_context()
         rows = [
             {"content": "Safe content 1", "id": 1},
             {"content": "Violent content here", "id": 2},  # This one triggers violation
@@ -920,7 +977,7 @@ class TestContentSafetyPooledExecution:
         # Row 3: success (no error field)
         assert "_content_safety_error" not in result.rows[2]
 
-    def test_pooled_rate_limit_triggers_capacity_error(self) -> None:
+    def test_pooled_rate_limit_triggers_capacity_error(self, mock_httpx_client: MagicMock) -> None:
         """Rate limit (429) triggers CapacityError for AIMD retry."""
         import httpx
 
@@ -938,14 +995,16 @@ class TestContentSafetyPooledExecution:
             }
         )
 
-        # Create mock client that returns 429
-        mock_client = MagicMock()
-        mock_client.post.side_effect = httpx.HTTPStatusError(
+        # Initialize recorder
+        ctx = make_mock_context()
+        transform.on_start(ctx)
+
+        # Configure mock client to raise HTTPStatusError (429)
+        mock_httpx_client.post.side_effect = httpx.HTTPStatusError(
             "Rate limited",
             request=Mock(),
             response=Mock(status_code=429),
         )
-        transform._http_client = mock_client
 
         row = {"content": "test", "id": 1}
 

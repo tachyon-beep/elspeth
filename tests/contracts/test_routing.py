@@ -17,8 +17,7 @@ class TestRoutingAction:
             mode=RoutingMode.MOVE,
             reason={},
         )
-        assert hasattr(action, "mode")
-        assert action.mode == RoutingMode.MOVE
+        assert action.mode is RoutingMode.MOVE
 
     def test_continue_action(self) -> None:
         """continue_ creates action with MOVE mode and no destinations."""
@@ -139,6 +138,66 @@ class TestRoutingAction:
 
         with pytest.raises(ValueError, match=r"unique path names.*duplicates"):
             RoutingAction.fork_to_paths(["path_a", "path_a", "path_b"])
+
+    def test_continue_with_destinations_raises(self) -> None:
+        """CONTINUE kind with non-empty destinations raises ValueError.
+
+        CONTINUE means "proceed to next node" - destinations are resolved
+        from the pipeline graph, not specified in the action.
+        """
+        from elspeth.contracts import RoutingAction, RoutingKind, RoutingMode
+
+        with pytest.raises(ValueError, match="CONTINUE must have empty destinations"):
+            RoutingAction(
+                kind=RoutingKind.CONTINUE,
+                destinations=("sink_a",),
+                mode=RoutingMode.MOVE,
+            )
+
+    def test_fork_to_paths_with_move_mode_raises(self) -> None:
+        """FORK_TO_PATHS kind with MOVE mode raises ValueError.
+
+        FORK creates child tokens - MOVE would violate the fork semantics
+        by destroying the parent token prematurely.
+        """
+        from elspeth.contracts import RoutingAction, RoutingKind, RoutingMode
+
+        with pytest.raises(ValueError, match="FORK_TO_PATHS must use COPY mode"):
+            RoutingAction(
+                kind=RoutingKind.FORK_TO_PATHS,
+                destinations=("path_a", "path_b"),
+                mode=RoutingMode.MOVE,
+            )
+
+    def test_route_with_zero_destinations_raises(self) -> None:
+        """ROUTE kind with zero destinations raises ValueError.
+
+        ROUTE must specify exactly one destination - zero destinations
+        would cause token to silently drop without audit trail.
+        """
+        from elspeth.contracts import RoutingAction, RoutingKind, RoutingMode
+
+        with pytest.raises(ValueError, match="ROUTE must have exactly one destination"):
+            RoutingAction(
+                kind=RoutingKind.ROUTE,
+                destinations=(),
+                mode=RoutingMode.MOVE,
+            )
+
+    def test_route_with_multiple_destinations_raises(self) -> None:
+        """ROUTE kind with multiple destinations raises ValueError.
+
+        ROUTE is single-destination routing. For multi-destination,
+        use FORK_TO_PATHS which creates separate token lineages.
+        """
+        from elspeth.contracts import RoutingAction, RoutingKind, RoutingMode
+
+        with pytest.raises(ValueError, match="ROUTE must have exactly one destination"):
+            RoutingAction(
+                kind=RoutingKind.ROUTE,
+                destinations=("sink_a", "sink_b"),
+                mode=RoutingMode.MOVE,
+            )
 
 
 class TestRoutingSpec:
