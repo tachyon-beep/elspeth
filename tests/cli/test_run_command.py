@@ -317,17 +317,15 @@ class TestRunCommandResourceCleanup:
         settings_file.write_text(yaml.dump(settings))
 
         # Track if close was called
-        close_called = []
-        original_close = None
-
-        def track_close(self: object) -> None:
-            close_called.append(True)
-            if original_close:
-                original_close(self)
+        close_called: list[bool] = []
 
         from elspeth.core.landscape import LandscapeDB
 
         original_close = LandscapeDB.close
+
+        def track_close(self: LandscapeDB) -> None:
+            close_called.append(True)
+            original_close(self)
 
         with patch.object(LandscapeDB, "close", track_close):
             result = runner.invoke(app, ["run", "--settings", str(settings_file), "--execute"])
@@ -376,17 +374,15 @@ class TestRunCommandResourceCleanup:
         settings_file.write_text(yaml.dump(settings))
 
         # Track if close was called
-        close_called = []
-        original_close = None
-
-        def track_close(self: object) -> None:
-            close_called.append(True)
-            if original_close:
-                original_close(self)
+        close_called: list[bool] = []
 
         from elspeth.core.landscape import LandscapeDB
 
         original_close = LandscapeDB.close
+
+        def track_close(self: LandscapeDB) -> None:
+            close_called.append(True)
+            original_close(self)
 
         with patch.object(LandscapeDB, "close", track_close):
             result = runner.invoke(app, ["run", "--settings", str(settings_file), "--execute"])

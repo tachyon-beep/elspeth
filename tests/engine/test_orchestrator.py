@@ -11,6 +11,7 @@ from collections.abc import Iterator
 from typing import TYPE_CHECKING, Any, ClassVar
 
 import pytest
+from pydantic import ConfigDict
 
 from elspeth.cli_helpers import instantiate_plugins_from_config
 from elspeth.contracts import Determinism, RoutingMode, SourceRow
@@ -1202,7 +1203,7 @@ class TestLifecycleHooks:
         from elspeth.contracts import PluginSchema, SourceRow
 
         class TestSchema(PluginSchema):
-            model_config: ClassVar[dict[str, Any]] = {"extra": "allow"}
+            model_config: ClassVar[ConfigDict] = ConfigDict(extra="allow")
 
         class TrackedTransform(BaseTransform):
             name = "tracked"
@@ -1283,7 +1284,7 @@ class TestLifecycleHooks:
         call_order: list[str] = []
 
         class TestSchema(PluginSchema):
-            model_config: ClassVar[dict[str, Any]] = {"extra": "allow"}
+            model_config: ClassVar[ConfigDict] = ConfigDict(extra="allow")
 
         class TrackedTransform(BaseTransform):
             name = "tracked"
@@ -1368,7 +1369,7 @@ class TestLifecycleHooks:
         completed: list[bool] = []
 
         class TestSchema(PluginSchema):
-            model_config: ClassVar[dict[str, Any]] = {"extra": "allow"}
+            model_config: ClassVar[ConfigDict] = ConfigDict(extra="allow")
 
         class FailingTransform(BaseTransform):
             name = "failing"
@@ -2100,7 +2101,7 @@ class TestSinkLifecycleHooks:
         completed: list[str] = []
 
         class TestSchema(PluginSchema):
-            model_config: ClassVar[dict[str, Any]] = {"extra": "allow"}
+            model_config: ClassVar[ConfigDict] = ConfigDict(extra="allow")
 
         class FailingTransform(BaseTransform):
             name = "failing"

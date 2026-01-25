@@ -50,7 +50,7 @@ class TestRowOutcome:
         # (str, Enum) allows direct string comparison for database serialization
         assert RowOutcome.COMPLETED == "completed"  # type: ignore[comparison-overlap]
         # Can be created from string values (for DB reads)
-        assert RowOutcome("completed") == RowOutcome.COMPLETED
+        assert RowOutcome("completed") == RowOutcome.COMPLETED  # type: ignore[unreachable]
 
     def test_has_all_terminal_states(self) -> None:
         """RowOutcome has all terminal states from architecture."""

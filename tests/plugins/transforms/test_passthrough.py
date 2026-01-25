@@ -161,12 +161,12 @@ class TestPassThrough:
         from elspeth.plugins.transforms.passthrough import PassThrough
 
         # Valid: Dynamic schema (always compatible with itself)
-        config = {"schema": {"fields": "dynamic"}}
-        PassThrough(config)  # Should succeed
+        dynamic_config = {"schema": {"fields": "dynamic"}}
+        PassThrough(dynamic_config)  # Should succeed
 
         # Valid: Explicit schema (compatible with itself)
-        config = {"schema": {"mode": "strict", "fields": ["id: int", "name: str"]}}
-        PassThrough(config)  # Should succeed
+        explicit_config = {"schema": {"mode": "strict", "fields": ["id: int", "name: str"]}}
+        PassThrough(explicit_config)  # Should succeed
 
         # Note: PassThrough has same input/output schema, so always compatible
         # More complex transforms tested separately

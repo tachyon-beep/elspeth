@@ -5,12 +5,14 @@ These tests verify that resume requires source schema for type fidelity
 and fails early with a clear error if schema is not available.
 """
 
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from elspeth.contracts import Determinism
+from elspeth.contracts.results import SourceRow
 from elspeth.core.checkpoint import CheckpointManager
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape.database import LandscapeDB
@@ -32,12 +34,10 @@ class SourceWithoutSchema(BaseSource):
         # Intentionally do NOT set self._schema_class
         # This simulates old source plugins that don't support type fidelity
 
-    def load(self, ctx: PluginContext) -> list[dict[str, Any]]:
-        """Return test rows."""
-        return [
-            {"id": 1, "value": "row1"},
-            {"id": 2, "value": "row2"},
-        ]
+    def load(self, ctx: PluginContext) -> Iterator[SourceRow]:
+        """Yield test rows."""
+        yield SourceRow.valid({"id": 1, "value": "row1"})
+        yield SourceRow.valid({"id": 2, "value": "row2"})
 
     def on_start(self, ctx: PluginContext) -> None:
         pass

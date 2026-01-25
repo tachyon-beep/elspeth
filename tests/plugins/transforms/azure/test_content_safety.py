@@ -623,6 +623,7 @@ class TestAzureContentSafetyTransform:
 
         # Should block - severity 1 IS > threshold 0
         assert result.status == "error"
+        assert result.reason is not None
         assert result.reason["reason"] == "content_safety_violation"
         assert result.reason["categories"]["self_harm"]["exceeded"] is True
 

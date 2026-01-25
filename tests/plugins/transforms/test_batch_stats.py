@@ -8,6 +8,8 @@ BatchStats outputs a completely different shape ({count, sum, mean, batch_size})
 than its input, but incorrectly sets output_schema = input_schema.
 """
 
+from typing import Any
+
 import pytest
 
 from elspeth.plugins.context import PluginContext
@@ -26,7 +28,13 @@ class TestBatchStatsHappyPath:
         return PluginContext(run_id="test-run", config={})
 
     def test_implements_protocol(self) -> None:
-        """BatchStats implements TransformProtocol."""
+        """BatchStats implements TransformProtocol.
+
+        Note: BatchStats is batch-aware and has a different process() signature
+        (list[dict] instead of dict). At runtime, isinstance() passes because
+        runtime_checkable only checks method presence. Mypy correctly identifies
+        the signature incompatibility, so we type-ignore this specific check.
+        """
         from elspeth.plugins.transforms.batch_stats import BatchStats
 
         transform = BatchStats(
@@ -35,7 +43,9 @@ class TestBatchStatsHappyPath:
                 "value_field": "amount",
             }
         )
-        assert isinstance(transform, TransformProtocol)
+        # BatchStats.process() takes list[dict], not dict, so the protocol
+        # signatures are incompatible at the type level. Runtime check passes.
+        assert isinstance(transform, TransformProtocol)  # type: ignore[unreachable]
 
     def test_has_required_attributes(self) -> None:
         """BatchStats has name and is_batch_aware."""
@@ -124,7 +134,7 @@ class TestBatchStatsHappyPath:
             }
         )
 
-        rows = [
+        rows: list[dict[str, Any]] = [
             {"id": 1, "amount": 10.0},
             {"id": 2, "amount": "not_a_number"},  # Skip this
             {"id": 3, "amount": 30.0},

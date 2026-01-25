@@ -315,7 +315,7 @@ class TestExecutionGraphAccessors:
 
         assert incoming == []
 
-    def test_get_effective_producer_schema_walks_through_gates(self):
+    def test_get_effective_producer_schema_walks_through_gates(self) -> None:
         """_get_effective_producer_schema() recursively finds schema through gate chain."""
         from elspeth.contracts import PluginSchema, RoutingMode
         from elspeth.core.dag import ExecutionGraph
@@ -353,7 +353,7 @@ class TestExecutionGraphAccessors:
         assert "no incoming edges" in str(exc_info.value).lower()
         assert "bug in graph construction" in str(exc_info.value).lower()
 
-    def test_get_effective_producer_schema_handles_chained_gates(self):
+    def test_get_effective_producer_schema_handles_chained_gates(self) -> None:
         """_get_effective_producer_schema() recursively walks through multiple gates."""
         from elspeth.contracts import PluginSchema, RoutingMode
         from elspeth.core.dag import ExecutionGraph
@@ -401,7 +401,7 @@ class TestExecutionGraphAccessors:
         # NEW behavior: Only checks structural validity (no cycles)
         graph.validate()  # Should NOT raise - no structural problems
 
-    def test_get_effective_producer_schema_returns_direct_schema_for_transform(self):
+    def test_get_effective_producer_schema_returns_direct_schema_for_transform(self) -> None:
         """_get_effective_producer_schema() returns output_schema directly for transform nodes."""
         from elspeth.contracts import PluginSchema
         from elspeth.core.dag import ExecutionGraph
@@ -421,7 +421,7 @@ class TestExecutionGraphAccessors:
 
         assert effective_schema == TransformOutput
 
-    def test_validate_edge_schemas_uses_effective_schema_for_gates(self):
+    def test_validate_edge_schemas_uses_effective_schema_for_gates(self) -> None:
         """validate_edge_compatibility() uses effective producer schema for gate edges."""
         from elspeth.contracts import PluginSchema, RoutingMode
         from elspeth.core.dag import ExecutionGraph
@@ -457,7 +457,7 @@ class TestExecutionGraphAccessors:
         assert "gate" in str(exc_info.value)
         assert "sink" in str(exc_info.value)
 
-    def test_validate_edge_schemas_validates_all_fork_destinations(self):
+    def test_validate_edge_schemas_validates_all_fork_destinations(self) -> None:
         """Fork gates validate all destination edges against effective schema."""
         from elspeth.contracts import PluginSchema, RoutingMode
         from elspeth.core.dag import ExecutionGraph
@@ -2161,6 +2161,7 @@ class TestDynamicSchemaDetection:
         Dynamic schemas have no fields and extra='allow', matching the detection
         logic in ExecutionGraph._get_missing_required_fields().
         """
+        from elspeth.contracts import PluginSchema
         from elspeth.contracts.schema import SchemaConfig
         from elspeth.plugins.schema_factory import create_schema_from_config
 
@@ -2179,7 +2180,7 @@ class TestDynamicSchemaDetection:
         )
 
         # Helper to check if schema is dynamic (matches logic in dag.py)
-        def is_dynamic_schema(schema: type | None) -> bool:
+        def is_dynamic_schema(schema: type[PluginSchema] | None) -> bool:
             if schema is None:
                 return True
             return len(schema.model_fields) == 0 and schema.model_config.get("extra") == "allow"

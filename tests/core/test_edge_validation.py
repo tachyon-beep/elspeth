@@ -1,11 +1,12 @@
 """Test edge compatibility validation during graph construction."""
 
-from typing import ClassVar
+from typing import Any, ClassVar
 
 import pytest
 
 from elspeth.contracts import PluginSchema
 from elspeth.core.dag import ExecutionGraph
+from tests.conftest import as_sink, as_source
 
 
 class ProducerSchema(PluginSchema):
@@ -190,18 +191,23 @@ def test_edge_validation_timing_from_plugin_instances() -> None:
     # Create mock plugins with incompatible schemas
     class MockSource:
         name: ClassVar[str] = "test_source"
-        config: ClassVar[dict] = {}
+        config: ClassVar[dict[str, Any]] = {}
         output_schema: ClassVar[type[PluginSchema]] = ProducerSchema  # Has: id, name
 
     class MockSink:
         name: ClassVar[str] = "test_sink"
-        config: ClassVar[dict] = {}
+        config: ClassVar[dict[str, Any]] = {}
         input_schema: ClassVar[type[PluginSchema]] = ConsumerSchema  # Needs: id, name, email
 
     # Should fail DURING from_plugin_instances (PHASE 2 validation)
     with pytest.raises(ValueError, match=r"missing required fields.*email"):
         ExecutionGraph.from_plugin_instances(
-            source=MockSource(), transforms=[], sinks={"out": MockSink()}, aggregations={}, gates=[], output_sink="out"
+            source=as_source(MockSource()),
+            transforms=[],
+            sinks={"out": as_sink(MockSink())},
+            aggregations={},
+            gates=[],
+            output_sink="out",
         )
 
 

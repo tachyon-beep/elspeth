@@ -13,7 +13,7 @@ the WP-09 specific verification requirements.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
@@ -142,7 +142,6 @@ class TestCompositeConditions:
 
         class CollectSink(_TestSinkBase):
             name = "collect"
-            config: ClassVar[dict[str, Any]] = {}
 
             def __init__(self) -> None:
                 self.results: list[dict[str, Any]] = []
@@ -219,7 +218,6 @@ class TestCompositeConditions:
 
         class CollectSink(_TestSinkBase):
             name = "collect"
-            config: ClassVar[dict[str, Any]] = {}
 
             def __init__(self) -> None:
                 self.results: list[dict[str, Any]] = []
@@ -290,7 +288,6 @@ class TestCompositeConditions:
 
         class CollectSink(_TestSinkBase):
             name = "collect"
-            config: ClassVar[dict[str, Any]] = {}
 
             def __init__(self) -> None:
                 self.results: list[dict[str, Any]] = []
@@ -364,7 +361,6 @@ class TestCompositeConditions:
 
         class CollectSink(_TestSinkBase):
             name = "collect"
-            config: ClassVar[dict[str, Any]] = {}
 
             def __init__(self) -> None:
                 self.results: list[dict[str, Any]] = []
@@ -515,7 +511,6 @@ class TestRouteLabelResolution:
 
         class CollectSink(_TestSinkBase):
             name = "collect"
-            config: ClassVar[dict[str, Any]] = {}
 
             def __init__(self) -> None:
                 self.results: list[dict[str, Any]] = []
@@ -737,7 +732,6 @@ class TestForkCreatesChildTokens:
 
         class CollectSink(_TestSinkBase):
             name = "collect"
-            config: ClassVar[dict[str, Any]] = {}
 
             def __init__(self) -> None:
                 self.results: list[dict[str, Any]] = []
@@ -844,7 +838,6 @@ class TestForkCreatesChildTokens:
 
         class CollectSink(_TestSinkBase):
             name = "collect"
-            config: ClassVar[dict[str, Any]] = {}
 
             def __init__(self) -> None:
                 self.results: list[dict[str, Any]] = []
@@ -1088,7 +1081,6 @@ class TestEndToEndPipeline:
 
         class CollectSink(_TestSinkBase):
             name = "collect"
-            config: ClassVar[dict[str, Any]] = {}
 
             def __init__(self) -> None:
                 self.results: list[dict[str, Any]] = []
@@ -1205,7 +1197,6 @@ class TestEndToEndPipeline:
 
         class CollectSink(_TestSinkBase):
             name = "collect"
-            config: ClassVar[dict[str, Any]] = {}
 
             def __init__(self) -> None:
                 self.results: list[dict[str, Any]] = []
@@ -1293,7 +1284,6 @@ class TestEndToEndPipeline:
 
         class CollectSink(_TestSinkBase):
             name = "collect"
-            config: ClassVar[dict[str, Any]] = {}
 
             def __init__(self) -> None:
                 self.results: list[dict[str, Any]] = []

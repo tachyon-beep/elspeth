@@ -2050,7 +2050,7 @@ def make_mock_sink(
     artifact_size: int = 1024,
     artifact_hash: str = "mock_hash",
     raises: Exception | None = None,
-):
+) -> Any:
     """Factory for creating mock sinks with common patterns.
 
     Args:
@@ -2068,7 +2068,7 @@ def make_mock_sink(
     from elspeth.plugins.context import PluginContext
 
     class MockSink:
-        def __init__(self):
+        def __init__(self) -> None:
             self.name = name
             self.node_id = node_id
 
@@ -3405,6 +3405,8 @@ class TestAggregationExecutorCheckpoint:
             config={},
             schema_config=DYNAMIC_SCHEMA,
         )
+        node_id = agg_node.node_id
+        assert node_id is not None  # Narrowing for type checker
 
         settings = AggregationSettings(
             name="test_agg",
@@ -3416,16 +3418,16 @@ class TestAggregationExecutorCheckpoint:
             recorder=recorder,
             span_factory=SpanFactory(),
             run_id=run.run_id,
-            aggregation_settings={agg_node.node_id: settings},
+            aggregation_settings={node_id: settings},
         )
 
         # Create batch in landscape (must exist before flush)
-        batch = recorder.create_batch(run_id=run.run_id, aggregation_node_id=agg_node.node_id)
+        batch = recorder.create_batch(run_id=run.run_id, aggregation_node_id=node_id)
 
         # Simulate checkpoint with 2 buffered tokens (ready to flush)
-        checkpoint_state = {
+        checkpoint_state: dict[str, Any] = {
             "_version": "1.0",
-            agg_node.node_id: {
+            node_id: {
                 "tokens": [
                     {
                         "token_id": "token-101",
@@ -3445,10 +3447,10 @@ class TestAggregationExecutorCheckpoint:
         }
 
         # Create rows and tokens in landscape for the checkpoint
-        for i, token_data in enumerate(checkpoint_state[agg_node.node_id]["tokens"]):
+        for i, token_data in enumerate(checkpoint_state[node_id]["tokens"]):
             row = recorder.create_row(
                 run_id=run.run_id,
-                source_node_id=agg_node.node_id,
+                source_node_id=node_id,
                 row_index=i,
                 data=token_data["row_data"],
                 row_id=token_data["row_id"],
@@ -3465,7 +3467,7 @@ class TestAggregationExecutorCheckpoint:
         # Mock the batch-aware transform
         class MockBatchTransform:
             name = "batch_sum"
-            node_id = agg_node.node_id
+            mock_node_id = node_id
 
             def process(self, rows: list[dict[str, Any]], ctx: PluginContext) -> TransformResult:
                 total = sum(r["value"] for r in rows)
@@ -3476,8 +3478,8 @@ class TestAggregationExecutorCheckpoint:
 
         # Execute flush - should NOT crash with IndexError
         result, consumed_tokens = executor.execute_flush(
-            node_id=agg_node.node_id,
-            transform=transform,
+            node_id=node_id,
+            transform=as_transform(transform),
             ctx=ctx,
             step_in_pipeline=1,
             trigger_type=TriggerType.COUNT,
@@ -3514,6 +3516,8 @@ class TestAggregationExecutorCheckpoint:
             config={},
             schema_config=DYNAMIC_SCHEMA,
         )
+        node_id = agg_node.node_id
+        assert node_id is not None  # Narrowing for type checker
 
         settings = AggregationSettings(
             name="test_agg",
@@ -3525,21 +3529,21 @@ class TestAggregationExecutorCheckpoint:
             recorder=recorder,
             span_factory=SpanFactory(),
             run_id=run.run_id,
-            aggregation_settings={agg_node.node_id: settings},
+            aggregation_settings={node_id: settings},
         )
 
         # Initialize batch_id (required for flush)
-        executor._batch_ids[agg_node.node_id] = "batch-123"
+        executor._batch_ids[node_id] = "batch-123"
 
         # SIMULATE THE ORIGINAL BUG: buffer has rows but tokens is empty
         # (This should never happen after Tasks 1 & 2, but the guard should catch it)
-        executor._buffers[agg_node.node_id] = [{"value": 10}, {"value": 20}]
-        executor._buffer_tokens[agg_node.node_id] = []  # EMPTY - the bug state!
+        executor._buffers[node_id] = [{"value": 10}, {"value": 20}]
+        executor._buffer_tokens[node_id] = []  # EMPTY - the bug state!
 
         # Mock transform
         class MockTransform:
             name = "test"
-            node_id = agg_node.node_id
+            mock_node_id = node_id
 
         transform = MockTransform()
         ctx = PluginContext(run_id=run.run_id, config={})
@@ -3547,8 +3551,8 @@ class TestAggregationExecutorCheckpoint:
         # VERIFY: Flush crashes with clear RuntimeError (not IndexError)
         with pytest.raises(RuntimeError, match="Internal state corruption"):
             executor.execute_flush(
-                node_id=agg_node.node_id,
-                transform=transform,
+                node_id=node_id,
+                transform=as_transform(transform),
                 ctx=ctx,
                 step_in_pipeline=1,
                 trigger_type=TriggerType.COUNT,

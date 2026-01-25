@@ -69,10 +69,7 @@ class CollectSink(_TestSinkBase):
 
     def __init__(self) -> None:
         self.rows: list[dict[str, Any]] = []
-
-    @property
-    def config(self) -> dict[str, Any]:
-        return {}
+        self.config: dict[str, Any] = {}
 
     def on_start(self, ctx: Any) -> None:
         pass

@@ -448,26 +448,27 @@ class TestAggregationRecoveryIntegration:
         assert evaluator.should_trigger() is False
 
         # Create checkpoint with aggregation state
-        agg_state = {
+        sum_agg_state: dict[str, Any] = {
+            "tokens": [
+                {
+                    "token_id": t.token_id,
+                    "row_id": t.row_id,
+                    "branch_name": None,
+                    "row_data": {},
+                }
+                for t in tokens
+            ],
+            "batch_id": None,
+            "elapsed_age_seconds": evaluator.get_age_seconds(),  # Bug #6 fix: store elapsed time
+        }
+        agg_state: dict[str, Any] = {
             "_version": "1.0",  # Required checkpoint version
-            "sum_aggregator": {
-                "tokens": [
-                    {
-                        "token_id": t.token_id,
-                        "row_id": t.row_id,
-                        "branch_name": None,
-                        "row_data": {},
-                    }
-                    for t in tokens
-                ],
-                "batch_id": None,
-                "elapsed_age_seconds": evaluator.get_age_seconds(),  # Bug #6 fix: store elapsed time
-            },
+            "sum_aggregator": sum_agg_state,
         }
 
         # Verify elapsed time is stored in checkpoint state
-        assert "elapsed_age_seconds" in agg_state["sum_aggregator"]
-        assert 29.0 <= agg_state["sum_aggregator"]["elapsed_age_seconds"] <= 31.0
+        assert "elapsed_age_seconds" in sum_agg_state
+        assert 29.0 <= sum_agg_state["elapsed_age_seconds"] <= 31.0
 
         checkpoint_mgr.create_checkpoint(
             run_id=run.run_id,

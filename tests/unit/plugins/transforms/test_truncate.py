@@ -34,6 +34,7 @@ class TestTruncate:
         result = transform.process({"title": "This is a very long title"}, ctx)
 
         assert result.status == "success"
+        assert result.row is not None
         assert result.row["title"] == "This is a "
         assert len(result.row["title"]) == 10
 
@@ -49,6 +50,7 @@ class TestTruncate:
         result = transform.process({"title": "Short"}, ctx)
 
         assert result.status == "success"
+        assert result.row is not None
         assert result.row["title"] == "Short"
 
     def test_truncates_with_suffix(self, ctx: PluginContext) -> None:
@@ -64,6 +66,7 @@ class TestTruncate:
         result = transform.process({"title": "This is a very long title"}, ctx)
 
         assert result.status == "success"
+        assert result.row is not None
         assert result.row["title"] == "This is a ..."
         assert len(result.row["title"]) == 13
 
@@ -80,6 +83,7 @@ class TestTruncate:
         result = transform.process({"title": "Short"}, ctx)
 
         assert result.status == "success"
+        assert result.row is not None
         assert result.row["title"] == "Short"
 
     def test_multiple_fields(self, ctx: PluginContext) -> None:
@@ -100,6 +104,7 @@ class TestTruncate:
         )
 
         assert result.status == "success"
+        assert result.row is not None
         assert result.row["title"] == "Very "
         assert result.row["description"] == "Very long "
 
@@ -116,6 +121,7 @@ class TestTruncate:
         result = transform.process({"title": "Test"}, ctx)
 
         assert result.status == "success"
+        assert result.row is not None
         assert result.row["title"] == "Test"
         assert "description" not in result.row
 
@@ -132,6 +138,7 @@ class TestTruncate:
         result = transform.process({"title": "Test"}, ctx)
 
         assert result.status == "error"
+        assert result.reason is not None
         assert result.reason["reason"] == "missing_field"
         assert result.reason["field"] == "description"
 
@@ -147,6 +154,7 @@ class TestTruncate:
         result = transform.process({"count": 12345678}, ctx)
 
         assert result.status == "success"
+        assert result.row is not None
         assert result.row["count"] == 12345678
 
     def test_preserves_unspecified_fields(self, ctx: PluginContext) -> None:
@@ -168,6 +176,7 @@ class TestTruncate:
         )
 
         assert result.status == "success"
+        assert result.row is not None
         assert result.row["title"] == "Long "
         assert result.row["id"] == 123
         assert result.row["other"] == "unchanged"
@@ -195,6 +204,7 @@ class TestTruncate:
         result = transform.process({"title": "12345"}, ctx)
 
         assert result.status == "success"
+        assert result.row is not None
         assert result.row["title"] == "12345"
 
     def test_empty_string(self, ctx: PluginContext) -> None:
@@ -209,4 +219,5 @@ class TestTruncate:
         result = transform.process({"title": ""}, ctx)
 
         assert result.status == "success"
+        assert result.row is not None
         assert result.row["title"] == ""

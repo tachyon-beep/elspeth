@@ -1,9 +1,11 @@
 """Tests for dynamic plugin discovery."""
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 
+from elspeth.contracts import Determinism
 from elspeth.plugins.base import BaseSink, BaseSource, BaseTransform
 from elspeth.plugins.discovery import discover_plugins_in_directory
 
@@ -18,7 +20,7 @@ class TestDiscoverPlugins:
 
         discovered = discover_plugins_in_directory(sources_dir, BaseSource)
 
-        names = [cls.name for cls in discovered]
+        names = [cls.name for cls in discovered]  # type: ignore[attr-defined]
         assert "csv" in names, f"Expected 'csv' in {names}"
 
     def test_discovers_passthrough_transform(self) -> None:
@@ -28,7 +30,7 @@ class TestDiscoverPlugins:
 
         discovered = discover_plugins_in_directory(transforms_dir, BaseTransform)
 
-        names = [cls.name for cls in discovered]
+        names = [cls.name for cls in discovered]  # type: ignore[attr-defined]
         assert "passthrough" in names, f"Expected 'passthrough' in {names}"
 
     def test_discovers_csv_sink(self) -> None:
@@ -38,7 +40,7 @@ class TestDiscoverPlugins:
 
         discovered = discover_plugins_in_directory(sinks_dir, BaseSink)
 
-        names = [cls.name for cls in discovered]
+        names = [cls.name for cls in discovered]  # type: ignore[attr-defined]
         assert "csv" in names, f"Expected 'csv' in {names}"
 
     def test_excludes_non_plugin_files(self) -> None:
@@ -73,7 +75,7 @@ class TestDiscoverAllPlugins:
 
         discovered = discover_all_plugins()
 
-        source_names = [cls.name for cls in discovered["sources"]]
+        source_names = [cls.name for cls in discovered["sources"]]  # type: ignore[attr-defined]
         assert "csv" in source_names
         assert "json" in source_names
         assert "null" in source_names
@@ -86,7 +88,7 @@ class TestDiscoverAllPlugins:
 
         discovered = discover_all_plugins()
 
-        transform_names = [cls.name for cls in discovered["transforms"]]
+        transform_names = [cls.name for cls in discovered["transforms"]]  # type: ignore[attr-defined]
         assert "passthrough" in transform_names
         assert "field_mapper" in transform_names
         # LLM transforms live in plugins/llm/ - verify ALL are discovered
@@ -103,7 +105,7 @@ class TestDiscoverAllPlugins:
 
         discovered = discover_all_plugins()
 
-        sink_names = [cls.name for cls in discovered["sinks"]]
+        sink_names = [cls.name for cls in discovered["sinks"]]  # type: ignore[attr-defined]
         assert "csv" in sink_names
         assert "json" in sink_names
         assert "database" in sink_names
@@ -115,7 +117,7 @@ class TestDiscoverAllPlugins:
         discovered = discover_all_plugins()
 
         for plugin_type, plugins in discovered.items():
-            names = [cls.name for cls in plugins]
+            names = [cls.name for cls in plugins]  # type: ignore[attr-defined]
             assert len(names) == len(set(names)), f"Duplicate names in {plugin_type}: {names}"
 
     def test_discovery_finds_expected_plugin_counts(self) -> None:
@@ -138,15 +140,15 @@ class TestDiscoverAllPlugins:
 
         assert len(discovered["sources"]) == EXPECTED_SOURCE_COUNT, (
             f"Source count: expected {EXPECTED_SOURCE_COUNT}, got {len(discovered['sources'])}. "
-            f"Found: {[cls.name for cls in discovered['sources']]}"
+            f"Found: {[cls.name for cls in discovered['sources']]}"  # type: ignore[attr-defined]
         )
         assert len(discovered["transforms"]) == EXPECTED_TRANSFORM_COUNT, (
             f"Transform count: expected {EXPECTED_TRANSFORM_COUNT}, got {len(discovered['transforms'])}. "
-            f"Found: {[cls.name for cls in discovered['transforms']]}"
+            f"Found: {[cls.name for cls in discovered['transforms']]}"  # type: ignore[attr-defined]
         )
         assert len(discovered["sinks"]) == EXPECTED_SINK_COUNT, (
             f"Sink count: expected {EXPECTED_SINK_COUNT}, got {len(discovered['sinks'])}. "
-            f"Found: {[cls.name for cls in discovered['sinks']]}"
+            f"Found: {[cls.name for cls in discovered['sinks']]}"  # type: ignore[attr-defined]
         )
 
 
@@ -262,7 +264,7 @@ class SourceTwo(BaseSource):
 
         # Should find 2 classes (both with name="duplicate_name")
         assert len(discovered) == 2
-        names = [cls.name for cls in discovered]
+        names = [cls.name for cls in discovered]  # type: ignore[attr-defined]
         assert names == ["duplicate_name", "duplicate_name"]
 
     def test_discover_all_raises_on_duplicate_names(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -278,12 +280,12 @@ class SourceTwo(BaseSource):
         class FakeSource1(BaseSource):
             name = "collision"
             __module__ = "elspeth.plugins._discovered.sources.source1"
-            output_schema = None
+            output_schema = None  # type: ignore[assignment]
             node_id = None
-            determinism = "deterministic"
+            determinism = Determinism.DETERMINISTIC
             plugin_version = "1.0.0"
 
-            def __init__(self, config: dict) -> None:
+            def __init__(self, config: dict[str, Any]) -> None:
                 pass
 
             def load(self, ctx):  # type: ignore[no-untyped-def]
@@ -301,12 +303,12 @@ class SourceTwo(BaseSource):
         class FakeSource2(BaseSource):
             name = "collision"  # Same name - duplicate!
             __module__ = "elspeth.plugins._discovered.azure.source2"
-            output_schema = None
+            output_schema = None  # type: ignore[assignment]
             node_id = None
-            determinism = "deterministic"
+            determinism = Determinism.DETERMINISTIC
             plugin_version = "1.0.0"
 
-            def __init__(self, config: dict) -> None:
+            def __init__(self, config: dict[str, Any]) -> None:
                 pass
 
             def load(self, ctx):  # type: ignore[no-untyped-def]
@@ -381,7 +383,7 @@ class TestCreateDynamicHookimpl:
 
         hookimpl_obj = create_dynamic_hookimpl([FakePlugin1, FakePlugin2], "elspeth_get_source")
 
-        result = hookimpl_obj.elspeth_get_source()
+        result = hookimpl_obj.elspeth_get_source()  # type: ignore[attr-defined]
         assert result == [FakePlugin1, FakePlugin2]
 
     def test_hookimpl_integrates_with_pluggy(self) -> None:
@@ -420,4 +422,4 @@ class TestCreateDynamicHookimpl:
         manager.register(hookimpl_obj)
 
         source = manager.get_source_by_name("test_dynamic")
-        assert source is TestSource
+        assert source is TestSource  # type: ignore[comparison-overlap]

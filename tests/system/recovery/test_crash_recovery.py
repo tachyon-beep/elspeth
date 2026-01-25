@@ -43,10 +43,10 @@ class _FailOnceTransform(BaseTransform):
     Used to test retry and recovery behavior.
     """
 
-    name: ClassVar[str] = "fail_once"
-    determinism: ClassVar[Determinism] = Determinism.DETERMINISTIC
-    input_schema: ClassVar[type[_InputSchema]] = _InputSchema
-    output_schema: ClassVar[type[_InputSchema]] = _InputSchema
+    name = "fail_once"
+    determinism = Determinism.DETERMINISTIC
+    input_schema = _InputSchema
+    output_schema = _InputSchema
 
     _attempt_count: ClassVar[dict[str, int]] = {}
     _fail_row_ids: ClassVar[set[str]] = set()

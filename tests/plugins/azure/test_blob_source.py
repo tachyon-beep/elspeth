@@ -382,6 +382,7 @@ class TestAzureBlobSourceJSONL:
         # Second row quarantined (line 2)
         assert results[1].is_quarantined is True
         assert results[1].quarantine_destination == "quarantine"
+        assert results[1].quarantine_error is not None
         assert "JSON parse error" in results[1].quarantine_error
         assert "line 2" in results[1].quarantine_error
         assert "__raw_line__" in results[1].row

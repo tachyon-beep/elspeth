@@ -71,6 +71,7 @@ class TestForkJoinTopology:
         result = validator.validate(checkpoint, modified_graph)
 
         assert not result.can_resume
+        assert result.reason is not None
         assert "upstream" in result.reason.lower() or "structure changed" in result.reason.lower()
 
     def test_resume_allows_fork_path_change_after_checkpoint(self) -> None:
@@ -173,6 +174,7 @@ class TestTransitiveUpstreamChanges:
         result = validator.validate(checkpoint, modified_graph)
 
         assert not result.can_resume
+        assert result.reason is not None
         assert "upstream" in result.reason.lower() or "structure changed" in result.reason.lower()
 
     def test_resume_rejects_deep_upstream_insertion(self) -> None:

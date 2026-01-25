@@ -5,6 +5,8 @@ These tests verify that checkpoint state includes version information
 and that resume fails gracefully with incompatible versions.
 """
 
+from typing import Any
+
 import pytest
 
 from elspeth.engine.executors import AggregationExecutor
@@ -95,7 +97,7 @@ class TestCheckpointVersionValidation:
         )
 
         # Attempt to restore without version field (old format)
-        old_format_state = {
+        old_format_state: dict[str, Any] = {
             "test_node": {
                 "tokens": [],
                 "batch_id": None,

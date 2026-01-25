@@ -5,6 +5,8 @@ These tests verify that the processor records token outcomes at determination
 points, creating entries in the token_outcomes table for audit trail completeness.
 """
 
+from typing import Any
+
 import pytest
 
 from elspeth.contracts import NodeType, RowOutcome
@@ -87,7 +89,7 @@ class TestAllOutcomeTypesRecorded:
             (RowOutcome.EXPANDED, {"expand_group_id": "expand_123"}),
         ],
     )
-    def test_outcome_type_can_be_recorded(self, outcome: RowOutcome, kwargs: dict[str, str]) -> None:
+    def test_outcome_type_can_be_recorded(self, outcome: RowOutcome, kwargs: dict[str, Any]) -> None:
         """Each outcome type (non-batch) should be recordable with appropriate context."""
         from elspeth.contracts import Determinism, NodeType
         from elspeth.contracts.schema import SchemaConfig

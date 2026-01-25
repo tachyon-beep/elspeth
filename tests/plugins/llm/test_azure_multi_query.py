@@ -153,6 +153,7 @@ class TestSingleQueryProcessing:
             }
             spec = transform._query_specs[0]  # cs1_diagnosis
 
+            assert ctx.state_id is not None
             transform._process_single_query(row, spec, ctx.state_id)
 
             # Check template was rendered with correct content
@@ -175,6 +176,7 @@ class TestSingleQueryProcessing:
             row = {"cs1_bg": "data", "cs1_sym": "data", "cs1_hist": "data"}
             spec = transform._query_specs[0]  # cs1_diagnosis
 
+            assert ctx.state_id is not None
             result = transform._process_single_query(row, spec, ctx.state_id)
 
             assert result.status == "success"
@@ -202,9 +204,11 @@ class TestSingleQueryProcessing:
             row = {"cs1_bg": "data", "cs1_sym": "data", "cs1_hist": "data"}
             spec = transform._query_specs[0]
 
+            assert ctx.state_id is not None
             result = transform._process_single_query(row, spec, ctx.state_id)
 
             assert result.status == "error"
+            assert result.reason is not None
             assert "json" in result.reason["reason"].lower()
 
     def test_process_single_query_raises_capacity_error_on_rate_limit(self) -> None:
@@ -230,6 +234,7 @@ class TestSingleQueryProcessing:
                 mock_llm_client.chat_completion.side_effect = RateLimitError("Rate limit exceeded")
                 mock_get_client.return_value = mock_llm_client
 
+                assert ctx.state_id is not None
                 with pytest.raises(CapacityError) as exc_info:
                     transform._process_single_query(row, spec, ctx.state_id)
 
@@ -250,9 +255,11 @@ class TestSingleQueryProcessing:
             with patch.object(transform._template, "render_with_metadata") as mock_render:
                 mock_render.side_effect = TemplateError("Undefined variable 'missing'")
 
+                assert ctx.state_id is not None
                 result = transform._process_single_query(row, spec, ctx.state_id)
 
                 assert result.status == "error"
+                assert result.reason is not None
                 assert result.reason["reason"] == "template_rendering_failed"
                 assert "missing" in result.reason["error"]
 
@@ -326,6 +333,7 @@ class TestRowProcessing:
             result = transform.process(row, ctx)
 
             assert result.status == "success"
+            assert result.row is not None
             output = result.row
 
             # Original fields preserved
@@ -379,6 +387,7 @@ class TestRowProcessing:
 
             # Entire row fails
             assert result.status == "error"
+            assert result.reason is not None
             assert "query_failed" in result.reason["reason"]
 
 

@@ -13,6 +13,8 @@ See TestProcessorBatchTransforms for the new approach.
 from pathlib import Path
 from typing import Any, ClassVar
 
+from pydantic import ConfigDict
+
 from elspeth.contracts import PluginSchema, RoutingMode
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.plugins.base import BaseTransform
@@ -30,7 +32,7 @@ DYNAMIC_SCHEMA = SchemaConfig.from_dict({"fields": "dynamic"})
 class _TestSchema(PluginSchema):
     """Dynamic schema for test plugins."""
 
-    model_config: ClassVar[dict[str, Any]] = {"extra": "allow"}
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra="allow")
 
 
 class TestRowProcessor:

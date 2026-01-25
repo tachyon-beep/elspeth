@@ -518,6 +518,7 @@ class TestJSONSourceParseErrors:
         quarantined = results[0]
         assert quarantined.is_quarantined is True
         assert quarantined.quarantine_destination == "quarantine"
+        assert quarantined.quarantine_error is not None
         assert "JSON parse error" in quarantined.quarantine_error
         assert "file_path" in quarantined.row
 

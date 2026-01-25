@@ -7,7 +7,7 @@ They are processed AFTER plugin transforms but BEFORE sinks.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any
 
 import pytest
 
@@ -131,9 +131,9 @@ class TestConfigGateIntegration:
 
         class CollectSink(_TestSinkBase):
             name = "collect"
-            config: ClassVar[dict[str, Any]] = {}
 
             def __init__(self) -> None:
+                super().__init__()
                 self.results: list[dict[str, Any]] = []
 
             def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
@@ -195,9 +195,9 @@ class TestConfigGateIntegration:
 
         class CollectSink(_TestSinkBase):
             name = "collect"
-            config: ClassVar[dict[str, Any]] = {}
 
             def __init__(self) -> None:
+                super().__init__()
                 self.results: list[dict[str, Any]] = []
 
             def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
@@ -281,9 +281,9 @@ class TestConfigGateIntegration:
 
         class CollectSink(_TestSinkBase):
             name = "collect"
-            config: ClassVar[dict[str, Any]] = {}
 
             def __init__(self) -> None:
+                super().__init__()
                 self.results: list[dict[str, Any]] = []
 
             def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
@@ -399,9 +399,9 @@ class TestConfigGateIntegration:
 
         class CollectSink(_TestSinkBase):
             name = "collect"
-            config: ClassVar[dict[str, Any]] = {}
 
             def __init__(self) -> None:
+                super().__init__()
                 self.results: list[dict[str, Any]] = []
 
             def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
@@ -510,9 +510,9 @@ class TestConfigGateIntegration:
 
         class CollectSink(_TestSinkBase):
             name = "collect"
-            config: ClassVar[dict[str, Any]] = {}
 
             def __init__(self) -> None:
+                super().__init__()
                 self.results: list[dict[str, Any]] = []
 
             def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
@@ -750,9 +750,9 @@ class TestMultipleConfigGates:
 
         class CollectSink(_TestSinkBase):
             name = "collect"
-            config: ClassVar[dict[str, Any]] = {}
 
             def __init__(self) -> None:
+                super().__init__()
                 self.results: list[dict[str, Any]] = []
 
             def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:

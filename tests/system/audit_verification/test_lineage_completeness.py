@@ -49,10 +49,10 @@ class _OutputSchema(PluginSchema):
 class _PassthroughTransform(BaseTransform):
     """Transform that passes data through unchanged."""
 
-    name: ClassVar[str] = "passthrough"
-    determinism: ClassVar[Determinism] = Determinism.DETERMINISTIC
-    input_schema: ClassVar[type[_InputSchema]] = _InputSchema
-    output_schema: ClassVar[type[_InputSchema]] = _InputSchema
+    name = "passthrough"
+    determinism = Determinism.DETERMINISTIC
+    input_schema = _InputSchema
+    output_schema = _InputSchema
 
     def __init__(self) -> None:
         super().__init__({})
@@ -66,10 +66,10 @@ class _PassthroughTransform(BaseTransform):
 class _EnrichingTransform(BaseTransform):
     """Transform that adds a field to the data."""
 
-    name: ClassVar[str] = "enricher"
-    determinism: ClassVar[Determinism] = Determinism.DETERMINISTIC
-    input_schema: ClassVar[type[_InputSchema]] = _InputSchema
-    output_schema: ClassVar[type[_OutputSchema]] = _OutputSchema
+    name = "enricher"
+    determinism = Determinism.DETERMINISTIC
+    input_schema = _InputSchema
+    output_schema = _OutputSchema
 
     def __init__(self) -> None:
         super().__init__({})
