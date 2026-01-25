@@ -509,24 +509,11 @@ allow_hits:
   reason: Optional schema config with explicit default - not all nodes define schemas
   safety: 'Default value is well-defined: dynamic fields'
   expires: null
-- key: engine/orchestrator.py:R2:Orchestrator:resume:line=1345
-  owner: architecture
-  reason: 'Optional protocol attribute: _schema_class only exists on sources with
-    Pydantic schemas'
-  safety: None default means source uses dynamic schema - type restoration skipped,
-    backward compatible
-  expires: null
 - key: core/dag.py:R2:ExecutionGraph:from_plugin_instances:line=365
   owner: architecture
   reason: 'Trust boundary: plugin instances may not have config attribute (legacy
     plugins)'
   safety: Empty dict default is safe - used for deterministic node ID generation
-  expires: null
-- key: core/dag.py:R2:ExecutionGraph:from_plugin_instances:line=372
-  owner: architecture
-  reason: 'Trust boundary: plugin instances may not have output_schema attribute (dynamic
-    schemas)'
-  safety: None default is safe - missing schema means dynamic schema
   expires: null
 - key: core/dag.py:R2:ExecutionGraph:from_plugin_instances:line=378
   owner: architecture
@@ -534,41 +521,11 @@ allow_hits:
     plugins)'
   safety: Empty dict default is safe - used for deterministic node ID generation
   expires: null
-- key: core/dag.py:R2:ExecutionGraph:from_plugin_instances:line=386
-  owner: architecture
-  reason: 'Trust boundary: plugin instances may not have input_schema attribute (dynamic
-    schemas)'
-  safety: None default is safe - missing schema means dynamic schema
-  expires: null
 - key: core/dag.py:R2:ExecutionGraph:from_plugin_instances:line=397
   owner: architecture
   reason: 'Trust boundary: plugin instances may not have config attribute (legacy
     plugins)'
   safety: Empty dict default is safe - used for deterministic node ID generation
-  expires: null
-- key: core/dag.py:R2:ExecutionGraph:from_plugin_instances:line=407
-  owner: architecture
-  reason: 'Trust boundary: plugin instances may not have input_schema attribute (dynamic
-    schemas)'
-  safety: None default is safe - missing schema means dynamic schema
-  expires: null
-- key: core/dag.py:R2:ExecutionGraph:from_plugin_instances:line=408
-  owner: architecture
-  reason: 'Trust boundary: plugin instances may not have output_schema attribute (dynamic
-    schemas)'
-  safety: None default is safe - missing schema means dynamic schema
-  expires: null
-- key: core/dag.py:R2:ExecutionGraph:from_plugin_instances:line=432
-  owner: architecture
-  reason: 'Trust boundary: plugin instances may not have input_schema attribute (dynamic
-    schemas)'
-  safety: None default is safe - missing schema means dynamic schema
-  expires: null
-- key: core/dag.py:R2:ExecutionGraph:from_plugin_instances:line=433
-  owner: architecture
-  reason: 'Trust boundary: plugin instances may not have output_schema attribute (dynamic
-    schemas)'
-  safety: None default is safe - missing schema means dynamic schema
   expires: null
 - key: engine/executors.py:R1:GateExecutor:execute_gate:line=416
   owner: architecture
@@ -640,54 +597,6 @@ allow_hits:
   owner: architecture
   reason: 'Intentional Optional API: batch_id lookup for node_id'
   safety: None is safe - means no batch exists yet, recorded as null in checkpoint
-  expires: null
-- key: engine/executors.py:R1:AggregationExecutor:restore_from_checkpoint:line=1218
-  owner: architecture
-  reason: 'Optional field: branch_name in TokenInfo is None by default (not forked)'
-  safety: None is safe - TokenInfo contract allows branch_name=None for non-forked
-    tokens
-  expires: null
-- key: engine/executors.py:R1:AggregationExecutor:restore_from_checkpoint:line=1227
-  owner: architecture
-  reason: 'Optional field: batch_id may not exist in checkpoint (fresh buffer)'
-  safety: None means no batch to restore - explicit check follows on line 1222
-  expires: null
-- key: engine/executors.py:R1:AggregationExecutor:restore_from_checkpoint:line=1233
-  owner: architecture
-  reason: Optional trigger evaluator lookup - node may not have trigger config
-  safety: None means 'no trigger config' - correctly skipped
-  expires: null
-- key: engine/executors.py:R1:AggregationExecutor:restore_from_checkpoint:line=1243
-  owner: architecture
-  reason: 'Optional field: elapsed_age_seconds for Bug #6 timeout preservation (backward
-    compat)'
-  safety: Defaults to 0.0 for old checkpoints - graceful degradation, no timeout restoration
-  expires: null
-- key: engine/executors.py:R1:AggregationExecutor:get_batch_id:line=1253
-  owner: architecture
-  reason: 'Intentional Optional API: returns None if no batch exists for node_id'
-  safety: Callers check return value - this is the documented contract
-  expires: null
-- key: engine/executors.py:R1:AggregationExecutor:should_flush:line=1264
-  owner: architecture
-  reason: 'Intentional Optional API: returns False if no evaluator exists for node_id'
-  safety: No evaluator means no trigger config - return False is correct behavior
-  expires: null
-- key: engine/executors.py:R1:AggregationExecutor:get_trigger_type:line=1278
-  owner: architecture
-  reason: 'Intentional Optional API: returns None if no evaluator exists for node_id'
-  safety: No evaluator means no trigger config - return None is correct behavior
-  expires: null
-- key: engine/executors.py:R1:AggregationExecutor:get_restored_state:line=1307
-  owner: architecture
-  reason: 'Intentional Optional API: returns None if no state was restored for node_id'
-  safety: Callers check return value - None means 'not restored, use default state'
-  expires: null
-- key: engine/executors.py:R4:SinkExecutor:write:line=1494
-  owner: architecture
-  reason: Broad exception handling can suppress bugs
-  safety: Re-raises after recording error - ensures all exceptions are captured in
-    audit trail
   expires: null
 - key: engine/executors.py:R1:AggregationExecutor:execute_flush:line=891
   owner: architecture

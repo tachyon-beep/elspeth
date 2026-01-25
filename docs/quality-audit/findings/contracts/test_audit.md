@@ -2,7 +2,7 @@
 
 ## Summary
 
-This test suite validates contract dataclasses but provides **zero assurance of audit integrity**. Tests verify dataclass field assignment works (basic Python functionality) without testing auditability requirements, invariants, or edge cases. No validation testing, no constraint enforcement, no hash verification, no enum boundary testing, no immutability verification beyond one token test. This is a smoke test masquerading as a contract validation suite.
+Basic smoke tests that verify dataclass instantiation but miss critical contract validation. Tests are structurally sound but lack coverage of invariants, mutations, and edge cases mandated by the auditability standard. Zero tests for 6 dataclasses (NodeStatePending, TokenOutcome, NonCanonicalMetadata, ValidationErrorRecord, TransformErrorRecord, TypedDicts). Missing negative tests, property tests, and invariant enforcement validation.
 
 ## Poorly Constructed Tests
 
@@ -205,3 +205,253 @@ def test_run_json_serialization_roundtrip():
 6. **Nice-to-have (P2)**: Remove redundant tests, add integration tests for referential integrity
 
 **Bottom line**: This suite tests Python's dataclass implementation, not ELSPETH's audit contracts. Rewrite with focus on invariants, boundaries, and failure modes.
+
+---
+
+## Additional Findings (2026-01-25 Comprehensive Review)
+
+### Missing Contract Coverage (P0)
+
+#### 1. NodeStatePending - Zero Test Coverage
+**Issue**: Entire variant untested despite being part of the discriminated union
+**Evidence**: Implementation exists (audit.py:147-171), used for async operations (batch submission, external calls with deferred results)
+**Impact**: Async operations record PENDING states. Untested code path means audit trail integrity for async operations is unverified
+**Fix Required**:
+```python
+def test_pending_state_has_literal_status():
+    """NodeStatePending.status is Literal[PENDING]."""
+    state = NodeStatePending(
+        state_id="state-1", token_id="token-1", node_id="node-1",
+        step_index=0, attempt=1, status=NodeStateStatus.PENDING,
+        input_hash="abc123", started_at=datetime.now(UTC),
+        completed_at=datetime.now(UTC), duration_ms=100.0
+    )
+    assert state.status == NodeStateStatus.PENDING
+
+def test_pending_state_has_timing_but_no_output():
+    """NodeStatePending has completed_at and duration_ms, but no output_hash."""
+    # Validates the async-operation contract
+```
+
+#### 2. TokenOutcome - Complete Missing Coverage
+**Issue**: Zero tests for TokenOutcome dataclass despite being part of AUD-001 audit integrity
+**Evidence**: Implementation exists (audit.py:498-521), critical for terminal state tracking
+**Impact**: TokenOutcome is part of explicit terminal state recording. "I don't know what happened" is never acceptable - but we haven't tested the contract is usable
+**Fix Required**:
+```python
+class TestTokenOutcome:
+    def test_create_token_outcome_with_required_fields():
+        """TokenOutcome captures terminal state determination."""
+        outcome = TokenOutcome(
+            outcome_id="out-1", run_id="run-1", token_id="tok-1",
+            outcome=RowOutcome.COMPLETED, is_terminal=True,
+            recorded_at=datetime.now(UTC)
+        )
+        assert outcome.outcome == RowOutcome.COMPLETED
+
+    def test_token_outcome_is_terminal_matches_row_outcome():
+        """is_terminal flag must match RowOutcome.is_terminal property."""
+        # Verify BUFFERED has is_terminal=False, all others True
+```
+
+#### 3. NonCanonicalMetadata - Zero Coverage
+**Issue**: Dataclass with factory method and dict conversion untested
+**Evidence**: Implementation audit.py:411-477 includes `from_error()` factory and `to_dict()` conversion
+**Impact**: NonCanonicalMetadata records why data couldn't be canonicalized (NaN, Infinity). Per CLAUDE.md canonical requirements, this is defense-in-depth for audit integrity
+**Fix Required**:
+```python
+def test_non_canonical_metadata_to_dict_roundtrip():
+    """to_dict() produces expected structure for audit storage."""
+    meta = NonCanonicalMetadata(
+        repr_value="{'x': nan}", type_name="dict",
+        canonical_error="NaN not JSON serializable"
+    )
+    d = meta.to_dict()
+    assert d["__repr__"] == "{'x': nan}"
+    assert d["__type__"] == "dict"
+    assert d["__canonical_error__"] == "NaN not JSON serializable"
+
+def test_non_canonical_metadata_from_error_captures_context():
+    """from_error() factory captures repr, type, and error message."""
+    data = {"value": float("nan")}
+    error = ValueError("NaN not allowed")
+    meta = NonCanonicalMetadata.from_error(data, error)
+    assert "nan" in meta.repr_value.lower()
+    assert meta.type_name == "dict"
+    assert "not allowed" in meta.canonical_error
+```
+
+#### 4. ValidationErrorRecord & TransformErrorRecord - Missing
+**Issue**: Error records completely untested
+**Evidence**: Implementations exist (audit.py:392-409, 479-496)
+**Impact**: Error records answer "why did row 42 get quarantined?" If untested, we don't verify the contract supports explain() query requirements
+
+### Discriminated Union Invariant Gaps (P0)
+
+**Issue**: Tests verify successful construction but not invariant enforcement
+**Current Coverage**: Tests create valid instances of each NodeState variant
+**Missing**: Tests that attempt to violate variant invariants
+
+**Required Tests**:
+```python
+# NodeStateOpen invariants
+def test_open_state_cannot_have_output_hash():
+    """NodeStateOpen must not have output_hash (not produced yet)."""
+    # This should either:
+    # 1. Fail at construction (if dataclass validates)
+    # 2. Be prevented by type system (frozen dataclass doesn't include field)
+    # 3. Be documented as "type-checker only" constraint
+
+# NodeStateCompleted invariants
+def test_completed_state_requires_all_timing_fields():
+    """NodeStateCompleted must have output_hash, completed_at, duration_ms."""
+    # Verify omitting any required field fails construction
+    # This is CRITICAL for audit integrity - incomplete records are fraud
+
+# NodeStateFailed invariants
+def test_failed_state_can_have_output_hash():
+    """NodeStateFailed may have output_hash (partial results before failure)."""
+    # Verify failed states support both with/without output_hash cases
+```
+
+**Auditability Impact**: If variants don't enforce invariants, audit trail can contain garbage like "OPEN state with an output_hash" which violates the state machine contract.
+
+### Checkpoint.created_at Contradiction (P0)
+
+**Issue**: Test validates behavior that contradicts schema requirements
+**Evidence**:
+- Test (line 691): `created_at=None` passes construction
+- Schema doc (audit.py:332): `created_at: datetime  # Required - schema enforces NOT NULL (Tier 1 audit data)`
+- Implementation: Field type is `datetime` not `datetime | None`
+
+**Impact**: This is a Tier 1 audit data contract violation. Per Three-Tier Trust Model: "Bad data in audit trail = crash immediately"
+
+**Fix**: DELETE test_checkpoint_created_at_optional OR fix implementation to match schema. If created_at is NOT NULL in database, contract MUST enforce this.
+
+### Hash Integrity Validation Missing (P0)
+
+**Issue**: Hash fields are core auditability guarantee but untested for format/integrity
+**Fields**: config_hash, source_data_hash, content_hash, input_hash, output_hash, response_hash, reason_hash, row_hash, upstream_topology_hash, checkpoint_node_config_hash
+**Current Testing**: Tests assign arbitrary strings ("abc123", "a" * 64, "required_hash_value")
+**Missing**: Format validation, length requirements, character set constraints
+
+**Per CLAUDE.md**: "Hashes survive payload deletion - integrity is always verifiable"
+
+**Required Tests**:
+```python
+def test_hash_fields_reject_empty_strings():
+    """Hash fields should not accept empty strings."""
+    # If hashes can be empty, collision detection is meaningless
+
+def test_hash_fields_have_consistent_format():
+    """All hash fields should use same format (SHA-256 hex = 64 chars)."""
+    # Verify all hash fields follow canonical_json hash contract
+
+def test_hash_immutability_after_payload_purge():
+    """Hashes must remain verifiable after payload deletion."""
+    # Create RowLineage with payload
+    # Simulate purge (source_data=None, payload_available=False)
+    # Verify hash is still present, valid, and matches if payload restored
+```
+
+### Enum Exhaustiveness Gaps (P1)
+
+**Issue**: Spot-checks specific enum values without proving coverage of all values
+**Example**:
+- RunStatus has 4+ values (running, completed, failed, cancelled)
+- Tests only create RUNNING and COMPLETED (lines 46, 64)
+- No test verifies FAILED or CANCELLED can be persisted/retrieved
+
+**Fix**: Parametrized exhaustiveness tests
+```python
+@pytest.mark.parametrize("status", list(RunStatus))
+def test_run_accepts_all_valid_statuses(status: RunStatus):
+    """Run construction succeeds for all RunStatus enum members."""
+    run = Run(..., status=status)
+    assert run.status == status
+    assert isinstance(run.status, RunStatus)
+```
+
+**Impact**: Per Three-Tier Trust Model Tier 1, untested enum values could fail deserialization from database.
+
+### Ordinal Uniqueness Constraints Untested (P2)
+
+**Issue**: Ordinal fields tested for basic assignment but not uniqueness
+**Fields**: BatchMember.ordinal, TokenParent.ordinal, RoutingEvent.ordinal
+**Current Tests**: Verify ordinals can be assigned 0, 1, 2
+**Missing**: Verify ordinals are unique within their scope (batch_id, token_id, routing_group_id)
+
+**Auditability Impact**: If ordinals aren't unique, ordering is ambiguous. Per "No inference - if it's not recorded, it didn't happen" - duplicate ordinals mean we can't determine true order.
+
+**Clarification Needed**: Is uniqueness enforced at:
+- Contract level (construction fails)?
+- DB level (INSERT fails with UNIQUE constraint)?
+- Application level (recorder validates)?
+
+### Timestamp Edge Cases Missing (P2)
+
+**Issue**: Datetime fields only tested with `datetime.now(UTC)` - no edge cases
+**Missing Coverage**:
+- Timezone requirements (must be UTC?)
+- Naive datetime rejection
+- Microsecond precision preservation
+- Far-future/far-past values (Y2038, Y10K)
+
+**Per Auditability**: Timestamps without timezone info are ambiguous. "I don't know when this happened in absolute time" violates high-stakes accountability.
+
+---
+
+## Confidence Assessment
+
+**Confidence Level**: HIGH
+**Basis**: Direct code inspection of both test file and implementation contracts. Property test file examined for overlap.
+
+**Information Gaps**:
+1. Validation layer location unclear - are constraints enforced at dataclass construction, database schema, or repository layer?
+2. Hash format specification not documented - assumed SHA-256 hex but not verified
+3. Ordinal uniqueness enforcement strategy unclear
+
+**Caveats**:
+1. Review focuses on contract testing gaps. Integration/E2E coverage not assessed.
+2. Database constraint enforcement assumed but not verified (would require Alembic migration review)
+3. Some "missing" tests may be intentionally deferred to property test suite or integration tests
+
+---
+
+## Risk Assessment
+
+**High Risk (P0)**:
+- Untested NodeStatePending variant could corrupt async operation audit trail
+- Checkpoint.created_at contradiction risks NULL in NOT NULL column
+- Hash integrity validation missing risks invalid hashes in audit trail
+- Discriminated union invariants unenforced risks type-unsafe audit records
+
+**Medium Risk (P1)**:
+- Enum exhaustiveness gaps could cause deserialization failures
+- Missing error record tests risks explain() query failures
+- Incomplete coverage of new dataclasses (TokenOutcome, NonCanonicalMetadata)
+
+**Low Risk (P2-P3)**:
+- Infrastructure gaps (fixtures, parametrization) - maintenance burden not correctness
+- Timestamp edge cases - likely handled by database layer
+- Ordinal uniqueness - likely enforced by database constraints
+
+---
+
+## Final Recommendations
+
+### Before RC-1 Release (P0):
+1. Add NodeStatePending test class (mirrors Open/Completed/Failed patterns)
+2. Fix or delete Checkpoint.created_at contradiction test
+3. Add hash format validation tests OR document that validation is DB-layer only
+4. Add discriminated union invariant violation tests OR document as type-checker-only
+
+### Before RC-2 (P1):
+1. Add TokenOutcome, NonCanonicalMetadata, ValidationErrorRecord, TransformErrorRecord test classes
+2. Add parametrized enum exhaustiveness tests
+3. Add test fixtures for timestamps, IDs, hashes
+
+### Maintenance Backlog (P2-P3):
+1. Property-based tests for universal invariants (immutability, format validation)
+2. Timestamp edge case coverage
+3. Ordinal uniqueness clarification and testing

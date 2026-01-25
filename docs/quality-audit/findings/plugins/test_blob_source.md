@@ -1,217 +1,351 @@
 # Test Quality Review: test_blob_source.py
 
 ## Summary
-The test file is well-structured with good organization and coverage of authentication methods. However, it has critical gaps in external system error handling, lacks property-based testing for schema validation edge cases, and contains assertions that access internal state violating encapsulation boundaries. Several tests violate the Three-Tier Trust Model by not verifying audit trail recording for quarantined rows.
+
+Test suite for AzureBlobSource demonstrates good structural organization with clear test classes and comprehensive coverage of config validation, format support, and authentication methods. However, critical gaps exist in testing external data boundary behavior, NaN/Infinity handling per canonical standards, mutation testing, and CSV parse error edge cases. Several tests violate the "no assertion-free tests" principle by checking only for non-crash behavior without verifying expected outcomes.
 
 ## Poorly Constructed Tests
 
 ### Test: test_csv_parse_error_quarantines (line 518)
-**Issue**: Weak assertion - does not verify quarantined row structure or audit trail recording
-**Evidence**: Line 542 only checks `assert isinstance(rows, list)` - this passes even if quarantine logic is completely broken
-**Fix**:
-- Assert exactly 1 quarantined row is returned
-- Verify quarantine_destination matches config
-- Verify quarantine_error contains meaningful parse error
-- Verify ctx.record_validation_error was called with parse mode
-**Priority**: P1
+**Issue**: Assertion-free test that only verifies "didn't crash" without checking actual quarantine behavior.
+**Evidence**:
+```python
+# Should NOT raise - should quarantine instead
+rows = list(source.load(ctx))
+
+# Pipeline continues (doesn't crash)
+# Note: With on_bad_lines="warn", pandas may parse some rows or quarantine the whole file
+# Either way, we should not crash
+assert isinstance(rows, list)  # Got results, not a crash
+```
+This assertion is meaningless - `list()` always returns a list. The test doesn't verify that rows were actually quarantined with proper error messages, whether `ctx.record_validation_error()` was called, or what the `SourceRow` states are.
+
+**Fix**: Assert concrete behavior:
+```python
+rows = list(source.load(ctx))
+
+# Should get quarantined rows, not valid rows
+assert len(rows) > 0, "Should quarantine malformed CSV, not return empty list"
+assert all(r.is_quarantined for r in rows), "All rows from malformed CSV should be quarantined"
+assert any("parse error" in r.quarantine_error.lower() for r in rows), "Should document parse error"
+```
+**Priority**: P1 - This tests BUG-BLOB-01 fix, must verify actual quarantine behavior
 
 ### Test: test_csv_structural_failure_quarantines_blob (line 544)
-**Issue**: Assertion is too weak - `assert len(rows) >= 0` is a tautology
-**Evidence**: Line 565 - this assertion always passes, provides zero value
-**Fix**:
-- Assert exactly what quarantine behavior should occur (1 quarantined row with specific structure)
-- Verify audit trail recording via ctx.record_validation_error
-- Check quarantine_error message indicates structural failure
-**Priority**: P1
+**Issue**: Assertion-free test - only checks `len(rows) >= 0` which is always true and meaningless.
+**Evidence**:
+```python
+# Should get one quarantined "row" representing the unparseable blob
+assert len(rows) >= 0  # Either empty or quarantined row
+# No crash = success
+```
+This is worse than no test - it gives false confidence. The test doesn't verify quarantine behavior, doesn't check `ctx.record_validation_error()` was called, and `len(rows) >= 0` is a tautology.
+
+**Fix**: Assert deterministic behavior:
+```python
+rows = list(source.load(ctx))
+
+# Binary garbage should quarantine the entire blob as one "row"
+assert len(rows) == 1, "Binary data should quarantine blob as single row"
+assert rows[0].is_quarantined is True
+assert rows[0].quarantine_destination == "quarantine"
+assert "parse error" in rows[0].quarantine_error.lower()
+assert "__raw_blob_preview__" in rows[0].row, "Should preserve evidence for audit"
+```
+**Priority**: P0 - Critical BUG-BLOB-01 regression test has no actual assertions
 
 ### Test: test_close_clears_client (line 578)
-**Issue**: Accesses internal state `source._blob_client` directly
-**Evidence**: Line 588 - violates encapsulation, makes test brittle to implementation changes
-**Fix**: Remove this test entirely - `close()` idempotency (line 572) is sufficient. Internal state clearing is an implementation detail, not a contract.
+**Issue**: Accesses internal state `_blob_client` directly, violating encapsulation and creating brittle tests.
+**Evidence**:
+```python
+source.close()
+assert source._blob_client is None
+```
+Per CLAUDE.md prohibition on defensive programming: "Access fields directly (obj.field) not defensively (obj.get('field'))" applies to contracts, not internal implementation details. Testing private attributes creates coupling to implementation.
+
+**Fix**: Test observable behavior, not internal state. Either remove the assertion (close is idempotent, that's the contract) or test that subsequent operations after close() raise appropriate errors.
+**Priority**: P2 - Brittle test, not critical functionality
+
+### Test: test_close_is_idempotent (line 572)
+**Issue**: Assertion-free test - calls close() twice but doesn't verify anything.
+**Evidence**:
+```python
+source.close()
+source.close()  # Should not raise
+```
+While "should not raise" is a valid assertion, the comment doesn't count as an assertion. The test should explicitly verify idempotence.
+
+**Fix**: Add explicit assertions:
+```python
+source.close()
+# First close succeeds
+try:
+    source.close()
+    # Second close also succeeds
+except Exception as e:
+    pytest.fail(f"close() should be idempotent, raised: {e}")
+```
+Or better, test that operations after close() have predictable behavior.
+**Priority**: P3 - Minor, but sets bad precedent for assertion-free tests
+
+## Missing Critical Test Cases
+
+### Missing: NaN/Infinity rejection in CSV data
+**Issue**: Per CLAUDE.md canonical standards, "NaN and Infinity are strictly rejected, not silently converted." No tests verify this defense-in-depth for sources.
+**Evidence**: None of the CSV tests include rows with NaN, Inf, or -Inf values.
+**Required tests**:
+```python
+def test_csv_nan_values_quarantined():
+    """CSV rows with NaN should quarantine with clear error, not coerce to null."""
+    csv_data = b"id,score\n1,NaN\n2,100\n"
+    # ...
+    rows = list(source.load(ctx))
+    assert len(rows) == 2
+    assert rows[0].is_quarantined
+    assert "NaN" in rows[0].quarantine_error or "invalid" in rows[0].quarantine_error.lower()
+    assert not rows[1].is_quarantined
+
+def test_csv_infinity_values_quarantined():
+    """CSV rows with Infinity should quarantine, not coerce."""
+    csv_data = b"id,score\n1,Infinity\n2,100\n"
+    # Should quarantine, not silently convert to null or large number
+```
+**Priority**: P1 - Critical auditability requirement from CLAUDE.md
+
+### Missing: JSON array containing non-dict values
+**Issue**: `_validate_and_yield()` has logic for "May be non-dict for malformed external data (e.g., JSON arrays containing primitives)" but no tests verify this case.
+**Evidence**: Line 494 comment in implementation, but TestAzureBlobSourceJSON has no test for `[1, 2, 3]` or `["a", "b"]`.
+**Required test**:
+```python
+def test_json_array_of_primitives_quarantined():
+    """JSON array containing primitives should quarantine each element."""
+    json_data = b'[1, 2, "string", {"valid": "object"}]'
+    # ...
+    rows = list(source.load(ctx))
+    assert len(rows) == 4
+    # First 3 should quarantine (primitives)
+    assert all(rows[i].is_quarantined for i in range(3))
+    # Last is valid dict
+    assert not rows[3].is_quarantined
+```
+**Priority**: P1 - Documented edge case with no coverage
+
+### Missing: Empty blob files
+**Issue**: No tests for empty CSV, empty JSON array `[]`, or empty JSONL files.
+**Evidence**: All test data in fixtures has content.
+**Required tests**:
+```python
+def test_csv_empty_file():
+    """Empty CSV file should yield zero rows, not crash."""
+    csv_data = b""
+    # Should yield 0 rows
+
+def test_json_empty_array():
+    """Empty JSON array should yield zero rows."""
+    json_data = b'[]'
+    # Should yield 0 rows
+
+def test_jsonl_empty_file():
+    """Empty JSONL file should yield zero rows."""
+    jsonl_data = b""
+    # Should yield 0 rows
+```
+**Priority**: P2 - Common edge case in production
+
+### Missing: CSV with only headers, no data
+**Issue**: CSV with header row but no data rows - untested.
+**Required test**:
+```python
+def test_csv_headers_only():
+    """CSV with headers but no data rows should yield zero rows."""
+    csv_data = b"id,name,score\n"  # Header only
+    # Should yield 0 rows, not crash or yield malformed row
+```
 **Priority**: P2
 
-### Test: test_auth_connection_string (line 611)
-**Issue**: Multiple tests (lines 611-645) access internal `_auth_config` state
-**Evidence**: Lines 614, 615, 627-628, 642-645 all assert on internal fields
-**Fix**: These tests verify Pydantic model behavior, not plugin behavior. Consider:
-- Move to `test_azure_auth.py` if testing AzureAuthConfig specifically
-- Or delete entirely - config validation is already tested via PluginConfigError tests
-**Priority**: P2
+### Missing: Unicode handling beyond latin-1
+**Issue**: Only one encoding test (latin-1), but no tests for UTF-8 BOM, emoji, CJK characters, surrogate pairs.
+**Required tests**:
+```python
+def test_csv_utf8_with_bom():
+    """CSV with UTF-8 BOM should parse correctly."""
+    csv_data = b'\xef\xbb\xbfid,name\n1,test\n'  # UTF-8 BOM
 
-### Test: test_validation_failure_quarantines_row (line 420)
-**Issue**: Does not verify audit trail recording via ctx.record_validation_error
-**Evidence**: No assertion that ctx recorded the validation error
-**Fix**: Add mock or spy on ctx.record_validation_error to verify:
-- Called 1 time for the bad row
-- Called with correct schema_mode
-- Called with correct destination
-**Priority**: P1
+def test_csv_emoji_and_cjk():
+    """CSV with emoji and CJK characters should preserve them."""
+    csv_data = "id,name\n1,测试\n2,🎉\n".encode('utf-8')
+```
+**Priority**: P2 - Internationalization requirement
 
-### Test: test_jsonl_malformed_line_quarantined_not_crash (line 358)
-**Issue**: Does not verify audit trail recording
-**Evidence**: Asserts quarantined row structure but not ctx.record_validation_error call
-**Fix**: Verify ctx.record_validation_error was called with schema_mode="parse" for the malformed line
-**Priority**: P1
+### Missing: Schema coercion verification
+**Issue**: Per Three-Tier Trust Model, sources are "the ONLY place coercion is allowed." Tests don't verify that `"42"` → `42` coercion actually happens.
+**Evidence**: All CSV tests leave data as strings (`dtype=str` in implementation), but no tests verify that schema with `int` fields actually coerces string values.
+**Required test**:
+```python
+def test_csv_schema_coercion():
+    """Source schema should coerce string values to target types."""
+    csv_data = b"id,score\n1,100\n2,200\n"  # CSV values are strings
+    source = AzureBlobSource(
+        make_config(
+            schema={
+                "mode": "strict",
+                "fields": ["id: int", "score: int"],
+            }
+        )
+    )
+    rows = list(source.load(ctx))
+    # Should coerce CSV strings to ints
+    assert rows[0].row["id"] == 1  # int, not "1"
+    assert isinstance(rows[0].row["id"], int)
+```
+**Priority**: P1 - Core auditability requirement, must verify trust boundary behavior
+
+### Missing: JSONL with mixed valid/invalid lines
+**Issue**: Line 358 test has valid-invalid-valid pattern, but doesn't verify line number accuracy in quarantine metadata.
+**Evidence**: Test checks `"line 2" in results[1].quarantine_error` but doesn't verify `__line_number__` field correctness.
+**Fix**: Strengthen test:
+```python
+assert results[1].row["__line_number__"] == 2, "Should track exact line number for audit"
+```
+**Priority**: P2 - Auditability detail
+
+### Missing: Concurrent load() calls
+**Issue**: No test verifies behavior when `load()` is called multiple times or from multiple contexts.
+**Required test**:
+```python
+def test_load_multiple_times_same_source():
+    """load() should be idempotent - multiple calls should work."""
+    source = AzureBlobSource(make_config())
+    rows1 = list(source.load(ctx))
+    rows2 = list(source.load(ctx))
+    assert rows1 == rows2  # Same results
+```
+**Priority**: P3 - Unclear if this is supported, but should be documented
 
 ## Misclassified Tests
 
-### Tests: TestAzureBlobSourceAuthClientCreation (lines 751-841)
-**Issue**: Tests are integration tests masquerading as unit tests
-**Evidence**:
-- Line 762 imports real Azure SDK modules
-- Lines 776-791, 806-825, 832-840 patch Azure SDK calls
-- Tests verify Azure SDK is called correctly, not plugin behavior
-**Fix**:
-- Move to `tests/integration/test_azure_blob_auth_integration.py`
-- Mark with `@pytest.mark.integration`
-- Require Azure SDK installed (not mocked)
-- Current tests use mocks which provide false confidence - they verify mock call signatures, not actual Azure behavior
-**Priority**: P1
+### Test: test_auth_managed_identity_uses_default_credential (line 765)
+**Issue**: Classified as unit test but requires azure.identity package (integration dependency).
+**Evidence**: Uses `pytest.importorskip("azure.identity")` in fixture - this makes it an integration test.
+**Fix**: Move TestAzureBlobSourceAuthClientCreation class to `tests/integration/test_azure_blob_auth.py` or mark with `@pytest.mark.integration`.
+**Priority**: P2 - Organizational, affects test pyramid
 
-### Tests: Config validation tests (lines 120-204)
-**Issue**: These are Pydantic model tests, not plugin tests
-**Evidence**: All tests in TestAzureBlobSourceConfigValidation verify Pydantic validation, not plugin logic
-**Fix**:
-- Consider moving to `tests/plugins/azure/test_azure_blob_config.py`
-- Or accept as boundary testing - config validation failures ARE plugin initialization failures
-- If kept, add docstring clarifying "These test config validation at initialization boundary"
-**Priority**: P3 (lowest - arguable whether this is a problem)
+### Test: test_auth_service_principal_uses_client_secret_credential (line 793)
+**Issue**: Same as above - integration test masquerading as unit test.
+**Fix**: Move to integration test suite.
+**Priority**: P2
+
+### Test: test_auth_connection_string_uses_from_connection_string (line 827)
+**Issue**: Same as above.
+**Fix**: Move to integration test suite.
+**Priority**: P2
 
 ## Infrastructure Gaps
 
 ### Gap: No property-based testing for schema validation
-**Issue**: Schema validation with coercion is complex - edge cases likely untested
-**Evidence**: Tests only cover basic type coercion (line 422-455) but not:
-- Mixed valid/invalid types in same field across rows
-- Coercion boundary cases (e.g., "123abc" as int)
-- Unicode edge cases in string fields
-- Nested JSON structures in free mode
-**Fix**: Add `test_blob_source_schema_property_tests.py` using Hypothesis:
+**Issue**: Per CLAUDE.md Technology Stack, "Property Testing: Hypothesis - Manual edge-case hunting." The validation tests are all hand-written examples, but Hypothesis would catch edge cases automatically.
+**Evidence**: TestAzureBlobSourceValidation has 2 tests - could be 1 property test.
+**Recommendation**:
 ```python
-@given(st.lists(st.dictionaries(st.text(), st.one_of(st.integers(), st.text(), st.none()))))
-def test_schema_validation_handles_arbitrary_inputs(rows):
-    # Verify no crash, all rows either valid or quarantined
-```
-**Priority**: P2
+from hypothesis import given, strategies as st
 
-### Gap: No fixtures for mock Azure clients
-**Issue**: Every test manually creates mock_client, sets return_value, patches download_blob
-**Evidence**: Lines 213-214, 228-230, 242-243, 256-257, etc. - repeated 20+ times
-**Fix**: Create fixtures:
+@given(st.dictionaries(st.text(), st.one_of(st.integers(), st.text(), st.none())))
+def test_validation_handles_arbitrary_dicts(row_dict):
+    """Schema validation should never crash, always quarantine or accept."""
+    # Property: validation always returns SourceRow, never raises
+    results = list(source._validate_and_yield(row_dict, ctx))
+    assert len(results) == 1
+    assert isinstance(results[0], SourceRow)
+```
+**Priority**: P2 - Would catch many edge cases, but hand-written tests are adequate for now
+
+### Gap: Repeated mock setup
+**Issue**: Every test manually creates `mock_client` and configures `download_blob().readall()`. This should be a parameterized fixture.
+**Evidence**: Lines 212-214, 228-230, 241-243, 253-256, etc. - identical mock setup in every test.
+**Fix**: Create fixture:
 ```python
 @pytest.fixture
-def mock_csv_blob(mock_blob_client):
-    def _make_csv(content: str):
+def mock_blob_data(mock_blob_client):
+    """Fixture that returns a function to set blob data."""
+    def _set_data(data: bytes):
         mock_client = MagicMock()
-        mock_client.download_blob.return_value.readall.return_value = content.encode()
+        mock_client.download_blob.return_value.readall.return_value = data
         mock_blob_client.return_value = mock_client
-        return mock_client
-    return _make_csv
+    return _set_data
+
+# Then use:
+def test_load_csv(mock_blob_data, ctx):
+    mock_blob_data(b"id,name\n1,alice\n")
+    source = AzureBlobSource(make_config())
+    rows = list(source.load(ctx))
 ```
-Then use: `mock_csv_blob("id,name\n1,alice\n")`
-**Priority**: P2
+**Priority**: P3 - DRY principle, but not affecting correctness
 
-### Gap: No test for audit trail context recording
-**Issue**: Tests verify quarantine row structure but not ctx.record_validation_error calls
-**Evidence**: PluginContext is created (line 38) but never inspected or mocked
-**Fix**:
-- Mock ctx.record_validation_error in quarantine tests
-- Assert it was called with correct (row, error, schema_mode, destination)
-- This verifies the audit trail, not just the quarantine routing
-**Priority**: P1
-
-### Gap: No test for concurrent load() calls
-**Issue**: Plugin might be called by multiple threads (DAG parallelism)
-**Evidence**: No thread-safety tests for lazy _blob_client initialization (line 282)
-**Fix**: Add test that calls load() from 2 threads simultaneously, verify no race condition in _get_blob_client
-**Priority**: P3 (depends on whether engine parallelizes source loading)
-
-### Gap: Missing error tests for external system failures
-**Issue**: Only 3 generic error tests (lines 484-516), missing specific Azure SDK errors
-**Evidence**:
-- No test for `ClientAuthenticationError` (wrong credentials)
-- No test for `ServiceRequestError` (network timeout)
-- No test for `ResourceExistsError` (wrong resource type)
-- No test for Azure throttling (429 responses)
-**Fix**: Add specific Azure SDK error tests:
+### Gap: No fixture for PluginContext with validation tracking
+**Issue**: Tests call `ctx.record_validation_error()` but don't verify it was called. The `ctx` fixture is minimal.
+**Evidence**: Line 36-38 creates minimal context, but validation tests (line 420, 457) don't verify context was updated.
+**Fix**: Create mock context fixture that tracks calls:
 ```python
-def test_blob_download_authentication_error_propagates(...)
-def test_blob_download_network_timeout_propagates(...)
-def test_blob_download_throttled_propagates(...)
+@pytest.fixture
+def ctx_with_tracking():
+    """Context that tracks validation errors."""
+    context = MagicMock(spec=PluginContext)
+    context.run_id = "test-run"
+    context.config = {}
+    context.validation_errors = []  # Track calls
+    context.record_validation_error = MagicMock(side_effect=lambda **kw: context.validation_errors.append(kw))
+    return context
 ```
-**Priority**: P1
+**Priority**: P1 - Validation is critical for auditability, must verify context records it
 
-### Gap: No test verifying blob is NOT re-downloaded on multiple load() calls
-**Issue**: Current design re-downloads blob every time load() is called
-**Evidence**: No test verifying caching behavior (or lack thereof)
-**Fix**: Add test calling load() twice, verify _get_blob_client().download_blob() called twice (no caching). Document this as expected behavior or implement caching if needed.
-**Priority**: P3
-
-### Gap: No test for empty blob
-**Issue**: What happens when blob exists but is 0 bytes?
-**Evidence**: No test for empty CSV, empty JSON array, empty JSONL
-**Fix**: Add tests:
+### Gap: No shared test data constants
+**Issue**: Test data is inline in each test. Shared constants would make patterns visible.
+**Evidence**: `b"id,name,value\n1,alice,100\n"` appears in multiple places with slight variations.
+**Fix**: Create module-level constants:
 ```python
-def test_empty_csv_blob_yields_no_rows(...)
-def test_empty_json_array_yields_no_rows(...)
-def test_empty_jsonl_blob_yields_no_rows(...)
+VALID_CSV_TWO_ROWS = b"id,name,value\n1,alice,100\n2,bob,200\n"
+INVALID_CSV_BAD_INT = b"id,name,score\n1,alice,95\n2,bob,bad\n3,carol,92\n"
 ```
-**Priority**: P2
+**Priority**: P3 - Maintainability, not correctness
 
-### Gap: No test for large blob handling
-**Issue**: Memory usage for multi-GB blobs not tested
-**Evidence**: All test blobs are tiny (< 1KB)
-**Fix**: Add test with mock blob returning large content (10MB+), verify:
-- No memory explosion
-- Rows yielded incrementally (not all loaded into memory)
-- HOWEVER: Current implementation reads entire blob into memory (line 325 `readall()`), so this is likely a DESIGN issue, not a test issue
-**Priority**: P2 (flag as potential memory issue in production)
+## Test Isolation Issues
+
+### Issue: mock_blob_client fixture modifies global state
+**Issue**: The `@patch` decorator in the fixture (line 44) patches `AzureBlobSource._get_blob_client` globally for all tests using the fixture. This is correct usage, but could cause confusion if tests are run in unexpected order.
+**Evidence**: Line 44 uses `with patch(...)` as context manager, which is scoped correctly.
+**Assessment**: Actually fine - using context manager, so properly isolated. Not a real issue.
+**Priority**: N/A - False alarm
 
 ## Positive Observations
 
-- **Excellent test organization**: Clear class-based grouping by concern (CSV, JSON, JSONL, validation, errors, auth)
-- **Good use of make_config helper**: Eliminates boilerplate, makes test intent clear
-- **Comprehensive auth method coverage**: All 3 auth methods tested (connection string, managed identity, service principal)
-- **Clear test names**: Function names describe exactly what is being tested
-- **Proper use of pytest.raises**: Error tests use context managers with match= for specificity
-- **BUG-BLOB-01 regression coverage**: Lines 518-567 specifically test the bug fix, preventing regression
-
-## Confidence Assessment
-
-**Confidence Level**: Medium
-
-These tests provide reasonable coverage of happy paths and basic error cases, but have gaps in:
-- External system error handling (Azure SDK specific errors)
-- Audit trail verification (ctx.record_validation_error calls)
-- Schema validation edge cases (property-based testing needed)
-- Internal state access violates encapsulation in several tests
+- **Excellent test organization**: Test classes clearly separate concerns (protocol, config validation, CSV, JSON, JSONL, validation, errors, lifecycle, auth).
+- **Good use of fixtures**: `make_config()` helper reduces duplication and makes auth option testing clean.
+- **Comprehensive auth testing**: All three auth methods tested with mutual exclusivity checks - thorough.
+- **BUG-BLOB-01 coverage**: Tests exist for the CSV parse bug (even if assertions are weak).
+- **Quarantine testing**: Tests verify both `quarantine` and `discard` modes work correctly.
+- **Encoding coverage**: At least one non-UTF-8 test (latin-1) shows awareness of encoding issues.
+- **JSONL edge case**: Line 346 tests empty line handling - good attention to detail.
 
 ## Risk Assessment
 
-**High Risk Areas**:
-1. **Weak quarantine tests** (P1): Current assertions too permissive, could miss broken quarantine logic
-2. **Missing Azure SDK error tests** (P1): Production will encounter these, tests don't cover them
-3. **No audit trail verification** (P1): Violates auditability standard - tests don't verify ctx recording
+**High Risk**:
+- P0 assertion-free tests for BUG-BLOB-01 (lines 518, 544) - regression tests have no teeth
+- P1 missing NaN/Infinity rejection tests - violates canonical standards
+- P1 missing coercion verification - can't prove trust boundary works correctly
+- P1 missing context validation tracking - can't prove audit trail is populated
 
-**Medium Risk Areas**:
-1. **Misclassified integration tests** (P1 to reclassify): False confidence from mocked Azure SDK calls
-2. **Missing property-based tests** (P2): Edge cases in schema validation likely uncovered
+**Medium Risk**:
+- P2 misclassified integration tests - affects CI/CD pipeline structure
+- P2 missing empty file tests - production edge case
+- P2 missing non-dict JSON handling test - documented but untested
 
-**Low Risk Areas**:
-1. **Encapsulation violations** (P2): Tests access internal state, brittle but not wrong
-2. **Missing concurrency tests** (P3): Depends on engine design
+**Low Risk**:
+- P3 infrastructure gaps (DRY, fixtures) - maintainability, not correctness
+- P3 assertion-free idempotence test - minor issue
 
-## Information Gaps
+## Recommendations
 
-- **Unknown**: Does the engine call source.load() from multiple threads? (affects P3 concurrency gap)
-- **Unknown**: Is blob caching expected or forbidden? (affects P3 caching gap)
-- **Unknown**: What is the maximum expected blob size? (affects P2 memory gap)
-- **Assumption**: ctx.record_validation_error is critical for audit trail (based on CLAUDE.md) - needs verification
-
-## Caveats
-
-- Review based on CLAUDE.md standards - some critiques may reflect project-specific rigor beyond typical practice
-- "Poorly constructed" does not mean "wrong" - many tests work but could be more robust
-- Misclassification of integration tests as unit tests is common but violates test pyramid principles
-- Property-based testing gap is typical for most codebases, not a unique failure
-- Internal state access is pragmatic for lifecycle tests (close()) but violates encapsulation ideals
+1. **Immediate (P0)**: Fix assertion-free BUG-BLOB-01 tests with concrete quarantine behavior checks.
+2. **Pre-release (P1)**: Add NaN/Infinity rejection tests, schema coercion verification, and context validation tracking.
+3. **Post-release (P2)**: Reorganize auth tests into integration suite, add empty file tests.
+4. **Backlog (P3)**: Refactor fixtures to reduce duplication, consider Hypothesis for property testing.
