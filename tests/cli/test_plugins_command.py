@@ -94,46 +94,126 @@ class TestPluginInfo:
 class TestPluginsListCommand:
     """Tests for plugins list command."""
 
-    def test_plugins_list_shows_sources(self) -> None:
-        """plugins list shows available sources."""
+    def _get_section_content(self, output: str, section_header: str) -> str:
+        """Extract content for a section by header.
+
+        Args:
+            output: Full CLI output
+            section_header: Header like "SOURCES:" or "TRANSFORMS:"
+
+        Returns:
+            Content from header until next section or end
+        """
+        lines = output.split("\n")
+        in_section = False
+        section_lines = []
+        for line in lines:
+            if section_header in line.upper():
+                in_section = True
+                continue
+            if in_section:
+                # Check if we hit another section header
+                if line.strip() and line.strip().endswith(":") and line.strip()[:-1].isupper():
+                    break
+                section_lines.append(line)
+        return "\n".join(section_lines)
+
+    def test_plugins_list_shows_sources_in_sources_section(self) -> None:
+        """plugins list shows csv/json under SOURCES section specifically."""
         from elspeth.cli import app
 
         result = runner.invoke(app, ["plugins", "list"])
         assert result.exit_code == 0
-        assert "csv" in result.stdout.lower()
-        assert "json" in result.stdout.lower()
 
-    def test_plugins_list_shows_sinks(self) -> None:
-        """plugins list shows available sinks."""
+        # Parse sources section specifically
+        sources_section = self._get_section_content(result.stdout, "SOURCES:")
+        assert "csv" in sources_section.lower(), f"Expected 'csv' in SOURCES section, got: {sources_section}"
+        assert "json" in sources_section.lower(), f"Expected 'json' in SOURCES section, got: {sources_section}"
+
+    def test_plugins_list_shows_sinks_in_sinks_section(self) -> None:
+        """plugins list shows database under SINKS section specifically."""
         from elspeth.cli import app
 
         result = runner.invoke(app, ["plugins", "list"])
         assert result.exit_code == 0
-        assert "database" in result.stdout.lower()
 
-    def test_plugins_list_has_sections(self) -> None:
-        """plugins list organizes by type."""
+        # Parse sinks section specifically
+        sinks_section = self._get_section_content(result.stdout, "SINKS:")
+        assert "database" in sinks_section.lower(), f"Expected 'database' in SINKS section, got: {sinks_section}"
+
+    def test_plugins_list_shows_transforms_in_transforms_section(self) -> None:
+        """plugins list shows transforms under TRANSFORMS section specifically."""
         from elspeth.cli import app
 
         result = runner.invoke(app, ["plugins", "list"])
         assert result.exit_code == 0
-        assert "source" in result.stdout.lower()
-        assert "sink" in result.stdout.lower()
 
-    def test_plugins_list_type_filter(self) -> None:
-        """plugins list --type filters by plugin type."""
+        # Parse transforms section specifically
+        transforms_section = self._get_section_content(result.stdout, "TRANSFORMS:")
+        assert "passthrough" in transforms_section.lower(), f"Expected 'passthrough' in TRANSFORMS section, got: {transforms_section}"
+
+    def test_plugins_list_has_all_sections(self) -> None:
+        """plugins list organizes by type with section headers."""
         from elspeth.cli import app
 
-        # Filter to sources only
+        result = runner.invoke(app, ["plugins", "list"])
+        assert result.exit_code == 0
+
+        output_upper = result.stdout.upper()
+        assert "SOURCES:" in output_upper, "Missing SOURCES: section header"
+        assert "TRANSFORMS:" in output_upper, "Missing TRANSFORMS: section header"
+        assert "SINKS:" in output_upper, "Missing SINKS: section header"
+
+    def test_plugins_list_type_filter_source(self) -> None:
+        """plugins list --type source shows only sources."""
+        from elspeth.cli import app
+
         result = runner.invoke(app, ["plugins", "list", "--type", "source"])
         assert result.exit_code == 0
-        assert "csv" in result.stdout.lower()
-        # Should not show sinks
-        assert "database" not in result.stdout.lower()
 
-    def test_plugins_list_invalid_type(self) -> None:
-        """plugins list --type with invalid type shows error."""
+        output_upper = result.stdout.upper()
+        assert "SOURCES:" in output_upper, "Missing SOURCES: header"
+        assert "SINKS:" not in output_upper, "Should not show SINKS: when filtering to source"
+        assert "TRANSFORMS:" not in output_upper, "Should not show TRANSFORMS: when filtering to source"
+
+        # csv should appear in sources section
+        assert "csv" in result.stdout.lower()
+
+    def test_plugins_list_type_filter_transform(self) -> None:
+        """plugins list --type transform shows only transforms."""
+        from elspeth.cli import app
+
+        result = runner.invoke(app, ["plugins", "list", "--type", "transform"])
+        assert result.exit_code == 0
+
+        output_upper = result.stdout.upper()
+        assert "TRANSFORMS:" in output_upper, "Missing TRANSFORMS: header"
+        assert "SOURCES:" not in output_upper, "Should not show SOURCES: when filtering to transform"
+        assert "SINKS:" not in output_upper, "Should not show SINKS: when filtering to transform"
+
+        # passthrough should appear in transforms section
+        assert "passthrough" in result.stdout.lower()
+
+    def test_plugins_list_type_filter_sink(self) -> None:
+        """plugins list --type sink shows only sinks."""
+        from elspeth.cli import app
+
+        result = runner.invoke(app, ["plugins", "list", "--type", "sink"])
+        assert result.exit_code == 0
+
+        output_upper = result.stdout.upper()
+        assert "SINKS:" in output_upper, "Missing SINKS: header"
+        assert "SOURCES:" not in output_upper, "Should not show SOURCES: when filtering to sink"
+        assert "TRANSFORMS:" not in output_upper, "Should not show TRANSFORMS: when filtering to sink"
+
+    def test_plugins_list_invalid_type_error_message(self) -> None:
+        """plugins list --type with invalid type shows specific error."""
         from elspeth.cli import app
 
         result = runner.invoke(app, ["plugins", "list", "--type", "invalid"])
-        assert result.exit_code != 0
+        assert result.exit_code == 1, f"Expected exit code 1 for invalid type, got {result.exit_code}"
+        # Should show the invalid type name
+        output = result.stdout.lower() + (result.stderr or "").lower()
+        assert "invalid" in output, f"Expected 'invalid' in error message, got: {output}"
+        # Should mention valid types
+        assert "valid types" in output or "source" in output, f"Expected mention of valid types, got: {output}"

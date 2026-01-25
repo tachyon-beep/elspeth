@@ -57,7 +57,7 @@ class TestExplainScreen:
         from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.tui.screens.explain_screen import ExplainScreen
 
-        # Create test data
+        # Create test data with source and sink
         db = LandscapeDB.in_memory()
         recorder = LandscapeRecorder(db)
         run = recorder.begin_run(config={}, canonical_version="v1")
@@ -65,6 +65,14 @@ class TestExplainScreen:
             run_id=run.run_id,
             plugin_name="csv_source",
             node_type="source",
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+        recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="csv_sink",
+            node_type="sink",
             plugin_version="1.0",
             config={},
             schema_config=DYNAMIC_SCHEMA,
@@ -77,21 +85,48 @@ class TestExplainScreen:
         assert lineage is not None
         assert lineage["run_id"] == run.run_id
 
+        # Verify source is correctly identified - not just run_id
+        assert lineage["source"]["name"] == "csv_source", f"Expected source 'csv_source', got '{lineage['source']['name']}'"
+        assert lineage["source"]["node_id"] is not None, "Source node_id should be set"
+
+        # Verify sinks list contains our sink
+        sink_names = [s["name"] for s in lineage["sinks"]]
+        assert "csv_sink" in sink_names, f"Expected 'csv_sink' in sinks, got {sink_names}"
+
     def test_tree_selection_updates_detail_panel(self) -> None:
-        """Selecting a node in tree updates detail panel."""
+        """Selecting a node in tree updates detail panel with node info."""
+        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
         from elspeth.tui.screens.explain_screen import ExplainScreen
 
-        screen = ExplainScreen()
+        # Create test data with a node we can select
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        run = recorder.begin_run(config={}, canonical_version="v1")
+        node = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="test_transform",
+            node_type="transform",
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+
+        screen = ExplainScreen(db=db, run_id=run.run_id)
 
         # Initially no selection
         assert screen.get_detail_panel_state() is None
 
-        # Simulate selecting a node
-        mock_node_id = "node-001"
-        screen.on_tree_select(mock_node_id)
+        # Select the node - use node.node_id (string), not node object
+        screen.on_tree_select(node.node_id)
 
-        # Selection should be recorded (actual state loading depends on DB)
-        assert screen._selected_node_id == mock_node_id
+        # Detail panel should now show node info via public API
+        detail_state = screen.get_detail_panel_state()
+        assert detail_state is not None, "Detail panel should have state after selection"
+        assert detail_state["node_id"] == node.node_id, f"Expected node_id '{node.node_id}', got '{detail_state.get('node_id')}'"
+        assert detail_state["plugin_name"] == "test_transform", (
+            f"Expected plugin_name 'test_transform', got '{detail_state.get('plugin_name')}'"
+        )
+        assert detail_state["node_type"] == "transform", f"Expected node_type 'transform', got '{detail_state.get('node_type')}'"
 
     def test_render_without_data(self) -> None:
         """Screen renders gracefully without data."""
@@ -224,3 +259,51 @@ class TestExplainScreenStateModel:
 
         assert result.startswith("loaded:")
         assert screen.state.state_type == ScreenStateType.LOADED
+
+    def test_loading_failed_state_on_db_error(self) -> None:
+        """Screen enters LoadingFailedState when database query fails.
+
+        This tests the error path that was previously unexercised.
+        """
+        from unittest.mock import patch
+
+        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.tui.screens.explain_screen import ExplainScreen, ScreenStateType
+
+        db = LandscapeDB.in_memory()
+
+        # Monkeypatch get_nodes to raise an exception
+        with patch.object(
+            LandscapeRecorder,
+            "get_nodes",
+            side_effect=RuntimeError("Simulated database error"),
+        ):
+            screen = ExplainScreen(db=db, run_id="test-run-id")
+
+        # Should enter LoadingFailedState, not crash
+        assert isinstance(screen.state, LoadingFailedState), f"Expected LoadingFailedState, got {type(screen.state).__name__}"
+        assert screen.state.run_id == "test-run-id"
+        assert screen.state.error is not None, "LoadingFailedState should have error message"
+        assert "database error" in screen.state.error.lower(), f"Expected error about database, got: {screen.state.error}"
+        assert screen.state.state_type == ScreenStateType.LOADING_FAILED
+
+    def test_loading_failed_state_preserves_db_for_retry(self) -> None:
+        """LoadingFailedState preserves db and run_id for potential retry."""
+        from unittest.mock import patch
+
+        from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+        from elspeth.tui.screens.explain_screen import ExplainScreen
+
+        db = LandscapeDB.in_memory()
+
+        with patch.object(
+            LandscapeRecorder,
+            "get_nodes",
+            side_effect=RuntimeError("Connection failed"),
+        ):
+            screen = ExplainScreen(db=db, run_id="retry-test-run")
+
+        assert isinstance(screen.state, LoadingFailedState)
+        # Should preserve db for retry
+        assert screen.state.db is db
+        assert screen.state.run_id == "retry-test-run"

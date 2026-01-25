@@ -100,7 +100,15 @@ output_sink: output
         result = runner.invoke(app, ["validate", "--settings", str(config_file)])
         assert result.exit_code != 0
         # Should show clear error from plugin instantiation
-        assert "error" in result.output.lower()
+        output_lower = result.output.lower()
+        assert "error" in output_lower, f"Expected 'error' in output, got: {result.output}"
+        # Error should mention the plugin type or config issue
+        # (missing path and on_validation_failure for csv source)
+        assert "path" in output_lower or "csv" in output_lower or "source" in output_lower, (
+            f"Expected error to mention plugin/config issue, got: {result.output}"
+        )
+        # Ensure it's NOT reporting as valid
+        assert "pipeline configuration valid" not in output_lower, "Should not report as valid when config has missing required fields"
 
     finally:
         config_file.unlink()
@@ -196,7 +204,10 @@ output_sink: output
         result = runner.invoke(app, ["validate", "--settings", str(config_file)])
         # Should pass validation - fork/join pattern with compatible schemas
         assert result.exit_code == 0
-        assert "valid" in result.output.lower()
+        # Use exact phrase to avoid matching "invalid"
+        assert "pipeline configuration valid" in result.output.lower(), (
+            f"Expected 'Pipeline configuration valid' in output, got: {result.output}"
+        )
 
     finally:
         config_file.unlink()
@@ -266,7 +277,10 @@ output_sink: output
         result = runner.invoke(app, ["validate", "--settings", str(config_file)])
         # Should pass validation - fork branches to separate sinks with compatible schemas
         assert result.exit_code == 0
-        assert "valid" in result.output.lower()
+        # Use exact phrase to avoid matching "invalid"
+        assert "pipeline configuration valid" in result.output.lower(), (
+            f"Expected 'Pipeline configuration valid' in output, got: {result.output}"
+        )
 
         # NOTE: This test validates that the configuration is accepted.
         # Verifying the actual DAG structure (edge existence) would require
@@ -404,7 +418,7 @@ output_sink: output
         result = runner.invoke(app, ["validate", "--settings", str(config_file)])
         # Should PASS - dynamic schemas skip validation
         assert result.exit_code == 0
-        assert "valid" in result.output.lower()
+        assert "pipeline configuration valid" in result.output.lower()
 
     finally:
         config_file.unlink()
@@ -447,7 +461,7 @@ output_sink: output
         result = runner.invoke(app, ["validate", "--settings", str(config_file)])
         # Should PASS - dynamic schemas in chain skip validation
         assert result.exit_code == 0
-        assert "valid" in result.output.lower()
+        assert "pipeline configuration valid" in result.output.lower()
 
     finally:
         config_file.unlink()

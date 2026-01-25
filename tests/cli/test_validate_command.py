@@ -98,7 +98,10 @@ class TestValidateCommand:
         """Valid config passes validation."""
         result = runner.invoke(app, ["validate", "-s", str(valid_config)])
         assert result.exit_code == 0
-        assert "valid" in result.stdout.lower()
+        # Use exact phrase to avoid matching "invalid"
+        assert "pipeline configuration valid" in result.stdout.lower(), (
+            f"Expected 'Pipeline configuration valid' in output, got: {result.stdout}"
+        )
 
     def test_validate_file_not_found(self) -> None:
         """Nonexistent file shows error."""
@@ -206,7 +209,22 @@ output_sink: results
         result = runner.invoke(app, ["validate", "-s", str(config_file)])
 
         assert result.exit_code == 0
-        # Should show graph info with node and edge counts
-        assert "graph" in result.stdout.lower()
-        assert "node" in result.stdout.lower()
-        assert "edge" in result.stdout.lower()
+
+        # Should show graph info with actual node and edge counts
+        import re
+
+        output_lower = result.stdout.lower()
+        assert "graph:" in output_lower, f"Expected 'Graph:' in output, got: {result.stdout}"
+
+        # Parse node and edge counts from output
+        # Format: "Graph: N nodes, M edges"
+        match = re.search(r"graph:\s*(\d+)\s+nodes?,\s*(\d+)\s+edges?", output_lower)
+        assert match is not None, f"Expected 'Graph: N nodes, M edges' format, got: {result.stdout}"
+
+        node_count = int(match.group(1))
+        edge_count = int(match.group(2))
+
+        # For this config: 1 source + 1 gate + 2 sinks = 4 nodes
+        # Edges: source→gate, gate→results, gate→flagged = 3 edges
+        assert node_count == 4, f"Expected 4 nodes (source+gate+2sinks), got {node_count}"
+        assert edge_count == 3, f"Expected 3 edges (source→gate→2sinks), got {edge_count}"
