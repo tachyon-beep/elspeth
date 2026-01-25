@@ -5,7 +5,8 @@ defaults:
 allow_hits:
 - key: tui/screens/explain_screen.py:R4:ExplainScreen:_load_pipeline_structure:line=165
   owner: architecture
-  reason: 'Trust boundary: loading pipeline structure that may fail for corrupt/incomplete runs'
+  reason: 'Trust boundary: loading pipeline structure that may fail for corrupt/incomplete
+    runs'
   safety: Errors logged with exc_info; returns LoadingFailedState with error message
   expires: null
 - key: tui/screens/explain_screen.py:R4:ExplainScreen:_load_node_state:line=265
@@ -98,41 +99,6 @@ allow_hits:
   reason: 'Trust boundary: displaying size_bytes that may be malformed'
   safety: Graceful degradation - conditionally displayed
   expires: null
-- key: engine/orchestrator.py:R4:Orchestrator:_cleanup_transforms:line=209
-  owner: architecture
-  reason: 'Best-effort cleanup: one plugin failure shouldn''t prevent others from cleanup'
-  safety: Logged with warning, other plugins still get close() called
-  expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_validate_route_destinations:line=246
-  owner: architecture
-  reason: Building lookup for gate names - only gates (not transforms) are in map
-  safety: None means 'not a gate at this sequence' - correctly skipped
-  expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_validate_route_destinations:line=253
-  owner: architecture
-  reason: Building lookup for gate names - only gates (not transforms) are in map
-  safety: None means 'not a gate at this sequence' - correctly skipped
-  expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_validate_route_destinations:line=269
-  owner: architecture
-  reason: Fallback for error message - use node_id if gate name not found
-  safety: Error message still produced with node_id as fallback
-  expires: null
-- key: engine/orchestrator.py:R2:Orchestrator:_validate_source_quarantine_destination:line=342
-  owner: architecture
-  reason: Optional protocol extension - _on_validation_failure only on sources with SourceDataConfig
-  safety: None default means source doesn't support quarantine routing - validation skipped
-  expires: null
-- key: engine/orchestrator.py:R1:Orchestrator:_execute_run:line=672
-  owner: architecture
-  reason: Optional schema config with explicit default - not all nodes define schemas
-  safety: 'Default value is well-defined: dynamic fields'
-  expires: null
-- key: engine/orchestrator.py:R2:Orchestrator:resume:line=1334
-  owner: architecture
-  reason: 'Optional protocol attribute: _schema_class only exists on sources with Pydantic schemas'
-  safety: None default means source uses dynamic schema - type restoration skipped, backward compatible
-  expires: null
 - key: engine/executors.py:R1:GateExecutor:execute_gate:line=407
   owner: architecture
   reason: Lookup with explicit None check - raises MissingEdgeError if not found
@@ -201,7 +167,8 @@ allow_hits:
 - key: engine/executors.py:R1:AggregationExecutor:restore_from_checkpoint:line=1203
   owner: architecture
   reason: 'Optional field: branch_name in TokenInfo is None by default (not forked)'
-  safety: None is safe - TokenInfo contract allows branch_name=None for non-forked tokens
+  safety: None is safe - TokenInfo contract allows branch_name=None for non-forked
+    tokens
   expires: null
 - key: engine/executors.py:R1:AggregationExecutor:restore_from_checkpoint:line=1212
   owner: architecture
@@ -270,8 +237,10 @@ allow_hits:
   expires: null
 - key: contracts/schema.py:R1:SchemaConfig:from_dict:line=199
   owner: architecture
-  reason: 'Round-trip serialization: to_dict() outputs mode=''dynamic'', from_dict() must accept it'
-  safety: Explicit check for serialized form before standard parsing - enables audit trail storage
+  reason: 'Round-trip serialization: to_dict() outputs mode=''dynamic'', from_dict()
+    must accept it'
+  safety: Explicit check for serialized form before standard parsing - enables audit
+    trail storage
   expires: null
 - key: contracts/data.py:R3:_type_name:line=199
   owner: architecture
@@ -311,7 +280,8 @@ allow_hits:
 - key: core/config.py:R1:_expand_env_vars:_expand_string:replacer:line=748
   owner: architecture
   reason: 'Trust boundary: environment variables are external input that may not exist'
-  safety: Explicit None check follows; falls back to default or keeps original for later error
+  safety: Explicit None check follows; falls back to default or keeps original for
+    later error
   expires: null
 - key: core/config.py:R1:_fingerprint_config_for_audit:line=1010
   owner: architecture
@@ -320,8 +290,10 @@ allow_hits:
   expires: null
 - key: plugins/sinks/database_sink.py:R1:DatabaseSink:__init__:line=82
   owner: architecture
-  reason: 'Trust boundary: ELSPETH_ALLOW_RAW_SECRETS is optional env var (not required in production)'
-  safety: Missing env var = empty string = False = production mode (fail-closed), consistent with config.py:992
+  reason: 'Trust boundary: ELSPETH_ALLOW_RAW_SECRETS is optional env var (not required
+    in production)'
+  safety: Missing env var = empty string = False = production mode (fail-closed),
+    consistent with config.py:992
   expires: null
 - key: plugins/clients/llm.py:R1:LLMResponse:total_tokens:line=45
   owner: architecture
@@ -340,7 +312,8 @@ allow_hits:
   expires: null
 - key: plugins/clients/http.py:R4:AuditedHTTPClient:post:line=165
   owner: architecture
-  reason: 'Trust boundary: external HTTP response may claim JSON but contain invalid JSON'
+  reason: 'Trust boundary: external HTTP response may claim JSON but contain invalid
+    JSON'
   safety: Falls back to text storage - body is still recorded for audit
   expires: null
 - key: plugins/llm/openrouter.py:R1:OpenRouterLLMTransform:_process_sequential:line=263
@@ -470,143 +443,77 @@ allow_hits:
   expires: null
 - key: plugins/discovery.py:R2:_discover_in_file:line=126
   owner: architecture
-  reason: 'Trust boundary: scanning arbitrary classes that may or may not have ''name'' attribute'
+  reason: 'Trust boundary: scanning arbitrary classes that may or may not have ''name''
+    attribute'
   safety: Classes without valid name are skipped with warning log - discovery continues
   expires: null
 - key: plugins/discovery.py:R2:get_plugin_description:line=233
   owner: architecture
-  reason: 'UI display fallback: generating human-readable description for classes without ''name'' attr'
+  reason: 'UI display fallback: generating human-readable description for classes
+    without ''name'' attr'
   safety: Falls back to class __name__ for display - no control flow or audit impact
   expires: null
 - key: cli.py:R1:_execute_pipeline:_format_run_completed:line=540
   owner: architecture
-  reason: 'Intentional Optional API: status_symbols lookup with default for unknown statuses'
+  reason: 'Intentional Optional API: status_symbols lookup with default for unknown
+    statuses'
   safety: Default '?' symbol for unrecognized statuses - output still produced
   expires: null
 - key: cli.py:R1:_execute_pipeline_with_instances:_format_run_completed:line=752
   owner: architecture
-  reason: 'Intentional Optional API: status_symbols lookup with default for unknown statuses'
+  reason: 'Intentional Optional API: status_symbols lookup with default for unknown
+    statuses'
   safety: Default '?' symbol for unrecognized statuses - output still produced
   expires: null
 - key: cli.py:R1:_execute_resume_with_instances:_format_run_completed:line=1177
   owner: architecture
-  reason: 'Intentional Optional API: status_symbols lookup with default for unknown statuses'
+  reason: 'Intentional Optional API: status_symbols lookup with default for unknown
+    statuses'
   safety: Default '?' symbol for unrecognized statuses - output still produced
-  expires: null
-- key: cli.py:R1:health:line=1456
-  owner: architecture
-  reason: 'Trust boundary: environment variable GIT_COMMIT_SHA is optional external input'
-  safety: Empty string default is safe - commit SHA is informational only
-  expires: null
-- key: cli.py:R4:health:line=1468
-  owner: architecture
-  reason: 'Trust boundary: git subprocess may fail for many reasons (not installed, not a repo, etc.)'
-  safety: Graceful fallback to 'unknown' - health check reports git as unavailable
-  expires: null
-- key: cli.py:R1:health:line=1484
-  owner: architecture
-  reason: 'Trust boundary: environment variable DATABASE_URL is optional external input'
-  safety: Empty string default triggers skip logic - database check only runs if configured
-  expires: null
-- key: cli.py:R4:health:line=1496
-  owner: architecture
-  reason: 'Trust boundary: database connection may fail for many reasons (network, auth, etc.)'
-  safety: Error recorded in checks dict with status='error' - health check reports DB as unhealthy
-  expires: null
-- key: cli.py:R4:health:line=1560
-  owner: architecture
-  reason: 'Trust boundary: plugin manager initialization may fail due to misconfiguration'
-  safety: Error recorded in checks dict with status='error' - health check reports plugins as unhealthy
   expires: null
 - key: core/events.py:R1:EventBus:emit:line=83
   owner: architecture
-  reason: 'Intentional Optional API: checking subscription presence, not hiding missing keys'
-  safety: Empty list default means 'no subscribers' - documented behavior, events are decoupled
+  reason: 'Intentional Optional API: checking subscription presence, not hiding missing
+    keys'
+  safety: Empty list default means 'no subscribers' - documented behavior, events
+    are decoupled
   expires: null
 - key: core/security/fingerprint.py:R1:get_fingerprint_key:line=77
   owner: architecture
-  reason: 'Trust boundary: ELSPETH_FINGERPRINT_KEY is optional external input (dev mode)'
-  safety: 'Explicit check: if not set, falls through to Key Vault check or raises ValueError'
+  reason: 'Trust boundary: ELSPETH_FINGERPRINT_KEY is optional external input (dev
+    mode)'
+  safety: 'Explicit check: if not set, falls through to Key Vault check or raises
+    ValueError'
   expires: null
 - key: core/security/fingerprint.py:R1:get_fingerprint_key:line=82
   owner: architecture
-  reason: 'Trust boundary: ELSPETH_KEYVAULT_URL is optional external input (production mode)'
+  reason: 'Trust boundary: ELSPETH_KEYVAULT_URL is optional external input (production
+    mode)'
   safety: 'Explicit check: if not set, raises ValueError with guidance on configuration'
   expires: null
 - key: core/security/fingerprint.py:R1:get_fingerprint_key:line=84
   owner: architecture
-  reason: 'Trust boundary: ELSPETH_KEYVAULT_SECRET_NAME is optional with sensible default'
+  reason: 'Trust boundary: ELSPETH_KEYVAULT_SECRET_NAME is optional with sensible
+    default'
   safety: Default 'elspeth-fingerprint-key' used when not set - documented behavior
   expires: null
 - key: core/landscape/database.py:R1:LandscapeDB:_validate_schema:line=135
   owner: architecture
   reason: 'Trust boundary: SQLAlchemy inspector FK dict structure from external library'
-  safety: Empty list default is safe - missing constrained_columns means no FK to validate
+  safety: Empty list default is safe - missing constrained_columns means no FK to
+    validate
   expires: null
 - key: contracts/results.py:R3:ArtifactDescriptor:for_database:line=239
   owner: architecture
-  reason: 'Security boundary: enforce SanitizedDatabaseUrl to prevent credentials in audit trail'
+  reason: 'Security boundary: enforce SanitizedDatabaseUrl to prevent credentials
+    in audit trail'
   safety: Raises TypeError with guidance to use SanitizedDatabaseUrl.from_raw_url()
   expires: null
 - key: contracts/results.py:R3:ArtifactDescriptor:for_webhook:line=270
   owner: architecture
-  reason: 'Security boundary: enforce SanitizedWebhookUrl to prevent tokens in audit trail'
+  reason: 'Security boundary: enforce SanitizedWebhookUrl to prevent tokens in audit
+    trail'
   safety: Raises TypeError with guidance to use SanitizedWebhookUrl.from_raw_url()
-  expires: null
-- key: core/dag.py:R2:ExecutionGraph:from_plugin_instances:line=350
-  owner: architecture
-  reason: 'Trust boundary: plugin instances may not have config attribute (legacy plugins)'
-  safety: Empty dict default is safe - used for deterministic node ID generation
-  expires: null
-- key: core/dag.py:R2:ExecutionGraph:from_plugin_instances:line=357
-  owner: architecture
-  reason: 'Trust boundary: plugin instances may not have output_schema attribute (dynamic schemas)'
-  safety: None default is safe - missing schema means dynamic schema
-  expires: null
-- key: core/dag.py:R2:ExecutionGraph:from_plugin_instances:line=363
-  owner: architecture
-  reason: 'Trust boundary: plugin instances may not have config attribute (legacy plugins)'
-  safety: Empty dict default is safe - used for deterministic node ID generation
-  expires: null
-- key: core/dag.py:R2:ExecutionGraph:from_plugin_instances:line=371
-  owner: architecture
-  reason: 'Trust boundary: plugin instances may not have input_schema attribute (dynamic schemas)'
-  safety: None default is safe - missing schema means dynamic schema
-  expires: null
-- key: core/dag.py:R2:ExecutionGraph:from_plugin_instances:line=382
-  owner: architecture
-  reason: 'Trust boundary: plugin instances may not have config attribute (legacy plugins)'
-  safety: Empty dict default is safe - used for deterministic node ID generation
-  expires: null
-- key: core/dag.py:R2:ExecutionGraph:from_plugin_instances:line=392
-  owner: architecture
-  reason: 'Trust boundary: plugin instances may not have input_schema attribute (dynamic schemas)'
-  safety: None default is safe - missing schema means dynamic schema
-  expires: null
-- key: core/dag.py:R2:ExecutionGraph:from_plugin_instances:line=393
-  owner: architecture
-  reason: 'Trust boundary: plugin instances may not have output_schema attribute (dynamic schemas)'
-  safety: None default is safe - missing schema means dynamic schema
-  expires: null
-- key: core/dag.py:R2:ExecutionGraph:from_plugin_instances:line=417
-  owner: architecture
-  reason: 'Trust boundary: plugin instances may not have input_schema attribute (dynamic schemas)'
-  safety: None default is safe - missing schema means dynamic schema
-  expires: null
-- key: core/dag.py:R2:ExecutionGraph:from_plugin_instances:line=418
-  owner: architecture
-  reason: 'Trust boundary: plugin instances may not have output_schema attribute (dynamic schemas)'
-  safety: None default is safe - missing schema means dynamic schema
-  expires: null
-- key: core/dag.py:R1:ExecutionGraph:_get_missing_required_fields:line=821
-  owner: architecture
-  reason: 'Trust boundary: Pydantic model_config may not have ''extra'' key (defaults to ''forbid'')'
-  safety: Checking for dynamic schema marker - missing 'extra' key means not dynamic
-  expires: null
-- key: core/dag.py:R1:ExecutionGraph:_get_missing_required_fields:line=822
-  owner: architecture
-  reason: 'Trust boundary: Pydantic model_config may not have ''extra'' key (defaults to ''forbid'')'
-  safety: Checking for dynamic schema marker - missing 'extra' key means not dynamic
   expires: null
 - key: plugins/transforms/azure/content_safety.py:R1:AzureContentSafety:_check_thresholds:line=586
   owner: architecture
@@ -630,21 +537,152 @@ allow_hits:
   expires: null
 - key: plugins/validation.py:R4:PluginConfigValidator:validate_schema_config:line=229
   owner: architecture
-  reason: 'Trust boundary: SchemaConfig.from_dict may raise ValueError or other exceptions from field parsing'
-  safety: Converts to structured ValidationError - unexpected errors still reported to caller
+  reason: 'Trust boundary: SchemaConfig.from_dict may raise ValueError or other exceptions
+    from field parsing'
+  safety: Converts to structured ValidationError - unexpected errors still reported
+    to caller
   expires: null
 - key: plugins/validation.py:R1:PluginConfigValidator:_extract_errors:line=349
   owner: architecture
-  reason: 'Trust boundary: Pydantic error dict structure from external library - ''input'' field is optional'
-  safety: Graceful default to '<unknown>' - error message still produced with field and message
+  reason: 'Trust boundary: Pydantic error dict structure from external library - ''input''
+    field is optional'
+  safety: Graceful default to '<unknown>' - error message still produced with field
+    and message
   expires: null
 - key: core/dag.py:R1:ExecutionGraph:_get_missing_required_fields:line=840
   owner: architecture
-  reason: 'Trust boundary: Pydantic model_config may not have ''extra'' key (defaults to ''forbid'')'
+  reason: 'Trust boundary: Pydantic model_config may not have ''extra'' key (defaults
+    to ''forbid'')'
   safety: Checking for dynamic schema marker - missing 'extra' key means not dynamic
   expires: null
 - key: core/dag.py:R1:ExecutionGraph:_get_missing_required_fields:line=841
   owner: architecture
-  reason: 'Trust boundary: Pydantic model_config may not have ''extra'' key (defaults to ''forbid'')'
+  reason: 'Trust boundary: Pydantic model_config may not have ''extra'' key (defaults
+    to ''forbid'')'
   safety: Checking for dynamic schema marker - missing 'extra' key means not dynamic
+  expires: null
+- key: cli.py:R1:health:line=1517
+  owner: architecture
+  reason: 'Trust boundary: environment variable GIT_COMMIT_SHA is optional external
+    input'
+  safety: Empty string default is safe - commit SHA is informational only
+  expires: null
+- key: cli.py:R4:health:line=1529
+  owner: architecture
+  reason: 'Trust boundary: git subprocess may fail for many reasons (not installed,
+    not a repo, etc.)'
+  safety: Graceful fallback to 'unknown' - health check reports git as unavailable
+  expires: null
+- key: cli.py:R1:health:line=1545
+  owner: architecture
+  reason: 'Trust boundary: environment variable DATABASE_URL is optional external
+    input'
+  safety: Empty string default triggers skip logic - database check only runs if configured
+  expires: null
+- key: cli.py:R4:health:line=1557
+  owner: architecture
+  reason: 'Trust boundary: database connection may fail for many reasons (network,
+    auth, etc.)'
+  safety: Error recorded in checks dict with status='error' - health check reports
+    DB as unhealthy
+  expires: null
+- key: cli.py:R4:health:line=1621
+  owner: architecture
+  reason: 'Trust boundary: plugin manager initialization may fail due to misconfiguration'
+  safety: Error recorded in checks dict with status='error' - health check reports
+    plugins as unhealthy
+  expires: null
+- key: engine/orchestrator.py:R4:Orchestrator:_cleanup_transforms:line=214
+  owner: architecture
+  reason: 'Best-effort cleanup: one plugin failure shouldn''t prevent others from
+    cleanup'
+  safety: Logged with warning, other plugins still get close() called
+  expires: null
+- key: engine/orchestrator.py:R1:Orchestrator:_validate_route_destinations:line=251
+  owner: architecture
+  reason: Building lookup for gate names - only gates (not transforms) are in map
+  safety: None means 'not a gate at this sequence' - correctly skipped
+  expires: null
+- key: engine/orchestrator.py:R1:Orchestrator:_validate_route_destinations:line=258
+  owner: architecture
+  reason: Building lookup for gate names - only gates (not transforms) are in map
+  safety: None means 'not a gate at this sequence' - correctly skipped
+  expires: null
+- key: engine/orchestrator.py:R1:Orchestrator:_validate_route_destinations:line=274
+  owner: architecture
+  reason: Fallback for error message - use node_id if gate name not found
+  safety: Error message still produced with node_id as fallback
+  expires: null
+- key: engine/orchestrator.py:R2:Orchestrator:_validate_source_quarantine_destination:line=347
+  owner: architecture
+  reason: Optional protocol extension - _on_validation_failure only on sources with
+    SourceDataConfig
+  safety: None default means source doesn't support quarantine routing - validation
+    skipped
+  expires: null
+- key: engine/orchestrator.py:R1:Orchestrator:_execute_run:line=680
+  owner: architecture
+  reason: Optional schema config with explicit default - not all nodes define schemas
+  safety: 'Default value is well-defined: dynamic fields'
+  expires: null
+- key: engine/orchestrator.py:R2:Orchestrator:resume:line=1345
+  owner: architecture
+  reason: 'Optional protocol attribute: _schema_class only exists on sources with
+    Pydantic schemas'
+  safety: None default means source uses dynamic schema - type restoration skipped,
+    backward compatible
+  expires: null
+- key: core/dag.py:R2:ExecutionGraph:from_plugin_instances:line=365
+  owner: architecture
+  reason: 'Trust boundary: plugin instances may not have config attribute (legacy
+    plugins)'
+  safety: Empty dict default is safe - used for deterministic node ID generation
+  expires: null
+- key: core/dag.py:R2:ExecutionGraph:from_plugin_instances:line=372
+  owner: architecture
+  reason: 'Trust boundary: plugin instances may not have output_schema attribute (dynamic
+    schemas)'
+  safety: None default is safe - missing schema means dynamic schema
+  expires: null
+- key: core/dag.py:R2:ExecutionGraph:from_plugin_instances:line=378
+  owner: architecture
+  reason: 'Trust boundary: plugin instances may not have config attribute (legacy
+    plugins)'
+  safety: Empty dict default is safe - used for deterministic node ID generation
+  expires: null
+- key: core/dag.py:R2:ExecutionGraph:from_plugin_instances:line=386
+  owner: architecture
+  reason: 'Trust boundary: plugin instances may not have input_schema attribute (dynamic
+    schemas)'
+  safety: None default is safe - missing schema means dynamic schema
+  expires: null
+- key: core/dag.py:R2:ExecutionGraph:from_plugin_instances:line=397
+  owner: architecture
+  reason: 'Trust boundary: plugin instances may not have config attribute (legacy
+    plugins)'
+  safety: Empty dict default is safe - used for deterministic node ID generation
+  expires: null
+- key: core/dag.py:R2:ExecutionGraph:from_plugin_instances:line=407
+  owner: architecture
+  reason: 'Trust boundary: plugin instances may not have input_schema attribute (dynamic
+    schemas)'
+  safety: None default is safe - missing schema means dynamic schema
+  expires: null
+- key: core/dag.py:R2:ExecutionGraph:from_plugin_instances:line=408
+  owner: architecture
+  reason: 'Trust boundary: plugin instances may not have output_schema attribute (dynamic
+    schemas)'
+  safety: None default is safe - missing schema means dynamic schema
+  expires: null
+- key: core/dag.py:R2:ExecutionGraph:from_plugin_instances:line=432
+  owner: architecture
+  reason: 'Trust boundary: plugin instances may not have input_schema attribute (dynamic
+    schemas)'
+  safety: None default is safe - missing schema means dynamic schema
+  expires: null
+- key: core/dag.py:R2:ExecutionGraph:from_plugin_instances:line=433
+  owner: architecture
+  reason: 'Trust boundary: plugin instances may not have output_schema attribute (dynamic
+    schemas)'
+  safety: None default is safe - missing schema means dynamic schema
   expires: null
