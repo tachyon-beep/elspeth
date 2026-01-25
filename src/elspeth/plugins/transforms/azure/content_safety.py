@@ -21,6 +21,7 @@ import httpx
 from pydantic import BaseModel, Field
 
 from elspeth.contracts import Determinism
+from elspeth.contracts.schema import SchemaConfig
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.config_base import TransformDataConfig
 from elspeth.plugins.context import PluginContext
@@ -158,7 +159,18 @@ class AzureContentSafety(BaseTransform):
             allow_coercion=False,
         )
         self.input_schema = schema
-        self.output_schema = schema
+
+        # In batch mode (pool_size > 1), error fields are added to output rows.
+        # Use dynamic output schema to reflect this, as strict schemas would fail.
+        if self._pool_size > 1:
+            self.output_schema = create_schema_from_config(
+                SchemaConfig.from_dict({"fields": "dynamic"}),
+                "AzureContentSafetyOutputSchema",
+                allow_coercion=False,
+            )
+        else:
+            # Single-row mode: no error fields added, output matches input
+            self.output_schema = schema
 
         # Underlying HTTP client (stateless, can be shared)
         self._underlying_http_client: httpx.Client | None = None

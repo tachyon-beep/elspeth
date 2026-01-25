@@ -174,3 +174,64 @@ However, the issue is a **legitimate design gap**: the `has_header=False` option
 4. Consideration of whether to add similar support to `CSVSource` for consistency
 
 This is a genuine feature gap, not OBE or LOST.
+
+---
+
+## RESOLUTION: 2026-01-26
+
+**Status:** FIXED
+
+**Fixed by:** Claude Code (fix/rc1-bug-burndown-session-5)
+
+**Implementation:**
+
+Added schema field name mapping when `has_header=false` with explicit schema.
+
+### Code Evidence
+
+**Before (line 367-375 - no schema mapping):**
+```python
+header_arg = 0 if has_header else None
+df = pd.read_csv(
+    io.StringIO(text_data),
+    delimiter=delimiter,
+    header=header_arg,
+    dtype=str,
+    keep_default_na=False,
+    on_bad_lines="warn",
+)
+```
+
+**After (lines 367-382 - schema field names passed to pandas):**
+```python
+header_arg = 0 if has_header else None
+
+# When headerless CSV with explicit schema, use schema field names
+names_arg = None
+if not has_header and not self._schema_config.is_dynamic and self._schema_config.fields:
+    names_arg = [field_def.name for field_def in self._schema_config.fields]
+
+df = pd.read_csv(
+    io.StringIO(text_data),
+    delimiter=delimiter,
+    header=header_arg,
+    names=names_arg,  # Map columns to schema field names
+    dtype=str,
+    keep_default_na=False,
+    on_bad_lines="warn",
+)
+```
+
+### Impact
+
+**Fixed:**
+- ✅ Headerless CSV with explicit schema now uses schema field names instead of numeric (0, 1, 2...)
+- ✅ Rows pass schema validation with correct field names
+- ✅ Dynamic schema still infers from row content (backward compatible)
+
+**Example:**
+- **Before:** `{"0": "123", "1": "Alice"}` → validation fails (schema expects `id`, `name`)
+- **After:** `{"id": "123", "name": "Alice"}` → validation passes ✓
+
+**Files changed:**
+- `src/elspeth/plugins/azure/blob_source.py`

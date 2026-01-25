@@ -331,12 +331,27 @@ class AzureBlobSink(BaseSink):
             # Unreachable due to Pydantic Literal validation, but satisfies static analysis
             raise AssertionError(f"Unsupported format: {self._format}")
 
+    def _get_fieldnames_from_schema_or_row(self, row: dict[str, Any]) -> list[str]:
+        """Get fieldnames from schema or row keys.
+
+        When schema is explicit, returns field names from schema definition.
+        This ensures optional fields are present in the header.
+
+        When schema is dynamic, falls back to inferring from row keys.
+        """
+        if not self._schema_config.is_dynamic and self._schema_config.fields:
+            # Explicit schema: use field names from schema definition
+            return [field_def.name for field_def in self._schema_config.fields]
+        else:
+            # Dynamic schema: infer from row keys
+            return list(row.keys())
+
     def _serialize_csv(self, rows: list[dict[str, Any]]) -> bytes:
         """Serialize rows to CSV bytes."""
         output = io.StringIO()
 
-        # Determine fieldnames from first row
-        fieldnames = list(rows[0].keys())
+        # Determine fieldnames from schema (or first row if dynamic)
+        fieldnames = self._get_fieldnames_from_schema_or_row(rows[0])
 
         writer = csv.DictWriter(
             output,
