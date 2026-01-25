@@ -19,6 +19,7 @@ from elspeth.core.checkpoint import CheckpointManager, RecoveryManager
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.schema import (
+    edges_table,
     nodes_table,
     rows_table,
     runs_table,
@@ -79,6 +80,11 @@ class TestOrchestratorResumeRowProcessing:
         run_id = "test-resume-rows"
         now = datetime.now(UTC)
 
+        # Create source schema for resume ({"id": int, "value": str})
+        source_schema_json = json.dumps(
+            {"properties": {"id": {"type": "integer"}, "value": {"type": "string"}}, "required": ["id", "value"]}
+        )
+
         with landscape_db.engine.connect() as conn:
             # Create run (failed status)
             conn.execute(
@@ -89,6 +95,7 @@ class TestOrchestratorResumeRowProcessing:
                     settings_json="{}",
                     canonical_version="sha256-rfc8785-v1",
                     status="failed",
+                    source_schema_json=source_schema_json,
                 )
             )
 
@@ -137,6 +144,30 @@ class TestOrchestratorResumeRowProcessing:
                 )
             )
 
+            # Create edges (required for resume FK integrity)
+            conn.execute(
+                edges_table.insert().values(
+                    edge_id="e1",
+                    run_id=run_id,
+                    from_node_id="source-node",
+                    to_node_id="transform-node",
+                    label="continue",
+                    default_mode="move",
+                    created_at=now,
+                )
+            )
+            conn.execute(
+                edges_table.insert().values(
+                    edge_id="e2",
+                    run_id=run_id,
+                    from_node_id="transform-node",
+                    to_node_id="sink-node",
+                    label="continue",
+                    default_mode="move",
+                    created_at=now,
+                )
+            )
+
             # Create 5 rows with payload data
             all_row_data = []
             for i in range(5):
@@ -169,18 +200,28 @@ class TestOrchestratorResumeRowProcessing:
 
             conn.commit()
 
+        # Build graph matching the nodes created above
+        graph = ExecutionGraph()
+        graph.add_node("source-node", node_type="source", plugin_name="null", config={})
+        graph.add_node("transform-node", node_type="transform", plugin_name="passthrough", config={})
+        graph.add_node("sink-node", node_type="sink", plugin_name="csv", config={})
+        graph.add_edge("source-node", "transform-node", label="continue", mode=RoutingMode.MOVE)
+        graph.add_edge("transform-node", "sink-node", label="continue", mode=RoutingMode.MOVE)
+
         # Create checkpoint at row 2 (rows 3-4 are unprocessed)
         checkpoint_manager.create_checkpoint(
             run_id=run_id,
             token_id="tok-002",
             node_id="transform-node",
             sequence_number=2,
+            graph=graph,
         )
 
         return {
             "run_id": run_id,
             "all_row_data": all_row_data,
             "unprocessed_indices": [3, 4],
+            "graph": graph,
         }
 
     def _create_test_config(self, tmp_path: Path) -> tuple[PipelineConfig, Path]:
@@ -279,9 +320,10 @@ class TestOrchestratorResumeRowProcessing:
         Then: rows_processed == 2 (rows 3 and 4)
         """
         run_id = failed_run_with_payloads["run_id"]
+        fixture_graph = failed_run_with_payloads["graph"]
 
         # Get resume point
-        resume_point = recovery_manager.get_resume_point(run_id)
+        resume_point = recovery_manager.get_resume_point(run_id, graph=fixture_graph)
         assert resume_point is not None
 
         # Create config and graph
@@ -316,9 +358,10 @@ class TestOrchestratorResumeRowProcessing:
         Then: Output CSV contains 2 rows
         """
         run_id = failed_run_with_payloads["run_id"]
+        fixture_graph = failed_run_with_payloads["graph"]
 
         # Get resume point
-        resume_point = recovery_manager.get_resume_point(run_id)
+        resume_point = recovery_manager.get_resume_point(run_id, graph=fixture_graph)
         assert resume_point is not None
 
         # Create config and graph
@@ -356,9 +399,10 @@ class TestOrchestratorResumeRowProcessing:
         Row data comes from payload store during resume, so it's required.
         """
         run_id = failed_run_with_payloads["run_id"]
+        fixture_graph = failed_run_with_payloads["graph"]
 
         # Get resume point
-        resume_point = recovery_manager.get_resume_point(run_id)
+        resume_point = recovery_manager.get_resume_point(run_id, graph=fixture_graph)
         assert resume_point is not None
 
         # Create config and graph
@@ -379,9 +423,10 @@ class TestOrchestratorResumeRowProcessing:
     ) -> None:
         """resume() returns RunResult with correct status and counts."""
         run_id = failed_run_with_payloads["run_id"]
+        fixture_graph = failed_run_with_payloads["graph"]
 
         # Get resume point
-        resume_point = recovery_manager.get_resume_point(run_id)
+        resume_point = recovery_manager.get_resume_point(run_id, graph=fixture_graph)
         assert resume_point is not None
 
         # Create config and graph

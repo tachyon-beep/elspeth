@@ -182,6 +182,7 @@ class TestSchemaConfig:
         )
         assert config.is_dynamic is False
         assert config.mode == "strict"
+        assert config.fields is not None
         assert len(config.fields) == 2
         assert config.fields[0].name == "id"
         assert config.fields[0].field_type == "int"
@@ -202,6 +203,7 @@ class TestSchemaConfig:
                 "fields": [{"score": "float?"}],
             }
         )
+        assert config.fields is not None
         assert config.fields[0].name == "score"
         assert config.fields[0].field_type == "float"
         assert config.fields[0].required is False
@@ -219,6 +221,7 @@ class TestSchemaConfig:
                 "fields": ["id: int", {"name": "str"}, "score: float?"],
             }
         )
+        assert config.fields is not None
         assert len(config.fields) == 3
         assert config.fields[0].name == "id"
         assert config.fields[1].name == "name"

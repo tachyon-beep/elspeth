@@ -369,7 +369,7 @@ class ExecutionGraph:
             node_type="source",
             plugin_name=source.name,
             config=source_config,
-            output_schema=getattr(source, "output_schema", None),
+            output_schema=source.output_schema,  # SourceProtocol requires this
         )
 
         # Add sinks
@@ -383,7 +383,7 @@ class ExecutionGraph:
                 node_type="sink",
                 plugin_name=sink.name,
                 config=sink_config,
-                input_schema=getattr(sink, "input_schema", None),
+                input_schema=sink.input_schema,  # SinkProtocol requires this
             )
 
         graph._sink_id_map = dict(sink_ids)
@@ -404,8 +404,8 @@ class ExecutionGraph:
                 node_type="transform",
                 plugin_name=transform.name,
                 config=transform_config,
-                input_schema=getattr(transform, "input_schema", None),
-                output_schema=getattr(transform, "output_schema", None),
+                input_schema=transform.input_schema,  # TransformProtocol requires this
+                output_schema=transform.output_schema,  # TransformProtocol requires this
             )
 
             graph.add_edge(prev_node_id, tid, label="continue", mode=RoutingMode.MOVE)
@@ -429,8 +429,8 @@ class ExecutionGraph:
                 node_type="aggregation",
                 plugin_name=agg_config.plugin,
                 config=agg_node_config,
-                input_schema=getattr(transform, "input_schema", None),
-                output_schema=getattr(transform, "output_schema", None),
+                input_schema=transform.input_schema,  # TransformProtocol requires this (aggregations use transforms)
+                output_schema=transform.output_schema,  # TransformProtocol requires this (aggregations use transforms)
             )
 
             graph.add_edge(prev_node_id, aid, label="continue", mode=RoutingMode.MOVE)

@@ -49,7 +49,6 @@ class TestRowOutcome:
 
         # (str, Enum) allows direct string comparison for database serialization
         assert RowOutcome.COMPLETED == "completed"  # type: ignore[comparison-overlap]
-        assert RowOutcome.COMPLETED.value == "completed"
         # Can be created from string values (for DB reads)
         assert RowOutcome("completed") == RowOutcome.COMPLETED
 

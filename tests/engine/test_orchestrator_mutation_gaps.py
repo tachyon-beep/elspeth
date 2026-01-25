@@ -478,8 +478,10 @@ class TestCheckpointSequencing:
         the counter without attempting DB insert (avoids FK constraint on run_id).
         The increment at line 152 happens unconditionally when checkpointing is enabled.
         """
+        from elspeth.contracts import RoutingMode
         from elspeth.core.checkpoint import CheckpointManager
         from elspeth.core.config import CheckpointSettings
+        from elspeth.core.dag import ExecutionGraph
         from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import Orchestrator
 
@@ -493,6 +495,15 @@ class TestCheckpointSequencing:
             checkpoint_manager=checkpoint_manager,
             checkpoint_settings=checkpoint_settings,
         )
+
+        # Build graph matching the nodes used in _maybe_checkpoint calls
+        graph = ExecutionGraph()
+        graph.add_node("source-1", node_type="source", plugin_name="null", config={})
+        graph.add_node("sink-1", node_type="sink", plugin_name="csv", config={})
+        graph.add_edge("source-1", "sink-1", label="continue", mode=RoutingMode.MOVE)
+
+        # Set the graph on the orchestrator (normally done in execute())
+        orchestrator._current_graph = graph
 
         # Initial sequence number
         assert orchestrator._sequence_number == 0

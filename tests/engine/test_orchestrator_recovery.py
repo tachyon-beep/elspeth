@@ -1,5 +1,6 @@
 """Tests for orchestrator crash recovery."""
 
+import json
 from pathlib import Path
 from typing import Any
 from unittest.mock import Mock
@@ -7,7 +8,7 @@ from unittest.mock import Mock
 import pytest
 
 from elspeth.cli_helpers import instantiate_plugins_from_config
-from elspeth.contracts import Determinism, NodeType
+from elspeth.contracts import Determinism, NodeType, PluginSchema
 from elspeth.contracts.enums import BatchStatus
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.core.checkpoint import CheckpointManager, RecoveryManager
@@ -16,6 +17,13 @@ from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.core.payload_store import FilesystemPayloadStore
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
+
+
+class RowSchema(PluginSchema):
+    """Schema for row data used in recovery tests."""
+
+    id: int
+    value: int
 
 
 class TestOrchestratorResume:
@@ -63,8 +71,9 @@ class TestOrchestratorResume:
         """Create a failed run with an incomplete batch."""
         recorder = LandscapeRecorder(landscape_db)
 
-        # Create run
-        run = recorder.begin_run(config={}, canonical_version="v1")
+        # Create run with source schema for resume type restoration
+        source_schema_json = json.dumps(RowSchema.model_json_schema())
+        run = recorder.begin_run(config={}, canonical_version="v1", source_schema_json=source_schema_json)
 
         # Register nodes
         recorder.register_node(

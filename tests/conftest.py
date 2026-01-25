@@ -412,8 +412,8 @@ def real_landscape_db(tmp_path):
     from elspeth.core.landscape.database import LandscapeDB
 
     # Use in-memory database for fast tests
+    # Tables are created automatically during initialization
     db = LandscapeDB.in_memory()
-    db.create_tables()
     return db
 
 

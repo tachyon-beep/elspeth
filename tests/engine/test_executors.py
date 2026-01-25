@@ -3159,7 +3159,7 @@ class TestAggregationExecutorCheckpoint:
 
         # Don't buffer anything
         state = executor.get_checkpoint_state()
-        assert state == {}  # Empty buffers not included
+        assert state == {"_version": "1.0"}  # Only version field when no buffers
 
     def test_restore_from_checkpoint_reconstructs_full_token_info(self) -> None:
         """Restore reconstructs complete TokenInfo objects from checkpoint data."""
@@ -3196,6 +3196,7 @@ class TestAggregationExecutorCheckpoint:
 
         # Checkpoint state with new format (full TokenInfo data)
         checkpoint_state = {
+            "_version": "1.0",
             agg_node.node_id: {
                 "tokens": [
                     {
@@ -3212,7 +3213,7 @@ class TestAggregationExecutorCheckpoint:
                     },
                 ],
                 "batch_id": "batch-123",
-            }
+            },
         }
 
         # Restore from checkpoint
@@ -3277,6 +3278,7 @@ class TestAggregationExecutorCheckpoint:
 
         # Simulate checkpoint state with 4 rows buffered (new format)
         checkpoint_state = {
+            "_version": "1.0",
             agg_node.node_id: {
                 "tokens": [
                     {
@@ -3288,7 +3290,7 @@ class TestAggregationExecutorCheckpoint:
                     for i in range(4)
                 ],
                 "batch_id": "batch-123",
-            }
+            },
         }
 
         executor.restore_from_checkpoint(checkpoint_state)
@@ -3422,6 +3424,7 @@ class TestAggregationExecutorCheckpoint:
 
         # Simulate checkpoint with 2 buffered tokens (ready to flush)
         checkpoint_state = {
+            "_version": "1.0",
             agg_node.node_id: {
                 "tokens": [
                     {
@@ -3438,7 +3441,7 @@ class TestAggregationExecutorCheckpoint:
                     },
                 ],
                 "batch_id": batch.batch_id,
-            }
+            },
         }
 
         # Create rows and tokens in landscape for the checkpoint
@@ -3914,8 +3917,8 @@ class TestAggregationExecutorCheckpoint:
             aggregation_settings={agg_node.node_id: settings},
         )
 
-        # Restore from empty checkpoint
-        executor.restore_from_checkpoint({})
+        # Restore from empty checkpoint (only version, no aggregation buffers)
+        executor.restore_from_checkpoint({"_version": "1.0"})
 
         # VERIFY: No errors, buffers remain empty (but initialized for the node)
         assert agg_node.node_id in executor._buffers
@@ -3960,11 +3963,12 @@ class TestAggregationExecutorCheckpoint:
 
         # Old checkpoint format (missing 'tokens' key)
         invalid_checkpoint = {
+            "_version": "1.0",
             agg_node.node_id: {
                 "rows": [{"value": 10}],  # Old format
                 "token_ids": ["token-1"],  # Old format
                 "batch_id": None,
-            }
+            },
         }
 
         # VERIFY: Crashes with clear ValueError
@@ -4008,10 +4012,11 @@ class TestAggregationExecutorCheckpoint:
 
         # Invalid checkpoint (tokens is not a list)
         invalid_checkpoint = {
+            "_version": "1.0",
             agg_node.node_id: {
                 "tokens": "not-a-list",  # Wrong type
                 "batch_id": None,
-            }
+            },
         }
 
         # VERIFY: Crashes with clear ValueError
@@ -4055,6 +4060,7 @@ class TestAggregationExecutorCheckpoint:
 
         # Invalid checkpoint (token missing row_data field)
         invalid_checkpoint = {
+            "_version": "1.0",
             agg_node.node_id: {
                 "tokens": [
                     {
@@ -4065,7 +4071,7 @@ class TestAggregationExecutorCheckpoint:
                     }
                 ],
                 "batch_id": None,
-            }
+            },
         }
 
         # VERIFY: Crashes with clear ValueError mentioning missing field

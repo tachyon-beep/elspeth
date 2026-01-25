@@ -925,12 +925,22 @@ class TestOrchestratorAcceptsGraph:
         mock_source.name = "csv"
         mock_source.determinism = Determinism.IO_READ
         mock_source.plugin_version = "1.0.0"
+        schema_mock = MagicMock()
+
+        schema_mock.model_json_schema.return_value = {"type": "object"}
+
+        mock_source.output_schema = schema_mock
         mock_source.load.return_value = iter([])  # Empty source
 
         mock_sink = MagicMock()
         mock_sink.name = "csv"
         mock_sink.determinism = Determinism.IO_WRITE
         mock_sink.plugin_version = "1.0.0"
+        schema_mock = MagicMock()
+
+        schema_mock.model_json_schema.return_value = {"type": "object"}
+
+        mock_sink.input_schema = schema_mock
 
         pipeline_config = PipelineConfig(
             source=mock_source,
@@ -1072,6 +1082,11 @@ class TestOrchestratorOutputSinkRouting:
         mock_source.name = "csv"
         mock_source.determinism = Determinism.IO_READ
         mock_source.plugin_version = "1.0.0"
+        schema_mock = MagicMock()
+
+        schema_mock.model_json_schema.return_value = {"type": "object"}
+
+        mock_source.output_schema = schema_mock
         mock_source.load.return_value = iter([SourceRow.valid({"id": 1, "value": "test"})])
 
         # Mock sinks - track what gets written
@@ -1125,6 +1140,11 @@ class TestOrchestratorGateRouting:
         mock_source.name = "csv"
         mock_source.determinism = Determinism.IO_READ
         mock_source.plugin_version = "1.0.0"
+        schema_mock = MagicMock()
+
+        schema_mock.model_json_schema.return_value = {"type": "object"}
+
+        mock_source.output_schema = schema_mock
         mock_source.load.return_value = iter([SourceRow.valid({"id": 1, "score": 0.2})])
 
         # Config-driven gate: always routes to "flagged" sink
@@ -1206,6 +1226,11 @@ class TestLifecycleHooks:
         mock_source.name = "csv"
         mock_source.determinism = Determinism.IO_READ
         mock_source.plugin_version = "1.0.0"
+        schema_mock = MagicMock()
+
+        schema_mock.model_json_schema.return_value = {"type": "object"}
+
+        mock_source.output_schema = schema_mock
         mock_source.load.return_value = iter([SourceRow.valid({"id": 1})])
 
         transform = TrackedTransform()
@@ -1213,6 +1238,11 @@ class TestLifecycleHooks:
         mock_sink.name = "csv"
         mock_sink.determinism = Determinism.IO_WRITE
         mock_sink.plugin_version = "1.0.0"
+        schema_mock = MagicMock()
+
+        schema_mock.model_json_schema.return_value = {"type": "object"}
+
+        mock_sink.input_schema = schema_mock
         mock_sink.write.return_value = ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="abc123")
 
         config = PipelineConfig(
@@ -1280,6 +1310,11 @@ class TestLifecycleHooks:
         mock_source.name = "csv"
         mock_source.determinism = Determinism.IO_READ
         mock_source.plugin_version = "1.0.0"
+        schema_mock = MagicMock()
+
+        schema_mock.model_json_schema.return_value = {"type": "object"}
+
+        mock_source.output_schema = schema_mock
         mock_source.load.return_value = iter([SourceRow.valid({"id": 1}), SourceRow.valid({"id": 2})])
 
         transform = TrackedTransform()
@@ -1287,6 +1322,11 @@ class TestLifecycleHooks:
         mock_sink.name = "csv"
         mock_sink.determinism = Determinism.IO_WRITE
         mock_sink.plugin_version = "1.0.0"
+        schema_mock = MagicMock()
+
+        schema_mock.model_json_schema.return_value = {"type": "object"}
+
+        mock_sink.input_schema = schema_mock
         mock_sink.write.return_value = ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="abc123")
 
         config = PipelineConfig(
@@ -1354,6 +1394,11 @@ class TestLifecycleHooks:
         mock_source.name = "csv"
         mock_source.determinism = Determinism.IO_READ
         mock_source.plugin_version = "1.0.0"
+        schema_mock = MagicMock()
+
+        schema_mock.model_json_schema.return_value = {"type": "object"}
+
+        mock_source.output_schema = schema_mock
         mock_source.load.return_value = iter([SourceRow.valid({"id": 1})])
 
         transform = FailingTransform()
@@ -1361,6 +1406,11 @@ class TestLifecycleHooks:
         mock_sink.name = "csv"
         mock_sink.determinism = Determinism.IO_WRITE
         mock_sink.plugin_version = "1.0.0"
+        schema_mock = MagicMock()
+
+        schema_mock.model_json_schema.return_value = {"type": "object"}
+
+        mock_sink.input_schema = schema_mock
 
         config = PipelineConfig(
             source=mock_source,
@@ -1929,6 +1979,11 @@ class TestSourceLifecycleHooks:
         mock_sink.name = "csv"
         mock_sink.determinism = Determinism.IO_WRITE
         mock_sink.plugin_version = "1.0.0"
+        schema_mock = MagicMock()
+
+        schema_mock.model_json_schema.return_value = {"type": "object"}
+
+        mock_sink.input_schema = schema_mock
         mock_sink.write.return_value = ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="abc123")
 
         config = PipelineConfig(
@@ -1996,6 +2051,11 @@ class TestSinkLifecycleHooks:
         mock_source.name = "csv"
         mock_source.determinism = Determinism.IO_READ
         mock_source.plugin_version = "1.0.0"
+        schema_mock = MagicMock()
+
+        schema_mock.model_json_schema.return_value = {"type": "object"}
+
+        mock_source.output_schema = schema_mock
         mock_source.load.return_value = iter([SourceRow.valid({"value": 1})])
 
         sink = TrackedSink()
@@ -2081,6 +2141,11 @@ class TestSinkLifecycleHooks:
         mock_source.name = "csv"
         mock_source.determinism = Determinism.IO_READ
         mock_source.plugin_version = "1.0.0"
+        schema_mock = MagicMock()
+
+        schema_mock.model_json_schema.return_value = {"type": "object"}
+
+        mock_source.output_schema = schema_mock
         mock_source.load.return_value = iter([SourceRow.valid({"value": 1})])
 
         transform = FailingTransform()
@@ -4089,12 +4154,22 @@ class TestCoalesceWiring:
         mock_source.name = "csv"
         mock_source.load.return_value = iter([])
         mock_source.plugin_version = "1.0.0"
+        schema_mock = MagicMock()
+
+        schema_mock.model_json_schema.return_value = {"type": "object"}
+
+        mock_source.output_schema = schema_mock
         mock_source.determinism = "deterministic"
         mock_source.output_schema = _TestSchema
 
         mock_sink = MagicMock()
         mock_sink.name = "csv"
         mock_sink.plugin_version = "1.0.0"
+        schema_mock = MagicMock()
+
+        schema_mock.model_json_schema.return_value = {"type": "object"}
+
+        mock_sink.input_schema = schema_mock
         mock_sink.determinism = "deterministic"
         mock_sink.input_schema = _TestSchema
 
@@ -4161,12 +4236,22 @@ class TestCoalesceWiring:
         mock_source.name = "csv"
         mock_source.load.return_value = iter([MagicMock(is_quarantined=False, row={"value": 1})])
         mock_source.plugin_version = "1.0.0"
+        schema_mock = MagicMock()
+
+        schema_mock.model_json_schema.return_value = {"type": "object"}
+
+        mock_source.output_schema = schema_mock
         mock_source.determinism = "deterministic"
         mock_source.output_schema = _TestSchema
 
         mock_sink = MagicMock()
         mock_sink.name = "csv"
         mock_sink.plugin_version = "1.0.0"
+        schema_mock = MagicMock()
+
+        schema_mock.model_json_schema.return_value = {"type": "object"}
+
+        mock_sink.input_schema = schema_mock
         mock_sink.determinism = "deterministic"
         mock_sink.input_schema = _TestSchema
         mock_sink.write.return_value = ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="abc123")
@@ -4309,12 +4394,22 @@ class TestCoalesceWiring:
         mock_source.name = "csv"
         mock_source.load.return_value = iter([])  # Empty - immediate end
         mock_source.plugin_version = "1.0.0"
+        schema_mock = MagicMock()
+
+        schema_mock.model_json_schema.return_value = {"type": "object"}
+
+        mock_source.output_schema = schema_mock
         mock_source.determinism = "deterministic"
         mock_source.output_schema = _TestSchema
 
         mock_sink = MagicMock()
         mock_sink.name = "csv"
         mock_sink.plugin_version = "1.0.0"
+        schema_mock = MagicMock()
+
+        schema_mock.model_json_schema.return_value = {"type": "object"}
+
+        mock_sink.input_schema = schema_mock
         mock_sink.determinism = "deterministic"
         mock_sink.input_schema = _TestSchema
 
@@ -4401,12 +4496,22 @@ class TestCoalesceWiring:
         mock_source.name = "csv"
         mock_source.load.return_value = iter([])  # Empty - immediate end
         mock_source.plugin_version = "1.0.0"
+        schema_mock = MagicMock()
+
+        schema_mock.model_json_schema.return_value = {"type": "object"}
+
+        mock_source.output_schema = schema_mock
         mock_source.determinism = "deterministic"
         mock_source.output_schema = _TestSchema
 
         mock_sink = MagicMock()
         mock_sink.name = "csv"
         mock_sink.plugin_version = "1.0.0"
+        schema_mock = MagicMock()
+
+        schema_mock.model_json_schema.return_value = {"type": "object"}
+
+        mock_sink.input_schema = schema_mock
         mock_sink.determinism = "deterministic"
         mock_sink.input_schema = _TestSchema
         mock_sink.write.return_value = ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="abc123")
@@ -4523,12 +4628,22 @@ class TestCoalesceWiring:
         mock_source.name = "csv"
         mock_source.load.return_value = iter([])  # Empty - immediate end
         mock_source.plugin_version = "1.0.0"
+        schema_mock = MagicMock()
+
+        schema_mock.model_json_schema.return_value = {"type": "object"}
+
+        mock_source.output_schema = schema_mock
         mock_source.determinism = "deterministic"
         mock_source.output_schema = _TestSchema
 
         mock_sink = MagicMock()
         mock_sink.name = "csv"
         mock_sink.plugin_version = "1.0.0"
+        schema_mock = MagicMock()
+
+        schema_mock.model_json_schema.return_value = {"type": "object"}
+
+        mock_sink.input_schema = schema_mock
         mock_sink.determinism = "deterministic"
         mock_sink.input_schema = _TestSchema
 
@@ -4632,12 +4747,22 @@ class TestCoalesceWiring:
         mock_source.name = "csv"
         mock_source.load.return_value = iter([])
         mock_source.plugin_version = "1.0.0"
+        schema_mock = MagicMock()
+
+        schema_mock.model_json_schema.return_value = {"type": "object"}
+
+        mock_source.output_schema = schema_mock
         mock_source.determinism = "deterministic"
         mock_source.output_schema = _TestSchema
 
         mock_sink = MagicMock()
         mock_sink.name = "csv"
         mock_sink.plugin_version = "1.0.0"
+        schema_mock = MagicMock()
+
+        schema_mock.model_json_schema.return_value = {"type": "object"}
+
+        mock_sink.input_schema = schema_mock
         mock_sink.determinism = "deterministic"
         mock_sink.input_schema = _TestSchema
 
@@ -4916,6 +5041,11 @@ class TestOrchestratorProgress:
         mock_source.name = "test_source"
         mock_source.determinism = Determinism.IO_READ
         mock_source.plugin_version = "1.0.0"
+        schema_mock = MagicMock()
+
+        schema_mock.model_json_schema.return_value = {"type": "object"}
+
+        mock_source.output_schema = schema_mock
         mock_source.load.return_value = iter([SourceRow.valid({"value": i}) for i in range(150)])
 
         # Config-driven gate: always routes to "routed_sink"

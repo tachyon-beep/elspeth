@@ -17,7 +17,7 @@ from elspeth.plugins.context import PluginContext
 
 
 @pytest.fixture
-def recorder():
+def recorder() -> LandscapeRecorder:
     """Create in-memory recorder with a registered run."""
     db = LandscapeDB("sqlite:///:memory:")
     rec = LandscapeRecorder(db)
@@ -47,7 +47,7 @@ def recorder():
 class TestValidationErrorNonCanonical:
     """Test validation error recording for non-canonical data."""
 
-    def test_record_primitive_int(self, recorder):
+    def test_record_primitive_int(self, recorder: LandscapeRecorder) -> None:
         """Primitive int should be quarantined without crash."""
         ctx = PluginContext(
             run_id="test-run",
@@ -67,7 +67,7 @@ class TestValidationErrorNonCanonical:
         assert token.node_id == "source_node"
         assert token.destination == "discard"
 
-    def test_record_primitive_string(self, recorder):
+    def test_record_primitive_string(self, recorder: LandscapeRecorder) -> None:
         """Primitive string should be quarantined without crash."""
         ctx = PluginContext(
             run_id="test-run",
@@ -85,7 +85,7 @@ class TestValidationErrorNonCanonical:
 
         assert token.error_id is not None
 
-    def test_record_list(self, recorder):
+    def test_record_list(self, recorder: LandscapeRecorder) -> None:
         """List should be quarantined without crash."""
         ctx = PluginContext(
             run_id="test-run",
@@ -103,7 +103,7 @@ class TestValidationErrorNonCanonical:
 
         assert token.error_id is not None
 
-    def test_record_nan_value(self, recorder):
+    def test_record_nan_value(self, recorder: LandscapeRecorder) -> None:
         """Row with NaN should be quarantined without crash."""
         ctx = PluginContext(
             run_id="test-run",
@@ -122,7 +122,7 @@ class TestValidationErrorNonCanonical:
         assert token.error_id is not None
         assert token.node_id == "source_node"
 
-    def test_record_infinity_value(self, recorder):
+    def test_record_infinity_value(self, recorder: LandscapeRecorder) -> None:
         """Row with Infinity should be quarantined without crash."""
         ctx = PluginContext(
             run_id="test-run",
@@ -140,7 +140,7 @@ class TestValidationErrorNonCanonical:
 
         assert token.error_id is not None
 
-    def test_record_negative_infinity(self, recorder):
+    def test_record_negative_infinity(self, recorder: LandscapeRecorder) -> None:
         """Row with -Infinity should be quarantined without crash."""
         ctx = PluginContext(
             run_id="test-run",
@@ -158,7 +158,7 @@ class TestValidationErrorNonCanonical:
 
         assert token.error_id is not None
 
-    def test_audit_trail_contains_repr_fallback(self, recorder):
+    def test_audit_trail_contains_repr_fallback(self, recorder: LandscapeRecorder) -> None:
         """Verify audit trail stores repr() for non-canonical data."""
         ctx = PluginContext(
             run_id="test-run",
@@ -197,7 +197,7 @@ class TestValidationErrorNonCanonical:
             assert "nan" in row_data["__repr__"].lower()
             assert "__canonical_error__" in row_data
 
-    def test_multiple_non_canonical_rows(self, recorder):
+    def test_multiple_non_canonical_rows(self, recorder: LandscapeRecorder) -> None:
         """Multiple non-canonical rows should all be recorded."""
         ctx = PluginContext(
             run_id="test-run",

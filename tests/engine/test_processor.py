@@ -2948,7 +2948,9 @@ class TestProcessorBatchTransforms:
         )
 
         # Simulate restored checkpoint with 2 rows already buffered
+        # Note: _version field required since Bug #12 checkpoint versioning fix
         restored_buffer_state = {
+            "_version": "1.0",
             sum_node.node_id: {
                 "tokens": [
                     {
@@ -2965,7 +2967,7 @@ class TestProcessorBatchTransforms:
                     },
                 ],
                 "batch_id": old_batch.batch_id,
-            }
+            },
         }
 
         processor = RowProcessor(

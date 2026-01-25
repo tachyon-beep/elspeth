@@ -454,10 +454,8 @@ class Orchestrator:
 
             # Serialize source schema for resume type restoration
             # This enables proper type coercion (datetime/Decimal) when resuming from JSON payloads
-            source_schema_class = getattr(config.source, "_schema_class", None)
-            source_schema_json = None
-            if source_schema_class is not None:
-                source_schema_json = json.dumps(source_schema_class.model_json_schema())
+            # SourceProtocol requires output_schema - all sources have schemas (even dynamic ones)
+            source_schema_json = json.dumps(config.source.output_schema.model_json_schema())
 
             recorder = LandscapeRecorder(self._db, payload_store=payload_store)
             run = recorder.begin_run(
@@ -1491,12 +1489,12 @@ class Orchestrator:
         from elspeth.core.landscape.schema import runs_table
 
         with self._db.engine.connect() as conn:
-            result = conn.execute(select(runs_table.c.source_schema_json).where(runs_table.c.run_id == run_id)).fetchone()
+            run_row = conn.execute(select(runs_table.c.source_schema_json).where(runs_table.c.run_id == run_id)).fetchone()
 
-        if result is None:
+        if run_row is None:
             raise ValueError(f"Resume failed: Run {run_id} not found in database")
 
-        source_schema_json = result.source_schema_json
+        source_schema_json = run_row.source_schema_json
 
         # REQUIRED: Schema must be stored in audit trail for type restoration
         # Without schema, resumed rows would have degraded types (str instead of datetime/Decimal)

@@ -256,12 +256,174 @@ class TestLineageAfterRetention:
 class TestExplainQueryFunctionality:
     """Tests for explain query functionality."""
 
-    @pytest.mark.skip(reason="Explain CLI not yet integrated with system tests")
     def test_explain_returns_source_data(self, tmp_path: Path) -> None:
-        """Explain query returns original source data for a row."""
-        pass
+        """Explain query returns original source data for a row.
 
-    @pytest.mark.skip(reason="Explain CLI not yet integrated with system tests")
+        This verifies the fundamental audit requirement: for any processed row,
+        we can trace back to the exact source data that was ingested.
+
+        Uses PayloadStore to persist source data, as required by CLAUDE.md:
+        "Source entry - Raw data stored before any processing" (non-negotiable)
+        """
+        from elspeth.core.landscape.lineage import explain
+        from elspeth.core.landscape.recorder import LandscapeRecorder
+        from elspeth.core.payload_store import FilesystemPayloadStore
+        from elspeth.engine.artifacts import ArtifactDescriptor
+
+        # Setup database and payload store
+        db = LandscapeDB.in_memory()
+        payload_path = tmp_path / "payloads"
+        payload_path.mkdir()
+        payload_store = FilesystemPayloadStore(payload_path)
+
+        # Source data we want to trace
+        source_data = {"id": "trace_me", "value": 42}
+
+        # Build source
+        class TestSource(_TestSourceBase):
+            name = "test_source"
+            output_schema = _InputSchema
+
+            def load(self, ctx: Any) -> Any:
+                yield SourceRow.valid(source_data)
+
+            def close(self) -> None:
+                pass
+
+        source = TestSource()
+
+        # Build sink
+        class TestSink(_TestSinkBase):
+            name = "collect_sink"
+            results: ClassVar[list[dict[str, Any]]] = []
+
+            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
+                TestSink.results.extend(rows)
+                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
+
+            def close(self) -> None:
+                pass
+
+        TestSink.results.clear()
+
+        # Pipeline config with a transform
+        config = PipelineConfig(
+            source=as_source(source),
+            transforms=[_PassthroughTransform()],
+            sinks={"default": as_sink(TestSink())},
+        )
+
+        # Run pipeline with payload_store to persist source data
+        orchestrator = Orchestrator(db)
+        result = orchestrator.run(
+            config,
+            graph=_build_linear_graph(config),
+            payload_store=payload_store,
+        )
+
+        assert result.status == "completed"
+        assert result.rows_processed == 1
+
+        # Query lineage via explain (with payload_store for data retrieval)
+        recorder = LandscapeRecorder(db, payload_store=payload_store)
+        rows = recorder.get_rows(result.run_id)
+        assert len(rows) == 1
+
+        row = rows[0]
+        lineage = explain(recorder, run_id=result.run_id, row_id=row.row_id)
+
+        # Verify explain returns lineage with source data
+        assert lineage is not None, "Explain must return lineage for processed row"
+        assert lineage.source_row is not None, "Lineage must include source_row"
+        assert lineage.source_row.payload_available is True, "Payload must be available"
+        assert lineage.source_row.source_data == source_data, (
+            f"Source data mismatch: expected {source_data}, got {lineage.source_row.source_data}"
+        )
+
+        db.close()
+
     def test_explain_returns_transform_history(self, tmp_path: Path) -> None:
-        """Explain query returns transformation history for a row."""
-        pass
+        """Explain query returns transformation history for a row.
+
+        This verifies that explain() returns node_states showing each transform
+        the row passed through, enabling full audit trail reconstruction.
+        """
+        from elspeth.contracts import NodeStateStatus
+        from elspeth.core.landscape.lineage import explain
+        from elspeth.core.landscape.recorder import LandscapeRecorder
+        from elspeth.engine.artifacts import ArtifactDescriptor
+
+        # Setup database
+        db = LandscapeDB.in_memory()
+
+        # Build source
+        class TestSource(_TestSourceBase):
+            name = "test_source"
+            output_schema = _InputSchema
+
+            def load(self, ctx: Any) -> Any:
+                yield SourceRow.valid({"id": "history_row", "value": 100})
+
+            def close(self) -> None:
+                pass
+
+        source = TestSource()
+
+        # Build sink
+        class TestSink(_TestSinkBase):
+            name = "collect_sink"
+            results: ClassVar[list[dict[str, Any]]] = []
+
+            def write(self, rows: Any, ctx: Any) -> ArtifactDescriptor:
+                TestSink.results.extend(rows)
+                return ArtifactDescriptor.for_file(path="memory", size_bytes=0, content_hash="")
+
+            def close(self) -> None:
+                pass
+
+        TestSink.results.clear()
+
+        # Pipeline with multiple transforms to verify history ordering
+        config = PipelineConfig(
+            source=as_source(source),
+            transforms=[
+                _PassthroughTransform(),  # Stage 0
+                _EnrichingTransform(),  # Stage 1 - adds enriched + processed_by
+            ],
+            sinks={"default": as_sink(TestSink())},
+        )
+
+        # Run pipeline
+        orchestrator = Orchestrator(db)
+        result = orchestrator.run(config, graph=_build_linear_graph(config))
+
+        assert result.status == "completed"
+        assert result.rows_processed == 1
+
+        # Verify enriched output (proves transforms ran)
+        assert len(TestSink.results) == 1
+        assert TestSink.results[0]["enriched"] is True
+
+        # Query lineage via explain
+        recorder = LandscapeRecorder(db)
+        rows = recorder.get_rows(result.run_id)
+        assert len(rows) == 1
+
+        row = rows[0]
+        lineage = explain(recorder, run_id=result.run_id, row_id=row.row_id)
+
+        # Verify explain returns transform history
+        assert lineage is not None, "Explain must return lineage for processed row"
+        assert len(lineage.node_states) >= 2, f"Expected at least 2 node_states (for 2 transforms), got {len(lineage.node_states)}"
+
+        # Verify node_states are ordered by step_index
+        step_indices = [state.step_index for state in lineage.node_states]
+        assert step_indices == sorted(step_indices), f"Node states should be ordered by step_index: {step_indices}"
+
+        # Verify all states completed successfully
+        for state in lineage.node_states:
+            assert state.status == NodeStateStatus.COMPLETED, (
+                f"Node state at step {state.step_index} has status {state.status}, expected COMPLETED"
+            )
+
+        db.close()

@@ -306,8 +306,11 @@ class TestCheckpointDurability:
 
         recorder = LandscapeRecorder(db, payload_store=payload_store)
 
-        # Create the run
-        run = recorder.begin_run(config={}, canonical_version="v1")
+        # Create the run with source schema for resume type restoration
+        import json as json_lib
+
+        source_schema_json = json_lib.dumps(RowSchema.model_json_schema())
+        run = recorder.begin_run(config={}, canonical_version="v1", source_schema_json=source_schema_json)
         run_id = run.run_id
 
         # Register source node
@@ -347,6 +350,22 @@ class TestCheckpointDurability:
             config={},
             determinism=Determinism.DETERMINISTIC,
             schema_config=SchemaConfig(mode=None, fields=None, is_dynamic=True),
+        )
+
+        # Register edges (required for resume to build edge_map)
+        recorder.register_edge(
+            run_id=run_id,
+            from_node_id="source",
+            to_node_id="transform_0",
+            label="continue",
+            mode=RoutingMode.MOVE,
+        )
+        recorder.register_edge(
+            run_id=run_id,
+            from_node_id="transform_0",
+            to_node_id="sink_default",
+            label="continue",
+            mode=RoutingMode.MOVE,
         )
 
         # Create 5 source rows with payload storage

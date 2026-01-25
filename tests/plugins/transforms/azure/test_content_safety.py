@@ -864,7 +864,7 @@ class TestContentSafetyPooledExecution:
             }
         )
 
-        def make_response(*args, **kwargs):
+        def make_response(*args: Any, **kwargs: Any) -> MagicMock:
             """Return response based on content, not call order (avoids race condition)."""
             response = MagicMock()
             response.status_code = 200

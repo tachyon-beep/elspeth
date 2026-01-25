@@ -8,8 +8,6 @@ This test confirms that the schema validation bypass bug is fixed:
 Relates-To: P1-2026-01-21-schema-validator-ignores-dag-routing
 """
 
-import pytest
-
 
 def test_schema_validation_end_to_end(tmp_path, plugin_manager):
     """Verify schemas are extracted from plugin instances and validation works.
@@ -138,11 +136,110 @@ def test_schema_validation_end_to_end(tmp_path, plugin_manager):
 def test_static_schema_validation(plugin_manager):
     """Verify static schemas are populated from plugin classes.
 
-    This test would use plugins that declare schemas as class attributes
+    This test uses plugins that declare schemas as class attributes
     (not dynamic schemas set in __init__).
 
-    For now, this is skipped because all our builtin plugins (CSV, passthrough)
-    use dynamic schemas. If we add plugins with static class-level schemas,
-    this test should be implemented.
+    Complements test_schema_validation_end_to_end which uses dynamic schemas.
+    Together they verify the schema validation mechanism works for both
+    static (class-level) and dynamic (instance-level) schema definitions.
+
+    Relates-To: P1-2026-01-21-schema-validator-ignores-dag-routing
     """
-    pytest.skip("No static schema plugins available for testing")
+    from collections.abc import Iterator
+    from typing import Any
+
+    from elspeth.contracts import ArtifactDescriptor, PluginSchema, SourceRow
+    from elspeth.core.dag import ExecutionGraph
+    from elspeth.plugins.results import TransformResult
+    from tests.conftest import (
+        _TestSinkBase,
+        _TestSourceBase,
+        _TestTransformBase,
+        as_sink,
+        as_source,
+        as_transform,
+    )
+
+    # Define test plugins with STATIC class-level schemas
+    # These are set at class definition time, not in __init__
+
+    class StaticSchema(PluginSchema):
+        """Static schema with explicit fields."""
+
+        id: int
+        value: str
+
+    class StaticSchemaSource(_TestSourceBase):
+        """Source with static class-level output_schema."""
+
+        name = "static_source"
+        output_schema = StaticSchema  # Class-level static schema
+
+        def __init__(self) -> None:
+            self._data = [{"id": 1, "value": "test"}]
+
+        def load(self, ctx: Any) -> Iterator[SourceRow]:
+            yield from self.wrap_rows(self._data)
+
+    class StaticSchemaTransform(_TestTransformBase):
+        """Transform with static class-level input/output schemas."""
+
+        name = "static_transform"
+        input_schema = StaticSchema  # Class-level static schema
+        output_schema = StaticSchema  # Class-level static schema
+
+        def process(self, row: dict[str, Any], ctx: Any) -> TransformResult:
+            return TransformResult.success(row)
+
+    class StaticSchemaSink(_TestSinkBase):
+        """Sink with static class-level input_schema."""
+
+        name = "static_sink"
+        input_schema = StaticSchema  # Class-level static schema
+
+        def __init__(self) -> None:
+            self.written: list[dict[str, Any]] = []
+
+        def write(self, rows: list[dict[str, Any]], ctx: Any) -> ArtifactDescriptor:
+            self.written.extend(rows)
+            return ArtifactDescriptor.for_file(path="memory://test", size_bytes=0, content_hash="test")
+
+    # Build graph with static schema plugins
+    source = StaticSchemaSource()
+    transform = StaticSchemaTransform()
+    sink = StaticSchemaSink()
+
+    graph = ExecutionGraph.from_plugin_instances(
+        source=as_source(source),
+        transforms=[as_transform(transform)],
+        sinks={"output": as_sink(sink)},
+        aggregations={},
+        gates=[],
+        output_sink="output",
+    )
+
+    # Validation should pass (schemas are compatible - all use StaticSchema)
+    graph.validate()
+
+    # Verify static schemas were populated from plugin class attributes
+    nodes = graph.get_nodes()
+    source_nodes = [n for n in nodes if n.node_type == "source"]
+    transform_nodes = [n for n in nodes if n.node_type == "transform"]
+    sink_nodes = [n for n in nodes if n.node_type == "sink"]
+
+    assert len(source_nodes) == 1, "Should have exactly one source node"
+    assert len(transform_nodes) == 1, "Should have exactly one transform node"
+    assert len(sink_nodes) == 1, "Should have exactly one sink node"
+
+    source_node = source_nodes[0]
+    transform_node = transform_nodes[0]
+    sink_node = sink_nodes[0]
+
+    # CRITICAL: Static schemas should be populated (not None)
+    # This is the key difference from dynamic schemas which are None at graph time
+    assert source_node.output_schema is StaticSchema, f"Source output_schema should be StaticSchema, got {source_node.output_schema}"
+    assert transform_node.input_schema is StaticSchema, f"Transform input_schema should be StaticSchema, got {transform_node.input_schema}"
+    assert transform_node.output_schema is StaticSchema, (
+        f"Transform output_schema should be StaticSchema, got {transform_node.output_schema}"
+    )
+    assert sink_node.input_schema is StaticSchema, f"Sink input_schema should be StaticSchema, got {sink_node.input_schema}"

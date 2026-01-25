@@ -315,7 +315,6 @@ class TestExecutionGraphAccessors:
 
         assert incoming == []
 
-    @pytest.mark.skip(reason="Method deleted in Task 2, will be restored in Task 2.5")
     def test_get_effective_producer_schema_walks_through_gates(self):
         """_get_effective_producer_schema() recursively finds schema through gate chain."""
         from elspeth.contracts import PluginSchema, RoutingMode
@@ -339,22 +338,21 @@ class TestExecutionGraphAccessors:
 
         assert effective_schema == OutputSchema
 
-    @pytest.mark.skip(reason="Method deleted in Task 2, will be restored in Task 2.5")
     def test_get_effective_producer_schema_crashes_on_gate_without_inputs(self):
         """_get_effective_producer_schema() crashes if gate has no incoming edges."""
-        from elspeth.core.dag import ExecutionGraph, GraphValidationError
+        from elspeth.core.dag import ExecutionGraph
 
         graph = ExecutionGraph()
         graph.add_node("gate", node_type="gate", plugin_name="config_gate:orphan")
 
         # Gate with no inputs is a bug in our code - should crash
-        with pytest.raises(GraphValidationError) as exc_info:
+        # ValueError is raised by internal validation during edge compatibility checking
+        with pytest.raises(ValueError) as exc_info:
             graph._get_effective_producer_schema("gate")
 
         assert "no incoming edges" in str(exc_info.value).lower()
         assert "bug in graph construction" in str(exc_info.value).lower()
 
-    @pytest.mark.skip(reason="Method deleted in Task 2, will be restored in Task 2.5")
     def test_get_effective_producer_schema_handles_chained_gates(self):
         """_get_effective_producer_schema() recursively walks through multiple gates."""
         from elspeth.contracts import PluginSchema, RoutingMode
@@ -403,7 +401,6 @@ class TestExecutionGraphAccessors:
         # NEW behavior: Only checks structural validity (no cycles)
         graph.validate()  # Should NOT raise - no structural problems
 
-    @pytest.mark.skip(reason="Method deleted in Task 2, will be restored in Task 2.5")
     def test_get_effective_producer_schema_returns_direct_schema_for_transform(self):
         """_get_effective_producer_schema() returns output_schema directly for transform nodes."""
         from elspeth.contracts import PluginSchema
@@ -424,11 +421,10 @@ class TestExecutionGraphAccessors:
 
         assert effective_schema == TransformOutput
 
-    @pytest.mark.skip(reason="Method deleted in Task 2, will be restored in Task 2.5")
     def test_validate_edge_schemas_uses_effective_schema_for_gates(self):
-        """_validate_edge_schemas() uses effective producer schema for gate edges."""
+        """validate_edge_compatibility() uses effective producer schema for gate edges."""
         from elspeth.contracts import PluginSchema, RoutingMode
-        from elspeth.core.dag import ExecutionGraph, GraphValidationError
+        from elspeth.core.dag import ExecutionGraph
 
         class SourceOutput(PluginSchema):
             id: int
@@ -451,20 +447,20 @@ class TestExecutionGraphAccessors:
         graph.add_edge("gate", "sink", label="flagged", mode=RoutingMode.MOVE)
 
         # Should detect schema incompatibility on gate -> sink edge
-        with pytest.raises(GraphValidationError) as exc_info:
-            graph.validate()
+        # validate_edge_compatibility() raises ValueError for schema mismatches
+        with pytest.raises(ValueError) as exc_info:
+            graph.validate_edge_compatibility()
 
         # Verify error mentions the missing field
         assert "score" in str(exc_info.value).lower()
-        # Verify error includes plugin names (config_gate:check -> csv)
-        assert "config_gate:check" in str(exc_info.value)
-        assert "csv" in str(exc_info.value)
+        # Verify error includes node IDs (gate -> sink)
+        assert "gate" in str(exc_info.value)
+        assert "sink" in str(exc_info.value)
 
-    @pytest.mark.skip(reason="Method deleted in Task 2, will be restored in Task 2.5")
     def test_validate_edge_schemas_validates_all_fork_destinations(self):
         """Fork gates validate all destination edges against effective schema."""
         from elspeth.contracts import PluginSchema, RoutingMode
-        from elspeth.core.dag import ExecutionGraph, GraphValidationError
+        from elspeth.core.dag import ExecutionGraph
 
         class SourceOutput(PluginSchema):
             id: int
@@ -488,11 +484,12 @@ class TestExecutionGraphAccessors:
         graph.add_edge("gate", "sink_b", label="branch_b", mode=RoutingMode.COPY)  # Fork: COPY mode
 
         # Should detect incompatibility on gate -> sink_b edge
-        with pytest.raises(GraphValidationError) as exc_info:
-            graph.validate()
+        # validate_edge_compatibility() raises ValueError for schema mismatches
+        with pytest.raises(ValueError) as exc_info:
+            graph.validate_edge_compatibility()
 
         assert "score" in str(exc_info.value).lower()
-        assert "config_gate:fork" in str(exc_info.value)
+        assert "gate" in str(exc_info.value)
 
 
 class TestExecutionGraphFromConfig:
@@ -1663,7 +1660,6 @@ class TestCoalesceNodes:
 class TestSchemaValidation:
     """Tests for graph-based schema compatibility validation."""
 
-    @pytest.mark.skip(reason="Schema validation removed from DAG layer in Task 2, will be restored in Task 2.5")
     def test_schema_validation_catches_gate_routing_to_incompatible_sink(self) -> None:
         """Gate routes to sink before required field is added - should fail validation.
 
@@ -1673,7 +1669,7 @@ class TestSchemaValidation:
         the "final transform output", missing this incompatibility.
         """
         from elspeth.contracts import PluginSchema
-        from elspeth.core.dag import ExecutionGraph, GraphValidationError
+        from elspeth.core.dag import ExecutionGraph
 
         class SourceSchema(PluginSchema):
             """Source provides: name, quality."""
@@ -1737,14 +1733,12 @@ class TestSchemaValidation:
         graph.add_edge("gate", "add_score", label="continue")
         graph.add_edge("add_score", "processed_sink", label="continue")
 
-        # BUG: Current implementation doesn't validate edge-by-edge
         # The gate routes to raw_sink with SourceSchema (no 'score' field),
         # but raw_sink requires RawSinkSchema (with 'score' field).
-        # This should raise GraphValidationError.
-        with pytest.raises(GraphValidationError, match="score"):
-            graph.validate()
+        # validate_edge_compatibility() raises ValueError for schema mismatches
+        with pytest.raises(ValueError, match="score"):
+            graph.validate_edge_compatibility()
 
-    @pytest.mark.skip(reason="Schema validation removed from DAG layer in Task 2, will be restored in Task 2.5")
     def test_coalesce_rejects_incompatible_branch_schemas(self) -> None:
         """Coalesce with incompatible branch schemas should fail validation.
 
@@ -1753,7 +1747,7 @@ class TestSchemaValidation:
         doesn't support per-branch transforms.
         """
         from elspeth.contracts import PluginSchema, RoutingMode
-        from elspeth.core.dag import ExecutionGraph, GraphValidationError
+        from elspeth.core.dag import ExecutionGraph
 
         class SourceOutput(PluginSchema):
             id: int
@@ -1820,10 +1814,11 @@ class TestSchemaValidation:
         graph.add_edge("coalesce", "sink", label="continue", mode=RoutingMode.MOVE)
 
         # Should crash: coalesce can't merge BranchAOutput and BranchBOutput
-        with pytest.raises(GraphValidationError) as exc_info:
-            graph.validate()
+        # validate_edge_compatibility() raises ValueError for schema mismatches
+        with pytest.raises(ValueError) as exc_info:
+            graph.validate_edge_compatibility()
 
-        # Error should mention incompatible fields
+        # Error should mention incompatible schemas
         error_msg = str(exc_info.value).lower()
         assert "schema" in error_msg or "incompatible" in error_msg
 
@@ -1862,11 +1857,10 @@ class TestSchemaValidation:
         # Should pass - schemas compatible at both edges
         graph.validate()
 
-    @pytest.mark.skip(reason="Schema validation removed from DAG layer in Task 2, will be restored in Task 2.5")
     def test_aggregation_schema_transition_incompatible_output(self) -> None:
         """Aggregation with incompatible output_schema should fail validation."""
         from elspeth.contracts import PluginSchema
-        from elspeth.core.dag import ExecutionGraph, GraphValidationError
+        from elspeth.core.dag import ExecutionGraph
 
         class SourceOutput(PluginSchema):
             value: float
@@ -1899,16 +1893,16 @@ class TestSchemaValidation:
         graph.add_edge("agg", "sink", label="continue")
 
         # Should crash - sink requires 'average' field
-        with pytest.raises(GraphValidationError) as exc_info:
-            graph.validate()
+        # validate_edge_compatibility() raises ValueError for schema mismatches
+        with pytest.raises(ValueError) as exc_info:
+            graph.validate_edge_compatibility()
 
         assert "average" in str(exc_info.value).lower()
 
-    @pytest.mark.skip(reason="Schema validation removed from DAG layer in Task 2, will be restored in Task 2.5")
     def test_schema_validation_error_includes_diagnostic_details(self) -> None:
         """Schema validation errors include field name, producer node, consumer node."""
         from elspeth.contracts import PluginSchema
-        from elspeth.core.dag import ExecutionGraph, GraphValidationError
+        from elspeth.core.dag import ExecutionGraph
 
         class SourceOutput(PluginSchema):
             id: int
@@ -1927,19 +1921,20 @@ class TestSchemaValidation:
         graph.add_edge("my_source", "my_sink", label="continue")
 
         # Capture error and verify diagnostic details
-        with pytest.raises(GraphValidationError) as exc_info:
-            graph.validate()
+        # validate_edge_compatibility() raises ValueError for schema mismatches
+        with pytest.raises(ValueError) as exc_info:
+            graph.validate_edge_compatibility()
 
         error_msg = str(exc_info.value)
 
         # Should include field name
         assert "score" in error_msg.lower()
 
-        # Should include producer node (or plugin name)
-        assert "my_source" in error_msg or "csv_reader" in error_msg
+        # Should include producer node ID
+        assert "my_source" in error_msg
 
-        # Should include consumer node (or plugin name)
-        assert "my_sink" in error_msg or "db_writer" in error_msg
+        # Should include consumer node ID
+        assert "my_sink" in error_msg
 
 
 def test_from_plugin_instances_extracts_schemas():
@@ -2010,7 +2005,6 @@ output_sink: output
         config_file.unlink()
 
 
-@pytest.mark.skip(reason="Method deleted in Task 2, will be restored in Task 2.5")
 def test_validate_aggregation_dual_schema():
     """Verify aggregation edges validate against correct schemas."""
     from elspeth.contracts.schema import SchemaConfig
@@ -2044,11 +2038,10 @@ def test_validate_aggregation_dual_schema():
     graph.add_edge("source", "agg", label="continue")
     graph.add_edge("agg", "sink", label="continue")
 
-    errors = graph._validate_edge_schemas()
-    assert len(errors) == 0  # Should pass
+    # Should pass - validate_edge_compatibility() raises ValueError on failure
+    graph.validate_edge_compatibility()  # No exception means success
 
 
-@pytest.mark.skip(reason="Method deleted in Task 2, will be restored in Task 2.5")
 def test_validate_aggregation_detects_incompatibility():
     """Verify validation detects aggregation output mismatch."""
     from elspeth.contracts.schema import SchemaConfig
@@ -2088,9 +2081,11 @@ def test_validate_aggregation_detects_incompatibility():
     graph.add_edge("source", "agg", label="continue")
     graph.add_edge("agg", "sink", label="continue")
 
-    errors = graph._validate_edge_schemas()
-    assert len(errors) > 0
-    assert "sum" in errors[0]
+    # Should fail - sink requires 'sum' which aggregation output doesn't provide
+    with pytest.raises(ValueError) as exc_info:
+        graph.validate_edge_compatibility()
+
+    assert "sum" in str(exc_info.value).lower()
 
 
 class TestDynamicSchemaDetection:
@@ -2160,11 +2155,13 @@ class TestDynamicSchemaDetection:
         # Should NOT raise - validation is skipped for dynamic schemas
         graph.validate()
 
-    @pytest.mark.skip(reason="Helper function deleted in Task 2, will be restored in Task 2.5")
-    def test_is_dynamic_schema_helper_detects_dynamic_schemas(self) -> None:
-        """_is_dynamic_schema() helper correctly identifies dynamic vs explicit schemas."""
+    def test_dynamic_schema_detection_in_validation(self) -> None:
+        """Dynamic schema detection correctly identifies dynamic vs explicit schemas.
+
+        Dynamic schemas have no fields and extra='allow', matching the detection
+        logic in ExecutionGraph._get_missing_required_fields().
+        """
         from elspeth.contracts.schema import SchemaConfig
-        from elspeth.core.dag import _is_dynamic_schema
         from elspeth.plugins.schema_factory import create_schema_from_config
 
         # Create dynamic schema
@@ -2181,14 +2178,20 @@ class TestDynamicSchemaDetection:
             allow_coercion=False,
         )
 
+        # Helper to check if schema is dynamic (matches logic in dag.py)
+        def is_dynamic_schema(schema: type | None) -> bool:
+            if schema is None:
+                return True
+            return len(schema.model_fields) == 0 and schema.model_config.get("extra") == "allow"
+
         # Test dynamic schema detection
-        assert _is_dynamic_schema(DynamicSchema) is True
+        assert is_dynamic_schema(DynamicSchema) is True
 
         # Test explicit schema detection
-        assert _is_dynamic_schema(ExplicitSchema) is False
+        assert is_dynamic_schema(ExplicitSchema) is False
 
         # Test backwards compat (None = dynamic)
-        assert _is_dynamic_schema(None) is True
+        assert is_dynamic_schema(None) is True
 
 
 class TestDeterministicNodeIDs:
