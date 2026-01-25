@@ -372,6 +372,14 @@ class TestCheckpointDurability:
             token = recorder.create_token(row_id=row.row_id)
             token_ids.append(token.token_id)
 
+        # Build graph for checkpoint topology validation
+        test_graph = ExecutionGraph()
+        test_graph.add_node("source", node_type="source", plugin_name="list_source", config={})
+        test_graph.add_node("transform_0", node_type="transform", plugin_name="passthrough", config={})
+        test_graph.add_node("sink_default", node_type="sink", plugin_name="tracking_sink", config={})
+        test_graph.add_edge("source", "transform_0", label="continue")
+        test_graph.add_edge("transform_0", "sink_default", label="continue")
+
         # Simulate: First 2 rows were successfully written to sink and checkpointed
         # (In real scenario, this happens in orchestrator after sink.write() returns)
         for i in range(2):
@@ -380,6 +388,7 @@ class TestCheckpointDurability:
                 token_id=token_ids[i],
                 node_id="sink_default",  # Checkpoint at sink node
                 sequence_number=i + 1,
+                graph=test_graph,
             )
 
         # Mark run as failed (simulating crash after 2 rows written)
@@ -395,15 +404,6 @@ class TestCheckpointDurability:
         unprocessed_row_ids = recovery.get_unprocessed_rows(run_id)
         assert len(unprocessed_row_ids) == 3, f"Expected 3 unprocessed rows, got {len(unprocessed_row_ids)}"
 
-        # Verify can_resume returns True
-        resume_check = recovery.can_resume(run_id)
-        assert resume_check.can_resume, f"Cannot resume: {resume_check.reason}"
-
-        # --- Phase 3: Resume and verify recovery ---
-        # Get resume point
-        resume_point = recovery.get_resume_point(run_id)
-        assert resume_point is not None
-
         # Create fresh components for resume (simulating new process)
         source = ListSource(all_rows)  # Same data
         transform = PassthroughTransform()
@@ -414,6 +414,18 @@ class TestCheckpointDurability:
             transforms=[transform],
             sinks={"default": as_sink(sink)},
         )
+
+        # Build graph for topology validation
+        graph = _build_test_graph(config)
+
+        # Verify can_resume returns True
+        resume_check = recovery.can_resume(run_id, graph)
+        assert resume_check.can_resume, f"Cannot resume: {resume_check.reason}"
+
+        # --- Phase 3: Resume and verify recovery ---
+        # Get resume point
+        resume_point = recovery.get_resume_point(run_id, graph)
+        assert resume_point is not None
 
         orchestrator = Orchestrator(
             db,

@@ -60,6 +60,7 @@ from elspeth.contracts.audit import (
     ValidationErrorRecord,
 )
 from elspeth.contracts.identity import TokenInfo
+from elspeth.contracts.checkpoint import ResumeCheck, ResumePoint
 from elspeth.contracts.results import (
     ArtifactDescriptor,
     FailureInfo,
@@ -162,6 +163,9 @@ __all__ = [  # Grouped by category for readability
     "TriggerType",
     # identity
     "TokenInfo",
+    # checkpoint
+    "ResumeCheck",
+    "ResumePoint",
     # results (NOTE: AcceptResult deleted in aggregation structural cleanup)
     "ArtifactDescriptor",
     "FailureInfo",

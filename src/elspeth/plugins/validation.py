@@ -101,7 +101,7 @@ class PluginConfigValidator:
             from elspeth.plugins.azure.blob_source import AzureBlobSourceConfig
 
             return AzureBlobSourceConfig
-        elif source_type == "null_source":
+        elif source_type == "null":
             # NullSource has no config class (resume-only source)
             # Return None to signal "no validation needed"
             return None

@@ -20,11 +20,16 @@ import hashlib
 import math
 from datetime import UTC, datetime
 from decimal import Decimal
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import pandas as pd
 import rfc8785
+
+if TYPE_CHECKING:
+    import networkx as nx
+
+    from elspeth.core.dag import ExecutionGraph
 
 # Version string stored with every run for hash verification
 CANONICAL_VERSION = "sha256-rfc8785-v1"
@@ -152,6 +157,94 @@ def stable_hash(obj: Any, version: str = CANONICAL_VERSION) -> str:
     """
     canonical = canonical_json(obj)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def compute_upstream_topology_hash(
+    graph: "ExecutionGraph",
+    node_id: str,
+) -> str:
+    """Compute hash of upstream topology (nodes + edges) for checkpoint validation.
+
+    Captures both:
+    - Which nodes must execute before checkpoint node
+    - How those nodes are connected (edge structure)
+    - Incoming edges to the checkpoint node (routing changes)
+
+    This prevents false negatives where node set is preserved
+    but edge connectivity changes.
+
+    Args:
+        graph: Execution graph to analyze
+        node_id: Checkpoint node ID
+
+    Returns:
+        SHA-256 hash of canonical upstream topology representation.
+    """
+    import networkx as nx
+
+    # Get NetworkX graph via public accessor
+    nx_graph = graph.get_nx_graph()
+
+    # Get all ancestor nodes
+    ancestors = nx.ancestors(nx_graph, node_id)
+
+    # Include checkpoint node to capture incoming edges
+    # (outgoing edges are automatically excluded since descendants aren't in ancestors)
+    upstream_nodes = [*list(ancestors), node_id]
+    upstream_subgraph: "nx.MultiDiGraph[Any]" = nx_graph.subgraph(upstream_nodes)  # type: ignore[assignment]
+
+    # Create canonical representation of topology
+    topology_data = {
+        "nodes": sorted(
+            [
+                {
+                    "node_id": n,
+                    "plugin_name": graph.get_node_info(n).plugin_name,
+                    "config_hash": stable_hash(graph.get_node_info(n).config),
+                }
+                for n in upstream_nodes
+            ],
+            key=lambda x: x["node_id"],
+        ),
+        "edges": sorted(
+            [_edge_to_canonical_dict(upstream_subgraph, u, v, k) for u, v, k in upstream_subgraph.edges(keys=True)],
+            key=lambda x: (x["from"], x["to"], x["key"]),
+        ),
+    }
+
+    return stable_hash(topology_data)
+
+
+def _edge_to_canonical_dict(
+    graph: "nx.MultiDiGraph[Any]",
+    u: str,
+    v: str,
+    k: str,
+) -> dict[str, Any]:
+    """Convert edge to canonical dict for hashing.
+
+    Uses explicit defaults for missing attributes to ensure
+    hash stability across graphs with inconsistent edge data.
+
+    Args:
+        graph: NetworkX graph containing the edge
+        u: Source node ID
+        v: Target node ID
+        k: Edge key
+
+    Returns:
+        Canonical dict representation of edge attributes.
+    """
+    edge_data = graph.edges[u, v, k]
+    # Edge data is Tier 1 (Our Data) - crash on missing/wrong attributes
+    # If label or mode are missing/wrong, that's a bug in ExecutionGraph.add_edge()
+    return {
+        "from": u,
+        "to": v,
+        "key": k,
+        "label": edge_data["label"],
+        "mode": edge_data["mode"].value,
+    }
 
 
 def repr_hash(obj: Any) -> str:

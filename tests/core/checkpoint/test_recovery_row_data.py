@@ -113,11 +113,15 @@ class TestRecoveryManagerRowData:
             conn.commit()
 
         # Checkpoint at last row
+        from tests.core.checkpoint.conftest import _create_test_graph
+
+        graph = _create_test_graph(checkpoint_node="node")
         checkpoint_manager.create_checkpoint(
             run_id=run_id,
             token_id="tok-0",
             node_id="node",
             sequence_number=0,
+            graph=graph,
         )
 
         result = recovery_manager.get_unprocessed_row_data(run_id, payload_store)
@@ -201,11 +205,15 @@ class TestRecoveryManagerRowData:
             conn.commit()
 
         # Checkpoint at row 0
+        from tests.core.checkpoint.conftest import _create_test_graph
+
+        graph = _create_test_graph(checkpoint_node="node")
         checkpoint_manager.create_checkpoint(
             run_id=run_id,
             token_id="tok-0",
             node_id="node",
             sequence_number=0,
+            graph=graph,
         )
 
         with pytest.raises(ValueError, match="payload has been purged"):

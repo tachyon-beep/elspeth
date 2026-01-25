@@ -3,13 +3,17 @@
 import json
 import uuid
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import asc, delete, desc, select
 
 from elspeth.contracts import Checkpoint
+from elspeth.core.canonical import compute_upstream_topology_hash, stable_hash
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.schema import checkpoints_table
+
+if TYPE_CHECKING:
+    from elspeth.core.dag import ExecutionGraph
 
 
 class IncompatibleCheckpointError(Exception):
@@ -43,6 +47,7 @@ class CheckpointManager:
         token_id: str,
         node_id: str,
         sequence_number: int,
+        graph: "ExecutionGraph",
         aggregation_state: dict[str, Any] | None = None,
     ) -> Checkpoint:
         """Create a checkpoint at current progress point.
@@ -52,6 +57,7 @@ class CheckpointManager:
             token_id: Current token being processed
             node_id: Current node in the pipeline
             sequence_number: Monotonic progress marker
+            graph: Execution graph for topology validation (REQUIRED)
             aggregation_state: Optional serializable aggregation buffers
 
         Returns:
@@ -61,6 +67,11 @@ class CheckpointManager:
         now = datetime.now(UTC)
 
         agg_json = json.dumps(aggregation_state) if aggregation_state is not None else None
+
+        # Compute topology hashes
+        upstream_topology_hash = compute_upstream_topology_hash(graph, node_id)
+        node_info = graph.get_node_info(node_id)
+        checkpoint_node_config_hash = stable_hash(node_info.config)
 
         with self._db.engine.connect() as conn:
             conn.execute(
@@ -72,6 +83,8 @@ class CheckpointManager:
                     sequence_number=sequence_number,
                     aggregation_state_json=agg_json,
                     created_at=now,
+                    upstream_topology_hash=upstream_topology_hash,
+                    checkpoint_node_config_hash=checkpoint_node_config_hash,
                 )
             )
             conn.commit()
@@ -84,6 +97,8 @@ class CheckpointManager:
             sequence_number=sequence_number,
             aggregation_state_json=agg_json,
             created_at=now,
+            upstream_topology_hash=upstream_topology_hash,
+            checkpoint_node_config_hash=checkpoint_node_config_hash,
         )
 
     def get_latest_checkpoint(self, run_id: str) -> Checkpoint | None:
@@ -117,6 +132,8 @@ class CheckpointManager:
             sequence_number=result.sequence_number,
             aggregation_state_json=result.aggregation_state_json,
             created_at=result.created_at,
+            upstream_topology_hash=result.upstream_topology_hash,
+            checkpoint_node_config_hash=result.checkpoint_node_config_hash,
         )
 
         # Validate checkpoint compatibility before returning
@@ -147,6 +164,8 @@ class CheckpointManager:
                 sequence_number=r.sequence_number,
                 aggregation_state_json=r.aggregation_state_json,
                 created_at=r.created_at,
+                upstream_topology_hash=r.upstream_topology_hash,
+                checkpoint_node_config_hash=r.checkpoint_node_config_hash,
             )
             for r in results
         ]

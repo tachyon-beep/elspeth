@@ -57,7 +57,7 @@ def test_validator_accepts_null_source_with_empty_config():
 
     config = {}
 
-    errors = validator.validate_source_config("null_source", config)
+    errors = validator.validate_source_config("null", config)
     assert errors == []
 
 
@@ -70,7 +70,7 @@ def test_validator_accepts_null_source_with_arbitrary_config():
         "another_field": 42,
     }
 
-    errors = validator.validate_source_config("null_source", config)
+    errors = validator.validate_source_config("null", config)
     assert errors == []
 
 

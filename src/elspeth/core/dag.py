@@ -80,6 +80,21 @@ class ExecutionGraph:
         """Check if node exists."""
         return self._graph.has_node(node_id)
 
+    def get_nx_graph(self) -> MultiDiGraph[str]:
+        """Return the underlying NetworkX graph for advanced operations.
+
+        Use this for topology analysis, subgraph operations, and other
+        NetworkX algorithms that require direct graph access.
+
+        Returns:
+            The underlying NetworkX MultiDiGraph.
+
+        Warning:
+            Direct graph manipulation should be avoided. Use ExecutionGraph
+            methods (add_node, add_edge) to ensure integrity constraints.
+        """
+        return self._graph
+
     def add_node(
         self,
         node_id: str,
@@ -446,6 +461,7 @@ class ExecutionGraph:
             )
 
             graph.add_edge(prev_node_id, gid, label="continue", mode=RoutingMode.MOVE)
+            prev_node_id = gid  # Advance chain to this gate
 
             # Gate routes to sinks
             for route_label, target in gate_config.routes.items():
@@ -718,11 +734,11 @@ class ExecutionGraph:
             )
 
     def _get_effective_producer_schema(self, node_id: str) -> type[PluginSchema] | None:
-        """Get effective output schema, walking through pass-through nodes (gates).
+        """Get effective output schema, walking through pass-through nodes (gates, coalesce).
 
-        Gates and other pass-through nodes don't transform data - they inherit
-        schema from their upstream producers. This method walks backwards through
-        the graph to find the nearest schema-carrying producer.
+        Gates and coalesce nodes don't transform data - they inherit schema from their
+        upstream producers. This method walks backwards through the graph to find the
+        nearest schema-carrying producer.
 
         Args:
             node_id: Node to get effective schema for
@@ -731,7 +747,7 @@ class ExecutionGraph:
             Output schema type, or None if dynamic
 
         Raises:
-            ValueError: If gate has no incoming edges (graph construction bug)
+            ValueError: If pass-through node has no incoming edges (graph construction bug)
         """
         node_info = self.get_node_info(node_id)
 
@@ -739,27 +755,30 @@ class ExecutionGraph:
         if node_info.output_schema is not None:
             return node_info.output_schema
 
-        # Node has no schema - check if it's a pass-through type (gate)
-        if node_info.node_type == "gate":
-            # Gate passes data unchanged - inherit from upstream producer
+        # Node has no schema - check if it's a pass-through type (gate or coalesce)
+        if node_info.node_type in ("gate", "coalesce"):
+            # Pass-through nodes inherit schema from upstream producers
             incoming = list(self._graph.in_edges(node_id, data=True))
 
             if not incoming:
-                # Gate with no inputs is a graph construction bug - CRASH
-                raise ValueError(f"Gate node '{node_id}' has no incoming edges - this indicates a bug in graph construction")
+                # Pass-through node with no inputs is a graph construction bug - CRASH
+                raise ValueError(
+                    f"{node_info.node_type.capitalize()} node '{node_id}' has no incoming edges - "
+                    f"this indicates a bug in graph construction"
+                )
 
-            # Get effective schema from first input (recursive for chained gates)
+            # Get effective schema from first input (recursive for chained pass-through nodes)
             first_edge_source = incoming[0][0]
             first_schema = self._get_effective_producer_schema(first_edge_source)
 
-            # For multi-input gates, verify all inputs have same schema
+            # For multi-input nodes, verify all inputs have same schema
             if len(incoming) > 1:
                 for from_id, _, _ in incoming[1:]:
                     other_schema = self._get_effective_producer_schema(from_id)
                     if first_schema != other_schema:
-                        # Multi-input gates with incompatible schemas - CRASH
+                        # Multi-input pass-through nodes with incompatible schemas - CRASH
                         raise ValueError(
-                            f"Gate '{node_id}' receives incompatible schemas from "
+                            f"{node_info.node_type.capitalize()} '{node_id}' receives incompatible schemas from "
                             f"multiple inputs - this is a graph construction bug. "
                             f"First input schema: {first_schema}, "
                             f"Other input schema: {other_schema}"
@@ -767,7 +786,7 @@ class ExecutionGraph:
 
             return first_schema
 
-        # Not a gate and no schema - return None (dynamic)
+        # Not a pass-through node and no schema - return None (dynamic)
         return None
 
     def _validate_coalesce_compatibility(self, coalesce_id: str) -> None:

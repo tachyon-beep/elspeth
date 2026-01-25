@@ -349,6 +349,9 @@ checkpoints_table = Table(
     Column("sequence_number", Integer, nullable=False),  # Monotonic progress marker
     Column("aggregation_state_json", Text),  # Serialized aggregation buffers (if any)
     Column("created_at", DateTime(timezone=True), nullable=False),
+    # Topology validation (topological checkpoint compatibility)
+    Column("upstream_topology_hash", String(64)),  # Hash of nodes + edges upstream of checkpoint
+    Column("checkpoint_node_config_hash", String(64)),  # Hash of checkpoint node config only
 )
 
 Index("ix_checkpoints_run", checkpoints_table.c.run_id)

@@ -8,49 +8,20 @@ The actual resume logic (Orchestrator.resume()) is implemented separately.
 """
 
 import json
-from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import select
 from sqlalchemy.engine import Row
 
-from elspeth.contracts import Checkpoint, RunStatus
+from elspeth.contracts import ResumeCheck, ResumePoint, RunStatus
+from elspeth.core.checkpoint.compatibility import CheckpointCompatibilityValidator
 from elspeth.core.checkpoint.manager import CheckpointManager
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.schema import rows_table, runs_table, tokens_table
 from elspeth.core.payload_store import PayloadStore
 
-
-@dataclass(frozen=True)
-class ResumeCheck:
-    """Result of checking if a run can be resumed.
-
-    Replaces tuple[bool, str | None] return type from can_resume().
-    """
-
-    can_resume: bool
-    reason: str | None = None
-
-    def __post_init__(self) -> None:
-        if self.can_resume and self.reason is not None:
-            raise ValueError("can_resume=True should not have a reason")
-        if not self.can_resume and self.reason is None:
-            raise ValueError("can_resume=False must have a reason explaining why")
-
-
-@dataclass
-class ResumePoint:
-    """Information needed to resume a run.
-
-    Contains all the data needed by Orchestrator.resume() to continue
-    processing from where a failed run left off.
-    """
-
-    checkpoint: Checkpoint
-    token_id: str
-    node_id: str
-    sequence_number: int
-    aggregation_state: dict[str, Any] | None
+if TYPE_CHECKING:
+    from elspeth.core.dag import ExecutionGraph
 
 
 class RecoveryManager:
@@ -81,16 +52,18 @@ class RecoveryManager:
         self._db = db
         self._checkpoint_manager = checkpoint_manager
 
-    def can_resume(self, run_id: str) -> ResumeCheck:
+    def can_resume(self, run_id: str, graph: "ExecutionGraph") -> ResumeCheck:
         """Check if a run can be resumed.
 
         A run can be resumed if:
         - It exists in the database
         - Its status is "failed" (not "completed" or "running")
         - At least one checkpoint exists for recovery
+        - The checkpoint's upstream topology is compatible with current graph
 
         Args:
             run_id: The run to check
+            graph: The current execution graph to validate against
 
         Returns:
             ResumeCheck with can_resume=True if resumable,
@@ -110,9 +83,11 @@ class RecoveryManager:
         if checkpoint is None:
             return ResumeCheck(can_resume=False, reason="No checkpoint found for recovery")
 
-        return ResumeCheck(can_resume=True)
+        # Validate topological compatibility
+        validator = CheckpointCompatibilityValidator()
+        return validator.validate(checkpoint, graph)
 
-    def get_resume_point(self, run_id: str) -> ResumePoint | None:
+    def get_resume_point(self, run_id: str, graph: "ExecutionGraph") -> ResumePoint | None:
         """Get the resume point for a failed run.
 
         Returns all information needed to resume processing:
@@ -124,11 +99,12 @@ class RecoveryManager:
 
         Args:
             run_id: The run to get resume point for
+            graph: The current execution graph to validate against
 
         Returns:
             ResumePoint if run can be resumed, None otherwise
         """
-        check = self.can_resume(run_id)
+        check = self.can_resume(run_id, graph)
         if not check.can_resume:
             return None
 

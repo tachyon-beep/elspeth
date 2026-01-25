@@ -49,8 +49,8 @@ RowPlugin = BaseTransform | BaseGate
 """Union of all row-processing plugin types for pipeline transforms list."""
 
 if TYPE_CHECKING:
+    from elspeth.contracts import ResumePoint
     from elspeth.core.checkpoint import CheckpointManager
-    from elspeth.core.checkpoint.recovery import ResumePoint
     from elspeth.core.config import CheckpointSettings, ElspethSettings
 
 
@@ -142,6 +142,7 @@ class Orchestrator:
         self._checkpoint_manager = checkpoint_manager
         self._checkpoint_settings = checkpoint_settings
         self._sequence_number = 0  # Monotonic counter for checkpoint ordering
+        self._current_graph: ExecutionGraph | None = None  # Set during execution for checkpointing
 
     def _maybe_checkpoint(self, run_id: str, token_id: str, node_id: str) -> None:
         """Create checkpoint if configured.
@@ -163,6 +164,9 @@ class Orchestrator:
             return
         if self._checkpoint_manager is None:
             return
+        if self._current_graph is None:
+            # Should never happen - graph is set during execution
+            raise RuntimeError("Cannot create checkpoint: execution graph not available")
 
         self._sequence_number += 1
 
@@ -182,6 +186,7 @@ class Orchestrator:
                 token_id=token_id,
                 node_id=node_id,
                 sequence_number=self._sequence_number,
+                graph=self._current_graph,
             )
 
     def _delete_checkpoints(self, run_id: str) -> None:
@@ -602,6 +607,9 @@ class Orchestrator:
             batch_checkpoints: Restored batch checkpoints (maps node_id -> checkpoint_data)
             payload_store: Optional PayloadStore for persisting source row payloads
         """
+        # Store graph for checkpointing during execution
+        self._current_graph = graph
+
         # Get execution order from graph
         execution_order = graph.topological_order()
 
@@ -1130,6 +1138,9 @@ class Orchestrator:
             for sink in config.sinks.values():
                 sink.close()
 
+        # Clear graph after execution completes
+        self._current_graph = None
+
         return RunResult(
             run_id=run_id,
             status=RunStatus.RUNNING,  # Will be updated to COMPLETED
@@ -1400,6 +1411,9 @@ class Orchestrator:
         Returns:
             RunResult with processing counts
         """
+        # Store graph for checkpointing during execution
+        self._current_graph = graph
+
         # Get explicit node ID mappings from graph
         source_id = graph.get_source()
         if source_id is None:
@@ -1654,6 +1668,9 @@ class Orchestrator:
             # Close all sinks (NOT source - wasn't opened)
             for sink in config.sinks.values():
                 sink.close()
+
+        # Clear graph after execution completes
+        self._current_graph = None
 
         return RunResult(
             run_id=run_id,

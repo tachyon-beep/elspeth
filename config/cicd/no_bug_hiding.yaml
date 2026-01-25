@@ -638,3 +638,13 @@ allow_hits:
   reason: 'Trust boundary: Pydantic error dict structure from external library - ''input'' field is optional'
   safety: Graceful default to '<unknown>' - error message still produced with field and message
   expires: null
+- key: core/dag.py:R1:ExecutionGraph:_get_missing_required_fields:line=840
+  owner: architecture
+  reason: 'Trust boundary: Pydantic model_config may not have ''extra'' key (defaults to ''forbid'')'
+  safety: Checking for dynamic schema marker - missing 'extra' key means not dynamic
+  expires: null
+- key: core/dag.py:R1:ExecutionGraph:_get_missing_required_fields:line=841
+  owner: architecture
+  reason: 'Trust boundary: Pydantic model_config may not have ''extra'' key (defaults to ''forbid'')'
+  safety: Checking for dynamic schema marker - missing 'extra' key means not dynamic
+  expires: null

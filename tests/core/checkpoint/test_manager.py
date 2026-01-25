@@ -3,10 +3,14 @@
 import json
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
 from elspeth.core.checkpoint.manager import CheckpointManager, IncompatibleCheckpointError
+
+if TYPE_CHECKING:
+    from elspeth.core.dag import ExecutionGraph
 
 
 class TestCheckpointManager:
@@ -19,6 +23,15 @@ class TestCheckpointManager:
 
         db = LandscapeDB(f"sqlite:///{tmp_path}/test.db")  # Tables auto-created
         return CheckpointManager(db)
+
+    @pytest.fixture
+    def mock_graph(self) -> "ExecutionGraph":
+        """Create a simple mock graph for testing."""
+        from elspeth.core.dag import ExecutionGraph
+
+        graph = ExecutionGraph()
+        graph.add_node("node-001", node_type="transform", plugin_name="test", config={})
+        return graph
 
     @pytest.fixture
     def setup_run(self, manager: CheckpointManager) -> str:
@@ -76,25 +89,26 @@ class TestCheckpointManager:
             conn.commit()
         return "run-001"
 
-    def test_create_checkpoint(self, manager: CheckpointManager, setup_run: str) -> None:
+    def test_create_checkpoint(self, manager: CheckpointManager, setup_run: str, mock_graph: "ExecutionGraph") -> None:
         """Can create a checkpoint."""
         checkpoint = manager.create_checkpoint(
             run_id="run-001",
             token_id="tok-001",
             node_id="node-001",
             sequence_number=1,
+            graph=mock_graph,
         )
 
         assert checkpoint.checkpoint_id is not None
         assert checkpoint.run_id == "run-001"
         assert checkpoint.sequence_number == 1
 
-    def test_get_latest_checkpoint(self, manager: CheckpointManager, setup_run: str) -> None:
+    def test_get_latest_checkpoint(self, manager: CheckpointManager, setup_run: str, mock_graph: "ExecutionGraph") -> None:
         """Can retrieve the latest checkpoint for a run."""
         # Create multiple checkpoints
-        manager.create_checkpoint("run-001", "tok-001", "node-001", 1)
-        manager.create_checkpoint("run-001", "tok-001", "node-001", 2)
-        manager.create_checkpoint("run-001", "tok-001", "node-001", 3)
+        manager.create_checkpoint("run-001", "tok-001", "node-001", 1, mock_graph)
+        manager.create_checkpoint("run-001", "tok-001", "node-001", 2, mock_graph)
+        manager.create_checkpoint("run-001", "tok-001", "node-001", 3, mock_graph)
 
         latest = manager.get_latest_checkpoint("run-001")
 
@@ -106,7 +120,7 @@ class TestCheckpointManager:
         latest = manager.get_latest_checkpoint("nonexistent-run")
         assert latest is None
 
-    def test_checkpoint_with_aggregation_state(self, manager: CheckpointManager, setup_run: str) -> None:
+    def test_checkpoint_with_aggregation_state(self, manager: CheckpointManager, setup_run: str, mock_graph: "ExecutionGraph") -> None:
         """Can store aggregation state in checkpoint."""
         agg_state = {"buffer": [1, 2, 3], "count": 3}
 
@@ -115,6 +129,7 @@ class TestCheckpointManager:
             token_id="tok-001",
             node_id="node-001",
             sequence_number=1,
+            graph=mock_graph,
             aggregation_state=agg_state,
         )
 
@@ -123,7 +138,9 @@ class TestCheckpointManager:
         assert loaded.aggregation_state_json is not None
         assert json.loads(loaded.aggregation_state_json) == agg_state
 
-    def test_checkpoint_with_empty_aggregation_state_preserved(self, manager: CheckpointManager, setup_run: str) -> None:
+    def test_checkpoint_with_empty_aggregation_state_preserved(
+        self, manager: CheckpointManager, setup_run: str, mock_graph: "ExecutionGraph"
+    ) -> None:
         """Empty aggregation state {} is distinct from None (no state).
 
         Regression test for truthiness bug: empty dict {} should serialize to "{}"
@@ -138,6 +155,7 @@ class TestCheckpointManager:
             token_id="tok-001",
             node_id="node-001",
             sequence_number=1,
+            graph=mock_graph,
             aggregation_state={},  # Empty dict, not None
         )
 
@@ -150,7 +168,9 @@ class TestCheckpointManager:
             "instead of `if aggregation_state is not None:`"
         )
 
-    def test_checkpoint_with_none_aggregation_state_is_null(self, manager: CheckpointManager, setup_run: str) -> None:
+    def test_checkpoint_with_none_aggregation_state_is_null(
+        self, manager: CheckpointManager, setup_run: str, mock_graph: "ExecutionGraph"
+    ) -> None:
         """None aggregation state stays as NULL/None in the database.
 
         Complements test_checkpoint_with_empty_aggregation_state_preserved to
@@ -162,6 +182,7 @@ class TestCheckpointManager:
             token_id="tok-001",
             node_id="node-001",
             sequence_number=1,
+            graph=mock_graph,
             aggregation_state=None,
         )
 
@@ -170,21 +191,21 @@ class TestCheckpointManager:
         # None should stay as None (NULL in DB)
         assert loaded.aggregation_state_json is None, f"None aggregation state should stay as None, got {loaded.aggregation_state_json!r}"
 
-    def test_get_checkpoints_ordered(self, manager: CheckpointManager, setup_run: str) -> None:
+    def test_get_checkpoints_ordered(self, manager: CheckpointManager, setup_run: str, mock_graph: "ExecutionGraph") -> None:
         """Get all checkpoints ordered by sequence number."""
-        manager.create_checkpoint("run-001", "tok-001", "node-001", 3)
-        manager.create_checkpoint("run-001", "tok-001", "node-001", 1)
-        manager.create_checkpoint("run-001", "tok-001", "node-001", 2)
+        manager.create_checkpoint("run-001", "tok-001", "node-001", 3, mock_graph)
+        manager.create_checkpoint("run-001", "tok-001", "node-001", 1, mock_graph)
+        manager.create_checkpoint("run-001", "tok-001", "node-001", 2, mock_graph)
 
         checkpoints = manager.get_checkpoints("run-001")
 
         assert len(checkpoints) == 3
         assert [c.sequence_number for c in checkpoints] == [1, 2, 3]
 
-    def test_delete_checkpoints(self, manager: CheckpointManager, setup_run: str) -> None:
+    def test_delete_checkpoints(self, manager: CheckpointManager, setup_run: str, mock_graph: "ExecutionGraph") -> None:
         """Delete all checkpoints for a run."""
-        manager.create_checkpoint("run-001", "tok-001", "node-001", 1)
-        manager.create_checkpoint("run-001", "tok-001", "node-001", 2)
+        manager.create_checkpoint("run-001", "tok-001", "node-001", 1, mock_graph)
+        manager.create_checkpoint("run-001", "tok-001", "node-001", 2, mock_graph)
 
         deleted = manager.delete_checkpoints("run-001")
 
@@ -285,7 +306,7 @@ class TestCheckpointManager:
         assert "deterministic node IDs" in error_msg
         assert "Resume not supported" in error_msg
 
-    def test_new_checkpoint_accepted(self, manager: CheckpointManager, setup_run: str) -> None:
+    def test_new_checkpoint_accepted(self, manager: CheckpointManager, setup_run: str, mock_graph: "ExecutionGraph") -> None:
         """Checkpoints created on or after 2026-01-24 should be accepted.
 
         New checkpoints use deterministic hash-based node IDs which are
@@ -319,7 +340,7 @@ class TestCheckpointManager:
         # SQLite may return timezone-naive datetime, so compare the datetime values
         assert checkpoint.created_at.replace(tzinfo=None) == new_date.replace(tzinfo=None)
 
-    def test_checkpoint_after_cutoff_accepted(self, manager: CheckpointManager, setup_run: str) -> None:
+    def test_checkpoint_after_cutoff_accepted(self, manager: CheckpointManager, setup_run: str, mock_graph: "ExecutionGraph") -> None:
         """Checkpoints created after 2026-01-24 should be accepted.
 
         Verifies that the cutoff is inclusive - any date >= 2026-01-24 00:00:00 is valid.

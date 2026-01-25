@@ -1215,6 +1215,68 @@ def _execute_resume_with_instances(
     return result
 
 
+def _build_validation_graph(settings_config: ElspethSettings) -> ExecutionGraph:
+    """Build execution graph for resume topology validation.
+
+    CRITICAL: Uses the ORIGINAL source plugin configuration (not NullSource)
+    to match the topology hash computed during the original run.
+
+    The checkpoint's upstream_topology_hash was computed with the real source,
+    so validation must use the same source to avoid false topology mismatches.
+
+    Returns:
+        ExecutionGraph with original source for topology validation
+    """
+    from elspeth.cli_helpers import instantiate_plugins_from_config
+
+    plugins = instantiate_plugins_from_config(settings_config)
+
+    graph = ExecutionGraph.from_plugin_instances(
+        source=plugins["source"],  # Use ORIGINAL source, not NullSource
+        transforms=plugins["transforms"],
+        sinks=plugins["sinks"],
+        aggregations=plugins["aggregations"],
+        gates=list(settings_config.gates),
+        output_sink=settings_config.output_sink,
+        coalesce_settings=list(settings_config.coalesce) if settings_config.coalesce else None,
+    )
+
+    graph.validate()
+    return graph
+
+
+def _build_execution_graph(settings_config: ElspethSettings) -> ExecutionGraph:
+    """Build execution graph for resume execution.
+
+    Uses NullSource because resume data comes from stored payloads,
+    not from re-reading the original source.
+
+    Returns:
+        ExecutionGraph with NullSource for execution
+    """
+    from elspeth.cli_helpers import instantiate_plugins_from_config
+    from elspeth.plugins.sources.null_source import NullSource
+
+    plugins = instantiate_plugins_from_config(settings_config)
+
+    # Override source with NullSource for resume execution
+    null_source = NullSource({})
+    resume_plugins = {**plugins, "source": null_source}
+
+    graph = ExecutionGraph.from_plugin_instances(
+        source=resume_plugins["source"],
+        transforms=resume_plugins["transforms"],
+        sinks=resume_plugins["sinks"],
+        aggregations=resume_plugins["aggregations"],
+        gates=list(settings_config.gates),
+        output_sink=settings_config.output_sink,
+        coalesce_settings=list(settings_config.coalesce) if settings_config.coalesce else None,
+    )
+
+    graph.validate()
+    return graph
+
+
 @app.command()
 def resume(
     run_id: str = typer.Argument(..., help="Run ID to resume"),
@@ -1256,35 +1318,28 @@ def resume(
     from elspeth.core.checkpoint import CheckpointManager, RecoveryManager
     from elspeth.core.landscape import LandscapeDB
 
-    # Try to load settings - needed for execute mode and optional for dry-run
+    # Settings are REQUIRED for topology validation
     settings_config: ElspethSettings | None = None
     settings_path = Path(settings_file).expanduser() if settings_file else Path("settings.yaml")
-    if settings_path.exists():
-        try:
-            settings_config = load_settings(settings_path)
-        except Exception as e:
-            if execute:
-                typer.echo(f"Error loading {settings_path}: {e}", err=True)
-                typer.echo(
-                    "Settings are required for --execute mode to rebuild pipeline.",
-                    err=True,
-                )
-                raise typer.Exit(1) from None
-            # For dry-run, settings are optional - continue without
+
+    if not settings_path.exists():
+        typer.echo(f"Error: Settings file not found: {settings_path}", err=True)
+        typer.echo("Settings are required to validate checkpoint compatibility.", err=True)
+        raise typer.Exit(1)
+
+    try:
+        settings_config = load_settings(settings_path)
+    except Exception as e:
+        typer.echo(f"Error loading {settings_path}: {e}", err=True)
+        raise typer.Exit(1) from None
 
     # Resolve database URL
-    db_url: str | None = None
-
     if database:
         db_path = Path(database).expanduser()
         db_url = f"sqlite:///{db_path.resolve()}"
-    elif settings_config is not None:
+    else:
         db_url = settings_config.landscape.url
         typer.echo(f"Using database from settings.yaml: {db_url}")
-    else:
-        typer.echo("Error: No settings.yaml found and --database not provided.", err=True)
-        typer.echo("Specify --database to provide path to Landscape database.", err=True)
-        raise typer.Exit(1)
 
     # Initialize database and recovery manager
     try:
@@ -1297,15 +1352,22 @@ def resume(
         checkpoint_manager = CheckpointManager(db)
         recovery_manager = RecoveryManager(db, checkpoint_manager)
 
-        # Check if run can be resumed
-        check = recovery_manager.can_resume(run_id)
+        # Build graph for topology validation (uses original source)
+        try:
+            validation_graph = _build_validation_graph(settings_config)
+        except Exception as e:
+            typer.echo(f"Error building validation graph: {e}", err=True)
+            raise typer.Exit(1) from None
+
+        # Check if run can be resumed (with topology validation)
+        check = recovery_manager.can_resume(run_id, validation_graph)
 
         if not check.can_resume:
             typer.echo(f"Cannot resume run {run_id}: {check.reason}", err=True)
             raise typer.Exit(1)
 
         # Get resume point information
-        resume_point = recovery_manager.get_resume_point(run_id)
+        resume_point = recovery_manager.get_resume_point(run_id, validation_graph)
         if resume_point is None:
             typer.echo(f"Error: Could not get resume point for run {run_id}", err=True)
             raise typer.Exit(1)
@@ -1327,13 +1389,10 @@ def resume(
 
         if not execute:
             typer.echo("\nDry run - use --execute to actually resume processing.")
+            typer.echo("Topology validation passed - checkpoint is compatible with current config.")
             return
 
-        # Execute resume
-        if settings_config is None:
-            typer.echo("Error: settings.yaml required for --execute mode.", err=True)
-            raise typer.Exit(1)
-
+        # Execute resume (graph already built above for validation)
         typer.echo(f"\nResuming run {run_id}...")
 
         # Get payload store from settings
@@ -1346,8 +1405,16 @@ def resume(
 
         payload_store = FilesystemPayloadStore(payload_path)
 
-        # NEW: Instantiate plugins BEFORE graph construction
+        # Build execution graph (uses NullSource for resume)
+        try:
+            execution_graph = _build_execution_graph(settings_config)
+        except Exception as e:
+            typer.echo(f"Error building execution graph: {e}", err=True)
+            raise typer.Exit(1) from None
+
+        # Instantiate plugins for execution
         from elspeth.cli_helpers import instantiate_plugins_from_config
+        from elspeth.plugins.sources.null_source import NullSource
 
         try:
             plugins = instantiate_plugins_from_config(settings_config)
@@ -1355,36 +1422,30 @@ def resume(
             typer.echo(f"Error instantiating plugins: {e}", err=True)
             raise typer.Exit(1) from None
 
-        # CRITICAL: Override source with NullSource for resume (data comes from payloads)
-        from elspeth.plugins.sources.null_source import NullSource
+        # CRITICAL: Force sinks to append mode to prevent data loss
+        # Resume must ADD to existing output, not truncate it
+        manager = _get_plugin_manager()
+        resume_sinks = {}
+        for sink_name, sink_config in settings_config.sinks.items():
+            sink_options = dict(sink_config.options)
+            sink_options["mode"] = "append"  # Override mode to append
 
+            sink_cls = manager.get_sink_by_name(sink_config.plugin)
+            resume_sinks[sink_name] = sink_cls(sink_options)  # type: ignore[assignment]
+
+        # Override source with NullSource for resume (data comes from payloads)
         null_source = NullSource({})
         resume_plugins = {
             **plugins,
-            "source": null_source,  # Override with NullSource for resume
+            "source": null_source,
+            "sinks": resume_sinks,  # Use append-mode sinks
         }
 
-        # NEW: Build graph from plugin instances
-        try:
-            graph = ExecutionGraph.from_plugin_instances(
-                source=resume_plugins["source"],
-                transforms=resume_plugins["transforms"],
-                sinks=resume_plugins["sinks"],
-                aggregations=resume_plugins["aggregations"],
-                gates=list(settings_config.gates),
-                output_sink=settings_config.output_sink,
-                coalesce_settings=list(settings_config.coalesce) if settings_config.coalesce else None,
-            )
-            graph.validate()
-        except GraphValidationError as e:
-            typer.echo(f"Pipeline graph error: {e}", err=True)
-            raise typer.Exit(1) from None
-
-        # Execute resume with pre-instantiated plugins
+        # Execute resume with execution graph (NullSource)
         try:
             result = _execute_resume_with_instances(
                 config=settings_config,
-                graph=graph,
+                graph=execution_graph,
                 plugins=resume_plugins,
                 resume_point=resume_point,
                 payload_store=payload_store,
