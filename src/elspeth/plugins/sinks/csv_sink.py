@@ -63,6 +63,17 @@ class CSVSink(BaseSink):
     plugin_version = "1.0.0"
     # determinism inherited from BaseSink (IO_WRITE)
 
+    # Resume capability: CSV can append to existing files
+    supports_resume: bool = True
+
+    def configure_for_resume(self) -> None:
+        """Configure CSV sink for resume mode.
+
+        Switches from truncate mode to append mode so resume operations
+        add to existing output instead of overwriting.
+        """
+        self._mode = "append"
+
     def __init__(self, config: dict[str, Any]) -> None:
         super().__init__(config)
         cfg = CSVSinkConfig.from_dict(config)
