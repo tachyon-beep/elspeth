@@ -146,7 +146,7 @@ class TestCoalesceAuditGap1a:
             assert token_outcome is not None, (
                 f"Gap 1a: Consumed token {consumed_token.token_id} has NO token_outcome! "
                 f"get_token_outcome() returns None, violating audit contract. "
-                f"Expected: RowOutcome.COALESCED with join_group_id={merged_token.token_id}"
+                f"Expected: RowOutcome.COALESCED with join_group_id={merged_token.join_group_id}"
             )
 
             # Verify outcome details
@@ -154,9 +154,10 @@ class TestCoalesceAuditGap1a:
                 f"Consumed token {consumed_token.token_id} should have outcome=COALESCED, got {token_outcome.outcome}"
             )
 
-            assert token_outcome.join_group_id == merged_token.token_id, (
-                f"Consumed token {consumed_token.token_id} should link to merged token "
-                f"via join_group_id={merged_token.token_id}, got {token_outcome.join_group_id}"
+            # Verify consumed token has the canonical join_group_id (same as merged token)
+            assert token_outcome.join_group_id == merged_token.join_group_id, (
+                f"Consumed token {consumed_token.token_id} should have same join_group_id as merged token "
+                f"(canonical ID={merged_token.join_group_id}), got {token_outcome.join_group_id}"
             )
 
 

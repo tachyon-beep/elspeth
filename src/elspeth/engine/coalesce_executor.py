@@ -297,7 +297,7 @@ class CoalesceExecutor:
                 run_id=self._run_id,
                 token_id=token.token_id,
                 outcome=RowOutcome.COALESCED,
-                join_group_id=merged_token.token_id,
+                join_group_id=merged_token.join_group_id,
             )
 
         # Build audit metadata
@@ -570,5 +570,11 @@ class CoalesceExecutor:
                 )
 
             # first policy: should never have pending entries (merges immediately)
+
+        # Clear completed keys to prevent unbounded memory growth
+        # After flush, no more tokens will arrive (source ended), so late-arrival
+        # detection is no longer needed. This prevents O(rows) memory accumulation
+        # in long-running pipelines.
+        self._completed_keys.clear()
 
         return results

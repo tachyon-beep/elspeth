@@ -415,22 +415,22 @@ allow_hits:
     trail'
   safety: Raises TypeError with guidance to use SanitizedWebhookUrl.from_raw_url()
   expires: null
-- key: plugins/transforms/azure/content_safety.py:R1:AzureContentSafety:_check_thresholds:line=565
+- key: plugins/transforms/azure/content_safety.py:R1:AzureContentSafety:_check_thresholds:line=625
   owner: architecture
   reason: 'Trust boundary: Azure API may not return all content categories (hate)'
   safety: Graceful default to 0 (safe) - missing category is treated as 'not detected'
   expires: null
-- key: plugins/transforms/azure/content_safety.py:R1:AzureContentSafety:_check_thresholds:line=569
+- key: plugins/transforms/azure/content_safety.py:R1:AzureContentSafety:_check_thresholds:line=629
   owner: architecture
   reason: 'Trust boundary: Azure API may not return all content categories (violence)'
   safety: Graceful default to 0 (safe) - missing category is treated as 'not detected'
   expires: null
-- key: plugins/transforms/azure/content_safety.py:R1:AzureContentSafety:_check_thresholds:line=573
+- key: plugins/transforms/azure/content_safety.py:R1:AzureContentSafety:_check_thresholds:line=633
   owner: architecture
   reason: 'Trust boundary: Azure API may not return all content categories (sexual)'
   safety: Graceful default to 0 (safe) - missing category is treated as 'not detected'
   expires: null
-- key: plugins/transforms/azure/content_safety.py:R1:AzureContentSafety:_check_thresholds:line=577
+- key: plugins/transforms/azure/content_safety.py:R1:AzureContentSafety:_check_thresholds:line=637
   owner: architecture
   reason: 'Trust boundary: Azure API may not return all content categories (self_harm)'
   safety: Graceful default to 0 (safe) - missing category is treated as 'not detected'

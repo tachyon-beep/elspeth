@@ -508,23 +508,30 @@ class AzureContentSafety(BaseTransform):
 
         Records all API calls to audit trail for full traceability.
         """
-        # Use audited client for state_id (automatic recording), stateless client otherwise
-        if state_id is None:
-            client = self._get_underlying_http_client()
-        else:
-            client = self._get_http_client(state_id)
+        import time
+
+        from elspeth.contracts import CallStatus, CallType
+
+        # Always use underlying client - we'll record manually to ensure correct status
+        client = self._get_underlying_http_client()
 
         url = f"{self._endpoint}/contentsafety/text:analyze?api-version={self.API_VERSION}"
 
+        # Build request data for audit
         request_data = {
-            "text": text,
+            "method": "POST",
+            "url": url,
+            "json": {"text": text},
+            "headers": {"Content-Type": "application/json"},  # Don't record API key
         }
 
+        start = time.perf_counter()
+
         try:
-            # AuditedHTTPClient records call automatically (timing, request, response)
+            # Make HTTP call (without automatic audit recording)
             response = client.post(
                 url,
-                json=request_data,
+                json={"text": text},
                 headers={
                     "Ocp-Apim-Subscription-Key": self._api_key,
                     "Content-Type": "application/json",
@@ -532,22 +539,75 @@ class AzureContentSafety(BaseTransform):
             )
             response.raise_for_status()
 
+            latency_ms = (time.perf_counter() - start) * 1000
+
             # Parse response into category -> severity mapping
             # Azure API responses are external data (Tier 3: Zero Trust) - wrap parsing
-            data = response.json()
-            result: dict[str, int] = {}
-            for item in data["categoriesAnalysis"]:
-                category = item["category"].lower().replace("selfharm", "self_harm")
-                result[category] = item["severity"]
+            try:
+                data = response.json()
+                result: dict[str, int] = {}
+                for item in data["categoriesAnalysis"]:
+                    category = item["category"].lower().replace("selfharm", "self_harm")
+                    result[category] = item["severity"]
 
-            return result
+                # SUCCESS - response was valid and parseable
+                if state_id is not None and self._recorder is not None:
+                    response_data = {
+                        "status_code": response.status_code,
+                        "body_size": len(response.content),
+                        "body": data,
+                    }
+                    self._recorder.record_call(
+                        state_id=state_id,
+                        call_index=self._recorder.allocate_call_index(state_id),
+                        call_type=CallType.HTTP,
+                        status=CallStatus.SUCCESS,
+                        request_data=request_data,
+                        response_data=response_data,
+                        latency_ms=latency_ms,
+                    )
 
-        except (KeyError, TypeError, ValueError) as e:
-            # Malformed response - AuditedHTTPClient already recorded the call
-            raise httpx.RequestError(f"Malformed API response: {e}") from e
+                return result
 
-        except (httpx.HTTPStatusError, httpx.RequestError):
-            # Network/HTTP errors - AuditedHTTPClient already recorded the call
+            except (KeyError, TypeError, ValueError) as e:
+                # Malformed response - record as ERROR since we can't use the response
+                if state_id is not None and self._recorder is not None:
+                    response_data = {
+                        "status_code": response.status_code,
+                        "body_size": len(response.content),
+                        "body": response.text,  # Store raw text for debugging
+                    }
+                    self._recorder.record_call(
+                        state_id=state_id,
+                        call_index=self._recorder.allocate_call_index(state_id),
+                        call_type=CallType.HTTP,
+                        status=CallStatus.ERROR,
+                        request_data=request_data,
+                        response_data=response_data,
+                        error={
+                            "type": "MalformedResponse",
+                            "message": f"Response parsing failed: {e}",
+                        },
+                        latency_ms=latency_ms,
+                    )
+                raise httpx.RequestError(f"Malformed API response: {e}") from e
+
+        except (httpx.HTTPStatusError, httpx.RequestError) as e:
+            # Network/HTTP errors - record as ERROR
+            latency_ms = (time.perf_counter() - start) * 1000
+            if state_id is not None and self._recorder is not None:
+                self._recorder.record_call(
+                    state_id=state_id,
+                    call_index=self._recorder.allocate_call_index(state_id),
+                    call_type=CallType.HTTP,
+                    status=CallStatus.ERROR,
+                    request_data=request_data,
+                    error={
+                        "type": type(e).__name__,
+                        "message": str(e),
+                    },
+                    latency_ms=latency_ms,
+                )
             raise
 
     def _check_thresholds(

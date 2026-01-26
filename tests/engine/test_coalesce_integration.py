@@ -659,8 +659,13 @@ class TestCoalesceAuditTrail:
             assert parent_outcome.fork_group_id is not None, "FORKED outcome must have fork_group_id"
 
             # P1: Verify token_parents for merged token (should have 2 parents with proper ordinals)
-            # The merged token is the join_group_id from the consumed tokens
-            merged_token_id = recorder.get_token_outcome(consumed_token_ids[0]).join_group_id
+            # Find the merged token by looking in tokens table for token with same join_group_id
+            # that is NOT one of the consumed tokens
+            canonical_join_group_id = recorder.get_token_outcome(consumed_token_ids[0]).join_group_id
+            merged_tokens = [t for t in all_tokens if t.join_group_id == canonical_join_group_id and t.token_id not in consumed_token_ids]
+            assert len(merged_tokens) == 1, f"Should have exactly 1 merged token, got {len(merged_tokens)}"
+            merged_token_id = merged_tokens[0].token_id
+
             parents = recorder.get_token_parents(merged_token_id)
             assert len(parents) == 2, f"Merged token should have 2 parents, got {len(parents)}"
 

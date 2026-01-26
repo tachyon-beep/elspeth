@@ -706,8 +706,8 @@ class RowProcessor:
                             )
                         )
 
-                    # Generate fork group ID linking parent to children
-                    fork_group_id = uuid.uuid4().hex[:16]
+                    # Use canonical fork_group_id from recorder (all children share same ID)
+                    fork_group_id = outcome.child_tokens[0].fork_group_id
                     self._recorder.record_token_outcome(
                         run_id=self._run_id,
                         token_id=current_token.token_id,
@@ -840,8 +840,8 @@ class RowProcessor:
                             )
                         )
 
-                    # Parent token is EXPANDED (terminal for parent)
-                    expand_group_id = uuid.uuid4().hex[:16]
+                    # Parent token is EXPANDED (terminal for parent) - use canonical expand_group_id
+                    expand_group_id = child_tokens[0].expand_group_id
                     self._recorder.record_token_outcome(
                         run_id=self._run_id,
                         token_id=current_token.token_id,
@@ -977,7 +977,8 @@ class RowProcessor:
                     # 2. COMPLETED (later, at sink) - indicates final destination
                     # This is consistent with the BUFFERED pattern where tokens transition
                     # through multiple states before reaching their final outcome.
-                    join_group_id = f"{coalesce_name}_{uuid.uuid4().hex[:8]}"
+                    # Use canonical join_group_id from recorder (via merged_token)
+                    join_group_id = coalesce_outcome.merged_token.join_group_id
                     self._recorder.record_token_outcome(
                         run_id=self._run_id,
                         token_id=coalesce_outcome.merged_token.token_id,
