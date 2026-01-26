@@ -89,7 +89,7 @@ Open `examples/threshold_gate/settings.yaml`:
 
 ```yaml
 # SENSE: Where data comes from
-datasource:
+source:
   plugin: csv
   options:
     path: examples/threshold_gate/input.csv
@@ -134,7 +134,7 @@ landscape:
 
 | Section | Purpose |
 |---------|---------|
-| `datasource` | **SENSE** - Load data from CSV, validate schema |
+| `source` | **SENSE** - Load data from CSV, validate schema |
 | `gates` | **DECIDE** - Route based on condition |
 | `sinks` | **ACT** - Write to output files |
 | `landscape` | **AUDIT** - Record everything |
@@ -240,7 +240,7 @@ EOF
 ```bash
 cat > config/pipeline.yaml << 'EOF'
 # SENSE: Load from CSV
-datasource:
+source:
   plugin: csv
   options:
     path: /app/input/transactions.csv  # Container path!
@@ -473,7 +473,7 @@ sinks:
 Add a field before routing:
 
 ```yaml
-row_plugins:
+transforms:
   - plugin: field_mapper
     options:
       schema:
@@ -529,8 +529,8 @@ schema:
 
 **Fix:** Ensure the source schema coerces numeric fields. The expression parser does NOT allow function calls like `int()`:
 ```yaml
-# In datasource config - coerce to int at source
-datasource:
+# In source config - coerce to int at source
+source:
   plugin: csv
   options:
     schema:
