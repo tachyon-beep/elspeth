@@ -7,11 +7,8 @@ pipeline execution. It wraps the low-level database operations.
 
 import json
 import logging
-import uuid
-from datetime import UTC, datetime
-from enum import Enum
 from threading import Lock
-from typing import TYPE_CHECKING, Any, Literal, TypeVar, overload
+from typing import TYPE_CHECKING, Any, Literal, overload
 
 if TYPE_CHECKING:
     from elspeth.contracts.schema import SchemaConfig
@@ -56,6 +53,7 @@ from elspeth.contracts import (
 )
 from elspeth.core.canonical import canonical_json, repr_hash, stable_hash
 from elspeth.core.landscape._database_ops import DatabaseOps
+from elspeth.core.landscape._helpers import coerce_enum, generate_id, now
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.core.landscape.repositories import (
     ArtifactRepository,
@@ -92,43 +90,6 @@ from elspeth.core.landscape.schema import (
     transform_errors_table,
     validation_errors_table,
 )
-
-E = TypeVar("E", bound=Enum)
-
-
-def _now() -> datetime:
-    """Get current UTC timestamp."""
-    return datetime.now(UTC)
-
-
-def _generate_id() -> str:
-    """Generate a unique ID."""
-    return uuid.uuid4().hex
-
-
-def _coerce_enum(value: str | E, enum_type: type[E]) -> E:
-    """Coerce a string or enum value to the target enum type.
-
-    Args:
-        value: String value or enum instance
-        enum_type: Target enum class
-
-    Returns:
-        Enum instance
-
-    Raises:
-        ValueError: If string doesn't match any enum value
-
-    Example:
-        >>> _coerce_enum("transform", NodeType)
-        <NodeType.TRANSFORM: 'transform'>
-        >>> _coerce_enum(NodeType.TRANSFORM, NodeType)
-        <NodeType.TRANSFORM: 'transform'>
-    """
-    if isinstance(value, enum_type):
-        return value
-    # str-based enums use value lookup
-    return enum_type(value)
 
 
 class LandscapeRecorder:
@@ -217,16 +178,16 @@ class LandscapeRecorder:
             ValueError: If status string is not a valid RunStatus value
         """
         # Validate and coerce status enum early - fail fast on typos
-        status_enum = _coerce_enum(status, RunStatus)
+        status_enum = coerce_enum(status, RunStatus)
 
-        run_id = run_id or _generate_id()
+        run_id = run_id or generate_id()
         settings_json = canonical_json(config)
         config_hash = stable_hash(config)
-        now = _now()
+        timestamp = now()
 
         run = Run(
             run_id=run_id,
-            started_at=now,
+            started_at=timestamp,
             config_hash=config_hash,
             settings_json=settings_json,
             canonical_version=canonical_version,
@@ -271,8 +232,8 @@ class LandscapeRecorder:
             ValueError: If status string is not a valid RunStatus value
         """
         # Validate and coerce status enum early - fail fast on typos
-        status_enum = _coerce_enum(status, RunStatus)
-        now = _now()
+        status_enum = coerce_enum(status, RunStatus)
+        timestamp = now()
 
         with self._db.connection() as conn:
             conn.execute(
@@ -280,7 +241,7 @@ class LandscapeRecorder:
                 .where(runs_table.c.run_id == run_id)
                 .values(
                     status=status_enum.value,  # Store string in DB
-                    completed_at=now,
+                    completed_at=timestamp,
                     reproducibility_grade=reproducibility_grade,
                 )
             )
@@ -379,7 +340,7 @@ class LandscapeRecorder:
             Only updates status field - does not set completed_at or reproducibility_grade.
         """
         # Validate and coerce status enum - fail fast on typos
-        status_enum = _coerce_enum(status, RunStatus)
+        status_enum = coerce_enum(status, RunStatus)
 
         with self._db.connection() as conn:
             conn.execute(runs_table.update().where(runs_table.c.run_id == run_id).values(status=status_enum.value))
@@ -400,7 +361,7 @@ class LandscapeRecorder:
 
         if status is not None:
             # Validate and coerce status enum - fail fast on typos
-            status_enum = _coerce_enum(status, RunStatus)
+            status_enum = coerce_enum(status, RunStatus)
             query = query.where(runs_table.c.status == status_enum.value)
 
         rows = self._ops.execute_fetchall(query)
@@ -431,12 +392,12 @@ class LandscapeRecorder:
             ValueError: If status is not a valid ExportStatus value
         """
         # Validate and coerce status - crash on invalid values per Data Manifesto
-        status_enum = _coerce_enum(status, ExportStatus)
+        status_enum = coerce_enum(status, ExportStatus)
 
         updates: dict[str, Any] = {"export_status": status_enum.value}
 
         if status_enum == ExportStatus.COMPLETED:
-            updates["exported_at"] = _now()
+            updates["exported_at"] = now()
             # Clear stale error when transitioning to completed
             updates["export_error"] = None
         elif status_enum == ExportStatus.PENDING:
@@ -493,13 +454,13 @@ class LandscapeRecorder:
             ValueError: If node_type or determinism string is not a valid enum value
         """
         # Validate and coerce enums early - fail fast on typos
-        node_type_enum = _coerce_enum(node_type, NodeType)
-        determinism_enum = _coerce_enum(determinism, Determinism)
+        node_type_enum = coerce_enum(node_type, NodeType)
+        determinism_enum = coerce_enum(determinism, Determinism)
 
-        node_id = node_id or _generate_id()
+        node_id = node_id or generate_id()
         config_json = canonical_json(config)
         config_hash = stable_hash(config)
-        now = _now()
+        timestamp = now()
 
         # Extract schema info for audit (WP-11.99)
         schema_fields_json: str | None = None
@@ -528,7 +489,7 @@ class LandscapeRecorder:
             config_json=config_json,
             schema_hash=schema_hash,
             sequence_in_pipeline=sequence,
-            registered_at=now,
+            registered_at=timestamp,
             schema_mode=schema_mode,
             schema_fields=schema_fields_list,
         )
@@ -581,10 +542,10 @@ class LandscapeRecorder:
             ValueError: If mode string is not a valid RoutingMode value
         """
         # Validate and coerce mode enum early - fail fast on typos
-        mode_enum = _coerce_enum(mode, RoutingMode)
+        mode_enum = coerce_enum(mode, RoutingMode)
 
-        edge_id = edge_id or _generate_id()
-        now = _now()
+        edge_id = edge_id or generate_id()
+        timestamp = now()
 
         edge = Edge(
             edge_id=edge_id,
@@ -593,7 +554,7 @@ class LandscapeRecorder:
             to_node_id=to_node_id,
             label=label,
             default_mode=mode_enum,  # Strict: enum type
-            created_at=now,
+            created_at=timestamp,
         )
 
         with self._db.connection() as conn:
@@ -700,9 +661,9 @@ class LandscapeRecorder:
         """
         from elspeth.core.canonical import canonical_json
 
-        row_id = row_id or _generate_id()
+        row_id = row_id or generate_id()
         data_hash = stable_hash(data)
-        now = _now()
+        timestamp = now()
 
         # Landscape owns payload persistence - serialize and store if configured
         final_payload_ref = payload_ref  # Legacy path (will be removed)
@@ -718,7 +679,7 @@ class LandscapeRecorder:
             row_index=row_index,
             source_data_hash=data_hash,
             source_data_ref=final_payload_ref,
-            created_at=now,
+            created_at=timestamp,
         )
 
         with self._db.connection() as conn:
@@ -757,8 +718,8 @@ class LandscapeRecorder:
         Returns:
             Token model
         """
-        token_id = token_id or _generate_id()
-        now = _now()
+        token_id = token_id or generate_id()
+        timestamp = now()
 
         token = Token(
             token_id=token_id,
@@ -766,7 +727,7 @@ class LandscapeRecorder:
             fork_group_id=fork_group_id,
             join_group_id=join_group_id,
             branch_name=branch_name,
-            created_at=now,
+            created_at=timestamp,
         )
 
         with self._db.connection() as conn:
@@ -814,13 +775,13 @@ class LandscapeRecorder:
         if not branches:
             raise ValueError("fork_token requires at least one branch")
 
-        fork_group_id = _generate_id()
+        fork_group_id = generate_id()
         children = []
 
         with self._db.connection() as conn:
             for ordinal, branch_name in enumerate(branches):
-                child_id = _generate_id()
-                now = _now()
+                child_id = generate_id()
+                timestamp = now()
 
                 # Create child token
                 conn.execute(
@@ -830,7 +791,7 @@ class LandscapeRecorder:
                         fork_group_id=fork_group_id,
                         branch_name=branch_name,
                         step_in_pipeline=step_in_pipeline,
-                        created_at=now,
+                        created_at=timestamp,
                     )
                 )
 
@@ -850,7 +811,7 @@ class LandscapeRecorder:
                         fork_group_id=fork_group_id,
                         branch_name=branch_name,
                         step_in_pipeline=step_in_pipeline,
-                        created_at=now,
+                        created_at=timestamp,
                     )
                 )
 
@@ -876,9 +837,9 @@ class LandscapeRecorder:
         Returns:
             Merged Token model
         """
-        join_group_id = _generate_id()
-        token_id = _generate_id()
-        now = _now()
+        join_group_id = generate_id()
+        token_id = generate_id()
+        timestamp = now()
 
         with self._db.connection() as conn:
             # Create merged token
@@ -888,7 +849,7 @@ class LandscapeRecorder:
                     row_id=row_id,
                     join_group_id=join_group_id,
                     step_in_pipeline=step_in_pipeline,
-                    created_at=now,
+                    created_at=timestamp,
                 )
             )
 
@@ -907,7 +868,7 @@ class LandscapeRecorder:
             row_id=row_id,
             join_group_id=join_group_id,
             step_in_pipeline=step_in_pipeline,
-            created_at=now,
+            created_at=timestamp,
         )
 
     def expand_token(
@@ -941,13 +902,13 @@ class LandscapeRecorder:
         if count < 1:
             raise ValueError("expand_token requires at least 1 child")
 
-        expand_group_id = _generate_id()
+        expand_group_id = generate_id()
         children = []
 
         with self._db.connection() as conn:
             for ordinal in range(count):
-                child_id = _generate_id()
-                now = _now()
+                child_id = generate_id()
+                timestamp = now()
 
                 # Create child token with expand_group_id
                 conn.execute(
@@ -956,7 +917,7 @@ class LandscapeRecorder:
                         row_id=row_id,
                         expand_group_id=expand_group_id,
                         step_in_pipeline=step_in_pipeline,
-                        created_at=now,
+                        created_at=timestamp,
                     )
                 )
 
@@ -975,7 +936,7 @@ class LandscapeRecorder:
                         row_id=row_id,
                         expand_group_id=expand_group_id,
                         step_in_pipeline=step_in_pipeline,
-                        created_at=now,
+                        created_at=timestamp,
                     )
                 )
 
@@ -1010,9 +971,9 @@ class LandscapeRecorder:
         Returns:
             NodeStateOpen model with status=OPEN
         """
-        state_id = state_id or _generate_id()
+        state_id = state_id or generate_id()
         input_hash = stable_hash(input_data)
-        now = _now()
+        timestamp = now()
 
         context_json = canonical_json(context_before) if context_before is not None else None
 
@@ -1025,7 +986,7 @@ class LandscapeRecorder:
             status=NodeStateStatus.OPEN,
             input_hash=input_hash,
             context_before_json=context_json,
-            started_at=now,
+            started_at=timestamp,
         )
 
         with self._db.connection() as conn:
@@ -1124,7 +1085,7 @@ class LandscapeRecorder:
         if duration_ms is None:
             raise ValueError("duration_ms is required when completing a node state")
 
-        now = _now()
+        timestamp = now()
         output_hash = stable_hash(output_data) if output_data is not None else None
         error_json = canonical_json(error) if error is not None else None
         context_json = canonical_json(context_after) if context_after is not None else None
@@ -1139,7 +1100,7 @@ class LandscapeRecorder:
                     duration_ms=duration_ms,
                     error_json=error_json,
                     context_after_json=context_json,
-                    completed_at=now,
+                    completed_at=timestamp,
                 )
             )
 
@@ -1197,12 +1158,12 @@ class LandscapeRecorder:
             ValueError: If mode string is not a valid RoutingMode value
         """
         # Validate and coerce mode enum early - fail fast on typos
-        mode_enum = _coerce_enum(mode, RoutingMode)
+        mode_enum = coerce_enum(mode, RoutingMode)
 
-        event_id = event_id or _generate_id()
-        routing_group_id = routing_group_id or _generate_id()
+        event_id = event_id or generate_id()
+        routing_group_id = routing_group_id or generate_id()
         reason_hash = stable_hash(reason) if reason else None
-        now = _now()
+        timestamp = now()
 
         event = RoutingEvent(
             event_id=event_id,
@@ -1213,7 +1174,7 @@ class LandscapeRecorder:
             mode=mode_enum,  # Strict: enum type
             reason_hash=reason_hash,
             reason_ref=reason_ref,
-            created_at=now,
+            created_at=timestamp,
         )
 
         with self._db.connection() as conn:
@@ -1251,14 +1212,14 @@ class LandscapeRecorder:
         Returns:
             List of RoutingEvent models
         """
-        routing_group_id = _generate_id()
+        routing_group_id = generate_id()
         reason_hash = stable_hash(reason) if reason else None
-        now = _now()
+        timestamp = now()
         events = []
 
         with self._db.connection() as conn:
             for ordinal, route in enumerate(routes):
-                event_id = _generate_id()
+                event_id = generate_id()
                 event = RoutingEvent(
                     event_id=event_id,
                     state_id=state_id,
@@ -1268,7 +1229,7 @@ class LandscapeRecorder:
                     mode=route.mode,  # Already RoutingMode enum from RoutingSpec
                     reason_hash=reason_hash,
                     reason_ref=None,
-                    created_at=now,
+                    created_at=timestamp,
                 )
 
                 conn.execute(
@@ -1309,8 +1270,8 @@ class LandscapeRecorder:
         Returns:
             Batch model with status="draft"
         """
-        batch_id = batch_id or _generate_id()
-        now = _now()
+        batch_id = batch_id or generate_id()
+        timestamp = now()
 
         batch = Batch(
             batch_id=batch_id,
@@ -1318,7 +1279,7 @@ class LandscapeRecorder:
             aggregation_node_id=aggregation_node_id,
             attempt=attempt,
             status=BatchStatus.DRAFT,  # Strict: enum type
-            created_at=now,
+            created_at=timestamp,
         )
 
         with self._db.connection() as conn:
@@ -1395,7 +1356,7 @@ class LandscapeRecorder:
         if state_id:
             updates["aggregation_state_id"] = state_id
         if status in ("completed", "failed"):
-            updates["completed_at"] = _now()
+            updates["completed_at"] = now()
 
         with self._db.connection() as conn:
             conn.execute(batches_table.update().where(batches_table.c.batch_id == batch_id).values(**updates))
@@ -1421,7 +1382,7 @@ class LandscapeRecorder:
         Returns:
             Updated Batch model
         """
-        now = _now()
+        timestamp = now()
 
         with self._db.connection() as conn:
             conn.execute(
@@ -1432,7 +1393,7 @@ class LandscapeRecorder:
                     trigger_type=trigger_type,
                     trigger_reason=trigger_reason,
                     aggregation_state_id=state_id,
-                    completed_at=now,
+                    completed_at=timestamp,
                 )
             )
 
@@ -1592,8 +1553,8 @@ class LandscapeRecorder:
         Returns:
             Artifact model
         """
-        artifact_id = artifact_id or _generate_id()
-        now = _now()
+        artifact_id = artifact_id or generate_id()
+        timestamp = now()
 
         artifact = Artifact(
             artifact_id=artifact_id,
@@ -1604,7 +1565,7 @@ class LandscapeRecorder:
             path_or_uri=path,
             content_hash=content_hash,
             size_bytes=size_bytes,
-            created_at=now,
+            created_at=timestamp,
             idempotency_key=idempotency_key,
         )
 
@@ -1877,8 +1838,8 @@ class LandscapeRecorder:
             Invalid state_id will raise IntegrityError due to foreign key constraint.
             Call indices should be allocated via allocate_call_index() for coordination.
         """
-        call_id = _generate_id()
-        now = _now()
+        call_id = generate_id()
+        timestamp = now()
 
         # Hash request (always required)
         request_hash = stable_hash(request_data)
@@ -1913,7 +1874,7 @@ class LandscapeRecorder:
             "response_ref": response_ref,
             "error_json": error_json,
             "latency_ms": latency_ms,
-            "created_at": now,
+            "created_at": timestamp,
         }
 
         with self._db.connection() as conn:
@@ -1931,7 +1892,7 @@ class LandscapeRecorder:
             response_ref=response_ref,
             error_json=error_json,
             latency_ms=latency_ms,
-            created_at=now,
+            created_at=timestamp,
         )
 
     # === Explain Methods (Graceful Degradation) ===
@@ -2065,7 +2026,7 @@ class LandscapeRecorder:
         Raises:
             IntegrityError: If terminal outcome already exists for token
         """
-        outcome_id = f"out_{_generate_id()[:12]}"
+        outcome_id = f"out_{generate_id()[:12]}"
         is_terminal = outcome.is_terminal
         context_json = json.dumps(context) if context is not None else None
 
@@ -2077,7 +2038,7 @@ class LandscapeRecorder:
                     token_id=token_id,
                     outcome=outcome.value,
                     is_terminal=1 if is_terminal else 0,
-                    recorded_at=_now(),
+                    recorded_at=now(),
                     sink_name=sink_name,
                     batch_id=batch_id,
                     fork_group_id=fork_group_id,
@@ -2188,7 +2149,7 @@ class LandscapeRecorder:
             error_id for tracking
         """
         logger = logging.getLogger(__name__)
-        error_id = f"verr_{_generate_id()[:12]}"
+        error_id = f"verr_{generate_id()[:12]}"
 
         # Tier-3 (external data) trust boundary: row_data may be non-canonical
         # Try canonical hash/JSON first, fall back to safe representations
@@ -2220,7 +2181,7 @@ class LandscapeRecorder:
                     error=error,
                     schema_mode=schema_mode,
                     destination=destination,
-                    created_at=_now(),
+                    created_at=now(),
                 )
             )
 
@@ -2253,7 +2214,7 @@ class LandscapeRecorder:
         Returns:
             error_id for tracking
         """
-        error_id = f"terr_{_generate_id()[:12]}"
+        error_id = f"terr_{generate_id()[:12]}"
 
         with self._db.connection() as conn:
             conn.execute(
@@ -2266,7 +2227,7 @@ class LandscapeRecorder:
                     row_data_json=canonical_json(row_data),
                     error_details_json=canonical_json(error_details),
                     destination=destination,
-                    created_at=_now(),
+                    created_at=now(),
                 )
             )
 
