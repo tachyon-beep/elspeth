@@ -17,7 +17,7 @@ def test_unknown_source_plugin_error():
     runner = CliRunner()
 
     config_yaml = """
-datasource:
+source:
   plugin: nonexistent_source  # Unknown plugin
   options:
     path: test.csv
@@ -29,7 +29,7 @@ sinks:
       path: out.csv
       schema: {fields: dynamic}
 
-output_sink: output
+default_sink: output
 """
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
@@ -50,13 +50,13 @@ output_sink: output
 def test_unknown_transform_plugin_error():
     """Verify clear error for unknown transform plugin."""
     config_dict = {
-        "datasource": {
+        "source": {
             "plugin": "csv",
             "options": {"path": "test.csv", "schema": {"fields": "dynamic"}, "on_validation_failure": "discard"},
         },
-        "row_plugins": [{"plugin": "nonexistent_transform", "options": {}}],
+        "transforms": [{"plugin": "nonexistent_transform", "options": {}}],
         "sinks": {"out": {"plugin": "csv", "options": {"path": "out.csv", "schema": {"fields": "dynamic"}}}},
-        "output_sink": "out",
+        "default_sink": "out",
     }
 
     adapter = TypeAdapter(ElspethSettings)
@@ -76,7 +76,7 @@ def test_plugin_initialization_error():
     runner = CliRunner()
 
     config_yaml = """
-datasource:
+source:
   plugin: csv
   options:
     # Missing required 'path' option
@@ -89,7 +89,7 @@ sinks:
       path: out.csv
       schema: {fields: dynamic}
 
-output_sink: output
+default_sink: output
 """
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
@@ -100,7 +100,15 @@ output_sink: output
         result = runner.invoke(app, ["validate", "--settings", str(config_file)])
         assert result.exit_code != 0
         # Should show clear error from plugin instantiation
-        assert "error" in result.output.lower()
+        output_lower = result.output.lower()
+        assert "error" in output_lower, f"Expected 'error' in output, got: {result.output}"
+        # Error should mention the plugin type or config issue
+        # (missing path and on_validation_failure for csv source)
+        assert "path" in output_lower or "csv" in output_lower or "source" in output_lower, (
+            f"Expected error to mention plugin/config issue, got: {result.output}"
+        )
+        # Ensure it's NOT reporting as valid
+        assert "pipeline configuration valid" not in output_lower, "Should not report as valid when config has missing required fields"
 
     finally:
         config_file.unlink()
@@ -109,12 +117,12 @@ output_sink: output
 def test_schema_extraction_from_instance():
     """Verify schemas are NOT None after instantiation."""
     config_dict = {
-        "datasource": {
+        "source": {
             "plugin": "csv",
             "options": {"path": "test.csv", "schema": {"mode": "strict", "fields": ["value: float"]}, "on_validation_failure": "discard"},
         },
         "sinks": {"out": {"plugin": "csv", "options": {"path": "out.csv", "schema": {"mode": "strict", "fields": ["value: float"]}}}},
-        "output_sink": "out",
+        "default_sink": "out",
     }
 
     adapter = TypeAdapter(ElspethSettings)
@@ -135,7 +143,7 @@ def test_fork_join_validation():
     runner = CliRunner()
 
     config_yaml = """
-datasource:
+source:
   plugin: csv
   options:
     path: test.csv
@@ -155,7 +163,7 @@ gates:
       - branch_high
       - branch_low
 
-row_plugins:
+transforms:
   - plugin: passthrough
     options:
       schema:
@@ -185,7 +193,7 @@ sinks:
       path: low.csv
       schema: {fields: dynamic}
 
-output_sink: output
+default_sink: output
 """
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
@@ -196,7 +204,10 @@ output_sink: output
         result = runner.invoke(app, ["validate", "--settings", str(config_file)])
         # Should pass validation - fork/join pattern with compatible schemas
         assert result.exit_code == 0
-        assert "valid" in result.output.lower()
+        # Use exact phrase to avoid matching "invalid"
+        assert "pipeline configuration valid" in result.output.lower(), (
+            f"Expected 'Pipeline configuration valid' in output, got: {result.output}"
+        )
 
     finally:
         config_file.unlink()
@@ -212,7 +223,7 @@ def test_fork_to_separate_sinks_without_coalesce():
     runner = CliRunner()
 
     config_yaml = """
-datasource:
+source:
   plugin: csv
   options:
     path: test.csv
@@ -255,7 +266,7 @@ sinks:
       path: output.csv
       schema: {fields: dynamic}
 
-output_sink: output
+default_sink: output
 """
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
@@ -266,7 +277,10 @@ output_sink: output
         result = runner.invoke(app, ["validate", "--settings", str(config_file)])
         # Should pass validation - fork branches to separate sinks with compatible schemas
         assert result.exit_code == 0
-        assert "valid" in result.output.lower()
+        # Use exact phrase to avoid matching "invalid"
+        assert "pipeline configuration valid" in result.output.lower(), (
+            f"Expected 'Pipeline configuration valid' in output, got: {result.output}"
+        )
 
         # NOTE: This test validates that the configuration is accepted.
         # Verifying the actual DAG structure (edge existence) would require
@@ -295,7 +309,7 @@ def test_coalesce_compatible_branch_schemas():
     runner = CliRunner()
 
     config_yaml = """
-datasource:
+source:
   plugin: csv
   options:
     path: test.csv
@@ -315,7 +329,7 @@ gates:
       - branch_high
       - branch_low
 
-row_plugins:
+transforms:
   - plugin: passthrough
     options:
       schema:
@@ -344,7 +358,7 @@ sinks:
         fields:
           - "value: float"
 
-output_sink: output
+default_sink: output
 """
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
@@ -376,7 +390,7 @@ def test_dynamic_schema_to_specific_schema_validation():
 
     # Case 1: Dynamic source → Specific sink (should PASS - validation skipped)
     config_yaml_dynamic_to_specific = """
-datasource:
+source:
   plugin: csv
   options:
     path: test.csv
@@ -393,7 +407,7 @@ sinks:
         fields:
           - "field_a: str"  # Specific schema
 
-output_sink: output
+default_sink: output
 """
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
@@ -404,14 +418,14 @@ output_sink: output
         result = runner.invoke(app, ["validate", "--settings", str(config_file)])
         # Should PASS - dynamic schemas skip validation
         assert result.exit_code == 0
-        assert "valid" in result.output.lower()
+        assert "pipeline configuration valid" in result.output.lower()
 
     finally:
         config_file.unlink()
 
     # Case 2: Specific source → Dynamic transform → Specific sink (should PASS)
     config_yaml_mixed = """
-datasource:
+source:
   plugin: csv
   options:
     path: test.csv
@@ -421,7 +435,7 @@ datasource:
         - "value: float"  # Specific
     on_validation_failure: discard
 
-row_plugins:
+transforms:
   - plugin: passthrough
     options:
       schema: {fields: dynamic}  # Dynamic transform
@@ -436,7 +450,7 @@ sinks:
         fields:
           - "value: float"  # Specific
 
-output_sink: output
+default_sink: output
 """
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
@@ -447,7 +461,7 @@ output_sink: output
         result = runner.invoke(app, ["validate", "--settings", str(config_file)])
         # Should PASS - dynamic schemas in chain skip validation
         assert result.exit_code == 0
-        assert "valid" in result.output.lower()
+        assert "pipeline configuration valid" in result.output.lower()
 
     finally:
         config_file.unlink()

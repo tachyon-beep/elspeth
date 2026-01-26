@@ -23,7 +23,7 @@
 # Run with:
 #   uv run elspeth run -s examples/azure_blob_sentiment/settings.yaml --execute
 
-datasource:
+source:
   plugin: azure_blob
   options:
     sas_token: "${AZURE_STORAGE_SAS_TOKEN}"
@@ -42,7 +42,7 @@ datasource:
         - "text: str"
     on_validation_failure: discard
 
-row_plugins:
+transforms:
   # Step 1: Filter blocked keywords (fast, local check)
   - plugin: keyword_filter
     options:
@@ -187,7 +187,7 @@ sinks:
       schema:
         fields: dynamic
 
-output_sink: output
+default_sink: output
 
 # Audit trail stored locally
 landscape:

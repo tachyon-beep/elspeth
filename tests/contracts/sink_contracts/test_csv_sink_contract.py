@@ -6,6 +6,8 @@ Verifies CSVSink honors the SinkProtocol contract.
 
 from __future__ import annotations
 
+import hashlib
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -13,6 +15,7 @@ import pytest
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 
+from elspeth.plugins.context import PluginContext
 from elspeth.plugins.sinks.csv_sink import CSVSink
 
 from .test_sink_protocol import SinkContractTestBase, SinkDeterminismContractTestBase
@@ -25,14 +28,20 @@ class TestCSVSinkContract(SinkContractTestBase):
     """Contract tests for CSVSink."""
 
     @pytest.fixture
-    def sink(self, tmp_path: Path) -> SinkProtocol:
-        """Create a CSVSink instance."""
-        return CSVSink(
-            {
-                "path": str(tmp_path / "output.csv"),
-                "schema": {"fields": "dynamic"},
-            }
-        )
+    def sink_factory(self, tmp_path: Path) -> Callable[[], SinkProtocol]:
+        """Create a factory for CSVSink instances."""
+        counter = [0]
+
+        def factory() -> SinkProtocol:
+            counter[0] += 1
+            return CSVSink(
+                {
+                    "path": str(tmp_path / f"output_{counter[0]}.csv"),
+                    "schema": {"fields": "dynamic"},
+                }
+            )
+
+        return factory
 
     @pytest.fixture
     def sample_rows(self) -> list[dict[str, Any]]:
@@ -48,14 +57,20 @@ class TestCSVSinkDeterminism(SinkDeterminismContractTestBase):
     """Determinism contract tests for CSVSink."""
 
     @pytest.fixture
-    def sink(self, tmp_path: Path) -> SinkProtocol:
-        """Create a CSVSink instance."""
-        return CSVSink(
-            {
-                "path": str(tmp_path / "output.csv"),
-                "schema": {"fields": "dynamic"},
-            }
-        )
+    def sink_factory(self, tmp_path: Path) -> Callable[[], SinkProtocol]:
+        """Create a factory for CSVSink instances."""
+        counter = [0]
+
+        def factory() -> SinkProtocol:
+            counter[0] += 1
+            return CSVSink(
+                {
+                    "path": str(tmp_path / f"output_{counter[0]}.csv"),
+                    "schema": {"fields": "dynamic"},
+                }
+            )
+
+        return factory
 
     @pytest.fixture
     def sample_rows(self) -> list[dict[str, Any]]:
@@ -65,34 +80,39 @@ class TestCSVSinkDeterminism(SinkDeterminismContractTestBase):
             {"id": 2, "name": "Bob"},
         ]
 
-    def test_csv_sink_content_hash_is_deterministic(self, tmp_path: Path) -> None:
-        """CSVSink: Same rows MUST produce same content_hash."""
-        from elspeth.plugins.context import PluginContext
 
-        rows = [{"id": 1, "name": "Alice"}, {"id": 2, "name": "Bob"}]
+class TestCSVSinkHashVerification:
+    """Tests that verify content_hash and size_bytes match actual file content."""
+
+    def test_content_hash_matches_file_content(self, tmp_path: Path) -> None:
+        """Contract: content_hash MUST match SHA-256 of actual file bytes."""
+        csv_path = tmp_path / "hash_verify.csv"
         ctx = PluginContext(run_id="test", config={})
 
-        # Write to first file
-        sink1 = CSVSink(
-            {
-                "path": str(tmp_path / "output1.csv"),
-                "schema": {"fields": "dynamic"},
-            }
-        )
-        result1 = sink1.write(rows, ctx)
-        sink1.close()
+        rows = [{"id": 1, "name": "Alice"}, {"id": 2, "name": "Bob"}]
+        sink = CSVSink({"path": str(csv_path), "schema": {"fields": "dynamic"}})
+        result = sink.write(rows, ctx)
+        sink.close()
 
-        # Write to second file
-        sink2 = CSVSink(
-            {
-                "path": str(tmp_path / "output2.csv"),
-                "schema": {"fields": "dynamic"},
-            }
+        expected_hash = hashlib.sha256(csv_path.read_bytes()).hexdigest()
+        assert result.content_hash == expected_hash, (
+            f"content_hash does not match file content! reported={result.content_hash}, actual={expected_hash}"
         )
-        result2 = sink2.write(rows, ctx)
-        sink2.close()
 
-        assert result1.content_hash == result2.content_hash, "Same data produced different hashes - audit integrity compromised!"
+    def test_size_bytes_matches_file_size(self, tmp_path: Path) -> None:
+        """Contract: size_bytes MUST match actual file size."""
+        csv_path = tmp_path / "size_verify.csv"
+        ctx = PluginContext(run_id="test", config={})
+
+        rows = [{"id": 1, "name": "Alice"}, {"id": 2, "name": "Bob"}]
+        sink = CSVSink({"path": str(csv_path), "schema": {"fields": "dynamic"}})
+        result = sink.write(rows, ctx)
+        sink.close()
+
+        expected_size = csv_path.stat().st_size
+        assert result.size_bytes == expected_size, (
+            f"size_bytes does not match file size! reported={result.size_bytes}, actual={expected_size}"
+        )
 
 
 class TestCSVSinkAppendMode:
@@ -100,12 +120,9 @@ class TestCSVSinkAppendMode:
 
     def test_append_mode_adds_rows(self, tmp_path: Path) -> None:
         """Append mode MUST add rows to existing file."""
-        from elspeth.plugins.context import PluginContext
-
         csv_path = tmp_path / "append_test.csv"
         ctx = PluginContext(run_id="test", config={})
 
-        # First write
         sink1 = CSVSink(
             {
                 "path": str(csv_path),
@@ -116,7 +133,6 @@ class TestCSVSinkAppendMode:
         sink1.write([{"id": 1, "name": "Alice"}], ctx)
         sink1.close()
 
-        # Append write
         sink2 = CSVSink(
             {
                 "path": str(csv_path),
@@ -127,18 +143,15 @@ class TestCSVSinkAppendMode:
         sink2.write([{"id": 2, "name": "Bob"}], ctx)
         sink2.close()
 
-        # Verify file has both rows
         content = csv_path.read_text()
         lines = content.strip().split("\n")
 
-        assert len(lines) == 3  # Header + 2 data rows
+        assert len(lines) == 3
         assert "Alice" in content
         assert "Bob" in content
 
     def test_append_to_nonexistent_creates_file(self, tmp_path: Path) -> None:
         """Append mode on non-existent file MUST create it with header."""
-        from elspeth.plugins.context import PluginContext
-
         csv_path = tmp_path / "new_file.csv"
         ctx = PluginContext(run_id="test", config={})
 
@@ -158,15 +171,11 @@ class TestCSVSinkAppendMode:
         content = csv_path.read_text()
         lines = content.strip().split("\n")
 
-        assert len(lines) == 2  # Header + 1 data row
+        assert len(lines) == 2
 
 
 class TestCSVSinkPropertyBased:
     """Property-based tests for CSVSink."""
-
-    # RFC 8785 safe integer bounds
-    _MAX_SAFE_INT = 2**53 - 1
-    _MIN_SAFE_INT = -(2**53 - 1)
 
     @given(
         rows=st.lists(
@@ -184,11 +193,9 @@ class TestCSVSinkPropertyBased:
     @settings(max_examples=50, suppress_health_check=[HealthCheck.function_scoped_fixture])
     def test_csv_sink_handles_arbitrary_rows(self, tmp_path: Path, rows: list[dict[str, Any]]) -> None:
         """Property: CSVSink handles any valid row data."""
-        # Use unique path for each test run
         import uuid
 
         from elspeth.contracts import ArtifactDescriptor
-        from elspeth.plugins.context import PluginContext
 
         csv_path = tmp_path / f"test_{uuid.uuid4().hex[:8]}.csv"
 
@@ -224,11 +231,8 @@ class TestCSVSinkPropertyBased:
         """Property: Same rows always produce same hash."""
         import uuid
 
-        from elspeth.plugins.context import PluginContext
-
         ctx = PluginContext(run_id="test", config={})
 
-        # Write twice to different files
         path1 = tmp_path / f"test1_{uuid.uuid4().hex[:8]}.csv"
         path2 = tmp_path / f"test2_{uuid.uuid4().hex[:8]}.csv"
 
@@ -241,6 +245,109 @@ class TestCSVSinkPropertyBased:
         sink2.close()
 
         assert result1.content_hash == result2.content_hash
+
+
+class TestCSVSinkQuotingCharacters:
+    """Tests for CSV quoting with special characters (commas, quotes, newlines)."""
+
+    def test_csv_quoting_with_commas(self, tmp_path: Path) -> None:
+        """CSVSink MUST properly quote fields containing commas."""
+        import csv
+
+        csv_path = tmp_path / "quoting_commas.csv"
+        ctx = PluginContext(run_id="test", config={})
+
+        rows = [{"id": 1, "data": "value with, comma"}]
+        sink = CSVSink({"path": str(csv_path), "schema": {"fields": "dynamic"}})
+        sink.write(rows, ctx)
+        sink.close()
+
+        with open(csv_path, newline="") as f:
+            reader = csv.DictReader(f)
+            read_rows = list(reader)
+
+        assert len(read_rows) == 1
+        assert read_rows[0]["data"] == "value with, comma"
+
+    def test_csv_quoting_with_double_quotes(self, tmp_path: Path) -> None:
+        """CSVSink MUST properly escape fields containing double quotes."""
+        import csv
+
+        csv_path = tmp_path / "quoting_quotes.csv"
+        ctx = PluginContext(run_id="test", config={})
+
+        rows = [{"id": 1, "data": 'value with "quotes"'}]
+        sink = CSVSink({"path": str(csv_path), "schema": {"fields": "dynamic"}})
+        sink.write(rows, ctx)
+        sink.close()
+
+        with open(csv_path, newline="") as f:
+            reader = csv.DictReader(f)
+            read_rows = list(reader)
+
+        assert len(read_rows) == 1
+        assert read_rows[0]["data"] == 'value with "quotes"'
+
+    def test_csv_quoting_with_newlines(self, tmp_path: Path) -> None:
+        """CSVSink MUST properly quote fields containing newlines."""
+        import csv
+
+        csv_path = tmp_path / "quoting_newlines.csv"
+        ctx = PluginContext(run_id="test", config={})
+
+        rows = [{"id": 1, "data": "value with\nnewline"}]
+        sink = CSVSink({"path": str(csv_path), "schema": {"fields": "dynamic"}})
+        sink.write(rows, ctx)
+        sink.close()
+
+        with open(csv_path, newline="") as f:
+            reader = csv.DictReader(f)
+            read_rows = list(reader)
+
+        assert len(read_rows) == 1
+        assert read_rows[0]["data"] == "value with\nnewline"
+
+    def test_csv_quoting_all_special_characters(self, tmp_path: Path) -> None:
+        """CSVSink MUST handle fields with all CSV special characters combined."""
+        import csv
+
+        csv_path = tmp_path / "quoting_all.csv"
+        ctx = PluginContext(run_id="test", config={})
+
+        rows = [{"id": 1, "data": 'value with "quotes" and, commas\nand newlines'}]
+        sink = CSVSink({"path": str(csv_path), "schema": {"fields": "dynamic"}})
+        sink.write(rows, ctx)
+        sink.close()
+
+        with open(csv_path, newline="") as f:
+            reader = csv.DictReader(f)
+            read_rows = list(reader)
+
+        assert len(read_rows) == 1
+        assert read_rows[0]["data"] == 'value with "quotes" and, commas\nand newlines'
+
+    def test_csv_quoting_roundtrip_determinism(self, tmp_path: Path) -> None:
+        """CSVSink MUST produce deterministic output with special characters."""
+        ctx = PluginContext(run_id="test", config={})
+
+        rows = [
+            {"id": 1, "data": 'complex "value", with\nspecial chars'},
+            {"id": 2, "data": "another\nvalue"},
+        ]
+
+        path1 = tmp_path / "roundtrip1.csv"
+        path2 = tmp_path / "roundtrip2.csv"
+
+        sink1 = CSVSink({"path": str(path1), "schema": {"fields": "dynamic"}})
+        result1 = sink1.write(rows, ctx)
+        sink1.close()
+
+        sink2 = CSVSink({"path": str(path2), "schema": {"fields": "dynamic"}})
+        result2 = sink2.write(rows, ctx)
+        sink2.close()
+
+        assert result1.content_hash == result2.content_hash
+        assert path1.read_bytes() == path2.read_bytes()
 
 
 class TestCSVSinkValidation:

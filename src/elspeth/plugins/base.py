@@ -234,6 +234,28 @@ class BaseSink(ABC):
     determinism: Determinism = Determinism.IO_WRITE
     plugin_version: str = "0.0.0"
 
+    # Resume capability (Phase 5 - Checkpoint/Resume)
+    # Default: sinks don't support resume. Override in subclasses that can append.
+    supports_resume: bool = False
+
+    def configure_for_resume(self) -> None:
+        """Configure sink for resume mode (append instead of truncate).
+
+        Called by engine when resuming a run. Override in sinks that support
+        resume to switch from truncate mode to append mode.
+
+        Default implementation raises NotImplementedError. Subclasses that
+        set supports_resume=True MUST override this method.
+
+        Raises:
+            NotImplementedError: If sink cannot be resumed.
+        """
+        raise NotImplementedError(
+            f"{self.__class__.__name__} does not support resume. "
+            f"To make this sink resumable, set supports_resume=True and "
+            f"implement configure_for_resume()."
+        )
+
     def __init__(self, config: dict[str, Any]) -> None:
         """Initialize with configuration.
 

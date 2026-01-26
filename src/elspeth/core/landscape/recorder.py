@@ -7,10 +7,8 @@ pipeline execution. It wraps the low-level database operations.
 
 import json
 import logging
-import uuid
-from datetime import UTC, datetime
-from enum import Enum
-from typing import TYPE_CHECKING, Any, Literal, TypeVar, overload
+from threading import Lock
+from typing import TYPE_CHECKING, Any, Literal, overload
 
 if TYPE_CHECKING:
     from elspeth.contracts.schema import SchemaConfig
@@ -54,7 +52,26 @@ from elspeth.contracts import (
     ValidationErrorRecord,
 )
 from elspeth.core.canonical import canonical_json, repr_hash, stable_hash
+from elspeth.core.landscape._database_ops import DatabaseOps
+from elspeth.core.landscape._helpers import coerce_enum, generate_id, now
 from elspeth.core.landscape.database import LandscapeDB
+from elspeth.core.landscape.repositories import (
+    ArtifactRepository,
+    BatchMemberRepository,
+    BatchRepository,
+    CallRepository,
+    EdgeRepository,
+    NodeRepository,
+    NodeStateRepository,
+    RoutingEventRepository,
+    RowRepository,
+    RunRepository,
+    TokenOutcomeRepository,
+    TokenParentRepository,
+    TokenRepository,
+    TransformErrorRepository,
+    ValidationErrorRepository,
+)
 from elspeth.core.landscape.row_data import RowDataResult, RowDataState
 from elspeth.core.landscape.schema import (
     artifacts_table,
@@ -73,140 +90,6 @@ from elspeth.core.landscape.schema import (
     transform_errors_table,
     validation_errors_table,
 )
-
-E = TypeVar("E", bound=Enum)
-
-
-def _now() -> datetime:
-    """Get current UTC timestamp."""
-    return datetime.now(UTC)
-
-
-def _generate_id() -> str:
-    """Generate a unique ID."""
-    return uuid.uuid4().hex
-
-
-def _coerce_enum(value: str | E, enum_type: type[E]) -> E:
-    """Coerce a string or enum value to the target enum type.
-
-    Args:
-        value: String value or enum instance
-        enum_type: Target enum class
-
-    Returns:
-        Enum instance
-
-    Raises:
-        ValueError: If string doesn't match any enum value
-
-    Example:
-        >>> _coerce_enum("transform", NodeType)
-        <NodeType.TRANSFORM: 'transform'>
-        >>> _coerce_enum(NodeType.TRANSFORM, NodeType)
-        <NodeType.TRANSFORM: 'transform'>
-    """
-    if isinstance(value, enum_type):
-        return value
-    # str-based enums use value lookup
-    return enum_type(value)
-
-
-def _row_to_node_state(row: Any) -> NodeState:
-    """Convert a database row to the appropriate NodeState type.
-
-    Uses discriminated union pattern - status field determines the concrete type.
-
-    Args:
-        row: Database row from node_states table
-
-    Returns:
-        NodeStateOpen, NodeStatePending, NodeStateCompleted, or NodeStateFailed depending on status
-    """
-    status = NodeStateStatus(row.status)
-
-    if status == NodeStateStatus.OPEN:
-        return NodeStateOpen(
-            state_id=row.state_id,
-            token_id=row.token_id,
-            node_id=row.node_id,
-            step_index=row.step_index,
-            attempt=row.attempt,
-            status=NodeStateStatus.OPEN,
-            input_hash=row.input_hash,
-            started_at=row.started_at,
-            context_before_json=row.context_before_json,
-        )
-    elif status == NodeStateStatus.PENDING:
-        # Pending states must have completed_at, duration_ms (but no output_hash yet)
-        # Validate required fields - None indicates audit integrity violation
-        if row.duration_ms is None:
-            raise ValueError(f"PENDING state {row.state_id} has NULL duration_ms - audit integrity violation")
-        if row.completed_at is None:
-            raise ValueError(f"PENDING state {row.state_id} has NULL completed_at - audit integrity violation")
-        return NodeStatePending(
-            state_id=row.state_id,
-            token_id=row.token_id,
-            node_id=row.node_id,
-            step_index=row.step_index,
-            attempt=row.attempt,
-            status=NodeStateStatus.PENDING,
-            input_hash=row.input_hash,
-            started_at=row.started_at,
-            completed_at=row.completed_at,
-            duration_ms=row.duration_ms,
-            context_before_json=row.context_before_json,
-            context_after_json=row.context_after_json,
-        )
-    elif status == NodeStateStatus.COMPLETED:
-        # Completed states must have output_hash, completed_at, duration_ms
-        # Validate required fields - None indicates audit integrity violation
-        if row.output_hash is None:
-            raise ValueError(f"COMPLETED state {row.state_id} has NULL output_hash - audit integrity violation")
-        if row.duration_ms is None:
-            raise ValueError(f"COMPLETED state {row.state_id} has NULL duration_ms - audit integrity violation")
-        if row.completed_at is None:
-            raise ValueError(f"COMPLETED state {row.state_id} has NULL completed_at - audit integrity violation")
-        return NodeStateCompleted(
-            state_id=row.state_id,
-            token_id=row.token_id,
-            node_id=row.node_id,
-            step_index=row.step_index,
-            attempt=row.attempt,
-            status=NodeStateStatus.COMPLETED,
-            input_hash=row.input_hash,
-            started_at=row.started_at,
-            output_hash=row.output_hash,
-            completed_at=row.completed_at,
-            duration_ms=row.duration_ms,
-            context_before_json=row.context_before_json,
-            context_after_json=row.context_after_json,
-        )
-    elif status == NodeStateStatus.FAILED:
-        # Failed states must have completed_at, duration_ms (error_json and output_hash are optional)
-        # Validate required fields - None indicates audit integrity violation
-        if row.duration_ms is None:
-            raise ValueError(f"FAILED state {row.state_id} has NULL duration_ms - audit integrity violation")
-        if row.completed_at is None:
-            raise ValueError(f"FAILED state {row.state_id} has NULL completed_at - audit integrity violation")
-        return NodeStateFailed(
-            state_id=row.state_id,
-            token_id=row.token_id,
-            node_id=row.node_id,
-            step_index=row.step_index,
-            attempt=row.attempt,
-            status=NodeStateStatus.FAILED,
-            input_hash=row.input_hash,
-            started_at=row.started_at,
-            completed_at=row.completed_at,
-            duration_ms=row.duration_ms,
-            error_json=row.error_json,
-            output_hash=row.output_hash,
-            context_before_json=row.context_before_json,
-            context_after_json=row.context_after_json,
-        )
-    else:
-        raise ValueError(f"Unknown status {row.status} for state {row.state_id}")
 
 
 class LandscapeRecorder:
@@ -237,6 +120,32 @@ class LandscapeRecorder:
         """
         self._db = db
         self._payload_store = payload_store
+
+        # Per-state_id call index allocation
+        # Ensures UNIQUE(state_id, call_index) across all client types and retries
+        self._call_indices: dict[str, int] = {}  # state_id → next_index
+        self._call_index_lock: Lock = Lock()
+
+        # Database operations helper for reduced boilerplate
+        self._ops = DatabaseOps(db)
+
+        # Repository instances for row-to-object conversions
+        # Session is passed per-call so we pass None here
+        self._run_repo = RunRepository(None)
+        self._node_repo = NodeRepository(None)
+        self._edge_repo = EdgeRepository(None)
+        self._row_repo = RowRepository(None)
+        self._token_repo = TokenRepository(None)
+        self._token_parent_repo = TokenParentRepository(None)
+        self._call_repo = CallRepository(None)
+        self._routing_event_repo = RoutingEventRepository(None)
+        self._batch_repo = BatchRepository(None)
+        self._node_state_repo = NodeStateRepository(None)
+        self._validation_error_repo = ValidationErrorRepository(None)
+        self._transform_error_repo = TransformErrorRepository(None)
+        self._token_outcome_repo = TokenOutcomeRepository(None)
+        self._artifact_repo = ArtifactRepository(None)
+        self._batch_member_repo = BatchMemberRepository(None)
 
     # === Run Management ===
 
@@ -269,16 +178,16 @@ class LandscapeRecorder:
             ValueError: If status string is not a valid RunStatus value
         """
         # Validate and coerce status enum early - fail fast on typos
-        status_enum = _coerce_enum(status, RunStatus)
+        status_enum = coerce_enum(status, RunStatus)
 
-        run_id = run_id or _generate_id()
+        run_id = run_id or generate_id()
         settings_json = canonical_json(config)
         config_hash = stable_hash(config)
-        now = _now()
+        timestamp = now()
 
         run = Run(
             run_id=run_id,
-            started_at=now,
+            started_at=timestamp,
             config_hash=config_hash,
             settings_json=settings_json,
             canonical_version=canonical_version,
@@ -286,19 +195,18 @@ class LandscapeRecorder:
             reproducibility_grade=reproducibility_grade,
         )
 
-        with self._db.connection() as conn:
-            conn.execute(
-                runs_table.insert().values(
-                    run_id=run.run_id,
-                    started_at=run.started_at,
-                    config_hash=run.config_hash,
-                    settings_json=run.settings_json,
-                    canonical_version=run.canonical_version,
-                    status=run.status,
-                    reproducibility_grade=run.reproducibility_grade,
-                    source_schema_json=source_schema_json,
-                )
+        self._ops.execute_insert(
+            runs_table.insert().values(
+                run_id=run.run_id,
+                started_at=run.started_at,
+                config_hash=run.config_hash,
+                settings_json=run.settings_json,
+                canonical_version=run.canonical_version,
+                status=run.status,
+                reproducibility_grade=run.reproducibility_grade,
+                source_schema_json=source_schema_json,
             )
+        )
 
         return run
 
@@ -323,19 +231,18 @@ class LandscapeRecorder:
             ValueError: If status string is not a valid RunStatus value
         """
         # Validate and coerce status enum early - fail fast on typos
-        status_enum = _coerce_enum(status, RunStatus)
-        now = _now()
+        status_enum = coerce_enum(status, RunStatus)
+        timestamp = now()
 
-        with self._db.connection() as conn:
-            conn.execute(
-                runs_table.update()
-                .where(runs_table.c.run_id == run_id)
-                .values(
-                    status=status_enum.value,  # Store string in DB
-                    completed_at=now,
-                    reproducibility_grade=reproducibility_grade,
-                )
+        self._ops.execute_update(
+            runs_table.update()
+            .where(runs_table.c.run_id == run_id)
+            .values(
+                status=status_enum.value,  # Store string in DB
+                completed_at=timestamp,
+                reproducibility_grade=reproducibility_grade,
             )
+        )
 
         result = self.get_run(run_id)
         assert result is not None, f"Run {run_id} not found after update"
@@ -350,29 +257,11 @@ class LandscapeRecorder:
         Returns:
             Run model or None if not found
         """
-        with self._db.connection() as conn:
-            result = conn.execute(select(runs_table).where(runs_table.c.run_id == run_id))
-            row = result.fetchone()
-
+        query = select(runs_table).where(runs_table.c.run_id == run_id)
+        row = self._ops.execute_fetchone(query)
         if row is None:
             return None
-
-        return Run(
-            run_id=row.run_id,
-            started_at=row.started_at,
-            completed_at=row.completed_at,
-            config_hash=row.config_hash,
-            settings_json=row.settings_json,
-            canonical_version=row.canonical_version,
-            status=RunStatus(row.status),  # Coerce DB string to enum
-            reproducibility_grade=row.reproducibility_grade,
-            # Use explicit is not None check - empty string should raise, not become None (Tier 1)
-            export_status=ExportStatus(row.export_status) if row.export_status is not None else None,
-            export_error=row.export_error,
-            exported_at=row.exported_at,
-            export_format=row.export_format,
-            export_sink=row.export_sink,
-        )
+        return self._run_repo.load(row)
 
     def get_source_schema(self, run_id: str) -> str:
         """Get source schema JSON for a run (for resume/type restoration).
@@ -390,8 +279,8 @@ class LandscapeRecorder:
             This encapsulates Landscape schema access for Orchestrator resume.
             Schema is required for type fidelity when restoring rows from payloads.
         """
-        with self._db.connection() as conn:
-            run_row = conn.execute(select(runs_table.c.source_schema_json).where(runs_table.c.run_id == run_id)).fetchone()
+        query = select(runs_table.c.source_schema_json).where(runs_table.c.run_id == run_id)
+        run_row = self._ops.execute_fetchone(query)
 
         if run_row is None:
             raise ValueError(f"Run {run_id} not found in database")
@@ -422,8 +311,8 @@ class LandscapeRecorder:
             This encapsulates Landscape schema access for Orchestrator resume.
             Edge IDs are required for FK integrity when recording routing events.
         """
-        with self._db.connection() as conn:
-            edges = conn.execute(select(edges_table).where(edges_table.c.run_id == run_id)).fetchall()
+        query = select(edges_table).where(edges_table.c.run_id == run_id)
+        edges = self._ops.execute_fetchall(query)
 
         edge_map: dict[tuple[str, str], str] = {}
         for edge in edges:
@@ -449,10 +338,9 @@ class LandscapeRecorder:
             Only updates status field - does not set completed_at or reproducibility_grade.
         """
         # Validate and coerce status enum - fail fast on typos
-        status_enum = _coerce_enum(status, RunStatus)
+        status_enum = coerce_enum(status, RunStatus)
 
-        with self._db.connection() as conn:
-            conn.execute(runs_table.update().where(runs_table.c.run_id == run_id).values(status=status_enum.value))
+        self._ops.execute_update(runs_table.update().where(runs_table.c.run_id == run_id).values(status=status_enum.value))
 
     def list_runs(self, *, status: RunStatus | str | None = None) -> list[Run]:
         """List all runs in the database.
@@ -470,32 +358,11 @@ class LandscapeRecorder:
 
         if status is not None:
             # Validate and coerce status enum - fail fast on typos
-            status_enum = _coerce_enum(status, RunStatus)
+            status_enum = coerce_enum(status, RunStatus)
             query = query.where(runs_table.c.status == status_enum.value)
 
-        with self._db.connection() as conn:
-            result = conn.execute(query)
-            rows = result.fetchall()
-
-        return [
-            Run(
-                run_id=row.run_id,
-                started_at=row.started_at,
-                completed_at=row.completed_at,
-                config_hash=row.config_hash,
-                settings_json=row.settings_json,
-                canonical_version=row.canonical_version,
-                status=RunStatus(row.status),  # Coerce DB string to enum
-                reproducibility_grade=row.reproducibility_grade,
-                # Use explicit is not None check - empty string should raise, not become None (Tier 1)
-                export_status=ExportStatus(row.export_status) if row.export_status is not None else None,
-                export_error=row.export_error,
-                exported_at=row.exported_at,
-                export_format=row.export_format,
-                export_sink=row.export_sink,
-            )
-            for row in rows
-        ]
+        rows = self._ops.execute_fetchall(query)
+        return [self._run_repo.load(row) for row in rows]
 
     def set_export_status(
         self,
@@ -522,12 +389,12 @@ class LandscapeRecorder:
             ValueError: If status is not a valid ExportStatus value
         """
         # Validate and coerce status - crash on invalid values per Data Manifesto
-        status_enum = _coerce_enum(status, ExportStatus)
+        status_enum = coerce_enum(status, ExportStatus)
 
         updates: dict[str, Any] = {"export_status": status_enum.value}
 
         if status_enum == ExportStatus.COMPLETED:
-            updates["exported_at"] = _now()
+            updates["exported_at"] = now()
             # Clear stale error when transitioning to completed
             updates["export_error"] = None
         elif status_enum == ExportStatus.PENDING:
@@ -543,8 +410,7 @@ class LandscapeRecorder:
         if export_sink is not None:
             updates["export_sink"] = export_sink
 
-        with self._db.connection() as conn:
-            conn.execute(runs_table.update().where(runs_table.c.run_id == run_id).values(**updates))
+        self._ops.execute_update(runs_table.update().where(runs_table.c.run_id == run_id).values(**updates))
 
     # === Node and Edge Registration ===
 
@@ -584,13 +450,13 @@ class LandscapeRecorder:
             ValueError: If node_type or determinism string is not a valid enum value
         """
         # Validate and coerce enums early - fail fast on typos
-        node_type_enum = _coerce_enum(node_type, NodeType)
-        determinism_enum = _coerce_enum(determinism, Determinism)
+        node_type_enum = coerce_enum(node_type, NodeType)
+        determinism_enum = coerce_enum(determinism, Determinism)
 
-        node_id = node_id or _generate_id()
+        node_id = node_id or generate_id()
         config_json = canonical_json(config)
         config_hash = stable_hash(config)
-        now = _now()
+        timestamp = now()
 
         # Extract schema info for audit (WP-11.99)
         schema_fields_json: str | None = None
@@ -619,29 +485,28 @@ class LandscapeRecorder:
             config_json=config_json,
             schema_hash=schema_hash,
             sequence_in_pipeline=sequence,
-            registered_at=now,
+            registered_at=timestamp,
             schema_mode=schema_mode,
             schema_fields=schema_fields_list,
         )
 
-        with self._db.connection() as conn:
-            conn.execute(
-                nodes_table.insert().values(
-                    node_id=node.node_id,
-                    run_id=node.run_id,
-                    plugin_name=node.plugin_name,
-                    node_type=node.node_type.value,  # Store string in DB
-                    plugin_version=node.plugin_version,
-                    determinism=node.determinism.value,  # Store string in DB
-                    config_hash=node.config_hash,
-                    config_json=node.config_json,
-                    schema_hash=node.schema_hash,
-                    sequence_in_pipeline=node.sequence_in_pipeline,
-                    registered_at=node.registered_at,
-                    schema_mode=node.schema_mode,
-                    schema_fields_json=schema_fields_json,
-                )
+        self._ops.execute_insert(
+            nodes_table.insert().values(
+                node_id=node.node_id,
+                run_id=node.run_id,
+                plugin_name=node.plugin_name,
+                node_type=node.node_type.value,  # Store string in DB
+                plugin_version=node.plugin_version,
+                determinism=node.determinism.value,  # Store string in DB
+                config_hash=node.config_hash,
+                config_json=node.config_json,
+                schema_hash=node.schema_hash,
+                sequence_in_pipeline=node.sequence_in_pipeline,
+                registered_at=node.registered_at,
+                schema_mode=node.schema_mode,
+                schema_fields_json=schema_fields_json,
             )
+        )
 
         return node
 
@@ -672,10 +537,10 @@ class LandscapeRecorder:
             ValueError: If mode string is not a valid RoutingMode value
         """
         # Validate and coerce mode enum early - fail fast on typos
-        mode_enum = _coerce_enum(mode, RoutingMode)
+        mode_enum = coerce_enum(mode, RoutingMode)
 
-        edge_id = edge_id or _generate_id()
-        now = _now()
+        edge_id = edge_id or generate_id()
+        timestamp = now()
 
         edge = Edge(
             edge_id=edge_id,
@@ -684,71 +549,42 @@ class LandscapeRecorder:
             to_node_id=to_node_id,
             label=label,
             default_mode=mode_enum,  # Strict: enum type
-            created_at=now,
+            created_at=timestamp,
         )
 
-        with self._db.connection() as conn:
-            conn.execute(
-                edges_table.insert().values(
-                    edge_id=edge.edge_id,
-                    run_id=edge.run_id,
-                    from_node_id=edge.from_node_id,
-                    to_node_id=edge.to_node_id,
-                    label=edge.label,
-                    default_mode=edge.default_mode.value,  # Store string in DB
-                    created_at=edge.created_at,
-                )
+        self._ops.execute_insert(
+            edges_table.insert().values(
+                edge_id=edge.edge_id,
+                run_id=edge.run_id,
+                from_node_id=edge.from_node_id,
+                to_node_id=edge.to_node_id,
+                label=edge.label,
+                default_mode=edge.default_mode.value,  # Store string in DB
+                created_at=edge.created_at,
             )
+        )
 
         return edge
 
-    def _row_to_node(self, row: Any) -> Node:
-        """Convert a database row to a Node model.
+    def get_node(self, node_id: str, run_id: str) -> Node | None:
+        """Get a node by its composite primary key (node_id, run_id).
 
-        Args:
-            row: Database row from nodes table
-
-        Returns:
-            Node model with all fields including schema info
-        """
-        # Parse schema_fields_json back to list
-        schema_fields: list[dict[str, object]] | None = None
-        if row.schema_fields_json is not None:
-            schema_fields = json.loads(row.schema_fields_json)
-
-        return Node(
-            node_id=row.node_id,
-            run_id=row.run_id,
-            plugin_name=row.plugin_name,
-            node_type=NodeType(row.node_type),  # Coerce DB string to enum
-            plugin_version=row.plugin_version,
-            determinism=Determinism(row.determinism),  # Coerce DB string to enum
-            config_hash=row.config_hash,
-            config_json=row.config_json,
-            schema_hash=row.schema_hash,
-            sequence_in_pipeline=row.sequence_in_pipeline,
-            registered_at=row.registered_at,
-            schema_mode=row.schema_mode,
-            schema_fields=schema_fields,
-        )
-
-    def get_node(self, node_id: str) -> Node | None:
-        """Get a node by ID.
+        NOTE: The nodes table has a composite PK (node_id, run_id). The same
+        node_id can exist in multiple runs, so run_id is required to identify
+        the specific node.
 
         Args:
             node_id: Node ID to retrieve
+            run_id: Run ID the node belongs to
 
         Returns:
             Node model or None if not found
         """
-        with self._db.connection() as conn:
-            result = conn.execute(select(nodes_table).where(nodes_table.c.node_id == node_id))
-            row = result.fetchone()
-
+        query = select(nodes_table).where((nodes_table.c.node_id == node_id) & (nodes_table.c.run_id == run_id))
+        row = self._ops.execute_fetchone(query)
         if row is None:
             return None
-
-        return self._row_to_node(row)
+        return self._node_repo.load(row)
 
     def get_nodes(self, run_id: str) -> list[Node]:
         """Get all nodes for a run.
@@ -759,17 +595,15 @@ class LandscapeRecorder:
         Returns:
             List of Node models, ordered by sequence (NULL sequences last)
         """
-        with self._db.connection() as conn:
-            result = conn.execute(
-                select(nodes_table)
-                .where(nodes_table.c.run_id == run_id)
-                # Use nullslast() for consistent NULL handling across databases
-                # Nodes without sequence (e.g., dynamically added) sort last
-                .order_by(nodes_table.c.sequence_in_pipeline.nullslast())
-            )
-            rows = result.fetchall()
-
-        return [self._row_to_node(row) for row in rows]
+        query = (
+            select(nodes_table)
+            .where(nodes_table.c.run_id == run_id)
+            # Use nullslast() for consistent NULL handling across databases
+            # Nodes without sequence (e.g., dynamically added) sort last
+            .order_by(nodes_table.c.sequence_in_pipeline.nullslast())
+        )
+        rows = self._ops.execute_fetchall(query)
+        return [self._node_repo.load(row) for row in rows]
 
     def get_edges(self, run_id: str) -> list[Edge]:
         """Get all edges for a run.
@@ -782,23 +616,8 @@ class LandscapeRecorder:
             for deterministic export signatures.
         """
         query = select(edges_table).where(edges_table.c.run_id == run_id).order_by(edges_table.c.created_at, edges_table.c.edge_id)
-
-        with self._db.connection() as conn:
-            result = conn.execute(query)
-            rows = result.fetchall()
-
-        return [
-            Edge(
-                edge_id=r.edge_id,
-                run_id=r.run_id,
-                from_node_id=r.from_node_id,
-                to_node_id=r.to_node_id,
-                label=r.label,
-                default_mode=RoutingMode(r.default_mode),  # Coerce DB string to enum
-                created_at=r.created_at,
-            )
-            for r in rows
-        ]
+        rows = self._ops.execute_fetchall(query)
+        return [self._edge_repo.load(row) for row in rows]
 
     # === Row and Token Management ===
 
@@ -836,9 +655,9 @@ class LandscapeRecorder:
         """
         from elspeth.core.canonical import canonical_json
 
-        row_id = row_id or _generate_id()
+        row_id = row_id or generate_id()
         data_hash = stable_hash(data)
-        now = _now()
+        timestamp = now()
 
         # Landscape owns payload persistence - serialize and store if configured
         final_payload_ref = payload_ref  # Legacy path (will be removed)
@@ -854,21 +673,20 @@ class LandscapeRecorder:
             row_index=row_index,
             source_data_hash=data_hash,
             source_data_ref=final_payload_ref,
-            created_at=now,
+            created_at=timestamp,
         )
 
-        with self._db.connection() as conn:
-            conn.execute(
-                rows_table.insert().values(
-                    row_id=row.row_id,
-                    run_id=row.run_id,
-                    source_node_id=row.source_node_id,
-                    row_index=row.row_index,
-                    source_data_hash=row.source_data_hash,
-                    source_data_ref=row.source_data_ref,
-                    created_at=row.created_at,
-                )
+        self._ops.execute_insert(
+            rows_table.insert().values(
+                row_id=row.row_id,
+                run_id=row.run_id,
+                source_node_id=row.source_node_id,
+                row_index=row.row_index,
+                source_data_hash=row.source_data_hash,
+                source_data_ref=row.source_data_ref,
+                created_at=row.created_at,
             )
+        )
 
         return row
 
@@ -893,8 +711,8 @@ class LandscapeRecorder:
         Returns:
             Token model
         """
-        token_id = token_id or _generate_id()
-        now = _now()
+        token_id = token_id or generate_id()
+        timestamp = now()
 
         token = Token(
             token_id=token_id,
@@ -902,20 +720,19 @@ class LandscapeRecorder:
             fork_group_id=fork_group_id,
             join_group_id=join_group_id,
             branch_name=branch_name,
-            created_at=now,
+            created_at=timestamp,
         )
 
-        with self._db.connection() as conn:
-            conn.execute(
-                tokens_table.insert().values(
-                    token_id=token.token_id,
-                    row_id=token.row_id,
-                    fork_group_id=token.fork_group_id,
-                    join_group_id=token.join_group_id,
-                    branch_name=token.branch_name,
-                    created_at=token.created_at,
-                )
+        self._ops.execute_insert(
+            tokens_table.insert().values(
+                token_id=token.token_id,
+                row_id=token.row_id,
+                fork_group_id=token.fork_group_id,
+                join_group_id=token.join_group_id,
+                branch_name=token.branch_name,
+                created_at=token.created_at,
             )
+        )
 
         return token
 
@@ -950,13 +767,13 @@ class LandscapeRecorder:
         if not branches:
             raise ValueError("fork_token requires at least one branch")
 
-        fork_group_id = _generate_id()
+        fork_group_id = generate_id()
         children = []
 
         with self._db.connection() as conn:
             for ordinal, branch_name in enumerate(branches):
-                child_id = _generate_id()
-                now = _now()
+                child_id = generate_id()
+                timestamp = now()
 
                 # Create child token
                 conn.execute(
@@ -966,7 +783,7 @@ class LandscapeRecorder:
                         fork_group_id=fork_group_id,
                         branch_name=branch_name,
                         step_in_pipeline=step_in_pipeline,
-                        created_at=now,
+                        created_at=timestamp,
                     )
                 )
 
@@ -986,7 +803,7 @@ class LandscapeRecorder:
                         fork_group_id=fork_group_id,
                         branch_name=branch_name,
                         step_in_pipeline=step_in_pipeline,
-                        created_at=now,
+                        created_at=timestamp,
                     )
                 )
 
@@ -1012,9 +829,9 @@ class LandscapeRecorder:
         Returns:
             Merged Token model
         """
-        join_group_id = _generate_id()
-        token_id = _generate_id()
-        now = _now()
+        join_group_id = generate_id()
+        token_id = generate_id()
+        timestamp = now()
 
         with self._db.connection() as conn:
             # Create merged token
@@ -1024,7 +841,7 @@ class LandscapeRecorder:
                     row_id=row_id,
                     join_group_id=join_group_id,
                     step_in_pipeline=step_in_pipeline,
-                    created_at=now,
+                    created_at=timestamp,
                 )
             )
 
@@ -1043,7 +860,7 @@ class LandscapeRecorder:
             row_id=row_id,
             join_group_id=join_group_id,
             step_in_pipeline=step_in_pipeline,
-            created_at=now,
+            created_at=timestamp,
         )
 
     def expand_token(
@@ -1077,13 +894,13 @@ class LandscapeRecorder:
         if count < 1:
             raise ValueError("expand_token requires at least 1 child")
 
-        expand_group_id = _generate_id()
+        expand_group_id = generate_id()
         children = []
 
         with self._db.connection() as conn:
             for ordinal in range(count):
-                child_id = _generate_id()
-                now = _now()
+                child_id = generate_id()
+                timestamp = now()
 
                 # Create child token with expand_group_id
                 conn.execute(
@@ -1092,7 +909,7 @@ class LandscapeRecorder:
                         row_id=row_id,
                         expand_group_id=expand_group_id,
                         step_in_pipeline=step_in_pipeline,
-                        created_at=now,
+                        created_at=timestamp,
                     )
                 )
 
@@ -1111,7 +928,7 @@ class LandscapeRecorder:
                         row_id=row_id,
                         expand_group_id=expand_group_id,
                         step_in_pipeline=step_in_pipeline,
-                        created_at=now,
+                        created_at=timestamp,
                     )
                 )
 
@@ -1123,6 +940,7 @@ class LandscapeRecorder:
         self,
         token_id: str,
         node_id: str,
+        run_id: str,
         step_index: int,
         input_data: dict[str, Any],
         *,
@@ -1135,6 +953,7 @@ class LandscapeRecorder:
         Args:
             token_id: Token being processed
             node_id: Node processing the token
+            run_id: Run ID for composite FK to nodes table
             step_index: Position in token's execution path
             input_data: Input data for hashing
             state_id: Optional state ID (generated if not provided)
@@ -1144,9 +963,9 @@ class LandscapeRecorder:
         Returns:
             NodeStateOpen model with status=OPEN
         """
-        state_id = state_id or _generate_id()
+        state_id = state_id or generate_id()
         input_hash = stable_hash(input_data)
-        now = _now()
+        timestamp = now()
 
         context_json = canonical_json(context_before) if context_before is not None else None
 
@@ -1159,23 +978,23 @@ class LandscapeRecorder:
             status=NodeStateStatus.OPEN,
             input_hash=input_hash,
             context_before_json=context_json,
-            started_at=now,
+            started_at=timestamp,
         )
 
-        with self._db.connection() as conn:
-            conn.execute(
-                node_states_table.insert().values(
-                    state_id=state.state_id,
-                    token_id=state.token_id,
-                    node_id=state.node_id,
-                    step_index=state.step_index,
-                    attempt=state.attempt,
-                    status=state.status.value,
-                    input_hash=state.input_hash,
-                    context_before_json=state.context_before_json,
-                    started_at=state.started_at,
-                )
+        self._ops.execute_insert(
+            node_states_table.insert().values(
+                state_id=state.state_id,
+                token_id=state.token_id,
+                node_id=state.node_id,
+                run_id=run_id,  # Added for composite FK to nodes
+                step_index=state.step_index,
+                attempt=state.attempt,
+                status=state.status.value,
+                input_hash=state.input_hash,
+                context_before_json=state.context_before_json,
+                started_at=state.started_at,
             )
+        )
 
         return state
 
@@ -1257,24 +1076,23 @@ class LandscapeRecorder:
         if duration_ms is None:
             raise ValueError("duration_ms is required when completing a node state")
 
-        now = _now()
+        timestamp = now()
         output_hash = stable_hash(output_data) if output_data is not None else None
         error_json = canonical_json(error) if error is not None else None
         context_json = canonical_json(context_after) if context_after is not None else None
 
-        with self._db.connection() as conn:
-            conn.execute(
-                node_states_table.update()
-                .where(node_states_table.c.state_id == state_id)
-                .values(
-                    status=status_enum.value,
-                    output_hash=output_hash,
-                    duration_ms=duration_ms,
-                    error_json=error_json,
-                    context_after_json=context_json,
-                    completed_at=now,
-                )
+        self._ops.execute_update(
+            node_states_table.update()
+            .where(node_states_table.c.state_id == state_id)
+            .values(
+                status=status_enum.value,
+                output_hash=output_hash,
+                duration_ms=duration_ms,
+                error_json=error_json,
+                context_after_json=context_json,
+                completed_at=timestamp,
             )
+        )
 
         result = self.get_node_state(state_id)
         assert result is not None, f"NodeState {state_id} not found after update"
@@ -1291,14 +1109,11 @@ class LandscapeRecorder:
         Returns:
             NodeState (union of Open, Completed, or Failed) or None
         """
-        with self._db.connection() as conn:
-            result = conn.execute(select(node_states_table).where(node_states_table.c.state_id == state_id))
-            row = result.fetchone()
-
+        query = select(node_states_table).where(node_states_table.c.state_id == state_id)
+        row = self._ops.execute_fetchone(query)
         if row is None:
             return None
-
-        return _row_to_node_state(row)
+        return self._node_state_repo.load(row)
 
     # === Routing Event Recording ===
 
@@ -1333,12 +1148,12 @@ class LandscapeRecorder:
             ValueError: If mode string is not a valid RoutingMode value
         """
         # Validate and coerce mode enum early - fail fast on typos
-        mode_enum = _coerce_enum(mode, RoutingMode)
+        mode_enum = coerce_enum(mode, RoutingMode)
 
-        event_id = event_id or _generate_id()
-        routing_group_id = routing_group_id or _generate_id()
+        event_id = event_id or generate_id()
+        routing_group_id = routing_group_id or generate_id()
         reason_hash = stable_hash(reason) if reason else None
-        now = _now()
+        timestamp = now()
 
         event = RoutingEvent(
             event_id=event_id,
@@ -1349,23 +1164,22 @@ class LandscapeRecorder:
             mode=mode_enum,  # Strict: enum type
             reason_hash=reason_hash,
             reason_ref=reason_ref,
-            created_at=now,
+            created_at=timestamp,
         )
 
-        with self._db.connection() as conn:
-            conn.execute(
-                routing_events_table.insert().values(
-                    event_id=event.event_id,
-                    state_id=event.state_id,
-                    edge_id=event.edge_id,
-                    routing_group_id=event.routing_group_id,
-                    ordinal=event.ordinal,
-                    mode=event.mode.value,  # Store string in DB
-                    reason_hash=event.reason_hash,
-                    reason_ref=event.reason_ref,
-                    created_at=event.created_at,
-                )
+        self._ops.execute_insert(
+            routing_events_table.insert().values(
+                event_id=event.event_id,
+                state_id=event.state_id,
+                edge_id=event.edge_id,
+                routing_group_id=event.routing_group_id,
+                ordinal=event.ordinal,
+                mode=event.mode.value,  # Store string in DB
+                reason_hash=event.reason_hash,
+                reason_ref=event.reason_ref,
+                created_at=event.created_at,
             )
+        )
 
         return event
 
@@ -1387,14 +1201,14 @@ class LandscapeRecorder:
         Returns:
             List of RoutingEvent models
         """
-        routing_group_id = _generate_id()
+        routing_group_id = generate_id()
         reason_hash = stable_hash(reason) if reason else None
-        now = _now()
+        timestamp = now()
         events = []
 
         with self._db.connection() as conn:
             for ordinal, route in enumerate(routes):
-                event_id = _generate_id()
+                event_id = generate_id()
                 event = RoutingEvent(
                     event_id=event_id,
                     state_id=state_id,
@@ -1404,7 +1218,7 @@ class LandscapeRecorder:
                     mode=route.mode,  # Already RoutingMode enum from RoutingSpec
                     reason_hash=reason_hash,
                     reason_ref=None,
-                    created_at=now,
+                    created_at=timestamp,
                 )
 
                 conn.execute(
@@ -1445,8 +1259,8 @@ class LandscapeRecorder:
         Returns:
             Batch model with status="draft"
         """
-        batch_id = batch_id or _generate_id()
-        now = _now()
+        batch_id = batch_id or generate_id()
+        timestamp = now()
 
         batch = Batch(
             batch_id=batch_id,
@@ -1454,20 +1268,19 @@ class LandscapeRecorder:
             aggregation_node_id=aggregation_node_id,
             attempt=attempt,
             status=BatchStatus.DRAFT,  # Strict: enum type
-            created_at=now,
+            created_at=timestamp,
         )
 
-        with self._db.connection() as conn:
-            conn.execute(
-                batches_table.insert().values(
-                    batch_id=batch.batch_id,
-                    run_id=batch.run_id,
-                    aggregation_node_id=batch.aggregation_node_id,
-                    attempt=batch.attempt,
-                    status=batch.status.value,  # Store string in DB
-                    created_at=batch.created_at,
-                )
+        self._ops.execute_insert(
+            batches_table.insert().values(
+                batch_id=batch.batch_id,
+                run_id=batch.run_id,
+                aggregation_node_id=batch.aggregation_node_id,
+                attempt=batch.attempt,
+                status=batch.status.value,  # Store string in DB
+                created_at=batch.created_at,
             )
+        )
 
         return batch
 
@@ -1493,14 +1306,13 @@ class LandscapeRecorder:
             ordinal=ordinal,
         )
 
-        with self._db.connection() as conn:
-            conn.execute(
-                batch_members_table.insert().values(
-                    batch_id=member.batch_id,
-                    token_id=member.token_id,
-                    ordinal=member.ordinal,
-                )
+        self._ops.execute_insert(
+            batch_members_table.insert().values(
+                batch_id=member.batch_id,
+                token_id=member.token_id,
+                ordinal=member.ordinal,
             )
+        )
 
         return member
 
@@ -1531,10 +1343,9 @@ class LandscapeRecorder:
         if state_id:
             updates["aggregation_state_id"] = state_id
         if status in ("completed", "failed"):
-            updates["completed_at"] = _now()
+            updates["completed_at"] = now()
 
-        with self._db.connection() as conn:
-            conn.execute(batches_table.update().where(batches_table.c.batch_id == batch_id).values(**updates))
+        self._ops.execute_update(batches_table.update().where(batches_table.c.batch_id == batch_id).values(**updates))
 
     def complete_batch(
         self,
@@ -1557,20 +1368,19 @@ class LandscapeRecorder:
         Returns:
             Updated Batch model
         """
-        now = _now()
+        timestamp = now()
 
-        with self._db.connection() as conn:
-            conn.execute(
-                batches_table.update()
-                .where(batches_table.c.batch_id == batch_id)
-                .values(
-                    status=status,
-                    trigger_type=trigger_type,
-                    trigger_reason=trigger_reason,
-                    aggregation_state_id=state_id,
-                    completed_at=now,
-                )
+        self._ops.execute_update(
+            batches_table.update()
+            .where(batches_table.c.batch_id == batch_id)
+            .values(
+                status=status,
+                trigger_type=trigger_type,
+                trigger_reason=trigger_reason,
+                aggregation_state_id=state_id,
+                completed_at=timestamp,
             )
+        )
 
         result = self.get_batch(batch_id)
         assert result is not None, f"Batch {batch_id} not found after update"
@@ -1585,25 +1395,11 @@ class LandscapeRecorder:
         Returns:
             Batch model or None
         """
-        with self._db.connection() as conn:
-            result = conn.execute(select(batches_table).where(batches_table.c.batch_id == batch_id))
-            row = result.fetchone()
-
+        query = select(batches_table).where(batches_table.c.batch_id == batch_id)
+        row = self._ops.execute_fetchone(query)
         if row is None:
             return None
-
-        return Batch(
-            batch_id=row.batch_id,
-            run_id=row.run_id,
-            aggregation_node_id=row.aggregation_node_id,
-            aggregation_state_id=row.aggregation_state_id,
-            trigger_type=row.trigger_type,
-            trigger_reason=row.trigger_reason,
-            attempt=row.attempt,
-            status=BatchStatus(row.status),  # Coerce DB string to enum
-            created_at=row.created_at,
-            completed_at=row.completed_at,
-        )
+        return self._batch_repo.load(row)
 
     def get_batches(
         self,
@@ -1632,26 +1428,8 @@ class LandscapeRecorder:
 
         # Order for deterministic export signatures
         query = query.order_by(batches_table.c.created_at, batches_table.c.batch_id)
-
-        with self._db.connection() as conn:
-            result = conn.execute(query)
-            rows = result.fetchall()
-
-        return [
-            Batch(
-                batch_id=row.batch_id,
-                run_id=row.run_id,
-                aggregation_node_id=row.aggregation_node_id,
-                aggregation_state_id=row.aggregation_state_id,
-                trigger_type=row.trigger_type,
-                trigger_reason=row.trigger_reason,
-                attempt=row.attempt,
-                status=BatchStatus(row.status),  # Coerce DB string to enum
-                created_at=row.created_at,
-                completed_at=row.completed_at,
-            )
-            for row in rows
-        ]
+        rows = self._ops.execute_fetchall(query)
+        return [self._batch_repo.load(row) for row in rows]
 
     def get_incomplete_batches(self, run_id: str) -> list[Batch]:
         """Get batches that need recovery (draft, executing, or failed).
@@ -1668,29 +1446,14 @@ class LandscapeRecorder:
             List of Batch objects with status in (draft, executing, failed),
             ordered by created_at ascending (oldest first for deterministic recovery)
         """
-        with self._db.connection() as conn:
-            result = conn.execute(
-                select(batches_table)
-                .where(batches_table.c.run_id == run_id)
-                .where(batches_table.c.status.in_(["draft", "executing", "failed"]))
-                .order_by(batches_table.c.created_at.asc())
-            ).fetchall()
-
-        return [
-            Batch(
-                batch_id=row.batch_id,
-                run_id=row.run_id,
-                aggregation_node_id=row.aggregation_node_id,
-                attempt=row.attempt,
-                status=BatchStatus(row.status),
-                created_at=row.created_at,
-                aggregation_state_id=row.aggregation_state_id,
-                trigger_type=row.trigger_type,
-                trigger_reason=row.trigger_reason,
-                completed_at=row.completed_at,
-            )
-            for row in result
-        ]
+        query = (
+            select(batches_table)
+            .where(batches_table.c.run_id == run_id)
+            .where(batches_table.c.status.in_(["draft", "executing", "failed"]))
+            .order_by(batches_table.c.created_at.asc())
+        )
+        result = self._ops.execute_fetchall(query)
+        return [self._batch_repo.load(row) for row in result]
 
     def get_batch_members(self, batch_id: str) -> list[BatchMember]:
         """Get all members of a batch.
@@ -1701,20 +1464,9 @@ class LandscapeRecorder:
         Returns:
             List of BatchMember models (ordered by ordinal)
         """
-        with self._db.connection() as conn:
-            result = conn.execute(
-                select(batch_members_table).where(batch_members_table.c.batch_id == batch_id).order_by(batch_members_table.c.ordinal)
-            )
-            rows = result.fetchall()
-
-        return [
-            BatchMember(
-                batch_id=row.batch_id,
-                token_id=row.token_id,
-                ordinal=row.ordinal,
-            )
-            for row in rows
-        ]
+        query = select(batch_members_table).where(batch_members_table.c.batch_id == batch_id).order_by(batch_members_table.c.ordinal)
+        rows = self._ops.execute_fetchall(query)
+        return [self._batch_member_repo.load(row) for row in rows]
 
     def retry_batch(self, batch_id: str) -> Batch:
         """Create a new batch attempt from a failed batch.
@@ -1786,8 +1538,8 @@ class LandscapeRecorder:
         Returns:
             Artifact model
         """
-        artifact_id = artifact_id or _generate_id()
-        now = _now()
+        artifact_id = artifact_id or generate_id()
+        timestamp = now()
 
         artifact = Artifact(
             artifact_id=artifact_id,
@@ -1798,25 +1550,24 @@ class LandscapeRecorder:
             path_or_uri=path,
             content_hash=content_hash,
             size_bytes=size_bytes,
-            created_at=now,
+            created_at=timestamp,
             idempotency_key=idempotency_key,
         )
 
-        with self._db.connection() as conn:
-            conn.execute(
-                artifacts_table.insert().values(
-                    artifact_id=artifact.artifact_id,
-                    run_id=artifact.run_id,
-                    produced_by_state_id=artifact.produced_by_state_id,
-                    sink_node_id=artifact.sink_node_id,
-                    artifact_type=artifact.artifact_type,
-                    path_or_uri=artifact.path_or_uri,
-                    content_hash=artifact.content_hash,
-                    size_bytes=artifact.size_bytes,
-                    idempotency_key=artifact.idempotency_key,
-                    created_at=artifact.created_at,
-                )
+        self._ops.execute_insert(
+            artifacts_table.insert().values(
+                artifact_id=artifact.artifact_id,
+                run_id=artifact.run_id,
+                produced_by_state_id=artifact.produced_by_state_id,
+                sink_node_id=artifact.sink_node_id,
+                artifact_type=artifact.artifact_type,
+                path_or_uri=artifact.path_or_uri,
+                content_hash=artifact.content_hash,
+                size_bytes=artifact.size_bytes,
+                idempotency_key=artifact.idempotency_key,
+                created_at=artifact.created_at,
             )
+        )
 
         return artifact
 
@@ -1840,25 +1591,8 @@ class LandscapeRecorder:
         if sink_node_id:
             query = query.where(artifacts_table.c.sink_node_id == sink_node_id)
 
-        with self._db.connection() as conn:
-            result = conn.execute(query)
-            rows = result.fetchall()
-
-        return [
-            Artifact(
-                artifact_id=row.artifact_id,
-                run_id=row.run_id,
-                produced_by_state_id=row.produced_by_state_id,
-                sink_node_id=row.sink_node_id,
-                artifact_type=row.artifact_type,
-                path_or_uri=row.path_or_uri,
-                content_hash=row.content_hash,
-                size_bytes=row.size_bytes,
-                created_at=row.created_at,
-                idempotency_key=row.idempotency_key,
-            )
-            for row in rows
-        ]
+        rows = self._ops.execute_fetchall(query)
+        return [self._artifact_repo.load(row) for row in rows]
 
     # === Row and Token Query Methods ===
 
@@ -1872,23 +1606,8 @@ class LandscapeRecorder:
             List of Row models, ordered by row_index
         """
         query = select(rows_table).where(rows_table.c.run_id == run_id).order_by(rows_table.c.row_index)
-
-        with self._db.connection() as conn:
-            result = conn.execute(query)
-            db_rows = result.fetchall()
-
-        return [
-            Row(
-                row_id=r.row_id,
-                run_id=r.run_id,
-                source_node_id=r.source_node_id,
-                row_index=r.row_index,
-                source_data_hash=r.source_data_hash,
-                source_data_ref=r.source_data_ref,
-                created_at=r.created_at,
-            )
-            for r in db_rows
-        ]
+        db_rows = self._ops.execute_fetchall(query)
+        return [self._row_repo.load(r) for r in db_rows]
 
     def get_tokens(self, row_id: str) -> list[Token]:
         """Get all tokens for a row.
@@ -1901,24 +1620,8 @@ class LandscapeRecorder:
             for deterministic export signatures.
         """
         query = select(tokens_table).where(tokens_table.c.row_id == row_id).order_by(tokens_table.c.created_at, tokens_table.c.token_id)
-
-        with self._db.connection() as conn:
-            result = conn.execute(query)
-            db_rows = result.fetchall()
-
-        return [
-            Token(
-                token_id=r.token_id,
-                row_id=r.row_id,
-                fork_group_id=r.fork_group_id,
-                join_group_id=r.join_group_id,
-                expand_group_id=r.expand_group_id,
-                branch_name=r.branch_name,
-                step_in_pipeline=r.step_in_pipeline,
-                created_at=r.created_at,
-            )
-            for r in db_rows
-        ]
+        db_rows = self._ops.execute_fetchall(query)
+        return [self._token_repo.load(r) for r in db_rows]
 
     def get_node_states_for_token(self, token_id: str) -> list[NodeState]:
         """Get all node states for a token.
@@ -1936,12 +1639,8 @@ class LandscapeRecorder:
             .where(node_states_table.c.token_id == token_id)
             .order_by(node_states_table.c.step_index, node_states_table.c.attempt)
         )
-
-        with self._db.connection() as conn:
-            result = conn.execute(query)
-            db_rows = result.fetchall()
-
-        return [_row_to_node_state(r) for r in db_rows]
+        db_rows = self._ops.execute_fetchall(query)
+        return [self._node_state_repo.load(r) for r in db_rows]
 
     def get_row(self, row_id: str) -> Row | None:
         """Get a row by ID.
@@ -1953,23 +1652,10 @@ class LandscapeRecorder:
             Row model or None if not found
         """
         query = select(rows_table).where(rows_table.c.row_id == row_id)
-
-        with self._db.connection() as conn:
-            result = conn.execute(query)
-            r = result.fetchone()
-
+        r = self._ops.execute_fetchone(query)
         if r is None:
             return None
-
-        return Row(
-            row_id=r.row_id,
-            run_id=r.run_id,
-            source_node_id=r.source_node_id,
-            row_index=r.row_index,
-            source_data_hash=r.source_data_hash,
-            source_data_ref=r.source_data_ref,
-            created_at=r.created_at,
-        )
+        return self._row_repo.load(r)
 
     def get_row_data(self, row_id: str) -> RowDataResult:
         """Get the payload data for a row with explicit state.
@@ -2012,24 +1698,10 @@ class LandscapeRecorder:
             Token model or None if not found
         """
         query = select(tokens_table).where(tokens_table.c.token_id == token_id)
-
-        with self._db.connection() as conn:
-            result = conn.execute(query)
-            r = result.fetchone()
-
+        r = self._ops.execute_fetchone(query)
         if r is None:
             return None
-
-        return Token(
-            token_id=r.token_id,
-            row_id=r.row_id,
-            fork_group_id=r.fork_group_id,
-            join_group_id=r.join_group_id,
-            expand_group_id=r.expand_group_id,
-            branch_name=r.branch_name,
-            step_in_pipeline=r.step_in_pipeline,
-            created_at=r.created_at,
-        )
+        return self._token_repo.load(r)
 
     def get_token_parents(self, token_id: str) -> list[TokenParent]:
         """Get parent relationships for a token.
@@ -2041,19 +1713,8 @@ class LandscapeRecorder:
             List of TokenParent models (ordered by ordinal)
         """
         query = select(token_parents_table).where(token_parents_table.c.token_id == token_id).order_by(token_parents_table.c.ordinal)
-
-        with self._db.connection() as conn:
-            result = conn.execute(query)
-            db_rows = result.fetchall()
-
-        return [
-            TokenParent(
-                token_id=r.token_id,
-                parent_token_id=r.parent_token_id,
-                ordinal=r.ordinal,
-            )
-            for r in db_rows
-        ]
+        db_rows = self._ops.execute_fetchall(query)
+        return [self._token_parent_repo.load(r) for r in db_rows]
 
     def get_routing_events(self, state_id: str) -> list[RoutingEvent]:
         """Get routing events for a node state.
@@ -2070,25 +1731,8 @@ class LandscapeRecorder:
             .where(routing_events_table.c.state_id == state_id)
             .order_by(routing_events_table.c.ordinal, routing_events_table.c.event_id)
         )
-
-        with self._db.connection() as conn:
-            result = conn.execute(query)
-            db_rows = result.fetchall()
-
-        return [
-            RoutingEvent(
-                event_id=r.event_id,
-                state_id=r.state_id,
-                edge_id=r.edge_id,
-                routing_group_id=r.routing_group_id,
-                ordinal=r.ordinal,
-                mode=RoutingMode(r.mode),  # Coerce DB string to enum
-                reason_hash=r.reason_hash,
-                reason_ref=r.reason_ref,
-                created_at=r.created_at,
-            )
-            for r in db_rows
-        ]
+        db_rows = self._ops.execute_fetchall(query)
+        return [self._routing_event_repo.load(r) for r in db_rows]
 
     def get_calls(self, state_id: str) -> list[Call]:
         """Get external calls for a node state.
@@ -2100,28 +1744,47 @@ class LandscapeRecorder:
             List of Call models, ordered by call_index
         """
         query = select(calls_table).where(calls_table.c.state_id == state_id).order_by(calls_table.c.call_index)
+        db_rows = self._ops.execute_fetchall(query)
+        return [self._call_repo.load(r) for r in db_rows]
 
-        with self._db.connection() as conn:
-            result = conn.execute(query)
-            db_rows = result.fetchall()
+    def allocate_call_index(self, state_id: str) -> int:
+        """Allocate next call index for a state_id (thread-safe).
 
-        return [
-            Call(
-                call_id=r.call_id,
-                state_id=r.state_id,
-                call_index=r.call_index,
-                call_type=r.call_type,
-                status=r.status,
-                request_hash=r.request_hash,
-                request_ref=r.request_ref,
-                response_hash=r.response_hash,
-                response_ref=r.response_ref,
-                error_json=r.error_json,
-                latency_ms=r.latency_ms,
-                created_at=r.created_at,
-            )
-            for r in db_rows
-        ]
+        Provides centralized call index allocation ensuring UNIQUE(state_id, call_index)
+        across all client types (HTTP, LLM) and retry attempts.
+
+        This is the single source of truth for call numbering. All AuditedClient
+        instances MUST delegate to this method rather than maintaining their own counters.
+
+        Thread Safety:
+            Uses a lock to prevent race conditions when multiple threads allocate
+            indices concurrently. Safe for pooled execution scenarios.
+
+        Persistence:
+            Counter persists across retries within the same run. The LandscapeRecorder
+            lifecycle matches the run lifecycle, not the execution attempt.
+
+        Args:
+            state_id: Node state ID to allocate index for
+
+        Returns:
+            Sequential call index (0-based), unique within this state_id
+
+        Example:
+            # Two different client types, same state_id
+            http_client = AuditedHTTPClient(recorder, state_id="state-001")
+            llm_client = AuditedLLMClient(recorder, state_id="state-001")
+
+            # Both delegate to same recorder - indices coordinate correctly
+            http_client.post(...)  # allocates index 0
+            llm_client.query(...)   # allocates index 1 (not 0!)
+        """
+        with self._call_index_lock:
+            if state_id not in self._call_indices:
+                self._call_indices[state_id] = 0
+            idx = self._call_indices[state_id]
+            self._call_indices[state_id] += 1
+            return idx
 
     def record_call(
         self,
@@ -2157,9 +1820,10 @@ class LandscapeRecorder:
         Note:
             Duplicate (state_id, call_index) will raise IntegrityError from SQLAlchemy.
             Invalid state_id will raise IntegrityError due to foreign key constraint.
+            Call indices should be allocated via allocate_call_index() for coordination.
         """
-        call_id = _generate_id()
-        now = _now()
+        call_id = generate_id()
+        timestamp = now()
 
         # Hash request (always required)
         request_hash = stable_hash(request_data)
@@ -2194,11 +1858,10 @@ class LandscapeRecorder:
             "response_ref": response_ref,
             "error_json": error_json,
             "latency_ms": latency_ms,
-            "created_at": now,
+            "created_at": timestamp,
         }
 
-        with self._db.connection() as conn:
-            conn.execute(calls_table.insert().values(**values))
+        self._ops.execute_insert(calls_table.insert().values(**values))
 
         return Call(
             call_id=call_id,
@@ -2212,7 +1875,7 @@ class LandscapeRecorder:
             response_ref=response_ref,
             error_json=error_json,
             latency_ms=latency_ms,
-            created_at=now,
+            created_at=timestamp,
         )
 
     # === Explain Methods (Graceful Degradation) ===
@@ -2346,28 +2009,27 @@ class LandscapeRecorder:
         Raises:
             IntegrityError: If terminal outcome already exists for token
         """
-        outcome_id = f"out_{_generate_id()[:12]}"
+        outcome_id = f"out_{generate_id()[:12]}"
         is_terminal = outcome.is_terminal
         context_json = json.dumps(context) if context is not None else None
 
-        with self._db.connection() as conn:
-            conn.execute(
-                token_outcomes_table.insert().values(
-                    outcome_id=outcome_id,
-                    run_id=run_id,
-                    token_id=token_id,
-                    outcome=outcome.value,
-                    is_terminal=1 if is_terminal else 0,
-                    recorded_at=_now(),
-                    sink_name=sink_name,
-                    batch_id=batch_id,
-                    fork_group_id=fork_group_id,
-                    join_group_id=join_group_id,
-                    expand_group_id=expand_group_id,
-                    error_hash=error_hash,
-                    context_json=context_json,
-                )
+        self._ops.execute_insert(
+            token_outcomes_table.insert().values(
+                outcome_id=outcome_id,
+                run_id=run_id,
+                token_id=token_id,
+                outcome=outcome.value,
+                is_terminal=1 if is_terminal else 0,
+                recorded_at=now(),
+                sink_name=sink_name,
+                batch_id=batch_id,
+                fork_group_id=fork_group_id,
+                join_group_id=join_group_id,
+                expand_group_id=expand_group_id,
+                error_hash=error_hash,
+                context_json=context_json,
             )
+        )
 
         return outcome_id
 
@@ -2383,38 +2045,20 @@ class LandscapeRecorder:
         Returns:
             TokenOutcome dataclass or None if no outcome recorded
         """
-        with self._db.connection() as conn:
-            # Get most recent outcome (terminal preferred)
-            result = conn.execute(
-                select(token_outcomes_table)
-                .where(token_outcomes_table.c.token_id == token_id)
-                .order_by(
-                    token_outcomes_table.c.is_terminal.desc(),  # Terminal first
-                    token_outcomes_table.c.recorded_at.desc(),  # Then by time
-                )
-                .limit(1)
-            ).fetchone()
-
-            if result is None:
-                return None
-
-            # Tier 1 Trust Model: This is OUR data. Trust DB values directly.
-            # If is_terminal is not 0 or 1, that's an audit integrity violation.
-            return TokenOutcome(
-                outcome_id=result.outcome_id,
-                run_id=result.run_id,
-                token_id=result.token_id,
-                outcome=RowOutcome(result.outcome),
-                is_terminal=result.is_terminal == 1,  # DB stores as Integer
-                recorded_at=result.recorded_at,
-                sink_name=result.sink_name,
-                batch_id=result.batch_id,
-                fork_group_id=result.fork_group_id,
-                join_group_id=result.join_group_id,
-                expand_group_id=result.expand_group_id,
-                error_hash=result.error_hash,
-                context_json=result.context_json,
+        # Get most recent outcome (terminal preferred)
+        query = (
+            select(token_outcomes_table)
+            .where(token_outcomes_table.c.token_id == token_id)
+            .order_by(
+                token_outcomes_table.c.is_terminal.desc(),  # Terminal first
+                token_outcomes_table.c.recorded_at.desc(),  # Then by time
             )
+            .limit(1)
+        )
+        result = self._ops.execute_fetchone(query)
+        if result is None:
+            return None
+        return self._token_outcome_repo.load(result)
 
     def get_token_outcomes_for_row(self, run_id: str, row_id: str) -> list[TokenOutcome]:
         """Get all token outcomes for a row in a single query.
@@ -2430,54 +2074,33 @@ class LandscapeRecorder:
             List of TokenOutcome objects, empty if no outcomes recorded.
             Ordered by recorded_at for deterministic behavior.
         """
-        with self._db.connection() as conn:
-            # Single JOIN query: tokens + outcomes
-            query = (
-                select(
-                    token_outcomes_table.c.outcome_id,
-                    token_outcomes_table.c.run_id,
-                    token_outcomes_table.c.token_id,
-                    token_outcomes_table.c.outcome,
-                    token_outcomes_table.c.is_terminal,
-                    token_outcomes_table.c.recorded_at,
-                    token_outcomes_table.c.sink_name,
-                    token_outcomes_table.c.batch_id,
-                    token_outcomes_table.c.fork_group_id,
-                    token_outcomes_table.c.join_group_id,
-                    token_outcomes_table.c.expand_group_id,
-                    token_outcomes_table.c.error_hash,
-                    token_outcomes_table.c.context_json,
-                )
-                .join(
-                    tokens_table,
-                    token_outcomes_table.c.token_id == tokens_table.c.token_id,
-                )
-                .where(tokens_table.c.row_id == row_id)
-                .where(token_outcomes_table.c.run_id == run_id)
-                .order_by(token_outcomes_table.c.recorded_at)
+        # Single JOIN query: tokens + outcomes
+        query = (
+            select(
+                token_outcomes_table.c.outcome_id,
+                token_outcomes_table.c.run_id,
+                token_outcomes_table.c.token_id,
+                token_outcomes_table.c.outcome,
+                token_outcomes_table.c.is_terminal,
+                token_outcomes_table.c.recorded_at,
+                token_outcomes_table.c.sink_name,
+                token_outcomes_table.c.batch_id,
+                token_outcomes_table.c.fork_group_id,
+                token_outcomes_table.c.join_group_id,
+                token_outcomes_table.c.expand_group_id,
+                token_outcomes_table.c.error_hash,
+                token_outcomes_table.c.context_json,
             )
-
-            rows = conn.execute(query).fetchall()
-
-            # Tier 1 Trust Model: This is OUR data. Trust DB values directly.
-            return [
-                TokenOutcome(
-                    outcome_id=r.outcome_id,
-                    run_id=r.run_id,
-                    token_id=r.token_id,
-                    outcome=RowOutcome(r.outcome),
-                    is_terminal=r.is_terminal == 1,
-                    recorded_at=r.recorded_at,
-                    sink_name=r.sink_name,
-                    batch_id=r.batch_id,
-                    fork_group_id=r.fork_group_id,
-                    join_group_id=r.join_group_id,
-                    expand_group_id=r.expand_group_id,
-                    error_hash=r.error_hash,
-                    context_json=r.context_json,
-                )
-                for r in rows
-            ]
+            .join(
+                tokens_table,
+                token_outcomes_table.c.token_id == tokens_table.c.token_id,
+            )
+            .where(tokens_table.c.row_id == row_id)
+            .where(token_outcomes_table.c.run_id == run_id)
+            .order_by(token_outcomes_table.c.recorded_at)
+        )
+        rows = self._ops.execute_fetchall(query)
+        return [self._token_outcome_repo.load(r) for r in rows]
 
     # === Validation Error Recording (WP-11.99) ===
 
@@ -2508,7 +2131,7 @@ class LandscapeRecorder:
             error_id for tracking
         """
         logger = logging.getLogger(__name__)
-        error_id = f"verr_{_generate_id()[:12]}"
+        error_id = f"verr_{generate_id()[:12]}"
 
         # Tier-3 (external data) trust boundary: row_data may be non-canonical
         # Try canonical hash/JSON first, fall back to safe representations
@@ -2529,20 +2152,19 @@ class LandscapeRecorder:
             metadata = NonCanonicalMetadata.from_error(row_data, e)
             row_data_json = json.dumps(metadata.to_dict())
 
-        with self._db.connection() as conn:
-            conn.execute(
-                validation_errors_table.insert().values(
-                    error_id=error_id,
-                    run_id=run_id,
-                    node_id=node_id,
-                    row_hash=row_hash,
-                    row_data_json=row_data_json,
-                    error=error,
-                    schema_mode=schema_mode,
-                    destination=destination,
-                    created_at=_now(),
-                )
+        self._ops.execute_insert(
+            validation_errors_table.insert().values(
+                error_id=error_id,
+                run_id=run_id,
+                node_id=node_id,
+                row_hash=row_hash,
+                row_data_json=row_data_json,
+                error=error,
+                schema_mode=schema_mode,
+                destination=destination,
+                created_at=now(),
             )
+        )
 
         return error_id
 
@@ -2573,22 +2195,21 @@ class LandscapeRecorder:
         Returns:
             error_id for tracking
         """
-        error_id = f"terr_{_generate_id()[:12]}"
+        error_id = f"terr_{generate_id()[:12]}"
 
-        with self._db.connection() as conn:
-            conn.execute(
-                transform_errors_table.insert().values(
-                    error_id=error_id,
-                    run_id=run_id,
-                    token_id=token_id,
-                    transform_id=transform_id,
-                    row_hash=stable_hash(row_data),
-                    row_data_json=canonical_json(row_data),
-                    error_details_json=canonical_json(error_details),
-                    destination=destination,
-                    created_at=_now(),
-                )
+        self._ops.execute_insert(
+            transform_errors_table.insert().values(
+                error_id=error_id,
+                run_id=run_id,
+                token_id=token_id,
+                transform_id=transform_id,
+                row_hash=stable_hash(row_data),
+                row_data_json=canonical_json(row_data),
+                error_details_json=canonical_json(error_details),
+                destination=destination,
+                created_at=now(),
             )
+        )
 
         return error_id
 
@@ -2611,25 +2232,8 @@ class LandscapeRecorder:
             validation_errors_table.c.run_id == run_id,
             validation_errors_table.c.row_hash == row_hash,
         )
-
-        with self._db.connection() as conn:
-            result = conn.execute(query)
-            rows = result.fetchall()
-
-        return [
-            ValidationErrorRecord(
-                error_id=r.error_id,
-                run_id=r.run_id,
-                node_id=r.node_id,
-                row_hash=r.row_hash,
-                error=r.error,
-                schema_mode=r.schema_mode,
-                destination=r.destination,
-                created_at=r.created_at,
-                row_data_json=r.row_data_json,
-            )
-            for r in rows
-        ]
+        rows = self._ops.execute_fetchall(query)
+        return [self._validation_error_repo.load(r) for r in rows]
 
     def get_validation_errors_for_run(self, run_id: str) -> list[ValidationErrorRecord]:
         """Get all validation errors for a run.
@@ -2643,25 +2247,8 @@ class LandscapeRecorder:
         query = (
             select(validation_errors_table).where(validation_errors_table.c.run_id == run_id).order_by(validation_errors_table.c.created_at)
         )
-
-        with self._db.connection() as conn:
-            result = conn.execute(query)
-            rows = result.fetchall()
-
-        return [
-            ValidationErrorRecord(
-                error_id=r.error_id,
-                run_id=r.run_id,
-                node_id=r.node_id,
-                row_hash=r.row_hash,
-                error=r.error,
-                schema_mode=r.schema_mode,
-                destination=r.destination,
-                created_at=r.created_at,
-                row_data_json=r.row_data_json,
-            )
-            for r in rows
-        ]
+        rows = self._ops.execute_fetchall(query)
+        return [self._validation_error_repo.load(r) for r in rows]
 
     def get_transform_errors_for_token(self, token_id: str) -> list[TransformErrorRecord]:
         """Get transform errors for a specific token.
@@ -2675,25 +2262,8 @@ class LandscapeRecorder:
         query = select(transform_errors_table).where(
             transform_errors_table.c.token_id == token_id,
         )
-
-        with self._db.connection() as conn:
-            result = conn.execute(query)
-            rows = result.fetchall()
-
-        return [
-            TransformErrorRecord(
-                error_id=r.error_id,
-                run_id=r.run_id,
-                token_id=r.token_id,
-                transform_id=r.transform_id,
-                row_hash=r.row_hash,
-                destination=r.destination,
-                created_at=r.created_at,
-                row_data_json=r.row_data_json,
-                error_details_json=r.error_details_json,
-            )
-            for r in rows
-        ]
+        rows = self._ops.execute_fetchall(query)
+        return [self._transform_error_repo.load(r) for r in rows]
 
     def get_transform_errors_for_run(self, run_id: str) -> list[TransformErrorRecord]:
         """Get all transform errors for a run.
@@ -2707,25 +2277,8 @@ class LandscapeRecorder:
         query = (
             select(transform_errors_table).where(transform_errors_table.c.run_id == run_id).order_by(transform_errors_table.c.created_at)
         )
-
-        with self._db.connection() as conn:
-            result = conn.execute(query)
-            rows = result.fetchall()
-
-        return [
-            TransformErrorRecord(
-                error_id=r.error_id,
-                run_id=r.run_id,
-                token_id=r.token_id,
-                transform_id=r.transform_id,
-                row_hash=r.row_hash,
-                destination=r.destination,
-                created_at=r.created_at,
-                row_data_json=r.row_data_json,
-                error_details_json=r.error_details_json,
-            )
-            for r in rows
-        ]
+        rows = self._ops.execute_fetchall(query)
+        return [self._transform_error_repo.load(r) for r in rows]
 
     # === Call Lookup Methods (for Replay Mode) ===
 
@@ -2752,42 +2305,26 @@ class LandscapeRecorder:
             If multiple calls match (same request made twice), returns
             the first one chronologically (ordered by created_at).
         """
-        # Need to join through node_states to get to run_id
+        # Join to node_states to filter by run_id
+        # NOTE: Use node_states.run_id directly (denormalized column) instead of
+        # joining through nodes table. The nodes table has composite PK (node_id, run_id),
+        # so joining on node_id alone would be ambiguous when node_id is reused across runs.
         query = (
             select(calls_table)
             .join(
                 node_states_table,
                 calls_table.c.state_id == node_states_table.c.state_id,
             )
-            .join(nodes_table, node_states_table.c.node_id == nodes_table.c.node_id)
-            .where(nodes_table.c.run_id == run_id)
+            .where(node_states_table.c.run_id == run_id)
             .where(calls_table.c.call_type == call_type)
             .where(calls_table.c.request_hash == request_hash)
             .order_by(calls_table.c.created_at)
             .limit(1)
         )
-
-        with self._db.connection() as conn:
-            result = conn.execute(query)
-            row = result.fetchone()
-
+        row = self._ops.execute_fetchone(query)
         if row is None:
             return None
-
-        return Call(
-            call_id=row.call_id,
-            state_id=row.state_id,
-            call_index=row.call_index,
-            call_type=CallType(row.call_type),
-            status=CallStatus(row.status),
-            request_hash=row.request_hash,
-            request_ref=row.request_ref,
-            response_hash=row.response_hash,
-            response_ref=row.response_ref,
-            error_json=row.error_json,
-            latency_ms=row.latency_ms,
-            created_at=row.created_at,
-        )
+        return self._call_repo.load(row)
 
     def get_call_response_data(self, call_id: str) -> dict[str, Any] | None:
         """Retrieve the response data for a call.
@@ -2810,9 +2347,8 @@ class LandscapeRecorder:
             - Response data has been purged from payload store
         """
         # Get the call record first
-        with self._db.connection() as conn:
-            result = conn.execute(select(calls_table).where(calls_table.c.call_id == call_id))
-            row = result.fetchone()
+        query = select(calls_table).where(calls_table.c.call_id == call_id)
+        row = self._ops.execute_fetchone(query)
 
         if row is None:
             return None

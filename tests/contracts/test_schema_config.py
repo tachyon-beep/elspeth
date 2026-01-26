@@ -256,3 +256,69 @@ class TestSchemaConfig:
                     "fields": [[1, 2, 3]],
                 }
             )
+
+
+class TestSchemaConfigSerialization:
+    """Tests for SchemaConfig serialization and round-trip."""
+
+    def test_dynamic_schema_to_dict(self) -> None:
+        """Dynamic schema serializes with mode='dynamic'."""
+        from elspeth.contracts.schema import SchemaConfig
+
+        config = SchemaConfig.from_dict({"fields": "dynamic"})
+        serialized = config.to_dict()
+        assert serialized == {"mode": "dynamic", "fields": None}
+
+    def test_dynamic_schema_roundtrip(self) -> None:
+        """Dynamic schema survives serialization round-trip."""
+        from elspeth.contracts.schema import SchemaConfig
+
+        config = SchemaConfig.from_dict({"fields": "dynamic"})
+        serialized = config.to_dict()
+        roundtrip = SchemaConfig.from_dict(serialized)
+        assert roundtrip.is_dynamic is True
+        assert roundtrip.mode is None
+        assert roundtrip.fields is None
+
+    def test_strict_schema_to_dict(self) -> None:
+        """Strict schema with fields serializes correctly."""
+        from elspeth.contracts.schema import SchemaConfig
+
+        config = SchemaConfig.from_dict(
+            {
+                "mode": "strict",
+                "fields": ["id: int", "name: str", "score: float?"],
+            }
+        )
+        serialized = config.to_dict()
+        assert serialized["mode"] == "strict"
+        assert len(serialized["fields"]) == 3
+        assert serialized["fields"][0] == {"name": "id", "type": "int", "required": True}
+        assert serialized["fields"][1] == {"name": "name", "type": "str", "required": True}
+        assert serialized["fields"][2] == {"name": "score", "type": "float", "required": False}
+
+    def test_strict_schema_roundtrip(self) -> None:
+        """Strict schema survives serialization round-trip via dict-form fields."""
+        from elspeth.contracts.schema import SchemaConfig
+
+        original = SchemaConfig.from_dict(
+            {
+                "mode": "strict",
+                "fields": ["id: int", "name: str"],
+            }
+        )
+        serialized = original.to_dict()
+        roundtrip = SchemaConfig.from_dict(
+            {
+                "mode": serialized["mode"],
+                "fields": [{f["name"]: f["type"] + ("?" if not f["required"] else "")} for f in serialized["fields"]],
+            }
+        )
+        assert roundtrip.is_dynamic is False
+        assert roundtrip.mode == "strict"
+        assert roundtrip.fields is not None
+        assert len(roundtrip.fields) == 2
+        assert roundtrip.fields[0].name == "id"
+        assert roundtrip.fields[0].field_type == "int"
+        assert roundtrip.fields[1].name == "name"
+        assert roundtrip.fields[1].field_type == "str"

@@ -164,3 +164,95 @@ class TestGetRowDataExplicitStates:
 
         assert result.state == RowDataState.AVAILABLE
         assert result.data == test_data
+
+
+class TestGetRowDataTier1Corruption:
+    """Tier 1 corruption tests: get_row_data must propagate integrity failures.
+
+    Per the Three-Tier Trust Model, corrupted audit data (Tier 1) must crash
+    immediately - no silent recovery, no coercion, no defaults.
+    """
+
+    def test_integrity_error_propagates(self, tmp_path: Path) -> None:
+        """IntegrityError from corrupted payload must propagate (not be swallowed).
+
+        When payload bytes have been tampered with (hash mismatch),
+        FilesystemPayloadStore.retrieve raises IntegrityError.
+        This must propagate to the caller - Tier 1 data corruption
+        is a crash-worthy event.
+        """
+        from elspeth.core.payload_store import IntegrityError
+
+        db = LandscapeDB.in_memory()
+        payload_store = FilesystemPayloadStore(tmp_path / "payloads")
+        recorder = LandscapeRecorder(db, payload_store=payload_store)
+
+        run = recorder.begin_run(config={}, canonical_version="v1")
+        source = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="csv_source",
+            node_type="source",
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+
+        # Store valid payload and create row
+        test_data = {"field": "value"}
+        payload_ref = payload_store.store(json.dumps(test_data).encode())
+        row = recorder.create_row(
+            run_id=run.run_id,
+            source_node_id=source.node_id,
+            row_index=0,
+            data=test_data,
+            payload_ref=payload_ref,
+        )
+
+        # Corrupt the payload file by tampering with its contents
+        # FilesystemPayloadStore uses hash[:2]/hash as path structure
+        payload_path = tmp_path / "payloads" / payload_ref[:2] / payload_ref
+        payload_path.write_bytes(b"corrupted data that won't match hash")
+
+        # get_row_data must raise IntegrityError, not silently return garbage
+        import pytest
+
+        with pytest.raises(IntegrityError):
+            recorder.get_row_data(row.row_id)
+
+    def test_invalid_json_propagates(self, tmp_path: Path) -> None:
+        """Invalid JSON in payload must propagate JSONDecodeError.
+
+        When payload bytes are valid (hash matches) but contain non-JSON,
+        the JSON parse failure must propagate - this indicates
+        Tier 1 corruption or a bug in our code.
+        """
+        import pytest
+
+        db = LandscapeDB.in_memory()
+        payload_store = FilesystemPayloadStore(tmp_path / "payloads")
+        recorder = LandscapeRecorder(db, payload_store=payload_store)
+
+        run = recorder.begin_run(config={}, canonical_version="v1")
+        source = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="csv_source",
+            node_type="source",
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+
+        # Store non-JSON bytes (but with valid hash)
+        non_json_data = b"this is not valid JSON {"
+        payload_ref = payload_store.store(non_json_data)
+        row = recorder.create_row(
+            run_id=run.run_id,
+            source_node_id=source.node_id,
+            row_index=0,
+            data={"placeholder": "ignored"},  # This won't be retrieved
+            payload_ref=payload_ref,
+        )
+
+        # get_row_data must raise JSONDecodeError, not return None or garbage
+        with pytest.raises(json.JSONDecodeError):
+            recorder.get_row_data(row.row_id)

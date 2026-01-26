@@ -80,6 +80,7 @@ from elspeth.contracts import Determinism, PluginSchema, SourceRow
 from elspeth.plugins.manager import PluginManager
 
 if TYPE_CHECKING:
+    from elspeth.contracts import TransformResult
     from elspeth.plugins.protocols import (
         GateProtocol,
         SinkProtocol,
@@ -117,7 +118,7 @@ def plugin_manager() -> PluginManager:
 
                 gates=list(config.gates),
 
-                output_sink=config.output_sink,
+                default_sink=config.default_sink,
 
             )
     """
@@ -397,6 +398,29 @@ def as_gate(gate: Any) -> "GateProtocol":
     return cast("GateProtocol", gate)
 
 
+def as_transform_result(result: Any) -> "TransformResult":
+    """Assert and cast a result to TransformResult.
+
+    Used when extracting results from CollectorOutputPort which stores
+    TransformResult | ExceptionResult. In normal test scenarios, we expect
+    TransformResult - ExceptionResult only occurs for plugin bugs.
+
+    Args:
+        result: The result to cast (typically from collector.results[i][1])
+
+    Returns:
+        The result cast to TransformResult
+
+    Raises:
+        AssertionError: If result is ExceptionResult (unexpected plugin bug)
+    """
+    from elspeth.engine.batch_adapter import ExceptionResult
+
+    if isinstance(result, ExceptionResult):
+        raise AssertionError(f"Expected TransformResult but got ExceptionResult: {result.exception}\n{result.traceback}")
+    return cast("TransformResult", result)
+
+
 # =============================================================================
 # Integration Test Fixtures (INFRA-02)
 # =============================================================================
@@ -476,6 +500,7 @@ __all__ = [
     "as_sink",
     "as_source",
     "as_transform",
+    "as_transform_result",
     "plugin_manager",
     "real_landscape_db",
     "real_landscape_recorder",

@@ -41,6 +41,7 @@ from elspeth.core.landscape.models import (
     NodeStateCompleted,
     NodeStateFailed,
     NodeStateOpen,
+    NodeStatePending,
     RoutingEvent,
     Row,
     RowLineage,
@@ -474,6 +475,100 @@ class TestNodeStateUnion:
             duration_ms=10.0,
         )
         assert isinstance(state, NodeStateFailed)
+
+    def test_node_state_pending_is_node_state(self) -> None:
+        """P1: NodeStatePending is a valid NodeState (async batch flows)."""
+        now = datetime.now(UTC)
+        state: NodeState = NodeStatePending(
+            state_id="s1",
+            token_id="t1",
+            node_id="n1",
+            step_index=0,
+            attempt=1,
+            status=NodeStateStatus.PENDING,
+            input_hash="h1",
+            started_at=now,
+            completed_at=now,
+            duration_ms=10.0,
+        )
+        assert isinstance(state, NodeStatePending)
+
+
+# =============================================================================
+# Tests for NodeStatePending dataclass (P1: missing from union coverage)
+# =============================================================================
+
+
+class TestNodeStatePendingDataclass:
+    """P1: Verify NodeStatePending dataclass field defaults and requirements.
+
+    NodeStatePending was missing from mutation-gap suite. It is a core audit
+    state for async operations (batch submission) where processing completed
+    but output is pending.
+    """
+
+    @pytest.fixture
+    def minimal_pending_state(self) -> NodeStatePending:
+        """Create NodeStatePending with only required fields."""
+        now = datetime.now(UTC)
+        return NodeStatePending(
+            state_id="state-001",
+            token_id="tok-001",
+            node_id="node-001",
+            step_index=0,
+            attempt=1,
+            status=NodeStateStatus.PENDING,
+            input_hash="input123",
+            started_at=now,
+            completed_at=now,
+            duration_ms=50.0,
+        )
+
+    def test_completed_at_is_required(self) -> None:
+        """P1: completed_at is required for NodeStatePending (no default)."""
+        now = datetime.now(UTC)
+        with pytest.raises(TypeError):
+            NodeStatePending(  # type: ignore[call-arg]
+                state_id="state-001",
+                token_id="tok-001",
+                node_id="node-001",
+                step_index=0,
+                attempt=1,
+                status=NodeStateStatus.PENDING,
+                input_hash="input123",
+                started_at=now,
+                # completed_at missing
+                duration_ms=50.0,
+            )
+
+    def test_duration_ms_is_required(self) -> None:
+        """P1: duration_ms is required for NodeStatePending (no default)."""
+        now = datetime.now(UTC)
+        with pytest.raises(TypeError):
+            NodeStatePending(  # type: ignore[call-arg]
+                state_id="state-001",
+                token_id="tok-001",
+                node_id="node-001",
+                step_index=0,
+                attempt=1,
+                status=NodeStateStatus.PENDING,
+                input_hash="input123",
+                started_at=now,
+                completed_at=now,
+                # duration_ms missing
+            )
+
+    def test_context_before_json_defaults_to_none(self, minimal_pending_state: NodeStatePending) -> None:
+        """P1: context_before_json must default to None."""
+        assert minimal_pending_state.context_before_json is None
+
+    def test_context_after_json_defaults_to_none(self, minimal_pending_state: NodeStatePending) -> None:
+        """P1: context_after_json must default to None."""
+        assert minimal_pending_state.context_after_json is None
+
+    def test_status_is_literal_pending(self, minimal_pending_state: NodeStatePending) -> None:
+        """P1: status must be NodeStateStatus.PENDING."""
+        assert minimal_pending_state.status == NodeStateStatus.PENDING
 
 
 # =============================================================================

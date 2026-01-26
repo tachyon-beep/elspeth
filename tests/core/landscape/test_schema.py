@@ -216,6 +216,27 @@ class TestPhase5CheckpointSchema:
         assert "sequence_number" in columns
         assert "aggregation_state_json" in columns
 
+    def test_checkpoints_table_has_topology_validation_columns(self) -> None:
+        """P1: Verify checkpoint topology hash columns exist and are non-nullable.
+
+        These columns were added in Bug #7 fix for checkpoint validation.
+        A schema regression that removes them would break checkpoint
+        compatibility validation and undermine recovery integrity.
+        """
+        from elspeth.core.landscape.schema import checkpoints_table
+
+        columns = {c.name: c for c in checkpoints_table.columns}
+
+        # upstream_topology_hash must exist and be non-nullable
+        assert "upstream_topology_hash" in columns, "Missing upstream_topology_hash column"
+        assert columns["upstream_topology_hash"].nullable is False, "upstream_topology_hash must be non-nullable for checkpoint validation"
+
+        # checkpoint_node_config_hash must exist and be non-nullable
+        assert "checkpoint_node_config_hash" in columns, "Missing checkpoint_node_config_hash column"
+        assert columns["checkpoint_node_config_hash"].nullable is False, (
+            "checkpoint_node_config_hash must be non-nullable for checkpoint validation"
+        )
+
     def test_checkpoints_table_in_metadata(self) -> None:
         """Verify checkpoints table is registered in metadata."""
         from elspeth.core.landscape.schema import metadata

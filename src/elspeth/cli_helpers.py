@@ -30,12 +30,12 @@ def instantiate_plugins_from_config(config: "ElspethSettings") -> dict[str, Any]
     manager = _get_plugin_manager()
 
     # Instantiate source (raises on unknown plugin)
-    source_cls = manager.get_source_by_name(config.datasource.plugin)
-    source = source_cls(dict(config.datasource.options))
+    source_cls = manager.get_source_by_name(config.source.plugin)
+    source = source_cls(dict(config.source.options))
 
     # Instantiate transforms
     transforms = []
-    for plugin_config in config.row_plugins:
+    for plugin_config in config.transforms:
         transform_cls = manager.get_transform_by_name(plugin_config.plugin)
         transforms.append(transform_cls(dict(plugin_config.options)))
 

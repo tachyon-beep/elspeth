@@ -485,9 +485,11 @@ class TestCheckpointRecoveryIntegration:
 
         # Manually set the sink_id_map and transform_id_map since we're building
         # the graph manually (not from config)
-        graph._sink_id_map = {"default": "sink"}
-        graph._transform_id_map = {0: "xform"}
-        graph._output_sink = "default"
+        from elspeth.contracts import NodeID, SinkName
+
+        graph._sink_id_map = {SinkName("default"): NodeID("sink")}
+        graph._transform_id_map = {0: NodeID("xform")}
+        graph._default_sink = "default"
 
         result = orchestrator.resume(
             resume_point=resume_point,

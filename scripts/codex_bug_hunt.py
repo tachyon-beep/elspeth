@@ -10,7 +10,7 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
-from codex_audit_common import (
+from codex_audit_common import (  # type: ignore[import-not-found]
     AsyncTqdm,
     chunked,
     ensure_log_file,
@@ -255,8 +255,8 @@ def _deduplicate_and_merge(
         return 0
 
     text = output_path.read_text(encoding="utf-8")
-    reports = []
-    current = []
+    reports: list[str] = []
+    current: list[str] = []
     for line in text.splitlines():
         if line.strip() == "---":
             reports.append("\n".join(current).strip())
@@ -418,7 +418,7 @@ async def _run_batches(
         _organize_by_priority(output_dir)
 
     # Generate summary statistics
-    summary = generate_summary(output_dir, no_defect_marker="No concrete bug found")
+    summary: dict[str, int] = generate_summary(output_dir, no_defect_marker="No concrete bug found")
     summary["merged"] = total_merged
     summary["gated"] = total_gated
     return summary

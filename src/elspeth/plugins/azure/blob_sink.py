@@ -234,6 +234,26 @@ class AzureBlobSink(BaseSink):
     plugin_version = "1.0.0"
     # determinism inherited from BaseSink (IO_WRITE)
 
+    # Resume capability: Azure Blobs are immutable - cannot append
+    supports_resume: bool = False
+
+    def configure_for_resume(self) -> None:
+        """Azure Blob sink does not support resume.
+
+        Azure Blobs are immutable - once uploaded, they cannot be appended to.
+        A new blob would need to be created with combined content, which is
+        not supported in the resume flow.
+
+        Raises:
+            NotImplementedError: Always, as Azure Blobs cannot be appended.
+        """
+        raise NotImplementedError(
+            "AzureBlobSink does not support resume. "
+            "Azure Blobs are immutable and cannot be appended to. "
+            "Consider using a different blob_path template (e.g., '{{ run_id }}/output.csv') "
+            "to create unique blobs per run, or use a local file sink for resumable pipelines."
+        )
+
     def __init__(self, config: dict[str, Any]) -> None:
         super().__init__(config)
         cfg = AzureBlobSinkConfig.from_dict(config)
@@ -331,12 +351,27 @@ class AzureBlobSink(BaseSink):
             # Unreachable due to Pydantic Literal validation, but satisfies static analysis
             raise AssertionError(f"Unsupported format: {self._format}")
 
+    def _get_fieldnames_from_schema_or_row(self, row: dict[str, Any]) -> list[str]:
+        """Get fieldnames from schema or row keys.
+
+        When schema is explicit, returns field names from schema definition.
+        This ensures optional fields are present in the header.
+
+        When schema is dynamic, falls back to inferring from row keys.
+        """
+        if not self._schema_config.is_dynamic and self._schema_config.fields:
+            # Explicit schema: use field names from schema definition
+            return [field_def.name for field_def in self._schema_config.fields]
+        else:
+            # Dynamic schema: infer from row keys
+            return list(row.keys())
+
     def _serialize_csv(self, rows: list[dict[str, Any]]) -> bytes:
         """Serialize rows to CSV bytes."""
         output = io.StringIO()
 
-        # Determine fieldnames from first row
-        fieldnames = list(rows[0].keys())
+        # Determine fieldnames from schema (or first row if dynamic)
+        fieldnames = self._get_fieldnames_from_schema_or_row(rows[0])
 
         writer = csv.DictWriter(
             output,

@@ -25,7 +25,7 @@ def test_schema_validation_actually_works() -> None:
     # This exact config would PASS validation before fix (bug)
     # Should FAIL validation after fix (correct)
     config_yaml = """
-datasource:
+source:
   plugin: csv
   options:
     path: input.csv
@@ -36,7 +36,7 @@ datasource:
         - "field_b: int"
     on_validation_failure: discard
 
-row_plugins:
+transforms:
   - plugin: passthrough
     options:
       schema:
@@ -55,7 +55,7 @@ sinks:
         fields:
           - "field_c: float"  # INCOMPATIBLE: requires field_c, gets field_a/field_b
 
-output_sink: output
+default_sink: output
 """
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
@@ -86,7 +86,7 @@ def test_compatible_schemas_still_pass() -> None:
     runner = CliRunner()
 
     config_yaml = """
-datasource:
+source:
   plugin: csv
   options:
     path: input.csv
@@ -97,7 +97,7 @@ datasource:
         - "field_b: int"
     on_validation_failure: discard
 
-row_plugins:
+transforms:
   - plugin: passthrough
     options:
       schema:
@@ -116,7 +116,7 @@ sinks:
         fields:
           - "field_a: str"  # Compatible: subset of producer schema
 
-output_sink: output
+default_sink: output
 """
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:

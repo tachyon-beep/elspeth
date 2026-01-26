@@ -201,6 +201,8 @@ class TestNodeRepository:
             registered_at: datetime
             schema_hash: str | None = None
             sequence_in_pipeline: int | None = None
+            schema_mode: str | None = None
+            schema_fields_json: str | None = None
 
         db_row = NodeRow(
             node_id="node-123",
@@ -238,6 +240,8 @@ class TestNodeRepository:
             registered_at: datetime
             schema_hash: str | None = None
             sequence_in_pipeline: int | None = None
+            schema_mode: str | None = None
+            schema_fields_json: str | None = None
 
         db_row = NodeRow(
             node_id="node-123",
@@ -272,6 +276,8 @@ class TestNodeRepository:
             registered_at: datetime
             schema_hash: str | None = None
             sequence_in_pipeline: int | None = None
+            schema_mode: str | None = None
+            schema_fields_json: str | None = None
 
         db_row = NodeRow(
             node_id="node-123",
@@ -634,6 +640,7 @@ class TestBatchRepository:
             status: str  # String in DB
             created_at: datetime
             aggregation_state_id: str | None = None
+            trigger_type: str | None = None
             trigger_reason: str | None = None
             completed_at: datetime | None = None
 
@@ -664,6 +671,7 @@ class TestBatchRepository:
             status: str
             created_at: datetime
             aggregation_state_id: str | None = None
+            trigger_type: str | None = None
             trigger_reason: str | None = None
             completed_at: datetime | None = None
 

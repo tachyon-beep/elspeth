@@ -6,6 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from elspeth.contracts import NodeID, SinkName
 from elspeth.core.landscape import LandscapeDB
 from elspeth.engine.orchestrator import Orchestrator
 
@@ -26,7 +27,7 @@ class TestNodeIdAssignment:
                 source=source,  # type: ignore[arg-type]
                 transforms=[],
                 sinks={},
-                source_id="source-1",
+                source_id=NodeID("source-1"),
                 transform_id_map={},
                 sink_id_map={},
             )
@@ -43,7 +44,7 @@ class TestNodeIdAssignment:
             source=source,
             transforms=[],
             sinks={},
-            source_id="source-1",
+            source_id=NodeID("source-1"),
             transform_id_map={},
             sink_id_map={},
         )
@@ -67,8 +68,8 @@ class TestNodeIdAssignment:
             source=source,
             transforms=[t1, t2],
             sinks={},
-            source_id="source-1",
-            transform_id_map={0: "transform-0", 1: "transform-1"},
+            source_id=NodeID("source-1"),
+            transform_id_map={0: NodeID("transform-0"), 1: NodeID("transform-1")},
             sink_id_map={},
         )
 
@@ -92,9 +93,9 @@ class TestNodeIdAssignment:
             source=source,
             transforms=[],
             sinks={"output": sink1, "errors": sink2},
-            source_id="source-1",
+            source_id=NodeID("source-1"),
             transform_id_map={},
-            sink_id_map={"output": "sink-output", "errors": "sink-errors"},
+            sink_id_map={SinkName("output"): NodeID("sink-output"), SinkName("errors"): NodeID("sink-errors")},
         )
 
         assert sink1.node_id == "sink-output"
@@ -116,7 +117,7 @@ class TestNodeIdAssignment:
                 source=source,
                 transforms=[t1],
                 sinks={},
-                source_id="source-1",
+                source_id=NodeID("source-1"),
                 transform_id_map={},  # Missing mapping for sequence 0
                 sink_id_map={},
             )
@@ -137,7 +138,7 @@ class TestNodeIdAssignment:
                 source=source,
                 transforms=[],
                 sinks={"output": sink},
-                source_id="source-1",
+                source_id=NodeID("source-1"),
                 transform_id_map={},
                 sink_id_map={},  # Missing mapping for "output"
             )
@@ -164,9 +165,9 @@ class TestNodeIdAssignment:
             source=source,
             transforms=[t1, t2],
             sinks={"default": sink1, "errors": sink2},
-            source_id="src-001",
-            transform_id_map={0: "xform-0", 1: "xform-1"},
-            sink_id_map={"default": "sink-default", "errors": "sink-errors"},
+            source_id=NodeID("src-001"),
+            transform_id_map={0: NodeID("xform-0"), 1: NodeID("xform-1")},
+            sink_id_map={SinkName("default"): NodeID("sink-default"), SinkName("errors"): NodeID("sink-errors")},
         )
 
         # Verify all assignments
@@ -175,3 +176,45 @@ class TestNodeIdAssignment:
         assert t2.node_id == "xform-1"
         assert sink1.node_id == "sink-default"
         assert sink2.node_id == "sink-errors"
+
+    def test_assign_plugin_node_ids_preserves_preassigned_transform_ids(self) -> None:
+        """Should preserve pre-assigned node_ids on transforms (aggregation path).
+
+        Aggregation transforms have their node_id assigned by CLI from
+        aggregation_id_map before _assign_plugin_node_ids is called.
+        The method should skip these transforms without error.
+        """
+        db = MagicMock(spec=LandscapeDB)
+        orchestrator = Orchestrator(db)
+
+        source = MagicMock()
+        source.node_id = None
+
+        # Regular transform without node_id
+        t1 = MagicMock()
+        t1.node_id = None
+
+        # Aggregation transform with pre-assigned node_id
+        t2 = MagicMock()
+        t2.node_id = "agg-1"  # Pre-assigned by CLI
+
+        # Regular transform without node_id
+        t3 = MagicMock()
+        t3.node_id = None
+
+        # Note: transform_id_map only has entries for transforms WITHOUT pre-assigned node_ids
+        # Sequence 1 (t2) is not in the map because it already has node_id
+        orchestrator._assign_plugin_node_ids(
+            source=source,
+            transforms=[t1, t2, t3],
+            sinks={},
+            source_id=NodeID("source-1"),
+            transform_id_map={0: NodeID("transform-0"), 2: NodeID("transform-2")},  # No entry for seq 1
+            sink_id_map={},
+        )
+
+        # Verify pre-assigned node_id remains unchanged
+        assert t2.node_id == "agg-1"
+        # Verify other transforms get assigned from map
+        assert t1.node_id == "transform-0"
+        assert t3.node_id == "transform-2"

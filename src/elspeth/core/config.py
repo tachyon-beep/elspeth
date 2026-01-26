@@ -44,16 +44,24 @@ class TriggerConfig(BaseModel):
     Trigger types:
     - count: Fire after N rows accumulated
     - timeout: Fire after N seconds since first accept
-    - condition: Fire when expression evaluates to true
+    - condition: Fire when expression evaluates to true (batch-level metrics only)
 
     Note: end_of_source is IMPLICIT - always checked at source exhaustion.
     It is not configured here because it always applies.
+
+    Condition Context:
+        Trigger conditions evaluate at BATCH level, not row level. Available variables:
+        - batch_count: Number of rows accumulated in current batch (int)
+        - batch_age_seconds: Time elapsed since first row accepted (float)
+
+        Individual row data is NOT accessible in trigger conditions. For row-level
+        routing decisions, use Gates instead of triggers.
 
     Example YAML (combined triggers):
         trigger:
           count: 1000           # Fire after 1000 rows
           timeout_seconds: 3600         # Or after 1 hour
-          condition: "row['type'] == 'flush_signal'"  # Or on special row
+          condition: "batch_count >= 100 and batch_age_seconds < 30"  # Or batch metrics
     """
 
     model_config = {"frozen": True}
@@ -70,7 +78,7 @@ class TriggerConfig(BaseModel):
     )
     condition: str | None = Field(
         default=None,
-        description="Fire when expression evaluates to true",
+        description="Fire when expression evaluates to true (batch-level: batch_count, batch_age_seconds)",
     )
 
     @field_validator("condition")
@@ -302,6 +310,17 @@ class CoalesceSettings(BaseModel):
     Coalesce merges tokens from parallel fork paths back into a single token.
     Tokens are correlated by row_id (same source row that was forked).
 
+    Memory Implications:
+        When using 'require_all' or 'quorum' policies, tokens arriving early
+        are held in memory waiting for their siblings. If one branch consistently
+        fails before reaching coalesce, the other branches' tokens will be held
+        until flush_pending() is called at end-of-source.
+
+        For high-volume pipelines with unreliable branches:
+        - Consider 'best_effort' with timeout for faster memory release
+        - Consider 'first' to avoid holding tokens entirely
+        - Monitor rows_coalesce_failed counter for excessive failures
+
     Example YAML:
         coalesce:
           - name: merge_analysis
@@ -377,7 +396,7 @@ class CoalesceSettings(BaseModel):
         return self
 
 
-class DatasourceSettings(BaseModel):
+class SourceSettings(BaseModel):
     """Source plugin configuration per architecture."""
 
     model_config = {"frozen": True}
@@ -389,7 +408,7 @@ class DatasourceSettings(BaseModel):
     )
 
 
-class RowPluginSettings(BaseModel):
+class TransformSettings(BaseModel):
     """Transform plugin configuration per architecture.
 
     Note: Gate routing is now config-driven only (see GateSettings).
@@ -588,13 +607,13 @@ class ElspethSettings(BaseModel):
     model_config = {"frozen": True}
 
     # Required - core pipeline definition
-    datasource: DatasourceSettings = Field(
+    source: SourceSettings = Field(
         description="Source plugin configuration (exactly one per run)",
     )
     sinks: dict[str, SinkSettings] = Field(
         description="Named sink configurations (one or more required)",
     )
-    output_sink: str = Field(
+    default_sink: str = Field(
         description="Default sink for rows that complete the pipeline",
     )
 
@@ -603,13 +622,13 @@ class ElspethSettings(BaseModel):
         default=RunMode.LIVE,
         description="Execution mode: live (real calls), replay (use recorded), verify (compare)",
     )
-    replay_source_run_id: str | None = Field(
+    replay_from: str | None = Field(
         default=None,
         description="Run ID to replay/verify against (required for replay/verify modes)",
     )
 
     # Optional - transform chain
-    row_plugins: list[RowPluginSettings] = Field(
+    transforms: list[TransformSettings] = Field(
         default_factory=list,
         description="Ordered list of transforms/gates to apply",
     )
@@ -659,10 +678,10 @@ class ElspethSettings(BaseModel):
     )
 
     @model_validator(mode="after")
-    def validate_output_sink_exists(self) -> "ElspethSettings":
-        """Ensure output_sink references a defined sink."""
-        if self.output_sink not in self.sinks:
-            raise ValueError(f"output_sink '{self.output_sink}' not found in sinks. Available sinks: {list(self.sinks.keys())}")
+    def validate_default_sink_exists(self) -> "ElspethSettings":
+        """Ensure default_sink references a defined sink."""
+        if self.default_sink not in self.sinks:
+            raise ValueError(f"default_sink '{self.default_sink}' not found in sinks. Available sinks: {list(self.sinks.keys())}")
         return self
 
     @model_validator(mode="after")
@@ -705,14 +724,14 @@ class ElspethSettings(BaseModel):
         return self
 
     @model_validator(mode="after")
-    def validate_replay_source_run_id(self) -> "ElspethSettings":
-        """Ensure replay_source_run_id is set when mode requires it.
+    def validate_replay_from(self) -> "ElspethSettings":
+        """Ensure replay_from is set when mode requires it.
 
         Replay and verify modes need a source run ID to replay/compare against.
-        Live mode does not require (and ignores) replay_source_run_id.
+        Live mode does not require (and ignores) replay_from.
         """
-        if self.run_mode in (RunMode.REPLAY, RunMode.VERIFY) and not self.replay_source_run_id:
-            raise ValueError(f"replay_source_run_id is required when run_mode is '{self.run_mode.value}'")
+        if self.run_mode in (RunMode.REPLAY, RunMode.VERIFY) and not self.replay_from:
+            raise ValueError(f"replay_from is required when run_mode is '{self.run_mode.value}'")
         return self
 
     @field_validator("sinks")
@@ -949,10 +968,10 @@ def _expand_config_templates(
 
     config = dict(raw_config)
 
-    # === Row plugin options - expand template files ===
-    if "row_plugins" in config and isinstance(config["row_plugins"], list):
+    # === Transform plugin options - expand template files ===
+    if "transforms" in config and isinstance(config["transforms"], list):
         plugins = []
-        for plugin_config in config["row_plugins"]:
+        for plugin_config in config["transforms"]:
             if isinstance(plugin_config, dict):
                 plugin = dict(plugin_config)
                 if "options" in plugin and isinstance(plugin["options"], dict):
@@ -960,7 +979,7 @@ def _expand_config_templates(
                 plugins.append(plugin)
             else:
                 plugins.append(plugin_config)
-        config["row_plugins"] = plugins
+        config["transforms"] = plugins
 
     # === Aggregation options - expand template files ===
     if "aggregations" in config and isinstance(config["aggregations"], list):
@@ -987,9 +1006,9 @@ def _fingerprint_config_for_audit(
     The original config (with secrets) is untouched.
 
     Processes:
-    - datasource.options
+    - source.options
     - sinks.*.options
-    - row_plugins[*].options
+    - transforms[*].options
     - aggregations[*].options
     - landscape.url (DSN password)
 
@@ -1029,9 +1048,9 @@ def _fingerprint_config_for_audit(
                 # Dev mode: password was removed but not fingerprinted
                 landscape["url_password_redacted"] = True
 
-    # === Datasource options ===
-    if "datasource" in config and isinstance(config["datasource"], dict):
-        ds = config["datasource"]
+    # === Source options ===
+    if "source" in config and isinstance(config["source"], dict):
+        ds = config["source"]
         if "options" in ds and isinstance(ds["options"], dict):
             ds["options"] = _fingerprint_secrets(ds["options"], fail_if_no_key=fail_if_no_key)
 
@@ -1041,9 +1060,9 @@ def _fingerprint_config_for_audit(
             if isinstance(sink, dict) and "options" in sink and isinstance(sink["options"], dict):
                 sink["options"] = _fingerprint_secrets(sink["options"], fail_if_no_key=fail_if_no_key)
 
-    # === Row plugin options ===
-    if "row_plugins" in config and isinstance(config["row_plugins"], list):
-        for plugin in config["row_plugins"]:
+    # === Transform plugin options ===
+    if "transforms" in config and isinstance(config["transforms"], list):
+        for plugin in config["transforms"]:
             if isinstance(plugin, dict) and "options" in plugin and isinstance(plugin["options"], dict):
                 plugin["options"] = _fingerprint_secrets(plugin["options"], fail_if_no_key=fail_if_no_key)
 

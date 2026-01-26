@@ -311,6 +311,96 @@ class TestParallelEdgeValidation:
         assert not result.can_resume
 
 
+class TestCheckpointNodeValidation:
+    """Tests for checkpoint node existence and config validation.
+
+    These tests cover the basic rejection paths in the validator:
+    1. Checkpoint node removed from graph
+    2. Checkpoint node config changed
+
+    These were identified as missing by quality audit - P1 priority.
+    """
+
+    def test_resume_rejects_missing_checkpoint_node(self) -> None:
+        """Resume must reject when checkpoint node is removed from graph."""
+        # Original: source → transform → checkpoint_node
+        original_graph = ExecutionGraph()
+        original_graph.add_node("source", node_type="source", plugin_name="csv")
+        original_graph.add_node("transform", node_type="transform", plugin_name="passthrough")
+        original_graph.add_node("checkpoint_node", node_type="transform", plugin_name="llm", config={"prompt": "test"})
+
+        original_graph.add_edge("source", "transform", label="continue", mode=RoutingMode.MOVE)
+        original_graph.add_edge("transform", "checkpoint_node", label="continue", mode=RoutingMode.MOVE)
+
+        validator = CheckpointCompatibilityValidator()
+        original_topology_hash = validator.compute_upstream_topology_hash(original_graph, "checkpoint_node")
+        original_config_hash = stable_hash({"prompt": "test"})
+
+        checkpoint = Checkpoint(
+            checkpoint_id="ckpt-missing-001",
+            run_id="run-missing-001",
+            token_id="tok-001",
+            node_id="checkpoint_node",
+            sequence_number=5,
+            created_at=datetime.now(UTC),
+            upstream_topology_hash=original_topology_hash,
+            checkpoint_node_config_hash=original_config_hash,
+        )
+
+        # Modified: checkpoint_node is REMOVED
+        modified_graph = ExecutionGraph()
+        modified_graph.add_node("source", node_type="source", plugin_name="csv")
+        modified_graph.add_node("transform", node_type="transform", plugin_name="passthrough")
+        # NOTE: checkpoint_node is NOT added
+
+        modified_graph.add_edge("source", "transform", label="continue", mode=RoutingMode.MOVE)
+
+        # Should FAIL - checkpoint node no longer exists
+        result = validator.validate(checkpoint, modified_graph)
+
+        assert not result.can_resume
+        assert result.reason is not None
+        assert "checkpoint_node" in result.reason or "not found" in result.reason.lower() or "missing" in result.reason.lower()
+
+    def test_resume_rejects_checkpoint_config_change(self) -> None:
+        """Resume must reject when checkpoint node config changes."""
+        # Original: source → checkpoint_node with config {"prompt": "original"}
+        original_graph = ExecutionGraph()
+        original_graph.add_node("source", node_type="source", plugin_name="csv")
+        original_graph.add_node("checkpoint_node", node_type="transform", plugin_name="llm", config={"prompt": "original"})
+
+        original_graph.add_edge("source", "checkpoint_node", label="continue", mode=RoutingMode.MOVE)
+
+        validator = CheckpointCompatibilityValidator()
+        original_topology_hash = validator.compute_upstream_topology_hash(original_graph, "checkpoint_node")
+        original_config_hash = stable_hash({"prompt": "original"})
+
+        checkpoint = Checkpoint(
+            checkpoint_id="ckpt-config-001",
+            run_id="run-config-001",
+            token_id="tok-001",
+            node_id="checkpoint_node",
+            sequence_number=10,
+            created_at=datetime.now(UTC),
+            upstream_topology_hash=original_topology_hash,
+            checkpoint_node_config_hash=original_config_hash,
+        )
+
+        # Modified: SAME topology, DIFFERENT checkpoint node config
+        modified_graph = ExecutionGraph()
+        modified_graph.add_node("source", node_type="source", plugin_name="csv")
+        modified_graph.add_node("checkpoint_node", node_type="transform", plugin_name="llm", config={"prompt": "changed"})  # CHANGED
+
+        modified_graph.add_edge("source", "checkpoint_node", label="continue", mode=RoutingMode.MOVE)
+
+        # Should FAIL - checkpoint node config changed
+        result = validator.validate(checkpoint, modified_graph)
+
+        assert not result.can_resume
+        assert result.reason is not None
+        assert "configuration" in result.reason.lower() or "config" in result.reason.lower()
+
+
 # Bug #7 fix: Legacy checkpoint test class removed
 # With nullable=False on topology hash fields, legacy checkpoints cannot exist in the system.
 # This enforces the "No Legacy Code Policy" - old checkpoints are incompatible by design.

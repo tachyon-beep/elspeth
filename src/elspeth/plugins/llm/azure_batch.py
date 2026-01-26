@@ -400,17 +400,35 @@ class AzureBatchLLMTransform(BaseTransform):
             "content_size": len(jsonl_content),
         }
         start = time.perf_counter()
-        batch_file = client.files.create(
-            file=("batch_input.jsonl", file_bytes),
-            purpose="batch",
-        )
-        ctx.record_call(
-            call_type=CallType.HTTP,
-            status=CallStatus.SUCCESS,
-            request_data=upload_request,
-            response_data={"file_id": batch_file.id, "status": batch_file.status},
-            latency_ms=(time.perf_counter() - start) * 1000,
-        )
+        try:
+            batch_file = client.files.create(
+                file=("batch_input.jsonl", file_bytes),
+                purpose="batch",
+            )
+            ctx.record_call(
+                call_type=CallType.HTTP,
+                status=CallStatus.SUCCESS,
+                request_data=upload_request,
+                response_data={"file_id": batch_file.id, "status": batch_file.status},
+                latency_ms=(time.perf_counter() - start) * 1000,
+            )
+        except Exception as e:
+            # External API failure - record error and return structured result
+            ctx.record_call(
+                call_type=CallType.HTTP,
+                status=CallStatus.ERROR,
+                request_data=upload_request,
+                response_data={"error": str(e), "error_type": type(e).__name__},
+                latency_ms=(time.perf_counter() - start) * 1000,
+            )
+            return TransformResult.error(
+                {
+                    "reason": "file_upload_failed",
+                    "error": str(e),
+                    "error_type": type(e).__name__,
+                },
+                retryable=True,  # Network/auth errors are retryable
+            )
 
         # Create batch job (with audit recording)
         batch_request = {
@@ -420,18 +438,36 @@ class AzureBatchLLMTransform(BaseTransform):
             "completion_window": "24h",
         }
         start = time.perf_counter()
-        batch = client.batches.create(
-            input_file_id=batch_file.id,
-            endpoint="/chat/completions",
-            completion_window="24h",
-        )
-        ctx.record_call(
-            call_type=CallType.HTTP,
-            status=CallStatus.SUCCESS,
-            request_data=batch_request,
-            response_data={"batch_id": batch.id, "status": batch.status},
-            latency_ms=(time.perf_counter() - start) * 1000,
-        )
+        try:
+            batch = client.batches.create(
+                input_file_id=batch_file.id,
+                endpoint="/chat/completions",
+                completion_window="24h",
+            )
+            ctx.record_call(
+                call_type=CallType.HTTP,
+                status=CallStatus.SUCCESS,
+                request_data=batch_request,
+                response_data={"batch_id": batch.id, "status": batch.status},
+                latency_ms=(time.perf_counter() - start) * 1000,
+            )
+        except Exception as e:
+            # External API failure - record error and return structured result
+            ctx.record_call(
+                call_type=CallType.HTTP,
+                status=CallStatus.ERROR,
+                request_data=batch_request,
+                response_data={"error": str(e), "error_type": type(e).__name__},
+                latency_ms=(time.perf_counter() - start) * 1000,
+            )
+            return TransformResult.error(
+                {
+                    "reason": "batch_create_failed",
+                    "error": str(e),
+                    "error_type": type(e).__name__,
+                },
+                retryable=True,  # Network/auth errors are retryable
+            )
 
         # 4. CHECKPOINT immediately after submit
         checkpoint_data = {
@@ -482,18 +518,38 @@ class AzureBatchLLMTransform(BaseTransform):
             "batch_id": batch_id,
         }
         start = time.perf_counter()
-        batch = client.batches.retrieve(batch_id)
-        ctx.record_call(
-            call_type=CallType.HTTP,
-            status=CallStatus.SUCCESS,
-            request_data=retrieve_request,
-            response_data={
-                "batch_id": batch.id,
-                "status": batch.status,
-                "output_file_id": getattr(batch, "output_file_id", None),
-            },
-            latency_ms=(time.perf_counter() - start) * 1000,
-        )
+        try:
+            batch = client.batches.retrieve(batch_id)
+            ctx.record_call(
+                call_type=CallType.HTTP,
+                status=CallStatus.SUCCESS,
+                request_data=retrieve_request,
+                response_data={
+                    "batch_id": batch.id,
+                    "status": batch.status,
+                    "output_file_id": getattr(batch, "output_file_id", None),
+                },
+                latency_ms=(time.perf_counter() - start) * 1000,
+            )
+        except Exception as e:
+            # External API failure - record error and return structured result
+            ctx.record_call(
+                call_type=CallType.HTTP,
+                status=CallStatus.ERROR,
+                request_data=retrieve_request,
+                response_data={"error": str(e), "error_type": type(e).__name__},
+                latency_ms=(time.perf_counter() - start) * 1000,
+            )
+            # DON'T clear checkpoint - batch exists on Azure, retry should resume checking
+            return TransformResult.error(
+                {
+                    "reason": "batch_retrieve_failed",
+                    "error": str(e),
+                    "error_type": type(e).__name__,
+                    "batch_id": batch_id,
+                },
+                retryable=True,  # Transient failure - retry status check
+            )
 
         if batch.status == "completed":
             # Download results and assemble output
@@ -590,25 +646,72 @@ class AzureBatchLLMTransform(BaseTransform):
             "file_id": output_file_id,
         }
         start = time.perf_counter()
-        output_content = client.files.content(output_file_id)
-        ctx.record_call(
-            call_type=CallType.HTTP,
-            status=CallStatus.SUCCESS,
-            request_data=download_request,
-            response_data={
-                "file_id": output_file_id,
-                "content": output_content.text,  # BUG-AZURE-01 FIX: Include actual JSONL output
-                "content_length": len(output_content.text),
-            },
-            latency_ms=(time.perf_counter() - start) * 1000,
-        )
+        try:
+            output_content = client.files.content(output_file_id)
+            ctx.record_call(
+                call_type=CallType.HTTP,
+                status=CallStatus.SUCCESS,
+                request_data=download_request,
+                response_data={
+                    "file_id": output_file_id,
+                    "content": output_content.text,  # BUG-AZURE-01 FIX: Include actual JSONL output
+                    "content_length": len(output_content.text),
+                },
+                latency_ms=(time.perf_counter() - start) * 1000,
+            )
+        except Exception as e:
+            # External API failure - record error and return structured result
+            ctx.record_call(
+                call_type=CallType.HTTP,
+                status=CallStatus.ERROR,
+                request_data=download_request,
+                response_data={"error": str(e), "error_type": type(e).__name__},
+                latency_ms=(time.perf_counter() - start) * 1000,
+            )
+            # DON'T clear checkpoint - batch completed on Azure, retry should re-attempt download
+            return TransformResult.error(
+                {
+                    "reason": "file_download_failed",
+                    "error": str(e),
+                    "error_type": type(e).__name__,
+                    "output_file_id": output_file_id,
+                },
+                retryable=True,  # Transient failure - retry download
+            )
 
-        # Parse JSONL results
+        # Parse JSONL results (EXTERNAL DATA - wrap parsing)
         results_by_id: dict[str, dict[str, Any]] = {}
-        for line in output_content.text.strip().split("\n"):
-            if line:
+        malformed_lines: list[str] = []
+
+        for line_num, line in enumerate(output_content.text.strip().split("\n"), start=1):
+            if not line:
+                continue
+
+            try:
                 result = json.loads(line)
-                results_by_id[result["custom_id"]] = result
+            except json.JSONDecodeError as e:
+                # Log malformed line but continue processing other lines
+                malformed_lines.append(f"Line {line_num}: JSON parse error - {e}")
+                continue
+
+            # Validate custom_id presence
+            custom_id = result.get("custom_id")
+            if custom_id is None:
+                malformed_lines.append(f"Line {line_num}: Missing 'custom_id' field")
+                continue
+
+            results_by_id[custom_id] = result
+
+        # If ALL lines are malformed, fail the entire batch
+        if not results_by_id and malformed_lines:
+            self._clear_checkpoint(ctx)
+            return TransformResult.error(
+                {
+                    "reason": "all_output_lines_malformed",
+                    "malformed_count": len(malformed_lines),
+                    "errors": malformed_lines[:10],  # First 10 errors for diagnosis
+                }
+            )
 
         # Assemble output rows in original order
         output_rows: list[dict[str, Any]] = []

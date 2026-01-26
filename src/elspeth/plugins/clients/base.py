@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-from threading import Lock
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -14,17 +13,21 @@ class AuditedClientBase:
     """Base class for clients that automatically record to audit trail.
 
     Provides common infrastructure for tracking external calls:
-    - Reference to LandscapeRecorder for audit storage
+    - Reference to LandscapeRecorder for audit storage and call index allocation
     - State ID linking calls to the current processing state
-    - Call index counter for ordering multiple calls within a state
 
     Subclasses implement specific client protocols (LLM, HTTP, etc.)
     while inheriting automatic audit recording.
 
     Thread Safety:
-        The _next_call_index method is thread-safe. Multiple threads can
-        safely call this method concurrently without risk of duplicate
-        call indices, which is essential for pooled execution scenarios.
+        The _next_call_index method delegates to LandscapeRecorder.allocate_call_index(),
+        which is thread-safe. Multiple threads and multiple client types can safely
+        call this method concurrently without risk of call_index collisions.
+
+    Call Index Coordination:
+        Call indices are allocated centrally by the LandscapeRecorder, ensuring
+        UNIQUE(state_id, call_index) across all client types (HTTP, LLM) and retry
+        attempts. This prevents IntegrityError when multiple clients share the same state_id.
     """
 
     def __init__(
@@ -35,24 +38,27 @@ class AuditedClientBase:
         """Initialize audited client.
 
         Args:
-            recorder: LandscapeRecorder for audit trail storage
+            recorder: LandscapeRecorder for audit trail storage and call index allocation
             state_id: Node state ID to associate calls with
         """
         self._recorder = recorder
         self._state_id = state_id
-        self._call_index = 0
-        self._call_index_lock = Lock()
 
     def _next_call_index(self) -> int:
-        """Get next call index for this client (thread-safe).
+        """Get next call index for this state (thread-safe).
 
-        Each call within a node state gets a unique index for ordering.
-        This method is safe to call from multiple threads concurrently.
+        Delegates to LandscapeRecorder for centralized call index allocation.
+        This ensures unique indices across all client types sharing the same state_id.
 
         Returns:
-            Sequential call index, unique within this client instance
+            Sequential call index, unique within this state_id (not just this client)
         """
-        with self._call_index_lock:
-            idx = self._call_index
-            self._call_index += 1
-            return idx
+        return self._recorder.allocate_call_index(self._state_id)
+
+    def close(self) -> None:
+        """Release any resources held by the client.
+
+        Default implementation is a no-op. Subclasses may override
+        to close underlying connections or resources.
+        """
+        pass

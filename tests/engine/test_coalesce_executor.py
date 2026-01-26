@@ -313,6 +313,117 @@ class TestCoalesceExecutorFirst:
         assert outcome.merged_token is not None
         assert outcome.merged_token.row_data == {"result": "from_slow"}
 
+    def test_late_arrival_after_first_merge_handled_gracefully(
+        self,
+        recorder: LandscapeRecorder,
+        run: Run,
+    ) -> None:
+        """Late arrivals after FIRST policy merge should be handled gracefully.
+
+        This test verifies the fix for Gap #2 from fork/coalesce deep dive.
+
+        Scenario:
+        - Fork creates 2 child tokens (branches fast, slow)
+        - fast branch arrives first at coalesce (FIRST policy)
+        - Merge happens immediately (first branch triggers merge)
+        - slow branch arrives AFTER merge already completed
+
+        Expected behavior for late arrival:
+        - Late arrival should NOT create orphan pending entry
+        - Late arrival should get failure outcome with reason "late_arrival_after_merge"
+        - Late arrival should have audit trail showing it was rejected as late
+
+        Gap #2 problem: Previously late arrivals created NEW pending entries that:
+        1. Would never merge (siblings already processed)
+        2. Would fail at flush_pending() with incomplete_branches
+        3. Created confusing duplicate audit entries for the same fork operation
+        """
+        from elspeth.contracts import NodeType, TokenInfo
+        from elspeth.engine.coalesce_executor import CoalesceExecutor
+        from elspeth.engine.tokens import TokenManager
+
+        span_factory = SpanFactory()
+        token_manager = TokenManager(recorder)
+
+        source_node = recorder.register_node(
+            run_id=run.run_id,
+            node_id="source_1",
+            plugin_name="test_source",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+        coalesce_node = recorder.register_node(
+            run_id=run.run_id,
+            node_id="coalesce_1",
+            plugin_name="first_wins",
+            node_type=NodeType.COALESCE,
+            plugin_version="1.0.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+
+        settings = CoalesceSettings(
+            name="first_wins",
+            branches=["fast", "slow"],
+            policy="first",
+            merge="union",
+        )
+
+        executor = CoalesceExecutor(
+            recorder=recorder,
+            span_factory=span_factory,
+            token_manager=token_manager,
+            run_id=run.run_id,
+        )
+        executor.register_coalesce(settings, coalesce_node.node_id)
+
+        # Create parent token and fork it
+        initial_token = token_manager.create_initial_token(
+            run_id=run.run_id,
+            source_node_id=source_node.node_id,
+            row_index=0,
+            row_data={"value": 100},
+        )
+        children = token_manager.fork_token(
+            parent_token=initial_token,
+            branches=["fast", "slow"],
+            step_in_pipeline=1,
+        )
+
+        # Fast token arrives first - should merge immediately
+        token_fast = TokenInfo(
+            row_id=children[0].row_id,
+            token_id=children[0].token_id,
+            row_data={"value": 100, "fast_result": 1},
+            branch_name="fast",
+        )
+        outcome_fast = executor.accept(token_fast, "first_wins", step_in_pipeline=2)
+        assert outcome_fast.held is False
+        assert outcome_fast.merged_token is not None
+
+        # Slow token arrives AFTER merge completed - late arrival!
+        token_slow = TokenInfo(
+            row_id=children[1].row_id,
+            token_id=children[1].token_id,
+            row_data={"value": 100, "slow_result": 2},
+            branch_name="slow",
+        )
+        outcome_slow = executor.accept(token_slow, "first_wins", step_in_pipeline=2)
+
+        # Late arrival should get rejected with failure outcome
+        assert outcome_slow.held is False, "Late arrival should not be held"
+        assert outcome_slow.merged_token is None, "Late arrival should not create merged token"
+        assert outcome_slow.failure_reason == "late_arrival_after_merge", (
+            f"Late arrival should have failure_reason='late_arrival_after_merge', got '{outcome_slow.failure_reason}'"
+        )
+
+        # Late arrival should have consumed_tokens populated
+        assert outcome_slow.consumed_tokens is not None
+        assert len(outcome_slow.consumed_tokens) == 1
+        assert outcome_slow.consumed_tokens[0].token_id == token_slow.token_id
+
 
 class TestCoalesceExecutorQuorum:
     """Test QUORUM policy."""
@@ -408,13 +519,21 @@ class TestCoalesceExecutorQuorum:
         self,
         recorder: LandscapeRecorder,
         run: Run,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """QUORUM should NOT merge on timeout if quorum not met."""
-        import time
-
+        import elspeth.engine.coalesce_executor as coalesce_mod
         from elspeth.contracts import NodeType, TokenInfo
         from elspeth.engine.coalesce_executor import CoalesceExecutor
         from elspeth.engine.tokens import TokenManager
+
+        # Deterministic clock for timeout testing (use list for mutable closure)
+        fake_time = [100.0]
+
+        def fake_monotonic() -> float:
+            return fake_time[0]
+
+        monkeypatch.setattr(coalesce_mod.time, "monotonic", fake_monotonic)  # type: ignore[attr-defined]
 
         span_factory = SpanFactory()
         token_manager = TokenManager(recorder)
@@ -478,12 +597,288 @@ class TestCoalesceExecutorQuorum:
         outcome = executor.accept(token_a, "quorum_merge", step_in_pipeline=2)
         assert outcome.held is True
 
-        # Wait for timeout
-        time.sleep(0.15)
+        # Advance clock past timeout (0.1s + 0.05s margin)
+        fake_time[0] = 100.15
 
         # check_timeouts should return empty list (quorum not met)
         timed_out = executor.check_timeouts("quorum_merge", step_in_pipeline=2)
         assert len(timed_out) == 0
+
+    def test_flush_pending_quorum_failure_records_audit_trail(
+        self,
+        recorder: LandscapeRecorder,
+        run: Run,
+    ) -> None:
+        """When coalesce fails (quorum not met), consumed tokens MUST have audit records.
+
+        This test verifies the fix for Issue #1 from integration seam analysis.
+
+        Audit gap scenario:
+        - Fork creates 3 child tokens (branches A, B, C)
+        - Only branches A and B arrive at coalesce (need all 3 for quorum)
+        - flush_pending() called at end-of-source
+        - Result: quorum_not_met failure
+
+        Expected audit trail:
+        - consumed_tokens list populated in CoalesceOutcome
+        - Each consumed token has node_state recorded (status="failed")
+
+        Without this, tokens "disappear" from audit trail - violating auditability contract.
+        """
+        from elspeth.contracts import NodeType, TokenInfo
+        from elspeth.engine.coalesce_executor import CoalesceExecutor
+        from elspeth.engine.tokens import TokenManager
+
+        span_factory = SpanFactory()
+        token_manager = TokenManager(recorder)
+
+        source_node = recorder.register_node(
+            run_id=run.run_id,
+            node_id="source_1",
+            plugin_name="test_source",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+        coalesce_node = recorder.register_node(
+            run_id=run.run_id,
+            node_id="coalesce_1",
+            plugin_name="quorum_merge",
+            node_type=NodeType.COALESCE,
+            plugin_version="1.0.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+
+        settings = CoalesceSettings(
+            name="quorum_merge",
+            branches=["path_a", "path_b", "path_c"],
+            policy="quorum",
+            quorum_count=3,  # Need all 3 branches
+            merge="union",
+        )
+
+        executor = CoalesceExecutor(
+            recorder=recorder,
+            span_factory=span_factory,
+            token_manager=token_manager,
+            run_id=run.run_id,
+        )
+        executor.register_coalesce(settings, coalesce_node.node_id)
+
+        # Create parent token and fork it
+        initial_token = token_manager.create_initial_token(
+            run_id=run.run_id,
+            source_node_id=source_node.node_id,
+            row_index=0,
+            row_data={"value": 100},
+        )
+        children = token_manager.fork_token(
+            parent_token=initial_token,
+            branches=["path_a", "path_b", "path_c"],
+            step_in_pipeline=1,
+        )
+
+        # Accept only 2 of 3 tokens (quorum not met)
+        token_a = TokenInfo(
+            row_id=children[0].row_id,
+            token_id=children[0].token_id,
+            row_data={"value": 100, "a_result": 1},
+            branch_name="path_a",
+        )
+        token_b = TokenInfo(
+            row_id=children[1].row_id,
+            token_id=children[1].token_id,
+            row_data={"value": 100, "b_result": 2},
+            branch_name="path_b",
+        )
+
+        outcome_a = executor.accept(token_a, "quorum_merge", step_in_pipeline=2)
+        assert outcome_a.held is True  # Waiting for siblings
+
+        outcome_b = executor.accept(token_b, "quorum_merge", step_in_pipeline=2)
+        assert outcome_b.held is True  # Still waiting (need 3)
+
+        # End-of-source: flush pending coalesces
+        flushed = executor.flush_pending(step_in_pipeline=2)
+
+        # Verify failure outcome returned
+        assert len(flushed) == 1
+        failure_outcome = flushed[0]
+        assert failure_outcome.held is False
+        assert failure_outcome.merged_token is None
+        assert failure_outcome.failure_reason == "quorum_not_met"
+
+        # CRITICAL: consumed_tokens MUST be populated
+        assert failure_outcome.consumed_tokens is not None, (
+            "CoalesceOutcome.consumed_tokens must be populated on failure (currently returns empty list, losing tokens)"
+        )
+        assert len(failure_outcome.consumed_tokens) == 2, (
+            f"Expected 2 consumed tokens (A and B), got {len(failure_outcome.consumed_tokens)}"
+        )
+
+        # Verify the tokens are the ones we submitted
+        consumed_ids = {t.token_id for t in failure_outcome.consumed_tokens}
+        assert token_a.token_id in consumed_ids
+        assert token_b.token_id in consumed_ids
+
+        # AUDIT TRAIL VERIFICATION:
+        # Each consumed token MUST have node state recorded
+        for token in failure_outcome.consumed_tokens:
+            node_states = recorder.get_node_states_for_token(token.token_id)
+
+            # Find the coalesce node state
+            coalesce_states = [ns for ns in node_states if ns.node_id == coalesce_node.node_id]
+
+            assert len(coalesce_states) > 0, (
+                f"Token {token.token_id} has NO node state for coalesce_1 - audit gap! Cannot trace what happened to this token."
+            )
+
+            coalesce_state = coalesce_states[0]
+
+            # Verify node state indicates failure
+            assert coalesce_state.status == "failed", f"Token {token.token_id} node state should be 'failed', got '{coalesce_state.status}'"
+
+            # Verify error_json explains the failure (type narrow to NodeStateFailed)
+            from elspeth.contracts import NodeStateFailed
+
+            assert isinstance(coalesce_state, NodeStateFailed), "Failed state should be NodeStateFailed"
+            assert coalesce_state.error_json is not None, f"Token {token.token_id} failed node state must have error_json populated"
+
+            import json
+
+            error_data = json.loads(coalesce_state.error_json)
+            assert "failure_reason" in error_data, f"Token {token.token_id} node state missing failure explanation in error_json"
+            assert error_data["failure_reason"] == "quorum_not_met"
+
+    def test_held_tokens_have_audit_trail(
+        self,
+        recorder: LandscapeRecorder,
+        run: Run,
+    ) -> None:
+        """Held tokens (waiting for siblings) MUST have audit trail showing open state.
+
+        This test verifies the fix for Gap #1 from fork/coalesce deep dive.
+
+        Scenario:
+        - Fork creates 3 child tokens (branches A, B, C)
+        - Branch A arrives at coalesce (need all 3 for require_all)
+        - Branch A is held waiting for B and C
+        - Branch B arrives (still need C)
+        - Branch B is held waiting for C
+
+        Expected audit trail while held:
+        - Each held token has node_state with status="open" (in-progress)
+        - Node state shows input_data (what token brought to coalesce)
+        - Node state is NOT completed yet (no completed_at, no duration)
+        - When merge/fail happens, these open states are completed
+
+        Gap #1 problem: Previously held tokens had NO audit record until merge/fail.
+        If pipeline crashed or was queried mid-run, held tokens were invisible.
+        This violated ELSPETH's core contract: "I don't know what happened is never acceptable"
+        """
+        from elspeth.contracts import NodeType, TokenInfo
+        from elspeth.engine.coalesce_executor import CoalesceExecutor
+        from elspeth.engine.tokens import TokenManager
+
+        span_factory = SpanFactory()
+        token_manager = TokenManager(recorder)
+
+        source_node = recorder.register_node(
+            run_id=run.run_id,
+            node_id="source_1",
+            plugin_name="test_source",
+            node_type=NodeType.SOURCE,
+            plugin_version="1.0.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+        coalesce_node = recorder.register_node(
+            run_id=run.run_id,
+            node_id="coalesce_1",
+            plugin_name="require_all_merge",
+            node_type=NodeType.COALESCE,
+            plugin_version="1.0.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+
+        settings = CoalesceSettings(
+            name="require_all_merge",
+            branches=["path_a", "path_b", "path_c"],
+            policy="require_all",
+            merge="union",
+        )
+
+        executor = CoalesceExecutor(
+            recorder=recorder,
+            span_factory=span_factory,
+            token_manager=token_manager,
+            run_id=run.run_id,
+        )
+        executor.register_coalesce(settings, coalesce_node.node_id)
+
+        # Create parent token and fork it
+        initial_token = token_manager.create_initial_token(
+            run_id=run.run_id,
+            source_node_id=source_node.node_id,
+            row_index=0,
+            row_data={"value": 100},
+        )
+        children = token_manager.fork_token(
+            parent_token=initial_token,
+            branches=["path_a", "path_b", "path_c"],
+            step_in_pipeline=1,
+        )
+
+        # Accept first token - should be held
+        token_a = TokenInfo(
+            row_id=children[0].row_id,
+            token_id=children[0].token_id,
+            row_data={"value": 100, "a_result": 1},
+            branch_name="path_a",
+        )
+        outcome_a = executor.accept(token_a, "require_all_merge", step_in_pipeline=2)
+        assert outcome_a.held is True
+
+        # CRITICAL: Token A should now have audit trail showing it's held
+        node_states_a = recorder.get_node_states_for_token(token_a.token_id)
+        coalesce_states_a = [ns for ns in node_states_a if ns.node_id == coalesce_node.node_id]
+
+        assert len(coalesce_states_a) > 0, (
+            f"Held token {token_a.token_id} has NO node state for coalesce - "
+            f"audit gap! Cannot trace that this token is waiting for siblings."
+        )
+
+        held_state_a = coalesce_states_a[0]
+        # Held tokens have status="open" (in-progress, not completed yet)
+        from elspeth.contracts import NodeStateStatus
+
+        assert held_state_a.status == NodeStateStatus.OPEN, (
+            f"Held token should have status='open' (in-progress), got '{held_state_a.status}'"
+        )
+
+        # Accept second token - should also be held (2 < 3)
+        token_b = TokenInfo(
+            row_id=children[1].row_id,
+            token_id=children[1].token_id,
+            row_data={"value": 100, "b_result": 2},
+            branch_name="path_b",
+        )
+        outcome_b = executor.accept(token_b, "require_all_merge", step_in_pipeline=2)
+        assert outcome_b.held is True
+
+        # Token B should also have audit trail
+        node_states_b = recorder.get_node_states_for_token(token_b.token_id)
+        coalesce_states_b = [ns for ns in node_states_b if ns.node_id == coalesce_node.node_id]
+
+        assert len(coalesce_states_b) > 0, f"Held token {token_b.token_id} has NO node state - audit gap!"
+
+        held_state_b = coalesce_states_b[0]
+        assert held_state_b.status == NodeStateStatus.OPEN, (
+            f"Held token should have status='open' (in-progress), got '{held_state_b.status}'"
+        )
 
 
 class TestCoalesceExecutorBestEffort:
@@ -493,13 +888,21 @@ class TestCoalesceExecutorBestEffort:
         self,
         recorder: LandscapeRecorder,
         run: Run,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """BEST_EFFORT should merge whatever arrived when timeout expires."""
-        import time
-
+        import elspeth.engine.coalesce_executor as coalesce_mod
         from elspeth.contracts import NodeType, TokenInfo
         from elspeth.engine.coalesce_executor import CoalesceExecutor
         from elspeth.engine.tokens import TokenManager
+
+        # Deterministic clock for timeout testing (use list for mutable closure)
+        fake_time = [100.0]
+
+        def fake_monotonic() -> float:
+            return fake_time[0]
+
+        monkeypatch.setattr(coalesce_mod.time, "monotonic", fake_monotonic)  # type: ignore[attr-defined]
 
         span_factory = SpanFactory()
         token_manager = TokenManager(recorder)
@@ -562,8 +965,8 @@ class TestCoalesceExecutorBestEffort:
         outcome1 = executor.accept(token_a, "best_effort_merge", step_in_pipeline=2)
         assert outcome1.held is True
 
-        # Wait for timeout
-        time.sleep(0.15)
+        # Advance clock past timeout (0.1s + 0.05s margin)
+        fake_time[0] = 100.15
 
         # Check timeout and force merge
         timed_out = executor.check_timeouts("best_effort_merge", step_in_pipeline=2)
@@ -701,6 +1104,53 @@ class TestCoalesceAuditMetadata:
             assert "branch" in entry
             assert "arrival_offset_ms" in entry
             assert entry["arrival_offset_ms"] >= 0
+
+        # P1: Verify audit trail - node_states for consumed tokens
+        from elspeth.contracts.enums import NodeStateStatus, RowOutcome
+        from elspeth.core.canonical import stable_hash
+
+        for token in outcome2.consumed_tokens:
+            node_states = recorder.get_node_states_for_token(token.token_id)
+
+            # Find the coalesce node state
+            coalesce_states = [ns for ns in node_states if ns.node_id == coalesce_node.node_id]
+            assert len(coalesce_states) == 1, f"Token {token.token_id} should have exactly 1 node state for coalesce node"
+
+            state = coalesce_states[0]
+            # Verify status is COMPLETED for successful merge
+            assert state.status == NodeStateStatus.COMPLETED, (
+                f"Token {token.token_id} coalesce node state should be COMPLETED, got {state.status}"
+            )
+            # Verify input_hash is present (audit trail integrity)
+            assert state.input_hash is not None, f"Token {token.token_id} node state must have input_hash for audit trail"
+            # Verify input_hash matches the token's row_data
+            expected_input_hash = stable_hash(token.row_data)
+            assert state.input_hash == expected_input_hash, (
+                f"Token {token.token_id} input_hash mismatch: expected {expected_input_hash}, got {state.input_hash}"
+            )
+            # Verify output_hash is present for completed state
+            assert state.output_hash is not None, f"Token {token.token_id} completed node state must have output_hash"
+
+            # Verify token outcome is COALESCED
+            token_outcome = recorder.get_token_outcome(token.token_id)
+            assert token_outcome is not None, f"Token {token.token_id} must have outcome recorded"
+            assert token_outcome.outcome == RowOutcome.COALESCED, (
+                f"Token {token.token_id} outcome should be COALESCED, got {token_outcome.outcome}"
+            )
+
+        # P1: Verify token_parents lineage for merged token
+        merged_token_id = outcome2.merged_token.token_id
+        parents = recorder.get_token_parents(merged_token_id)
+        assert len(parents) == 2, f"Merged token should have 2 parents, got {len(parents)}"
+
+        # Verify ordinals are 0 and 1 (ordered correctly)
+        ordinals = sorted([p.ordinal for p in parents])
+        assert ordinals == [0, 1], f"Parent ordinals should be [0, 1], got {ordinals}"
+
+        # Verify parent token_ids match consumed tokens
+        parent_ids = {p.parent_token_id for p in parents}
+        consumed_ids = {t.token_id for t in outcome2.consumed_tokens}
+        assert parent_ids == consumed_ids, f"Merged token parents {parent_ids} should match consumed tokens {consumed_ids}"
 
 
 class TestCoalesceIntegration:

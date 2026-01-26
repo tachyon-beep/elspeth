@@ -23,10 +23,10 @@ def test_schema_validation_end_to_end(tmp_path, plugin_manager):
     """
     from elspeth.cli_helpers import instantiate_plugins_from_config
     from elspeth.core.config import (
-        DatasourceSettings,
         ElspethSettings,
-        RowPluginSettings,
         SinkSettings,
+        SourceSettings,
+        TransformSettings,
     )
     from elspeth.core.dag import ExecutionGraph
 
@@ -37,7 +37,7 @@ def test_schema_validation_end_to_end(tmp_path, plugin_manager):
     # Build config with compatible plugins
     # All plugins use dynamic schemas (fields: dynamic)
     config = ElspethSettings(
-        datasource=DatasourceSettings(
+        source=SourceSettings(
             plugin="csv",
             options={
                 "path": str(csv_path),
@@ -45,8 +45,8 @@ def test_schema_validation_end_to_end(tmp_path, plugin_manager):
                 "schema": {"fields": "dynamic"},
             },
         ),
-        row_plugins=[
-            RowPluginSettings(
+        transforms=[
+            TransformSettings(
                 plugin="passthrough",
                 options={"schema": {"fields": "dynamic"}},
             ),
@@ -60,7 +60,7 @@ def test_schema_validation_end_to_end(tmp_path, plugin_manager):
                 },
             ),
         },
-        output_sink="output",
+        default_sink="output",
     )
 
     # Build graph with real PluginManager
@@ -75,7 +75,7 @@ def test_schema_validation_end_to_end(tmp_path, plugin_manager):
         sinks=plugins["sinks"],
         aggregations=plugins["aggregations"],
         gates=list(config.gates),
-        output_sink=config.output_sink,
+        default_sink=config.default_sink,
     )
 
     # Validation should pass (schemas are compatible)
@@ -217,7 +217,7 @@ def test_static_schema_validation(plugin_manager):
         sinks={"output": as_sink(sink)},
         aggregations={},
         gates=[],
-        output_sink="output",
+        default_sink="output",
     )
 
     # Validation should pass (schemas are compatible - all use StaticSchema)

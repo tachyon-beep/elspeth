@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ELSPETH is a **domain-agnostic framework for auditable Sense/Decide/Act (SDA) pipelines**. It provides scaffolding for data processing workflows where every decision must be traceable to its source, regardless of whether the "decide" step is an LLM, ML model, rules engine, or threshold check.
 
-**Current Status:** RC-1. Core architecture and audit trail are complete. External integrations (LLMs, databases, Azure) are complete.
+**Current Status:** RC-1. Core architecture, a core set of plugins and the audit trail are complete. Missing features are being patched in and a significant bug hunt is underway.
 
 ## Auditability Standard
 
@@ -103,12 +103,96 @@ EXTERNAL DATA              PIPELINE DATA              AUDIT TRAIL
     is allowed                 (values can still fail)
 ```
 
+### External Call Boundaries in Transforms
+
+**CRITICAL:** Trust tiers are about **data flows**, not plugin types. **Any data crossing from an external system is Tier 3**, regardless of which plugin makes the call.
+
+Transforms that make external calls (LLM APIs, HTTP requests, database queries) create **mini Tier 3 boundaries** within their implementation:
+
+```python
+def process(self, row: dict[str, Any], ctx: PluginContext) -> TransformResult:
+    # row enters as Tier 2 (pipeline data - trust the schema)
+
+    # External call creates Tier 3 boundary
+    try:
+        llm_response = self._llm_client.query(prompt)  # EXTERNAL DATA - zero trust
+    except Exception as e:
+        return TransformResult.error({"reason": "llm_call_failed", "error": str(e)})
+
+    # IMMEDIATELY validate at the boundary - don't let "their data" travel
+    try:
+        parsed = json.loads(llm_response.content)
+    except json.JSONDecodeError:
+        return TransformResult.error({"reason": "invalid_json", "raw": llm_response.content[:200]})
+
+    # Validate structure type IMMEDIATELY
+    if not isinstance(parsed, dict):
+        return TransformResult.error({
+            "reason": "invalid_json_type",
+            "expected": "object",
+            "actual": type(parsed).__name__
+        })
+
+    # NOW it's our data (Tier 2) - add to row and continue
+    row["llm_classification"] = parsed["category"]  # Safe - validated above
+    return TransformResult.success(row)
+```
+
+**The rule: Minimize the distance external data travels before you validate it.**
+
+- ✅ **Validate immediately** - right after the external call returns
+- ✅ **Coerce once** - normalize types at the boundary
+- ✅ **Trust thereafter** - once validated, it's Tier 2 pipeline data
+- ❌ **Don't carry raw external data** - passing `llm_response` to helper methods without validation
+- ❌ **Don't defer validation** - "I'll check it later when I use it"
+- ❌ **Don't validate multiple times** - if it's validated once, trust it
+
+**Common external boundaries in transforms:**
+
+| External Call Type | Tier 3 Boundary | Validation Pattern |
+|-------------------|-----------------|-------------------|
+| LLM API response | Response content | Wrap JSON parse, validate type is dict, check required fields |
+| HTTP API response | Response body | Wrap request, validate status code, parse and validate schema |
+| Database query results | Result rows | Validate row structure, handle missing fields, coerce types |
+| File reads (in transform) | File contents | Same validation as source plugins |
+| Message queue consume | Message payload | Parse format, validate schema, quarantine malformed messages |
+
+**Example from azure_multi_query_llm.py** (the correct pattern):
+
+```python
+# Line 227-236: External call (Tier 3 boundary created)
+try:
+    response = await self._llm_executor.execute_llm_call(...)
+except Exception as e:
+    return TransformResult.error(...)  # Wrapped immediately
+
+# Line 241-251: IMMEDIATE validation at boundary
+try:
+    parsed = json.loads(response.content)
+except json.JSONDecodeError:
+    return TransformResult.error(...)  # Can't parse - reject immediately
+
+# Line 253-263: Structure type validation (defense against non-dict JSON)
+if not isinstance(parsed, dict):
+    return TransformResult.error({
+        "reason": "invalid_json_type",
+        "expected": "object",
+        "actual": type(parsed).__name__
+    })
+
+# Line 266-274: NOW safe to use - it's validated Tier 2 data
+output[output_key] = parsed[json_field]  # No defensive .get() needed
+```
+
+From this point forward, `parsed` is treated as Tier 2 pipeline data. No more validation. No `.get()` calls. We trust it because we validated it at the boundary.
+
 ### Coercion Rules by Plugin Type
 
 | Plugin Type | Coercion Allowed? | Rationale |
 |-------------|-------------------|-----------|
 | **Source** | ✅ Yes | Normalizes external data at ingestion boundary |
-| **Transform** | ❌ No | Receives validated data; wrong types = upstream bug |
+| **Transform (on row)** | ❌ No | Receives validated data; wrong types = upstream bug |
+| **Transform (on external call)** | ✅ Yes | External response is Tier 3 - validate/coerce immediately |
 | **Sink** | ❌ No | Receives validated data; wrong types = upstream bug |
 
 ### Operation Wrapping Rules
@@ -117,14 +201,19 @@ EXTERNAL DATA              PIPELINE DATA              AUDIT TRAIL
 |----------------------|---------------------|-----|
 | `self._config.field` | ❌ No | Our code, our config - crash on bug |
 | `self._internal_state` | ❌ No | Our code - crash on bug |
+| `landscape.get_row_state(token_id)` | ❌ No | Our data - crash on corruption |
 | `row["field"]` arithmetic/parsing | ✅ Yes | Their data values can fail operations |
 | `external_api.call(row["id"])` | ✅ Yes | External system, anything can happen |
+| `json.loads(external_response)` | ✅ Yes | External data - validate immediately |
+| `validated_dict["field"]` | ❌ No | Already validated at boundary - trust it |
 
 **Rule of thumb:**
 
-- Reading from Landscape tables? Crash on any anomaly.
-- Operating on row field values? Wrap, return error result, quarantine row.
-- Accessing internal state? Let it crash - that's a bug to fix.
+- **Reading from Landscape tables?** Crash on any anomaly - it's our data.
+- **Operating on row field values?** Wrap operations, return error result, quarantine row.
+- **Calling external systems?** Wrap call AND validate response immediately at boundary.
+- **Using already-validated external data?** Trust it - no defensive `.get()` needed.
+- **Accessing internal state?** Let it crash - that's a bug to fix.
 
 ## Plugin Ownership: System Code, Not User Code
 
@@ -225,6 +314,41 @@ SENSE (Sources) → DECIDE (Transforms/Gates) → ACT (Sinks)
 | **Canonical** | Two-phase deterministic JSON canonicalization for hashing |
 | **Payload Store** | Separates large blobs from audit tables with retention policies |
 | **Configuration** | Dynaconf + Pydantic with multi-source precedence |
+
+### Composite Primary Key Pattern: nodes Table
+
+**CRITICAL:** The `nodes` table has a composite primary key `(node_id, run_id)`. This means the same `node_id` can exist in multiple runs when the same pipeline runs multiple times.
+
+**Queries touching `node_states` must use `node_states.run_id` directly:**
+
+```python
+# WRONG - Ambiguous join when node_id is reused across runs
+query = (
+    select(calls_table)
+    .join(node_states_table, calls_table.c.state_id == node_states_table.c.state_id)
+    .join(nodes_table, node_states_table.c.node_id == nodes_table.c.node_id)  # BUG!
+    .where(nodes_table.c.run_id == run_id)
+)
+
+# CORRECT - Use denormalized run_id on node_states
+query = (
+    select(calls_table)
+    .join(node_states_table, calls_table.c.state_id == node_states_table.c.state_id)
+    .where(node_states_table.c.run_id == run_id)  # Direct filter, no ambiguous join
+)
+```
+
+**Why:** The `node_states` table has a denormalized `run_id` column (schema comment: "Added for composite FK"). Use it directly instead of joining through `nodes` table. The join on `node_id` alone would match multiple nodes rows when `node_id` is reused.
+
+**If you MUST access columns from `nodes` table:** Use composite join with BOTH keys:
+
+```python
+.join(
+    nodes_table,
+    (node_states_table.c.node_id == nodes_table.c.node_id) &
+    (node_states_table.c.run_id == nodes_table.c.run_id)
+)
+```
 
 ### DAG Execution Model
 
@@ -363,6 +487,60 @@ Never store secrets - use HMAC fingerprints:
 fingerprint = hmac.new(fingerprint_key, secret.encode(), hashlib.sha256).hexdigest()
 ```
 
+### Test Path Integrity
+
+**Never bypass production code paths in tests.** When integration tests manually construct objects instead of using production factories, bugs hide in the untested path.
+
+**The Dual Code Path Problem:**
+
+```python
+# WRONG - Manual construction in tests bypasses production logic
+def test_fork_coalesce_manually_built():
+    graph = ExecutionGraph()
+    graph.add_node("source", ...)
+    graph._branch_to_coalesce = {"path_a": "merge1"}  # Manual assignment
+    # This test passes even when from_plugin_instances() is broken!
+```
+
+```python
+# CORRECT - Uses production path
+def test_fork_coalesce_production_path():
+    graph = ExecutionGraph.from_plugin_instances(  # Production factory
+        source=source,
+        transforms=transforms,
+        sinks=sinks,
+        gates=gates,
+        coalesce_settings=coalesce_settings,
+        output_sink="output",
+    )
+    branch_map = graph.get_branch_to_coalesce_map()
+    # This test FAILS if from_plugin_instances() is broken!
+```
+
+**Why this matters:**
+
+- **BUG-LINEAGE-01** hid for weeks because tests manually built graphs
+- Manual construction had `branch_to_coalesce[branch] = coalesce_config.name` (correct)
+- Production path had `branch_to_coalesce[branch] = cid` (node_id - wrong!)
+- Tests passed, production was broken
+
+**Rules:**
+
+- ✅ Use `ExecutionGraph.from_plugin_instances()` in integration tests
+- ✅ Use `instantiate_plugins_from_config()` to get real plugin instances
+- ✅ Exercise the same code path that production uses
+- ❌ Manual `graph.add_node()` / `graph._field = value` bypasses validation
+- ❌ Direct attribute assignment skips production logic
+- ❌ "It's easier to test this way" creates blind spots
+
+**When manual construction is acceptable:**
+
+- Unit tests of graph algorithms (topological sort, cycle detection)
+- Testing graph visualization/rendering
+- Testing helper methods that don't depend on construction path
+
+**For integration tests:** Always use production factories.
+
 ## Configuration Precedence (High to Low)
 
 1. Runtime overrides (CLI flags, env vars)
@@ -370,20 +548,6 @@ fingerprint = hmac.new(fingerprint_key, secret.encode(), hashlib.sha256).hexdige
 3. Profile configuration (`profiles/production.yaml`)
 4. Plugin pack defaults (`packs/llm/defaults.yaml`)
 5. System defaults
-
-## Implementation Phases
-
-**Design principle:** Prove the DAG infrastructure with deterministic transforms before adding external calls. LLMs are Phase 6, not Phase 1.
-
-| Phase | Priority | Scope |
-| ----- | -------- | ----- |
-| 1 | P0 | Foundation: Canonical (rfc8785), Landscape, Config, DAG validation (NetworkX) |
-| 2 | P0 | Plugin System: hookspecs, base classes, schema contracts |
-| 3 | P0 | SDA Engine: RowProcessor, Orchestrator, OpenTelemetry spans |
-| 4 | P1 | CLI (Typer + Textual), basic sources/sinks (CSV, JSON, database) |
-| 5 | P1 | Production: Checkpointing, rate limiting (pyrate-limiter), retention |
-| 6 | P2 | External calls: LLM pack (LiteLLM), record/replay/verify (DeepDiff) |
-| 7 | P2 | Advanced: A/B testing, Azure pack, multi-destination routing |
 
 ## The Attributability Test
 

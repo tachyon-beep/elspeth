@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 import pytest
 
 from elspeth.contracts import Determinism, PluginSchema, RoutingMode, SourceRow
+from elspeth.contracts.types import NodeID, SinkName
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
@@ -84,27 +85,27 @@ def _build_linear_graph(config: PipelineConfig) -> ExecutionGraph:
 
     graph.add_node("source", node_type="source", plugin_name=config.source.name)
 
-    transform_ids: dict[int, str] = {}
+    transform_ids: dict[int, NodeID] = {}
     prev = "source"
     for i, t in enumerate(config.transforms):
-        node_id = f"transform_{i}"
+        node_id = NodeID(f"transform_{i}")
         transform_ids[i] = node_id
         graph.add_node(node_id, node_type="transform", plugin_name=t.name)
         graph.add_edge(prev, node_id, label="continue", mode=RoutingMode.MOVE)
         prev = node_id
 
-    sink_ids: dict[str, str] = {}
+    sink_ids: dict[SinkName, NodeID] = {}
     for sink_name, sink in config.sinks.items():
-        node_id = f"sink_{sink_name}"
-        sink_ids[sink_name] = node_id
+        node_id = NodeID(f"sink_{sink_name}")
+        sink_ids[SinkName(sink_name)] = node_id
         graph.add_node(node_id, node_type="sink", plugin_name=sink.name)
 
-    if "default" in sink_ids:
-        graph.add_edge(prev, sink_ids["default"], label="continue", mode=RoutingMode.MOVE)
+    if SinkName("default") in sink_ids:
+        graph.add_edge(prev, sink_ids[SinkName("default")], label="continue", mode=RoutingMode.MOVE)
 
     graph._sink_id_map = sink_ids
     graph._transform_id_map = transform_ids
-    graph._output_sink = "default" if "default" in sink_ids else next(iter(sink_ids))
+    graph._default_sink = SinkName("default") if SinkName("default") in sink_ids else next(iter(sink_ids))
     graph._route_resolution_map = {}
 
     return graph
@@ -215,7 +216,7 @@ class TestResumeIdempotence:
 
         config_a = PipelineConfig(
             source=as_source(source_a),
-            transforms=[transform_a],
+            transforms=[transform_a],  # type: ignore[list-item]
             sinks={"default": as_sink(sink_a)},
         )
 
@@ -330,9 +331,9 @@ class TestResumeIdempotence:
         graph_b.add_node("sink_default", node_type="sink", plugin_name="collect_sink", config={})
         graph_b.add_edge("source", "transform_0", label="continue", mode=RoutingMode.MOVE)
         graph_b.add_edge("transform_0", "sink_default", label="continue", mode=RoutingMode.MOVE)
-        graph_b._sink_id_map = {"default": "sink_default"}
-        graph_b._transform_id_map = {0: "transform_0"}
-        graph_b._output_sink = "default"
+        graph_b._sink_id_map = {SinkName("default"): NodeID("sink_default")}
+        graph_b._transform_id_map = {0: NodeID("transform_0")}
+        graph_b._default_sink = SinkName("default")
         graph_b._route_resolution_map = {}
         graph_b._config_gate_id_map = {}
 
@@ -370,7 +371,7 @@ class TestResumeIdempotence:
 
         config_b = PipelineConfig(
             source=as_source(source_b),
-            transforms=[transform_b],
+            transforms=[transform_b],  # type: ignore[list-item]
             sinks={"default": as_sink(sink_b)},
         )
 
@@ -496,7 +497,7 @@ class TestRetryBehavior:
 
         config = PipelineConfig(
             source=as_source(source),
-            transforms=[transform],
+            transforms=[transform],  # type: ignore[list-item]
             sinks={"default": as_sink(TestSink())},
         )
 

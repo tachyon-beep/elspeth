@@ -40,3 +40,21 @@ class TestTokenInfo:
         token.row_data["b"] = 2
 
         assert token.row_data == {"a": 1, "b": 2}
+
+    def test_token_info_fields_mutable(self) -> None:
+        """TokenInfo fields can be reassigned (dataclass is not frozen)."""
+        from elspeth.contracts import TokenInfo
+
+        token = TokenInfo(row_id="r", token_id="t", row_data={})
+        token.branch_name = "sentiment"
+
+        assert token.branch_name == "sentiment"
+
+    def test_token_info_not_frozen(self) -> None:
+        """TokenInfo dataclass params confirm it is not frozen."""
+        from elspeth.contracts import TokenInfo
+
+        assert TokenInfo.__dataclass_fields__["branch_name"].default is None
+        token = TokenInfo(row_id="r", token_id="t", row_data={})
+        token.row_id = "new_row_id"
+        assert token.row_id == "new_row_id"

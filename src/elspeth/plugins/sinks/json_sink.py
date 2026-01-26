@@ -29,6 +29,7 @@ class JSONSinkConfig(PathConfig):
     indent: int | None = None
     encoding: str = "utf-8"
     validate_input: bool = False  # Optional runtime validation of incoming rows
+    mode: Literal["write", "append"] = "write"  # "write" (truncate) or "append"
 
 
 class JSONSink(BaseSink):
@@ -54,6 +55,29 @@ class JSONSink(BaseSink):
     plugin_version = "1.0.0"
     # determinism inherited from BaseSink (IO_WRITE)
 
+    # Note: supports_resume is set per-instance in __init__ based on format.
+    # JSONL format supports resume (append), JSON array does not.
+    # JSON array format rewrites the entire file on each write (seek(0) + truncate),
+    # so it cannot append to existing output. JSONL writes line-by-line and can
+    # append to existing files.
+
+    def configure_for_resume(self) -> None:
+        """Configure JSON sink for resume mode.
+
+        Only JSONL format supports resume. JSON array format rewrites the
+        entire file on each write and cannot append.
+
+        Raises:
+            NotImplementedError: If format is JSON array (not JSONL).
+        """
+        if self._format != "jsonl":
+            raise NotImplementedError(
+                f"JSONSink with format='{self._format}' does not support resume. "
+                f"JSON array format rewrites the entire file and cannot append. "
+                f"Use format='jsonl' for resumable JSON output."
+            )
+        self._mode = "append"
+
     def __init__(self, config: dict[str, Any]) -> None:
         super().__init__(config)
         cfg = JSONSinkConfig.from_dict(config)
@@ -68,6 +92,11 @@ class JSONSink(BaseSink):
         if fmt is None:
             fmt = "jsonl" if self._path.suffix == ".jsonl" else "json"
         self._format = fmt
+        self._mode = cfg.mode
+
+        # Set resume capability based on format
+        # JSONL can append; JSON array rewrites entirely and cannot resume
+        self.supports_resume = fmt == "jsonl"
 
         # Store schema config for audit trail
         # PathConfig (via DataPluginConfig) ensures schema_config is not None
@@ -139,10 +168,14 @@ class JSONSink(BaseSink):
         )
 
     def _write_jsonl_batch(self, rows: list[dict[str, Any]]) -> None:
-        """Write rows as JSONL (append mode)."""
+        """Write rows as JSONL.
+
+        Uses write mode (truncate) or append mode based on self._mode.
+        Append mode is used during resume to add to existing output.
+        """
         if self._file is None:
-            # Handle kept open for streaming writes, closed in close()
-            self._file = open(self._path, "w", encoding=self._encoding)  # noqa: SIM115
+            file_mode = "a" if self._mode == "append" else "w"
+            self._file = open(self._path, file_mode, encoding=self._encoding)  # noqa: SIM115
 
         for row in rows:
             json.dump(row, self._file)

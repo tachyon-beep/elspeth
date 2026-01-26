@@ -10,7 +10,7 @@
 # Run with:
 #   uv run elspeth run -s examples/json_explode/settings.yaml --execute
 
-datasource:
+source:
   plugin: json
   options:
     path: examples/json_explode/input.json
@@ -21,7 +21,7 @@ datasource:
         - "items: any"
     on_validation_failure: discard
 
-row_plugins:
+transforms:
   - plugin: json_explode
     options:
       array_field: items
@@ -38,7 +38,7 @@ sinks:
       schema:
         fields: dynamic
 
-output_sink: output
+default_sink: output
 
 landscape:
   url: sqlite:///examples/json_explode/runs/audit.db

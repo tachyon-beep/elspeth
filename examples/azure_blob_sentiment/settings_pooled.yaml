@@ -23,7 +23,7 @@
 #   - AIMD throttling automatically backs off on rate limits
 #   - Results maintain submission order despite concurrent processing
 
-datasource:
+source:
   plugin: azure_blob
   options:
     sas_token: "${AZURE_STORAGE_SAS_TOKEN}"
@@ -42,7 +42,7 @@ datasource:
         - "text: str"
     on_validation_failure: discard
 
-row_plugins:
+transforms:
   - plugin: azure_llm
     options:
       deployment_name: "${AZURE_OPENAI_DEPLOYMENT}"
@@ -85,7 +85,7 @@ sinks:
       schema:
         fields: dynamic
 
-output_sink: output
+default_sink: output
 
 # Audit trail stored locally
 landscape:

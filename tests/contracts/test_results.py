@@ -123,9 +123,9 @@ class TestTransformResult:
         assert success.status == "success"
         assert error.status == "error"
 
-        # String identity check
-        assert isinstance(success.status, str)
-        assert isinstance(error.status, str)
+        # String identity check - must be exactly str, not StrEnum
+        assert type(success.status) is str
+        assert type(error.status) is str
 
     def test_audit_fields_default_to_none(self) -> None:
         """Audit fields default to None, set by executor."""
@@ -202,15 +202,15 @@ class TestAcceptResultDeleted:
 
     def test_accept_result_deleted_from_contracts(self) -> None:
         """AcceptResult should be deleted from contracts.results."""
-        import elspeth.contracts.results as results
-
-        assert not hasattr(results, "AcceptResult"), "AcceptResult should be deleted - aggregation is structural"
+        with pytest.raises(ImportError):
+            from elspeth.contracts.results import AcceptResult  # type: ignore[attr-defined] # noqa: F401
 
     def test_accept_result_not_exported(self) -> None:
         """AcceptResult should NOT be exported from elspeth.contracts."""
         import elspeth.contracts as contracts
 
-        assert not hasattr(contracts, "AcceptResult"), "AcceptResult should not be exported - aggregation is structural"
+        with pytest.raises(AttributeError):
+            _ = contracts.AcceptResult  # type: ignore[attr-defined]
 
 
 class TestRowResult:
@@ -292,12 +292,10 @@ class TestArtifactDescriptor:
             size_bytes=500,
         )
 
-        # artifact_type is the field name
-        assert hasattr(descriptor, "artifact_type")
         assert descriptor.artifact_type == "database"
 
-        # 'kind' should not exist as an attribute
-        assert not hasattr(descriptor, "kind")
+        with pytest.raises(AttributeError):
+            _ = descriptor.kind  # type: ignore[attr-defined]
 
     def test_content_hash_is_required(self) -> None:
         """content_hash is required (not optional) - audit integrity."""
@@ -353,6 +351,21 @@ class TestArtifactDescriptor:
 
         with pytest.raises(AttributeError):
             descriptor.content_hash = "new_hash"  # type: ignore[misc]
+
+    def test_missing_required_fields_raises_type_error(self) -> None:
+        """ArtifactDescriptor requires all fields - TypeError on missing."""
+        with pytest.raises(TypeError):
+            ArtifactDescriptor(  # type: ignore[call-arg]
+                artifact_type="file",
+                path_or_uri="file:///test",
+            )
+
+        with pytest.raises(TypeError):
+            ArtifactDescriptor(  # type: ignore[call-arg]
+                artifact_type="file",
+                path_or_uri="file:///test",
+                content_hash="hash",
+            )
 
 
 class TestArtifactDescriptorFactories:

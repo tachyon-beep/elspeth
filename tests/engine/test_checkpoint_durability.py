@@ -24,7 +24,7 @@ from typing import Any
 
 import pytest
 
-from elspeth.contracts import PluginSchema, RoutingMode, SourceRow
+from elspeth.contracts import NodeID, PluginSchema, RoutingMode, SinkName, SourceRow
 from elspeth.core.checkpoint import CheckpointManager
 from elspeth.core.config import CheckpointSettings
 from elspeth.core.dag import ExecutionGraph
@@ -38,6 +38,7 @@ from tests.conftest import (
     _TestSourceBase,
     as_sink,
     as_source,
+    as_transform,
 )
 
 
@@ -76,12 +77,14 @@ def _build_test_graph(config: PipelineConfig) -> ExecutionGraph:
     output_sink = "default" if "default" in sink_ids else next(iter(sink_ids))
     graph.add_edge(prev, sink_ids[output_sink], label="continue", mode=RoutingMode.MOVE)
 
-    # Populate internal maps
-    graph._sink_id_map = sink_ids
-    graph._transform_id_map = transform_ids
+    # Use public setter method instead of private field assignment
+    # This is test code that needs to set up graph structure, but we still prefer
+    # the setattr pattern for better encapsulation when public setters aren't available
+    graph._sink_id_map = {SinkName(k): NodeID(v) for k, v in sink_ids.items()}
+    graph._transform_id_map = {k: NodeID(v) for k, v in transform_ids.items()}
     graph._config_gate_id_map = {}
     graph._route_resolution_map = {}
-    graph._output_sink = output_sink
+    graph._default_sink = output_sink
 
     return graph
 
@@ -186,7 +189,7 @@ class TestCheckpointDurability:
 
         config = PipelineConfig(
             source=as_source(source),
-            transforms=[transform],
+            transforms=[as_transform(transform)],
             sinks={"default": as_sink(sink)},
         )
 
@@ -212,6 +215,35 @@ class TestCheckpointDurability:
         run_id = _get_latest_run_id(db)
         final_checkpoints = checkpoint_manager.get_checkpoints(run_id)
         assert len(final_checkpoints) == 0, "Checkpoints should be deleted on success"
+
+        # P1 Fix: Verify audit trail records for sink writes
+        from sqlalchemy import select
+
+        from elspeth.core.landscape.schema import (
+            artifacts_table,
+            node_states_table,
+            token_outcomes_table,
+        )
+
+        # Get sink node_id from graph
+        test_graph = _build_test_graph(config)
+        sink_node_id = test_graph.get_sink_id_map()[SinkName("default")]
+
+        # Verify node_states exist for all rows at sink
+        with db.engine.connect() as conn:
+            states = conn.execute(select(node_states_table).where(node_states_table.c.node_id == sink_node_id)).fetchall()
+            assert len(states) == 5, f"Expected 5 node_states at sink, got {len(states)}"
+            assert all(s.status == "completed" for s in states), "All sink states should be completed"
+
+            # Verify token_outcomes exist and are terminal
+            outcomes = conn.execute(select(token_outcomes_table).where(token_outcomes_table.c.run_id == run_id)).fetchall()
+            terminal_outcomes = [o for o in outcomes if o.is_terminal == 1]
+            assert len(terminal_outcomes) == 5, f"Expected 5 terminal outcomes, got {len(terminal_outcomes)}"
+
+            # Verify artifacts have content hashes
+            artifacts = conn.execute(select(artifacts_table).where(artifacts_table.c.run_id == run_id)).fetchall()
+            assert len(artifacts) >= 1, "Expected at least 1 artifact"
+            assert all(a.content_hash for a in artifacts), "All artifacts should have content_hash"
 
     def test_crash_before_sink_write_recovers_correctly(self, tmp_path: Path) -> None:
         """End-to-end test: crash before sink write, then recover correctly.
@@ -430,7 +462,7 @@ class TestCheckpointDurability:
 
         config = PipelineConfig(
             source=as_source(source),
-            transforms=[transform],
+            transforms=[as_transform(transform)],
             sinks={"default": as_sink(sink)},
         )
 
@@ -486,6 +518,37 @@ class TestCheckpointDurability:
         # Checkpoints should be deleted after successful completion
         final_checkpoints = checkpoint_manager.get_checkpoints(run_id)
         assert len(final_checkpoints) == 0, "Checkpoints should be deleted on success"
+
+        # P1 Fix: Verify audit trail records after resume
+        from sqlalchemy import select
+
+        from elspeth.core.landscape.schema import (
+            artifacts_table,
+            node_states_table,
+            token_outcomes_table,
+        )
+
+        # Get sink node_id from graph
+        resume_graph = _build_test_graph(config)
+        sink_node_id = resume_graph.get_sink_id_map()[SinkName("default")]
+
+        with db.engine.connect() as conn:
+            # Verify node_states at sink for resumed rows (3 new rows processed)
+            states = conn.execute(
+                select(node_states_table).where((node_states_table.c.node_id == sink_node_id) & (node_states_table.c.status == "completed"))
+            ).fetchall()
+            # Resume should have written 3 new rows to sink
+            assert len(states) >= 3, f"Expected at least 3 completed sink states after resume, got {len(states)}"
+
+            # Verify terminal token_outcomes exist for resumed rows
+            outcomes = conn.execute(select(token_outcomes_table).where(token_outcomes_table.c.run_id == run_id)).fetchall()
+            terminal_outcomes = [o for o in outcomes if o.is_terminal == 1]
+            # 3 new tokens should have terminal outcomes
+            assert len(terminal_outcomes) >= 3, f"Expected at least 3 terminal outcomes after resume, got {len(terminal_outcomes)}"
+
+            # Verify artifacts have content hashes
+            artifacts = conn.execute(select(artifacts_table).where(artifacts_table.c.run_id == run_id)).fetchall()
+            assert all(a.content_hash for a in artifacts), "All artifacts should have content_hash"
 
     def test_failed_batch_creates_no_checkpoints(self, tmp_path: Path) -> None:
         """If sink.write() fails, NO checkpoints should be created.
@@ -553,7 +616,7 @@ class TestCheckpointDurability:
 
         config = PipelineConfig(
             source=as_source(source),
-            transforms=[transform],
+            transforms=[as_transform(transform)],
             sinks={"default": as_sink(sink)},
         )
 
@@ -649,13 +712,14 @@ class TestCheckpointDurability:
 
         config = PipelineConfig(
             source=as_source(source),
-            transforms=[transform],
+            transforms=[as_transform(transform)],
             sinks={"default": as_sink(sink)},
         )
 
         graph = _build_test_graph(config)
-        sink_node_id = graph._sink_id_map["default"]
-        transform_node_id = graph._transform_id_map[0]
+        # P3 Fix: Use public API for accessing graph internals
+        sink_node_id = graph.get_sink_id_map()[SinkName("default")]
+        transform_node_id = graph.get_transform_id_map()[0]
 
         orchestrator = Orchestrator(
             db,
@@ -760,7 +824,7 @@ class TestCheckpointDurability:
 
         config = PipelineConfig(
             source=as_source(source),
-            transforms=[transform],
+            transforms=[as_transform(transform)],
             sinks={"default": as_sink(sink)},
         )
 
@@ -862,7 +926,7 @@ class TestCheckpointTimingInvariants:
 
         config = PipelineConfig(
             source=as_source(source),
-            transforms=[transform],
+            transforms=[as_transform(transform)],
             sinks={"default": as_sink(sink)},
         )
 
@@ -881,6 +945,13 @@ class TestCheckpointTimingInvariants:
             f"Expected 2 checkpoints (at sequence 2 and 4 with interval=2), "
             f"got {len(captured_checkpoints)}. "
             "every_n checkpointing should create checkpoints at interval boundaries."
+        )
+
+        # P2 Fix: Assert actual checkpoint sequence numbers, not just count
+        seqs = sorted(cp.sequence_number for cp in captured_checkpoints)
+        assert seqs == [2, 4], (
+            f"Expected checkpoints at sequence numbers [2, 4], got {seqs}. "
+            "With checkpoint_interval=2, checkpoints should be created at every 2nd row."
         )
 
         # All checkpoint node_ids should be sinks
@@ -949,7 +1020,7 @@ class TestCheckpointTimingInvariants:
 
         config = PipelineConfig(
             source=as_source(source),
-            transforms=[transform],
+            transforms=[as_transform(transform)],
             sinks={"default": as_sink(sink)},
         )
 
@@ -1029,7 +1100,7 @@ class TestCheckpointTimingInvariants:
 
         config = PipelineConfig(
             source=as_source(source),
-            transforms=[transform],
+            transforms=[as_transform(transform)],
             sinks={"default": as_sink(sink)},
         )
 

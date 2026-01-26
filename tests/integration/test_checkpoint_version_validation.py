@@ -9,6 +9,7 @@ from typing import Any
 
 import pytest
 
+from elspeth.contracts.types import NodeID
 from elspeth.engine.executors import AggregationExecutor
 from elspeth.engine.spans import SpanFactory
 
@@ -142,4 +143,4 @@ class TestCheckpointVersionValidation:
         executor.restore_from_checkpoint(valid_state)
 
         # Verify executor state was updated
-        assert executor.get_buffer_count("test_node") == 0  # Empty buffer restored
+        assert executor.get_buffer_count(NodeID("test_node")) == 0  # Empty buffer restored

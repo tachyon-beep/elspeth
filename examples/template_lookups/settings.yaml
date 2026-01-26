@@ -4,7 +4,7 @@
 landscape:
   url: sqlite:///examples/template_lookups/runs/audit.db
 
-datasource:
+source:
   plugin: csv
   options:
     path: examples/template_lookups/input.csv
@@ -20,9 +20,9 @@ sinks:
       schema:
         fields: dynamic
 
-output_sink: output
+default_sink: output
 
-row_plugins:
+transforms:
   - plugin: openrouter_llm
     options:
       model: "anthropic/claude-3-haiku"

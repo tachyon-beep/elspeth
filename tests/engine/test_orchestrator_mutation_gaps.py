@@ -40,88 +40,93 @@ class TestRunResultDefaults:
     """Verify RunResult dataclass has correct default values.
 
     These tests catch mutations that change default field values.
+
+    P3 Fix: rows_routed is required (not defaulted), so we only test
+    fields that actually have defaults (rows_quarantined through rows_buffered).
     """
 
-    def test_rows_routed_defaults_to_zero(self) -> None:
-        """Line 81: rows_routed must default to 0, not any other value."""
-        # Create RunResult with only required fields
-        result = RunResult(
-            run_id="test-run",
-            status=RunStatus.COMPLETED,
-            rows_processed=10,
-            rows_succeeded=10,
-            rows_failed=0,
-            rows_routed=0,  # This is required, but we test the type/value
-        )
-        # If mutation changed default to 1 or None, this would be wrong
-        assert result.rows_routed == 0
-        assert isinstance(result.rows_routed, int)
-
     def test_rows_quarantined_defaults_to_zero(self) -> None:
-        """Line 82: rows_quarantined must default to 0."""
+        """Line 93: rows_quarantined must default to 0."""
+        # Create RunResult WITHOUT rows_quarantined - should default to 0
         result = RunResult(
             run_id="test-run",
             status=RunStatus.COMPLETED,
             rows_processed=10,
             rows_succeeded=10,
             rows_failed=0,
-            rows_routed=0,
+            rows_routed=5,  # Required field, must provide
         )
         # rows_quarantined has a default - verify it's 0
         assert result.rows_quarantined == 0
         assert isinstance(result.rows_quarantined, int)
 
     def test_rows_forked_defaults_to_zero(self) -> None:
-        """Line 83: rows_forked must default to 0."""
+        """Line 94: rows_forked must default to 0."""
         result = RunResult(
             run_id="test-run",
             status=RunStatus.COMPLETED,
             rows_processed=10,
             rows_succeeded=10,
             rows_failed=0,
-            rows_routed=0,
+            rows_routed=5,
         )
         assert result.rows_forked == 0
         assert isinstance(result.rows_forked, int)
 
     def test_rows_coalesced_defaults_to_zero(self) -> None:
-        """Line 84: rows_coalesced must default to 0."""
+        """Line 95: rows_coalesced must default to 0."""
         result = RunResult(
             run_id="test-run",
             status=RunStatus.COMPLETED,
             rows_processed=10,
             rows_succeeded=10,
             rows_failed=0,
-            rows_routed=0,
+            rows_routed=5,
         )
         assert result.rows_coalesced == 0
         assert isinstance(result.rows_coalesced, int)
 
     def test_rows_expanded_defaults_to_zero(self) -> None:
-        """Line 85: rows_expanded must default to 0."""
+        """Line 96: rows_expanded must default to 0."""
         result = RunResult(
             run_id="test-run",
             status=RunStatus.COMPLETED,
             rows_processed=10,
             rows_succeeded=10,
             rows_failed=0,
-            rows_routed=0,
+            rows_routed=5,
         )
         assert result.rows_expanded == 0
         assert isinstance(result.rows_expanded, int)
 
     def test_rows_buffered_defaults_to_zero(self) -> None:
-        """Line 86: rows_buffered must default to 0."""
+        """Line 97: rows_buffered must default to 0."""
         result = RunResult(
             run_id="test-run",
             status=RunStatus.COMPLETED,
             rows_processed=10,
             rows_succeeded=10,
             rows_failed=0,
-            rows_routed=0,
+            rows_routed=5,
         )
         assert result.rows_buffered == 0
         assert isinstance(result.rows_buffered, int)
+
+    def test_rows_routed_is_required(self) -> None:
+        """P3 Fix: rows_routed has no default - verify it's required.
+
+        Previous test was tautological (passed explicit 0). This test
+        verifies the field is actually required by checking TypeError.
+        """
+        with pytest.raises(TypeError, match="rows_routed"):
+            RunResult(  # type: ignore[call-arg]
+                run_id="test-run",
+                status=RunStatus.COMPLETED,
+                rows_processed=10,
+                rows_succeeded=10,
+                rows_failed=0,
+                # rows_routed omitted - should fail
+            )
 
 
 # =============================================================================
@@ -433,33 +438,87 @@ class TestSourceQuarantineValidation:
 # =============================================================================
 # Tests for node type metadata (lines 590, 595-596, 599)
 # Mutations: changing determinism values, plugin_version
+#
+# P1 Fix: Previous tests were tautological - just asserted enum constants.
+# New tests run orchestrator and query audit database to verify node metadata.
 # =============================================================================
 
 
 class TestNodeTypeMetadata:
-    """Test that different node types get correct metadata."""
+    """Test that different node types get correct metadata in audit trail.
 
-    def test_config_gate_has_deterministic_flag(self) -> None:
-        """Line 590: Config gates should be marked as DETERMINISTIC."""
-        # This tests the logic that config gates get Determinism.DETERMINISTIC
+    P1 Fix: Actually run orchestrator and query LandscapeRecorder.get_nodes()
+    to verify determinism and plugin_version are recorded correctly.
+    """
 
-        # The orchestrator sets this value - we verify via the Determinism enum
-        assert Determinism.DETERMINISTIC.value == "deterministic"
+    def test_config_gate_recorded_as_deterministic(self, plugin_manager) -> None:
+        """Config gates should be recorded as DETERMINISTIC in audit trail."""
+        from elspeth.cli_helpers import instantiate_plugins_from_config
+        from elspeth.core.config import (
+            ElspethSettings,
+            GateSettings,
+            SinkSettings,
+            SourceSettings,
+        )
+        from elspeth.core.dag import ExecutionGraph
+        from elspeth.core.landscape import LandscapeDB
+        from elspeth.core.landscape.recorder import LandscapeRecorder
+        from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
-    def test_aggregation_defaults_to_deterministic(self) -> None:
-        """Lines 595-596: Aggregation nodes default to DETERMINISTIC."""
+        db = LandscapeDB.in_memory()
 
-        # Aggregations are typically deterministic (sum, count, avg)
-        # The orchestrator sets Determinism.DETERMINISTIC for them
-        determinism = Determinism.DETERMINISTIC
-        assert determinism == Determinism.DETERMINISTIC
+        # Create settings with a config gate
+        settings = ElspethSettings(
+            source=SourceSettings(
+                plugin="null",
+                options={"schema": {"fields": "dynamic"}},
+            ),
+            sinks={
+                "high": SinkSettings(plugin="csv", options={"path": "high.csv", "schema": {"fields": "dynamic"}}),
+                "low": SinkSettings(plugin="csv", options={"path": "low.csv", "schema": {"fields": "dynamic"}}),
+            },
+            default_sink="low",
+            gates=[
+                GateSettings(
+                    name="priority_gate",
+                    condition="True",  # Always route to high
+                    routes={"true": "high", "false": "low"},  # Boolean routes use lowercase
+                ),
+            ],
+        )
 
-    def test_coalesce_is_deterministic(self) -> None:
-        """Line 599: Coalesce nodes are DETERMINISTIC (merge is deterministic)."""
+        plugins = instantiate_plugins_from_config(settings)
+        graph = ExecutionGraph.from_plugin_instances(
+            source=plugins["source"],
+            transforms=plugins["transforms"],
+            sinks=plugins["sinks"],
+            aggregations=plugins["aggregations"],
+            gates=list(settings.gates),
+            default_sink=settings.default_sink,
+        )
 
-        # Coalesce merges tokens from parallel paths - deterministic operation
-        determinism = Determinism.DETERMINISTIC
-        assert determinism == Determinism.DETERMINISTIC
+        config = PipelineConfig(
+            source=plugins["source"],
+            transforms=[],
+            sinks=plugins["sinks"],
+            gates=list(settings.gates),
+        )
+
+        orchestrator = Orchestrator(db)
+        result = orchestrator.run(config, graph)
+        assert result.status == RunStatus.COMPLETED
+
+        # P1 Fix: Query audit trail and verify config gate metadata
+        recorder = LandscapeRecorder(db)
+        nodes = recorder.get_nodes(result.run_id)
+
+        # Find the config gate node
+        gate_nodes = [n for n in nodes if n.node_type.value == "gate"]
+        assert len(gate_nodes) == 1, f"Expected 1 gate node, found {len(gate_nodes)}"
+
+        gate_node = gate_nodes[0]
+        assert gate_node.determinism == Determinism.DETERMINISTIC, f"Config gate should be DETERMINISTIC, got {gate_node.determinism}"
+        assert gate_node.plugin_version is not None, "Gate should have plugin_version recorded"
 
 
 # =============================================================================

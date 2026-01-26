@@ -14,7 +14,7 @@
 #   - Routes rows with amount <= 1000 to normal.csv (4 rows)
 #   - Creates audit.db in runs/
 
-datasource:
+source:
   plugin: csv
   options:
     path: /app/pipeline/input.csv
@@ -46,7 +46,7 @@ sinks:
       schema:
         fields: dynamic
 
-output_sink: output
+default_sink: output
 
 landscape:
   url: sqlite:////app/pipeline/runs/audit.db

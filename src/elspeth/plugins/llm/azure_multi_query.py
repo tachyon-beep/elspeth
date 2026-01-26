@@ -2,6 +2,10 @@
 
 Executes multiple LLM queries per row in parallel, merging all results
 into a single output row with all-or-nothing error handling.
+
+Uses BatchTransformMixin for row-level pipelining (multiple rows in flight
+with FIFO output ordering) and PooledExecutor for query-level concurrency
+(parallel LLM queries within each row).
 """
 
 from __future__ import annotations
@@ -12,6 +16,7 @@ from typing import TYPE_CHECKING, Any
 
 from elspeth.contracts import Determinism, TransformResult
 from elspeth.plugins.base import BaseTransform
+from elspeth.plugins.batching import BatchTransformMixin, OutputPort
 from elspeth.plugins.clients.llm import AuditedLLMClient, LLMClientError, RateLimitError
 from elspeth.plugins.context import PluginContext
 from elspeth.plugins.llm.multi_query import MultiQueryConfig, QuerySpec
@@ -25,12 +30,39 @@ if TYPE_CHECKING:
     from elspeth.core.landscape.recorder import LandscapeRecorder
 
 
-class AzureMultiQueryLLMTransform(BaseTransform):
+class AzureMultiQueryLLMTransform(BaseTransform, BatchTransformMixin):
     """LLM transform that executes case_studies x criteria queries per row.
 
     For each row, expands the cross-product of case studies and criteria
     into individual LLM queries. All queries run in parallel (up to pool_size),
     with all-or-nothing error semantics (if any query fails, the row fails).
+
+    Architecture:
+        Uses two layers of concurrency:
+        1. Row-level pipelining (BatchTransformMixin): Multiple rows in flight,
+           FIFO output ordering, backpressure when buffer is full.
+        2. Query-level concurrency (PooledExecutor): Parallel LLM queries within
+           each row, AIMD backoff on rate limits.
+
+        Flow:
+            Orchestrator → accept() → [RowReorderBuffer] → [Worker Pool]
+                → _process_row() → PooledExecutor → LLM API
+                → emit() → OutputPort (sink or next transform)
+
+    Usage:
+        # 1. Instantiate
+        transform = AzureMultiQueryLLMTransform(config)
+
+        # 2. Connect output port (required before accept())
+        transform.connect_output(output_port, max_pending=30)
+
+        # 3. Feed rows (blocks on backpressure)
+        for row in source:
+            transform.accept(row, ctx)
+
+        # 4. Flush and close
+        transform.flush_batch_processing()
+        transform.close()
 
     Configuration example:
         transforms:
@@ -66,7 +98,6 @@ class AzureMultiQueryLLMTransform(BaseTransform):
     """
 
     name = "azure_multi_query_llm"
-    is_batch_aware = True
     creates_tokens = False  # Does not create new tokens (1 row in -> 1 row out)
     determinism: Determinism = Determinism.NON_DETERMINISTIC
     plugin_version = "1.0.0"
@@ -83,6 +114,8 @@ class AzureMultiQueryLLMTransform(BaseTransform):
         self._azure_api_key = cfg.api_key
         self._azure_api_version = cfg.api_version
         self._deployment_name = cfg.deployment_name
+        self._pool_size = cfg.pool_size
+        self._max_capacity_retry_seconds = cfg.max_capacity_retry_seconds
         self._model = cfg.model or cfg.deployment_name
 
         # Store template settings
@@ -127,7 +160,37 @@ class AzureMultiQueryLLMTransform(BaseTransform):
         self._llm_clients_lock = Lock()
         self._underlying_client: AzureOpenAI | None = None
 
-        # PHASE 1: Validate self-consistency
+        # Batch processing state (initialized by connect_output)
+        self._batch_initialized = False
+
+    def connect_output(
+        self,
+        output: OutputPort,
+        max_pending: int = 30,
+    ) -> None:
+        """Connect output port and initialize batch processing.
+
+        Call this after __init__ but before accept(). The output port
+        receives results in FIFO order (submission order, not completion order).
+
+        Args:
+            output: Output port to emit results to (sink adapter or next transform)
+            max_pending: Maximum rows in flight before accept() blocks (backpressure)
+
+        Raises:
+            RuntimeError: If called more than once
+        """
+        if self._batch_initialized:
+            raise RuntimeError("connect_output() already called")
+
+        self.init_batch_processing(
+            max_pending=max_pending,
+            output=output,
+            name=self.name,
+            max_workers=max_pending,  # Match workers to max_pending
+            batch_wait_timeout=float(self._max_capacity_retry_seconds),
+        )
+        self._batch_initialized = True
 
     def on_start(self, ctx: PluginContext) -> None:
         """Capture recorder reference for pooled execution."""
@@ -208,22 +271,35 @@ class AzureMultiQueryLLMTransform(BaseTransform):
         llm_client = self._get_llm_client(state_id)
 
         # 5. Call LLM (EXTERNAL - wrap, raise CapacityError for retry)
+        # Build kwargs for LLM call
+        llm_kwargs: dict[str, Any] = {
+            "model": self._model,
+            "messages": messages,
+            "temperature": self._temperature,
+            "max_tokens": self._max_tokens,
+        }
+
+        # Add response_format if configured (OpenAI expects {"type": "json_object"})
+        if self._response_format == "json":
+            llm_kwargs["response_format"] = {"type": "json_object"}
+
         try:
-            response = llm_client.chat_completion(
-                model=self._model,
-                messages=messages,
-                temperature=self._temperature,
-                max_tokens=self._max_tokens,
-            )
+            response = llm_client.chat_completion(**llm_kwargs)
         except RateLimitError as e:
             raise CapacityError(429, str(e)) from e
         except LLMClientError as e:
+            # Re-raise retryable errors (NetworkError, ServerError) - let pool retry
+            # Return error for non-retryable (ContentPolicyError, ContextLengthError)
+            if e.retryable:
+                raise  # Pool catches LLMClientError and applies AIMD retry
             return TransformResult.error(
                 {
                     "reason": "llm_call_failed",
                     "error": str(e),
+                    "error_type": type(e).__name__,
                     "query": spec.output_prefix,
-                }
+                },
+                retryable=False,
             )
 
         # 6. Parse JSON response (THEIR DATA - wrap)
@@ -247,6 +323,18 @@ class AzureMultiQueryLLMTransform(BaseTransform):
                     "error": str(e),
                     "query": spec.output_prefix,
                     "raw_response": response.content[:500],  # Truncate for audit
+                }
+            )
+
+        # Validate JSON type is object (EXTERNAL DATA - validate structure)
+        if not isinstance(parsed, dict):
+            return TransformResult.error(
+                {
+                    "reason": "invalid_json_type",
+                    "expected": "object",
+                    "actual": type(parsed).__name__,
+                    "query": spec.output_prefix,
+                    "raw_response": response.content[:500],
                 }
             )
 
@@ -277,24 +365,75 @@ class AzureMultiQueryLLMTransform(BaseTransform):
 
         return TransformResult.success(output)
 
+    def accept(self, row: dict[str, Any], ctx: PluginContext) -> None:
+        """Accept a row for processing.
+
+        Submits the row to the batch processing pipeline. Returns quickly
+        unless backpressure is applied (buffer full). Results flow through
+        the output port in FIFO order.
+
+        Args:
+            row: Input row with all case study fields
+            ctx: Plugin context with token and landscape
+
+        Raises:
+            RuntimeError: If connect_output() was not called
+            ValueError: If ctx.token is None
+        """
+        if not self._batch_initialized:
+            raise RuntimeError("connect_output() must be called before accept(). This wires up the output port for result emission.")
+
+        # Capture recorder on first row (same as on_start)
+        if self._recorder is None and ctx.landscape is not None:
+            self._recorder = ctx.landscape
+
+        self.accept_row(row, ctx, self._process_row)
+
     def process(
         self,
-        row: dict[str, Any] | list[dict[str, Any]],
+        row: dict[str, Any],
         ctx: PluginContext,
     ) -> TransformResult:
-        """Process row(s) with all queries in parallel.
+        """Not supported - use accept() for row-level pipelining.
 
-        For single row: executes all (case_study x criterion) queries,
-        merges results into one output row.
+        This transform uses BatchTransformMixin for concurrent row processing
+        with FIFO output ordering. Call accept() instead of process().
 
-        For batch: processes each row independently (batch of multi-query rows).
+        Raises:
+            NotImplementedError: Always, directing callers to use accept()
         """
-        # Batch dispatch
-        if isinstance(row, list):
-            return self._process_batch(row, ctx)
+        raise NotImplementedError(
+            f"{self.__class__.__name__} uses row-level pipelining. Use accept() instead of process(). See class docstring for usage."
+        )
 
-        # Single row processing
-        return self._process_single_row(row, ctx)
+    def _process_row(
+        self,
+        row: dict[str, Any],
+        ctx: PluginContext,
+    ) -> TransformResult:
+        """Process a single row with all queries. Called by worker threads.
+
+        This is the processor function passed to accept_row(). It runs in
+        the BatchTransformMixin's worker pool and calls through to the
+        existing _process_single_row_internal() which uses PooledExecutor
+        for query-level parallelism.
+
+        Args:
+            row: Input row with all case study fields
+            ctx: Plugin context with state_id for audit trail
+
+        Returns:
+            TransformResult with all query results merged, or error
+        """
+        if ctx.state_id is None:
+            raise RuntimeError("state_id is required for batch processing. Ensure transform is executed through the engine.")
+
+        try:
+            return self._process_single_row_internal(row, ctx.state_id)
+        finally:
+            # Clean up cached clients for this state_id
+            with self._llm_clients_lock:
+                self._llm_clients.pop(ctx.state_id, None)
 
     def _process_single_row_internal(
         self,
@@ -341,94 +480,54 @@ class AzureMultiQueryLLMTransform(BaseTransform):
 
         return TransformResult.success(output)
 
-    def _process_single_row(
-        self,
-        row: dict[str, Any],
-        ctx: PluginContext,
-    ) -> TransformResult:
-        """Process a single row with all queries in parallel.
-
-        Executes all (case_study x criterion) queries for this row.
-        All-or-nothing: if any query fails, the entire row fails.
-
-        Args:
-            row: Input row with all case study fields
-            ctx: Plugin context with landscape and state_id
-
-        Returns:
-            TransformResult with all query results merged, or error
-        """
-        if ctx.landscape is None or ctx.state_id is None:
-            raise RuntimeError("Multi-query transform requires landscape recorder and state_id.")
-
-        # Capture recorder for pooled execution
-        if self._recorder is None:
-            self._recorder = ctx.landscape
-
-        try:
-            return self._process_single_row_internal(row, ctx.state_id)
-        finally:
-            # Clean up cached clients for this state_id
-            with self._llm_clients_lock:
-                self._llm_clients.pop(ctx.state_id, None)
-
     def _execute_queries_parallel(
         self,
         row: dict[str, Any],
         state_id: str,
     ) -> list[TransformResult]:
-        """Execute queries in parallel via ThreadPoolExecutor.
+        """Execute queries in parallel via PooledExecutor with AIMD retry.
 
-        This method uses ThreadPoolExecutor directly for per-row query parallelism
-        rather than PooledExecutor.execute_batch(). The distinction:
-
-        - PooledExecutor.execute_batch(): Designed for cross-row batching with AIMD
-          throttling to adaptively manage rate limits across many rows.
-        - ThreadPoolExecutor here: Simple parallel execution within a single row.
-          All queries share the same underlying AzureOpenAI client which handles
-          its own rate limiting, so AIMD overhead is unnecessary.
+        Uses PooledExecutor.execute_batch() to get:
+        - Automatic retry on capacity errors with AIMD backoff
+        - Timeout after max_capacity_retry_seconds
+        - Proper audit trail for all retry attempts
 
         Args:
             row: The input row data
-            state_id: State ID for audit trail
+            state_id: State ID for audit trail (shared across all queries for this row)
 
         Returns:
             List of TransformResults in query spec order
         """
-        from concurrent.futures import ThreadPoolExecutor, as_completed
+        from elspeth.plugins.pooling.executor import RowContext
 
         # Type narrowing - caller ensures executor is not None
         assert self._executor is not None
 
-        results_by_index: dict[int, TransformResult] = {}
+        # Build RowContext for each query
+        # All queries share the same state_id (FK constraint)
+        # Uniqueness comes from call_index allocated by recorder
+        contexts = [
+            RowContext(
+                row={"original_row": row, "spec": spec},
+                state_id=state_id,
+                row_index=i,
+            )
+            for i, spec in enumerate(self._query_specs)
+        ]
 
-        with ThreadPoolExecutor(max_workers=self._executor.pool_size) as executor:
-            futures = {
-                executor.submit(
-                    self._process_single_query,
-                    row,
-                    spec,
-                    state_id,
-                ): i
-                for i, spec in enumerate(self._query_specs)
-            }
+        # Execute all queries with retry support
+        # PooledExecutor handles capacity errors with AIMD backoff
+        results = self._executor.execute_batch(
+            contexts=contexts,
+            process_fn=lambda work, work_state_id: self._process_single_query(
+                work["original_row"],
+                work["spec"],
+                work_state_id,
+            ),
+        )
 
-            for future in as_completed(futures):
-                idx = futures[future]
-                try:
-                    results_by_index[idx] = future.result()
-                except CapacityError as e:
-                    # If capacity error escapes, treat as error
-                    results_by_index[idx] = TransformResult.error(
-                        {
-                            "reason": "capacity_exhausted",
-                            "query": self._query_specs[idx].output_prefix,
-                            "error": str(e),
-                        }
-                    )
-
-        # Return in submission order
-        return [results_by_index[i] for i in range(len(self._query_specs))]
+        return results
 
     def _execute_queries_sequential(
         self,
@@ -436,6 +535,9 @@ class AzureMultiQueryLLMTransform(BaseTransform):
         state_id: str,
     ) -> list[TransformResult]:
         """Execute queries sequentially (fallback when no executor).
+
+        Without PooledExecutor, capacity errors are not retried - they immediately
+        fail the query. This is acceptable for the fallback path.
 
         Args:
             row: The input row data
@@ -450,6 +552,7 @@ class AzureMultiQueryLLMTransform(BaseTransform):
             try:
                 result = self._process_single_query(row, spec, state_id)
             except CapacityError as e:
+                # No retry in sequential mode - fail immediately
                 result = TransformResult.error(
                     {
                         "reason": "rate_limited",
@@ -461,65 +564,16 @@ class AzureMultiQueryLLMTransform(BaseTransform):
 
         return results
 
-    def _process_batch(
-        self,
-        rows: list[dict[str, Any]],
-        ctx: PluginContext,
-    ) -> TransformResult:
-        """Process batch of rows (aggregation mode).
-
-        Each row is processed independently. Failed rows get _error marker
-        while successful rows continue. This implements partial success semantics
-        for batch processing.
-
-        Args:
-            rows: List of input rows
-            ctx: Plugin context with landscape and state_id
-
-        Returns:
-            TransformResult.success_multi with all row results, or
-            TransformResult.success for empty batch
-        """
-        if not rows:
-            return TransformResult.success({"batch_empty": True, "row_count": 0})
-
-        if ctx.landscape is None or ctx.state_id is None:
-            raise RuntimeError("Batch processing requires landscape recorder and state_id.")
-
-        if self._recorder is None:
-            self._recorder = ctx.landscape
-
-        # BUG-AZURE-02 FIX: Use ONE LLM client for entire batch
-        # All rows share ctx.state_id, ensuring FK constraint satisfaction
-        # and maintaining call_index continuity across all queries.
-        # The client is cached by _get_llm_client(), so all rows reuse the same instance.
-
-        output_rows: list[dict[str, Any]] = []
-
-        try:
-            for _i, row in enumerate(rows):
-                # BUG-AZURE-02 FIX: Use shared state_id for all rows in batch
-                # (removed synthetic row_state_id creation)
-                result = self._process_single_row_internal(row, ctx.state_id)
-
-                if result.status == "success" and result.row is not None:
-                    output_rows.append(result.row)
-                else:
-                    # Row failed - include original with error marker
-                    error_row = dict(row)
-                    error_row["_error"] = result.reason
-                    output_rows.append(error_row)
-        finally:
-            # Clean up batch client after all rows processed
-            with self._llm_clients_lock:
-                self._llm_clients.pop(ctx.state_id, None)
-
-        return TransformResult.success_multi(output_rows)
-
     def close(self) -> None:
         """Release resources."""
+        # Shutdown batch processing infrastructure first
+        if self._batch_initialized:
+            self.shutdown_batch_processing()
+
+        # Then shutdown query-level executor
         if self._executor is not None:
             self._executor.shutdown(wait=True)
+
         self._recorder = None
         with self._llm_clients_lock:
             self._llm_clients.clear()

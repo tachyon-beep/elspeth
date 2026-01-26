@@ -9,7 +9,7 @@
 # Run with:
 #   uv run elspeth run -s examples/openrouter_sentiment/settings.yaml --execute
 
-datasource:
+source:
   plugin: csv
   options:
     path: examples/openrouter_sentiment/input.csv
@@ -20,7 +20,7 @@ datasource:
         - "text: str"
     on_validation_failure: discard
 
-row_plugins:
+transforms:
   - plugin: openrouter_llm
     options:
       api_key: "${OPENROUTER_API_KEY}"
@@ -45,7 +45,7 @@ sinks:
       schema:
         fields: dynamic
 
-output_sink: output
+default_sink: output
 
 # Audit trail stored in runs/
 landscape:

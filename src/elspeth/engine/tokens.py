@@ -157,6 +157,7 @@ class TokenManager:
                 token_id=child.token_id,
                 row_data=copy.deepcopy(data),
                 branch_name=child.branch_name,
+                fork_group_id=child.fork_group_id,
             )
             for child in children
         ]
@@ -193,6 +194,7 @@ class TokenManager:
             row_id=row_id,
             token_id=merged.token_id,
             row_data=merged_data,
+            join_group_id=merged.join_group_id,
         )
 
     def update_row_data(
@@ -251,6 +253,7 @@ class TokenManager:
                 token_id=db_child.token_id,
                 row_data=row_data,
                 branch_name=parent_token.branch_name,  # Inherit branch
+                expand_group_id=db_child.expand_group_id,
             )
             for db_child, row_data in zip(db_children, expanded_rows, strict=True)
         ]

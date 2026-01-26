@@ -3,12 +3,11 @@
 import json
 from pathlib import Path
 from typing import Any
-from unittest.mock import Mock
 
 import pytest
 
 from elspeth.cli_helpers import instantiate_plugins_from_config
-from elspeth.contracts import Determinism, NodeType, PluginSchema
+from elspeth.contracts import Determinism, NodeType, PluginSchema, RunStatus
 from elspeth.contracts.enums import BatchStatus
 from elspeth.contracts.schema import SchemaConfig
 from elspeth.core.checkpoint import CheckpointManager, RecoveryManager
@@ -116,8 +115,10 @@ class TestOrchestratorResume:
             run_id=run.run_id,
             aggregation_node_id="agg_node",
         )
+        original_members = []
         for i, token in enumerate(tokens):
             recorder.add_batch_member(batch.batch_id, token.token_id, ordinal=i)
+            original_members.append(token.token_id)
 
         # Checkpoint with aggregation state
         agg_state = {"buffer": [0, 100, 200], "sum": 300, "count": 3}
@@ -137,16 +138,10 @@ class TestOrchestratorResume:
         return {
             "run_id": run.run_id,
             "batch_id": batch.batch_id,
+            "batch_attempt": batch.attempt,
+            "original_members": original_members,
             "agg_state": agg_state,
         }
-
-    def test_resume_method_exists(
-        self,
-        orchestrator: Orchestrator,
-    ) -> None:
-        """Orchestrator has resume() method."""
-        assert hasattr(orchestrator, "resume")
-        assert callable(orchestrator.resume)
 
     def test_resume_retries_failed_batches(
         self,
@@ -158,9 +153,17 @@ class TestOrchestratorResume:
         plugin_manager,
         mock_graph: ExecutionGraph,
     ) -> None:
-        """resume() retries batches that were executing when crash occurred."""
+        """resume() retries batches that were executing when crash occurred.
+
+        P1 Fix: Stronger assertions on:
+        - Attempt number incremented
+        - Batch members preserved
+        - Run completion status
+        """
         run_id = failed_run_with_batch["run_id"]
         original_batch_id = failed_run_with_batch["batch_id"]
+        original_attempt = failed_run_with_batch["batch_attempt"]
+        original_members = failed_run_with_batch["original_members"]
 
         # Get resume point
         resume_point = recovery_manager.get_resume_point(run_id, mock_graph)
@@ -171,36 +174,52 @@ class TestOrchestratorResume:
         graph = self._create_minimal_graph(plugin_manager)
 
         # Act
-        orchestrator.resume(resume_point, config, graph, payload_store=payload_store)
+        result = orchestrator.resume(resume_point, config, graph, payload_store=payload_store)
 
-        # Assert: Original batch marked failed, retry batch created
+        # Assert: Original batch marked failed
         recorder = LandscapeRecorder(landscape_db)
 
         original_batch = recorder.get_batch(original_batch_id)
         assert original_batch is not None
-        assert original_batch.status == BatchStatus.FAILED
+        assert original_batch.status == BatchStatus.FAILED, f"Original batch should be FAILED, got {original_batch.status}"
 
-        # Find retry batch
+        # P1 Fix: Find retry batch and verify attempt increment
         all_batches = recorder.get_batches(run_id, node_id="agg_node")
-        retry_batches = [b for b in all_batches if b.attempt > 0]
-        assert len(retry_batches) >= 1
+        retry_batches = [b for b in all_batches if b.attempt > original_attempt]
+        assert len(retry_batches) >= 1, "Should have at least one retry batch"
+
+        retry_batch = retry_batches[0]
+        assert retry_batch.attempt == original_attempt + 1, (
+            f"Retry batch attempt should be {original_attempt + 1}, got {retry_batch.attempt}"
+        )
+
+        # P1 Fix: Verify batch members are preserved in retry
+        retry_members = recorder.get_batch_members(retry_batch.batch_id)
+        retry_member_token_ids = {m.token_id for m in retry_members}
+        original_member_set = set(original_members)
+        assert retry_member_token_ids == original_member_set, (
+            f"Retry batch should have same members. Expected {original_member_set}, got {retry_member_token_ids}"
+        )
+
+        # P1 Fix: Verify run completed successfully (or appropriate status)
+        run = recorder.get_run(run_id)
+        assert run is not None
+        # After resume, run should be completed (or still failed if retry failed)
+        assert run.status in (RunStatus.COMPLETED, RunStatus.FAILED), f"Run should be COMPLETED or FAILED after resume, got {run.status}"
+
+        # Verify result reflects the resumed run
+        assert result.run_id == run_id
 
     def _create_minimal_config(self) -> PipelineConfig:
-        """Create minimal config for resume testing."""
-        # Mock source and sink
-        source = Mock()
-        source.name = "null"
-        source.plugin_version = "1.0"
-        source.determinism = Determinism.DETERMINISTIC
-        source.output_schema = {"fields": "dynamic"}
-        source.load = Mock(return_value=[])
+        """Create minimal config for resume testing.
 
-        sink = Mock()
-        sink.name = "csv"
-        sink.plugin_version = "1.0"
-        sink.determinism = Determinism.DETERMINISTIC
-        sink.input_schema = {"fields": "dynamic"}
-        sink.write_batch = Mock()
+        Uses real plugin types for proper protocol compliance.
+        """
+        from elspeth.plugins.sinks.csv_sink import CSVSink
+        from elspeth.plugins.sources.null_source import NullSource
+
+        source = NullSource({"schema": {"fields": "dynamic"}})
+        sink = CSVSink({"path": "/tmp/test_recovery.csv", "schema": {"fields": "dynamic"}, "mode": "overwrite"})
 
         return PipelineConfig(
             source=source,
@@ -211,19 +230,19 @@ class TestOrchestratorResume:
     def _create_minimal_graph(self, plugin_manager) -> ExecutionGraph:
         """Create minimal execution graph for resume testing."""
         from elspeth.core.config import (
-            DatasourceSettings,
             ElspethSettings,
             SinkSettings,
+            SourceSettings,
         )
         from elspeth.core.dag import ExecutionGraph
 
         settings = ElspethSettings(
-            datasource=DatasourceSettings(
+            source=SourceSettings(
                 plugin="null",
                 options={"schema": {"fields": "dynamic"}},
             ),
             sinks={"default": SinkSettings(plugin="csv", options={"path": "default.csv", "schema": {"fields": "dynamic"}})},
-            output_sink="default",
+            default_sink="default",
         )
         plugins = instantiate_plugins_from_config(settings)
         return ExecutionGraph.from_plugin_instances(
@@ -232,7 +251,7 @@ class TestOrchestratorResume:
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(settings.gates),
-            output_sink=settings.output_sink,
+            default_sink=settings.default_sink,
         )
 
 

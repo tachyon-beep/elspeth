@@ -10,8 +10,9 @@ class TestPluginSchemaLocation:
         """PluginSchema should be importable from elspeth.contracts."""
         from elspeth.contracts import PluginSchema
 
-        assert PluginSchema.model_config.get("extra") == "ignore"
-        assert PluginSchema.model_config.get("frozen") is False
+        assert PluginSchema.model_config["extra"] == "ignore"
+        assert PluginSchema.model_config["frozen"] is False
+        assert PluginSchema.model_config["strict"] is False
 
     def test_schema_validation_error_importable_from_contracts(self) -> None:
         """SchemaValidationError should be importable from contracts."""
@@ -20,6 +21,7 @@ class TestPluginSchemaLocation:
         error = SchemaValidationError("field", "message", "value")
         assert error.field == "field"
         assert error.message == "message"
+        assert error.value == "value"
 
     def test_compatibility_result_importable_from_contracts(self) -> None:
         """CompatibilityResult should be importable from contracts."""

@@ -365,10 +365,17 @@ class AzureBlobSource(BaseSource):
         try:
             # Use pandas for robust CSV parsing (consistent with CSVSource)
             header_arg = 0 if has_header else None
+
+            # When headerless CSV with explicit schema, use schema field names
+            names_arg = None
+            if not has_header and not self._schema_config.is_dynamic and self._schema_config.fields:
+                names_arg = [field_def.name for field_def in self._schema_config.fields]
+
             df = pd.read_csv(
                 io.StringIO(text_data),
                 delimiter=delimiter,
                 header=header_arg,
+                names=names_arg,  # Map columns to schema field names
                 dtype=str,  # Keep all values as strings for consistent handling
                 keep_default_na=False,  # Don't convert empty strings to NaN
                 on_bad_lines="warn",  # Warn but skip bad lines instead of crashing

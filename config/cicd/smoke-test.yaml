@@ -15,7 +15,7 @@
 #   elspeth run --settings config/cicd/smoke-test.yaml --execute
 
 # Source: null source yields no rows (instant completion)
-datasource:
+source:
   plugin: "null"
 
 # Sink: JSON output for verification
@@ -26,7 +26,7 @@ sinks:
       path: /app/output/smoke-test-output.json
 
 # Default output sink
-output_sink: output
+default_sink: output
 
 # Landscape: SQLite database for audit trail
 landscape:

@@ -83,3 +83,18 @@ class TestTruncateStrictContract(TransformErrorContractTestBase):
     def error_input(self) -> dict[str, Any]:
         """Return input that triggers error (missing required field in strict mode)."""
         return {"other_field": "value", "id": 2}
+
+    def test_strict_missing_field_returns_error(
+        self,
+        transform: TransformProtocol,
+        error_input: dict[str, Any],
+        ctx: Any,
+    ) -> None:
+        """Contract: Strict mode MUST return error with missing_field reason."""
+        from elspeth.plugins.context import PluginContext
+
+        ctx = PluginContext(run_id="test", config={})
+        result = transform.process(error_input, ctx)
+        assert result.status == "error"
+        assert result.reason is not None
+        assert result.reason["reason"] == "missing_field"

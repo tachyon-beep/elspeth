@@ -16,6 +16,14 @@ import networkx as nx
 from networkx import MultiDiGraph
 
 from elspeth.contracts import EdgeInfo, RoutingMode
+from elspeth.contracts.types import (
+    AggregationName,
+    BranchName,
+    CoalesceName,
+    GateName,
+    NodeID,
+    SinkName,
+)
 
 if TYPE_CHECKING:
     from elspeth.contracts import PluginSchema
@@ -38,7 +46,7 @@ class NodeInfo:
     during the run. This guarantees audit trail consistency.
     """
 
-    node_id: str
+    node_id: NodeID
     node_type: str  # source, transform, gate, aggregation, coalesce, sink
     plugin_name: str
     config: dict[str, Any] = field(default_factory=dict)
@@ -56,15 +64,15 @@ class ExecutionGraph:
 
     def __init__(self) -> None:
         self._graph: MultiDiGraph[str] = nx.MultiDiGraph()
-        self._sink_id_map: dict[str, str] = {}
-        self._transform_id_map: dict[int, str] = {}
-        self._config_gate_id_map: dict[str, str] = {}  # gate_name -> node_id
-        self._aggregation_id_map: dict[str, str] = {}  # agg_name -> node_id
-        self._coalesce_id_map: dict[str, str] = {}  # coalesce_name -> node_id
-        self._branch_to_coalesce: dict[str, str] = {}  # branch_name -> coalesce_name
-        self._output_sink: str = ""
-        self._route_label_map: dict[tuple[str, str], str] = {}  # (gate_node, sink_name) -> route_label
-        self._route_resolution_map: dict[tuple[str, str], str] = {}  # (gate_node, label) -> sink_name | "continue"
+        self._sink_id_map: dict[SinkName, NodeID] = {}
+        self._transform_id_map: dict[int, NodeID] = {}
+        self._config_gate_id_map: dict[GateName, NodeID] = {}  # gate_name -> node_id
+        self._aggregation_id_map: dict[AggregationName, NodeID] = {}  # agg_name -> node_id
+        self._coalesce_id_map: dict[CoalesceName, NodeID] = {}  # coalesce_name -> node_id
+        self._branch_to_coalesce: dict[BranchName, CoalesceName] = {}  # branch_name -> coalesce_name
+        self._default_sink: str = ""
+        self._route_label_map: dict[tuple[NodeID, str], str] = {}  # (gate_node, sink_name) -> route_label
+        self._route_resolution_map: dict[tuple[NodeID, str], str] = {}  # (gate_node, label) -> sink_name | "continue"
 
     @property
     def node_count(self) -> int:
@@ -116,7 +124,7 @@ class ExecutionGraph:
             output_schema: Output schema (None for dynamic or N/A like sinks)
         """
         info = NodeInfo(
-            node_id=node_id,
+            node_id=NodeID(node_id),
             node_type=node_type,
             plugin_name=plugin_name,
             config=config or {},
@@ -214,24 +222,24 @@ class ExecutionGraph:
         except nx.NetworkXUnfeasible as e:
             raise GraphValidationError(f"Cannot sort graph: {e}") from e
 
-    def get_source(self) -> str | None:
+    def get_source(self) -> NodeID | None:
         """Get the source node ID.
 
         Returns:
             The source node ID, or None if not exactly one source exists.
         """
         # All nodes have "info" - added via add_node(), direct access is safe
-        sources = [node_id for node_id, data in self._graph.nodes(data=True) if data["info"].node_type == "source"]
+        sources = [NodeID(node_id) for node_id, data in self._graph.nodes(data=True) if data["info"].node_type == "source"]
         return sources[0] if len(sources) == 1 else None
 
-    def get_sinks(self) -> list[str]:
+    def get_sinks(self) -> list[NodeID]:
         """Get all sink node IDs.
 
         Returns:
             List of sink node IDs.
         """
         # All nodes have "info" - added via add_node(), direct access is safe
-        return [node_id for node_id, data in self._graph.nodes(data=True) if data["info"].node_type == "sink"]
+        return [NodeID(node_id) for node_id, data in self._graph.nodes(data=True) if data["info"].node_type == "sink"]
 
     def get_node_info(self, node_id: str) -> NodeInfo:
         """Get NodeInfo for a node.
@@ -302,7 +310,7 @@ class ExecutionGraph:
         sinks: dict[str, SinkProtocol],
         aggregations: dict[str, tuple[TransformProtocol, AggregationSettings]],
         gates: list[GateSettings],
-        output_sink: str,
+        default_sink: str,
         coalesce_settings: list[CoalesceSettings] | None = None,
     ) -> ExecutionGraph:
         """Build ExecutionGraph from plugin instances.
@@ -316,7 +324,7 @@ class ExecutionGraph:
             sinks: Dict of sink_name -> instantiated sink
             aggregations: Dict of agg_name -> (transform_instance, AggregationSettings)
             gates: Config-driven gate settings
-            output_sink: Default output sink name
+            default_sink: Default output sink name
             coalesce_settings: Coalesce configs for fork/join patterns
 
         Returns:
@@ -331,7 +339,7 @@ class ExecutionGraph:
 
         graph = cls()
 
-        def node_id(prefix: str, name: str, config: dict[str, Any], sequence: int | None = None) -> str:
+        def node_id(prefix: str, name: str, config: dict[str, Any], sequence: int | None = None) -> NodeID:
             """Generate deterministic node ID based on plugin type and config.
 
             Node IDs must be deterministic for checkpoint/resume compatibility.
@@ -358,8 +366,8 @@ class ExecutionGraph:
 
             # Include sequence number for nodes that can have duplicates
             if sequence is not None:
-                return f"{prefix}_{name}_{config_hash}_{sequence}"
-            return f"{prefix}_{name}_{config_hash}"
+                return NodeID(f"{prefix}_{name}_{config_hash}_{sequence}")
+            return NodeID(f"{prefix}_{name}_{config_hash}")
 
         # Add source - extract schema from instance
         source_config = source.config  # type: ignore[attr-defined]
@@ -373,11 +381,11 @@ class ExecutionGraph:
         )
 
         # Add sinks
-        sink_ids: dict[str, str] = {}
+        sink_ids: dict[SinkName, NodeID] = {}
         for sink_name, sink in sinks.items():
             sink_config = sink.config  # type: ignore[attr-defined]
             sid = node_id("sink", sink_name, sink_config)
-            sink_ids[sink_name] = sid
+            sink_ids[SinkName(sink_name)] = sid
             graph.add_node(
                 sid,
                 node_type="sink",
@@ -387,10 +395,10 @@ class ExecutionGraph:
             )
 
         graph._sink_id_map = dict(sink_ids)
-        graph._output_sink = output_sink
+        graph._default_sink = default_sink
 
         # Build transform chain
-        transform_ids: dict[int, str] = {}
+        transform_ids: dict[int, NodeID] = {}
         prev_node_id = source_id
 
         for i, transform in enumerate(transforms):
@@ -414,7 +422,7 @@ class ExecutionGraph:
         graph._transform_id_map = transform_ids
 
         # Build aggregations - dual schemas
-        aggregation_ids: dict[str, str] = {}
+        aggregation_ids: dict[AggregationName, NodeID] = {}
         for agg_name, (transform, agg_config) in aggregations.items():
             agg_node_config = {
                 "trigger": agg_config.trigger.model_dump(),
@@ -422,7 +430,7 @@ class ExecutionGraph:
                 "options": dict(agg_config.options),
             }
             aid = node_id("aggregation", agg_name, agg_node_config)
-            aggregation_ids[agg_name] = aid
+            aggregation_ids[AggregationName(agg_name)] = aid
 
             graph.add_node(
                 aid,
@@ -439,8 +447,8 @@ class ExecutionGraph:
         graph._aggregation_id_map = aggregation_ids
 
         # Build gates (config-driven, no instances)
-        config_gate_ids: dict[str, str] = {}
-        gate_sequence: list[tuple[str, GateSettings]] = []
+        config_gate_ids: dict[GateName, NodeID] = {}
+        gate_sequence: list[tuple[NodeID, GateSettings]] = []
 
         for gate_config in gates:
             gate_node_config = {
@@ -451,7 +459,7 @@ class ExecutionGraph:
                 gate_node_config["fork_to"] = list(gate_config.fork_to)
 
             gid = node_id("config_gate", gate_config.name, gate_node_config)
-            config_gate_ids[gate_config.name] = gid
+            config_gate_ids[GateName(gate_config.name)] = gid
 
             graph.add_node(
                 gid,
@@ -471,9 +479,9 @@ class ExecutionGraph:
                     # Fork is a special routing mode - handled by fork_to branches
                     graph._route_resolution_map[(gid, route_label)] = "fork"
                 else:
-                    if target not in sink_ids:
+                    if SinkName(target) not in sink_ids:
                         raise GraphValidationError(f"Gate '{gate_config.name}' route '{route_label}' references unknown sink '{target}'")
-                    target_sink_id = sink_ids[target]
+                    target_sink_id = sink_ids[SinkName(target)]
                     graph.add_edge(gid, target_sink_id, label=route_label, mode=RoutingMode.MOVE)
                     graph._route_label_map[(gid, target)] = route_label
                     graph._route_resolution_map[(gid, route_label)] = target
@@ -485,11 +493,12 @@ class ExecutionGraph:
         # ===== COALESCE IMPLEMENTATION (BUILD NODES AND MAPPINGS FIRST) =====
         # Build coalesce nodes BEFORE connecting gates (needed for branch routing)
         if coalesce_settings:
-            coalesce_ids: dict[str, str] = {}
-            branch_to_coalesce: dict[str, str] = {}
+            coalesce_ids: dict[CoalesceName, NodeID] = {}
+            branch_to_coalesce: dict[BranchName, CoalesceName] = {}
 
             for coalesce_config in coalesce_settings:
                 # Coalesce merges - no schema transformation
+                # Note: Pydantic validates min_length=2 for branches field
                 config_dict: dict[str, Any] = {
                     "branches": list(coalesce_config.branches),
                     "policy": coalesce_config.policy,
@@ -503,11 +512,20 @@ class ExecutionGraph:
                     config_dict["select_branch"] = coalesce_config.select_branch
 
                 cid = node_id("coalesce", coalesce_config.name, config_dict)
-                coalesce_ids[coalesce_config.name] = cid
+                coalesce_ids[CoalesceName(coalesce_config.name)] = cid
 
-                # Map branches to this coalesce
+                # Map branches to this coalesce - check for duplicates
                 for branch_name in coalesce_config.branches:
-                    branch_to_coalesce[branch_name] = cid
+                    if BranchName(branch_name) in branch_to_coalesce:
+                        # Branch already mapped to another coalesce
+                        existing_coalesce = branch_to_coalesce[BranchName(branch_name)]
+                        raise GraphValidationError(
+                            f"Duplicate branch name '{branch_name}' found in coalesce settings.\n"
+                            f"Branch '{branch_name}' is already mapped to coalesce '{existing_coalesce}', "
+                            f"but coalesce '{coalesce_config.name}' also declares it.\n"
+                            f"Each fork branch can only merge at one coalesce point."
+                        )
+                    branch_to_coalesce[BranchName(branch_name)] = CoalesceName(coalesce_config.name)
 
                 graph.add_node(
                     cid,
@@ -527,13 +545,14 @@ class ExecutionGraph:
         for gate_id, gate_config in gate_sequence:
             if gate_config.fork_to:
                 for branch_name in gate_config.fork_to:
-                    if branch_name in branch_to_coalesce:
+                    if BranchName(branch_name) in branch_to_coalesce:
                         # Explicit coalesce destination
-                        coalesce_id = branch_to_coalesce[branch_name]
+                        coalesce_name = branch_to_coalesce[BranchName(branch_name)]
+                        coalesce_id = coalesce_ids[coalesce_name]
                         graph.add_edge(gate_id, coalesce_id, label=branch_name, mode=RoutingMode.COPY)
-                    elif branch_name in sink_ids:
+                    elif SinkName(branch_name) in sink_ids:
                         # Explicit sink destination (branch name matches sink name)
-                        graph.add_edge(gate_id, sink_ids[branch_name], label=branch_name, mode=RoutingMode.COPY)
+                        graph.add_edge(gate_id, sink_ids[SinkName(branch_name)], label=branch_name, mode=RoutingMode.COPY)
                     else:
                         # NO FALLBACK - this is a configuration error
                         raise GraphValidationError(
@@ -546,6 +565,28 @@ class ExecutionGraph:
                             f"Available sinks: {sorted(sink_ids.keys())}"
                         )
 
+        # ===== VALIDATE COALESCE BRANCHES ARE PRODUCED BY GATES =====
+        # All branches declared in coalesce settings must be produced by some fork gate
+        if coalesce_settings and branch_to_coalesce:
+            # Collect all branches produced by gates
+            produced_branches: set[str] = set()
+            for _gate_id, gate_config in gate_sequence:
+                if gate_config.fork_to:
+                    produced_branches.update(gate_config.fork_to)
+
+            # Check that all coalesce branches are produced
+            for branch_name, coalesce_name in branch_to_coalesce.items():
+                if branch_name not in produced_branches:
+                    raise GraphValidationError(
+                        f"Coalesce '{coalesce_name}' declares branch '{branch_name}', "
+                        f"but no gate produces this branch.\n"
+                        f"Branches must be listed in a gate's fork_to list to be valid.\n"
+                        f"\n"
+                        f"Branches produced by gates: {sorted(produced_branches) if produced_branches else '(none)'}\n"
+                        f"Coalesce '{coalesce_name}' expects branches: "
+                        f"{sorted([b for b, c in branch_to_coalesce.items() if c == coalesce_name])}"
+                    )
+
         # ===== CONNECT GATE CONTINUE ROUTES =====
         # CRITICAL FIX: Handle ALL continue routes, not just "true"
         for i, (gid, gate_config) in enumerate(gate_sequence):
@@ -557,33 +598,33 @@ class ExecutionGraph:
                 if i + 1 < len(gate_sequence):
                     next_node_id = gate_sequence[i + 1][0]
                 else:
-                    if output_sink not in sink_ids:
+                    if SinkName(default_sink) not in sink_ids:
                         raise GraphValidationError(
                             f"Gate '{gate_config.name}' has 'continue' route but is the last gate "
-                            f"and output_sink '{output_sink}' is not in configured sinks. "
+                            f"and default_sink '{default_sink}' is not in configured sinks. "
                             f"Available sinks: {sorted(sink_ids.keys())}"
                         )
-                    next_node_id = sink_ids[output_sink]
+                    next_node_id = sink_ids[SinkName(default_sink)]
 
                 if not graph._graph.has_edge(gid, next_node_id, key="continue"):
                     graph.add_edge(gid, next_node_id, label="continue", mode=RoutingMode.MOVE)
 
         # ===== CONNECT FINAL NODE TO OUTPUT (NO GATES CASE) =====
-        if not gates and output_sink in sink_ids:
-            graph.add_edge(prev_node_id, sink_ids[output_sink], label="continue", mode=RoutingMode.MOVE)
+        if not gates and SinkName(default_sink) in sink_ids:
+            graph.add_edge(prev_node_id, sink_ids[SinkName(default_sink)], label="continue", mode=RoutingMode.MOVE)
 
         # ===== CONNECT COALESCE TO OUTPUT =====
         if coalesce_settings:
             for coalesce_id in coalesce_ids.values():
-                if output_sink in sink_ids:
-                    graph.add_edge(coalesce_id, sink_ids[output_sink], label="continue", mode=RoutingMode.MOVE)
+                if SinkName(default_sink) in sink_ids:
+                    graph.add_edge(coalesce_id, sink_ids[SinkName(default_sink)], label="continue", mode=RoutingMode.MOVE)
 
         # PHASE 2 VALIDATION: Validate schema compatibility AFTER graph is built
         graph.validate_edge_compatibility()
 
         return graph
 
-    def get_sink_id_map(self) -> dict[str, str]:
+    def get_sink_id_map(self) -> dict[SinkName, NodeID]:
         """Get explicit sink_name -> node_id mapping.
 
         Returns:
@@ -592,7 +633,7 @@ class ExecutionGraph:
         """
         return dict(self._sink_id_map)
 
-    def get_transform_id_map(self) -> dict[int, str]:
+    def get_transform_id_map(self) -> dict[int, NodeID]:
         """Get explicit sequence -> node_id mapping for transforms.
 
         Returns:
@@ -600,7 +641,7 @@ class ExecutionGraph:
         """
         return dict(self._transform_id_map)
 
-    def get_config_gate_id_map(self) -> dict[str, str]:
+    def get_config_gate_id_map(self) -> dict[GateName, NodeID]:
         """Get explicit gate_name -> node_id mapping for config-driven gates.
 
         Returns:
@@ -608,7 +649,7 @@ class ExecutionGraph:
         """
         return dict(self._config_gate_id_map)
 
-    def get_aggregation_id_map(self) -> dict[str, str]:
+    def get_aggregation_id_map(self) -> dict[AggregationName, NodeID]:
         """Get explicit agg_name -> node_id mapping for aggregations.
 
         Returns:
@@ -616,7 +657,7 @@ class ExecutionGraph:
         """
         return dict(self._aggregation_id_map)
 
-    def get_coalesce_id_map(self) -> dict[str, str]:
+    def get_coalesce_id_map(self) -> dict[CoalesceName, NodeID]:
         """Get explicit coalesce_name -> node_id mapping.
 
         Returns:
@@ -624,7 +665,7 @@ class ExecutionGraph:
         """
         return dict(self._coalesce_id_map)
 
-    def get_branch_to_coalesce_map(self) -> dict[str, str]:
+    def get_branch_to_coalesce_map(self) -> dict[BranchName, CoalesceName]:
         """Get branch_name -> coalesce_name mapping.
 
         Returns:
@@ -633,9 +674,9 @@ class ExecutionGraph:
         """
         return dict(self._branch_to_coalesce)
 
-    def get_output_sink(self) -> str:
-        """Get the output sink name."""
-        return self._output_sink
+    def get_default_sink(self) -> str:
+        """Get the default sink name."""
+        return self._default_sink
 
     def get_route_label(self, from_node_id: str, sink_name: str) -> str:
         """Get the route label for an edge from a gate to a sink.
@@ -648,13 +689,13 @@ class ExecutionGraph:
             The route label (e.g., "suspicious") or "continue" for default path
         """
         # Check explicit route mapping first
-        if (from_node_id, sink_name) in self._route_label_map:
-            return self._route_label_map[(from_node_id, sink_name)]
+        if (NodeID(from_node_id), sink_name) in self._route_label_map:
+            return self._route_label_map[(NodeID(from_node_id), sink_name)]
 
         # Default path uses "continue" label
         return "continue"
 
-    def get_route_resolution_map(self) -> dict[tuple[str, str], str]:
+    def get_route_resolution_map(self) -> dict[tuple[NodeID, str], str]:
         """Get the route resolution map for all gates.
 
         Returns:

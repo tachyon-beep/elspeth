@@ -124,6 +124,37 @@ class TestLineageResultDefaults:
         assert result.validation_errors == [], f"validation_errors should default to [], got {result.validation_errors!r}"
         assert result.validation_errors is not None
 
+    def test_validation_errors_default_is_independent_per_instance(self, minimal_token: Token, minimal_row_lineage: RowLineage) -> None:
+        """Line 53: Each instance should get its own empty list for validation_errors.
+
+        Ensures default_factory=list creates new list per instance,
+        not a shared mutable default. Mirrors transform_errors test.
+        """
+        result1 = LineageResult(
+            token=minimal_token,
+            source_row=minimal_row_lineage,
+            node_states=[],
+            routing_events=[],
+            calls=[],
+            parent_tokens=[],
+        )
+
+        result2 = LineageResult(
+            token=minimal_token,
+            source_row=minimal_row_lineage,
+            node_states=[],
+            routing_events=[],
+            calls=[],
+            parent_tokens=[],
+        )
+
+        # Should be different list instances (not shared)
+        assert result1.validation_errors is not result2.validation_errors, "Each LineageResult should have its own validation_errors list"
+        # Mutation on one should not affect the other
+        # Note: Intentionally appending wrong type to test list isolation, not type correctness
+        result1.validation_errors.append("test")  # type: ignore[arg-type]
+        assert result2.validation_errors == [], "Shared mutable default detected"
+
 
 class TestLineageResultFieldTypes:
     """Tests ensuring field types are correct."""

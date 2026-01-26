@@ -106,7 +106,7 @@ sinks:
         fields: dynamic
 
 # Default sink for processed rows
-output_sink: output
+default_sink: output
 
 # Audit trail database
 landscape:
@@ -294,7 +294,7 @@ sinks:
     options: { ... }
 
 # Required: Default output sink
-output_sink: <sink_name>
+default_sink: <sink_name>
 
 # Required: Audit trail
 landscape:

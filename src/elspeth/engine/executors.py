@@ -24,6 +24,7 @@ from elspeth.contracts import (
     TokenInfo,
 )
 from elspeth.contracts.enums import RoutingKind, RoutingMode, TriggerType
+from elspeth.contracts.types import NodeID
 from elspeth.core.canonical import stable_hash
 from elspeth.core.config import AggregationSettings, GateSettings
 from elspeth.core.landscape import LandscapeRecorder
@@ -42,6 +43,7 @@ from elspeth.plugins.results import (
 )
 
 if TYPE_CHECKING:
+    from elspeth.engine.batch_adapter import SharedBatchAdapter
     from elspeth.engine.tokens import TokenManager
 
 __all__ = [
@@ -65,7 +67,7 @@ class MissingEdgeError(Exception):
     traceable to a registered edge. Silent edge loss is unacceptable.
     """
 
-    def __init__(self, node_id: str, label: str) -> None:
+    def __init__(self, node_id: NodeID, label: str) -> None:
         """Initialize with routing details.
 
         Args:
@@ -127,6 +129,33 @@ class TransformExecutor:
         self._recorder = recorder
         self._spans = span_factory
 
+    def _get_batch_adapter(self, transform: TransformProtocol) -> "SharedBatchAdapter":
+        """Get or create shared batch adapter for transform.
+
+        Creates adapter once per transform instance and stores it as an
+        instance attribute for reuse across rows. This solves the deadlock
+        where per-row adapters were created but only the first was connected.
+
+        Args:
+            transform: The batch-aware transform
+
+        Returns:
+            SharedBatchAdapter for this transform
+        """
+        from elspeth.engine.batch_adapter import SharedBatchAdapter
+
+        if not hasattr(transform, "_executor_batch_adapter"):
+            adapter = SharedBatchAdapter()
+            transform._executor_batch_adapter = adapter  # type: ignore[attr-defined]
+
+            # Connect output (one-time setup)
+            # Use _pool_size stored by LLM transforms, default to 30
+            max_pending = getattr(transform, "_pool_size", 30)
+            transform.connect_output(output=adapter, max_pending=max_pending)  # type: ignore[attr-defined]
+            transform._batch_initialized = True  # type: ignore[attr-defined]
+
+        return transform._executor_batch_adapter  # type: ignore[attr-defined, return-value, no-any-return]
+
     def execute_transform(
         self,
         transform: TransformProtocol,
@@ -141,6 +170,11 @@ class TransformExecutor:
         responsibility (e.g., RetryManager wraps this for retryable transforms).
         Each attempt gets its own node_state record with attempt number tracked
         by the caller.
+
+        Supports two execution modes:
+        1. Synchronous: transform.process() returns TransformResult immediately
+        2. Asynchronous (BatchTransformMixin): transform.accept() submits work,
+           results flow through output port and are awaited synchronously
 
         Error Routing:
         - TransformResult.error() is a LEGITIMATE processing failure
@@ -173,6 +207,7 @@ class TransformExecutor:
         state = self._recorder.begin_node_state(
             token_id=token.token_id,
             node_id=transform.node_id,
+            run_id=ctx.run_id,
             step_index=step_in_pipeline,
             input_data=token.row_data,
             attempt=attempt,
@@ -184,11 +219,55 @@ class TransformExecutor:
         ctx.node_id = transform.node_id
         ctx._call_index = 0  # Reset call index for this state
 
+        # Detect batch transforms (those using BatchTransformMixin)
+        # They have accept() method and process() raises NotImplementedError
+        has_accept = hasattr(transform, "accept") and callable(getattr(transform, "accept", None))
+
         # Execute with timing and span
         with self._spans.transform_span(transform.name, input_hash=input_hash):
             start = time.perf_counter()
             try:
-                result = transform.process(token.row_data, ctx)
+                if has_accept:
+                    # Batch transform: use accept() with SharedBatchAdapter
+                    # One adapter per transform, multiple waiters per adapter
+                    adapter = self._get_batch_adapter(transform)
+
+                    # Register waiter for THIS token AND attempt (before accept!)
+                    # Using (token_id, state_id) ensures retry safety: if a timeout
+                    # occurs and retry happens, the new attempt's waiter won't receive
+                    # stale results from the previous attempt.
+                    waiter = adapter.register(token.token_id, state.state_id)
+
+                    # Set token on context for BatchTransformMixin
+                    ctx.token = token
+
+                    # Submit work - this returns immediately
+                    transform.accept(token.row_data, ctx)  # type: ignore[attr-defined]
+
+                    # Block until THIS row's result arrives.
+                    #
+                    # DESIGN DECISION: Sequential row processing
+                    # The orchestrator processes rows one at a time, blocking here
+                    # until each row completes. This is intentional:
+                    # - Concurrency happens WITHIN each row (multi-query transforms
+                    #   make 10+ LLM calls concurrently for a single row)
+                    # - Across rows, processing is sequential for:
+                    #   1. Simpler audit ordering (deterministic state progression)
+                    #   2. Natural backpressure (no unbounded queue growth)
+                    #   3. Single-threaded orchestrator (easier to reason about)
+                    #
+                    # For true cross-row parallelism, the orchestrator would need
+                    # to be async/await or multi-threaded, which adds complexity.
+                    #
+                    # Timeout is derived from transform's batch_wait_timeout config
+                    # (default 3600s = 1 hour) to allow for sustained rate limiting
+                    # and AIMD backoff during capacity errors.
+                    wait_timeout = getattr(transform, "_batch_wait_timeout", 3600.0)
+                    result = waiter.wait(timeout=wait_timeout)
+                else:
+                    # Regular transform: synchronous process()
+                    result = transform.process(token.row_data, ctx)
+
                 duration_ms = (time.perf_counter() - start) * 1000
             except Exception as e:
                 duration_ms = (time.perf_counter() - start) * 1000
@@ -203,6 +282,29 @@ class TransformExecutor:
                     duration_ms=duration_ms,
                     error=error,
                 )
+
+                # For TimeoutError on batch transforms, evict the buffer entry
+                # to prevent FIFO blocking on retry attempts.
+                #
+                # The eviction flow:
+                # 1. First attempt times out at waiter.wait()
+                # 2. We call evict_submission() to remove buffer entry
+                # 3. Retry attempt gets new sequence number and can proceed
+                # 4. Original worker may still complete, but result is discarded
+                if isinstance(e, TimeoutError) and has_accept:
+                    evict_fn = getattr(transform, "evict_submission", None)
+                    if evict_fn is not None:
+                        try:
+                            evict_fn(token.token_id, state.state_id)
+                        except Exception as evict_err:
+                            # Eviction failure is logged but doesn't change the
+                            # original exception - timeout is still the root cause
+                            logger.warning(
+                                "Failed to evict timed-out submission for token %s: %s",
+                                token.token_id,
+                                evict_err,
+                            )
+
                 raise
 
         # Populate audit fields
@@ -324,8 +426,8 @@ class GateExecutor:
         self,
         recorder: LandscapeRecorder,
         span_factory: SpanFactory,
-        edge_map: dict[tuple[str, str], str] | None = None,
-        route_resolution_map: dict[tuple[str, str], str] | None = None,
+        edge_map: dict[tuple[NodeID, str], str] | None = None,
+        route_resolution_map: dict[tuple[NodeID, str], str] | None = None,
     ) -> None:
         """Initialize executor.
 
@@ -371,6 +473,7 @@ class GateExecutor:
         state = self._recorder.begin_node_state(
             token_id=token.token_id,
             node_id=gate.node_id,
+            run_id=ctx.run_id,
             step_index=step_in_pipeline,
             input_data=token.row_data,
         )
@@ -424,11 +527,11 @@ class GateExecutor:
         elif action.kind == RoutingKind.ROUTE:
             # Gate returned a route label - resolve via routes config
             route_label = action.destinations[0]
-            destination = self._route_resolution_map.get((gate.node_id, route_label))
+            destination = self._route_resolution_map.get((NodeID(gate.node_id), route_label))
 
             if destination is None:
                 # Label not in routes config - this is a configuration error
-                raise MissingEdgeError(node_id=gate.node_id, label=route_label)
+                raise MissingEdgeError(node_id=NodeID(gate.node_id), label=route_label)
 
             if destination == "continue":
                 # Route label resolves to "continue" - record routing event (AUD-002)
@@ -535,6 +638,7 @@ class GateExecutor:
         state = self._recorder.begin_node_state(
             token_id=token.token_id,
             node_id=node_id,
+            run_id=ctx.run_id,
             step_index=step_in_pipeline,
             input_data=token.row_data,
         )
@@ -697,11 +801,12 @@ class GateExecutor:
         Raises:
             MissingEdgeError: If any destination has no registered edge.
         """
+        typed_node_id = NodeID(node_id)
         if len(action.destinations) == 1:
             dest = action.destinations[0]
-            edge_id = self._edge_map.get((node_id, dest))
+            edge_id = self._edge_map.get((typed_node_id, dest))
             if edge_id is None:
-                raise MissingEdgeError(node_id=node_id, label=dest)
+                raise MissingEdgeError(node_id=typed_node_id, label=dest)
 
             self._recorder.record_routing_event(
                 state_id=state_id,
@@ -713,9 +818,9 @@ class GateExecutor:
             # Multiple destinations (fork)
             routes = []
             for dest in action.destinations:
-                edge_id = self._edge_map.get((node_id, dest))
+                edge_id = self._edge_map.get((typed_node_id, dest))
                 if edge_id is None:
-                    raise MissingEdgeError(node_id=node_id, label=dest)
+                    raise MissingEdgeError(node_id=typed_node_id, label=dest)
                 routes.append(RoutingSpec(edge_id=edge_id, mode=action.mode))
 
             self._recorder.record_routing_events(
@@ -751,7 +856,7 @@ class AggregationExecutor:
         span_factory: SpanFactory,
         run_id: str,
         *,
-        aggregation_settings: dict[str, AggregationSettings] | None = None,
+        aggregation_settings: dict[NodeID, AggregationSettings] | None = None,
     ) -> None:
         """Initialize executor.
 
@@ -765,15 +870,15 @@ class AggregationExecutor:
         self._spans = span_factory
         self._run_id = run_id
         self._member_counts: dict[str, int] = {}  # batch_id -> count for ordinals
-        self._batch_ids: dict[str, str | None] = {}  # node_id -> current batch_id
-        self._aggregation_settings = aggregation_settings or {}
-        self._trigger_evaluators: dict[str, TriggerEvaluator] = {}
-        self._restored_states: dict[str, dict[str, Any]] = {}  # node_id -> state
+        self._batch_ids: dict[NodeID, str | None] = {}  # node_id -> current batch_id
+        self._aggregation_settings: dict[NodeID, AggregationSettings] = aggregation_settings or {}
+        self._trigger_evaluators: dict[NodeID, TriggerEvaluator] = {}
+        self._restored_states: dict[NodeID, dict[str, Any]] = {}  # node_id -> state
 
         # Engine-owned row buffers (node_id -> list of row dicts)
-        self._buffers: dict[str, list[dict[str, Any]]] = {}
+        self._buffers: dict[NodeID, list[dict[str, Any]]] = {}
         # Token tracking for audit trail (node_id -> list of TokenInfo)
-        self._buffer_tokens: dict[str, list[TokenInfo]] = {}
+        self._buffer_tokens: dict[NodeID, list[TokenInfo]] = {}
 
         # Create trigger evaluators for each configured aggregation
         for node_id, settings in self._aggregation_settings.items():
@@ -783,7 +888,7 @@ class AggregationExecutor:
 
     def buffer_row(
         self,
-        node_id: str,
+        node_id: NodeID,
         token: TokenInfo,
     ) -> None:
         """Buffer a row for aggregation.
@@ -829,7 +934,7 @@ class AggregationExecutor:
         if evaluator is not None:
             evaluator.record_accept()
 
-    def get_buffered_rows(self, node_id: str) -> list[dict[str, Any]]:
+    def get_buffered_rows(self, node_id: NodeID) -> list[dict[str, Any]]:
         """Get currently buffered rows (does not clear buffer).
 
         Args:
@@ -840,7 +945,7 @@ class AggregationExecutor:
         """
         return list(self._buffers.get(node_id, []))
 
-    def get_buffered_tokens(self, node_id: str) -> list[TokenInfo]:
+    def get_buffered_tokens(self, node_id: NodeID) -> list[TokenInfo]:
         """Get currently buffered tokens (does not clear buffer).
 
         Args:
@@ -851,7 +956,7 @@ class AggregationExecutor:
         """
         return list(self._buffer_tokens.get(node_id, []))
 
-    def _get_buffered_data(self, node_id: str) -> tuple[list[dict[str, Any]], list[TokenInfo]]:
+    def _get_buffered_data(self, node_id: NodeID) -> tuple[list[dict[str, Any]], list[TokenInfo]]:
         """Internal: Get buffered rows and tokens without clearing.
 
         IMPORTANT: This method does NOT record audit trail. Production code
@@ -870,7 +975,7 @@ class AggregationExecutor:
 
     def execute_flush(
         self,
-        node_id: str,
+        node_id: NodeID,
         transform: TransformProtocol,
         ctx: PluginContext,
         step_in_pipeline: int,
@@ -940,6 +1045,7 @@ class AggregationExecutor:
         state = self._recorder.begin_node_state(
             token_id=representative_token.token_id,
             node_id=node_id,
+            run_id=ctx.run_id,
             step_index=step_in_pipeline,
             input_data=batch_input,
             attempt=0,
@@ -1075,7 +1181,7 @@ class AggregationExecutor:
 
         return result, buffered_tokens
 
-    def _reset_batch_state(self, node_id: str) -> None:
+    def _reset_batch_state(self, node_id: NodeID) -> None:
         """Reset batch tracking state for next batch.
 
         Args:
@@ -1087,7 +1193,7 @@ class AggregationExecutor:
             if batch_id in self._member_counts:
                 del self._member_counts[batch_id]
 
-    def get_buffer_count(self, node_id: str) -> int:
+    def get_buffer_count(self, node_id: NodeID) -> int:
         """Get the number of rows currently buffered for an aggregation.
 
         Args:
@@ -1208,10 +1314,12 @@ class AggregationExecutor:
                 f"This checkpoint may be from a different ELSPETH version."
             )
 
-        for node_id, node_state in state.items():
+        for node_id_str, node_state in state.items():
             # Skip version metadata field
-            if node_id == "_version":
+            if node_id_str == "_version":
                 continue
+            # Convert to typed NodeID for dictionary access
+            node_id = NodeID(node_id_str)
             # Validate checkpoint format (OUR DATA - crash on mismatch, don't hide with .get())
             if "tokens" not in node_state:
                 raise ValueError(
@@ -1275,14 +1383,14 @@ class AggregationExecutor:
                     # Adjust timer: make it think first accept was N seconds ago
                     evaluator._first_accept_time = time.monotonic() - elapsed_seconds
 
-    def get_batch_id(self, node_id: str) -> str | None:
+    def get_batch_id(self, node_id: NodeID) -> str | None:
         """Get current batch ID for an aggregation node.
 
         Primarily for testing - production code accesses this via checkpoint state.
         """
         return self._batch_ids.get(node_id)
 
-    def should_flush(self, node_id: str) -> bool:
+    def should_flush(self, node_id: NodeID) -> bool:
         """Check if the aggregation should flush based on trigger config.
 
         Args:
@@ -1296,7 +1404,7 @@ class AggregationExecutor:
             return False
         return evaluator.should_trigger()
 
-    def get_trigger_type(self, node_id: str) -> "TriggerType | None":
+    def get_trigger_type(self, node_id: NodeID) -> "TriggerType | None":
         """Get the TriggerType for the trigger that fired.
 
         Args:
@@ -1310,7 +1418,7 @@ class AggregationExecutor:
             return None
         return evaluator.get_trigger_type()
 
-    def restore_state(self, node_id: str, state: dict[str, Any]) -> None:
+    def restore_state(self, node_id: NodeID, state: dict[str, Any]) -> None:
         """Restore aggregation state from checkpoint.
 
         Called during recovery to restore plugin state. The state is stored
@@ -1322,7 +1430,7 @@ class AggregationExecutor:
         """
         self._restored_states[node_id] = state
 
-    def get_restored_state(self, node_id: str) -> dict[str, Any] | None:
+    def get_restored_state(self, node_id: NodeID) -> dict[str, Any] | None:
         """Get restored state for an aggregation node.
 
         Used by aggregation plugins during recovery to restore their
@@ -1352,7 +1460,7 @@ class AggregationExecutor:
         if batch is None:
             raise ValueError(f"Batch not found: {batch_id}")
 
-        node_id = batch.aggregation_node_id
+        node_id = NodeID(batch.aggregation_node_id)
         self._batch_ids[node_id] = batch_id
 
         # Restore member count from database
@@ -1453,6 +1561,7 @@ class SinkExecutor:
             state = self._recorder.begin_node_state(
                 token_id=token.token_id,
                 node_id=sink_node_id,
+                run_id=ctx.run_id,
                 step_index=step_in_pipeline,
                 input_data=token.row_data,
             )

@@ -242,9 +242,10 @@ class ExplainScreen:
         """
         try:
             recorder = LandscapeRecorder(db)
-            node = recorder.get_node(node_id)
+            # Query by composite PK (node_id, run_id) - no post-hoc validation needed
+            node = recorder.get_node(node_id, run_id)
 
-            if node is None or node.run_id != run_id:
+            if node is None:
                 return None
 
             # Build result with required fields - direct access, crash on missing

@@ -50,7 +50,7 @@ class TestDeaggregationPipeline:
         output_dir.mkdir()
 
         config = {
-            "datasource": {
+            "source": {
                 "plugin": "json",
                 "options": {
                     "path": str(input_data),
@@ -61,7 +61,7 @@ class TestDeaggregationPipeline:
                     "on_validation_failure": "discard",
                 },
             },
-            "row_plugins": [
+            "transforms": [
                 {
                     "plugin": "json_explode",
                     "options": {
@@ -81,7 +81,7 @@ class TestDeaggregationPipeline:
                     },
                 },
             },
-            "output_sink": "output",
+            "default_sink": "output",
             "landscape": {"url": f"sqlite:///{tmp_path / 'audit.db'}"},
         }
         config_file = tmp_path / "settings.yaml"
@@ -181,7 +181,7 @@ class TestDeaggregationAuditTrail:
 
         # Build config programmatically for test
         config_dict = {
-            "datasource": {
+            "source": {
                 "plugin": "json",
                 "options": {
                     "path": str(input_data),
@@ -192,7 +192,7 @@ class TestDeaggregationAuditTrail:
                     "on_validation_failure": "discard",
                 },
             },
-            "row_plugins": [
+            "transforms": [
                 {
                     "plugin": "json_explode",
                     "options": {
@@ -212,7 +212,7 @@ class TestDeaggregationAuditTrail:
                     },
                 },
             },
-            "output_sink": "output",
+            "default_sink": "output",
             "landscape": {"url": f"sqlite:///{tmp_path / 'audit.db'}"},
         }
 
@@ -234,12 +234,12 @@ class TestDeaggregationAuditTrail:
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(settings.gates),
-            output_sink=settings.output_sink,
+            default_sink=settings.default_sink,
         )
 
         # Instantiate plugins
-        source = JSONSource(dict(settings.datasource.options))
-        transform = JSONExplode(dict(settings.row_plugins[0].options))
+        source = JSONSource(dict(settings.source.options))
+        transform = JSONExplode(dict(settings.transforms[0].options))
         sink = JSONSink(dict(settings.sinks["output"].options))
 
         # Build pipeline config
@@ -350,7 +350,7 @@ class TestSourceSchemaValidation:
         output_dir.mkdir()
 
         config = {
-            "datasource": {
+            "source": {
                 "plugin": "json",
                 "options": {
                     "path": str(valid_and_invalid_input),
@@ -362,7 +362,7 @@ class TestSourceSchemaValidation:
                     "on_validation_failure": "discard",
                 },
             },
-            "row_plugins": [
+            "transforms": [
                 {
                     "plugin": "json_explode",
                     "options": {
@@ -382,7 +382,7 @@ class TestSourceSchemaValidation:
                     },
                 },
             },
-            "output_sink": "output",
+            "default_sink": "output",
             "landscape": {"url": f"sqlite:///{tmp_path / 'audit.db'}"},
         }
 

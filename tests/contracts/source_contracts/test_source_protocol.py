@@ -10,6 +10,7 @@ Contract guarantees verified:
 3. Quarantined rows MUST have error and destination
 4. close() MUST be idempotent (safe to call multiple times)
 5. Lifecycle hooks on_start/on_complete MUST not raise
+6. output_schema MUST be a PluginSchema subclass
 
 Usage:
     Create a subclass with fixtures providing:
@@ -34,7 +35,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from elspeth.contracts import Determinism, SourceRow
+from elspeth.contracts import Determinism, PluginSchema, SourceRow
 from elspeth.plugins.context import PluginContext
 
 if TYPE_CHECKING:
@@ -71,24 +72,20 @@ class SourceContractTestBase(ABC):
 
     def test_source_has_name(self, source: SourceProtocol) -> None:
         """Contract: Source MUST have a 'name' attribute."""
-        assert hasattr(source, "name")
         assert isinstance(source.name, str)
         assert len(source.name) > 0
 
     def test_source_has_output_schema(self, source: SourceProtocol) -> None:
-        """Contract: Source MUST have an 'output_schema' attribute."""
-        assert hasattr(source, "output_schema")
-        # output_schema should be a class (type), not an instance
+        """Contract: Source MUST have an 'output_schema' that is a PluginSchema subclass."""
         assert isinstance(source.output_schema, type)
+        assert issubclass(source.output_schema, PluginSchema)
 
     def test_source_has_determinism(self, source: SourceProtocol) -> None:
         """Contract: Source MUST have a 'determinism' attribute."""
-        assert hasattr(source, "determinism")
         assert isinstance(source.determinism, Determinism)
 
     def test_source_has_plugin_version(self, source: SourceProtocol) -> None:
         """Contract: Source MUST have a 'plugin_version' attribute."""
-        assert hasattr(source, "plugin_version")
         assert isinstance(source.plugin_version, str)
 
     # =========================================================================
@@ -150,19 +147,12 @@ class SourceContractTestBase(ABC):
 
     def test_on_start_does_not_raise(self, source: SourceProtocol, ctx: PluginContext) -> None:
         """Contract: on_start() lifecycle hook MUST not raise."""
-        # on_start is optional, so check if it exists
-        if hasattr(source, "on_start"):
-            # Should not raise
-            source.on_start(ctx)
+        source.on_start(ctx)
 
     def test_on_complete_does_not_raise(self, source: SourceProtocol, ctx: PluginContext) -> None:
         """Contract: on_complete() lifecycle hook MUST not raise."""
-        # on_complete is optional, so check if it exists
-        if hasattr(source, "on_complete"):
-            # First load data
-            list(source.load(ctx))
-            # Should not raise
-            source.on_complete(ctx)
+        list(source.load(ctx))
+        source.on_complete(ctx)
 
 
 # =============================================================================

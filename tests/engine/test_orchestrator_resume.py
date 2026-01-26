@@ -5,6 +5,7 @@ Covers the full resume workflow:
 1. Create failed run with checkpoint and payload data
 2. Call orchestrator.resume() with payload_store
 3. Verify rows after checkpoint are processed
+4. P1 Fix: Verify audit trail (node_states, token_outcomes, artifacts)
 """
 
 import json
@@ -14,10 +15,11 @@ from typing import Any
 
 import pytest
 
-from elspeth.contracts import RoutingMode
+from elspeth.contracts import NodeID, RoutingMode, RunStatus, SinkName
 from elspeth.core.checkpoint import CheckpointManager, RecoveryManager
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape.database import LandscapeDB
+from elspeth.core.landscape.recorder import LandscapeRecorder
 from elspeth.core.landscape.schema import (
     edges_table,
     nodes_table,
@@ -170,10 +172,13 @@ class TestOrchestratorResumeRowProcessing:
 
             # Create 5 rows with payload data
             all_row_data = []
+            token_ids = []
             for i in range(5):
                 row_id = f"row-{i:03d}"
+                token_id = f"tok-{i:03d}"
                 row_data = {"id": i, "value": f"data-{i}"}
                 all_row_data.append(row_data)
+                token_ids.append(token_id)
 
                 # Store payload
                 payload_bytes = json.dumps(row_data).encode("utf-8")
@@ -192,7 +197,7 @@ class TestOrchestratorResumeRowProcessing:
                 )
                 conn.execute(
                     tokens_table.insert().values(
-                        token_id=f"tok-{i:03d}",
+                        token_id=token_id,
                         row_id=row_id,
                         created_at=now,
                     )
@@ -208,6 +213,14 @@ class TestOrchestratorResumeRowProcessing:
         graph.add_edge("source-node", "transform-node", label="continue", mode=RoutingMode.MOVE)
         graph.add_edge("transform-node", "sink-node", label="continue", mode=RoutingMode.MOVE)
 
+        # Set internal ID maps needed by orchestrator (normally done by from_plugin_instances)
+        # These are required for the orchestrator to resolve nodes during execution
+        graph._sink_id_map = {SinkName("default"): NodeID("sink-node")}
+        graph._transform_id_map = {0: NodeID("transform-node")}
+        graph._config_gate_id_map = {}
+        graph._route_resolution_map = {}
+        graph._default_sink = "default"
+
         # Create checkpoint at row 2 (rows 3-4 are unprocessed)
         checkpoint_manager.create_checkpoint(
             run_id=run_id,
@@ -221,6 +234,7 @@ class TestOrchestratorResumeRowProcessing:
             "run_id": run_id,
             "all_row_data": all_row_data,
             "unprocessed_indices": [3, 4],
+            "unprocessed_token_ids": token_ids[3:5],
             "graph": graph,
         }
 
@@ -255,56 +269,6 @@ class TestOrchestratorResumeRowProcessing:
 
         return config, output_path
 
-    def _create_test_graph(self) -> ExecutionGraph:
-        """Create execution graph matching the test config.
-
-        Graph: source-node -> transform-node -> sink-node
-        """
-        graph = ExecutionGraph()
-
-        # Add nodes
-        graph.add_node(
-            "source-node",
-            node_type="source",
-            plugin_name="null",
-            config={},
-        )
-        graph.add_node(
-            "transform-node",
-            node_type="transform",
-            plugin_name="passthrough",
-            config={"schema": {"fields": "dynamic"}},
-        )
-        graph.add_node(
-            "sink-node",
-            node_type="sink",
-            plugin_name="csv",
-            config={"schema": {"fields": "dynamic"}},
-        )
-
-        # Add edges
-        graph.add_edge(
-            "source-node",
-            "transform-node",
-            label="continue",
-            mode=RoutingMode.MOVE,
-        )
-        graph.add_edge(
-            "transform-node",
-            "sink-node",
-            label="continue",
-            mode=RoutingMode.MOVE,
-        )
-
-        # Set up internal maps
-        graph._sink_id_map = {"default": "sink-node"}
-        graph._transform_id_map = {0: "transform-node"}
-        graph._config_gate_id_map = {}
-        graph._output_sink = "default"
-        graph._route_resolution_map = {}
-
-        return graph
-
     def test_resume_processes_unprocessed_rows(
         self,
         orchestrator: Orchestrator,
@@ -326,15 +290,15 @@ class TestOrchestratorResumeRowProcessing:
         resume_point = recovery_manager.get_resume_point(run_id, graph=fixture_graph)
         assert resume_point is not None
 
-        # Create config and graph
+        # Create config (uses real plugins) but reuse fixture_graph
+        # The fixture_graph has node IDs that match the database entries
         config, _output_path = self._create_test_config(tmp_path)
-        graph = self._create_test_graph()
 
-        # Act: Resume with payload store
+        # Act: Resume with payload store, using fixture graph to match DB nodes
         result = orchestrator.resume(
             resume_point,
             config,
-            graph,
+            fixture_graph,  # Must use fixture graph to match DB node IDs
             payload_store=payload_store,
         )
 
@@ -364,15 +328,14 @@ class TestOrchestratorResumeRowProcessing:
         resume_point = recovery_manager.get_resume_point(run_id, graph=fixture_graph)
         assert resume_point is not None
 
-        # Create config and graph
+        # Create config (uses real plugins) but reuse fixture_graph
         config, output_path = self._create_test_config(tmp_path)
-        graph = self._create_test_graph()
 
-        # Act: Resume with payload store
+        # Act: Resume with payload store, using fixture graph to match DB nodes
         orchestrator.resume(
             resume_point,
             config,
-            graph,
+            fixture_graph,
             payload_store=payload_store,
         )
 
@@ -405,23 +368,26 @@ class TestOrchestratorResumeRowProcessing:
         resume_point = recovery_manager.get_resume_point(run_id, graph=fixture_graph)
         assert resume_point is not None
 
-        # Create config and graph
+        # Create config (uses real plugins) but reuse fixture_graph
         config, _output_path = self._create_test_config(tmp_path)
-        graph = self._create_test_graph()
 
         # Act & Assert: Should raise without payload_store
         with pytest.raises(ValueError, match=r"payload_store.*required"):
-            orchestrator.resume(resume_point, config, graph)
+            orchestrator.resume(resume_point, config, fixture_graph)
 
     def test_resume_returns_run_result_with_status(
         self,
         orchestrator: Orchestrator,
+        landscape_db: LandscapeDB,
         recovery_manager: RecoveryManager,
         payload_store: FilesystemPayloadStore,
         failed_run_with_payloads: dict[str, Any],
         tmp_path: Path,
     ) -> None:
-        """resume() returns RunResult with correct status and counts."""
+        """resume() returns RunResult with correct status and counts.
+
+        P2 Fix: Assert exact expected values instead of vacuous >= 0.
+        """
         run_id = failed_run_with_payloads["run_id"]
         fixture_graph = failed_run_with_payloads["graph"]
 
@@ -429,22 +395,84 @@ class TestOrchestratorResumeRowProcessing:
         resume_point = recovery_manager.get_resume_point(run_id, graph=fixture_graph)
         assert resume_point is not None
 
-        # Create config and graph
+        # Create config (uses real plugins) but reuse fixture_graph
         config, _output_path = self._create_test_config(tmp_path)
-        graph = self._create_test_graph()
 
-        # Act
+        # Act: Resume with payload store, using fixture graph to match DB nodes
         result = orchestrator.resume(
             resume_point,
             config,
-            graph,
+            fixture_graph,
             payload_store=payload_store,
         )
 
-        # Assert
+        # P2 Fix: Assert exact expected values
         assert isinstance(result, RunResult)
         assert result.run_id == run_id
-        # Status should be set by completion
-        assert result.rows_processed >= 0
-        assert result.rows_succeeded >= 0
-        assert result.rows_failed >= 0
+        # Resume should complete successfully
+        assert result.status == RunStatus.COMPLETED, f"Expected COMPLETED, got {result.status}"
+        # Exactly 2 rows should be processed (rows 3 and 4)
+        assert result.rows_processed == 2, f"Expected 2 rows_processed, got {result.rows_processed}"
+        assert result.rows_succeeded == 2, f"Expected 2 rows_succeeded, got {result.rows_succeeded}"
+        assert result.rows_failed == 0, f"Expected 0 rows_failed, got {result.rows_failed}"
+
+    def test_resume_creates_audit_trail_for_resumed_tokens(
+        self,
+        orchestrator: Orchestrator,
+        landscape_db: LandscapeDB,
+        recovery_manager: RecoveryManager,
+        payload_store: FilesystemPayloadStore,
+        failed_run_with_payloads: dict[str, Any],
+        tmp_path: Path,
+    ) -> None:
+        """P1 Fix: resume() creates proper audit trail entries.
+
+        Verifies that node_states and token_outcomes are created for
+        the resumed rows (rows 3 and 4). Note: resume creates NEW tokens
+        for the rows, so we query by row_id to find the processed tokens.
+        """
+        run_id = failed_run_with_payloads["run_id"]
+        fixture_graph = failed_run_with_payloads["graph"]
+
+        # Get resume point
+        resume_point = recovery_manager.get_resume_point(run_id, graph=fixture_graph)
+        assert resume_point is not None
+
+        # Create config (uses real plugins) but reuse fixture_graph
+        config, _output_path = self._create_test_config(tmp_path)
+
+        # Act: Resume with payload store, using fixture graph to match DB nodes
+        result = orchestrator.resume(
+            resume_point,
+            config,
+            fixture_graph,
+            payload_store=payload_store,
+        )
+
+        assert result.status == RunStatus.COMPLETED
+
+        # P1 Fix: Verify audit trail entries for resumed rows
+        recorder = LandscapeRecorder(landscape_db)
+
+        # The unprocessed rows (indices 3 and 4) should have tokens with audit records
+        # Resume may create new tokens for these rows, so query by row_id
+        unprocessed_row_ids = ["row-003", "row-004"]
+
+        for row_id in unprocessed_row_ids:
+            # Get tokens for this row
+            tokens = recorder.get_tokens(row_id)
+            assert len(tokens) >= 1, f"Row {row_id} should have at least one token after resume"
+
+            # Check that at least one token has node_states (processing records)
+            has_node_states = False
+            has_outcome = False
+            for token in tokens:
+                states = recorder.get_node_states_for_token(token.token_id)
+                if len(states) > 0:
+                    has_node_states = True
+                outcome = recorder.get_token_outcome(token.token_id)
+                if outcome is not None:
+                    has_outcome = True
+
+            assert has_node_states, f"Row {row_id} should have tokens with node_states after resume"
+            assert has_outcome, f"Row {row_id} should have tokens with token_outcome after resume"

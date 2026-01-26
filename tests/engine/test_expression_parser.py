@@ -703,8 +703,13 @@ class TestExpressionParserFuzz:
     @given(expression=malicious_patterns)
     @settings(max_examples=100, deadline=None)
     def test_malicious_patterns(self, expression: str) -> None:
-        """Known malicious patterns should be rejected, not crash."""
-        self._assert_safe_parse(expression)
+        """Known malicious patterns MUST be rejected with security/syntax errors.
+
+        These patterns are known-bad expressions that MUST be rejected at parse time.
+        Simply "not crashing" is insufficient - we assert explicit rejection.
+        """
+        with pytest.raises((ExpressionSecurityError, ExpressionSyntaxError)):
+            ExpressionParser(expression)
 
     @given(expression=expression_like_input())
     @settings(max_examples=300, deadline=None)

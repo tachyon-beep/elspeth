@@ -31,7 +31,7 @@ class TestCLIIntegration:
         all completed rows to the "default" sink via output_sink.
         """
         config = {
-            "datasource": {
+            "source": {
                 "plugin": "csv",
                 "options": {
                     "path": str(sample_csv),
@@ -49,7 +49,7 @@ class TestCLIIntegration:
                     },
                 },
             },
-            "output_sink": "default",
+            "default_sink": "default",
             # Use temp-path DB to avoid polluting CWD during tests
             "landscape": {"url": f"sqlite:///{tmp_path / 'landscape.db'}"},
         }
@@ -145,7 +145,7 @@ class TestSourceQuarantineRouting:
     def quarantine_pipeline_config(self, tmp_path: Path, csv_with_invalid_rows: Path) -> Path:
         """Create pipeline with quarantine sink for invalid rows."""
         config = {
-            "datasource": {
+            "source": {
                 "plugin": "csv",
                 "options": {
                     "path": str(csv_with_invalid_rows),
@@ -172,7 +172,7 @@ class TestSourceQuarantineRouting:
                     },
                 },
             },
-            "output_sink": "default",
+            "default_sink": "default",
             "landscape": {"url": f"sqlite:///{tmp_path / 'landscape.db'}"},
         }
         config_file = tmp_path / "settings.yaml"
@@ -209,7 +209,7 @@ class TestSourceQuarantineRouting:
     def test_discard_does_not_write_to_sink(self, tmp_path: Path, csv_with_invalid_rows: Path) -> None:
         """When on_validation_failure='discard', invalid rows are not written."""
         config = {
-            "datasource": {
+            "source": {
                 "plugin": "csv",
                 "options": {
                     "path": str(csv_with_invalid_rows),
@@ -229,7 +229,7 @@ class TestSourceQuarantineRouting:
                     },
                 },
             },
-            "output_sink": "default",
+            "default_sink": "default",
             "landscape": {"url": f"sqlite:///{tmp_path / 'landscape.db'}"},
         }
         config_file = tmp_path / "settings.yaml"

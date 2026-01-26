@@ -42,7 +42,7 @@ class TestLandscapeExport:
         db_path = tmp_path / "audit.db"
 
         config = {
-            "datasource": {
+            "source": {
                 "plugin": "csv",
                 "options": {
                     "path": str(input_csv),
@@ -66,7 +66,7 @@ class TestLandscapeExport:
                     },
                 },
             },
-            "output_sink": "output",
+            "default_sink": "output",
             "landscape": {
                 "url": f"sqlite:///{db_path}",
                 "export": {
@@ -157,7 +157,7 @@ class TestLandscapeExport:
         db_path = tmp_path / "audit.db"
 
         config = {
-            "datasource": {
+            "source": {
                 "plugin": "csv",
                 "options": {
                     "path": str(input_csv),
@@ -181,7 +181,7 @@ class TestLandscapeExport:
                     },
                 },
             },
-            "output_sink": "output",
+            "default_sink": "output",
             "landscape": {
                 "url": f"sqlite:///{db_path}",
                 "export": {
@@ -268,6 +268,7 @@ class TestSignedExportDeterminism:
             state = recorder.begin_node_state(
                 token_id=token.token_id,
                 node_id="node_0",
+                run_id=run.run_id,
                 step_index=0,
                 input_data={"x": i},
             )
@@ -305,7 +306,7 @@ class TestSignedExportDeterminism:
         db_path = tmp_path / "audit.db"
 
         config = {
-            "datasource": {
+            "source": {
                 "plugin": "csv",
                 "options": {
                     "path": str(input_csv),
@@ -329,7 +330,7 @@ class TestSignedExportDeterminism:
                     },
                 },
             },
-            "output_sink": "output",
+            "default_sink": "output",
             "landscape": {
                 "url": f"sqlite:///{db_path}",
                 "export": {
@@ -377,7 +378,7 @@ class TestSignedExportDeterminism:
             db_path = tmp_path / f"audit_{i}.db"
 
             config = {
-                "datasource": {
+                "source": {
                     "plugin": "csv",
                     "options": {
                         "path": str(input_csv),
@@ -401,7 +402,7 @@ class TestSignedExportDeterminism:
                         },
                     },
                 },
-                "output_sink": "output",
+                "default_sink": "output",
                 "landscape": {
                     "url": f"sqlite:///{db_path}",
                     "export": {

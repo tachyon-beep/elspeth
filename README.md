@@ -169,7 +169,7 @@ Signed exports include:
 
 ```yaml
 # pipeline.yaml
-datasource:
+source:
   plugin: csv
   options:
     path: data/input.csv
@@ -187,7 +187,7 @@ sinks:
     options:
       path: output/flagged.csv
 
-row_plugins:
+transforms:
   - plugin: field_mapper
     options:
       schema:
@@ -202,7 +202,7 @@ gates:
       "true": continue
       "false": flagged
 
-output_sink: results
+default_sink: results
 
 landscape:
   url: sqlite:///./audit.db

@@ -251,15 +251,15 @@ class TestElspethSettingsAggregations:
     def test_elspeth_settings_aggregations_default_empty(self) -> None:
         """Aggregations defaults to empty list."""
         from elspeth.core.config import (
-            DatasourceSettings,
             ElspethSettings,
             SinkSettings,
+            SourceSettings,
         )
 
         settings = ElspethSettings(
-            datasource=DatasourceSettings(plugin="csv"),
+            source=SourceSettings(plugin="csv"),
             sinks={"output": SinkSettings(plugin="csv")},
-            output_sink="output",
+            default_sink="output",
         )
         assert settings.aggregations == []
 
@@ -267,16 +267,16 @@ class TestElspethSettingsAggregations:
         """Aggregations can be configured."""
         from elspeth.core.config import (
             AggregationSettings,
-            DatasourceSettings,
             ElspethSettings,
             SinkSettings,
+            SourceSettings,
             TriggerConfig,
         )
 
         settings = ElspethSettings(
-            datasource=DatasourceSettings(plugin="csv"),
+            source=SourceSettings(plugin="csv"),
             sinks={"output": SinkSettings(plugin="csv")},
-            output_sink="output",
+            default_sink="output",
             aggregations=[
                 AggregationSettings(
                     name="batch_stats",
@@ -292,17 +292,17 @@ class TestElspethSettingsAggregations:
         """Aggregation names must be unique."""
         from elspeth.core.config import (
             AggregationSettings,
-            DatasourceSettings,
             ElspethSettings,
             SinkSettings,
+            SourceSettings,
             TriggerConfig,
         )
 
         with pytest.raises(ValidationError, match=r"(?i)duplicate.*name"):
             ElspethSettings(
-                datasource=DatasourceSettings(plugin="csv"),
+                source=SourceSettings(plugin="csv"),
                 sinks={"output": SinkSettings(plugin="csv")},
-                output_sink="output",
+                default_sink="output",
                 aggregations=[
                     AggregationSettings(
                         name="batch_stats",

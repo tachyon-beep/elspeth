@@ -100,7 +100,7 @@ graph = ExecutionGraph.from_config(config, manager)
 
 # NEW (working - schemas from instances)
 plugins = instantiate_plugins_from_config(config)
-graph = ExecutionGraph.from_plugin_instances(**plugins, gates=..., output_sink=...)
+graph = ExecutionGraph.from_plugin_instances(**plugins, gates=..., default_sink=...)
 # Schemas extracted via getattr(instance, "input_schema", None) → actual schema
 ```
 

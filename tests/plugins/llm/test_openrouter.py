@@ -1,15 +1,17 @@
 # tests/plugins/llm/test_openrouter.py
-"""Tests for OpenRouter LLM transform."""
+"""Tests for OpenRouter LLM transform with row-level pipelining."""
 
 from collections.abc import Generator
 from contextlib import contextmanager
-from typing import Any
 from unittest.mock import Mock, patch
 
 import httpx
 import pytest
 
-from elspeth.contracts import Determinism
+from elspeth.contracts import Determinism, TransformResult
+from elspeth.contracts.identity import TokenInfo
+from elspeth.engine.batch_adapter import ExceptionResult
+from elspeth.plugins.batching.ports import CollectorOutputPort
 from elspeth.plugins.config_base import PluginConfigError
 from elspeth.plugins.context import PluginContext
 from elspeth.plugins.llm.openrouter import OpenRouterConfig, OpenRouterLLMTransform
@@ -56,6 +58,15 @@ def mock_httpx_client(response: Mock | None = None, side_effect: Exception | Non
         mock_client_class.return_value.__enter__ = Mock(return_value=mock_client)
         mock_client_class.return_value.__exit__ = Mock(return_value=None)
         yield mock_client
+
+
+def make_token(row_id: str = "row-1", token_id: str | None = None) -> TokenInfo:
+    """Create a TokenInfo for testing."""
+    return TokenInfo(
+        row_id=row_id,
+        token_id=token_id or f"token-{row_id}",
+        row_data={},  # Not used in these tests
+    )
 
 
 class TestOpenRouterConfig:
@@ -210,9 +221,28 @@ class TestOpenRouterLLMTransformInit:
         )
         assert transform.determinism == Determinism.NON_DETERMINISTIC
 
+    def test_process_raises_not_implemented(self) -> None:
+        """process() raises NotImplementedError directing to accept()."""
+        transform = OpenRouterLLMTransform(
+            {
+                "api_key": "sk-test-key",
+                "model": "anthropic/claude-3-opus",
+                "template": "{{ row.text }}",
+                "schema": DYNAMIC_SCHEMA,
+            }
+        )
+        ctx = PluginContext(run_id="test-run", config={})
 
-class TestOpenRouterLLMTransformProcess:
-    """Tests for OpenRouterLLMTransform processing."""
+        with pytest.raises(NotImplementedError, match="row-level pipelining"):
+            transform.process({"text": "hello"}, ctx)
+
+
+class TestOpenRouterLLMTransformPipelining:
+    """Tests for OpenRouterLLMTransform with row-level pipelining.
+
+    These tests verify the accept() API that uses BatchTransformMixin
+    for concurrent row processing with FIFO output ordering.
+    """
 
     @pytest.fixture
     def mock_recorder(self) -> Mock:
@@ -222,19 +252,26 @@ class TestOpenRouterLLMTransformProcess:
         return recorder
 
     @pytest.fixture
+    def collector(self) -> CollectorOutputPort:
+        """Create output collector for capturing results."""
+        return CollectorOutputPort()
+
+    @pytest.fixture
     def ctx(self, mock_recorder: Mock) -> PluginContext:
-        """Create plugin context with landscape and state_id for audited HTTP."""
+        """Create plugin context with landscape, state_id, and token."""
+        token = make_token("row-1")
         return PluginContext(
             run_id="test-run",
             config={},
             landscape=mock_recorder,
             state_id="test-state-id",
+            token=token,
         )
 
     @pytest.fixture
-    def transform(self) -> OpenRouterLLMTransform:
-        """Create a basic OpenRouter transform."""
-        return OpenRouterLLMTransform(
+    def transform(self, collector: CollectorOutputPort, mock_recorder: Mock) -> Generator[OpenRouterLLMTransform, None, None]:
+        """Create and initialize OpenRouter transform with pipelining."""
+        t = OpenRouterLLMTransform(
             {
                 "api_key": "sk-test-key",
                 "model": "anthropic/claude-3-opus",
@@ -242,16 +279,31 @@ class TestOpenRouterLLMTransformProcess:
                 "schema": DYNAMIC_SCHEMA,
             }
         )
+        # Initialize with recorder reference
+        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        t.on_start(init_ctx)
+        # Connect output port
+        t.connect_output(collector, max_pending=10)
+        yield t
+        # Cleanup
+        t.close()
 
-    def test_successful_api_call_returns_enriched_row(self, ctx: PluginContext, transform: OpenRouterLLMTransform) -> None:
-        """Successful API call returns row with LLM response."""
+    def test_successful_api_call_emits_enriched_row(
+        self, ctx: PluginContext, transform: OpenRouterLLMTransform, collector: CollectorOutputPort
+    ) -> None:
+        """Successful API call emits row with LLM response to output port."""
         mock_response = _create_mock_response(
             content="The analysis is positive.",
             usage={"prompt_tokens": 10, "completion_tokens": 25},
         )
 
         with mock_httpx_client(response=mock_response):
-            result = transform.process({"text": "hello world"}, ctx)
+            transform.accept({"text": "hello world"}, ctx)
+            transform.flush_batch_processing(timeout=10.0)
+
+        assert len(collector.results) == 1
+        _token, result, _state_id = collector.results[0]
+        assert isinstance(result, TransformResult)
 
         assert result.status == "success"
         assert result.row is not None
@@ -266,18 +318,26 @@ class TestOpenRouterLLMTransformProcess:
         # Original data preserved
         assert result.row["text"] == "hello world"
 
-    def test_template_rendering_error_returns_transform_error(self, ctx: PluginContext, transform: OpenRouterLLMTransform) -> None:
-        """Template rendering failure returns TransformResult.error()."""
+    def test_template_rendering_error_emits_error(
+        self, ctx: PluginContext, transform: OpenRouterLLMTransform, collector: CollectorOutputPort
+    ) -> None:
+        """Template rendering failure emits TransformResult.error()."""
         # Missing required_field triggers template error (no HTTP call needed)
-        result = transform.process({"other_field": "value"}, ctx)
+        with mock_httpx_client():
+            transform.accept({"other_field": "value"}, ctx)
+            transform.flush_batch_processing(timeout=10.0)
+
+        assert len(collector.results) == 1
+        _, result, _state_id = collector.results[0]
+        assert isinstance(result, TransformResult)
 
         assert result.status == "error"
         assert result.reason is not None
         assert result.reason["reason"] == "template_rendering_failed"
         assert "template_hash" in result.reason
 
-    def test_http_error_returns_transform_error(self, ctx: PluginContext, transform: OpenRouterLLMTransform) -> None:
-        """HTTP error returns TransformResult.error()."""
+    def test_http_error_emits_error(self, ctx: PluginContext, transform: OpenRouterLLMTransform, collector: CollectorOutputPort) -> None:
+        """HTTP error emits TransformResult.error()."""
         with mock_httpx_client(
             side_effect=httpx.HTTPStatusError(
                 "Server error",
@@ -285,14 +345,21 @@ class TestOpenRouterLLMTransformProcess:
                 response=Mock(status_code=500),
             )
         ):
-            result = transform.process({"text": "hello"}, ctx)
+            transform.accept({"text": "hello"}, ctx)
+            transform.flush_batch_processing(timeout=10.0)
+
+        assert len(collector.results) == 1
+        _, result, _state_id = collector.results[0]
+        assert isinstance(result, TransformResult)
 
         assert result.status == "error"
         assert result.reason is not None
         assert result.reason["reason"] == "api_call_failed"
         assert result.retryable is False
 
-    def test_rate_limit_429_is_retryable(self, ctx: PluginContext, transform: OpenRouterLLMTransform) -> None:
+    def test_rate_limit_429_is_retryable(
+        self, ctx: PluginContext, transform: OpenRouterLLMTransform, collector: CollectorOutputPort
+    ) -> None:
         """Rate limit (429) errors are marked retryable."""
         with mock_httpx_client(
             side_effect=httpx.HTTPStatusError(
@@ -301,14 +368,21 @@ class TestOpenRouterLLMTransformProcess:
                 response=Mock(status_code=429),
             )
         ):
-            result = transform.process({"text": "hello"}, ctx)
+            transform.accept({"text": "hello"}, ctx)
+            transform.flush_batch_processing(timeout=10.0)
+
+        assert len(collector.results) == 1
+        _, result, _state_id = collector.results[0]
+        assert isinstance(result, TransformResult)
 
         assert result.status == "error"
         assert result.reason is not None
         assert result.reason["reason"] == "api_call_failed"
         assert result.retryable is True
 
-    def test_service_unavailable_503_is_retryable(self, ctx: PluginContext, transform: OpenRouterLLMTransform) -> None:
+    def test_service_unavailable_503_is_retryable(
+        self, ctx: PluginContext, transform: OpenRouterLLMTransform, collector: CollectorOutputPort
+    ) -> None:
         """Service unavailable (503) errors are marked retryable for consistency with pooled mode."""
         with mock_httpx_client(
             side_effect=httpx.HTTPStatusError(
@@ -317,14 +391,21 @@ class TestOpenRouterLLMTransformProcess:
                 response=Mock(status_code=503),
             )
         ):
-            result = transform.process({"text": "hello"}, ctx)
+            transform.accept({"text": "hello"}, ctx)
+            transform.flush_batch_processing(timeout=10.0)
+
+        assert len(collector.results) == 1
+        _, result, _state_id = collector.results[0]
+        assert isinstance(result, TransformResult)
 
         assert result.status == "error"
         assert result.reason is not None
         assert result.reason["reason"] == "api_call_failed"
         assert result.retryable is True
 
-    def test_overloaded_529_is_retryable(self, ctx: PluginContext, transform: OpenRouterLLMTransform) -> None:
+    def test_overloaded_529_is_retryable(
+        self, ctx: PluginContext, transform: OpenRouterLLMTransform, collector: CollectorOutputPort
+    ) -> None:
         """Overloaded (529) errors are marked retryable for consistency with pooled mode."""
         with mock_httpx_client(
             side_effect=httpx.HTTPStatusError(
@@ -333,31 +414,70 @@ class TestOpenRouterLLMTransformProcess:
                 response=Mock(status_code=529),
             )
         ):
-            result = transform.process({"text": "hello"}, ctx)
+            transform.accept({"text": "hello"}, ctx)
+            transform.flush_batch_processing(timeout=10.0)
+
+        assert len(collector.results) == 1
+        _, result, _state_id = collector.results[0]
+        assert isinstance(result, TransformResult)
 
         assert result.status == "error"
         assert result.reason is not None
         assert result.reason["reason"] == "api_call_failed"
         assert result.retryable is True
 
-    def test_request_error_not_retryable(self, ctx: PluginContext, transform: OpenRouterLLMTransform) -> None:
+    def test_request_error_not_retryable(
+        self, ctx: PluginContext, transform: OpenRouterLLMTransform, collector: CollectorOutputPort
+    ) -> None:
         """Network/connection errors (RequestError) are not retryable."""
         with mock_httpx_client(side_effect=httpx.ConnectError("Connection refused")):
-            result = transform.process({"text": "hello"}, ctx)
+            transform.accept({"text": "hello"}, ctx)
+            transform.flush_batch_processing(timeout=10.0)
+
+        assert len(collector.results) == 1
+        _, result, _state_id = collector.results[0]
+        assert isinstance(result, TransformResult)
 
         assert result.status == "error"
         assert result.reason is not None
         assert result.reason["reason"] == "api_call_failed"
         assert result.retryable is False
 
-    def test_missing_landscape_raises_runtime_error(self, transform: OpenRouterLLMTransform) -> None:
-        """Missing landscape in context raises RuntimeError."""
-        ctx = PluginContext(run_id="test-run", config={}, landscape=None, state_id=None)
+    def test_missing_state_id_propagates_exception(
+        self, mock_recorder: Mock, transform: OpenRouterLLMTransform, collector: CollectorOutputPort
+    ) -> None:
+        """Missing state_id causes exception propagation, not error result.
 
-        with pytest.raises(RuntimeError, match="requires landscape"):
-            transform.process({"text": "hello"}, ctx)
+        Per CLAUDE.md crash-on-exception policy: a missing state_id is a bug
+        in calling code (our internal code, not user data), so it should crash
+        rather than be converted to an error result.
 
-    def test_system_prompt_included_in_request(self, ctx: PluginContext, mock_recorder: Mock) -> None:
+        BatchTransformMixin wraps such exceptions in ExceptionResult for
+        propagation through the async pattern. In production, TransformExecutor
+        would re-raise this exception. In tests using collector directly,
+        we see the ExceptionResult wrapper.
+        """
+        token = make_token("row-1")
+        ctx = PluginContext(
+            run_id="test-run",
+            config={},
+            landscape=mock_recorder,
+            state_id=None,  # Missing state_id - calling code bug
+            token=token,
+        )
+
+        transform.accept({"text": "hello"}, ctx)
+        transform.flush_batch_processing(timeout=10.0)
+
+        assert len(collector.results) == 1
+        _output_token, result, _state_id = collector.results[0]
+
+        # Exception propagates via ExceptionResult wrapper (not TransformResult)
+        assert isinstance(result, ExceptionResult)
+        assert isinstance(result.exception, RuntimeError)
+        assert "state_id" in str(result.exception)
+
+    def test_system_prompt_included_in_request(self, mock_recorder: Mock, collector: CollectorOutputPort) -> None:
         """System prompt is included when configured."""
         transform = OpenRouterLLMTransform(
             {
@@ -368,27 +488,46 @@ class TestOpenRouterLLMTransformProcess:
                 "system_prompt": "You are a helpful assistant.",
             }
         )
+        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        transform.on_start(init_ctx)
+        transform.connect_output(collector, max_pending=10)
 
-        mock_response = _create_mock_response()
-        with mock_httpx_client(response=mock_response) as mock_client:
-            transform.process({"text": "hello"}, ctx)
+        token = make_token("row-1")
+        ctx = PluginContext(
+            run_id="test-run",
+            config={},
+            landscape=mock_recorder,
+            state_id="test-state-id",
+            token=token,
+        )
 
-            # Verify request body
-            call_args = mock_client.post.call_args
-            request_body = call_args.kwargs["json"]
-            messages = request_body["messages"]
+        try:
+            mock_response = _create_mock_response()
+            with mock_httpx_client(response=mock_response) as mock_client:
+                transform.accept({"text": "hello"}, ctx)
+                transform.flush_batch_processing(timeout=10.0)
 
-            assert len(messages) == 2
-            assert messages[0]["role"] == "system"
-            assert messages[0]["content"] == "You are a helpful assistant."
-            assert messages[1]["role"] == "user"
-            assert messages[1]["content"] == "hello"
+                # Verify request body
+                call_args = mock_client.post.call_args
+                request_body = call_args.kwargs["json"]
+                messages = request_body["messages"]
 
-    def test_no_system_prompt_single_message(self, ctx: PluginContext, transform: OpenRouterLLMTransform) -> None:
+                assert len(messages) == 2
+                assert messages[0]["role"] == "system"
+                assert messages[0]["content"] == "You are a helpful assistant."
+                assert messages[1]["role"] == "user"
+                assert messages[1]["content"] == "hello"
+        finally:
+            transform.close()
+
+    def test_no_system_prompt_single_message(
+        self, ctx: PluginContext, transform: OpenRouterLLMTransform, collector: CollectorOutputPort
+    ) -> None:
         """Without system prompt, only user message is sent."""
         mock_response = _create_mock_response()
         with mock_httpx_client(response=mock_response) as mock_client:
-            transform.process({"text": "hello"}, ctx)
+            transform.accept({"text": "hello"}, ctx)
+            transform.flush_batch_processing(timeout=10.0)
 
             call_args = mock_client.post.call_args
             request_body = call_args.kwargs["json"]
@@ -397,7 +536,7 @@ class TestOpenRouterLLMTransformProcess:
             assert len(messages) == 1
             assert messages[0]["role"] == "user"
 
-    def test_custom_response_field(self, ctx: PluginContext) -> None:
+    def test_custom_response_field(self, mock_recorder: Mock, collector: CollectorOutputPort) -> None:
         """Custom response_field name is used."""
         transform = OpenRouterLLMTransform(
             {
@@ -408,10 +547,30 @@ class TestOpenRouterLLMTransformProcess:
                 "response_field": "analysis",
             }
         )
+        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        transform.on_start(init_ctx)
+        transform.connect_output(collector, max_pending=10)
 
-        mock_response = _create_mock_response(content="Result text")
-        with mock_httpx_client(response=mock_response):
-            result = transform.process({"text": "hello"}, ctx)
+        token = make_token("row-1")
+        ctx = PluginContext(
+            run_id="test-run",
+            config={},
+            landscape=mock_recorder,
+            state_id="test-state-id",
+            token=token,
+        )
+
+        try:
+            mock_response = _create_mock_response(content="Result text")
+            with mock_httpx_client(response=mock_response):
+                transform.accept({"text": "hello"}, ctx)
+                transform.flush_batch_processing(timeout=10.0)
+        finally:
+            transform.close()
+
+        assert len(collector.results) == 1
+        _, result, _state_id = collector.results[0]
+        assert isinstance(result, TransformResult)
 
         assert result.status == "success"
         assert result.row is not None
@@ -421,18 +580,24 @@ class TestOpenRouterLLMTransformProcess:
         assert "analysis_variables_hash" in result.row
         assert "analysis_model" in result.row
 
-    def test_model_from_response_used_when_available(self, ctx: PluginContext, transform: OpenRouterLLMTransform) -> None:
+    def test_model_from_response_used_when_available(
+        self, ctx: PluginContext, transform: OpenRouterLLMTransform, collector: CollectorOutputPort
+    ) -> None:
         """Model name from response is used if different from request."""
         mock_response = _create_mock_response(
             model="anthropic/claude-3-opus-20240229"  # Different from request
         )
         with mock_httpx_client(response=mock_response):
-            result = transform.process({"text": "hello"}, ctx)
+            transform.accept({"text": "hello"}, ctx)
+            transform.flush_batch_processing(timeout=10.0)
 
+        assert len(collector.results) == 1
+        _, result, _state_id = collector.results[0]
+        assert isinstance(result, TransformResult)
         assert result.row is not None
         assert result.row["llm_response_model"] == "anthropic/claude-3-opus-20240229"
 
-    def test_raise_for_status_called(self, ctx: PluginContext, transform: OpenRouterLLMTransform) -> None:
+    def test_raise_for_status_called(self, ctx: PluginContext, transform: OpenRouterLLMTransform, collector: CollectorOutputPort) -> None:
         """raise_for_status is called on response to check errors."""
         mock_response = _create_mock_response(
             raise_for_status_error=httpx.HTTPStatusError(
@@ -442,12 +607,66 @@ class TestOpenRouterLLMTransformProcess:
             )
         )
         with mock_httpx_client(response=mock_response):
-            result = transform.process({"text": "hello"}, ctx)
+            transform.accept({"text": "hello"}, ctx)
+            transform.flush_batch_processing(timeout=10.0)
 
+        assert len(collector.results) == 1
+        _, result, _state_id = collector.results[0]
+        assert isinstance(result, TransformResult)
         assert result.status == "error"
 
-    def test_close_is_noop(self, transform: OpenRouterLLMTransform) -> None:
-        """close() does nothing but doesn't raise."""
+    def test_connect_output_required_before_accept(self) -> None:
+        """accept() raises RuntimeError if connect_output() not called."""
+        transform = OpenRouterLLMTransform(
+            {
+                "api_key": "sk-test-key",
+                "model": "anthropic/claude-3-opus",
+                "template": "{{ row.text }}",
+                "schema": DYNAMIC_SCHEMA,
+            }
+        )
+
+        token = make_token("row-1")
+        ctx = PluginContext(
+            run_id="test-run",
+            config={},
+            state_id="test-state-id",
+            token=token,
+        )
+
+        with pytest.raises(RuntimeError, match="connect_output"):
+            transform.accept({"text": "hello"}, ctx)
+
+    def test_connect_output_cannot_be_called_twice(self, collector: CollectorOutputPort, mock_recorder: Mock) -> None:
+        """connect_output() raises if called more than once."""
+        transform = OpenRouterLLMTransform(
+            {
+                "api_key": "sk-test-key",
+                "model": "anthropic/claude-3-opus",
+                "template": "{{ row.text }}",
+                "schema": DYNAMIC_SCHEMA,
+            }
+        )
+        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        transform.on_start(init_ctx)
+        transform.connect_output(collector, max_pending=10)
+
+        try:
+            with pytest.raises(RuntimeError, match="already called"):
+                transform.connect_output(collector, max_pending=10)
+        finally:
+            transform.close()
+
+    def test_close_is_noop_when_not_initialized(self) -> None:
+        """close() does nothing when transform wasn't fully initialized."""
+        transform = OpenRouterLLMTransform(
+            {
+                "api_key": "sk-test-key",
+                "model": "anthropic/claude-3-opus",
+                "template": "{{ row.text }}",
+                "schema": DYNAMIC_SCHEMA,
+            }
+        )
         transform.close()  # Should not raise
 
 
@@ -462,16 +681,11 @@ class TestOpenRouterLLMTransformIntegration:
         return recorder
 
     @pytest.fixture
-    def ctx(self, mock_recorder: Mock) -> PluginContext:
-        """Create plugin context with landscape and state_id."""
-        return PluginContext(
-            run_id="test-run",
-            config={},
-            landscape=mock_recorder,
-            state_id="test-state-id",
-        )
+    def collector(self) -> CollectorOutputPort:
+        """Create output collector for capturing results."""
+        return CollectorOutputPort()
 
-    def test_complex_template_with_multiple_variables(self, ctx: PluginContext) -> None:
+    def test_complex_template_with_multiple_variables(self, mock_recorder: Mock, collector: CollectorOutputPort) -> None:
         """Complex template with multiple variables works correctly."""
         transform = OpenRouterLLMTransform(
             {
@@ -488,24 +702,43 @@ class TestOpenRouterLLMTransformIntegration:
                 "schema": DYNAMIC_SCHEMA,
             }
         )
+        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        transform.on_start(init_ctx)
+        transform.connect_output(collector, max_pending=10)
 
-        mock_response = _create_mock_response(content="Summary text")
-        with mock_httpx_client(response=mock_response) as mock_client:
-            result = transform.process(
-                {"name": "Test Item", "score": 95, "category": "A"},
-                ctx,
-            )
+        token = make_token("row-1")
+        ctx = PluginContext(
+            run_id="test-run",
+            config={},
+            landscape=mock_recorder,
+            state_id="test-state-id",
+            token=token,
+        )
 
-            assert result.status == "success"
-            # Check the prompt was rendered correctly
-            call_args = mock_client.post.call_args
-            request_body = call_args.kwargs["json"]
-            user_message = request_body["messages"][0]["content"]
-            assert "Test Item" in user_message
-            assert "95" in user_message
-            assert "A" in user_message
+        try:
+            mock_response = _create_mock_response(content="Summary text")
+            with mock_httpx_client(response=mock_response) as mock_client:
+                transform.accept(
+                    {"name": "Test Item", "score": 95, "category": "A"},
+                    ctx,
+                )
+                transform.flush_batch_processing(timeout=10.0)
 
-    def test_empty_usage_handled_gracefully(self, ctx: PluginContext) -> None:
+                assert len(collector.results) == 1
+                _, result, _state_id = collector.results[0]
+                assert isinstance(result, TransformResult)
+                assert result.status == "success"
+                # Check the prompt was rendered correctly
+                call_args = mock_client.post.call_args
+                request_body = call_args.kwargs["json"]
+                user_message = request_body["messages"][0]["content"]
+                assert "Test Item" in user_message
+                assert "95" in user_message
+                assert "A" in user_message
+        finally:
+            transform.close()
+
+    def test_empty_usage_handled_gracefully(self, mock_recorder: Mock, collector: CollectorOutputPort) -> None:
         """Empty usage dict from API is handled."""
         transform = OpenRouterLLMTransform(
             {
@@ -514,6 +747,18 @@ class TestOpenRouterLLMTransformIntegration:
                 "template": "{{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
             }
+        )
+        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        transform.on_start(init_ctx)
+        transform.connect_output(collector, max_pending=10)
+
+        token = make_token("row-1")
+        ctx = PluginContext(
+            run_id="test-run",
+            config={},
+            landscape=mock_recorder,
+            state_id="test-state-id",
+            token=token,
         )
 
         response = Mock(spec=httpx.Response)
@@ -528,15 +773,22 @@ class TestOpenRouterLLMTransformIntegration:
         response.content = b""
         response.text = ""
 
-        with mock_httpx_client(response=response):
-            result = transform.process({"text": "hello"}, ctx)
+        try:
+            with mock_httpx_client(response=response):
+                transform.accept({"text": "hello"}, ctx)
+                transform.flush_batch_processing(timeout=10.0)
+        finally:
+            transform.close()
 
+        assert len(collector.results) == 1
+        _, result, _state_id = collector.results[0]
+        assert isinstance(result, TransformResult)
         assert result.status == "success"
         assert result.row is not None
         assert result.row["llm_response_usage"] == {}
 
-    def test_connection_error_returns_transform_error(self, ctx: PluginContext) -> None:
-        """Network connection error returns TransformResult.error()."""
+    def test_connection_error_emits_error(self, mock_recorder: Mock, collector: CollectorOutputPort) -> None:
+        """Network connection error emits TransformResult.error()."""
         transform = OpenRouterLLMTransform(
             {
                 "api_key": "sk-test-key",
@@ -545,17 +797,36 @@ class TestOpenRouterLLMTransformIntegration:
                 "schema": DYNAMIC_SCHEMA,
             }
         )
+        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        transform.on_start(init_ctx)
+        transform.connect_output(collector, max_pending=10)
 
-        with mock_httpx_client(side_effect=httpx.ConnectError("Failed to connect to server")):
-            result = transform.process({"text": "hello"}, ctx)
+        token = make_token("row-1")
+        ctx = PluginContext(
+            run_id="test-run",
+            config={},
+            landscape=mock_recorder,
+            state_id="test-state-id",
+            token=token,
+        )
 
+        try:
+            with mock_httpx_client(side_effect=httpx.ConnectError("Failed to connect to server")):
+                transform.accept({"text": "hello"}, ctx)
+                transform.flush_batch_processing(timeout=10.0)
+        finally:
+            transform.close()
+
+        assert len(collector.results) == 1
+        _, result, _state_id = collector.results[0]
+        assert isinstance(result, TransformResult)
         assert result.status == "error"
         assert result.reason is not None
         assert result.reason["reason"] == "api_call_failed"
         assert "connect" in result.reason["error"].lower()
         assert result.retryable is False  # Connection errors not auto-retryable
 
-    def test_timeout_passed_to_http_client(self, ctx: PluginContext) -> None:
+    def test_timeout_passed_to_http_client(self, mock_recorder: Mock, collector: CollectorOutputPort) -> None:
         """Custom timeout_seconds is used when creating HTTP client."""
         transform = OpenRouterLLMTransform(
             {
@@ -570,14 +841,34 @@ class TestOpenRouterLLMTransformIntegration:
         # The transform stores the timeout internally
         assert transform._timeout == 120.0
 
-        mock_response = _create_mock_response()
-        with mock_httpx_client(response=mock_response):
-            result = transform.process({"text": "hello"}, ctx)
+        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        transform.on_start(init_ctx)
+        transform.connect_output(collector, max_pending=10)
 
+        token = make_token("row-1")
+        ctx = PluginContext(
+            run_id="test-run",
+            config={},
+            landscape=mock_recorder,
+            state_id="test-state-id",
+            token=token,
+        )
+
+        try:
+            mock_response = _create_mock_response()
+            with mock_httpx_client(response=mock_response):
+                transform.accept({"text": "hello"}, ctx)
+                transform.flush_batch_processing(timeout=10.0)
+        finally:
+            transform.close()
+
+        assert len(collector.results) == 1
+        _, result, _state_id = collector.results[0]
+        assert isinstance(result, TransformResult)
         assert result.status == "success"
 
-    def test_empty_choices_returns_error(self, ctx: PluginContext) -> None:
-        """Empty choices array returns TransformResult.error()."""
+    def test_empty_choices_emits_error(self, mock_recorder: Mock, collector: CollectorOutputPort) -> None:
+        """Empty choices array emits TransformResult.error()."""
         transform = OpenRouterLLMTransform(
             {
                 "api_key": "sk-test-key",
@@ -585,6 +876,18 @@ class TestOpenRouterLLMTransformIntegration:
                 "template": "{{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
             }
+        )
+        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        transform.on_start(init_ctx)
+        transform.connect_output(collector, max_pending=10)
+
+        token = make_token("row-1")
+        ctx = PluginContext(
+            run_id="test-run",
+            config={},
+            landscape=mock_recorder,
+            state_id="test-state-id",
+            token=token,
         )
 
         response = Mock(spec=httpx.Response)
@@ -599,15 +902,22 @@ class TestOpenRouterLLMTransformIntegration:
         response.content = b""
         response.text = ""
 
-        with mock_httpx_client(response=response):
-            result = transform.process({"text": "hello"}, ctx)
+        try:
+            with mock_httpx_client(response=response):
+                transform.accept({"text": "hello"}, ctx)
+                transform.flush_batch_processing(timeout=10.0)
+        finally:
+            transform.close()
 
+        assert len(collector.results) == 1
+        _, result, _state_id = collector.results[0]
+        assert isinstance(result, TransformResult)
         assert result.status == "error"
         assert result.reason is not None
         assert result.reason["reason"] == "empty_choices"
 
-    def test_missing_choices_key_returns_error(self, ctx: PluginContext) -> None:
-        """Missing 'choices' key in response returns TransformResult.error()."""
+    def test_missing_choices_key_emits_error(self, mock_recorder: Mock, collector: CollectorOutputPort) -> None:
+        """Missing 'choices' key in response emits TransformResult.error()."""
         transform = OpenRouterLLMTransform(
             {
                 "api_key": "sk-test-key",
@@ -615,6 +925,18 @@ class TestOpenRouterLLMTransformIntegration:
                 "template": "{{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
             }
+        )
+        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        transform.on_start(init_ctx)
+        transform.connect_output(collector, max_pending=10)
+
+        token = make_token("row-1")
+        ctx = PluginContext(
+            run_id="test-run",
+            config={},
+            landscape=mock_recorder,
+            state_id="test-state-id",
+            token=token,
         )
 
         response = Mock(spec=httpx.Response)
@@ -629,15 +951,22 @@ class TestOpenRouterLLMTransformIntegration:
         response.content = b""
         response.text = ""
 
-        with mock_httpx_client(response=response):
-            result = transform.process({"text": "hello"}, ctx)
+        try:
+            with mock_httpx_client(response=response):
+                transform.accept({"text": "hello"}, ctx)
+                transform.flush_batch_processing(timeout=10.0)
+        finally:
+            transform.close()
 
+        assert len(collector.results) == 1
+        _, result, _state_id = collector.results[0]
+        assert isinstance(result, TransformResult)
         assert result.status == "error"
         assert result.reason is not None
         assert result.reason["reason"] == "malformed_response"
 
-    def test_malformed_choice_structure_returns_error(self, ctx: PluginContext) -> None:
-        """Malformed choice structure returns TransformResult.error()."""
+    def test_malformed_choice_structure_emits_error(self, mock_recorder: Mock, collector: CollectorOutputPort) -> None:
+        """Malformed choice structure emits TransformResult.error()."""
         transform = OpenRouterLLMTransform(
             {
                 "api_key": "sk-test-key",
@@ -645,6 +974,18 @@ class TestOpenRouterLLMTransformIntegration:
                 "template": "{{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
             }
+        )
+        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        transform.on_start(init_ctx)
+        transform.connect_output(collector, max_pending=10)
+
+        token = make_token("row-1")
+        ctx = PluginContext(
+            run_id="test-run",
+            config={},
+            landscape=mock_recorder,
+            state_id="test-state-id",
+            token=token,
         )
 
         response = Mock(spec=httpx.Response)
@@ -659,15 +1000,22 @@ class TestOpenRouterLLMTransformIntegration:
         response.content = b""
         response.text = ""
 
-        with mock_httpx_client(response=response):
-            result = transform.process({"text": "hello"}, ctx)
+        try:
+            with mock_httpx_client(response=response):
+                transform.accept({"text": "hello"}, ctx)
+                transform.flush_batch_processing(timeout=10.0)
+        finally:
+            transform.close()
 
+        assert len(collector.results) == 1
+        _, result, _state_id = collector.results[0]
+        assert isinstance(result, TransformResult)
         assert result.status == "error"
         assert result.reason is not None
         assert result.reason["reason"] == "malformed_response"
 
-    def test_invalid_json_response_returns_error(self, ctx: PluginContext) -> None:
-        """Non-JSON response body returns TransformResult.error()."""
+    def test_invalid_json_response_emits_error(self, mock_recorder: Mock, collector: CollectorOutputPort) -> None:
+        """Non-JSON response body emits TransformResult.error()."""
         transform = OpenRouterLLMTransform(
             {
                 "api_key": "sk-test-key",
@@ -675,6 +1023,18 @@ class TestOpenRouterLLMTransformIntegration:
                 "template": "{{ row.text }}",
                 "schema": DYNAMIC_SCHEMA,
             }
+        )
+        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        transform.on_start(init_ctx)
+        transform.connect_output(collector, max_pending=10)
+
+        token = make_token("row-1")
+        ctx = PluginContext(
+            run_id="test-run",
+            config={},
+            landscape=mock_recorder,
+            state_id="test-state-id",
+            token=token,
         )
 
         response = Mock(spec=httpx.Response)
@@ -686,9 +1046,16 @@ class TestOpenRouterLLMTransformIntegration:
         response.text = "<html><body>Error: Service Unavailable</body></html>"
         response.content = b"<html><body>Error: Service Unavailable</body></html>"
 
-        with mock_httpx_client(response=response):
-            result = transform.process({"text": "hello"}, ctx)
+        try:
+            with mock_httpx_client(response=response):
+                transform.accept({"text": "hello"}, ctx)
+                transform.flush_batch_processing(timeout=10.0)
+        finally:
+            transform.close()
 
+        assert len(collector.results) == 1
+        _, result, _state_id = collector.results[0]
+        assert isinstance(result, TransformResult)
         assert result.status == "error"
         assert result.reason is not None
         assert result.reason["reason"] == "invalid_json_response"
@@ -709,16 +1076,11 @@ class TestOpenRouterTemplateFeatures:
         return recorder
 
     @pytest.fixture
-    def ctx(self, mock_recorder: Mock) -> PluginContext:
-        """Create plugin context with landscape and state_id."""
-        return PluginContext(
-            run_id="test-run",
-            config={},
-            landscape=mock_recorder,
-            state_id="test-state-id",
-        )
+    def collector(self) -> CollectorOutputPort:
+        """Create output collector for capturing results."""
+        return CollectorOutputPort()
 
-    def test_lookup_data_accessible_in_template(self, ctx: PluginContext) -> None:
+    def test_lookup_data_accessible_in_template(self, mock_recorder: Mock, collector: CollectorOutputPort) -> None:
         """Lookup data is accessible via lookup.* namespace in templates."""
         transform = OpenRouterLLMTransform(
             {
@@ -729,20 +1091,39 @@ class TestOpenRouterTemplateFeatures:
                 "lookup": {"categories": ["positive", "negative"]},
             }
         )
+        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        transform.on_start(init_ctx)
+        transform.connect_output(collector, max_pending=10)
 
-        mock_response = _create_mock_response(content="positive")
-        with mock_httpx_client(response=mock_response) as mock_client:
-            result = transform.process({"text": "I love this!"}, ctx)
+        token = make_token("row-1")
+        ctx = PluginContext(
+            run_id="test-run",
+            config={},
+            landscape=mock_recorder,
+            state_id="test-state-id",
+            token=token,
+        )
 
-            assert result.status == "success"
-            # Verify template rendered correctly with lookup data
-            call_args = mock_client.post.call_args
-            request_body = call_args.kwargs["json"]
-            user_message = request_body["messages"][0]["content"]
-            assert "Classify as positive or negative:" in user_message
-            assert "I love this!" in user_message
+        try:
+            mock_response = _create_mock_response(content="positive")
+            with mock_httpx_client(response=mock_response) as mock_client:
+                transform.accept({"text": "I love this!"}, ctx)
+                transform.flush_batch_processing(timeout=10.0)
 
-    def test_two_dimensional_lookup_row_plus_lookup(self, ctx: PluginContext) -> None:
+                assert len(collector.results) == 1
+                _, result, _state_id = collector.results[0]
+                assert isinstance(result, TransformResult)
+                assert result.status == "success"
+                # Verify template rendered correctly with lookup data
+                call_args = mock_client.post.call_args
+                request_body = call_args.kwargs["json"]
+                user_message = request_body["messages"][0]["content"]
+                assert "Classify as positive or negative:" in user_message
+                assert "I love this!" in user_message
+        finally:
+            transform.close()
+
+    def test_two_dimensional_lookup_row_plus_lookup(self, mock_recorder: Mock, collector: CollectorOutputPort) -> None:
         """Two-dimensional lookup: lookup.X[row.Y] works correctly."""
         transform = OpenRouterLLMTransform(
             {
@@ -753,18 +1134,37 @@ class TestOpenRouterTemplateFeatures:
                 "lookup": {"tones": {"formal": "professional", "casual": "friendly"}},
             }
         )
+        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        transform.on_start(init_ctx)
+        transform.connect_output(collector, max_pending=10)
 
-        mock_response = _create_mock_response(content="Processed")
-        with mock_httpx_client(response=mock_response) as mock_client:
-            result = transform.process({"text": "Hello", "tone_id": "formal"}, ctx)
+        token = make_token("row-1")
+        ctx = PluginContext(
+            run_id="test-run",
+            config={},
+            landscape=mock_recorder,
+            state_id="test-state-id",
+            token=token,
+        )
 
-            assert result.status == "success"
-            call_args = mock_client.post.call_args
-            request_body = call_args.kwargs["json"]
-            user_message = request_body["messages"][0]["content"]
-            assert "Use tone: professional" in user_message
+        try:
+            mock_response = _create_mock_response(content="Processed")
+            with mock_httpx_client(response=mock_response) as mock_client:
+                transform.accept({"text": "Hello", "tone_id": "formal"}, ctx)
+                transform.flush_batch_processing(timeout=10.0)
 
-    def test_lookup_hash_included_in_output(self, ctx: PluginContext) -> None:
+                assert len(collector.results) == 1
+                _, result, _state_id = collector.results[0]
+                assert isinstance(result, TransformResult)
+                assert result.status == "success"
+                call_args = mock_client.post.call_args
+                request_body = call_args.kwargs["json"]
+                user_message = request_body["messages"][0]["content"]
+                assert "Use tone: professional" in user_message
+        finally:
+            transform.close()
+
+    def test_lookup_hash_included_in_output(self, mock_recorder: Mock, collector: CollectorOutputPort) -> None:
         """Output includes lookup_hash when lookup data is configured."""
         transform = OpenRouterLLMTransform(
             {
@@ -775,11 +1175,30 @@ class TestOpenRouterTemplateFeatures:
                 "lookup": {"cats": ["A", "B", "C"]},
             }
         )
+        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        transform.on_start(init_ctx)
+        transform.connect_output(collector, max_pending=10)
 
-        mock_response = _create_mock_response(content="Result")
-        with mock_httpx_client(response=mock_response):
-            result = transform.process({"text": "test"}, ctx)
+        token = make_token("row-1")
+        ctx = PluginContext(
+            run_id="test-run",
+            config={},
+            landscape=mock_recorder,
+            state_id="test-state-id",
+            token=token,
+        )
 
+        try:
+            mock_response = _create_mock_response(content="Result")
+            with mock_httpx_client(response=mock_response):
+                transform.accept({"text": "test"}, ctx)
+                transform.flush_batch_processing(timeout=10.0)
+        finally:
+            transform.close()
+
+        assert len(collector.results) == 1
+        _, result, _state_id = collector.results[0]
+        assert isinstance(result, TransformResult)
         assert result.status == "success"
         assert result.row is not None
         # New audit fields should be present
@@ -788,7 +1207,7 @@ class TestOpenRouterTemplateFeatures:
         # lookup_source is None when lookup is inline (not from file)
         assert "llm_response_lookup_source" in result.row
 
-    def test_template_source_included_in_output(self, ctx: PluginContext) -> None:
+    def test_template_source_included_in_output(self, mock_recorder: Mock, collector: CollectorOutputPort) -> None:
         """Output includes template_source when provided."""
         transform = OpenRouterLLMTransform(
             {
@@ -799,16 +1218,35 @@ class TestOpenRouterTemplateFeatures:
                 "schema": DYNAMIC_SCHEMA,
             }
         )
+        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        transform.on_start(init_ctx)
+        transform.connect_output(collector, max_pending=10)
 
-        mock_response = _create_mock_response(content="Analysis result")
-        with mock_httpx_client(response=mock_response):
-            result = transform.process({"text": "hello"}, ctx)
+        token = make_token("row-1")
+        ctx = PluginContext(
+            run_id="test-run",
+            config={},
+            landscape=mock_recorder,
+            state_id="test-state-id",
+            token=token,
+        )
 
+        try:
+            mock_response = _create_mock_response(content="Analysis result")
+            with mock_httpx_client(response=mock_response):
+                transform.accept({"text": "hello"}, ctx)
+                transform.flush_batch_processing(timeout=10.0)
+        finally:
+            transform.close()
+
+        assert len(collector.results) == 1
+        _, result, _state_id = collector.results[0]
+        assert isinstance(result, TransformResult)
         assert result.status == "success"
         assert result.row is not None
         assert result.row["llm_response_template_source"] == "prompts/analysis.j2"
 
-    def test_all_audit_fields_present_with_lookup(self, ctx: PluginContext) -> None:
+    def test_all_audit_fields_present_with_lookup(self, mock_recorder: Mock, collector: CollectorOutputPort) -> None:
         """All audit metadata fields are present when using template with lookup."""
         transform = OpenRouterLLMTransform(
             {
@@ -821,11 +1259,30 @@ class TestOpenRouterTemplateFeatures:
                 "lookup_source": "prompts/lookups.yaml",
             }
         )
+        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        transform.on_start(init_ctx)
+        transform.connect_output(collector, max_pending=10)
 
-        mock_response = _create_mock_response(content="Done")
-        with mock_httpx_client(response=mock_response):
-            result = transform.process({"text": "data"}, ctx)
+        token = make_token("row-1")
+        ctx = PluginContext(
+            run_id="test-run",
+            config={},
+            landscape=mock_recorder,
+            state_id="test-state-id",
+            token=token,
+        )
 
+        try:
+            mock_response = _create_mock_response(content="Done")
+            with mock_httpx_client(response=mock_response):
+                transform.accept({"text": "data"}, ctx)
+                transform.flush_batch_processing(timeout=10.0)
+        finally:
+            transform.close()
+
+        assert len(collector.results) == 1
+        _, result, _state_id = collector.results[0]
+        assert isinstance(result, TransformResult)
         assert result.status == "success"
         assert result.row is not None
 
@@ -842,7 +1299,7 @@ class TestOpenRouterTemplateFeatures:
         assert result.row["llm_response_lookup_source"] == "prompts/lookups.yaml"
         assert result.row["llm_response_lookup_hash"] is not None
 
-    def test_no_lookup_has_none_hash_in_output(self, ctx: PluginContext) -> None:
+    def test_no_lookup_has_none_hash_in_output(self, mock_recorder: Mock, collector: CollectorOutputPort) -> None:
         """Output has None for lookup fields when no lookup configured."""
         transform = OpenRouterLLMTransform(
             {
@@ -853,11 +1310,30 @@ class TestOpenRouterTemplateFeatures:
                 # No lookup configured
             }
         )
+        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        transform.on_start(init_ctx)
+        transform.connect_output(collector, max_pending=10)
 
-        mock_response = _create_mock_response(content="Result")
-        with mock_httpx_client(response=mock_response):
-            result = transform.process({"text": "test"}, ctx)
+        token = make_token("row-1")
+        ctx = PluginContext(
+            run_id="test-run",
+            config={},
+            landscape=mock_recorder,
+            state_id="test-state-id",
+            token=token,
+        )
 
+        try:
+            mock_response = _create_mock_response(content="Result")
+            with mock_httpx_client(response=mock_response):
+                transform.accept({"text": "test"}, ctx)
+                transform.flush_batch_processing(timeout=10.0)
+        finally:
+            transform.close()
+
+        assert len(collector.results) == 1
+        _, result, _state_id = collector.results[0]
+        assert isinstance(result, TransformResult)
         assert result.status == "success"
         assert result.row is not None
         # Fields should be present but None
@@ -866,7 +1342,7 @@ class TestOpenRouterTemplateFeatures:
         assert "llm_response_lookup_source" in result.row
         assert result.row["llm_response_lookup_source"] is None
 
-    def test_lookup_iteration_in_template(self, ctx: PluginContext) -> None:
+    def test_lookup_iteration_in_template(self, mock_recorder: Mock, collector: CollectorOutputPort) -> None:
         """Lookup data can be iterated in templates."""
         transform = OpenRouterLLMTransform(
             {
@@ -886,19 +1362,38 @@ Text: {{ row.text }}""",
                 },
             }
         )
+        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        transform.on_start(init_ctx)
+        transform.connect_output(collector, max_pending=10)
 
-        mock_response = _create_mock_response(content="spam")
-        with mock_httpx_client(response=mock_response) as mock_client:
-            result = transform.process({"text": "Buy now! Limited offer!"}, ctx)
+        token = make_token("row-1")
+        ctx = PluginContext(
+            run_id="test-run",
+            config={},
+            landscape=mock_recorder,
+            state_id="test-state-id",
+            token=token,
+        )
 
-            assert result.status == "success"
-            call_args = mock_client.post.call_args
-            request_body = call_args.kwargs["json"]
-            user_message = request_body["messages"][0]["content"]
-            assert "spam: unwanted messages" in user_message
-            assert "ham: legitimate messages" in user_message
+        try:
+            mock_response = _create_mock_response(content="spam")
+            with mock_httpx_client(response=mock_response) as mock_client:
+                transform.accept({"text": "Buy now! Limited offer!"}, ctx)
+                transform.flush_batch_processing(timeout=10.0)
 
-    def test_template_error_includes_source_in_error_details(self, ctx: PluginContext) -> None:
+                assert len(collector.results) == 1
+                _, result, _state_id = collector.results[0]
+                assert isinstance(result, TransformResult)
+                assert result.status == "success"
+                call_args = mock_client.post.call_args
+                request_body = call_args.kwargs["json"]
+                user_message = request_body["messages"][0]["content"]
+                assert "spam: unwanted messages" in user_message
+                assert "ham: legitimate messages" in user_message
+        finally:
+            transform.close()
+
+    def test_template_error_includes_source_in_error_details(self, mock_recorder: Mock, collector: CollectorOutputPort) -> None:
         """Template rendering error includes template_source for debugging."""
         transform = OpenRouterLLMTransform(
             {
@@ -909,18 +1404,37 @@ Text: {{ row.text }}""",
                 "schema": DYNAMIC_SCHEMA,
             }
         )
+        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        transform.on_start(init_ctx)
+        transform.connect_output(collector, max_pending=10)
 
-        # Process with missing required_field - should fail template rendering
-        result = transform.process({"other_field": "value"}, ctx)
+        token = make_token("row-1")
+        ctx = PluginContext(
+            run_id="test-run",
+            config={},
+            landscape=mock_recorder,
+            state_id="test-state-id",
+            token=token,
+        )
 
+        try:
+            # Process with missing required_field - should fail template rendering
+            transform.accept({"other_field": "value"}, ctx)
+            transform.flush_batch_processing(timeout=10.0)
+        finally:
+            transform.close()
+
+        assert len(collector.results) == 1
+        _, result, _state_id = collector.results[0]
+        assert isinstance(result, TransformResult)
         assert result.status == "error"
         assert result.reason is not None
         assert result.reason["reason"] == "template_rendering_failed"
         assert result.reason["template_source"] == "prompts/requires_field.j2"
 
 
-class TestOpenRouterBatchProcessing:
-    """Tests for batch-aware aggregation processing."""
+class TestOpenRouterConcurrency:
+    """Tests for concurrent row processing via BatchTransformMixin."""
 
     @pytest.fixture
     def mock_recorder(self) -> Mock:
@@ -930,170 +1444,97 @@ class TestOpenRouterBatchProcessing:
         return recorder
 
     @pytest.fixture
-    def ctx(self, mock_recorder: Mock) -> PluginContext:
-        """Create plugin context with landscape and state_id for batch processing."""
-        return PluginContext(
+    def collector(self) -> CollectorOutputPort:
+        """Create output collector for capturing results."""
+        return CollectorOutputPort()
+
+    def test_multiple_rows_processed_in_fifo_order(self, mock_recorder: Mock, collector: CollectorOutputPort) -> None:
+        """Multiple rows are emitted in submission order (FIFO)."""
+        transform = OpenRouterLLMTransform(
+            {
+                "api_key": "sk-test-key",
+                "model": "anthropic/claude-3-opus",
+                "template": "{{ row.text }}",
+                "schema": DYNAMIC_SCHEMA,
+            }
+        )
+        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        transform.on_start(init_ctx)
+        transform.connect_output(collector, max_pending=10)
+
+        rows = [
+            {"text": "first"},
+            {"text": "second"},
+            {"text": "third"},
+        ]
+
+        try:
+            mock_response = _create_mock_response(content="Response")
+            with mock_httpx_client(response=mock_response):
+                for i, row in enumerate(rows):
+                    token = make_token(f"row-{i}")
+                    ctx = PluginContext(
+                        run_id="test-run",
+                        config={},
+                        landscape=mock_recorder,
+                        state_id=f"state-{i}",
+                        token=token,
+                    )
+                    transform.accept(row, ctx)
+
+                transform.flush_batch_processing(timeout=10.0)
+        finally:
+            transform.close()
+
+        # Results should be in FIFO order
+        assert len(collector.results) == 3
+        for i, (_token, result, _state_id) in enumerate(collector.results):
+            assert isinstance(result, TransformResult)
+            assert result.status == "success"
+            assert result.row is not None
+            assert result.row["text"] == rows[i]["text"]
+
+    def test_on_start_captures_recorder(self, mock_recorder: Mock) -> None:
+        """on_start() captures recorder reference for HTTP client creation."""
+        transform = OpenRouterLLMTransform(
+            {
+                "api_key": "sk-test-key",
+                "model": "anthropic/claude-3-opus",
+                "template": "{{ row.text }}",
+                "schema": DYNAMIC_SCHEMA,
+            }
+        )
+
+        # Verify _recorder starts as None
+        assert transform._recorder is None
+
+        ctx = PluginContext(
             run_id="test-run",
             config={},
             landscape=mock_recorder,
             state_id="test-state-id",
         )
+        transform.on_start(ctx)
 
-    @pytest.fixture
-    def batch_config(self) -> dict[str, Any]:
-        """Config with pooling enabled for batch processing."""
-        return {
-            "model": "anthropic/claude-3-haiku",
-            "template": "Analyze: {{ row.text }}",
-            "api_key": "test-key",
-            "pool_size": 3,
-            "schema": {"fields": "dynamic"},
-        }
+        # Verify recorder was captured
+        assert transform._recorder is mock_recorder
 
-    @pytest.fixture
-    def batch_transform(self, batch_config: dict[str, Any]) -> OpenRouterLLMTransform:
-        """Create transform with batch config."""
-        return OpenRouterLLMTransform(batch_config)
-
-    def test_is_batch_aware_is_true(self, batch_transform: OpenRouterLLMTransform) -> None:
-        """Transform should declare batch awareness for aggregation."""
-        assert batch_transform.is_batch_aware is True
-
-    def test_process_accepts_list_of_rows(
-        self,
-        batch_transform: OpenRouterLLMTransform,
-        ctx: PluginContext,
-        mock_recorder: Mock,
-    ) -> None:
-        """process() should accept list[dict] for batch aggregation."""
-        # Initialize transform with recorder reference
-        batch_transform.on_start(ctx)
-
-        # Mock successful responses for 3 rows
-        mock_response = _create_mock_response(
-            content="Sentiment: positive",
-            status_code=200,
+    def test_close_clears_recorder(self, mock_recorder: Mock, collector: CollectorOutputPort) -> None:
+        """close() clears recorder reference."""
+        transform = OpenRouterLLMTransform(
+            {
+                "api_key": "sk-test-key",
+                "model": "anthropic/claude-3-opus",
+                "template": "{{ row.text }}",
+                "schema": DYNAMIC_SCHEMA,
+            }
         )
+        init_ctx = PluginContext(run_id="test", config={}, landscape=mock_recorder)
+        transform.on_start(init_ctx)
+        transform.connect_output(collector, max_pending=10)
 
-        rows = [
-            {"text": "I love this product!"},
-            {"text": "This is terrible."},
-            {"text": "It's okay I guess."},
-        ]
+        assert transform._recorder is not None
 
-        with mock_httpx_client(response=mock_response):
-            result = batch_transform.process(rows, ctx)
+        transform.close()
 
-        assert result.status == "success"
-        assert result.is_multi_row is True
-        assert result.rows is not None
-        assert len(result.rows) == 3
-        for output_row in result.rows:
-            assert "llm_response" in output_row
-
-    def test_batch_with_partial_failures(
-        self,
-        batch_transform: OpenRouterLLMTransform,
-        ctx: PluginContext,
-        mock_recorder: Mock,
-    ) -> None:
-        """Batch should continue even if some rows fail (per-row error tracking)."""
-        # Initialize transform with recorder reference
-        batch_transform.on_start(ctx)
-
-        rows = [
-            {"text": "Row 1"},
-            {"text": "FAIL"},  # Special marker to trigger failure
-            {"text": "Row 3"},
-        ]
-
-        # We need to mock at a lower level since batch uses PooledExecutor
-        # Mock the _process_single_with_state method to control individual row results
-        # Use row content to determine success/failure (not call order - concurrent!)
-        def mock_process_fn(row: dict[str, Any], state_id: str) -> Any:
-            from elspeth.contracts import TransformResult
-
-            if row.get("text") == "FAIL":
-                # This row should fail
-                return TransformResult.error({"reason": "api_call_failed", "error": "Bad Request"})
-            else:
-                # Success case
-                output = dict(row)
-                output["llm_response"] = "Result"
-                output["llm_response_usage"] = {}
-                output["llm_response_template_hash"] = "test-hash"
-                output["llm_response_variables_hash"] = "test-vars-hash"
-                output["llm_response_template_source"] = None
-                output["llm_response_lookup_hash"] = None
-                output["llm_response_lookup_source"] = None
-                output["llm_response_system_prompt_source"] = None
-                output["llm_response_model"] = "anthropic/claude-3-haiku"
-                return TransformResult.success(output)
-
-        with patch.object(batch_transform, "_process_single_with_state", side_effect=mock_process_fn):
-            result = batch_transform.process(rows, ctx)
-
-        # Should still succeed overall with per-row errors
-        assert result.status == "success"
-        assert result.is_multi_row is True
-        assert result.rows is not None
-        assert len(result.rows) == 3
-
-        # Row 0 and 2 should have responses
-        assert result.rows[0]["llm_response"] is not None
-        assert result.rows[2]["llm_response"] is not None
-
-        # Row 1 should have error
-        assert result.rows[1]["llm_response"] is None
-        assert "llm_response_error" in result.rows[1]
-
-    def test_empty_batch_returns_success(
-        self,
-        batch_transform: OpenRouterLLMTransform,
-        ctx: PluginContext,
-    ) -> None:
-        """Empty batch should return success with metadata."""
-        result = batch_transform.process([], ctx)
-
-        assert result.status == "success"
-        assert result.row is not None
-        assert result.row["batch_empty"] is True
-        assert result.row["row_count"] == 0
-
-    def test_batch_missing_landscape_raises_error(
-        self,
-        batch_transform: OpenRouterLLMTransform,
-    ) -> None:
-        """Batch processing without landscape should raise RuntimeError."""
-        ctx = PluginContext(run_id="test-run", config={}, landscape=None, state_id=None)
-        rows = [{"text": "test"}]
-
-        with pytest.raises(RuntimeError, match="requires landscape"):
-            batch_transform.process(rows, ctx)
-
-    def test_batch_all_rows_fail_returns_error(
-        self,
-        batch_transform: OpenRouterLLMTransform,
-        ctx: PluginContext,
-        mock_recorder: Mock,
-    ) -> None:
-        """When all rows fail, batch should return error."""
-        batch_transform.on_start(ctx)
-
-        rows = [
-            {"text": "Row 1"},
-            {"text": "Row 2"},
-        ]
-
-        def mock_fail_fn(row: dict[str, Any], state_id: str) -> Any:
-            from elspeth.contracts import TransformResult
-
-            return TransformResult.error({"reason": "api_call_failed", "error": "All failed"})
-
-        with patch.object(batch_transform, "_process_single_with_state", side_effect=mock_fail_fn):
-            result = batch_transform.process(rows, ctx)
-
-        assert result.status == "error"
-        assert result.reason is not None
-        assert result.reason["reason"] == "all_rows_failed"
-        assert result.reason["row_count"] == 2
+        assert transform._recorder is None

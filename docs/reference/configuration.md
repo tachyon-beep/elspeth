@@ -8,9 +8,9 @@ Complete reference for ELSPETH pipeline configuration.
 
 - [Configuration File Format](#configuration-file-format)
 - [Top-Level Settings](#top-level-settings)
-- [Datasource Settings](#datasource-settings)
+- [Source Settings](#source-settings)
 - [Sink Settings](#sink-settings)
-- [Transform Settings (row_plugins)](#transform-settings-row_plugins)
+- [Transform Settings](#transform-settings)
 - [Gate Settings](#gate-settings)
 - [Aggregation Settings](#aggregation-settings)
 - [Coalesce Settings](#coalesce-settings)
@@ -51,12 +51,12 @@ Nested environment variables use double underscore: `ELSPETH_LANDSCAPE__URL`.
 
 | Field | Type | Required | Default | Description |
 |-------|------|----------|---------|-------------|
-| `datasource` | object | **Yes** | - | Source plugin configuration (exactly one per run) |
+| `source` | object | **Yes** | - | Source plugin configuration (exactly one per run) |
 | `sinks` | object | **Yes** | - | Named sink configurations (at least one required) |
-| `output_sink` | string | **Yes** | - | Default sink for rows completing the pipeline |
+| `default_sink` | string | **Yes** | - | Default sink for rows completing the pipeline |
 | `run_mode` | string | No | `"live"` | Execution mode: `live`, `replay`, `verify` |
-| `replay_source_run_id` | string | No | - | Run ID to replay/verify against (required for replay/verify modes) |
-| `row_plugins` | list | No | `[]` | Ordered transforms to apply |
+| `replay_from` | string | No | - | Run ID to replay/verify against (required for replay/verify modes) |
+| `transforms` | list | No | `[]` | Ordered transforms to apply |
 | `gates` | list | No | `[]` | Config-driven routing gates |
 | `coalesce` | list | No | `[]` | Fork path merge configurations |
 | `aggregations` | list | No | `[]` | Batch processing configurations |
@@ -77,12 +77,12 @@ Nested environment variables use double underscore: `ELSPETH_LANDSCAPE__URL`.
 
 ---
 
-## Datasource Settings
+## Source Settings
 
 Configures the single data source for the pipeline.
 
 ```yaml
-datasource:
+source:
   plugin: csv
   options:
     path: data/input.csv
@@ -154,7 +154,7 @@ sinks:
       schema:
         fields: dynamic
 
-output_sink: output  # Default destination
+default_sink: output  # Default destination
 ```
 
 | Field | Type | Required | Description |
@@ -172,12 +172,12 @@ output_sink: output  # Default destination
 
 ---
 
-## Transform Settings (row_plugins)
+## Transform Settings
 
 Ordered list of transforms applied to each row.
 
 ```yaml
-row_plugins:
+transforms:
   - plugin: field_mapper
     options:
       schema:
@@ -612,7 +612,7 @@ The expression parser does **not** allow type coercion functions. Instead, coerc
 
 ```yaml
 # CORRECT - coerce at source
-datasource:
+source:
   plugin: csv
   options:
     schema:
@@ -634,8 +634,8 @@ gates:
 ## Complete Example
 
 ```yaml
-# Datasource - where data comes from
-datasource:
+# Source - where data comes from
+source:
   plugin: csv
   options:
     path: data/transactions.csv
@@ -670,10 +670,10 @@ sinks:
       schema:
         fields: dynamic
 
-output_sink: output
+default_sink: output
 
 # Transforms
-row_plugins:
+transforms:
   - plugin: field_mapper
     options:
       schema:

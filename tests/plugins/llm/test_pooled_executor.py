@@ -281,7 +281,7 @@ class TestPooledExecutorCapacityHandling:
         assert len(results) == 1
         assert results[0].status == "error"
         assert results[0].reason is not None
-        assert "capacity_retry_timeout" in results[0].reason["reason"]
+        assert results[0].reason["reason"] == "retry_timeout"
 
         # Should have made multiple attempts before giving up
         assert call_count > 1

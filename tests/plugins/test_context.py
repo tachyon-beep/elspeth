@@ -453,3 +453,57 @@ class TestTransformErrorRecording:
         # Token should have error_id from landscape
         assert token.error_id == "terr_abc123def4"
         assert token.destination == "failed_rows"
+
+
+class TestTokenField:
+    """Tests for token field used by BatchTransformMixin for row-level pipelining."""
+
+    def test_token_field_defaults_to_none(self) -> None:
+        """PluginContext.token defaults to None."""
+        from elspeth.plugins.context import PluginContext
+
+        ctx = PluginContext(run_id="test-run", config={})
+        assert ctx.token is None
+
+    def test_token_accepts_token_info(self) -> None:
+        """PluginContext accepts TokenInfo via token parameter."""
+        from elspeth.contracts.identity import TokenInfo
+        from elspeth.plugins.context import PluginContext
+
+        token = TokenInfo(row_id="row-1", token_id="token-row-1", row_data={"x": 1})
+        ctx = PluginContext(run_id="test-run", config={}, token=token)
+
+        assert ctx.token is not None
+        assert ctx.token is token  # Same object reference
+        assert ctx.token.row_id == "row-1"
+        assert ctx.token.token_id == "token-row-1"
+        assert ctx.token.row_data == {"x": 1}
+
+    def test_token_identity_preserved_on_access(self) -> None:
+        """Token identity is preserved - multiple accesses return same object."""
+        from elspeth.contracts.identity import TokenInfo
+        from elspeth.plugins.context import PluginContext
+
+        token = TokenInfo(row_id="row-42", token_id="token-42", row_data={"value": 100})
+        ctx = PluginContext(run_id="test-run", config={}, token=token)
+
+        # Multiple accesses should return the exact same object
+        access1 = ctx.token
+        access2 = ctx.token
+        assert access1 is access2
+        assert access1 is token
+
+    def test_token_can_be_mutated_after_construction(self) -> None:
+        """Token field can be set after construction (engine sets it per-row)."""
+        from elspeth.contracts.identity import TokenInfo
+        from elspeth.plugins.context import PluginContext
+
+        ctx = PluginContext(run_id="test-run", config={})
+        assert ctx.token is None
+
+        # Engine sets token before calling batch transforms
+        token = TokenInfo(row_id="row-99", token_id="token-99", row_data={"data": "test"})
+        ctx.token = token
+
+        assert ctx.token is token
+        assert ctx.token.row_id == "row-99"

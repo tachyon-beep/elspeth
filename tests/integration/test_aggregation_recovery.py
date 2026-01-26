@@ -14,6 +14,7 @@ from typing import Any
 import pytest
 
 from elspeth.contracts.enums import BatchStatus
+from elspeth.contracts.types import NodeID
 from elspeth.core.checkpoint import CheckpointManager, RecoveryManager
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape.database import LandscapeDB
@@ -492,7 +493,7 @@ class TestAggregationRecoveryIntegration:
 
         # Create aggregation settings with timeout trigger
         agg_settings = {
-            "sum_aggregator": AggregationSettings(
+            NodeID("sum_aggregator"): AggregationSettings(
                 name="sum_aggregator",
                 plugin="test_aggregation",
                 trigger=trigger_config,
@@ -512,10 +513,10 @@ class TestAggregationRecoveryIntegration:
         executor.restore_from_checkpoint(agg_state)
 
         # Verify buffer was restored
-        assert executor.get_buffer_count("sum_aggregator") == 3
+        assert executor.get_buffer_count(NodeID("sum_aggregator")) == 3
 
         # Get the restored evaluator
-        restored_evaluator = executor._trigger_evaluators.get("sum_aggregator")
+        restored_evaluator = executor._trigger_evaluators.get(NodeID("sum_aggregator"))
         assert restored_evaluator is not None
 
         # Verify batch count was restored

@@ -5,9 +5,89 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
+from elspeth.contracts import NodeStateStatus, RowOutcome, RunStatus
+from elspeth.core.landscape import LandscapeDB, LandscapeRecorder
+
 # Note: In Click 8.0+, mix_stderr is no longer a CliRunner parameter.
 # Stderr output is combined with stdout by default when using CliRunner.invoke()
 runner = CliRunner()
+
+
+def verify_audit_trail(
+    audit_db_path: Path,
+    *,
+    expected_row_count: int,
+    expected_output_sink: str = "results",
+) -> None:
+    """Verify audit trail integrity after a pipeline run.
+
+    This helper validates that the Landscape audit trail contains:
+    - Exactly one completed run
+    - Expected number of rows with valid source hashes
+    - Tokens for each row with valid node states
+    - Terminal outcomes for each token
+    - Artifacts from the output sink with content hashes
+
+    Args:
+        audit_db_path: Path to the Landscape SQLite database
+        expected_row_count: Number of rows expected to be processed
+        expected_output_sink: Name of the output sink (default "results")
+
+    Raises:
+        AssertionError: If any audit trail validation fails
+    """
+    db = LandscapeDB.from_url(f"sqlite:///{audit_db_path}")
+    try:
+        recorder = LandscapeRecorder(db)
+
+        # 1. Verify run was recorded and completed
+        runs = recorder.list_runs()
+        assert len(runs) == 1, f"Expected 1 run, got {len(runs)}"
+        run = runs[0]
+        assert run.status == RunStatus.COMPLETED, f"Expected run status COMPLETED, got {run.status}"
+        run_id = run.run_id
+
+        # 2. Verify rows were recorded
+        rows = recorder.get_rows(run_id)
+        assert len(rows) == expected_row_count, f"Expected {expected_row_count} rows, got {len(rows)}"
+        # Each row should have a source data hash
+        for row in rows:
+            assert row.source_data_hash, f"Row {row.row_id} missing source_data_hash"
+
+        # 3. Verify tokens and node states for each row
+        for row in rows:
+            tokens = recorder.get_tokens(row.row_id)
+            assert tokens, f"Row {row.row_id} has no tokens"
+
+            for token in tokens:
+                # Get node states for this token
+                states = recorder.get_node_states_for_token(token.token_id)
+                assert states, f"Token {token.token_id} has no node states"
+
+                # Verify each state has input_hash and completed successfully
+                for state in states:
+                    assert state.input_hash, f"NodeState {state.state_id} missing input_hash"
+                    # Check status is completed (not failed)
+                    if state.status == NodeStateStatus.COMPLETED:
+                        # Completed states must have output_hash
+                        assert state.output_hash, f"Completed state {state.state_id} missing output_hash"
+
+            # Verify terminal outcome for the row
+            outcomes = recorder.get_token_outcomes_for_row(run_id, row.row_id)
+            terminal_outcomes = [o for o in outcomes if o.is_terminal]
+            assert terminal_outcomes, f"Row {row.row_id} has no terminal outcome"
+            # All terminal outcomes should be COMPLETED (reached output sink)
+            for outcome in terminal_outcomes:
+                assert outcome.outcome == RowOutcome.COMPLETED, f"Expected COMPLETED outcome, got {outcome.outcome}"
+
+        # 4. Verify artifacts were recorded
+        artifacts = recorder.get_artifacts(run_id)
+        assert artifacts, "No artifacts recorded"
+        for artifact in artifacts:
+            assert artifact.content_hash, f"Artifact {artifact.artifact_id} missing content_hash"
+            assert artifact.artifact_type, f"Artifact {artifact.artifact_id} missing artifact_type"
+    finally:
+        db.close()
 
 
 class TestCLIBasics:
@@ -62,7 +142,7 @@ class TestRunCommandExecutesTransforms:
         # Config with a passthrough transform
         config_file = tmp_path / "settings.yaml"
         config_file.write_text(f"""
-datasource:
+source:
   plugin: csv
   options:
     path: "{input_file}"
@@ -78,13 +158,13 @@ sinks:
       schema:
         fields: dynamic
 
-row_plugins:
+transforms:
   - plugin: passthrough
     options:
       schema:
         fields: dynamic
 
-output_sink: results
+default_sink: results
 
 landscape:
   enabled: true
@@ -97,6 +177,9 @@ landscape:
         assert result.exit_code == 0, f"CLI failed: {result.stdout}"
         # Output should exist with data processed
         assert output_file.exists()
+
+        # Verify audit trail integrity - 2 rows processed through passthrough transform
+        verify_audit_trail(audit_db, expected_row_count=2)
 
     def test_field_mapper_transform_modifies_output(self, tmp_path: Path) -> None:
         """Field mapper should rename columns - proves transform actually runs."""
@@ -116,7 +199,7 @@ landscape:
         # Config with field_mapper that renames 'old_name' to 'new_name'
         config_file = tmp_path / "settings.yaml"
         config_file.write_text(f"""
-datasource:
+source:
   plugin: csv
   options:
     path: "{input_file}"
@@ -132,7 +215,7 @@ sinks:
       schema:
         fields: dynamic
 
-row_plugins:
+transforms:
   - plugin: field_mapper
     options:
       schema:
@@ -140,7 +223,7 @@ row_plugins:
       mapping:
         old_name: new_name
 
-output_sink: results
+default_sink: results
 
 landscape:
   enabled: true
@@ -158,6 +241,9 @@ landscape:
         # If transform ran, we should have 'new_name' column, not 'old_name'
         assert "new_name" in output_content, f"Field mapper should have renamed 'old_name' to 'new_name'. Output was: {output_content}"
 
+        # Verify audit trail integrity - 2 rows processed through field_mapper transform
+        verify_audit_trail(audit_db, expected_row_count=2)
+
 
 class TestPurgeCommand:
     """Tests for purge CLI command."""
@@ -172,7 +258,7 @@ class TestPurgeCommand:
         assert "retention" in result.stdout.lower() or "days" in result.stdout.lower()
 
     def test_purge_dry_run(self, tmp_path: Path) -> None:
-        """purge --dry-run shows what would be deleted."""
+        """purge --dry-run shows what would be deleted or that nothing expired."""
         from elspeth.cli import app
 
         result = runner.invoke(
@@ -186,7 +272,11 @@ class TestPurgeCommand:
         )
 
         assert result.exit_code == 0
-        assert "would delete" in result.stdout.lower() or "0" in result.stdout
+        # CLI outputs either "would delete N payload(s)" or "No payloads older than X days found"
+        output_lower = result.stdout.lower()
+        assert "would delete" in output_lower or "no payloads older than" in output_lower, (
+            f"Expected purge dry-run message, got: {result.stdout}"
+        )
 
     def test_purge_with_retention_override(self, tmp_path: Path) -> None:
         """purge --retention-days overrides default."""
@@ -396,9 +486,9 @@ class TestPurgeCommand:
         custom_payload_path = tmp_path / "custom_payloads"
         custom_payload_path.mkdir()
         settings = {
-            "datasource": {"plugin": "csv", "path": "test.csv"},
+            "source": {"plugin": "csv", "path": "test.csv"},
             "sinks": {"output": {"plugin": "csv", "path": "output.csv"}},
-            "output_sink": "output",
+            "default_sink": "output",
             "landscape": {"url": f"sqlite:///{tmp_path / 'landscape.db'}"},
             "payload_store": {
                 "backend": "filesystem",
@@ -435,9 +525,9 @@ class TestPurgeCommand:
 
         # Create settings.yaml with unsupported backend
         settings = {
-            "datasource": {"plugin": "csv", "path": "test.csv"},
+            "source": {"plugin": "csv", "path": "test.csv"},
             "sinks": {"output": {"plugin": "csv", "path": "output.csv"}},
-            "output_sink": "output",
+            "default_sink": "output",
             "landscape": {"url": f"sqlite:///{tmp_path / 'landscape.db'}"},
             "payload_store": {
                 "backend": "azure_blob",  # Unsupported backend
@@ -507,7 +597,7 @@ class TestResumeCommand:
         settings_file.write_text(f"""
 landscape:
   url: "sqlite:///{tmp_path / "test.db"}"
-datasource:
+source:
   plugin: csv
   options:
     path: dummy.csv
@@ -516,6 +606,9 @@ datasource:
       fields: dynamic
 transforms:
   - plugin: passthrough
+    options:
+      schema:
+        fields: dynamic
 sinks:
   output:
     plugin: csv
@@ -523,7 +616,7 @@ sinks:
       path: output.csv
       schema:
         fields: dynamic
-output_sink: output
+default_sink: output
 """)
 
         # Set up database with a completed run
@@ -575,7 +668,7 @@ output_sink: output
         settings_file.write_text(f"""
 landscape:
   url: "sqlite:///{tmp_path / "test.db"}"
-datasource:
+source:
   plugin: csv
   options:
     path: dummy.csv
@@ -584,6 +677,9 @@ datasource:
       fields: dynamic
 transforms:
   - plugin: passthrough
+    options:
+      schema:
+        fields: dynamic
 sinks:
   output:
     plugin: csv
@@ -591,7 +687,7 @@ sinks:
       path: output.csv
       schema:
         fields: dynamic
-output_sink: output
+default_sink: output
 """)
 
         # Set up database with a running run
@@ -692,7 +788,7 @@ output_sink: output
         settings_file.write_text(f"""
 landscape:
   url: "sqlite:///{tmp_path / "test.db"}"
-datasource:
+source:
   plugin: csv
   options:
     path: dummy.csv
@@ -701,6 +797,9 @@ datasource:
       fields: dynamic
 transforms:
   - plugin: passthrough
+    options:
+      schema:
+        fields: dynamic
 sinks:
   output:
     plugin: csv
@@ -708,7 +807,7 @@ sinks:
       path: output.csv
       schema:
         fields: dynamic
-output_sink: output
+default_sink: output
 """)
 
         # Build graph to get actual node IDs (use ORIGINAL source for validation)
@@ -728,7 +827,7 @@ output_sink: output
             sinks=plugins["sinks"],
             aggregations=plugins["aggregations"],
             gates=list(settings_config.gates),
-            output_sink=settings_config.output_sink,
+            default_sink=settings_config.default_sink,
             coalesce_settings=list(settings_config.coalesce) if settings_config.coalesce else None,
         )
         graph.validate()
@@ -862,7 +961,7 @@ class TestTildeExpansion:
 
         # Create a settings file
         settings_content = """
-datasource:
+source:
   plugin: csv
   options:
     path: input.csv
@@ -871,7 +970,7 @@ sinks:
     plugin: json
     options:
       path: output.json
-output_sink: default
+default_sink: default
 """
         settings_file = tmp_path / "settings.yaml"
         settings_file.write_text(settings_content)
@@ -897,7 +996,7 @@ output_sink: default
         from elspeth.cli import app
 
         settings_content = """
-datasource:
+source:
   plugin: csv
   options:
     path: input.csv
@@ -906,7 +1005,7 @@ sinks:
     plugin: json
     options:
       path: output.json
-output_sink: default
+default_sink: default
 """
         settings_file = tmp_path / "settings.yaml"
         settings_file.write_text(settings_content)

@@ -34,7 +34,11 @@ class TestRetryManager:
 
         manager = RetryManager(RetryConfig(max_attempts=3, base_delay=0.01))
 
+        call_count = 0
+
         def failing_operation() -> None:
+            nonlocal call_count
+            call_count += 1
             raise TypeError("Not retryable")
 
         with pytest.raises(TypeError):
@@ -42,6 +46,9 @@ class TestRetryManager:
                 failing_operation,
                 is_retryable=lambda e: isinstance(e, ValueError),
             )
+
+        # Verify non-retryable error does NOT trigger retries - exactly 1 call
+        assert call_count == 1
 
     def test_max_attempts_exceeded(self) -> None:
         from elspeth.engine.retry import MaxRetriesExceeded, RetryConfig, RetryManager
@@ -192,5 +199,5 @@ class TestMaxRetriesExceeded:
         original = ValueError("original error")
         exc = MaxRetriesExceeded(attempts=5, last_error=original)
 
-        assert "5" in str(exc)
-        assert "original error" in str(exc)
+        # Assert exact message format, not just substring presence
+        assert str(exc) == "Max retries (5) exceeded: original error"

@@ -89,8 +89,12 @@ class TestAuditedLLMClient:
 
     def _create_mock_recorder(self) -> MagicMock:
         """Create a mock LandscapeRecorder."""
+        import itertools
+
         recorder = MagicMock()
         recorder.record_call = MagicMock()
+        counter = itertools.count()
+        recorder.allocate_call_index.side_effect = lambda _: next(counter)
         return recorder
 
     def _create_mock_openai_client(

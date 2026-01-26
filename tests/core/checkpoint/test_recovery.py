@@ -195,11 +195,19 @@ class TestRecoveryProtocol:
         assert "not found" in check.reason.lower()
 
     def test_get_resume_point(self, recovery_manager: RecoveryManager, failed_run_with_checkpoint: str, mock_graph: ExecutionGraph) -> None:
+        """Resume point returns exact checkpoint values, not just non-null.
+
+        The fixture creates checkpoint with tok-001, node-001, sequence 1.
+        A regression returning wrong values (but still non-null) would break resume.
+        """
         resume_point = recovery_manager.get_resume_point(failed_run_with_checkpoint, mock_graph)
+
         assert resume_point is not None
-        assert resume_point.token_id is not None
-        assert resume_point.node_id is not None
-        assert resume_point.sequence_number > 0
+
+        # Assert exact values from fixture, not just non-null/positive
+        assert resume_point.token_id == "tok-001"
+        assert resume_point.node_id == "node-001"
+        assert resume_point.sequence_number == 1
 
     def test_get_resume_point_returns_none_for_unresumable_run(
         self, recovery_manager: RecoveryManager, completed_run: str, mock_graph: ExecutionGraph

@@ -7,77 +7,14 @@ from typing import Any
 
 import pytest
 
-from elspeth.contracts import Determinism, PluginSchema, RoutingMode, SourceRow
+from elspeth.contracts import PluginSchema, SourceRow
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape import LandscapeDB
 from elspeth.engine.artifacts import ArtifactDescriptor
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 from elspeth.plugins.base import BaseTransform
 from elspeth.plugins.results import TransformResult
-from tests.conftest import as_sink, as_source
-
-
-def _build_test_graph(config: PipelineConfig) -> ExecutionGraph:
-    """Build a simple graph for testing.
-
-    Creates a linear graph matching the PipelineConfig structure:
-    source -> transforms... -> sinks
-    """
-    graph = ExecutionGraph()
-
-    # Add source
-    graph.add_node("source", node_type="source", plugin_name=config.source.name)
-
-    # Add transforms and populate transform_id_map
-    transform_ids: dict[int, str] = {}
-    prev = "source"
-    for i, t in enumerate(config.transforms):
-        node_id = f"transform_{i}"
-        transform_ids[i] = node_id
-        is_gate = hasattr(t, "evaluate")
-        graph.add_node(
-            node_id,
-            node_type="gate" if is_gate else "transform",
-            plugin_name=t.name,
-        )
-        graph.add_edge(prev, node_id, label="continue", mode=RoutingMode.MOVE)
-        prev = node_id
-
-    # Add sinks and populate sink_id_map
-    sink_ids: dict[str, str] = {}
-    for sink_name, sink in config.sinks.items():
-        node_id = f"sink_{sink_name}"
-        sink_ids[sink_name] = node_id
-        graph.add_node(node_id, node_type="sink", plugin_name=sink.name)
-        graph.add_edge(prev, node_id, label=sink_name, mode=RoutingMode.MOVE)
-
-        # Gates can route to any sink, so add edges from all gates
-        for i, t in enumerate(config.transforms):
-            if hasattr(t, "evaluate"):
-                gate_id = f"transform_{i}"
-                if gate_id != prev:  # Don't duplicate edge
-                    graph.add_edge(gate_id, node_id, label=sink_name, mode=RoutingMode.MOVE)
-
-    # Populate internal ID maps
-    graph._sink_id_map = sink_ids
-    graph._transform_id_map = transform_ids
-
-    # Populate route resolution map: (gate_id, label) -> sink_name
-    route_resolution_map: dict[tuple[str, str], str] = {}
-    for i, t in enumerate(config.transforms):
-        if hasattr(t, "evaluate"):  # It's a gate
-            gate_id = f"transform_{i}"
-            for sink_name in sink_ids:
-                route_resolution_map[(gate_id, sink_name)] = sink_name
-    graph._route_resolution_map = route_resolution_map
-
-    # Set output_sink
-    if "default" in sink_ids:
-        graph._output_sink = "default"
-    elif sink_ids:
-        graph._output_sink = next(iter(sink_ids))
-
-    return graph
+from tests.conftest import _TestSinkBase, _TestSourceBase, as_sink, as_source, as_transform
 
 
 class ValueSchema(PluginSchema):
@@ -86,16 +23,14 @@ class ValueSchema(PluginSchema):
     value: int
 
 
-class ListSource:
+class ListSource(_TestSourceBase):
     """Test source that yields from a list."""
 
     name = "list_source"
     output_schema = ValueSchema
-    node_id: str | None = None  # Required by SourceProtocol
-    determinism = Determinism.DETERMINISTIC  # Required by SourceProtocol
-    plugin_version = "1.0.0"  # Required by SourceProtocol
 
     def __init__(self, data: list[dict[str, Any]]) -> None:
+        super().__init__()
         self._data = data
 
     def on_start(self, ctx: Any) -> None:
@@ -121,17 +56,14 @@ class FailingSource(ListSource):
         raise RuntimeError("Source failed intentionally")
 
 
-class CollectSink:
+class CollectSink(_TestSinkBase):
     """Test sink that collects results in memory."""
 
     name = "collect"
-    input_schema = ValueSchema  # Required by SinkProtocol
-    idempotent = True  # Required by SinkProtocol
-    node_id: str | None = None  # Required by SinkProtocol
-    determinism = Determinism.DETERMINISTIC  # Required by SinkProtocol
-    plugin_version = "1.0"  # Required by SinkProtocol
+    input_schema = ValueSchema
 
     def __init__(self) -> None:
+        super().__init__()
         self.results: list[dict[str, Any]] = []
 
     def on_start(self, ctx: Any) -> None:
@@ -199,14 +131,24 @@ class TestOrchestratorCleanup:
         source = ListSource([{"value": 1}, {"value": 2}])
         sink = CollectSink()
 
+        # P2 Fix: Use from_plugin_instances instead of private field mutation
+        graph = ExecutionGraph.from_plugin_instances(
+            source=as_source(source),
+            transforms=[as_transform(transform_1), as_transform(transform_2)],
+            sinks={"default": as_sink(sink)},
+            aggregations={},
+            gates=[],
+            default_sink="default",
+        )
+
         config = PipelineConfig(
             source=as_source(source),
-            transforms=[transform_1, transform_2],
+            transforms=[as_transform(transform_1), as_transform(transform_2)],
             sinks={"default": as_sink(sink)},
         )
 
         orchestrator = Orchestrator(db)
-        orchestrator.run(config, graph=_build_test_graph(config))
+        orchestrator.run(config, graph=graph)
 
         # Verify close() was called on all transforms
         assert transform_1.close_called, "transform_1.close() was not called"
@@ -225,16 +167,26 @@ class TestOrchestratorCleanup:
         source = FailingSource([{"value": 1}])
         sink = CollectSink()
 
+        # P2 Fix: Use from_plugin_instances instead of private field mutation
+        graph = ExecutionGraph.from_plugin_instances(
+            source=as_source(source),
+            transforms=[as_transform(transform_1), as_transform(transform_2)],
+            sinks={"default": as_sink(sink)},
+            aggregations={},
+            gates=[],
+            default_sink="default",
+        )
+
         config = PipelineConfig(
             source=as_source(source),
-            transforms=[transform_1, transform_2],
+            transforms=[as_transform(transform_1), as_transform(transform_2)],
             sinks={"default": as_sink(sink)},
         )
 
         orchestrator = Orchestrator(db)
 
         with pytest.raises(RuntimeError, match="Source failed intentionally"):
-            orchestrator.run(config, graph=_build_test_graph(config))
+            orchestrator.run(config, graph=graph)
 
         # Verify close() was called on all transforms even though run failed
         assert transform_1.close_called, "transform_1.close() was not called after failure"
@@ -267,15 +219,25 @@ class TestOrchestratorCleanup:
         transform = MinimalTransform()
         sink = CollectSink()
 
+        # P2 Fix: Use from_plugin_instances instead of private field mutation
+        graph = ExecutionGraph.from_plugin_instances(
+            source=as_source(source),
+            transforms=[as_transform(transform)],
+            sinks={"default": as_sink(sink)},
+            aggregations={},
+            gates=[],
+            default_sink="default",
+        )
+
         config = PipelineConfig(
             source=as_source(source),
-            transforms=[transform],
+            transforms=[as_transform(transform)],
             sinks={"default": as_sink(sink)},
         )
 
         orchestrator = Orchestrator(db)
         # Should not raise even though transform has no close()
-        result = orchestrator.run(config, graph=_build_test_graph(config))
+        result = orchestrator.run(config, graph=graph)
 
         assert result.status == "completed"
 
@@ -296,15 +258,25 @@ class TestOrchestratorCleanup:
         source = ListSource([{"value": 1}])
         sink = CollectSink()
 
+        # P2 Fix: Use from_plugin_instances instead of private field mutation
+        graph = ExecutionGraph.from_plugin_instances(
+            source=as_source(source),
+            transforms=[as_transform(transform_1), as_transform(transform_2)],
+            sinks={"default": as_sink(sink)},
+            aggregations={},
+            gates=[],
+            default_sink="default",
+        )
+
         config = PipelineConfig(
             source=as_source(source),
-            transforms=[transform_1, transform_2],
+            transforms=[as_transform(transform_1), as_transform(transform_2)],
             sinks={"default": as_sink(sink)},
         )
 
         orchestrator = Orchestrator(db)
         # Should complete without raising, despite first transform's close() failing
-        result = orchestrator.run(config, graph=_build_test_graph(config))
+        result = orchestrator.run(config, graph=graph)
 
         assert result.status == "completed"
         # Both close() methods should have been called

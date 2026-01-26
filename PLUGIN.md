@@ -103,7 +103,7 @@ class ElspethBuiltinTransforms:
 **Use it:**
 
 ```yaml
-row_plugins:
+transforms:
   - plugin: double_value
     options:
       schema:

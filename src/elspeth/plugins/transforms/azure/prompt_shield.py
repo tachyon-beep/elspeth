@@ -8,23 +8,24 @@ Prompt Shield API to detect:
 Unlike Content Safety, Prompt Shield is binary detection - no thresholds.
 Either an attack is detected or it isn't.
 
-Supports both sequential (pool_size=1) and pooled (pool_size>1) execution modes.
+Uses BatchTransformMixin for row-level pipelining (multiple rows in flight
+with FIFO output ordering) and PooledExecutor for internal concurrency.
 """
 
 from __future__ import annotations
 
-import time
 from threading import Lock
 from typing import TYPE_CHECKING, Any
 
 import httpx
 from pydantic import Field
 
-from elspeth.contracts import CallStatus, CallType, Determinism
+from elspeth.contracts import Determinism
 from elspeth.plugins.base import BaseTransform
+from elspeth.plugins.batching import BatchTransformMixin, OutputPort
 from elspeth.plugins.config_base import TransformDataConfig
 from elspeth.plugins.context import PluginContext
-from elspeth.plugins.pooling import CapacityError, PoolConfig, PooledExecutor, RowContext, is_capacity_error
+from elspeth.plugins.pooling import CapacityError, PoolConfig, PooledExecutor, is_capacity_error
 from elspeth.plugins.results import TransformResult
 from elspeth.plugins.schema_factory import create_schema_from_config
 
@@ -94,7 +95,7 @@ class AzurePromptShieldConfig(TransformDataConfig):
         )
 
 
-class AzurePromptShield(BaseTransform):
+class AzurePromptShield(BaseTransform, BatchTransformMixin):
     """Detect jailbreak attempts and prompt injection using Azure Prompt Shield.
 
     Analyzes text against Azure's Prompt Shield API which detects:
@@ -103,7 +104,28 @@ class AzurePromptShield(BaseTransform):
 
     Returns error result if any attack is detected (binary, no thresholds).
 
-    Supports both sequential (pool_size=1) and pooled (pool_size>1) execution.
+    Uses BatchTransformMixin for row-level pipelining: multiple rows can be
+    in flight concurrently with FIFO output ordering.
+
+    Architecture:
+        Orchestrator → accept() → [RowReorderBuffer] → [Worker Pool]
+            → _process_row() → Azure API
+            → emit() → OutputPort (sink or next transform)
+
+    Usage:
+        # 1. Instantiate
+        transform = AzurePromptShield(config)
+
+        # 2. Connect output port (required before accept())
+        transform.connect_output(output_port, max_pending=30)
+
+        # 3. Feed rows (blocks on backpressure)
+        for row in source:
+            transform.accept(row, ctx)
+
+        # 4. Flush and close
+        transform.flush_batch_processing()
+        transform.close()
     """
 
     name = "azure_prompt_shield"
@@ -122,6 +144,7 @@ class AzurePromptShield(BaseTransform):
         self._fields = cfg.fields
         self._on_error = cfg.on_error
         self._pool_size = cfg.pool_size
+        self._max_capacity_retry_seconds = cfg.max_capacity_retry_seconds
 
         assert cfg.schema_config is not None
         schema = create_schema_from_config(
@@ -130,179 +153,128 @@ class AzurePromptShield(BaseTransform):
             allow_coercion=False,
         )
         self.input_schema = schema
+        # BatchTransformMixin processes rows individually, output schema matches input
         self.output_schema = schema
 
-        # Create own HTTP client (following OpenRouter pattern)
-        # Single shared client since httpx.Client is stateless
-        self._http_client: httpx.Client | None = None
+        # Per-state_id HTTP client cache for audit trail
+        # Each AuditedHTTPClient has its own call_index counter, ensuring
+        # (state_id, call_index) uniqueness even across retries.
+        self._underlying_http_client: httpx.Client | None = None
+        self._http_clients: dict[str, Any] = {}  # state_id -> AuditedHTTPClient
+        self._http_clients_lock = Lock()
 
-        # Recorder reference for pooled execution (set in on_start)
+        # Recorder reference for pooled execution (set in on_start or first accept)
         self._recorder: LandscapeRecorder | None = None
 
-        # Create pooled executor if pool_size > 1
+        # Create pooled executor if pool_size > 1 (for internal concurrency)
         if cfg.pool_config is not None:
             self._executor: PooledExecutor | None = PooledExecutor(cfg.pool_config)
         else:
             self._executor = None
 
-        # Thread-safe call index counter for audit trail
-        self._call_index = 0
-        self._call_index_lock = Lock()
-
-        # Dynamic is_batch_aware based on pool_size
-        # Set as instance attribute to override class attribute
-        self.is_batch_aware = self._pool_size > 1
+        # Batch processing state (initialized by connect_output)
+        self._batch_initialized = False
 
     def on_start(self, ctx: PluginContext) -> None:
-        """Capture recorder reference for pooled execution.
-
-        In pooled mode, _process_single_with_state() is called from worker
-        threads that don't have access to PluginContext. This captures the
-        recorder reference at pipeline start so it can be used later.
-        """
+        """Capture recorder reference for pooled execution."""
         self._recorder = ctx.landscape
 
-    def process(
+    def connect_output(
         self,
-        row: dict[str, Any] | list[dict[str, Any]],
-        ctx: PluginContext,
-    ) -> TransformResult:
-        """Analyze row content for prompt injection attacks.
+        output: OutputPort,
+        max_pending: int = 30,
+    ) -> None:
+        """Connect output port and initialize batch processing.
 
-        When is_batch_aware=True and used in aggregation, receives list[dict].
-        Otherwise receives single dict.
+        Call this after __init__ but before accept(). The output port
+        receives results in FIFO order (submission order, not completion order).
 
-        Routes to pooled or sequential execution based on pool_size config.
+        Args:
+            output: Output port to emit results to (sink adapter or next transform)
+            max_pending: Maximum rows in flight before accept() blocks (backpressure)
+
+        Raises:
+            RuntimeError: If called more than once
         """
-        # Dispatch to batch processing if given a list
-        # NOTE: This isinstance check is legitimate polymorphic dispatch for
-        # batch-aware transforms, not defensive programming to hide bugs.
-        if isinstance(row, list):
-            return self._process_batch(row, ctx)
+        if self._batch_initialized:
+            raise RuntimeError("connect_output() already called")
 
-        # Route to pooled execution if configured (single row)
-        if self._executor is not None:
-            if ctx.landscape is None or ctx.state_id is None:
-                raise RuntimeError(
-                    "Pooled execution requires landscape recorder and state_id. Ensure transform is executed through the engine."
-                )
-            row_ctx = RowContext(row=row, state_id=ctx.state_id, row_index=0)
-            results = self._executor.execute_batch(
-                contexts=[row_ctx],
-                process_fn=self._process_single_with_state,
-            )
-            return results[0]
+        self.init_batch_processing(
+            max_pending=max_pending,
+            output=output,
+            name=self.name,
+            max_workers=max_pending,  # Match workers to max_pending
+            batch_wait_timeout=float(self._max_capacity_retry_seconds),
+        )
+        self._batch_initialized = True
 
-        # Sequential execution path (pool_size=1)
-        return self._process_single(row, ctx)
+    def accept(self, row: dict[str, Any], ctx: PluginContext) -> None:
+        """Accept a row for processing.
 
-    def _process_single(
+        Submits the row to the batch processing pipeline. Returns quickly
+        unless backpressure is applied (buffer full). Results flow through
+        the output port in FIFO order.
+
+        Args:
+            row: Input row with fields to analyze
+            ctx: Plugin context with token and landscape
+
+        Raises:
+            RuntimeError: If connect_output() was not called
+            ValueError: If ctx.token is None
+        """
+        if not self._batch_initialized:
+            raise RuntimeError("connect_output() must be called before accept(). This wires up the output port for result emission.")
+
+        # Capture recorder on first row (same as on_start)
+        if self._recorder is None and ctx.landscape is not None:
+            self._recorder = ctx.landscape
+
+        self.accept_row(row, ctx, self._process_row)
+
+    def process(
         self,
         row: dict[str, Any],
         ctx: PluginContext,
     ) -> TransformResult:
-        """Process a single row sequentially.
+        """Not supported - use accept() for row-level pipelining.
 
-        This is the original sequential processing logic.
+        This transform uses BatchTransformMixin for concurrent row processing
+        with FIFO output ordering. Call accept() instead of process().
+
+        Raises:
+            NotImplementedError: Always, directing callers to use accept()
         """
-        fields_to_scan = self._get_fields_to_scan(row)
-
-        for field_name in fields_to_scan:
-            if field_name not in row:
-                continue  # Skip fields not present in this row
-
-            value = row[field_name]
-            if not isinstance(value, str):
-                continue
-
-            # Call Azure API
-            try:
-                analysis = self._analyze_prompt(value, ctx.state_id)
-            except httpx.HTTPStatusError as e:
-                is_capacity = is_capacity_error(e.response.status_code)
-                return TransformResult.error(
-                    {
-                        "reason": "api_error",
-                        "error_type": "capacity_error" if is_capacity else "http_error",
-                        "status_code": e.response.status_code,
-                        "message": str(e),
-                        "retryable": is_capacity,
-                    },
-                    retryable=is_capacity,
-                )
-            except httpx.RequestError as e:
-                return TransformResult.error(
-                    {
-                        "reason": "api_error",
-                        "error_type": "network_error",
-                        "message": str(e),
-                        "retryable": True,
-                    },
-                    retryable=True,
-                )
-
-            # Check if any attack was detected
-            if analysis["user_prompt_attack"] or analysis["document_attack"]:
-                return TransformResult.error(
-                    {
-                        "reason": "prompt_injection_detected",
-                        "field": field_name,
-                        "attacks": analysis,
-                        "retryable": False,
-                    }
-                )
-
-        return TransformResult.success(row)
-
-    def _process_batch(
-        self,
-        rows: list[dict[str, Any]],
-        ctx: PluginContext,
-    ) -> TransformResult:
-        """Process batch of rows with parallel execution via PooledExecutor.
-
-        Called when transform is used as aggregation node and trigger fires.
-        All rows share the same state_id; call_index provides audit uniqueness.
-        """
-        if not rows:
-            return TransformResult.success({"batch_empty": True, "row_count": 0})
-
-        if ctx.landscape is None or ctx.state_id is None:
-            raise RuntimeError(
-                "Batch processing requires landscape recorder and state_id. Ensure transform is executed through the engine."
-            )
-
-        # Ensure we have an executor for parallel processing
-        if self._executor is None:
-            # Fallback: process sequentially if no pool configured
-            return self._process_batch_sequential(rows, ctx)
-
-        # Create contexts - all rows share same state_id (call_index provides uniqueness)
-        contexts = [RowContext(row=row, state_id=ctx.state_id, row_index=i) for i, row in enumerate(rows)]
-
-        # Execute all rows in parallel
-        results = self._executor.execute_batch(
-            contexts=contexts,
-            process_fn=self._process_single_with_state,
+        raise NotImplementedError(
+            f"{self.__class__.__name__} uses row-level pipelining. Use accept() instead of process(). See class docstring for usage."
         )
 
-        # Assemble output with per-row error tracking
-        return self._assemble_batch_results(rows, results)
-
-    def _process_batch_sequential(
+    def _process_row(
         self,
-        rows: list[dict[str, Any]],
+        row: dict[str, Any],
         ctx: PluginContext,
     ) -> TransformResult:
-        """Fallback for batch processing without executor (pool_size=1).
+        """Process a single row. Called by worker threads.
 
-        Processes rows one at a time using existing sequential logic.
+        This is the processor function passed to accept_row(). It runs in
+        the BatchTransformMixin's worker pool.
+
+        Args:
+            row: Input row with fields to analyze
+            ctx: Plugin context with state_id for audit trail
+
+        Returns:
+            TransformResult indicating success or attack detection
         """
-        results: list[TransformResult] = []
-        for row in rows:
-            result = self._process_single(row, ctx)
-            results.append(result)
-        return self._assemble_batch_results(rows, results)
+        if ctx.state_id is None:
+            raise RuntimeError("state_id is required for batch processing. Ensure transform is executed through the engine.")
+
+        try:
+            return self._process_single_with_state(row, ctx.state_id)
+        finally:
+            # Clean up cached HTTP client for this state_id
+            with self._http_clients_lock:
+                self._http_clients.pop(ctx.state_id, None)
 
     def _process_single_with_state(
         self,
@@ -368,45 +340,6 @@ class AzurePromptShield(BaseTransform):
 
         return TransformResult.success(row)
 
-    def _assemble_batch_results(
-        self,
-        rows: list[dict[str, Any]],
-        results: list[TransformResult],
-    ) -> TransformResult:
-        """Assemble batch results with per-row error tracking.
-
-        Follows AzureLLMTransform pattern: include all rows in output,
-        mark failures with _prompt_shield_error instead of failing entire batch.
-        """
-        output_rows: list[dict[str, Any]] = []
-        all_failed = True
-
-        for row, result in zip(rows, results, strict=True):
-            output_row = dict(row)
-
-            if result.status == "success" and result.row is not None:
-                all_failed = False
-                # Success - row passes through unchanged
-                # (Prompt Shield doesn't add fields on success)
-            else:
-                # Per-row error tracking - embed error in row
-                output_row["_prompt_shield_error"] = result.reason or {
-                    "reason": "unknown_error",
-                }
-
-            output_rows.append(output_row)
-
-        # Only return error if ALL rows failed
-        if all_failed and output_rows:
-            return TransformResult.error(
-                {
-                    "reason": "all_rows_failed",
-                    "row_count": len(rows),
-                }
-            )
-
-        return TransformResult.success_multi(output_rows)
-
     def _get_fields_to_scan(self, row: dict[str, Any]) -> list[str]:
         """Determine which fields to scan based on config."""
         if self._fields == "all":
@@ -416,18 +349,37 @@ class AzurePromptShield(BaseTransform):
         else:
             return self._fields
 
-    def _get_http_client(self) -> httpx.Client:
-        """Get or create HTTP client for API calls."""
-        if self._http_client is None:
-            self._http_client = httpx.Client(timeout=30.0)
-        return self._http_client
+    def _get_underlying_http_client(self) -> httpx.Client:
+        """Get or create stateless HTTP client for API calls without audit recording."""
+        if self._underlying_http_client is None:
+            self._underlying_http_client = httpx.Client(timeout=30.0)
+        return self._underlying_http_client
 
-    def _next_call_index(self) -> int:
-        """Get next call index in thread-safe manner."""
-        with self._call_index_lock:
-            index = self._call_index
-            self._call_index += 1
-            return index
+    def _get_http_client(self, state_id: str) -> Any:
+        """Get or create audited HTTP client for a state_id.
+
+        Clients are cached to preserve call_index across retries.
+        This ensures uniqueness of (state_id, call_index) even when
+        the pooled executor retries after CapacityError.
+
+        Args:
+            state_id: State ID for audit trail recording
+
+        Returns:
+            AuditedHTTPClient instance with per-instance call_index counter
+        """
+        from elspeth.plugins.clients.http import AuditedHTTPClient
+
+        with self._http_clients_lock:
+            if state_id not in self._http_clients:
+                if self._recorder is None:
+                    raise RuntimeError("PromptShield requires recorder for audited calls.")
+                self._http_clients[state_id] = AuditedHTTPClient(
+                    recorder=self._recorder,
+                    state_id=state_id,
+                    timeout=30.0,
+                )
+            return self._http_clients[state_id]
 
     def _analyze_prompt(
         self,
@@ -446,23 +398,30 @@ class AzurePromptShield(BaseTransform):
 
         Records all API calls to audit trail for full traceability.
         """
-        client = self._get_http_client()
+        import time
+
+        from elspeth.contracts import CallStatus, CallType
+
+        # Always use underlying client - we'll record manually to ensure correct status
+        client = self._get_underlying_http_client()
 
         url = f"{self._endpoint}/contentsafety/text:shieldPrompt?api-version={self.API_VERSION}"
 
-        request_data = {
-            "userPrompt": text,
-            "documents": [text],
+        # Build request data for audit
+        request_data_for_audit = {
+            "method": "POST",
+            "url": url,
+            "json": {"userPrompt": text, "documents": [text]},
+            "headers": {"Content-Type": "application/json"},  # Don't record API key
         }
 
-        # Track timing for audit
-        start_time = time.monotonic()
-        call_index = self._next_call_index()
+        start = time.perf_counter()
 
         try:
+            # Make HTTP call (without automatic audit recording)
             response = client.post(
                 url,
-                json=request_data,
+                json={"userPrompt": text, "documents": [text]},
                 headers={
                     "Ocp-Apim-Subscription-Key": self._api_key,
                     "Content-Type": "application/json",
@@ -470,86 +429,98 @@ class AzurePromptShield(BaseTransform):
             )
             response.raise_for_status()
 
+            latency_ms = (time.perf_counter() - start) * 1000
+
             # Parse response - Azure API responses are external data (Tier 3: Zero Trust)
             # Security transform: fail CLOSED on malformed response
-            data = response.json()
-            user_attack = data["userPromptAnalysis"]["attackDetected"]
-            documents_analysis = data["documentsAnalysis"]
-            doc_attack = any(doc["attackDetected"] for doc in documents_analysis)
+            try:
+                data = response.json()
+                user_attack = data["userPromptAnalysis"]["attackDetected"]
+                documents_analysis = data["documentsAnalysis"]
+                doc_attack = any(doc["attackDetected"] for doc in documents_analysis)
 
-            latency_ms = (time.monotonic() - start_time) * 1000
+                # SUCCESS - response was valid and parseable
+                if state_id is not None and self._recorder is not None:
+                    response_data = {
+                        "status_code": response.status_code,
+                        "body_size": len(response.content),
+                        "body": data,
+                    }
+                    self._recorder.record_call(
+                        state_id=state_id,
+                        call_index=self._recorder.allocate_call_index(state_id),
+                        call_type=CallType.HTTP,
+                        status=CallStatus.SUCCESS,
+                        request_data=request_data_for_audit,
+                        response_data=response_data,
+                        latency_ms=latency_ms,
+                    )
 
-            # Record successful call to audit trail
-            if self._recorder is not None and state_id is not None:
+                return {
+                    "user_prompt_attack": user_attack,
+                    "document_attack": doc_attack,
+                }
+
+            except (KeyError, TypeError) as e:
+                # Malformed response - record as ERROR since we can't use the response
+                if state_id is not None and self._recorder is not None:
+                    response_data = {
+                        "status_code": response.status_code,
+                        "body_size": len(response.content),
+                        "body": response.text,  # Store raw text for debugging
+                    }
+                    self._recorder.record_call(
+                        state_id=state_id,
+                        call_index=self._recorder.allocate_call_index(state_id),
+                        call_type=CallType.HTTP,
+                        status=CallStatus.ERROR,
+                        request_data=request_data_for_audit,
+                        response_data=response_data,
+                        error={
+                            "type": "MalformedResponse",
+                            "message": f"Response parsing failed: {e}",
+                        },
+                        latency_ms=latency_ms,
+                    )
+                raise httpx.RequestError(f"Malformed Prompt Shield response: {e}") from e
+
+        except (httpx.HTTPStatusError, httpx.RequestError) as e:
+            # Network/HTTP errors - record as ERROR
+            latency_ms = (time.perf_counter() - start) * 1000
+            if state_id is not None and self._recorder is not None:
                 self._recorder.record_call(
                     state_id=state_id,
-                    call_index=call_index,
-                    call_type=CallType.HTTP,
-                    status=CallStatus.SUCCESS,
-                    request_data={"url": url, "body": request_data},
-                    response_data=data,
-                    latency_ms=latency_ms,
-                )
-
-            return {
-                "user_prompt_attack": user_attack,
-                "document_attack": doc_attack,
-            }
-
-        except (KeyError, TypeError) as e:
-            latency_ms = (time.monotonic() - start_time) * 1000
-            # Record failed call to audit trail
-            if self._recorder is not None and state_id is not None:
-                self._recorder.record_call(
-                    state_id=state_id,
-                    call_index=call_index,
+                    call_index=self._recorder.allocate_call_index(state_id),
                     call_type=CallType.HTTP,
                     status=CallStatus.ERROR,
-                    request_data={"url": url, "body": request_data},
-                    error={"reason": "malformed_response", "message": str(e)},
-                    latency_ms=latency_ms,
-                )
-            raise httpx.RequestError(f"Malformed Prompt Shield response: {e}") from e
-
-        except httpx.HTTPStatusError as e:
-            latency_ms = (time.monotonic() - start_time) * 1000
-            # Record failed call to audit trail
-            if self._recorder is not None and state_id is not None:
-                self._recorder.record_call(
-                    state_id=state_id,
-                    call_index=call_index,
-                    call_type=CallType.HTTP,
-                    status=CallStatus.ERROR,
-                    request_data={"url": url, "body": request_data},
+                    request_data=request_data_for_audit,
                     error={
-                        "reason": "http_error",
-                        "status_code": e.response.status_code,
+                        "type": type(e).__name__,
                         "message": str(e),
                     },
                     latency_ms=latency_ms,
                 )
             raise
 
-        except httpx.RequestError as e:
-            latency_ms = (time.monotonic() - start_time) * 1000
-            # Record failed call to audit trail
-            if self._recorder is not None and state_id is not None:
-                self._recorder.record_call(
-                    state_id=state_id,
-                    call_index=call_index,
-                    call_type=CallType.HTTP,
-                    status=CallStatus.ERROR,
-                    request_data={"url": url, "body": request_data},
-                    error={"reason": "network_error", "message": str(e)},
-                    latency_ms=latency_ms,
-                )
-            raise
-
     def close(self) -> None:
         """Release resources."""
+        # Shutdown batch processing infrastructure first
+        if self._batch_initialized:
+            self.shutdown_batch_processing()
+
+        # Then shutdown query-level executor (if used for internal concurrency)
         if self._executor is not None:
             self._executor.shutdown(wait=True)
-        if self._http_client is not None:
-            self._http_client.close()
-            self._http_client = None
+
+        # Close all cached HTTP clients
+        with self._http_clients_lock:
+            for client in self._http_clients.values():
+                client.close()
+            self._http_clients.clear()
+
+        # Close underlying stateless client
+        if self._underlying_http_client is not None:
+            self._underlying_http_client.close()
+            self._underlying_http_client = None
+
         self._recorder = None

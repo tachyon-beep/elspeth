@@ -7,6 +7,61 @@ Tests for:
 """
 
 
+class TestExecutionErrorSchema:
+    """Tests for ExecutionError TypedDict schema introspection."""
+
+    def test_execution_error_required_keys(self) -> None:
+        """ExecutionError has exactly exception and type as required keys."""
+        from elspeth.contracts import ExecutionError
+
+        assert ExecutionError.__required_keys__ == frozenset({"exception", "type"})
+
+    def test_execution_error_optional_keys(self) -> None:
+        """ExecutionError has traceback as optional key."""
+        from elspeth.contracts import ExecutionError
+
+        assert ExecutionError.__optional_keys__ == frozenset({"traceback"})
+
+    def test_execution_error_all_keys(self) -> None:
+        """ExecutionError total keys match required + optional."""
+        from elspeth.contracts import ExecutionError
+
+        all_keys = ExecutionError.__required_keys__ | ExecutionError.__optional_keys__
+        assert all_keys == frozenset({"exception", "type", "traceback"})
+
+
+class TestRoutingReasonSchema:
+    """Tests for RoutingReason TypedDict schema introspection."""
+
+    def test_routing_reason_required_keys(self) -> None:
+        """RoutingReason has rule and matched_value as required keys."""
+        from elspeth.contracts import RoutingReason
+
+        assert RoutingReason.__required_keys__ == frozenset({"rule", "matched_value"})
+
+    def test_routing_reason_optional_keys(self) -> None:
+        """RoutingReason has threshold, field, comparison as optional keys."""
+        from elspeth.contracts import RoutingReason
+
+        assert RoutingReason.__optional_keys__ == frozenset({"threshold", "field", "comparison"})
+
+
+class TestTransformReasonSchema:
+    """Tests for TransformReason TypedDict schema introspection."""
+
+    def test_transform_reason_required_keys(self) -> None:
+        """TransformReason has action as required key."""
+        from elspeth.contracts import TransformReason
+
+        assert TransformReason.__required_keys__ == frozenset({"action"})
+
+    def test_transform_reason_optional_keys(self) -> None:
+        """TransformReason has fields_modified and validation_errors as optional keys."""
+        from elspeth.contracts import TransformReason
+
+        assert TransformReason.__optional_keys__ == frozenset({"fields_modified", "validation_errors"})
+
+
 class TestExecutionError:
     """Tests for ExecutionError TypedDict."""
 

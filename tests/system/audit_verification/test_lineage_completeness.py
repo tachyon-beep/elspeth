@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 import pytest
 
 from elspeth.contracts import Determinism, PluginSchema, RoutingMode, SourceRow
+from elspeth.contracts.types import NodeID, SinkName
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape.database import LandscapeDB
 from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
@@ -92,30 +93,30 @@ def _build_linear_graph(config: PipelineConfig) -> ExecutionGraph:
     graph.add_node("source", node_type="source", plugin_name=config.source.name)
 
     # Add transforms
-    transform_ids: dict[int, str] = {}
+    transform_ids: dict[int, NodeID] = {}
     prev = "source"
     for i, t in enumerate(config.transforms):
-        node_id = f"transform_{i}"
+        node_id = NodeID(f"transform_{i}")
         transform_ids[i] = node_id
         graph.add_node(node_id, node_type="transform", plugin_name=t.name)
         graph.add_edge(prev, node_id, label="continue", mode=RoutingMode.MOVE)
         prev = node_id
 
     # Add sinks
-    sink_ids: dict[str, str] = {}
+    sink_ids: dict[SinkName, NodeID] = {}
     for sink_name, sink in config.sinks.items():
-        node_id = f"sink_{sink_name}"
-        sink_ids[sink_name] = node_id
+        node_id = NodeID(f"sink_{sink_name}")
+        sink_ids[SinkName(sink_name)] = node_id
         graph.add_node(node_id, node_type="sink", plugin_name=sink.name)
 
     # Connect last transform to default sink
-    if "default" in sink_ids:
-        graph.add_edge(prev, sink_ids["default"], label="continue", mode=RoutingMode.MOVE)
+    if SinkName("default") in sink_ids:
+        graph.add_edge(prev, sink_ids[SinkName("default")], label="continue", mode=RoutingMode.MOVE)
 
     # Populate internal maps
     graph._sink_id_map = sink_ids
     graph._transform_id_map = transform_ids
-    graph._output_sink = "default" if "default" in sink_ids else next(iter(sink_ids))
+    graph._default_sink = SinkName("default") if SinkName("default") in sink_ids else next(iter(sink_ids))
     graph._route_resolution_map = {}
 
     return graph
@@ -163,7 +164,7 @@ class TestLineageCompleteness:
         # Pipeline config
         config = PipelineConfig(
             source=as_source(source),
-            transforms=[_PassthroughTransform()],
+            transforms=[_PassthroughTransform()],  # type: ignore[list-item]
             sinks={"default": as_sink(TestSink())},
         )
 
@@ -217,8 +218,8 @@ class TestLineageCompleteness:
         config = PipelineConfig(
             source=as_source(source),
             transforms=[
-                _PassthroughTransform(),  # Stage 1
-                _EnrichingTransform(),  # Stage 2 - adds fields
+                _PassthroughTransform(),  # type: ignore[list-item]
+                _EnrichingTransform(),  # type: ignore[list-item]
             ],
             sinks={"default": as_sink(TestSink())},
         )
@@ -309,7 +310,7 @@ class TestExplainQueryFunctionality:
         # Pipeline config with a transform
         config = PipelineConfig(
             source=as_source(source),
-            transforms=[_PassthroughTransform()],
+            transforms=[_PassthroughTransform()],  # type: ignore[list-item]
             sinks={"default": as_sink(TestSink())},
         )
 
@@ -387,8 +388,8 @@ class TestExplainQueryFunctionality:
         config = PipelineConfig(
             source=as_source(source),
             transforms=[
-                _PassthroughTransform(),  # Stage 0
-                _EnrichingTransform(),  # Stage 1 - adds enriched + processed_by
+                _PassthroughTransform(),  # type: ignore[list-item]
+                _EnrichingTransform(),  # type: ignore[list-item]
             ],
             sinks={"default": as_sink(TestSink())},
         )

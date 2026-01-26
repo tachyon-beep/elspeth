@@ -53,7 +53,7 @@ class TestPassThroughContract(TransformContractPropertyTestBase):
 
         assert result.status == "success"
         assert result.row is not None
-        assert set(result.row.keys()) == set(input_row.keys())
+        assert result.row == input_row
 
     def test_passthrough_does_not_mutate_input(self, transform: TransformProtocol) -> None:
         """PassThrough MUST NOT mutate the input row."""
@@ -187,4 +187,8 @@ class TestPassThroughPropertyBased:
         result1 = transform.process(data, ctx)
         result2 = transform.process(data, ctx)
 
+        assert result1.status == "success"
+        assert result2.status == "success"
+        assert result1.row is not None
+        assert result2.row is not None
         assert result1.row == result2.row

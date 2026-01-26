@@ -90,7 +90,13 @@ class TestCheckpointManager:
         return "run-001"
 
     def test_create_checkpoint(self, manager: CheckpointManager, setup_run: str, mock_graph: "ExecutionGraph") -> None:
-        """Can create a checkpoint."""
+        """Can create a checkpoint with all fields correctly populated.
+
+        Verifies all checkpoint fields, not just sequence number, to ensure
+        resume compatibility and audit lineage integrity.
+        """
+        from elspeth.core.canonical import compute_upstream_topology_hash, stable_hash
+
         checkpoint = manager.create_checkpoint(
             run_id="run-001",
             token_id="tok-001",
@@ -99,9 +105,26 @@ class TestCheckpointManager:
             graph=mock_graph,
         )
 
+        # Basic identity fields
         assert checkpoint.checkpoint_id is not None
         assert checkpoint.run_id == "run-001"
         assert checkpoint.sequence_number == 1
+
+        # Token and node identity (critical for resume correctness)
+        assert checkpoint.token_id == "tok-001"
+        assert checkpoint.node_id == "node-001"
+
+        # Timestamp must be timezone-aware (audit requirement)
+        assert checkpoint.created_at is not None
+        assert checkpoint.created_at.tzinfo is not None
+
+        # Topology hashes must match expected values (resume compatibility)
+        expected_upstream_hash = compute_upstream_topology_hash(mock_graph, "node-001")
+        node_info = mock_graph.get_node_info("node-001")
+        expected_config_hash = stable_hash(node_info.config)
+
+        assert checkpoint.upstream_topology_hash == expected_upstream_hash
+        assert checkpoint.checkpoint_node_config_hash == expected_config_hash
 
     def test_get_latest_checkpoint(self, manager: CheckpointManager, setup_run: str, mock_graph: "ExecutionGraph") -> None:
         """Can retrieve the latest checkpoint for a run."""

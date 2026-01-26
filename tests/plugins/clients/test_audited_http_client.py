@@ -15,8 +15,12 @@ class TestAuditedHTTPClient:
 
     def _create_mock_recorder(self) -> MagicMock:
         """Create a mock LandscapeRecorder."""
+        import itertools
+
         recorder = MagicMock()
         recorder.record_call = MagicMock()
+        counter = itertools.count()
+        recorder.allocate_call_index.side_effect = lambda _: next(counter)
         return recorder
 
     def test_successful_post_records_to_audit_trail(self) -> None:
@@ -653,3 +657,131 @@ class TestAuditedHTTPClient:
         call_kwargs = recorder.record_call.call_args[1]
         assert call_kwargs["status"] == CallStatus.ERROR
         assert call_kwargs["error"]["status_code"] == 302
+
+    def test_large_text_response_not_truncated(self) -> None:
+        """Large text responses (>100KB) are recorded completely, not truncated.
+
+        This test verifies that the HTTP client does not truncate large non-JSON
+        responses before passing them to record_call(). The payload store auto-persist
+        mechanism in LandscapeRecorder is designed to handle large payloads.
+        """
+        recorder = self._create_mock_recorder()
+
+        # Create 150KB text response (exceeds old 100KB truncation limit)
+        large_text = "x" * 150_000
+
+        client = AuditedHTTPClient(
+            recorder=recorder,
+            state_id="state_123",
+        )
+
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 200
+        mock_response.headers = {"content-type": "text/plain"}
+        mock_response.content = large_text.encode("utf-8")
+        mock_response.text = large_text
+
+        with patch("httpx.Client") as mock_client_class:
+            mock_client = MagicMock()
+            mock_client.__enter__ = MagicMock(return_value=mock_client)
+            mock_client.__exit__ = MagicMock(return_value=False)
+            mock_client.post.return_value = mock_response
+            mock_client_class.return_value = mock_client
+
+            client.post("https://api.example.com/large-response")
+
+        call_kwargs = recorder.record_call.call_args[1]
+        recorded_body = call_kwargs["response_data"]["body"]
+
+        # CRITICAL: Must record ALL 150KB, not truncated to 100KB
+        assert len(recorded_body) == 150_000, f"Expected 150000 chars, got {len(recorded_body)}"
+        assert recorded_body == large_text
+
+    def test_large_json_response_not_truncated(self) -> None:
+        """Large JSON responses (>100KB) are recorded as complete dict.
+
+        This test verifies that large JSON responses are parsed and recorded
+        completely without truncation.
+        """
+        import json
+
+        recorder = self._create_mock_recorder()
+
+        # Create large JSON with >100KB when serialized
+        large_json = {"items": [{"id": i, "data": "x" * 1000} for i in range(200)]}
+        json_str = json.dumps(large_json)
+        assert len(json_str) > 100_000, "Test setup error: JSON not large enough"
+
+        client = AuditedHTTPClient(
+            recorder=recorder,
+            state_id="state_123",
+        )
+
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 200
+        mock_response.headers = {"content-type": "application/json"}
+        mock_response.content = json_str.encode("utf-8")
+        mock_response.json.return_value = large_json
+
+        with patch("httpx.Client") as mock_client_class:
+            mock_client = MagicMock()
+            mock_client.__enter__ = MagicMock(return_value=mock_client)
+            mock_client.__exit__ = MagicMock(return_value=False)
+            mock_client.post.return_value = mock_response
+            mock_client_class.return_value = mock_client
+
+            client.post("https://api.example.com/large-json")
+
+        call_kwargs = recorder.record_call.call_args[1]
+        recorded_body = call_kwargs["response_data"]["body"]
+
+        # JSON should be parsed as dict, not truncated
+        assert isinstance(recorded_body, dict)
+        assert len(recorded_body["items"]) == 200
+        assert recorded_body == large_json
+
+    def test_binary_response_recorded_as_base64(self) -> None:
+        """Binary responses (images, PDFs) are recorded as base64.
+
+        This test verifies that binary content (which cannot be decoded as UTF-8)
+        is properly handled by encoding it as base64 for JSON serialization.
+        """
+        import base64
+
+        recorder = self._create_mock_recorder()
+
+        # Simulate a small PNG image (binary data that's not valid UTF-8)
+        # PNG file signature + minimal IHDR chunk
+        binary_data = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x06\x00\x00\x00\x1f\x15\xc4\x89"
+
+        client = AuditedHTTPClient(
+            recorder=recorder,
+            state_id="state_123",
+        )
+
+        mock_response = MagicMock(spec=httpx.Response)
+        mock_response.status_code = 200
+        mock_response.headers = {"content-type": "image/png"}
+        mock_response.content = binary_data
+        # Note: .text would raise UnicodeDecodeError for real binary data
+        # For this test, we're verifying the code path that uses .content instead
+
+        with patch("httpx.Client") as mock_client_class:
+            mock_client = MagicMock()
+            mock_client.__enter__ = MagicMock(return_value=mock_client)
+            mock_client.__exit__ = MagicMock(return_value=False)
+            mock_client.post.return_value = mock_response
+            mock_client_class.return_value = mock_client
+
+            client.post("https://api.example.com/image")
+
+        call_kwargs = recorder.record_call.call_args[1]
+        recorded_body = call_kwargs["response_data"]["body"]
+
+        # Binary should be encoded as base64 in a dict
+        assert isinstance(recorded_body, dict), f"Expected dict, got {type(recorded_body)}"
+        assert "_binary" in recorded_body, "Expected '_binary' key in response body"
+
+        # Verify we can decode it back to original binary data
+        decoded = base64.b64decode(recorded_body["_binary"])
+        assert decoded == binary_data, "Decoded binary data doesn't match original"

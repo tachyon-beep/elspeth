@@ -62,6 +62,14 @@ from elspeth.contracts.audit import (
 )
 from elspeth.contracts.identity import TokenInfo
 from elspeth.contracts.checkpoint import ResumeCheck, ResumePoint
+from elspeth.contracts.types import (
+    AggregationName,
+    BranchName,
+    CoalesceName,
+    GateName,
+    NodeID,
+    SinkName,
+)
 from elspeth.contracts.results import (
     ArtifactDescriptor,
     FailureInfo,
@@ -82,15 +90,15 @@ from elspeth.contracts.config import (
     CheckpointSettings,
     ConcurrencySettings,
     DatabaseSettings,
-    DatasourceSettings,
     ElspethSettings,
     LandscapeExportSettings,
     LandscapeSettings,
     PayloadStoreSettings,
     RateLimitSettings,
     RetrySettings,
-    RowPluginSettings,
     SinkSettings,
+    SourceSettings,
+    TransformSettings,
 )
 from elspeth.contracts.events import (
     PhaseAction,
@@ -145,15 +153,15 @@ __all__ = [  # Grouped by category for readability
     "CheckpointSettings",
     "ConcurrencySettings",
     "DatabaseSettings",
-    "DatasourceSettings",
     "ElspethSettings",
     "LandscapeExportSettings",
     "LandscapeSettings",
     "PayloadStoreSettings",
     "RateLimitSettings",
     "RetrySettings",
-    "RowPluginSettings",
     "SinkSettings",
+    "SourceSettings",
+    "TransformSettings",
     # enums
     "BatchStatus",
     "CallStatus",
@@ -173,6 +181,13 @@ __all__ = [  # Grouped by category for readability
     # checkpoint
     "ResumeCheck",
     "ResumePoint",
+    # types
+    "AggregationName",
+    "BranchName",
+    "CoalesceName",
+    "GateName",
+    "NodeID",
+    "SinkName",
     # results (NOTE: AcceptResult deleted in aggregation structural cleanup)
     "ArtifactDescriptor",
     "FailureInfo",

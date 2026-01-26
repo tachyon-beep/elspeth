@@ -17,13 +17,21 @@ from typing import Any
 
 import pytest
 
-from elspeth.contracts import RoutingMode, SourceRow
+from elspeth.contracts import (
+    BranchName,
+    CoalesceName,
+    GateName,
+    NodeID,
+    RoutingMode,
+    SinkName,
+    SourceRow,
+)
 from elspeth.core.config import (
     CoalesceSettings,
-    DatasourceSettings,
     ElspethSettings,
     GateSettings,
     SinkSettings,
+    SourceSettings,
 )
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape import LandscapeDB
@@ -36,6 +44,7 @@ from tests.conftest import (
     _TestSourceBase,
     as_sink,
     as_source,
+    as_transform,
 )
 
 
@@ -193,7 +202,7 @@ def _build_fork_coalesce_graph(
         )
 
     # Create edges from fork gates to coalesce nodes (for branches in coalesce)
-    output_sink_id = sink_ids[settings.output_sink]
+    output_sink_id = sink_ids[settings.default_sink]
 
     for gate_config in settings.gates:
         if gate_config.fork_to:
@@ -231,14 +240,14 @@ def _build_fork_coalesce_graph(
     if not settings.gates or not any(g.fork_to for g in settings.gates):
         graph.add_edge(prev, output_sink_id, label="continue", mode=RoutingMode.MOVE)
 
-    # Populate internal ID maps
-    graph._sink_id_map = sink_ids
-    graph._transform_id_map = transform_ids
-    graph._config_gate_id_map = config_gate_ids
-    graph._coalesce_id_map = coalesce_ids
-    graph._branch_to_coalesce = branch_to_coalesce
-    graph._route_resolution_map = route_resolution_map
-    graph._output_sink = settings.output_sink
+    # Populate internal ID maps with proper types
+    graph._sink_id_map = {SinkName(k): NodeID(v) for k, v in sink_ids.items()}
+    graph._transform_id_map = {k: NodeID(v) for k, v in transform_ids.items()}
+    graph._config_gate_id_map = {GateName(k): NodeID(v) for k, v in config_gate_ids.items()}
+    graph._coalesce_id_map = {CoalesceName(k): NodeID(v) for k, v in coalesce_ids.items()}
+    graph._branch_to_coalesce = {BranchName(k): CoalesceName(v) for k, v in branch_to_coalesce.items()}
+    graph._route_resolution_map = {(NodeID(k[0]), k[1]): v for k, v in route_resolution_map.items()}
+    graph._default_sink = settings.default_sink
 
     return graph
 
@@ -261,14 +270,14 @@ class TestForkCoalescePipeline:
     ) -> None:
         """Complete fork/join pipeline should produce merged output."""
         settings = ElspethSettings(
-            datasource=DatasourceSettings(
+            source=SourceSettings(
                 plugin="list_source",
                 options={},
             ),
             sinks={
                 "output": SinkSettings(plugin="collect_sink", options={}),
             },
-            output_sink="output",
+            default_sink="output",
             gates=[
                 GateSettings(
                     name="forker",
@@ -312,8 +321,8 @@ class TestForkCoalescePipeline:
         # The fork children were coalesced
         assert result.rows_coalesced == 1
 
-        # Sink should have received merged output
-        assert len(sink.rows) >= 1
+        # Sink should have received exactly 1 merged output
+        assert len(sink.rows) == 1
         merged = sink.rows[0]
         assert merged["id"] == 1
         assert merged["value"] == 100
@@ -324,12 +333,12 @@ class TestForkCoalescePipeline:
     ) -> None:
         """Branches not in coalesce should still reach output sink."""
         settings = ElspethSettings(
-            datasource=DatasourceSettings(
+            source=SourceSettings(
                 plugin="list_source",
                 options={},
             ),
             sinks={"output": SinkSettings(plugin="collect_sink", options={})},
-            output_sink="output",
+            default_sink="output",
             gates=[
                 GateSettings(
                     name="forker",
@@ -409,14 +418,14 @@ class TestForkCoalescePipeline:
                 )
 
         settings = ElspethSettings(
-            datasource=DatasourceSettings(
+            source=SourceSettings(
                 plugin="list_source",
                 options={},
             ),
             sinks={
                 "output": SinkSettings(plugin="collect_sink", options={}),
             },
-            output_sink="output",
+            default_sink="output",
             gates=[
                 GateSettings(
                     name="forker",
@@ -441,7 +450,7 @@ class TestForkCoalescePipeline:
 
         config = PipelineConfig(
             source=as_source(source),
-            transforms=[transform],
+            transforms=[as_transform(transform)],
             sinks={"output": as_sink(sink)},
             gates=settings.gates,
             coalesce_settings=settings.coalesce,
@@ -460,7 +469,7 @@ class TestForkCoalescePipeline:
         assert result.rows_coalesced == 1
 
         # Merged output should have enriched=True from transform
-        assert len(sink.rows) >= 1
+        assert len(sink.rows) == 1
         merged = sink.rows[0]
         assert merged["id"] == 1
         assert merged["value"] == 42
@@ -472,14 +481,14 @@ class TestForkCoalescePipeline:
     ) -> None:
         """Multiple source rows each fork and coalesce independently."""
         settings = ElspethSettings(
-            datasource=DatasourceSettings(
+            source=SourceSettings(
                 plugin="list_source",
                 options={},
             ),
             sinks={
                 "output": SinkSettings(plugin="collect_sink", options={}),
             },
-            output_sink="output",
+            default_sink="output",
             gates=[
                 GateSettings(
                     name="forker",
@@ -543,14 +552,14 @@ class TestCoalesceAuditTrail:
     ) -> None:
         """Coalesce should record node states for consumed tokens."""
         settings = ElspethSettings(
-            datasource=DatasourceSettings(
+            source=SourceSettings(
                 plugin="list_source",
                 options={},
             ),
             sinks={
                 "output": SinkSettings(plugin="collect_sink", options={}),
             },
-            output_sink="output",
+            default_sink="output",
             gates=[
                 GateSettings(
                     name="forker",
@@ -591,8 +600,18 @@ class TestCoalesceAuditTrail:
         assert result.status == "completed"
         assert result.rows_coalesced == 1
 
-        # Query the audit trail for node states at the coalesce node
-        from elspeth.core.landscape.schema import node_states_table, nodes_table
+        # Query the audit trail for complete verification
+        from elspeth.contracts.enums import RowOutcome
+        from elspeth.core.landscape import LandscapeRecorder
+        from elspeth.core.landscape.schema import (
+            artifacts_table,
+            node_states_table,
+            nodes_table,
+            token_outcomes_table,
+            tokens_table,
+        )
+
+        recorder = LandscapeRecorder(db)
 
         with db.connection() as conn:
             # Find coalesce node
@@ -609,3 +628,70 @@ class TestCoalesceAuditTrail:
             assert len(states_result) == 2
             for state in states_result:
                 assert state.status == "completed"
+                # P1: Verify hashes are non-null
+                assert state.input_hash is not None, "Node state must have input_hash for audit trail"
+                assert state.output_hash is not None, "Completed node state must have output_hash"
+                # P1: Verify no error for successful coalesce
+                assert state.error_json is None, "Completed node state should not have error_json"
+
+            # P1: Verify token_outcomes for consumed tokens (should be COALESCED)
+            consumed_token_ids = [state.token_id for state in states_result]
+            for token_id in consumed_token_ids:
+                outcome = recorder.get_token_outcome(token_id)
+                assert outcome is not None, f"Token {token_id} must have terminal outcome recorded"
+                assert outcome.outcome == RowOutcome.COALESCED, f"Consumed token should have COALESCED outcome, got {outcome.outcome}"
+                # join_group_id should point to the merged token
+                assert outcome.join_group_id is not None, "COALESCED outcome must have join_group_id pointing to merged token"
+
+            # P1: Verify the parent token had FORKED outcome
+            # Find gate node (where fork happened)
+            gate_nodes = conn.execute(nodes_table.select().where(nodes_table.c.node_type == "gate")).fetchall()
+            assert len(gate_nodes) == 1, "Should have exactly one gate node"
+
+            # Get all tokens to find parent/fork relationships
+            all_tokens = conn.execute(tokens_table.select()).fetchall()
+
+            # Find tokens with fork_group_id (these are fork children)
+            fork_children = [t for t in all_tokens if t.fork_group_id is not None]
+            assert len(fork_children) >= 2, "Should have at least 2 fork child tokens"
+
+            # Find the parent token by looking for outcome=FORKED
+            # Note: fork_group_id on children is a grouping ID, NOT the parent token_id
+            forked_outcomes = conn.execute(token_outcomes_table.select().where(token_outcomes_table.c.outcome == "forked")).fetchall()
+            assert len(forked_outcomes) >= 1, "Should have at least 1 FORKED outcome"
+
+            parent_outcome_row = forked_outcomes[0]
+            parent_token_id = parent_outcome_row.token_id
+            parent_outcome = recorder.get_token_outcome(parent_token_id)
+            assert parent_outcome is not None, "Parent token must have outcome recorded"
+            assert parent_outcome.outcome == RowOutcome.FORKED, f"Parent token should have FORKED outcome, got {parent_outcome.outcome}"
+            assert parent_outcome.fork_group_id is not None, "FORKED outcome must have fork_group_id"
+
+            # P1: Verify token_parents for merged token (should have 2 parents with proper ordinals)
+            # Find the merged token by looking in tokens table for token with same join_group_id
+            # that is NOT one of the consumed tokens
+            consumed_outcome = recorder.get_token_outcome(consumed_token_ids[0])
+            assert consumed_outcome is not None, "Consumed token must have outcome"
+            canonical_join_group_id = consumed_outcome.join_group_id
+            merged_tokens = [t for t in all_tokens if t.join_group_id == canonical_join_group_id and t.token_id not in consumed_token_ids]
+            assert len(merged_tokens) == 1, f"Should have exactly 1 merged token, got {len(merged_tokens)}"
+            merged_token_id = merged_tokens[0].token_id
+
+            parents = recorder.get_token_parents(merged_token_id)
+            assert len(parents) == 2, f"Merged token should have 2 parents, got {len(parents)}"
+
+            # Verify ordinals are 0 and 1 (ordered)
+            ordinals = sorted([p.ordinal for p in parents])
+            assert ordinals == [0, 1], f"Parent ordinals should be [0, 1], got {ordinals}"
+
+            # Verify parent token_ids match consumed tokens
+            parent_ids = {p.parent_token_id for p in parents}
+            assert parent_ids == set(consumed_token_ids), "Merged token parents should match consumed tokens"
+
+            # P1: Verify artifacts have content_hash, artifact_type, sink_node_id
+            artifacts = conn.execute(artifacts_table.select()).fetchall()
+            assert len(artifacts) >= 1, "Should have at least 1 artifact from sink"
+            for artifact in artifacts:
+                assert artifact.content_hash is not None, "Artifact must have content_hash"
+                assert artifact.artifact_type is not None, "Artifact must have artifact_type"
+                assert artifact.sink_node_id is not None, "Artifact must have sink_node_id"
