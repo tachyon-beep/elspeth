@@ -23,9 +23,9 @@ def test_schema_validation_end_to_end(tmp_path, plugin_manager):
     """
     from elspeth.cli_helpers import instantiate_plugins_from_config
     from elspeth.core.config import (
-        DatasourceSettings,
+        SourceSettings,
         ElspethSettings,
-        RowPluginSettings,
+        TransformSettings,
         SinkSettings,
     )
     from elspeth.core.dag import ExecutionGraph
@@ -37,7 +37,7 @@ def test_schema_validation_end_to_end(tmp_path, plugin_manager):
     # Build config with compatible plugins
     # All plugins use dynamic schemas (fields: dynamic)
     config = ElspethSettings(
-        datasource=DatasourceSettings(
+        source=SourceSettings(
             plugin="csv",
             options={
                 "path": str(csv_path),
@@ -45,8 +45,8 @@ def test_schema_validation_end_to_end(tmp_path, plugin_manager):
                 "schema": {"fields": "dynamic"},
             },
         ),
-        row_plugins=[
-            RowPluginSettings(
+        transforms=[
+            TransformSettings(
                 plugin="passthrough",
                 options={"schema": {"fields": "dynamic"}},
             ),

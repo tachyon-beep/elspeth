@@ -1,7 +1,7 @@
 # STRESS TEST: 500 rows × 10 queries = 5000 LLM calls at pool_size 30
 # Expect to hit rate limits and observe AIMD backoff behavior
 
-datasource:
+source:
   plugin: csv
   options:
     path: examples/openrouter_multi_query_assessment/input_500.csv
@@ -17,7 +17,7 @@ datasource:
         - "cs2_history: str"
     on_validation_failure: discard
 
-row_plugins:
+transforms:
   - plugin: openrouter_multi_query_llm
     options:
       model: "anthropic/claude-3-5-sonnet"

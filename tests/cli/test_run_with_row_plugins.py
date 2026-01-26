@@ -114,7 +114,7 @@ class TestRunWithTransforms:
     def settings_with_passthrough(self, tmp_path: Path, sample_csv: Path, output_csv: Path) -> Path:
         """Config with passthrough transform."""
         config = {
-            "datasource": {
+            "source": {
                 "plugin": "csv",
                 "options": {
                     "path": str(sample_csv),
@@ -122,7 +122,7 @@ class TestRunWithTransforms:
                     "schema": DYNAMIC_SCHEMA,
                 },
             },
-            "row_plugins": [
+            "transforms": [
                 {
                     "plugin": "passthrough",
                     "type": "transform",
@@ -146,7 +146,7 @@ class TestRunWithTransforms:
     def settings_with_field_mapper(self, tmp_path: Path, sample_csv: Path, output_csv: Path) -> Path:
         """Config with field_mapper transform that renames columns."""
         config = {
-            "datasource": {
+            "source": {
                 "plugin": "csv",
                 "options": {
                     "path": str(sample_csv),
@@ -154,7 +154,7 @@ class TestRunWithTransforms:
                     "schema": DYNAMIC_SCHEMA,
                 },
             },
-            "row_plugins": [
+            "transforms": [
                 {
                     "plugin": "field_mapper",
                     "type": "transform",
@@ -181,7 +181,7 @@ class TestRunWithTransforms:
     def settings_with_chained_transforms(self, tmp_path: Path, sample_csv: Path, output_csv: Path) -> Path:
         """Config with multiple transforms chained together."""
         config = {
-            "datasource": {
+            "source": {
                 "plugin": "csv",
                 "options": {
                     "path": str(sample_csv),
@@ -189,7 +189,7 @@ class TestRunWithTransforms:
                     "schema": DYNAMIC_SCHEMA,
                 },
             },
-            "row_plugins": [
+            "transforms": [
                 {
                     "plugin": "passthrough",
                     "type": "transform",

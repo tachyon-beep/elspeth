@@ -17,7 +17,7 @@ def test_resume_command_uses_new_graph_construction():
 
     # Create minimal valid config
     config_yaml = """
-datasource:
+source:
   plugin: csv
   options:
     path: test.csv
@@ -30,7 +30,7 @@ sinks:
     options:
       path: output.csv
 
-output_sink: output
+default_sink: output
 
 landscape:
   url: "sqlite:///:memory:"

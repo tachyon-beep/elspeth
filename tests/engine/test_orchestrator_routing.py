@@ -118,9 +118,9 @@ class TestOrchestratorOutputSinkRouting:
         from unittest.mock import MagicMock
 
         from elspeth.core.config import (
-            DatasourceSettings,
             ElspethSettings,
             SinkSettings,
+            SourceSettings,
         )
         from elspeth.core.dag import ExecutionGraph
         from elspeth.core.landscape import LandscapeDB
@@ -131,7 +131,7 @@ class TestOrchestratorOutputSinkRouting:
 
         # Config with default_sink="results" (NOT "default")
         settings = ElspethSettings(
-            datasource=DatasourceSettings(
+            source=SourceSettings(
                 plugin="csv",
                 options={
                     "path": "test.csv",

@@ -230,14 +230,14 @@ class TestOrchestratorResume:
     def _create_minimal_graph(self, plugin_manager) -> ExecutionGraph:
         """Create minimal execution graph for resume testing."""
         from elspeth.core.config import (
-            DatasourceSettings,
             ElspethSettings,
             SinkSettings,
+            SourceSettings,
         )
         from elspeth.core.dag import ExecutionGraph
 
         settings = ElspethSettings(
-            datasource=DatasourceSettings(
+            source=SourceSettings(
                 plugin="null",
                 options={"schema": {"fields": "dynamic"}},
             ),

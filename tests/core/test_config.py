@@ -2221,7 +2221,7 @@ default_sink: output
 
         config_dict = {
             "landscape": {"url": "postgresql://user:mysecret@host/db"},
-            "datasource": {"plugin": "csv", "options": {}},
+            "source": {"plugin": "csv", "options": {}},
             "sinks": {"output": {"plugin": "csv_sink"}},
             "default_sink": "output",
         }
@@ -2242,7 +2242,7 @@ default_sink: output
 
         config_dict = {
             "landscape": {"url": "postgresql://user:mysecret@host/db"},
-            "datasource": {"plugin": "csv", "options": {}},
+            "source": {"plugin": "csv", "options": {}},
             "sinks": {"output": {"plugin": "csv_sink"}},
             "default_sink": "output",
         }

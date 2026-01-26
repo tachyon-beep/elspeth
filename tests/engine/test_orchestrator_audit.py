@@ -169,11 +169,11 @@ class TestOrchestratorLandscapeExport:
         """Orchestrator should export audit trail after run completes."""
         from elspeth.contracts import PluginSchema
         from elspeth.core.config import (
-            DatasourceSettings,
             ElspethSettings,
             LandscapeExportSettings,
             LandscapeSettings,
             SinkSettings,
+            SourceSettings,
         )
         from elspeth.core.dag import ExecutionGraph
         from elspeth.core.landscape import LandscapeDB
@@ -237,7 +237,7 @@ class TestOrchestratorLandscapeExport:
 
         # Build settings with export enabled
         settings = ElspethSettings(
-            datasource=DatasourceSettings(
+            source=SourceSettings(
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -305,11 +305,11 @@ class TestOrchestratorLandscapeExport:
 
         from elspeth.contracts import PluginSchema
         from elspeth.core.config import (
-            DatasourceSettings,
             ElspethSettings,
             LandscapeExportSettings,
             LandscapeSettings,
             SinkSettings,
+            SourceSettings,
         )
         from elspeth.core.dag import ExecutionGraph
         from elspeth.core.landscape import LandscapeDB
@@ -367,7 +367,7 @@ class TestOrchestratorLandscapeExport:
         export_sink = CollectSink()
 
         settings = ElspethSettings(
-            datasource=DatasourceSettings(
+            source=SourceSettings(
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -437,11 +437,11 @@ class TestOrchestratorLandscapeExport:
 
         from elspeth.contracts import PluginSchema
         from elspeth.core.config import (
-            DatasourceSettings,
             ElspethSettings,
             LandscapeExportSettings,
             LandscapeSettings,
             SinkSettings,
+            SourceSettings,
         )
         from elspeth.core.dag import ExecutionGraph
         from elspeth.core.landscape import LandscapeDB
@@ -495,7 +495,7 @@ class TestOrchestratorLandscapeExport:
         export_sink = CollectSink()
 
         settings = ElspethSettings(
-            datasource=DatasourceSettings(
+            source=SourceSettings(
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -555,10 +555,10 @@ class TestOrchestratorLandscapeExport:
         """Should not export when export.enabled is False."""
         from elspeth.contracts import PluginSchema
         from elspeth.core.config import (
-            DatasourceSettings,
             ElspethSettings,
             LandscapeSettings,
             SinkSettings,
+            SourceSettings,
         )
         from elspeth.core.dag import ExecutionGraph
         from elspeth.core.landscape import LandscapeDB
@@ -613,7 +613,7 @@ class TestOrchestratorLandscapeExport:
 
         # Export disabled (the default)
         settings = ElspethSettings(
-            datasource=DatasourceSettings(
+            source=SourceSettings(
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -735,7 +735,7 @@ class TestOrchestratorConfigRecording:
 
         # Create config WITH resolved configuration dict
         resolved_config = {
-            "datasource": {"plugin": "csv", "options": {"path": "test.csv"}},
+            "source": {"plugin": "csv", "options": {"path": "test.csv"}},
             "sinks": {"default": {"plugin": "csv"}},
             "default_sink": "default",
         }

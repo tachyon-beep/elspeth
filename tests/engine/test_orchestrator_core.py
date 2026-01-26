@@ -437,9 +437,9 @@ class TestOrchestratorAcceptsGraph:
         from unittest.mock import MagicMock
 
         from elspeth.core.config import (
-            DatasourceSettings,
             ElspethSettings,
             SinkSettings,
+            SourceSettings,
         )
         from elspeth.core.dag import ExecutionGraph
         from elspeth.core.landscape import LandscapeDB
@@ -449,7 +449,7 @@ class TestOrchestratorAcceptsGraph:
 
         # Build config and graph from settings
         settings = ElspethSettings(
-            datasource=DatasourceSettings(
+            source=SourceSettings(
                 plugin="csv",
                 options={
                     "path": "test.csv",

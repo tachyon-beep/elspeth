@@ -91,7 +91,7 @@ class TestForkGroupIDConsistency:
         sink_b = CollectSink()
 
         settings = ElspethSettings(
-            datasource={"plugin": "list_source"},
+            source={"plugin": "list_source"},
             gates=[
                 GateSettings(
                     name="fork_gate",
@@ -149,7 +149,7 @@ class TestForkGroupIDConsistency:
         sink_b = CollectSink()
 
         settings = ElspethSettings(
-            datasource={"plugin": "list_source"},
+            source={"plugin": "list_source"},
             gates=[
                 GateSettings(
                     name="fork_gate",
@@ -219,7 +219,7 @@ class TestJoinGroupIDConsistency:
         sink = CollectSink()
 
         settings = ElspethSettings(
-            datasource={"plugin": "list_source"},
+            source={"plugin": "list_source"},
             gates=[
                 GateSettings(
                     name="fork_gate",
@@ -274,7 +274,7 @@ class TestJoinGroupIDConsistency:
         sink = CollectSink()
 
         settings = ElspethSettings(
-            datasource={"plugin": "list_source"},
+            source={"plugin": "list_source"},
             gates=[
                 GateSettings(
                     name="fork_gate",
@@ -346,7 +346,7 @@ class TestJoinGroupIDConsistency:
         sink = CollectSink()
 
         settings = ElspethSettings(
-            datasource={"plugin": "list_source"},
+            source={"plugin": "list_source"},
             gates=[
                 GateSettings(
                     name="fork_gate",

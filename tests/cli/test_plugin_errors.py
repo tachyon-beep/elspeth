@@ -17,7 +17,7 @@ def test_unknown_source_plugin_error():
     runner = CliRunner()
 
     config_yaml = """
-datasource:
+source:
   plugin: nonexistent_source  # Unknown plugin
   options:
     path: test.csv
@@ -29,7 +29,7 @@ sinks:
       path: out.csv
       schema: {fields: dynamic}
 
-output_sink: output
+default_sink: output
 """
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
@@ -50,11 +50,11 @@ output_sink: output
 def test_unknown_transform_plugin_error():
     """Verify clear error for unknown transform plugin."""
     config_dict = {
-        "datasource": {
+        "source": {
             "plugin": "csv",
             "options": {"path": "test.csv", "schema": {"fields": "dynamic"}, "on_validation_failure": "discard"},
         },
-        "row_plugins": [{"plugin": "nonexistent_transform", "options": {}}],
+        "transforms": [{"plugin": "nonexistent_transform", "options": {}}],
         "sinks": {"out": {"plugin": "csv", "options": {"path": "out.csv", "schema": {"fields": "dynamic"}}}},
         "default_sink": "out",
     }
@@ -76,7 +76,7 @@ def test_plugin_initialization_error():
     runner = CliRunner()
 
     config_yaml = """
-datasource:
+source:
   plugin: csv
   options:
     # Missing required 'path' option
@@ -89,7 +89,7 @@ sinks:
       path: out.csv
       schema: {fields: dynamic}
 
-output_sink: output
+default_sink: output
 """
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
@@ -117,7 +117,7 @@ output_sink: output
 def test_schema_extraction_from_instance():
     """Verify schemas are NOT None after instantiation."""
     config_dict = {
-        "datasource": {
+        "source": {
             "plugin": "csv",
             "options": {"path": "test.csv", "schema": {"mode": "strict", "fields": ["value: float"]}, "on_validation_failure": "discard"},
         },
@@ -143,7 +143,7 @@ def test_fork_join_validation():
     runner = CliRunner()
 
     config_yaml = """
-datasource:
+source:
   plugin: csv
   options:
     path: test.csv
@@ -163,7 +163,7 @@ gates:
       - branch_high
       - branch_low
 
-row_plugins:
+transforms:
   - plugin: passthrough
     options:
       schema:
@@ -193,7 +193,7 @@ sinks:
       path: low.csv
       schema: {fields: dynamic}
 
-output_sink: output
+default_sink: output
 """
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
@@ -223,7 +223,7 @@ def test_fork_to_separate_sinks_without_coalesce():
     runner = CliRunner()
 
     config_yaml = """
-datasource:
+source:
   plugin: csv
   options:
     path: test.csv
@@ -266,7 +266,7 @@ sinks:
       path: output.csv
       schema: {fields: dynamic}
 
-output_sink: output
+default_sink: output
 """
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
@@ -309,7 +309,7 @@ def test_coalesce_compatible_branch_schemas():
     runner = CliRunner()
 
     config_yaml = """
-datasource:
+source:
   plugin: csv
   options:
     path: test.csv
@@ -329,7 +329,7 @@ gates:
       - branch_high
       - branch_low
 
-row_plugins:
+transforms:
   - plugin: passthrough
     options:
       schema:
@@ -358,7 +358,7 @@ sinks:
         fields:
           - "value: float"
 
-output_sink: output
+default_sink: output
 """
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
@@ -390,7 +390,7 @@ def test_dynamic_schema_to_specific_schema_validation():
 
     # Case 1: Dynamic source → Specific sink (should PASS - validation skipped)
     config_yaml_dynamic_to_specific = """
-datasource:
+source:
   plugin: csv
   options:
     path: test.csv
@@ -407,7 +407,7 @@ sinks:
         fields:
           - "field_a: str"  # Specific schema
 
-output_sink: output
+default_sink: output
 """
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
@@ -425,7 +425,7 @@ output_sink: output
 
     # Case 2: Specific source → Dynamic transform → Specific sink (should PASS)
     config_yaml_mixed = """
-datasource:
+source:
   plugin: csv
   options:
     path: test.csv
@@ -435,7 +435,7 @@ datasource:
         - "value: float"  # Specific
     on_validation_failure: discard
 
-row_plugins:
+transforms:
   - plugin: passthrough
     options:
       schema: {fields: dynamic}  # Dynamic transform
@@ -450,7 +450,7 @@ sinks:
         fields:
           - "value: float"  # Specific
 
-output_sink: output
+default_sink: output
 """
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:

@@ -15,7 +15,7 @@
 #   - AIMD throttling automatically backs off on rate limits
 #   - Results maintain submission order despite concurrent processing
 
-datasource:
+source:
   plugin: csv
   options:
     path: examples/openrouter_sentiment/input.csv
@@ -26,7 +26,7 @@ datasource:
         - "text: str"
     on_validation_failure: discard
 
-row_plugins:
+transforms:
   - plugin: openrouter_llm
     options:
       api_key: "${OPENROUTER_API_KEY}"

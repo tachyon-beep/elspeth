@@ -30,10 +30,10 @@ class TestOrchestratorRetry:
         """Orchestrator creates RetryManager when settings.retry is configured."""
         from elspeth.contracts import PluginSchema
         from elspeth.core.config import (
-            DatasourceSettings,
             ElspethSettings,
             RetrySettings,
             SinkSettings,
+            SourceSettings,
         )
         from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.artifacts import ArtifactDescriptor
@@ -101,7 +101,7 @@ class TestOrchestratorRetry:
 
         # Settings with retry configuration
         settings = ElspethSettings(
-            datasource=DatasourceSettings(
+            source=SourceSettings(
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -146,10 +146,10 @@ class TestOrchestratorRetry:
         """When all retry attempts fail, row should be marked FAILED."""
         from elspeth.contracts import PluginSchema
         from elspeth.core.config import (
-            DatasourceSettings,
             ElspethSettings,
             RetrySettings,
             SinkSettings,
+            SourceSettings,
         )
         from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.artifacts import ArtifactDescriptor
@@ -209,7 +209,7 @@ class TestOrchestratorRetry:
                 pass
 
         settings = ElspethSettings(
-            datasource=DatasourceSettings(
+            source=SourceSettings(
                 plugin="csv",
                 options={
                     "path": "test.csv",

@@ -251,13 +251,13 @@ class TestElspethSettingsAggregations:
     def test_elspeth_settings_aggregations_default_empty(self) -> None:
         """Aggregations defaults to empty list."""
         from elspeth.core.config import (
-            DatasourceSettings,
+            SourceSettings,
             ElspethSettings,
             SinkSettings,
         )
 
         settings = ElspethSettings(
-            datasource=DatasourceSettings(plugin="csv"),
+            source=SourceSettings(plugin="csv"),
             sinks={"output": SinkSettings(plugin="csv")},
             default_sink="output",
         )
@@ -267,14 +267,14 @@ class TestElspethSettingsAggregations:
         """Aggregations can be configured."""
         from elspeth.core.config import (
             AggregationSettings,
-            DatasourceSettings,
+            SourceSettings,
             ElspethSettings,
             SinkSettings,
             TriggerConfig,
         )
 
         settings = ElspethSettings(
-            datasource=DatasourceSettings(plugin="csv"),
+            source=SourceSettings(plugin="csv"),
             sinks={"output": SinkSettings(plugin="csv")},
             default_sink="output",
             aggregations=[
@@ -292,7 +292,7 @@ class TestElspethSettingsAggregations:
         """Aggregation names must be unique."""
         from elspeth.core.config import (
             AggregationSettings,
-            DatasourceSettings,
+            SourceSettings,
             ElspethSettings,
             SinkSettings,
             TriggerConfig,
@@ -300,7 +300,7 @@ class TestElspethSettingsAggregations:
 
         with pytest.raises(ValidationError, match=r"(?i)duplicate.*name"):
             ElspethSettings(
-                datasource=DatasourceSettings(plugin="csv"),
+                source=SourceSettings(plugin="csv"),
                 sinks={"output": SinkSettings(plugin="csv")},
                 default_sink="output",
                 aggregations=[

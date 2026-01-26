@@ -212,7 +212,7 @@ class TestIntegrationAuditFixes:
 
         # Begin a run
         run = recorder.begin_run(
-            config={"datasource": {"plugin": "csv"}},
+            config={"source": {"plugin": "csv"}},
             canonical_version="1.0.0",
         )
 

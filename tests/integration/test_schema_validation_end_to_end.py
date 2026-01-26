@@ -24,7 +24,7 @@ def test_compatible_pipeline_passes_validation():
     runner = CliRunner()
 
     config_yaml = """
-datasource:
+source:
   plugin: csv
   options:
     path: test_input.csv
@@ -34,7 +34,7 @@ datasource:
         - "value: float"
     on_validation_failure: discard
 
-row_plugins:
+transforms:
   - plugin: passthrough
     options:
       schema:
@@ -52,7 +52,7 @@ sinks:
         fields:
           - "value: float"
 
-output_sink: output
+default_sink: output
 """
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
@@ -73,7 +73,7 @@ def test_transform_chain_incompatibility_detected():
     runner = CliRunner()
 
     config_yaml = """
-datasource:
+source:
   plugin: csv
   options:
     path: test_input.csv
@@ -83,7 +83,7 @@ datasource:
         - "field_a: str"
     on_validation_failure: discard
 
-row_plugins:
+transforms:
   - plugin: passthrough
     options:
       schema:
@@ -104,7 +104,7 @@ sinks:
       path: test_output.csv
       schema: {fields: dynamic}
 
-output_sink: output
+default_sink: output
 """
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
@@ -132,7 +132,7 @@ def test_aggregation_output_incompatibility_detected():
     runner = CliRunner()
 
     config_yaml = """
-datasource:
+source:
   plugin: csv
   options:
     path: test_input.csv
@@ -164,7 +164,7 @@ sinks:
         fields:
           - "total_records: int"  # Would be incompatible, but validation is skipped
 
-output_sink: output
+default_sink: output
 """
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
@@ -186,14 +186,14 @@ def test_dynamic_schemas_skip_validation():
     runner = CliRunner()
 
     config_yaml = """
-datasource:
+source:
   plugin: csv
   options:
     path: test_input.csv
     schema: {fields: dynamic}  # Dynamic schema
     on_validation_failure: discard
 
-row_plugins:
+transforms:
   - plugin: passthrough
     options:
       schema: {fields: dynamic}
@@ -205,7 +205,7 @@ sinks:
       path: test_output.csv
       schema: {fields: dynamic}
 
-output_sink: output
+default_sink: output
 """
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
@@ -226,7 +226,7 @@ def test_aggregation_incoming_edge_uses_input_schema():
     runner = CliRunner()
 
     config_yaml = """
-datasource:
+source:
   plugin: csv
   options:
     path: test.csv
@@ -255,7 +255,7 @@ sinks:
       path: out.csv
       schema: {fields: dynamic}
 
-output_sink: output
+default_sink: output
 """
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
@@ -284,7 +284,7 @@ def test_aggregation_outgoing_edge_uses_output_schema():
     runner = CliRunner()
 
     config_yaml = """
-datasource:
+source:
   plugin: csv
   options:
     path: test.csv
@@ -317,7 +317,7 @@ sinks:
         fields:
           - "nonexistent_field: str"  # Would be incompatible, but validation is skipped
 
-output_sink: output
+default_sink: output
 """
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
@@ -357,7 +357,7 @@ def test_two_phase_validation_separates_self_and_compatibility_errors(plugin_man
 
     # PHASE 2 should fail: Well-formed schemas, incompatible connection
     good_self_bad_compat_config = {
-        "datasource": {
+        "source": {
             "plugin": "csv",
             "options": {
                 "path": "test.csv",
@@ -365,7 +365,7 @@ def test_two_phase_validation_separates_self_and_compatibility_errors(plugin_man
                 "on_validation_failure": "discard",
             },
         },
-        "row_plugins": [
+        "transforms": [
             {
                 "plugin": "passthrough",
                 "options": {

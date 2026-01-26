@@ -143,17 +143,17 @@ class TestCoalesceWiring:
 
         from elspeth.core.config import (
             CoalesceSettings,
-            DatasourceSettings,
             ElspethSettings,
             GateSettings,
             SinkSettings,
+            SourceSettings,
         )
         from elspeth.core.dag import ExecutionGraph
         from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
         settings = ElspethSettings(
-            datasource=DatasourceSettings(
+            source=SourceSettings(
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -252,10 +252,10 @@ class TestCoalesceWiring:
         from elspeth.contracts.results import RowResult
         from elspeth.core.config import (
             CoalesceSettings,
-            DatasourceSettings,
             ElspethSettings,
             GateSettings,
             SinkSettings,
+            SourceSettings,
         )
         from elspeth.core.dag import ExecutionGraph
         from elspeth.core.landscape import LandscapeDB
@@ -290,7 +290,7 @@ class TestCoalesceWiring:
 
         # Settings with coalesce (needed to enable coalesce path in orchestrator)
         settings = ElspethSettings(
-            datasource=DatasourceSettings(
+            source=SourceSettings(
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -384,17 +384,17 @@ class TestCoalesceWiring:
 
         from elspeth.core.config import (
             CoalesceSettings,
-            DatasourceSettings,
             ElspethSettings,
             GateSettings,
             SinkSettings,
+            SourceSettings,
         )
         from elspeth.core.dag import ExecutionGraph
         from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
         settings = ElspethSettings(
-            datasource=DatasourceSettings(
+            source=SourceSettings(
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -483,10 +483,10 @@ class TestCoalesceWiring:
         from elspeth.contracts import TokenInfo
         from elspeth.core.config import (
             CoalesceSettings,
-            DatasourceSettings,
             ElspethSettings,
             GateSettings,
             SinkSettings,
+            SourceSettings,
         )
         from elspeth.core.dag import ExecutionGraph
         from elspeth.core.landscape import LandscapeDB
@@ -495,7 +495,7 @@ class TestCoalesceWiring:
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
         settings = ElspethSettings(
-            datasource=DatasourceSettings(
+            source=SourceSettings(
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -617,10 +617,10 @@ class TestCoalesceWiring:
 
         from elspeth.core.config import (
             CoalesceSettings,
-            DatasourceSettings,
             ElspethSettings,
             GateSettings,
             SinkSettings,
+            SourceSettings,
         )
         from elspeth.core.dag import ExecutionGraph
         from elspeth.core.landscape import LandscapeDB
@@ -628,7 +628,7 @@ class TestCoalesceWiring:
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
         settings = ElspethSettings(
-            datasource=DatasourceSettings(
+            source=SourceSettings(
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -732,18 +732,18 @@ class TestCoalesceWiring:
 
         from elspeth.core.config import (
             CoalesceSettings,
-            DatasourceSettings,
             ElspethSettings,
             GateSettings,
-            RowPluginSettings,
             SinkSettings,
+            SourceSettings,
+            TransformSettings,
         )
         from elspeth.core.dag import ExecutionGraph
         from elspeth.core.landscape import LandscapeDB
         from elspeth.engine.orchestrator import Orchestrator, PipelineConfig
 
         settings = ElspethSettings(
-            datasource=DatasourceSettings(
+            source=SourceSettings(
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -753,9 +753,9 @@ class TestCoalesceWiring:
             ),
             sinks={"output": SinkSettings(plugin="csv", options={"path": "out.csv", "schema": {"fields": "dynamic"}})},
             default_sink="output",
-            row_plugins=[
-                RowPluginSettings(plugin="passthrough", options={"schema": {"fields": "dynamic"}}),  # Step 0
-                RowPluginSettings(plugin="passthrough", options={"schema": {"fields": "dynamic"}}),  # Step 1
+            transforms=[
+                TransformSettings(plugin="passthrough", options={"schema": {"fields": "dynamic"}}),  # Step 0
+                TransformSettings(plugin="passthrough", options={"schema": {"fields": "dynamic"}}),  # Step 1
             ],
             gates=[
                 GateSettings(

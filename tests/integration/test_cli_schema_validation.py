@@ -13,7 +13,7 @@ def test_cli_run_detects_schema_incompatibility():
     runner = CliRunner()
 
     config_yaml = """
-datasource:
+source:
   plugin: csv
   options:
     path: test_input.csv
@@ -22,7 +22,7 @@ datasource:
       fields:
         field_a: {type: str}
 
-row_plugins:
+transforms:
   - plugin: passthrough
     options:
       schema:
@@ -39,7 +39,7 @@ sinks:
         fields:
           field_b: {type: int}  # INCOMPATIBLE
 
-output_sink: output
+default_sink: output
 """
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
@@ -62,7 +62,7 @@ def test_cli_validate_detects_schema_incompatibility():
     runner = CliRunner()
 
     config_yaml = """
-datasource:
+source:
   plugin: csv
   options:
     path: test_input.csv
@@ -71,7 +71,7 @@ datasource:
       fields:
         field_a: {type: str}
 
-row_plugins:
+transforms:
   - plugin: passthrough
     options:
       schema:
@@ -88,7 +88,7 @@ sinks:
         fields:
           field_b: {type: int}  # INCOMPATIBLE
 
-output_sink: output
+default_sink: output
 """
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:

@@ -50,7 +50,7 @@ class TestDeaggregationPipeline:
         output_dir.mkdir()
 
         config = {
-            "datasource": {
+            "source": {
                 "plugin": "json",
                 "options": {
                     "path": str(input_data),
@@ -61,7 +61,7 @@ class TestDeaggregationPipeline:
                     "on_validation_failure": "discard",
                 },
             },
-            "row_plugins": [
+            "transforms": [
                 {
                     "plugin": "json_explode",
                     "options": {
@@ -181,7 +181,7 @@ class TestDeaggregationAuditTrail:
 
         # Build config programmatically for test
         config_dict = {
-            "datasource": {
+            "source": {
                 "plugin": "json",
                 "options": {
                     "path": str(input_data),
@@ -192,7 +192,7 @@ class TestDeaggregationAuditTrail:
                     "on_validation_failure": "discard",
                 },
             },
-            "row_plugins": [
+            "transforms": [
                 {
                     "plugin": "json_explode",
                     "options": {
@@ -350,7 +350,7 @@ class TestSourceSchemaValidation:
         output_dir.mkdir()
 
         config = {
-            "datasource": {
+            "source": {
                 "plugin": "json",
                 "options": {
                     "path": str(valid_and_invalid_input),
@@ -362,7 +362,7 @@ class TestSourceSchemaValidation:
                     "on_validation_failure": "discard",
                 },
             },
-            "row_plugins": [
+            "transforms": [
                 {
                     "plugin": "json_explode",
                     "options": {

@@ -2643,7 +2643,7 @@ class TestRetryIntegration:
         # ElspethSettings requires datasource, sinks, output_sink but
         # those are not used when orchestrator.run() already has PipelineConfig
         settings = ElspethSettings(
-            datasource={"plugin": "memory"},
+            source={"plugin": "memory"},
             sinks={"default": {"plugin": "memory"}},
             default_sink="default",
             retry={
@@ -2807,7 +2807,7 @@ class TestRetryIntegration:
         # ElspethSettings requires datasource, sinks, output_sink but
         # those are not used when orchestrator.run() already has PipelineConfig
         settings = ElspethSettings(
-            datasource={"plugin": "memory"},
+            source={"plugin": "memory"},
             sinks={"default": {"plugin": "memory"}},
             default_sink="default",
             retry={

@@ -401,9 +401,9 @@ class TestConfigGateIntegration:
         """
         from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.core.config import (
-            DatasourceSettings,
             ElspethSettings,
             SinkSettings,
+            SourceSettings,
         )
         from elspeth.core.config import (
             GateSettings as GateSettingsConfig,
@@ -423,7 +423,7 @@ class TestConfigGateIntegration:
 
         # Build settings for graph construction
         settings = ElspethSettings(
-            datasource=DatasourceSettings(
+            source=SourceSettings(
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -500,9 +500,9 @@ class TestConfigGateIntegration:
         """
         from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.core.config import (
-            DatasourceSettings,
             ElspethSettings,
             SinkSettings,
+            SourceSettings,
         )
         from elspeth.core.config import (
             GateSettings as GateSettingsConfig,
@@ -525,7 +525,7 @@ class TestConfigGateIntegration:
         # NOTE: Route keys must be strings because the executor converts
         # non-bool/non-string results to strings via str()
         settings = ElspethSettings(
-            datasource=DatasourceSettings(
+            source=SourceSettings(
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -657,15 +657,15 @@ class TestConfigGateFromSettings:
         """ExecutionGraph.from_plugin_instances() includes config gates."""
         from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.core.config import (
-            DatasourceSettings,
             ElspethSettings,
             GateSettings,
             SinkSettings,
+            SourceSettings,
         )
         from elspeth.core.dag import ExecutionGraph
 
         settings = ElspethSettings(
-            datasource=DatasourceSettings(
+            source=SourceSettings(
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -716,15 +716,15 @@ class TestConfigGateFromSettings:
         """ExecutionGraph.from_plugin_instances() validates gate route targets."""
         from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.core.config import (
-            DatasourceSettings,
             ElspethSettings,
             GateSettings,
             SinkSettings,
+            SourceSettings,
         )
         from elspeth.core.dag import ExecutionGraph, GraphValidationError
 
         settings = ElspethSettings(
-            datasource=DatasourceSettings(
+            source=SourceSettings(
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -760,16 +760,16 @@ class TestConfigGateFromSettings:
         """Config gates come after plugin transforms in topological order."""
         from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.core.config import (
-            DatasourceSettings,
             ElspethSettings,
             GateSettings,
-            RowPluginSettings,
             SinkSettings,
+            SourceSettings,
+            TransformSettings,
         )
         from elspeth.core.dag import ExecutionGraph
 
         settings = ElspethSettings(
-            datasource=DatasourceSettings(
+            source=SourceSettings(
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -779,8 +779,8 @@ class TestConfigGateFromSettings:
             ),
             sinks={"output": SinkSettings(plugin="csv", options={"path": "output.csv", "schema": {"fields": "dynamic"}})},
             default_sink="output",
-            row_plugins=[
-                RowPluginSettings(plugin="passthrough", options={"schema": {"fields": "dynamic"}}),
+            transforms=[
+                TransformSettings(plugin="passthrough", options={"schema": {"fields": "dynamic"}}),
             ],
             gates=[
                 GateSettings(

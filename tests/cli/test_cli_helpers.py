@@ -12,7 +12,7 @@ from elspeth.plugins.base import BaseSink, BaseSource, BaseTransform
 def test_instantiate_plugins_from_config(tmp_path: Path):
     """Verify helper instantiates all plugins from config."""
     config_yaml = """
-datasource:
+source:
   plugin: csv
   options:
     path: test.csv
@@ -20,7 +20,7 @@ datasource:
       fields: dynamic
     on_validation_failure: discard
 
-row_plugins:
+transforms:
   - plugin: passthrough
     options:
       schema:
@@ -34,7 +34,7 @@ sinks:
       schema:
         fields: dynamic
 
-output_sink: output
+default_sink: output
 """
     config_file = tmp_path / "settings.yaml"
     config_file.write_text(config_yaml)
@@ -82,7 +82,7 @@ def test_instantiate_plugins_raises_on_invalid_plugin():
     from elspeth.core.config import ElspethSettings
 
     config_dict = {
-        "datasource": {"plugin": "nonexistent", "options": {}},
+        "source": {"plugin": "nonexistent", "options": {}},
         "sinks": {"out": {"plugin": "csv", "options": {"path": "o.csv"}}},
         "default_sink": "out",
     }

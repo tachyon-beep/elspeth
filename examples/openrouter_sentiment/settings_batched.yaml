@@ -28,7 +28,7 @@
 # Run with:
 #   uv run elspeth run -s examples/openrouter_sentiment/settings_batched.yaml --execute
 
-datasource:
+source:
   plugin: csv
   options:
     path: examples/openrouter_sentiment/input.csv

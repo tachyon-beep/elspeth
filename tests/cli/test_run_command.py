@@ -104,7 +104,7 @@ class TestRunCommand:
         output_file = tmp_path / "output.json"
         landscape_db = tmp_path / "landscape.db"
         settings = {
-            "datasource": {
+            "source": {
                 "plugin": "csv",
                 "options": {
                     "path": str(sample_data),
@@ -173,7 +173,7 @@ class TestRunCommandWithNewConfig:
         """Run command accepts README-style config."""
         config_file = tmp_path / "settings.yaml"
         config_file.write_text("""
-datasource:
+source:
   plugin: csv
   options:
     path: input.csv
@@ -189,7 +189,7 @@ sinks:
       schema:
         fields: dynamic
 
-output_sink: results
+default_sink: results
 """)
 
         result = runner.invoke(app, ["run", "-s", str(config_file), "--dry-run"])
@@ -215,14 +215,14 @@ source:
         """Run shows Pydantic validation errors clearly."""
         config_file = tmp_path / "settings.yaml"
         config_file.write_text("""
-datasource:
+source:
   plugin: csv
 
 sinks:
   output:
     plugin: csv
 
-output_sink: nonexistent
+default_sink: nonexistent
 
 concurrency:
   max_workers: -5
@@ -241,22 +241,22 @@ concurrency:
         """Run shows output_sink validation error when it references nonexistent sink."""
         config_file = tmp_path / "settings.yaml"
         config_file.write_text("""
-datasource:
+source:
   plugin: csv
 
 sinks:
   output:
     plugin: csv
 
-output_sink: nonexistent
+default_sink: nonexistent
 """)
 
         result = runner.invoke(app, ["run", "-s", str(config_file), "--dry-run"])
 
         assert result.exit_code != 0
-        # Should show helpful error about output_sink
+        # Should show helpful error about default_sink
         output = result.stdout + (result.stderr or "")
-        assert "nonexistent" in output.lower() or "output_sink" in output.lower()
+        assert "nonexistent" in output.lower() or "default_sink" in output.lower()
 
 
 class TestRunCommandGraphValidation:
@@ -270,7 +270,7 @@ class TestRunCommandGraphValidation:
 
         config_file = tmp_path / "settings.yaml"
         config_file.write_text(f"""
-datasource:
+source:
   plugin: csv
   options:
     path: {csv_file}
@@ -293,7 +293,7 @@ gates:
       "true": missing_sink
       "false": continue
 
-output_sink: output
+default_sink: output
 """)
 
         result = runner.invoke(app, ["run", "-s", str(config_file), "--execute"])
@@ -311,7 +311,7 @@ output_sink: output
 
         config_file = tmp_path / "settings.yaml"
         config_file.write_text(f"""
-datasource:
+source:
   plugin: csv
   options:
     path: {csv_file}
@@ -340,7 +340,7 @@ gates:
       "true": flagged
       "false": continue
 
-output_sink: results
+default_sink: results
 """)
 
         result = runner.invoke(app, ["run", "-s", str(config_file), "--dry-run", "-v"])
@@ -372,7 +372,7 @@ class TestRunCommandResourceCleanup:
         landscape_db = tmp_path / "landscape.db"
 
         settings = {
-            "datasource": {
+            "source": {
                 "plugin": "csv",
                 "options": {
                     "path": str(csv_file),
@@ -429,7 +429,7 @@ class TestRunCommandResourceCleanup:
         landscape_db = tmp_path / "landscape.db"
 
         settings = {
-            "datasource": {
+            "source": {
                 "plugin": "csv",
                 "options": {
                     "path": str(tmp_path / "nonexistent.csv"),  # Will fail
@@ -496,7 +496,7 @@ class TestRunCommandProgress:
         output_file = tmp_path / "progress_output.json"
         landscape_db = tmp_path / "landscape.db"
         settings = {
-            "datasource": {
+            "source": {
                 "plugin": "csv",
                 "options": {
                     "path": str(multi_row_data),
@@ -565,7 +565,7 @@ class TestRunCommandGraphReuse:
 
         settings_file = tmp_path / "settings.yaml"
         settings_file.write_text(f"""
-datasource:
+source:
   plugin: csv
   options:
     path: {csv_file}
@@ -581,7 +581,7 @@ sinks:
       schema:
         fields: dynamic
 
-output_sink: default
+default_sink: default
 landscape:
   url: sqlite:///{landscape_db}
 """)
@@ -634,7 +634,7 @@ landscape:
 
         settings_file = tmp_path / "settings.yaml"
         settings_file.write_text(f"""
-datasource:
+source:
   plugin: csv
   options:
     path: {csv_file}
@@ -650,7 +650,7 @@ sinks:
       schema:
         fields: dynamic
 
-output_sink: default
+default_sink: default
 landscape:
   url: sqlite:///{landscape_db}
 """)

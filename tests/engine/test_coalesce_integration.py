@@ -20,10 +20,10 @@ import pytest
 from elspeth.contracts import RoutingMode, SourceRow
 from elspeth.core.config import (
     CoalesceSettings,
-    DatasourceSettings,
     ElspethSettings,
     GateSettings,
     SinkSettings,
+    SourceSettings,
 )
 from elspeth.core.dag import ExecutionGraph
 from elspeth.core.landscape import LandscapeDB
@@ -261,7 +261,7 @@ class TestForkCoalescePipeline:
     ) -> None:
         """Complete fork/join pipeline should produce merged output."""
         settings = ElspethSettings(
-            datasource=DatasourceSettings(
+            source=SourceSettings(
                 plugin="list_source",
                 options={},
             ),
@@ -324,7 +324,7 @@ class TestForkCoalescePipeline:
     ) -> None:
         """Branches not in coalesce should still reach output sink."""
         settings = ElspethSettings(
-            datasource=DatasourceSettings(
+            source=SourceSettings(
                 plugin="list_source",
                 options={},
             ),
@@ -409,7 +409,7 @@ class TestForkCoalescePipeline:
                 )
 
         settings = ElspethSettings(
-            datasource=DatasourceSettings(
+            source=SourceSettings(
                 plugin="list_source",
                 options={},
             ),
@@ -472,7 +472,7 @@ class TestForkCoalescePipeline:
     ) -> None:
         """Multiple source rows each fork and coalesce independently."""
         settings = ElspethSettings(
-            datasource=DatasourceSettings(
+            source=SourceSettings(
                 plugin="list_source",
                 options={},
             ),
@@ -543,7 +543,7 @@ class TestCoalesceAuditTrail:
     ) -> None:
         """Coalesce should record node states for consumed tokens."""
         settings = ElspethSettings(
-            datasource=DatasourceSettings(
+            source=SourceSettings(
                 plugin="list_source",
                 options={},
             ),

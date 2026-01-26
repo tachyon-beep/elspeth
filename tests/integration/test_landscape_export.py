@@ -42,7 +42,7 @@ class TestLandscapeExport:
         db_path = tmp_path / "audit.db"
 
         config = {
-            "datasource": {
+            "source": {
                 "plugin": "csv",
                 "options": {
                     "path": str(input_csv),
@@ -157,7 +157,7 @@ class TestLandscapeExport:
         db_path = tmp_path / "audit.db"
 
         config = {
-            "datasource": {
+            "source": {
                 "plugin": "csv",
                 "options": {
                     "path": str(input_csv),
@@ -305,7 +305,7 @@ class TestSignedExportDeterminism:
         db_path = tmp_path / "audit.db"
 
         config = {
-            "datasource": {
+            "source": {
                 "plugin": "csv",
                 "options": {
                     "path": str(input_csv),
@@ -377,7 +377,7 @@ class TestSignedExportDeterminism:
             db_path = tmp_path / f"audit_{i}.db"
 
             config = {
-                "datasource": {
+                "source": {
                     "plugin": "csv",
                     "options": {
                         "path": str(input_csv),

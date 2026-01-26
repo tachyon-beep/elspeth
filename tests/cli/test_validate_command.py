@@ -18,7 +18,7 @@ class TestValidateCommand:
     def valid_config(self, tmp_path: Path) -> Path:
         """Create a valid pipeline config using new schema."""
         config = {
-            "datasource": {
+            "source": {
                 "plugin": "csv",
                 "options": {
                     "path": "/data/input.csv",
@@ -69,9 +69,9 @@ class TestValidateCommand:
 
     @pytest.fixture
     def invalid_output_sink_config(self, tmp_path: Path) -> Path:
-        """Create config with invalid output_sink reference."""
+        """Create config with invalid default_sink reference."""
         config = {
-            "datasource": {
+            "source": {
                 "plugin": "csv",
                 "options": {
                     "path": "/data/input.csv",
@@ -119,16 +119,16 @@ class TestValidateCommand:
         assert result.exit_code != 0 or result.exception is not None
 
     def test_validate_missing_datasource(self, missing_datasource_config: Path) -> None:
-        """Missing datasource shows error."""
+        """Missing source shows error."""
         result = runner.invoke(app, ["validate", "-s", str(missing_datasource_config)])
         assert result.exit_code != 0
-        assert "datasource" in result.output.lower()
+        assert "source" in result.output.lower()
 
     def test_validate_invalid_output_sink(self, invalid_output_sink_config: Path) -> None:
-        """Invalid output_sink reference shows error."""
+        """Invalid default_sink reference shows error."""
         result = runner.invoke(app, ["validate", "-s", str(invalid_output_sink_config)])
         assert result.exit_code != 0
-        assert "nonexistent" in result.output.lower() or "output_sink" in result.output.lower()
+        assert "nonexistent" in result.output.lower() or "default_sink" in result.output.lower()
 
 
 class TestValidateCommandGraphValidation:
@@ -138,7 +138,7 @@ class TestValidateCommandGraphValidation:
         """Validate command catches gate routing to nonexistent sink."""
         config_file = tmp_path / "settings.yaml"
         config_file.write_text("""
-datasource:
+source:
   plugin: csv
   options:
     path: /data/input.csv
@@ -161,7 +161,7 @@ gates:
       "true": nonexistent_sink
       "false": continue
 
-output_sink: output
+default_sink: output
 """)
 
         result = runner.invoke(app, ["validate", "-s", str(config_file)])
@@ -174,7 +174,7 @@ output_sink: output
         """Validate command shows graph structure on success."""
         config_file = tmp_path / "settings.yaml"
         config_file.write_text("""
-datasource:
+source:
   plugin: csv
   options:
     path: /data/input.csv
@@ -203,7 +203,7 @@ gates:
       "true": flagged
       "false": continue
 
-output_sink: results
+default_sink: results
 """)
 
         result = runner.invoke(app, ["validate", "-s", str(config_file)])

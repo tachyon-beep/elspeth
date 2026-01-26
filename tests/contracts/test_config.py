@@ -20,18 +20,18 @@ class TestConfigReexports:
         """Config types are Pydantic (trust boundary validation)."""
         from pydantic import BaseModel
 
-        from elspeth.contracts import DatasourceSettings, ElspethSettings
+        from elspeth.contracts import ElspethSettings, SourceSettings
 
         assert issubclass(ElspethSettings, BaseModel)
-        assert issubclass(DatasourceSettings, BaseModel)
+        assert issubclass(SourceSettings, BaseModel)
 
     def test_settings_are_frozen(self) -> None:
         """Config is immutable after construction."""
         from pydantic import ValidationError
 
-        from elspeth.contracts import DatasourceSettings
+        from elspeth.contracts import SourceSettings
 
-        settings = DatasourceSettings(plugin="csv_local")
+        settings = SourceSettings(plugin="csv_local")
 
         with pytest.raises(ValidationError):
             settings.plugin = "other"  # type: ignore[misc]

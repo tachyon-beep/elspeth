@@ -90,6 +90,7 @@ TRANSFORM_CONFIGS: dict[str, dict[str, Any] | None] = {
     "azure_batch_llm": None,
     "azure_multi_query_llm": None,
     "openrouter_llm": None,
+    "openrouter_multi_query_llm": None,
 }
 
 
@@ -264,6 +265,7 @@ class TestTransformSchemaContracts:
             ("azure_batch_llm", "Requires Azure OpenAI deployment and API key"),
             ("azure_multi_query_llm", "Requires Azure OpenAI deployment and API key"),
             ("openrouter_llm", "Requires OpenRouter API key"),
+            ("openrouter_multi_query_llm", "Requires OpenRouter API key"),
         ],
     )
     def test_transform_requires_credentials_skip(self, manager: PluginManager, transform_name: str, reason: str) -> None:

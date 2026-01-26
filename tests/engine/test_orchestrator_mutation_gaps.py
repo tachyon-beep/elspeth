@@ -455,10 +455,10 @@ class TestNodeTypeMetadata:
         """Config gates should be recorded as DETERMINISTIC in audit trail."""
         from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.core.config import (
-            DatasourceSettings,
             ElspethSettings,
             GateSettings,
             SinkSettings,
+            SourceSettings,
         )
         from elspeth.core.dag import ExecutionGraph
         from elspeth.core.landscape import LandscapeDB
@@ -469,7 +469,7 @@ class TestNodeTypeMetadata:
 
         # Create settings with a config gate
         settings = ElspethSettings(
-            datasource=DatasourceSettings(
+            source=SourceSettings(
                 plugin="null",
                 options={"schema": {"fields": "dynamic"}},
             ),

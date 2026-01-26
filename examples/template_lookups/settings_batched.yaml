@@ -31,7 +31,7 @@
 landscape:
   url: sqlite:///examples/template_lookups/runs/audit_batched.db
 
-datasource:
+source:
   plugin: csv
   options:
     path: examples/template_lookups/input.csv

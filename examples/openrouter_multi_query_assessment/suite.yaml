@@ -12,7 +12,7 @@
 # Run with:
 #   uv run elspeth run -s examples/openrouter_multi_query_assessment/suite.yaml --execute
 
-datasource:
+source:
   plugin: csv
   options:
     path: examples/openrouter_multi_query_assessment/input.csv
@@ -28,7 +28,7 @@ datasource:
         - "cs2_history: str"
     on_validation_failure: discard
 
-row_plugins:
+transforms:
   - plugin: openrouter_multi_query_llm
     options:
       # OpenRouter model - choose from 100+ providers

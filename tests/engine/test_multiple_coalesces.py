@@ -9,11 +9,11 @@ from __future__ import annotations
 from elspeth.cli_helpers import instantiate_plugins_from_config
 from elspeth.core.config import (
     CoalesceSettings,
-    DatasourceSettings,
     ElspethSettings,
     GateSettings,
-    RowPluginSettings,
     SinkSettings,
+    SourceSettings,
+    TransformSettings,
 )
 from elspeth.core.dag import ExecutionGraph
 
@@ -34,12 +34,12 @@ class TestMultipleCoalescePoints:
         3. Production path (from_plugin_instances) exercises correct mappings
         """
         settings = ElspethSettings(
-            datasource=DatasourceSettings(
+            source=SourceSettings(
                 plugin="null",
                 options={"count": 2},
             ),
             transforms=[
-                RowPluginSettings(
+                TransformSettings(
                     plugin="passthrough",
                     options={"schema": {"fields": "dynamic"}},
                 ),

@@ -20,7 +20,7 @@ def test_plugin_instantiation_performance():
     """Measure plugin instantiation time."""
 
     config_yaml = """
-datasource:
+source:
   plugin: csv
   options:
     path: test.csv
@@ -28,7 +28,7 @@ datasource:
       fields: dynamic
     on_validation_failure: discard
 
-row_plugins:
+transforms:
   - plugin: passthrough
     options:
       schema:
@@ -50,7 +50,7 @@ sinks:
       schema:
         fields: dynamic
 
-output_sink: output
+default_sink: output
 """
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
@@ -79,7 +79,7 @@ def test_graph_construction_performance():
     """Measure graph construction and validation time."""
 
     config_yaml = """
-datasource:
+source:
   plugin: csv
   options:
     path: test.csv
@@ -87,7 +87,7 @@ datasource:
       fields: dynamic
     on_validation_failure: discard
 
-row_plugins:
+transforms:
   - plugin: passthrough
     options:
       schema:
@@ -101,7 +101,7 @@ sinks:
       schema:
         fields: dynamic
 
-output_sink: output
+default_sink: output
 """
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
@@ -138,7 +138,7 @@ def test_end_to_end_validation_performance():
     """Measure end-to-end validation performance."""
 
     config_yaml = """
-datasource:
+source:
   plugin: csv
   options:
     path: test.csv
@@ -146,7 +146,7 @@ datasource:
       fields: dynamic
     on_validation_failure: discard
 
-row_plugins:
+transforms:
   - plugin: passthrough
     options:
       schema:
@@ -164,7 +164,7 @@ sinks:
       schema:
         fields: dynamic
 
-output_sink: output
+default_sink: output
 """
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:

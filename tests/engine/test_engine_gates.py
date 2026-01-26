@@ -579,9 +579,9 @@ class TestRouteLabelResolution:
     def test_route_labels_resolve_to_sinks(self, plugin_manager) -> None:
         """Verify route labels map to correct sinks."""
         from elspeth.core.config import (
-            DatasourceSettings,
             ElspethSettings,
             SinkSettings,
+            SourceSettings,
         )
         from elspeth.core.config import (
             GateSettings as GateSettingsConfig,
@@ -589,7 +589,7 @@ class TestRouteLabelResolution:
         from elspeth.core.dag import ExecutionGraph
 
         settings = ElspethSettings(
-            datasource=DatasourceSettings(
+            source=SourceSettings(
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -643,9 +643,9 @@ class TestRouteLabelResolution:
         P1 Fix: Added audit trail verification for node_states, token_outcomes.
         """
         from elspeth.core.config import (
-            DatasourceSettings,
             ElspethSettings,
             SinkSettings,
+            SourceSettings,
         )
         from elspeth.core.config import (
             GateSettings as GateSettingsConfig,
@@ -658,7 +658,7 @@ class TestRouteLabelResolution:
 
         # Build settings with ternary condition that returns category directly
         settings = ElspethSettings(
-            datasource=DatasourceSettings(
+            source=SourceSettings(
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -781,9 +781,9 @@ class TestForkCreatesChildTokens:
     def test_fork_gate_in_graph(self, plugin_manager) -> None:
         """Verify fork gate is correctly represented in graph."""
         from elspeth.core.config import (
-            DatasourceSettings,
             ElspethSettings,
             SinkSettings,
+            SourceSettings,
         )
         from elspeth.core.config import (
             GateSettings as GateSettingsConfig,
@@ -791,7 +791,7 @@ class TestForkCreatesChildTokens:
         from elspeth.core.dag import ExecutionGraph
 
         settings = ElspethSettings(
-            datasource=DatasourceSettings(
+            source=SourceSettings(
                 plugin="csv",
                 options={
                     "path": "test.csv",
@@ -845,9 +845,9 @@ class TestForkCreatesChildTokens:
         P1 Fix: Added audit trail verification including token_parents for lineage.
         """
         from elspeth.core.config import (
-            DatasourceSettings,
             ElspethSettings,
             SinkSettings,
+            SourceSettings,
         )
         from elspeth.core.config import (
             GateSettings as GateSettingsConfig,
@@ -864,7 +864,7 @@ class TestForkCreatesChildTokens:
 
         # Config with fork gate and branch-named sinks
         settings = ElspethSettings(
-            datasource=DatasourceSettings(plugin="null"),
+            source=SourceSettings(plugin="null"),
             sinks={
                 "path_a": SinkSettings(plugin="csv", options={"path": "path_a.csv", "schema": {"fields": "dynamic"}}),
                 "path_b": SinkSettings(plugin="csv", options={"path": "path_b.csv", "schema": {"fields": "dynamic"}}),
@@ -931,9 +931,9 @@ class TestForkCreatesChildTokens:
         P1 Fix: Added audit trail verification including token_parents for lineage.
         """
         from elspeth.core.config import (
-            DatasourceSettings,
             ElspethSettings,
             SinkSettings,
+            SourceSettings,
         )
         from elspeth.core.config import (
             GateSettings as GateSettingsConfig,
@@ -950,7 +950,7 @@ class TestForkCreatesChildTokens:
         archive_sink = CollectSink()
 
         settings = ElspethSettings(
-            datasource=DatasourceSettings(plugin="null"),
+            source=SourceSettings(plugin="null"),
             sinks={
                 "analysis": SinkSettings(plugin="csv", options={"path": "analysis.csv", "schema": {"fields": "dynamic"}}),
                 "archive": SinkSettings(plugin="csv", options={"path": "archive.csv", "schema": {"fields": "dynamic"}}),
@@ -1766,9 +1766,9 @@ class TestErrorHandling:
         """Route to non-existent sink caught when building graph."""
         from elspeth.cli_helpers import instantiate_plugins_from_config
         from elspeth.core.config import (
-            DatasourceSettings,
             ElspethSettings,
             SinkSettings,
+            SourceSettings,
         )
         from elspeth.core.config import (
             GateSettings as GateSettingsConfig,
@@ -1776,7 +1776,7 @@ class TestErrorHandling:
         from elspeth.core.dag import ExecutionGraph, GraphValidationError
 
         settings = ElspethSettings(
-            datasource=DatasourceSettings(
+            source=SourceSettings(
                 plugin="csv",
                 options={
                     "path": "test.csv",

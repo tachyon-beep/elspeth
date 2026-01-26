@@ -142,7 +142,7 @@ class TestRunCommandExecutesTransforms:
         # Config with a passthrough transform
         config_file = tmp_path / "settings.yaml"
         config_file.write_text(f"""
-datasource:
+source:
   plugin: csv
   options:
     path: "{input_file}"
@@ -158,13 +158,13 @@ sinks:
       schema:
         fields: dynamic
 
-row_plugins:
+transforms:
   - plugin: passthrough
     options:
       schema:
         fields: dynamic
 
-output_sink: results
+default_sink: results
 
 landscape:
   enabled: true
@@ -199,7 +199,7 @@ landscape:
         # Config with field_mapper that renames 'old_name' to 'new_name'
         config_file = tmp_path / "settings.yaml"
         config_file.write_text(f"""
-datasource:
+source:
   plugin: csv
   options:
     path: "{input_file}"
@@ -215,7 +215,7 @@ sinks:
       schema:
         fields: dynamic
 
-row_plugins:
+transforms:
   - plugin: field_mapper
     options:
       schema:
@@ -223,7 +223,7 @@ row_plugins:
       mapping:
         old_name: new_name
 
-output_sink: results
+default_sink: results
 
 landscape:
   enabled: true
@@ -486,7 +486,7 @@ class TestPurgeCommand:
         custom_payload_path = tmp_path / "custom_payloads"
         custom_payload_path.mkdir()
         settings = {
-            "datasource": {"plugin": "csv", "path": "test.csv"},
+            "source": {"plugin": "csv", "path": "test.csv"},
             "sinks": {"output": {"plugin": "csv", "path": "output.csv"}},
             "default_sink": "output",
             "landscape": {"url": f"sqlite:///{tmp_path / 'landscape.db'}"},
@@ -525,7 +525,7 @@ class TestPurgeCommand:
 
         # Create settings.yaml with unsupported backend
         settings = {
-            "datasource": {"plugin": "csv", "path": "test.csv"},
+            "source": {"plugin": "csv", "path": "test.csv"},
             "sinks": {"output": {"plugin": "csv", "path": "output.csv"}},
             "default_sink": "output",
             "landscape": {"url": f"sqlite:///{tmp_path / 'landscape.db'}"},
@@ -597,7 +597,7 @@ class TestResumeCommand:
         settings_file.write_text(f"""
 landscape:
   url: "sqlite:///{tmp_path / "test.db"}"
-datasource:
+source:
   plugin: csv
   options:
     path: dummy.csv
@@ -606,6 +606,9 @@ datasource:
       fields: dynamic
 transforms:
   - plugin: passthrough
+    options:
+      schema:
+        fields: dynamic
 sinks:
   output:
     plugin: csv
@@ -613,7 +616,7 @@ sinks:
       path: output.csv
       schema:
         fields: dynamic
-output_sink: output
+default_sink: output
 """)
 
         # Set up database with a completed run
@@ -665,7 +668,7 @@ output_sink: output
         settings_file.write_text(f"""
 landscape:
   url: "sqlite:///{tmp_path / "test.db"}"
-datasource:
+source:
   plugin: csv
   options:
     path: dummy.csv
@@ -674,6 +677,9 @@ datasource:
       fields: dynamic
 transforms:
   - plugin: passthrough
+    options:
+      schema:
+        fields: dynamic
 sinks:
   output:
     plugin: csv
@@ -681,7 +687,7 @@ sinks:
       path: output.csv
       schema:
         fields: dynamic
-output_sink: output
+default_sink: output
 """)
 
         # Set up database with a running run
@@ -782,7 +788,7 @@ output_sink: output
         settings_file.write_text(f"""
 landscape:
   url: "sqlite:///{tmp_path / "test.db"}"
-datasource:
+source:
   plugin: csv
   options:
     path: dummy.csv
@@ -791,6 +797,9 @@ datasource:
       fields: dynamic
 transforms:
   - plugin: passthrough
+    options:
+      schema:
+        fields: dynamic
 sinks:
   output:
     plugin: csv
@@ -798,7 +807,7 @@ sinks:
       path: output.csv
       schema:
         fields: dynamic
-output_sink: output
+default_sink: output
 """)
 
         # Build graph to get actual node IDs (use ORIGINAL source for validation)
@@ -952,7 +961,7 @@ class TestTildeExpansion:
 
         # Create a settings file
         settings_content = """
-datasource:
+source:
   plugin: csv
   options:
     path: input.csv
@@ -961,7 +970,7 @@ sinks:
     plugin: json
     options:
       path: output.json
-output_sink: default
+default_sink: default
 """
         settings_file = tmp_path / "settings.yaml"
         settings_file.write_text(settings_content)
@@ -987,7 +996,7 @@ output_sink: default
         from elspeth.cli import app
 
         settings_content = """
-datasource:
+source:
   plugin: csv
   options:
     path: input.csv
@@ -996,7 +1005,7 @@ sinks:
     plugin: json
     options:
       path: output.json
-output_sink: default
+default_sink: default
 """
         settings_file = tmp_path / "settings.yaml"
         settings_file.write_text(settings_content)
