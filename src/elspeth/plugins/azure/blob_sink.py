@@ -234,6 +234,26 @@ class AzureBlobSink(BaseSink):
     plugin_version = "1.0.0"
     # determinism inherited from BaseSink (IO_WRITE)
 
+    # Resume capability: Azure Blobs are immutable - cannot append
+    supports_resume: bool = False
+
+    def configure_for_resume(self) -> None:
+        """Azure Blob sink does not support resume.
+
+        Azure Blobs are immutable - once uploaded, they cannot be appended to.
+        A new blob would need to be created with combined content, which is
+        not supported in the resume flow.
+
+        Raises:
+            NotImplementedError: Always, as Azure Blobs cannot be appended.
+        """
+        raise NotImplementedError(
+            "AzureBlobSink does not support resume. "
+            "Azure Blobs are immutable and cannot be appended to. "
+            "Consider using a different blob_path template (e.g., '{{ run_id }}/output.csv') "
+            "to create unique blobs per run, or use a local file sink for resumable pipelines."
+        )
+
     def __init__(self, config: dict[str, Any]) -> None:
         super().__init__(config)
         cfg = AzureBlobSinkConfig.from_dict(config)
