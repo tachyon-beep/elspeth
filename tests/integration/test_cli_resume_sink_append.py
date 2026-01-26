@@ -1,67 +1,120 @@
-"""Unit test for resume command sink append mode enforcement.
+"""Unit tests for sink resume capability.
 
-This test verifies that the resume command ALWAYS forces sinks into append mode,
-even when the sink is configured with mode="write" (default).
-
-This prevents data loss when resuming from a checkpoint.
+These tests verify that sinks properly declare and implement resume capability,
+which is used by the CLI resume command to configure sinks for append mode.
 """
 
+import os
+
+import pytest
+
 from elspeth.plugins.sinks.csv_sink import CSVSink
+from elspeth.plugins.sinks.database_sink import DatabaseSink
+from elspeth.plugins.sinks.json_sink import JSONSink
 
 
-def test_resume_should_force_sinks_to_append_mode():
-    """Demonstrate that resume needs to force sinks into append mode.
+class TestSinkResumeCapabilityDeclarations:
+    """Verify sinks correctly declare their resume capability."""
 
-    This is a DOCUMENTATION TEST that shows the expected behavior:
-    - User has sink configured with mode="write" (or no mode, which defaults to write)
-    - Resume command must override this to mode="append" to prevent data loss
-    - Without this override, resuming will truncate existing output files
+    def test_csv_sink_supports_resume(self):
+        """CSVSink declares supports_resume=True."""
+        assert CSVSink.supports_resume is True
 
-    This test currently PASSES to document the requirement.
-    The actual bug is in cli.py line 1420 where instantiate_plugins_from_config()
-    is called without overriding sink modes to append.
-    """
-    # Simulate what user has in their settings.yaml
-    user_sink_config = {
-        "path": "/tmp/output.csv",
-        "schema": {"fields": "dynamic"},
-        # NOTE: User does NOT specify mode, so it defaults to "write"
-    }
+    def test_database_sink_supports_resume(self):
+        """DatabaseSink declares supports_resume=True."""
+        assert DatabaseSink.supports_resume is True
 
-    # What happens NOW (wrong):
-    # resume command does: plugins = instantiate_plugins_from_config(settings)
-    # This creates sinks with mode="write", which truncates on open
-    sink_wrong = CSVSink(user_sink_config)
-    assert sink_wrong._mode == "write"  # This will TRUNCATE existing file!
+    def test_jsonl_sink_supports_resume(self):
+        """JSONSink with JSONL format supports resume."""
+        sink = JSONSink(
+            {
+                "path": "/tmp/test.jsonl",
+                "schema": {"fields": "dynamic"},
+                "format": "jsonl",
+            }
+        )
+        assert sink.supports_resume is True
 
-    # What SHOULD happen (correct):
-    # resume command should override sink mode to append
-    resume_sink_config = {**user_sink_config, "mode": "append"}
-    sink_correct = CSVSink(resume_sink_config)
-    assert sink_correct._mode == "append"  # This will ADD to existing file
-
-    # The fix needs to happen in cli.py after line 1420:
-    # After instantiating plugins, iterate through sinks and force append mode
-
-
-def test_csv_sink_mode_default_is_write():
-    """Verify CSVSink defaults to mode='write' when not specified."""
-    sink = CSVSink(
-        {
-            "path": "/tmp/test.csv",
-            "schema": {"fields": "dynamic"},
-        }
-    )
-    assert sink._mode == "write", "CSVSink should default to write mode"
+    def test_json_array_sink_does_not_support_resume(self):
+        """JSONSink with JSON array format does NOT support resume."""
+        sink = JSONSink(
+            {
+                "path": "/tmp/test.json",
+                "schema": {"fields": "dynamic"},
+                "format": "json",
+            }
+        )
+        assert sink.supports_resume is False
 
 
-def test_csv_sink_respects_append_mode():
-    """Verify CSVSink respects mode='append' when specified."""
-    sink = CSVSink(
-        {
-            "path": "/tmp/test.csv",
-            "schema": {"fields": "dynamic"},
-            "mode": "append",
-        }
-    )
-    assert sink._mode == "append", "CSVSink should use append mode when specified"
+class TestSinkConfigureForResume:
+    """Verify sinks properly implement configure_for_resume."""
+
+    def test_csv_sink_configure_for_resume(self):
+        """CSVSink.configure_for_resume sets mode to append."""
+        sink = CSVSink(
+            {
+                "path": "/tmp/test.csv",
+                "schema": {"fields": "dynamic"},
+                "mode": "write",
+            }
+        )
+        assert sink._mode == "write"
+
+        sink.configure_for_resume()
+
+        assert sink._mode == "append"
+
+    @pytest.fixture(autouse=True)
+    def allow_raw_secrets(self):
+        """Allow raw secrets for database testing."""
+        os.environ["ELSPETH_ALLOW_RAW_SECRETS"] = "true"
+        yield
+        os.environ.pop("ELSPETH_ALLOW_RAW_SECRETS", None)
+
+    def test_database_sink_configure_for_resume(self):
+        """DatabaseSink.configure_for_resume sets if_exists to append."""
+        sink = DatabaseSink(
+            {
+                "url": "sqlite:///:memory:",
+                "table": "test",
+                "schema": {"fields": "dynamic"},
+                "if_exists": "replace",
+            }
+        )
+        assert sink._if_exists == "replace"
+
+        sink.configure_for_resume()
+
+        assert sink._if_exists == "append"
+
+    def test_jsonl_sink_configure_for_resume(self):
+        """JSONSink JSONL format configure_for_resume sets mode to append."""
+        sink = JSONSink(
+            {
+                "path": "/tmp/test.jsonl",
+                "schema": {"fields": "dynamic"},
+                "format": "jsonl",
+                "mode": "write",
+            }
+        )
+        assert sink._mode == "write"
+
+        sink.configure_for_resume()
+
+        assert sink._mode == "append"
+
+    def test_json_array_sink_configure_for_resume_raises(self):
+        """JSONSink JSON array format configure_for_resume raises NotImplementedError."""
+        sink = JSONSink(
+            {
+                "path": "/tmp/test.json",
+                "schema": {"fields": "dynamic"},
+                "format": "json",
+            }
+        )
+
+        with pytest.raises(NotImplementedError) as exc_info:
+            sink.configure_for_resume()
+
+        assert "jsonl" in str(exc_info.value).lower()
