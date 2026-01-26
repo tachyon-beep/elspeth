@@ -298,6 +298,66 @@ class TestTransformErrorsForeignKeys:
         assert error_record.token_id == token.token_id
         assert error_record.transform_id == "node_test"
 
+    def test_rejects_orphan_run_id(self, landscape_db: LandscapeDB, recorder: LandscapeRecorder) -> None:
+        """P1: FK constraint should reject transform_errors with non-existent run_id.
+
+        Previous tests only exercised token/node FKs. run_id is core audit
+        linkage - orphan error records without a run would violate Tier 1
+        audit integrity.
+        """
+        # Arrange: Create a run with valid token and transform for all other FKs
+        run = recorder.begin_run(
+            config={"test": True},
+            canonical_version="1.0",
+        )
+        recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="csv_source",
+            node_type="source",
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+            node_id="source_test",
+            sequence=0,
+        )
+        row = recorder.create_row(
+            run_id=run.run_id,
+            source_node_id="source_test",
+            row_index=1,
+            data={"id": "test-1"},
+        )
+        token = recorder.create_token(
+            row_id=row.row_id,
+        )
+        recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="test_transform",
+            node_type="transform",
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+            node_id="node_test",
+            sequence=0,
+        )
+
+        # Act & Assert: Try to insert error with non-existent run_id
+        with (
+            pytest.raises(IntegrityError, match=r"(FOREIGN KEY constraint failed|violates foreign key)"),
+            landscape_db.connection() as conn,
+        ):
+            conn.execute(
+                transform_errors_table.insert().values(
+                    error_id="terr_orphan_run",
+                    run_id="nonexistent_run",  # ORPHAN - no such run
+                    token_id=token.token_id,
+                    transform_id="node_test",
+                    row_hash="abc123",
+                    destination="discard",
+                    created_at=datetime.now(UTC),
+                )
+            )
+            conn.commit()
+
 
 class TestValidationErrorsForeignKeys:
     """Verify validation_errors FK constraints."""

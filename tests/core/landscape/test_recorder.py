@@ -399,6 +399,41 @@ class TestLandscapeRecorderTokens:
         assert row.row_index == 0
         assert row.source_data_hash is not None
 
+    def test_create_row_hash_correctness(self) -> None:
+        """P1: Verify row hash matches stable_hash of data (not just non-NULL).
+
+        Hash correctness is the audit integrity anchor. A regression in
+        canonicalization or hash computation would silently corrupt the
+        audit trail while weak tests still pass.
+        """
+        from elspeth.core.canonical import stable_hash
+        from elspeth.core.landscape.database import LandscapeDB
+        from elspeth.core.landscape.recorder import LandscapeRecorder
+
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        run = recorder.begin_run(config={}, canonical_version="v1")
+        source = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="source",
+            node_type="source",
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+
+        test_data = {"name": "Alice", "value": 42}
+        row = recorder.create_row(
+            run_id=run.run_id,
+            source_node_id=source.node_id,
+            row_index=0,
+            data=test_data,
+        )
+
+        # Verify hash correctness (not just existence)
+        expected_hash = stable_hash(test_data)
+        assert row.source_data_hash == expected_hash, f"row hash mismatch: expected {expected_hash}, got {row.source_data_hash}"
+
     def test_create_initial_token(self) -> None:
         from elspeth.core.landscape.database import LandscapeDB
         from elspeth.core.landscape.recorder import LandscapeRecorder
@@ -462,6 +497,54 @@ class TestLandscapeRecorderTokens:
         assert child_tokens[1].branch_name == "classifier"
         # All children share same fork_group_id
         assert child_tokens[0].fork_group_id == child_tokens[1].fork_group_id
+
+    def test_fork_token_parent_lineage_verified(self) -> None:
+        """P1: Verify fork creates parent relationships in token_parents table.
+
+        Fork lineage is foundational to audit explainability. A regression
+        that drops or corrupts fork lineage would break explain() queries
+        for forks, yet without this test the weak fork_group_id/branch_name
+        assertions would still pass.
+        """
+        from elspeth.core.landscape.database import LandscapeDB
+        from elspeth.core.landscape.recorder import LandscapeRecorder
+
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        run = recorder.begin_run(config={}, canonical_version="v1")
+        source = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="source",
+            node_type="source",
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+        row = recorder.create_row(
+            run_id=run.run_id,
+            source_node_id=source.node_id,
+            row_index=0,
+            data={},
+        )
+        parent_token = recorder.create_token(row_id=row.row_id)
+
+        # Fork to two branches
+        child_tokens = recorder.fork_token(
+            parent_token_id=parent_token.token_id,
+            row_id=row.row_id,
+            branches=["stats", "classifier"],
+        )
+
+        # P1: Verify token_parents entries for each child
+        parents_0 = recorder.get_token_parents(child_tokens[0].token_id)
+        assert len(parents_0) == 1, f"Expected 1 parent for child 0, got {len(parents_0)}"
+        assert parents_0[0].parent_token_id == parent_token.token_id
+        assert parents_0[0].ordinal == 0
+
+        parents_1 = recorder.get_token_parents(child_tokens[1].token_id)
+        assert len(parents_1) == 1, f"Expected 1 parent for child 1, got {len(parents_1)}"
+        assert parents_1[0].parent_token_id == parent_token.token_id
+        assert parents_1[0].ordinal == 1
 
     def test_coalesce_tokens(self) -> None:
         from elspeth.core.landscape.database import LandscapeDB
@@ -664,6 +747,64 @@ class TestLandscapeRecorderNodeStates:
         assert state.state_id is not None
         assert state.status == NodeStateStatus.OPEN
         assert state.input_hash is not None
+
+    def test_node_state_hash_correctness(self) -> None:
+        """P1: Verify input/output hashes match stable_hash (not just non-NULL).
+
+        Hash correctness is the audit integrity anchor. Tests must validate
+        the actual hash values, not just check for existence.
+        """
+        from elspeth.contracts import NodeStateStatus
+        from elspeth.core.canonical import stable_hash
+        from elspeth.core.landscape.database import LandscapeDB
+        from elspeth.core.landscape.recorder import LandscapeRecorder
+
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+        run = recorder.begin_run(config={}, canonical_version="v1")
+        node = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="transform",
+            node_type="transform",
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+        row = recorder.create_row(
+            run_id=run.run_id,
+            source_node_id=node.node_id,
+            row_index=0,
+            data={},
+        )
+        token = recorder.create_token(row_id=row.row_id)
+
+        input_data = {"x": 1, "y": 2}
+        output_data = {"x": 1, "y": 2, "z": 3}
+
+        state = recorder.begin_node_state(
+            token_id=token.token_id,
+            node_id=node.node_id,
+            step_index=0,
+            input_data=input_data,
+        )
+
+        # P1: Verify input_hash matches expected
+        expected_input_hash = stable_hash(input_data)
+        assert state.input_hash == expected_input_hash, f"input_hash mismatch: expected {expected_input_hash}, got {state.input_hash}"
+
+        completed = recorder.complete_node_state(
+            state_id=state.state_id,
+            status="completed",
+            output_data=output_data,
+            duration_ms=10.5,
+        )
+
+        # P1: Verify output_hash matches expected
+        assert completed.status == NodeStateStatus.COMPLETED
+        expected_output_hash = stable_hash(output_data)
+        assert completed.output_hash == expected_output_hash, (
+            f"output_hash mismatch: expected {expected_output_hash}, got {completed.output_hash}"
+        )
 
     def test_complete_node_state_success(self) -> None:
         from elspeth.contracts import NodeStateStatus

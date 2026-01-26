@@ -720,3 +720,171 @@ class TestLandscapeExporterSigning:
 
         # All exports should produce the same order
         assert len(set(exports)) == 1, f"Record order changed between exports: {exports}"
+
+
+class TestLandscapeExporterCallRecords:
+    """P1: Exporter must export external call records."""
+
+    def test_exporter_extracts_calls(self) -> None:
+        """P1: Exporter should yield call records for external calls.
+
+        External call records are explicitly part of the audit trail per
+        the Data Manifesto. Export regressions that drop or mis-serialize
+        calls would break legal-grade auditability.
+        """
+        from elspeth.contracts.enums import CallStatus, CallType
+
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+
+        run = recorder.begin_run(config={}, canonical_version="v1")
+        node = recorder.register_node(
+            run_id=run.run_id,
+            node_id="llm_transform",
+            plugin_name="llm_classifier",
+            node_type="transform",
+            plugin_version="1.0.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+        row = recorder.create_row(
+            run_id=run.run_id,
+            source_node_id=node.node_id,
+            row_index=0,
+            data={"text": "test"},
+        )
+        token = recorder.create_token(row_id=row.row_id)
+        state = recorder.begin_node_state(
+            token_id=token.token_id,
+            node_id=node.node_id,
+            step_index=0,
+            input_data={"text": "test"},
+        )
+
+        # Record an LLM call
+        call = recorder.record_call(
+            state_id=state.state_id,
+            call_index=0,
+            call_type=CallType.LLM,
+            status=CallStatus.SUCCESS,
+            request_data={"prompt": "classify this", "model": "gpt-4"},
+            response_data={"category": "positive", "confidence": 0.95},
+            latency_ms=250.5,
+        )
+
+        recorder.complete_node_state(
+            state_id=state.state_id,
+            status="completed",
+            output_data={"category": "positive"},
+            duration_ms=300.0,
+        )
+        recorder.complete_run(run.run_id, status="completed")
+
+        exporter = LandscapeExporter(db)
+        records = list(exporter.export_run(run.run_id))
+
+        # P1: Verify call records are extracted
+        call_records = [r for r in records if r["record_type"] == "call"]
+        assert len(call_records) == 1, f"Expected 1 call record, got {len(call_records)}"
+
+        call_record = call_records[0]
+        assert call_record["call_id"] == call.call_id
+        assert call_record["state_id"] == state.state_id
+        assert call_record["call_type"] == "llm"  # Enum value
+        assert call_record["status"] == "success"  # Enum value
+        assert call_record["request_hash"] is not None
+        assert call_record["response_hash"] is not None
+        assert call_record["latency_ms"] == 250.5
+
+
+class TestLandscapeExporterManifestIntegrity:
+    """P1: Verify manifest hash chain is correct, not just that fields exist."""
+
+    def test_manifest_hash_chain_verified(self) -> None:
+        """P1: Recompute expected final_hash and verify against manifest.
+
+        Previous tests only checked that final_hash exists. A broken hash
+        chain (wrong order, missing records, wrong algorithm) could ship
+        without detection, undermining tamper-evidence.
+        """
+        import hashlib
+
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+
+        run = recorder.begin_run(config={"test": True}, canonical_version="v1")
+        recorder.register_node(
+            run_id=run.run_id,
+            node_id="source",
+            plugin_name="csv",
+            node_type="source",
+            plugin_version="1.0.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+        recorder.create_row(
+            run_id=run.run_id,
+            source_node_id="source",
+            row_index=0,
+            data={"value": 42},
+        )
+        recorder.complete_run(run.run_id, status="completed")
+
+        exporter = LandscapeExporter(db, signing_key=b"hash-chain-test-key")
+        records = list(exporter.export_run(run.run_id, sign=True))
+
+        # Separate manifest from content records
+        manifest = next(r for r in records if r["record_type"] == "manifest")
+        content_records = [r for r in records if r["record_type"] != "manifest"]
+
+        # P1: Recompute final_hash from signatures
+        running_hash = hashlib.sha256()
+        for record in content_records:
+            running_hash.update(record["signature"].encode())
+
+        expected_final_hash = running_hash.hexdigest()
+        assert manifest["final_hash"] == expected_final_hash, (
+            f"Hash chain mismatch: expected {expected_final_hash}, got {manifest['final_hash']}"
+        )
+
+
+class TestLandscapeExporterTier1Corruption:
+    """P1: Exporter must crash on corrupted Tier 1 audit data."""
+
+    def test_exporter_crashes_on_invalid_enum_in_database(self) -> None:
+        """P1: Invalid enum value in audit DB should crash, not silently coerce.
+
+        Per the Three-Tier Trust Model, corrupted Tier 1 data must crash
+        immediately. If invalid enums are silently coerced, auditors could
+        receive garbage data that looks valid.
+        """
+        from sqlalchemy import text
+
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+
+        run = recorder.begin_run(config={}, canonical_version="v1")
+        recorder.register_node(
+            run_id=run.run_id,
+            node_id="source",
+            plugin_name="csv",
+            node_type="source",
+            plugin_version="1.0.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+        recorder.complete_run(run.run_id, status="completed")
+
+        # Corrupt the run status directly in the database
+        with db.connection() as conn:
+            conn.execute(
+                text("UPDATE runs SET status = 'INVALID_STATUS_VALUE' WHERE run_id = :run_id"),
+                {"run_id": run.run_id},
+            )
+            conn.commit()
+
+        exporter = LandscapeExporter(db)
+
+        # P1: Exporter must crash on invalid status, not return garbage
+        with pytest.raises((ValueError, KeyError)):
+            list(exporter.export_run(run.run_id))
