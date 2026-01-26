@@ -1427,16 +1427,40 @@ def resume(
             typer.echo(f"Error instantiating plugins: {e}", err=True)
             raise typer.Exit(1) from None
 
-        # CRITICAL: Force sinks to append mode to prevent data loss
-        # Resume must ADD to existing output, not truncate it
+        # CRITICAL: Validate and configure sinks for resume mode
+        # Each sink declares whether it supports resume and self-configures
         manager = _get_plugin_manager()
         resume_sinks = {}
-        for sink_name, sink_config in settings_config.sinks.items():
-            sink_options = dict(sink_config.options)
-            sink_options["mode"] = "append"  # Override mode to append
 
+        for sink_name, sink_config in settings_config.sinks.items():
             sink_cls = manager.get_sink_by_name(sink_config.plugin)
-            resume_sinks[sink_name] = sink_cls(sink_options)  # type: ignore[assignment]
+            sink_options = dict(sink_config.options)
+
+            # Instantiate sink to check resume capability
+            try:
+                sink = sink_cls(sink_options)
+            except Exception as e:
+                typer.echo(f"Error creating sink '{sink_name}': {e}", err=True)
+                raise typer.Exit(1) from None
+
+            # Check if sink supports resume
+            if not sink.supports_resume:
+                typer.echo(
+                    f"Error: Cannot resume with sink '{sink_name}' (plugin: {sink_config.plugin}). "
+                    f"This sink does not support resume/append mode.\n"
+                    f"Hint: Use a different sink type or start a new run.",
+                    err=True,
+                )
+                raise typer.Exit(1)
+
+            # Configure sink for resume (switches to append mode)
+            try:
+                sink.configure_for_resume()
+            except NotImplementedError as e:
+                typer.echo(f"Error: {e}", err=True)
+                raise typer.Exit(1) from None
+
+            resume_sinks[sink_name] = sink
 
         # Override source with NullSource for resume (data comes from payloads)
         null_source = NullSource({})

@@ -449,32 +449,32 @@ allow_hits:
   safety: Graceful default to '<unknown>' - error message still produced with field
     and message
   expires: null
-- key: cli.py:R1:health:line=1522
+- key: cli.py:R1:health:line=1546
   owner: architecture
   reason: 'Trust boundary: environment variable GIT_COMMIT_SHA is optional external
     input'
   safety: Empty string default is safe - commit SHA is informational only
   expires: null
-- key: cli.py:R4:health:line=1534
+- key: cli.py:R4:health:line=1558
   owner: architecture
   reason: 'Trust boundary: git subprocess may fail for many reasons (not installed,
     not a repo, etc.)'
   safety: Graceful fallback to 'unknown' - health check reports git as unavailable
   expires: null
-- key: cli.py:R1:health:line=1550
+- key: cli.py:R1:health:line=1574
   owner: architecture
   reason: 'Trust boundary: environment variable DATABASE_URL is optional external
     input'
   safety: Empty string default triggers skip logic - database check only runs if configured
   expires: null
-- key: cli.py:R4:health:line=1562
+- key: cli.py:R4:health:line=1586
   owner: architecture
   reason: 'Trust boundary: database connection may fail for many reasons (network,
     auth, etc.)'
   safety: Error recorded in checks dict with status='error' - health check reports
     DB as unhealthy
   expires: null
-- key: cli.py:R4:health:line=1626
+- key: cli.py:R4:health:line=1650
   owner: architecture
   reason: 'Trust boundary: plugin manager initialization may fail due to misconfiguration'
   safety: Error recorded in checks dict with status='error' - health check reports
