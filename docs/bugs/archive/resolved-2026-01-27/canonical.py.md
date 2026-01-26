@@ -1,13 +1,32 @@
 # Bug Report: NaN/Infinity Rejection Bypassed in Multi-Dimensional NumPy Arrays
 
-## Summary
+## RESOLUTION (2026-01-27)
+
+**Status: ALREADY FIXED**
+
+This bug was fixed in commit `b5f3f50` (2026-01-25) on the same day it was reported. The fix adds `np.any(np.isnan(obj))` and `np.any(np.isinf(obj))` checks that work on arrays of any dimensionality.
+
+### Evidence of Fix:
+1. `canonical.py:77-87` now validates entire array using `np.any()` before conversion
+2. Comment `BUG-CANON-01 fix` explicitly references this bug
+3. Tests at `test_canonical.py:73-108` cover 2D and 3D arrays with NaN/Infinity
+4. 11 NaN-related tests pass including multi-dimensional cases
+
+### Verification:
+```bash
+.venv/bin/python -m pytest tests/core/test_canonical.py -v -k "nan or inf"  # 11 passed
+```
+
+---
+
+## Summary (Original Report)
 
 - `np.ndarray` normalization only applies `_normalize_value` to top-level elements, so nested lists from multi-dimensional arrays bypass explicit NaN/Infinity checks and type normalization.
 
 ## Severity
 
-- Severity: major
-- Priority: P1
+- Severity: ~~major~~ **RESOLVED**
+- Priority: ~~P1~~ **CLOSED**
 
 ## Reporter
 

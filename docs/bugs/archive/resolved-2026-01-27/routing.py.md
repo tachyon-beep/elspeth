@@ -1,13 +1,35 @@
 # Bug Report: ROUTE accepts string mode, allowing COPY semantics without fork
 
-## Summary
+## RESOLUTION (2026-01-27)
+
+**Status: NOT A BUG (Invalid Report)**
+
+This bug report was based on incorrect analysis. `RoutingMode` is a **StrEnum** (`class RoutingMode(str, Enum)`), which means string comparison works correctly.
+
+### Evidence:
+1. `"copy" == RoutingMode.COPY` evaluates to `True` due to StrEnum inheritance
+2. `RoutingAction.route('review', mode="copy")` correctly raises ValueError
+3. 24 routing contract tests pass including `test_route_with_copy_raises`
+
+### Verification:
+```python
+>>> from elspeth.contracts.routing import RoutingAction
+>>> RoutingAction.route('review', mode='copy')
+# Raises: ValueError: COPY mode not supported for ROUTE kind...
+```
+
+The static analysis tool that generated this report didn't understand Python's StrEnum behavior.
+
+---
+
+## Summary (Original Report - INVALID)
 
 - `RoutingAction.__post_init__` only blocks `RoutingMode.COPY` enums, so `mode="copy"` bypasses the ROUTE prohibition and gets coerced later, recording a COPY route even though no fork occurs.
 
 ## Severity
 
-- Severity: major
-- Priority: P1
+- Severity: ~~major~~ **INVALID**
+- Priority: ~~P1~~ **CLOSED**
 
 ## Reporter
 

@@ -494,3 +494,87 @@ class TestExplainFunction:
         # Should raise ValueError listing the ambiguous tokens
         with pytest.raises(ValueError, match="has 3 tokens at sink 'same_sink'"):
             explain(recorder, run_id=run.run_id, row_id=row.row_id, sink="same_sink")
+
+    def test_explain_crashes_on_missing_parent_token(self) -> None:
+        """explain() must crash on missing parent token (audit DB corruption).
+
+        Per CLAUDE.md Tier 1 trust model: audit trail data is FULL TRUST.
+        If a token_parents record references a non-existent parent_token_id,
+        that's database corruption and MUST crash with a clear error.
+
+        Silent recovery (skipping missing parents) would return incomplete
+        lineage, undermining audit integrity guarantees.
+        """
+        import pytest
+
+        from elspeth.contracts.enums import RowOutcome
+        from elspeth.core.landscape.database import LandscapeDB
+        from elspeth.core.landscape.lineage import explain
+        from elspeth.core.landscape.recorder import LandscapeRecorder
+        from elspeth.core.landscape.schema import token_parents_table, tokens_table
+
+        db = LandscapeDB.in_memory()
+        recorder = LandscapeRecorder(db)
+
+        # Setup: create run with source node
+        run = recorder.begin_run(config={}, canonical_version="sha256-rfc8785-v1")
+        node = recorder.register_node(
+            run_id=run.run_id,
+            plugin_name="csv",
+            node_type="source",
+            plugin_version="1.0",
+            config={},
+            schema_config=DYNAMIC_SCHEMA,
+        )
+        row = recorder.create_row(
+            run_id=run.run_id,
+            source_node_id=node.node_id,
+            row_index=0,
+            data={"id": 1},
+        )
+
+        # Create parent token
+        parent_token = recorder.create_token(row_id=row.row_id)
+
+        # Create child token via fork
+        child_tokens = recorder.fork_token(
+            parent_token_id=parent_token.token_id,
+            row_id=row.row_id,
+            branches=["branch_a"],
+        )
+        child_token = child_tokens[0]
+
+        # Record terminal outcome for child
+        recorder.record_token_outcome(
+            token_id=child_token.token_id,
+            run_id=run.run_id,
+            outcome=RowOutcome.COMPLETED,
+            sink_name="output",
+        )
+
+        # CORRUPT THE DATABASE: Delete the parent token while keeping the token_parents reference
+        # This simulates DB corruption - a parent reference that points to nothing
+        # NOTE: FK constraints normally prevent this. We must disable them to simulate
+        # corruption from external sources (backup restoration, direct DB manipulation).
+        from sqlalchemy import text
+
+        with db.engine.connect() as conn:
+            # Disable FK constraints temporarily to simulate external corruption
+            conn.execute(text("PRAGMA foreign_keys = OFF"))
+            conn.execute(tokens_table.delete().where(tokens_table.c.token_id == parent_token.token_id))
+            conn.commit()
+            # Re-enable FK constraints
+            conn.execute(text("PRAGMA foreign_keys = ON"))
+
+        # Verify corruption: token_parents still references the deleted parent
+        with db.engine.connect() as conn:
+            from sqlalchemy import select
+
+            result = conn.execute(select(token_parents_table).where(token_parents_table.c.token_id == child_token.token_id))
+            parent_refs = list(result)
+            assert len(parent_refs) == 1, "token_parents reference should still exist"
+            assert parent_refs[0].parent_token_id == parent_token.token_id
+
+        # explain() MUST crash on this corruption - silent recovery is NOT acceptable
+        with pytest.raises(ValueError, match=r"parent token.*not found|missing parent|audit.*integrity"):
+            explain(recorder, run_id=run.run_id, token_id=child_token.token_id)

@@ -1,13 +1,35 @@
 # Bug Report: explain() silently drops missing parent tokens, masking audit integrity violations
 
-## Summary
+## RESOLUTION (2026-01-27)
+
+**Status: FIXED**
+
+This was a **real bug** that violated CLAUDE.md's Tier 1 trust model. Fixed by making `explain()` crash on missing parent tokens instead of silently returning incomplete lineage.
+
+### Fix Details:
+- **File:** `src/elspeth/core/landscape/lineage.py:167-182`
+- **Change:** Replaced silent `if parent_token is not None` skip with explicit `ValueError` raise
+- **Test:** Added `test_explain_crashes_on_missing_parent_token` to verify behavior
+
+### Defense in Depth:
+- **Primary defense:** FK constraints prevent deletion of parent tokens (this was already working)
+- **Secondary defense:** Code now crashes if corruption is detected (e.g., from external data import)
+
+### Verification:
+```bash
+.venv/bin/python -m pytest tests/core/landscape/test_lineage.py -v  # 14 passed
+```
+
+---
+
+## Summary (Original Report)
 
 - Lineage assembly ignores missing parent_token_id references, returning incomplete parent_tokens without surfacing the audit DB anomaly.
 
 ## Severity
 
-- Severity: major
-- Priority: P1
+- Severity: ~~major~~ **FIXED**
+- Priority: ~~P1~~ **CLOSED**
 
 ## Reporter
 

@@ -1,13 +1,32 @@
 # Bug Report: Resume Drops Row Data By Validating Through NullSource Schema
 
-## Summary
+## RESOLUTION (2026-01-27)
+
+**Status: ALREADY FIXED**
+
+This bug was fixed in commit `b2a3518` (2026-01-23) before this report was filed. The report was based on static analysis of outdated code.
+
+### Evidence of Fix:
+1. `orchestrator.py:1511-1520` retrieves schema from audit trail via `recorder.get_source_schema(run_id)`, NOT from `config.source._schema_class`
+2. `orchestrator.py:1354-1359` validates schema has fields and raises clear error if empty
+3. 110 resume-related tests pass, including type fidelity tests for datetime/Decimal
+4. `test_resume_comprehensive.py` covers datetime, Decimal, array, and nested object restoration
+
+### Verification:
+```bash
+.venv/bin/python -m pytest tests/ -k "resume" -v  # 110 passed
+```
+
+---
+
+## Summary (Original Report)
 
 - Resume replaces the real source with `NullSource`, so type restoration validates against an empty schema and drops all row fields, producing empty `row_data` during resume.
 
 ## Severity
 
-- Severity: critical
-- Priority: P0
+- Severity: ~~critical~~ **RESOLVED**
+- Priority: ~~P0~~ **CLOSED**
 
 ## Reporter
 
