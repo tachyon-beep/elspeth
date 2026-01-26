@@ -32,6 +32,7 @@ from elspeth.engine.executors import (
 from elspeth.engine.retry import MaxRetriesExceeded, RetryManager
 from elspeth.engine.spans import SpanFactory
 from elspeth.engine.tokens import TokenManager
+from elspeth.plugins.clients.llm import LLMClientError
 from elspeth.plugins.context import PluginContext
 from elspeth.plugins.protocols import GateProtocol, TransformProtocol
 
@@ -463,6 +464,12 @@ class RowProcessor:
         def is_retryable(e: BaseException) -> bool:
             # Retry transient errors (network, timeout, rate limit)
             # Don't retry programming errors (AttributeError, TypeError, etc.)
+            #
+            # LLMClientError has a retryable attribute:
+            # - RateLimitError, NetworkError, ServerError: retryable=True
+            # - ContentPolicyError, ContextLengthError: retryable=False
+            if isinstance(e, LLMClientError):
+                return e.retryable
             return isinstance(e, ConnectionError | TimeoutError | OSError)
 
         return self._retry_manager.execute_with_retry(

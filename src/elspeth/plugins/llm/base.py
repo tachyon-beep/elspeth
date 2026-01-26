@@ -17,7 +17,7 @@ from pydantic import Field, field_validator
 
 from elspeth.contracts import Determinism, TransformResult
 from elspeth.plugins.base import BaseTransform
-from elspeth.plugins.clients.llm import LLMClientError, RateLimitError
+from elspeth.plugins.clients.llm import LLMClientError
 from elspeth.plugins.config_base import TransformDataConfig
 from elspeth.plugins.context import PluginContext
 from elspeth.plugins.llm.templates import PromptTemplate, TemplateError
@@ -233,6 +233,9 @@ class BaseLLMTransform(BaseTransform):
 
         # 4. Call LLM via audited client
         # This is an EXTERNAL SYSTEM - wrap in try/catch
+        # Retryable errors (RateLimitError, NetworkError, ServerError) are re-raised
+        # to let the engine's RetryManager handle them. Non-retryable errors
+        # (ContentPolicyError, ContextLengthError) return TransformResult.error().
         try:
             response = llm_client.chat_completion(
                 model=self._model,
@@ -240,17 +243,14 @@ class BaseLLMTransform(BaseTransform):
                 temperature=self._temperature,
                 max_tokens=self._max_tokens,
             )
-        except RateLimitError as e:
-            # Rate limit - retryable
-            return TransformResult.error(
-                {"reason": "rate_limited", "error": str(e)},
-                retryable=True,
-            )
         except LLMClientError as e:
-            # Other LLM error - check if retryable
+            if e.retryable:
+                # Re-raise for engine retry (RateLimitError, NetworkError, ServerError)
+                raise
+            # Non-retryable error - return error result
             return TransformResult.error(
                 {"reason": "llm_call_failed", "error": str(e)},
-                retryable=e.retryable,
+                retryable=False,
             )
 
         # 5. Build output row (OUR CODE - let exceptions crash)

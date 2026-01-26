@@ -500,17 +500,17 @@ allow_hits:
   reason: 'Trust boundary (Tier 3): OpenRouter API may return different model than requested'
   safety: Graceful fallback to configured model - audit captures actual
   expires: null
-- key: plugins/batching/mixin.py:R4:BatchTransformMixin:_process_and_complete:line=230
+- key: plugins/batching/mixin.py:R4:BatchTransformMixin:_process_and_complete:line=231
   owner: architecture
   reason: 'Trust boundary: batch processing can fail for many reasons (API errors, timeouts)'
   safety: Caught, logged, and result emitted with error status for audit trail
   expires: null
-- key: plugins/batching/mixin.py:R4:BatchTransformMixin:_release_loop:line=281
+- key: plugins/batching/mixin.py:R4:BatchTransformMixin:_release_loop:line=288
   owner: architecture
   reason: 'Background thread cleanup: iteration failure should not crash release loop'
   safety: Logged with error, loop continues to process remaining results
   expires: null
-- key: plugins/batching/mixin.py:R4:BatchTransformMixin:_release_loop:line=294
+- key: plugins/batching/mixin.py:R4:BatchTransformMixin:_release_loop:line=301
   owner: architecture
   reason: 'Background thread emit: emit failure should not crash release loop'
   safety: Logged with error, loop continues - waiter will timeout if emit fails

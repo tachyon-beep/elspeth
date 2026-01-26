@@ -12,6 +12,7 @@ from elspeth.contracts import Determinism, TransformResult
 from elspeth.contracts.identity import TokenInfo
 from elspeth.engine.batch_adapter import ExceptionResult
 from elspeth.plugins.batching.ports import CollectorOutputPort
+from elspeth.plugins.clients.llm import RateLimitError
 from elspeth.plugins.config_base import PluginConfigError
 from elspeth.plugins.context import PluginContext
 from elspeth.plugins.llm.azure import AzureLLMTransform, AzureOpenAIConfig
@@ -459,8 +460,19 @@ class TestAzureLLMTransformPipelining:
         assert "API Error" in result.reason["error"]
         assert result.retryable is False
 
-    def test_rate_limit_error_is_retryable(self, ctx: PluginContext, transform: AzureLLMTransform, collector: CollectorOutputPort) -> None:
-        """Rate limit errors marked retryable=True."""
+    def test_rate_limit_error_propagates_for_engine_retry(
+        self, ctx: PluginContext, transform: AzureLLMTransform, collector: CollectorOutputPort
+    ) -> None:
+        """Rate limit errors propagate as exceptions for engine retry.
+
+        Retryable errors (RateLimitError, NetworkError, ServerError) are re-raised
+        rather than converted to TransformResult.error(). This allows the engine's
+        RetryManager to handle retries with proper backoff.
+
+        BatchTransformMixin wraps such exceptions in ExceptionResult for
+        propagation through the async pattern. In production, TransformExecutor
+        would re-raise this exception so RetryManager can act on it.
+        """
         with mock_azure_openai_client(side_effect=Exception("Rate limit exceeded 429")):
             transform.accept({"text": "hello"}, ctx)
             transform.flush_batch_processing(timeout=10.0)
@@ -468,11 +480,11 @@ class TestAzureLLMTransformPipelining:
         assert len(collector.results) == 1
         _, result, _state_id = collector.results[0]
 
-        assert isinstance(result, TransformResult)
-        assert result.status == "error"
-        assert result.reason is not None
-        assert result.reason["reason"] == "rate_limited"
-        assert result.retryable is True
+        # Exception propagates via ExceptionResult wrapper (not TransformResult)
+        # This allows the engine's RetryManager to retry the operation
+        assert isinstance(result, ExceptionResult)
+        assert isinstance(result.exception, RateLimitError)
+        assert "429" in str(result.exception)
 
     def test_missing_state_id_propagates_exception(
         self, mock_recorder: Mock, transform: AzureLLMTransform, collector: CollectorOutputPort

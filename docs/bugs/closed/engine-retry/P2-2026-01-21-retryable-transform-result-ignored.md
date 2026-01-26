@@ -89,9 +89,42 @@
 - Related issues/PRs: N/A
 - Related design docs: `docs/contracts/plugin-protocol.md`
 
+## Resolution (2026-01-27)
+
+**Status: FIXED**
+
+Fixed in branch fix/rc1-bug-burndown-session-6.
+
+### Fix Applied: Option C - Re-raise retryable exceptions
+
+**Changes made:**
+
+1. **`src/elspeth/engine/processor.py`:**
+   - Added `LLMClientError` import
+   - Updated `is_retryable()` to recognize `LLMClientError` with `retryable=True`
+
+2. **`src/elspeth/plugins/llm/azure.py`:**
+   - Changed to re-raise retryable `LLMClientError` (including `RateLimitError`) instead of converting to `TransformResult.error()`
+   - Non-retryable errors (e.g., `ContentPolicyError`) still return `TransformResult.error(retryable=False)`
+
+3. **`src/elspeth/plugins/llm/base.py`:**
+   - Same pattern: re-raise retryable exceptions, return error results for non-retryable
+
+4. **Tests updated:**
+   - `tests/plugins/llm/test_azure.py`: `test_rate_limit_error_propagates_for_engine_retry`
+   - `tests/plugins/llm/test_base.py`: `test_rate_limit_error_propagates_for_engine_retry`, `test_retryable_llm_error_propagates_as_exception`
+
+**Why Option C:**
+- Consistent with existing `PooledExecutor` pattern (catches exceptions, applies AIMD retry)
+- `TransformResult.error()` is for **semantic errors** (invalid data, business rule violations)
+- **Transient failures** (rate limits, network errors) should be retried transparently via exceptions
+- No changes needed to `RetryManager` architecture
+
+---
+
 ## Verification (2026-01-25)
 
-**Status: STILL VALID**
+**Status: SUPERSEDED BY FIX ABOVE**
 
 Verified against current codebase (commit 7540e57 on branch fix/rc1-bug-burndown-session-4).
 
